@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -33,19 +34,36 @@ func NewOpenAIClient() (LLMClient, error) {
 }
 
 func (o *openAIClient) GetPatch(ctx context.Context, prompt string) (string, error) {
-	// For demonstration, we do a ChatCompletion.
-	// Real usage might do a text completion with special instructions for JSON output.
+	// Create chat completion request
 	resp, err := o.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: openai.F(openai.ChatModelGPT3_5Turbo),
+		Model: openai.F(openai.ChatModelGPT4),
 		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage(prompt),
 		}),
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create chat completion: %w", err)
 	}
+
+	// Check for empty response
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("no choices from LLM")
 	}
-	return resp.Choices[0].Message.Content, nil
+
+	// Get content from first choice
+	content := resp.Choices[0].Message.Content
+
+	// Validate content is valid JSON
+	var patches struct {
+		Patches []struct {
+			File    string `json:"file"`
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		} `json:"patches"`
+	}
+	if err := json.Unmarshal([]byte(content), &patches); err != nil {
+		return "", fmt.Errorf("invalid patch JSON: %w", err)
+	}
+
+	return content, nil
 }

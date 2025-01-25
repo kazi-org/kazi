@@ -44,13 +44,44 @@ type Prompt struct {
 }
 
 func LoadConfig(path string) (*KaziProject, error) {
+	// Read config file
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
+
+	// Parse YAML
 	var cfg KaziProject
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal YAML: %w", err)
+		return nil, fmt.Errorf("parse config file: %w", err)
 	}
+
+	// Validate API version
+	if cfg.APIVersion != "kazi.io/v1" {
+		return nil, fmt.Errorf("unsupported API version: %s", cfg.APIVersion)
+	}
+
+	// Validate required fields
+	if cfg.Kind != "KaziProject" {
+		return nil, fmt.Errorf("invalid kind: %s", cfg.Kind)
+	}
+	if cfg.Metadata.Name == "" {
+		return nil, fmt.Errorf("missing required field: metadata.name")
+	}
+	if cfg.Spec.Global.Workspace == "" {
+		return nil, fmt.Errorf("missing required field: spec.global.workspace")
+	}
+	if len(cfg.Spec.Prompts) == 0 {
+		return nil, fmt.Errorf("missing required field: prompts")
+	}
+	for i, p := range cfg.Spec.Prompts {
+		if p.Name == "" {
+			return nil, fmt.Errorf("missing required field: prompts[%d].name", i)
+		}
+		if p.Instructions == "" {
+			return nil, fmt.Errorf("missing required field: prompts[%d].instructions", i)
+		}
+	}
+
 	return &cfg, nil
 }
