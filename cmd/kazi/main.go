@@ -3,12 +3,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/kazi-org/kazi/internal/ai/openai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
 	"github.com/kazi-org/kazi/internal/ls/gols"
@@ -123,6 +124,31 @@ func max(a, b int) int {
 	return b
 }
 
+// mockGitCommitter implements workflow.GitCommitter interface
+type mockGitCommitter struct {
+	workspace string
+}
+
+func (m *mockGitCommitter) Commit(ctx context.Context, message string) error {
+	fmt.Printf("Would commit changes with message: %s\n", message)
+	return nil
+}
+
+func (m *mockGitCommitter) Status(ctx context.Context) (git.Status, error) {
+	return nil, nil
+}
+
+// mockValidator implements workflow.Validator interface
+type mockValidator struct {
+	config config.GlobalConfig
+}
+
+func (m *mockValidator) Validate(ctx context.Context) error {
+	fmt.Printf("Would run: %s\n", m.config.LintCommand)
+	fmt.Printf("Would run: %s\n", m.config.TestCommand)
+	return nil
+}
+
 func run() error {
 	// Get workspace directory
 	wd, err := os.Getwd()
@@ -187,28 +213,31 @@ func run() error {
 	// Use the first prompt from the config
 	prompt := cfg.Spec.Prompts[0]
 
-	// Create workflow
-	w, err := workflow.NewWorkflow(codeCtx, cfg.Spec.Rules, cfg.Spec.Global)
+	// Create OpenAI client
+	llmClient, err := openai.NewClient()
 	if err != nil {
-		return fmt.Errorf("create workflow: %w", err)
+		return fmt.Errorf("create OpenAI client: %w", err)
+	}
+
+	// Create processor configuration
+	procCfg := &workflow.ProcessorConfig{
+		GitCommitter:    &mockGitCommitter{workspace: cfg.Spec.Global.Workspace},
+		Validator:       &mockValidator{config: cfg.Spec.Global},
+		RequestBuilder:  workflow.NewRequestBuilderWithConfig(codeCtx, cfg.Spec.Rules, workflow.NewConfigFromGlobal(cfg.Spec.Global, cfg.Spec.Rules)),
+		PatchApplier:    patch.NewApplier(cfg.Spec.Global.Workspace),
+		UserInteraction: workflow.NewDefaultInteraction(),
+		LLMClient:       llmClient,
+	}
+
+	// Create and run processor
+	proc, err := workflow.NewProcessor(procCfg)
+	if err != nil {
+		return fmt.Errorf("create processor: %w", err)
 	}
 
 	// Process the prompt
-	response, err := w.Execute(context.Background(), prompt)
-	if err != nil {
-		return fmt.Errorf("execute workflow: %w", err)
-	}
-
-	// Parse and apply patches
-	var ps patch.PatchSet
-	if err := json.Unmarshal([]byte(response), &ps); err != nil {
-		return fmt.Errorf("parse patch set: %w", err)
-	}
-
-	// Apply patches
-	applier := patch.NewApplier(cfg.Spec.Global.Workspace)
-	if err := applier.Apply(&ps); err != nil {
-		return fmt.Errorf("apply patches: %w", err)
+	if err := proc.Process(ctx, prompt); err != nil {
+		return fmt.Errorf("process prompt: %w", err)
 	}
 
 	return nil

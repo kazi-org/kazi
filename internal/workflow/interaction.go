@@ -7,8 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/go-git/go-git/v5/plumbing/color"
-	"github.com/go-git/go-git/v5/plumbing/format/diff"
+	"github.com/fatih/color"
 	"github.com/kazi-org/kazi/internal/patch"
 )
 
@@ -27,41 +26,59 @@ func NewDefaultInteraction() UserInteraction {
 // displayColoredDiff shows a colored diff of the changes
 func (d *defaultInteraction) displayColoredDiff(changes *patch.PatchSet) {
 	// Create color config with default colors
-	cc := diff.NewColorConfig()
+	red := color.New(color.FgRed)
+	green := color.New(color.FgGreen)
+	blue := color.New(color.FgBlue)
+	bold := color.New(color.Bold)
 
 	// Display each patch
 	for _, p := range changes.Patches {
 		// Print file header
-		fmt.Printf("%s%sdiff --git a/%s b/%s%s\n",
-			cc[diff.Meta], color.Bold,
-			p.File, p.File,
-			cc.Reset(diff.Meta))
+		bold.Printf("diff --git a/%s b/%s\n", p.File, p.File)
 
 		// Print file mode changes based on patch type
 		switch p.Type {
 		case "create":
-			fmt.Printf("%snew file mode 100644%s\n", cc[diff.Meta], cc.Reset(diff.Meta))
+			blue.Println("new file mode 100644")
 		case "delete":
-			fmt.Printf("%sdeleted file mode 100644%s\n", cc[diff.Meta], cc.Reset(diff.Meta))
+			blue.Println("deleted file mode 100644")
 		case "modify":
-			fmt.Printf("%smodified file mode 100644%s\n", cc[diff.Meta], cc.Reset(diff.Meta))
+			blue.Println("modified file mode 100644")
 		}
 
 		// Print file paths
-		fmt.Printf("%s--- a/%s%s\n", cc[diff.Meta], p.File, cc.Reset(diff.Meta))
-		fmt.Printf("%s+++ b/%s%s\n", cc[diff.Meta], p.File, cc.Reset(diff.Meta))
+		blue.Printf("--- a/%s\n", p.File)
+		blue.Printf("+++ b/%s\n", p.File)
 
-		// Print content changes
-		lines := strings.Split(p.Content, "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "+") {
-				fmt.Printf("%s%s%s\n", cc[diff.New], line, cc.Reset(diff.New))
-			} else if strings.HasPrefix(line, "-") {
-				fmt.Printf("%s%s%s\n", cc[diff.Old], line, cc.Reset(diff.Old))
-			} else if strings.HasPrefix(line, "@") {
-				fmt.Printf("%s%s%s\n", cc[diff.Frag], line, cc.Reset(diff.Frag))
-			} else {
-				fmt.Printf("%s%s%s\n", cc[diff.Context], line, cc.Reset(diff.Context))
+		// Print content changes with proper diff markers
+		if p.Type == "create" {
+			// For new files, show all lines as added
+			for _, line := range strings.Split(p.Content, "\n") {
+				green.Printf("+%s\n", line)
+			}
+		} else if p.Type == "delete" {
+			// For deleted files, show all lines as removed
+			content, err := os.ReadFile(p.File)
+			if err == nil {
+				for _, line := range strings.Split(string(content), "\n") {
+					red.Printf("-%s\n", line)
+				}
+			}
+		} else if p.Type == "replace" {
+			// For modified files, show the diff
+			content, err := os.ReadFile(p.File)
+			if err == nil {
+				lines := strings.Split(string(content), "\n")
+
+				// Show lines being removed
+				for i := p.FromLine - 1; i < p.ToLine && i < len(lines); i++ {
+					red.Printf("-%s\n", lines[i])
+				}
+
+				// Show lines being added
+				for _, line := range strings.Split(p.Content, "\n") {
+					green.Printf("+%s\n", line)
+				}
 			}
 		}
 		fmt.Println()
