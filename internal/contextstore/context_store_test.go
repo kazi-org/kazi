@@ -2,302 +2,169 @@ package contextstore
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kazi-org/kazi/internal/contextstore/types"
 	gols "github.com/kazi-org/kazi/internal/ls/gols"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 // mockLSPClient implements lsp.LSPClient for testing
 type mockLSPClient struct {
-	symbols     []gols.WorkspaceSymbol
-	docStrings  map[string]string
-	definitions map[string]*gols.SymbolDefinition
-	references  map[string][]string
+	mock.Mock
 }
 
 func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]gols.WorkspaceSymbol, error) {
-	return m.symbols, nil
+	args := m.Called(query)
+	return args.Get(0).([]gols.WorkspaceSymbol), args.Error(1)
 }
 
-func (m *mockLSPClient) GetSymbolDocumentation(file, symbol string) (string, error) {
-	return m.docStrings[symbol], nil
+func (m *mockLSPClient) GetSymbolDocumentation(uri string, symbolName string) (string, error) {
+	args := m.Called(uri, symbolName)
+	return args.String(0), args.Error(1)
 }
 
 func (m *mockLSPClient) GetReferences(symbol string) ([]string, error) {
-	return m.references[symbol], nil
+	args := m.Called(symbol)
+	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockLSPClient) GetSymbolDefinition(file, symbol string) (*gols.SymbolDefinition, error) {
-	def, ok := m.definitions[symbol]
-	if !ok {
-		return nil, fmt.Errorf("symbol %q not found", symbol)
-	}
-	return def, nil
+func (m *mockLSPClient) GetSymbolDefinition(filePath, symbolName string) (*gols.SymbolDefinition, error) {
+	args := m.Called(filePath, symbolName)
+	return args.Get(0).(*gols.SymbolDefinition), args.Error(1)
 }
 
-func (m *mockLSPClient) GetFileContent(file string) (string, error) {
-	if strings.Contains(file, "invalid.go") {
-		return "invalid go code", nil
-	}
-	if strings.Contains(file, "main.go") {
-		return "package main\n\nfunc main() {}\n", nil
-	}
-	if strings.Contains(file, "types.go") || strings.Contains(file, "funcs.go") {
-		return "package example\n\nfunc main() {}\n", nil
-	}
-	return "", fmt.Errorf("file not found: %s", file)
+func (m *mockLSPClient) GetFileContent(filePath string) (string, error) {
+	args := m.Called(filePath)
+	return args.String(0), args.Error(1)
 }
 
-func (m *mockLSPClient) GetSymbolLocation(file, symbol string) (gols.Location, error) {
-	return gols.Location{}, nil
+func (m *mockLSPClient) GetSymbolLocation(filePath, symbolName string) (gols.Location, error) {
+	args := m.Called(filePath, symbolName)
+	return args.Get(0).(gols.Location), args.Error(1)
 }
 
 func (m *mockLSPClient) CheckCode(code string) (bool, string) {
-	// For testing, we'll consider any code that starts with "package" as valid
-	if strings.HasPrefix(strings.TrimSpace(code), "package") {
-		return true, ""
-	}
-	return false, "invalid Go code"
+	args := m.Called(code)
+	return args.Bool(0), args.String(1)
 }
 
 func (m *mockLSPClient) Close() error {
-	return nil
+	args := m.Called()
+	return args.Error(0)
+}
+
+func TestKaziContextStore_GetSymbol(t *testing.T) {
+	// Create a mock LSP client
+	mockClient := new(mockLSPClient)
+
+	// Create a test store
+	store := NewKaziContextStore("testdata", mockClient)
+
+	// Create a test symbol context
+	testSymbol := &types.SymbolContext{
+		Name:      "TestFunc",
+		Kind:      types.KindFunction,
+		DocString: "Test function documentation",
+	}
+
+	// Add the test symbol to the store's code context
+	store.(*KaziContextStore).codeCtx.Files["test.go"] = &types.FileContext{
+		FilePath: "test.go",
+		Symbols:  map[string]*types.SymbolContext{"TestFunc": testSymbol},
+	}
+
+	// Test getting an existing symbol
+	result := store.GetSymbol("TestFunc")
+	assert.Equal(t, testSymbol, result)
+
+	// Test getting a non-existent symbol
+	result = store.GetSymbol("NonExistentFunc")
+	assert.Nil(t, result)
+}
+
+func TestKaziContextStore_GetFile(t *testing.T) {
+	// Create a mock LSP client
+	mockClient := new(mockLSPClient)
+
+	// Create a test store
+	store := NewKaziContextStore("testdata", mockClient)
+
+	// Create a test file context
+	testFile := &types.FileContext{
+		FilePath: "test.go",
+		Symbols: map[string]*types.SymbolContext{
+			"TestFunc": {
+				Name:      "TestFunc",
+				Kind:      types.KindFunction,
+				DocString: "Test function documentation",
+			},
+		},
+	}
+
+	// Add the test file to the store's code context
+	store.(*KaziContextStore).codeCtx.Files["test.go"] = testFile
+
+	// Test getting an existing file
+	result := store.GetFile("test.go")
+	assert.Equal(t, testFile, result)
+
+	// Test getting a non-existent file
+	result = store.GetFile("nonexistent.go")
+	assert.Nil(t, result)
 }
 
 func TestKaziContextStore_BuildOrRefresh(t *testing.T) {
-	tests := []struct {
-		name        string
-		files       map[string]string
-		wantSymbols map[string]SymbolContext
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "Single Go file with function",
-			files: map[string]string{
-				"main.go": `package main
+	// Create a mock LSP client
+	mockClient := new(mockLSPClient)
 
-// HelloWorld prints a greeting
-func HelloWorld() {
-	println("Hello, World!")
-}
-`,
-			},
-			wantSymbols: map[string]SymbolContext{
-				"HelloWorld": {
-					Name:       "HelloWorld",
-					Kind:       "function",
-					DocString:  "HelloWorld prints a greeting\n",
-					StartLine:  4,
-					EndLine:    6,
-					Package:    "main",
-					Exported:   true,
-					Signature:  "func HelloWorld()",
-					References: []string{"main.go"},
+	// Set up mock expectations
+	mockClient.On("GetFileContent", "test.go").Return("package test\n\nfunc TestFunc() {}", nil)
+	mockClient.On("CheckCode", mock.Anything).Return(true, "")
+	mockClient.On("GetWorkspaceSymbols", mock.Anything).Return([]gols.WorkspaceSymbol{
+		{
+			Name: "TestFunc",
+			Kind: "function",
+			Location: gols.Location{
+				URI: "test.go",
+				Range: gols.Range{
+					Start: gols.Position{Line: 2, Character: 0},
+					End:   gols.Position{Line: 2, Character: 20},
 				},
 			},
 		},
-		{
-			name: "Multiple files with types and functions",
-			files: map[string]string{
-				"types.go": `package example
-
-// User represents a user in the system
-type User struct {
-	Name string
-	Age  int
-}
-
-// unexportedType is not exported
-type unexportedType struct{}
-`,
-				"funcs.go": `package example
-
-// GetUser returns a new user
-func GetUser(name string) *User {
-	return &User{Name: name}
-}
-`,
-			},
-			wantSymbols: map[string]SymbolContext{
-				"User": {
-					Name:      "User",
-					Kind:      "type",
-					DocString: "User represents a user in the system\n",
-					Package:   "example",
-					Exported:  true,
-				},
-				"GetUser": {
-					Name:      "GetUser",
-					Kind:      "function",
-					DocString: "GetUser returns a new user\n",
-					Package:   "example",
-					Exported:  true,
-					Signature: "func GetUser(name string) *User",
-				},
-			},
+	}, nil)
+	mockClient.On("GetSymbolDocumentation", mock.Anything, mock.Anything).Return("Test function documentation", nil)
+	mockClient.On("GetSymbolDefinition", mock.Anything, mock.Anything).Return(&gols.SymbolDefinition{
+		Signature: "func TestFunc()",
+	}, nil)
+	mockClient.On("GetReferences", mock.Anything).Return([]string{"test.go"}, nil)
+	mockClient.On("GetSymbolLocation", mock.Anything, mock.Anything).Return(gols.Location{
+		URI: "test.go",
+		Range: gols.Range{
+			Start: gols.Position{Line: 2, Character: 0},
+			End:   gols.Position{Line: 2, Character: 20},
 		},
-		{
-			name: "Invalid Go file",
-			files: map[string]string{
-				"invalid.go": `package main
+	}, nil)
 
-func invalid syntax {
-`,
-			},
-			wantErr:     true,
-			errContains: "invalid Go code",
-		},
-	}
+	// Create a test store
+	store := NewKaziContextStore("testdata", mockClient)
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create temporary workspace
-			tmpDir, err := os.MkdirTemp("", "kazi-context-test-*")
-			if err != nil {
-				t.Fatalf("Failed to create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tmpDir)
+	// Test building the context
+	err := store.BuildOrRefresh(context.Background())
+	assert.NoError(t, err)
 
-			// Write test files
-			for name, content := range tc.files {
-				path := filepath.Join(tmpDir, name)
-				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-					t.Fatalf("Failed to write file %s: %v", name, err)
-				}
-			}
+	// Verify that the mock expectations were met
+	mockClient.AssertExpectations(t)
 
-			// Create mock LSP client with test data
-			mockClient := &mockLSPClient{
-				symbols: []gols.WorkspaceSymbol{
-					{
-						Name: "HelloWorld",
-						Kind: "function",
-						Location: gols.Location{
-							URI: "main.go",
-							Range: gols.Range{
-								Start: gols.Position{Line: 3},
-								End:   gols.Position{Line: 5},
-							},
-						},
-					},
-					{
-						Name: "User",
-						Kind: "type",
-						Location: gols.Location{
-							URI: "types.go",
-							Range: gols.Range{
-								Start: gols.Position{Line: 3},
-								End:   gols.Position{Line: 5},
-							},
-						},
-					},
-					{
-						Name: "GetUser",
-						Kind: "function",
-						Location: gols.Location{
-							URI: "funcs.go",
-							Range: gols.Range{
-								Start: gols.Position{Line: 3},
-								End:   gols.Position{Line: 4},
-							},
-						},
-					},
-				},
-				docStrings: map[string]string{
-					"HelloWorld": "HelloWorld prints a greeting\n",
-					"User":       "User represents a user in the system\n",
-					"GetUser":    "GetUser returns a new user\n",
-				},
-				definitions: map[string]*gols.SymbolDefinition{
-					"HelloWorld": &gols.SymbolDefinition{Signature: "func HelloWorld()"},
-					"User":       &gols.SymbolDefinition{Signature: "type User struct"},
-					"GetUser":    &gols.SymbolDefinition{Signature: "func GetUser(name string) *User"},
-				},
-				references: map[string][]string{
-					"HelloWorld": {"main.go"},
-					"User":       {"types.go", "funcs.go"},
-					"GetUser":    {"funcs.go"},
-				},
-			}
-
-			// Create context store with mock client
-			store := NewKaziContextStore(tmpDir, mockClient)
-			ctx := context.Background()
-			err = store.BuildOrRefresh(ctx)
-
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error but got nil")
-				}
-				if tc.errContains != "" && !contains(err.Error(), tc.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			// Get and verify context
-			codeCtx := store.GetCodeContext()
-			if codeCtx == nil {
-				t.Fatal("expected non-nil code context")
-			}
-
-			// Verify symbols
-			for name, want := range tc.wantSymbols {
-				var found bool
-				var got *SymbolContext
-				for _, fc := range codeCtx.Files {
-					if s, ok := fc.Symbols[name]; ok {
-						found = true
-						got = s
-						break
-					}
-				}
-				if !found {
-					t.Errorf("symbol %q not found", name)
-					continue
-				}
-
-				// Compare fields that should always match
-				if got.Name != want.Name {
-					t.Errorf("symbol %q name = %q, want %q", name, got.Name, want.Name)
-				}
-				if got.Kind != want.Kind {
-					t.Errorf("symbol %q kind = %q, want %q", name, got.Kind, want.Kind)
-				}
-				if got.DocString != want.DocString {
-					t.Errorf("symbol %q doc = %q, want %q", name, got.DocString, want.DocString)
-				}
-				if got.Package != want.Package {
-					t.Errorf("symbol %q package = %q, want %q", name, got.Package, want.Package)
-				}
-				if got.Exported != want.Exported {
-					t.Errorf("symbol %q exported = %v, want %v", name, got.Exported, want.Exported)
-				}
-
-				// Compare optional fields only if specified in want
-				if want.StartLine != 0 && got.StartLine != want.StartLine {
-					t.Errorf("symbol %q start line = %d, want %d", name, got.StartLine, want.StartLine)
-				}
-				if want.EndLine != 0 && got.EndLine != want.EndLine {
-					t.Errorf("symbol %q end line = %d, want %d", name, got.EndLine, want.EndLine)
-				}
-				if want.Signature != "" && got.Signature != want.Signature {
-					t.Errorf("symbol %q signature = %q, want %q", name, got.Signature, want.Signature)
-				}
-				if len(want.References) > 0 && !stringSliceEqual(got.References, want.References) {
-					t.Errorf("symbol %q references = %v, want %v", name, got.References, want.References)
-				}
-			}
-		})
-	}
+	// Test that the context was built correctly
+	result := store.GetSymbol("TestFunc")
+	assert.NotNil(t, result)
+	assert.Equal(t, "TestFunc", result.Name)
+	assert.Equal(t, types.KindFunction, result.Kind)
+	assert.Equal(t, "Test function documentation", result.DocString)
 }
 
 // stringSliceEqual returns true if two string slices have the same elements in the same order

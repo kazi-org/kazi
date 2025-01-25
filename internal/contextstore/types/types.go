@@ -1,48 +1,21 @@
-// Package contextstore provides functionality for maintaining and querying
-// a code context store that tracks Go source code symbols and their relationships.
-package contextstore
+// Package types provides the core data structures for the code context store.
+package types
 
-import (
-	"context"
+import gols "github.com/kazi-org/kazi/internal/ls/gols"
 
-	gols "github.com/kazi-org/kazi/internal/ls/gols"
+// SymbolKind represents the type of a symbol (function, type, constant, etc.)
+type SymbolKind string
+
+const (
+	// KindFunction represents a function symbol
+	KindFunction SymbolKind = "function"
+	// KindType represents a type symbol
+	KindType SymbolKind = "type"
+	// KindConstant represents a constant symbol
+	KindConstant SymbolKind = "constant"
+	// KindVariable represents a variable symbol
+	KindVariable SymbolKind = "variable"
 )
-
-// SymbolReader provides read-only access to symbol information.
-type SymbolReader interface {
-	// GetSymbol returns symbol information by name.
-	// Returns nil if the symbol is not found.
-	GetSymbol(name string) *SymbolContext
-}
-
-// FileReader provides read-only access to file information.
-type FileReader interface {
-	// GetFile returns file information by path.
-	// Returns nil if the file is not found.
-	GetFile(path string) *FileContext
-}
-
-// ContextReader provides read-only access to code context information.
-type ContextReader interface {
-	SymbolReader
-	FileReader
-	// GetCodeContext returns the current snapshot of the code context.
-	GetCodeContext() *CodeContext
-}
-
-// ContextBuilder handles the building and refreshing of code context.
-type ContextBuilder interface {
-	// BuildOrRefresh scans the workspace and updates the code context.
-	// The context parameter is used to control the scan operation's lifetime.
-	// Returns an error if the scan fails.
-	BuildOrRefresh(ctx context.Context) error
-}
-
-// Store combines the reader and builder interfaces for managing code context.
-type Store interface {
-	ContextReader
-	ContextBuilder
-}
 
 // CodeContext represents the entire workspace's code context.
 // It provides a snapshot of all files and their symbols at a point in time.
@@ -62,20 +35,6 @@ type FileContext struct {
 	// Symbols maps symbol names to their detailed context information
 	Symbols map[string]*SymbolContext
 }
-
-// SymbolKind represents the type of a symbol (function, type, constant, etc.)
-type SymbolKind string
-
-const (
-	// KindFunction represents a function symbol
-	KindFunction SymbolKind = "function"
-	// KindType represents a type symbol
-	KindType SymbolKind = "type"
-	// KindConstant represents a constant symbol
-	KindConstant SymbolKind = "constant"
-	// KindVariable represents a variable symbol
-	KindVariable SymbolKind = "variable"
-)
 
 // SymbolContext represents detailed information about a single symbol
 // (function, type, constant, or variable).

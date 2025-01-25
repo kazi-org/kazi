@@ -12,7 +12,8 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	kaziconfig "github.com/kazi-org/kazi/internal/config"
-	"github.com/kazi-org/kazi/internal/contextstore"
+	"github.com/kazi-org/kazi/internal/contextstore/types"
+	"github.com/stretchr/testify/assert"
 )
 
 // mockAIClient implements ai.LLMClient for testing
@@ -113,7 +114,7 @@ func TestProcessPrompt(t *testing.T) {
 		prompt      kaziconfig.Prompt
 		global      kaziconfig.GlobalConfig
 		rules       []string
-		ctx         *contextstore.CodeContext
+		ctx         *types.CodeContext
 		mockResp    string
 		wantErr     bool
 		errContains string
@@ -238,7 +239,7 @@ func TestRequestBuilder(t *testing.T) {
 		prompt   kaziconfig.Prompt
 		global   kaziconfig.GlobalConfig
 		rules    []string
-		ctx      *contextstore.CodeContext
+		ctx      *types.CodeContext
 		contains []string
 	}{
 		{
@@ -277,15 +278,15 @@ func TestRequestBuilder(t *testing.T) {
 				Workspace: "/test/workspace",
 			},
 			rules: nil,
-			ctx: &contextstore.CodeContext{
-				Files: map[string]*contextstore.FileContext{
+			ctx: &types.CodeContext{
+				Files: map[string]*types.FileContext{
 					"main.go": {
 						FilePath: "main.go",
 						Imports:  []string{"fmt", "os"},
-						Symbols: map[string]*contextstore.SymbolContext{
+						Symbols: map[string]*types.SymbolContext{
 							"main": {
 								Name:      "main",
-								Kind:      "function",
+								Kind:      types.KindFunction,
 								Package:   "main",
 								Exported:  true,
 								DocString: "main is the entry point",
@@ -307,12 +308,11 @@ func TestRequestBuilder(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			builder := newRequestBuilder(tc.rules, tc.global, tc.ctx)
-			got := builder.Build(tc.prompt)
-			for _, want := range tc.contains {
-				if !strings.Contains(got, want) {
-					t.Errorf("request does not contain %q", want)
-				}
+			builder := NewRequestBuilderWithConfig(tc.ctx, tc.rules, tc.global)
+			request := builder.Build(tc.prompt)
+
+			for _, substr := range tc.contains {
+				assert.Contains(t, request, substr)
 			}
 		})
 	}

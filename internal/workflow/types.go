@@ -2,11 +2,11 @@ package workflow
 
 import (
 	"context"
+	"io"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/kazi-org/kazi/internal/ai"
 	"github.com/kazi-org/kazi/internal/config"
-	"github.com/kazi-org/kazi/internal/contextstore"
+	"github.com/kazi-org/kazi/internal/contextstore/types"
 	"github.com/kazi-org/kazi/internal/patch"
 )
 
@@ -61,11 +61,27 @@ type LLMRequestBuilder interface {
 	Build(prompt config.Prompt) string
 }
 
+// LLMClient provides access to language model functionality
+type LLMClient interface {
+	// GetPatch takes a prompt and returns a JSON string containing the patches to apply.
+	GetPatch(ctx context.Context, prompt string) (string, error)
+	// StreamPatch takes a prompt and returns a stream of patch chunks.
+	StreamPatch(ctx context.Context, prompt string) (io.ReadCloser, error)
+}
+
+// ContextStore provides access to code context information
+type ContextStore interface {
+	// GetCodeContext returns the current code context
+	GetCodeContext() *types.CodeContext
+	// BuildOrRefresh updates the code context
+	BuildOrRefresh(ctx context.Context) error
+}
+
 // Options contains the configuration for the workflow processor
 type Options struct {
 	Workspace string
 	Rules     []string
-	Context   *contextstore.CodeContext
+	Context   *types.CodeContext
 	Config    config.GlobalConfig
 }
 
@@ -76,6 +92,34 @@ type ProcessorConfig struct {
 	RequestBuilder  LLMRequestBuilder
 	PatchApplier    patch.Applier
 	UserInteraction UserInteraction
-	LLMClient       ai.LLMClient
+	LLMClient       LLMClient
 	Options         *Options
+}
+
+// Workflow represents a sequence of operations to be performed
+type Workflow interface {
+	// Execute runs the workflow with the given context
+	Execute(ctx context.Context) error
+}
+
+// WorkflowConfig holds configuration for workflow execution
+type WorkflowConfig struct {
+	// Rules are project-specific rules to follow
+	Rules []string
+	// Config is the global configuration
+	Config config.GlobalConfig
+	// Store provides access to code context
+	Store ContextStore
+	// LLMClient provides access to language model functionality
+	LLMClient LLMClient
+}
+
+// WorkflowResult represents the result of a workflow execution
+type WorkflowResult struct {
+	// Success indicates whether the workflow completed successfully
+	Success bool
+	// Message contains any output or error message
+	Message string
+	// CodeContext contains the code context at completion
+	CodeContext *types.CodeContext
 }
