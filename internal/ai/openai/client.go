@@ -16,6 +16,7 @@ import (
 // Client is a real client using go-openai
 type Client struct {
 	client *openai.Client
+	model  string
 }
 
 // ClientOption is a function that modifies the OpenAI client configuration
@@ -26,6 +27,15 @@ func WithBaseURL(url string) ClientOption {
 	return func(config *openai.ClientConfig) {
 		config.BaseURL = url
 	}
+}
+
+// getModelFromEnv gets the model from environment variable or returns default
+func getModelFromEnv() string {
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		return "o1-mini" // Default to o1-mini
+	}
+	return model
 }
 
 // NewClient creates a new OpenAI client
@@ -41,6 +51,7 @@ func NewClient(opts ...ClientOption) (ai.LLMClient, error) {
 	cli := openai.NewClientWithConfig(config)
 	return &Client{
 		client: cli,
+		model:  getModelFromEnv(),
 	}, nil
 }
 
@@ -49,7 +60,7 @@ func (o *Client) GetPatch(ctx context.Context, prompt string) (string, error) {
 	resp, err := o.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model: openai.GPT4,
+			Model: o.model,
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role:    openai.ChatMessageRoleUser,
@@ -130,7 +141,7 @@ func (o *Client) StreamPatch(ctx context.Context, prompt string) (io.ReadCloser,
 	stream, err := o.client.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model: openai.GPT4,
+			Model: o.model,
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role:    openai.ChatMessageRoleUser,

@@ -97,3 +97,33 @@ func LoadConfig(path string) (*KaziProject, error) {
 
 	return LoadConfigFromReader(f)
 }
+
+// DefaultConfig creates a default configuration with the given prompt
+func DefaultConfig(prompt string) *KaziProject {
+	wd, err := os.Getwd()
+	if err != nil {
+		wd = "." // Fallback to current directory if we can't get working directory
+	}
+
+	return &KaziProject{
+		APIVersion: "kazi.io/v1",
+		Kind:       "KaziProject",
+		Metadata: Metadata{
+			Name: "default",
+		},
+		Spec: ProjectSpec{
+			Global: GlobalConfig{
+				Workspace:   wd,
+				LintCommand: "go vet ./...",
+				TestCommand: "go test ./...",
+				LanguageServer: LanguageServer{
+					Name:    "gopls",
+					Command: "gopls",
+					Timeout: "30s",
+				},
+			},
+			Rules:   []string{},
+			Prompts: []string{prompt},
+		},
+	}
+}
