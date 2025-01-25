@@ -70,6 +70,13 @@ func (d *defaultInteraction) displayColoredDiff(changes *patch.PatchSet) {
 			if err == nil {
 				lines := strings.Split(string(content), "\n")
 
+				// Show context before
+				if len(p.ContextBefore) > 0 {
+					for _, line := range p.ContextBefore {
+						fmt.Printf(" %s\n", line)
+					}
+				}
+
 				// Show lines being removed
 				for i := p.FromLine - 1; i < p.ToLine && i < len(lines); i++ {
 					red.Printf("-%s\n", lines[i])
@@ -78,6 +85,13 @@ func (d *defaultInteraction) displayColoredDiff(changes *patch.PatchSet) {
 				// Show lines being added
 				for _, line := range strings.Split(p.Content, "\n") {
 					green.Printf("+%s\n", line)
+				}
+
+				// Show context after
+				if len(p.ContextAfter) > 0 {
+					for _, line := range p.ContextAfter {
+						fmt.Printf(" %s\n", line)
+					}
 				}
 			}
 		}
@@ -92,7 +106,7 @@ func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patc
 
 	// Show commit message
 	fmt.Printf("\nProposed commit message:\n")
-	fmt.Printf("%s%s%s\n", color.Bold, changes.Commit.Subject, color.Reset)
+	fmt.Printf("%s\n", changes.Commit.Subject)
 	if changes.Commit.Body != "" {
 		fmt.Printf("\n%s\n", changes.Commit.Body)
 	}
@@ -102,7 +116,7 @@ func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patc
 	fmt.Println("- yes    : accept current changes")
 	fmt.Println("- no     : reject current changes")
 	fmt.Println("- chat   : modify the prompt and try again")
-	fmt.Println("- abort  : abort the entire operation")
+	fmt.Println("- quit   : quit the entire operation")
 	fmt.Println("- all    : accept all changes in current prompt")
 	fmt.Println("- yolo   : accept all changes in all prompts")
 
@@ -130,7 +144,7 @@ func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patc
 					return 0, "", fmt.Errorf("read prompt: %w", err)
 				}
 				return ModeChat, strings.TrimSpace(promptStr), nil
-			case "abort", "a":
+			case "quit", "q":
 				return ModeAbort, "", nil
 			case "all":
 				return ModeAll, "", nil

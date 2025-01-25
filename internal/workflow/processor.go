@@ -47,6 +47,9 @@ func (p *processor) Process(ctx context.Context, prompt string) error {
 			return fmt.Errorf("get patch from LLM: %w", err)
 		}
 
+		// Debug: Print the raw JSON response
+		fmt.Printf("\nDebug - LLM Response:\n%s\n\n", patchJSON)
+
 		// Parse patch set
 		var ps patch.PatchSet
 		if err := json.Unmarshal([]byte(patchJSON), &ps); err != nil {

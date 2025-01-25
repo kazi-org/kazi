@@ -64,7 +64,7 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
 	rb.tokenCount = 0
 
 	// Add system message
-	systemMsg := "You are a Go expert. CRITICAL: Respond ONLY with a SINGLE LINE of valid JSON matching this schema:\n\n"
+	systemMsg := "You are a Go expert. CRITICAL: Respond ONLY with a SINGLE LINE of valid JSON matching this schema. Make patches as minimal as possible, changing only the lines that need to change. ALWAYS include 3 lines of context before and after the change:\n\n"
 	rb.addContent(&b, systemMsg)
 
 	// JSON schema
@@ -76,17 +76,17 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
   "patches": [{
     "file": "string (file path)",
     "type": "create|replace|delete",
-    "fromLine": "number (1-indexed, required for replace)",
-    "toLine": "number (1-indexed, required for replace)",
-    "contextBefore": ["string (optional)"],
-    "contextAfter": ["string (optional)"],
-    "content": "string (required for create/replace)"
+    "fromLine": "number (1-indexed, required for replace, ONLY include lines that actually change)",
+    "toLine": "number (1-indexed, required for replace, ONLY include lines that actually change)",
+    "contextBefore": ["string (REQUIRED, exactly 3 lines of context before the change)"],
+    "contextAfter": ["string (REQUIRED, exactly 3 lines of context after the change)"],
+    "content": "string (required for create/replace, ONLY include changed lines)"
   }]
 }` + "\n\n"
 	rb.addContent(&b, schema)
 
 	// Example
-	example := `Example (EXACTLY like this): {"commit":{"subject":"Add error handling","body":"Add proper error handling"},"patches":[{"file":"main.go","type":"replace","fromLine":10,"toLine":15,"content":"func process() error {\n  return nil\n}"}]}` + "\n\n"
+	example := `Example (EXACTLY like this): {"commit":{"subject":"Optimize helloHandler"},"patches":[{"file":"main.go","type":"replace","fromLine":9,"toLine":9,"contextBefore":["import (",")","\nfunc helloHandler(w http.ResponseWriter, r *http.Request) {"],"contextAfter":["}","\nfunc main() {","\thttp.HandleFunc(\"/\", helloHandler)"],"content":"\tw.Write([]byte(\"Hello, World!\"))"}]}` + "\n\n"
 	rb.addContent(&b, example)
 
 	// Add code context if within token limit

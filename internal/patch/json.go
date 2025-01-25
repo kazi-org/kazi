@@ -7,11 +7,13 @@ import (
 
 // tempPatch is used for initial JSON unmarshaling
 type tempPatch struct {
-	File     string `json:"file"`
-	Type     string `json:"type"`
-	Content  string `json:"content"`
-	FromLine int    `json:"fromLine"`
-	ToLine   int    `json:"toLine"`
+	File          string   `json:"file"`
+	Type          string   `json:"type"`
+	Content       string   `json:"content"`
+	FromLine      int      `json:"fromLine"`
+	ToLine        int      `json:"toLine"`
+	ContextBefore []string `json:"contextBefore"`
+	ContextAfter  []string `json:"contextAfter"`
 }
 
 // tempPatchSet is used for initial JSON unmarshaling
@@ -54,15 +56,24 @@ func (ps *PatchSet) UnmarshalJSON(data []byte) error {
 			if p.FromLine <= 0 || p.ToLine < p.FromLine {
 				return fmt.Errorf("invalid line range: from=%d, to=%d", p.FromLine, p.ToLine)
 			}
+			// Validate context lines
+			if len(p.ContextBefore) == 0 {
+				return fmt.Errorf("missing required field: contextBefore")
+			}
+			if len(p.ContextAfter) == 0 {
+				return fmt.Errorf("missing required field: contextAfter")
+			}
 		}
 
 		// Create chunk
 		ps.Patches[i] = Chunk{
-			File:     p.File,
-			Type:     patchType,
-			Content:  p.Content,
-			FromLine: p.FromLine,
-			ToLine:   p.ToLine,
+			File:          p.File,
+			Type:          patchType,
+			Content:       p.Content,
+			FromLine:      p.FromLine,
+			ToLine:        p.ToLine,
+			ContextBefore: p.ContextBefore,
+			ContextAfter:  p.ContextAfter,
 		}
 	}
 

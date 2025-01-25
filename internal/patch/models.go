@@ -15,8 +15,8 @@ type Chunk struct {
 	Type          PatchType `json:"type"`
 	FromLine      int       `json:"fromLine"`
 	ToLine        int       `json:"toLine"`
-	ContextBefore []string  `json:"contextBefore,omitempty"`
-	ContextAfter  []string  `json:"contextAfter,omitempty"`
+	ContextBefore []string  `json:"contextBefore"`
+	ContextAfter  []string  `json:"contextAfter"`
 	Content       string    `json:"content"`
 }
 
