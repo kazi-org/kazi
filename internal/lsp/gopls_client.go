@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 package lsp
 
 import (
@@ -131,12 +134,52 @@ func NewGoplsClient(ctx context.Context, workspace string, command string, timeo
 	return g, nil
 }
 
+// signalGracefulShutdown sends an appropriate signal for graceful shutdown
+func signalGracefulShutdown(process *os.Process) error {
+	return process.Signal(os.Interrupt)
+}
+
 func (g *GoplsClient) Close() error {
+	// Send shutdown request
+	var result interface{}
+	if err := g.sendRequest("shutdown", nil, &result); err != nil {
+		log.Printf("Warning: LSP shutdown request failed: %v", err)
+	}
+
+	// Send exit notification
+	if err := g.sendNotification("exit", nil); err != nil {
+		log.Printf("Warning: LSP exit notification failed: %v", err)
+	}
+
+	// Cancel context and wait for listen goroutine to finish
 	g.cancel()
 	g.doneWg.Wait()
+
+	// Try graceful shutdown first
 	if g.cmd.Process != nil {
-		g.cmd.Process.Kill()
+		// Send appropriate signal based on OS
+		if err := signalGracefulShutdown(g.cmd.Process); err != nil {
+			log.Printf("Warning: failed to send shutdown signal: %v", err)
+		}
+
+		// Wait for process to exit with timeout
+		done := make(chan error, 1)
+		go func() {
+			done <- g.cmd.Wait()
+		}()
+
+		select {
+		case <-time.After(2 * time.Second):
+			// If graceful shutdown fails, force kill as last resort
+			log.Printf("Warning: LSP server did not shut down gracefully, forcing termination")
+			g.cmd.Process.Kill()
+		case err := <-done:
+			if err != nil {
+				log.Printf("Warning: LSP server exited with error: %v", err)
+			}
+		}
 	}
+
 	return nil
 }
 
