@@ -88,13 +88,13 @@ func (o *Client) GetPatch(ctx context.Context, prompt string) (string, error) {
 			Body    string `json:"body,omitempty"`
 		} `json:"commit"`
 		Patches []struct {
-			File          string   `json:"file"`
-			Type          string   `json:"type"`
-			FromLine      int      `json:"fromLine"`
-			ToLine        int      `json:"toLine"`
-			Content       string   `json:"content"`
-			ContextBefore []string `json:"contextBefore"`
-			ContextAfter  []string `json:"contextAfter"`
+			File        string   `json:"file"`
+			Type        string   `json:"type"`
+			FromLine    int      `json:"fromLine"`
+			ToLine      int      `json:"toLine"`
+			Content     string   `json:"content"`
+			LinesBefore []string `json:"linesBefore"`
+			LinesAfter  []string `json:"linesAfter"`
 		} `json:"patches"`
 	}
 	if err := json.Unmarshal([]byte(content), &patchSet); err != nil {
@@ -122,11 +122,11 @@ func (o *Client) GetPatch(ctx context.Context, prompt string) (string, error) {
 			if p.ToLine < p.FromLine {
 				return "", fmt.Errorf("invalid toLine in patch %d: must be >= fromLine", i)
 			}
-			if len(p.ContextBefore) == 0 {
-				return "", fmt.Errorf("missing required field: patches[%d].contextBefore", i)
+			if len(p.LinesBefore) == 0 {
+				return "", fmt.Errorf("missing required field: patches[%d].linesBefore", i)
 			}
-			if len(p.ContextAfter) == 0 {
-				return "", fmt.Errorf("missing required field: patches[%d].contextAfter", i)
+			if len(p.LinesAfter) == 0 {
+				return "", fmt.Errorf("missing required field: patches[%d].linesAfter", i)
 			}
 		}
 		if p.Type != "delete" && p.Content == "" {

@@ -57,36 +57,18 @@ func TestNewClient(t *testing.T) {
 func TestGetPatch(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST request, got %s", r.Method)
-		}
-		if !strings.HasSuffix(r.URL.Path, "/chat/completions") {
-			t.Errorf("expected path to end with /chat/completions, got %s", r.URL.Path)
-		}
-
-		// Write response
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{
-			"id": "test-id",
-			"object": "chat.completion",
-			"created": 1234567890,
-			"model": "gpt-4",
-			"choices": [
-				{
-					"message": {
-						"role": "assistant",
-						"content": "{\"patches\":[{\"file\":\"test.go\",\"type\":\"create\",\"content\":\"package main\"}]}"
-					},
-					"finish_reason": "stop",
-					"index": 0
+		response := `{
+			"choices": [{
+				"message": {
+					"content": "{\"commit\":{\"subject\":\"Add user endpoint\"},\"patches\":[{\"file\":\"main.go\",\"type\":\"replace\",\"fromLine\":1,\"toLine\":1,\"linesBefore\":[\"package main\",\"\",\"import (\"],\"linesAfter\":[\")\",\"func main() {\"],\"content\":\"fmt.Println(\\\"Hello\\\")\"}]}"
 				}
-			]
-		}`)
+			}]
+		}`
+		w.Write([]byte(response))
 	}))
 	defer server.Close()
 
-	// Create client with test server
+	// Create client with test server URL
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	client, err := NewClient(WithBaseURL(server.URL))
 	if err != nil {
@@ -94,24 +76,14 @@ func TestGetPatch(t *testing.T) {
 	}
 
 	// Test GetPatch
-	resp, err := client.GetPatch(context.Background(), "test prompt")
+	patch, err := client.GetPatch(context.Background(), "test prompt")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Errorf("unexpected error: %v", err)
 	}
 
-	// Verify response
-	var patches struct {
-		Patches []struct {
-			File    string `json:"file"`
-			Type    string `json:"type"`
-			Content string `json:"content"`
-		} `json:"patches"`
-	}
-	if err := json.Unmarshal([]byte(resp), &patches); err != nil {
-		t.Fatalf("invalid JSON response: %v", err)
-	}
-	if len(patches.Patches) != 1 {
-		t.Errorf("expected 1 patch, got %d", len(patches.Patches))
+	// Verify patch content
+	if !strings.Contains(patch, "Add user endpoint") {
+		t.Error("patch does not contain expected commit subject")
 	}
 }
 

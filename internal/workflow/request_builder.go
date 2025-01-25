@@ -118,17 +118,17 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
             "description": "Ending line number (1-indexed)",
             "required": true
           },
-          "contextBefore": {
+          "linesBefore": {
             "type": "array",
-            "description": "Exactly 3 lines of context before the change",
+            "description": "Exactly 3 lines of code before the change",
             "items": {"type": "string"},
             "minItems": 3,
             "maxItems": 3,
             "required": true
           },
-          "contextAfter": {
+          "linesAfter": {
             "type": "array",
-            "description": "Exactly 3 lines of context after the change",
+            "description": "Exactly 3 lines of code after the change",
             "items": {"type": "string"},
             "minItems": 3,
             "maxItems": 3,
@@ -164,8 +164,8 @@ Example response:
     "type": "replace",
     "fromLine": 8,
     "toLine": 10,
-    "contextBefore": ["package main", "", "import ("],
-    "contextAfter": [")", "", "func createUser(w http.ResponseWriter, r *http.Request) {"],
+    "linesBefore": ["package main", "", "import ("],
+    "linesAfter": [")", "", "func createUser(w http.ResponseWriter, r *http.Request) {"],
     "content": "\t\"encoding/json\"\n\t\"fmt\"\n\t\"net/http\""
   }]
 }

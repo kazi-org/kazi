@@ -3,6 +3,7 @@ package contextstore
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,11 @@ import (
 // mockLSPClient implements LSPClient for testing
 type mockLSPClient struct {
 	mock.Mock
+	symbols      []types.WorkspaceSymbol
+	docs         map[string]string
+	definitions  map[string]*types.SymbolDefinition
+	references   map[string][]*types.Location
+	fileContents map[string]string
 }
 
 func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]types.WorkspaceSymbol, error) {
@@ -58,6 +64,14 @@ func (m *mockLSPClient) Close() error {
 	return args.Error(0)
 }
 
+func (m *mockLSPClient) FormatFile(filePath string) (string, error) {
+	content, ok := m.fileContents[filePath]
+	if !ok {
+		return "", fmt.Errorf("file not found: %s", filePath)
+	}
+	return content, nil
+}
+
 func TestKaziContextStore(t *testing.T) {
 	// Create test directory and file
 	testDir := "testdata"
@@ -75,6 +89,44 @@ func main() {
 	assert.NoError(t, err)
 
 	mockClient := new(mockLSPClient)
+	mockClient.On("GetFileContent", mock.Anything).Return(`package main
+
+func main() {
+	println("Hello, World!")
+}`, nil)
+	mockClient.On("GetWorkspaceSymbols", mock.Anything).Return([]types.WorkspaceSymbol{
+		{
+			Name: "main",
+			Kind: types.KindFunction,
+			Location: types.Location{
+				URI: "main.go",
+				Range: types.Range{
+					Start: types.Position{Line: 3, Character: 1},
+					End:   types.Position{Line: 3, Character: 5},
+				},
+			},
+		},
+	}, nil)
+	mockClient.On("GetSymbolDocumentation", mock.Anything, mock.Anything).Return("main function", nil)
+	mockClient.On("GetReferences", mock.Anything, mock.Anything).Return([]*types.Location{}, nil)
+	mockClient.On("GetSymbolDefinition", mock.Anything, mock.Anything).Return(&types.SymbolDefinition{
+		Name:      "main",
+		Kind:      types.KindFunction,
+		URI:       "main.go",
+		StartLine: 3,
+		EndLine:   5,
+		DocString: "main function",
+	}, nil)
+	mockClient.On("GetSymbolLocation", mock.Anything, mock.Anything).Return(&types.Location{
+		URI: "main.go",
+		Range: types.Range{
+			Start: types.Position{Line: 3, Character: 1},
+			End:   types.Position{Line: 3, Character: 5},
+		},
+	}, nil)
+	mockClient.On("CheckCode", mock.Anything).Return(true, nil)
+	mockClient.On("Close").Return(nil)
+
 	store := NewKaziContextStore(StoreConfig{
 		Workspace:    testDir,
 		ScanInterval: 30,

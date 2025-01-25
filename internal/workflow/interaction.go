@@ -71,8 +71,8 @@ func (d *defaultInteraction) displayColoredDiff(changes *patch.PatchSet) {
 				lines := strings.Split(string(content), "\n")
 
 				// Show context before
-				if len(p.ContextBefore) > 0 {
-					for _, line := range p.ContextBefore {
+				if len(p.LinesBefore) > 0 {
+					for _, line := range p.LinesBefore {
 						fmt.Printf(" %s\n", line)
 					}
 				}
@@ -88,8 +88,8 @@ func (d *defaultInteraction) displayColoredDiff(changes *patch.PatchSet) {
 				}
 
 				// Show context after
-				if len(p.ContextAfter) > 0 {
-					for _, line := range p.ContextAfter {
+				if len(p.LinesAfter) > 0 {
+					for _, line := range p.LinesAfter {
 						fmt.Printf(" %s\n", line)
 					}
 				}

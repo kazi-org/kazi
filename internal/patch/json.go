@@ -7,13 +7,13 @@ import (
 
 // tempPatch is used for initial JSON unmarshaling
 type tempPatch struct {
-	File          string   `json:"file"`
-	Type          string   `json:"type"`
-	Content       string   `json:"content"`
-	FromLine      int      `json:"fromLine"`
-	ToLine        int      `json:"toLine"`
-	ContextBefore []string `json:"contextBefore"`
-	ContextAfter  []string `json:"contextAfter"`
+	File        string   `json:"file"`
+	Type        string   `json:"type"`
+	Content     string   `json:"content"`
+	FromLine    int      `json:"fromLine"`
+	ToLine      int      `json:"toLine"`
+	LinesBefore []string `json:"linesBefore"`
+	LinesAfter  []string `json:"linesAfter"`
 }
 
 // tempPatchSet is used for initial JSON unmarshaling
@@ -56,24 +56,24 @@ func (ps *PatchSet) UnmarshalJSON(data []byte) error {
 			if p.FromLine <= 0 || p.ToLine < p.FromLine {
 				return fmt.Errorf("invalid line range: from=%d, to=%d", p.FromLine, p.ToLine)
 			}
-			// Validate context lines
-			if len(p.ContextBefore) == 0 {
-				return fmt.Errorf("missing required field: contextBefore")
+			// Validate lines
+			if len(p.LinesBefore) == 0 {
+				return fmt.Errorf("missing required field: linesBefore")
 			}
-			if len(p.ContextAfter) == 0 {
-				return fmt.Errorf("missing required field: contextAfter")
+			if len(p.LinesAfter) == 0 {
+				return fmt.Errorf("missing required field: linesAfter")
 			}
 		}
 
 		// Create chunk
 		ps.Patches[i] = Chunk{
-			File:          p.File,
-			Type:          patchType,
-			Content:       p.Content,
-			FromLine:      p.FromLine,
-			ToLine:        p.ToLine,
-			ContextBefore: p.ContextBefore,
-			ContextAfter:  p.ContextAfter,
+			File:        p.File,
+			Type:        patchType,
+			Content:     p.Content,
+			FromLine:    p.FromLine,
+			ToLine:      p.ToLine,
+			LinesBefore: p.LinesBefore,
+			LinesAfter:  p.LinesAfter,
 		}
 	}
 

@@ -56,12 +56,12 @@ func applyPatch(chunk *patch.Chunk) error {
 		result = append(result, lines[:chunk.FromLine-1]...)
 
 		// Add context before if provided
-		if len(chunk.ContextBefore) > 0 {
-			// Verify context matches
-			contextStart := max(0, chunk.FromLine-len(chunk.ContextBefore)-1)
+		if len(chunk.LinesBefore) > 0 {
+			// Get actual context before the change
+			contextStart := max(0, chunk.FromLine-len(chunk.LinesBefore)-1)
 			actualContext := lines[contextStart : chunk.FromLine-1]
-			if !matchContext(actualContext, chunk.ContextBefore) {
-				return fmt.Errorf("context before doesn't match in file %s", chunk.File)
+			if !matchContext(actualContext, chunk.LinesBefore) {
+				return fmt.Errorf("context before does not match in file %s", chunk.File)
 			}
 		}
 
@@ -69,12 +69,12 @@ func applyPatch(chunk *patch.Chunk) error {
 		result = append(result, strings.Split(chunk.Content, "\n")...)
 
 		// Add context after if provided
-		if len(chunk.ContextAfter) > 0 {
-			// Verify context matches
-			contextEnd := min(len(lines), chunk.ToLine+len(chunk.ContextAfter))
+		if len(chunk.LinesAfter) > 0 {
+			// Get actual context after the change
+			contextEnd := min(len(lines), chunk.ToLine+len(chunk.LinesAfter))
 			actualContext := lines[chunk.ToLine:contextEnd]
-			if !matchContext(actualContext, chunk.ContextAfter) {
-				return fmt.Errorf("context after doesn't match in file %s", chunk.File)
+			if !matchContext(actualContext, chunk.LinesAfter) {
+				return fmt.Errorf("context after does not match in file %s", chunk.File)
 			}
 		}
 

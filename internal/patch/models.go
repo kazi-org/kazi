@@ -11,13 +11,13 @@ const (
 
 // Chunk represents a single patch operation
 type Chunk struct {
-	File          string    `json:"file"`
-	Type          PatchType `json:"type"`
-	FromLine      int       `json:"fromLine"`
-	ToLine        int       `json:"toLine"`
-	ContextBefore []string  `json:"contextBefore"`
-	ContextAfter  []string  `json:"contextAfter"`
-	Content       string    `json:"content"`
+	File        string    `json:"file"`
+	Type        PatchType `json:"type"`
+	FromLine    int       `json:"fromLine"`
+	ToLine      int       `json:"toLine"`
+	LinesBefore []string  `json:"linesBefore"`
+	LinesAfter  []string  `json:"linesAfter"`
+	Content     string    `json:"content"`
 }
 
 // CommitMessage represents a structured git commit message
