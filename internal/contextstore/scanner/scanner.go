@@ -1,80 +1,208 @@
-// Package scanner provides functionality for scanning Go workspaces
-// and extracting code context information.
+// Package scanner provides functionality for scanning Go source code.
 package scanner
 
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/kazi-org/kazi/internal/contextstore/format"
 	"github.com/kazi-org/kazi/internal/contextstore/types"
-	gols "github.com/kazi-org/kazi/internal/ls/gols"
+	lstypes "github.com/kazi-org/kazi/internal/ls/types"
 	"github.com/pkg/errors"
 )
 
-// Scanner defines the interface for code scanning operations.
+// Scanner defines the interface for scanning Go source code.
 type Scanner interface {
-	// Scan performs a workspace scan and returns a new CodeContext.
-	// The context parameter is used to control the scan operation's lifetime.
+	// Scan scans the workspace and returns a code context.
 	Scan(ctx context.Context) (*types.CodeContext, error)
 }
 
-// Config holds configuration for workspace scanning.
+// Config holds configuration for the scanner.
 type Config struct {
 	// Workspace is the root directory to scan
 	Workspace string
 	// ScanInterval is the minimum time between scans in seconds
 	ScanInterval int64
 	// LSPClient provides language server protocol functionality
-	LSPClient gols.LSPClient
+	LSPClient interface {
+		GetWorkspaceSymbols(query string) ([]lstypes.WorkspaceSymbol, error)
+		GetSymbolDocumentation(filePath, symbolName string) (string, error)
+		GetReferences(filePath, symbolName string) ([]*lstypes.Location, error)
+		GetSymbolDefinition(filePath, symbolName string) (*lstypes.SymbolDefinition, error)
+		GetFileContent(filePath string) (string, error)
+	}
 }
 
 // GoWorkspaceScanner implements Scanner for Go workspaces.
 type GoWorkspaceScanner struct {
 	config Config
+	fset   *token.FileSet
 }
 
-// NewGoWorkspaceScanner creates a new scanner with the given configuration.
+// NewGoWorkspaceScanner creates a new scanner for Go workspaces.
 func NewGoWorkspaceScanner(config Config) Scanner {
-	return &GoWorkspaceScanner{config: config}
+	return &GoWorkspaceScanner{
+		config: config,
+		fset:   token.NewFileSet(),
+	}
 }
 
-// Scan implements the Scanner interface.
-func (ws *GoWorkspaceScanner) Scan(ctx context.Context) (*types.CodeContext, error) {
+// Scan implements Scanner.Scan.
+func (s *GoWorkspaceScanner) Scan(ctx context.Context) (*types.CodeContext, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	codeCtx := types.NewCodeContext()
 
-	err := filepath.Walk(ws.config.Workspace, func(path string, info os.FileInfo, err error) error {
+	// Get all Go files in the workspace
+	err := filepath.Walk(s.config.Workspace, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return errors.Wrap(err, "walk error")
+			return err
 		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if info.Name() == ".git" {
-			return filepath.SkipDir
-		}
-
 		if !info.IsDir() && strings.HasSuffix(path, ".go") {
-			fileCtx, err := ws.processGoFile(ctx, path)
+			relPath, err := filepath.Rel(s.config.Workspace, path)
 			if err != nil {
-				return errors.Wrapf(err, "process file %s", path)
+				return errors.Wrap(err, "get relative path")
 			}
-			if fileCtx != nil {
-				relPath, err := filepath.Rel(ws.config.Workspace, path)
-				if err != nil {
-					return errors.Wrap(err, "get relative path")
+
+			// Parse file
+			f, err := parser.ParseFile(s.fset, path, nil, parser.ParseComments)
+			if err != nil {
+				return errors.Wrap(err, "parse file")
+			}
+
+			fileCtx := &types.FileContext{
+				FilePath: relPath,
+				Symbols:  make(map[string]*types.SymbolContext),
+			}
+			codeCtx.Files[relPath] = fileCtx
+
+			// Process imports
+			for _, imp := range f.Imports {
+				path := strings.Trim(imp.Path.Value, `"`)
+				if imp.Name != nil {
+					path = fmt.Sprintf("%s %s", imp.Name.Name, path)
 				}
-				codeCtx.Files[relPath] = fileCtx
+			}
+
+			// Process declarations
+			for _, decl := range f.Decls {
+				switch d := decl.(type) {
+				case *ast.FuncDecl:
+					pos := s.fset.Position(d.Pos())
+					end := s.fset.Position(d.End())
+
+					// Format function signature
+					var signature string
+					if d.Type.Params != nil && len(d.Type.Params.List) > 0 {
+						params := make([]string, 0, len(d.Type.Params.List))
+						for _, p := range d.Type.Params.List {
+							paramType := fmt.Sprintf("%v", p.Type)
+							if len(p.Names) > 0 {
+								names := make([]string, len(p.Names))
+								for i, name := range p.Names {
+									names[i] = name.Name
+								}
+								paramType = fmt.Sprintf("%s %v", strings.Join(names, ", "), p.Type)
+							}
+							params = append(params, paramType)
+						}
+						signature = fmt.Sprintf("func %s(%s)", d.Name.Name, strings.Join(params, ", "))
+					} else {
+						signature = fmt.Sprintf("func %s()", d.Name.Name)
+					}
+
+					sym := &types.SymbolContext{
+						Name:      d.Name.Name,
+						Kind:      string(types.KindFunction),
+						DocString: d.Doc.Text(),
+						Signature: signature,
+						Location: &lstypes.Location{
+							URI: relPath,
+							Range: lstypes.Range{
+								Start: lstypes.Position{
+									Line:      pos.Line - 1,
+									Character: pos.Column - 1,
+								},
+								End: lstypes.Position{
+									Line:      end.Line - 1,
+									Character: end.Column - 1,
+								},
+							},
+						},
+					}
+					fileCtx.Symbols[d.Name.Name] = sym
+
+				case *ast.GenDecl:
+					for _, spec := range d.Specs {
+						switch ts := spec.(type) {
+						case *ast.TypeSpec:
+							pos := s.fset.Position(ts.Pos())
+							end := s.fset.Position(ts.End())
+
+							sym := &types.SymbolContext{
+								Name:      ts.Name.Name,
+								Kind:      string(types.KindType),
+								DocString: d.Doc.Text(),
+								Location: &lstypes.Location{
+									URI: relPath,
+									Range: lstypes.Range{
+										Start: lstypes.Position{
+											Line:      pos.Line - 1,
+											Character: pos.Column - 1,
+										},
+										End: lstypes.Position{
+											Line:      end.Line - 1,
+											Character: end.Column - 1,
+										},
+									},
+								},
+							}
+							fileCtx.Symbols[ts.Name.Name] = sym
+
+						case *ast.ValueSpec:
+							for _, name := range ts.Names {
+								pos := s.fset.Position(name.Pos())
+								end := s.fset.Position(name.End())
+
+								kind := string(types.KindVariable)
+								if d.Tok == token.CONST {
+									kind = string(types.KindConstant)
+								}
+
+								sym := &types.SymbolContext{
+									Name:      name.Name,
+									Kind:      kind,
+									DocString: d.Doc.Text(),
+									Location: &lstypes.Location{
+										URI: relPath,
+										Range: lstypes.Range{
+											Start: lstypes.Position{
+												Line:      pos.Line - 1,
+												Character: pos.Column - 1,
+											},
+											End: lstypes.Position{
+												Line:      end.Line - 1,
+												Character: end.Column - 1,
+											},
+										},
+									},
+								}
+								fileCtx.Symbols[name.Name] = sym
+							}
+						}
+					}
+				}
 			}
 		}
-
 		return nil
 	})
 
@@ -85,87 +213,46 @@ func (ws *GoWorkspaceScanner) Scan(ctx context.Context) (*types.CodeContext, err
 	return codeCtx, nil
 }
 
-// processGoFile analyzes a single Go file and returns its FileContext.
-func (ws *GoWorkspaceScanner) processGoFile(ctx context.Context, path string) (*types.FileContext, error) {
-	relPath, err := filepath.Rel(ws.config.Workspace, path)
+func (s *GoWorkspaceScanner) scanFile(filePath string) (*types.FileContext, error) {
+	// Parse the file
+	f, err := parser.ParseFile(s.fset, filePath, nil, parser.ParseComments)
 	if err != nil {
-		return nil, errors.Wrap(err, "get relative path")
+		return nil, fmt.Errorf("parse file: %w", err)
 	}
 
-	content, err := ws.config.LSPClient.GetFileContent(relPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "read file")
+	fileCtx := &types.FileContext{
+		FilePath: filePath,
+		Symbols:  make(map[string]*types.SymbolContext),
 	}
 
-	if ok, errMsg := ws.config.LSPClient.CheckCode(content); !ok {
-		return nil, fmt.Errorf("invalid Go code: %s", errMsg)
-	}
+	// Process declarations
+	for _, decl := range f.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			pos := s.fset.Position(d.Pos())
+			end := s.fset.Position(d.End())
 
-	pkgName := format.ExtractPackageName(content)
-	symbols, err := ws.config.LSPClient.GetWorkspaceSymbols(filepath.Base(relPath))
-	if err != nil {
-		return nil, errors.Wrap(err, "get symbols")
-	}
-
-	fileCtx := types.NewFileContext(relPath)
-
-	for _, sym := range symbols {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
+			sym := &types.SymbolContext{
+				Name:      d.Name.Name,
+				Kind:      string(types.KindFunction),
+				DocString: d.Doc.Text(),
+				Location: &lstypes.Location{
+					URI: filePath,
+					Range: lstypes.Range{
+						Start: lstypes.Position{
+							Line:      pos.Line - 1,
+							Character: pos.Column - 1,
+						},
+						End: lstypes.Position{
+							Line:      end.Line - 1,
+							Character: end.Column - 1,
+						},
+					},
+				},
+			}
+			fileCtx.Symbols[d.Name.Name] = sym
 		}
-
-		if filepath.Base(sym.Location.URI) != filepath.Base(path) {
-			continue
-		}
-
-		symCtx, err := ws.buildSymbolContext(ctx, &sym, pkgName, relPath)
-		if err != nil {
-			// Log error but continue processing other symbols
-			fmt.Printf("Warning: failed to process symbol %s: %v\n", sym.Name, err)
-			continue
-		}
-
-		fileCtx.Symbols[sym.Name] = symCtx
 	}
 
 	return fileCtx, nil
-}
-
-// buildSymbolContext creates a SymbolContext for a single symbol.
-func (ws *GoWorkspaceScanner) buildSymbolContext(ctx context.Context, sym *gols.WorkspaceSymbol, pkgName, filePath string) (*types.SymbolContext, error) {
-	doc, err := ws.config.LSPClient.GetSymbolDocumentation(filepath.Base(filePath), sym.Name)
-	if err != nil {
-		return nil, errors.Wrap(err, "get documentation")
-	}
-
-	def, err := ws.config.LSPClient.GetSymbolDefinition(filepath.Base(filePath), sym.Name)
-	if err != nil {
-		return nil, errors.Wrap(err, "get definition")
-	}
-
-	refs, err := ws.config.LSPClient.GetReferences(sym.Name)
-	if err != nil {
-		return nil, errors.Wrap(err, "get references")
-	}
-
-	loc, err := ws.config.LSPClient.GetSymbolLocation(filepath.Base(filePath), sym.Name)
-	if err != nil {
-		loc = sym.Location // fallback to basic location
-	}
-
-	return &types.SymbolContext{
-		Name:       sym.Name,
-		Kind:       types.SymbolKind(sym.Kind),
-		DocString:  doc,
-		StartLine:  sym.Location.Range.Start.Line + 1,
-		EndLine:    sym.Location.Range.End.Line + 1,
-		Signature:  def.Signature,
-		Exported:   format.IsExported(sym.Name),
-		Package:    pkgName,
-		References: refs,
-		Location:   loc,
-		TypeInfo:   def.Kind,
-	}, nil
 }

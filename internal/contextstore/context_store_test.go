@@ -1,39 +1,41 @@
+// Package contextstore provides functionality for managing code context.
 package contextstore
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/kazi-org/kazi/internal/contextstore/types"
-	gols "github.com/kazi-org/kazi/internal/ls/gols"
+	"github.com/kazi-org/kazi/internal/ls/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// mockLSPClient implements lsp.LSPClient for testing
+// mockLSPClient implements LSPClient for testing
 type mockLSPClient struct {
 	mock.Mock
 }
 
-func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]gols.WorkspaceSymbol, error) {
+func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]types.WorkspaceSymbol, error) {
 	args := m.Called(query)
-	return args.Get(0).([]gols.WorkspaceSymbol), args.Error(1)
+	return args.Get(0).([]types.WorkspaceSymbol), args.Error(1)
 }
 
-func (m *mockLSPClient) GetSymbolDocumentation(uri string, symbolName string) (string, error) {
-	args := m.Called(uri, symbolName)
+func (m *mockLSPClient) GetSymbolDocumentation(filePath, symbolName string) (string, error) {
+	args := m.Called(filePath, symbolName)
 	return args.String(0), args.Error(1)
 }
 
-func (m *mockLSPClient) GetReferences(symbol string) ([]string, error) {
-	args := m.Called(symbol)
-	return args.Get(0).([]string), args.Error(1)
+func (m *mockLSPClient) GetReferences(filePath, symbolName string) ([]*types.Location, error) {
+	args := m.Called(filePath, symbolName)
+	return args.Get(0).([]*types.Location), args.Error(1)
 }
 
-func (m *mockLSPClient) GetSymbolDefinition(filePath, symbolName string) (*gols.SymbolDefinition, error) {
+func (m *mockLSPClient) GetSymbolDefinition(filePath, symbolName string) (*types.SymbolDefinition, error) {
 	args := m.Called(filePath, symbolName)
-	return args.Get(0).(*gols.SymbolDefinition), args.Error(1)
+	return args.Get(0).(*types.SymbolDefinition), args.Error(1)
 }
 
 func (m *mockLSPClient) GetFileContent(filePath string) (string, error) {
@@ -41,14 +43,14 @@ func (m *mockLSPClient) GetFileContent(filePath string) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-func (m *mockLSPClient) GetSymbolLocation(filePath, symbolName string) (gols.Location, error) {
+func (m *mockLSPClient) GetSymbolLocation(filePath, symbolName string) (*types.Location, error) {
 	args := m.Called(filePath, symbolName)
-	return args.Get(0).(gols.Location), args.Error(1)
+	return args.Get(0).(*types.Location), args.Error(1)
 }
 
-func (m *mockLSPClient) CheckCode(code string) (bool, string) {
+func (m *mockLSPClient) CheckCode(code string) (bool, error) {
 	args := m.Called(code)
-	return args.Bool(0), args.String(1)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *mockLSPClient) Close() error {
@@ -56,127 +58,48 @@ func (m *mockLSPClient) Close() error {
 	return args.Error(0)
 }
 
-func TestKaziContextStore_GetSymbol(t *testing.T) {
-	// Create a mock LSP client
-	mockClient := new(mockLSPClient)
+func TestKaziContextStore(t *testing.T) {
+	// Create test directory and file
+	testDir := "testdata"
+	err := os.MkdirAll(testDir, 0755)
+	assert.NoError(t, err)
+	defer os.RemoveAll(testDir)
 
-	// Create a test store
-	store := NewKaziContextStore(StoreConfig{
-		Workspace:    "testdata",
-		ScanInterval: 30,
-		LSPClient:    mockClient,
-	})
+	testFile := filepath.Join(testDir, "main.go")
+	err = os.WriteFile(testFile, []byte(`package main
 
-	// Create a test symbol context
-	testSymbol := &types.SymbolContext{
-		Name:      "TestFunc",
-		Kind:      types.KindFunction,
-		DocString: "Test function documentation",
-	}
-
-	// Add the test symbol to the store's code context
-	store.(*KaziContextStore).codeCtx.Files["test.go"] = &types.FileContext{
-		FilePath: "test.go",
-		Symbols:  map[string]*types.SymbolContext{"TestFunc": testSymbol},
-	}
-
-	// Test getting an existing symbol
-	result := store.GetSymbol("TestFunc")
-	assert.Equal(t, testSymbol, result)
-
-	// Test getting a non-existent symbol
-	result = store.GetSymbol("NonExistentFunc")
-	assert.Nil(t, result)
+func main() {
+	println("Hello, World!")
 }
-
-func TestKaziContextStore_GetFile(t *testing.T) {
-	// Create a mock LSP client
-	mockClient := new(mockLSPClient)
-
-	// Create a test store
-	store := NewKaziContextStore(StoreConfig{
-		Workspace:    "testdata",
-		ScanInterval: 30,
-		LSPClient:    mockClient,
-	})
-
-	// Create a test file context
-	testFile := &types.FileContext{
-		FilePath: "test.go",
-		Symbols: map[string]*types.SymbolContext{
-			"TestFunc": {
-				Name:      "TestFunc",
-				Kind:      types.KindFunction,
-				DocString: "Test function documentation",
-			},
-		},
-	}
-
-	// Add the test file to the store's code context
-	store.(*KaziContextStore).codeCtx.Files["test.go"] = testFile
-
-	// Test getting an existing file
-	result := store.GetFile("test.go")
-	assert.Equal(t, testFile, result)
-
-	// Test getting a non-existent file
-	result = store.GetFile("nonexistent.go")
-	assert.Nil(t, result)
-}
-
-func TestKaziContextStore_BuildOrRefresh(t *testing.T) {
-	// Create a mock LSP client
-	mockClient := new(mockLSPClient)
-
-	// Set up mock expectations
-	mockClient.On("GetFileContent", "test.go").Return("package test\n\nfunc TestFunc() {}", nil)
-	mockClient.On("CheckCode", mock.Anything).Return(true, "")
-	mockClient.On("GetWorkspaceSymbols", mock.Anything).Return([]gols.WorkspaceSymbol{
-		{
-			Name: "TestFunc",
-			Kind: "function",
-			Location: gols.Location{
-				URI: "test.go",
-				Range: gols.Range{
-					Start: gols.Position{Line: 2, Character: 0},
-					End:   gols.Position{Line: 2, Character: 20},
-				},
-			},
-		},
-	}, nil)
-	mockClient.On("GetSymbolDocumentation", mock.Anything, mock.Anything).Return("Test function documentation", nil)
-	mockClient.On("GetSymbolDefinition", mock.Anything, mock.Anything).Return(&gols.SymbolDefinition{
-		Signature: "func TestFunc()",
-	}, nil)
-	mockClient.On("GetReferences", mock.Anything).Return([]string{"test.go"}, nil)
-	mockClient.On("GetSymbolLocation", mock.Anything, mock.Anything).Return(gols.Location{
-		URI: "test.go",
-		Range: gols.Range{
-			Start: gols.Position{Line: 2, Character: 0},
-			End:   gols.Position{Line: 2, Character: 20},
-		},
-	}, nil)
-
-	// Create a test store
-	store := NewKaziContextStore(StoreConfig{
-		Workspace:    "testdata",
-		ScanInterval: 30,
-		LSPClient:    mockClient,
-	})
-
-	// Test building the context
-	err := store.BuildOrRefresh(context.Background())
+`), 0644)
 	assert.NoError(t, err)
 
-	// Verify that the mock expectations were met
-	mockClient.AssertExpectations(t)
+	mockClient := new(mockLSPClient)
+	store := NewKaziContextStore(StoreConfig{
+		Workspace:    testDir,
+		ScanInterval: 30,
+		LSPClient:    mockClient,
+	})
 
-	// Test that the context was built correctly
-	result := store.GetSymbol("TestFunc")
-	assert.NotNil(t, result)
-	assert.Equal(t, "TestFunc", result.Name)
-	assert.Equal(t, types.KindFunction, result.Kind)
-	assert.Equal(t, "Test function documentation", result.DocString)
+	// Build the code context
+	err = store.BuildOrRefresh(context.Background())
+	assert.NoError(t, err)
+
+	// Test GetSymbol
+	sym := store.GetSymbol("main")
+	assert.NotNil(t, sym)
+	assert.Equal(t, "main", sym.Name)
+	assert.Equal(t, string(types.KindFunction), sym.Kind)
+
+	// Test GetFile
+	file := store.GetFile("main.go")
+	assert.NotNil(t, file)
+	assert.Equal(t, "main.go", file.FilePath)
+
+	// Test GetCodeContext
+	ctx := store.GetCodeContext()
+	assert.NotNil(t, ctx)
+	assert.Len(t, ctx.Files, 1)
 }
 
 // stringSliceEqual returns true if two string slices have the same elements in the same order

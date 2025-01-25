@@ -1,4 +1,4 @@
-// Package format provides utilities for formatting Go code elements.
+// Package format provides formatting utilities for code context.
 package format
 
 import (
@@ -8,8 +8,113 @@ import (
 	"go/token"
 	"strings"
 
-	gols "github.com/kazi-org/kazi/internal/ls/gols"
+	"github.com/kazi-org/kazi/internal/contextstore/types"
+	lstypes "github.com/kazi-org/kazi/internal/ls/types"
 )
+
+// FormatSymbol formats a symbol definition into a human-readable string.
+func FormatSymbol(def *lstypes.SymbolDefinition) string {
+	if def == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Name: %s\n", def.Name))
+	sb.WriteString(fmt.Sprintf("Kind: %s\n", def.Kind))
+
+	if def.DocString != "" {
+		sb.WriteString(fmt.Sprintf("Documentation:\n%s\n", def.DocString))
+	}
+
+	if def.Signature != "" {
+		sb.WriteString(fmt.Sprintf("Signature: %s\n", def.Signature))
+	}
+
+	if len(def.References) > 0 {
+		sb.WriteString("References:\n")
+		for _, ref := range def.References {
+			if ref != nil {
+				sb.WriteString(fmt.Sprintf("  - %s\n", ref.URI))
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// FormatSymbolContext formats a symbol context into a human-readable string.
+func FormatSymbolContext(ctx *types.SymbolContext) string {
+	var sb strings.Builder
+
+	// Format basic info
+	sb.WriteString(fmt.Sprintf("Name: %s\n", ctx.Name))
+	sb.WriteString(fmt.Sprintf("Kind: %s\n", ctx.Kind))
+
+	// Format location
+	if ctx.Location != nil {
+		sb.WriteString(fmt.Sprintf("Location: %s\n", ctx.Location.URI))
+	}
+
+	// Format documentation
+	if ctx.DocString != "" {
+		sb.WriteString(fmt.Sprintf("Documentation: %s\n", ctx.DocString))
+	}
+
+	// Format signature
+	if ctx.Signature != "" {
+		sb.WriteString(fmt.Sprintf("Signature: %s\n", ctx.Signature))
+	}
+
+	// Format references
+	if len(ctx.References) > 0 {
+		sb.WriteString("References:\n")
+		for _, ref := range ctx.References {
+			if ref != nil {
+				sb.WriteString(fmt.Sprintf("  - %s\n", ref.URI))
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// FormatFileContext formats a file context into a human-readable string.
+func FormatFileContext(ctx *types.FileContext) string {
+	if ctx == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("File: %s\n", ctx.FilePath))
+
+	if len(ctx.Symbols) > 0 {
+		sb.WriteString("\nSymbols:\n")
+		for _, sym := range ctx.Symbols {
+			sb.WriteString(fmt.Sprintf("\n%s\n", FormatSymbolContext(sym)))
+		}
+	}
+
+	return sb.String()
+}
+
+// FormatCodeContext formats a code context into a human-readable string.
+func FormatCodeContext(ctx *types.CodeContext) string {
+	if ctx == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Code Context:\n")
+
+	if len(ctx.Files) > 0 {
+		sb.WriteString("\nFiles:\n")
+		for _, file := range ctx.Files {
+			sb.WriteString(fmt.Sprintf("\n%s\n", FormatFileContext(file)))
+		}
+	}
+
+	return sb.String()
+}
 
 // FuncType formats a function type into a string representation.
 // It handles parameters, results, and their names in a consistent format.
@@ -159,7 +264,7 @@ func FuncSignature(fn *ast.FuncDecl) string {
 
 // ExtractMethodSet extracts method names from a symbol definition.
 // It parses the signature to find method definitions.
-func ExtractMethodSet(def *gols.SymbolDefinition) []string {
+func ExtractMethodSet(def *lstypes.SymbolDefinition) []string {
 	var methods []string
 	if strings.Contains(def.Signature, "func") {
 		parts := strings.Split(def.Signature, "func")
@@ -174,7 +279,7 @@ func ExtractMethodSet(def *gols.SymbolDefinition) []string {
 
 // ExtractImplementedInterfaces extracts interface names from a symbol's documentation.
 // It looks for "implements" keyword in the docstring.
-func ExtractImplementedInterfaces(def *gols.SymbolDefinition) []string {
+func ExtractImplementedInterfaces(def *lstypes.SymbolDefinition) []string {
 	var interfaces []string
 	if strings.Contains(def.DocString, "implements") {
 		parts := strings.Split(def.DocString, "implements")

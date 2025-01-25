@@ -1,3 +1,4 @@
+// Package workflow provides functionality for building and executing AI requests.
 package workflow
 
 import (
@@ -8,20 +9,15 @@ import (
 	"github.com/kazi-org/kazi/internal/contextstore/types"
 )
 
-// RequestBuilder helps build context-aware requests for the AI.
+// RequestBuilder builds AI requests with code context.
 type RequestBuilder struct {
 	codeCtx *types.CodeContext
 	rules   []string
-	config  config.GlobalConfig
+	config  *Config
 }
 
-// NewRequestBuilder creates a new request builder with the given code context.
-func NewRequestBuilder(codeCtx *types.CodeContext) *RequestBuilder {
-	return &RequestBuilder{codeCtx: codeCtx}
-}
-
-// NewRequestBuilderWithConfig creates a new request builder with the given configuration.
-func NewRequestBuilderWithConfig(codeCtx *types.CodeContext, rules []string, config config.GlobalConfig) *RequestBuilder {
+// NewRequestBuilderWithConfig creates a new request builder with configuration.
+func NewRequestBuilderWithConfig(codeCtx *types.CodeContext, rules []string, config *Config) *RequestBuilder {
 	return &RequestBuilder{
 		codeCtx: codeCtx,
 		rules:   rules,
@@ -29,151 +25,119 @@ func NewRequestBuilderWithConfig(codeCtx *types.CodeContext, rules []string, con
 	}
 }
 
-// BuildRequest builds a request string that includes relevant code context.
-func (rb *RequestBuilder) BuildRequest(userPrompt string, codeSnippet string) string {
+// BuildRequest builds an AI request with relevant code context.
+func (rb *RequestBuilder) BuildRequest(prompt string) string {
 	var b strings.Builder
 
-	// Add user prompt
-	b.WriteString("# USER's request\n")
-	b.WriteString(userPrompt + "\n\n")
-
-	// Add code snippet if provided
-	if codeSnippet != "" {
-		b.WriteString("# Code snippet\n```go\n")
-		b.WriteString(codeSnippet)
-		b.WriteString("\n```\n\n")
-	}
-
-	// Add relevant context
-	context := rb.findRelevantContext(codeSnippet, userPrompt)
-	if context != "" {
-		b.WriteString("# Relevant code context\n")
-		b.WriteString(context)
-	}
-
-	return b.String()
-}
-
-// findRelevantContext finds code context relevant to the user's request.
-func (rb *RequestBuilder) findRelevantContext(codeSnippet, userPrompt string) string {
-	if rb.codeCtx == nil || rb.codeCtx.Files == nil {
-		return ""
-	}
-
-	type snippetScore struct {
-		fc    *types.FileContext
-		score int
-	}
-
-	var allScores []snippetScore
-	keywords := strings.Fields(strings.ToLower(userPrompt + " " + codeSnippet))
-
-	// Score each file based on keyword matches
-	for _, fc := range rb.codeCtx.Files {
-		if fc == nil {
-			continue
-		}
-		score := 0
-		for _, kw := range keywords {
-			if strings.Contains(strings.ToLower(fc.FilePath), kw) {
-				score += 5
-			}
-			for _, sym := range fc.Symbols {
-				if sym == nil {
-					continue
-				}
-				if strings.Contains(strings.ToLower(sym.Name), kw) {
-					score += 3
-				}
-				if strings.Contains(strings.ToLower(sym.DocString), kw) {
-					score += 2
-				}
-			}
-		}
-		if score > 0 {
-			allScores = append(allScores, snippetScore{fc: fc, score: score})
-		}
-	}
-
-	// Sort by score
-	for i := 0; i < len(allScores)-1; i++ {
-		for j := i + 1; j < len(allScores); j++ {
-			if allScores[i].score < allScores[j].score {
-				allScores[i], allScores[j] = allScores[j], allScores[i]
-			}
-		}
-	}
-
-	// Build context string with top matches
-	var b strings.Builder
-	for i, scored := range allScores {
-		if i >= 3 { // Limit to top 3 files
-			break
-		}
-		fc := scored.fc
-		b.WriteString(fmt.Sprintf("File: %s\n", fc.FilePath))
-		if len(fc.Imports) > 0 {
-			b.WriteString(fmt.Sprintf("Imports: %s\n", strings.Join(fc.Imports, ", ")))
-		}
-		for _, sym := range fc.Symbols {
-			if sym == nil {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("Symbol: %s (%s)\n", sym.Name, sym.Kind))
-			if sym.DocString != "" {
-				b.WriteString("  " + sym.DocString + "\n")
-			}
+	// Add global configuration
+	if rb.config != nil && rb.config.Global.Rules != nil {
+		b.WriteString("Global rules:\n")
+		for _, rule := range rb.config.Global.Rules {
+			b.WriteString(fmt.Sprintf("- %s\n", rule))
 		}
 		b.WriteString("\n")
 	}
+
+	// Add specific rules
+	if len(rb.rules) > 0 {
+		b.WriteString("Specific rules:\n")
+		for _, rule := range rb.rules {
+			b.WriteString(fmt.Sprintf("- %s\n", rule))
+		}
+		b.WriteString("\n")
+	}
+
+	// Add code context
+	if rb.codeCtx != nil {
+		b.WriteString("Code context:\n")
+		for path, file := range rb.codeCtx.Files {
+			b.WriteString(fmt.Sprintf("%s:\n", path))
+			for name, sym := range file.Symbols {
+				b.WriteString(fmt.Sprintf("- %s: %s\n", name, sym.Signature))
+				b.WriteString(fmt.Sprintf("  Kind: %s\n", sym.Kind))
+				if sym.DocString != "" {
+					b.WriteString(fmt.Sprintf("  Doc: %s\n", sym.DocString))
+				}
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	// Add the prompt
+	b.WriteString("Instructions:\n")
+	b.WriteString(prompt)
 
 	return b.String()
 }
 
 // Build implements the LLMRequestBuilder interface.
 func (rb *RequestBuilder) Build(prompt config.Prompt) string {
-	var b strings.Builder
+	return rb.BuildRequest(prompt.Instructions)
+}
 
-	// Add project rules if available
-	if len(rb.rules) > 0 {
-		b.WriteString("# Project Rules:\n")
-		for _, rule := range rb.rules {
-			b.WriteString("- " + rule + "\n")
-		}
-		b.WriteString("\n")
+// findRelevantContext finds code context relevant to the prompt.
+func (rb *RequestBuilder) findRelevantContext(prompt string) string {
+	if rb.codeCtx == nil {
+		return ""
 	}
 
-	// Add project configuration
-	b.WriteString("# Project Configuration:\n")
-	b.WriteString("- Lint Command: " + rb.config.LintCommand + "\n")
-	b.WriteString("- Test Command: " + rb.config.TestCommand + "\n\n")
+	type scoredSymbol struct {
+		symbol *types.SymbolContext
+		score  int
+	}
 
-	// Add user request
-	b.WriteString("# User Request:\n")
-	b.WriteString(prompt.Instructions + "\n\n")
+	var scored []scoredSymbol
+	keywords := strings.Fields(strings.ToLower(prompt))
 
-	// Add code context
-	if rb.codeCtx != nil && len(rb.codeCtx.Files) > 0 {
-		b.WriteString("# Workspace Context:\n")
-		for path, fc := range rb.codeCtx.Files {
-			if fc == nil {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("File: %s\n", path))
-			if len(fc.Imports) > 0 {
-				b.WriteString(fmt.Sprintf("Imports: %s\n", strings.Join(fc.Imports, ", ")))
-			}
-			for name, sym := range fc.Symbols {
-				if sym == nil {
-					continue
+	// Score each symbol based on keyword matches
+	for _, file := range rb.codeCtx.Files {
+		for _, sym := range file.Symbols {
+			score := 0
+
+			// Check symbol name
+			for _, kw := range keywords {
+				if strings.Contains(strings.ToLower(sym.Name), kw) {
+					score += 5
 				}
-				b.WriteString(fmt.Sprintf("Symbol: %s (%s)\n", name, sym.Kind))
-				if sym.DocString != "" {
-					b.WriteString("  " + sym.DocString + "\n")
+				if strings.Contains(strings.ToLower(sym.DocString), kw) {
+					score += 3
+				}
+				if strings.Contains(strings.ToLower(sym.Signature), kw) {
+					score += 2
 				}
 			}
-			b.WriteString("\n")
+
+			if score > 0 {
+				scored = append(scored, scoredSymbol{symbol: sym, score: score})
+			}
 		}
+	}
+
+	// Sort by score in descending order
+	for i := 0; i < len(scored)-1; i++ {
+		for j := i + 1; j < len(scored); j++ {
+			if scored[j].score > scored[i].score {
+				scored[i], scored[j] = scored[j], scored[i]
+			}
+		}
+	}
+
+	// Build context string with top matches
+	var b strings.Builder
+	for i, s := range scored {
+		if i >= 5 { // Limit to top 5 matches
+			break
+		}
+
+		sym := s.symbol
+		b.WriteString(fmt.Sprintf("=== %s (%s) ===\n", sym.Name, sym.Kind))
+		if sym.DocString != "" {
+			b.WriteString(sym.DocString + "\n")
+		}
+		if sym.Signature != "" {
+			b.WriteString(sym.Signature + "\n")
+		}
+		b.WriteString("\n")
 	}
 
 	return b.String()
