@@ -43,11 +43,17 @@ func (w *workflow) Execute(ctx context.Context, prompt string) (string, error) {
 	// Build the request
 	request := rb.BuildRequest(prompt)
 
+	// Log the request
+	fmt.Printf("\n=== Request to OpenAI ===\n%s\n=== End Request ===\n\n", request)
+
 	// Process through AI
 	response, err := w.ai.GetPatch(ctx, request)
 	if err != nil {
 		return "", err
 	}
+
+	// Log the response
+	fmt.Printf("\n=== Response from OpenAI ===\n%s\n=== End Response ===\n\n", response)
 
 	return response, nil
 }

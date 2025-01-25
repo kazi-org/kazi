@@ -30,7 +30,8 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
 
 	// Add system message
 	b.WriteString("You are an expert Go developer who follows best practices and writes clean, maintainable code. Your task is to help modify or create Go code based on the user's request.\n\n")
-	b.WriteString("Please respond with a JSON object containing patches to apply. The response should have:\n")
+	b.WriteString("IMPORTANT: Your response must be a valid JSON object without any markdown formatting or explanation text. Just the raw JSON.\n\n")
+	b.WriteString("The JSON response should have:\n")
 	b.WriteString("1. A commit message with:\n")
 	b.WriteString("   - subject: Short imperative summary (max 50 chars)\n")
 	b.WriteString("   - body: Detailed explanation (optional)\n\n")
@@ -45,37 +46,10 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
 	b.WriteString("   - contextBefore: (optional) lines of context before the change\n")
 	b.WriteString("   - contextAfter: (optional) lines of context after the change\n")
 	b.WriteString("   - content: the content to insert/replace\n\n")
-	b.WriteString("Example response format:\n")
-	b.WriteString(`{
-  "commit": {
-    "subject": "Add error handling to processData function",
-    "body": "- Add error return value\n- Handle edge cases\n- Add error tests"
-  },
-  "patches": [
-    {
-      "file": "main.go",
-      "type": "create",
-      "content": "package main\n\nfunc main() {\n  // ...\n}\n"
-    },
-    {
-      "file": "utils.go",
-      "type": "replace",
-      "fromLine": 10,
-      "toLine": 15,
-      "contextBefore": [
-        "package utils",
-        "",
-        "import \"errors\""
-      ],
-      "content": "func processData(data []string) ([]string, error) {\n  if len(data) == 0 {\n    return nil, errors.New(\"empty data\")\n  }\n  // ...\n}\n",
-      "contextAfter": [
-        "",
-        "func otherFunc() {",
-        "  // ..."
-      ]
-    }
-  ]
-}` + "\n\n")
+	b.WriteString("Example response (this is what your response should look like):\n")
+	b.WriteString(`{"commit":{"subject":"Add error handling to processData function","body":"- Add error return value\n- Handle edge cases\n- Add error tests"},"patches":[{"file":"main.go","type":"create","content":"package main\n\nfunc main() {\n  // ...\n}\n"},{"file":"utils.go","type":"replace","fromLine":10,"toLine":15,"contextBefore":["package utils","","import \"errors\""],"content":"func processData(data []string) ([]string, error) {\n  if len(data) == 0 {\n    return nil, errors.New(\"empty data\")\n  }\n  // ...\n}\n","contextAfter":["","func otherFunc() {","  // ..."]}]}` + "\n\n")
+
+	b.WriteString("REMEMBER: Your response must be a single line of valid JSON without any markdown formatting, explanation text, or code blocks.\n\n")
 
 	// Add patching guidelines
 	b.WriteString("When creating patches:\n")
