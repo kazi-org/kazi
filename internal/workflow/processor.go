@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/kazi-org/kazi/internal/ai"
+	"github.com/kazi-org/kazi/internal/ls/gols"
 	"github.com/kazi-org/kazi/internal/patch"
 )
 
@@ -17,6 +19,7 @@ type processor struct {
 	patchApplier    patch.Applier
 	userInteraction UserInteraction
 	llmClient       ai.LLMClient
+	lspClient       gols.LSPClient
 }
 
 // NewProcessor creates a new workflow processor with the given configuration
@@ -32,6 +35,7 @@ func NewProcessor(cfg *ProcessorConfig) (Processor, error) {
 		patchApplier:    cfg.PatchApplier,
 		userInteraction: cfg.UserInteraction,
 		llmClient:       cfg.LLMClient,
+		lspClient:       cfg.LSPClient,
 	}, nil
 }
 
@@ -87,6 +91,19 @@ func (p *processor) Process(ctx context.Context, prompt string) error {
 
 // applyChanges applies the patch set and creates a commit
 func (p *processor) applyChanges(ctx context.Context, ps *patch.PatchSet) error {
+	// Format files before applying patches
+	for _, patch := range ps.Patches {
+		if string(patch.Type) == "replace" {
+			formatted, err := p.lspClient.FormatFile(patch.File)
+			if err != nil {
+				return fmt.Errorf("format file %s: %w", patch.File, err)
+			}
+			if err := os.WriteFile(patch.File, []byte(formatted), 0644); err != nil {
+				return fmt.Errorf("write formatted file %s: %w", patch.File, err)
+			}
+		}
+	}
+
 	// Apply patches
 	if err := p.patchApplier.Apply(ps); err != nil {
 		return fmt.Errorf("apply patches: %w", err)

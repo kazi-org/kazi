@@ -5,8 +5,10 @@ import (
 	"io"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/kazi-org/kazi/internal/ai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore/types"
+	"github.com/kazi-org/kazi/internal/ls/gols"
 	"github.com/kazi-org/kazi/internal/patch"
 )
 
@@ -92,7 +94,8 @@ type ProcessorConfig struct {
 	RequestBuilder  LLMRequestBuilder
 	PatchApplier    patch.Applier
 	UserInteraction UserInteraction
-	LLMClient       LLMClient
+	LLMClient       ai.LLMClient
+	LSPClient       gols.LSPClient
 	Options         *Options
 }
 

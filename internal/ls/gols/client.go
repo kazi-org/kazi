@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"strings"
@@ -518,4 +519,25 @@ func (c *GoClient) CheckCode(code string) (bool, error) {
 		return false, fmt.Errorf("invalid Go code: %v", err)
 	}
 	return true, nil
+}
+
+// FormatFile formats a Go file using gofmt.
+func (c *GoClient) FormatFile(filePath string) (string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filePath, content, parser.ParseComments)
+	if err != nil {
+		return "", fmt.Errorf("parse file: %w", err)
+	}
+
+	var buf strings.Builder
+	if err := printer.Fprint(&buf, fset, f); err != nil {
+		return "", fmt.Errorf("format file: %w", err)
+	}
+
+	return buf.String(), nil
 }

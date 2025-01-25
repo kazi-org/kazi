@@ -51,5 +51,6 @@ type LSPClient interface {
 	GetReferences(filePath, symbolName string) ([]*types.Location, error)
 	GetFileContent(filePath string) (string, error)
 	CheckCode(code string) (bool, error)
+	FormatFile(filePath string) (string, error)
 	Close() error
 }

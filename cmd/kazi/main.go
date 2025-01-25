@@ -227,6 +227,7 @@ func run() error {
 		PatchApplier:    patch.NewApplier(cfg.Spec.Global.Workspace),
 		UserInteraction: workflow.NewDefaultInteraction(),
 		LLMClient:       llmClient,
+		LSPClient:       lspClient,
 	}
 
 	// Create and run processor
