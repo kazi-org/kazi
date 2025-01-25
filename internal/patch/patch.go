@@ -1,42 +1,11 @@
 package patch
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
-
-type PatchType string
-
-const (
-	PatchCreate  PatchType = "create"
-	PatchReplace PatchType = "replace"
-	PatchDelete  PatchType = "delete"
-)
-
-type Chunk struct {
-	File          string    `json:"file"`
-	Type          PatchType `json:"type"`
-	FromLine      int       `json:"fromLine"`
-	ToLine        int       `json:"toLine"`
-	ContextBefore []string  `json:"contextBefore,omitempty"`
-	ContextAfter  []string  `json:"contextAfter,omitempty"`
-	Content       string    `json:"content"`
-}
-
-// CommitMessage represents a structured git commit message
-type CommitMessage struct {
-	Subject string `json:"subject"` // Short imperative summary (max 50 chars)
-	Body    string `json:"body"`    // Detailed explanation (optional)
-}
-
-// PatchSet is the top-level object from the LLM
-type PatchSet struct {
-	Commit  CommitMessage `json:"commit"`
-	Patches []Chunk       `json:"patches"`
-}
 
 // Apply attempts to apply each chunk to the local workspace
 func (ps *PatchSet) Apply(workspace string) error {
@@ -138,57 +107,4 @@ func (ps *PatchSet) rollback(workspace string, backups map[string][]byte, filesT
 		}
 	}
 	return fmt.Errorf("operation rolled back: %w", err)
-}
-
-func (ps *PatchSet) UnmarshalJSON(data []byte) error {
-	// Define a temporary struct to unmarshal into
-	type tempPatch struct {
-		File    string `json:"file"`
-		Type    string `json:"type"`
-		Content string `json:"content"`
-	}
-	type tempPatchSet struct {
-		Patches []tempPatch   `json:"patches"`
-		Commit  CommitMessage `json:"commit"`
-	}
-
-	// Unmarshal into temporary struct
-	var temp tempPatchSet
-	if err := json.Unmarshal(data, &temp); err != nil {
-		return err
-	}
-
-	// Validate and convert patches
-	ps.Patches = make([]Chunk, len(temp.Patches))
-	for i, p := range temp.Patches {
-		// Validate required fields
-		if p.File == "" {
-			return fmt.Errorf("missing required field: file")
-		}
-
-		// Convert patch type
-		var patchType PatchType
-		switch p.Type {
-		case "create":
-			patchType = PatchCreate
-		case "replace":
-			patchType = PatchReplace
-		case "delete":
-			patchType = PatchDelete
-		default:
-			return fmt.Errorf("invalid patch type: %s", p.Type)
-		}
-
-		// Create chunk
-		ps.Patches[i] = Chunk{
-			File:    p.File,
-			Type:    patchType,
-			Content: p.Content,
-		}
-	}
-
-	// Copy commit message
-	ps.Commit = temp.Commit
-
-	return nil
 }
