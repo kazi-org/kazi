@@ -3,46 +3,135 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestLoadConfig(t *testing.T) {
 	tests := []struct {
-		name          string
-		content       string
-		wantErr       bool
-		errContains   string
-		validateField func(*testing.T, *KaziProject)
+		name        string
+		content     string
+		want        *KaziProject
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name: "Valid minimal config",
+			name: "Valid config with defaults",
 			content: `apiVersion: kazi.io/v1
 kind: KaziProject
 metadata:
-  name: test-project
+  name: test
 spec:
   global:
     workspace: "."
-    buildCommand: "go build"
-    testCommand: "go test"
   rules:
     - "Use gofmt for formatting"
-    - "Write tests for all functions"
   prompts:
-    - name: "test"
+    - name: "Test"
       instructions: "add test"`,
-			wantErr: false,
-			validateField: func(t *testing.T, cfg *KaziProject) {
-				if cfg.Metadata.Name != "test-project" {
-					t.Errorf("expected name 'test-project', got %q", cfg.Metadata.Name)
-				}
-				if cfg.Spec.Global.BuildCommand != "go build" {
-					t.Errorf("expected build command 'go build', got %q", cfg.Spec.Global.BuildCommand)
-				}
-				if len(cfg.Spec.Prompts) != 1 {
-					t.Errorf("expected 1 prompt, got %d", len(cfg.Spec.Prompts))
-				}
+			want: &KaziProject{
+				APIVersion: "kazi.io/v1",
+				Kind:       "KaziProject",
+				Metadata: Metadata{
+					Name: "test",
+				},
+				Spec: ProjectSpec{
+					Global: GlobalConfig{
+						Workspace:   ".",
+						LintCommand: "go vet ./...",
+						TestCommand: "go test ./...",
+						LanguageServer: LanguageServer{
+							Timeout: "30s",
+						},
+					},
+					Rules: []string{"Use gofmt for formatting"},
+					Prompts: []Prompt{
+						{Name: "Test", Instructions: "add test"},
+					},
+				},
+			},
+		},
+		{
+			name: "Valid config with custom commands",
+			content: `apiVersion: kazi.io/v1
+kind: KaziProject
+metadata:
+  name: test
+spec:
+  global:
+    workspace: "."
+    lintCommand: "golangci-lint run"
+    testCommand: "go test -v ./..."
+  rules:
+    - "Use gofmt for formatting"
+  prompts:
+    - name: "Test"
+      instructions: "add test"`,
+			want: &KaziProject{
+				APIVersion: "kazi.io/v1",
+				Kind:       "KaziProject",
+				Metadata: Metadata{
+					Name: "test",
+				},
+				Spec: ProjectSpec{
+					Global: GlobalConfig{
+						Workspace:   ".",
+						LintCommand: "golangci-lint run",
+						TestCommand: "go test -v ./...",
+						LanguageServer: LanguageServer{
+							Timeout: "30s",
+						},
+					},
+					Rules: []string{"Use gofmt for formatting"},
+					Prompts: []Prompt{
+						{Name: "Test", Instructions: "add test"},
+					},
+				},
+			},
+		},
+		{
+			name: "Valid config with custom LSP settings",
+			content: `apiVersion: kazi.io/v1
+kind: KaziProject
+metadata:
+  name: test
+spec:
+  global:
+    workspace: "."
+    lintCommand: "golangci-lint run"
+    testCommand: "go test -v ./..."
+    languageServer:
+      name: "gopls"
+      command: "gopls serve"
+      timeout: "1m"
+  rules:
+    - "Use gofmt for formatting"
+  prompts:
+    - name: "Test"
+      instructions: "add test"`,
+			want: &KaziProject{
+				APIVersion: "kazi.io/v1",
+				Kind:       "KaziProject",
+				Metadata: Metadata{
+					Name: "test",
+				},
+				Spec: ProjectSpec{
+					Global: GlobalConfig{
+						Workspace:   ".",
+						LintCommand: "golangci-lint run",
+						TestCommand: "go test -v ./...",
+						LanguageServer: LanguageServer{
+							Name:    "gopls",
+							Command: "gopls serve",
+							Timeout: "1m",
+						},
+					},
+					Rules: []string{"Use gofmt for formatting"},
+					Prompts: []Prompt{
+						{Name: "Test", Instructions: "add test"},
+					},
+				},
 			},
 		},
 		{
@@ -56,34 +145,27 @@ spec:
 			content: `apiVersion: kazi.io/v1
 kind: KaziProject
 metadata:
-  name: test-project
+  name: test
 spec:
   global:
-    workspace: "."
-    buildCommand: "go build"
-    testCommand: "go test"
-  rules:
-    - "Use gofmt for formatting"
-    - "Write tests for all functions"`,
+    workspace: "."`,
 			wantErr:     true,
-			errContains: "missing required field: prompts",
+			errContains: "missing required field: spec.prompts",
 		},
 		{
 			name: "Invalid API version",
 			content: `apiVersion: kazi.io/v2
 kind: KaziProject
 metadata:
-  name: test-project
+  name: test
 spec:
   global:
     workspace: "."
-    buildCommand: "go build"
-    testCommand: "go test"
   prompts:
     - name: "test"
       instructions: "add test"`,
 			wantErr:     true,
-			errContains: "unsupported API version: kazi.io/v2",
+			errContains: `invalid API version "kazi.io/v2", expected kazi.io/v1`,
 		},
 	}
 
@@ -107,7 +189,7 @@ spec:
 				if err == nil {
 					t.Fatal("expected error but got nil")
 				}
-				if tc.errContains != "" && !contains(err.Error(), tc.errContains) {
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
 					t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
 				}
 				return
@@ -116,9 +198,9 @@ spec:
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			// Validate fields if provided
-			if tc.validateField != nil {
-				tc.validateField(t, cfg)
+			// Compare results
+			if !reflect.DeepEqual(cfg, tc.want) {
+				t.Errorf("LoadConfig() = %+v, want %+v", cfg, tc.want)
 			}
 		})
 	}

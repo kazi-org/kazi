@@ -25,11 +25,12 @@ type ProjectSpec struct {
 	Prompts []Prompt     `yaml:"prompts"`
 }
 
+// GlobalConfig contains global configuration for the project
 type GlobalConfig struct {
 	Workspace      string         `yaml:"workspace"`
-	LanguageServer LanguageServer `yaml:"languageServer"`
-	BuildCommand   string         `yaml:"buildCommand"`
+	LintCommand    string         `yaml:"lintCommand"`
 	TestCommand    string         `yaml:"testCommand"`
+	LanguageServer LanguageServer `yaml:"languageServer"`
 }
 
 type LanguageServer struct {
@@ -43,14 +44,13 @@ type Prompt struct {
 	Instructions string `yaml:"instructions"`
 }
 
+// LoadConfig loads the configuration from the given file path
 func LoadConfig(path string) (*KaziProject, error) {
-	// Read config file
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
-	// Parse YAML
 	var cfg KaziProject
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config file: %w", err)
@@ -58,12 +58,12 @@ func LoadConfig(path string) (*KaziProject, error) {
 
 	// Validate API version
 	if cfg.APIVersion != "kazi.io/v1" {
-		return nil, fmt.Errorf("unsupported API version: %s", cfg.APIVersion)
+		return nil, fmt.Errorf("invalid API version %q, expected kazi.io/v1", cfg.APIVersion)
 	}
 
 	// Validate required fields
-	if cfg.Kind != "KaziProject" {
-		return nil, fmt.Errorf("invalid kind: %s", cfg.Kind)
+	if cfg.Kind == "" {
+		return nil, fmt.Errorf("missing required field: kind")
 	}
 	if cfg.Metadata.Name == "" {
 		return nil, fmt.Errorf("missing required field: metadata.name")
@@ -72,15 +72,20 @@ func LoadConfig(path string) (*KaziProject, error) {
 		return nil, fmt.Errorf("missing required field: spec.global.workspace")
 	}
 	if len(cfg.Spec.Prompts) == 0 {
-		return nil, fmt.Errorf("missing required field: prompts")
+		return nil, fmt.Errorf("missing required field: spec.prompts")
 	}
-	for i, p := range cfg.Spec.Prompts {
-		if p.Name == "" {
-			return nil, fmt.Errorf("missing required field: prompts[%d].name", i)
-		}
-		if p.Instructions == "" {
-			return nil, fmt.Errorf("missing required field: prompts[%d].instructions", i)
-		}
+
+	// Set default commands if not specified
+	if cfg.Spec.Global.LintCommand == "" {
+		cfg.Spec.Global.LintCommand = "go vet ./..."
+	}
+	if cfg.Spec.Global.TestCommand == "" {
+		cfg.Spec.Global.TestCommand = "go test ./..."
+	}
+
+	// Set default LSP timeout if not specified
+	if cfg.Spec.Global.LanguageServer.Timeout == "" {
+		cfg.Spec.Global.LanguageServer.Timeout = "30s"
 	}
 
 	return &cfg, nil

@@ -3,7 +3,6 @@ package contextstore
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/printer"
 	"go/token"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	lsp "github.com/kazi-org/kazi/internal/lsp/go"
 )
 
 // KaziContextStore is the main container that builds/refreshes the CodeContext
@@ -20,21 +21,23 @@ type KaziContextStore struct {
 	workspace    string
 	lastScan     int64
 	scanInterval int64
+	lspClient    lsp.LSPClient
 }
 
 // NewKaziContextStore creates a new store with default scan interval
-func NewKaziContextStore(workspace string) *KaziContextStore {
+func NewKaziContextStore(workspace string, lspClient lsp.LSPClient) *KaziContextStore {
 	return &KaziContextStore{
 		codeCtx: &CodeContext{
 			Files: make(map[string]*FileContext),
 		},
 		workspace:    workspace,
 		scanInterval: 30,
+		lspClient:    lspClient,
 	}
 }
 
 // BuildOrRefresh scans the workspace, ignoring .git.
-// Parses Go files to extract symbols, docstrings, and other metadata
+// Uses LSP client to extract symbols, docstrings, and other metadata
 func (cs *KaziContextStore) BuildOrRefresh() error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -45,132 +48,94 @@ func (cs *KaziContextStore) BuildOrRefresh() error {
 	}
 	codeCtx := &CodeContext{Files: make(map[string]*FileContext)}
 
-	// Create a new token.FileSet to track positions in parsed files
-	fset := token.NewFileSet()
-
-	err := filepath.Walk(cs.workspace, func(path string, info os.FileInfo, werr error) error {
-		if werr != nil {
-			return werr
-		}
-		if info.IsDir() {
-			if info.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		rel, _ := filepath.Rel(cs.workspace, path)
-
-		// skip non-go or .gitignore
-		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, ".gitignore") {
-			return nil
-		}
-
-		// Parse the Go file
-		astFile, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	err := filepath.Walk(cs.workspace, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return fmt.Errorf("parse Go file %s: %w", rel, err)
+			return err
 		}
 
-		fc := &FileContext{
-			FilePath: rel,
-			Imports:  make([]string, 0, len(astFile.Imports)),
-			Symbols:  make(map[string]*SymbolContext),
+		// Skip .git directory
+		if info.Name() == ".git" {
+			return filepath.SkipDir
 		}
 
-		// Extract imports
-		for _, imp := range astFile.Imports {
-			if imp.Path != nil {
-				// Remove quotes from import path
-				importPath := strings.Trim(imp.Path.Value, "\"")
-				fc.Imports = append(fc.Imports, importPath)
+		// Only process Go files
+		if !info.IsDir() && strings.HasSuffix(path, ".go") {
+			relPath, err := filepath.Rel(cs.workspace, path)
+			if err != nil {
+				return fmt.Errorf("get relative path: %w", err)
 			}
-		}
 
-		// Extract symbols (functions, types, etc.)
-		ast.Inspect(astFile, func(n ast.Node) bool {
-			switch node := n.(type) {
-			case *ast.GenDecl:
-				// Handle const and var declarations
-				if node.Tok == token.CONST || node.Tok == token.VAR {
-					for _, spec := range node.Specs {
-						if valueSpec, ok := spec.(*ast.ValueSpec); ok {
-							for _, name := range valueSpec.Names {
-								sc := &SymbolContext{
-									Name:      name.Name,
-									Kind:      strings.ToLower(node.Tok.String()), // "const" or "var"
-									StartLine: fset.Position(valueSpec.Pos()).Line,
-									EndLine:   fset.Position(valueSpec.End()).Line,
-									Package:   astFile.Name.Name,
-									Exported:  name.IsExported(),
-								}
-								if valueSpec.Doc != nil {
-									sc.DocString = valueSpec.Doc.Text()
-								} else if node.Doc != nil {
-									sc.DocString = node.Doc.Text()
-								}
-								// Get value signature
-								if valueSpec.Type != nil {
-									sc.Signature = fmt.Sprintf("%s %s", name.Name, formatNode(valueSpec.Type))
-								}
-								// Get value definition as code lines
-								start := fset.Position(valueSpec.Pos()).Line
-								end := fset.Position(valueSpec.End()).Line
-								data, err := os.ReadFile(path)
-								if err == nil {
-									lines := strings.Split(string(data), "\n")
-									if start > 0 && end <= len(lines) {
-										sc.CodeLines = lines[start-1 : end]
-									}
-								}
-								fc.Symbols[sc.Name] = sc
-							}
-						}
-					}
-				} else if node.Tok == token.TYPE {
-					// Handle type declarations
-					for _, spec := range node.Specs {
-						if typeSpec, ok := spec.(*ast.TypeSpec); ok {
-							sc := &SymbolContext{
-								Name:       typeSpec.Name.Name,
-								Kind:       "type",
-								StartLine:  fset.Position(typeSpec.Pos()).Line,
-								EndLine:    fset.Position(typeSpec.End()).Line,
-								Package:    astFile.Name.Name,
-								Exported:   typeSpec.Name.IsExported(),
-								References: []string{rel},
-							}
-							// Get doc string from type spec or parent GenDecl
-							if typeSpec.Doc != nil {
-								sc.DocString = typeSpec.Doc.Text()
-							} else if node.Doc != nil {
-								sc.DocString = node.Doc.Text()
-							}
-							fc.Symbols[typeSpec.Name.Name] = sc
-						}
-					}
+			// Check if file is valid Go code and get its content
+			content, err := cs.lspClient.GetFileContent(relPath)
+			if err != nil {
+				return fmt.Errorf("read file %s: %w", relPath, err)
+			}
+			if ok, errMsg := cs.lspClient.CheckCode(content); !ok {
+				return fmt.Errorf("parse Go file %s: %s", relPath, errMsg)
+			}
+
+			// Extract package name from file content
+			pkgName := "main" // default
+			if lines := strings.Split(content, "\n"); len(lines) > 0 {
+				if pkgLine := strings.TrimSpace(lines[0]); strings.HasPrefix(pkgLine, "package ") {
+					pkgName = strings.TrimPrefix(pkgLine, "package ")
+				}
+			}
+
+			// Get symbols in file
+			symbols, err := cs.lspClient.GetWorkspaceSymbols("")
+			if err != nil {
+				return fmt.Errorf("get symbols from %s: %w", relPath, err)
+			}
+
+			fileCtx := &FileContext{
+				FilePath: relPath,
+				Symbols:  make(map[string]*SymbolContext),
+			}
+
+			// Convert LSP symbols to SymbolContext
+			for _, sym := range symbols {
+				if filepath.Base(sym.Location.URI) != filepath.Base(path) {
+					continue
 				}
 
-			case *ast.FuncDecl:
-				// Function declaration
-				sc := &SymbolContext{
-					Name:       node.Name.Name,
-					Kind:       "function",
-					DocString:  node.Doc.Text(),
-					StartLine:  fset.Position(node.Pos()).Line,
-					EndLine:    fset.Position(node.End()).Line,
-					Package:    astFile.Name.Name,
-					Exported:   node.Name.IsExported(),
-					Signature:  getFuncSignature(node),
-					References: []string{rel},
+				doc, err := cs.lspClient.GetSymbolDocumentation(filepath.Base(path), sym.Name)
+				if err != nil {
+					// Skip if we can't get documentation
+					continue
 				}
-				fc.Symbols[node.Name.Name] = sc
-			}
-			return true
-		})
 
-		codeCtx.Files[rel] = fc
+				def, err := cs.lspClient.GetSymbolDefinition(filepath.Base(path), sym.Name)
+				if err != nil {
+					// Skip if we can't get definition
+					continue
+				}
+
+				refs, err := cs.lspClient.GetReferences(sym.Name)
+				if err != nil {
+					// Skip if we can't get references
+					continue
+				}
+
+				fileCtx.Symbols[sym.Name] = &SymbolContext{
+					Name:       sym.Name,
+					Kind:       sym.Kind,
+					DocString:  doc,
+					StartLine:  sym.Location.Range.Start.Line + 1,
+					EndLine:    sym.Location.Range.End.Line + 1,
+					Signature:  def.Signature,
+					Exported:   strings.Title(sym.Name) == sym.Name,
+					Package:    pkgName,
+					References: refs,
+				}
+			}
+
+			codeCtx.Files[relPath] = fileCtx
+		}
+
 		return nil
 	})
+
 	if err != nil {
 		return fmt.Errorf("walk workspace: %w", err)
 	}
@@ -180,7 +145,7 @@ func (cs *KaziContextStore) BuildOrRefresh() error {
 	return nil
 }
 
-// GetCodeContext returns the read-only CodeContext
+// GetCodeContext returns the current code context
 func (cs *KaziContextStore) GetCodeContext() *CodeContext {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()

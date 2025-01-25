@@ -1,0 +1,22 @@
+
+rules:
+  - Keep functions small and focused (Single Responsibility Principle).
+  - Group code by functionality, not technical layers (Single Responsibility Principle).
+  - Design small, focused interfaces with one or two methods (Interface Segregation Principle).
+  - Use concrete types for parameters and return interfaces for flexibility (Dependency Inversion Principle).
+  - Export only what’s necessary to minimize the public API surface (Encapsulation).
+  - Handle errors explicitly and immediately; avoid hidden failures (Robustness).
+  - Use meaningful, descriptive names for variables, functions, and interfaces (Readability).
+  - Prefer clear and simple code over cleverness for maintainability (Readability and Open/Closed Principle).
+  - Use `defer` for cleanup to ensure proper resource management (Robustness).
+  - Avoid global state; pass dependencies explicitly (Dependency Inversion Principle).
+  - Write table-driven tests for consistent and thorough testing (Testability).
+  - Communicate through channels, not shared memory, in concurrency (Concurrency Safety).
+  - Use `context.Context` to manage goroutine lifetimes and avoid leaks (Concurrency Safety).
+  - Write clear and concise documentation for exported elements (Clarity).
+  - Profile and optimize only after identifying bottlenecks (Performance and Maintainability).
+  - Organize imports and code for clarity and readability (Readability).
+  - Wrap errors with additional context for debugging and clarity (Error Transparency).
+  - Use meaningful and consistent naming for interfaces (e.g., `Reader`, `Writer`) (Clarity and Design).
+  - Reuse memory effectively when working with slices and large data (Performance).
+  - Avoid premature optimization; focus on clarity first (Maintainability).

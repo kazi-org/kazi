@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -11,57 +12,64 @@ import (
 	"github.com/kazi-org/kazi/internal/ai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
+	lsp "github.com/kazi-org/kazi/internal/lsp/go"
 	"github.com/kazi-org/kazi/internal/workflow"
 )
 
 // App represents the main application and its dependencies.
 // It encapsulates all the components needed to run the Kazi tool.
 type App struct {
-	config   *config.KaziProject
-	aiClient ai.LLMClient
+	config    *config.KaziProject
+	aiClient  ai.LLMClient
+	lspClient lsp.LSPClient
+	ctxStore  *contextstore.KaziContextStore
+	workspace string
 }
 
 // NewApp creates a new instance of App with the given dependencies.
 // It validates the input parameters to ensure they are not nil.
-func NewApp(cfg *config.KaziProject, aiClient ai.LLMClient) (*App, error) {
+func NewApp(cfg *config.KaziProject, aiClient ai.LLMClient, lspClient lsp.LSPClient, workspace string) (*App, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("config cannot be nil")
+		return nil, fmt.Errorf("config is nil")
 	}
 	if aiClient == nil {
-		return nil, fmt.Errorf("AI client cannot be nil")
+		return nil, fmt.Errorf("AI client is nil")
+	}
+	if lspClient == nil {
+		return nil, fmt.Errorf("LSP client is nil")
+	}
+
+	// Ensure workspace path is absolute
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return nil, fmt.Errorf("get absolute workspace path: %w", err)
+	}
+
+	// Verify workspace exists
+	if _, err := os.Stat(absWorkspace); err != nil {
+		return nil, fmt.Errorf("workspace does not exist: %w", err)
+	}
+
+	ctxStore := contextstore.NewKaziContextStore(absWorkspace, lspClient)
+	if err := ctxStore.BuildOrRefresh(); err != nil {
+		return nil, fmt.Errorf("build context store: %w", err)
 	}
 
 	return &App{
-		config:   cfg,
-		aiClient: aiClient,
+		config:    cfg,
+		aiClient:  aiClient,
+		lspClient: lspClient,
+		ctxStore:  ctxStore,
+		workspace: absWorkspace,
 	}, nil
 }
 
 // Run executes the main application logic.
 // It processes each prompt in the configuration, building context and applying changes.
 func (a *App) Run() error {
-	// Ensure workspace path is absolute
-	absWorkspace, err := filepath.Abs(a.config.Spec.Global.Workspace)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute workspace path: %w", err)
-	}
-	a.config.Spec.Global.Workspace = absWorkspace
-
-	// Validate workspace path exists
-	if _, err := os.Stat(absWorkspace); os.IsNotExist(err) {
-		return fmt.Errorf("workspace path does not exist: %s", absWorkspace)
-	}
-
-	// Create and initialize the context store
-	store := contextstore.NewKaziContextStore(absWorkspace)
-	if err := store.BuildOrRefresh(); err != nil {
-		return fmt.Errorf("failed to build code context: %w", err)
-	}
-
 	// Process each prompt in the configuration
-	ctxStore := store.GetCodeContext()
 	for _, prompt := range a.config.Spec.Prompts {
-		if err := a.processPrompt(prompt, ctxStore); err != nil {
+		if err := a.processPrompt(prompt); err != nil {
 			return err
 		}
 	}
@@ -71,7 +79,7 @@ func (a *App) Run() error {
 
 // processPrompt handles a single prompt, applying the workflow steps.
 // It encapsulates the prompt processing logic for better error handling and readability.
-func (a *App) processPrompt(prompt config.Prompt, ctxStore *contextstore.CodeContext) error {
+func (a *App) processPrompt(prompt config.Prompt) error {
 	if prompt.Name == "" {
 		return fmt.Errorf("prompt name cannot be empty")
 	}
@@ -84,7 +92,7 @@ func (a *App) processPrompt(prompt config.Prompt, ctxStore *contextstore.CodeCon
 		prompt,
 		a.config.Spec.Global,
 		a.config.Spec.Rules,
-		ctxStore,
+		a.ctxStore.GetCodeContext(),
 		a.aiClient,
 	)
 	if err != nil {
@@ -96,43 +104,54 @@ func (a *App) processPrompt(prompt config.Prompt, ctxStore *contextstore.CodeCon
 
 // initApp initializes the application with all its dependencies.
 // It handles configuration loading and AI client initialization.
-func initApp(configPath string) (*App, error) {
+func initApp(ctx context.Context, configPath string) (*App, error) {
 	// Ensure config path is absolute
 	absConfigPath, err := filepath.Abs(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute config path: %w", err)
+		return nil, fmt.Errorf("get absolute config path: %w", err)
 	}
 
-	// Load and validate configuration
+	// Load config
 	cfg, err := config.LoadConfig(absConfigPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config from %s: %w", absConfigPath, err)
+		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	// Initialize the AI client
+	// Initialize AI client
 	aiClient, err := ai.NewOpenAIClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize AI client: %w", err)
+		return nil, fmt.Errorf("init AI client: %w", err)
 	}
 
-	// Create and validate the application instance
-	return NewApp(cfg, aiClient)
+	// Initialize LSP client
+	lspClient, err := lsp.NewGoClient(ctx, cfg.Spec.Global.Workspace)
+	if err != nil {
+		return nil, fmt.Errorf("init LSP client: %w", err)
+	}
+
+	return NewApp(cfg, aiClient, lspClient, cfg.Spec.Global.Workspace)
 }
 
 // run is the main entry point for the application logic.
 // It handles command-line flags and initializes the application.
 func run() error {
-	var configPath string
-	flag.StringVar(&configPath, "config", "kazi.yml", "Path to kazi.yml (YAML format) config file")
+	// Parse flags
+	configPath := flag.String("config", "kazi.yaml", "path to config file")
 	flag.Parse()
 
-	app, err := initApp(configPath)
+	// Initialize app
+	ctx := context.Background()
+	app, err := initApp(ctx, *configPath)
 	if err != nil {
-		return fmt.Errorf("initialization failed: %w", err)
+		return fmt.Errorf("init app: %w", err)
 	}
+	defer app.lspClient.Close()
 
-	if err := app.Run(); err != nil {
-		return fmt.Errorf("application error: %w", err)
+	// Process each prompt
+	for _, prompt := range app.config.Spec.Prompts {
+		if err := workflow.ProcessPrompt(prompt, app.config.Spec.Global, app.config.Spec.Rules, app.ctxStore.GetCodeContext(), app.aiClient); err != nil {
+			return fmt.Errorf("process prompt %q: %w", prompt.Name, err)
+		}
 	}
 
 	return nil

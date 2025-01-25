@@ -1,11 +1,71 @@
 package contextstore
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	lsp "github.com/kazi-org/kazi/internal/lsp/go"
 )
+
+// mockLSPClient implements lsp.LSPClient for testing
+type mockLSPClient struct {
+	symbols     []lsp.WorkspaceSymbol
+	docStrings  map[string]string
+	definitions map[string]*lsp.SymbolDefinition
+	references  map[string][]string
+}
+
+func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error) {
+	return m.symbols, nil
+}
+
+func (m *mockLSPClient) GetSymbolDocumentation(file, symbol string) (string, error) {
+	return m.docStrings[symbol], nil
+}
+
+func (m *mockLSPClient) GetReferences(symbol string) ([]string, error) {
+	return m.references[symbol], nil
+}
+
+func (m *mockLSPClient) GetSymbolDefinition(file, symbol string) (*lsp.SymbolDefinition, error) {
+	def, ok := m.definitions[symbol]
+	if !ok {
+		return nil, fmt.Errorf("symbol %q not found", symbol)
+	}
+	return def, nil
+}
+
+func (m *mockLSPClient) GetFileContent(file string) (string, error) {
+	if strings.Contains(file, "invalid.go") {
+		return "invalid go code", nil
+	}
+	if strings.Contains(file, "main.go") {
+		return "package main\n\nfunc main() {}\n", nil
+	}
+	if strings.Contains(file, "types.go") || strings.Contains(file, "funcs.go") {
+		return "package example\n\nfunc main() {}\n", nil
+	}
+	return "", fmt.Errorf("file not found: %s", file)
+}
+
+func (m *mockLSPClient) GetSymbolLocation(file, symbol string) (lsp.Location, error) {
+	return lsp.Location{}, nil
+}
+
+func (m *mockLSPClient) CheckCode(code string) (bool, string) {
+	// For testing, we'll consider any code that starts with "package" as valid
+	if strings.HasPrefix(strings.TrimSpace(code), "package") {
+		return true, ""
+	}
+	return false, "invalid Go code"
+}
+
+func (m *mockLSPClient) Close() error {
+	return nil
+}
 
 func TestKaziContextStore_BuildOrRefresh(t *testing.T) {
 	tests := []struct {
@@ -110,8 +170,62 @@ func invalid syntax {
 				}
 			}
 
-			// Create context store
-			store := NewKaziContextStore(tmpDir)
+			// Create mock LSP client with test data
+			mockClient := &mockLSPClient{
+				symbols: []lsp.WorkspaceSymbol{
+					{
+						Name: "HelloWorld",
+						Kind: "function",
+						Location: lsp.Location{
+							URI: "main.go",
+							Range: lsp.Range{
+								Start: lsp.Position{Line: 3},
+								End:   lsp.Position{Line: 5},
+							},
+						},
+					},
+					{
+						Name: "User",
+						Kind: "type",
+						Location: lsp.Location{
+							URI: "types.go",
+							Range: lsp.Range{
+								Start: lsp.Position{Line: 3},
+								End:   lsp.Position{Line: 5},
+							},
+						},
+					},
+					{
+						Name: "GetUser",
+						Kind: "function",
+						Location: lsp.Location{
+							URI: "funcs.go",
+							Range: lsp.Range{
+								Start: lsp.Position{Line: 3},
+								End:   lsp.Position{Line: 4},
+							},
+						},
+					},
+				},
+				docStrings: map[string]string{
+					"HelloWorld": "HelloWorld prints a greeting\n",
+					"User":       "User represents a user in the system\n",
+					"GetUser":    "GetUser returns a new user\n",
+				},
+				definitions: map[string]*lsp.SymbolDefinition{
+					"HelloWorld": &lsp.SymbolDefinition{Signature: "func HelloWorld()"},
+					"User":       &lsp.SymbolDefinition{Signature: "type User struct"},
+					"GetUser":    &lsp.SymbolDefinition{Signature: "func GetUser(name string) *User"},
+				},
+				references: map[string][]string{
+					"HelloWorld": {"main.go"},
+					"User":       {"types.go", "funcs.go"},
+					"GetUser":    {"funcs.go"},
+				},
+			}
+
+			// Create context store with mock client
+			store := NewKaziContextStore(tmpDir, mockClient)
 			err = store.BuildOrRefresh()
 
 			if tc.wantErr {

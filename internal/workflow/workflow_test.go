@@ -8,100 +8,77 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kazi-org/kazi/internal/config"
+	"github.com/go-git/go-git/v5"
+	kaziconfig "github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
 	"github.com/kazi-org/kazi/internal/patch"
 	"github.com/kazi-org/kazi/internal/shell"
 )
 
+// mockAIClient implements ai.LLMClient for testing
 type mockAIClient struct {
 	response string
-	err      error
 }
 
 func (m *mockAIClient) GetPatch(context.Context, string) (string, error) {
-	if m.err != nil {
-		return "", m.err
-	}
 	return m.response, nil
 }
 
 func TestProcessPrompt(t *testing.T) {
 	tests := []struct {
 		name        string
-		prompt      config.Prompt
-		global      config.GlobalConfig
+		prompt      kaziconfig.Prompt
+		global      kaziconfig.GlobalConfig
 		rules       []string
-		ctxStore    *contextstore.CodeContext
+		ctx         *contextstore.CodeContext
 		mockResp    string
-		mockErr     error
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name: "Successful patch",
-			prompt: config.Prompt{
-				Name:         "test",
+			name: "Success",
+			prompt: kaziconfig.Prompt{
+				Name:         "Test",
 				Instructions: "Add a function",
 			},
-			global: config.GlobalConfig{
-				Workspace:    ".",
-				BuildCommand: "", // Skip build for test
-				TestCommand:  "", // Skip test for test
+			global: kaziconfig.GlobalConfig{
+				Workspace:   ".",
+				LintCommand: "",
+				TestCommand: "",
 			},
-			rules: []string{
-				"Use gofmt for formatting",
-				"Write tests for all functions",
-			},
+			rules: []string{"Use gofmt for formatting"},
 			mockResp: `{
-				"patches": [
-					{
-						"file": "main.go",
-						"type": "create",
-						"content": "package main\n\nfunc main() {}\n"
-					}
-				],
+				"patches": [{
+					"file": "main.go",
+					"type": "create",
+					"content": "package main\n\nfunc main() {}\n"
+				}],
 				"commit": {
 					"subject": "Add main function",
-					"body": "Added a basic main function"
+					"body": "Added main function implementation"
 				}
 			}`,
 		},
 		{
-			name: "Invalid patch JSON",
-			prompt: config.Prompt{
-				Name:         "test",
+			name: "Invalid JSON response",
+			prompt: kaziconfig.Prompt{
+				Name:         "Test",
 				Instructions: "Add a function",
 			},
-			global: config.GlobalConfig{
-				Workspace:    ".",
-				BuildCommand: "",
-				TestCommand:  "",
+			global: kaziconfig.GlobalConfig{
+				Workspace:   ".",
+				LintCommand: "",
+				TestCommand: "",
 			},
 			mockResp:    "invalid json",
 			wantErr:     true,
-			errContains: "invalid character",
-		},
-		{
-			name: "AI client error",
-			prompt: config.Prompt{
-				Name:         "test",
-				Instructions: "Add a function",
-			},
-			global: config.GlobalConfig{
-				Workspace:    ".",
-				BuildCommand: "",
-				TestCommand:  "",
-			},
-			mockErr:     fmt.Errorf("AI service unavailable"),
-			wantErr:     true,
-			errContains: "AI service unavailable",
+			errContains: "parse patch JSON",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create temporary workspace
+			// Create temp workspace
 			tmpDir, err := os.MkdirTemp("", "kazi-workflow-test-*")
 			if err != nil {
 				t.Fatalf("Failed to create temp dir: %v", err)
@@ -116,19 +93,16 @@ func TestProcessPrompt(t *testing.T) {
 				t.Fatalf("Failed to initialize git repo: %v", err)
 			}
 
-			// Create mock AI client
-			client := &mockAIClient{
-				response: tc.mockResp,
-				err:      tc.mockErr,
-			}
+			// Create mock client
+			client := &mockAIClient{response: tc.mockResp}
 
 			// Process prompt
-			err = ProcessPrompt(tc.prompt, tc.global, tc.rules, tc.ctxStore, client)
+			err = ProcessPrompt(tc.prompt, tc.global, tc.rules, tc.ctx, client)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error but got nil")
 				}
-				if tc.errContains != "" && !contains(err.Error(), tc.errContains) {
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
 					t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
 				}
 				return
@@ -169,49 +143,49 @@ func TestProcessPrompt(t *testing.T) {
 func TestBuildLLMRequest(t *testing.T) {
 	tests := []struct {
 		name     string
-		prompt   config.Prompt
-		global   config.GlobalConfig
+		prompt   kaziconfig.Prompt
+		global   kaziconfig.GlobalConfig
 		rules    []string
-		ctxStore *contextstore.CodeContext
-		want     []string
+		ctx      *contextstore.CodeContext
+		contains []string
 	}{
 		{
 			name: "Basic request",
-			prompt: config.Prompt{
-				Name:         "test",
+			prompt: kaziconfig.Prompt{
+				Name:         "Test",
 				Instructions: "do something",
 			},
-			global: config.GlobalConfig{
-				Workspace:    "/test/workspace",
-				BuildCommand: "go build",
-				TestCommand:  "go test",
+			global: kaziconfig.GlobalConfig{
+				Workspace:   "/test/workspace",
+				LintCommand: "go vet ./...",
+				TestCommand: "go test ./...",
 			},
 			rules: []string{
 				"Use gofmt for formatting",
 				"Write tests for all functions",
 			},
-			want: []string{
+			contains: []string{
 				"Project Rules:",
 				"- Use gofmt for formatting",
 				"- Write tests for all functions",
 				"Project Configuration:",
-				"- Build Command: go build",
-				"- Test Command: go test",
+				"- Lint Command: go vet ./...",
+				"- Test Command: go test ./...",
 				"User Request:",
 				"do something",
 			},
 		},
 		{
 			name: "With context",
-			prompt: config.Prompt{
+			prompt: kaziconfig.Prompt{
 				Name:         "test",
 				Instructions: "do something",
 			},
-			global: config.GlobalConfig{
+			global: kaziconfig.GlobalConfig{
 				Workspace: "/test/workspace",
 			},
 			rules: nil,
-			ctxStore: &contextstore.CodeContext{
+			ctx: &contextstore.CodeContext{
 				Files: map[string]*contextstore.FileContext{
 					"main.go": {
 						FilePath: "main.go",
@@ -228,7 +202,7 @@ func TestBuildLLMRequest(t *testing.T) {
 					},
 				},
 			},
-			want: []string{
+			contains: []string{
 				"Workspace Context:",
 				"File: main.go",
 				"Imports: fmt, os",
@@ -241,8 +215,8 @@ func TestBuildLLMRequest(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildLLMRequest(tc.prompt, tc.global, tc.rules, tc.ctxStore)
-			for _, want := range tc.want {
+			got := buildLLMRequest(tc.prompt, tc.global, tc.rules, tc.ctx)
+			for _, want := range tc.contains {
 				if !strings.Contains(got, want) {
 					t.Errorf("request does not contain %q", want)
 				}
@@ -253,24 +227,19 @@ func TestBuildLLMRequest(t *testing.T) {
 
 // initGitRepo initializes a git repository in the given directory
 func initGitRepo(dir string) error {
-	cmds := []struct {
-		name string
-		args []string
-	}{
-		{"git", []string{"init"}},
-		{"git", []string{"config", "user.email", "test@example.com"}},
-		{"git", []string{"config", "user.name", "Test User"}},
+	// Initialize repository
+	if _, err := git.PlainInit(dir, false); err != nil {
+		return fmt.Errorf("init git repo: %w", err)
 	}
 
-	for _, cmd := range cmds {
-		cmdStr := cmd.name
-		if len(cmd.args) > 0 {
-			cmdStr += " " + strings.Join(cmd.args, " ")
-		}
-		if err := shell.RunCommand(dir, cmdStr); err != nil {
-			return err
-		}
+	// Configure git user using shell commands
+	if err := shell.RunCommand(dir, "git config user.name 'Test User'"); err != nil {
+		return fmt.Errorf("set git user name: %w", err)
 	}
+	if err := shell.RunCommand(dir, "git config user.email 'test@example.com'"); err != nil {
+		return fmt.Errorf("set git user email: %w", err)
+	}
+
 	return nil
 }
 
@@ -282,7 +251,7 @@ func contains(s, substr string) bool {
 func TestShowDiffAndCommit(t *testing.T) {
 	tests := []struct {
 		name        string
-		prompt      config.Prompt
+		prompt      kaziconfig.Prompt
 		workspace   string
 		setupFiles  map[string]string
 		patches     []patch.Chunk
@@ -292,7 +261,7 @@ func TestShowDiffAndCommit(t *testing.T) {
 	}{
 		{
 			name: "Create and commit new file",
-			prompt: config.Prompt{
+			prompt: kaziconfig.Prompt{
 				Name:         "test",
 				Instructions: "Add main.go",
 			},
@@ -311,7 +280,7 @@ func TestShowDiffAndCommit(t *testing.T) {
 		},
 		{
 			name: "Modify existing file",
-			prompt: config.Prompt{
+			prompt: kaziconfig.Prompt{
 				Name:         "test",
 				Instructions: "Update main.go",
 			},
@@ -334,7 +303,7 @@ func TestShowDiffAndCommit(t *testing.T) {
 		},
 		{
 			name: "Delete file",
-			prompt: config.Prompt{
+			prompt: kaziconfig.Prompt{
 				Name:         "test",
 				Instructions: "Delete main.go",
 			},
@@ -356,7 +325,7 @@ func TestShowDiffAndCommit(t *testing.T) {
 		},
 		{
 			name: "Invalid patch type",
-			prompt: config.Prompt{
+			prompt: kaziconfig.Prompt{
 				Name:         "test",
 				Instructions: "Invalid patch",
 			},

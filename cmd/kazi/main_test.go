@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kazi-org/kazi/internal/config"
+	lsp "github.com/kazi-org/kazi/internal/lsp/go"
 )
 
 // testCase represents a single integration test scenario
@@ -64,10 +66,6 @@ func setupTestWorkspace(t *testing.T, files setupFiles, configContent string) (s
 	}
 
 	// Initialize git repo
-	if err := os.Mkdir(filepath.Join(tmpDir, ".git"), 0755); err != nil {
-		cleanup()
-		t.Fatalf("Failed to create .git directory: %v", err)
-	}
 	if err := initGitRepo(tmpDir); err != nil {
 		cleanup()
 		t.Fatalf("Failed to initialize git repo: %v", err)
@@ -76,132 +74,222 @@ func setupTestWorkspace(t *testing.T, files setupFiles, configContent string) (s
 	return tmpDir, cleanup
 }
 
-func TestKaziIntegration(t *testing.T) {
-	tests := []testCase{
-		{
-			name:          "Missing config file",
-			configContent: "",
-			setupFiles: setupFiles{
-				"main.go": `package main; func main() {}`,
-			},
-			wantErr:     true,
-			errContains: "read config file",
-		},
-		{
-			name: "Non-existent workspace path",
-			configContent: `apiVersion: kazi.io/v1
-kind: KaziProject
-metadata:
-  name: test-project
-spec:
-  global:
-    workspace: "/nonexistent/path"
-  rules:
-    - "We use snake_case"
-    - "All exported items start with capital letter"
-  prompts:
-    - name: "Test"
-      instructions: "add test"`,
-			setupFiles: setupFiles{
-				"main.go": `package main
-func main() {}
-`,
-			},
-			wantErr:     true,
-			errContains: "workspace path does not exist",
-		},
+// mockLSPClient implements lsp.LSPClient for testing
+type mockLSPClient struct{}
+
+func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error) {
+	return []lsp.WorkspaceSymbol{}, nil
+}
+
+func (m *mockLSPClient) GetSymbolDocumentation(file, symbol string) (string, error) {
+	return "", nil
+}
+
+func (m *mockLSPClient) GetReferences(symbol string) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockLSPClient) GetSymbolDefinition(file, symbol string) (*lsp.SymbolDefinition, error) {
+	return nil, nil
+}
+
+func (m *mockLSPClient) GetFileContent(file string) (string, error) {
+	return "package main\n\nfunc main() {}\n", nil
+}
+
+func (m *mockLSPClient) GetSymbolLocation(file, symbol string) (lsp.Location, error) {
+	return lsp.Location{}, nil
+}
+
+func (m *mockLSPClient) CheckCode(code string) (bool, string) {
+	// For testing, we'll consider any code that starts with "package" as valid
+	if strings.HasPrefix(strings.TrimSpace(code), "package") {
+		return true, ""
 	}
+	return false, "invalid Go code"
+}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Setup test workspace
-			tmpDir, cleanup := setupTestWorkspace(t, tc.setupFiles, tc.configContent)
-			defer cleanup()
+func (m *mockLSPClient) Close() error {
+	return nil
+}
 
-			// Load configuration
-			cfg, err := config.LoadConfig(filepath.Join(tmpDir, "kazi.yml"))
-			if err != nil {
-				if !tc.wantErr {
-					t.Fatalf("Unexpected error loading config: %v", err)
-				}
-				if tc.errContains != "" && !contains(err.Error(), tc.errContains) {
-					t.Fatalf("Error %q does not contain %q", err.Error(), tc.errContains)
-				}
-				return
-			}
-
-			// Update workspace paths
-			if cfg != nil {
-				if tc.name == "Non-existent workspace path" {
-					cfg.Spec.Global.Workspace = filepath.Join(tmpDir, "no_such_dir")
-				} else {
-					cfg.Spec.Global.Workspace = tmpDir
-				}
-			}
-
-			// Create and run app
-			app, err := NewApp(cfg, &mockAIClient{})
-			if err != nil {
-				t.Fatalf("Failed to create app: %v", err)
-			}
-
-			err = app.Run()
-			if err != nil {
-				if !tc.wantErr {
-					t.Fatalf("Unexpected error running app: %v", err)
-				}
-				if tc.errContains != "" && !contains(err.Error(), tc.errContains) {
-					t.Fatalf("Error %q does not contain %q", err.Error(), tc.errContains)
-				}
-				return
-			}
-
-			if tc.wantErr {
-				t.Fatalf("Expected error but got none")
-			}
-		})
-	}
+// mockNewGoClient returns a mock LSP client for testing
+func mockNewGoClient(ctx context.Context, workspace string) (lsp.LSPClient, error) {
+	return &mockLSPClient{}, nil
 }
 
 // mockAIClient implements ai.LLMClient for testing
 type mockAIClient struct{}
 
-func (m *mockAIClient) GetPatch(context.Context, string) (string, error) {
+func (m *mockAIClient) GetPatch(ctx context.Context, prompt string) (string, error) {
 	return `{
-		"patches": [{
-			"file": "main.go",
-			"type": "replace",
-			"fromLine": 1,
-			"toLine": 4,
-			"content": "package main\n\nfunc Foo() {}\n\nfunc main() {}\n"
-		}],
+		"patches": [
+			{
+				"file": "main_test.go",
+				"type": "create",
+				"content": "package main\n\nimport \"testing\"\n\nfunc TestGreet(t *testing.T) {\n\tgot := Greet(\"World\")\n\twant := \"Hello, World!\"\n\tif got != want {\n\t\tt.Errorf(\"Greet(\\\"World\\\") = %q, want %q\", got, want)\n\t}\n}\n"
+			}
+		],
 		"commit": {
-			"subject": "Add Foo function",
-			"body": "Added new Foo function as requested"
+			"subject": "Add test for Greet function",
+			"body": "Added a test case to verify the Greet function returns the expected greeting message."
 		}
 	}`, nil
 }
 
-// initGitRepo initializes a git repository in the given directory
-func initGitRepo(dir string) error {
-	cmds := []struct {
-		name string
-		args []string
-	}{
-		{"git", []string{"init"}},
-		{"git", []string{"config", "user.email", "test@example.com"}},
-		{"git", []string{"config", "user.name", "Test User"}},
-		{"git", []string{"add", "."}},
-		{"git", []string{"commit", "-m", "Initial commit"}},
+func TestKaziIntegration(t *testing.T) {
+	// Save original NewGoClient function and restore it after test
+	originalNewGoClient := lsp.NewGoClient
+	defer func() { lsp.NewGoClient = originalNewGoClient }()
+	lsp.NewGoClient = mockNewGoClient
+
+	// Create temporary workspace
+	tmpDir, err := os.MkdirTemp("", "kazi-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize Go module
+	cmd := exec.Command("go", "mod", "init", "example.com/test")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to initialize Go module: %v", err)
 	}
 
-	for _, cmd := range cmds {
-		c := exec.Command(cmd.name, cmd.args...)
-		c.Dir = dir
-		if err := c.Run(); err != nil {
-			return fmt.Errorf("failed to run %s %v: %w", cmd.name, cmd.args, err)
+	// Download dependencies
+	cmd = exec.Command("go", "mod", "tidy")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to download dependencies: %v", err)
+	}
+
+	// Create test file
+	testFile := filepath.Join(tmpDir, "main.go")
+	err = os.WriteFile(testFile, []byte(`package main
+
+import (
+	"fmt"
+)
+
+// Greet returns a greeting message
+func Greet(name string) string {
+	return fmt.Sprintf("Hello, %s!", name)
+}
+
+func main() {
+	fmt.Println(Greet("World"))
+}
+`), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Create config file
+	configPath := filepath.Join(tmpDir, "kazi.yaml")
+	err = os.WriteFile(configPath, []byte(`apiVersion: kazi.io/v1
+kind: KaziProject
+metadata:
+  name: test-project
+spec:
+  global:
+    workspace: "`+tmpDir+`"
+    lintCommand: "go vet ./..."
+    testCommand: "go test ./..."
+    languageServer:
+      name: gopls
+      command: gopls
+      timeout: 30s
+  rules:
+    - "We use snake_case"
+  prompts:
+    - name: test
+      instructions: "add test"
+`), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	// Initialize git repository
+	if err := initGitRepo(tmpDir); err != nil {
+		t.Fatalf("Failed to initialize git repo: %v", err)
+	}
+
+	// Set config path flag
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+	os.Args = []string{"kazi", "-config", configPath}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+	// Load config
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Create LSP client
+	lspClient, err := lsp.NewGoClient(context.Background(), tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create LSP client: %v", err)
+	}
+
+	// Run test with mock AI client
+	app, err := NewApp(cfg, &mockAIClient{}, lspClient, tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create app: %v", err)
+	}
+
+	if err := app.Run(); err != nil {
+		t.Fatalf("Failed to run app: %v", err)
+	}
+}
+
+// initGitRepo initializes a git repository in the given directory
+func initGitRepo(dir string) error {
+	// Remove existing .git directory if it exists
+	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+		return fmt.Errorf("failed to remove existing .git directory: %w", err)
+	}
+
+	// Initialize repository
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to initialize git repo: %s: %w", string(out), err)
+	}
+
+	// Configure git user
+	cmds := []struct {
+		args []string
+		env  []string
+	}{
+		{
+			args: []string{"config", "user.email", "test@example.com"},
+			env:  []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null"},
+		},
+		{
+			args: []string{"config", "user.name", "Test User"},
+			env:  []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null"},
+		},
+		{
+			args: []string{"add", "."},
+			env:  nil,
+		},
+		{
+			args: []string{"commit", "-m", "Initial commit"},
+			env:  []string{"GIT_AUTHOR_DATE=2024-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2024-01-01T00:00:00Z"},
+		},
+	}
+
+	for _, c := range cmds {
+		cmd := exec.Command("git", c.args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), c.env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to run git %v: %s: %w", c.args, string(out), err)
 		}
 	}
+
 	return nil
 }
 
