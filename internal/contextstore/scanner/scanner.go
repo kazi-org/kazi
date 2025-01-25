@@ -185,34 +185,32 @@ func (s *GoWorkspaceScanner) getOrParseFile(path string) (*ast.File, error) {
 
 // processFile processes a single file and returns its FileContext
 func (s *GoWorkspaceScanner) processFile(ctx context.Context, path string) (*types.FileContext, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	// Create file context
+	fileCtx := &types.FileContext{
+		FilePath: path,
+		Symbols:  make(map[string]*types.SymbolContext),
 	}
 
-	relPath, err := filepath.Rel(s.config.Workspace, path)
+	// Get file content from LSP client
+	content, err := s.config.LSPClient.GetFileContent(path)
 	if err != nil {
-		return nil, errors.Wrap(err, "get relative path")
+		return nil, errors.Wrap(err, "get file content")
 	}
+	fileCtx.Content = content
 
-	f, err := s.getOrParseFile(path)
+	// Parse file
+	file, err := s.getOrParseFile(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse file")
 	}
 
-	fileCtx := &types.FileContext{
-		FilePath: relPath,
-		Symbols:  make(map[string]*types.SymbolContext),
-	}
-
-	// Use custom visitor for more efficient traversal
+	// Visit AST nodes to collect symbols
 	visitor := &symbolVisitor{
 		fset:    s.fset,
 		fileCtx: fileCtx,
-		relPath: relPath,
+		relPath: path,
 	}
-	ast.Walk(visitor, f)
+	ast.Walk(visitor, file)
 
 	return fileCtx, nil
 }

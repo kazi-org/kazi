@@ -27,6 +27,7 @@ type CodeContext struct {
 // FileContext represents the context for a single file.
 type FileContext struct {
 	FilePath string                    // Path to the file
+	Content  string                    // File content
 	Symbols  map[string]*SymbolContext // Map of symbol names to symbol contexts
 }
 

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
 	"github.com/kazi-org/kazi/internal/ls/gols"
+	"github.com/kazi-org/kazi/internal/patch"
 	"github.com/kazi-org/kazi/internal/workflow"
 )
 
@@ -19,6 +21,106 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func applyPatch(chunk *patch.Chunk) error {
+	switch chunk.Type {
+	case patch.PatchCreate:
+		// Create new file
+		if err := os.WriteFile(chunk.File, []byte(chunk.Content), 0644); err != nil {
+			return fmt.Errorf("create file %s: %w", chunk.File, err)
+		}
+		fmt.Printf("Created file: %s\n", chunk.File)
+
+	case patch.PatchReplace:
+		// Read existing file
+		content, err := os.ReadFile(chunk.File)
+		if err != nil {
+			return fmt.Errorf("read file %s: %w", chunk.File, err)
+		}
+
+		lines := strings.Split(string(content), "\n")
+		if chunk.FromLine < 1 || chunk.FromLine > len(lines) ||
+			chunk.ToLine < chunk.FromLine || chunk.ToLine > len(lines) {
+			return fmt.Errorf("invalid line range %d-%d for file %s", chunk.FromLine, chunk.ToLine, chunk.File)
+		}
+
+		// Build the new content
+		var result []string
+
+		// Add lines before the change
+		result = append(result, lines[:chunk.FromLine-1]...)
+
+		// Add context before if provided
+		if len(chunk.ContextBefore) > 0 {
+			// Verify context matches
+			contextStart := max(0, chunk.FromLine-len(chunk.ContextBefore)-1)
+			actualContext := lines[contextStart : chunk.FromLine-1]
+			if !matchContext(actualContext, chunk.ContextBefore) {
+				return fmt.Errorf("context before doesn't match in file %s", chunk.File)
+			}
+		}
+
+		// Add the new content
+		result = append(result, strings.Split(chunk.Content, "\n")...)
+
+		// Add context after if provided
+		if len(chunk.ContextAfter) > 0 {
+			// Verify context matches
+			contextEnd := min(len(lines), chunk.ToLine+len(chunk.ContextAfter))
+			actualContext := lines[chunk.ToLine:contextEnd]
+			if !matchContext(actualContext, chunk.ContextAfter) {
+				return fmt.Errorf("context after doesn't match in file %s", chunk.File)
+			}
+		}
+
+		// Add remaining lines
+		result = append(result, lines[chunk.ToLine:]...)
+
+		// Write back to file
+		if err := os.WriteFile(chunk.File, []byte(strings.Join(result, "\n")), 0644); err != nil {
+			return fmt.Errorf("write file %s: %w", chunk.File, err)
+		}
+		fmt.Printf("Modified file: %s\n", chunk.File)
+
+	case patch.PatchDelete:
+		// Delete file
+		if err := os.Remove(chunk.File); err != nil {
+			return fmt.Errorf("delete file %s: %w", chunk.File, err)
+		}
+		fmt.Printf("Deleted file: %s\n", chunk.File)
+
+	default:
+		return fmt.Errorf("unknown patch type: %s", chunk.Type)
+	}
+
+	return nil
+}
+
+func matchContext(actual []string, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for i := range actual {
+		if actual[i] != expected[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func run() error {
@@ -91,41 +193,23 @@ func run() error {
 		return fmt.Errorf("failed to process workflow: %w", err)
 	}
 
-	// Parse and apply patches
-	var patches struct {
-		Patches []struct {
-			File    string `json:"file"`
-			Type    string `json:"type"`
-			Content string `json:"content"`
-		} `json:"patches"`
-	}
-	if err := json.Unmarshal([]byte(response), &patches); err != nil {
+	// Parse patches
+	var patchSet patch.PatchSet
+	if err := json.Unmarshal([]byte(response), &patchSet); err != nil {
 		return fmt.Errorf("parse patches: %w", err)
 	}
 
+	// Print commit message
+	fmt.Printf("\nApplying changes: %s\n", patchSet.Commit.Subject)
+	if patchSet.Commit.Body != "" {
+		fmt.Printf("\n%s\n", patchSet.Commit.Body)
+	}
+	fmt.Println()
+
 	// Apply patches
-	for _, p := range patches.Patches {
-		switch p.Type {
-		case "create":
-			// Create new file
-			if err := os.WriteFile(p.File, []byte(p.Content), 0644); err != nil {
-				return fmt.Errorf("create file %s: %w", p.File, err)
-			}
-			fmt.Printf("Created file: %s\n", p.File)
-		case "modify":
-			// Modify existing file
-			if err := os.WriteFile(p.File, []byte(p.Content), 0644); err != nil {
-				return fmt.Errorf("modify file %s: %w", p.File, err)
-			}
-			fmt.Printf("Modified file: %s\n", p.File)
-		case "delete":
-			// Delete file
-			if err := os.Remove(p.File); err != nil {
-				return fmt.Errorf("delete file %s: %w", p.File, err)
-			}
-			fmt.Printf("Deleted file: %s\n", p.File)
-		default:
-			return fmt.Errorf("unknown patch type: %s", p.Type)
+	for _, chunk := range patchSet.Patches {
+		if err := applyPatch(&chunk); err != nil {
+			return fmt.Errorf("apply patch: %w", err)
 		}
 	}
 
