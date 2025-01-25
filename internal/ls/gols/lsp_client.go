@@ -1,4 +1,4 @@
-package lsp
+package gols
 
 import (
 	"context"

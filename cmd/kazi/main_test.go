@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/kazi-org/kazi/internal/config"
-	lsp "github.com/kazi-org/kazi/internal/lsp/go"
+	gols "github.com/kazi-org/kazi/internal/ls/gols"
 )
 
 // testCase represents a single integration test scenario
@@ -74,11 +74,11 @@ func setupTestWorkspace(t *testing.T, files setupFiles, configContent string) (s
 	return tmpDir, cleanup
 }
 
-// mockLSPClient implements lsp.LSPClient for testing
+// mockLSPClient implements gols.LSPClient for testing
 type mockLSPClient struct{}
 
-func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error) {
-	return []lsp.WorkspaceSymbol{}, nil
+func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]gols.WorkspaceSymbol, error) {
+	return []gols.WorkspaceSymbol{}, nil
 }
 
 func (m *mockLSPClient) GetSymbolDocumentation(file, symbol string) (string, error) {
@@ -89,7 +89,7 @@ func (m *mockLSPClient) GetReferences(symbol string) ([]string, error) {
 	return nil, nil
 }
 
-func (m *mockLSPClient) GetSymbolDefinition(file, symbol string) (*lsp.SymbolDefinition, error) {
+func (m *mockLSPClient) GetSymbolDefinition(file, symbol string) (*gols.SymbolDefinition, error) {
 	return nil, nil
 }
 
@@ -97,8 +97,8 @@ func (m *mockLSPClient) GetFileContent(file string) (string, error) {
 	return "package main\n\nfunc main() {}\n", nil
 }
 
-func (m *mockLSPClient) GetSymbolLocation(file, symbol string) (lsp.Location, error) {
-	return lsp.Location{}, nil
+func (m *mockLSPClient) GetSymbolLocation(file, symbol string) (gols.Location, error) {
+	return gols.Location{}, nil
 }
 
 func (m *mockLSPClient) CheckCode(code string) (bool, string) {
@@ -114,7 +114,7 @@ func (m *mockLSPClient) Close() error {
 }
 
 // mockNewGoClient returns a mock LSP client for testing
-func mockNewGoClient(ctx context.Context, workspace string) (lsp.LSPClient, error) {
+func mockNewGoClient(ctx context.Context, workspace string) (gols.LSPClient, error) {
 	return &mockLSPClient{}, nil
 }
 
@@ -139,9 +139,9 @@ func (m *mockAIClient) GetPatch(ctx context.Context, prompt string) (string, err
 
 func TestKaziIntegration(t *testing.T) {
 	// Save original NewGoClient function and restore it after test
-	originalNewGoClient := lsp.NewGoClient
-	defer func() { lsp.NewGoClient = originalNewGoClient }()
-	lsp.NewGoClient = mockNewGoClient
+	originalNewGoClient := gols.NewGoClient
+	defer func() { gols.NewGoClient = originalNewGoClient }()
+	gols.NewGoClient = mockNewGoClient
 
 	// Create temporary workspace
 	tmpDir, err := os.MkdirTemp("", "kazi-test-*")
@@ -228,7 +228,7 @@ spec:
 	}
 
 	// Create LSP client
-	lspClient, err := lsp.NewGoClient(context.Background(), tmpDir)
+	lspClient, err := gols.NewGoClient(context.Background(), tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to create LSP client: %v", err)
 	}

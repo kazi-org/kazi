@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	lsp "github.com/kazi-org/kazi/internal/lsp/go"
+	gols "github.com/kazi-org/kazi/internal/ls/gols"
 )
 
 // KaziContextStore is the main container that builds/refreshes the CodeContext
@@ -21,11 +21,11 @@ type KaziContextStore struct {
 	workspace    string
 	lastScan     int64
 	scanInterval int64
-	lspClient    lsp.LSPClient
+	lspClient    gols.LSPClient
 }
 
 // NewKaziContextStore creates a new store with default scan interval
-func NewKaziContextStore(workspace string, lspClient lsp.LSPClient) *KaziContextStore {
+func NewKaziContextStore(workspace string, lspClient gols.LSPClient) *KaziContextStore {
 	return &KaziContextStore{
 		codeCtx: &CodeContext{
 			Files: make(map[string]*FileContext),

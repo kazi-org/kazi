@@ -12,7 +12,7 @@ import (
 	"github.com/kazi-org/kazi/internal/ai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
-	lsp "github.com/kazi-org/kazi/internal/lsp/go"
+	gols "github.com/kazi-org/kazi/internal/ls/gols"
 	"github.com/kazi-org/kazi/internal/workflow"
 )
 
@@ -21,14 +21,14 @@ import (
 type App struct {
 	config    *config.KaziProject
 	aiClient  ai.LLMClient
-	lspClient lsp.LSPClient
+	lspClient gols.LSPClient
 	ctxStore  *contextstore.KaziContextStore
 	workspace string
 }
 
 // NewApp creates a new instance of App with the given dependencies.
 // It validates the input parameters to ensure they are not nil.
-func NewApp(cfg *config.KaziProject, aiClient ai.LLMClient, lspClient lsp.LSPClient, workspace string) (*App, error) {
+func NewApp(cfg *config.KaziProject, aiClient ai.LLMClient, lspClient gols.LSPClient, workspace string) (*App, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
@@ -124,7 +124,7 @@ func initApp(ctx context.Context, configPath string) (*App, error) {
 	}
 
 	// Initialize LSP client
-	lspClient, err := lsp.NewGoClient(ctx, cfg.Spec.Global.Workspace)
+	lspClient, err := gols.NewGoClient(ctx, cfg.Spec.Global.Workspace)
 	if err != nil {
 		return nil, fmt.Errorf("init LSP client: %w", err)
 	}

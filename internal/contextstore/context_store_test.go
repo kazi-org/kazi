@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	lsp "github.com/kazi-org/kazi/internal/lsp/go"
+	gols "github.com/kazi-org/kazi/internal/ls/gols"
 )
 
 // mockLSPClient implements lsp.LSPClient for testing
 type mockLSPClient struct {
-	symbols     []lsp.WorkspaceSymbol
+	symbols     []gols.WorkspaceSymbol
 	docStrings  map[string]string
-	definitions map[string]*lsp.SymbolDefinition
+	definitions map[string]*gols.SymbolDefinition
 	references  map[string][]string
 }
 
-func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error) {
+func (m *mockLSPClient) GetWorkspaceSymbols(query string) ([]gols.WorkspaceSymbol, error) {
 	return m.symbols, nil
 }
 
@@ -30,7 +30,7 @@ func (m *mockLSPClient) GetReferences(symbol string) ([]string, error) {
 	return m.references[symbol], nil
 }
 
-func (m *mockLSPClient) GetSymbolDefinition(file, symbol string) (*lsp.SymbolDefinition, error) {
+func (m *mockLSPClient) GetSymbolDefinition(file, symbol string) (*gols.SymbolDefinition, error) {
 	def, ok := m.definitions[symbol]
 	if !ok {
 		return nil, fmt.Errorf("symbol %q not found", symbol)
@@ -51,8 +51,8 @@ func (m *mockLSPClient) GetFileContent(file string) (string, error) {
 	return "", fmt.Errorf("file not found: %s", file)
 }
 
-func (m *mockLSPClient) GetSymbolLocation(file, symbol string) (lsp.Location, error) {
-	return lsp.Location{}, nil
+func (m *mockLSPClient) GetSymbolLocation(file, symbol string) (gols.Location, error) {
+	return gols.Location{}, nil
 }
 
 func (m *mockLSPClient) CheckCode(code string) (bool, string) {
@@ -172,37 +172,37 @@ func invalid syntax {
 
 			// Create mock LSP client with test data
 			mockClient := &mockLSPClient{
-				symbols: []lsp.WorkspaceSymbol{
+				symbols: []gols.WorkspaceSymbol{
 					{
 						Name: "HelloWorld",
 						Kind: "function",
-						Location: lsp.Location{
+						Location: gols.Location{
 							URI: "main.go",
-							Range: lsp.Range{
-								Start: lsp.Position{Line: 3},
-								End:   lsp.Position{Line: 5},
+							Range: gols.Range{
+								Start: gols.Position{Line: 3},
+								End:   gols.Position{Line: 5},
 							},
 						},
 					},
 					{
 						Name: "User",
 						Kind: "type",
-						Location: lsp.Location{
+						Location: gols.Location{
 							URI: "types.go",
-							Range: lsp.Range{
-								Start: lsp.Position{Line: 3},
-								End:   lsp.Position{Line: 5},
+							Range: gols.Range{
+								Start: gols.Position{Line: 3},
+								End:   gols.Position{Line: 5},
 							},
 						},
 					},
 					{
 						Name: "GetUser",
 						Kind: "function",
-						Location: lsp.Location{
+						Location: gols.Location{
 							URI: "funcs.go",
-							Range: lsp.Range{
-								Start: lsp.Position{Line: 3},
-								End:   lsp.Position{Line: 4},
+							Range: gols.Range{
+								Start: gols.Position{Line: 3},
+								End:   gols.Position{Line: 4},
 							},
 						},
 					},
@@ -212,10 +212,10 @@ func invalid syntax {
 					"User":       "User represents a user in the system\n",
 					"GetUser":    "GetUser returns a new user\n",
 				},
-				definitions: map[string]*lsp.SymbolDefinition{
-					"HelloWorld": &lsp.SymbolDefinition{Signature: "func HelloWorld()"},
-					"User":       &lsp.SymbolDefinition{Signature: "type User struct"},
-					"GetUser":    &lsp.SymbolDefinition{Signature: "func GetUser(name string) *User"},
+				definitions: map[string]*gols.SymbolDefinition{
+					"HelloWorld": &gols.SymbolDefinition{Signature: "func HelloWorld()"},
+					"User":       &gols.SymbolDefinition{Signature: "type User struct"},
+					"GetUser":    &gols.SymbolDefinition{Signature: "func GetUser(name string) *User"},
 				},
 				references: map[string][]string{
 					"HelloWorld": {"main.go"},
