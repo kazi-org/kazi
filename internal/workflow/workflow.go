@@ -25,16 +25,16 @@ func NewWorkflow(codeCtx *types.CodeContext, rules []string, config config.Globa
 }
 
 // Execute executes the workflow with the given prompt.
-func (w *workflow) Execute(ctx context.Context, prompt config.Prompt) (string, error) {
+func (w *workflow) Execute(ctx context.Context, prompt string) (string, error) {
 	// Create request builder with configuration
 	rb := NewRequestBuilderWithConfig(w.codeCtx, w.rules, NewConfigFromGlobal(w.config, w.rules))
 
 	// Build and return the request
-	return rb.Build(prompt), nil
+	return rb.BuildRequest(prompt), nil
 }
 
 // Process processes a prompt with the given code context.
-func Process(ctx context.Context, codeCtx *types.CodeContext, prompt config.Prompt, rules []string, g config.GlobalConfig) (string, error) {
+func Process(ctx context.Context, codeCtx *types.CodeContext, prompt string, rules []string, g config.GlobalConfig) (string, error) {
 	// Create workflow
 	w := NewWorkflow(codeCtx, rules, g)
 

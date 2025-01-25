@@ -32,13 +32,13 @@ const (
 type UserInteraction interface {
 	// PromptForChanges asks the user to accept or reject changes
 	// Returns the user's choice and optionally a new prompt if in chat mode
-	PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, *config.Prompt, error)
+	PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, string, error)
 }
 
 // Processor handles the workflow of processing prompts and applying changes
 type Processor interface {
 	// Process takes a prompt and processes it through the LLM, applying the resulting changes
-	Process(ctx context.Context, prompt config.Prompt) error
+	Process(ctx context.Context, prompt string) error
 }
 
 // GitCommitter handles git operations for committing changes
@@ -58,7 +58,7 @@ type Validator interface {
 // LLMRequestBuilder builds prompts for the LLM
 type LLMRequestBuilder interface {
 	// Build creates a formatted request string for the LLM
-	Build(prompt config.Prompt) string
+	Build(prompt string) string
 }
 
 // LLMClient provides access to language model functionality

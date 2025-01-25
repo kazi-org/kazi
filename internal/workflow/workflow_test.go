@@ -16,7 +16,7 @@ func TestProcess(t *testing.T) {
 		codeCtx *types.CodeContext
 		rules   []string
 		global  config.GlobalConfig
-		prompt  config.Prompt
+		prompt  string
 		want    string
 	}{
 		{
@@ -47,9 +47,7 @@ func TestProcess(t *testing.T) {
 					Timeout: "30s",
 				},
 			},
-			prompt: config.Prompt{
-				Instructions: "test instructions",
-			},
+			prompt: "test instructions",
 			want: `Global rules:
 - rule1
 - rule2

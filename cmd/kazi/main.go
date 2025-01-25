@@ -60,15 +60,12 @@ func run() error {
 	}
 
 	// Create prompt
-	prompt := config.Prompt{
-		Name:         "test",
-		Instructions: "test instructions",
-	}
+	prompt := "test"
 
 	// Process prompt
 	result, err := workflow.Process(ctx, codeCtx, prompt, cfg.Spec.Rules, cfg.Spec.Global)
 	if err != nil {
-		return fmt.Errorf("process prompt: %w", err)
+		return fmt.Errorf("failed to process workflow: %w", err)
 	}
 
 	fmt.Println(result)

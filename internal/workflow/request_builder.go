@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore/types"
 )
 
@@ -68,11 +67,6 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
 	b.WriteString(prompt)
 
 	return b.String()
-}
-
-// Build implements the LLMRequestBuilder interface.
-func (rb *RequestBuilder) Build(prompt config.Prompt) string {
-	return rb.BuildRequest(prompt.Instructions)
 }
 
 // findRelevantContext finds code context relevant to the prompt.

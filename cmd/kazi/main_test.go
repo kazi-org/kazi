@@ -29,9 +29,7 @@ spec:
     - rule1
     - rule2
   prompts:
-    - name: test-prompt
-      description: Test prompt
-      prompt: Test prompt
+    - "Test prompt"
 `), 0644)
 	assert.NoError(t, err)
 
