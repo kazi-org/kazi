@@ -22,27 +22,35 @@ type Location struct {
 	Range Range  `json:"range"` // The location's range
 }
 
-// SymbolDefinition contains information about where a symbol is defined.
-type SymbolDefinition struct {
-	StartLine int    // Starting line of the symbol definition
-	EndLine   int    // Ending line of the symbol definition
-	URI       string // Resource identifier where the symbol is defined
-}
-
 // SymbolKind denotes the kind of symbol (variable, function, etc.)
-type SymbolKind int
+type SymbolKind string
+
+// Symbol kind constants
+const (
+	KindFunction SymbolKind = "function"
+	KindType     SymbolKind = "type"
+	KindConstant SymbolKind = "constant"
+	KindVariable SymbolKind = "variable"
+)
 
 // WorkspaceSymbol represents a program element found in the workspace.
 type WorkspaceSymbol struct {
 	Name     string     `json:"name"` // The name of the symbol
 	Kind     SymbolKind `json:"kind"` // The kind of symbol
-	Location struct {
-		URI   string `json:"uri"` // Resource identifier
-		Range struct {
-			Start Position `json:"start"`
-			End   Position `json:"end"`
-		} `json:"range"`
-	} `json:"location"`
+	Location Location   `json:"location"`
+}
+
+// SymbolDefinition represents a symbol's definition and metadata.
+type SymbolDefinition struct {
+	Name       string
+	Kind       SymbolKind
+	Location   *Location
+	DocString  string
+	Signature  string
+	References []*Location
+	StartLine  int
+	EndLine    int
+	URI        string
 }
 
 // RequestMessage represents a JSON-RPC request message.

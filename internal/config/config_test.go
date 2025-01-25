@@ -28,8 +28,7 @@ spec:
   rules:
     - "Use gofmt for formatting"
   prompts:
-    - name: "Test"
-      instructions: "add test"`,
+    - "add test"`,
 			want: &KaziProject{
 				APIVersion: "kazi.io/v1",
 				Kind:       "KaziProject",
@@ -45,10 +44,8 @@ spec:
 							Timeout: "30s",
 						},
 					},
-					Rules: []string{"Use gofmt for formatting"},
-					Prompts: []Prompt{
-						{Name: "Test", Instructions: "add test"},
-					},
+					Rules:   []string{"Use gofmt for formatting"},
+					Prompts: []string{"add test"},
 				},
 			},
 		},
@@ -66,8 +63,8 @@ spec:
   rules:
     - "Use gofmt for formatting"
   prompts:
-    - name: "Test"
-      instructions: "add test"`,
+    - "add test"
+    - "implement validation"`,
 			want: &KaziProject{
 				APIVersion: "kazi.io/v1",
 				Kind:       "KaziProject",
@@ -83,10 +80,8 @@ spec:
 							Timeout: "30s",
 						},
 					},
-					Rules: []string{"Use gofmt for formatting"},
-					Prompts: []Prompt{
-						{Name: "Test", Instructions: "add test"},
-					},
+					Rules:   []string{"Use gofmt for formatting"},
+					Prompts: []string{"add test", "implement validation"},
 				},
 			},
 		},
@@ -108,8 +103,7 @@ spec:
   rules:
     - "Use gofmt for formatting"
   prompts:
-    - name: "Test"
-      instructions: "add test"`,
+    - "add test"`,
 			want: &KaziProject{
 				APIVersion: "kazi.io/v1",
 				Kind:       "KaziProject",
@@ -127,10 +121,8 @@ spec:
 							Timeout: "1m",
 						},
 					},
-					Rules: []string{"Use gofmt for formatting"},
-					Prompts: []Prompt{
-						{Name: "Test", Instructions: "add test"},
-					},
+					Rules:   []string{"Use gofmt for formatting"},
+					Prompts: []string{"add test"},
 				},
 			},
 		},
@@ -162,8 +154,7 @@ spec:
   global:
     workspace: "."
   prompts:
-    - name: "test"
-      instructions: "add test"`,
+    - "test"`,
 			wantErr:     true,
 			errContains: `invalid API version "kazi.io/v2", expected kazi.io/v1`,
 		},

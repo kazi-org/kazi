@@ -22,7 +22,7 @@ type Metadata struct {
 type ProjectSpec struct {
 	Global  GlobalConfig `yaml:"global"`
 	Rules   []string     `yaml:"rules"`
-	Prompts []Prompt     `yaml:"prompts"`
+	Prompts []string     `yaml:"prompts"`
 }
 
 // GlobalConfig contains global configuration for the project
@@ -37,11 +37,6 @@ type LanguageServer struct {
 	Name    string `yaml:"name"`
 	Command string `yaml:"command"`
 	Timeout string `yaml:"timeout,omitempty"` // Duration string like "5s", "1m", etc.
-}
-
-type Prompt struct {
-	Name         string `yaml:"name"`
-	Instructions string `yaml:"instructions"`
 }
 
 // LoadConfig loads the configuration from the given file path

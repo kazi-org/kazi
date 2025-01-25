@@ -1,144 +1,92 @@
-// Package symbol provides functionality for managing and querying code symbols.
+// Package symbol provides functionality for managing code symbols.
 package symbol
 
 import (
-	"fmt"
-	"sort"
 	"strings"
-	"sync"
 
 	"github.com/kazi-org/kazi/internal/contextstore/types"
 )
 
-// Manager defines the interface for symbol management operations.
+// Manager provides operations for managing code symbols.
 type Manager interface {
-	// GetSymbolContext returns the context for a specific symbol in a file.
-	GetSymbolContext(filePath, symbolName string) (*types.SymbolContext, error)
-
-	// ExpandSymbolDetail returns a detailed string representation of a symbol.
-	ExpandSymbolDetail(filePath, symbolName string) (string, error)
-
-	// FindRelevantContext finds and returns relevant code context based on a code snippet and user prompt.
-	FindRelevantContext(codeSnippet, userPrompt string) string
+	// GetSymbolByName returns a symbol by its name.
+	GetSymbolByName(name string) *types.SymbolContext
+	// GetSymbolsByKind returns all symbols of a given kind.
+	GetSymbolsByKind(kind string) []*types.SymbolContext
+	// GetSymbolsByFile returns all symbols in a given file.
+	GetSymbolsByFile(filePath string) []*types.SymbolContext
+	// GetSymbolsByPattern returns all symbols matching a pattern.
+	GetSymbolsByPattern(pattern string) []*types.SymbolContext
 }
 
-// manager implements the Manager interface.
-type manager struct {
-	store Store
-	mu    sync.RWMutex
-}
-
-// Store defines the minimal interface required by the symbol manager.
+// Store represents a store that can be queried for symbols.
 type Store interface {
+	GetSymbol(name string) *types.SymbolContext
+	GetFile(path string) *types.FileContext
 	GetCodeContext() *types.CodeContext
 }
 
-// New creates a new symbol manager instance.
-func New(store Store) Manager {
-	return &manager{store: store}
+// DefaultManager implements Manager using a Store.
+type DefaultManager struct {
+	store Store
 }
 
-// GetSymbolContext implements Manager interface.
-func (sm *manager) GetSymbolContext(filePath, symbolName string) (*types.SymbolContext, error) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	cc := sm.store.GetCodeContext()
-	fc, exists := cc.Files[filePath]
-	if !exists {
-		return nil, fmt.Errorf("file not found in code context: %s", filePath)
-	}
-	sc, ok := fc.Symbols[symbolName]
-	if !ok {
-		return nil, fmt.Errorf("symbol not found: %s in file %s", symbolName, filePath)
-	}
-	return sc, nil
+// NewManager creates a new DefaultManager with the given store.
+func NewManager(store Store) Manager {
+	return &DefaultManager{store: store}
 }
 
-// ExpandSymbolDetail implements Manager interface.
-func (sm *manager) ExpandSymbolDetail(filePath, symbolName string) (string, error) {
-	sc, err := sm.GetSymbolContext(filePath, symbolName)
-	if err != nil {
-		return "", err
-	}
-
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Symbol: %s (%s)\n", sc.Name, sc.Kind))
-	if sc.DocString != "" {
-		b.WriteString("Documentation:\n")
-		b.WriteString(sc.DocString + "\n")
-	}
-	b.WriteString("Code:\n")
-	for _, line := range sc.CodeLines {
-		b.WriteString(line + "\n")
-	}
-	if len(sc.References) > 0 {
-		b.WriteString("References:\n")
-		for _, r := range sc.References {
-			b.WriteString("- " + r + "\n")
-		}
-	}
-	return b.String(), nil
+// GetSymbolByName returns a symbol by its name.
+func (m *DefaultManager) GetSymbolByName(name string) *types.SymbolContext {
+	return m.store.GetSymbol(name)
 }
 
-// FindRelevantContext implements Manager interface.
-func (sm *manager) FindRelevantContext(codeSnippet, userPrompt string) string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	cc := sm.store.GetCodeContext()
-	type snippetScore struct {
-		sc    *types.SymbolContext
-		score int
+// GetSymbolsByKind returns all symbols of a given kind.
+func (m *DefaultManager) GetSymbolsByKind(kind string) []*types.SymbolContext {
+	var symbols []*types.SymbolContext
+	ctx := m.store.GetCodeContext()
+	if ctx == nil {
+		return nil
 	}
-	var allScores []snippetScore
-	keywords := strings.Fields(strings.ToLower(userPrompt + " " + codeSnippet))
 
-	// Score each symbol based on keyword matches
-	for _, fc := range cc.Files {
-		for _, sym := range fc.Symbols {
-			score := 0
-			// Check name
-			for _, kw := range keywords {
-				if strings.Contains(strings.ToLower(sym.Name), kw) {
-					score += 5
-				}
-				if strings.Contains(strings.ToLower(sym.DocString), kw) {
-					score += 3
-				}
-				for _, line := range sym.CodeLines {
-					if strings.Contains(strings.ToLower(line), kw) {
-						score += 2
-					}
-				}
-			}
-			if score > 0 {
-				allScores = append(allScores, snippetScore{sc: sym, score: score})
+	for _, file := range ctx.Files {
+		for _, sym := range file.Symbols {
+			if sym.Kind == kind {
+				symbols = append(symbols, sym)
 			}
 		}
 	}
+	return symbols
+}
 
-	// Sort by score in descending order
-	sort.Slice(allScores, func(i, j int) bool {
-		return allScores[i].score > allScores[j].score
-	})
-
-	// Build the result string with the top 5 matches
-	var builder strings.Builder
-	for i, scored := range allScores {
-		if i >= 5 {
-			break
-		}
-		sc := scored.sc
-		builder.WriteString(fmt.Sprintf("=== %s (%s) ===\n", sc.Name, sc.Kind))
-		if sc.DocString != "" {
-			builder.WriteString(sc.DocString + "\n")
-		}
-		for _, line := range sc.CodeLines {
-			builder.WriteString(line + "\n")
-		}
-		builder.WriteString("\n")
+// GetSymbolsByFile returns all symbols in a given file.
+func (m *DefaultManager) GetSymbolsByFile(filePath string) []*types.SymbolContext {
+	var symbols []*types.SymbolContext
+	file := m.store.GetFile(filePath)
+	if file == nil {
+		return nil
 	}
 
-	return builder.String()
+	for _, sym := range file.Symbols {
+		symbols = append(symbols, sym)
+	}
+	return symbols
+}
+
+// GetSymbolsByPattern returns all symbols matching a pattern.
+func (m *DefaultManager) GetSymbolsByPattern(pattern string) []*types.SymbolContext {
+	var symbols []*types.SymbolContext
+	ctx := m.store.GetCodeContext()
+	if ctx == nil {
+		return nil
+	}
+
+	for _, file := range ctx.Files {
+		for _, sym := range file.Symbols {
+			if strings.Contains(sym.Name, pattern) {
+				symbols = append(symbols, sym)
+			}
+		}
+	}
+	return symbols
 }

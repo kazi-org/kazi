@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/color"
 	"github.com/go-git/go-git/v5/plumbing/format/diff"
-	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/patch"
 )
 
@@ -70,7 +69,7 @@ func (d *defaultInteraction) displayColoredDiff(changes *patch.PatchSet) {
 }
 
 // PromptForChanges asks the user to accept or reject changes
-func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, *config.Prompt, error) {
+func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, string, error) {
 	// Display colored diff
 	d.displayColoredDiff(changes)
 
@@ -93,33 +92,33 @@ func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patc
 	for {
 		select {
 		case <-ctx.Done():
-			return 0, nil, ctx.Err()
+			return 0, "", ctx.Err()
 		default:
 			fmt.Print("\nYour choice: ")
 			input, err := d.reader.ReadString('\n')
 			if err != nil {
-				return 0, nil, fmt.Errorf("read user input: %w", err)
+				return 0, "", fmt.Errorf("read user input: %w", err)
 			}
 
 			input = strings.TrimSpace(strings.ToLower(input))
 			switch input {
 			case "yes", "y":
-				return ModeYes, nil, nil
+				return ModeYes, "", nil
 			case "no", "n":
-				return ModeNo, nil, nil
+				return ModeNo, "", nil
 			case "chat", "c":
 				fmt.Print("Enter new prompt: ")
 				promptStr, err := d.reader.ReadString('\n')
 				if err != nil {
-					return 0, nil, fmt.Errorf("read prompt: %w", err)
+					return 0, "", fmt.Errorf("read prompt: %w", err)
 				}
-				return ModeChat, &config.Prompt{Instructions: strings.TrimSpace(promptStr)}, nil
+				return ModeChat, strings.TrimSpace(promptStr), nil
 			case "abort", "a":
-				return ModeAbort, nil, nil
+				return ModeAbort, "", nil
 			case "all":
-				return ModeAll, nil, nil
+				return ModeAll, "", nil
 			case "yolo":
-				return ModeYolo, nil, nil
+				return ModeYolo, "", nil
 			default:
 				fmt.Println("Invalid choice. Please try again.")
 			}

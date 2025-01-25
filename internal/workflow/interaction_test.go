@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/patch"
 )
 
@@ -22,9 +21,9 @@ func newMockInteraction(responses []string) *mockInteraction {
 	}
 }
 
-func (m *mockInteraction) PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, *config.Prompt, error) {
+func (m *mockInteraction) PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, string, error) {
 	if m.index >= len(m.responses) {
-		return ModeAbort, nil, nil
+		return ModeAbort, "", nil
 	}
 
 	response := m.responses[m.index]
@@ -32,19 +31,19 @@ func (m *mockInteraction) PromptForChanges(ctx context.Context, changes *patch.P
 
 	switch response {
 	case "yes", "y":
-		return ModeYes, nil, nil
+		return ModeYes, "", nil
 	case "no", "n":
-		return ModeNo, nil, nil
+		return ModeNo, "", nil
 	case "chat", "c":
-		return ModeChat, &config.Prompt{Instructions: "modified prompt"}, nil
+		return ModeChat, "modified prompt", nil
 	case "abort", "a":
-		return ModeAbort, nil, nil
+		return ModeAbort, "", nil
 	case "all":
-		return ModeAll, nil, nil
+		return ModeAll, "", nil
 	case "yolo":
-		return ModeYolo, nil, nil
+		return ModeYolo, "", nil
 	default:
-		return ModeAbort, nil, nil
+		return ModeAbort, "", nil
 	}
 }
 
@@ -66,7 +65,7 @@ func TestUserInteraction(t *testing.T) {
 		name        string
 		input       string
 		wantMode    UserInteractionMode
-		wantPrompt  *config.Prompt
+		wantPrompt  string
 		wantErr     bool
 		errContains string
 		patchSet    *patch.PatchSet
@@ -101,12 +100,10 @@ func TestUserInteraction(t *testing.T) {
 			},
 		},
 		{
-			name:     "Chat mode",
-			input:    "chat\nmodified prompt\n",
-			wantMode: ModeChat,
-			wantPrompt: &config.Prompt{
-				Instructions: "modified prompt",
-			},
+			name:       "Chat mode",
+			input:      "chat\nmodified prompt\n",
+			wantMode:   ModeChat,
+			wantPrompt: "modified prompt",
 			patchSet: &patch.PatchSet{
 				Patches: []patch.Chunk{
 					{
@@ -192,15 +189,15 @@ func TestUserInteraction(t *testing.T) {
 				t.Errorf("mode = %v, want %v", mode, tc.wantMode)
 			}
 
-			if tc.wantPrompt != nil {
-				if prompt == nil {
-					t.Fatal("expected prompt but got nil")
+			if tc.wantPrompt != "" {
+				if prompt == "" {
+					t.Fatal("expected prompt but got empty string")
 				}
-				if prompt.Instructions != tc.wantPrompt.Instructions {
-					t.Errorf("prompt = %q, want %q", prompt.Instructions, tc.wantPrompt.Instructions)
+				if prompt != tc.wantPrompt {
+					t.Errorf("prompt = %q, want %q", prompt, tc.wantPrompt)
 				}
-			} else if prompt != nil {
-				t.Errorf("prompt = %v, want nil", prompt)
+			} else if prompt != "" {
+				t.Errorf("prompt = %q, want empty string", prompt)
 			}
 		})
 	}
