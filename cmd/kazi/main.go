@@ -66,7 +66,11 @@ func NewApp(opts ...Option) *App {
 	app.workspace = absWorkspace
 
 	// Initialize context store
-	app.ctxStore = contextstore.NewKaziContextStore(absWorkspace, app.lspClient)
+	app.ctxStore = contextstore.NewKaziContextStore(contextstore.StoreConfig{
+		Workspace:    absWorkspace,
+		ScanInterval: 30, // 30 seconds default
+		LSPClient:    app.lspClient,
+	})
 	if err := app.ctxStore.BuildOrRefresh(context.Background()); err != nil {
 		log.Fatalf("build context store: %v", err)
 	}
@@ -155,12 +159,22 @@ func initApp(ctx context.Context, configPath string) (*App, error) {
 		return nil, fmt.Errorf("init LSP client: %w", err)
 	}
 
-	return NewApp(
-		WithConfig(cfg),
-		WithAI(aiClient),
-		WithLSP(lspClient),
-		WithWorkspace(cfg.Spec.Global.Workspace),
-	), nil
+	// Initialize context store
+	ctxStore := contextstore.NewKaziContextStore(contextstore.StoreConfig{
+		Workspace:    cfg.Spec.Global.Workspace,
+		ScanInterval: 30, // 30 seconds default
+		LSPClient:    lspClient,
+	})
+
+	// Initialize user interaction
+	userInteraction := workflow.NewDefaultInteraction()
+
+	return &App{
+		config:          cfg,
+		aiClient:        aiClient,
+		ctxStore:        ctxStore,
+		userInteraction: userInteraction,
+	}, nil
 }
 
 // run is the main entry point for the application logic.

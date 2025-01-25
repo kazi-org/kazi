@@ -13,26 +13,19 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Store provides the complete interface for managing code context.
-type Store interface {
-	// GetSymbol returns symbol information by name.
-	// Returns nil if the symbol is not found.
-	GetSymbol(name string) *types.SymbolContext
-
-	// GetFile returns file information by path.
-	// Returns nil if the file is not found.
-	GetFile(path string) *types.FileContext
-
-	// GetCodeContext returns the current snapshot of the code context.
-	GetCodeContext() *types.CodeContext
-
-	// BuildOrRefresh scans the workspace and updates the code context.
-	// The context parameter is used to control the scan operation's lifetime.
-	// Returns an error if the scan fails.
-	BuildOrRefresh(ctx context.Context) error
+// StoreConfig holds configuration for the context store.
+type StoreConfig struct {
+	// Workspace is the root directory to scan
+	Workspace string
+	// ScanInterval is the minimum time between scans in seconds
+	ScanInterval int64
+	// LSPClient provides language server protocol functionality
+	LSPClient gols.LSPClient
 }
 
 // KaziContextStore implements the Store interface for managing code context.
+// It provides thread-safe access to code context information and handles
+// periodic workspace scanning.
 type KaziContextStore struct {
 	mu           sync.RWMutex
 	codeCtx      *types.CodeContext
@@ -42,19 +35,21 @@ type KaziContextStore struct {
 	scanner      scanner.Scanner
 }
 
-// NewKaziContextStore creates a new store with default scan interval of 30 seconds.
-func NewKaziContextStore(workspace string, lspClient gols.LSPClient) Store {
-	config := scanner.Config{
-		Workspace:    workspace,
-		ScanInterval: 30,
-		LSPClient:    lspClient,
+// NewKaziContextStore creates a new store with the given configuration.
+// It initializes the store with an empty code context and sets up the scanner
+// with the provided configuration.
+func NewKaziContextStore(config StoreConfig) Store {
+	scannerConfig := scanner.Config{
+		Workspace:    config.Workspace,
+		ScanInterval: config.ScanInterval,
+		LSPClient:    config.LSPClient,
 	}
 
 	return &KaziContextStore{
 		codeCtx:      types.NewCodeContext(),
-		workspace:    workspace,
+		workspace:    config.Workspace,
 		scanInterval: config.ScanInterval,
-		scanner:      scanner.NewGoWorkspaceScanner(config),
+		scanner:      scanner.NewGoWorkspaceScanner(scannerConfig),
 	}
 }
 
@@ -67,6 +62,7 @@ func (cs *KaziContextStore) GetCodeContext() *types.CodeContext {
 }
 
 // GetSymbol implements SymbolReader interface.
+// It returns symbol information by name, or nil if not found.
 func (cs *KaziContextStore) GetSymbol(name string) *types.SymbolContext {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
@@ -74,6 +70,7 @@ func (cs *KaziContextStore) GetSymbol(name string) *types.SymbolContext {
 }
 
 // GetFile implements FileReader interface.
+// It returns file information by path, or nil if not found.
 func (cs *KaziContextStore) GetFile(path string) *types.FileContext {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
@@ -82,6 +79,7 @@ func (cs *KaziContextStore) GetFile(path string) *types.FileContext {
 
 // BuildOrRefresh scans the workspace and updates the code context.
 // It will skip scanning if the last scan was performed within scanInterval seconds.
+// This method is safe for concurrent access.
 func (cs *KaziContextStore) BuildOrRefresh(ctx context.Context) error {
 	// Quick check without lock
 	now := time.Now().Unix()

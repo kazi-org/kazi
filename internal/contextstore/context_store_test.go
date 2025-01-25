@@ -61,7 +61,11 @@ func TestKaziContextStore_GetSymbol(t *testing.T) {
 	mockClient := new(mockLSPClient)
 
 	// Create a test store
-	store := NewKaziContextStore("testdata", mockClient)
+	store := NewKaziContextStore(StoreConfig{
+		Workspace:    "testdata",
+		ScanInterval: 30,
+		LSPClient:    mockClient,
+	})
 
 	// Create a test symbol context
 	testSymbol := &types.SymbolContext{
@@ -90,7 +94,11 @@ func TestKaziContextStore_GetFile(t *testing.T) {
 	mockClient := new(mockLSPClient)
 
 	// Create a test store
-	store := NewKaziContextStore("testdata", mockClient)
+	store := NewKaziContextStore(StoreConfig{
+		Workspace:    "testdata",
+		ScanInterval: 30,
+		LSPClient:    mockClient,
+	})
 
 	// Create a test file context
 	testFile := &types.FileContext{
@@ -150,7 +158,11 @@ func TestKaziContextStore_BuildOrRefresh(t *testing.T) {
 	}, nil)
 
 	// Create a test store
-	store := NewKaziContextStore("testdata", mockClient)
+	store := NewKaziContextStore(StoreConfig{
+		Workspace:    "testdata",
+		ScanInterval: 30,
+		LSPClient:    mockClient,
+	})
 
 	// Test building the context
 	err := store.BuildOrRefresh(context.Background())
