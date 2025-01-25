@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/kazi-org/kazi/internal/ai/openai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
@@ -149,6 +152,97 @@ func (m *mockValidator) Validate(ctx context.Context) error {
 	return nil
 }
 
+// realGitCommitter implements workflow.GitCommitter interface
+type realGitCommitter struct {
+	workspace string
+	repo      *git.Repository
+	wt        *git.Worktree
+}
+
+func newRealGitCommitter(workspace string) (*realGitCommitter, error) {
+	repo, err := git.PlainOpen(workspace)
+	if err != nil {
+		return nil, fmt.Errorf("open git repo: %w", err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("get worktree: %w", err)
+	}
+
+	return &realGitCommitter{
+		workspace: workspace,
+		repo:      repo,
+		wt:        wt,
+	}, nil
+}
+
+func (g *realGitCommitter) Status(ctx context.Context) (git.Status, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		status, err := g.wt.Status()
+		if err != nil {
+			return nil, fmt.Errorf("get git status: %w", err)
+		}
+		return status, nil
+	}
+}
+
+func (g *realGitCommitter) Commit(ctx context.Context, message string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Stage all changes
+		if err := g.wt.AddGlob("."); err != nil {
+			return fmt.Errorf("stage changes: %w", err)
+		}
+
+		// Create commit
+		_, err := g.wt.Commit(message, &git.CommitOptions{
+			Author: &object.Signature{
+				Name:  "Kazi AI",
+				Email: "kazi@example.com",
+				When:  time.Now(),
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("create commit: %w", err)
+		}
+
+		return nil
+	}
+}
+
+// realValidator implements workflow.Validator interface
+type realValidator struct {
+	config config.GlobalConfig
+}
+
+func (v *realValidator) Validate(ctx context.Context) error {
+	// Run linting if configured
+	if v.config.LintCommand != "" {
+		cmd := exec.CommandContext(ctx, "sh", "-c", v.config.LintCommand)
+		cmd.Dir = v.config.Workspace
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("lint failed: %s: %w", string(out), err)
+		}
+	}
+
+	// Run tests if configured
+	if v.config.TestCommand != "" {
+		cmd := exec.CommandContext(ctx, "sh", "-c", v.config.TestCommand)
+		cmd.Dir = v.config.Workspace
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("tests failed: %s: %w", string(out), err)
+		}
+	}
+
+	return nil
+}
+
 func run() error {
 	// Get workspace directory
 	wd, err := os.Getwd()
@@ -210,19 +304,22 @@ func run() error {
 		return fmt.Errorf("failed to get code context")
 	}
 
-	// Use the first prompt from the config
-	prompt := cfg.Spec.Prompts[0]
-
 	// Create OpenAI client
 	llmClient, err := openai.NewClient()
 	if err != nil {
 		return fmt.Errorf("create OpenAI client: %w", err)
 	}
 
+	// Initialize git committer
+	gitCommitter, err := newRealGitCommitter(cfg.Spec.Global.Workspace)
+	if err != nil {
+		return fmt.Errorf("create git committer: %w", err)
+	}
+
 	// Create processor configuration
 	procCfg := &workflow.ProcessorConfig{
-		GitCommitter:    &mockGitCommitter{workspace: cfg.Spec.Global.Workspace},
-		Validator:       &mockValidator{config: cfg.Spec.Global},
+		GitCommitter:    gitCommitter,
+		Validator:       &realValidator{config: cfg.Spec.Global},
 		RequestBuilder:  workflow.NewRequestBuilderWithConfig(codeCtx, cfg.Spec.Rules, workflow.NewConfigFromGlobal(cfg.Spec.Global, cfg.Spec.Rules)),
 		PatchApplier:    patch.NewApplier(cfg.Spec.Global.Workspace),
 		UserInteraction: workflow.NewDefaultInteraction(),
@@ -230,15 +327,35 @@ func run() error {
 		LSPClient:       lspClient,
 	}
 
-	// Create and run processor
+	// Create processor
 	proc, err := workflow.NewProcessor(procCfg)
 	if err != nil {
 		return fmt.Errorf("create processor: %w", err)
 	}
 
-	// Process the prompt
-	if err := proc.Process(ctx, prompt); err != nil {
-		return fmt.Errorf("process prompt: %w", err)
+	// Process all prompts in sequence
+	for i, prompt := range cfg.Spec.Prompts {
+		fmt.Printf("\nProcessing prompt %d/%d: %s\n", i+1, len(cfg.Spec.Prompts), prompt)
+
+		// Process the prompt
+		if err := proc.Process(ctx, prompt); err != nil {
+			return fmt.Errorf("process prompt %d: %w", i+1, err)
+		}
+
+		// Refresh code context after each prompt
+		if err := store.BuildOrRefresh(ctx); err != nil {
+			return fmt.Errorf("refresh code context after prompt %d: %w", i+1, err)
+		}
+		codeCtx = store.GetCodeContext()
+
+		// Update request builder with fresh context
+		procCfg.RequestBuilder = workflow.NewRequestBuilderWithConfig(codeCtx, cfg.Spec.Rules, workflow.NewConfigFromGlobal(cfg.Spec.Global, cfg.Spec.Rules))
+
+		// Create new processor with updated config
+		proc, err = workflow.NewProcessor(procCfg)
+		if err != nil {
+			return fmt.Errorf("create processor with updated context: %w", err)
+		}
 	}
 
 	return nil

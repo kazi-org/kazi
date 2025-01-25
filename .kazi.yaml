@@ -9,7 +9,7 @@ metadata:
 spec:
   global:
     workspace: "."
-    lintCommand: "golangci-lint run"
+    lintCommand: "go vet ./..."
     testCommand: "go test ./..."
     languageServer:
       name: gopls
@@ -30,8 +30,8 @@ spec:
     - Document your code to clarify intent, especially for exported types and functions.
 
   prompts:
-    - "Review this code for potential performance improvements, focusing on reducing allocations, optimizing loops, and identifying concurrency opportunities."
-    - "Add comprehensive error handling to this code following Go best practices. Include appropriate logging, error wrapping, and ensure all error cases are handled gracefully."
-    - "Refactor this code to improve its testability. Extract dependencies into interfaces, make the code more modular, and add unit tests with good coverage."
-    - "Add detailed documentation to this code including package overview, function documentation with examples, and clear explanations of complex logic or algorithms."
-    - "Analyze this code for potential race conditions or concurrency issues. Suggest improvements using Go's concurrency patterns like mutexes, channels, or sync primitives." 
+    - "Create a basic HTTP server with a GET /users endpoint that returns a list of users. Include a User struct with fields for ID, Name, and Email. Store users in memory for now."
+    - "Add a POST /user endpoint that creates a new user. Validate that the name and email are not empty, and generate a unique ID for each user. Return appropriate HTTP status codes."
+    - "Implement a DELETE /user/:id endpoint that removes a user by their ID. Return 404 if the user is not found and 200 on successful deletion."
+    - "Add a PUT /user/:id endpoint to update an existing user's information. Validate the input and return appropriate status codes (404 if not found, 400 for invalid input, 200 for success)."
+    - "Create a GET /products endpoint that returns a list of products. Include a Product struct with fields for ID, Name, Description, and Price. Store products in memory similar to users." 

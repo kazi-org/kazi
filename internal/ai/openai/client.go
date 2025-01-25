@@ -81,16 +81,57 @@ func (o *Client) GetPatch(ctx context.Context, prompt string) (string, error) {
 	// Get content from first choice
 	content := resp.Choices[0].Message.Content
 
-	// Validate content is valid JSON
-	var patches struct {
+	// Validate content is valid JSON with all required fields
+	var patchSet struct {
+		Commit struct {
+			Subject string `json:"subject"`
+			Body    string `json:"body,omitempty"`
+		} `json:"commit"`
 		Patches []struct {
-			File    string `json:"file"`
-			Type    string `json:"type"`
-			Content string `json:"content"`
+			File          string   `json:"file"`
+			Type          string   `json:"type"`
+			FromLine      int      `json:"fromLine"`
+			ToLine        int      `json:"toLine"`
+			Content       string   `json:"content"`
+			ContextBefore []string `json:"contextBefore"`
+			ContextAfter  []string `json:"contextAfter"`
 		} `json:"patches"`
 	}
-	if err := json.Unmarshal([]byte(content), &patches); err != nil {
+	if err := json.Unmarshal([]byte(content), &patchSet); err != nil {
 		return "", fmt.Errorf("invalid patch JSON: %w", err)
+	}
+
+	// Validate required fields
+	if patchSet.Commit.Subject == "" {
+		return "", fmt.Errorf("missing required field: commit.subject")
+	}
+	if len(patchSet.Patches) == 0 {
+		return "", fmt.Errorf("missing required field: patches")
+	}
+	for i, p := range patchSet.Patches {
+		if p.File == "" {
+			return "", fmt.Errorf("missing required field: patches[%d].file", i)
+		}
+		if p.Type == "" {
+			return "", fmt.Errorf("missing required field: patches[%d].type", i)
+		}
+		if p.Type == "replace" {
+			if p.FromLine <= 0 {
+				return "", fmt.Errorf("invalid fromLine in patch %d: must be > 0", i)
+			}
+			if p.ToLine < p.FromLine {
+				return "", fmt.Errorf("invalid toLine in patch %d: must be >= fromLine", i)
+			}
+			if len(p.ContextBefore) == 0 {
+				return "", fmt.Errorf("missing required field: patches[%d].contextBefore", i)
+			}
+			if len(p.ContextAfter) == 0 {
+				return "", fmt.Errorf("missing required field: patches[%d].contextAfter", i)
+			}
+		}
+		if p.Type != "delete" && p.Content == "" {
+			return "", fmt.Errorf("missing required field: patches[%d].content", i)
+		}
 	}
 
 	return content, nil

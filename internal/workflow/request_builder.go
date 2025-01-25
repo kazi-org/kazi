@@ -3,6 +3,7 @@ package workflow
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -64,34 +65,116 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
 	rb.tokenCount = 0
 
 	// Add system message
-	systemMsg := "You are a Go expert. CRITICAL: Respond ONLY with a SINGLE LINE of valid JSON matching this schema. Make patches as minimal as possible, changing only the lines that need to change. ALWAYS include 3 lines of context before and after the change:\n\n"
-	rb.addContent(&b, systemMsg)
+	systemMsg := `You are a Go expert. You will help modify or create Go code based on the user's request.
 
-	// JSON schema
-	schema := `{
+<structured_output>
+{
+  "name": "CodeChanges",
+  "description": "Describes changes to make to the codebase",
+  "format": "json",
+  "fields": {
+    "commit": {
+      "type": "object",
+      "description": "Information about the commit",
+      "required": true,
+      "fields": {
+        "subject": {
+          "type": "string",
+          "description": "Short commit message (max 50 chars)",
+          "required": true
+        },
+        "body": {
+          "type": "string",
+          "description": "Optional longer description",
+          "required": false
+        }
+      }
+    },
+    "patches": {
+      "type": "array",
+      "description": "List of patches to apply",
+      "required": true,
+      "items": {
+        "type": "object",
+        "fields": {
+          "file": {
+            "type": "string",
+            "description": "Path to the file to modify",
+            "required": true
+          },
+          "type": {
+            "type": "string",
+            "description": "Type of change: create, replace, or delete",
+            "enum": ["create", "replace", "delete"],
+            "required": true
+          },
+          "fromLine": {
+            "type": "integer",
+            "description": "Starting line number (1-indexed)",
+            "required": true
+          },
+          "toLine": {
+            "type": "integer",
+            "description": "Ending line number (1-indexed)",
+            "required": true
+          },
+          "contextBefore": {
+            "type": "array",
+            "description": "Exactly 3 lines of context before the change",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 3,
+            "required": true
+          },
+          "contextAfter": {
+            "type": "array",
+            "description": "Exactly 3 lines of context after the change",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 3,
+            "required": true
+          },
+          "content": {
+            "type": "string",
+            "description": "New content with properly escaped special characters (tabs as \\t, newlines as \\n, quotes as \\\")",
+            "required": true
+          }
+        }
+      }
+    }
+  }
+}
+</structured_output>
+
+IMPORTANT: 
+1. Your response must be VALID JSON matching the above schema exactly
+2. Make patches as minimal as possible, changing only necessary lines
+3. Line numbers must match the actual code context provided
+4. All code in content fields must properly escape special characters
+5. If multiple changes are needed, include multiple patches in correct order
+6. Verify line numbers and context match the actual code
+
+Example response:
+{
   "commit": {
-    "subject": "string (max 50 chars)",
-    "body": "string (optional)"
+    "subject": "Add new endpoint"
   },
   "patches": [{
-    "file": "string (file path)",
-    "type": "create|replace|delete",
-    "fromLine": "number (1-indexed, required for replace, ONLY include lines that actually change)",
-    "toLine": "number (1-indexed, required for replace, ONLY include lines that actually change)",
-    "contextBefore": ["string (REQUIRED, exactly 3 lines of context before the change)"],
-    "contextAfter": ["string (REQUIRED, exactly 3 lines of context after the change)"],
-    "content": "string (required for create/replace, ONLY include changed lines)"
+    "file": "main.go",
+    "type": "replace",
+    "fromLine": 8,
+    "toLine": 10,
+    "contextBefore": ["package main", "", "import ("],
+    "contextAfter": [")", "", "func createUser(w http.ResponseWriter, r *http.Request) {"],
+    "content": "\t\"encoding/json\"\n\t\"fmt\"\n\t\"net/http\""
   }]
-}` + "\n\n"
-	rb.addContent(&b, schema)
-
-	// Example
-	example := `Example (EXACTLY like this): {"commit":{"subject":"Optimize helloHandler"},"patches":[{"file":"main.go","type":"replace","fromLine":9,"toLine":9,"contextBefore":["import (",")","\nfunc helloHandler(w http.ResponseWriter, r *http.Request) {"],"contextAfter":["}","\nfunc main() {","\thttp.HandleFunc(\"/\", helloHandler)"],"content":"\tw.Write([]byte(\"Hello, World!\"))"}]}` + "\n\n"
-	rb.addContent(&b, example)
+}
+`
+	rb.addContent(&b, systemMsg)
 
 	// Add code context if within token limit
 	if rb.codeCtx != nil {
-		b.WriteString("\nCode to modify:\n")
+		b.WriteString("\nCode to modify (VERIFY LINE NUMBERS CAREFULLY):\n")
 		for path, file := range rb.codeCtx.Files {
 			header := fmt.Sprintf("=== %s ===\n", path)
 			if !rb.addContent(&b, header) {
@@ -141,63 +224,98 @@ func (rb *RequestBuilder) findRelevantContext(prompt string) string {
 		return ""
 	}
 
-	type scoredSymbol struct {
-		symbol *types.SymbolContext
-		score  int
-	}
-
-	var scored []scoredSymbol
+	// Extract keywords from the prompt
 	keywords := strings.Fields(strings.ToLower(prompt))
 
-	// Score each symbol based on keyword matches
-	for _, file := range rb.codeCtx.Files {
-		for _, sym := range file.Symbols {
-			score := 0
+	// Score each file based on:
+	// 1. Symbol matches (functions, types, etc)
+	// 2. Content relevance
+	// 3. References between files
+	type scoredFile struct {
+		path  string
+		score int
+	}
+	var scoredFiles []scoredFile
 
-			// Check symbol name
-			for _, kw := range keywords {
-				if strings.Contains(strings.ToLower(sym.Name), kw) {
-					score += 5
-				}
-				if strings.Contains(strings.ToLower(sym.DocString), kw) {
-					score += 3
-				}
-				if strings.Contains(strings.ToLower(sym.Signature), kw) {
-					score += 2
+	// Score files based on symbol matches
+	for path, file := range rb.codeCtx.Files {
+		score := 0
+
+		// Check symbols in the file
+		for _, symbol := range file.Symbols {
+			symbolName := strings.ToLower(symbol.Name)
+			for _, keyword := range keywords {
+				if strings.Contains(symbolName, keyword) {
+					score += 10 // Higher score for symbol matches
 				}
 			}
 
-			if score > 0 {
-				scored = append(scored, scoredSymbol{symbol: sym, score: score})
+			// Check symbol documentation
+			if symbol.DocString != "" {
+				docLower := strings.ToLower(symbol.DocString)
+				for _, keyword := range keywords {
+					if strings.Contains(docLower, keyword) {
+						score += 5 // Medium score for doc matches
+					}
+				}
 			}
+
+			// Check references to increase relevance of related files
+			if symbol.References != nil {
+				for _, ref := range symbol.References {
+					if ref != nil && ref.URI != path {
+						score += 2 // Small score for references
+					}
+				}
+			}
+		}
+
+		// Check file content
+		content := strings.ToLower(file.Content)
+		for _, keyword := range keywords {
+			if strings.Contains(content, keyword) {
+				score++ // Small score for content matches
+			}
+		}
+
+		if score > 0 {
+			scoredFiles = append(scoredFiles, scoredFile{path: path, score: score})
 		}
 	}
 
-	// Sort by score in descending order
-	for i := 0; i < len(scored)-1; i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].score > scored[i].score {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
-		}
-	}
+	// Sort files by score
+	sort.Slice(scoredFiles, func(i, j int) bool {
+		return scoredFiles[i].score > scoredFiles[j].score
+	})
 
-	// Build context string with top matches
+	// Build context string with most relevant files
 	var b strings.Builder
-	for i, s := range scored {
-		if i >= 5 { // Limit to top 5 matches
+	maxFiles := 3 // Limit to top 3 most relevant files
+	if len(scoredFiles) > maxFiles {
+		scoredFiles = scoredFiles[:maxFiles]
+	}
+
+	for _, sf := range scoredFiles {
+		file := rb.codeCtx.Files[sf.path]
+		header := fmt.Sprintf("=== %s ===\n", sf.path)
+		if !rb.addContent(&b, header) {
 			break
 		}
 
-		sym := s.symbol
-		b.WriteString(fmt.Sprintf("=== %s (%s) ===\n", sym.Name, sym.Kind))
-		if sym.DocString != "" {
-			b.WriteString(sym.DocString + "\n")
+		if file.Content != "" {
+			if !rb.addContent(&b, "```go\n") {
+				break
+			}
+			lines := strings.Split(file.Content, "\n")
+			for i, line := range lines {
+				lineContent := fmt.Sprintf("%4d | %s\n", i+1, line)
+				if !rb.addContent(&b, lineContent) {
+					rb.addContent(&b, "... (truncated)\n")
+					break
+				}
+			}
+			rb.addContent(&b, "```\n\n")
 		}
-		if sym.Signature != "" {
-			b.WriteString(sym.Signature + "\n")
-		}
-		b.WriteString("\n")
 	}
 
 	return b.String()
