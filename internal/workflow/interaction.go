@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-git/go-git/v5/plumbing/color"
+	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/patch"
 )
@@ -23,16 +25,58 @@ func NewDefaultInteraction() UserInteraction {
 	}
 }
 
+// displayColoredDiff shows a colored diff of the changes
+func (d *defaultInteraction) displayColoredDiff(changes *patch.PatchSet) {
+	// Create color config with default colors
+	cc := diff.NewColorConfig()
+
+	// Display each patch
+	for _, p := range changes.Patches {
+		// Print file header
+		fmt.Printf("%s%sdiff --git a/%s b/%s%s\n",
+			cc[diff.Meta], color.Bold,
+			p.File, p.File,
+			cc.Reset(diff.Meta))
+
+		// Print file mode changes based on patch type
+		switch p.Type {
+		case "create":
+			fmt.Printf("%snew file mode 100644%s\n", cc[diff.Meta], cc.Reset(diff.Meta))
+		case "delete":
+			fmt.Printf("%sdeleted file mode 100644%s\n", cc[diff.Meta], cc.Reset(diff.Meta))
+		case "modify":
+			fmt.Printf("%smodified file mode 100644%s\n", cc[diff.Meta], cc.Reset(diff.Meta))
+		}
+
+		// Print file paths
+		fmt.Printf("%s--- a/%s%s\n", cc[diff.Meta], p.File, cc.Reset(diff.Meta))
+		fmt.Printf("%s+++ b/%s%s\n", cc[diff.Meta], p.File, cc.Reset(diff.Meta))
+
+		// Print content changes
+		lines := strings.Split(p.Content, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "+") {
+				fmt.Printf("%s%s%s\n", cc[diff.New], line, cc.Reset(diff.New))
+			} else if strings.HasPrefix(line, "-") {
+				fmt.Printf("%s%s%s\n", cc[diff.Old], line, cc.Reset(diff.Old))
+			} else if strings.HasPrefix(line, "@") {
+				fmt.Printf("%s%s%s\n", cc[diff.Frag], line, cc.Reset(diff.Frag))
+			} else {
+				fmt.Printf("%s%s%s\n", cc[diff.Context], line, cc.Reset(diff.Context))
+			}
+		}
+		fmt.Println()
+	}
+}
+
 // PromptForChanges asks the user to accept or reject changes
 func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, *config.Prompt, error) {
-	// Show changes
-	fmt.Println("\nProposed changes:")
-	for _, p := range changes.Patches {
-		fmt.Printf("- %s: %s\n", p.Type, p.File)
-	}
+	// Display colored diff
+	d.displayColoredDiff(changes)
 
 	// Show commit message
-	fmt.Printf("\nCommit message:\n%s\n", changes.Commit.Subject)
+	fmt.Printf("\nProposed commit message:\n")
+	fmt.Printf("%s%s%s\n", color.Bold, changes.Commit.Subject, color.Reset)
 	if changes.Commit.Body != "" {
 		fmt.Printf("\n%s\n", changes.Commit.Body)
 	}
@@ -57,19 +101,19 @@ func (d *defaultInteraction) PromptForChanges(ctx context.Context, changes *patc
 				return 0, nil, fmt.Errorf("read user input: %w", err)
 			}
 
-			choice := strings.TrimSpace(strings.ToLower(input))
-			switch choice {
+			input = strings.TrimSpace(strings.ToLower(input))
+			switch input {
 			case "yes", "y":
 				return ModeYes, nil, nil
 			case "no", "n":
 				return ModeNo, nil, nil
 			case "chat", "c":
-				fmt.Print("\nEnter new prompt: ")
-				input, err := d.reader.ReadString('\n')
+				fmt.Print("Enter new prompt: ")
+				promptStr, err := d.reader.ReadString('\n')
 				if err != nil {
 					return 0, nil, fmt.Errorf("read prompt: %w", err)
 				}
-				return ModeChat, &config.Prompt{Instructions: strings.TrimSpace(input)}, nil
+				return ModeChat, &config.Prompt{Instructions: strings.TrimSpace(promptStr)}, nil
 			case "abort", "a":
 				return ModeAbort, nil, nil
 			case "all":
