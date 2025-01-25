@@ -93,6 +93,7 @@ func TestProcessPrompt(t *testing.T) {
 		mockResp    string
 		wantErr     bool
 		errContains string
+		responses   []string
 	}{
 		{
 			name: "Success",
@@ -117,6 +118,7 @@ func TestProcessPrompt(t *testing.T) {
 					"body": "Added main function implementation"
 				}
 			}`,
+			responses: []string{"yes"},
 		},
 		{
 			name: "Invalid JSON response",
@@ -132,6 +134,7 @@ func TestProcessPrompt(t *testing.T) {
 			mockResp:    "invalid json",
 			wantErr:     true,
 			errContains: "parse patch JSON",
+			responses:   []string{"yes"},
 		},
 	}
 
@@ -152,11 +155,12 @@ func TestProcessPrompt(t *testing.T) {
 				t.Fatalf("Failed to initialize git repo: %v", err)
 			}
 
-			// Create mock client
+			// Create mock client and interaction
 			client := &mockAIClient{response: tc.mockResp}
+			interaction := newMockInteraction(tc.responses)
 
 			// Process prompt
-			err = ProcessPrompt(tc.prompt, tc.global, tc.rules, tc.ctx, client)
+			err = ProcessPrompt(tc.prompt, tc.global, tc.rules, tc.ctx, client, interaction)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error but got nil")

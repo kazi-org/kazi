@@ -4,10 +4,36 @@ import (
 	"context"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/kazi-org/kazi/internal/ai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
 	"github.com/kazi-org/kazi/internal/patch"
 )
+
+// UserInteractionMode represents the different ways a user can respond to changes
+type UserInteractionMode int
+
+const (
+	// ModeYes accepts the current change
+	ModeYes UserInteractionMode = iota
+	// ModeNo rejects the current change
+	ModeNo
+	// ModeChat allows sending a new/modified prompt to the LLM
+	ModeChat
+	// ModeAbort aborts the entire operation
+	ModeAbort
+	// ModeAll accepts all changes in the current prompt
+	ModeAll
+	// ModeYolo accepts all changes in the list of prompts
+	ModeYolo
+)
+
+// UserInteraction handles user interaction for accepting changes
+type UserInteraction interface {
+	// PromptForChanges asks the user to accept or reject changes
+	// Returns the user's choice and optionally a new prompt if in chat mode
+	PromptForChanges(ctx context.Context, changes *patch.PatchSet) (UserInteractionMode, *config.Prompt, error)
+}
 
 // Processor handles the workflow of processing prompts and applying changes
 type Processor interface {
@@ -45,9 +71,11 @@ type Options struct {
 
 // ProcessorConfig holds all dependencies for the workflow processor
 type ProcessorConfig struct {
-	GitCommitter   GitCommitter
-	Validator      Validator
-	RequestBuilder LLMRequestBuilder
-	PatchApplier   patch.Applier
-	Options        *Options
+	GitCommitter    GitCommitter
+	Validator       Validator
+	RequestBuilder  LLMRequestBuilder
+	PatchApplier    patch.Applier
+	UserInteraction UserInteraction
+	LLMClient       ai.LLMClient
+	Options         *Options
 }

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kazi-org/kazi/internal/ai"
 	"github.com/kazi-org/kazi/internal/config"
@@ -10,7 +11,7 @@ import (
 )
 
 // ProcessPrompt processes a prompt using the workflow processor
-func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules []string, ctx *contextstore.CodeContext, client ai.LLMClient) error {
+func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules []string, ctx *contextstore.CodeContext, client ai.LLMClient, userInteraction UserInteraction) error {
 	// Create options
 	opts := &Options{
 		Workspace: g.Workspace,
@@ -22,7 +23,7 @@ func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules []string, ctx *
 	// Create dependencies
 	gitCommitter, err := newGitCommitter(g.Workspace)
 	if err != nil {
-		return err
+		return fmt.Errorf("create git committer: %w", err)
 	}
 
 	validator := newValidator(g)
@@ -31,17 +32,19 @@ func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules []string, ctx *
 
 	// Create processor config
 	cfg := &ProcessorConfig{
-		GitCommitter:   gitCommitter,
-		Validator:      validator,
-		RequestBuilder: requestBuilder,
-		PatchApplier:   patchApplier,
-		Options:        opts,
+		GitCommitter:    gitCommitter,
+		Validator:       validator,
+		RequestBuilder:  requestBuilder,
+		PatchApplier:    patchApplier,
+		UserInteraction: userInteraction,
+		LLMClient:       client,
+		Options:         opts,
 	}
 
 	// Create and run processor
-	processor, err := NewProcessor(client, cfg)
+	processor, err := NewProcessor(cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("create processor: %w", err)
 	}
 
 	return processor.Process(context.Background(), p)

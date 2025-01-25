@@ -20,54 +20,78 @@ import (
 // App represents the main application and its dependencies.
 // It encapsulates all the components needed to run the Kazi tool.
 type App struct {
-	config    *config.KaziProject
-	aiClient  ai.LLMClient
-	lspClient gols.LSPClient
-	ctxStore  *contextstore.KaziContextStore
-	workspace string
+	config          *config.KaziProject
+	aiClient        ai.LLMClient
+	lspClient       gols.LSPClient
+	ctxStore        *contextstore.KaziContextStore
+	workspace       string
+	userInteraction workflow.UserInteraction
 }
 
+// Option configures the App
+type Option func(*App)
+
 // NewApp creates a new instance of App with the given dependencies.
-// It validates the input parameters to ensure they are not nil.
-func NewApp(cfg *config.KaziProject, aiClient ai.LLMClient, lspClient gols.LSPClient, workspace string) (*App, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is nil")
+func NewApp(opts ...Option) *App {
+	app := &App{
+		userInteraction: workflow.NewDefaultInteraction(),
 	}
-	if aiClient == nil {
-		return nil, fmt.Errorf("AI client is nil")
+
+	for _, opt := range opts {
+		opt(app)
 	}
-	if lspClient == nil {
-		return nil, fmt.Errorf("LSP client is nil")
+
+	// Validate required fields
+	if app.config == nil {
+		log.Fatal("config is required")
+	}
+	if app.aiClient == nil {
+		log.Fatal("AI client is required")
+	}
+	if app.lspClient == nil {
+		log.Fatal("LSP client is required")
 	}
 
 	// Ensure workspace path is absolute
-	absWorkspace, err := filepath.Abs(workspace)
+	absWorkspace, err := filepath.Abs(app.workspace)
 	if err != nil {
-		return nil, fmt.Errorf("get absolute workspace path: %w", err)
+		log.Fatalf("get absolute workspace path: %v", err)
 	}
 
 	// Verify workspace exists
 	if _, err := os.Stat(absWorkspace); err != nil {
-		return nil, fmt.Errorf("workspace does not exist: %w", err)
+		log.Fatalf("workspace does not exist: %v", err)
 	}
 
-	ctxStore := contextstore.NewKaziContextStore(absWorkspace, lspClient)
-	if err := ctxStore.BuildOrRefresh(); err != nil {
-		return nil, fmt.Errorf("build context store: %w", err)
+	app.workspace = absWorkspace
+
+	// Initialize context store
+	app.ctxStore = contextstore.NewKaziContextStore(absWorkspace, app.lspClient)
+	if err := app.ctxStore.BuildOrRefresh(); err != nil {
+		log.Fatalf("build context store: %v", err)
 	}
 
-	return &App{
-		config:    cfg,
-		aiClient:  aiClient,
-		lspClient: lspClient,
-		ctxStore:  ctxStore,
-		workspace: absWorkspace,
-	}, nil
+	return app
 }
 
-// Run executes the main application logic.
-// It processes each prompt in the configuration, building context and applying changes.
-func (a *App) Run() error {
+// Run executes the main application logic
+func (a *App) Run(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "--help", "-h":
+			fmt.Println("Usage: kazi [options]")
+			fmt.Println("Options:")
+			fmt.Println("  --help, -h     Show help")
+			fmt.Println("  --version, -v  Show version")
+			return nil
+		case "--version", "-v":
+			fmt.Println("kazi version 0.1.0")
+			return nil
+		default:
+			return fmt.Errorf("unknown flag: %s", args[0])
+		}
+	}
+
 	// Process each prompt in the configuration
 	for _, prompt := range a.config.Spec.Prompts {
 		if err := a.processPrompt(prompt); err != nil {
@@ -95,6 +119,7 @@ func (a *App) processPrompt(prompt config.Prompt) error {
 		a.config.Spec.Rules,
 		a.ctxStore.GetCodeContext(),
 		a.aiClient,
+		a.userInteraction,
 	)
 	if err != nil {
 		return fmt.Errorf("prompt %q failed: %w", prompt.Name, err)
@@ -130,7 +155,12 @@ func initApp(ctx context.Context, configPath string) (*App, error) {
 		return nil, fmt.Errorf("init LSP client: %w", err)
 	}
 
-	return NewApp(cfg, aiClient, lspClient, cfg.Spec.Global.Workspace)
+	return NewApp(
+		WithConfig(cfg),
+		WithAI(aiClient),
+		WithLSP(lspClient),
+		WithWorkspace(cfg.Spec.Global.Workspace),
+	), nil
 }
 
 // run is the main entry point for the application logic.
@@ -148,18 +178,47 @@ func run() error {
 	}
 	defer app.lspClient.Close()
 
-	// Process each prompt
-	for _, prompt := range app.config.Spec.Prompts {
-		if err := workflow.ProcessPrompt(prompt, app.config.Spec.Global, app.config.Spec.Rules, app.ctxStore.GetCodeContext(), app.aiClient); err != nil {
-			return fmt.Errorf("process prompt %q: %w", prompt.Name, err)
-		}
-	}
-
-	return nil
+	// Run the app
+	return app.Run(flag.Args())
 }
 
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// WithUserInteraction sets the user interaction interface for the app
+func WithUserInteraction(interaction workflow.UserInteraction) Option {
+	return func(app *App) {
+		app.userInteraction = interaction
+	}
+}
+
+// WithConfig sets the config for the app
+func WithConfig(config *config.KaziProject) Option {
+	return func(app *App) {
+		app.config = config
+	}
+}
+
+// WithAI sets the AI client for the app
+func WithAI(aiClient ai.LLMClient) Option {
+	return func(app *App) {
+		app.aiClient = aiClient
+	}
+}
+
+// WithLSP sets the LSP client for the app
+func WithLSP(lspClient gols.LSPClient) Option {
+	return func(app *App) {
+		app.lspClient = lspClient
+	}
+}
+
+// WithWorkspace sets the workspace for the app
+func WithWorkspace(workspace string) Option {
+	return func(app *App) {
+		app.workspace = workspace
 	}
 }

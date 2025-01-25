@@ -12,47 +12,96 @@ import (
 
 // processor implements Processor interface
 type processor struct {
-	llmClient    ai.LLMClient
-	gitCommitter GitCommitter
-	validator    Validator
-	reqBuilder   LLMRequestBuilder
-	patchApplier patch.Applier
+	gitCommitter    GitCommitter
+	validator       Validator
+	reqBuilder      LLMRequestBuilder
+	patchApplier    patch.Applier
+	userInteraction UserInteraction
+	llmClient       ai.LLMClient
 }
 
 // NewProcessor creates a new workflow processor with the given configuration
-func NewProcessor(llmClient ai.LLMClient, cfg *ProcessorConfig) (Processor, error) {
+func NewProcessor(cfg *ProcessorConfig) (Processor, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("processor config is required")
 	}
 
 	return &processor{
-		llmClient:    llmClient,
-		gitCommitter: cfg.GitCommitter,
-		validator:    cfg.Validator,
-		reqBuilder:   cfg.RequestBuilder,
-		patchApplier: cfg.PatchApplier,
+		gitCommitter:    cfg.GitCommitter,
+		validator:       cfg.Validator,
+		reqBuilder:      cfg.RequestBuilder,
+		patchApplier:    cfg.PatchApplier,
+		userInteraction: cfg.UserInteraction,
+		llmClient:       cfg.LLMClient,
 	}, nil
 }
 
 // Process handles the workflow of processing a prompt through the LLM and applying changes
 func (p *processor) Process(ctx context.Context, prompt config.Prompt) error {
-	// Build LLM request
-	request := p.reqBuilder.Build(prompt)
+	for {
+		// Build LLM request
+		request := p.reqBuilder.Build(prompt)
 
-	// Get patch from LLM
-	resp, err := p.llmClient.GetPatch(ctx, request)
-	if err != nil {
-		return fmt.Errorf("get patch from LLM: %w", err)
+		// Get patch from LLM
+		resp, err := p.llmClient.GetPatch(ctx, request)
+		if err != nil {
+			return fmt.Errorf("get patch from LLM: %w", err)
+		}
+
+		// Parse patch set
+		var ps patch.PatchSet
+		if err := json.Unmarshal([]byte(resp), &ps); err != nil {
+			return fmt.Errorf("parse patch JSON: %w", err)
+		}
+
+		// Get user's decision
+		mode, newPrompt, err := p.userInteraction.PromptForChanges(ctx, &ps)
+		if err != nil {
+			return fmt.Errorf("get user decision: %w", err)
+		}
+
+		switch mode {
+		case ModeYes:
+			if err := p.applyChanges(ctx, &ps); err != nil {
+				return err
+			}
+			return nil
+
+		case ModeNo:
+			return nil
+
+		case ModeChat:
+			if newPrompt == nil {
+				return fmt.Errorf("chat mode requires a new prompt")
+			}
+			prompt = *newPrompt
+			continue
+
+		case ModeAbort:
+			return nil
+
+		case ModeAll:
+			if err := p.applyChanges(ctx, &ps); err != nil {
+				return err
+			}
+			return nil
+
+		case ModeYolo:
+			if err := p.applyChanges(ctx, &ps); err != nil {
+				return err
+			}
+			return nil
+
+		default:
+			return fmt.Errorf("unknown interaction mode: %v", mode)
+		}
 	}
+}
 
-	// Parse patch set
-	var ps patch.PatchSet
-	if err := json.Unmarshal([]byte(resp), &ps); err != nil {
-		return fmt.Errorf("parse patch JSON: %w", err)
-	}
-
+// applyChanges applies the patch set and commits the changes
+func (p *processor) applyChanges(ctx context.Context, ps *patch.PatchSet) error {
 	// Apply patches
-	if err := p.patchApplier.Apply(&ps); err != nil {
+	if err := p.patchApplier.Apply(ps); err != nil {
 		return fmt.Errorf("apply patches: %w", err)
 	}
 
@@ -62,7 +111,7 @@ func (p *processor) Process(ctx context.Context, prompt config.Prompt) error {
 	}
 
 	// Show diff and commit changes
-	if err := p.commitChanges(ctx, prompt, &ps); err != nil {
+	if err := p.commitChanges(ctx, ps); err != nil {
 		return fmt.Errorf("commit changes: %w", err)
 	}
 
@@ -70,14 +119,12 @@ func (p *processor) Process(ctx context.Context, prompt config.Prompt) error {
 }
 
 // commitChanges handles showing diff and committing changes
-func (p *processor) commitChanges(ctx context.Context, prompt config.Prompt, ps *patch.PatchSet) error {
+func (p *processor) commitChanges(ctx context.Context, ps *patch.PatchSet) error {
 	// Get status
 	status, err := p.gitCommitter.Status(ctx)
 	if err != nil {
 		return fmt.Errorf("get git status: %w", err)
 	}
-
-	fmt.Printf("\n--- Processing prompt: %s ---\n\n", prompt.Name)
 
 	if status.IsClean() {
 		fmt.Println("No changes to commit.")

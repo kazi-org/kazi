@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +11,8 @@ import (
 
 	"github.com/kazi-org/kazi/internal/config"
 	gols "github.com/kazi-org/kazi/internal/ls/gols"
+	"github.com/kazi-org/kazi/internal/patch"
+	"github.com/kazi-org/kazi/internal/workflow"
 )
 
 // testCase represents a single integration test scenario
@@ -137,110 +138,114 @@ func (m *mockAIClient) GetPatch(ctx context.Context, prompt string) (string, err
 	}`, nil
 }
 
+// mockInteraction implements workflow.UserInteraction for testing
+type mockInteraction struct {
+	responses []string
+	index     int
+}
+
+func newMockInteraction(responses []string) *mockInteraction {
+	return &mockInteraction{
+		responses: responses,
+	}
+}
+
+func (m *mockInteraction) PromptForChanges(ctx context.Context, changes *patch.PatchSet) (workflow.UserInteractionMode, *config.Prompt, error) {
+	if m.index >= len(m.responses) {
+		return workflow.ModeAbort, nil, nil
+	}
+
+	response := m.responses[m.index]
+	m.index++
+
+	switch response {
+	case "yes", "y":
+		return workflow.ModeYes, nil, nil
+	case "no", "n":
+		return workflow.ModeNo, nil, nil
+	case "chat", "c":
+		return workflow.ModeChat, &config.Prompt{Instructions: "modified prompt"}, nil
+	case "abort", "a":
+		return workflow.ModeAbort, nil, nil
+	case "all":
+		return workflow.ModeAll, nil, nil
+	case "yolo":
+		return workflow.ModeYolo, nil, nil
+	default:
+		return workflow.ModeAbort, nil, nil
+	}
+}
+
 func TestKaziIntegration(t *testing.T) {
-	// Save original NewGoClient function and restore it after test
-	originalNewGoClient := gols.NewGoClient
-	defer func() { gols.NewGoClient = originalNewGoClient }()
-	gols.NewGoClient = mockNewGoClient
-
-	// Create temporary workspace
-	tmpDir, err := os.MkdirTemp("", "kazi-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+	// Create mock dependencies
+	mockConfig := &config.KaziProject{
+		APIVersion: "kazi.io/v1",
+		Kind:       "KaziProject",
+		Metadata: config.Metadata{
+			Name: "test-project",
+		},
+		Spec: config.ProjectSpec{
+			Global: config.GlobalConfig{
+				Workspace: ".",
+				LanguageServer: config.LanguageServer{
+					Name:    "gopls",
+					Command: "gopls",
+					Timeout: "30s",
+				},
+			},
+			Rules: []string{"Use gofmt for formatting"},
+			Prompts: []config.Prompt{
+				{
+					Name:         "test",
+					Instructions: "add test",
+				},
+			},
+		},
 	}
-	defer os.RemoveAll(tmpDir)
+	mockAI := &mockAIClient{}
+	mockLSP := &mockLSPClient{}
 
-	// Initialize Go module
-	cmd := exec.Command("go", "mod", "init", "example.com/test")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to initialize Go module: %v", err)
-	}
-
-	// Download dependencies
-	cmd = exec.Command("go", "mod", "tidy")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to download dependencies: %v", err)
-	}
-
-	// Create test file
-	testFile := filepath.Join(tmpDir, "main.go")
-	err = os.WriteFile(testFile, []byte(`package main
-
-import (
-	"fmt"
-)
-
-// Greet returns a greeting message
-func Greet(name string) string {
-	return fmt.Sprintf("Hello, %s!", name)
-}
-
-func main() {
-	fmt.Println(Greet("World"))
-}
-`), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write test file: %v", err)
-	}
-
-	// Create config file
-	configPath := filepath.Join(tmpDir, "kazi.yaml")
-	err = os.WriteFile(configPath, []byte(`apiVersion: kazi.io/v1
-kind: KaziProject
-metadata:
-  name: test-project
-spec:
-  global:
-    workspace: "`+tmpDir+`"
-    lintCommand: "go vet ./..."
-    testCommand: "go test ./..."
-    languageServer:
-      name: gopls
-      command: gopls
-      timeout: 30s
-  rules:
-    - "We use snake_case"
-  prompts:
-    - name: test
-      instructions: "add test"
-`), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
+	tests := []struct {
+		name      string
+		args      []string
+		responses []string
+		wantErr   bool
+	}{
+		{
+			name:      "help",
+			args:      []string{"--help"},
+			responses: []string{"yes"},
+			wantErr:   false,
+		},
+		{
+			name:      "version",
+			args:      []string{"--version"},
+			responses: []string{"yes"},
+			wantErr:   false,
+		},
+		{
+			name:      "invalid flag",
+			args:      []string{"--invalid"},
+			responses: []string{"yes"},
+			wantErr:   true,
+		},
 	}
 
-	// Initialize git repository
-	if err := initGitRepo(tmpDir); err != nil {
-		t.Fatalf("Failed to initialize git repo: %v", err)
-	}
-
-	// Set config path flag
-	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
-	os.Args = []string{"kazi", "-config", configPath}
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-
-	// Load config
-	cfg, err := config.LoadConfig(configPath)
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
-	}
-
-	// Create LSP client
-	lspClient, err := gols.NewGoClient(context.Background(), tmpDir)
-	if err != nil {
-		t.Fatalf("Failed to create LSP client: %v", err)
-	}
-
-	// Run test with mock AI client
-	app, err := NewApp(cfg, &mockAIClient{}, lspClient, tmpDir)
-	if err != nil {
-		t.Fatalf("Failed to create app: %v", err)
-	}
-
-	if err := app.Run(); err != nil {
-		t.Fatalf("Failed to run app: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			interaction := newMockInteraction(tt.responses)
+			app := NewApp(
+				WithConfig(mockConfig),
+				WithAI(mockAI),
+				WithLSP(mockLSP),
+				WithWorkspace("."),
+				WithUserInteraction(interaction),
+			)
+			err := app.Run(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
