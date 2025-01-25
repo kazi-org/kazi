@@ -12,82 +12,35 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/kazi-org/kazi/internal/ls/types"
 )
 
-// LSPClient is the interface your code references
-type LSPClient interface {
-	GetWorkspaceSymbols(query string) ([]WorkspaceSymbol, error)
-	GetSymbolDocumentation(uri string, symbolName string) (string, error)
-	GetReferences(symbol string) ([]string, error)
-	GetSymbolDefinition(filePath, symbolName string) (*SymbolDefinition, error)
-	GetFileContent(filePath string) (string, error)
-	GetSymbolLocation(filePath, symbolName string) (Location, error)
-	CheckCode(code string) (bool, string)
-	Close() error
-}
-
-// GoplsClient is a minimal JSON-RPC client for gopls
+// GoplsClient implements the LSPClient interface using the gopls language server
 type GoplsClient struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    io.ReadCloser
-	reader    *bufio.Reader
-	mu        sync.Mutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	idCount   int
-	responseC map[int]chan json.RawMessage
-	doneWg    sync.WaitGroup
-
+	cmd          *exec.Cmd
+	stdin        io.WriteCloser
+	stdout       io.ReadCloser
+	reader       *bufio.Reader
+	mu           sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	idCount      int
+	responseC    map[int]chan json.RawMessage
+	doneWg       sync.WaitGroup
 	workspaceDir string
-	timeout      time.Duration // timeout for LSP requests
+	timeout      time.Duration
 }
 
-// NewNoopClient returns a no-op client if we fail to start gopls
-func NewNoopClient() LSPClient {
-	return &noopClient{}
-}
-
-// Noop client does nothing
-type noopClient struct{}
-
-func (n *noopClient) GetWorkspaceSymbols(query string) ([]WorkspaceSymbol, error) {
-	return nil, nil
-}
-func (n *noopClient) GetSymbolDocumentation(uri string, symbolName string) (string, error) {
-	return "", nil
-}
-func (n *noopClient) GetReferences(symbol string) ([]string, error) {
-	return nil, nil
-}
-func (n *noopClient) GetSymbolDefinition(filePath, symbolName string) (*SymbolDefinition, error) {
-	return nil, nil
-}
-func (n *noopClient) GetFileContent(filePath string) (string, error) {
-	return "", nil
-}
-func (n *noopClient) GetSymbolLocation(filePath, symbolName string) (Location, error) {
-	return Location{}, nil
-}
-func (n *noopClient) CheckCode(code string) (bool, string) {
-	return true, ""
-}
-func (n *noopClient) Close() error {
-	return nil
-}
-
-// NewGoplsClient spawns a gopls process, does "initialize" request
+// NewGoplsClient creates a new gopls client instance
 func NewGoplsClient(ctx context.Context, workspace string, command string, timeout time.Duration) (*GoplsClient, error) {
 	if timeout == 0 {
-		timeout = 5 * time.Second // default timeout
+		timeout = 5 * time.Second
 	}
 	if command == "" {
-		command = "gopls" // default command
+		command = "gopls"
 	}
 
 	ctx2, cancel := context.WithCancel(ctx)
@@ -128,7 +81,7 @@ func NewGoplsClient(ctx context.Context, workspace string, command string, timeo
 
 	if err := g.initialize(); err != nil {
 		g.Close()
-		return nil, fmt.Errorf("%s init: %w", command, err)
+		return nil, fmt.Errorf("initialization failed: %w", err)
 	}
 
 	return g, nil
@@ -139,30 +92,25 @@ func signalGracefulShutdown(process *os.Process) error {
 	return process.Signal(os.Interrupt)
 }
 
+// Close implements the Closer interface
 func (g *GoplsClient) Close() error {
-	// Send shutdown request
 	var result interface{}
 	if err := g.sendRequest("shutdown", nil, &result); err != nil {
 		log.Printf("Warning: LSP shutdown request failed: %v", err)
 	}
 
-	// Send exit notification
 	if err := g.sendNotification("exit", nil); err != nil {
 		log.Printf("Warning: LSP exit notification failed: %v", err)
 	}
 
-	// Cancel context and wait for listen goroutine to finish
 	g.cancel()
 	g.doneWg.Wait()
 
-	// Try graceful shutdown first
 	if g.cmd.Process != nil {
-		// Send appropriate signal based on OS
 		if err := signalGracefulShutdown(g.cmd.Process); err != nil {
 			log.Printf("Warning: failed to send shutdown signal: %v", err)
 		}
 
-		// Wait for process to exit with timeout
 		done := make(chan error, 1)
 		go func() {
 			done <- g.cmd.Wait()
@@ -170,7 +118,6 @@ func (g *GoplsClient) Close() error {
 
 		select {
 		case <-time.After(2 * time.Second):
-			// If graceful shutdown fails, force kill as last resort
 			log.Printf("Warning: LSP server did not shut down gracefully, forcing termination")
 			g.cmd.Process.Kill()
 		case err := <-done:
@@ -183,51 +130,10 @@ func (g *GoplsClient) Close() error {
 	return nil
 }
 
-// minimal "CheckCode"
-func (g *GoplsClient) CheckCode(code string) (bool, string) {
-	// skipping real diag code for brevity
-	return true, ""
-}
-
-// placeholders
-func (g *GoplsClient) GetWorkspaceSymbols(query string) ([]WorkspaceSymbol, error) {
-	// do a "workspace/symbol" request
-	type wsParams struct {
-		Query string `json:"query"`
-	}
-	var result []WorkspaceSymbol
-	err := g.sendRequest("workspace/symbol", wsParams{Query: query}, &result)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-func (g *GoplsClient) GetSymbolDocumentation(uri string, symbolName string) (string, error) {
-	return "", nil
-}
-func (g *GoplsClient) GetReferences(symbol string) ([]string, error) {
-	return nil, nil
-}
-func (g *GoplsClient) GetSymbolDefinition(filePath, symbolName string) (*SymbolDefinition, error) {
-	return nil, nil
-}
-func (g *GoplsClient) GetSymbolLocation(filePath, symbolName string) (Location, error) {
-	return Location{}, nil
-}
-func (g *GoplsClient) GetFileContent(filePath string) (string, error) {
-	// read from disk for now
-	full := filepath.Join(g.workspaceDir, filePath)
-	data, err := os.ReadFile(full)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-// minimal JSON-RPC initialization
+// initialize performs the LSP initialization sequence
 func (g *GoplsClient) initialize() error {
 	params := map[string]interface{}{
-		"processId": 12345,
+		"processId": os.Getpid(),
 		"rootUri":   "file://" + g.workspaceDir,
 		"capabilities": map[string]interface{}{
 			"textDocument": map[string]interface{}{
@@ -237,165 +143,159 @@ func (g *GoplsClient) initialize() error {
 			},
 		},
 	}
+
 	var initRes interface{}
 	if err := g.sendRequest("initialize", params, &initRes); err != nil {
-		return err
+		return fmt.Errorf("initialize request failed: %w", err)
 	}
+
 	if err := g.sendNotification("initialized", map[string]interface{}{}); err != nil {
-		return err
+		return fmt.Errorf("initialized notification failed: %w", err)
 	}
+
 	return nil
 }
 
-// we define a minimal JSON-RPC request/response
+// sendRequest sends a JSON-RPC request and waits for the response
 func (g *GoplsClient) sendRequest(method string, params interface{}, result interface{}) error {
 	g.mu.Lock()
-	g.idCount++
 	id := g.idCount
-	ch := make(chan json.RawMessage, 1)
-	g.responseC[id] = ch
+	g.idCount++
+	responseC := make(chan json.RawMessage, 1)
+	g.responseC[id] = responseC
 	g.mu.Unlock()
 
-	req := RequestMessage{
+	req := types.RequestMessage{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  method,
 		Params:  params,
 	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		return err
-	}
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
-	_, err = g.stdin.Write([]byte(header))
-	if err != nil {
-		return err
-	}
-	_, err = g.stdin.Write(data)
-	if err != nil {
-		return err
+
+	if err := json.NewEncoder(g.stdin).Encode(req); err != nil {
+		g.mu.Lock()
+		delete(g.responseC, id)
+		g.mu.Unlock()
+		return fmt.Errorf("encode request: %w", err)
 	}
 
 	select {
-	case raw := <-ch:
-		// parse base
-		var base ResponseMessage
-		if e := json.Unmarshal(raw, &base); e != nil {
-			return e
-		}
-		if base.Error != nil {
-			return fmt.Errorf("lsp error: %s", base.Error.Message)
-		}
+	case response := <-responseC:
+		g.mu.Lock()
+		delete(g.responseC, id)
+		g.mu.Unlock()
+
 		if result != nil {
-			if e := json.Unmarshal(base.Result, result); e != nil {
-				return e
+			if err := json.Unmarshal(response, result); err != nil {
+				return fmt.Errorf("decode response: %w", err)
 			}
 		}
 		return nil
 	case <-time.After(g.timeout):
-		return fmt.Errorf("request %s timed out after %v", method, g.timeout)
+		g.mu.Lock()
+		delete(g.responseC, id)
+		g.mu.Unlock()
+		return fmt.Errorf("request timeout after %v", g.timeout)
 	case <-g.ctx.Done():
-		return fmt.Errorf("context canceled")
+		g.mu.Lock()
+		delete(g.responseC, id)
+		g.mu.Unlock()
+		return g.ctx.Err()
 	}
 }
 
+// sendNotification sends a JSON-RPC notification (no response expected)
 func (g *GoplsClient) sendNotification(method string, params interface{}) error {
-	notif := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method":  method,
-		"params":  params,
+	req := types.RequestMessage{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
 	}
-	data, err := json.Marshal(notif)
-	if err != nil {
-		return err
-	}
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
-	if _, err := g.stdin.Write([]byte(header)); err != nil {
-		return err
-	}
-	if _, err := g.stdin.Write(data); err != nil {
-		return err
-	}
-	return nil
+	return json.NewEncoder(g.stdin).Encode(req)
 }
 
+// listen handles incoming messages from the language server
 func (g *GoplsClient) listen() {
 	defer g.doneWg.Done()
 	for {
-		select {
-		case <-g.ctx.Done():
-			return
-		default:
-			if err := g.readMessage(); err != nil {
-				log.Printf("gopls read error: %v", err)
-				return
+		if err := g.readMessage(); err != nil {
+			if err != io.EOF && g.ctx.Err() == nil {
+				log.Printf("Error reading message: %v", err)
 			}
+			return
 		}
 	}
 }
 
+// readMessage reads and processes a single message from the language server
 func (g *GoplsClient) readMessage() error {
-	headers := make(map[string]string)
+	var header struct {
+		ContentLength int `json:"Content-Length"`
+	}
+
 	for {
 		line, err := g.reader.ReadString('\n')
 		if err != nil {
 			return err
 		}
-		line = strings.TrimSpace(line)
+		line = line[:len(line)-1]
 		if line == "" {
 			break
 		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
-			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		if n, err := fmt.Sscanf(line, "Content-Length: %d", &header.ContentLength); err != nil || n != 1 {
+			continue
 		}
 	}
-	lengthStr, ok := headers["Content-Length"]
+
+	if header.ContentLength == 0 {
+		return fmt.Errorf("invalid Content-Length: 0")
+	}
+
+	body := make([]byte, header.ContentLength)
+	if _, err := io.ReadFull(g.reader, body); err != nil {
+		return err
+	}
+
+	var resp types.ResponseMessage
+	if err := json.Unmarshal(body, &resp); err != nil {
+		var req types.RequestMessage
+		if err := json.Unmarshal(body, &req); err != nil {
+			return fmt.Errorf("decode message: %w", err)
+		}
+		return g.handleNotification(body)
+	}
+
+	return g.handleResponse(body)
+}
+
+// handleResponse processes a response message from the language server
+func (g *GoplsClient) handleResponse(body []byte) error {
+	var resp types.ResponseMessage
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	g.mu.Lock()
+	responseC, ok := g.responseC[resp.ID]
+	g.mu.Unlock()
+
 	if !ok {
-		return nil
-	}
-	length, err := strconv.Atoi(lengthStr)
-	if err != nil {
-		return err
-	}
-	body := make([]byte, length)
-	_, err = io.ReadFull(g.reader, body)
-	if err != nil {
-		return err
+		return nil // Response for a cancelled request
 	}
 
-	var raw map[string]interface{}
-	if e := json.Unmarshal(body, &raw); e != nil {
-		return e
+	if resp.Error != nil {
+		responseC <- nil
+		return fmt.Errorf("server error: %v", resp.Error.Message)
 	}
 
-	if _, hasID := raw["id"]; hasID {
-		g.handleResponse(body)
-	} else if _, hasMethod := raw["method"]; hasMethod {
-		g.handleNotification(body)
-	}
+	responseC <- resp.Result
 	return nil
 }
 
-func (g *GoplsClient) handleResponse(body []byte) {
-	var base ResponseMessage
-	if e := json.Unmarshal(body, &base); e != nil {
-		log.Printf("handleResp unmarshal: %v", e)
-		return
-	}
-	id := base.ID
-	g.mu.Lock()
-	ch, ok := g.responseC[id]
-	if ok {
-		ch <- body
-		close(ch)
-		delete(g.responseC, id)
-	}
-	g.mu.Unlock()
-}
-
-func (g *GoplsClient) handleNotification(body []byte) {
-	log.Printf("gopls notification: %s", string(body))
+// handleNotification processes a notification message from the language server
+func (g *GoplsClient) handleNotification(body []byte) error {
+	// TODO: Implement notification handling if needed
+	return nil
 }
 
 // minimal types
