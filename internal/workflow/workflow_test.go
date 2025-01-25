@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	kaziconfig "github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
-	"github.com/kazi-org/kazi/internal/shell"
 )
 
 // mockAIClient implements ai.LLMClient for testing
@@ -21,6 +21,66 @@ type mockAIClient struct {
 
 func (m *mockAIClient) GetPatch(context.Context, string) (string, error) {
 	return m.response, nil
+}
+
+// initGitRepo initializes a git repository in the given directory
+func initGitRepo(dir string) error {
+	// Initialize repository
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		return fmt.Errorf("init git repo: %w", err)
+	}
+
+	// Configure git user
+	cfg := config.NewConfig()
+	cfg.User.Name = "Test User"
+	cfg.User.Email = "test@example.com"
+
+	if err := repo.SetConfig(cfg); err != nil {
+		return fmt.Errorf("set git config: %w", err)
+	}
+
+	return nil
+}
+
+// getGitStatus returns the status of a git repository
+func getGitStatus(dir string) (string, error) {
+	repo, err := git.PlainOpen(dir)
+	if err != nil {
+		return "", fmt.Errorf("open git repo: %w", err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("get worktree: %w", err)
+	}
+
+	status, err := wt.Status()
+	if err != nil {
+		return "", fmt.Errorf("get status: %w", err)
+	}
+
+	return status.String(), nil
+}
+
+// getLastCommitMessage returns the message of the last commit
+func getLastCommitMessage(dir string) (string, error) {
+	repo, err := git.PlainOpen(dir)
+	if err != nil {
+		return "", fmt.Errorf("open git repo: %w", err)
+	}
+
+	ref, err := repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("get HEAD: %w", err)
+	}
+
+	commit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		return "", fmt.Errorf("get commit: %w", err)
+	}
+
+	return commit.Message, nil
 }
 
 func TestProcessPrompt(t *testing.T) {
@@ -118,43 +178,25 @@ func TestProcessPrompt(t *testing.T) {
 				}
 
 				// Verify git status is clean
-				out, err := shell.RunCommandOutput(tmpDir, "git status --porcelain")
+				status, err := getGitStatus(tmpDir)
 				if err != nil {
 					t.Errorf("Failed to get git status: %v", err)
 				}
-				if out != "" {
-					t.Errorf("Git status not clean, got: %s", out)
+				if status != "" {
+					t.Errorf("Git status not clean, got: %s", status)
 				}
 
 				// Verify commit message
-				out, err = shell.RunCommandOutput(tmpDir, "git log -1 --pretty=%B")
+				msg, err := getLastCommitMessage(tmpDir)
 				if err != nil {
 					t.Fatalf("Failed to get commit message: %v", err)
 				}
-				if !strings.Contains(out, "Add main function") {
+				if !strings.Contains(msg, "Add main function") {
 					t.Error("Expected commit message not found in git log")
 				}
 			}
 		})
 	}
-}
-
-// initGitRepo initializes a git repository in the given directory
-func initGitRepo(dir string) error {
-	// Initialize repository
-	if _, err := git.PlainInit(dir, false); err != nil {
-		return fmt.Errorf("init git repo: %w", err)
-	}
-
-	// Configure git user using shell commands
-	if err := shell.RunCommand(dir, "git config user.name 'Test User'"); err != nil {
-		return fmt.Errorf("set git user name: %w", err)
-	}
-	if err := shell.RunCommand(dir, "git config user.email 'test@example.com'"); err != nil {
-		return fmt.Errorf("set git user email: %w", err)
-	}
-
-	return nil
 }
 
 // contains checks if a string contains a substring
@@ -320,11 +362,11 @@ func TestGitCommitter(t *testing.T) {
 
 			// Verify commit only if we should have committed
 			if tc.shouldCommit {
-				out, err := shell.RunCommandOutput(tmpDir, "git log -1 --pretty=%B")
+				msg, err := getLastCommitMessage(tmpDir)
 				if err != nil {
 					t.Fatalf("Failed to get commit message: %v", err)
 				}
-				if !strings.Contains(out, tc.commitMsg) {
+				if !strings.Contains(msg, tc.commitMsg) {
 					t.Errorf("Commit message %q not found in git log", tc.commitMsg)
 				}
 			}
