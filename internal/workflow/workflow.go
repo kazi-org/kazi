@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -16,38 +15,42 @@ import (
 	"github.com/kazi-org/kazi/internal/shell"
 )
 
+// ProcessPrompt processes a prompt using the workflow processor
 func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules []string, ctx *contextstore.CodeContext, client ai.LLMClient) error {
-	// Build LLM request
-	prompt := buildLLMRequest(p, g, rules, ctx)
+	// Create options
+	opts := &Options{
+		Workspace: g.Workspace,
+		Rules:     rules,
+		Context:   ctx,
+		Config:    g,
+	}
 
-	// Get patch from LLM
-	resp, err := client.GetPatch(context.Background(), prompt)
+	// Create dependencies
+	gitCommitter, err := newGitCommitter(g.Workspace)
 	if err != nil {
-		return fmt.Errorf("get patch from LLM: %w", err)
+		return err
 	}
 
-	// Parse patch set
-	var ps patch.PatchSet
-	if err := json.Unmarshal([]byte(resp), &ps); err != nil {
-		return fmt.Errorf("parse patch JSON: %w", err)
+	validator := newValidator(g)
+	requestBuilder := newRequestBuilder(rules, g, ctx)
+	patchApplier := patch.NewApplier(g.Workspace)
+
+	// Create processor config
+	cfg := &ProcessorConfig{
+		GitCommitter:   gitCommitter,
+		Validator:      validator,
+		RequestBuilder: requestBuilder,
+		PatchApplier:   patchApplier,
+		Options:        opts,
 	}
 
-	// Apply patches
-	if err := ps.Apply(g.Workspace); err != nil {
-		return fmt.Errorf("apply patches: %w", err)
+	// Create and run processor
+	processor, err := NewProcessor(client, cfg)
+	if err != nil {
+		return err
 	}
 
-	// Run build/test if configured
-	if err := validateBuildAndTest(g); err != nil {
-		return fmt.Errorf("build/test failed: %w", err)
-	}
-
-	// Show diff and commit
-	if err := showDiffAndCommit(p, g.Workspace, &ps); err != nil {
-		return fmt.Errorf("commit changes: %w", err)
-	}
-
-	return nil
+	return processor.Process(context.Background(), p)
 }
 
 func buildLLMRequest(p config.Prompt, g config.GlobalConfig, rules []string, ctx *contextstore.CodeContext) string {

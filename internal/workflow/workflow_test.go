@@ -11,7 +11,6 @@ import (
 	"github.com/go-git/go-git/v5"
 	kaziconfig "github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
-	"github.com/kazi-org/kazi/internal/patch"
 	"github.com/kazi-org/kazi/internal/shell"
 )
 
@@ -140,7 +139,30 @@ func TestProcessPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildLLMRequest(t *testing.T) {
+// initGitRepo initializes a git repository in the given directory
+func initGitRepo(dir string) error {
+	// Initialize repository
+	if _, err := git.PlainInit(dir, false); err != nil {
+		return fmt.Errorf("init git repo: %w", err)
+	}
+
+	// Configure git user using shell commands
+	if err := shell.RunCommand(dir, "git config user.name 'Test User'"); err != nil {
+		return fmt.Errorf("set git user name: %w", err)
+	}
+	if err := shell.RunCommand(dir, "git config user.email 'test@example.com'"); err != nil {
+		return fmt.Errorf("set git user email: %w", err)
+	}
+
+	return nil
+}
+
+// contains checks if a string contains a substring
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
+
+func TestRequestBuilder(t *testing.T) {
 	tests := []struct {
 		name     string
 		prompt   kaziconfig.Prompt
@@ -215,7 +237,8 @@ func TestBuildLLMRequest(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildLLMRequest(tc.prompt, tc.global, tc.rules, tc.ctx)
+			builder := newRequestBuilder(tc.rules, tc.global, tc.ctx)
+			got := builder.Build(tc.prompt)
 			for _, want := range tc.contains {
 				if !strings.Contains(got, want) {
 					t.Errorf("request does not contain %q", want)
@@ -225,127 +248,33 @@ func TestBuildLLMRequest(t *testing.T) {
 	}
 }
 
-// initGitRepo initializes a git repository in the given directory
-func initGitRepo(dir string) error {
-	// Initialize repository
-	if _, err := git.PlainInit(dir, false); err != nil {
-		return fmt.Errorf("init git repo: %w", err)
-	}
-
-	// Configure git user using shell commands
-	if err := shell.RunCommand(dir, "git config user.name 'Test User'"); err != nil {
-		return fmt.Errorf("set git user name: %w", err)
-	}
-	if err := shell.RunCommand(dir, "git config user.email 'test@example.com'"); err != nil {
-		return fmt.Errorf("set git user email: %w", err)
-	}
-
-	return nil
-}
-
-// contains checks if a string contains a substring
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
-func TestShowDiffAndCommit(t *testing.T) {
+func TestGitCommitter(t *testing.T) {
 	tests := []struct {
-		name        string
-		prompt      kaziconfig.Prompt
-		workspace   string
-		setupFiles  map[string]string
-		patches     []patch.Chunk
-		commit      patch.CommitMessage
-		wantErr     bool
-		errContains string
+		name         string
+		setupFiles   map[string]string
+		commitMsg    string
+		wantErr      bool
+		errContains  string
+		shouldCommit bool
 	}{
 		{
-			name: "Create and commit new file",
-			prompt: kaziconfig.Prompt{
-				Name:         "test",
-				Instructions: "Add main.go",
-			},
-			setupFiles: map[string]string{},
-			patches: []patch.Chunk{
-				{
-					File:    "main.go",
-					Type:    patch.PatchCreate,
-					Content: "package main\n\nfunc main() {}\n",
-				},
-			},
-			commit: patch.CommitMessage{
-				Subject: "Add main function",
-				Body:    "Added a basic main function",
-			},
-		},
-		{
-			name: "Modify existing file",
-			prompt: kaziconfig.Prompt{
-				Name:         "test",
-				Instructions: "Update main.go",
-			},
+			name: "Commit changes",
 			setupFiles: map[string]string{
-				"main.go": "package main\n",
+				"test.txt": "test content",
 			},
-			patches: []patch.Chunk{
-				{
-					File:     "main.go",
-					Type:     patch.PatchReplace,
-					FromLine: 1,
-					ToLine:   1,
-					Content:  "package main\n\nfunc main() {}\n",
-				},
-			},
-			commit: patch.CommitMessage{
-				Subject: "Update main function",
-				Body:    "Added main function implementation",
-			},
+			commitMsg:    "Add test file",
+			shouldCommit: true,
 		},
 		{
-			name: "Delete file",
-			prompt: kaziconfig.Prompt{
-				Name:         "test",
-				Instructions: "Delete main.go",
-			},
-			setupFiles: map[string]string{
-				"main.go": "package main\n",
-			},
-			patches: []patch.Chunk{
-				{
-					File:     "main.go",
-					Type:     patch.PatchDelete,
-					FromLine: 1,
-					ToLine:   1,
-				},
-			},
-			commit: patch.CommitMessage{
-				Subject: "Remove main.go",
-				Body:    "File is no longer needed",
-			},
-		},
-		{
-			name: "Invalid patch type",
-			prompt: kaziconfig.Prompt{
-				Name:         "test",
-				Instructions: "Invalid patch",
-			},
-			patches: []patch.Chunk{
-				{
-					File: "main.go",
-					Type: "invalid",
-				},
-			},
-			commit: patch.CommitMessage{
-				Subject: "Invalid change",
-			},
-			wantErr:     true,
-			errContains: "unknown patch type: invalid",
+			name:         "Empty workspace",
+			commitMsg:    "Empty commit",
+			shouldCommit: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create temporary workspace
+			// Create temp workspace
 			tmpDir, err := os.MkdirTemp("", "kazi-workflow-test-*")
 			if err != nil {
 				t.Fatalf("Failed to create temp dir: %v", err)
@@ -357,7 +286,7 @@ func TestShowDiffAndCommit(t *testing.T) {
 				t.Fatalf("Failed to initialize git repo: %v", err)
 			}
 
-			// Write setup files
+			// Create setup files
 			for name, content := range tc.setupFiles {
 				path := filepath.Join(tmpDir, name)
 				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
@@ -365,67 +294,91 @@ func TestShowDiffAndCommit(t *testing.T) {
 				}
 			}
 
-			// Add initial files to git
-			if len(tc.setupFiles) > 0 {
-				if err := shell.RunCommand(tmpDir, "git add ."); err != nil {
-					t.Fatalf("Failed to add files to git: %v", err)
-				}
-				if err := shell.RunCommand(tmpDir, "git commit -m 'Initial commit'"); err != nil {
-					t.Fatalf("Failed to commit files: %v", err)
-				}
+			// Create git committer
+			committer, err := newGitCommitter(tmpDir)
+			if err != nil {
+				t.Fatalf("Failed to create git committer: %v", err)
 			}
 
-			// Create patch set
-			ps := &patch.PatchSet{
-				Patches: tc.patches,
-				Commit:  tc.commit,
+			// Get status and commit
+			status, err := committer.Status(context.Background())
+			if err != nil {
+				t.Fatalf("Failed to get status: %v", err)
 			}
 
-			// Apply patches first
-			if err := ps.Apply(tmpDir); err != nil {
-				if tc.wantErr {
-					if tc.errContains != "" && !contains(err.Error(), tc.errContains) {
-						t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
+			if !status.IsClean() {
+				if err := committer.Commit(context.Background(), tc.commitMsg); err != nil {
+					if tc.wantErr {
+						if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+							t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
+						}
+						return
 					}
-					return
+					t.Fatalf("Failed to commit: %v", err)
 				}
-				t.Fatalf("Failed to apply patches: %v", err)
 			}
 
-			// Show diff and commit
-			err = showDiffAndCommit(tc.prompt, tmpDir, ps)
+			// Verify commit only if we should have committed
+			if tc.shouldCommit {
+				out, err := shell.RunCommandOutput(tmpDir, "git log -1 --pretty=%B")
+				if err != nil {
+					t.Fatalf("Failed to get commit message: %v", err)
+				}
+				if !strings.Contains(out, tc.commitMsg) {
+					t.Errorf("Commit message %q not found in git log", tc.commitMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestValidator(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      kaziconfig.GlobalConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "No commands",
+			config: kaziconfig.GlobalConfig{
+				Workspace: ".",
+			},
+		},
+		{
+			name: "With commands",
+			config: kaziconfig.GlobalConfig{
+				Workspace:   ".",
+				LintCommand: "echo 'lint'",
+				TestCommand: "echo 'test'",
+			},
+		},
+		{
+			name: "Failed command",
+			config: kaziconfig.GlobalConfig{
+				Workspace:   ".",
+				LintCommand: "exit 1",
+			},
+			wantErr:     true,
+			errContains: "lint failed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			validator := newValidator(tc.config)
+			err := validator.Validate(context.Background())
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error but got nil")
 				}
-				if tc.errContains != "" && !contains(err.Error(), tc.errContains) {
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
 					t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-
-			// Verify git status is clean
-			out, err := shell.RunCommandOutput(tmpDir, "git status --porcelain")
-			if err != nil {
-				t.Errorf("Failed to get git status: %v", err)
-			}
-			if out != "" {
-				t.Errorf("Git status not clean, got: %s", out)
-			}
-
-			// Verify commit message
-			out, err = shell.RunCommandOutput(tmpDir, "git log -1 --pretty=%B")
-			if err != nil {
-				t.Fatalf("Failed to get commit message: %v", err)
-			}
-			if !strings.Contains(out, tc.commit.Subject) {
-				t.Errorf("Commit subject %q not found in message: %s", tc.commit.Subject, out)
-			}
-			if tc.commit.Body != "" && !strings.Contains(out, tc.commit.Body) {
-				t.Errorf("Commit body %q not found in message: %s", tc.commit.Body, out)
 			}
 		})
 	}
