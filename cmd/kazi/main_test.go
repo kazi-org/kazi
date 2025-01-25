@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,6 +137,42 @@ func (m *mockAIClient) GetPatch(ctx context.Context, prompt string) (string, err
 			"body": "Added a test case to verify the Greet function returns the expected greeting message."
 		}
 	}`, nil
+}
+
+// mockStream implements io.ReadCloser for testing
+type mockStream struct {
+	content string
+	pos     int
+}
+
+func (s *mockStream) Read(p []byte) (n int, err error) {
+	if s.pos >= len(s.content) {
+		return 0, io.EOF
+	}
+	n = copy(p, []byte(s.content[s.pos:]))
+	s.pos += n
+	return n, nil
+}
+
+func (s *mockStream) Close() error {
+	return nil
+}
+
+func (m *mockAIClient) StreamPatch(ctx context.Context, prompt string) (io.ReadCloser, error) {
+	content := `{
+		"patches": [
+			{
+				"file": "main_test.go",
+				"type": "create",
+				"content": "package main\n\nimport \"testing\"\n\nfunc TestGreet(t *testing.T) {\n\tgot := Greet(\"World\")\n\twant := \"Hello, World!\"\n\tif got != want {\n\t\tt.Errorf(\"Greet(\\\"World\\\") = %q, want %q\", got, want)\n\t}\n}\n"
+			}
+		],
+		"commit": {
+			"subject": "Add test for Greet function",
+			"body": "Added a test case to verify the Greet function returns the expected greeting message."
+		}
+	}`
+	return &mockStream{content: content}, nil
 }
 
 // mockInteraction implements workflow.UserInteraction for testing

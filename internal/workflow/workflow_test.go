@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,29 @@ type mockAIClient struct {
 
 func (m *mockAIClient) GetPatch(context.Context, string) (string, error) {
 	return m.response, nil
+}
+
+// mockStream implements io.ReadCloser for testing
+type mockStream struct {
+	content string
+	pos     int
+}
+
+func (s *mockStream) Read(p []byte) (n int, err error) {
+	if s.pos >= len(s.content) {
+		return 0, io.EOF
+	}
+	n = copy(p, []byte(s.content[s.pos:]))
+	s.pos += n
+	return n, nil
+}
+
+func (s *mockStream) Close() error {
+	return nil
+}
+
+func (m *mockAIClient) StreamPatch(ctx context.Context, prompt string) (io.ReadCloser, error) {
+	return &mockStream{content: m.response}, nil
 }
 
 // initGitRepo initializes a git repository in the given directory
