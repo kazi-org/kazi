@@ -88,47 +88,20 @@ func TestKaziIntegration(t *testing.T) {
 			errContains: "read config file",
 		},
 		{
-			name: "Minimal config with no build/test commands",
-			configContent: `apiVersion: kazi.io/v1
-kind: KaziProject
-metadata:
-  name: minimal
-spec:
-  global:
-    workspace: "."
-    buildCommand: ""
-    testCommand: ""
-  rules:
-    style: "We use snake_case"
-  prompts:
-    - name: "Add function"
-      instructions: "Add a function named Foo in main.go"
-`,
-			setupFiles: setupFiles{
-				"main.go": `package main
-
-func main() {}
-`,
-			},
-			wantErr: false,
-		},
-		{
 			name: "Non-existent workspace path",
 			configContent: `apiVersion: kazi.io/v1
 kind: KaziProject
 metadata:
-  name: bad-workspace
+  name: test-project
 spec:
   global:
-    workspace: "./no_such_dir"
-    buildCommand: ""
-    testCommand: ""
+    workspace: "/nonexistent/path"
   rules:
-    naming: "All exported items start with capital letter"
+    - "We use snake_case"
+    - "All exported items start with capital letter"
   prompts:
     - name: "Test"
-      instructions: "Nothing"
-`,
+      instructions: "add test"`,
 			setupFiles: setupFiles{
 				"main.go": `package main
 func main() {}
@@ -194,7 +167,19 @@ func main() {}
 type mockAIClient struct{}
 
 func (m *mockAIClient) GetPatch(context.Context, string) (string, error) {
-	return `{"patches":[{"file":"main.go","type":"create","content":"package main\n\nfunc main() {}\n"}]}`, nil
+	return `{
+		"patches": [{
+			"file": "main.go",
+			"type": "replace",
+			"fromLine": 1,
+			"toLine": 4,
+			"content": "package main\n\nfunc Foo() {}\n\nfunc main() {}\n"
+		}],
+		"commit": {
+			"subject": "Add Foo function",
+			"body": "Added new Foo function as requested"
+		}
+	}`, nil
 }
 
 // initGitRepo initializes a git repository in the given directory

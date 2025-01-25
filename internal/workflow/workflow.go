@@ -13,7 +13,7 @@ import (
 	"github.com/kazi-org/kazi/internal/shell"
 )
 
-func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules map[string]string, ctx *contextstore.CodeContext, client ai.LLMClient) error {
+func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules []string, ctx *contextstore.CodeContext, client ai.LLMClient) error {
 	// Build LLM request
 	prompt := buildLLMRequest(p, g, rules, ctx)
 
@@ -54,14 +54,14 @@ func ProcessPrompt(p config.Prompt, g config.GlobalConfig, rules map[string]stri
 	return nil
 }
 
-func buildLLMRequest(p config.Prompt, g config.GlobalConfig, rules map[string]string, ctx *contextstore.CodeContext) string {
+func buildLLMRequest(p config.Prompt, g config.GlobalConfig, rules []string, ctx *contextstore.CodeContext) string {
 	var b strings.Builder
 
 	// Add project rules
 	if len(rules) > 0 {
 		b.WriteString("Project Rules:\n")
-		for k, v := range rules {
-			fmt.Fprintf(&b, "- %s: %s\n", k, v)
+		for _, rule := range rules {
+			fmt.Fprintf(&b, "- %s\n", rule)
 		}
 	}
 

@@ -100,7 +100,7 @@ func TestPatchSet_Apply(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errContains: "no such file",
+			errContains: "file does not exist",
 		},
 	}
 

@@ -20,9 +20,9 @@ type Metadata struct {
 }
 
 type ProjectSpec struct {
-	Global  GlobalConfig      `yaml:"global"`
-	Rules   map[string]string `yaml:"rules"`
-	Prompts []Prompt          `yaml:"prompts"`
+	Global  GlobalConfig `yaml:"global"`
+	Rules   []string     `yaml:"rules"`
+	Prompts []Prompt     `yaml:"prompts"`
 }
 
 type GlobalConfig struct {

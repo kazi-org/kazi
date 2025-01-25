@@ -27,7 +27,8 @@ spec:
     buildCommand: "go build"
     testCommand: "go test"
   rules:
-    style: "gofmt"
+    - "Use gofmt for formatting"
+    - "Write tests for all functions"
   prompts:
     - name: "test"
       instructions: "add test"`,
@@ -62,7 +63,8 @@ spec:
     buildCommand: "go build"
     testCommand: "go test"
   rules:
-    style: "gofmt"`,
+    - "Use gofmt for formatting"
+    - "Write tests for all functions"`,
 			wantErr:     true,
 			errContains: "missing required field: prompts",
 		},

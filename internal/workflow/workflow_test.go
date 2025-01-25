@@ -31,7 +31,7 @@ func TestProcessPrompt(t *testing.T) {
 		name        string
 		prompt      config.Prompt
 		global      config.GlobalConfig
-		rules       map[string]string
+		rules       []string
 		ctxStore    *contextstore.CodeContext
 		mockResp    string
 		mockErr     error
@@ -49,8 +49,9 @@ func TestProcessPrompt(t *testing.T) {
 				BuildCommand: "", // Skip build for test
 				TestCommand:  "", // Skip test for test
 			},
-			rules: map[string]string{
-				"style": "gofmt",
+			rules: []string{
+				"Use gofmt for formatting",
+				"Write tests for all functions",
 			},
 			mockResp: `{
 				"patches": [
@@ -170,7 +171,7 @@ func TestBuildLLMRequest(t *testing.T) {
 		name     string
 		prompt   config.Prompt
 		global   config.GlobalConfig
-		rules    map[string]string
+		rules    []string
 		ctxStore *contextstore.CodeContext
 		want     []string
 	}{
@@ -185,14 +186,14 @@ func TestBuildLLMRequest(t *testing.T) {
 				BuildCommand: "go build",
 				TestCommand:  "go test",
 			},
-			rules: map[string]string{
-				"style": "gofmt",
-				"test":  "required",
+			rules: []string{
+				"Use gofmt for formatting",
+				"Write tests for all functions",
 			},
 			want: []string{
 				"Project Rules:",
-				"- style: gofmt",
-				"- test: required",
+				"- Use gofmt for formatting",
+				"- Write tests for all functions",
 				"Project Configuration:",
 				"- Build Command: go build",
 				"- Test Command: go test",
