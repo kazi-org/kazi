@@ -79,13 +79,16 @@ func (n *noopClient) Close() error {
 }
 
 // NewGoplsClient spawns a gopls process, does "initialize" request
-func NewGoplsClient(ctx context.Context, workspace string, timeout time.Duration) (*GoplsClient, error) {
+func NewGoplsClient(ctx context.Context, workspace string, command string, timeout time.Duration) (*GoplsClient, error) {
 	if timeout == 0 {
 		timeout = 5 * time.Second // default timeout
 	}
+	if command == "" {
+		command = "gopls" // default command
+	}
 
 	ctx2, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(ctx2, "gopls")
+	cmd := exec.CommandContext(ctx2, command)
 	cmd.Dir = workspace
 
 	stdin, err := cmd.StdinPipe()
@@ -102,7 +105,7 @@ func NewGoplsClient(ctx context.Context, workspace string, timeout time.Duration
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("start gopls: %w", err)
+		return nil, fmt.Errorf("start %s: %w", command, err)
 	}
 
 	g := &GoplsClient{
@@ -122,7 +125,7 @@ func NewGoplsClient(ctx context.Context, workspace string, timeout time.Duration
 
 	if err := g.initialize(); err != nil {
 		g.Close()
-		return nil, fmt.Errorf("gopls init: %w", err)
+		return nil, fmt.Errorf("%s init: %w", command, err)
 	}
 
 	return g, nil

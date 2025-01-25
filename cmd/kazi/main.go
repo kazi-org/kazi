@@ -96,9 +96,9 @@ func main() {
 			timeout = 5 * time.Second
 		}
 	}
-	lspCli, err = lsp.NewGoplsClient(context.Background(), cfg.Spec.Global.Workspace, timeout)
+	lspCli, err = lsp.NewGoplsClient(context.Background(), cfg.Spec.Global.Workspace, cfg.Spec.Global.LanguageServer.Command, timeout)
 	if err != nil {
-		log.Printf("Warning: could not start gopls: %v. Using no-op LSP client.", err)
+		log.Printf("Warning: could not start LSP server: %v. Using no-op LSP client.", err)
 		lspCli = lsp.NewNoopClient()
 	}
 	defer lspCli.Close()

@@ -197,7 +197,7 @@ func initMockOrRealAI() (ai.LLMClient, error) {
 
 // initMockOrRealLSP is a placeholder if you want real gopls or a noop
 func initMockOrRealLSP(workspace string) (lsp.LSPClient, error) {
-	return lsp.NewGoplsClient(context.Background(), workspace, 5*time.Second)
+	return lsp.NewGoplsClient(context.Background(), workspace, "gopls", 5*time.Second)
 	// or handle errors
 }
 

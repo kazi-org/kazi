@@ -1,7 +1,6 @@
 package contextstore
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,11 +107,4 @@ func (cs *KaziContextStore) GetCodeContext() *CodeContext {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 	return cs.codeCtx
-}
-
-// computeFileHash is an optional function to detect changes
-func computeFileHash(content string) string {
-	h := sha256.New()
-	h.Write([]byte(content))
-	return fmt.Sprintf("%x", h.Sum(nil))[:16]
 }
