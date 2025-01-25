@@ -1,6 +1,7 @@
 package contextstore
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,7 +150,7 @@ func invalid syntax {
 `,
 			},
 			wantErr:     true,
-			errContains: "parse Go file invalid.go",
+			errContains: "invalid Go code",
 		},
 	}
 
@@ -226,7 +227,8 @@ func invalid syntax {
 
 			// Create context store with mock client
 			store := NewKaziContextStore(tmpDir, mockClient)
-			err = store.BuildOrRefresh()
+			ctx := context.Background()
+			err = store.BuildOrRefresh(ctx)
 
 			if tc.wantErr {
 				if err == nil {
@@ -242,8 +244,8 @@ func invalid syntax {
 			}
 
 			// Get and verify context
-			ctx := store.GetCodeContext()
-			if ctx == nil {
+			codeCtx := store.GetCodeContext()
+			if codeCtx == nil {
 				t.Fatal("expected non-nil code context")
 			}
 
@@ -251,7 +253,7 @@ func invalid syntax {
 			for name, want := range tc.wantSymbols {
 				var found bool
 				var got *SymbolContext
-				for _, fc := range ctx.Files {
+				for _, fc := range codeCtx.Files {
 					if s, ok := fc.Symbols[name]; ok {
 						found = true
 						got = s

@@ -23,7 +23,7 @@ type App struct {
 	config          *config.KaziProject
 	aiClient        ai.LLMClient
 	lspClient       gols.LSPClient
-	ctxStore        *contextstore.KaziContextStore
+	ctxStore        contextstore.Store
 	workspace       string
 	userInteraction workflow.UserInteraction
 }
@@ -67,7 +67,7 @@ func NewApp(opts ...Option) *App {
 
 	// Initialize context store
 	app.ctxStore = contextstore.NewKaziContextStore(absWorkspace, app.lspClient)
-	if err := app.ctxStore.BuildOrRefresh(); err != nil {
+	if err := app.ctxStore.BuildOrRefresh(context.Background()); err != nil {
 		log.Fatalf("build context store: %v", err)
 	}
 

@@ -1,339 +1,258 @@
 package contextstore
 
 import (
+	"context"
 	"fmt"
-	"go/ast"
-	"go/printer"
-	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/kazi-org/kazi/internal/contextstore/format"
 	gols "github.com/kazi-org/kazi/internal/ls/gols"
+	"github.com/pkg/errors"
 )
 
-// KaziContextStore is the main container that builds/refreshes the CodeContext
+// codeScanner is the interface for code scanning operations.
+type codeScanner interface {
+	// scan performs a workspace scan and returns a new CodeContext.
+	scan(ctx context.Context) (*CodeContext, error)
+}
+
+// scannerConfig holds configuration for workspace scanning.
+type scannerConfig struct {
+	// workspace is the root directory to scan
+	workspace string
+	// scanInterval is the minimum time between scans in seconds
+	scanInterval int64
+	// lspClient provides language server protocol functionality
+	lspClient gols.LSPClient
+}
+
+// goWorkspaceScanner handles the scanning of Go workspace files.
+type goWorkspaceScanner struct {
+	config scannerConfig
+}
+
+// KaziContextStore implements the Store interface for managing code context.
 type KaziContextStore struct {
 	mu           sync.RWMutex
 	codeCtx      *CodeContext
 	workspace    string
 	lastScan     int64
 	scanInterval int64
-	lspClient    gols.LSPClient
+	scanner      codeScanner
 }
 
-// NewKaziContextStore creates a new store with default scan interval
-func NewKaziContextStore(workspace string, lspClient gols.LSPClient) *KaziContextStore {
-	return &KaziContextStore{
-		codeCtx: &CodeContext{
-			Files: make(map[string]*FileContext),
-		},
+// NewKaziContextStore creates a new store with default scan interval of 30 seconds.
+func NewKaziContextStore(workspace string, lspClient gols.LSPClient) Store {
+	config := scannerConfig{
 		workspace:    workspace,
 		scanInterval: 30,
 		lspClient:    lspClient,
 	}
+
+	return &KaziContextStore{
+		codeCtx:      NewCodeContext(),
+		workspace:    workspace,
+		scanInterval: config.scanInterval,
+		scanner:      newGoWorkspaceScanner(config),
+	}
 }
 
-// BuildOrRefresh scans the workspace, ignoring .git.
-// Uses LSP client to extract symbols, docstrings, and other metadata
-func (cs *KaziContextStore) BuildOrRefresh() error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	now := time.Now().Unix()
-	if now-cs.lastScan < cs.scanInterval {
-		return nil // skip
-	}
-	codeCtx := &CodeContext{Files: make(map[string]*FileContext)}
-
-	err := filepath.Walk(cs.workspace, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip .git directory
-		if info.Name() == ".git" {
-			return filepath.SkipDir
-		}
-
-		// Only process Go files
-		if !info.IsDir() && strings.HasSuffix(path, ".go") {
-			relPath, err := filepath.Rel(cs.workspace, path)
-			if err != nil {
-				return fmt.Errorf("get relative path: %w", err)
-			}
-
-			// Check if file is valid Go code and get its content
-			content, err := cs.lspClient.GetFileContent(relPath)
-			if err != nil {
-				return fmt.Errorf("read file %s: %w", relPath, err)
-			}
-			if ok, errMsg := cs.lspClient.CheckCode(content); !ok {
-				return fmt.Errorf("parse Go file %s: %s", relPath, errMsg)
-			}
-
-			// Extract package name from file content
-			pkgName := "main" // default
-			if lines := strings.Split(content, "\n"); len(lines) > 0 {
-				if pkgLine := strings.TrimSpace(lines[0]); strings.HasPrefix(pkgLine, "package ") {
-					pkgName = strings.TrimPrefix(pkgLine, "package ")
-				}
-			}
-
-			// Get symbols in file using targeted query
-			symbols, err := cs.lspClient.GetWorkspaceSymbols(filepath.Base(relPath))
-			if err != nil {
-				return fmt.Errorf("get symbols from %s: %w", relPath, err)
-			}
-
-			fileCtx := &FileContext{
-				FilePath: relPath,
-				Symbols:  make(map[string]*SymbolContext),
-			}
-
-			// Convert LSP symbols to SymbolContext with enhanced information
-			for _, sym := range symbols {
-				if filepath.Base(sym.Location.URI) != filepath.Base(path) {
-					continue
-				}
-
-				doc, err := cs.lspClient.GetSymbolDocumentation(filepath.Base(path), sym.Name)
-				if err != nil {
-					// Skip if we can't get documentation
-					continue
-				}
-
-				def, err := cs.lspClient.GetSymbolDefinition(filepath.Base(path), sym.Name)
-				if err != nil {
-					// Skip if we can't get definition
-					continue
-				}
-
-				refs, err := cs.lspClient.GetReferences(sym.Name)
-				if err != nil {
-					// Skip if we can't get references
-					continue
-				}
-
-				// Get precise symbol location
-				loc, err := cs.lspClient.GetSymbolLocation(filepath.Base(path), sym.Name)
-				if err != nil {
-					// Use fallback location from symbol
-					loc = sym.Location
-				}
-
-				symCtx := &SymbolContext{
-					Name:       sym.Name,
-					Kind:       sym.Kind,
-					DocString:  doc,
-					StartLine:  sym.Location.Range.Start.Line + 1,
-					EndLine:    sym.Location.Range.End.Line + 1,
-					Signature:  def.Signature,
-					Exported:   strings.Title(sym.Name) == sym.Name,
-					Package:    pkgName,
-					References: refs,
-					Location:   loc,
-					TypeInfo:   def.Kind,
-				}
-
-				// Add method set and interface information for types
-				if sym.Kind == "type" {
-					symCtx.Methods = extractMethodSet(def)
-					symCtx.Implements = extractImplementedInterfaces(def)
-				}
-
-				fileCtx.Symbols[sym.Name] = symCtx
-			}
-
-			codeCtx.Files[relPath] = fileCtx
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("walk workspace: %w", err)
-	}
-
-	cs.codeCtx = codeCtx
-	cs.lastScan = now
-	return nil
+// newGoWorkspaceScanner creates a new scanner with the given configuration.
+func newGoWorkspaceScanner(config scannerConfig) codeScanner {
+	return &goWorkspaceScanner{config: config}
 }
 
-// GetCodeContext returns the current code context
+// GetCodeContext returns the current code context.
+// This method is safe for concurrent access.
 func (cs *KaziContextStore) GetCodeContext() *CodeContext {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 	return cs.codeCtx
 }
 
-// formatFuncType formats a function type into a string
-func formatFuncType(ft *ast.FuncType) string {
-	var params, results []string
-
-	// Format parameters
-	if ft.Params != nil {
-		for _, p := range ft.Params.List {
-			param := formatNode(p.Type)
-			if len(p.Names) > 0 {
-				names := make([]string, len(p.Names))
-				for i, name := range p.Names {
-					names[i] = name.Name
-				}
-				param = fmt.Sprintf("%s %s", strings.Join(names, ", "), param)
-			}
-			params = append(params, param)
-		}
-	}
-
-	// Format results
-	if ft.Results != nil {
-		for _, r := range ft.Results.List {
-			result := formatNode(r.Type)
-			if len(r.Names) > 0 {
-				names := make([]string, len(r.Names))
-				for i, name := range r.Names {
-					names[i] = name.Name
-				}
-				result = fmt.Sprintf("%s %s", strings.Join(names, ", "), result)
-			}
-			results = append(results, result)
-		}
-	}
-
-	// Combine into signature
-	signature := fmt.Sprintf("(%s)", strings.Join(params, ", "))
-	if len(results) > 0 {
-		if len(results) == 1 && !strings.Contains(results[0], " ") {
-			signature += " " + results[0]
-		} else {
-			signature += fmt.Sprintf(" (%s)", strings.Join(results, ", "))
-		}
-	}
-	return signature
+// GetSymbol implements SymbolReader interface.
+func (cs *KaziContextStore) GetSymbol(name string) *SymbolContext {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.codeCtx.GetSymbol(name)
 }
 
-// formatNode formats an AST node into a string
-func formatNode(node ast.Node) string {
-	switch n := node.(type) {
-	case *ast.Ident:
-		return n.Name
-	case *ast.StarExpr:
-		return "*" + formatNode(n.X)
-	case *ast.ArrayType:
-		if n.Len == nil {
-			return "[]" + formatNode(n.Elt)
-		}
-		return fmt.Sprintf("[%s]%s", formatNode(n.Len), formatNode(n.Elt))
-	case *ast.MapType:
-		return fmt.Sprintf("map[%s]%s", formatNode(n.Key), formatNode(n.Value))
-	case *ast.InterfaceType:
-		return "interface{}"
-	case *ast.StructType:
-		return "struct{}"
-	case *ast.BasicLit:
-		return n.Value
-	case *ast.SelectorExpr:
-		return fmt.Sprintf("%s.%s", formatNode(n.X), n.Sel.Name)
+// GetFile implements FileReader interface.
+func (cs *KaziContextStore) GetFile(path string) *FileContext {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.codeCtx.GetFile(path)
+}
+
+// BuildOrRefresh scans the workspace and updates the code context.
+// It will skip scanning if the last scan was performed within scanInterval seconds.
+func (cs *KaziContextStore) BuildOrRefresh(ctx context.Context) error {
+	// Quick check without lock
+	now := time.Now().Unix()
+	if now-cs.lastScan < cs.scanInterval {
+		return nil
+	}
+
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	// Check again with lock to avoid race condition
+	if now-cs.lastScan < cs.scanInterval {
+		return nil
+	}
+
+	// Use provided context for cancellation
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
 	default:
-		return fmt.Sprintf("<%T>", node)
 	}
+
+	newCtx, err := cs.scanner.scan(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to scan workspace")
+	}
+
+	cs.codeCtx = newCtx
+	cs.lastScan = now
+	return nil
 }
 
-// getFuncSignature returns a string representation of a function's signature
-func getFuncSignature(fn *ast.FuncDecl) string {
-	var buf strings.Builder
-	buf.WriteString("func ")
-	if fn.Recv != nil {
-		buf.WriteByte('(')
-		if len(fn.Recv.List) > 0 {
-			if len(fn.Recv.List[0].Names) > 0 {
-				buf.WriteString(fn.Recv.List[0].Names[0].Name)
-				buf.WriteByte(' ')
-			}
-			printer.Fprint(&buf, token.NewFileSet(), fn.Recv.List[0].Type)
+// scan performs a full workspace scan and returns a new CodeContext.
+func (ws *goWorkspaceScanner) scan(ctx context.Context) (*CodeContext, error) {
+	codeCtx := NewCodeContext()
+
+	err := filepath.Walk(ws.config.workspace, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return errors.Wrap(err, "walk error")
 		}
-		buf.WriteString(") ")
-	}
-	buf.WriteString(fn.Name.Name)
-	buf.WriteByte('(')
-	if fn.Type.Params != nil && len(fn.Type.Params.List) > 0 {
-		for i, param := range fn.Type.Params.List {
-			if i > 0 {
-				buf.WriteString(", ")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+
+		if !info.IsDir() && strings.HasSuffix(path, ".go") {
+			fileCtx, err := ws.processGoFile(ctx, path)
+			if err != nil {
+				return errors.Wrapf(err, "process file %s", path)
 			}
-			if len(param.Names) > 0 {
-				for j, name := range param.Names {
-					if j > 0 {
-						buf.WriteString(", ")
-					}
-					buf.WriteString(name.Name)
+			if fileCtx != nil {
+				relPath, err := filepath.Rel(ws.config.workspace, path)
+				if err != nil {
+					return errors.Wrap(err, "get relative path")
 				}
-				buf.WriteByte(' ')
+				codeCtx.Files[relPath] = fileCtx
 			}
-			printer.Fprint(&buf, token.NewFileSet(), param.Type)
 		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, "walk workspace")
 	}
-	buf.WriteByte(')')
-	if fn.Type.Results != nil {
-		buf.WriteByte(' ')
-		if len(fn.Type.Results.List) > 1 || (len(fn.Type.Results.List) == 1 && len(fn.Type.Results.List[0].Names) > 0) {
-			buf.WriteString("(")
-		}
-		for i, result := range fn.Type.Results.List {
-			if i > 0 {
-				buf.WriteString(", ")
-			}
-			if len(result.Names) > 0 {
-				for j, name := range result.Names {
-					if j > 0 {
-						buf.WriteString(", ")
-					}
-					buf.WriteString(name.Name)
-				}
-				buf.WriteByte(' ')
-			}
-			printer.Fprint(&buf, token.NewFileSet(), result.Type)
-		}
-		if len(fn.Type.Results.List) > 1 || (len(fn.Type.Results.List) == 1 && len(fn.Type.Results.List[0].Names) > 0) {
-			buf.WriteString(")")
-		}
-	}
-	return buf.String()
+
+	return codeCtx, nil
 }
 
-// Helper functions for enhanced type information
-func extractMethodSet(def *gols.SymbolDefinition) []string {
-	var methods []string
-	// Extract method names from signature if it contains method definitions
-	if strings.Contains(def.Signature, "func") {
-		// Basic extraction - can be enhanced based on actual signature format
-		parts := strings.Split(def.Signature, "func")
-		for _, p := range parts[1:] {
-			if name := strings.TrimSpace(strings.Split(p, "(")[0]); name != "" {
-				methods = append(methods, name)
-			}
-		}
+// processGoFile analyzes a single Go file and returns its FileContext.
+func (ws *goWorkspaceScanner) processGoFile(ctx context.Context, path string) (*FileContext, error) {
+	relPath, err := filepath.Rel(ws.config.workspace, path)
+	if err != nil {
+		return nil, errors.Wrap(err, "get relative path")
 	}
-	return methods
+
+	content, err := ws.config.lspClient.GetFileContent(relPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "read file")
+	}
+
+	if ok, errMsg := ws.config.lspClient.CheckCode(content); !ok {
+		return nil, fmt.Errorf("invalid Go code: %s", errMsg)
+	}
+
+	pkgName := format.ExtractPackageName(content)
+	symbols, err := ws.config.lspClient.GetWorkspaceSymbols(filepath.Base(relPath))
+	if err != nil {
+		return nil, errors.Wrap(err, "get symbols")
+	}
+
+	fileCtx := NewFileContext(relPath)
+
+	for _, sym := range symbols {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		if filepath.Base(sym.Location.URI) != filepath.Base(path) {
+			continue
+		}
+
+		symCtx, err := ws.buildSymbolContext(ctx, &sym, pkgName, relPath)
+		if err != nil {
+			// Log error but continue processing other symbols
+			fmt.Printf("Warning: failed to process symbol %s: %v\n", sym.Name, err)
+			continue
+		}
+
+		fileCtx.Symbols[sym.Name] = symCtx
+	}
+
+	return fileCtx, nil
 }
 
-func extractImplementedInterfaces(def *gols.SymbolDefinition) []string {
-	var interfaces []string
-	// Extract interface names from docstring if it mentions implemented interfaces
-	if strings.Contains(def.DocString, "implements") {
-		// Basic extraction - can be enhanced based on actual documentation format
-		parts := strings.Split(def.DocString, "implements")
-		if len(parts) > 1 {
-			ifaces := strings.Split(parts[1], ".")
-			for _, iface := range ifaces {
-				if name := strings.TrimSpace(iface); name != "" {
-					interfaces = append(interfaces, name)
-				}
-			}
-		}
+// buildSymbolContext creates a SymbolContext for a single symbol.
+func (ws *goWorkspaceScanner) buildSymbolContext(ctx context.Context, sym *gols.WorkspaceSymbol, pkgName, filePath string) (*SymbolContext, error) {
+	doc, err := ws.config.lspClient.GetSymbolDocumentation(filepath.Base(filePath), sym.Name)
+	if err != nil {
+		return nil, errors.Wrap(err, "get documentation")
 	}
-	return interfaces
+
+	def, err := ws.config.lspClient.GetSymbolDefinition(filepath.Base(filePath), sym.Name)
+	if err != nil {
+		return nil, errors.Wrap(err, "get definition")
+	}
+
+	refs, err := ws.config.lspClient.GetReferences(sym.Name)
+	if err != nil {
+		return nil, errors.Wrap(err, "get references")
+	}
+
+	loc, err := ws.config.lspClient.GetSymbolLocation(filepath.Base(filePath), sym.Name)
+	if err != nil {
+		loc = sym.Location // fallback to basic location
+	}
+
+	symCtx := &SymbolContext{
+		Name:       sym.Name,
+		Kind:       SymbolKind(sym.Kind),
+		DocString:  doc,
+		StartLine:  sym.Location.Range.Start.Line + 1,
+		EndLine:    sym.Location.Range.End.Line + 1,
+		Signature:  def.Signature,
+		Exported:   format.IsExported(sym.Name),
+		Package:    pkgName,
+		References: refs,
+		Location:   loc,
+		TypeInfo:   def.Kind,
+	}
+
+	if symCtx.Kind == KindType {
+		symCtx.Methods = format.ExtractMethodSet(def)
+		symCtx.Implements = format.ExtractImplementedInterfaces(def)
+	}
+
+	return symCtx, nil
 }
