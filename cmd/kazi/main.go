@@ -27,10 +27,25 @@ func run() error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// Load configuration
-	cfg, err := config.LoadConfig(filepath.Join(wd, ".kazi.yaml"))
+	// Check if stdin has data
+	stat, err := os.Stdin.Stat()
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return fmt.Errorf("check stdin: %w", err)
+	}
+
+	var cfg *config.KaziProject
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		// Data is being piped to stdin
+		cfg, err = config.LoadConfigFromReader(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("load config from stdin: %w", err)
+		}
+	} else {
+		// No stdin data, try loading from file
+		cfg, err = config.LoadConfig(filepath.Join(wd, ".kazi.yaml"))
+		if err != nil {
+			return fmt.Errorf("load config from file: %w", err)
+		}
 	}
 
 	// Initialize LSP client

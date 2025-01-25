@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -39,16 +40,16 @@ type LanguageServer struct {
 	Timeout string `yaml:"timeout,omitempty"` // Duration string like "5s", "1m", etc.
 }
 
-// LoadConfig loads the configuration from the given file path
-func LoadConfig(path string) (*KaziProject, error) {
-	data, err := os.ReadFile(path)
+// LoadConfigFromReader loads the configuration from an io.Reader
+func LoadConfigFromReader(r io.Reader) (*KaziProject, error) {
+	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("read config file: %w", err)
+		return nil, fmt.Errorf("read config: %w", err)
 	}
 
 	var cfg KaziProject
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config file: %w", err)
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
 	// Validate API version
@@ -84,4 +85,15 @@ func LoadConfig(path string) (*KaziProject, error) {
 	}
 
 	return &cfg, nil
+}
+
+// LoadConfig loads the configuration from the given file path
+func LoadConfig(path string) (*KaziProject, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open config file: %w", err)
+	}
+	defer f.Close()
+
+	return LoadConfigFromReader(f)
 }
