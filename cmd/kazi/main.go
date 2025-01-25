@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/kazi-org/kazi/internal/ai"
+	"github.com/kazi-org/kazi/internal/ai/openai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
 	gols "github.com/kazi-org/kazi/internal/ls/gols"
@@ -118,7 +119,7 @@ func initApp(ctx context.Context, configPath string) (*App, error) {
 	}
 
 	// Initialize AI client
-	aiClient, err := ai.NewOpenAIClient()
+	aiClient, err := openai.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("init AI client: %w", err)
 	}

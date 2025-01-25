@@ -1,4 +1,4 @@
-package ai
+package openai
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-func TestOpenAIClient_GetPatch(t *testing.T) {
+func TestClient_GetPatch(t *testing.T) {
 	tests := []struct {
 		name        string
 		prompt      string
@@ -107,7 +107,7 @@ func TestOpenAIClient_GetPatch(t *testing.T) {
 			defer server.Close()
 
 			// Create client with test server URL
-			client := &openAIClient{
+			client := &Client{
 				apiKey: "test-key",
 				client: openai.NewClient(option.WithAPIKey("test-key"), option.WithBaseURL(server.URL)),
 			}
@@ -142,7 +142,7 @@ func TestOpenAIClient_GetPatch(t *testing.T) {
 	}
 }
 
-func TestNewOpenAIClient(t *testing.T) {
+func TestNewClient(t *testing.T) {
 	tests := []struct {
 		name        string
 		envKey      string
@@ -174,8 +174,8 @@ func TestNewOpenAIClient(t *testing.T) {
 				os.Unsetenv(tc.envKey)
 			}
 
-			// Test NewOpenAIClient
-			client, err := NewOpenAIClient()
+			// Test NewClient
+			client, err := NewClient()
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error but got nil")
@@ -190,7 +190,7 @@ func TestNewOpenAIClient(t *testing.T) {
 			}
 
 			// Verify client fields
-			oc, ok := client.(*openAIClient)
+			oc, ok := client.(*Client)
 			if !ok {
 				t.Fatal("client is not an openAIClient")
 			}

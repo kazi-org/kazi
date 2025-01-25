@@ -1,4 +1,5 @@
-package ai
+// Package openai provides an implementation of the ai.LLMClient interface using OpenAI's API.
+package openai
 
 import (
 	"context"
@@ -6,34 +7,32 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kazi-org/kazi/internal/ai"
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
 
-// Simple interface we can mock for testing
-type LLMClient interface {
-	GetPatch(ctx context.Context, prompt string) (string, error)
-}
-
-// openAIClient is a real client using openai-go
-type openAIClient struct {
+// Client is a real client using openai-go
+type Client struct {
 	apiKey string
 	client *openai.Client
 }
 
-func NewOpenAIClient() (LLMClient, error) {
+// NewClient creates a new OpenAI client
+func NewClient() (ai.LLMClient, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("missing OPENAI_API_KEY env")
 	}
 	cli := openai.NewClient(option.WithAPIKey(apiKey))
-	return &openAIClient{
+	return &Client{
 		apiKey: apiKey,
 		client: cli,
 	}, nil
 }
 
-func (o *openAIClient) GetPatch(ctx context.Context, prompt string) (string, error) {
+// GetPatch implements the ai.LLMClient interface
+func (o *Client) GetPatch(ctx context.Context, prompt string) (string, error) {
 	// Create chat completion request
 	resp, err := o.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Model: openai.F(openai.ChatModelGPT4),

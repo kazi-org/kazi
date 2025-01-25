@@ -82,8 +82,8 @@ func (cs *KaziContextStore) BuildOrRefresh() error {
 				}
 			}
 
-			// Get symbols in file
-			symbols, err := cs.lspClient.GetWorkspaceSymbols("")
+			// Get symbols in file using targeted query
+			symbols, err := cs.lspClient.GetWorkspaceSymbols(filepath.Base(relPath))
 			if err != nil {
 				return fmt.Errorf("get symbols from %s: %w", relPath, err)
 			}
@@ -93,7 +93,7 @@ func (cs *KaziContextStore) BuildOrRefresh() error {
 				Symbols:  make(map[string]*SymbolContext),
 			}
 
-			// Convert LSP symbols to SymbolContext
+			// Convert LSP symbols to SymbolContext with enhanced information
 			for _, sym := range symbols {
 				if filepath.Base(sym.Location.URI) != filepath.Base(path) {
 					continue
@@ -117,7 +117,14 @@ func (cs *KaziContextStore) BuildOrRefresh() error {
 					continue
 				}
 
-				fileCtx.Symbols[sym.Name] = &SymbolContext{
+				// Get precise symbol location
+				loc, err := cs.lspClient.GetSymbolLocation(filepath.Base(path), sym.Name)
+				if err != nil {
+					// Use fallback location from symbol
+					loc = sym.Location
+				}
+
+				symCtx := &SymbolContext{
 					Name:       sym.Name,
 					Kind:       sym.Kind,
 					DocString:  doc,
@@ -127,7 +134,17 @@ func (cs *KaziContextStore) BuildOrRefresh() error {
 					Exported:   strings.Title(sym.Name) == sym.Name,
 					Package:    pkgName,
 					References: refs,
+					Location:   loc,
+					TypeInfo:   def.Kind,
 				}
+
+				// Add method set and interface information for types
+				if sym.Kind == "type" {
+					symCtx.Methods = extractMethodSet(def)
+					symCtx.Implements = extractImplementedInterfaces(def)
+				}
+
+				fileCtx.Symbols[sym.Name] = symCtx
 			}
 
 			codeCtx.Files[relPath] = fileCtx
@@ -285,4 +302,38 @@ func getFuncSignature(fn *ast.FuncDecl) string {
 		}
 	}
 	return buf.String()
+}
+
+// Helper functions for enhanced type information
+func extractMethodSet(def *gols.SymbolDefinition) []string {
+	var methods []string
+	// Extract method names from signature if it contains method definitions
+	if strings.Contains(def.Signature, "func") {
+		// Basic extraction - can be enhanced based on actual signature format
+		parts := strings.Split(def.Signature, "func")
+		for _, p := range parts[1:] {
+			if name := strings.TrimSpace(strings.Split(p, "(")[0]); name != "" {
+				methods = append(methods, name)
+			}
+		}
+	}
+	return methods
+}
+
+func extractImplementedInterfaces(def *gols.SymbolDefinition) []string {
+	var interfaces []string
+	// Extract interface names from docstring if it mentions implemented interfaces
+	if strings.Contains(def.DocString, "implements") {
+		// Basic extraction - can be enhanced based on actual documentation format
+		parts := strings.Split(def.DocString, "implements")
+		if len(parts) > 1 {
+			ifaces := strings.Split(parts[1], ".")
+			for _, iface := range ifaces {
+				if name := strings.TrimSpace(iface); name != "" {
+					interfaces = append(interfaces, name)
+				}
+			}
+		}
+	}
+	return interfaces
 }
