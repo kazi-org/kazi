@@ -23,6 +23,9 @@ func NewFileManager(workspace string) FileManager {
 func (fm *defaultFileManager) ReadFile(path string) ([]byte, error) {
 	fullPath := filepath.Join(fm.workspace, path)
 	data, err := os.ReadFile(fullPath)
+	if os.IsNotExist(err) {
+		return nil, &ErrFileNotFound{Path: path}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read file %s: %w", path, err)
 	}
@@ -40,6 +43,9 @@ func (fm *defaultFileManager) WriteFile(path string, data []byte, perm os.FileMo
 func (fm *defaultFileManager) DeleteFile(path string) error {
 	fullPath := filepath.Join(fm.workspace, path)
 	if err := os.Remove(fullPath); err != nil {
+		if os.IsNotExist(err) {
+			return &ErrFileNotFound{Path: path}
+		}
 		return fmt.Errorf("delete file %s: %w", path, err)
 	}
 	return nil
@@ -53,47 +59,60 @@ func (fm *defaultFileManager) CreateDir(path string, perm os.FileMode) error {
 	return nil
 }
 
+func (fm *defaultFileManager) Close() error {
+	return nil // No cleanup needed for basic file manager
+}
+
 // defaultPatchValidator implements PatchValidator interface
 type defaultPatchValidator struct {
-	fm FileManager
+	fm FileReader
 }
 
 // NewPatchValidator creates a new patch validator
-func NewPatchValidator(fm FileManager) PatchValidator {
+func NewPatchValidator(fm FileReader) PatchValidator {
 	return &defaultPatchValidator{
 		fm: fm,
 	}
 }
 
 func (pv *defaultPatchValidator) Validate(ctx context.Context, chunk Chunk) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	switch chunk.Type {
 	case PatchCreate:
 		// Check if file already exists
 		_, err := pv.fm.ReadFile(chunk.File)
 		if err == nil {
-			return fmt.Errorf("create file %s: file already exists", chunk.File)
+			return &ErrFileExists{Path: chunk.File}
+		}
+		if _, ok := err.(*ErrFileNotFound); !ok {
+			return fmt.Errorf("validate create %s: %w", chunk.File, err)
 		}
 
 	case PatchReplace:
 		// Check if file exists and validate line range
 		data, err := pv.fm.ReadFile(chunk.File)
 		if err != nil {
-			return fmt.Errorf("read file %s: %w", chunk.File, err)
+			return fmt.Errorf("validate replace %s: %w", chunk.File, err)
 		}
 		lines := strings.Split(string(data), "\n")
 		if chunk.FromLine < 1 || chunk.FromLine > len(lines) || chunk.ToLine < chunk.FromLine || chunk.ToLine > len(lines) {
-			return fmt.Errorf("apply chunk in %s: line range out of bounds, file has %d lines", chunk.File, len(lines))
+			return fmt.Errorf("line range out of bounds in %s: file has %d lines", chunk.File, len(lines))
 		}
 
 	case PatchDelete:
 		// Check if file exists
 		_, err := pv.fm.ReadFile(chunk.File)
 		if err != nil {
-			return fmt.Errorf("delete file %s: file does not exist", chunk.File)
+			return fmt.Errorf("validate delete %s: %w", chunk.File, err)
 		}
 
 	default:
-		return fmt.Errorf("unknown patch type: %s", chunk.Type)
+		return &ErrInvalidPatchType{Type: chunk.Type}
 	}
 
 	return nil
@@ -112,6 +131,12 @@ func NewPatchApplier(fm FileManager) PatchApplier {
 }
 
 func (pa *defaultPatchApplier) Apply(ctx context.Context, chunk Chunk) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	switch chunk.Type {
 	case PatchCreate:
 		if err := pa.fm.CreateDir(filepath.Dir(chunk.File), 0755); err != nil {
@@ -124,19 +149,22 @@ func (pa *defaultPatchApplier) Apply(ctx context.Context, chunk Chunk) error {
 	case PatchReplace:
 		data, err := pa.fm.ReadFile(chunk.File)
 		if err != nil {
-			return fmt.Errorf("read file %s: %w", chunk.File, err)
+			return fmt.Errorf("read file for replace %s: %w", chunk.File, err)
 		}
 		lines := strings.Split(string(data), "\n")
 		newLines := strings.Split(chunk.Content, "\n")
 		lines = append(lines[:chunk.FromLine-1], append(newLines, lines[chunk.ToLine:]...)...)
 		if err := pa.fm.WriteFile(chunk.File, []byte(strings.Join(lines, "\n")), 0644); err != nil {
-			return fmt.Errorf("write file %s: %w", chunk.File, err)
+			return fmt.Errorf("write file for replace %s: %w", chunk.File, err)
 		}
 
 	case PatchDelete:
 		if err := pa.fm.DeleteFile(chunk.File); err != nil {
 			return fmt.Errorf("delete file %s: %w", chunk.File, err)
 		}
+
+	default:
+		return &ErrInvalidPatchType{Type: chunk.Type}
 	}
 
 	return nil
@@ -171,6 +199,12 @@ func (pr *defaultPatchRollbacker) Backup(path string, isDelete bool) error {
 }
 
 func (pr *defaultPatchRollbacker) Rollback(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	var errs []string
 	for file, data := range pr.backups {
 		if pr.toDelete[file] {
