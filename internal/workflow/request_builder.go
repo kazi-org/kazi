@@ -4,133 +4,133 @@ package workflow
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kazi-org/kazi/internal/contextstore/types"
 )
 
 // RequestBuilder builds AI requests with code context.
 type RequestBuilder struct {
-	codeCtx *types.CodeContext
-	rules   []string
-	config  *Config
+	codeCtx    *types.CodeContext
+	rules      []string
+	config     *Config
+	tokenCount int
 }
 
-// NewRequestBuilderWithConfig creates a new request builder with configuration.
-func NewRequestBuilderWithConfig(codeCtx *types.CodeContext, rules []string, config *Config) *RequestBuilder {
-	return &RequestBuilder{
-		codeCtx: codeCtx,
-		rules:   rules,
-		config:  config,
+// estimateTokens estimates the number of tokens in a string.
+// This is a rough approximation based on GPT tokenization rules.
+func (rb *RequestBuilder) estimateTokens(s string) int {
+	// Rough approximation:
+	// - 1 token per word (split by whitespace)
+	// - 1 token per punctuation
+	// - 1 token per 4 characters for non-word content
+	words := strings.Fields(s)
+	wordTokens := len(words)
+
+	// Count punctuation and special characters
+	punctCount := 0
+	for _, r := range s {
+		if strings.ContainsRune(".,!?;:()[]{}\"'", r) {
+			punctCount++
+		}
 	}
+
+	// Count remaining characters and divide by 4
+	totalChars := utf8.RuneCountInString(s)
+	wordChars := 0
+	for _, word := range words {
+		wordChars += utf8.RuneCountInString(word)
+	}
+	remainingChars := totalChars - wordChars - punctCount
+	charTokens := remainingChars / 4
+
+	return wordTokens + punctCount + charTokens
+}
+
+// addContent adds content to the builder if within token limit
+func (rb *RequestBuilder) addContent(b *strings.Builder, content string) bool {
+	tokens := rb.estimateTokens(content)
+	if rb.config.Global.TokenLimit > 0 && rb.tokenCount+tokens > rb.config.Global.TokenLimit {
+		return false
+	}
+	b.WriteString(content)
+	rb.tokenCount += tokens
+	return true
 }
 
 // BuildRequest builds an AI request with relevant code context.
 func (rb *RequestBuilder) BuildRequest(prompt string) string {
 	var b strings.Builder
+	rb.tokenCount = 0
 
 	// Add system message
-	b.WriteString("You are an expert Go developer who follows best practices and writes clean, maintainable code. Your task is to help modify or create Go code based on the user's request.\n\n")
-	b.WriteString("IMPORTANT: Your response must be a valid JSON object without any markdown formatting or explanation text. Just the raw JSON.\n\n")
-	b.WriteString("The JSON response should have:\n")
-	b.WriteString("1. A commit message with:\n")
-	b.WriteString("   - subject: Short imperative summary (max 50 chars)\n")
-	b.WriteString("   - body: Detailed explanation (optional)\n\n")
-	b.WriteString("2. An array of patches, where each patch has:\n")
-	b.WriteString("   - file: the path to the file to modify or create\n")
-	b.WriteString("   - type: one of:\n")
-	b.WriteString("     - 'create': create a new file\n")
-	b.WriteString("     - 'replace': modify an existing file\n")
-	b.WriteString("     - 'delete': delete an existing file\n")
-	b.WriteString("   - fromLine: (for 'replace' only) the 1-indexed line number where the modification starts\n")
-	b.WriteString("   - toLine: (for 'replace' only) the 1-indexed line number where the modification ends\n")
-	b.WriteString("   - contextBefore: (optional) lines of context before the change\n")
-	b.WriteString("   - contextAfter: (optional) lines of context after the change\n")
-	b.WriteString("   - content: the content to insert/replace\n\n")
-	b.WriteString("Example response (this is what your response should look like):\n")
-	b.WriteString(`{"commit":{"subject":"Add error handling to processData function","body":"- Add error return value\n- Handle edge cases\n- Add error tests"},"patches":[{"file":"main.go","type":"create","content":"package main\n\nfunc main() {\n  // ...\n}\n"},{"file":"utils.go","type":"replace","fromLine":10,"toLine":15,"contextBefore":["package utils","","import \"errors\""],"content":"func processData(data []string) ([]string, error) {\n  if len(data) == 0 {\n    return nil, errors.New(\"empty data\")\n  }\n  // ...\n}\n","contextAfter":["","func otherFunc() {","  // ..."]}]}` + "\n\n")
+	systemMsg := "You are a Go expert. CRITICAL: Respond ONLY with a SINGLE LINE of valid JSON matching this schema:\n\n"
+	rb.addContent(&b, systemMsg)
 
-	b.WriteString("REMEMBER: Your response must be a single line of valid JSON without any markdown formatting, explanation text, or code blocks.\n\n")
+	// JSON schema
+	schema := `{
+  "commit": {
+    "subject": "string (max 50 chars)",
+    "body": "string (optional)"
+  },
+  "patches": [{
+    "file": "string (file path)",
+    "type": "create|replace|delete",
+    "fromLine": "number (1-indexed, required for replace)",
+    "toLine": "number (1-indexed, required for replace)",
+    "contextBefore": ["string (optional)"],
+    "contextAfter": ["string (optional)"],
+    "content": "string (required for create/replace)"
+  }]
+}` + "\n\n"
+	rb.addContent(&b, schema)
 
-	// Add patching guidelines
-	b.WriteString("When creating patches:\n")
-	b.WriteString("1. For new files, use 'create' type and provide the complete file content\n")
-	b.WriteString("2. For modifying files:\n")
-	b.WriteString("   - Use 'replace' type with correct fromLine and toLine\n")
-	b.WriteString("   - Include contextBefore/contextAfter to show surrounding code\n")
-	b.WriteString("   - Ensure the content fits correctly at the specified location\n")
-	b.WriteString("3. For deleting files, use 'delete' type (no content needed)\n")
-	b.WriteString("4. Write clear commit messages:\n")
-	b.WriteString("   - Subject line should be imperative and concise\n")
-	b.WriteString("   - Body should explain the what and why of changes\n")
-	b.WriteString("5. Ensure all necessary imports are included\n")
-	b.WriteString("6. Maintain consistent formatting and style\n\n")
+	// Example
+	example := `Example (EXACTLY like this): {"commit":{"subject":"Add error handling","body":"Add proper error handling"},"patches":[{"file":"main.go","type":"replace","fromLine":10,"toLine":15,"content":"func process() error {\n  return nil\n}"}]}` + "\n\n"
+	rb.addContent(&b, example)
 
-	// Add Go best practices
-	b.WriteString("Follow these Go best practices:\n")
-	b.WriteString("- Give each type a single, well-defined responsibility (Single Responsibility)\n")
-	b.WriteString("- Extend behavior by adding new types or methods rather than modifying existing code (Open-Closed)\n")
-	b.WriteString("- Ensure that substitutable types preserve intended behavior (Liskov Substitution)\n")
-	b.WriteString("- Break larger interfaces into smaller, specialized ones (Interface Segregation)\n")
-	b.WriteString("- Depend on abstractions, not concrete implementations (Dependency Inversion)\n")
-	b.WriteString("- Prefer composition over inheritance to keep code simple and flexible\n")
-	b.WriteString("- Share memory by communicating (use goroutines and channels) rather than communicating by sharing memory\n")
-	b.WriteString("- Return errors explicitly and handle them consistently, avoiding exceptions\n")
-	b.WriteString("- Keep packages small and focused; each should have a single, clear purpose\n")
-	b.WriteString("- Document your code to clarify intent, especially for exported types and functions\n\n")
-
-	// Add global configuration
-	if rb.config != nil && rb.config.Global.Rules != nil {
-		b.WriteString("Global rules:\n")
-		for _, rule := range rb.config.Global.Rules {
-			b.WriteString(fmt.Sprintf("- %s\n", rule))
-		}
-		b.WriteString("\n")
-	}
-
-	// Add specific rules
-	if len(rb.rules) > 0 {
-		b.WriteString("Specific rules:\n")
-		for _, rule := range rb.rules {
-			b.WriteString(fmt.Sprintf("- %s\n", rule))
-		}
-		b.WriteString("\n")
-	}
-
-	// Add code context
+	// Add code context if within token limit
 	if rb.codeCtx != nil {
-		b.WriteString("Code context:\n")
+		b.WriteString("\nCode to modify:\n")
 		for path, file := range rb.codeCtx.Files {
-			b.WriteString(fmt.Sprintf("=== %s ===\n", path))
-			// Add file content with line numbers
+			header := fmt.Sprintf("=== %s ===\n", path)
+			if !rb.addContent(&b, header) {
+				break
+			}
+
+			// Add file content with line numbers if within token limit
 			if file.Content != "" {
-				b.WriteString("Content:\n```go\n")
+				if !rb.addContent(&b, "```go\n") {
+					break
+				}
 				lines := strings.Split(file.Content, "\n")
 				for i, line := range lines {
-					b.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+					lineContent := fmt.Sprintf("%4d | %s\n", i+1, line)
+					if !rb.addContent(&b, lineContent) {
+						rb.addContent(&b, "... (truncated)\n")
+						break
+					}
 				}
-				b.WriteString("```\n\n")
+				rb.addContent(&b, "```\n\n")
 			}
-			// Add symbols with locations
-			b.WriteString("Symbols:\n")
-			for name, sym := range file.Symbols {
-				b.WriteString(fmt.Sprintf("- %s: %s\n", name, sym.Signature))
-				b.WriteString(fmt.Sprintf("  Kind: %s\n", sym.Kind))
-				if sym.DocString != "" {
-					b.WriteString(fmt.Sprintf("  Doc: %s\n", sym.DocString))
-				}
-				if sym.Location != nil {
-					b.WriteString(fmt.Sprintf("  Location: lines %d-%d\n",
-						sym.Location.Range.Start.Line+1,
-						sym.Location.Range.End.Line+1))
-				}
-			}
-			b.WriteString("\n")
 		}
 	}
 
-	// Add the prompt
-	b.WriteString("Instructions:\n")
-	b.WriteString(prompt)
+	// Add rules if within token limit
+	if len(rb.rules) > 0 {
+		b.WriteString("\nFollow these rules:\n")
+		for _, rule := range rb.rules {
+			if !rb.addContent(&b, fmt.Sprintf("- %s\n", rule)) {
+				break
+			}
+		}
+		rb.addContent(&b, "\n")
+	}
+
+	// Always add the prompt
+	rb.addContent(&b, "\nTask:\n")
+	rb.addContent(&b, prompt)
+	rb.addContent(&b, "\n\nRespond ONLY with the JSON. No explanation, no markdown.")
 
 	return b.String()
 }
@@ -201,4 +201,19 @@ func (rb *RequestBuilder) findRelevantContext(prompt string) string {
 	}
 
 	return b.String()
+}
+
+// NewRequestBuilderWithConfig creates a new request builder with configuration.
+func NewRequestBuilderWithConfig(codeCtx *types.CodeContext, rules []string, config *Config) *RequestBuilder {
+	return &RequestBuilder{
+		codeCtx:    codeCtx,
+		rules:      rules,
+		config:     config,
+		tokenCount: 0,
+	}
+}
+
+// Build implements the LLMRequestBuilder interface
+func (rb *RequestBuilder) Build(prompt string) string {
+	return rb.BuildRequest(prompt)
 }

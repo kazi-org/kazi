@@ -187,30 +187,28 @@ func run() error {
 	// Use the first prompt from the config
 	prompt := cfg.Spec.Prompts[0]
 
-	// Process prompt
-	response, err := workflow.Process(ctx, codeCtx, prompt, cfg.Spec.Rules, cfg.Spec.Global)
+	// Create workflow
+	w, err := workflow.NewWorkflow(codeCtx, cfg.Spec.Rules, cfg.Spec.Global)
 	if err != nil {
-		return fmt.Errorf("failed to process workflow: %w", err)
+		return fmt.Errorf("create workflow: %w", err)
 	}
 
-	// Parse patches
-	var patchSet patch.PatchSet
-	if err := json.Unmarshal([]byte(response), &patchSet); err != nil {
-		return fmt.Errorf("parse patches: %w", err)
+	// Process the prompt
+	response, err := w.Execute(context.Background(), prompt)
+	if err != nil {
+		return fmt.Errorf("execute workflow: %w", err)
 	}
 
-	// Print commit message
-	fmt.Printf("\nApplying changes: %s\n", patchSet.Commit.Subject)
-	if patchSet.Commit.Body != "" {
-		fmt.Printf("\n%s\n", patchSet.Commit.Body)
+	// Parse and apply patches
+	var ps patch.PatchSet
+	if err := json.Unmarshal([]byte(response), &ps); err != nil {
+		return fmt.Errorf("parse patch set: %w", err)
 	}
-	fmt.Println()
 
 	// Apply patches
-	for _, chunk := range patchSet.Patches {
-		if err := applyPatch(&chunk); err != nil {
-			return fmt.Errorf("apply patch: %w", err)
-		}
+	applier := patch.NewApplier(cfg.Spec.Global.Workspace)
+	if err := applier.Apply(&ps); err != nil {
+		return fmt.Errorf("apply patches: %w", err)
 	}
 
 	return nil

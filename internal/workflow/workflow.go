@@ -3,12 +3,14 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/kazi-org/kazi/internal/ai"
 	"github.com/kazi-org/kazi/internal/ai/openai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore/types"
+	"github.com/kazi-org/kazi/internal/patch"
 )
 
 // workflow implements request processing.
@@ -43,17 +45,19 @@ func (w *workflow) Execute(ctx context.Context, prompt string) (string, error) {
 	// Build the request
 	request := rb.BuildRequest(prompt)
 
-	// Log the request
-	fmt.Printf("\n=== Request to OpenAI ===\n%s\n=== End Request ===\n\n", request)
-
 	// Process through AI
 	response, err := w.ai.GetPatch(ctx, request)
 	if err != nil {
 		return "", err
 	}
 
-	// Log the response
-	fmt.Printf("\n=== Response from OpenAI ===\n%s\n=== End Response ===\n\n", response)
+	// Try to parse as JSON
+	var ps patch.PatchSet
+	if err := json.Unmarshal([]byte(response), &ps); err != nil {
+		// Print the full response if JSON parsing fails
+		fmt.Printf("\n=== Invalid JSON Response ===\n%s\n=== End Response ===\n\n", response)
+		return "", fmt.Errorf("invalid JSON response: %w", err)
+	}
 
 	return response, nil
 }

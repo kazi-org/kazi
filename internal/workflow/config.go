@@ -7,7 +7,8 @@ import (
 
 // GlobalConfig holds global configuration settings.
 type GlobalConfig struct {
-	Rules []string // Global rules to apply
+	Rules      []string // Global rules to apply
+	TokenLimit int      // Maximum number of tokens for context (0 means no limit)
 }
 
 // Config holds configuration for the workflow.
@@ -19,7 +20,8 @@ type Config struct {
 func NewConfigFromGlobal(g config.GlobalConfig, rules []string) *Config {
 	return &Config{
 		Global: GlobalConfig{
-			Rules: rules,
+			Rules:      rules,
+			TokenLimit: 4000, // Default to 4000 tokens
 		},
 	}
 }

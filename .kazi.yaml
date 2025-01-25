@@ -1,0 +1,37 @@
+apiVersion: kazi.io/v1
+kind: KaziProject
+metadata:
+  name: my-go-project
+  labels:
+    language: go
+    type: backend
+
+spec:
+  global:
+    workspace: "."
+    lintCommand: "golangci-lint run"
+    testCommand: "go test ./..."
+    languageServer:
+      name: gopls
+      command: gopls
+      timeout: 30s
+    tokenLimit: 4000  # Default token limit for context
+
+  rules:
+    - Give each type a single, well-defined responsibility (Single Responsibility).
+    - Extend behavior by adding new types or methods rather than modifying existing code (Open-Closed).
+    - Ensure that substitutable types preserve intended behavior (Liskov Substitution).
+    - Break larger interfaces into smaller, specialized ones (Interface Segregation).
+    - Depend on abstractions, not concrete implementations (Dependency Inversion).
+    - Prefer composition over inheritance to keep code simple and flexible.
+    - Share memory by communicating (use goroutines and channels) rather than communicating by sharing memory.
+    - Return errors explicitly and handle them consistently, avoiding exceptions.
+    - Keep packages small and focused; each should have a single, clear purpose.
+    - Document your code to clarify intent, especially for exported types and functions.
+
+  prompts:
+    - "Review this code for potential performance improvements, focusing on reducing allocations, optimizing loops, and identifying concurrency opportunities."
+    - "Add comprehensive error handling to this code following Go best practices. Include appropriate logging, error wrapping, and ensure all error cases are handled gracefully."
+    - "Refactor this code to improve its testability. Extract dependencies into interfaces, make the code more modular, and add unit tests with good coverage."
+    - "Add detailed documentation to this code including package overview, function documentation with examples, and clear explanations of complex logic or algorithms."
+    - "Analyze this code for potential race conditions or concurrency issues. Suggest improvements using Go's concurrency patterns like mutexes, channels, or sync primitives." 

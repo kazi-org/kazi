@@ -32,6 +32,7 @@ type GlobalConfig struct {
 	LintCommand    string         `yaml:"lintCommand"`
 	TestCommand    string         `yaml:"testCommand"`
 	LanguageServer LanguageServer `yaml:"languageServer"`
+	TokenLimit     int            `yaml:"tokenLimit,omitempty"` // Maximum number of tokens for context (0 means no limit)
 }
 
 type LanguageServer struct {
