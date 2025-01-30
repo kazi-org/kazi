@@ -17,10 +17,6 @@ import (
 // mockLSPClient implements LSPClient for testing
 type mockLSPClient struct {
 	mock.Mock
-	symbols      []types.WorkspaceSymbol
-	docs         map[string]string
-	definitions  map[string]*types.SymbolDefinition
-	references   map[string][]*types.Location
 	fileContents map[string]string
 }
 
@@ -88,12 +84,24 @@ func main() {
 `), 0644)
 	assert.NoError(t, err)
 
-	mockClient := new(mockLSPClient)
+	// Create mock client with file contents
+	mockClient := &mockLSPClient{
+		fileContents: map[string]string{
+			testFile: `package main
+
+func main() {
+	println("Hello, World!")
+}`,
+		},
+	}
+
+	// Set up mock expectations
 	mockClient.On("GetFileContent", mock.Anything).Return(`package main
 
 func main() {
 	println("Hello, World!")
 }`, nil)
+
 	mockClient.On("GetWorkspaceSymbols", mock.Anything).Return([]types.WorkspaceSymbol{
 		{
 			Name: "main",
@@ -107,8 +115,19 @@ func main() {
 			},
 		},
 	}, nil)
+
 	mockClient.On("GetSymbolDocumentation", mock.Anything, mock.Anything).Return("main function", nil)
-	mockClient.On("GetReferences", mock.Anything, mock.Anything).Return([]*types.Location{}, nil)
+
+	mockClient.On("GetReferences", mock.Anything, mock.Anything).Return([]*types.Location{
+		{
+			URI: "main.go",
+			Range: types.Range{
+				Start: types.Position{Line: 3, Character: 1},
+				End:   types.Position{Line: 3, Character: 5},
+			},
+		},
+	}, nil)
+
 	mockClient.On("GetSymbolDefinition", mock.Anything, mock.Anything).Return(&types.SymbolDefinition{
 		Name:      "main",
 		Kind:      types.KindFunction,
@@ -117,6 +136,7 @@ func main() {
 		EndLine:   5,
 		DocString: "main function",
 	}, nil)
+
 	mockClient.On("GetSymbolLocation", mock.Anything, mock.Anything).Return(&types.Location{
 		URI: "main.go",
 		Range: types.Range{
@@ -124,9 +144,11 @@ func main() {
 			End:   types.Position{Line: 3, Character: 5},
 		},
 	}, nil)
+
 	mockClient.On("CheckCode", mock.Anything).Return(true, nil)
 	mockClient.On("Close").Return(nil)
 
+	// Create store with mock client
 	store := NewKaziContextStore(StoreConfig{
 		Workspace:    testDir,
 		ScanInterval: 30,
@@ -152,6 +174,9 @@ func main() {
 	ctx := store.GetCodeContext()
 	assert.NotNil(t, ctx)
 	assert.Len(t, ctx.Files, 1)
+
+	// Verify all mock expectations were met
+	mockClient.AssertExpectations(t)
 }
 
 // stringSliceEqual returns true if two string slices have the same elements in the same order

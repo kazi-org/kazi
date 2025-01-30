@@ -1,4 +1,3 @@
-// Package main provides the main entry point for the Kazi application.
 package main
 
 import (
@@ -13,26 +12,39 @@ func TestRun(t *testing.T) {
 	// Create test directory
 	testDir := t.TempDir()
 
-	// Initialize git repo
-	err := exec.Command("git", "init", testDir).Run()
-	if err != nil {
-		t.Fatalf("failed to initialize git repo: %v", err)
-	}
-
-	// Change to test directory
+	// Save original directory
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get current directory: %v", err)
 	}
-	defer os.Chdir(origDir)
 
+	// Change to test directory
 	if err := os.Chdir(testDir); err != nil {
 		t.Fatalf("failed to change directory: %v", err)
 	}
 
-	// Create test config file
-	err = os.WriteFile(".kazi.yaml", []byte(`
-apiVersion: kazi.io/v1
+	// Cleanup
+	defer func() {
+		os.Chdir(origDir)
+	}()
+
+	// Initialize git repo
+	err = exec.Command("git", "init", testDir).Run()
+	if err != nil {
+		t.Fatalf("failed to initialize git repo: %v", err)
+	}
+
+	// Create test file
+	err = os.WriteFile("main.go", []byte(`package main
+
+func main() {
+	println("Hello, World!")
+}
+`), 0644)
+	assert.NoError(t, err)
+
+	// Create test config
+	err = os.WriteFile(".kazi.yaml", []byte(`apiVersion: kazi.io/v1
 kind: Config
 metadata:
   name: test-config
@@ -40,11 +52,9 @@ spec:
   rules:
     - test rule
 `), 0644)
-	if err != nil {
-		t.Fatalf("failed to write config file: %v", err)
-	}
+	assert.NoError(t, err)
 
-	// Run test
+	// Run the command
 	err = run()
 	assert.NoError(t, err)
 }

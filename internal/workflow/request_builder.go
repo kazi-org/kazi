@@ -59,6 +59,11 @@ func (rb *RequestBuilder) addContent(b *strings.Builder, content string) bool {
 	return true
 }
 
+// TokenCount returns the current token count.
+func (rb *RequestBuilder) TokenCount() int {
+	return rb.tokenCount
+}
+
 // BuildRequest builds an AI request with relevant code context.
 func (rb *RequestBuilder) BuildRequest(prompt string) string {
 	var b strings.Builder
@@ -66,6 +71,9 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
 
 	// Add system message
 	systemMsg := `You are a Go expert. You will help modify or create Go code based on the user's request.
+
+IMPORTANT: You MUST respond with ONLY a JSON object. No other text, no explanations, no markdown.
+The JSON must match this EXACT schema:
 
 <structured_output>
 {
@@ -136,7 +144,7 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
           },
           "content": {
             "type": "string",
-            "description": "New content with properly escaped special characters (tabs as \\t, newlines as \\n, quotes as \\\")",
+            "description": "New content to insert. IMPORTANT: All special characters must be properly escaped. For example:\n- Use \\n for newlines\n- Use \\t for tabs\n- Use \\" for quotes\nDo not use raw newlines in the content field. Every newline must be \\n.",
             "required": true
           }
         }
@@ -146,15 +154,19 @@ func (rb *RequestBuilder) BuildRequest(prompt string) string {
 }
 </structured_output>
 
-IMPORTANT: 
-1. Your response must be VALID JSON matching the above schema exactly
-2. Make patches as minimal as possible, changing only necessary lines
-3. Line numbers must match the actual code context provided
-4. All code in content fields must properly escape special characters
-5. If multiple changes are needed, include multiple patches in correct order
-6. Verify line numbers and context match the actual code
+CRITICAL RESPONSE RULES:
+1. Your response must be ONLY the JSON object. No other text before or after.
+2. The JSON must be properly formatted and valid
+3. All strings in the JSON must be properly escaped:
+   - Use \\n for newlines (NEVER use raw newlines)
+   - Use \\t for tabs
+   - Use \\" for quotes
+4. Make patches as minimal as possible
+5. Line numbers must match the actual code
+6. Verify all required fields are present
 
-Example response:
+Here is an example of a valid response:
+
 {
   "commit": {
     "subject": "Add new endpoint"
@@ -166,7 +178,7 @@ Example response:
     "toLine": 10,
     "linesBefore": ["package main", "", "import ("],
     "linesAfter": [")", "", "func createUser(w http.ResponseWriter, r *http.Request) {"],
-    "content": "\t\"encoding/json\"\n\t\"fmt\"\n\t\"net/http\""
+    "content": "\\t\\"encoding/json\\"\\n\\t\\"fmt\\"\\n\\t\\"net/http\\""
   }]
 }
 `

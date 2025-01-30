@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,14 +16,27 @@ import (
 	"github.com/kazi-org/kazi/internal/ai/openai"
 	"github.com/kazi-org/kazi/internal/config"
 	"github.com/kazi-org/kazi/internal/contextstore"
+	"github.com/kazi-org/kazi/internal/log"
 	"github.com/kazi-org/kazi/internal/ls/gols"
 	"github.com/kazi-org/kazi/internal/patch"
 	"github.com/kazi-org/kazi/internal/workflow"
 )
 
 func main() {
+	// Parse flags
+	debug := flag.Bool("debug", false, "Enable debug logging")
+	flag.Parse()
+
+	// Enable debug logging if requested
+	if *debug {
+		log.EnableDebug()
+		log.Debug("Debug logging enabled")
+		log.Debug("Command line arguments: %v", os.Args)
+		log.Debug("Non-flag arguments: %v", flag.Args())
+	}
+
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		log.Error("%v", err)
 		os.Exit(1)
 	}
 }
@@ -249,13 +263,19 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
+	log.Debug("Working directory: %s", wd)
 
 	var cfg *config.KaziProject
 
+	// Get non-flag arguments
+	args := flag.Args()
+	log.Debug("Processing arguments: %v", args)
+
 	// Check for command line arguments first
-	if len(os.Args) > 1 {
-		// Use the first argument as the prompt
-		cfg = config.DefaultConfig(os.Args[1])
+	if len(args) > 0 {
+		// Use the first non-flag argument as the prompt
+		log.Debug("Using argument as prompt: %s", args[0])
+		cfg = config.DefaultConfig(args[0])
 	} else {
 		// Check if stdin has data
 		stat, err := os.Stdin.Stat()
@@ -265,13 +285,16 @@ func run() error {
 
 		if (stat.Mode() & os.ModeCharDevice) == 0 {
 			// Data is being piped to stdin
+			log.Debug("Reading config from stdin")
 			cfg, err = config.LoadConfigFromReader(os.Stdin)
 			if err != nil {
 				return fmt.Errorf("load config from stdin: %w", err)
 			}
 		} else {
 			// No stdin data, try loading from file
-			cfg, err = config.LoadConfig(filepath.Join(wd, ".kazi.yaml"))
+			configPath := filepath.Join(wd, ".kazi.yaml")
+			log.Debug("Loading config from file: %s", configPath)
+			cfg, err = config.LoadConfig(configPath)
 			if err != nil {
 				return fmt.Errorf("load config from file: %w", err)
 			}

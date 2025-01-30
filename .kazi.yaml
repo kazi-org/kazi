@@ -1,7 +1,7 @@
 apiVersion: kazi.io/v1
 kind: KaziProject
 metadata:
-  name: my-go-project
+  name: todo-api
   labels:
     language: go
     type: backend
@@ -30,8 +30,33 @@ spec:
     - Document your code to clarify intent, especially for exported types and functions.
 
   prompts:
-    - "Create a basic HTTP server with a GET /users endpoint that returns a list of users. Include a User struct with fields for ID, Name, and Email. Store users in memory for now."
-    - "Add a POST /user endpoint that creates a new user. Validate that the name and email are not empty, and generate a unique ID for each user. Return appropriate HTTP status codes."
-    - "Implement a DELETE /user/:id endpoint that removes a user by their ID. Return 404 if the user is not found and 200 on successful deletion."
-    - "Add a PUT /user/:id endpoint to update an existing user's information. Validate the input and return appropriate status codes (404 if not found, 400 for invalid input, 200 for success)."
-    - "Create a GET /products endpoint that returns a list of products. Include a Product struct with fields for ID, Name, Description, and Price. Store products in memory similar to users." 
+    - "Create a complete REST API for a TODO app with the following features:
+       - Use a clean architecture with separate layers for handlers, services, and repositories
+       - Implement CRUD operations for todos (Create, Read, Update, Delete)
+       - Each todo should have: ID, Title, Description, DueDate, Status (pending/completed), CreatedAt, UpdatedAt
+       - Use in-memory storage for now but design for easy database integration later
+       - Include proper error handling and validation
+       - Add comprehensive test coverage for all components
+       - Use chi router for routing
+       - Include middleware for logging and request ID tracking
+       - Add OpenAPI/Swagger documentation"
+
+    - "Enhance the TODO API with the following features:
+       - Add user authentication using JWT tokens
+       - Associate todos with users (each user can only see/modify their own todos)
+       - Add middleware to verify JWT tokens and extract user information
+       - Update all handlers to handle user context
+       - Add user registration and login endpoints
+       - Update tests to handle authentication
+       - Add rate limiting middleware to protect endpoints"
+
+    - "Add advanced features to the TODO API:
+       - Implement todo categories/tags for better organization
+       - Add filtering by status, due date, and tags
+       - Add sorting options (by due date, creation date, status)
+       - Implement pagination for list endpoints
+       - Add bulk operations (create/update/delete multiple todos)
+       - Add due date notifications using background workers
+       - Add metrics collection using Prometheus
+       - Implement caching using Redis for frequently accessed data
+       - Add API versioning" 
