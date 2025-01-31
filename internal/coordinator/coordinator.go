@@ -1,42 +1,90 @@
-// Package coordinator provides a single interface that orchestrates
-// the entire workflow from user prompt to final validated code changes.
+// coordinator.go
+//
+// Defines the Coordinator interface plus a simplified but more powerful 
+// DefaultCoordinator that uses the ContextAggregator + LLMClient + patch + validation.
 
 package coordinator
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/yourorg/kazi/internal/patch"
-	"github.com/yourorg/kazi/internal/project"
 	"github.com/yourorg/kazi/internal/validation"
 )
 
-// Coordinator orchestrates the prompt -> LLM -> patch -> validation loop.
+// Coordinator orchestrates prompt -> gather context -> LLM -> patch -> validation -> finalize.
 type Coordinator interface {
-	// ProcessPrompt is the main workflow:
-	//  1. Load/Update project context
-	//  2. Generate a patch from the LLM
-	//  3. Apply the patch
-	//  4. Validate
-	//  5. Commit or revert
-	ProcessPrompt(prompt string) error
+	// ProcessPrompt is the main entry. It gathers context from various sources,
+	// calls the LLM, applies patches, runs validation, and finalizes changes.
+	ProcessPrompt(ctx context.Context, userPrompt string) error
 }
 
-// DefaultCoordinator is a reference implementation that composes
-// a Project Manager, Patch Applier, and Validation Pipeline.
-// We also may reference an LSP client or knowledge logs if needed.
+// DefaultCoordinator composes everything needed for a typical Kazi workflow.
 type DefaultCoordinator struct {
-	ProjectManager project.Manager
-	PatchApplier   patch.Applier
-	Validator      validation.Pipeline
-	// Possibly: LLM client, doc store, ephemeral logs, etc.
+	// We standardize how we gather context from multiple sources 
+	// by referencing a ContextAggregator.
+	ContextAggregator ContextAggregator
+
+	// We also rely on an LLMClient to produce patches from the final prompt.
+	LLMClient LLMClient
+
+	// Applier for the patch
+	PatchApplier patch.Applier
+
+	// Validation pipeline
+	Validator validation.Pipeline
+
+	// We can define which context items or keys to gather each time. 
+	// For instance, "domainConstraints", "docs/productContext", "ephemeralLog".
+	ContextItems []ContextItem
 }
 
-// ProcessPrompt is a stub to illustrate how you'd orchestrate the workflow.
-func (dc *DefaultCoordinator) ProcessPrompt(prompt string) error {
-	// 1. Retrieve or update the project (dc.ProjectManager.LoadProject(...) if needed)
-	// 2. Possibly retrieve code chunks via ProvideChunks(...)
-	// 3. Call LLM with the project + chunk info => get patch
-	// 4. dc.PatchApplier.Apply(patchSet)
-	// 5. dc.Validator.ValidateAll()
-	// 6. If success, commit or finalize. If fail, revert or ask user.
+// ProcessPrompt orchestrates the entire loop in a simplified but more powerful approach.
+func (dc *DefaultCoordinator) ProcessPrompt(ctx context.Context, userPrompt string) error {
+	if dc.ContextAggregator == nil {
+		return fmt.Errorf("nil ContextAggregator in coordinator")
+	}
+	if dc.LLMClient == nil {
+		return fmt.Errorf("nil LLMClient in coordinator")
+	}
+	if dc.PatchApplier == nil {
+		return fmt.Errorf("nil PatchApplier")
+	}
+	if dc.Validator == nil {
+		return fmt.Errorf("nil Validator")
+	}
+
+	// 1. Gather all contexts from various sources
+	contextStr, err := dc.ContextAggregator.Aggregate(ctx, dc.ContextItems)
+	if err != nil {
+		return fmt.Errorf("aggregate context: %w", err)
+	}
+
+	// 2. Build a final prompt by merging the user's prompt with the aggregated contexts
+	finalPrompt := fmt.Sprintf("User Task:\n%s\n\nAdditional Context:\n%s", userPrompt, contextStr)
+
+	// 3. Call the LLM to get a patch
+	ps, err := dc.LLMClient.GeneratePatch(ctx, finalPrompt)
+	if err != nil {
+		return fmt.Errorf("generate patch: %w", err)
+	}
+	if ps == nil {
+		return fmt.Errorf("LLM returned nil PatchSet")
+	}
+
+	// 4. Apply the patch
+	if err := dc.PatchApplier.Apply(ctx, ps); err != nil {
+		return fmt.Errorf("apply patch: %w", err)
+	}
+
+	// 5. Validate the newly patched code
+	res := dc.Validator.ValidateAll(ctx)
+	if !res.Success {
+		return fmt.Errorf("validation failed:\n%v", res.Error())
+	}
+
+	// 6. If we get here, all is well. We might finalize or commit changes
+	fmt.Println("All done! Patch applied and validated successfully.")
 	return nil
 }
