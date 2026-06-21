@@ -183,16 +183,24 @@ agent stays focused on implementation. The LiveView dashboard is for inspection
 
 ## 10. Build order (a vertical slice of the final design, not a different one)
 
-Each milestone uses the *final* substrates at n=1; nothing is throwaway.
+Each milestone uses the *final* substrates at n=1; nothing is throwaway. The
+walking skeleton spans idea → production from Slice 0: every lifecycle phase gets
+its thinnest version on day one (integrate + deploy + verify-live included), and
+later slices *deepen* phases rather than add missing ones (ADR-0007).
 
-- **MVP-0** — one goal (`tests green`), one predicate provider (test runner), one
-  harness adapter (`claude -p`), the convergence loop with regression + flake +
-  budget handling. Single node. Prove convergence on one real repo.
-- **MVP-1** — add the prod-log predicate and the coverage guard → full `/qualify`
-  as a controller.
-- **MVP-2** — JetStream leases + presence → kill multi-session conflicts.
-- **MVP-3** — graph-aware partitioning + LiveView dashboard + Telegram goal-in /
-  ping-out → the public-worthy thing.
+- **MVP-0 (Slice 0)** — one goal spanning code + live predicates (`tests green`
+  AND a live prod probe), a test-runner provider, an http_probe provider, a
+  `claude -p` adapter, the convergence loop with non-agent **actions** (integrate:
+  branch/PR/merge; deploy: ship the artifact), objective termination, evidence in
+  SQLite. Single node. Proves a thin idea → production reconcile on a tiny
+  deployable fixture.
+- **MVP-1 (Slice 1)** — regression + flake + budget/stuck handling; add the
+  prod-log predicate and the coverage guard → full `/qualify` as a controller.
+- **MVP-2 (Slice 2)** — creation mode (failing acceptance predicates + browser
+  provider + vacuous-goal guard); kazi builds features, not only repairs.
+- **MVP-3 (Slice 3+)** — deepen: JetStream leases + presence, graph-aware
+  partitioning, richer deploy (multi-env/rollback), standing reconcilers,
+  idea→predicate front-end, LiveView dashboard, Telegram goal-in / ping-out.
 
-Dogfood on the user's own repos through MVP-2 before any world-facing claim. The
-public product falls out of the internal tool that already earns its keep.
+Dogfood on real repos through MVP-2 before any world-facing claim; from creation
+mode onward, kazi builds kazi.
