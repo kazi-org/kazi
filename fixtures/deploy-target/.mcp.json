@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "code-review-graph": {
+      "args": [
+        "mcp"
+      ],
+      "command": "code-review-graph"
+    }
+  }
+}
