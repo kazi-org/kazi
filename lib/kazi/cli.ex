@@ -207,6 +207,12 @@ defmodule Kazi.CLI do
       Enum.map_join(kinds, ", ", &inspect/1)
   end
 
+  defp format_run_error(:vacuous_goal),
+    do:
+      "goal is vacuous — every predicate already passes at t0, so there is nothing " <>
+        "to build or repair. A creation/repair goal must have at least one predicate " <>
+        "failing before kazi starts (concept R3); the goal is underspecified."
+
   defp format_run_error(:await_timeout),
     do: "the loop did not reach a terminal state within the await timeout"
 
