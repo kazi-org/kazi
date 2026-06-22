@@ -181,7 +181,10 @@ graph/repo-map + harness; use fixture repos; no real network. Build on
 - [x] T4.6 SHA-keyed orientation-pack cache in the read-model, incremental invalidation on the changed blast radius + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022, UC-006]  deps: [T4.2, T0.9]  acc: pack cached by (workspace, git-sha, failing-set); reused when unchanged; invalidated on blast-radius change; SQLite round-trip test  done: 2026-06-22 PR #47
 - [x] T4.7 Bounded working-set digest across iterations (from T4.1 json) distilled into the next prompt -- map memory, NOT conversation + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022]  deps: [T4.1, T4.3]  acc: next prompt carries a compact files-touched/what-changed note; no transcript carried; hermetic doubles  done: 2026-06-22 PR #48
 - [x] T4.8 claw-code hygiene in the adapter: per-dispatch token ceiling + evidence/tool-result truncation + minimal per-goal tool/permission set + tests  Owner: TBD  Est: 1h  verifies: [UC-009, UC-022]  deps: [T0.6]  acc: a dispatch is capped + evidence truncated to a budget; asserted via stub  done: 2026-06-22 PR #45
-- [ ] T4.9 (deferred, ADR-0005) Pluggable semantic-retrieval memory adapter via graphify embeddings (RAG over the target) feeding `build_prompt`  Owner: TBD  Est: TBD  verifies: [UC-022]  deps: [T4.2]  acc: optional adapter returns top-k relevant snippets for a failing predicate; off by default; core loop unchanged
+**T4.9 Pluggable semantic-retrieval memory adapter (verifies UC-022) -- UN-DEFERRED + EXPANDED into T4.9a-c (re-planned 2026-06-22, see ADR-0012). Off by default; the deterministic orientation pack (ADR-0010) + thin evidence (ADR-0009) remain the contract; retrieval only augments. Hermetic via a stub retriever; the real graphify-embeddings backend is integration-tagged/excluded by default.**
+- [ ] T4.9a `Kazi.Retrieval` behaviour (`retrieve/3` -> top-k snippets) + a default NO-OP backend (returns []) + inject snippets into `build_prompt/3` as a clearly-delimited optional section, OFF by default + tests  Owner: TBD  Est: 2h  verifies: [UC-022]  deps: [T4.2, T4.3]  acc: with retrieval disabled (default) `build_prompt` output is byte-identical to today; with an injected stub retriever, top-k snippets render in a dedicated section AFTER the orientation prefix + evidence body; deterministic given a fixed retriever; hermetic
+- [ ] T4.9b Graphify-embeddings backend implementing `Kazi.Retrieval`: embed the target + similarity-search the failing predicate's evidence terms for top-k snippets + a tagged integration test (the SAME behaviour-conformance shape as the stub) excluded by default  Owner: TBD  Est: 2.5h  verifies: [UC-022]  deps: [T4.9a]  acc: the backend returns top-k snippets for a query against a fixture index; the integration test is tagged and skipped without the graphify tooling so default `mix test` stays hermetic
+- [ ] T4.9c Opt-in wiring + cache reuse: enable retrieval per-goal via config/opts; reuse the T4.6 SHA-keyed cache to avoid re-embedding an unchanged target; assert the core loop is unchanged when off + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022, UC-006]  deps: [T4.9a, T4.6]  acc: a goal/config can enable retrieval; off-by-default leaves the loop + prompt unchanged; enabling injects retrieved snippets; the SHA-keyed cache is reused when the target is unchanged; hermetic
 
 ## Parallel Work
 
@@ -222,6 +225,8 @@ Waves reference task IDs; toggle the single checkbox in the WBS above. Run
 - **Wave 16 (6 agents):** T3.1b, T3.1c, T3.2a, T3.5b, T3.6b, T3.7a
 - **Wave 17 (6 agents):** T3.1d, T3.2b, T3.5c, T3.6c, T3.6d, T3.7b
 - **Wave 18 (1 agent):** T3.7c   (final ingress->authoring->egress e2e)
+- **Wave 19 (1 agent):** T4.9a   (retrieval behaviour + no-op default + build_prompt opt-in section)
+- **Wave 20 (2 agents):** T4.9b, T4.9c   (graphify-embeddings backend; opt-in wiring + cache reuse)
 
 T3.3/T3.4 (deploy deepening, standing mode) and now T3.1/T3.2/T3.5/T3.6/T3.7
 (NATS leases, graph partitioning, idea->predicate authoring, LiveView dashboard,
@@ -269,6 +274,16 @@ different directories in one commit. Add tests with every implementation task
 (API/http_probe test for any endpoint, Playwright test for any UI).
 
 ## Progress Log
+
+### 2026-06-22 -- Change Summary (T4.9 un-deferred)
+- E3 Slice-3 epic shipped end-to-end (T3.1a-d, T3.2a-b, T3.5a-c, T3.6a-d, T3.7a-c;
+  PRs #49-#64). Tests 372 -> 650.
+- Un-deferred T4.9 (per user direction) and granularized it into T4.9a-c (ADR-0012):
+  a `Kazi.Retrieval` behaviour with a no-op default + optional build_prompt section
+  (T4.9a), a graphify-embeddings backend integration-gated like the NATS test (T4.9b),
+  and opt-in wiring + T4.6 cache reuse (T4.9c). Off by default; deterministic
+  orientation (ADR-0010) + thin evidence (ADR-0009) remain the contract.
+- Scheduled Waves 19-20. New ADR-0012 (pluggable retrieval-memory adapter).
 
 ### 2026-06-22 -- Change Summary (Slice-3 granularization)
 - E4 context-injection epic shipped: T4.1-T4.8 merged (PRs #41-#48), T4.9 deferred
