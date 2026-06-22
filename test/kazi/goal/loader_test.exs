@@ -1,0 +1,166 @@
+defmodule Kazi.Goal.LoaderTest do
+  use ExUnit.Case, async: true
+  doctest Kazi.Goal.Loader
+
+  alias Kazi.{Budget, Goal, Predicate, Scope}
+  alias Kazi.Goal.Loader
+
+  @example_path Path.join([
+                  File.cwd!(),
+                  "priv",
+                  "examples",
+                  "deploy_target.toml"
+                ])
+
+  describe "load/1 — the checked-in example goal fixture" do
+    test "parses priv/examples/deploy_target.toml into a Goal" do
+      assert {:ok, %Goal{} = goal} = Loader.load(@example_path)
+
+      assert goal.id == "deploy-target-slice0"
+      assert goal.name =~ "Slice 0"
+      assert goal.metadata == %{"fixture" => "fixtures/deploy-target", "slice" => "0"}
+
+      assert %Budget{max_iterations: 10, max_tokens: 500_000, max_wall_clock_ms: nil} =
+               goal.budget
+
+      assert %Scope{workspace: "fixtures/deploy-target", paths: ["main.go"], repo: nil} =
+               goal.scope
+    end
+
+    test "the CODE predicate is a test_runner over the fixture's go test" do
+      assert {:ok, goal} = Loader.load(@example_path)
+
+      # Both example predicates are ordinary (non-guard) goals to reach.
+      assert goal.guards == []
+      assert [tests, _live] = goal.predicates
+
+      assert %Predicate{id: "go-tests", kind: :tests, guard?: false} = tests
+      assert tests.config[:cmd] == "go test ./..."
+      assert tests.description =~ "go test"
+    end
+
+    test "the LIVE predicate is an http_probe asserting /healthz returns \"ok\"" do
+      assert {:ok, goal} = Loader.load(@example_path)
+      assert [_tests, live] = goal.predicates
+
+      assert %Predicate{id: "healthz-live", kind: :http_probe, guard?: false} = live
+      assert live.config[:path] == "/healthz"
+      assert live.config[:expect_status] == 200
+      assert live.config[:expect_body] == "ok"
+    end
+  end
+
+  describe "from_map/1 — schema coverage" do
+    test "sorts guard predicates into guards, keeps order within each bucket" do
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "p1", "provider" => "test_runner"},
+          %{"id" => "inv", "provider" => "test_runner", "guard" => true},
+          %{"id" => "p2", "provider" => "http_probe"}
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.map(goal.predicates, & &1.id) == ["p1", "p2"]
+      assert Enum.map(goal.guards, & &1.id) == ["inv"]
+      assert hd(goal.guards).guard? == true
+    end
+
+    test "collects non-reserved predicate keys into config as atoms" do
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{
+            "id" => "p",
+            "provider" => "http_probe",
+            "description" => "probe",
+            "url" => "http://x/healthz",
+            "expect_status" => 200,
+            "expect_body" => "ok"
+          }
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      [p] = goal.predicates
+      assert p.description == "probe"
+      assert p.config == %{url: "http://x/healthz", expect_status: 200, expect_body: "ok"}
+      refute Map.has_key?(p.config, :id)
+      refute Map.has_key?(p.config, :provider)
+    end
+
+    test "budget and scope are optional" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "test_runner"}]}
+      assert {:ok, goal} = Loader.from_map(data)
+      assert goal.budget == %Budget{}
+      assert goal.scope == %Scope{}
+    end
+  end
+
+  describe "load/1 / from_map/1 — validation errors" do
+    test "missing file returns a readable error" do
+      assert {:error, reason} = Loader.load("/no/such/goal-file.toml")
+      assert reason =~ "cannot read goal-file"
+    end
+
+    test "malformed TOML on disk is reported, not raised" do
+      path =
+        Path.join(System.tmp_dir!(), "kazi-malformed-#{System.unique_integer([:positive])}.toml")
+
+      File.write!(path, "id = \nthis is not valid toml [[[")
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:error, reason} = Loader.load(path)
+      assert reason =~ "malformed TOML"
+    end
+
+    test "missing id is rejected" do
+      assert {:error, reason} =
+               Loader.from_map(%{"predicate" => [%{"id" => "p", "provider" => "test_runner"}]})
+
+      assert reason =~ ~s(missing required key "id")
+    end
+
+    test "a goal with no predicates is rejected" do
+      assert {:error, reason} = Loader.from_map(%{"id" => "g"})
+      assert reason =~ "at least one [[predicate]]"
+    end
+
+    test "an unknown provider is rejected with the known set listed" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "browser"}]}
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "unknown provider"
+      assert reason =~ "test_runner"
+      assert reason =~ "http_probe"
+    end
+
+    test "a predicate missing its provider is rejected" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p"}]}
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ ~s(missing required key "provider")
+    end
+
+    test "a non-positive budget value is rejected" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"max_iterations" => 0},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "budget.max_iterations must be a positive integer"
+    end
+
+    test "a non-string scope.workspace is rejected" do
+      data = %{
+        "id" => "g",
+        "scope" => %{"workspace" => 42},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "scope.workspace must be a string"
+    end
+  end
+end
