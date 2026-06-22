@@ -631,4 +631,62 @@ defmodule Kazi.LoopTest do
 
     assert msg =~ ":providers"
   end
+
+  # ===========================================================================
+  # T1.2 regression detector
+  # ===========================================================================
+
+  test "flags + attributes a green→red regression caused by a dispatch, visible in snapshot" do
+    # Two code predicates. `keep` starts green; `fix` starts red so the loop
+    # dispatches. After that dispatch, `keep` goes red (the regression the fix
+    # broke) while `fix` goes green; then `keep` recovers so the run can converge.
+    #
+    #   obs0: keep=pass, fix=fail  → dispatch (fix failing)
+    #   obs1: keep=fail, fix=pass  → keep regressed (green→red); dispatch (keep)
+    #   obs2: keep=pass, fix=pass  → all green → integrate → deploy → converged
+    script_pid = start_scripted(%{keep: [:pass, :fail, :pass], fix: [:fail, :pass]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:keep, :tests), Predicate.new(:fix, :tests)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} = start_loop(goal, %{tests: ScriptedProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :converged
+
+    # The regression is recorded in loop state and surfaced via snapshot/1, even
+    # after the predicate later recovered: it is computed over the FULL history,
+    # so the green→red EDGE at iteration 1 stays flagged.
+    snap = Kazi.Loop.snapshot(loop)
+
+    assert [flag] = snap.regressions
+    assert flag.predicate_id == :keep
+    assert flag.green_iteration == 0
+    assert flag.red_iteration == 1
+    assert flag.status == :fail
+
+    # Attributed to the dispatch decided after observing keep green (obs0) and
+    # before re-observing it red (obs1) — i.e. the dispatch that broke it.
+    assert %Action{kind: :dispatch_agent} = flag.attributed_dispatch
+    # That dispatch was the one targeting `fix` (the failing work-list at obs0).
+    assert flag.attributed_dispatch.params.failing == [:fix]
+  end
+
+  test "no regression flagged when no predicate goes green→red" do
+    # `code` is red then green (a normal fix) — never green→red.
+    script_pid = start_scripted(%{code: [:fail, :pass]})
+
+    goal = goal_with([Predicate.new(:code, :tests)], script_pid, self())
+
+    {:ok, loop} = start_loop(goal, %{tests: ScriptedProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :converged
+
+    assert Kazi.Loop.snapshot(loop).regressions == []
+  end
 end
