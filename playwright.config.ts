@@ -28,11 +28,13 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  // Boot the supervised Phoenix endpoint in the test env. `mix run --no-halt`
-  // starts the :kazi application (Repo + PubSub + Endpoint) and serves 4002.
-  // reuseExistingServer lets a developer keep a server running locally.
+  // Boot the supervised Phoenix endpoint in the test env via the Playwright
+  // server script (T3.6b): it starts the :kazi application (Repo + PubSub +
+  // Endpoint, serving 4002) and puts the read-model Sandbox in shared mode so the
+  // test-only /test/seed + /test/reset endpoints can stage goal-board fixtures
+  // that the browser then renders. reuseExistingServer lets a dev keep one up.
   webServer: {
-    command: "MIX_ENV=test mix run --no-halt",
+    command: "MIX_ENV=test mix run --no-halt priv/playwright/server.exs",
     url: `${baseURL}/healthz`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
