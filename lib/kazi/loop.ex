@@ -37,7 +37,7 @@ defmodule Kazi.Loop do
        keep re-observing until the live predicate flips or the operator stops it.
 
   "Code" vs "live" is decided by predicate `kind`: live predicates probe the
-  deployed system (`:http_probe`, `:prod_logs`, `:browser` by default) and only
+  deployed system (`:http_probe`, `:prod_log`, `:browser` by default) and only
   pass once the change is deployed; everything else (`:tests`, `:coverage`, …) is
   code. The set is injectable via the `:live_kinds` option so the loop stays
   decoupled from any concrete provider.
@@ -76,7 +76,14 @@ defmodule Kazi.Loop do
 
   require Logger
 
-  @default_live_kinds [:http_probe, :prod_logs, :browser]
+  # The registered provider kind for production-log evidence is `:prod_log`
+  # (singular) — see `Kazi.Providers.ProdLog`, `Kazi.Runtime`, and the goal loader,
+  # all of which key on `:prod_log`. It MUST appear here so a red prod-log probe is
+  # treated as a LIVE predicate (deploy-gated, polled) rather than a CODE predicate
+  # the loop would dispatch a fixer agent to "fix" before the change is even
+  # deployed (T1.6/T1.7, UC-021). A prior plural `:prod_logs` here silently
+  # mis-classified prod-log predicates as code.
+  @default_live_kinds [:http_probe, :prod_log, :browser]
 
   # When code is green and the change is landed + deployed but the whole vector is
   # still not satisfied (a live predicate has not yet flipped to :pass), the loop
@@ -726,7 +733,7 @@ defmodule Kazi.Loop do
   #
   # The ONLY gate to the `:converged` terminal state. `:converged` is success,
   # and success is objective: it requires the ENTIRE predicate vector to hold —
-  # every predicate, including LIVE ones (`:http_probe`, `:prod_logs`, …) that
+  # every predicate, including LIVE ones (`:http_probe`, `:prod_log`, …) that
   # only pass once the change is deployed and re-observed against the running
   # system (concept §1, §5). A failing live probe therefore blocks convergence
   # exactly as a failing test does; the loop keeps reconciling instead of
