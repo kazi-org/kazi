@@ -10,4 +10,15 @@ config :kazi, Kazi.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 1
 
+# Test dashboard endpoint. `server: true` on a fixed port (4002) so the
+# Playwright browser smoke test (Tier 3) can drive a real running endpoint;
+# ExUnit endpoint/LiveView tests (Tier 1) use Phoenix.ConnTest against the same
+# supervised endpoint regardless of the listener. secret_key_base is a fixed
+# test-only value.
+config :kazi, KaziWeb.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: 4002],
+  server: true,
+  secret_key_base: "kazitestsecretkeybasekazitestsecretkeybasekazitestsecretkeybase00",
+  check_origin: false
+
 config :logger, level: :warning
