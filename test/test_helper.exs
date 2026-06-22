@@ -12,6 +12,17 @@ Ecto.Adapters.SQL.Sandbox.mode(Kazi.Repo, :manual)
 #
 # `--include nats` overrides the default exclusion; the test itself reads
 # `NATS_URL` to connect (see test/kazi/coordination/lease/nats_test.exs).
-nats_opts = if System.get_env("NATS_URL"), do: [], else: [exclude: [:nats]]
+nats_excluded = if System.get_env("NATS_URL"), do: [], else: [:nats]
 
-ExUnit.start(nats_opts)
+# Integration tests tagged `:graphify` need the real graphify embeddings tool and
+# are EXCLUDED by default so the standard `mix test` stays hermetic (no embedding
+# model, no index, no network). They run only when `GRAPHIFY_CMD` names the
+# executable:
+#
+#     GRAPHIFY_CMD=graphify mix test --include graphify
+#
+# `--include graphify` overrides the default exclusion; the test reads
+# `GRAPHIFY_CMD` for the command (see test/kazi/retrieval/graphify_integration_test.exs).
+graphify_excluded = if System.get_env("GRAPHIFY_CMD"), do: [], else: [:graphify]
+
+ExUnit.start(exclude: nats_excluded ++ graphify_excluded)
