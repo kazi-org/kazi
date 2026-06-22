@@ -50,6 +50,33 @@ defmodule Kazi.Goal.LoaderTest do
     end
   end
 
+  describe "prod_log provider (T1.6) — author + dispatch" do
+    test "parses a goal declaring the prod_log provider into a :prod_log predicate" do
+      toml = """
+      id = "prod-clean"
+
+      [[predicate]]
+      id = "logs-clean"
+      provider = "prod_log"
+      description = "no 5xx/panics over the last 30m"
+      cmd = "gcloud"
+      args = ["logging", "read", "severity>=ERROR", "--freshness=30m"]
+      window_minutes = 30
+      max_5xx = 0
+      """
+
+      assert {:ok, goal} = Loader.from_map(Toml.decode!(toml))
+      assert [%Predicate{id: "logs-clean", kind: :prod_log} = pred] = goal.predicates
+      assert pred.config[:cmd] == "gcloud"
+      assert pred.config[:window_minutes] == 30
+      assert pred.config[:max_5xx] == 0
+    end
+
+    test "the runtime maps the :prod_log kind to the ProdLog provider module" do
+      assert Kazi.Runtime.provider_modules()[:prod_log] == Kazi.Providers.ProdLog
+    end
+  end
+
   describe "from_map/1 — schema coverage" do
     test "sorts guard predicates into guards, keeps order within each bucket" do
       data = %{

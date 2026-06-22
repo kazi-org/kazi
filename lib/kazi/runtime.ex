@@ -46,7 +46,8 @@ defmodule Kazi.Runtime do
   # mirroring the loader's `provider` → `kind` table (ADR-0002).
   @provider_modules %{
     tests: Kazi.Providers.TestRunner,
-    http_probe: Kazi.Providers.HttpProbe
+    http_probe: Kazi.Providers.HttpProbe,
+    prod_log: Kazi.Providers.ProdLog
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams.
