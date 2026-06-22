@@ -87,6 +87,26 @@ defmodule Kazi.ReadModel do
   end
 
   @doc """
+  Returns the goal's full per-iteration vector history (T1.1) read back from the
+  read-model: a list of `{iteration_index, Kazi.PredicateVector.t()}` in
+  ascending `iteration_index` (oldest-first).
+
+  This is the DB-side counterpart to `Kazi.Loop.history/1` (which serves the same
+  shape from the running loop's in-memory state): the regression (T1.2) and stuck
+  (T1.5) detectors read either, depending on whether they analyse a live loop or
+  a persisted run. Vectors are keyed by string predicate ids (their on-disk
+  form), as rehydrated by `to_predicate_vector/1`.
+  """
+  @spec iteration_history(Kazi.Goal.id()) :: [{non_neg_integer(), PredicateVector.t()}]
+  def iteration_history(goal_ref) do
+    goal_ref
+    |> list_iterations()
+    |> Enum.map(fn %Iteration{iteration_index: index} = iteration ->
+      {index, to_predicate_vector(iteration)}
+    end)
+  end
+
+  @doc """
   Fetches one iteration by `(goal_ref, iteration_index)`, or `nil`.
   """
   @spec get_iteration(Kazi.Goal.id(), non_neg_integer()) :: Iteration.t() | nil

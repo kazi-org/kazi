@@ -120,6 +120,13 @@ defmodule Kazi.Loop do
               # observability / history
               vector: nil,
               prev_vector: nil,
+              # ordered per-iteration vector history (T1.1): a list of
+              # `{iteration_index, PredicateVector.t()}` kept newest-first while
+              # in `data` (prepend is O(1)); read APIs reverse it to oldest-first.
+              # Full (unbounded) at Slice 0/1 scale — every iteration's whole
+              # vector is retained so the regression (T1.2) and stuck (T1.5)
+              # detectors can analyse the complete trajectory in-state.
+              history: [],
               actions: [],
               iterations: 0,
               # cached terminal result + await/2 waiters
@@ -198,13 +205,26 @@ defmodule Kazi.Loop do
     end
   end
 
+  @typedoc """
+  The in-state, ordered per-iteration vector history (T1.1): a list of
+  `{iteration_index, PredicateVector.t()}` in ascending `iteration_index`
+  (oldest-first). The downstream regression (T1.2) and stuck (T1.5) detectors
+  read this to analyse the goal's trajectory across iterations.
+  """
+  @type history :: [{non_neg_integer(), PredicateVector.t()}]
+
   @doc """
   Returns a snapshot of the loop's current vector, action history, and iteration
   count without blocking on termination. Useful for inspection / tests.
+
+  Includes `:history` — the full ordered per-iteration vector history (T1.1),
+  oldest-first; see `history/1` for the same data without the rest of the
+  snapshot.
   """
   @spec snapshot(:gen_statem.server_ref()) :: %{
           state: atom(),
           vector: PredicateVector.t() | nil,
+          history: history(),
           actions: [Action.kind()],
           iterations: non_neg_integer(),
           landed?: boolean(),
@@ -212,6 +232,19 @@ defmodule Kazi.Loop do
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
+  end
+
+  @doc """
+  Returns the loop's in-state per-iteration vector history (T1.1) without
+  blocking on termination: a list of `{iteration_index, PredicateVector.t()}` in
+  ascending `iteration_index` (oldest-first). One entry is appended per
+  observation; the list is empty before the first observation completes.
+
+  This is the read seam the regression (T1.2) and stuck (T1.5) detectors consume.
+  """
+  @spec history(:gen_statem.server_ref()) :: history()
+  def history(ref) do
+    :gen_statem.call(ref, :history)
   end
 
   # =============================================================================
@@ -254,11 +287,18 @@ defmodule Kazi.Loop do
   def handle_event(:internal, :observe, :observing, %Data{} = data) do
     vector = observe(data)
 
+    # 0-based per-goal iteration index for this observation (matches the
+    # read-model's iteration_index and the on_iteration payload's :iteration).
+    index = data.iterations
+
     data =
       %Data{
         data
         | prev_vector: data.vector,
           vector: vector,
+          # Prepend this observation's full vector to the in-state history
+          # (newest-first; read APIs reverse to oldest-first). T1.1.
+          history: [{index, vector} | data.history],
           iterations: data.iterations + 1
       }
 
@@ -332,6 +372,7 @@ defmodule Kazi.Loop do
     reply = %{
       state: state,
       vector: data.vector,
+      history: ordered_history(data),
       actions: Enum.reverse(data.actions),
       iterations: data.iterations,
       landed?: data.landed?,
@@ -339,6 +380,10 @@ defmodule Kazi.Loop do
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
+  end
+
+  def handle_event({:call, from}, :history, _state, data) do
+    {:keep_state_and_data, [{:reply, from, ordered_history(data)}]}
   end
 
   # =============================================================================
@@ -515,6 +560,12 @@ defmodule Kazi.Loop do
       iteration: data.iterations
     }
   end
+
+  # The in-state history (T1.1) is kept newest-first in `data` for O(1) prepend;
+  # readers (snapshot/1, history/1) want it oldest-first (ascending iteration
+  # index), so reverse it on the way out.
+  @spec ordered_history(Data.t()) :: history()
+  defp ordered_history(%Data{history: history}), do: Enum.reverse(history)
 
   # Record an executed action in history and apply any progress-flag changes.
   defp record_action(%Data{} = data, %Action{kind: kind}, flags) do
