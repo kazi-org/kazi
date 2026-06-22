@@ -82,6 +82,36 @@ defmodule Kazi.CLITest do
       assert {:error, message} = Kazi.CLI.parse(["run", "goal.toml", "--bogus", "x"])
       assert message =~ "unknown option"
     end
+
+    # T5.5 / T7.3: `kazi init` argv boundary (stack vs registry source).
+    test "parses `init <repo-dir>` (stack source)" do
+      assert {:init, "./repo", opts} = Kazi.CLI.parse(["init", "./repo"])
+      assert opts[:registry] == nil
+      assert opts[:enrich] == nil
+    end
+
+    test "parses `init <repo-dir> --out <file> --enrich`" do
+      assert {:init, "./repo", opts} =
+               Kazi.CLI.parse(["init", "./repo", "--out", "g.toml", "--enrich"])
+
+      assert opts[:out] == "g.toml"
+      assert opts[:enrich] == true
+    end
+
+    test "parses `init --registry <file.json>` (registry source, no positional)" do
+      assert {:init, nil, opts} = Kazi.CLI.parse(["init", "--registry", "caps.json"])
+      assert opts[:registry] == "caps.json"
+    end
+
+    test "`init --registry` with a stray positional repo-dir is an error" do
+      assert {:error, message} = Kazi.CLI.parse(["init", "--registry", "caps.json", "./repo"])
+      assert message =~ "no positional repo-dir"
+    end
+
+    test "`init` with neither a repo-dir nor --registry is an error" do
+      assert {:error, message} = Kazi.CLI.parse(["init"])
+      assert message =~ "requires a <repo-dir>" or message =~ "--registry"
+    end
   end
 
   # ===========================================================================
@@ -235,8 +265,197 @@ defmodule Kazi.CLITest do
   end
 
   # ===========================================================================
+  # Tier 2 — `kazi init` stack source (T5.5) writes one goal-file
+  # ===========================================================================
+
+  describe "run/2 — init stack source" do
+    @describetag :tmp_dir
+
+    test "detects the stack and writes a loadable goal-file with a live TODO scaffold",
+         %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "go-repo")
+      File.mkdir_p!(repo)
+      File.write!(Path.join(repo, "go.mod"), "module example.com/app\n")
+      out = Path.join(tmp_dir, "go.goal.toml")
+
+      {code, output} =
+        with_io(fn -> Kazi.CLI.run(["init", repo, "--out", out]) end)
+
+      assert code == 0
+      assert output =~ "WROTE  #{out}"
+      assert output =~ "Review the live-predicate TODO"
+
+      # The written goal-file loads and names the detected go test command.
+      assert {:ok, goal} = Kazi.Goal.Loader.load(out)
+      acceptance = Enum.find(goal.predicates, &(&1.id == "tests-pass"))
+      assert acceptance.config[:cmd] == "go"
+      assert acceptance.config[:args] == ["test", "./..."]
+
+      # The commented live-predicate scaffold is present (but does not parse).
+      toml = File.read!(out)
+      assert toml =~ "# [[predicate]]"
+      assert toml =~ ~s(# provider = "http_probe")
+    end
+
+    test "a repo with no recognised stack exits non-zero with a clear message",
+         %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "empty-repo")
+      File.mkdir_p!(repo)
+      File.write!(Path.join(repo, "README.txt"), "hi\n")
+
+      {code, stderr} =
+        with_io(:stderr, fn ->
+          Kazi.CLI.run(["init", repo, "--out", Path.join(tmp_dir, "x.toml")])
+        end)
+
+      assert code == 1
+      assert stderr =~ "could not detect a stack"
+    end
+  end
+
+  # ===========================================================================
+  # Tier 2 — `kazi init --registry` writes a goal SET (T7.3, ADR-0015)
+  # ===========================================================================
+
+  # A STUB harness for --enrich, driven through the same seam everything else
+  # uses. With enrichment OFF it is never called; ON it fills a gap with a live
+  # acceptance predicate. No real `claude`, no network.
+  defmodule InitStubHarness do
+    @behaviour Kazi.HarnessAdapter
+
+    @impl true
+    def run(_prompt, _workspace, _opts) do
+      {:ok,
+       %{
+         result: ~s({"predicates":[{"id":"probe","provider":"http_probe","url":"http://x/ok"}]})
+       }}
+    end
+  end
+
+  describe "run/2 — init registry source" do
+    @describetag :tmp_dir
+
+    test "writes one goal-file per capability under --out/<scope>/<id>.toml, all loadable",
+         %{tmp_dir: tmp_dir} do
+      registry = write_registry(tmp_dir)
+      out = Path.join(tmp_dir, "kazi-goals")
+
+      {code, output} =
+        with_io(fn -> Kazi.CLI.run(["init", "--registry", registry, "--out", out]) end)
+
+      assert code == 0
+      assert output =~ "Wrote 3 goal-file(s)"
+
+      auth = Path.join([out, "auth", "auth.password-reset.toml"])
+      billing = Path.join([out, "billing", "billing.invoice-pdf.toml"])
+      gap = Path.join([out, "search.autocomplete.toml"])
+
+      assert File.exists?(auth)
+      assert File.exists?(billing)
+      # The gap capability has no scope, so it lands at the top of --out.
+      assert File.exists?(gap)
+
+      # Every generated goal-file loads via the loader.
+      for path <- [auth, billing, gap] do
+        assert {:ok, _goal} = Kazi.Goal.Loader.load(path)
+        assert File.read!(path) =~ "# [[predicate]]"
+      end
+
+      # The declared binding names the real test command.
+      {:ok, auth_goal} = Kazi.Goal.Loader.load(auth)
+      [pred] = auth_goal.predicates ++ auth_goal.guards
+      assert pred.config[:cmd] == "go"
+    end
+
+    test "a prose .md registry path is rejected with a clear message", %{tmp_dir: tmp_dir} do
+      {code, stderr} =
+        with_io(:stderr, fn ->
+          Kazi.CLI.run(["init", "--registry", Path.join(tmp_dir, "capabilities.md")])
+        end)
+
+      assert code == 1
+      assert stderr =~ "could not adopt registry"
+      assert stderr =~ "GENERATED VIEW" or stderr =~ "generated view"
+    end
+
+    test "--enrich is OFF by default: the gap capability stays a gap-marker",
+         %{tmp_dir: tmp_dir} do
+      registry = write_registry(tmp_dir)
+      out = Path.join(tmp_dir, "no-enrich-goals")
+
+      # Pass a stub harness via inject_opts but NO --enrich: it must not be driven.
+      {code, _output} =
+        with_io(fn ->
+          Kazi.CLI.run(["init", "--registry", registry, "--out", out], harness: InitStubHarness)
+        end)
+
+      assert code == 0
+      gap = Path.join([out, "search.autocomplete.toml"])
+      {:ok, goal} = Kazi.Goal.Loader.load(gap)
+      # Gap-marker guard with the no-op `true` command (not enriched).
+      assert [marker] = goal.guards
+      assert marker.id == "acceptance-gap"
+    end
+
+    test "--enrich ON fills the gap via the injected stub harness", %{tmp_dir: tmp_dir} do
+      registry = write_registry(tmp_dir)
+      out = Path.join(tmp_dir, "enriched-goals")
+
+      {code, _output} =
+        with_io(fn ->
+          Kazi.CLI.run(
+            ["init", "--registry", registry, "--out", out, "--enrich"],
+            harness: InitStubHarness
+          )
+        end)
+
+      assert code == 0
+      gap = Path.join([out, "search.autocomplete.toml"])
+      {:ok, goal} = Kazi.Goal.Loader.load(gap)
+      # The gap is now an http_probe acceptance predicate (harness-proposed).
+      assert [filled] = goal.predicates
+      assert filled.kind == :http_probe
+    end
+  end
+
+  # ===========================================================================
   # helpers
   # ===========================================================================
+
+  # A small capability registry on disk for the init-registry tests: one declared
+  # binding (scoped auth), one multi-binding (scoped billing), one gap (no scope).
+  defp write_registry(tmp_dir) do
+    path = Path.join(tmp_dir, "capabilities.json")
+
+    File.write!(path, """
+    {
+      "version": 1,
+      "capabilities": [
+        {
+          "id": "auth.password-reset",
+          "name": "User can reset their password",
+          "test": {"cmd": "go", "args": ["test", "./auth/...", "-run", "TestPasswordReset"]},
+          "scope": "auth"
+        },
+        {
+          "id": "billing.invoice-pdf",
+          "name": "Customer can download an invoice PDF",
+          "tests": [
+            {"cmd": "go", "args": ["test", "./billing/..."]},
+            {"cmd": "npm", "args": ["run", "test:e2e:invoice"]}
+          ],
+          "scope": "billing"
+        },
+        {
+          "id": "search.autocomplete",
+          "name": "Search box suggests results as the user types"
+        }
+      ]
+    }
+    """)
+
+    path
+  end
 
   # A goal-file with a single code predicate that passes at t0 (the marker file
   # already exists) — the whole vector is satisfied before kazi acts, so the goal
