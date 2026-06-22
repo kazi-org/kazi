@@ -22,6 +22,9 @@ defmodule KaziWeb.DashboardLive do
     <main id="dashboard">
       <h1>kazi operator dashboard</h1>
       <p>Read-only projection of the reconciler (ADR-0011). Panels arrive in T3.6b–d.</p>
+      <nav>
+        <.link navigate={~p"/goals"} id="nav-goal-board">Goal board</.link>
+      </nav>
     </main>
     """
   end
