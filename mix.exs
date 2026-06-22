@@ -6,6 +6,7 @@ defmodule Kazi.MixProject do
       app: :kazi,
       version: "0.1.0",
       elixir: "~> 1.20",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       escript: escript(),
@@ -18,6 +19,12 @@ defmodule Kazi.MixProject do
   defp escript do
     [main_module: Kazi.CLI, name: "kazi"]
   end
+
+  # Compile hermetic test doubles under test/support/ only in the test env (e.g.
+  # Kazi.Context.StaticGraphSource — the injectable graph-source seam stub kept
+  # out of lib/ by the zero-stub policy).
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do
