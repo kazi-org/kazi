@@ -61,6 +61,17 @@ defmodule Kazi.LoopTest do
       do: PredicateResult.fail(%{id: id, live: :down})
   end
 
+  # A live provider that is ALWAYS down — :fail regardless of deploy state. Used
+  # by the objective-termination guard test (T0.8): with code green and the
+  # change landed + deployed, this red live probe must still block :converged.
+  defmodule AlwaysDownLiveProvider do
+    @behaviour Kazi.PredicateProvider
+
+    @impl true
+    def evaluate(%Predicate{id: id}, _context),
+      do: PredicateResult.fail(%{id: id, live: :down})
+  end
+
   # Harness double: records each invocation to the collector (from adapter_opts)
   # and reports success.
   defmodule RecordingHarness do
@@ -267,6 +278,72 @@ defmodule Kazi.LoopTest do
     :ok = Kazi.Loop.stop(loop)
     assert {:ok, result} = Kazi.Loop.await(loop, 1_000)
     assert result.outcome == :stopped
+  end
+
+  # ===========================================================================
+  # Objective-termination guard (T0.8, UC-005)
+  #
+  # The headline guarantee: success is objective and includes LIVE predicates.
+  # `:converged` must be unreachable while any live probe is red, even when all
+  # code/test predicates pass and the change is landed + deployed.
+  # ===========================================================================
+
+  test "a failing live probe blocks :converged even when all code predicates pass (T0.8)" do
+    # Code is green from the first observation; the live http_probe is always
+    # down. The loop should integrate + deploy (code is green and the change is
+    # not yet landed/deployed) and then spin re-observing the live predicate —
+    # but it must NEVER declare :converged while that probe is red.
+    script_pid = start_scripted(%{code: [:pass]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:code, :tests), Predicate.new(:live, :http_probe)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: ScriptedProvider, http_probe: AlwaysDownLiveProvider}, self())
+
+    # It cannot converge: await must time out, and the loop is still running.
+    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+
+    # It did do the deploy-chain work (code was green), yet stayed un-converged.
+    snap = Kazi.Loop.snapshot(loop)
+    refute snap.state == :converged
+    assert snap.deployed?, "code was green so the change should have been deployed"
+    assert :deploy in snap.actions
+    refute :dispatch_agent in snap.actions
+
+    # Stopping yields :stopped — confirming it never reached the success state on
+    # its own while the live predicate was failing.
+    :ok = Kazi.Loop.stop(loop)
+    assert {:ok, result} = Kazi.Loop.await(loop, 1_000)
+    assert result.outcome == :stopped
+    refute result.outcome == :converged
+  end
+
+  test "converges once the live probe flips to pass after deploy (live red → green, T0.8)" do
+    # Companion to the failing-live-probe test: same code-green setup, but the
+    # live provider passes once the change is deployed (DeployGatedLiveProvider).
+    # This proves the guard is not merely refusing to ever converge — it lets
+    # :converged through precisely when the WHOLE vector (code + live) holds.
+    script_pid = start_scripted(%{code: [:pass]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:code, :tests), Predicate.new(:live, :http_probe)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: ScriptedProvider, http_probe: DeployGatedLiveProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :converged
+    # Converged only after the live predicate could pass — i.e. post-deploy.
+    assert result.actions == [:integrate, :deploy]
   end
 
   test "start_link fails when a required dependency option is missing" do

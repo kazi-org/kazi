@@ -360,7 +360,9 @@ defmodule Kazi.Loop do
   defp decide(vector, %Data{} = data) do
     cond do
       # 1. Whole vector satisfied (incl. live predicates): converged, stop.
-      PredicateVector.satisfied?(vector) ->
+      #    `:converged` is reachable through this clause and no other — the
+      #    objective-termination guard (T0.8, UC-005).
+      all_satisfied?(vector) ->
         terminate_with(:converged, data)
 
       # 2. Code predicates failing: dispatch the agent with failing evidence.
@@ -383,6 +385,25 @@ defmodule Kazi.Loop do
         reobserve(data, data.reobserve_interval_ms)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Objective-termination guard (T0.8, UC-005)
+  #
+  # The ONLY gate to the `:converged` terminal state. `:converged` is success,
+  # and success is objective: it requires the ENTIRE predicate vector to hold —
+  # every predicate, including LIVE ones (`:http_probe`, `:prod_logs`, …) that
+  # only pass once the change is deployed and re-observed against the running
+  # system (concept §1, §5). A failing live probe therefore blocks convergence
+  # exactly as a failing test does; the loop keeps reconciling instead of
+  # declaring a success that isn't live.
+  #
+  # This is a thin, deliberately named wrapper over
+  # `Kazi.PredicateVector.satisfied?/1` (which already rejects an empty vector —
+  # the vacuous-goal guard). Naming it here makes the convergence invariant a
+  # single, self-documenting clause in `decide/1` that cannot silently regress
+  # to "code green is good enough".
+  @spec all_satisfied?(PredicateVector.t()) :: boolean()
+  defp all_satisfied?(%PredicateVector{} = vector), do: PredicateVector.satisfied?(vector)
 
   # Transition into :observing and schedule the next observation after `delay_ms`
   # via a state timeout (see the :reobserve handler for why this is a timeout and
