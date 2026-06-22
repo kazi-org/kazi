@@ -17,8 +17,10 @@ defmodule Kazi.AuthoringTest do
   alias Kazi.Authoring
   alias Kazi.Authoring.Draft
   alias Kazi.Goal
+  alias Kazi.ReadModel
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.Repo
+  alias Kazi.Runtime
 
   # An injectable stub harness (the seam): returns a fixed JSON proposal in the
   # result map's `:result` field — the shape a `claude --output-format json`
@@ -227,6 +229,157 @@ defmodule Kazi.AuthoringTest do
       assert prompt =~ "ship a /healthz route"
       assert prompt =~ "acceptance"
       assert prompt =~ "JSON"
+    end
+  end
+
+  # T3.5b (UC-017): the approval workflow over a proposed goal. Tier 2 — every
+  # transition crosses the real SQLite boundary; HERMETIC (the stub harness drafts
+  # the proposal, no real claude, no network, no loop spun).
+  describe "approve/2 — Tier 2 (transitions to runnable)" do
+    setup do
+      {:ok, draft} = Authoring.propose("a health endpoint that returns 200", harness: StubHarness)
+      %{draft: draft}
+    end
+
+    test "transitions proposed → approved and returns a runnable goal", %{draft: draft} do
+      assert {:ok, %Goal{} = goal} = Authoring.approve(draft.proposal_ref)
+
+      # The returned goal is exactly what the freshly-proposed draft held — the
+      # approval rehydrated it through the same loader, losing nothing.
+      assert goal.mode == :create
+      assert Enum.map(goal.predicates, & &1.id) == Enum.map(draft.goal.predicates, & &1.id)
+
+      # Runnable by Kazi.Runtime: `approve` hands back a `%Goal{}` (the shape
+      # `Runtime.run/2` accepts at its guard) whose every predicate kind the
+      # runtime can dispatch — exactly the gate `resolve_providers/2` enforces.
+      dispatchable = Runtime.provider_modules()
+      kinds = Goal.all_predicates(goal) |> Enum.map(& &1.kind) |> Enum.uniq()
+      assert Enum.all?(kinds, &Map.has_key?(dispatchable, &1))
+
+      # The transition is durable: the row now reads `approved` and is queryable.
+      assert %ProposedGoal{status: "approved"} =
+               ReadModel.get_proposed_goal(draft.proposal_ref)
+
+      assert Enum.any?(
+               ReadModel.list_proposed_goals(status: "approved"),
+               &(&1.proposal_ref == draft.proposal_ref)
+             )
+    end
+
+    test "an approved goal round-trips identically through the loader", %{draft: draft} do
+      assert {:ok, goal} = Authoring.approve(draft.proposal_ref)
+
+      row = ReadModel.get_proposed_goal(draft.proposal_ref)
+      assert {:ok, reloaded} = Kazi.Goal.Loader.from_map(row.goal)
+      assert reloaded.id == goal.id
+      assert Enum.map(reloaded.predicates, & &1.id) == Enum.map(goal.predicates, & &1.id)
+    end
+
+    test "rejects an unknown proposal ref" do
+      assert {:error, :not_found} = Authoring.approve("prop-does-not-exist")
+    end
+
+    test "refuses to approve an already-rejected goal (invalid transition)", %{draft: draft} do
+      assert {:ok, _} = Authoring.reject(draft.proposal_ref)
+
+      assert {:error, {:invalid_transition, :rejected, :approved}} =
+               Authoring.approve(draft.proposal_ref)
+    end
+
+    test "refuses to re-approve an already-approved goal", %{draft: draft} do
+      assert {:ok, _} = Authoring.approve(draft.proposal_ref)
+
+      assert {:error, {:invalid_transition, :approved, :approved}} =
+               Authoring.approve(draft.proposal_ref)
+    end
+  end
+
+  describe "reject/2 — Tier 2 (persisted + queryable)" do
+    setup do
+      {:ok, draft} = Authoring.propose("an idea to decline", harness: StubHarness)
+      %{draft: draft}
+    end
+
+    test "transitions proposed → rejected, persisted and queryable", %{draft: draft} do
+      assert {:ok, %Draft{status: :rejected} = rejected} = Authoring.reject(draft.proposal_ref)
+      assert rejected.proposal_ref == draft.proposal_ref
+
+      assert %ProposedGoal{status: "rejected"} =
+               ReadModel.get_proposed_goal(draft.proposal_ref)
+
+      assert Enum.any?(
+               ReadModel.list_proposed_goals(status: "rejected"),
+               &(&1.proposal_ref == draft.proposal_ref)
+             )
+    end
+
+    test "refuses to reject an already-approved goal", %{draft: draft} do
+      assert {:ok, _} = Authoring.approve(draft.proposal_ref)
+
+      assert {:error, {:invalid_transition, :approved, :rejected}} =
+               Authoring.reject(draft.proposal_ref)
+    end
+
+    test "rejects an unknown proposal ref" do
+      assert {:error, :not_found} = Authoring.reject("prop-missing")
+    end
+  end
+
+  describe "edit/3 — Tier 2 (re-review with an amended goal)" do
+    setup do
+      {:ok, draft} = Authoring.propose("an idea to refine", harness: StubHarness)
+      %{draft: draft}
+    end
+
+    test "replaces the goal payload and keeps it proposed", %{draft: draft} do
+      # A reviewer narrows the goal to a single test_runner predicate.
+      changes = %{
+        "id" => "refined-goal",
+        "mode" => "create",
+        "predicate" => [
+          %{"id" => "tests", "provider" => "test_runner", "acceptance" => true}
+        ]
+      }
+
+      assert {:ok, %Draft{status: :proposed} = edited} =
+               Authoring.edit(draft.proposal_ref, changes)
+
+      assert edited.goal.id == "refined-goal"
+      assert Enum.map(edited.goal.predicates, & &1.id) == ["tests"]
+
+      # Persisted: the row still reads `proposed`, now carrying the edited goal,
+      # which still rehydrates into a runnable goal.
+      row = ReadModel.get_proposed_goal(draft.proposal_ref)
+      assert row.status == "proposed"
+      assert {:ok, reloaded} = Kazi.Goal.Loader.from_map(row.goal)
+      assert reloaded.id == "refined-goal"
+
+      # An edited-then-approved goal is runnable.
+      assert {:ok, %Goal{}} = Authoring.approve(draft.proposal_ref)
+    end
+
+    test "refuses a malformed edit (goal that won't load) and writes nothing", %{draft: draft} do
+      # No predicates → the loader rejects it; the row must be untouched.
+      assert {:error, {:invalid_goal, _reason}} =
+               Authoring.edit(draft.proposal_ref, %{"id" => "broken", "mode" => "create"})
+
+      assert %ProposedGoal{status: "proposed", goal: goal} =
+               ReadModel.get_proposed_goal(draft.proposal_ref)
+
+      # The original drafted goal survives the failed edit.
+      assert {:ok, intact} = Kazi.Goal.Loader.from_map(goal)
+      assert length(intact.predicates) == length(draft.goal.predicates)
+    end
+
+    test "refuses to edit a terminal (approved) goal", %{draft: draft} do
+      assert {:ok, _} = Authoring.approve(draft.proposal_ref)
+
+      assert {:error, {:invalid_transition, :approved, :proposed}} =
+               Authoring.edit(draft.proposal_ref, %{
+                 "id" => "x",
+                 "mode" => "create",
+                 "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+               })
     end
   end
 end
