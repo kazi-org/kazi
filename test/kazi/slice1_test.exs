@@ -518,7 +518,9 @@ defmodule Kazi.Slice1Test do
         goal(
           "slice1-precedence-budget",
           [Predicate.new(:code, :tests)],
-          %{script_pid: script_pid}, budget: Budget.new(max_iterations: 2))
+          %{script_pid: script_pid},
+          budget: Budget.new(max_iterations: 2)
+        )
 
       {:ok, loop} =
         start_loop(g, %{tests: ScriptedProvider}, stuck_iterations: 3)
