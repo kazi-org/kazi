@@ -249,3 +249,34 @@ Remaining incomplete tasks are NOT pool-eligible:
 
 **Next:** complete T0.6h (human GCP setup) to unblock the T0.12 live dogfood; OR opt in
 to building the deferred T4.9. No other autonomous pool work remains.
+
+## 2026-06-22 — T4.9 retrieval adapter shipped; plan fully built (only human GCP remains)
+
+**Session:** continuation of `/loop /apply --pool`. Per user direction, un-deferred
+T4.9 (the ADR-0005 pluggable memory adapter), granularized it (ADR-0012), and built
+it across Waves 19-20, PRs #65-#67, all rebase-merged green.
+
+- **T4.9a** (PR #65): `Kazi.Retrieval` behaviour + no-op default + optional
+  build_prompt section, OFF by default (default output byte-identical, tested).
+- **T4.9b** (PR #66): graphify-embeddings backend behind the seam; integration test
+  tagged `:graphify` and excluded by default so `mix test` stays hermetic.
+- **T4.9c** (PR #67): per-goal opt-in wiring + SHA-keyed snippet cache (migration
+  20260622080000) reusing the T4.6 pattern; off-by-default leaves the loop unchanged.
+- **Tests:** 666 -> 698 passing (+32), 18 excluded (`:nats` + `:graphify` integration
+  tests); format + warnings-as-errors clean at every merge. ADR-0012 records the design.
+
+**Plan fully built. Every buildable agent task is complete: E0 (scaffold + Slice-0
+loop), E1 (trustworthy loops), E2 (creation mode), E3 (Slice-3: NATS leases,
+partitioning, authoring, LiveView dashboard, Telegram), E4 (context injection),
+and T4.9 (retrieval).** Cumulative this session: 372 -> 698 tests (+326).
+
+**The ONLY remaining work is human-gated:**
+- **T0.6h** (`kind: human`) — provision the GCP project + Cloud Run service + deploy
+  credentials. Irreducibly human (billing/credentials). This is the sole blocker for...
+- **T0.12** — the headline Slice-0 dogfood (idea -> live, verified production
+  deployment), which is the project's success metric (CLAUDE.md). It cannot run until
+  T0.6h lands. T0.13 already built the deployable fixture + Cloud Run deploy workflow,
+  so once GCP credentials exist the dogfood is unblocked.
+
+**Next (human):** complete T0.6h, then run T0.12 to close the idea->production loop and
+hit the project's success bar. No autonomous pool work remains.
