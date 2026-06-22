@@ -96,6 +96,8 @@ defmodule Kazi.Harness.ClaudeAdapter do
   alias Kazi.Context
   alias Kazi.Context.Pack
   alias Kazi.PredicateResult
+  alias Kazi.Retrieval
+  alias Kazi.Retrieval.Snippet
 
   @default_command "claude"
 
@@ -203,6 +205,20 @@ defmodule Kazi.Harness.ClaudeAdapter do
   shape never depends on whether the source found anything — keeping the head
   cacheable even on a sparse workspace.
 
+  ## Optional retrieval section (T4.9a, ADR-0012)
+
+  When a `Kazi.Retrieval` backend is injected via `:retriever` (or configured), its
+  top-k snippets are appended as a clearly-delimited
+  `## Relevant prior context (retrieved)` section AFTER the orientation prefix and
+  the failing-evidence body — augmenting, never replacing them. Retrieval is OFF by
+  default: the resolved default is the no-op (`Kazi.Retrieval.NoOp`, returns `[]`),
+  and an empty result appends NOTHING, so with no `:retriever` opt this returns
+  exactly what `build_prompt/2` returns — byte-identical to the pre-retrieval path.
+
+    * `:retriever` — a `Kazi.Retrieval` module or `{module, init_opts}` tuple. The
+      backend's `retrieve/3` is called with `failing`, the dispatch `:workspace`
+      (or `""` when none is supplied), and `init_opts`.
+
   ## Examples
 
       iex> pack = %Kazi.Context.Pack{origin: :repo_map, files: [Kazi.Context.FileRef.new("lib/a.ex")]}
@@ -216,9 +232,15 @@ defmodule Kazi.Harness.ClaudeAdapter do
       when is_binary(work_item) and is_list(failing) and is_list(opts) do
     body = build_evidence_prompt(work_item, failing)
 
-    case orientation_prefix(failing, opts) do
-      nil -> body
-      prefix -> prefix <> "\n\n" <> body
+    prompt =
+      case orientation_prefix(failing, opts) do
+        nil -> body
+        prefix -> prefix <> "\n\n" <> body
+      end
+
+    case retrieval_section(failing, opts) do
+      nil -> prompt
+      section -> prompt <> "\n\n" <> section
     end
   end
 
@@ -278,6 +300,52 @@ defmodule Kazi.Harness.ClaudeAdapter do
   # Thread only the orientation-builder options through to
   # `Kazi.Context.orientation_pack/3`, so the adapter does not reshape the pack.
   defp pack_opts(opts), do: Keyword.take(opts, [:graph_source, :token_budget])
+
+  # =============================================================================
+  # Optional retrieval section (T4.9a, ADR-0012)
+  # =============================================================================
+
+  # Resolve the optional retrieval augmentation, additively: run the resolved
+  # `Kazi.Retrieval` backend (explicit `:retriever` opt > config > the no-op
+  # default) and render any snippets it returns. The no-op default returns `[]`, so
+  # with no retriever this is `nil` and NOTHING is appended — keeping the default
+  # output byte-identical to the pre-retrieval path (ADR-0012's central constraint).
+  @spec retrieval_section([{Kazi.Predicate.id(), PredicateResult.t()}], keyword()) ::
+          String.t() | nil
+  defp retrieval_section(failing, opts) do
+    case Retrieval.retrieve(failing, retrieval_workspace(opts), opts) do
+      [] -> nil
+      snippets when is_list(snippets) -> render_retrieval(snippets)
+    end
+  end
+
+  # The workspace the retriever queries against. Reuses the same `:workspace` opt
+  # the orientation builder reads; absent it, retrieval runs workspace-less (a
+  # backend that needs one returns `[]`). Never crashes the pure prompt builder.
+  defp retrieval_workspace(opts) do
+    case Keyword.get(opts, :workspace) do
+      workspace when is_binary(workspace) -> workspace
+      _ -> ""
+    end
+  end
+
+  # Render the retrieved snippets as a single clearly-delimited section that sits
+  # AFTER the orientation prefix and the failing-evidence body. The heading is
+  # fixed (greppable, cache-stable) and each snippet renders its source attribution
+  # (when present) above a fenced text block.
+  @spec render_retrieval([Snippet.t()]) :: String.t()
+  defp render_retrieval(snippets) do
+    "## Relevant prior context (retrieved)\n\n" <>
+      "Similarity-retrieved snippets that may relate to the failing predicates. " <>
+      "Use them as hints; the failing evidence above is authoritative.\n\n" <>
+      Enum.map_join(snippets, "\n\n", &render_snippet/1)
+  end
+
+  defp render_snippet(%Snippet{text: text, source: nil}),
+    do: "```\n" <> text <> "\n```"
+
+  defp render_snippet(%Snippet{text: text, source: source}),
+    do: "### " <> source <> "\n```\n" <> text <> "\n```"
 
   defp render_failing({id, %PredicateResult{status: status, evidence: evidence}}) do
     "## Failing predicate: #{id} (#{status})\n" <> render_evidence(evidence)
