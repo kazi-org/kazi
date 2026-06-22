@@ -37,10 +37,21 @@ defmodule Kazi.Retrieval do
   application env; else the no-op default. A retriever may be a bare module or a
   `{module, init_opts}` tuple (the init opts are forwarded as the callback's
   `opts`), so a test double can carry its fixed result inline.
+
+  ## Cache reuse (T4.9c, ADR-0012 §4)
+
+  `cached_retrieve/4` wraps `retrieve/3` behind the SHA-keyed cache (the SAME
+  `Kazi.Context.cache_key/3` key + blast-radius invalidation as the T4.6
+  orientation-pack cache), so an unchanged target reuses its snippets instead of
+  re-embedding/re-retrieving. The cache is injected via `Kazi.Retrieval.Cache`
+  (default `Kazi.ReadModel`); the plain `retrieve/3` is unchanged for callers that
+  do not want caching.
   """
 
-  alias Kazi.PredicateResult
+  alias Kazi.{Context, PredicateResult}
   alias Kazi.Retrieval.{NoOp, Snippet}
+
+  @default_cache Kazi.ReadModel
 
   @typedoc """
   A retriever: a module implementing this behaviour, or a `{module, init_opts}`
@@ -100,6 +111,76 @@ defmodule Kazi.Retrieval do
       when is_list(failing) and is_binary(workspace) and is_list(opts) do
     {module, init_opts} = resolve(opts)
     module.retrieve(failing, workspace, init_opts)
+  end
+
+  @typedoc """
+  Options for `cached_retrieve/4`. Extends the retriever-resolution opts with the
+  cache seam:
+
+    * `:cache` — a module implementing `Kazi.Retrieval.Cache` (defaults to
+      `Kazi.ReadModel`, the SQLite read-model). Injected for hermetic tests.
+    * `:on_retrieve` — a 0-arity function called each time the underlying retriever
+      actually runs (a cache miss), so a test can assert a hit did **not**
+      re-retrieve. Defaults to a no-op.
+
+  Plus every option `retrieve/3` resolves a retriever from (`:retriever`).
+  """
+  @type cache_opts :: [cache: module(), on_retrieve: (-> any()), retriever: t()]
+
+  @doc """
+  `retrieve/3` behind the SHA-keyed retrieval cache (T4.9c, ADR-0012 §4): reuse the
+  cached snippets for an unchanged target instead of re-embedding and re-retrieving.
+
+  This mirrors `Kazi.Context.cached_orientation_pack/4` exactly — same key, same
+  blast-radius invalidation — so an iteration that already has a fresh orientation
+  pack cached also has its retrieved snippets cached. The flow:
+
+    1. key = `Kazi.Context.cache_key(workspace, git_sha, failing)` (the SAME key the
+       orientation-pack cache uses; the snippet cache is a distinct table).
+    2. `Cache.get_cached_snippets(key, current_blast_radius)` — on a **fresh hit**
+       (an entry exists *and* its stored blast radius equals
+       `current_blast_radius`) the cached snippets are returned and the retriever is
+       **not** invoked (no re-embed).
+    3. On a miss — no entry, or the blast radius changed (the cached snippets are
+       stale) — the resolved retriever runs, the fresh snippets are stored under
+       `key` with `current_blast_radius`, and returned.
+
+  `current_blast_radius` is the impacted files/symbols the snippets are scoped to
+  *now* (the same sorted set `Kazi.Context.Pack.blast_radius/1` yields for the
+  orientation pack). At the same `(workspace, git-SHA, failing-set)` the key is
+  identical, so a changed blast radius is what marks the cached snippets stale.
+
+  The cache is injected via `opts[:cache]` (default `Kazi.ReadModel`); tests pass an
+  in-memory double, keeping this hermetic. The plain `retrieve/3` is unchanged and
+  still usable directly when no cache is wanted.
+  """
+  @spec cached_retrieve(
+          [{Kazi.Predicate.id(), PredicateResult.t()}],
+          String.t(),
+          {String.t(), [String.t()]},
+          cache_opts()
+        ) :: [Snippet.t()]
+  def cached_retrieve(failing, workspace, git_sha_and_radius, opts \\ [])
+
+  def cached_retrieve(failing, workspace, {git_sha, current_blast_radius}, opts)
+      when is_list(failing) and is_binary(workspace) and is_binary(git_sha) and
+             is_list(current_blast_radius) and is_list(opts) do
+    cache = Keyword.get(opts, :cache, @default_cache)
+    on_retrieve = Keyword.get(opts, :on_retrieve, fn -> :ok end)
+    retriever_opts = Keyword.drop(opts, [:cache, :on_retrieve])
+
+    key = Context.cache_key(workspace, git_sha, failing)
+
+    case cache.get_cached_snippets(key, current_blast_radius) do
+      snippets when is_list(snippets) ->
+        snippets
+
+      nil ->
+        on_retrieve.()
+        snippets = retrieve(failing, workspace, retriever_opts)
+        _ = cache.put_cached_snippets(key, workspace, git_sha, snippets, current_blast_radius)
+        snippets
+    end
   end
 
   # A retriever may be a bare module or a {module, init_opts} tuple.

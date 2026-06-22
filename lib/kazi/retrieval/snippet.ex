@@ -41,4 +41,35 @@ defmodule Kazi.Retrieval.Snippet do
   def new(text, opts \\ []) when is_binary(text) and is_list(opts) do
     %__MODULE__{text: text, source: Keyword.get(opts, :source)}
   end
+
+  @doc """
+  Serializes a snippet to a JSON-safe map for the SHA-keyed retrieval cache
+  (T4.9c, ADR-0012). String keys only — the inverse of `from_serializable/1`,
+  which reconstructs an equal struct so a cached snippet reused on a hit is
+  identical to one freshly retrieved.
+
+  ## Examples
+
+      iex> Kazi.Retrieval.Snippet.new("t", source: "lib/a.ex") |> Kazi.Retrieval.Snippet.to_serializable()
+      %{"text" => "t", "source" => "lib/a.ex"}
+  """
+  @spec to_serializable(t()) :: map()
+  def to_serializable(%__MODULE__{text: text, source: source}) do
+    %{"text" => text, "source" => source}
+  end
+
+  @doc """
+  Reconstructs a snippet from the JSON-safe map `to_serializable/1` produced. The
+  round-trip is exact: `from_serializable(to_serializable(s)) == s` for any
+  snippet.
+
+  ## Examples
+
+      iex> Kazi.Retrieval.Snippet.from_serializable(%{"text" => "t", "source" => nil})
+      %Kazi.Retrieval.Snippet{text: "t", source: nil}
+  """
+  @spec from_serializable(map()) :: t()
+  def from_serializable(%{"text" => text} = map) do
+    %__MODULE__{text: text, source: Map.get(map, "source")}
+  end
 end
