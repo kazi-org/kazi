@@ -23,6 +23,13 @@ kazi-*.tar
 # env
 .env
 
+# Node / Playwright runtime for the :browser provider (T2.2). The runner script
+# (priv/browser/playwright_runner.js) is committed; its installed deps are not —
+# real use runs `npm i playwright && npx playwright install chromium` locally.
+node_modules/
+priv/browser/node_modules/
+package-lock.json
+
 # Claude Code coordination artifacts (per-machine)
 .claude/scratch/
 .claude/worktrees/
