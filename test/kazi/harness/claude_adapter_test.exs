@@ -8,6 +8,10 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
   alias Kazi.PredicateResult
 
   @stub Path.expand("../../support/stub_claude.sh", __DIR__)
+  # T4.1: a stub emitting a representative `claude -p --output-format json`
+  # envelope, and one whose JSON is deliberately malformed (degradation path).
+  @json_stub Path.expand("../../support/stub_claude_json.sh", __DIR__)
+  @bad_json_stub Path.expand("../../support/stub_claude_bad_json.sh", __DIR__)
 
   setup do
     workspace =
@@ -97,6 +101,82 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
       assert {:ok, result} = ClaudeAdapter.run("do work", workspace, [])
       assert result.command == @stub
       assert File.exists?(Path.join(workspace, "stub_edit.txt"))
+    end
+  end
+
+  describe "run/3 JSON envelope parsing (T4.1, UC-009/UC-022)" do
+    test "parses token usage, cost, result text, and touched working set", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} = ClaudeAdapter.run("fix it", workspace, command: @json_stub)
+
+      # Back-compat: the raw keys are still present alongside the structured ones.
+      assert result.command == @json_stub
+      assert result.workspace == workspace
+      assert result.exit == 0
+      assert is_binary(result.output)
+
+      # The agent's final result text.
+      assert result.result == "Made the failing unit test pass."
+
+      # Total tokens = input(100) + output(250) + cache_read(5000) + cache_create(0).
+      assert result.tokens == 5350
+      # The dollar cost surfaces too.
+      assert result.cost_usd == 0.0123
+      # The touched working set the harness reported.
+      assert result.touched == ["lib/app/widget.ex", "test/app/widget_test.exs"]
+
+      # The budget-consumable shape the loop's T1.4 guard reads (cost.tokens).
+      assert result.cost == %{tokens: 5350}
+    end
+
+    test "token total honors per-component env overrides on the stub", %{workspace: workspace} do
+      System.put_env("STUB_INPUT_TOKENS", "10")
+      System.put_env("STUB_OUTPUT_TOKENS", "20")
+      System.put_env("STUB_CACHE_READ_TOKENS", "0")
+      System.put_env("STUB_CACHE_CREATION_TOKENS", "5")
+
+      on_exit(fn ->
+        ~w(STUB_INPUT_TOKENS STUB_OUTPUT_TOKENS STUB_CACHE_READ_TOKENS STUB_CACHE_CREATION_TOKENS)
+        |> Enum.each(&System.delete_env/1)
+      end)
+
+      assert {:ok, result} = ClaudeAdapter.run("fix it", workspace, command: @json_stub)
+      assert result.tokens == 35
+      assert result.cost == %{tokens: 35}
+    end
+
+    test "degrades gracefully on malformed JSON: base keys only, no crash", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} = ClaudeAdapter.run("fix it", workspace, command: @bad_json_stub)
+
+      # The run still succeeded and the base keys are intact.
+      assert result.exit == 0
+      assert result.command == @bad_json_stub
+      assert result.workspace == workspace
+      assert is_binary(result.output)
+      assert File.exists?(Path.join(workspace, "stub_edit.txt"))
+
+      # No structured keys were fabricated from un-parseable output.
+      refute Map.has_key?(result, :tokens)
+      refute Map.has_key?(result, :cost)
+      refute Map.has_key?(result, :cost_usd)
+      refute Map.has_key?(result, :result)
+      refute Map.has_key?(result, :touched)
+    end
+
+    test "a plaintext (non-JSON) harness keeps the pre-T4.1 result shape", %{
+      workspace: workspace
+    } do
+      # The original plaintext stub emits no JSON — the adapter must degrade to
+      # exactly the back-compat base map (no structured keys), proving the JSON
+      # path is purely additive.
+      assert {:ok, result} = ClaudeAdapter.run("do work", workspace, command: @stub)
+
+      assert result.output =~ "stub ran in:"
+      refute Map.has_key?(result, :tokens)
+      refute Map.has_key?(result, :cost)
     end
   end
 end
