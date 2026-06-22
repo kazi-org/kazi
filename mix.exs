@@ -51,7 +51,12 @@ defmodule Kazi.MixProject do
       {:plug_cowboy, "~> 2.8"},
       # LiveView's connected-mount test helpers (`live/2`) parse the rendered DOM
       # with lazy_html; test-only.
-      {:lazy_html, ">= 0.1.0", only: :test}
+      {:lazy_html, ">= 0.1.0", only: :test},
+      # NATS client for the cross-node JetStream-KV lease backend
+      # (`Kazi.Coordination.Lease.Nats`, T3.1b, ADR-0004; UC-013). Used only by
+      # that backend and its integration-tagged test; the default in-memory
+      # backend needs no NATS server, so default `mix test` stays hermetic.
+      {:gnat, "~> 1.9"}
     ]
   end
 
