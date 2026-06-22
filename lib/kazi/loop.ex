@@ -95,6 +95,11 @@ defmodule Kazi.Loop do
   @behaviour :gen_statem
 
   alias Kazi.{Action, Goal, Predicate, PredicateResult, PredicateVector}
+  # T3.1d resource lease: the per-key lease substrate (acquire/renew/release via
+  # CAS + TTL on an injected clock, ADR-0006). The loop leases the goal's resource
+  # key before dispatch so contending instances serialize (see the dispatch-prep
+  # region of the `:dispatch_agent` ACT clause and `release_lease/1` on terminate).
+  alias Kazi.Coordination.Lease
   # T1.3 flake: the pure re-run/quarantine policy lives in its own module; the
   # loop only routes failing-predicate evaluation through it (see observe/1).
   alias Kazi.Loop.Flake
@@ -299,8 +304,46 @@ defmodule Kazi.Loop do
               # the agent on a prior approach (ADR-0008). Empty until the first
               # dispatch reports a touched set, so the first iteration's prompt is
               # unchanged. Appended last so the existing field order is untouched.
-              working_set_digest: Digest.empty()
+              working_set_digest: Digest.empty(),
+              # --- T3.1d resource lease: serialize work on a resource key -------
+              # Before driving the harness against a goal the loop leases the
+              # goal's RESOURCE KEY (ADR-0006: coordinate on resources, not
+              # identities), so two kazi instances aiming at the SAME key
+              # serialize — one works, the other DEFERS rather than colliding
+              # (UC-013). All injectable so tests drive the in-memory double and a
+              # virtual clock; LEASING IS OFF (a pure no-op) unless a `:lease`
+              # backend is supplied, so the existing single-instance loop and its
+              # tests are byte-for-byte unchanged. Appended last so the existing
+              # field order is untouched.
+              #
+              #   * `lease` — the `Kazi.Coordination.Lease` backend MODULE, or nil
+              #     to disable leasing entirely (the default — no key is held and
+              #     dispatch never defers).
+              #   * `lease_opts` — backend opts passed verbatim to every
+              #     acquire/renew/release (e.g. the in-memory double's `:store`,
+              #     and the injectable clock `:now_ms`/`:now_fn`).
+              #   * `lease_holder` — this instance's holder id (who holds the
+              #     lease); two instances MUST present distinct holders to contend.
+              #   * `lease_ttl_ms` — the lease TTL; the loop renews well within it
+              #     each time it dispatches so a live instance keeps the key.
+              #   * `resource_key` — the derived key this goal leases (computed
+              #     once at init from the injectable `:resource_key_fn`); nil when
+              #     leasing is off.
+              #   * `held_lease` — the `%Kazi.Coordination.Lease{}` currently held
+              #     (the CAS revision proving this acquisition), or nil when the
+              #     key is not held. Released on terminate.
+              lease: nil,
+              lease_opts: [],
+              lease_holder: nil,
+              lease_ttl_ms: nil,
+              resource_key: nil,
+              held_lease: nil
   end
+
+  # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
+  # loop renews on every dispatch (well within the TTL), so a live instance holds
+  # the key continuously while a crashed one lets it expire and free for another.
+  @default_lease_ttl_ms 30_000
 
   # =============================================================================
   # Public API
@@ -366,6 +409,28 @@ defmodule Kazi.Loop do
       index at which the stuck verdict fired. This is the human-escalation seam
       (hand the goal off to a person). Default: a logger warning. A raising
       callback is contained and never blocks the terminal stop.
+    * `:lease` — a `Kazi.Coordination.Lease` backend MODULE to coordinate work on
+      the goal's RESOURCE KEY (T3.1d, ADR-0006; UC-013). When supplied, the loop
+      acquires the lease BEFORE driving the harness, so two instances targeting
+      the same key serialize — one works, the other DEFERS (re-observes without
+      dispatching) until the key is free — and RELEASES it on terminate. When
+      omitted (default `nil`) leasing is OFF: no key is held and dispatch never
+      defers, exactly as before. Pair with `:lease_opts` (backend opts: the
+      in-memory double's `:store`, plus the injected clock `:now_ms`/`:now_fn`).
+    * `:lease_opts` — opts threaded verbatim to the lease backend's
+      acquire/renew/release (default `[]`). Carries the backend handle (e.g.
+      `store: store` for `Kazi.Coordination.Lease.Memory`) and, for determinism,
+      the injected clock; ignored unless `:lease` is set.
+    * `:lease_holder` — this instance's holder id presented to the lease backend
+      (default the goal id). Two instances MUST present DISTINCT holders to
+      actually contend (same-holder re-acquire is a refresh, not a collision).
+    * `:lease_ttl_ms` — the TTL a held lease is minted/renewed with (default
+      `#{30_000}` ms); the loop renews on every dispatch, well within it.
+    * `:resource_key_fn` — a 1-arity fn `goal -> key` deriving the resource key
+      the goal leases (default: `"goal:" <> goal.id`, narrowing to the goal's
+      `scope.repo` when set). Injectable so a test can make two goals derive the
+      SAME key (to assert serialization) or DISTINCT keys (to assert parallelism).
+      Ignored unless `:lease` is set.
     * `:name` — register the process under a name.
   """
   @spec start_link(keyword()) :: :gen_statem.start_ret()
@@ -558,13 +623,36 @@ defmodule Kazi.Loop do
       # T1.5 stuck: the window N + the human-escalation callback (default a
       # logger warning that hands off the persistent failing set).
       stuck_iterations: Keyword.get(opts, :stuck_iterations, StuckDetector.default_iterations()),
-      on_escalation: Keyword.get(opts, :on_escalation, &default_escalation/1)
+      on_escalation: Keyword.get(opts, :on_escalation, &default_escalation/1),
+      # T3.1d resource lease: the backend + opts + holder + TTL, and the resource
+      # key derived ONCE from the goal via the injectable `:resource_key_fn`. With
+      # no `:lease` backend, `resource_key` stays nil and the dispatch-prep region
+      # short-circuits to a no-op (leasing off), so the default loop is unchanged.
+      lease: Keyword.get(opts, :lease),
+      lease_opts: Keyword.get(opts, :lease_opts, []),
+      lease_holder: Keyword.get(opts, :lease_holder, goal.id),
+      lease_ttl_ms: Keyword.get(opts, :lease_ttl_ms, @default_lease_ttl_ms),
+      resource_key: derive_resource_key(opts, goal)
     }
 
     # Kick off the first observation as soon as we are initialized, without
     # blocking init/1.
     {:ok, :observing, data, [{:next_event, :internal, :observe}]}
   end
+
+  # T3.1d resource lease: release the held key if the process exits for ANY reason.
+  # The clean terminal paths already release via `terminate_with/2`, but an
+  # ABNORMAL exit (a crash, a supervisor shutdown) bypasses that — `terminate/3`
+  # is `:gen_statem`'s last gasp, so releasing here too means a held lease never
+  # leaks when the loop dies unexpectedly (release/2 is idempotent — releasing an
+  # already-freed key is a no-op, so double-release on the clean path is safe).
+  @impl :gen_statem
+  def terminate(_reason, _state, %Data{} = data) do
+    release_lease(data)
+    :ok
+  end
+
+  def terminate(_reason, _state, _data), do: :ok
 
   # --- OBSERVE → DIFF → DECIDE -------------------------------------------------
   #
@@ -589,39 +677,24 @@ defmodule Kazi.Loop do
 
   # --- ACT: dispatch the coding agent against failing-predicate evidence -------
   def handle_event(:internal, {:act, %Action{kind: :dispatch_agent} = action}, :acting, data) do
-    prompt = dispatch_prompt(action, data)
+    # T3.1d resource lease (ADR-0006; UC-013): before doing ANY work on the goal,
+    # hold the lease on its resource key. `hold_lease/1` acquires it (or renews the
+    # one we already hold) on the injected clock. If a DIFFERENT instance holds the
+    # key, it returns `:held` — we must NOT dispatch into a resource someone else
+    # is working — so we DEFER: re-observe on the poll interval and try again,
+    # rather than colliding. When leasing is off (`resource_key: nil`) this is a
+    # pure pass-through that always proceeds. The dispatch below runs only once we
+    # actually hold the key.
+    case hold_lease(data) do
+      {:held, data} ->
+        # Contention: another instance owns the key. Defer — yield and re-observe
+        # on the poll interval (a state timeout, so a queued `:stop` still drains)
+        # and let decide re-route to a dispatch on the next free tick.
+        reobserve(data, data.reobserve_interval_ms)
 
-    # T4.5 context injection (ADR-0010 §3): before the stateless `claude -p`
-    # dispatch, prepare the workspace so the agent starts oriented — expose the
-    # code-review-graph MCP in the workspace's `.mcp.json` and refresh its code
-    # graph if present. Best-effort: a prep error never blocks the dispatch (the
-    # MCP/graph is an orientation optimisation, not a precondition).
-    prepare_workspace(data)
-
-    result = data.harness.run(prompt, data.workspace, data.adapter_opts)
-
-    # T1.4 budget: accumulate this run's token estimate (if the harness reported
-    # one) into the running total the budget guard checks next tick.
-    data = accumulate_tokens(data, result)
-
-    # T4.7 working-set digest: distill a BOUNDED, transcript-free note of the
-    # files this iteration touched (map memory ONLY — `Digest.from_result/2`
-    # reads the result's `:touched` set and nothing else, never the agent's
-    # transcript/result text) and carry it forward so the NEXT dispatch's prompt
-    # starts oriented to WHERE prior work landed (ADR-0010 §4). A run that reports
-    # no touched set leaves the prior digest untouched, so the carried map memory
-    # is the most recent iteration that actually reported one.
-    data = record_working_set(data, result)
-
-    # The code changed under us: any prior land/deploy is now stale. Re-observe
-    # on the poll interval (not zero) so a goal whose code predicate never goes
-    # green polls rather than busy-spinning, and stays interruptible by `:stop`.
-    data = record_action(data, action, landed?: false, deployed?: false)
-    # T1.2 regression: log this dispatch keyed by the observation index that
-    # seeded it (data.iterations - 1, the last completed observation), so the
-    # detector can attribute a later green→red edge to it.
-    data = log_dispatch(data, action)
-    reobserve(data, data.reobserve_interval_ms)
+      {:ok, data} ->
+        dispatch_agent(action, data)
+    end
   end
 
   # --- ACT: integrate (land the converged code change) -------------------------
@@ -1068,6 +1141,48 @@ defmodule Kazi.Loop do
     {:next_state, :acting, data, [{:next_event, :internal, {:act, action}}]}
   end
 
+  # The harness dispatch proper, reached from the `:dispatch_agent` ACT clause
+  # ONLY once we hold the goal's resource lease (T3.1d). Byte-for-byte the
+  # pre-lease dispatch body — prepare the workspace, drive the harness, fold the
+  # token estimate / working-set digest, invalidate land/deploy, log the dispatch,
+  # and re-observe on the poll interval.
+  @spec dispatch_agent(Action.t(), Data.t()) :: :gen_statem.event_handler_result(atom())
+  defp dispatch_agent(%Action{} = action, data) do
+    prompt = dispatch_prompt(action, data)
+
+    # T4.5 context injection (ADR-0010 §3): before the stateless `claude -p`
+    # dispatch, prepare the workspace so the agent starts oriented — expose the
+    # code-review-graph MCP in the workspace's `.mcp.json` and refresh its code
+    # graph if present. Best-effort: a prep error never blocks the dispatch (the
+    # MCP/graph is an orientation optimisation, not a precondition).
+    prepare_workspace(data)
+
+    result = data.harness.run(prompt, data.workspace, data.adapter_opts)
+
+    # T1.4 budget: accumulate this run's token estimate (if the harness reported
+    # one) into the running total the budget guard checks next tick.
+    data = accumulate_tokens(data, result)
+
+    # T4.7 working-set digest: distill a BOUNDED, transcript-free note of the
+    # files this iteration touched (map memory ONLY — `Digest.from_result/2`
+    # reads the result's `:touched` set and nothing else, never the agent's
+    # transcript/result text) and carry it forward so the NEXT dispatch's prompt
+    # starts oriented to WHERE prior work landed (ADR-0010 §4). A run that reports
+    # no touched set leaves the prior digest untouched, so the carried map memory
+    # is the most recent iteration that actually reported one.
+    data = record_working_set(data, result)
+
+    # The code changed under us: any prior land/deploy is now stale. Re-observe
+    # on the poll interval (not zero) so a goal whose code predicate never goes
+    # green polls rather than busy-spinning, and stays interruptible by `:stop`.
+    data = record_action(data, action, landed?: false, deployed?: false)
+    # T1.2 regression: log this dispatch keyed by the observation index that
+    # seeded it (data.iterations - 1, the last completed observation), so the
+    # detector can attribute a later green→red edge to it.
+    data = log_dispatch(data, action)
+    reobserve(data, data.reobserve_interval_ms)
+  end
+
   # The prompt seeding the harness with the failing-predicate evidence
   # (concept §5). The concrete claude -p adapter (T0.6) owns prompt shaping; here
   # we hand it a deterministic, evidence-bearing string the test doubles can
@@ -1205,6 +1320,82 @@ defmodule Kazi.Loop do
   defp record_release_ref(%Data{} = data, _result), do: data
 
   # =============================================================================
+  # T3.1d resource lease: acquire-before-dispatch, renew, release-on-terminate
+  # =============================================================================
+
+  # Ensure this instance holds the goal's resource lease before dispatching work
+  # (ADR-0006; UC-013). The three outcomes:
+  #
+  #   * leasing OFF (`resource_key: nil`, no backend) — `{:ok, data}` unchanged: a
+  #     pure pass-through, so the default single-instance loop never leases.
+  #   * key free / already ours — acquire or renew on the injected clock and carry
+  #     the minted `%Lease{}` forward as `held_lease`: `{:ok, data}`.
+  #   * key held by a DIFFERENT instance — `{:held, data}`: the caller DEFERS
+  #     (re-observes without dispatching) so contending instances serialize rather
+  #     than collide. We do NOT hold a lease in this case (`held_lease` stays nil).
+  #
+  # acquire/4 itself is the serialization point: it succeeds when the key is free
+  # at `now_ms` OR already held by us (a re-acquire refreshes the TTL and bumps the
+  # CAS revision), and returns `{:error, :held}` only for a different, unexpired
+  # holder — so "renew" and "first acquire" are the same call. The injected clock
+  # rides in `lease_opts` (`:now_ms`/`:now_fn`), keeping TTL deterministic.
+  @spec hold_lease(Data.t()) :: {:ok, Data.t()} | {:held, Data.t()}
+  defp hold_lease(%Data{resource_key: nil} = data), do: {:ok, data}
+
+  defp hold_lease(
+         %Data{
+           lease: backend,
+           resource_key: key,
+           lease_holder: holder,
+           lease_ttl_ms: ttl_ms,
+           lease_opts: opts
+         } = data
+       ) do
+    case backend.acquire(key, holder, ttl_ms, opts) do
+      {:ok, %Lease{} = lease} -> {:ok, %Data{data | held_lease: lease}}
+      {:error, :held} -> {:held, %Data{data | held_lease: nil}}
+    end
+  end
+
+  # Release the held resource lease, if any (called on every terminal path and
+  # from `terminate/3`). A no-op when leasing is off or nothing is held; idempotent
+  # via the backend's `release/2`, so releasing twice (clean terminate then
+  # `terminate/3`) is safe. Clears `held_lease` so a stale lease can't be released
+  # again or mistaken for still-held.
+  @spec release_lease(Data.t()) :: Data.t()
+  defp release_lease(%Data{held_lease: nil} = data), do: data
+
+  defp release_lease(%Data{lease: backend, held_lease: %Lease{} = lease, lease_opts: opts} = data) do
+    :ok = backend.release(lease, opts)
+    %Data{data | held_lease: nil}
+  end
+
+  # Derive the resource key this goal leases from the injectable `:resource_key_fn`
+  # (default `default_resource_key/1`). Returns nil when leasing is OFF (no `:lease`
+  # backend), short-circuiting the whole lease path to a no-op.
+  @spec derive_resource_key(keyword(), Goal.t()) :: Lease.key() | nil
+  defp derive_resource_key(opts, %Goal{} = goal) do
+    case Keyword.get(opts, :lease) do
+      nil ->
+        nil
+
+      _backend ->
+        key_fn = Keyword.get(opts, :resource_key_fn, &default_resource_key/1)
+        key_fn.(goal)
+    end
+  end
+
+  # The default resource-key derivation: the goal's identity, narrowed to its
+  # repo when the scope names one — so goals on the same repo contend by default
+  # while distinct goals get distinct keys. Tests override `:resource_key_fn` to
+  # force two goals onto the SAME key (assert serialization) or DISTINCT keys
+  # (assert parallelism). ADR-0006's blast-radius partitioning (T3.2) supplies a
+  # finer key later; this is the conservative default until then.
+  @spec default_resource_key(Goal.t()) :: Lease.key()
+  defp default_resource_key(%Goal{scope: %{repo: repo}}) when is_binary(repo), do: "repo:" <> repo
+  defp default_resource_key(%Goal{id: id}), do: "goal:" <> id
+
+  # =============================================================================
   # Termination
   # =============================================================================
 
@@ -1214,6 +1405,11 @@ defmodule Kazi.Loop do
   # `snapshot/1` calls still succeed; the operator/owner tears it down. Terminal
   # states accept no further observe/act events.
   defp terminate_with(outcome, %Data{} = data) do
+    # T3.1d resource lease: on EVERY terminal outcome (:converged / :stopped —
+    # incl. an operator stop, stuck stop, await — / :over_budget) release the
+    # resource key so another instance can take it up. release/2 is idempotent and
+    # a no-op when nothing is held, so this is safe on a loop that never leased.
+    data = release_lease(data)
     result = build_result(outcome, data)
     replies = for from <- data.waiters, do: {:reply, from, {:ok, result}}
     data = %Data{data | result: result, waiters: []}
