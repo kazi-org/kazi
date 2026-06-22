@@ -1,7 +1,8 @@
 defmodule Kazi.Telegram do
   @moduledoc """
-  The Telegram bridge: ingress from a chat message to a proposed goal (T3.7a) and
-  egress of a terminal-event ping back out (T3.7b) — UC-019, ADR-0011.
+  The Telegram bridge: ingress from a chat message to a proposed goal (T3.7a),
+  egress of a terminal-event ping back out (T3.7b), and the round-trip that wires
+  the two ends together through approval and a run (T3.7c) — UC-019, ADR-0011.
 
   The bridge is a **transport** over the authoring API and the loop's *terminal
   result*, not a part of the core loop. A human sends kazi a prose idea in a
@@ -46,10 +47,24 @@ defmodule Kazi.Telegram do
     * `:over_budget`                   — a budget ceiling was hit; the reason
       names the exceeded dimension (`:max_iterations` / `:wall_clock` /
       `:token_budget`).
+
+  ## Round-trip (T3.7c)
+
+  `handle/2` is the bridge wired end to end: an inbound chat message becomes a
+  proposed goal (ingress, T3.7a/T3.5a), is approved into a runnable goal
+  (`Kazi.Authoring.approve/2`, T3.5b), driven to a terminal outcome
+  (`Kazi.Runtime.run/2`), and the outcome is pinged back to the originating chat
+  (egress, T3.7b). It is a thin orchestration over the **public** authoring and
+  runtime APIs — the same surface the CLI uses (ADR-0011 §2/§4) — and never
+  reaches into `Kazi.Loop` or `Kazi.Harness.*` (ADR-0011 §1): it consumes the
+  loop's terminal *result*, the value `Kazi.Runtime.run/2` returns, just as the
+  decoupled egress (`notify/3`) does. The ping is routed back to the inbound
+  message's `chat_id`, so a human's idea-in yields exactly one outcome-out.
   """
 
   alias Kazi.Authoring
   alias Kazi.Loop
+  alias Kazi.Runtime
   alias Kazi.Telegram.Message
 
   @typedoc """
@@ -163,6 +178,57 @@ defmodule Kazi.Telegram do
   defp budget_dimension(:token_budget), do: "token budget"
   defp budget_dimension(nil), do: "budget exhausted"
   defp budget_dimension(other), do: to_string(other)
+
+  @doc """
+  Drives the full bridge round-trip for one inbound `message` (T3.7c, UC-019).
+
+  Ties ingress → approval → run → egress together over the public authoring and
+  runtime APIs (ADR-0011 §2/§4), routing the terminal ping back to the message's
+  `chat_id`:
+
+  1. **Ingress** — parse the idea and `Kazi.Authoring.propose/2` it into a
+     `proposed` goal (T3.7a/T3.5a), forwarding the `:authoring` opts.
+  2. **Approval** — `Kazi.Authoring.approve/2` the draft's `proposal_ref`,
+     transitioning it `proposed → approved` and yielding the runnable
+     `Kazi.Goal` (T3.5b), forwarding the `:approve` opts.
+  3. **Run** — `Kazi.Runtime.run/2` the approved goal to a terminal outcome,
+     forwarding the `:run` opts (the injectable harness/integrate/deploy seams a
+     hermetic caller points at local stubs).
+  4. **Egress** — `notify/3` the terminal result back to the inbound `chat_id`,
+     emitting EXACTLY ONE outbound ping with the outcome's status (T3.7b).
+
+  The bridge stays DECOUPLED from the loop (ADR-0011 §1): it only consumes the
+  terminal result `Kazi.Runtime.run/2` returns; it never reaches into
+  `Kazi.Loop` or the harness. Returns `{:ok, %{draft: draft, result: result,
+  sent: sent}}` once the round-trip completes — the proposed/approved `draft`,
+  the loop's terminal `result`, and the egress `sent` ack — or `{:error,
+  reason}` from whichever step failed first (an unparsable idea, an authoring or
+  approval error, a run error). On a failed step nothing downstream runs and no
+  ping is sent.
+
+  ## Options
+
+    * `:client` — the `Kazi.Telegram.Client` module for the egress ping
+      (required).
+    * `:client_opts` — opts forwarded to the client's `send_message/3`
+      (default `[]`).
+    * `:authoring` — opts forwarded to `Kazi.Authoring.propose/2` (e.g. the
+      injected stub `:harness`). Default `[]`.
+    * `:approve` — opts forwarded to `Kazi.Authoring.approve/2`. Default `[]`.
+    * `:run` — opts forwarded to `Kazi.Runtime.run/2` (e.g. `:workspace`,
+      `:adapter_opts`, `:integrator`, `:deploy_cmd`). Default `[]`.
+  """
+  @spec handle(Message.t(), opts()) ::
+          {:ok, %{draft: Authoring.Draft.t(), result: Loop.result(), sent: term()}}
+          | {:error, term()}
+  def handle(%Message{} = message, opts) when is_list(opts) do
+    with {:ok, draft} <- ingest(message, opts),
+         {:ok, goal} <- Authoring.approve(draft.proposal_ref, Keyword.get(opts, :approve, [])),
+         {:ok, result} <- Runtime.run(goal, Keyword.get(opts, :run, [])),
+         {:ok, sent} <- notify(message.chat_id, result, opts) do
+      {:ok, %{draft: draft, result: result, sent: sent}}
+    end
+  end
 
   @doc """
   Polls the injected client for inbound updates and ingests each parsable one.
