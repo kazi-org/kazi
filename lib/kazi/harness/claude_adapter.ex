@@ -315,7 +315,7 @@ defmodule Kazi.Harness.ClaudeAdapter do
   defp retrieval_section(failing, opts) do
     case Retrieval.retrieve(failing, retrieval_workspace(opts), opts) do
       [] -> nil
-      snippets when is_list(snippets) -> render_retrieval(snippets)
+      snippets when is_list(snippets) -> render_retrieval_section(snippets)
     end
   end
 
@@ -329,12 +329,19 @@ defmodule Kazi.Harness.ClaudeAdapter do
     end
   end
 
-  # Render the retrieved snippets as a single clearly-delimited section that sits
-  # AFTER the orientation prefix and the failing-evidence body. The heading is
-  # fixed (greppable, cache-stable) and each snippet renders its source attribution
-  # (when present) above a fenced text block.
-  @spec render_retrieval([Snippet.t()]) :: String.t()
-  defp render_retrieval(snippets) do
+  @doc """
+  Renders retrieved `Kazi.Retrieval.Snippet`s as a single clearly-delimited
+  section (T4.9a, ADR-0012): a fixed `## Relevant prior context (retrieved)`
+  heading (greppable, cache-stable) over each snippet's source attribution (when
+  present) above a fenced text block.
+
+  Public so the convergence loop (`Kazi.Loop`, T4.9c) appends the SAME section to
+  its dispatch prompt that `build_prompt/3` produces — one renderer, no drift. The
+  caller is responsible for placing it AFTER the orientation prefix and the
+  failing-evidence body (it augments, never replaces them).
+  """
+  @spec render_retrieval_section([Snippet.t()]) :: String.t()
+  def render_retrieval_section(snippets) when is_list(snippets) do
     "## Relevant prior context (retrieved)\n\n" <>
       "Similarity-retrieved snippets that may relate to the failing predicates. " <>
       "Use them as hints; the failing evidence above is authoritative.\n\n" <>

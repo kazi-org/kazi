@@ -94,7 +94,11 @@ defmodule Kazi.Loop do
 
   @behaviour :gen_statem
 
-  alias Kazi.{Action, Goal, Predicate, PredicateResult, PredicateVector}
+  alias Kazi.{Action, Goal, Predicate, PredicateResult, PredicateVector, Retrieval}
+  # T4.9c retrieval opt-in (ADR-0012): the loop appends the goal-declared
+  # retriever's snippets to the dispatch prompt, reusing the adapter's render so
+  # the section is byte-identical to `build_prompt/3`'s (see `dispatch_prompt/2`).
+  alias Kazi.Harness.ClaudeAdapter
   # T3.1d resource lease: the per-key lease substrate (acquire/renew/release via
   # CAS + TTL on an injected clock, ADR-0006). The loop leases the goal's resource
   # key before dispatch so contending instances serialize (see the dispatch-prep
@@ -1194,6 +1198,13 @@ defmodule Kazi.Loop do
   # the next stateless iteration starts oriented without re-exploring (ADR-0010
   # §4). On the FIRST iteration the digest is empty and renders to nothing, so the
   # prompt is exactly the evidence string above (back-compat).
+  #
+  # T4.9c retrieval opt-in (ADR-0012): when the goal DECLARED a retriever (threaded
+  # by `Kazi.Runtime` into `adapter_opts[:retriever]`), its top-k snippets are
+  # APPENDED as a clearly-delimited section after the evidence (augmenting, never
+  # replacing it). Retrieval is OFF by default: with no `:retriever` the resolved
+  # default is the no-op (returns `[]`), so NOTHING is appended and the prompt is
+  # byte-identical to the pre-retrieval path (ADR-0012's central constraint).
   @spec dispatch_prompt(Action.t(), Data.t()) :: String.t()
   defp dispatch_prompt(%Action{params: params}, %Data{goal: goal} = data) do
     failing = Map.get(params, :failing, [])
@@ -1202,11 +1213,36 @@ defmodule Kazi.Loop do
       "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}\n" <>
         "evidence: #{inspect(Map.get(params, :evidence, %{}))}"
 
-    case Digest.render(data.working_set_digest) do
-      "" -> evidence_prompt
-      note -> note <> "\n\n" <> evidence_prompt
+    prompt =
+      case Digest.render(data.working_set_digest) do
+        "" -> evidence_prompt
+        note -> note <> "\n\n" <> evidence_prompt
+      end
+
+    case retrieval_section(data) do
+      nil -> prompt
+      section -> prompt <> "\n\n" <> section
     end
   end
+
+  # The optional retrieval augmentation for the dispatch prompt (T4.9c, ADR-0012).
+  # Resolves the goal-declared retriever from `adapter_opts` and renders any
+  # snippets it returns against the current failing slice. The no-op default
+  # returns `[]`, so with retrieval off this is `nil` and the prompt is unchanged.
+  @spec retrieval_section(Data.t()) :: String.t() | nil
+  defp retrieval_section(%Data{adapter_opts: adapter_opts, workspace: workspace} = data) do
+    ws = if is_binary(workspace), do: workspace, else: ""
+
+    case Retrieval.retrieve(failing_slice(data), ws, retrieval_opts(adapter_opts)) do
+      [] -> nil
+      snippets when is_list(snippets) -> ClaudeAdapter.render_retrieval_section(snippets)
+    end
+  end
+
+  # Forward only the retriever-resolution opt to `Kazi.Retrieval` (it ignores the
+  # rest of the adapter opts). Absent a `:retriever`, this yields `[]` and the
+  # resolved default is the no-op — off by default.
+  defp retrieval_opts(adapter_opts), do: Keyword.take(adapter_opts, [:retriever])
 
   # T4.5/T4.4 context injection (ADR-0010 §3): prepare the target workspace for the
   # imminent stateless dispatch — expose the code-review-graph MCP in its

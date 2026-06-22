@@ -280,9 +280,33 @@ defmodule Kazi.Runtime do
   # The harness adapter reads its command from adapter_opts (the
   # ClaudeAdapter :command seam); tests inject a stub binary the same way prod
   # passes model/flags. Anything the caller passes in :adapter_opts wins.
-  defp build_adapter_opts(_goal, opts) do
-    Keyword.get(opts, :adapter_opts, [])
+  #
+  # T4.9c (ADR-0012): per-goal retrieval opt-in. Retrieval is OFF by default — a
+  # goal that does not DECLARE a retriever (in `metadata[:retriever]`) threads NO
+  # `:retriever` into adapter_opts, so `build_prompt/3` resolves the no-op default
+  # and the prompt/loop are byte-identical to the pre-retrieval path (ADR-0012's
+  # central constraint). A goal that declares one wires it into the dispatch path.
+  # The caller's explicit `:adapter_opts` still wins (it is merged last), so a
+  # test/operator can override or disable the goal-declared retriever.
+  defp build_adapter_opts(%Goal{} = goal, opts) do
+    caller_opts = Keyword.get(opts, :adapter_opts, [])
+
+    case goal_retriever(goal) do
+      nil -> caller_opts
+      retriever -> Keyword.merge([retriever: retriever], caller_opts)
+    end
   end
+
+  # The retriever a goal DECLARES, if any, for per-goal retrieval opt-in (T4.9c).
+  # Read from `goal.metadata[:retriever]` (string or atom key, since goal-file
+  # metadata may carry either): a `Kazi.Retrieval` module or `{module, init_opts}`
+  # tuple. Absent the key, returns `nil` — the off-by-default state.
+  @spec goal_retriever(Goal.t()) :: Kazi.Retrieval.t() | nil
+  defp goal_retriever(%Goal{metadata: metadata}) when is_map(metadata) do
+    Map.get(metadata, :retriever) || Map.get(metadata, "retriever")
+  end
+
+  defp goal_retriever(%Goal{}), do: nil
 
   # Static context the loop threads into every integrate/deploy action. This is
   # how the runtime points the actions' OWN injectable seams — the integrate
