@@ -154,7 +154,10 @@ defmodule Kazi.Loop do
           reason: Budget.reason() | :stuck | nil,
           vector: PredicateVector.t() | nil,
           actions: [Action.kind()],
-          iterations: non_neg_integer()
+          iterations: non_neg_integer(),
+          # T3.3d deploy wiring: the release ref recorded on the most recent
+          # successful deploy (T3.3c), or nil if nothing was deployed this run.
+          release_ref: String.t() | nil
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -201,6 +204,14 @@ defmodule Kazi.Loop do
               # progress facts not captured by the predicate vector
               landed?: false,
               deployed?: false,
+              # T3.3d deploy wiring: the release ref recorded on the most recent
+              # successful deploy (T3.3c release tagging) — the durable identifier
+              # naming WHAT was shipped (distinct from the live deploy URL). The
+              # deploy ACT clause folds the deploy action result's `:release_ref`
+              # here so the runtime/CLI can surface it in the run outcome/snapshot
+              # and project it to the read-model. nil until a deploy succeeds with a
+              # release ref. Appended last so the existing field order is untouched.
+              release_ref: nil,
               # observability / history
               vector: nil,
               prev_vector: nil,
@@ -440,9 +451,11 @@ defmodule Kazi.Loop do
   snapshot. Also includes `:quarantine` — the list of predicate ids currently
   quarantined as flaky (T1.3), which are excluded from the convergence/work
   calculus; `:stuck_failing` — the list of predicate ids the loop stopped stuck
-  on (T1.5), or `nil` if it did not stop stuck; and `:regressions` (T1.2) — the
+  on (T1.5), or `nil` if it did not stop stuck; `:regressions` (T1.2) — the
   green→red predicate flags detected over the history so far, each with the
-  dispatch it is attributed to (see `Kazi.Loop.RegressionDetector`).
+  dispatch it is attributed to (see `Kazi.Loop.RegressionDetector`); and
+  `:release_ref` (T3.3d) — the release ref of the most recent successful deploy
+  (the T3.3c tag naming WHAT was shipped), or `nil` if nothing has been deployed.
   """
   @spec snapshot(:gen_statem.server_ref()) :: %{
           state: atom(),
@@ -455,6 +468,7 @@ defmodule Kazi.Loop do
           iterations: non_neg_integer(),
           landed?: boolean(),
           deployed?: boolean(),
+          release_ref: String.t() | nil,
           quarantine: [Kazi.Predicate.id()],
           tokens_used: non_neg_integer(),
           budget_reason: Budget.reason() | nil,
@@ -584,6 +598,11 @@ defmodule Kazi.Loop do
     result = data.deploy.execute(action, action_context(action, data))
     flags = if succeeded?(result), do: [deployed?: true], else: []
     data = record_action(data, action, flags)
+    # T3.3d deploy wiring: capture the release ref the deploy action returns
+    # (T3.3c release tagging) so it is surfaced in the run outcome/snapshot and
+    # projected to the read-model. A failed deploy (or one without a release ref)
+    # leaves the prior value untouched.
+    data = record_release_ref(data, result)
     reobserve(data, 0)
   end
 
@@ -645,6 +664,9 @@ defmodule Kazi.Loop do
       iterations: data.iterations,
       landed?: data.landed?,
       deployed?: data.deployed?,
+      # T3.3d deploy wiring: the release ref of the most recent successful deploy
+      # (T3.3c), or nil if nothing has been deployed yet.
+      release_ref: data.release_ref,
       # T1.3 flake: the predicate ids currently quarantined as flaky.
       quarantine: MapSet.to_list(data.quarantine),
       # T1.4 budget: current token spend + the dimension that stopped the loop
@@ -1079,6 +1101,18 @@ defmodule Kazi.Loop do
     }
   end
 
+  # T3.3d deploy wiring: pull the release ref out of a successful deploy result
+  # (the `:release_ref` the T3.3c tagging path puts there) and remember it on the
+  # loop's data, so it can be surfaced in snapshot/1, the terminal result, and the
+  # read-model projection. A non-`:release_ref`-bearing result (a failed deploy,
+  # or a deploy whose tagger could not produce one) leaves the prior value as-is.
+  @spec record_release_ref(Data.t(), Action.result()) :: Data.t()
+  defp record_release_ref(%Data{} = data, {:ok, %{release_ref: ref}}) when is_binary(ref) do
+    %Data{data | release_ref: ref}
+  end
+
+  defp record_release_ref(%Data{} = data, _result), do: data
+
   # =============================================================================
   # Termination
   # =============================================================================
@@ -1111,7 +1145,10 @@ defmodule Kazi.Loop do
       reason: stop_reason(data),
       vector: data.vector,
       actions: Enum.reverse(data.actions),
-      iterations: data.iterations
+      iterations: data.iterations,
+      # T3.3d deploy wiring: the release ref of the artifact deployed this run
+      # (T3.3c), surfaced so the runtime/CLI can report WHAT was shipped.
+      release_ref: data.release_ref
     }
   end
 
@@ -1300,7 +1337,12 @@ defmodule Kazi.Loop do
       converged?: PredicateVector.satisfied?(data.vector),
       # T1.2 regression: the green→red flags for this observation, so the runtime
       # projects them into the read-model (making the regression queryable).
-      regressions: data.regressions
+      regressions: data.regressions,
+      # T3.3d deploy wiring: the release ref of the artifact deployed so far this
+      # run (T3.3c), so the runtime projects it into the read-model's
+      # `release_ref` column (queryable via Kazi.ReadModel.release_refs/1). nil
+      # until a deploy succeeds with a release ref.
+      release_ref: data.release_ref
     }
 
     try do
