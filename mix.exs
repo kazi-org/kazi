@@ -10,7 +10,34 @@ defmodule Kazi.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       escript: escript(),
+      releases: releases(),
       deps: deps()
+    ]
+  end
+
+  # `MIX_ENV=prod mix release` builds the self-contained `kazi` release under
+  # `_build/prod/rel/kazi` (T6.1, ADR-0014). Unlike the escript, a release bundles
+  # ERTS *and* compiled NIFs — so the released binary has the full SQLite
+  # read-model (the escript silently degrades because it can't carry the exqlite
+  # NIF). This release is the foundation Burrito (T6.2) wraps into a single-file
+  # per-platform binary; it adds no Burrito config here.
+  #
+  # The CLI is invoked through the release's `eval` command, which runs a function
+  # in a booted-but-not-started VM and propagates its exit code:
+  #
+  #     _build/prod/rel/kazi/bin/kazi eval 'Kazi.Release.cli(["--help"])'
+  #     _build/prod/rel/kazi/bin/kazi eval \
+  #       'Kazi.Release.cli(["run", "goal.toml", "--workspace", "."])'
+  #
+  # `Kazi.Release.cli/1` dispatches to the same `Kazi.CLI` core every other entry
+  # (escript, `mix kazi.run`) shares, so `run`/`propose`/`list-proposed`/`approve`/
+  # `reject`/`--help` behave identically.
+  defp releases do
+    [
+      kazi: [
+        include_executables_for: [:unix],
+        applications: [kazi: :permanent]
+      ]
     ]
   end
 
