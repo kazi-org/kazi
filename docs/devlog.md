@@ -180,3 +180,35 @@ observations — `pred_b` stays red (red→red is not a new green→red edge), s
 single persistent flag is correct, not a missed re-detection. The loop continues
 to surface that flag every iteration via `snapshot/1`/the read-model until it
 escalates.
+
+## 2026-06-22 — E4 context-injection epic shipped; pool drained
+
+**Session:** `/loop /apply --pool`. Executed E4 (ADR-0010) end-to-end across two
+waves, 8 PRs, all rebase-merged with green CI and verified on integrated main.
+
+- **Wave 13:** T4.1 (adapter `--output-format json`: real token/cost/touched →
+  budget, PR #41), T4.2 (`Kazi.Context` orientation-pack builder, deterministic +
+  hermetic, PR #43), T4.5 (`Kazi.Workspace` code-review-graph MCP wiring + graph
+  freshness before dispatch, PR #42).
+- **Wave 14:** T4.3 (stable cacheable orientation prefix in `build_prompt`, PR #44),
+  T4.4 (target `.kazi/context.md` orientation file, PR #46), T4.6 (SHA-keyed
+  orientation-pack cache in the read-model + migration `20260622060000`, PR #47),
+  T4.8 (per-dispatch token/cost ceiling + `truncate_evidence/2` + least-privilege
+  tool/permission set, PR #45), then T4.7 (`Kazi.Loop.Digest`: bounded working-set
+  digest across iterations — map memory only, never the transcript, preserving
+  ADR-0008 anti-anchoring, PR #48).
+- **Tests:** 372 → 495 passing (+123) across the epic; format + warnings-as-errors
+  clean at every merge. T4.9 (semantic-retrieval RAG) remains deferred per ADR-0005.
+
+**Pool drained of ready work.** Remaining incomplete tasks are not pool-eligible:
+- **T0.6h** (`kind: human`) — GCP project/billing/Cloud Run provisioning. Blocks
+  **T0.12**, the headline Slice-0 dogfood (idea→live production probe), which is the
+  project's success bar. This human task is the critical-path blocker.
+- **T3.1 / T3.5 / T3.7** — unblocked by deps (T2.6 done) but coarse Slice-3
+  placeholders (NATS leases, predicate-authoring front-end, Telegram) with
+  `Est: TBD` and no acceptance criteria; need `/plan` granularization into hermetic
+  subtasks before agents can execute against a checkable bar. T3.2/T3.6 sit behind
+  T3.1.
+
+**Next:** either (a) complete T0.6h (human GCP setup) to unblock the T0.12 dogfood,
+or (b) `/plan` the Slice-3 epic (T3.1/T3.5/T3.7) into granular tasks for a new pool wave.
