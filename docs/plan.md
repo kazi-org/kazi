@@ -126,7 +126,7 @@ Acceptance: D2 met; kazi builds one real feature from acceptance predicates to l
 - [x] T2.3 Vacuous-goal guard: reject a goal whose predicates all pass at t0 (underspecified) + test  Owner: TBD  Est: 1h  verifies: [UC-010]  deps: [T0.4]
 - [x] T2.4 ExUnit tests for creation mode end-to-end  Owner: TBD  Est: 1.5h  verifies: [UC-010, UC-012]  deps: [T2.1, T2.2, T2.3]
 - [x] T2.5 Dogfood Slice 2: give kazi a small real feature as failing acceptance predicates; confirm it builds to green and live; record in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-010]  deps: [T2.4]
-- [ ] T2.6 Self-hosting cutover: document the kazi-builds-kazi loop; author the first self-hosted kazi goal for an E3 item  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T2.5]
+- [x] T2.6 Self-hosting cutover: document the kazi-builds-kazi loop; author the first self-hosted kazi goal for an E3 item  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T2.5]
 
 ### E3 -- Slice 3+ Backlog (P3, self-hosted, coarse -- re-plan when reached)
 
@@ -287,6 +287,29 @@ different directories in one commit. Add tests with every implementation task
 - Next: T1.7 (cross-cutting ExUnit tests for all Slice-1 features), then T1.8
   (hermetic Slice-1 dogfood: naive fix regresses another predicate -> detect +
   escalate; record in devlog). Slice 1 completes fully autonomously (no GCP).
+
+### 2026-06-22 -- Slices 1 & 2 complete (M1, M2); autonomous /apply drained
+- Slice 1 (E1) DONE: T1.7 cross-cutting tests (#25), T1.8 dogfood (#26, devlog).
+  M1 reached — D1 acceptance met (regression flagged, flakes quarantined,
+  budget+stuck escalate, prod-log works).
+- Slice 2 (E2) DONE: T2.1 acceptance predicates (#28), T2.2 browser provider
+  (#29, hermetic stub Playwright Port), T2.3 vacuous-goal guard (#27), T2.4
+  creation-mode e2e tests (#30), T2.5 creation dogfood (#31, devlog), T2.6
+  self-hosting cutover (#32: docs/self-hosting.md + first self-hosted goal
+  priv/goals/e3-t3.4-standing-reconciler.toml + parse test). M2 reached — D2
+  acceptance met (kazi builds a feature from failing acceptance criteria to
+  green-and-live, hermetic; production Cloud Run live is still T0.12).
+- State on main: 326 tests pass (40 doctests, 286 tests), compile clean
+  (warnings-as-errors), format clean, CI green. 32 PRs merged this run.
+- Two ADRs added (0008 harness invocation/context, 0009 prompt construction);
+  ADR index now lists 0007-0009.
+- AUTONOMOUS /apply COMPLETE for all concretely-specified tasks. Remaining work
+  is NOT agent-fannable: (a) T0.6h human GCP provisioning -> unblocks T0.12 (the
+  live production dogfood, the only gap to full M0/D0); (b) E3 backlog (T3.1-T3.7)
+  — intentionally coarse, "re-plan when reached", designed to be built as
+  SELF-HOSTED kazi goals (kazi builds kazi; first goal authored in T2.6).
+  Running the self-hosted goal drives the REAL claude harness against this repo
+  and opens PRs — needs explicit human go-ahead.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
