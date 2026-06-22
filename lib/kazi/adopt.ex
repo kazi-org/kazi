@@ -53,6 +53,27 @@ defmodule Kazi.Adopt do
   path, no `System.cmd`, no network, no git clone. Tests point it at a fixture
   repo dir (or inject an in-memory reader) and assert the derived command. The
   same repo at the same revision always yields the same result.
+
+  ## Optional harness ENRICHMENT (off by default)
+
+  `enrich/2` is the **opt-in** second step (ADR-0013 §4): behind an explicit
+  `enrich: true` flag, kazi drives the coding harness to propose live
+  `http_probe`/`browser` predicates from the repo's discovered endpoints, merging
+  them into a `detect/1` result alongside the deterministic `test_runner`
+  predicate. It is wired through the **same injectable harness seam used
+  everywhere else** (`Kazi.HarnessAdapter.run/3`, the `:harness` opt defaulting to
+  the real `Kazi.Harness.ClaudeAdapter`) — exactly the pattern `Kazi.Authoring`
+  uses — so tests inject a stub adapter and no real `claude` (or network) is
+  touched.
+
+  With enrichment **off** (the default), `enrich/2` is byte-identical to the
+  `detect/1` it wraps: the deterministic detection only, no harness call. The
+  on-path is non-deterministic by nature — the agent proposes live predicates from
+  what it discovers — which is exactly why it is opt-in and clearly separated from
+  the deterministic path (ADR-0013 §4 consequences). Proposed predicates are
+  validated to be **loadable-shaped** (they round-trip through
+  `Kazi.Goal.Loader.from_map/1`) before being merged, so enrichment can only ever
+  add predicates a goal-file could load.
   """
 
   @typedoc """
@@ -294,6 +315,225 @@ defmodule Kazi.Adopt do
   # config when set); `--cov` turns coverage measurement on.
   defp coverage_command(:python, needle) when needle in ["pytest-cov", "coverage"],
     do: {:ok, "pytest", ["--cov", "--cov-fail-under=0"], "pytest-cov"}
+
+  @typedoc """
+  An adopted result: the deterministic `detect/1` map (`:stack`, `:predicate`)
+  optionally carrying a `:proposed` list of harness-proposed live predicate maps
+  (each in the shape `Kazi.Goal.Loader.from_map/1` accepts). With enrichment off,
+  `:proposed` is `[]`.
+  """
+  @type adoption :: %{stack: stack(), predicate: map(), proposed: [map()]}
+
+  # The harness adapter driven when enrichment is on and the caller does not
+  # inject one. The real `claude -p` adapter — the same default `Kazi.Authoring`
+  # and the runtime use; tests inject a stub via the `:harness` opt (the seam), so
+  # lib/ carries no stub.
+  @default_harness Kazi.Harness.ClaudeAdapter
+
+  # Provider strings enrichment may propose. The harness is asked for LIVE
+  # predicates only; a proposed predicate naming any other provider (e.g.
+  # `test_runner`, which detection already owns) is dropped.
+  @enrich_providers ~w(http_probe browser)
+
+  @doc """
+  Adopts the repo at `path`: the deterministic `detect/1`, optionally **enriched**
+  with harness-proposed live predicates (ADR-0013 §4).
+
+  With enrichment **off** (the default), this is `detect/1` with an empty
+  `:proposed` list — byte-identical detection, no harness call, fully
+  deterministic. Pass `enrich: true` to opt in: kazi then drives the (injectable)
+  harness to propose `http_probe`/`browser` predicates from the repo's discovered
+  endpoints, validates each is loadable-shaped, and merges them under `:proposed`
+  alongside the detected `test_runner` `:predicate`. The on-path is
+  non-deterministic by nature (the agent proposes from what it discovers), which
+  is why it is opt-in.
+
+  Returns `{:ok, %{stack: stack, predicate: predicate_map, proposed: [predicate_map]}}`
+  on detection, or `{:error, :no_stack_detected}` when no marker is present.
+  Enrichment never fails the adoption: if the harness errors or proposes nothing
+  usable, `:proposed` is simply `[]` and the deterministic detection still stands.
+
+  ## Options
+
+  In addition to `detect/2`'s `:file_reader`:
+
+    * `:enrich` — opt into harness enrichment (default `false`). Off ⇒ no harness
+      call, deterministic output.
+    * `:harness` — the `Kazi.HarnessAdapter` module to drive (default the real
+      `Kazi.Harness.ClaudeAdapter`). The injection seam: tests pass a stub.
+    * `:adapter_opts` — keyword opts forwarded verbatim to the harness `run/3`
+      (e.g. a stub's control pid, a model).
+
+  ## Examples
+
+  Off by default — the deterministic detection with no proposals:
+
+      {:ok, %{stack: :go, proposed: []}} = Kazi.Adopt.adopt("/path/to/repo")
+
+  Opted in with a stub harness, proposed live predicates are merged:
+
+      {:ok, %{proposed: [probe | _]}} =
+        Kazi.Adopt.adopt("/path/to/repo", enrich: true, harness: StubHarness)
+      probe["provider"] #=> "http_probe"
+  """
+  @spec adopt(Path.t(), keyword()) :: {:ok, adoption()} | {:error, :no_stack_detected}
+  def adopt(path, opts \\ []) when is_binary(path) and is_list(opts) do
+    with {:ok, detection} <- detect(path, opts) do
+      {:ok, Map.put(detection, :proposed, enrich(path, detection, opts))}
+    end
+  end
+
+  @doc """
+  Returns the harness-proposed live predicate maps for `path`, or `[]`.
+
+  OFF by default: with `enrich: false` (or absent) this returns `[]` without
+  touching the harness — the determinism guarantee of the adopt off-path. With
+  `enrich: true` it drives the injectable harness seam (`:harness`, default the
+  real `Kazi.Harness.ClaudeAdapter`) via `run/3` — the same seam `Kazi.Authoring`
+  and the convergence loop use — asking it to propose `http_probe`/`browser`
+  predicates from the repo's discovered endpoints, and returns the subset that is
+  loadable-shaped (each round-trips through `Kazi.Goal.Loader.from_map/1`).
+
+  Enrichment is best-effort: a harness error, an unparseable proposal, or a
+  proposal carrying no usable live predicate all collapse to `[]` rather than
+  failing the adoption (the deterministic detection always stands).
+
+  `detection` is the `detect/1` result; it is accepted so the prompt can name the
+  detected stack, and so enrichment composes onto a detection the caller already
+  has.
+  """
+  @spec enrich(Path.t(), detection(), keyword()) :: [map()]
+  def enrich(path, detection, opts \\ [])
+      when is_binary(path) and is_map(detection) and is_list(opts) do
+    if Keyword.get(opts, :enrich, false) do
+      drive_enrichment(path, detection, opts)
+    else
+      []
+    end
+  end
+
+  # Drive the injectable harness for live-predicate proposals. Any failure path
+  # (harness error, unparseable payload, no usable predicate) yields `[]` — the
+  # deterministic detection always stands, so enrichment can only ever ADD.
+  defp drive_enrichment(path, detection, opts) do
+    harness = Keyword.get(opts, :harness, @default_harness)
+    adapter_opts = Keyword.get(opts, :adapter_opts, [])
+    prompt = enrich_prompt(detection)
+
+    case harness.run(prompt, path, adapter_opts) do
+      {:ok, result} when is_map(result) ->
+        result |> proposal_payload() |> decode_predicates() |> loadable_predicates()
+
+      _ ->
+        []
+    end
+  end
+
+  @doc """
+  Builds the prompt asking the harness to propose live predicates for an adopted
+  repo whose stack `detection` is already known (ADR-0013 §4).
+
+  Pure and total. It instructs the harness to emit a single JSON object listing
+  `http_probe`/`browser` predicates derived from the repo's discovered endpoints —
+  checkable live criteria, not prose — leaving the deterministic `test_runner`
+  predicate to detection.
+  """
+  @spec enrich_prompt(detection()) :: String.t()
+  def enrich_prompt(detection) when is_map(detection) do
+    stack = detection |> Map.get(:stack, :unknown) |> to_string()
+
+    """
+    This repository's stack was detected as #{stack} and its test command is
+    already captured. Inspect the repository for LIVE, externally-observable
+    surfaces — HTTP endpoints it serves and user-facing pages — and propose kazi
+    live predicates that check them.
+
+    Respond with a SINGLE JSON object and nothing else, of the shape:
+
+      {
+        "predicates": [
+          {"id": "<stable_id>", "provider": "http_probe",
+           "description": "<what must become true>",
+           "url": "<full URL>", "expect_status": 200}
+        ]
+      }
+
+    Each predicate's "provider" MUST be one of: #{Enum.join(@enrich_providers, ", ")}.
+    Do NOT propose a test_runner predicate — detection already owns that. Any other
+    key on a predicate is passed verbatim to the live provider as its config.
+    Propose only predicates you can ground in a real endpoint you found; if none,
+    return {"predicates": []}.
+    """
+  end
+
+  # The proposal payload out of the harness result map, mirroring Kazi.Authoring:
+  # a pre-decoded map under `:proposal`/`:result` is used directly; otherwise the
+  # `:result` text (the agent's final result in a `claude --output-format json`
+  # envelope) is the JSON to decode; falls back to raw `:output`.
+  defp proposal_payload(%{proposal: %{} = proposal}), do: proposal
+  defp proposal_payload(%{result: %{} = result}), do: result
+  defp proposal_payload(%{result: result}) when is_binary(result), do: result
+  defp proposal_payload(%{output: output}) when is_binary(output), do: output
+  defp proposal_payload(_result), do: nil
+
+  # Decode the proposal into the raw `"predicates"` list. A JSON string decodes to
+  # its object; an already-decoded map passes through; anything else yields `[]`.
+  defp decode_predicates(payload) when is_binary(payload) do
+    case Jason.decode(payload) do
+      {:ok, %{} = map} -> decode_predicates(map)
+      _ -> []
+    end
+  end
+
+  defp decode_predicates(%{"predicates" => list}) when is_list(list), do: list
+  defp decode_predicates(_payload), do: []
+
+  # Keep only proposed predicates that are (a) a live provider enrichment may
+  # propose and (b) loadable-shaped: each candidate is normalised to a goal-file
+  # predicate map and accepted only if it round-trips through
+  # `Kazi.Goal.Loader.from_map/1`. So enrichment can only ever add predicates a
+  # goal-file could load — a malformed or non-live entry is silently dropped.
+  defp loadable_predicates(list) do
+    list
+    |> Enum.map(&normalize_predicate/1)
+    |> Enum.filter(&loadable?/1)
+  end
+
+  # Normalise a raw proposal entry to a string-keyed goal-file predicate map: a
+  # required string `id` and a live `provider`, every other key carried verbatim
+  # as sibling config (the loader collects non-reserved keys into config). A
+  # missing id, a non-string provider, or a non-live provider yields `nil`.
+  defp normalize_predicate(%{"id" => id, "provider" => provider} = raw)
+       when is_binary(id) and id != "" and is_binary(provider) do
+    if provider in @enrich_providers do
+      raw
+      |> stringify_keys()
+      |> Map.put("id", id)
+      |> Map.put("provider", provider)
+    else
+      nil
+    end
+  end
+
+  defp normalize_predicate(_raw), do: nil
+
+  # A candidate is loadable iff it round-trips through the same validated loader
+  # the CLI uses — wrapped in a minimal one-predicate goal map so a single
+  # predicate is validated in isolation.
+  defp loadable?(nil), do: false
+
+  defp loadable?(%{} = predicate) do
+    case Kazi.Goal.Loader.from_map(%{"id" => "adopt-enrich", "predicate" => [predicate]}) do
+      {:ok, _goal} -> true
+      {:error, _reason} -> false
+    end
+  end
+
+  # Stringify map keys for the goal-file predicate shape (a stub may hand back
+  # atom-keyed config; the loader re-atomises non-reserved keys).
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {key, value} -> {to_string(key), value} end)
+  end
 
   # A goal-file predicate MAP in the shape Kazi.Goal.Loader.from_map/1 accepts:
   # string keys, `provider: "test_runner"` (-> :tests kind), `:cmd`/`:args` spread
