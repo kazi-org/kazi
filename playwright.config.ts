@@ -18,7 +18,13 @@ const baseURL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: "./test/playwright",
-  fullyParallel: true,
+  // Every spec mutates the ONE shared read-model the hermetic server boots (see
+  // priv/playwright/server.exs — a single shared-sandbox connection seeded/reset
+  // via /test/seed + /test/reset). Specs across files therefore cannot run in
+  // parallel without racing on that connection, so run serially with one worker.
+  // Within a file, the goal-board and history specs already use describe.serial.
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
