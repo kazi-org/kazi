@@ -40,9 +40,18 @@ defmodule Kazi.MixProject do
       {:ecto_sql, "~> 3.12"},
       {:ecto_sqlite3, "~> 0.17"},
       {:jason, "~> 1.4"},
-      {:toml, "~> 0.7"}
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:toml, "~> 0.7"},
+      # Slice-3 operator dashboard (ADR-0011, T3.6). A thin, read-mostly LiveView
+      # projection over the read-model + NATS state; it NEVER couples into
+      # Kazi.Loop / Kazi.Harness. Cowboy (plug_cowboy) is the HTTP server per the
+      # task; phoenix_live_view pulls in phoenix_template + phoenix_pubsub.
+      {:phoenix, "~> 1.8"},
+      {:phoenix_html, "~> 4.3"},
+      {:phoenix_live_view, "~> 1.2"},
+      {:plug_cowboy, "~> 2.8"},
+      # LiveView's connected-mount test helpers (`live/2`) parse the rendered DOM
+      # with lazy_html; test-only.
+      {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end
 
