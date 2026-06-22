@@ -150,4 +150,106 @@ defmodule Kazi.Context.Pack do
       "### #{path}\n```\n#{source || ""}\n```"
     end)
   end
+
+  # --- cache serialization (T4.6) --------------------------------------------
+
+  @doc """
+  The pack's **blast radius**: the sorted, deduped set of impacted file paths and
+  symbol-definition paths the pack is scoped to (T4.6, ADR-0010 §4).
+
+  The SHA-keyed cache reuses a pack only while its blast radius is unchanged. At
+  the same `(workspace, git-SHA, failing-set)` the cache key is identical, but a
+  structural change to the impacted set means the cached pack is stale — comparing
+  blast radii detects that without rebuilding. Test sources are excluded: they are
+  the failing test's source, already pinned by the failing set.
+
+  Pure and deterministic: equal packs have an equal blast radius.
+
+  ## Examples
+
+      iex> pack = %Kazi.Context.Pack{
+      ...>   files: [Kazi.Context.FileRef.new("lib/b.ex"), Kazi.Context.FileRef.new("lib/a.ex")],
+      ...>   symbols: [Kazi.Context.Symbol.new("f/1", "lib/c.ex")]
+      ...> }
+      iex> Kazi.Context.Pack.blast_radius(pack)
+      ["lib/a.ex", "lib/b.ex", "lib/c.ex"]
+  """
+  @spec blast_radius(t()) :: [String.t()]
+  def blast_radius(%__MODULE__{files: files, symbols: symbols}) do
+    file_paths = Enum.map(files, & &1.path)
+    symbol_paths = Enum.map(symbols, & &1.path)
+
+    (file_paths ++ symbol_paths)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  @doc """
+  Serializes the pack to a JSON-safe map for the read-model cache (T4.6). String
+  keys, no atoms in values (atoms don't survive a JSON round-trip) — the inverse
+  of `from_serializable/1`, which reconstructs an equal struct.
+  """
+  @spec to_serializable(t()) :: map()
+  def to_serializable(%__MODULE__{} = pack) do
+    %{
+      "origin" => Atom.to_string(pack.origin),
+      "token_budget" => pack.token_budget,
+      "files" => Enum.map(pack.files, &file_to_map/1),
+      "symbols" => Enum.map(pack.symbols, &symbol_to_map/1),
+      "test_sources" => Enum.map(pack.test_sources, &file_to_map/1)
+    }
+  end
+
+  @doc """
+  Reconstructs a pack from the JSON-safe map produced by `to_serializable/1`
+  (T4.6). The round-trip is exact: `from_serializable(to_serializable(pack)) ==
+  pack` for any pack, so a cached pack reused on a hit is identical to one freshly
+  built.
+  """
+  @spec from_serializable(map()) :: t()
+  def from_serializable(%{} = map) do
+    %__MODULE__{
+      origin: origin_from(Map.fetch!(map, "origin")),
+      token_budget: Map.get(map, "token_budget"),
+      files: map |> Map.get("files", []) |> Enum.map(&file_from_map/1),
+      symbols: map |> Map.get("symbols", []) |> Enum.map(&symbol_from_map/1),
+      test_sources: map |> Map.get("test_sources", []) |> Enum.map(&file_from_map/1)
+    }
+  end
+
+  defp file_to_map(%FileRef{path: path, source: source}) do
+    %{"path" => path, "source" => source}
+  end
+
+  defp file_from_map(%{"path" => path} = map) do
+    FileRef.new(path, source: Map.get(map, "source"))
+  end
+
+  defp symbol_to_map(%Symbol{} = s) do
+    %{
+      "name" => s.name,
+      "path" => s.path,
+      "kind" => Atom.to_string(s.kind),
+      "callers" => s.callers,
+      "callees" => s.callees
+    }
+  end
+
+  defp symbol_from_map(%{"name" => name, "path" => path} = map) do
+    Symbol.new(name, path,
+      kind: kind_from(Map.get(map, "kind", "other")),
+      callers: Map.get(map, "callers", []),
+      callees: Map.get(map, "callees", [])
+    )
+  end
+
+  # Only the origins/kinds this module itself emits are valid; an unknown value in
+  # a cached row is corruption, so fail loudly rather than minting a new atom.
+  defp origin_from("graph"), do: :graph
+  defp origin_from("repo_map"), do: :repo_map
+
+  defp kind_from("function"), do: :function
+  defp kind_from("module"), do: :module
+  defp kind_from("type"), do: :type
+  defp kind_from("other"), do: :other
 end
