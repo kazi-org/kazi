@@ -86,8 +86,8 @@ Acceptance: D0 met; T0.12 dogfood drives the fixture to a live, verified
 production deployment.
 
 - [x] T0.1 Initialize Elixir mix app `kazi` (supervision tree, `.formatter.exs`, `.gitignore`, mix.exs deps pinned)  Owner: TBD  Est: 1h  verifies: [infrastructure]  done: 2026-06-21 PR #3
-- [ ] T0.2 CI: GitHub Actions running `mix format --check-formatted` and `mix test`  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T0.1]
-- [ ] T0.3 Core domain types AND behaviours: `Goal`, `Predicate`, `PredicateResult{status,evidence}`, `PredicateVector`, `Action`; plus the `PredicateProvider`, `HarnessAdapter`, and `Action` behaviours (contracts only) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.1]
+- [x] T0.2 CI: GitHub Actions running `mix format --check-formatted` and `mix test`  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T0.1]  done: 2026-06-21 PR #4
+- [x] T0.3 Core domain types AND behaviours: `Goal`, `Predicate`, `PredicateResult{status,evidence}`, `PredicateVector`, `Action`; plus the `PredicateProvider`, `HarnessAdapter`, and `Action` behaviours (contracts only) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.1]  done: 2026-06-21 PR #6
 - [ ] T0.4 Goal loader + goal-file TOML schema + an example goal fixture (code predicates + a live predicate) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.3]
 - [ ] T0.5 Test-runner predicate provider (runs configurable cmd in the target workspace, maps exit/output -> `PredicateResult`) + tests  Owner: TBD  Est: 2h  verifies: [UC-002]  deps: [T0.3]
 - [ ] T0.5b Live http_probe predicate provider (request a URL, assert status/body) + tests  Owner: TBD  Est: 1.5h  verifies: [UC-011]  deps: [T0.3]
@@ -96,7 +96,7 @@ production deployment.
 - [ ] T0.7 Convergence state machine (GenStateMachine) against the behaviours/test-doubles: observe -> diff -> decide-next-action -> {dispatch agent | integrate | deploy} -> re-observe; converge-and-stop  Owner: TBD  Est: 3h  verifies: [UC-004]  deps: [T0.3]
 - [ ] T0.10a Integrate action: land a converged fix (branch -> commit -> push -> open PR -> rebase-merge) in the target workspace + tests with a fixture repo  Owner: TBD  Est: 2.5h  verifies: [UC-020]  deps: [T0.3]
 - [ ] T0.10b Deploy action: trigger a release/deploy of the target (`gcloud run deploy` or GitHub Actions dispatch); return a deploy ref; tests with a stub deployer  Owner: TBD  Est: 2h  verifies: [UC-015]  deps: [T0.3]
-- [ ] T0.13 Deployable target fixture: a tiny containerized web service (Podman build) with one failing unit test AND a behaviour the live probe checks, plus a Cloud Run deploy workflow  Owner: TBD  Est: 2.5h  verifies: [infrastructure]  deps: [T0.1]
+- [x] T0.13 Deployable target fixture: a tiny containerized web service (Podman build) with one failing unit test AND a behaviour the live probe checks, plus a Cloud Run deploy workflow  Owner: TBD  Est: 2.5h  verifies: [infrastructure]  deps: [T0.1]  done: 2026-06-21 PR #5 (Go service, isolated from kazi CI)
 - [ ] T0.6h Provision GCP project + Cloud Run service + deploy credentials for the fixture  Owner: TBD  Est: 2h  verifies: [infrastructure]  kind: human  blocked: Awaiting GCP project/billing setup
 - [ ] T0.7b Integration: wire concrete providers + adapter + integrate/deploy actions into the loop (replace test-doubles)  Owner: TBD  Est: 2h  verifies: [UC-004]  deps: [T0.5, T0.5b, T0.6, T0.7, T0.10a, T0.10b]
 - [ ] T0.8 Objective-termination guard: `:converged` reachable only when the FULL vector (code + live) is true; explicit test that a failing live probe blocks success  Owner: TBD  Est: 1h  verifies: [UC-005]  deps: [T0.7]
@@ -231,6 +231,13 @@ different directories in one commit. Add tests with every implementation task
   `mix test` 2 passed. Toolchain: Elixir 1.20.1 / Erlang OTP 29 (Homebrew).
 - Next: Wave 2 (T0.2 CI, T0.3 domain types+behaviours, T0.13 deployable fixture);
   kick off T0.6h (human, GCP) out-of-band.
+- Wave 2 DONE: T0.2 (PR #4, CI green on PR + main), T0.3 (PR #6, core types +
+  PredicateProvider/HarnessAdapter/Action behaviours, +Budget/+Scope helpers),
+  T0.13 (PR #5, Go convergence fixture under fixtures/deploy-target/, isolated).
+  Verified on main: compile clean (warnings-as-errors), format clean, 68 tests
+  pass (18 doctests, 50 tests), CI green.
+- Next: Wave 3 (8 agents): T0.4, T0.5, T0.5b, T0.6, T0.9, T0.7, T0.10a, T0.10b
+  (all build against T0.3 behaviours). Reminder: T0.6h human task still open.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
