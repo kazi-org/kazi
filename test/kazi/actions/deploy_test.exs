@@ -235,4 +235,199 @@ defmodule Kazi.Actions.DeployTest do
     args = File.read!(args_file) |> String.split("\n", trim: true)
     assert ["run", "deploy", "kazi-deploy-target" | _rest] = args
   end
+
+  # --- Rollback (T3.3b, UC-015) ----------------------------------------------
+
+  @prior_revision "kazi-deploy-target-00041-prior"
+  @current_revision "kazi-deploy-target-00042-current"
+
+  # A stub that emulates the two `gcloud run` calls a rollback makes. It records
+  # every arg, then branches on the subcommand: `run revisions list` prints the
+  # revisions newest-first (current then prior); `run services update-traffic`
+  # prints the service URL. Both exit 0. No real gcloud/network.
+  defp rollback_ok_stub(path, args_file, revisions, url) do
+    [current, prior] = revisions
+
+    script = """
+    #!/bin/sh
+    for a in "$@"; do echo "$a" >> "#{args_file}"; done
+    case "$2" in
+      revisions)
+        # `gcloud run revisions list ...` — newest first.
+        echo "#{current}"
+        echo "#{prior}"
+        ;;
+      services)
+        # `gcloud run services update-traffic ...` — print the service URL.
+        echo "#{url}"
+        ;;
+    esac
+    exit 0
+    """
+
+    write_executable(path, script)
+  end
+
+  # A stub whose `revisions list` succeeds but whose `update-traffic` exits
+  # non-zero — the rollback's traffic shift failed.
+  defp rollback_traffic_fail_stub(path, revisions) do
+    [current, prior] = revisions
+
+    script = """
+    #!/bin/sh
+    case "$2" in
+      revisions)
+        echo "#{current}"
+        echo "#{prior}"
+        ;;
+      services)
+        echo "ERROR: (gcloud.run.services.update-traffic) PERMISSION_DENIED" 1>&2
+        exit 1
+        ;;
+    esac
+    exit 0
+    """
+
+    write_executable(path, script)
+  end
+
+  defp rollback_action(cmd, extra \\ %{}) do
+    params =
+      Map.merge(
+        %{
+          cmd: cmd,
+          service: "kazi-deploy-target",
+          project: "my-proj",
+          region: "us-central1"
+        },
+        extra
+      )
+
+    Action.new(:rollback, params: params)
+  end
+
+  test "rollback invokes the deployer with rollback args and returns the prior ref",
+       %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    assert {:ok, result} = Deploy.execute(rollback_action(stub), %{})
+
+    # The prior revision is returned as the rollback ref.
+    assert result.prior_ref == @prior_revision
+    assert result.deploy_ref == @prior_revision
+    assert result.rolled_back_to == @prior_revision
+    assert result.url == @fake_url
+    assert result.service == "kazi-deploy-target"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+
+    # Step 1: it listed revisions for the service.
+    assert "revisions" in args
+    assert "list" in args
+    assert "--service" in args
+    assert "kazi-deploy-target" in args
+
+    # Step 2: it shifted 100% of traffic to the prior revision.
+    assert "services" in args
+    assert "update-traffic" in args
+    assert "--to-revisions" in args
+    assert "#{@prior_revision}=100" in args
+    assert "my-proj" in args
+    assert "us-central1" in args
+  end
+
+  test "rollback honours env selection (multi-env target)",
+       %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback_env"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    action =
+      Action.new(:rollback,
+        params: %{
+          cmd: stub,
+          env: :prod,
+          envs: %{
+            prod: %{service: "kazi-prod", project: "proj-prod", region: "europe-west1"}
+          }
+        }
+      )
+
+    assert {:ok, result} = Deploy.execute(action, %{})
+    assert result.service == "kazi-prod"
+    assert result.prior_ref == @prior_revision
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert "kazi-prod" in args
+    assert "proj-prod" in args
+    assert "europe-west1" in args
+  end
+
+  test "rollback with no prior revision returns an error result (no exception)",
+       %{dir: dir, args_file: args_file} do
+    # A stub whose `revisions list` returns only the current revision.
+    script = """
+    #!/bin/sh
+    for a in "$@"; do echo "$a" >> "#{args_file}"; done
+    case "$2" in
+      revisions) echo "#{@current_revision}" ;;
+      services) echo "#{@fake_url}" ;;
+    esac
+    exit 0
+    """
+
+    stub = write_executable(Path.join(dir, "gcloud_no_prior"), script)
+
+    assert {:error, :no_prior_revision} = Deploy.execute(rollback_action(stub), %{})
+  end
+
+  test "rollback whose traffic shift exits non-zero becomes an error result (no exception)",
+       %{dir: dir} do
+    stub =
+      rollback_traffic_fail_stub(
+        Path.join(dir, "gcloud_rollback_fail"),
+        [@current_revision, @prior_revision]
+      )
+
+    assert {:error, {:rollback_failed, 1, output}} =
+             Deploy.execute(rollback_action(stub), %{})
+
+    assert output =~ "PERMISSION_DENIED"
+  end
+
+  test "rollback with missing required config returns an error", %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback_missing"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    action = Action.new(:rollback, params: %{cmd: stub, project: "p", region: "r"})
+    assert {:error, {:missing_param, :service}} = Deploy.execute(action, %{})
+  end
+
+  test "rollback honours an unknown env as a clear error", %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback_unknown_env"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    action = Action.new(:rollback, params: %{cmd: stub, env: :qa, envs: %{}})
+    assert {:error, {:unknown_env, :qa}} = Deploy.execute(action, %{})
+  end
 end
