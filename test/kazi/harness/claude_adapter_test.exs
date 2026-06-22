@@ -4,6 +4,8 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
   # workspaces.
   use ExUnit.Case, async: false
 
+  alias Kazi.Context
+  alias Kazi.Context.StaticGraphSource
   alias Kazi.Harness.ClaudeAdapter
   alias Kazi.PredicateResult
 
@@ -49,6 +51,145 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
       prompt = ClaudeAdapter.build_prompt("nothing failing", [])
       assert prompt =~ "nothing failing"
       refute prompt =~ "Failing predicate"
+    end
+  end
+
+  describe "build_prompt/3 (stable orientation prefix, T4.3)" do
+    # A hermetic graph source keyed off the workspace, so the same (workspace,
+    # failing) always surveys the same structure — the stand-in for a fixed
+    # (git-sha, failing-set) the prompt cache hits on.
+    @workspace "/fixture/ws"
+
+    defp orientation_source do
+      StaticGraphSource.new(
+        origin: :graph,
+        files: ["lib/target.ex", "lib/helper.ex"],
+        symbols: [{"build/1", "lib/target.ex", [callers: ["caller/0"]]}],
+        test_sources: [{"test/target_test.exs", [source: "assert Target.build(1)"]}]
+      )
+    end
+
+    defp failing_unit do
+      [{:unit, PredicateResult.fail(%{output: "boom in lib/target.ex:42"})}]
+    end
+
+    test "with no context opt, build_prompt/3 is byte-identical to build_prompt/2" do
+      failing = failing_unit()
+
+      assert ClaudeAdapter.build_prompt("fix it", failing, []) ==
+               ClaudeAdapter.build_prompt("fix it", failing)
+    end
+
+    test "prepends the rendered orientation pack as the prompt head (:workspace)" do
+      prompt =
+        ClaudeAdapter.build_prompt("fix it", failing_unit(),
+          workspace: @workspace,
+          graph_source: orientation_source()
+        )
+
+      # The orientation head appears, carrying the impacted file/symbol map…
+      assert prompt =~ "# Orientation"
+      assert prompt =~ "lib/target.ex"
+      assert prompt =~ "build/1"
+      # …and the prefix sits in FRONT of the failing-evidence body.
+      assert orientation_index(prompt) < evidence_index(prompt)
+    end
+
+    test "accepts a pre-built :context_pack, rendering it verbatim as the prefix" do
+      pack =
+        Context.orientation_pack(failing_unit(), @workspace, graph_source: orientation_source())
+
+      prompt = ClaudeAdapter.build_prompt("fix it", failing_unit(), context_pack: pack)
+
+      assert prompt =~ Context.render(pack)
+      assert orientation_index(prompt) < evidence_index(prompt)
+    end
+
+    test ":context_pack takes precedence over :workspace" do
+      pack = %Kazi.Context.Pack{
+        origin: :repo_map,
+        files: [Kazi.Context.FileRef.new("lib/only.ex")]
+      }
+
+      prompt =
+        ClaudeAdapter.build_prompt("fix it", failing_unit(),
+          context_pack: pack,
+          workspace: @workspace,
+          graph_source: orientation_source()
+        )
+
+      # The given pack is what renders; the :workspace-built pack's "## Impacted
+      # symbols" / "build/1" content must NOT leak into the orientation head when a
+      # pack is supplied. (The evidence body legitimately mentions lib/target.ex,
+      # so assert on the prefix region, not the whole prompt.)
+      assert prefix_of(prompt) =~ "lib/only.ex"
+      refute prefix_of(prompt) =~ "build/1"
+      refute prefix_of(prompt) =~ "Impacted symbols"
+    end
+
+    test "the orientation prefix is byte-identical across iterations for the same (workspace, failing-set)" do
+      # Two separate dispatches for the same SHA-equivalent inputs: the cacheable
+      # head must be byte-for-byte identical so the prompt cache hits (ADR-0010).
+      opts = [workspace: @workspace, graph_source: orientation_source()]
+
+      first = ClaudeAdapter.build_prompt("fix it", failing_unit(), opts)
+      second = ClaudeAdapter.build_prompt("fix it", failing_unit(), opts)
+
+      assert prefix_of(first) == prefix_of(second)
+      assert first == second
+    end
+
+    test "the evidence section is unchanged versus the no-prefix path" do
+      failing = failing_unit()
+
+      with_prefix =
+        ClaudeAdapter.build_prompt("fix it", failing,
+          workspace: @workspace,
+          graph_source: orientation_source()
+        )
+
+      no_prefix = ClaudeAdapter.build_prompt("fix it", failing)
+
+      # The volatile tail (work item + failing-evidence) is byte-identical to the
+      # /2 output; only the orientation head is prepended.
+      assert String.ends_with?(with_prefix, no_prefix)
+      assert evidence_body(with_prefix) == no_prefix
+    end
+
+    test "an empty pack still yields a stable orientation marker (sparse workspace)" do
+      empty = %Kazi.Context.Pack{origin: :repo_map, files: [], symbols: [], test_sources: []}
+
+      prompt = ClaudeAdapter.build_prompt("fix it", failing_unit(), context_pack: empty)
+
+      assert prompt =~ "# Orientation"
+      assert orientation_index(prompt) < evidence_index(prompt)
+    end
+
+    # --- helpers: locate / split the two prompt regions -----------------------
+
+    @evidence_marker "The following predicates are currently failing."
+
+    defp orientation_index(prompt) do
+      {idx, _} = :binary.match(prompt, "# Orientation")
+      idx
+    end
+
+    defp evidence_index(prompt) do
+      {idx, _} = :binary.match(prompt, @evidence_marker)
+      idx
+    end
+
+    # The work-item + evidence tail of a prefixed prompt: everything from the work
+    # item onward. The prefix is joined to the body with "\n\n"; the body starts at
+    # the work item, which precedes the evidence marker on its own lines.
+    defp evidence_body(prompt) do
+      {idx, _} = :binary.match(prompt, "fix it\n\n" <> @evidence_marker)
+      binary_part(prompt, idx, byte_size(prompt) - idx)
+    end
+
+    defp prefix_of(prompt) do
+      {idx, _} = :binary.match(prompt, "fix it\n\n" <> @evidence_marker)
+      binary_part(prompt, 0, idx)
     end
   end
 
