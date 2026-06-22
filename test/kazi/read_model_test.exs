@@ -100,6 +100,53 @@ defmodule Kazi.ReadModelTest do
     assert ReadModel.latest_iteration("multi").iteration_index == 2
   end
 
+  test "iteration_history/1 returns the per-iteration vectors in order (T1.1)" do
+    # Two distinct vectors recorded out of order; the history must come back
+    # oldest-first with each iteration's FULL vector rehydrated.
+    iter0 =
+      PredicateVector.new(%{
+        unit: PredicateResult.fail(%{exit: 1}),
+        probe: PredicateResult.fail(%{http_status: 503})
+      })
+
+    iter1 =
+      PredicateVector.new(%{
+        unit: PredicateResult.pass(%{exit: 0}),
+        probe: PredicateResult.pass(%{http_status: 200})
+      })
+
+    # Insert index 1 before index 0 to prove ordering is by iteration_index.
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "hist",
+               iteration_index: 1,
+               predicate_vector: iter1
+             })
+
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "hist",
+               iteration_index: 0,
+               predicate_vector: iter0
+             })
+
+    history = ReadModel.iteration_history("hist")
+
+    assert [{0, v0}, {1, v1}] = history
+
+    # iter0: both predicates failing (full vector preserved, keyed by string id).
+    assert MapSet.new(PredicateVector.failing(v0)) == MapSet.new(["unit", "probe"])
+    assert PredicateVector.get(v0, "probe").evidence["http_status"] == 503
+
+    # iter1: the satisfied convergence vector.
+    assert PredicateVector.satisfied?(v1)
+    assert PredicateVector.get(v1, "unit").status == :pass
+  end
+
+  test "iteration_history/1 is empty for a goal with no recorded iterations (T1.1)" do
+    assert ReadModel.iteration_history("never-ran") == []
+  end
+
   test "rejects a duplicate (goal_ref, iteration_index)" do
     attrs = %{goal_ref: "dup", iteration_index: 0, predicate_vector: sample_vector()}
 
