@@ -10,6 +10,8 @@ defmodule Kazi.Application do
     children = [
       # Starts a worker by calling: Kazi.Worker.start_link(arg)
       # {Kazi.Worker, arg}
+      # Local read-model: SQLite (WAL) projection of the kazi.events log (T0.9).
+      Kazi.Repo
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
