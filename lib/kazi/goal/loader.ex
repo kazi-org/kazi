@@ -79,6 +79,7 @@ defmodule Kazi.Goal.Loader do
   | `"test_runner"`   | `:tests`         | test-runner (T0.5) |
   | `"http_probe"`    | `:http_probe`    | live probe (T0.5b) |
   | `"prod_log"`      | `:prod_log`      | prod-log query (T1.6) |
+  | `"browser"`       | `:browser`       | Playwright UI check (T2.2) |
 
   An unknown `provider` is a validation error rather than a silently-accepted
   atom, so a typo fails loudly at load time instead of at dispatch time.
@@ -101,7 +102,8 @@ defmodule Kazi.Goal.Loader do
   @provider_kinds %{
     "test_runner" => :tests,
     "http_probe" => :http_probe,
-    "prod_log" => :prod_log
+    "prod_log" => :prod_log,
+    "browser" => :browser
   }
 
   # Reserved keys on a [[predicate]] table; everything else falls through to
