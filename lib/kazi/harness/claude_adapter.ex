@@ -65,6 +65,8 @@ defmodule Kazi.Harness.ClaudeAdapter do
 
   @behaviour Kazi.HarnessAdapter
 
+  alias Kazi.Context
+  alias Kazi.Context.Pack
   alias Kazi.PredicateResult
 
   @default_command "claude"
@@ -127,6 +129,64 @@ defmodule Kazi.Harness.ClaudeAdapter do
   """
   @spec build_prompt(String.t(), [{Kazi.Predicate.id(), PredicateResult.t()}]) :: String.t()
   def build_prompt(work_item, failing) when is_binary(work_item) and is_list(failing) do
+    build_prompt(work_item, failing, [])
+  end
+
+  @doc """
+  Builds the focused prompt with an optional **stable orientation prefix**
+  prepended to the failing-evidence body (T4.3, ADR-0010 §3).
+
+  The orientation prefix is the rendered `Kazi.Context.Pack` — kazi's pre-computed
+  map memory of *where this work lives* (impacted files/symbols, the failing
+  test's source). It is the cacheable **head** of the prompt; the
+  failing-evidence section (`render_failing/1`/`render_evidence/1`) is the
+  volatile **tail**, byte-for-byte the same as `build_prompt/2` produces. Splitting
+  the prompt this way lets the harness's prompt cache hit the prefix across
+  iterations that share a `(git-sha, failing-set)` (ADR-0010): for the same
+  inputs the prefix is byte-identical, because the pack carries no timestamps,
+  run ids, or randomness (the determinism `Kazi.Context.orientation_pack/3`
+  guarantees, preserved end-to-end here).
+
+  The prefix is supplied through `opts`, and is **purely additive** — with no
+  context opt this returns exactly what `build_prompt/2` returns:
+
+    * `:context_pack` — a pre-built `Kazi.Context.Pack` (e.g. the cached pack from
+      T4.6). Rendered as-is; takes precedence over `:workspace`.
+    * `:workspace` — a target directory; the pack is built on demand via
+      `Kazi.Context.orientation_pack/3` from `failing` + this workspace.
+      `:graph_source` and `:token_budget` are threaded through to the builder
+      (so tests inject a hermetic source — no network, no live MCP).
+
+  An empty pack still renders to a stable empty-orientation marker, so the prefix
+  shape never depends on whether the source found anything — keeping the head
+  cacheable even on a sparse workspace.
+
+  ## Examples
+
+      iex> pack = %Kazi.Context.Pack{origin: :repo_map, files: [Kazi.Context.FileRef.new("lib/a.ex")]}
+      iex> prompt = Kazi.Harness.ClaudeAdapter.build_prompt("fix it", [], context_pack: pack)
+      iex> prompt =~ "# Orientation" and prompt =~ "lib/a.ex" and prompt =~ "fix it"
+      true
+  """
+  @spec build_prompt(String.t(), [{Kazi.Predicate.id(), PredicateResult.t()}], keyword()) ::
+          String.t()
+  def build_prompt(work_item, failing, opts)
+      when is_binary(work_item) and is_list(failing) and is_list(opts) do
+    body = build_evidence_prompt(work_item, failing)
+
+    case orientation_prefix(failing, opts) do
+      nil -> body
+      prefix -> prefix <> "\n\n" <> body
+    end
+  end
+
+  # The failing-evidence prompt: the work item plus the rendered failing-predicate
+  # evidence. This IS `build_prompt/2`'s output verbatim — the volatile tail the
+  # orientation prefix sits in front of, kept unchanged so callers (and the prompt
+  # cache) see the same evidence section with or without a prefix.
+  @spec build_evidence_prompt(String.t(), [{Kazi.Predicate.id(), PredicateResult.t()}]) ::
+          String.t()
+  defp build_evidence_prompt(work_item, failing) do
     header =
       "#{work_item}\n\n" <>
         "The following predicates are currently failing. Make each one pass. " <>
@@ -142,6 +202,40 @@ defmodule Kazi.Harness.ClaudeAdapter do
       _ -> header <> "\n" <> body
     end
   end
+
+  # Resolve the orientation prefix from opts, additively: a pre-built
+  # `:context_pack` wins; else build one from `:workspace` + `failing`; else no
+  # prefix at all (back-compat with `build_prompt/2`). The rendered prefix is a
+  # pure function of the pack, so it is byte-identical for the same inputs.
+  @spec orientation_prefix([{Kazi.Predicate.id(), PredicateResult.t()}], keyword()) ::
+          String.t() | nil
+  defp orientation_prefix(failing, opts) do
+    case context_pack(failing, opts) do
+      %Pack{} = pack -> Context.render(pack)
+      nil -> nil
+    end
+  end
+
+  @spec context_pack([{Kazi.Predicate.id(), PredicateResult.t()}], keyword()) :: Pack.t() | nil
+  defp context_pack(failing, opts) do
+    case Keyword.get(opts, :context_pack) do
+      %Pack{} = pack ->
+        pack
+
+      nil ->
+        case Keyword.get(opts, :workspace) do
+          workspace when is_binary(workspace) ->
+            Context.orientation_pack(failing, workspace, pack_opts(opts))
+
+          _ ->
+            nil
+        end
+    end
+  end
+
+  # Thread only the orientation-builder options through to
+  # `Kazi.Context.orientation_pack/3`, so the adapter does not reshape the pack.
+  defp pack_opts(opts), do: Keyword.take(opts, [:graph_source, :token_budget])
 
   defp render_failing({id, %PredicateResult{status: status, evidence: evidence}}) do
     "## Failing predicate: #{id} (#{status})\n" <> render_evidence(evidence)
