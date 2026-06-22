@@ -126,6 +126,124 @@ defmodule Kazi.AdoptTest do
     end
   end
 
+  describe "guards/1 baseline" do
+    test "a detected stack always yields a tests-pass baseline guard" do
+      assert {:ok, detection} = Adopt.detect(fixture("go"))
+      assert [baseline] = Adopt.guards(detection, path: fixture("go"))
+
+      assert baseline["id"] == "tests-pass-baseline"
+      assert baseline["provider"] == "test_runner"
+      assert baseline["guard"] == true
+      # The baseline reuses the detected test command as an invariant.
+      assert baseline["cmd"] == "go"
+      assert baseline["args"] == ["test", "./..."]
+    end
+
+    test "a stack with no coverage tool yields ONLY the baseline" do
+      # Plain elixir fixture (mix.exs without excoveralls) -> baseline only.
+      assert {:ok, detection} = Adopt.detect(fixture("elixir"))
+      assert [baseline] = Adopt.guards(detection, path: fixture("elixir"))
+      assert baseline["id"] == "tests-pass-baseline"
+
+      # Node-with-test (vitest run, no coverage flag) -> baseline only.
+      assert {:ok, node} = Adopt.detect(fixture("node-with-test"))
+      assert [node_baseline] = Adopt.guards(node, path: fixture("node-with-test"))
+      assert node_baseline["id"] == "tests-pass-baseline"
+
+      # Go has no coverage config marker -> baseline only (conservative).
+      assert {:ok, go} = Adopt.detect(fixture("go"))
+      assert [go_baseline] = Adopt.guards(go, path: fixture("go"))
+      assert go_baseline["id"] == "tests-pass-baseline"
+    end
+  end
+
+  describe "guards/1 coverage ratchet" do
+    test "elixir with excoveralls yields a coverage-ratchet guard" do
+      assert {:ok, detection} = Adopt.detect(fixture("elixir-coverage"))
+      assert [baseline, coverage] = Adopt.guards(detection, path: fixture("elixir-coverage"))
+
+      assert baseline["id"] == "tests-pass-baseline"
+      assert coverage["id"] == "coverage-ratchet"
+      assert coverage["provider"] == "test_runner"
+      assert coverage["guard"] == true
+      assert coverage["cmd"] == "mix"
+      assert coverage["args"] == ["coveralls"]
+    end
+
+    test "node with nyc yields a coverage-ratchet guard that enforces a threshold" do
+      assert {:ok, detection} = Adopt.detect(fixture("node-coverage"))
+      assert [_baseline, coverage] = Adopt.guards(detection, path: fixture("node-coverage"))
+
+      assert coverage["id"] == "coverage-ratchet"
+      assert coverage["cmd"] == "npx"
+      assert coverage["args"] == ["nyc", "--check-coverage", "npm", "test"]
+    end
+
+    test "python with pytest-cov yields a coverage-ratchet guard" do
+      assert {:ok, detection} = Adopt.detect(fixture("python-coverage"))
+      assert [_baseline, coverage] = Adopt.guards(detection, path: fixture("python-coverage"))
+
+      assert coverage["id"] == "coverage-ratchet"
+      assert coverage["cmd"] == "pytest"
+      assert coverage["args"] == ["--cov", "--cov-fail-under=0"]
+    end
+
+    test "coverage detection works through the injected in-memory reader" do
+      reader =
+        InMemoryReader.new(%{
+          "mix.exs" => "deps: [{:excoveralls, \"~> 0.18\", only: :test}]"
+        })
+
+      detection = %{
+        stack: :elixir,
+        predicate: %{"cmd" => "mix", "args" => ["test"]}
+      }
+
+      assert [_baseline, coverage] = Adopt.guards(detection, file_reader: reader)
+      assert coverage["id"] == "coverage-ratchet"
+    end
+  end
+
+  describe "guards/1 invariants" do
+    test "every emitted guard is evaluable by an existing provider (test_runner)" do
+      for name <- ["go", "elixir", "node-with-test", "elixir-coverage", "node-coverage"] do
+        assert {:ok, detection} = Adopt.detect(fixture(name))
+        guards = Adopt.guards(detection, path: fixture(name))
+
+        # NEVER emit a guard kazi cannot evaluate: the only command-running
+        # provider is test_runner, so every guard must use it.
+        for guard <- guards do
+          assert guard["provider"] == "test_runner"
+          assert guard["guard"] == true
+        end
+      end
+    end
+
+    test "every emitted guard round-trips through Kazi.Goal.Loader as an invariant" do
+      assert {:ok, detection} = Adopt.detect(fixture("elixir-coverage"))
+      guards = Adopt.guards(detection, path: fixture("elixir-coverage"))
+
+      goal_map = %{
+        "id" => "adopt-guards",
+        # A goal needs a non-guard predicate too; use the detected one.
+        "predicate" => [detection.predicate | guards]
+      }
+
+      assert {:ok, %Goal{} = goal} = Loader.from_map(goal_map)
+      # The two guard maps land in goal.guards as invariants.
+      assert length(goal.guards) == 2
+      assert Enum.all?(goal.guards, & &1.guard?)
+      assert Enum.all?(goal.guards, &(&1.kind == :tests))
+    end
+
+    test "guards/1 is deterministic across runs" do
+      assert {:ok, detection} = Adopt.detect(fixture("elixir-coverage"))
+
+      assert Adopt.guards(detection, path: fixture("elixir-coverage")) ==
+               Adopt.guards(detection, path: fixture("elixir-coverage"))
+    end
+  end
+
   # An in-memory file reader honoring the `File` contract (`regular?/1`,
   # `read/1`) used by `Kazi.Adopt`'s injectable seam. Keys are repo-relative
   # marker names; `Path.join(root, marker)` is matched on its trailing segment so
