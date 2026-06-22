@@ -299,7 +299,122 @@ defmodule Kazi.RuntimeTest do
     assert result.iterations > 0
   end
 
+  describe "per-goal retrieval opt-in (T4.9c, UC-022/UC-006)" do
+    test "off by default: a goal that declares NO retriever dispatches the unchanged prompt",
+         %{tmp_dir: tmp_dir} do
+      %{work: work, bare: bare} = setup_repo(tmp_dir)
+      {capture_stub, capture_file} = write_prompt_capture_stub(tmp_dir, work)
+      deploy_stub = write_noop_deploy_stub(tmp_dir)
+
+      integrator = fn request, _opts ->
+        {:ok, %{pr: 1, merge_commit: local_rebase_merge(bare, request.branch, request.base)}}
+      end
+
+      goal =
+        Goal.new("retr-off",
+          predicates: [
+            Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "test -f fixed.txt"]})
+          ],
+          scope: Scope.new(workspace: work)
+        )
+
+      assert {:ok, _result} =
+               Runtime.run(goal,
+                 workspace: work,
+                 adapter_opts: [command: capture_stub],
+                 integrator: integrator,
+                 deploy_cmd: deploy_stub,
+                 deploy_params: %{service: "s", project: "p", region: "r", source: work},
+                 reobserve_interval_ms: 5,
+                 await_timeout: 10_000
+               )
+
+      # The dispatched prompt carries the live failing evidence and NO retrieval
+      # section — off by default leaves the prompt unchanged.
+      prompt = File.read!(capture_file)
+      assert prompt =~ "fix failing predicates"
+      refute prompt =~ "## Relevant prior context (retrieved)"
+    end
+
+    test "enabling via goal metadata injects the retrieved snippets into the dispatch prompt",
+         %{tmp_dir: tmp_dir} do
+      %{work: work, bare: bare} = setup_repo(tmp_dir)
+      {capture_stub, capture_file} = write_prompt_capture_stub(tmp_dir, work)
+      deploy_stub = write_noop_deploy_stub(tmp_dir)
+
+      integrator = fn request, _opts ->
+        {:ok, %{pr: 1, merge_commit: local_rebase_merge(bare, request.branch, request.base)}}
+      end
+
+      # The goal DECLARES a retriever in its metadata — the per-goal opt-in. The
+      # runtime threads it into adapter_opts so the loop's dispatch prompt augments
+      # with the retrieved snippets.
+      retriever =
+        Kazi.Retrieval.StaticRetriever.new(
+          snippets: [{"def prior_fix(x), do: x", source: "lib/prior.ex:7"}]
+        )
+
+      goal =
+        Goal.new("retr-on",
+          predicates: [
+            Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "test -f fixed.txt"]})
+          ],
+          scope: Scope.new(workspace: work),
+          metadata: %{retriever: retriever}
+        )
+
+      assert {:ok, _result} =
+               Runtime.run(goal,
+                 workspace: work,
+                 adapter_opts: [command: capture_stub],
+                 integrator: integrator,
+                 deploy_cmd: deploy_stub,
+                 deploy_params: %{service: "s", project: "p", region: "r", source: work},
+                 reobserve_interval_ms: 5,
+                 await_timeout: 10_000
+               )
+
+      prompt = File.read!(capture_file)
+      # Augmented: the live evidence is still present AND the retrieved snippet is
+      # injected in the dedicated section.
+      assert prompt =~ "fix failing predicates"
+      assert prompt =~ "## Relevant prior context (retrieved)"
+      assert prompt =~ "def prior_fix(x), do: x"
+      assert prompt =~ "lib/prior.ex:7"
+    end
+  end
+
   # --- fixtures ----------------------------------------------------------------
+
+  # A harness stub that CAPTURES the prompt it is dispatched (the `-p` argument the
+  # ClaudeAdapter passes) to a file, then "fixes" the code so the goal converges.
+  # Lets a test assert what the loop's dispatch prompt actually carried. Returns
+  # `{stub_path, capture_file}`.
+  defp write_prompt_capture_stub(tmp_dir, _work) do
+    path = Path.join(tmp_dir, "stub_capture_#{System.unique_integer([:positive])}.sh")
+    capture_file = Path.join(tmp_dir, "captured_prompt_#{System.unique_integer([:positive])}.txt")
+
+    # `claude -p <prompt> --output-format json ...`: $2 is the prompt argument.
+    File.write!(path, """
+    #!/bin/sh
+    printf '%s' "$2" > "#{capture_file}"
+    echo "the converged fix" > fixed.txt
+    echo "{}"
+    exit 0
+    """)
+
+    File.chmod!(path, 0o755)
+    {path, capture_file}
+  end
+
+  # A no-op deploy stub: the goal has no live predicate, so once code is landed the
+  # loop deploys and converges; the stub stands in for `gcloud run deploy`.
+  defp write_noop_deploy_stub(tmp_dir) do
+    path = Path.join(tmp_dir, "noop_deploy_#{System.unique_integer([:positive])}.sh")
+    File.write!(path, "#!/bin/sh\necho deployed\nexit 0\n")
+    File.chmod!(path, 0o755)
+    path
+  end
 
   # A local bare "origin" with an initial commit on `main`, plus a working clone.
   defp setup_repo(tmp_dir) do
