@@ -128,13 +128,20 @@ Acceptance: D2 met; kazi builds one real feature from acceptance predicates to l
 - [x] T2.5 Dogfood Slice 2: give kazi a small real feature as failing acceptance predicates; confirm it builds to green and live; record in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-010]  deps: [T2.4]
 - [x] T2.6 Self-hosting cutover: document the kazi-builds-kazi loop; author the first self-hosted kazi goal for an E3 item  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T2.5]
 
-### E3 -- Slice 3+ Backlog (P3, self-hosted, coarse -- re-plan when reached)
+### E3 -- Slice 3+ (P3, self-hosted)
 
-Acceptance: each item re-planned as a kazi goal with failing acceptance
-predicates before build. Intentionally low-granularity.
+Acceptance: each item is a hermetic, checkable subtask (re-planned 2026-06-22).
+NATS JetStream and Phoenix LiveView are permitted Slice-3 dependencies; operator
+surfaces stay decoupled from the core reconciler (ADR-0011). Scheduled as Waves
+15-18 for /apply --pool. T3.3/T3.4 already shipped.
 
-- [ ] T3.1 NATS JetStream resource leases (KV CAS + per-key TTL) + presence/intent subjects  Owner: TBD  Est: TBD  verifies: [UC-013]  blocked-by: [T2.6]
-- [ ] T3.2 Graph-aware blast-radius partitioning via code-review-graph  Owner: TBD  Est: TBD  verifies: [UC-014]  blocked-by: [T3.1]
+**T3.1 NATS JetStream resource leases (verifies UC-013) -- EXPANDED into T3.1a-d (re-planned 2026-06-22, see ADR-0004/0006). All hermetic via an injectable lease/transport seam with an in-memory double; real NATS exercised only by an integration-tagged test.**
+- [ ] T3.1a `Kazi.Coordination.Lease` behaviour (acquire via CAS / renew / release, per-key TTL) + an in-memory test-double backend + a shared behaviour-conformance test suite  Owner: TBD  Est: 1.5h  verifies: [UC-013]  deps: [T2.6]  acc: acquire is mutually exclusive per key (second acquirer loses), TTL expiry frees the key on an injectable clock, renew extends it; the in-memory double passes the shared contract; hermetic (no NATS)
+- [ ] T3.1b Real NATS JetStream KV lease backend implementing the behaviour (CAS via KV revision, TTL via bucket max-age) + integration-tagged test that runs the shared contract against a real NATS when `NATS_URL` is set, skipped otherwise  Owner: TBD  Est: 2h  verifies: [UC-013]  deps: [T3.1a]  acc: the NATS backend passes the SAME shared behaviour-conformance suite as the double; the integration test is tagged and skipped without `NATS_URL` so default `mix test` stays hermetic
+- [ ] T3.1c Presence + work-intent subjects: publish/subscribe presence and per-resource intent on NATS subjects behind the transport seam + in-memory double; aggregate to a current presence/intent snapshot  Owner: TBD  Est: 1.5h  verifies: [UC-013]  deps: [T3.1a]  acc: publishing presence/intent from two doubles yields a merged snapshot listing both; stale entries age out on the injectable clock; hermetic via the double
+- [ ] T3.1d Wire leases into goal dispatch: a kazi instance acquires the resource lease before working a goal, renews on the clock, releases on terminate; contention defers rather than collides + tests  Owner: TBD  Est: 1.5h  verifies: [UC-013]  deps: [T3.1a, T3.1c]  acc: with the in-memory double, two instances targeting the same resource key serialize (one works, one defers); lease released on stop/await; hermetic
+- [ ] T3.2a `Kazi.Partition`: compute disjoint blast-radius partitions for a set of goals/changed files via the code-review-graph impact radius (reuse T4.2's `Kazi.Context` graph-source seam) + tests with a stub graph  Owner: TBD  Est: 1.5h  verifies: [UC-014]  deps: [T3.1a, T4.2]  acc: given a fixture graph + two goals with overlapping vs disjoint blast radii, returns one merged partition vs two; deterministic; hermetic (stub graph, no MCP)
+- [ ] T3.2b Map partitions to lease keys so overlapping blast radii contend on one lease while disjoint partitions proceed in parallel (integrate T3.1 leases) + tests  Owner: TBD  Est: 1h  verifies: [UC-014]  deps: [T3.2a, T3.1a]  acc: overlapping-partition goals derive the same lease key (serialize); disjoint goals derive distinct keys (parallel); asserted via the in-memory lease double; hermetic
 **T3.3 Deepen the deploy action: multi-env, rollback, release tagging (verifies UC-015) -- EXPANDED into T3.3a-d (re-planned 2026-06-22). Build on `Kazi.Actions.Deploy`; all hermetic via the injectable deployer seam.**
 - [x] T3.3a Multi-env deploy config: `Kazi.Actions.Deploy` accepts an `env` + per-env target (service/project/region) from action params and selects it  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T2.6]  acc: deploying with env :staging vs :prod invokes the injectable stub deployer with env-appropriate args; asserted via stub, hermetic (no real gcloud/network)
 - [x] T3.3b Rollback: a deploy rollback via the injectable deployer seam, returning the prior revision/deploy ref  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a]  acc: rollback invokes the stub deployer with rollback args and returns the prior ref; hermetic test
@@ -145,9 +152,17 @@ predicates before build. Intentionally low-granularity.
 - [x] T3.4b Re-trigger on drift: when a satisfied predicate regresses in standing mode, the loop re-dispatches and re-converges (reuses the convergence machinery)  Owner: TBD  Est: 1.5h  verifies: [UC-016]  deps: [T3.4a]  acc: a double whose predicate flips green->red post-converge causes re-dispatch + re-converge; persisted; hermetic
 - [x] T3.4c Graceful stop + supervision safety for standing goals: clean stop signal, bounded interval, no busy-spin  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a]  acc: stop/await semantics tested; interval respected via injectable clock; no tight loop
 - [x] T3.4d Author standing mode via goal-file/CLI flag + end-to-end ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a, T3.4b, T3.4c]  acc: a goal can declare standing mode; hermetic e2e test; mix test green
-- [ ] T3.5 Idea -> acceptance-predicate authoring front-end (agent proposes, human approves)  Owner: TBD  Est: TBD  verifies: [UC-017]  blocked-by: [T2.6]
-- [ ] T3.6 Phoenix LiveView dashboard (goal board, presence, lease map, history)  Owner: TBD  Est: TBD  verifies: [UC-018]  blocked-by: [T3.1]
-- [ ] T3.7 Telegram goal-in / ping-out  Owner: TBD  Est: TBD  verifies: [UC-019]  blocked-by: [T2.6]
+**T3.5 Idea -> acceptance-predicate authoring (verifies UC-017) -- EXPANDED into T3.5a-c (re-planned 2026-06-22, see ADR-0011). Walking-skeleton: CLI + read-model first; surfaces (T3.6/T3.7) consume the same `Kazi.Authoring` API. All hermetic via a stub harness adapter.**
+- [ ] T3.5a `Kazi.Authoring.propose/2`: from a prose idea, drive the harness adapter to draft a `Kazi.Goal` (acceptance predicates) returned as a structured reviewable artifact; persist it as status `proposed` in the read-model + tests with a stub adapter  Owner: TBD  Est: 2h  verifies: [UC-017]  deps: [T2.6]  acc: a fixture idea yields a structured draft goal (>=1 predicate) persisted as `proposed`; the harness is the injectable stub (no real claude); deterministic shape; hermetic
+- [ ] T3.5b Approval workflow: `approve`/`reject`/`edit` a proposed goal; on approve it transitions to an executable goal persisted as `approved`; reject/edit recorded; + tests  Owner: TBD  Est: 1.5h  verifies: [UC-017]  deps: [T3.5a]  acc: approve makes the goal runnable by `Kazi.Runtime`; reject/edit transitions persisted and queryable; invalid transitions rejected; hermetic
+- [ ] T3.5c CLI authoring surface + end-to-end ExUnit: `kazi propose <idea>` -> review -> `kazi approve <id>` -> runnable goal  Owner: TBD  Est: 1h  verifies: [UC-017]  deps: [T3.5a, T3.5b]  acc: CLI exposes propose/list-proposed/approve; e2e test drives idea->proposed->approved->run with stub adapter; `mix test` green; hermetic
+- [ ] T3.6a Phoenix + LiveView skeleton: add deps, endpoint/router/supervision, a `/healthz` route, and a Playwright harness (`playwright.config.ts` + smoke test)  Owner: TBD  Est: 2h  verifies: [UC-018]  deps: [T2.6]  acc: the app boots under the supervision tree, `/healthz` returns 200, `mix test` green incl. an LiveView smoke test, and `npx playwright test` loads the root page; hermetic (no NATS/harness)
+- [ ] T3.6b Goal board LiveView: list goals with status + latest predicate vector + iteration count from `Kazi.ReadModel`, live-updating; + LiveView test + Playwright (golden path + empty state)  Owner: TBD  Est: 2h  verifies: [UC-018]  deps: [T3.6a]  acc: seeded read-model renders the goal board; an injected update pushes a live change; empty-state renders; Playwright covers golden path + empty state; hermetic via fixture read-model
+- [ ] T3.6c Presence + lease map LiveView: render live presence/intent (T3.1c) and active leases (T3.1) from an injected source; + LiveView test + Playwright  Owner: TBD  Est: 1.5h  verifies: [UC-018]  deps: [T3.6a, T3.1c]  acc: injected presence/lease fixtures render as a presence list + lease map; a simulated lease release updates the view; Playwright asserts the rendered map; hermetic (no NATS)
+- [ ] T3.6d History view LiveView: per-goal iteration/evidence timeline from the read-model + Playwright test  Owner: TBD  Est: 1h  verifies: [UC-018]  deps: [T3.6b]  acc: a goal with N persisted iterations renders an ordered timeline with evidence; Playwright asserts the sequence; hermetic via fixture read-model
+- [ ] T3.7a `Kazi.Telegram` ingress behind an injectable client seam: parse an inbound message into a draft goal via `Kazi.Authoring.propose` + in-memory double tests  Owner: TBD  Est: 1.5h  verifies: [UC-019]  deps: [T2.6, T3.5a]  acc: a fixture inbound message produces a `proposed` goal through the authoring API; the Telegram client is the in-memory double (no token/network); hermetic
+- [ ] T3.7b `Kazi.Telegram` egress: send ping/notification on loop terminal events (converged / stuck / over-budget) through the client seam + tests  Owner: TBD  Est: 1h  verifies: [UC-019]  deps: [T3.7a]  acc: each terminal loop event yields exactly one outbound message captured by the double with the right status; no duplicate pings; hermetic
+- [ ] T3.7c Wire ingress -> authoring/approval and loop-events -> egress; end-to-end ExUnit  Owner: TBD  Est: 1h  verifies: [UC-019]  deps: [T3.7a, T3.7b]  acc: e2e test: inbound message -> proposed goal -> approve -> run -> terminal event -> outbound ping, all via doubles; `mix test` green; hermetic
 
 ### E4 -- Context injection / re-exploration mitigation (P3, see ADR-0010)
 
@@ -203,11 +218,20 @@ Waves reference task IDs; toggle the single checkbox in the WBS above. Run
 - **Wave 12 (2 agents):** T3.3d, T3.4d
 - **Wave 13 (3 agents):** T4.1, T4.2, T4.5   (foundational context-injection; deps met)
 - **Wave 14 (4 agents):** T4.3, T4.4, T4.6, T4.8   -> then T4.7 digest; T4.9 deferred (ADR-0005)
+- **Wave 15 (3 agents):** T3.1a, T3.5a, T3.6a   (Slice-3 foundations: lease behaviour, authoring, Phoenix skeleton; deps met by T2.6)
+- **Wave 16 (6 agents):** T3.1b, T3.1c, T3.2a, T3.5b, T3.6b, T3.7a
+- **Wave 17 (6 agents):** T3.1d, T3.2b, T3.5c, T3.6c, T3.6d, T3.7b
+- **Wave 18 (1 agent):** T3.7c   (final ingress->authoring->egress e2e)
 
-T3.3/T3.4 were re-planned into granular hermetic subtasks (2026-06-22). The rest
-of E3 -- T3.1 (NATS leases), T3.2 (graph partitioning), T3.5 (idea->predicate
-front-end), T3.6 (LiveView dashboard), T3.7 (Telegram) -- remains coarse and is
-re-planned per item when reached; no fixed waves.
+T3.3/T3.4 (deploy deepening, standing mode) and now T3.1/T3.2/T3.5/T3.6/T3.7
+(NATS leases, graph partitioning, idea->predicate authoring, LiveView dashboard,
+Telegram bridge) are re-planned into granular hermetic subtasks (2026-06-22; see
+ADR-0011 for the operator-surface decoupling decision). Waves 15-18 honor real
+deps: the lease behaviour T3.1a underpins partitioning (T3.2) and the dashboard's
+lease/presence map (T3.6c); authoring T3.5a underpins both the dashboard's write
+path and the Telegram ingress (T3.7a). All subtasks are hermetic, so /apply --pool
+can pick them up now. T4.9 (semantic-retrieval memory adapter) stays deferred
+(ADR-0005).
 
 E4 (context injection, ADR-0010) is granular and hermetic (Waves 13-14); deps are
 already met, so /apply --pool can pick it up. T4.9 (semantic-retrieval memory
@@ -245,6 +269,22 @@ different directories in one commit. Add tests with every implementation task
 (API/http_probe test for any endpoint, Playwright test for any UI).
 
 ## Progress Log
+
+### 2026-06-22 -- Change Summary (Slice-3 granularization)
+- E4 context-injection epic shipped: T4.1-T4.8 merged (PRs #41-#48), T4.9 deferred
+  (ADR-0005). Tests 372 -> 495.
+- Granularized the remaining E3/Slice-3 epic from coarse `Est: TBD` placeholders
+  into hermetic, checkable subtasks: T3.1 -> T3.1a-d (NATS lease behaviour + double,
+  real JetStream KV backend, presence/intent, dispatch wiring; UC-013); T3.2 ->
+  T3.2a-b (graph blast-radius partitioning reusing the T4.2 graph seam + lease-key
+  mapping; UC-014); T3.5 -> T3.5a-c (`Kazi.Authoring` propose/approve + CLI; UC-017);
+  T3.6 -> T3.6a-d (Phoenix LiveView skeleton, goal board, presence/lease map,
+  history; UC-018); T3.7 -> T3.7a-c (Telegram ingress/egress bridge; UC-019).
+- Scheduled Waves 15-18 for /apply --pool, honoring deps (T3.1a underpins T3.2 and
+  T3.6c; T3.5a underpins T3.6 write-path and T3.7a). All subtasks hermetic.
+- New ADR-0011 (Slice-3 operator surfaces): Phoenix LiveView for the dashboard;
+  dashboard + Telegram are READ projections over the read-model + NATS and never
+  couple into the core loop; surfaces sit behind injectable seams for hermetic tests.
 
 ### 2026-06-21 -- Change Summary (revision 2)
 - Revised the plan to make Slice 0 reach production (idea -> production walking
