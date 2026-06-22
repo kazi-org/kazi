@@ -125,7 +125,7 @@ Acceptance: D2 met; kazi builds one real feature from acceptance predicates to l
 - [x] T2.2 Browser predicate provider (Playwright via Port) + test (golden path + 1 edge case)  Owner: TBD  Est: 2.5h  verifies: [UC-012]  deps: [T0.5]
 - [x] T2.3 Vacuous-goal guard: reject a goal whose predicates all pass at t0 (underspecified) + test  Owner: TBD  Est: 1h  verifies: [UC-010]  deps: [T0.4]
 - [x] T2.4 ExUnit tests for creation mode end-to-end  Owner: TBD  Est: 1.5h  verifies: [UC-010, UC-012]  deps: [T2.1, T2.2, T2.3]
-- [ ] T2.5 Dogfood Slice 2: give kazi a small real feature as failing acceptance predicates; confirm it builds to green and live; record in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-010]  deps: [T2.4]
+- [x] T2.5 Dogfood Slice 2: give kazi a small real feature as failing acceptance predicates; confirm it builds to green and live; record in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-010]  deps: [T2.4]
 - [ ] T2.6 Self-hosting cutover: document the kazi-builds-kazi loop; author the first self-hosted kazi goal for an E3 item  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T2.5]
 
 ### E3 -- Slice 3+ Backlog (P3, self-hosted, coarse -- re-plan when reached)
