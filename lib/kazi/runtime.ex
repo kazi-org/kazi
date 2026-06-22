@@ -38,7 +38,7 @@ defmodule Kazi.Runtime do
   provider fails loudly here, not silently at dispatch).
   """
 
-  alias Kazi.{Goal, Loop, Predicate, ReadModel}
+  alias Kazi.{Goal, Loop, Predicate, PredicateResult, PredicateVector, ReadModel}
 
   require Logger
 
@@ -88,14 +88,28 @@ defmodule Kazi.Runtime do
       forwarded verbatim to `Kazi.Loop.start_link/1`.
 
   Returns `{:ok, result}` once the loop terminates, or `{:error, reason}` if the
-  loop could not be started or a predicate names an unknown provider.
+  loop could not be started, a predicate names an unknown provider, or the goal is
+  vacuous (`{:error, :vacuous_goal}` — see the t0 guard below).
+
+  ## Vacuous-goal guard (T2.3, UC-010, Risk R3)
+
+  Before entering the convergence loop, `run/2` observes the goal's FULL predicate
+  vector ONCE at t0 — every predicate evaluated through its real provider, the
+  same dispatch the loop uses. If the whole vector is already satisfied at t0
+  (every predicate passes before kazi does anything), the goal is **vacuous /
+  underspecified**: a creation or repair goal must have at least one predicate
+  failing at t0, otherwise "converged" would mean kazi built and verified nothing
+  (concept §"creation mode", R3). Such a goal is REJECTED with
+  `{:error, :vacuous_goal}`; the loop never starts and nothing is persisted as
+  converged. A goal with ≥1 failing predicate at t0 proceeds to the loop normally.
   """
   @spec run(Goal.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def run(%Goal{} = goal, opts \\ []) do
     workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
     await_timeout = Keyword.get(opts, :await_timeout, :infinity)
 
-    with {:ok, providers} <- resolve_providers(goal, opts) do
+    with {:ok, providers} <- resolve_providers(goal, opts),
+         :ok <- guard_not_vacuous(goal, providers, workspace) do
       loop_opts =
         opts
         |> Keyword.drop([
@@ -161,6 +175,58 @@ defmodule Kazi.Runtime do
       [] -> {:ok, Map.take(table, kinds)}
       unknown -> {:error, {:unknown_provider_kinds, unknown}}
     end
+  end
+
+  # =============================================================================
+  # Vacuous-goal guard (T2.3, UC-010, Risk R3)
+  # =============================================================================
+
+  # Observe the goal's full predicate vector ONCE at t0 — every predicate through
+  # its real provider, the same dispatch the loop performs each iteration — and
+  # reject the goal as vacuous if the WHOLE vector is already satisfied before
+  # kazi does anything. A creation/repair goal must have at least one predicate
+  # failing at t0; an all-pass-at-t0 goal is underspecified, and letting it
+  # "converge" would mean kazi built and verified nothing (R3). On rejection the
+  # loop never starts, so nothing is persisted as converged.
+  @spec guard_not_vacuous(Goal.t(), %{optional(Predicate.provider_kind()) => module()}, term()) ::
+          :ok | {:error, :vacuous_goal}
+  defp guard_not_vacuous(%Goal{} = goal, providers, workspace) do
+    if goal |> observe_t0(providers, workspace) |> PredicateVector.satisfied?() do
+      {:error, :vacuous_goal}
+    else
+      :ok
+    end
+  end
+
+  # The t0 observation: evaluate every predicate the goal carries (predicates ++
+  # guards) through its registered provider, building the same PredicateVector the
+  # loop builds each iteration. A predicate whose kind has no provider can't be
+  # asserted satisfied, so it is recorded :unknown (never :pass) — a goal can only
+  # be vacuous if every predicate genuinely passes against the real world.
+  @spec observe_t0(Goal.t(), %{optional(Predicate.provider_kind()) => module()}, term()) ::
+          PredicateVector.t()
+  defp observe_t0(%Goal{} = goal, providers, workspace) do
+    context = %{
+      goal: goal,
+      scope: goal.scope,
+      workspace: workspace,
+      landed?: false,
+      deployed?: false,
+      iteration: 0
+    }
+
+    goal
+    |> Goal.all_predicates()
+    |> Enum.map(fn %Predicate{id: id, kind: kind} = predicate ->
+      result =
+        case Map.get(providers, kind) do
+          nil -> PredicateResult.unknown()
+          provider -> provider.evaluate(predicate, context)
+        end
+
+      {id, result}
+    end)
+    |> PredicateVector.new()
   end
 
   # =============================================================================
