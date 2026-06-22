@@ -107,6 +107,42 @@ _build/prod/rel/kazi/bin/kazi eval 'Kazi.Release.cli(["list-proposed"])'
 `mix kazi.run`, so every subcommand (`run` / `propose` / `list-proposed` /
 `approve` / `reject` / `--help`) behaves identically.
 
+### Build a single-file native binary (Burrito)
+
+[Burrito](https://github.com/burrito-elixir/burrito) wraps the `mix release`
+above into one self-contained per-platform executable that bundles ERTS **and**
+the compiled exqlite NIF — so the binary has the **full SQLite read-model** with
+no Erlang prerequisite on the user's machine (T6.2, [ADR-0014](docs/adr/0014-binary-distribution-burrito-homebrew.md)).
+The `kazi` release declares four targets: macOS `aarch64`/`x86_64` and Linux
+`aarch64`/`x86_64`.
+
+Building requires [Zig](https://ziglang.org) **0.15.2** (Burrito's pinned
+version) and `xz` on `PATH`; cross-target builds also need `7z` for Windows
+(kazi ships no Windows target). Build the host target and run it:
+
+```sh
+# Build the binary for the current host platform (set BURRITO_TARGET to one of
+# macos_aarch64 / macos_x86_64 / linux_aarch64 / linux_x86_64; omit it to build
+# every declared target). Output lands in ./burrito_out/.
+BURRITO_TARGET=macos_aarch64 MIX_ENV=prod mix release --overwrite
+
+# The wrapped binary takes the CLI args directly — no `eval`. It reads them via
+# Burrito's argv and dispatches through the same Kazi.CLI core:
+./burrito_out/kazi_macos_aarch64 --help
+./burrito_out/kazi_macos_aarch64 run <goal-file> --workspace <path>
+./burrito_out/kazi_macos_aarch64 list-proposed
+```
+
+The binary persists its read-model to `$KAZI_DB` if set, otherwise
+`~/.kazi/kazi.db` (created on first run; see `config/runtime.exs`). Unlike the
+escript, every iteration and proposal is persisted — the NIF is bundled.
+
+> **macOS 26 + Zig note.** Burrito 1.5.0 pins Zig **0.15.2**, which cannot link
+> native binaries against the macOS 26 SDK (Xcode 26); Zig 0.16 links it but is
+> API-incompatible with Burrito's `build.zig`. On a macOS 26 host the wrap step
+> fails at the Zig link; build the macOS binaries on a macOS 15 (or earlier)
+> runner — which is what the release CI matrix (T6.3) targets.
+
 ---
 
 ## Quickstart 1 — describe a goal in plain English
