@@ -109,10 +109,10 @@ production deployment.
 Acceptance: D1 met; T1.8 dogfood passes.
 
 - [x] T1.1 Track the full predicate vector across iterations (in state + SQLite history)  Owner: TBD  Est: 1.5h  verifies: [UC-007]  deps: [T0.9]
-- [ ] T1.2 Regression detector: flag a predicate that went green -> red, attributed to the last dispatch  Owner: TBD  Est: 2h  verifies: [UC-007]  deps: [T1.1]
+- [x] T1.2 Regression detector: flag a predicate that went green -> red, attributed to the last dispatch  Owner: TBD  Est: 2h  verifies: [UC-007]  deps: [T1.1]
 - [x] T1.3 Flake handling: re-run policy + quarantine list so a nondeterministic fail is not treated as work  Owner: TBD  Est: 2h  verifies: [UC-008]  deps: [T0.7b]
 - [x] T1.4 Budget ceiling (iterations / wall-clock / token estimate) enforced as a hard stop  Owner: TBD  Est: 1.5h  verifies: [UC-009]  deps: [T0.7b]
-- [ ] T1.5 Stuck detector (N iterations, same failing set) + human-escalation hook  Owner: TBD  Est: 1.5h  verifies: [UC-009]  deps: [T0.7b]
+- [x] T1.5 Stuck detector (N iterations, same failing set) + human-escalation hook  Owner: TBD  Est: 1.5h  verifies: [UC-009]  deps: [T0.7b]
 - [x] T1.6 Prod-log predicate provider (query prod logs for 5xx/panics over a window) + tests  Owner: TBD  Est: 2h  verifies: [UC-021]  deps: [T0.3]
 - [ ] T1.7 ExUnit tests for regression, flake, budget, stuck, prod-log  Owner: TBD  Est: 2h  verifies: [UC-007, UC-008, UC-009, UC-021]  deps: [T1.2, T1.3, T1.4, T1.5, T1.6]
 - [ ] T1.8 Dogfood Slice 1: goal where the naive fix regresses another predicate; confirm detection + escalation; record in `docs/devlog.md`  Owner: TBD  Est: 1h  verifies: [UC-007]  deps: [T1.7]
@@ -278,6 +278,15 @@ different directories in one commit. Add tests with every implementation task
   T1.6 (prod-log provider) dispatched first (no mutual conflict); loop-touching
   T1.2/T1.3/T1.4/T1.5 sequenced after T1.1 to avoid loop.ex contention. T0.11 is
   the regression guard for all Slice-1 loop changes.
+- Slice 1 COMPONENTS DONE: T1.1 history (#19), T1.6 prod-log (#20), T1.3 flake/
+  quarantine (#21), T1.4 budget ceiling (#22), T1.5 stuck+escalation (#23), T1.2
+  regression detector (#24). All four loop detectors (Budget, Flake, Stuck,
+  Regression) compose in loop.ex via keep-both merges (verified: no silent
+  revert; snapshot exposes quarantine/budget_reason/regressions). 266 tests on
+  main (33 doctests, 233 tests), CI green.
+- Next: T1.7 (cross-cutting ExUnit tests for all Slice-1 features), then T1.8
+  (hermetic Slice-1 dogfood: naive fix regresses another predicate -> detect +
+  escalate; record in devlog). Slice 1 completes fully autonomously (no GCP).
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
