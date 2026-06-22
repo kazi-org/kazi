@@ -131,10 +131,11 @@ defmodule Kazi.RuntimeTest do
   test "fails loudly when a predicate names a provider the runtime can't dispatch" do
     goal =
       Goal.new("unknown-kind",
-        predicates: [Predicate.new(:p, :browser)]
+        predicates: [Predicate.new(:p, :no_such_kind)]
       )
 
-    assert {:error, {:unknown_provider_kinds, [:browser]}} = Runtime.run(goal, persist?: false)
+    assert {:error, {:unknown_provider_kinds, [:no_such_kind]}} =
+             Runtime.run(goal, persist?: false)
   end
 
   test "runs without touching the read-model when persistence is disabled", %{tmp_dir: tmp_dir} do

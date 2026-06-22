@@ -77,6 +77,34 @@ defmodule Kazi.Goal.LoaderTest do
     end
   end
 
+  describe "browser provider (T2.2) — author + dispatch" do
+    test "parses a goal declaring the browser provider into a :browser predicate" do
+      toml = """
+      id = "ui-acceptance"
+
+      [[predicate]]
+      id = "home-renders"
+      provider = "browser"
+      description = "home page shows the welcome heading"
+      url = "https://app.example.test/"
+
+      [[predicate.assertions]]
+      type = "text"
+      selector = "h1"
+      contains = "Welcome"
+      """
+
+      assert {:ok, goal} = Loader.from_map(Toml.decode!(toml))
+      assert [%Predicate{id: "home-renders", kind: :browser} = pred] = goal.predicates
+      assert pred.config[:url] == "https://app.example.test/"
+      assert [%{"type" => "text", "selector" => "h1"}] = pred.config[:assertions]
+    end
+
+    test "the runtime maps the :browser kind to the Browser provider module" do
+      assert Kazi.Runtime.provider_modules()[:browser] == Kazi.Providers.Browser
+    end
+  end
+
   describe "from_map/1 — schema coverage" do
     test "sorts guard predicates into guards, keeps order within each bucket" do
       data = %{
@@ -155,7 +183,7 @@ defmodule Kazi.Goal.LoaderTest do
     end
 
     test "an unknown provider is rejected with the known set listed" do
-      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "browser"}]}
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "no_such_provider"}]}
       assert {:error, reason} = Loader.from_map(data)
       assert reason =~ "unknown provider"
       assert reason =~ "test_runner"
