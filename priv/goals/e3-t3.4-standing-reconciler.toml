@@ -1,0 +1,93 @@
+# THE FIRST SELF-HOSTED kazi GOAL — kazi builds kazi (T2.6 cutover).
+#
+# This is a *creation-mode* goal (ADR-0002, T2.1) whose target workspace is the
+# kazi repo ITSELF. It specifies an E3 backlog item — **T3.4 standing/continuous
+# reconciler mode** (docs/plan.md E3, UC-016) — as FAILING ACCEPTANCE PREDICATES
+# over kazi's OWN `mix test` suite. From Slice 2 onward kazi no longer builds
+# kazi with /apply skills; it builds itself by converging goal-files like this one
+# (docs/self-hosting.md, concept §10 "from creation mode onward, kazi builds kazi").
+#
+# ## What T3.4 is
+#
+# Today a kazi goal is a one-shot reconcile: the loop runs until the predicate
+# vector is objectively :pass, stuck, or over budget, then it stops (ADR-0001,
+# Kazi.Loop). A *standing* (continuous) reconciler is a maintenance goal that does
+# NOT terminate on convergence — once green it keeps re-evaluating its predicates
+# and re-dispatches the fix arc whenever an invariant later regresses. It is the
+# difference between "fix this once" and "keep this true forever" (concept §10
+# Slice 3+, "standing reconcilers").
+#
+# ## How this goal is authored to FAIL at t0 (non-vacuous)
+#
+# The acceptance criterion is expressed over the `test_runner` provider running
+# kazi's OWN test suite against a NEW, not-yet-existing acceptance test file:
+#
+#     test/kazi/standing_reconciler_test.exs
+#
+# At t0 that file does NOT exist, so `mix test test/kazi/standing_reconciler_test.exs`
+# exits non-zero ("Paths given to mix test did not match any file") → the
+# acceptance predicate is :fail. There is real work to do, so the vacuous-goal
+# guard (T2.3) does not trip. Once kazi BUILDS the standing-reconciler mode and
+# lands that acceptance test (asserting the new behavior), the same command exits
+# 0 → the predicate flips to :pass and the goal converges. The failing predicate
+# IS the work-list (ADR-0002): kazi drives a coding agent in a loop until it holds.
+#
+# A guard predicate keeps the WHOLE existing suite green throughout — the new mode
+# must not regress any current behavior. A guard is an invariant, not a goal to
+# reach (Kazi.Predicate), so it is sorted into the goal's `guards`.
+#
+# ## How a human runs it (target workspace IS the kazi repo)
+#
+#     kazi run priv/goals/e3-t3.4-standing-reconciler.toml --workspace /path/to/kazi
+#     # or, from a build:  mix kazi.run priv/goals/e3-t3.4-standing-reconciler.toml --workspace /path/to/kazi
+#
+# kazi dispatches the harness (`claude -p`, ADR-0008/0009) in the kazi workspace,
+# integrates the converged change via a PR (Kazi.Actions.Integrate — rebase-merge,
+# house rule), and a HUMAN reviews and merges it. See docs/self-hosting.md.
+
+id = "e3-t3.4-standing-reconciler"
+name = "Build standing/continuous reconciler mode (E3 T3.4, UC-016) — kazi builds kazi"
+mode = "create"
+
+[metadata]
+slice = "3"
+mode = "create"
+backlog_item = "T3.4"
+use_case = "UC-016"
+self_hosted = "true"
+
+[budget]
+# A coarse E3 budget: standing-mode is a focused loop change plus its test. Re-tune
+# when the item is properly re-planned (docs/plan.md E3 is intentionally coarse).
+max_iterations = 25
+max_tokens = 1500000
+
+[scope]
+# The target workspace is the kazi repo itself (passed at run time as
+# `--workspace /path/to/kazi`; declared here so the goal-file is self-describing).
+# The standing-reconciler change lives in the loop and its acceptance test.
+paths = ["lib/kazi/loop.ex", "lib/kazi/loop/", "lib/kazi/runtime.ex", "test/"]
+
+# ACCEPTANCE predicate (test_runner over kazi's OWN mix test): the NEW acceptance
+# test for standing-reconciler mode must exist and pass. FAILS at t0 — the file
+# test/kazi/standing_reconciler_test.exs does not exist yet, so `mix test <path>`
+# exits non-zero. PASSES once kazi builds standing mode and lands that test. This
+# is the criterion that DEFINES the feature.
+[[predicate]]
+id = "standing-reconciler-acceptance"
+provider = "test_runner"
+description = "mix test test/kazi/standing_reconciler_test.exs passes (standing mode exists) — fails at t0, no such test"
+acceptance = true
+cmd = "mix"
+args = ["test", "test/kazi/standing_reconciler_test.exs"]
+
+# GUARD predicate (test_runner over kazi's OWN full suite): the existing suite must
+# stay green while standing mode is added — an invariant that must not regress, not
+# a goal to reach. The loader sorts `guard = true` into the goal's `guards`.
+[[predicate]]
+id = "suite-stays-green"
+provider = "test_runner"
+description = "the full kazi mix test suite stays green (no regression while building standing mode)"
+guard = true
+cmd = "mix"
+args = ["test"]
