@@ -109,8 +109,11 @@ defmodule Kazi.Runtime do
       defaults to the built-in Slice-0 map).
     * `:standing` — run as a standing (continuous/maintenance) reconciler (T3.4a,
       UC-016): the loop does not terminate at convergence but keeps re-observing
-      on the bounded interval to hold the goal's predicates true. Forwarded
-      verbatim to `Kazi.Loop.start_link/1`; default `false` (converge-and-stop).
+      on the bounded interval to hold the goal's predicates true. Forwarded to
+      `Kazi.Loop.start_link/1`. T3.4d: when omitted it DEFAULTS to the goal's own
+      declared `standing` field (so a goal-file `standing = true` runs standing
+      without a flag); an explicit `:standing` here (the CLI `--standing` flag)
+      OVERRIDES the goal-file. Default (neither set) `false` (converge-and-stop).
     * any other option (`:live_kinds`, `:reobserve_interval_ms`, `:name`) is
       forwarded verbatim to `Kazi.Loop.start_link/1`.
 
@@ -150,7 +153,11 @@ defmodule Kazi.Runtime do
           :goal_ref,
           :providers,
           :adapter_opts,
-          :extra_action_context
+          :extra_action_context,
+          # T3.4d standing wiring: dropped here and re-set in the merge below so
+          # the loop's standing mode defaults to the goal-file's declared
+          # `standing`, overridable by an explicit `:standing` opt (CLI flag).
+          :standing
         ])
         |> Keyword.merge(
           goal: goal,
@@ -163,7 +170,12 @@ defmodule Kazi.Runtime do
           on_iteration: build_on_iteration(goal, opts),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
-          extra_action_context: build_action_context(opts)
+          extra_action_context: build_action_context(opts),
+          # T3.4d standing wiring: the CLI `--standing` flag (an explicit
+          # `:standing` opt) wins; otherwise fall back to the goal-file's own
+          # declared `standing` field. So a goal authored standing runs standing
+          # with no flag, and the flag can still force it on for any goal.
+          standing: Keyword.get(opts, :standing, goal.standing)
         )
 
       with {:ok, loop} <- Loop.start_link(loop_opts) do

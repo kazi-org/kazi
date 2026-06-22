@@ -53,11 +53,17 @@ defmodule Kazi.CLI do
                              (T3.3d). Selects the goal/deploy's per-env target;
                              requires the goal-file's deploy config to define an
                              `envs` map for that environment.
+      --standing             Run as a STANDING (continuous/maintenance)
+                             reconciler (UC-016): instead of converging and
+                             stopping, hold the goal's predicates true forever,
+                             re-converging whenever one drifts. Overrides the
+                             goal-file's `standing` field.
       --help                 Show this help and exit.
 
   EXAMPLES:
       kazi run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
       kazi run priv/examples/deploy_target.toml --workspace ./target --env prod
+      kazi run priv/examples/standing_maintenance.toml --workspace ./svc --standing
   """
 
   @doc """
@@ -120,8 +126,11 @@ defmodule Kazi.CLI do
 
     * `{:help, opts}` — `--help` was requested.
     * `{:run, goal_file, opts}` — the `run` subcommand with its positional
-      goal-file and `opts` (`[workspace: path | nil, env: name | nil]`; `:env`
-      is the T3.3d deploy-environment selector).
+      goal-file and `opts`
+      (`[workspace: path | nil, env: name | nil, standing: boolean | nil]`).
+      `:env` is the T3.3d deploy-environment selector. `:standing` is `nil` when
+      `--standing` was not given (the goal-file's own `standing` field then
+      decides); `true` forces standing mode (T3.4d).
     * `{:error, message}` — a usage error (unknown command, missing goal-file).
   """
   @spec parse([String.t()]) :: parsed()
@@ -129,7 +138,9 @@ defmodule Kazi.CLI do
     {flags, positionals, invalid} =
       OptionParser.parse(argv,
         # T3.3d deploy wiring: --env picks the deploy environment (staging/prod).
-        strict: [workspace: :string, env: :string, help: :boolean],
+        # T3.4d standing wiring: --standing authors a standing-mode run from the
+        # CLI (overrides the goal-file's `standing`).
+        strict: [workspace: :string, env: :string, standing: :boolean, help: :boolean],
         aliases: [h: :help]
       )
 
@@ -148,8 +159,13 @@ defmodule Kazi.CLI do
   defp parse_command(["run", goal_file | rest], flags) do
     case rest do
       # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
-      [] -> {:run, goal_file, workspace: flags[:workspace], env: flags[:env]}
-      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+      # T3.4d standing wiring: carry the --standing flag through to the run.
+      [] ->
+        {:run, goal_file,
+         workspace: flags[:workspace], env: flags[:env], standing: flags[:standing]}
+
+      extra ->
+        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
 
@@ -190,6 +206,11 @@ defmodule Kazi.CLI do
 
     # The caller's static run config; CLI-owned keys (workspace/persist?) win, and
     # an explicit :persist? in runtime_opts can still override (tests).
+    #
+    # T3.4d standing wiring: only forward `:standing` when `--standing` was
+    # actually given (flag is true). When absent (nil) we leave it unset so
+    # `Kazi.Runtime.run/2` falls back to the goal-file's own declared `standing`
+    # field — the flag overrides the goal-file, it does not silently force it off.
     run_opts =
       runtime_opts
       |> Keyword.put_new(:persist?, persist?)
@@ -199,6 +220,7 @@ defmodule Kazi.CLI do
       # per-env target. Merged OVER any caller-supplied :deploy_params so tests
       # passing their own deploy_params keep working and an explicit --env wins.
       |> maybe_put_deploy_env(opts[:env])
+      |> maybe_put_standing(opts[:standing])
 
     case Runtime.run(goal, run_opts) do
       {:ok, %{outcome: :converged} = result} ->
@@ -230,6 +252,12 @@ defmodule Kazi.CLI do
 
     Keyword.put(run_opts, :deploy_params, deploy_params)
   end
+
+  # T3.4d standing wiring: forward `:standing` to the runtime ONLY when the
+  # `--standing` flag was given (true). A nil/false flag is left unset so the
+  # goal-file's declared `standing` decides (the flag overrides, never forces off).
+  defp maybe_put_standing(run_opts, true), do: Keyword.put(run_opts, :standing, true)
+  defp maybe_put_standing(run_opts, _), do: run_opts
 
   defp format_run_error({:unknown_provider_kinds, kinds}) do
     "goal names provider kind(s) this build can't evaluate: " <>
