@@ -5,8 +5,9 @@ defmodule Kazi.Budget do
 
   The budget is a *hard stop* enforced by the controller (T1.4) — when any limit
   is reached the loop terminates as `:over_budget` rather than burning money. A
-  `nil` field means that dimension is unbounded. Slice 0 carries the budget as
-  declared state; the enforcing stuck/budget logic lands in Slice 1.
+  `nil` field means that dimension is unbounded. This struct is the declared
+  state; the pure decision ("is usage over budget, and on which dimension?")
+  lives in `Kazi.Loop.Budget` and is enforced by `Kazi.Loop` once per tick.
   """
 
   @type t :: %__MODULE__{
