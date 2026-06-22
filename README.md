@@ -84,6 +84,29 @@ mix escript.build          # produces ./kazi
 ./kazi --help
 ```
 
+### Build a self-contained release (full read-model)
+
+The escript can't bundle the native SQLite NIF, so it runs **without** the
+read-model. A `mix release` bundles ERTS *and* the compiled NIFs, so the released
+binary has the **full read-model** (and is the foundation the per-platform binary
+is built from — see [ADR-0014](docs/adr/0014-binary-distribution-burrito-homebrew.md)):
+
+```sh
+MIX_ENV=prod mix release --overwrite     # builds _build/prod/rel/kazi
+
+# The CLI is invoked through the release's `eval` command, which propagates the
+# CLI's exit code (0 on convergence / a recorded proposal / approval, non-zero
+# otherwise) — so the release composes in scripts and CI like the escript:
+_build/prod/rel/kazi/bin/kazi eval 'Kazi.Release.cli(["--help"])'
+_build/prod/rel/kazi/bin/kazi eval \
+  'Kazi.Release.cli(["run", "<goal-file>", "--workspace", "<path>"])'
+_build/prod/rel/kazi/bin/kazi eval 'Kazi.Release.cli(["list-proposed"])'
+```
+
+`Kazi.Release.cli/1` dispatches to the same `Kazi.CLI` core as the escript and
+`mix kazi.run`, so every subcommand (`run` / `propose` / `list-proposed` /
+`approve` / `reject` / `--help`) behaves identically.
+
 ---
 
 ## Quickstart 1 — describe a goal in plain English
