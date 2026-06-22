@@ -33,5 +33,21 @@ defmodule KaziWeb.Router do
     pipe_through(:browser)
 
     live("/", DashboardLive, :index)
+    # T3.6b: the goal board — goals + status + predicate vector + iteration count,
+    # live-updating from Kazi.ReadModel (ADR-0011 read projection).
+    live("/goals", GoalBoardLive, :index)
+  end
+
+  # Test-only seed/reset endpoints for the Playwright harness (T3.6b). Mounted
+  # ONLY in the test env so the golden-path spec can seed the read-model and the
+  # empty-state spec can clear it; never present in dev/prod. The controller lives
+  # under test/support and is compiled only on the :test elixirc path.
+  if Mix.env() == :test do
+    scope "/test", KaziWeb do
+      pipe_through(:health)
+
+      post("/seed", TestSeedController, :seed)
+      post("/reset", TestSeedController, :reset)
+    end
   end
 end
