@@ -149,6 +149,25 @@ predicates before build. Intentionally low-granularity.
 - [ ] T3.6 Phoenix LiveView dashboard (goal board, presence, lease map, history)  Owner: TBD  Est: TBD  verifies: [UC-018]  blocked-by: [T3.1]
 - [ ] T3.7 Telegram goal-in / ping-out  Owner: TBD  Est: TBD  verifies: [UC-019]  blocked-by: [T2.6]
 
+### E4 -- Context injection / re-exploration mitigation (P3, see ADR-0010)
+
+Acceptance: each stateless `claude -p` iteration starts ORIENTED (blast-radius
+map injected) instead of re-discovering structure, without reintroducing
+conversation memory (ADR-0008/0009 preserved). Hermetically testable: stub the
+graph/repo-map + harness; use fixture repos; no real network. Build on
+`Kazi.Harness.ClaudeAdapter`, `Kazi.Runtime`, `Kazi.ReadModel`, and the
+`code-review-graph`/`graphify` tooling.
+
+- [ ] T4.1 `claude -p --output-format json` in the adapter: capture structured result + real token/cost + touched working set; feed token usage into the T1.4 budget. Tests use a stub binary emitting JSON  Owner: TBD  Est: 1.5h  verifies: [UC-009, UC-022]  deps: [T0.6]  acc: adapter parses json result incl. token usage; budget consumes it; hermetic stub
+- [ ] T4.2 `Kazi.Context` orientation-pack builder: from failing predicates + workspace produce a bounded, ranked pack (impacted files/symbols + failing test source + callers/callees) via code-review-graph when present else a tree-sitter repo map + tests  Owner: TBD  Est: 2.5h  verifies: [UC-022]  deps: [T0.3]  acc: given a fixture repo + failing predicate, returns a token-bounded ranked pack; deterministic; hermetic
+- [ ] T4.3 Inject the orientation pack into `build_prompt/2` as a STABLE cacheable prefix (keep the failing-evidence section) + tests  Owner: TBD  Est: 1h  verifies: [UC-022, UC-003]  deps: [T4.2]  acc: prompt carries an orientation prefix that is byte-identical across iterations for the same (sha, failing-set); evidence section unchanged
+- [ ] T4.4 Workspace orientation file: kazi generates/refreshes `CLAUDE.md`/`.kazi/context.md` in the target from the code graph/graphify + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022]  deps: [T4.2]  acc: a fixture target gets an up-to-date orientation file; regenerated on change; hermetic
+- [ ] T4.5 Wire `code-review-graph` MCP into the target workspace `.mcp.json` + ensure graph freshness before dispatch + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022]  deps: [T0.6]  acc: dispatch ensures a fresh graph + the workspace exposes the graph MCP; verified via stub; hermetic
+- [ ] T4.6 SHA-keyed orientation-pack cache in the read-model, incremental invalidation on the changed blast radius + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022, UC-006]  deps: [T4.2, T0.9]  acc: pack cached by (workspace, git-sha, failing-set); reused when unchanged; invalidated on blast-radius change; SQLite round-trip test
+- [ ] T4.7 Bounded working-set digest across iterations (from T4.1 json) distilled into the next prompt -- map memory, NOT conversation + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022]  deps: [T4.1, T4.3]  acc: next prompt carries a compact files-touched/what-changed note; no transcript carried; hermetic doubles
+- [ ] T4.8 claw-code hygiene in the adapter: per-dispatch token ceiling + evidence/tool-result truncation + minimal per-goal tool/permission set + tests  Owner: TBD  Est: 1h  verifies: [UC-009, UC-022]  deps: [T0.6]  acc: a dispatch is capped + evidence truncated to a budget; asserted via stub
+- [ ] T4.9 (deferred, ADR-0005) Pluggable semantic-retrieval memory adapter via graphify embeddings (RAG over the target) feeding `build_prompt`  Owner: TBD  Est: TBD  verifies: [UC-022]  deps: [T4.2]  acc: optional adapter returns top-k relevant snippets for a failing predicate; off by default; core loop unchanged
+
 ## Parallel Work
 
 Behaviours-first (T0.3 defines the provider/adapter/action contracts) lets the
@@ -182,11 +201,17 @@ Waves reference task IDs; toggle the single checkbox in the WBS above. Run
 - **Wave 10 (2 agents):** T3.3a, T3.4a   (foundational; deps met by T2.6)
 - **Wave 11 (4 agents):** T3.3b, T3.3c, T3.4b, T3.4c
 - **Wave 12 (2 agents):** T3.3d, T3.4d
+- **Wave 13 (3 agents):** T4.1, T4.2, T4.5   (foundational context-injection; deps met)
+- **Wave 14 (4 agents):** T4.3, T4.4, T4.6, T4.8   -> then T4.7 digest; T4.9 deferred (ADR-0005)
 
 T3.3/T3.4 were re-planned into granular hermetic subtasks (2026-06-22). The rest
 of E3 -- T3.1 (NATS leases), T3.2 (graph partitioning), T3.5 (idea->predicate
 front-end), T3.6 (LiveView dashboard), T3.7 (Telegram) -- remains coarse and is
 re-planned per item when reached; no fixed waves.
+
+E4 (context injection, ADR-0010) is granular and hermetic (Waves 13-14); deps are
+already met, so /apply --pool can pick it up. T4.9 (semantic-retrieval memory
+adapter) is the ADR-0005 deferred item -- left coarse.
 
 ## Timeline and Milestones
 
@@ -340,6 +365,12 @@ different directories in one commit. Add tests with every implementation task
   prod dogfood); and deferred E3 T3.1 NATS, T3.2 graph, T3.5 idea->predicate
   front-end, T3.6 LiveView dashboard, T3.7 Telegram (each needs re-plan + some
   introduce heavy deps). Next direction is a human decision.
+- 2026-06-22 ADDED EPIC E4 (context injection, ADR-0010): after a research-backed
+  brainstorm on mitigating per-iteration re-exploration (aider repo map, the
+  Codebase-Memory code-graph paper, claw-code compaction, prompt caching), added
+  T4.1-T4.9 + Waves 13-14. Strategy: inject blast-radius orientation + externalize
+  map-memory to the workspace; keep statelessness/anti-anchoring (ADR-0008/0009).
+  New ADR-0010; new UC-022. Deps already met, so /apply --pool can build E4.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
