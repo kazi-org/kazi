@@ -37,6 +37,7 @@ defmodule KaziWeb.Router do
     # live-updating from Kazi.ReadModel (ADR-0011 read projection).
     live("/goals", GoalBoardLive, :index)
     live("/leases", LeaseMapLive, :index)
+    live("/goals/:id/history", HistoryLive, :index)
   end
 
   # Test-only seed/reset endpoints for the Playwright harness (T3.6b). Mounted
