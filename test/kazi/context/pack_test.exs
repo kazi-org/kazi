@@ -61,4 +61,50 @@ defmodule Kazi.Context.PackTest do
       assert once == twice
     end
   end
+
+  describe "blast_radius/1 (T4.6)" do
+    test "is the sorted, deduped impacted files + symbol paths; excludes test sources" do
+      pack = %Pack{
+        origin: :graph,
+        files: [FileRef.new("lib/b.ex"), FileRef.new("lib/a.ex")],
+        symbols: [Symbol.new("f/1", "lib/a.ex"), Symbol.new("g/1", "lib/c.ex")],
+        test_sources: [FileRef.new("test/excluded_test.exs", source: "x")]
+      }
+
+      assert Pack.blast_radius(pack) == ["lib/a.ex", "lib/b.ex", "lib/c.ex"]
+    end
+
+    test "is empty for an empty pack" do
+      assert Pack.blast_radius(%Pack{origin: :repo_map}) == []
+    end
+  end
+
+  describe "to_serializable/1 + from_serializable/1 (T4.6)" do
+    test "round-trips a full pack to an identical struct" do
+      pack = %Pack{
+        origin: :graph,
+        token_budget: 4_000,
+        files: [FileRef.new("lib/a.ex"), FileRef.new("lib/b.ex")],
+        symbols: [
+          Symbol.new("f/1", "lib/a.ex", kind: :function, callers: ["g/0"], callees: ["h/0"])
+        ],
+        test_sources: [FileRef.new("test/a_test.exs", source: "assert true")]
+      }
+
+      assert pack |> Pack.to_serializable() |> Pack.from_serializable() == pack
+    end
+
+    test "the serialized form is JSON-safe (survives a real JSON encode/decode)" do
+      pack = %Pack{origin: :repo_map, token_budget: 100, files: [FileRef.new("lib/a.ex")]}
+      serialized = Pack.to_serializable(pack)
+
+      round_tripped = serialized |> Jason.encode!() |> Jason.decode!() |> Pack.from_serializable()
+      assert round_tripped == pack
+    end
+
+    test "round-trips an empty pack" do
+      pack = %Pack{origin: :repo_map, token_budget: 4_000}
+      assert pack |> Pack.to_serializable() |> Pack.from_serializable() == pack
+    end
+  end
 end
