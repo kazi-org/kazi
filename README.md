@@ -37,6 +37,46 @@ Two gaps nobody owns:
 Pre-implementation. The design is frozen in [`docs/concept.md`](docs/concept.md)
 and the [ADRs](docs/adr/). Code has not started.
 
+## CLI: `kazi run`
+
+Drive a goal-file to convergence against an explicit target workspace
+(`UC-004`):
+
+```
+kazi run <goal-file> --workspace <path>
+```
+
+- `<goal-file>` — a TOML goal-file (schema in `Kazi.Goal.Loader`; see the example
+  at [`priv/examples/deploy_target.toml`](priv/examples/deploy_target.toml)).
+- `--workspace <path>` — the target workspace where edits / integrate / deploy
+  operate. Falls back to the goal-file's `[scope]` workspace when omitted.
+- `--help` — usage.
+
+The command loads the goal, runs the reconcile loop via `Kazi.Runtime`, prints a
+human-readable outcome (converged / stopped) with the final predicate vector, and
+exits `0` on convergence, non-zero otherwise.
+
+### Two entry points
+
+There are two equivalent ways to invoke it; they share the same `Kazi.CLI` core:
+
+```sh
+# 1. Mix task — the persistent default. Boots the full app (incl. the native
+#    SQLite NIF), so every iteration is projected to the local read-model.
+mix kazi.run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
+
+# 2. Escript — a self-contained `kazi` binary, convenient for distribution.
+mix escript.build                 # produces ./kazi (gitignored — do not commit)
+./kazi run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
+./kazi --help
+```
+
+> **Read-model note.** An escript archive cannot bundle a native NIF, so the
+> escript runs **without** the SQLite read-model (it degrades gracefully with a
+> warning; convergence still works). Use `mix kazi.run` when you want iterations
+> persisted. The Mix task creates and migrates the read-model on startup, so a
+> fresh checkout persists from the very first run.
+
 ## Design at a glance
 
 - **Runtime:** Elixir / OTP + Phoenix LiveView ([ADR-0003](docs/adr/0003-language-elixir-otp.md))
