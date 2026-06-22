@@ -101,7 +101,7 @@ production deployment.
 - [x] T0.7b Integration: wire concrete providers + adapter + integrate/deploy actions into the loop (replace test-doubles)  Owner: TBD  Est: 2h  verifies: [UC-004]  deps: [T0.5, T0.5b, T0.6, T0.7, T0.10a, T0.10b]
 - [x] T0.8 Objective-termination guard: `:converged` reachable only when the FULL vector (code + live) is true; explicit test that a failing live probe blocks success  Owner: TBD  Est: 1h  verifies: [UC-005]  deps: [T0.7]
 - [x] T0.10 CLI entry `kazi run <goal-file> --workspace <path>` wiring loader + loop + actions against an explicit target workspace  Owner: TBD  Est: 1.5h  verifies: [UC-004]  deps: [T0.7]
-- [ ] T0.11 Full-loop integration test incl. a deliberately-failing-test fixture, with deploy + probe stubbed  Owner: TBD  Est: 2h  verifies: [UC-005]  deps: [T0.7b, T0.8, T0.10]
+- [x] T0.11 Full-loop integration test incl. a deliberately-failing-test fixture, with deploy + probe stubbed  Owner: TBD  Est: 2h  verifies: [UC-005]  deps: [T0.7b, T0.8, T0.10]
 - [ ] T0.12 Dogfood Slice 0 (idea -> production): run kazi against the deployable fixture; confirm it takes a failing test to a LIVE, verified production deployment and refuses success while tests OR the live probe fail; record result in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-005]  deps: [T0.11, T0.10a, T0.10b, T0.13, T0.6h]
 
 ### E1 -- Slice 1: Trustworthy Loop (P1)
@@ -269,6 +269,15 @@ different directories in one commit. Add tests with every implementation task
 - Next: Wave 5 (T0.11 full-loop integration test, deploy+probe stubbed) — single
   agent. Then Wave 6 T0.12 dogfood is BLOCKED on human T0.6h (GCP/Cloud Run) +
   real harness; the autonomous loop drives everything through T0.11.
+- Wave 5 DONE: T0.11 full-loop integration test (#18), CI green. test/kazi/
+  full_loop_test.exs drives real Runtime→Loop→providers→actions→SQLite with
+  harness/deploy/probe stubbed; hermetic (no Go, no network); proves the T0.8
+  live-gate (no converge while live probe red). 150 tests on main. SLICE 0 (E0)
+  CODE-COMPLETE — only T0.12 dogfood remains, BLOCKED on human T0.6h (GCP).
+- Slice 1 (E1) started while T0.12 waits on the human: T1.1 (vector history) +
+  T1.6 (prod-log provider) dispatched first (no mutual conflict); loop-touching
+  T1.2/T1.3/T1.4/T1.5 sequenced after T1.1 to avoid loop.ex contention. T0.11 is
+  the regression guard for all Slice-1 loop changes.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
