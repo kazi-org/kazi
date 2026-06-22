@@ -179,6 +179,47 @@ defmodule Kazi.RuntimeTest do
     assert ReadModel.list_iterations("no-persist") == []
   end
 
+  test "a hard budget ceiling stops the loop over-budget and persists the stop reason (T1.4)",
+       %{tmp_dir: tmp_dir} do
+    %{work: work} = setup_repo(tmp_dir)
+
+    # A code predicate that NEVER passes (`false` always exits non-zero) so the
+    # loop can only terminate by hitting the budget — not by converging. The
+    # harness stub does nothing useful (the predicate stays red).
+    goal =
+      Goal.new("over-budget",
+        predicates: [
+          Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "false"]})
+        ],
+        budget: [max_iterations: 2],
+        scope: Scope.new(workspace: work)
+      )
+
+    assert {:ok, result} =
+             Runtime.run(goal,
+               workspace: work,
+               adapter_opts: [command: "true"],
+               reobserve_interval_ms: 5,
+               await_timeout: 10_000
+             )
+
+    # The loop stopped on the hard budget ceiling, not on convergence.
+    assert result.outcome == :over_budget
+    assert result.reason == :max_iterations
+    assert result.iterations == 2
+
+    # The stop is visible in the persisted iteration log: a budget_stop row
+    # naming the exceeded dimension, beyond the last observed iteration index.
+    iterations = ReadModel.list_iterations("over-budget")
+    budget_stop = Enum.find(iterations, &(&1.action_kind == "budget_stop"))
+
+    assert budget_stop, "expected a persisted budget_stop iteration in the read-model"
+    # action_params round-trips through a JSON map column, so the reason atom is
+    # read back as its string form.
+    assert to_string(budget_stop.action_params["reason"]) == "max_iterations"
+    refute budget_stop.converged
+  end
+
   # --- fixtures ----------------------------------------------------------------
 
   # A local bare "origin" with an initial commit on `main`, plus a working clone.
