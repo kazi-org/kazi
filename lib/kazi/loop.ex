@@ -176,6 +176,12 @@ defmodule Kazi.Loop do
               # static config threaded to providers/adapter/actions
               workspace: nil,
               adapter_opts: [],
+              # T4.5 context injection (ADR-0010 §3): opts forwarded to
+              # `Kazi.Workspace.prepare/2`, which runs once before each agent
+              # dispatch to expose the code-review-graph MCP in the workspace's
+              # `.mcp.json` and refresh its code graph. Carries the `:graph_cmd`
+              # seam tests inject; empty in production (real binary default).
+              workspace_opts: [],
               live_kinds: nil,
               reobserve_interval_ms: nil,
               # T3.4a standing mode: when true the loop is a maintenance
@@ -514,6 +520,7 @@ defmodule Kazi.Loop do
       deploy: fetch!(opts, :deploy),
       workspace: Keyword.get(opts, :workspace),
       adapter_opts: Keyword.get(opts, :adapter_opts, []),
+      workspace_opts: Keyword.get(opts, :workspace_opts, []),
       live_kinds: MapSet.new(Keyword.get(opts, :live_kinds, @default_live_kinds)),
       reobserve_interval_ms: Keyword.get(opts, :reobserve_interval_ms, @default_reobserve_ms),
       # T3.4a standing mode: opt the loop into the continuous-maintenance
@@ -565,6 +572,13 @@ defmodule Kazi.Loop do
   # --- ACT: dispatch the coding agent against failing-predicate evidence -------
   def handle_event(:internal, {:act, %Action{kind: :dispatch_agent} = action}, :acting, data) do
     prompt = dispatch_prompt(action, data)
+
+    # T4.5 context injection (ADR-0010 §3): before the stateless `claude -p`
+    # dispatch, prepare the workspace so the agent starts oriented — expose the
+    # code-review-graph MCP in the workspace's `.mcp.json` and refresh its code
+    # graph if present. Best-effort: a prep error never blocks the dispatch (the
+    # MCP/graph is an orientation optimisation, not a precondition).
+    prepare_workspace(data)
 
     result = data.harness.run(prompt, data.workspace, data.adapter_opts)
 
@@ -1037,6 +1051,29 @@ defmodule Kazi.Loop do
 
     "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}\n" <>
       "evidence: #{inspect(Map.get(params, :evidence, %{}))}"
+  end
+
+  # T4.5 context injection (ADR-0010 §3): prepare the target workspace for the
+  # imminent stateless dispatch — expose the code-review-graph MCP in its
+  # `.mcp.json` and refresh its code graph if one is present (idempotent). A
+  # nil workspace (loops driven without a target dir) or any prep error is a
+  # no-op for the dispatch: orientation is an optimisation, never a precondition.
+  @spec prepare_workspace(Data.t()) :: :ok
+  defp prepare_workspace(%Data{workspace: nil}), do: :ok
+
+  defp prepare_workspace(%Data{workspace: workspace, workspace_opts: workspace_opts}) do
+    case Kazi.Workspace.prepare(workspace, workspace_opts) do
+      {:ok, _summary} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(fn ->
+          "kazi.loop: workspace prep failed for #{workspace}, dispatching anyway: " <>
+            inspect(reason)
+        end)
+
+        :ok
+    end
   end
 
   # Context threaded to an action's execute/2 (Kazi.Action.context). A plain map
