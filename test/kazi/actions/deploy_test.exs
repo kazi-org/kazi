@@ -430,4 +430,91 @@ defmodule Kazi.Actions.DeployTest do
     action = Action.new(:rollback, params: %{cmd: stub, env: :qa, envs: %{}})
     assert {:error, {:unknown_env, :qa}} = Deploy.execute(action, %{})
   end
+
+  # --- Release tagging (T3.3c, UC-015) ---------------------------------------
+
+  # A stub tagger that emulates `git tag <ref>`: records the args it was called
+  # with (so the test can assert the tag created) and exits 0.
+  defp ok_tagger(path, tag_args_file) do
+    script = """
+    #!/bin/sh
+    for a in "$@"; do echo "$a" >> "#{tag_args_file}"; done
+    exit 0
+    """
+
+    write_executable(path, script)
+  end
+
+  # A stub tagger that emulates a failed `git tag` (e.g. tag already exists).
+  defp fail_tagger(path) do
+    script = """
+    #!/bin/sh
+    echo "fatal: tag 'release-x' already exists" 1>&2
+    exit 128
+    """
+
+    write_executable(path, script)
+  end
+
+  test "a successful deploy creates a release tag via the injected tagger and returns it in the result",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tag_args_file = Path.join(dir, "tag_args.txt")
+    tagger = ok_tagger(Path.join(dir, "git_ok"), tag_args_file)
+
+    action = deploy_action(stub, %{tag_cmd: tagger, release_ref: "release-kazi-v1"})
+    assert {:ok, result} = Deploy.execute(action, %{})
+
+    # The release ref is recorded in the deploy result and is distinct from the
+    # deploy (live URL) ref.
+    assert result.release_ref == "release-kazi-v1"
+    assert result.deploy_ref == @fake_url
+    refute Map.has_key?(result, :release_error)
+
+    # The tagger was invoked as `git tag <release_ref>`.
+    tag_args = File.read!(tag_args_file) |> String.split("\n", trim: true)
+    assert tag_args == ["tag", "release-kazi-v1"]
+  end
+
+  test "derives a timestamped release ref when none is supplied",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tag_args_file = Path.join(dir, "tag_args.txt")
+    tagger = ok_tagger(Path.join(dir, "git_ok"), tag_args_file)
+
+    action = deploy_action(stub, %{tag_cmd: tagger})
+    assert {:ok, result} = Deploy.execute(action, %{})
+
+    # The derived ref names the deployed service and is the one passed to the tagger.
+    assert result.release_ref =~ ~r/^release-kazi-deploy-target-\d+$/
+    tag_args = File.read!(tag_args_file) |> String.split("\n", trim: true)
+    assert tag_args == ["tag", result.release_ref]
+  end
+
+  test "the tagger command can be injected via context",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tag_args_file = Path.join(dir, "tag_args.txt")
+    tagger = ok_tagger(Path.join(dir, "git_ctx"), tag_args_file)
+
+    action = deploy_action(stub, %{release_ref: "release-ctx"})
+    assert {:ok, result} = Deploy.execute(action, %{tag_cmd: tagger})
+    assert result.release_ref == "release-ctx"
+  end
+
+  test "a tagger failure does not fail the (successful) deploy",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tagger = fail_tagger(Path.join(dir, "git_fail"))
+
+    action = deploy_action(stub, %{tag_cmd: tagger, release_ref: "release-x"})
+    assert {:ok, result} = Deploy.execute(action, %{})
+
+    # The deploy still succeeded; the release ref is still recorded, with the
+    # tagger error surfaced separately rather than aborting the deploy.
+    assert result.deploy_ref == @fake_url
+    assert result.release_ref == "release-x"
+    assert {:tag_failed, 128, output} = result.release_error
+    assert output =~ "already exists"
+  end
 end
