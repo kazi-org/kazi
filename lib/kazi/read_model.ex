@@ -18,12 +18,22 @@ defmodule Kazi.ReadModel do
   """
 
   @behaviour Kazi.Context.Cache
+  @behaviour Kazi.Retrieval.Cache
 
   import Ecto.Query, only: [from: 2]
 
   alias Kazi.Context.Pack
   alias Kazi.{Action, PredicateResult, PredicateVector, Repo}
-  alias Kazi.ReadModel.{GoalSummary, Iteration, OrientationPackCache, ProposedGoal}
+
+  alias Kazi.ReadModel.{
+    GoalSummary,
+    Iteration,
+    OrientationPackCache,
+    ProposedGoal,
+    RetrievalSnippetCache
+  }
+
+  alias Kazi.Retrieval.Snippet
 
   # The PubSub topic the read-model broadcasts an iteration record on (T3.6b,
   # ADR-0011). The goal board LiveView subscribes to it so a freshly recorded
@@ -443,6 +453,89 @@ defmodule Kazi.ReadModel do
   def invalidate_cached_pack(cache_key) when is_binary(cache_key) do
     {count, _} =
       Repo.delete_all(from(c in OrientationPackCache, where: c.cache_key == ^cache_key))
+
+    count
+  end
+
+  # --- retrieval-snippet cache (T4.9c, ADR-0012 §4) --------------------------
+
+  @doc """
+  Caches a retrieved `[Kazi.Retrieval.Snippet]` under `cache_key`
+  (`Kazi.Context.cache_key/3`), recording the `workspace`/`git_sha` it was
+  retrieved at and the `blast_radius` it was scoped to for incremental invalidation
+  (T4.9c, ADR-0012 §4 — the same scheme as the T4.6 orientation-pack cache).
+
+  Upserts: re-storing under the same key replaces the prior entry (a refreshed
+  retrieval at the same `(workspace, git-SHA, failing-set)` whose blast radius
+  changed). Each snippet is serialized via `Kazi.Retrieval.Snippet.to_serializable/1`;
+  `get_cached_snippets/2` rehydrates them.
+
+  Returns `{:ok, row}` or `{:error, changeset}`.
+  """
+  @impl Kazi.Retrieval.Cache
+  @spec put_cached_snippets(String.t(), String.t(), String.t(), [Snippet.t()], [String.t()]) ::
+          {:ok, RetrievalSnippetCache.t()} | {:error, Ecto.Changeset.t()}
+  def put_cached_snippets(cache_key, workspace, git_sha, snippets, blast_radius)
+      when is_binary(cache_key) and is_binary(workspace) and is_binary(git_sha) and
+             is_list(snippets) and is_list(blast_radius) do
+    attrs = %{
+      cache_key: cache_key,
+      workspace: workspace,
+      git_sha: git_sha,
+      snippets: Enum.map(snippets, &Snippet.to_serializable/1),
+      blast_radius: Enum.sort(blast_radius)
+    }
+
+    %RetrievalSnippetCache{}
+    |> RetrievalSnippetCache.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: {:replace, [:workspace, :git_sha, :snippets, :blast_radius, :updated_at]},
+      conflict_target: :cache_key
+    )
+  end
+
+  @doc """
+  Fetches the cached `[Kazi.Retrieval.Snippet]` for `cache_key`, applying
+  incremental blast-radius invalidation (T4.9c, ADR-0012 §4).
+
+  Returns the rehydrated snippets only on a **fresh hit**: an entry exists *and* its
+  stored blast radius equals `current_blast_radius` (the impacted files/symbols the
+  snippets would be scoped to now). On a miss, or when the blast radius changed (the
+  cached snippets are stale because the target moved under us), returns `nil` so the
+  caller re-retrieves.
+
+  Equality is set-wise on the stored, sorted column — the same invalidation
+  `get_cached_pack/2` applies to orientation packs.
+  """
+  @impl Kazi.Retrieval.Cache
+  @spec get_cached_snippets(String.t(), [String.t()]) :: [Snippet.t()] | nil
+  def get_cached_snippets(cache_key, current_blast_radius)
+      when is_binary(cache_key) and is_list(current_blast_radius) do
+    case Repo.get_by(RetrievalSnippetCache, cache_key: cache_key) do
+      nil ->
+        nil
+
+      %RetrievalSnippetCache{blast_radius: stored, snippets: serialized} ->
+        if Enum.sort(stored) == Enum.sort(current_blast_radius) do
+          Enum.map(serialized, &Snippet.from_serializable/1)
+        else
+          # Blast radius changed at the same key: the cached snippets are stale.
+          # Treat as a miss; the caller re-retrieves and re-stores (upsert).
+          nil
+        end
+    end
+  end
+
+  @doc """
+  Deletes the cached snippet list for `cache_key`, if any. Returns the number of
+  rows removed (`0` or `1`). Used to explicitly evict an entry; routine invalidation
+  is handled inline by `get_cached_snippets/2` (a blast-radius mismatch is a miss,
+  and the next `put_cached_snippets/5` overwrites the stale row).
+  """
+  @spec invalidate_cached_snippets(String.t()) :: non_neg_integer()
+  def invalidate_cached_snippets(cache_key) when is_binary(cache_key) do
+    {count, _} =
+      Repo.delete_all(from(c in RetrievalSnippetCache, where: c.cache_key == ^cache_key))
 
     count
   end
