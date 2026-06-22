@@ -7,16 +7,29 @@ defmodule Kazi.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      # Starts a worker by calling: Kazi.Worker.start_link(arg)
-      # {Kazi.Worker, arg}
-      # Local read-model: SQLite (WAL) projection of the kazi.events log (T0.9).
-      Kazi.Repo
-    ]
+    # Local read-model: SQLite (WAL) projection of the kazi.events log (T0.9).
+    # The repo is omitted when the native SQLite (exqlite) NIF can't be loaded —
+    # notably under the `kazi` escript, whose archive cannot bundle a NIF. Booting
+    # the repo there would crash-loop the supervisor on a missing NIF; instead the
+    # CLI degrades to a non-persistent run (see `Kazi.CLI`). `mix kazi.run` and any
+    # real release boot with the NIF present, so the read-model starts normally.
+    children =
+      if sqlite_nif_available?() do
+        [Kazi.Repo]
+      else
+        []
+      end
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Kazi.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # The exqlite driver is a NIF; if its NIF module didn't load, no SQLite
+  # connection can be opened, so the read-model repo must not be supervised.
+  defp sqlite_nif_available? do
+    Code.ensure_loaded?(Exqlite.Sqlite3NIF) and
+      function_exported?(Exqlite.Sqlite3NIF, :open, 2)
   end
 end
