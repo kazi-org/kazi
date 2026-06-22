@@ -9,7 +9,11 @@ import { defineConfig, devices } from "@playwright/test";
  * No NATS and no harness are involved; the skeleton renders from the supervised
  * endpoint alone. T3.6b/c/d add more specs against this same baseURL.
  */
-const PORT = 4002;
+// Port is env-overridable (default 4002) so concurrent worktrees on this machine
+// can run the browser harness without colliding on the fixed listener. CI leaves
+// TEST_HTTP_PORT unset and keeps 4002. The same var is threaded into the server
+// command below so the booted endpoint and the browser agree on the port.
+const PORT = Number(process.env.TEST_HTTP_PORT ?? 4002);
 const baseURL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({

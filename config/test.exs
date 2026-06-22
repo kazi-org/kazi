@@ -15,9 +15,15 @@ config :kazi, Kazi.Repo,
 # ExUnit endpoint/LiveView tests (Tier 1) use Phoenix.ConnTest against the same
 # supervised endpoint regardless of the listener. secret_key_base is a fixed
 # test-only value.
+#
+# Port + listener are env-overridable (defaults unchanged: 4002, server: true) so
+# concurrent worktrees on this machine can run `mix test` without colliding on the
+# fixed listener — set TEST_HTTP_PORT to a free port, or TEST_SERVER=false to skip
+# the TCP listener entirely for an ExUnit-only run (ConnTest needs no listener).
+# CI and the Playwright harness leave these unset and keep 4002 + server: true.
 config :kazi, KaziWeb.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: 4002],
-  server: true,
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("TEST_HTTP_PORT", "4002"))],
+  server: System.get_env("TEST_SERVER", "true") == "true",
   secret_key_base: "kazitestsecretkeybasekazitestsecretkeybasekazitestsecretkeybase00",
   check_origin: false
 
