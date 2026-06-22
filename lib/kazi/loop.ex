@@ -59,8 +59,23 @@ defmodule Kazi.Loop do
   Standing mode is the FOUNDATION for re-trigger-on-drift (T3.4b) and graceful
   stop (T3.4c): because the loop keeps observing past convergence, a satisfied
   predicate that later regresses will be seen on the next observation and routed
-  back through the ordinary decide machinery. This task lays the steady-observe
-  foundation only; it does not itself add drift re-trigger or supervision.
+  back through the ordinary decide machinery.
+
+  ## Re-trigger on drift (T3.4b, UC-016)
+
+  Drift re-trigger is realized *entirely through the existing convergence
+  machinery* — there is no separate drift handler. When a standing loop is steady
+  (clause 1 of decide kept it alive and re-observing) and a previously-satisfied
+  code predicate REGRESSES on a later re-observation, the fresh vector is no
+  longer satisfied, so `decide/2` falls through to clause 2 (`code_failing?`) and
+  dispatches the coding agent against the drifted predicate exactly as for a
+  first-time failure. The `:dispatch_agent` ACT clause re-invalidates any prior
+  land/deploy (`landed?: false, deployed?: false`), so the loop then re-integrates
+  and re-deploys "as appropriate" before the next satisfied observation re-enters
+  clause 1 and returns it to steady observing (`converge_or_stay/1`). Reusing the
+  decide/act path — rather than forking a parallel reconcile — is the design: a
+  drift is just another unsatisfied observation. See the `# T3.4b drift` comments
+  at those two seams in `decide/2` and `converge_or_stay/1`.
 
   ## Dependency injection
 
@@ -782,6 +797,17 @@ defmodule Kazi.Loop do
         converge_or_stay(data)
 
       # 2. Code predicates failing: dispatch the agent with failing evidence.
+      #
+      #    T3.4b drift: this is ALSO the standing-mode drift re-trigger. Once a
+      #    standing loop is steady (clause 1 marked it `steady?` and re-observed),
+      #    a previously-satisfied code predicate that REGRESSES on a later
+      #    re-observation is seen as a fresh `code_failing?` here and routed back
+      #    through the SAME dispatch path — there is no separate drift handler. The
+      #    `:dispatch_agent` ACT clause then re-invalidates land/deploy
+      #    (`landed?: false, deployed?: false`), so the loop re-integrates and
+      #    re-deploys "as appropriate" before re-converging via clause 1. Reusing
+      #    the convergence machinery (rather than forking a parallel path) is the
+      #    whole point of T3.4b: drift is just another unsatisfied observation.
       code_failing?(vector, data) ->
         act(dispatch_action(vector, data), data)
 
@@ -866,6 +892,13 @@ defmodule Kazi.Loop do
   end
 
   defp converge_or_stay(%Data{standing: true} = data) do
+    # T3.4b drift: this clause is the RE-CONVERGE endpoint as well as the first
+    # converge. After a drift was reconciled back to green (via the dispatch path
+    # in decide clause 2), the next satisfied observation lands here again,
+    # re-marks the loop steady, and bumps `steady_observations` — so the loop
+    # returns to steady observing rather than terminating. `steady?` was cleared
+    # for THIS observation in `observe_tick/1`, so it correctly reads false on the
+    # drifted (unsatisfied) observation in between and true once re-converged.
     data = %Data{data | steady?: true, steady_observations: data.steady_observations + 1}
     reobserve(data, data.reobserve_interval_ms)
   end
