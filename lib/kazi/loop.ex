@@ -328,10 +328,56 @@ defmodule Kazi.Loop do
     end
   end
 
+  # T3.4c supervision safety: a `:gen_statem` does not get a `child_spec/1` for
+  # free (that ships with `use GenServer`), so without one a supervisor cannot
+  # start the loop as a child — `Supervisor.start_link([{Kazi.Loop, opts}], ...)`
+  # would raise `child_spec/1 is undefined`. Defining it here is what lets a
+  # standing goal (UC-016) sit in an OTP supervision tree.
+  #
+  # The default `:restart` is `:transient`: a *clean* stop never restarts. A
+  # standing loop reaching a terminal state (`:converged`/`:stopped`) does NOT
+  # exit — it stays alive inert so late `await/2`/`snapshot/1` still answer (see
+  # `terminate_with/2`) — so a graceful `stop/1` produces no exit and therefore
+  # no restart. Only an *abnormal* crash exits the process, and `:transient`
+  # restarts exactly that case, giving a supervised standing goal crash recovery
+  # without resurrecting a loop the operator deliberately stopped. Callers may
+  # override `:id`/`:restart`/`:shutdown` via the standard child-spec overrides.
+  @doc """
+  Returns a supervisor child specification so a loop can be placed in an OTP
+  supervision tree (T3.4c, UC-016) — e.g. `{Kazi.Loop, goal: goal, ...}` as a
+  child, or under a `DynamicSupervisor` for one standing goal per child.
+
+  `init_arg` is the same keyword list `start_link/1` takes. The default
+  `:restart` is `:transient` (restart only on abnormal exit): a graceful
+  `stop/1` leaves the process alive in a terminal state with no exit, so it is
+  never restarted; a crash is. Override any field with the standard child-spec
+  overrides, e.g. `Kazi.Loop.child_spec(opts) |> Supervisor.child_spec(id: ...)`
+  or by passing `:id`/`:restart`/`:shutdown` through.
+  """
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(init_arg) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [init_arg]},
+      restart: :transient,
+      type: :worker
+    }
+  end
+
   @doc """
   Asks the loop to stop. The process transitions to `:stopped` and reports
   `:stopped` to any `await/2` waiters. Idempotent / safe on an already-terminal
   loop.
+
+  Graceful + prompt (T3.4c): `stop/1` is an asynchronous cast. Because every
+  re-observe is scheduled as a *state timeout* (never an immediate internal
+  event — see the `:reobserve` handler), a queued `:stop` cast is always drained
+  by `:gen_statem` BEFORE a pending re-observe timeout fires. A standing loop
+  sitting idle between observations therefore stops on the next scheduler turn
+  rather than waiting out the full `:reobserve_interval_ms`, no matter how long
+  that interval is. The stop is clean: the process moves to the terminal
+  `:stopped` state and stays alive (inert) so late `await/2`/`snapshot/1` still
+  answer; it dispatches no further agent/integrate/deploy.
   """
   @spec stop(:gen_statem.server_ref()) :: :ok
   def stop(ref) do
@@ -535,6 +581,21 @@ defmodule Kazi.Loop do
   # busy-spinning.
   def handle_event({:timeout, :reobserve}, :reobserve, :observing, %Data{}) do
     {:keep_state_and_data, [{:next_event, :internal, :observe}]}
+  end
+
+  # T3.4c stop: drop a STALE re-observe timeout that lands in a terminal state.
+  # A state timeout's pending *timer* is cancelled on a state change, but a
+  # timeout that had ALREADY fired enqueues its `{:timeout, :reobserve}` event
+  # before the transition runs; if a `:stop` (or convergence / budget / stuck
+  # stop) moves the loop to a terminal state in the same window, that already-
+  # enqueued event is still delivered — now in `:converged`/`:stopped`/
+  # `:over_budget`. Without this clause it falls through to no matching
+  # `handle_event` and crashes the (supposedly cleanly-stopped) process, which
+  # under a `:transient` supervisor would even resurrect a deliberately stopped
+  # standing loop. Terminal states accept no more observations, so it is a no-op.
+  def handle_event({:timeout, :reobserve}, :reobserve, state, %Data{})
+      when state in [:converged, :stopped, :over_budget] do
+    :keep_state_and_data
   end
 
   # --- stop / await / snapshot (handled in any state) --------------------------
