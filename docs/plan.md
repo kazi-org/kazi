@@ -88,14 +88,14 @@ production deployment.
 - [x] T0.1 Initialize Elixir mix app `kazi` (supervision tree, `.formatter.exs`, `.gitignore`, mix.exs deps pinned)  Owner: TBD  Est: 1h  verifies: [infrastructure]  done: 2026-06-21 PR #3
 - [x] T0.2 CI: GitHub Actions running `mix format --check-formatted` and `mix test`  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T0.1]  done: 2026-06-21 PR #4
 - [x] T0.3 Core domain types AND behaviours: `Goal`, `Predicate`, `PredicateResult{status,evidence}`, `PredicateVector`, `Action`; plus the `PredicateProvider`, `HarnessAdapter`, and `Action` behaviours (contracts only) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.1]  done: 2026-06-21 PR #6
-- [ ] T0.4 Goal loader + goal-file TOML schema + an example goal fixture (code predicates + a live predicate) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.3]
-- [ ] T0.5 Test-runner predicate provider (runs configurable cmd in the target workspace, maps exit/output -> `PredicateResult`) + tests  Owner: TBD  Est: 2h  verifies: [UC-002]  deps: [T0.3]
-- [ ] T0.5b Live http_probe predicate provider (request a URL, assert status/body) + tests  Owner: TBD  Est: 1.5h  verifies: [UC-011]  deps: [T0.3]
-- [ ] T0.6 Harness-adapter behaviour impl: `claude -p` adapter that runs the harness IN THE TARGET WORKSPACE so edits land in place; focused prompt seeded with failing-predicate evidence; capture result. Tests use a stub binary  Owner: TBD  Est: 2h  verifies: [UC-003]  deps: [T0.3]
-- [ ] T0.9 SQLite read-model: Ecto SQLite3 repo + migration for iteration/evidence log; persist each iteration  Owner: TBD  Est: 2h  verifies: [UC-006]  deps: [T0.3]
-- [ ] T0.7 Convergence state machine (GenStateMachine) against the behaviours/test-doubles: observe -> diff -> decide-next-action -> {dispatch agent | integrate | deploy} -> re-observe; converge-and-stop  Owner: TBD  Est: 3h  verifies: [UC-004]  deps: [T0.3]
-- [ ] T0.10a Integrate action: land a converged fix (branch -> commit -> push -> open PR -> rebase-merge) in the target workspace + tests with a fixture repo  Owner: TBD  Est: 2.5h  verifies: [UC-020]  deps: [T0.3]
-- [ ] T0.10b Deploy action: trigger a release/deploy of the target (`gcloud run deploy` or GitHub Actions dispatch); return a deploy ref; tests with a stub deployer  Owner: TBD  Est: 2h  verifies: [UC-015]  deps: [T0.3]
+- [x] T0.4 Goal loader + goal-file TOML schema + an example goal fixture (code predicates + a live predicate) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.3]
+- [x] T0.5 Test-runner predicate provider (runs configurable cmd in the target workspace, maps exit/output -> `PredicateResult`) + tests  Owner: TBD  Est: 2h  verifies: [UC-002]  deps: [T0.3]
+- [x] T0.5b Live http_probe predicate provider (request a URL, assert status/body) + tests  Owner: TBD  Est: 1.5h  verifies: [UC-011]  deps: [T0.3]
+- [x] T0.6 Harness-adapter behaviour impl: `claude -p` adapter that runs the harness IN THE TARGET WORKSPACE so edits land in place; focused prompt seeded with failing-predicate evidence; capture result. Tests use a stub binary  Owner: TBD  Est: 2h  verifies: [UC-003]  deps: [T0.3]
+- [x] T0.9 SQLite read-model: Ecto SQLite3 repo + migration for iteration/evidence log; persist each iteration  Owner: TBD  Est: 2h  verifies: [UC-006]  deps: [T0.3]
+- [x] T0.7 Convergence state machine (GenStateMachine) against the behaviours/test-doubles: observe -> diff -> decide-next-action -> {dispatch agent | integrate | deploy} -> re-observe; converge-and-stop  Owner: TBD  Est: 3h  verifies: [UC-004]  deps: [T0.3]
+- [x] T0.10a Integrate action: land a converged fix (branch -> commit -> push -> open PR -> rebase-merge) in the target workspace + tests with a fixture repo  Owner: TBD  Est: 2.5h  verifies: [UC-020]  deps: [T0.3]
+- [x] T0.10b Deploy action: trigger a release/deploy of the target (`gcloud run deploy` or GitHub Actions dispatch); return a deploy ref; tests with a stub deployer  Owner: TBD  Est: 2h  verifies: [UC-015]  deps: [T0.3]
 - [x] T0.13 Deployable target fixture: a tiny containerized web service (Podman build) with one failing unit test AND a behaviour the live probe checks, plus a Cloud Run deploy workflow  Owner: TBD  Est: 2.5h  verifies: [infrastructure]  deps: [T0.1]  done: 2026-06-21 PR #5 (Go service, isolated from kazi CI)
 - [ ] T0.6h Provision GCP project + Cloud Run service + deploy credentials for the fixture  Owner: TBD  Est: 2h  verifies: [infrastructure]  kind: human  blocked: Awaiting GCP project/billing setup
 - [ ] T0.7b Integration: wire concrete providers + adapter + integrate/deploy actions into the loop (replace test-doubles)  Owner: TBD  Est: 2h  verifies: [UC-004]  deps: [T0.5, T0.5b, T0.6, T0.7, T0.10a, T0.10b]
@@ -238,6 +238,18 @@ different directories in one commit. Add tests with every implementation task
   pass (18 doctests, 50 tests), CI green.
 - Next: Wave 3 (8 agents): T0.4, T0.5, T0.5b, T0.6, T0.9, T0.7, T0.10a, T0.10b
   (all build against T0.3 behaviours). Reminder: T0.6h human task still open.
+- Wave 3 DONE (all 8 merged, CI green): T0.4 goal loader+TOML (#11), T0.5
+  test-runner provider (#7), T0.5b http_probe provider (#8), T0.6 claude -p
+  adapter (#9), T0.9 SQLite read-model (#13), T0.7 convergence :gen_statem loop
+  (#14), T0.10a integrate action (#12), T0.10b deploy action (#10). Verified on
+  main: compile clean (warnings-as-errors, 21 lib files), format clean, 130 tests
+  pass (18 doctests, 112 tests). Deps added additively: toml, ecto_sql,
+  ecto_sqlite3, jason. Providers/adapter/actions implement the T0.3 behaviours;
+  loop is real :gen_statem (no hex dep). Components built against contracts/doubles
+  — not yet assembled (that is T0.7b).
+- Next: Wave 4: T0.7b (wire real components into the loop), T0.8 (objective-
+  termination guard) in parallel; then T0.10 (CLI) after T0.7b so the CLI wires
+  the real runtime (avoids a stubbed CLI). T0.6h (human GCP) still gates T0.12.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
