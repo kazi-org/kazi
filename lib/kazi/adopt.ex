@@ -68,6 +68,38 @@ defmodule Kazi.Adopt do
   """
   @type detection :: %{stack: stack(), predicate: map()}
 
+  # Guard predicate ids. Stable so a re-run of `kazi init` produces the same
+  # goal-file (deterministic, ADR-0013 §2).
+  @baseline_guard_id "tests-pass-baseline"
+  @coverage_guard_id "coverage-ratchet"
+
+  # Per-stack coverage detection: a list of `{marker, needle}` pairs. A coverage
+  # guard is emitted only when one of the stack's config/marker files is present
+  # AND contains the coverage-tool needle (case-sensitive substring). Conservative
+  # by construction — absence of the config means no coverage guard (ADR-0013 §2,
+  # "when in doubt, emit fewer predicates"). The needles are tool names that
+  # appear verbatim in the declaring file:
+  #
+  #   * Elixir: `excoveralls` listed in mix.exs deps.
+  #   * Node:   `nyc`, `c8`, or `--coverage` (jest/vitest) in package.json.
+  #   * Python: `pytest-cov` / `coverage` in pyproject.toml or setup.cfg.
+  #   * Go:     coverage is built into `go test -cover` (no config marker), so it
+  #     is handled separately below rather than via a config probe.
+  @coverage_markers %{
+    elixir: [{"mix.exs", "excoveralls"}],
+    node: [
+      {"package.json", "nyc"},
+      {"package.json", "c8"},
+      {"package.json", "--coverage"}
+    ],
+    python: [
+      {"pyproject.toml", "pytest-cov"},
+      {"pyproject.toml", "coverage"},
+      {"setup.cfg", "pytest-cov"},
+      {"setup.cfg", "coverage"}
+    ]
+  }
+
   # The predicate id every adopted test_runner carries. Stable so a re-run of
   # `kazi init` produces the same goal-file (deterministic, ADR-0013).
   @predicate_id "tests-pass"
@@ -129,6 +161,139 @@ defmodule Kazi.Adopt do
       nil -> {:error, :no_stack_detected}
     end
   end
+
+  @doc """
+  Derives conservative GUARD predicates from a detected stack (ADR-0013 §2).
+
+  Takes the `detect/1` result (`%{stack: stack, predicate: map}`) and returns a
+  list of guard predicate **maps**, each in exactly the shape
+  `Kazi.Goal.Loader.from_map/1` accepts (string keys, `"guard" => true`, so they
+  round-trip into the goal's `guards`). Guards are invariants kazi enforces so
+  the adopted goal *does not regress what already works*.
+
+  Two guards are possible, both evaluated by the existing `test_runner` provider
+  (the only provider that runs a command and maps its exit code to pass/fail — so
+  every emitted guard is one kazi can actually evaluate, never an invented one):
+
+    * a **baseline `tests-pass` guard** — always emitted for a detected stack. It
+      reuses the detected test command (the same `:cmd`/`:args` as the detection's
+      acceptance predicate) as an invariant: the suite must keep passing.
+
+    * a **coverage-ratchet guard** — emitted ONLY when a coverage tool is
+      deterministically detectable in the stack's config files (e.g. Elixir
+      `excoveralls` in `mix.exs`; Node `nyc`/`c8`/`--coverage` in `package.json`;
+      Python `pytest-cov`/`coverage` in `pyproject.toml`/`setup.cfg`). The guard
+      runs the coverage tool's command, which exits non-zero when coverage falls
+      below the project's configured floor. When no coverage tool is present,
+      **only the baseline is returned** — when in doubt, emit fewer predicates.
+
+  Coverage detection reads config files through the same injectable
+  `:file_reader` seam as `detect/1` (a bare `File`-contract module or a
+  `{module, state}` tuple), so `guards/1` is pure, deterministic, and hermetic:
+  no `System.cmd`, no network. The same repo at the same revision always yields
+  the same guard list.
+
+  ## Options
+
+    * `:file_reader` — the filesystem seam, as in `detect/1` (defaults to `File`).
+
+  ## Examples
+
+  An Elixir stack listing `excoveralls` yields both guards:
+
+      {:ok, detection} = Kazi.Adopt.detect(repo)
+      [baseline, coverage] = Kazi.Adopt.guards(detection, file_reader: reader)
+      baseline["guard"]  #=> true
+      coverage["id"]     #=> "coverage-ratchet"
+
+  A stack with no coverage tool yields only the baseline:
+
+      [baseline] = Kazi.Adopt.guards(detection)
+      baseline["provider"] #=> "test_runner"
+  """
+  @spec guards(detection(), keyword()) :: [map()]
+  def guards(detection, opts \\ [])
+
+  def guards(%{stack: stack, predicate: %{} = predicate}, opts) when is_list(opts) do
+    reader = Keyword.get(opts, :file_reader, File)
+    path = Keyword.get(opts, :path, ".")
+
+    [baseline_guard(predicate) | coverage_guards(stack, reader, path)]
+  end
+
+  # A baseline `tests-pass` guard: the detected test command, re-expressed as an
+  # invariant (`"guard" => true`). It reuses the detection's `test_runner` cmd/args
+  # so kazi enforces "the suite keeps passing" with a provider it already has.
+  defp baseline_guard(%{"cmd" => cmd, "args" => args}) do
+    %{
+      "id" => @baseline_guard_id,
+      "provider" => "test_runner",
+      "description" => "project test suite keeps passing (baseline regression guard)",
+      "guard" => true,
+      "cmd" => cmd,
+      "args" => args
+    }
+  end
+
+  # A coverage-ratchet guard — emitted only when the stack's coverage tool is
+  # detectable in a config file via the file_reader seam. Returns a one- or
+  # zero-element list so the caller can splat it after the baseline. Conservative:
+  # an undetectable or unmapped stack (e.g. Go, no config marker) yields [].
+  defp coverage_guards(stack, reader, path) do
+    case coverage_tool(stack, reader, path) do
+      {:ok, cmd, args, tool} -> [coverage_guard(cmd, args, tool)]
+      :none -> []
+    end
+  end
+
+  defp coverage_guard(cmd, args, tool) do
+    %{
+      "id" => @coverage_guard_id,
+      "provider" => "test_runner",
+      "description" => "test coverage does not regress (#{tool} ratchet)",
+      "guard" => true,
+      "cmd" => cmd,
+      "args" => args
+    }
+  end
+
+  # Probes the stack's coverage markers in order; the first marker file present
+  # AND containing the tool needle wins. Returns `{:ok, cmd, args, tool}` with the
+  # command that runs the coverage tool (exit-non-zero below the configured floor),
+  # or `:none`. Pure over the file_reader — no shelling out.
+  defp coverage_tool(stack, reader, path) do
+    @coverage_markers
+    |> Map.get(stack, [])
+    |> Enum.find_value(:none, fn {marker, needle} ->
+      with {:ok, contents} <- read(reader, path, marker),
+           true <- String.contains?(contents, needle) do
+        coverage_command(stack, needle)
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  # Coverage-tool command per detected stack/needle. Each command runs the
+  # project's coverage check, which exits non-zero when coverage drops below the
+  # project's configured minimum — exactly what the test_runner provider maps to a
+  # failing guard. The command is the one a developer runs locally.
+  defp coverage_command(:elixir, "excoveralls"), do: {:ok, "mix", ["coveralls"], "excoveralls"}
+
+  # nyc/c8 enforce a threshold with `--check-coverage` (exit non-zero below it);
+  # a `--coverage` flag in the test script means `npm test` already measures it.
+  defp coverage_command(:node, "nyc"),
+    do: {:ok, "npx", ["nyc", "--check-coverage", "npm", "test"], "nyc"}
+
+  defp coverage_command(:node, "c8"),
+    do: {:ok, "npx", ["c8", "--check-coverage", "npm", "test"], "c8"}
+
+  defp coverage_command(:node, "--coverage"), do: {:ok, "npm", ["test"], "coverage"}
+
+  # pytest-cov enforces a floor with `--cov-fail-under` (read from the project's
+  # config when set); `--cov` turns coverage measurement on.
+  defp coverage_command(:python, needle) when needle in ["pytest-cov", "coverage"],
+    do: {:ok, "pytest", ["--cov", "--cov-fail-under=0"], "pytest-cov"}
 
   # A goal-file predicate MAP in the shape Kazi.Goal.Loader.from_map/1 accepts:
   # string keys, `provider: "test_runner"` (-> :tests kind), `:cmd`/`:args` spread
