@@ -280,3 +280,28 @@ and T4.9 (retrieval).** Cumulative this session: 372 -> 698 tests (+326).
 
 **Next (human):** complete T0.6h, then run T0.12 to close the idea->production loop and
 hit the project's success bar. No autonomous pool work remains.
+
+## 2026-06-22 — T0.12 Slice-0 dogfood CONVERGED (idea → live production)
+
+kazi drove the `fixtures/deploy-target` Go service from a deliberately failing test
+to a live, verified Cloud Run deployment — autonomously, end-to-end. This is the
+project's success bar (CLAUDE.md): idea → production, with objective convergence.
+
+**Run (`Kazi.Runtime.run`, goal = test_runner + http_probe, budget 8 iters):**
+- iter 1: both predicates FAIL (go test `not-ok`; live `/livez` body `not-ok`) → `:dispatch_agent` — a real `claude -p` edited `healthBody "not-ok"→"ok"`.
+- iter 2: code green, live still FAIL (not deployed) → `:integrate` (branch → PR #69 → rebase-merge to main).
+- iter 3: landed, not deployed → `:deploy` (`gcloud run deploy --source`).
+- iter 4: both PASS — live `/livez` returns `ok` → **`:converged`** (release_ref `release-kazi-deploy-target-1782167118`).
+- Independently verified live: `curl https://kazi-deploy-target-2r7ah2mlpa-wl.a.run.app/livez` → `200 "ok"`; `origin/main` fixture `healthBody = "ok"` (kazi's PR #69 merged).
+- Crucially, kazi REFUSED success while either predicate failed (iters 1-3 stayed non-converged) — done is objective, not the agent's opinion.
+
+**Real defects the dogfood surfaced (all now fixed or recorded):**
+- L-0001/L-0002: first Cloud-Run `--source` deploy needs `artifactregistry.admin` on the deploy SA and `cloudbuild.builds.builder` on the default compute SA.
+- L-0003: Cloud Run intercepts the exact path `/healthz`; the fixture's liveness route moved to `/livez`.
+- L-0004: a TOML goal-file can only express `body_match` as the string `"exact"`; the http_probe matched only the `:exact` atom, so it silently fell back to substring-contains and `"ok"` falsely passed on `"not-ok"`. Fixed in `Kazi.Providers.HttpProbe` (PR #68) + regression test; example goal corrected.
+- Open follow-up (non-fatal): running via `mix run` (not `mix kazi.run`) skips the read-model migration, so this run logged `no such table: iterations` and did NOT persist evidence to SQLite. Convergence is proven by the run log + the live service; persistence works under `mix kazi.run` (which migrates on startup). Worth a guard so any entrypoint ensures the read-model schema.
+
+**Infra note:** the `kazi-deploy` project's Domain-Restricted-Sharing org policy was
+relaxed (project-scoped allValues=ALLOW) to permit `allUsers` public invoker so the
+live probe can reach `/livez`. Restore it (delete the project-level override) if the
+fixture no longer needs to be public.

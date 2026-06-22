@@ -34,8 +34,34 @@ Two gaps nobody owns:
 
 ## Status
 
-Pre-implementation. The design is frozen in [`docs/concept.md`](docs/concept.md)
-and the [ADRs](docs/adr/). Code has not started.
+Slices 0–3 are implemented and green (Elixir/OTP; ~700 hermetic ExUnit tests). The
+design is in [`docs/concept.md`](docs/concept.md) and the [ADRs](docs/adr/); the
+live build plan is [`docs/plan.md`](docs/plan.md). What works today:
+
+- **Convergence core (Slice 0).** The reconcile loop (`:gen_statem`) drives a
+  goal-file's predicates to truth via a stateless `claude -p` harness plus
+  integrate (branch → PR → rebase-merge) and deploy actions; every iteration is
+  persisted to a SQLite read-model.
+- **Trustworthy loops (Slice 1).** Regression detection, flake quarantine, hard
+  budget ceilings (iterations / wall-clock / tokens), stuck-escalation, and a
+  production-log predicate.
+- **Creation mode (Slice 2).** kazi builds *new* features from failing acceptance
+  predicates, not only repairs existing behaviour. From Slice 2 on, kazi builds kazi.
+- **Slice 3.** NATS JetStream resource leases (revision-CAS + per-key TTL) with
+  presence/intent, graph-aware blast-radius partitioning, idea → acceptance-predicate
+  authoring (with a CLI), a Phoenix LiveView dashboard (goal board, presence/lease
+  map, per-goal history), and a Telegram goal-in / ping-out bridge.
+- **Context injection.** Each stateless iteration starts *oriented* — a
+  deterministic blast-radius orientation pack, an optional SHA-cached
+  semantic-retrieval adapter, and a bounded working-set digest — without
+  reintroducing conversation memory ([ADR-0010](docs/adr/0010-context-injection-reexploration-mitigation.md)).
+
+The live production dogfood (**T0.12**) is **done**: kazi drove the
+`fixtures/deploy-target` service from a deliberately failing test to a verified
+Cloud Run deployment — dispatching an agent to make the fix, integrating it (PR →
+rebase-merge), deploying, and confirming the live `/livez` endpoint returns `ok` —
+and refused to call it converged until *both* the unit test and the live probe
+passed. The idea → production loop is closed end-to-end.
 
 ## CLI: `kazi run`
 
@@ -79,11 +105,14 @@ mix escript.build                 # produces ./kazi (gitignored — do not commi
 
 ## Design at a glance
 
-- **Runtime:** Elixir / OTP + Phoenix LiveView ([ADR-0003](docs/adr/0003-language-elixir-otp.md))
-- **Coordination truth:** NATS JetStream — KV + streams ([ADR-0004](docs/adr/0004-coordination-substrate-nats-jetstream.md))
-- **Data split:** Git (code) · JetStream (coordination) · ETS (live state) · SQLite (read-model) ([ADR-0005](docs/adr/0005-data-layer-split.md))
-- **Goals:** machine-checkable predicate sets, evidence-backed ([ADR-0002](docs/adr/0002-goals-as-predicates.md))
 - **Positioning:** harness-agnostic outer loop, never a harness ([ADR-0001](docs/adr/0001-positioning-outer-loop-reconciler.md))
+- **Goals:** machine-checkable predicate sets, evidence-backed ([ADR-0002](docs/adr/0002-goals-as-predicates.md))
+- **Runtime:** Elixir / OTP + Phoenix LiveView ([ADR-0003](docs/adr/0003-language-elixir-otp.md))
+- **Coordination truth:** NATS JetStream — KV leases + streams ([ADR-0004](docs/adr/0004-coordination-substrate-nats-jetstream.md)), resource leases + graph partitioning ([ADR-0006](docs/adr/0006-coordination-leases-and-graph-partitioning.md))
+- **Data split:** Git (code) · JetStream (coordination) · ETS (live state) · SQLite (read-model) ([ADR-0005](docs/adr/0005-data-layer-split.md))
+- **Build strategy:** walking skeleton, idea → production from Slice 0 ([ADR-0007](docs/adr/0007-build-strategy-walking-skeleton.md))
+- **Harness & context:** stateless per iteration; kazi owns context ([ADR-0008](docs/adr/0008-harness-invocation-and-context.md)), a thin deterministic evidence projection ([ADR-0009](docs/adr/0009-prompt-construction-thin-evidence-projection.md)), with blast-radius context injection ([ADR-0010](docs/adr/0010-context-injection-reexploration-mitigation.md)) and an optional pluggable retrieval-memory adapter ([ADR-0012](docs/adr/0012-pluggable-retrieval-memory-adapter.md))
+- **Operator surfaces:** the LiveView dashboard and Telegram bridge are read projections decoupled from the core loop ([ADR-0011](docs/adr/0011-slice3-operator-surfaces.md))
 
 ## License
 

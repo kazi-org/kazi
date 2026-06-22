@@ -83,8 +83,9 @@ The goal's *acceptance* is the conjunction of all predicates. There is no
 ```
 observe   → evaluate every predicate, attach evidence, record the predicate VECTOR
 diff      → the failing predicates ARE the work-list
-dispatch  → drive an agent per work-item, given ONLY the failing-predicate evidence
-            as context, inside a leased blast radius
+dispatch  → drive an agent per work-item, given the failing-predicate evidence
+            plus a deterministic blast-radius orientation pack (ADR-0009/0010) —
+            map memory, never conversation memory — inside a leased blast radius
 re-observe→ re-evaluate; compare new vector to previous
 decide    → converged (all true) | progressing | stuck | regressed | over-budget
 ```

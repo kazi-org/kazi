@@ -97,12 +97,12 @@ production deployment.
 - [x] T0.10a Integrate action: land a converged fix (branch -> commit -> push -> open PR -> rebase-merge) in the target workspace + tests with a fixture repo  Owner: TBD  Est: 2.5h  verifies: [UC-020]  deps: [T0.3]
 - [x] T0.10b Deploy action: trigger a release/deploy of the target (`gcloud run deploy` or GitHub Actions dispatch); return a deploy ref; tests with a stub deployer  Owner: TBD  Est: 2h  verifies: [UC-015]  deps: [T0.3]
 - [x] T0.13 Deployable target fixture: a tiny containerized web service (Podman build) with one failing unit test AND a behaviour the live probe checks, plus a Cloud Run deploy workflow  Owner: TBD  Est: 2.5h  verifies: [infrastructure]  deps: [T0.1]  done: 2026-06-21 PR #5 (Go service, isolated from kazi CI)
-- [ ] T0.6h Provision GCP project + Cloud Run service + deploy credentials for the fixture  Owner: TBD  Est: 2h  verifies: [infrastructure]  kind: human  blocked: Awaiting GCP project/billing setup
+- [x] T0.6h Provision GCP project + Cloud Run service + deploy credentials for the fixture  Owner: TBD  Est: 2h  verifies: [infrastructure]  kind: human  done: 2026-06-22 (GCP project kazi-deploy + deploy SA + GH secrets; roles per lore L-0001/L-0002)
 - [x] T0.7b Integration: wire concrete providers + adapter + integrate/deploy actions into the loop (replace test-doubles)  Owner: TBD  Est: 2h  verifies: [UC-004]  deps: [T0.5, T0.5b, T0.6, T0.7, T0.10a, T0.10b]
 - [x] T0.8 Objective-termination guard: `:converged` reachable only when the FULL vector (code + live) is true; explicit test that a failing live probe blocks success  Owner: TBD  Est: 1h  verifies: [UC-005]  deps: [T0.7]
 - [x] T0.10 CLI entry `kazi run <goal-file> --workspace <path>` wiring loader + loop + actions against an explicit target workspace  Owner: TBD  Est: 1.5h  verifies: [UC-004]  deps: [T0.7]
 - [x] T0.11 Full-loop integration test incl. a deliberately-failing-test fixture, with deploy + probe stubbed  Owner: TBD  Est: 2h  verifies: [UC-005]  deps: [T0.7b, T0.8, T0.10]
-- [ ] T0.12 Dogfood Slice 0 (idea -> production): run kazi against the deployable fixture; confirm it takes a failing test to a LIVE, verified production deployment and refuses success while tests OR the live probe fail; record result in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-005]  deps: [T0.11, T0.10a, T0.10b, T0.13, T0.6h]
+- [x] T0.12 Dogfood Slice 0 (idea -> production): run kazi against the deployable fixture; confirm it takes a failing test to a LIVE, verified production deployment and refuses success while tests OR the live probe fail; record result in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-005]  deps: [T0.11, T0.10a, T0.10b, T0.13, T0.6h]  done: 2026-06-22 (converged in 4 iters: dispatch->integrate(PR #69)->deploy->live /livez="ok"; see devlog)
 
 ### E1 -- Slice 1: Trustworthy Loop (P1)
 
