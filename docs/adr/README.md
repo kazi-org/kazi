@@ -19,3 +19,5 @@ decision, write a new ADR that supersedes the old one (and update
 | [0010](0010-context-injection-reexploration-mitigation.md) | Context injection to mitigate per-iteration re-exploration | Accepted |
 | [0011](0011-slice3-operator-surfaces.md) | Slice-3 operator surfaces (LiveView dashboard + Telegram bridge) decoupled from the core loop | Accepted |
 | [0012](0012-pluggable-retrieval-memory-adapter.md) | Pluggable semantic-retrieval memory adapter (off by default) | Accepted |
+| [0013](0013-adopt-reverse-engineer-goals.md) | Adopting kazi on an existing project (`kazi init` reverse-engineers a goal-file) | Accepted |
+| [0014](0014-binary-distribution-burrito-homebrew.md) | Binary distribution via Burrito + Homebrew (supersedes escript-as-distribution) | Accepted |
