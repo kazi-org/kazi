@@ -186,6 +186,33 @@ graph/repo-map + harness; use fixture repos; no real network. Build on
 - [x] T4.9b Graphify-embeddings backend implementing `Kazi.Retrieval`: embed the target + similarity-search the failing predicate's evidence terms for top-k snippets + a tagged integration test (the SAME behaviour-conformance shape as the stub) excluded by default  Owner: TBD  Est: 2.5h  verifies: [UC-022]  deps: [T4.9a]  acc: the backend returns top-k snippets for a query against a fixture index; the integration test is tagged and skipped without the graphify tooling so default `mix test` stays hermetic  done: 2026-06-22 PR #66
 - [x] T4.9c Opt-in wiring + cache reuse: enable retrieval per-goal via config/opts; reuse the T4.6 SHA-keyed cache to avoid re-embedding an unchanged target; assert the core loop is unchanged when off + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022, UC-006]  deps: [T4.9a, T4.6]  acc: a goal/config can enable retrieval; off-by-default leaves the loop + prompt unchanged; enabling injects retrieved snippets; the SHA-keyed cache is reused when the target is unchanged; hermetic  done: 2026-06-22 PR #67
 
+### E5 -- Adopt kazi on an existing project: `kazi init` (P2, see ADR-0013)
+
+Acceptance: pointing `kazi init` at a working repo emits a loadable starter
+goal-file capturing the project's test command + guard invariants, with TODO
+placeholders for live predicates. Deterministic stack detection; optional harness
+enrichment off by default. Hermetic via fixture repos + a stub harness. Builds on
+`Kazi.Context.RepoMapSource`, the provider registry, and `Kazi.Goal.Loader`.
+
+- [ ] T5.1 `Kazi.Adopt.detect/1`: deterministic stack + test-command detection from marker files (`go.mod`->`go test ./...`, `mix.exs`->`mix test`, `package.json` test script, `pyproject.toml`/`setup.cfg`->`pytest`) returning a `test_runner` predicate spec + stack metadata; reuse the `Kazi.Context.RepoMapSource` introspection seam + tests with fixture repos  Owner: TBD  Est: 2h  verifies: [UC-023]  deps: [T4.2]  acc: each fixture stack yields the right `cmd`/`args`; unknown stack yields a clear no-detection result; deterministic; hermetic (no network)
+- [ ] T5.2 `Kazi.Adopt.guards/1`: derive conservative guard predicates from the detected stack (coverage-ratchet guard when a coverage tool is detectable; else a tests-pass/test-count baseline) + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1]  acc: a stack with coverage yields a coverage guard; one without yields only the baseline; never emits a guard it cannot evaluate; hermetic
+- [ ] T5.3 `Kazi.Adopt.to_toml/1`: render a detected goal (test_runner + guards + a COMMENTED `http_probe` predicate with TODO url/expected placeholders) to a goal-file that round-trips through `Kazi.Goal.Loader` + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1, T5.2]  acc: generated TOML loads cleanly via `Kazi.Goal.Loader`; the live predicate is present-but-commented with TODO placeholders; deterministic byte output; hermetic
+- [ ] T5.4 Optional harness enrichment: behind an explicit flag, drive the harness (injectable seam) to propose `http_probe`/`browser` predicates from discovered endpoints; OFF by default + tests with a stub harness  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1]  acc: with enrichment off the output is the deterministic detection only; with a stub harness on, proposed live predicates are merged; hermetic (no real agent)
+- [ ] T5.5 CLI `kazi init <path> [--enrich] [--out <file>]`: wire detect -> guards -> (optional enrich) -> write; print the written path + a "review then approve" hint + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1, T5.2, T5.3, T5.4]  acc: `kazi init` on a fixture writes a loadable goal-file and prints the path; `--out` honored; CLI parse/exec tested; hermetic
+- [ ] T5.6 End-to-end + example: `kazi init` against the `fixtures/deploy-target` repo produces a goal-file whose test_runner + guards load and whose live predicate is a TODO stub; commit a worked example + README "adopt an existing project" snippet  Owner: TBD  Est: 1h  verifies: [UC-023]  deps: [T5.5]  acc: e2e test asserts the generated goal loads + names the detected go test command; README shows the adopt flow; `mix test` green; hermetic
+
+### E6 -- Binary distribution: Burrito + Homebrew (P2, see ADR-0014)
+
+Acceptance: `brew install kazi-org/tap/kazi` installs a single self-contained
+binary (no Erlang prerequisite) with the FULL read-model (NIF bundled), and
+`kazi --help` / a fixture `kazi run` work from it. Supersedes escript-as-distribution.
+
+- [ ] T6.1 `mix release` config: add a `releases:` block for a `kazi` release exposing the CLI entrypoint; `MIX_ENV=prod mix release` builds; smoke-run the release's `kazi --help` in CI  Owner: TBD  Est: 1.5h  verifies: [UC-024]  deps: [infrastructure]  acc: `mix release` builds a `kazi` release; the released `bin/kazi eval`/start runs `--help` and exits 0; documented in the repo
+- [ ] T6.2 Burrito wrap: add Burrito with targets macOS `aarch64`/`x86_64` + Linux `x86_64`/`aarch64`; a built binary bundles ERTS + the `ecto_sqlite3` NIF; smoke-run a locally-built binary converging a fixture goal to prove the read-model works (no escript degradation)  Owner: TBD  Est: 2.5h  verifies: [UC-024]  deps: [T6.1]  acc: a Burrito binary for the host platform runs `kazi run` against a fixture and PERSISTS iterations to SQLite (read-model present); `--help` works; documented
+- [ ] T6.3 Release CI + release-please: tag-triggered GitHub Actions matrix builds Burrito binaries on macOS + Ubuntu runners, uploads them + checksums to GitHub Releases; release-please manages versioning from Conventional Commits  Owner: TBD  Est: 2h  verifies: [UC-024]  deps: [T6.2]  acc: a release tag produces per-platform binaries + a `.sha256` each as Release assets; the workflow is green on a dry-run/test tag
+- [ ] T6.4 Homebrew tap: create `kazi-org/homebrew-tap` with a `kazi` formula that downloads the platform artifact + verifies its checksum; `brew install kazi-org/tap/kazi` installs a working `kazi`  Owner: TBD  Est: 1.5h  verifies: [UC-024]  kind: any  deps: [T6.3]  acc: `brew install kazi-org/tap/kazi` on macOS installs a runnable `kazi`; `brew audit --strict` passes; `kazi --help` works post-install
+- [ ] T6.5 Docs: README install section leads with `brew install` + the prebuilt binary; note the runtime requirement that a coding agent (`claude`) must be on PATH; reframe the escript as a contributor convenience  Owner: TBD  Est: 0.5h  verifies: [UC-024]  deps: [T6.4]  acc: README documents brew + binary install and the harness-on-PATH requirement; links the GitHub Releases page
+
 ## Parallel Work
 
 Behaviours-first (T0.3 defines the provider/adapter/action contracts) lets the
@@ -227,6 +254,17 @@ Waves reference task IDs; toggle the single checkbox in the WBS above. Run
 - **Wave 18 (1 agent):** T3.7c   (final ingress->authoring->egress e2e)
 - **Wave 19 (1 agent):** T4.9a   (retrieval behaviour + no-op default + build_prompt opt-in section)
 - **Wave 20 (2 agents):** T4.9b, T4.9c   (graphify-embeddings backend; opt-in wiring + cache reuse)
+- **Wave 21 (2 agents):** T5.1, T6.1   (adopt: stack detection; binary: mix release config — independent epics)
+- **Wave 22 (4 agents):** T5.2, T5.3, T5.4, T6.2   (adopt: guards/writer/enrich; binary: Burrito wrap)
+- **Wave 23 (2 agents):** T5.5, T6.3   (adopt: `kazi init` CLI; binary: release CI + release-please)
+- **Wave 24 (2 agents):** T5.6, T6.4   (adopt: e2e + example; binary: Homebrew tap) -> then T6.5 docs
+
+E5 (adopt, ADR-0013) and E6 (binary distribution, ADR-0014) are independent and
+run in parallel across Waves 21-24. E5 is fully hermetic (fixture repos + stub
+harness). E6's later tasks need real release artifacts: T6.3 verifies on a test
+tag, and T6.4 (`brew install`) is `kind: any` — it needs the `kazi-org/homebrew-tap`
+repo and a published GitHub Release, so it completes against a real release rather
+than a stub.
 
 T3.3/T3.4 (deploy deepening, standing mode) and now T3.1/T3.2/T3.5/T3.6/T3.7
 (NATS leases, graph partitioning, idea->predicate authoring, LiveView dashboard,
@@ -274,6 +312,21 @@ different directories in one commit. Add tests with every implementation task
 (API/http_probe test for any endpoint, Playwright test for any UI).
 
 ## Progress Log
+
+### 2026-06-22 -- Change Summary (E5 adopt + E6 binary distribution)
+- T0.12 dogfood CONVERGED live (idea -> production); T0.12 + T0.6h marked done.
+  Every prior task in the plan is now [x].
+- Added two new epics for adoption + distribution:
+  - E5 (`kazi init`, ADR-0013): reverse-engineer a starter goal-file from an existing
+    repo. T5.1 deterministic stack detection (reusing `Kazi.Context.RepoMapSource`),
+    T5.2 conservative guards, T5.3 goal-file writer (loadable, TODO live stubs), T5.4
+    optional harness enrichment (off by default), T5.5 `kazi init` CLI, T5.6 e2e +
+    example. New UC-023.
+  - E6 (Burrito + Homebrew, ADR-0014): ship a single self-contained binary. T6.1 mix
+    release, T6.2 Burrito wrap (bundles ERTS + the SQLite NIF, fixing the escript
+    read-model gap), T6.3 release CI + release-please, T6.4 Homebrew tap, T6.5 docs.
+    New UC-024. Supersedes escript-as-distribution.
+- Scheduled Waves 21-24 (E5 and E6 run in parallel). New ADR-0013, ADR-0014.
 
 ### 2026-06-22 -- Change Summary (T4.9 un-deferred)
 - E3 Slice-3 epic shipped end-to-end (T3.1a-d, T3.2a-b, T3.5a-c, T3.6a-d, T3.7a-c;
