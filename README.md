@@ -277,6 +277,66 @@ correct. That's the whole point: done is observed, not asserted.
 
 ---
 
+## Adopt a capability registry
+
+Already maintain a machine-readable catalog of **what your product does**? Point
+`kazi init` at it and get one goal-file per capability — so each capability's
+status is *computed by the convergence loop* instead of hand-stamped in prose
+([ADR-0015](docs/adr/0015-init-source-output-model-registry-goal-set.md)).
+
+A capability registry is a small JSON file (`capabilities.json`):
+
+```json
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "id": "auth.password-reset",
+      "name": "User can reset their password",
+      "test": { "cmd": "go", "args": ["test", "./auth/...", "-run", "TestPasswordReset"] },
+      "scope": "auth"
+    },
+    {
+      "id": "search.autocomplete",
+      "name": "Search box suggests results as the user types"
+    }
+  ]
+}
+```
+
+```sh
+kazi init --registry capabilities.json --out kazi-goals/
+```
+
+This writes a **goal set** — one goal-file per capability, organised under
+`kazi-goals/<scope>/<id>.toml`:
+
+- A capability with a declared `test` binding becomes a runnable `test_runner`
+  **acceptance predicate** naming that exact command (`tests` carries several).
+- A capability with **no** binding is a *gap*: kazi never invents a command — it
+  marks the gap explicitly and leaves the acceptance predicate for you to fill
+  (or run `--enrich`, off by default, to have your coding agent propose one).
+- Every goal-file carries a **commented live-predicate TODO** — an `http_probe`
+  scaffold for you to point at the real deployed endpoint. Live predicates are
+  scaffolded, never guessed.
+
+Each generated goal-file loads cleanly and is immediately runnable:
+
+```sh
+kazi run kazi-goals/auth/auth.password-reset.toml --workspace ./my-product
+```
+
+> **Prose is not a registry.** `capabilities.md` / `usecases.md` are *generated
+> views* of the JSON, so `kazi init --registry` rejects a `.md` path: JSON is the
+> source of truth.
+
+There is also a single-repo form — `kazi init <repo-dir>` detects the stack
+(`go.mod` → `go test ./...`, `mix.exs` → `mix test`, …) and writes one baseline
+goal-file. Both forms are deterministic: the same input always produces the same
+goal-file.
+
+---
+
 ## Watch it work (and steer from your phone)
 
 - **LiveView dashboard** — a goal board, live agent presence, the lease map, and
@@ -290,6 +350,8 @@ correct. That's the whole point: done is observed, not asserted.
 ## CLI reference
 
 ```
+kazi init <repo-dir> [--out <file>] [--enrich]    # adopt a repo -> one goal-file
+kazi init --registry <file.json> [--out <dir>]    # adopt a registry -> a goal set
 kazi propose "<idea>" [--workspace <path>]   # draft predicates from plain English
 kazi list-proposed [--status <state>]        # review drafts (proposed/approved/rejected)
 kazi approve <proposal-ref>                  # bless a drafted goal
