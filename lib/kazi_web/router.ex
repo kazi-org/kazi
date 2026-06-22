@@ -36,6 +36,7 @@ defmodule KaziWeb.Router do
     # T3.6b: the goal board — goals + status + predicate vector + iteration count,
     # live-updating from Kazi.ReadModel (ADR-0011 read projection).
     live("/goals", GoalBoardLive, :index)
+    live("/leases", LeaseMapLive, :index)
   end
 
   # Test-only seed/reset endpoints for the Playwright harness (T3.6b). Mounted
@@ -48,6 +49,9 @@ defmodule KaziWeb.Router do
 
       post("/seed", TestSeedController, :seed)
       post("/reset", TestSeedController, :reset)
+      # T3.6c: drive the lease-map fixture source (presence/intent/lease snapshot).
+      post("/leases/seed", LeaseMapSeedController, :seed)
+      post("/leases/release", LeaseMapSeedController, :release)
     end
   end
 end
