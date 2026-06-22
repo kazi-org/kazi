@@ -100,7 +100,7 @@ production deployment.
 - [ ] T0.6h Provision GCP project + Cloud Run service + deploy credentials for the fixture  Owner: TBD  Est: 2h  verifies: [infrastructure]  kind: human  blocked: Awaiting GCP project/billing setup
 - [x] T0.7b Integration: wire concrete providers + adapter + integrate/deploy actions into the loop (replace test-doubles)  Owner: TBD  Est: 2h  verifies: [UC-004]  deps: [T0.5, T0.5b, T0.6, T0.7, T0.10a, T0.10b]
 - [x] T0.8 Objective-termination guard: `:converged` reachable only when the FULL vector (code + live) is true; explicit test that a failing live probe blocks success  Owner: TBD  Est: 1h  verifies: [UC-005]  deps: [T0.7]
-- [ ] T0.10 CLI entry `kazi run <goal-file> --workspace <path>` wiring loader + loop + actions against an explicit target workspace  Owner: TBD  Est: 1.5h  verifies: [UC-004]  deps: [T0.7]
+- [x] T0.10 CLI entry `kazi run <goal-file> --workspace <path>` wiring loader + loop + actions against an explicit target workspace  Owner: TBD  Est: 1.5h  verifies: [UC-004]  deps: [T0.7]
 - [ ] T0.11 Full-loop integration test incl. a deliberately-failing-test fixture, with deploy + probe stubbed  Owner: TBD  Est: 2h  verifies: [UC-005]  deps: [T0.7b, T0.8, T0.10]
 - [ ] T0.12 Dogfood Slice 0 (idea -> production): run kazi against the deployable fixture; confirm it takes a failing test to a LIVE, verified production deployment and refuses success while tests OR the live probe fail; record result in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-005]  deps: [T0.11, T0.10a, T0.10b, T0.13, T0.6h]
 
@@ -261,6 +261,14 @@ different directories in one commit. Add tests with every implementation task
 - Wave 4B: T0.10 CLI `kazi run <goal-file> --workspace <path>` over Kazi.Runtime.
   Then Wave 5 (T0.11 full-loop integration test), Wave 6 (T0.12 dogfood, gated on
   human T0.6h). T0.6h (GCP) STILL OPEN — blocks T0.12 only.
+- Wave 4B DONE: T0.10 CLI (#17), CI green. `mix kazi.run` + an escript `kazi`
+  (main_module Kazi.CLI). Exercised: --help; exit codes (usage→2, bad goal→1,
+  help→0); example goal loads. Escript can't bundle the SQLite NIF → degrades to
+  no-persistence with a warning (use `mix kazi.run` for persistence). 148 tests
+  on main (18 doctests, 130 tests). WAVE 4 COMPLETE.
+- Next: Wave 5 (T0.11 full-loop integration test, deploy+probe stubbed) — single
+  agent. Then Wave 6 T0.12 dogfood is BLOCKED on human T0.6h (GCP/Cloud Run) +
+  real harness; the autonomous loop drives everything through T0.11.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
