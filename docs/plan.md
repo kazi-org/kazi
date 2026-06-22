@@ -108,12 +108,12 @@ production deployment.
 
 Acceptance: D1 met; T1.8 dogfood passes.
 
-- [ ] T1.1 Track the full predicate vector across iterations (in state + SQLite history)  Owner: TBD  Est: 1.5h  verifies: [UC-007]  deps: [T0.9]
+- [x] T1.1 Track the full predicate vector across iterations (in state + SQLite history)  Owner: TBD  Est: 1.5h  verifies: [UC-007]  deps: [T0.9]
 - [ ] T1.2 Regression detector: flag a predicate that went green -> red, attributed to the last dispatch  Owner: TBD  Est: 2h  verifies: [UC-007]  deps: [T1.1]
 - [ ] T1.3 Flake handling: re-run policy + quarantine list so a nondeterministic fail is not treated as work  Owner: TBD  Est: 2h  verifies: [UC-008]  deps: [T0.7b]
 - [ ] T1.4 Budget ceiling (iterations / wall-clock / token estimate) enforced as a hard stop  Owner: TBD  Est: 1.5h  verifies: [UC-009]  deps: [T0.7b]
 - [ ] T1.5 Stuck detector (N iterations, same failing set) + human-escalation hook  Owner: TBD  Est: 1.5h  verifies: [UC-009]  deps: [T0.7b]
-- [ ] T1.6 Prod-log predicate provider (query prod logs for 5xx/panics over a window) + tests  Owner: TBD  Est: 2h  verifies: [UC-021]  deps: [T0.3]
+- [x] T1.6 Prod-log predicate provider (query prod logs for 5xx/panics over a window) + tests  Owner: TBD  Est: 2h  verifies: [UC-021]  deps: [T0.3]
 - [ ] T1.7 ExUnit tests for regression, flake, budget, stuck, prod-log  Owner: TBD  Est: 2h  verifies: [UC-007, UC-008, UC-009, UC-021]  deps: [T1.2, T1.3, T1.4, T1.5, T1.6]
 - [ ] T1.8 Dogfood Slice 1: goal where the naive fix regresses another predicate; confirm detection + escalation; record in `docs/devlog.md`  Owner: TBD  Est: 1h  verifies: [UC-007]  deps: [T1.7]
 
