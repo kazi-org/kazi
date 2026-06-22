@@ -1,0 +1,73 @@
+# Example kazi goal-file: CREATION MODE (Slice 2, plan task T2.1, concept §10).
+#
+# In *creation mode* a goal is authored as ACCEPTANCE CRITERIA — predicates
+# describing desired NEW behavior that FAIL at t0 (the feature does not exist
+# yet) and pass once kazi BUILDS it. This is the same convergence machinery the
+# Slice 0 repair goal uses (`priv/examples/deploy_target.toml`): the failing
+# predicates ARE the work-list; kazi drives a coding agent in a loop until every
+# acceptance predicate is objectively :pass. The only difference is intent — here
+# the predicates assert behavior that must be CREATED, not REPAIRED.
+#
+# The create-mode authoring pattern:
+#
+#   1. Set `mode = "create"` at the top level. This records that the goal's
+#      predicates are acceptance criteria for new behavior (it does not change
+#      how the loop evaluates them — it is intent the loader and tooling read).
+#   2. Author each acceptance predicate over a provider that observes the desired
+#      OUTCOME, not the implementation. Over the `http_probe` provider that means
+#      "GET <path> returns <status> with a body containing <X>" — true only once
+#      the endpoint exists. Mark each such predicate `acceptance = true`.
+#   3. Author the predicates so they FAIL at t0. Before the feature is built the
+#      endpoint 404s (or the route is absent), so the http_probe assertion does
+#      not hold → :fail → real work for the agent. Once kazi builds the endpoint
+#      the same probe passes → the goal converges. (The vacuous-goal guard, T2.3,
+#      rejects a create goal whose predicates already all pass at t0.)
+#
+# Run it like the repair example:
+#
+#     kazi run priv/examples/create_feature.toml --workspace <target-repo>
+#
+# See Kazi.Goal.Loader for the full schema and Kazi.Predicate for the acceptance
+# marker.
+
+id = "create-widgets-api"
+name = "Creation mode: build a /widgets API endpoint from failing acceptance criteria"
+mode = "create"
+
+[metadata]
+slice = "2"
+mode = "create"
+
+[budget]
+max_iterations = 15
+max_tokens = 750000
+
+[scope]
+# The target workspace is the repo kazi builds the feature in (passed at run time
+# as `--workspace <target-repo>`; declared here so the goal-file is
+# self-describing).
+paths = ["lib/", "test/"]
+
+# ACCEPTANCE predicate (http_probe): the NEW endpoint must exist and serve the
+# widgets list. FAILS at t0 — there is no GET /widgets route yet, so the deployed
+# service 404s and the status assertion does not hold. PASSES once kazi builds the
+# endpoint. This is the criterion that DEFINES the feature.
+[[predicate]]
+id = "widgets-list-200"
+provider = "http_probe"
+description = "GET /widgets returns 200 (the new endpoint exists) — fails at t0, no such route"
+acceptance = true
+path = "/widgets"
+expect_status = 200
+
+# ACCEPTANCE predicate (http_probe): the new endpoint must return the expected
+# payload shape. FAILS at t0 (no endpoint → no body to match). PASSES once kazi
+# builds the endpoint to serve the widgets collection.
+[[predicate]]
+id = "widgets-list-body"
+provider = "http_probe"
+description = "GET /widgets body contains \"widgets\" (serves the collection) — fails at t0"
+acceptance = true
+path = "/widgets"
+expect_status = 200
+expect_body = "widgets"
