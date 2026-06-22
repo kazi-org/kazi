@@ -65,6 +65,10 @@ defmodule Kazi.Loop do
   alias Kazi.Loop.Flake
   # T1.4 budget: the pure budget-ceiling guard (iterations / wall-clock / tokens).
   alias Kazi.Loop.Budget
+  # T1.5 stuck: the pure stuck detector (N iterations, same non-empty failing
+  # set). The loop only feeds it the T1.1 history and fires the human-escalation
+  # hook + terminal stop on its verdict (see observe_tick/1).
+  alias Kazi.Loop.StuckDetector
 
   require Logger
 
@@ -84,6 +88,10 @@ defmodule Kazi.Loop do
     * `:over_budget` — a hard budget ceiling was hit (T1.4): the loop stopped
       itself rather than burn more iterations / wall-clock / tokens (concept §5,
       ADR-0002). The exceeded dimension is in the result's `:reason`.
+
+  A stuck stop (T1.5) is reported as `:stopped` with reason `:stuck`: the loop
+  saw the same non-empty failing set persist across N iterations, escalated to a
+  human, and stopped rather than burning more work (concept §5).
   """
   @type outcome :: :converged | :stopped | :over_budget
 
@@ -91,12 +99,13 @@ defmodule Kazi.Loop do
   The final result handed to `await/2` waiters when the loop stops.
 
   `:reason` names the budget dimension that forced an `:over_budget` stop (T1.4),
-  e.g. `:max_iterations`, `:wall_clock`, or `:token_budget`; it is `nil` for the
-  `:converged` and `:stopped` outcomes.
+  e.g. `:max_iterations`, `:wall_clock`, or `:token_budget`; it is `:stuck` for a
+  T1.5 stuck stop (a `:stopped` outcome), and `nil` for a plain `:converged` or
+  operator-`:stopped` outcome.
   """
   @type result :: %{
           outcome: outcome(),
-          reason: Budget.reason() | nil,
+          reason: Budget.reason() | :stuck | nil,
           vector: PredicateVector.t() | nil,
           actions: [Action.kind()],
           iterations: non_neg_integer()
@@ -171,7 +180,15 @@ defmodule Kazi.Loop do
               # convergence/work calculus (see decide/2). Appended last so the
               # existing field order is untouched.
               flake_max_retries: nil,
-              quarantine: MapSet.new()
+              quarantine: MapSet.new(),
+              # T1.5 stuck: the window N (consecutive observations carrying the
+              # same non-empty failing set) that declares the loop stuck, and the
+              # human-escalation callback fired on a stuck verdict. Both appended
+              # last so the existing field order is untouched. `stuck_reason` is
+              # the failing set the loop stopped stuck on (surfaced in snapshot/1).
+              stuck_iterations: nil,
+              on_escalation: nil,
+              stuck_failing: nil
   end
 
   # =============================================================================
@@ -219,6 +236,19 @@ defmodule Kazi.Loop do
       used for the wall-clock budget dimension (T1.4). Injectable so the
       wall-clock ceiling is deterministically testable without sleeping. Default
       `fn -> System.monotonic_time(:millisecond) end`.
+    * `:stuck_iterations` — the stuck window N (T1.5): once the SAME non-empty
+      failing-predicate set persists across this many consecutive observations,
+      the loop has made no progress, fires the `:on_escalation` hook and stops as
+      `:stopped` with reason `:stuck`. Default
+      `Kazi.Loop.StuckDetector.default_iterations/0`. `0` disables stuck
+      detection.
+    * `:on_escalation` — a side-effect-only callback invoked ONCE when the loop
+      is detected stuck (T1.5), as
+      `fun.(%{goal: goal, failing: failing_set, iterations: index})` — the
+      persistent failing-predicate-id set, the goal, and the 0-based iteration
+      index at which the stuck verdict fired. This is the human-escalation seam
+      (hand the goal off to a person). Default: a logger warning. A raising
+      callback is contained and never blocks the terminal stop.
     * `:name` — register the process under a name.
   """
   @spec start_link(keyword()) :: :gen_statem.start_ret()
@@ -272,7 +302,8 @@ defmodule Kazi.Loop do
   oldest-first; see `history/1` for the same data without the rest of the
   snapshot. Also includes `:quarantine` — the list of predicate ids currently
   quarantined as flaky (T1.3), which are excluded from the convergence/work
-  calculus.
+  calculus — and `:stuck_failing` — the list of predicate ids the loop stopped
+  stuck on (T1.5), or `nil` if it did not stop stuck.
   """
   @spec snapshot(:gen_statem.server_ref()) :: %{
           state: atom(),
@@ -284,7 +315,8 @@ defmodule Kazi.Loop do
           deployed?: boolean(),
           quarantine: [Kazi.Predicate.id()],
           tokens_used: non_neg_integer(),
-          budget_reason: Budget.reason() | nil
+          budget_reason: Budget.reason() | nil,
+          stuck_failing: [Kazi.Predicate.id()] | nil
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
@@ -337,7 +369,11 @@ defmodule Kazi.Loop do
       # T1.4 budget: cache the hard ceiling + clock and start the wall-clock.
       budget: Keyword.get(opts, :budget, goal.budget),
       now_fn: now_fn,
-      started_at_ms: now_fn.()
+      started_at_ms: now_fn.(),
+      # T1.5 stuck: the window N + the human-escalation callback (default a
+      # logger warning that hands off the persistent failing set).
+      stuck_iterations: Keyword.get(opts, :stuck_iterations, StuckDetector.default_iterations()),
+      on_escalation: Keyword.get(opts, :on_escalation, &default_escalation/1)
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -444,7 +480,10 @@ defmodule Kazi.Loop do
       # T1.4 budget: current token spend + the dimension that stopped the loop
       # (nil unless it stopped :over_budget).
       tokens_used: data.tokens_used,
-      budget_reason: data.budget_reason
+      budget_reason: data.budget_reason,
+      # T1.5 stuck: the persistent failing set the loop stopped stuck on, or nil
+      # if it did not stop stuck.
+      stuck_failing: stuck_failing_list(data.stuck_failing)
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -485,7 +524,38 @@ defmodule Kazi.Loop do
     log_diff(data)
     notify_iteration(data)
 
-    decide(vector, data)
+    # T1.5 stuck: with the freshly-appended history in hand, ask the pure
+    # detector whether the same non-empty failing set has persisted across the
+    # last N observations. On a stuck verdict, fire the human-escalation hook and
+    # stop (a terminal `:stopped` with reason `:stuck`) rather than dispatching
+    # more work. Additive: this composes ahead of `decide` and touches neither
+    # the `:converged` guard (T0.8), the budget logic (T1.4), nor the flake logic
+    # (T1.3). If not stuck, fall through to `decide` unchanged.
+    #
+    # The history is reduced to only the CODE predicates the agent can actually
+    # act on — live predicates (deployed, legitimately polled in step 5) and
+    # quarantined ones (T1.3, no convergence claim) are excluded — so a loop
+    # merely WAITING on a live probe is not mistaken for a stalled agent.
+    case StuckDetector.stuck?(code_history(data), data.stuck_iterations) do
+      {:stuck, failing} -> terminate_stuck(failing, data)
+      :not_stuck -> decide(vector, data)
+    end
+  end
+
+  # T1.5 stuck: the per-iteration history reduced to only the actionable CODE
+  # predicates — each historical vector stripped of live predicates (which the
+  # loop polls in step 5, not fixes) and quarantined predicates (T1.3). The stuck
+  # detector then sees only the failing set the agent is responsible for, so a
+  # persistently-red live probe never trips an escalation.
+  @spec code_history(Data.t()) :: history()
+  defp code_history(%Data{goal: goal, live_kinds: live_kinds, quarantine: quarantine} = data) do
+    kinds = predicate_kinds(goal)
+    live_ids = for {id, kind} <- kinds, MapSet.member?(live_kinds, kind), do: id
+    drop_ids = MapSet.union(quarantine, MapSet.new(live_ids))
+
+    for {index, %PredicateVector{results: results}} <- ordered_history(data) do
+      {index, results |> Map.drop(MapSet.to_list(drop_ids)) |> PredicateVector.new()}
+    end
   end
 
   # Evaluate every predicate the goal carries (predicates ++ guards) via its
@@ -784,12 +854,110 @@ defmodule Kazi.Loop do
 
     %{
       outcome: outcome,
-      # T1.4 budget: the exceeded dimension, only set on an :over_budget stop.
-      reason: data.budget_reason,
+      # T1.4 budget: the exceeded dimension on an :over_budget stop; T1.5 stuck:
+      # `:stuck` on a stuck `:stopped`. nil otherwise.
+      reason: stop_reason(data),
       vector: data.vector,
       actions: Enum.reverse(data.actions),
       iterations: data.iterations
     }
+  end
+
+  # The terminal result's `:reason`: the budget dimension on an :over_budget stop
+  # (T1.4), `:stuck` on a stuck stop (T1.5), nil otherwise.
+  @spec stop_reason(Data.t()) :: Budget.reason() | :stuck | nil
+  defp stop_reason(%Data{stuck_failing: failing}) when not is_nil(failing), do: :stuck
+  defp stop_reason(%Data{budget_reason: reason}), do: reason
+
+  # T1.5 stuck: render the stuck failing set (a MapSet, or nil) as a sorted list
+  # for snapshot/1, or nil if the loop did not stop stuck.
+  @spec stuck_failing_list(StuckDetector.failing_set() | nil) :: [Kazi.Predicate.id()] | nil
+  defp stuck_failing_list(nil), do: nil
+  defp stuck_failing_list(%MapSet{} = failing), do: Enum.sort(MapSet.to_list(failing))
+
+  # =============================================================================
+  # T1.5 stuck: human escalation + terminal stop
+  # =============================================================================
+
+  # Stuck stop (T1.5): record the persistent failing set, fire the
+  # human-escalation hook ONCE (hand the goal off to a person), project the stop
+  # through the persistence seam, then transition to the terminal `:stopped`
+  # state. No further agent/integrate/deploy is dispatched (concept §5:
+  # escalate rather than keep burning iterations). The result's reason is `:stuck`
+  # (see `stop_reason/1`).
+  defp terminate_stuck(failing, %Data{} = data) do
+    data = %Data{data | stuck_failing: failing}
+    notify_escalation(data, failing)
+    notify_stuck_stop(data)
+    terminate_with(:stopped, data)
+  end
+
+  # Fire the human-escalation callback with the stuck context (the persistent
+  # failing set, the goal, and the iteration index at which it fired). Side-effect
+  # only and contained: a raising hook is logged and never blocks the stop.
+  @spec notify_escalation(Data.t(), StuckDetector.failing_set()) :: :ok
+  defp notify_escalation(%Data{on_escalation: callback} = data, failing)
+       when is_function(callback, 1) do
+    payload = %{
+      goal: data.goal,
+      failing: failing,
+      # 0-based index of the observation that produced the stuck verdict.
+      iterations: data.iterations - 1
+    }
+
+    try do
+      callback.(payload)
+    rescue
+      error ->
+        Logger.warning(fn ->
+          "kazi.loop on_escalation callback raised: #{Exception.message(error)}"
+        end)
+    end
+
+    :ok
+  end
+
+  defp notify_escalation(%Data{}, _failing), do: :ok
+
+  # The default human-escalation hook: a warning that names the goal and the
+  # persistent failing set, so an operator watching the logs is paged to step in.
+  @spec default_escalation(map()) :: :ok
+  defp default_escalation(%{goal: goal, failing: failing}) do
+    Logger.warning(fn ->
+      "kazi.loop goal=#{goal.id} STUCK — same failing set persisted: " <>
+        "#{inspect(MapSet.to_list(failing))}. Escalating to a human."
+    end)
+
+    :ok
+  end
+
+  # Project the stuck stop through the SAME persistence seam (`on_iteration`) as
+  # the budget stop (T1.4), so the stuck terminal — and its failing set — is
+  # recorded in the iteration log / read-model. Reuses the last observed vector at
+  # the index that produced the verdict; carries `:stop_reason` `:stuck`.
+  # Side-effect only and contained.
+  defp notify_stuck_stop(%Data{on_iteration: nil}), do: :ok
+
+  defp notify_stuck_stop(%Data{on_iteration: callback} = data)
+       when is_function(callback, 1) do
+    payload = %{
+      goal: data.goal,
+      iteration: data.iterations - 1,
+      vector: data.vector || PredicateVector.new(),
+      converged?: false,
+      stop_reason: :stuck
+    }
+
+    try do
+      callback.(payload)
+    rescue
+      error ->
+        Logger.warning(fn ->
+          "kazi.loop on_iteration (stuck stop) callback raised: #{Exception.message(error)}"
+        end)
+    end
+
+    :ok
   end
 
   # =============================================================================
