@@ -3,7 +3,7 @@ defmodule Kazi.Workspace do
   Prepare the target workspace so each stateless `claude -p` dispatch starts
   *oriented* with cheap structural queries available (T4.5, UC-022; ADR-0010 §3).
 
-  Two deterministic, idempotent preparations run before the harness is dispatched
+  Three deterministic, idempotent preparations run before the harness is dispatched
   into the workspace:
 
     1. **Expose the graph MCP.** Ensure the workspace's `.mcp.json` declares the
@@ -17,6 +17,14 @@ defmodule Kazi.Workspace do
        serves up-to-date structure: run `code-review-graph detect-changes` and,
        if it reports drift, `code-review-graph update --skip-flows`. A workspace
        with no graph is left untouched (the agent falls back to file reads).
+
+    3. **Write the orientation file.** When the caller passes the iteration's
+       failing predicates (the `:orientation` opt), materialise the
+       `Kazi.Context` orientation pack as a kazi-owned `.kazi/context.md` note in
+       the target (T4.4, `Kazi.Workspace.Orientation`) so a harness that scans
+       project files starts oriented too. Written **only when its bytes change**
+       (idempotent) and confined to the kazi-owned path — a user `CLAUDE.md` is
+       never touched. Omitted when no failing set is supplied.
 
   ## The graph-command seam (`:graph_cmd`)
 
@@ -40,14 +48,19 @@ defmodule Kazi.Workspace do
       existing file) | `:present` (the entry was already there);
     * `:graph` — `:absent` (no graph in the workspace) | `:fresh` (graph present,
       already up to date) | `:updated` (graph present, refreshed).
+    * `:orientation` — `:skipped` (no `:orientation` opt supplied) | `:unchanged`
+      (file already current) | `:created` | `:updated`.
 
   On a failure it could not work around it returns `{:error, reason}` (e.g. a
-  malformed existing `.mcp.json`). Graph-freshness failures are non-fatal: the
-  graph is an optimisation, so a `detect-changes`/`update` that errors is logged
-  and reported as `graph: :error` rather than failing the dispatch.
+  malformed existing `.mcp.json`). Graph-freshness and orientation-file failures
+  are non-fatal: both are orientation optimisations, so an error is logged and
+  reported as `graph: :error` / `orientation: :error` rather than failing the
+  dispatch.
   """
 
   require Logger
+
+  alias Kazi.Workspace.Orientation
 
   @mcp_filename ".mcp.json"
   @graph_db_path ".code-review-graph/graph.db"
@@ -64,7 +77,8 @@ defmodule Kazi.Workspace do
   @typedoc "What `prepare/2` did, per preparation step."
   @type summary :: %{
           mcp: :created | :merged | :present,
-          graph: :absent | :fresh | :updated | :error
+          graph: :absent | :fresh | :updated | :error,
+          orientation: :skipped | :unchanged | :created | :updated | :error
         }
 
   @doc """
@@ -79,15 +93,25 @@ defmodule Kazi.Workspace do
 
     * `:graph_cmd` — the `System.cmd`-shaped seam used to run `code-review-graph`
       for the freshness step (see the moduledoc). Defaults to the real binary.
+    * `:orientation` — `{failing, context_opts}` to write the `.kazi/context.md`
+      orientation note (T4.4): `failing` is the iteration's failing-predicate
+      slice (`Kazi.Context.failing/0`) and `context_opts` is forwarded to
+      `Kazi.Context.orientation_pack/3` (e.g. a hermetic `:graph_source` seam).
+      Omitted ⇒ the orientation step is skipped (`orientation: :skipped`).
 
   Returns `{:ok, summary}` (see `t:summary/0`) or `{:error, reason}` when the MCP
-  step could not complete (the freshness step never fails the call — it degrades
-  to `graph: :error`).
+  step could not complete (the freshness and orientation steps never fail the
+  call — they degrade to `graph: :error` / `orientation: :error`).
   """
   @spec prepare(String.t(), keyword()) :: {:ok, summary()} | {:error, term()}
   def prepare(workspace, opts \\ []) when is_binary(workspace) and is_list(opts) do
     with {:ok, mcp} <- ensure_mcp_server(workspace) do
-      {:ok, %{mcp: mcp, graph: ensure_graph_fresh(workspace, opts)}}
+      {:ok,
+       %{
+         mcp: mcp,
+         graph: ensure_graph_fresh(workspace, opts),
+         orientation: ensure_orientation(workspace, opts)
+       }}
     end
   end
 
@@ -233,5 +257,37 @@ defmodule Kazi.Workspace do
   @spec default_graph_cmd([String.t()], keyword()) :: {Collectable.t(), non_neg_integer()}
   defp default_graph_cmd(args, cmd_opts) do
     System.cmd(@graph_command, args, cmd_opts)
+  end
+
+  # =============================================================================
+  # Step 3: write the kazi-owned orientation file (T4.4, idempotent)
+  # =============================================================================
+
+  # With an `:orientation` opt carrying the iteration's failing predicates, refresh
+  # `.kazi/context.md` from the orientation pack (only rewriting on change). Without
+  # it (loops that do not thread a failing set) the step is skipped. Any write/read
+  # error degrades to `:error` — the orientation file is an optimisation, never a
+  # dispatch precondition (ADR-0010, file-read fallback).
+  @spec ensure_orientation(String.t(), keyword()) ::
+          :skipped | :unchanged | :created | :updated | :error
+  defp ensure_orientation(workspace, opts) do
+    case Keyword.get(opts, :orientation) do
+      {failing, context_opts} when is_list(failing) and is_list(context_opts) ->
+        case Orientation.refresh(workspace, failing, context_opts) do
+          {:ok, outcome} ->
+            outcome
+
+          {:error, reason} ->
+            Logger.warning(fn ->
+              "kazi.workspace: orientation file refresh failed for #{workspace}: " <>
+                inspect(reason)
+            end)
+
+            :error
+        end
+
+      nil ->
+        :skipped
+    end
   end
 end
