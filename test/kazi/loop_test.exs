@@ -72,6 +72,37 @@ defmodule Kazi.LoopTest do
       do: PredicateResult.fail(%{id: id, live: :down})
   end
 
+  # A provider whose result for a predicate ALTERNATES on every evaluation:
+  # :fail, :pass, :fail, :pass, … starting from a configurable first status. This
+  # is a genuine flake — within a single observation the loop's re-runs see the
+  # value flip — which the T1.3 re-run policy must detect and quarantine. The
+  # starting status per id is read from context.goal.metadata.flake_start.
+  defmodule AlternatingProvider do
+    @behaviour Kazi.PredicateProvider
+    use Agent
+
+    def start_link(_), do: Agent.start_link(fn -> %{} end)
+
+    @impl true
+    def evaluate(%Predicate{id: id}, context) do
+      pid = context.goal.metadata.alt_pid
+      start = Map.get(context.goal.metadata.flake_start, id, :fail)
+
+      n =
+        Agent.get_and_update(pid, fn counts ->
+          c = Map.get(counts, id, 0)
+          {c, Map.put(counts, id, c + 1)}
+        end)
+
+      status = if rem(n, 2) == 0, do: start, else: flip(start)
+      PredicateResult.new(status, %{id: id, status: status, eval: n})
+    end
+
+    defp flip(:fail), do: :pass
+    defp flip(:pass), do: :fail
+    defp flip(other), do: other
+  end
+
   # Harness double: records each invocation to the collector (from adapter_opts)
   # and reports success.
   defmodule RecordingHarness do
@@ -124,17 +155,27 @@ defmodule Kazi.LoopTest do
     pid
   end
 
-  defp start_loop(goal, providers, collector) do
+  defp start_loop(goal, providers, collector, opts \\ []) do
     Kazi.Loop.start_link(
-      goal: goal,
-      providers: providers,
-      harness: RecordingHarness,
-      integrate: RecordingIntegrate,
-      deploy: RecordingDeploy,
-      adapter_opts: [collector: collector],
-      # Poll the live predicate fast so tests don't wait on the production
-      # default interval.
-      reobserve_interval_ms: 5
+      [
+        goal: goal,
+        providers: providers,
+        harness: RecordingHarness,
+        integrate: RecordingIntegrate,
+        deploy: RecordingDeploy,
+        adapter_opts: [collector: collector],
+        # Poll the live predicate fast so tests don't wait on the production
+        # default interval.
+        reobserve_interval_ms: 5,
+        # These lifecycle tests use the ScriptedProvider to express status flips
+        # ACROSS observations (fail this iteration, pass the next, once the agent
+        # has "fixed" the code). Disable the T1.3 re-run policy here so a single
+        # observation consumes exactly one scripted status and those across-
+        # observation flips are not (correctly!) read as within-observation
+        # flakes. The dedicated flake tests below opt the policy back in.
+        flake_max_retries: 0
+      ]
+      |> Keyword.merge(opts)
     )
   end
 
@@ -455,6 +496,117 @@ defmodule Kazi.LoopTest do
     # satisfied vector.
     assert [{0, vector}] = Kazi.Loop.history(loop)
     assert Kazi.PredicateVector.satisfied?(vector)
+  end
+
+  # ===========================================================================
+  # Flake handling: re-run policy + quarantine (T1.3, UC-008)
+  #
+  # A nondeterministic predicate must not be treated as work. The loop re-runs a
+  # failing predicate through the REAL provider path; a flip (fail↔pass) is
+  # classified flaky, quarantined (surfaced via snapshot/1), kept out of the
+  # work-list (no dispatch), and excluded from convergence. A consistently-
+  # failing predicate is NOT quarantined and still drives a dispatch.
+  # ===========================================================================
+
+  test "a flaky predicate (alternating fail/pass) is quarantined and NOT dispatched as work" do
+    {:ok, alt_pid} = AlternatingProvider.start_link(nil)
+    script_pid = start_scripted(%{})
+
+    # The goal carries BOTH the alternating (flaky) provider's metadata and the
+    # scripted provider's (unused) pid so both behaviours can read context.
+    goal =
+      Goal.new("flake-test",
+        predicates: [Predicate.new(:flaky, :tests)],
+        metadata: %{
+          alt_pid: alt_pid,
+          flake_start: %{flaky: :fail},
+          script_pid: script_pid,
+          collector: self()
+        }
+      )
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: AlternatingProvider}, self(), flake_max_retries: 2)
+
+    # The flaky predicate is the only predicate; once quarantined it is excluded
+    # from convergence, so the vector (with nothing left to assert) cannot
+    # converge — the loop runs on. We just need it to have observed + quarantined.
+    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+
+    snap = Kazi.Loop.snapshot(loop)
+    assert :flaky in snap.quarantine, "the alternating predicate must be quarantined"
+
+    # It was never dispatched as work: a quarantined flake is not the work-list.
+    refute :dispatch_agent in snap.actions
+    refute_received {:dispatched, _prompt, _ws}
+
+    :ok = Kazi.Loop.stop(loop)
+  end
+
+  test "a quarantined flaky predicate does NOT block convergence of the real requirements" do
+    {:ok, alt_pid} = AlternatingProvider.start_link(nil)
+
+    # Two predicates: a genuinely-flaky one and a code predicate that is solidly
+    # green. Once the flaky one is quarantined, convergence is evaluated over the
+    # remaining (green) predicate only, so the loop converges despite the flake.
+    goal =
+      Goal.new("flake-converge",
+        predicates: [
+          Predicate.new(:flaky, :tests),
+          Predicate.new(:solid, :solid_tests)
+        ],
+        metadata: %{alt_pid: alt_pid, flake_start: %{flaky: :fail}, collector: self()}
+      )
+
+    # :solid is a plain code-kind predicate that always passes (a tiny inline
+    # always-pass provider via the existing DeployGated trick would gate on
+    # deploy; we want unconditional pass, so use AlternatingProvider with a start
+    # that never flips — start :pass and only one eval needed since pass is taken
+    # at face value, no re-run).
+    solid_provider = AlternatingProvider
+
+    goal = %{
+      goal
+      | metadata: Map.put(goal.metadata, :flake_start, %{flaky: :fail, solid: :pass})
+    }
+
+    {:ok, loop} =
+      start_loop(
+        goal,
+        %{tests: solid_provider, solid_tests: solid_provider},
+        self(),
+        flake_max_retries: 2
+      )
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :converged
+
+    # The flaky predicate was quarantined and never dispatched as work.
+    snap = Kazi.Loop.snapshot(loop)
+    assert :flaky in snap.quarantine
+    refute :dispatch_agent in result.actions
+  end
+
+  test "a consistently-failing predicate is NOT quarantined and still drives a dispatch" do
+    # ScriptedProvider returns :fail forever for :code — re-runs all see :fail, so
+    # classify/1 returns :fail (real work), NOT flaky. The loop must dispatch.
+    script_pid = start_scripted(%{code: [:fail]})
+
+    goal = goal_with([Predicate.new(:code, :tests)], script_pid, self())
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: ScriptedProvider}, self(), flake_max_retries: 2)
+
+    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+
+    snap = Kazi.Loop.snapshot(loop)
+    # A real failure: not quarantined, dispatched as work.
+    refute :code in snap.quarantine
+    assert :dispatch_agent in snap.actions
+    assert_received {:dispatched, prompt, _ws}
+    assert prompt =~ "code"
+
+    :ok = Kazi.Loop.stop(loop)
   end
 
   test "start_link fails when a required dependency option is missing" do

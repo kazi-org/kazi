@@ -60,6 +60,9 @@ defmodule Kazi.Loop do
   @behaviour :gen_statem
 
   alias Kazi.{Action, Goal, Predicate, PredicateResult, PredicateVector}
+  # T1.3 flake: the pure re-run/quarantine policy lives in its own module; the
+  # loop only routes failing-predicate evaluation through it (see observe/1).
+  alias Kazi.Loop.Flake
 
   require Logger
 
@@ -131,7 +134,15 @@ defmodule Kazi.Loop do
               iterations: 0,
               # cached terminal result + await/2 waiters
               result: nil,
-              waiters: []
+              waiters: [],
+              # T1.3 flake: max re-runs (extra evaluations) for a failing
+              # predicate before its result is taken as real (default via
+              # Kazi.Loop.Flake.max_retries/0), and the sticky set of predicate
+              # ids proven flaky and therefore QUARANTINED — excluded from the
+              # convergence/work calculus (see decide/2). Appended last so the
+              # existing field order is untouched.
+              flake_max_retries: nil,
+              quarantine: MapSet.new()
   end
 
   # =============================================================================
@@ -161,6 +172,10 @@ defmodule Kazi.Loop do
       (default `[]`).
     * `:live_kinds` — list of predicate kinds treated as *live* (only pass after
       deploy); default `#{inspect(@default_live_kinds)}`.
+    * `:flake_max_retries` — extra evaluations spent re-running a failing
+      predicate to tell a real failure from a flake (T1.3); default
+      `Kazi.Loop.Flake.max_retries/0`. `0` disables flake detection (a single
+      fail is taken as real).
     * `:on_iteration` — an optional side-effect-only callback invoked once per
       observation, *after* the vector is built and *before* `decide`, as
       `fun.(%{goal: goal, iteration: index, vector: vector, converged?: boolean})`
@@ -219,7 +234,9 @@ defmodule Kazi.Loop do
 
   Includes `:history` — the full ordered per-iteration vector history (T1.1),
   oldest-first; see `history/1` for the same data without the rest of the
-  snapshot.
+  snapshot. Also includes `:quarantine` — the list of predicate ids currently
+  quarantined as flaky (T1.3), which are excluded from the convergence/work
+  calculus.
   """
   @spec snapshot(:gen_statem.server_ref()) :: %{
           state: atom(),
@@ -228,7 +245,8 @@ defmodule Kazi.Loop do
           actions: [Action.kind()],
           iterations: non_neg_integer(),
           landed?: boolean(),
-          deployed?: boolean()
+          deployed?: boolean(),
+          quarantine: [Kazi.Predicate.id()]
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
@@ -269,7 +287,10 @@ defmodule Kazi.Loop do
       on_iteration: Keyword.get(opts, :on_iteration),
       integrate_params: Map.new(Keyword.get(opts, :integrate_params, %{})),
       deploy_params: Map.new(Keyword.get(opts, :deploy_params, %{})),
-      extra_action_context: Map.new(Keyword.get(opts, :extra_action_context, %{}))
+      extra_action_context: Map.new(Keyword.get(opts, :extra_action_context, %{})),
+      # T1.3 flake: how many extra evaluations to spend distinguishing a real
+      # failure from a flake (default Kazi.Loop.Flake.max_retries/0).
+      flake_max_retries: Keyword.get(opts, :flake_max_retries, Flake.max_retries())
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -285,7 +306,9 @@ defmodule Kazi.Loop do
   # iteration.
   @impl :gen_statem
   def handle_event(:internal, :observe, :observing, %Data{} = data) do
-    vector = observe(data)
+    # T1.3 flake: observe now also evolves the quarantine set (a failing
+    # predicate is re-run via the real provider path and may be classified flaky).
+    {vector, quarantine} = observe(data)
 
     # 0-based per-goal iteration index for this observation (matches the
     # read-model's iteration_index and the on_iteration payload's :iteration).
@@ -296,6 +319,8 @@ defmodule Kazi.Loop do
         data
         | prev_vector: data.vector,
           vector: vector,
+          # T1.3 flake: carry the (sticky) quarantine set forward.
+          quarantine: quarantine,
           # Prepend this observation's full vector to the in-state history
           # (newest-first; read APIs reverse to oldest-first). T1.1.
           history: [{index, vector} | data.history],
@@ -376,7 +401,9 @@ defmodule Kazi.Loop do
       actions: Enum.reverse(data.actions),
       iterations: data.iterations,
       landed?: data.landed?,
-      deployed?: data.deployed?
+      deployed?: data.deployed?,
+      # T1.3 flake: the predicate ids currently quarantined as flaky.
+      quarantine: MapSet.to_list(data.quarantine)
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -392,20 +419,82 @@ defmodule Kazi.Loop do
 
   # Evaluate every predicate the goal carries (predicates ++ guards) via its
   # registered provider, building the PredicateVector for this observation.
-  @spec observe(Data.t()) :: PredicateVector.t()
+  #
+  # T1.3 flake: returns `{vector, quarantine}` — observation also evolves the
+  # (sticky) quarantine set, because a failing predicate is re-run through the
+  # real provider path and may be classified flaky. The fold threads the set so
+  # one observation can quarantine several predicates.
+  @spec observe(Data.t()) :: {PredicateVector.t(), MapSet.t()}
   defp observe(%Data{goal: goal} = data) do
     context = provider_context(data)
 
-    goal
-    |> Goal.all_predicates()
-    |> Enum.map(fn %Predicate{} = predicate ->
-      {predicate.id, evaluate(predicate, context, data)}
-    end)
-    |> PredicateVector.new()
+    {pairs, quarantine} =
+      goal
+      |> Goal.all_predicates()
+      |> Enum.map_reduce(data.quarantine, fn %Predicate{} = predicate, quarantine ->
+        {result, quarantine} = evaluate(predicate, context, data, quarantine)
+        {{predicate.id, result}, quarantine}
+      end)
+
+    {PredicateVector.new(pairs), quarantine}
   end
 
-  @spec evaluate(Predicate.t(), map(), Data.t()) :: PredicateResult.t()
-  defp evaluate(%Predicate{kind: kind} = predicate, context, %Data{providers: providers}) do
+  # Evaluate one predicate, applying the T1.3 flake re-run policy and folding any
+  # flake into `quarantine`. Returns `{result, quarantine}`.
+  @spec evaluate(Predicate.t(), map(), Data.t(), MapSet.t()) :: {PredicateResult.t(), MapSet.t()}
+  defp evaluate(%Predicate{id: id} = predicate, context, %Data{} = data, quarantine) do
+    cond do
+      # Already-quarantined predicates are not re-evaluated as work: record them
+      # as :unknown (no convergence claim) so they neither become work nor block
+      # convergence. Quarantine is sticky for the run.
+      Flake.quarantined?(quarantine, id) ->
+        {Flake.quarantined_result(PredicateResult.unknown()), quarantine}
+
+      true ->
+        first = run_provider(predicate, context, data)
+        apply_flake_policy(predicate, context, data, quarantine, first)
+    end
+  end
+
+  # T1.3 flake: a passing first result is taken at face value; a failing/erroring
+  # one is re-run up to `flake_max_retries` times via the REAL provider path, and
+  # the result SEQUENCE is classified (pure `Kazi.Loop.Flake.classify/1`). A
+  # `:flaky` verdict quarantines the predicate and records it as :unknown; a real
+  # `:fail` is recorded unchanged (the last run's result), so a consistently
+  # failing predicate still drives a dispatch exactly as before.
+  @spec apply_flake_policy(Predicate.t(), map(), Data.t(), MapSet.t(), PredicateResult.t()) ::
+          {PredicateResult.t(), MapSet.t()}
+  defp apply_flake_policy(
+         %Predicate{id: id} = predicate,
+         context,
+         %Data{} = data,
+         quarantine,
+         first
+       ) do
+    if Flake.needs_rerun?(first) do
+      reruns =
+        for _ <- 1..data.flake_max_retries//1, do: run_provider(predicate, context, data)
+
+      sequence = [first | reruns]
+
+      case Flake.classify(sequence) do
+        :flaky ->
+          {Flake.quarantined_result(List.last(sequence)),
+           Flake.quarantine(quarantine, id, :flaky)}
+
+        # Consistent non-pass: record the last (re-run) result as the real one.
+        _fail ->
+          {List.last(sequence), quarantine}
+      end
+    else
+      {first, quarantine}
+    end
+  end
+
+  # The real provider invocation for one predicate (used by both the first
+  # evaluation and every re-run, so the flake policy works for ANY provider).
+  @spec run_provider(Predicate.t(), map(), Data.t()) :: PredicateResult.t()
+  defp run_provider(%Predicate{kind: kind} = predicate, context, %Data{providers: providers}) do
     case Map.get(providers, kind) do
       nil ->
         # No provider registered for this kind: an infra/config problem, not
@@ -427,8 +516,10 @@ defmodule Kazi.Loop do
     cond do
       # 1. Whole vector satisfied (incl. live predicates): converged, stop.
       #    `:converged` is reachable through this clause and no other — the
-      #    objective-termination guard (T0.8, UC-005).
-      all_satisfied?(vector) ->
+      #    objective-termination guard (T0.8, UC-005). T1.3 flake: quarantined
+      #    predicates are EXCLUDED from this check (they carry no convergence
+      #    claim), so a flake neither counts toward nor blocks convergence.
+      all_satisfied?(vector, data.quarantine) ->
         terminate_with(:converged, data)
 
       # 2. Code predicates failing: dispatch the agent with failing evidence.
@@ -468,8 +559,26 @@ defmodule Kazi.Loop do
   # the vacuous-goal guard). Naming it here makes the convergence invariant a
   # single, self-documenting clause in `decide/1` that cannot silently regress
   # to "code green is good enough".
-  @spec all_satisfied?(PredicateVector.t()) :: boolean()
-  defp all_satisfied?(%PredicateVector{} = vector), do: PredicateVector.satisfied?(vector)
+  #
+  # T1.3 flake: quarantined predicates are dropped from the vector before the
+  # satisfaction check — a known-flaky predicate carries no convergence claim and
+  # must neither block nor count toward convergence. The empty-vector guard still
+  # holds: a goal whose every predicate is quarantined (nothing left to assert
+  # over) is NOT satisfied, so it cannot converge vacuously.
+  @spec all_satisfied?(PredicateVector.t(), MapSet.t()) :: boolean()
+  defp all_satisfied?(%PredicateVector{} = vector, %MapSet{} = quarantine) do
+    vector
+    |> drop_quarantined(quarantine)
+    |> PredicateVector.satisfied?()
+  end
+
+  # Return the vector with all quarantined predicate ids removed.
+  @spec drop_quarantined(PredicateVector.t(), MapSet.t()) :: PredicateVector.t()
+  defp drop_quarantined(%PredicateVector{results: results}, %MapSet{} = quarantine) do
+    results
+    |> Map.drop(MapSet.to_list(quarantine))
+    |> PredicateVector.new()
+  end
 
   # Transition into :observing and schedule the next observation after `delay_ms`
   # via a state timeout (see the :reobserve handler for why this is a timeout and
