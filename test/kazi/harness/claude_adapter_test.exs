@@ -197,6 +197,95 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
     end
   end
 
+  describe "build_prompt/3 optional retrieval section (T4.9a, ADR-0012)" do
+    alias Kazi.Retrieval.StaticRetriever
+
+    @retrieval_heading "## Relevant prior context (retrieved)"
+
+    defp failing_retr do
+      [{:unit, PredicateResult.fail(%{output: "boom in lib/target.ex:42"})}]
+    end
+
+    test "with retrieval OFF (no :retriever), build_prompt/3 is byte-identical to /2" do
+      failing = failing_retr()
+
+      # The whole point of ADR-0012: the default path must not change a byte.
+      assert ClaudeAdapter.build_prompt("fix it", failing, []) ==
+               ClaudeAdapter.build_prompt("fix it", failing)
+    end
+
+    test "with retrieval OFF, no retrieval section is emitted" do
+      prompt = ClaudeAdapter.build_prompt("fix it", failing_retr(), [])
+      refute prompt =~ @retrieval_heading
+    end
+
+    test "an empty retriever result emits NOTHING (byte-identical to off)" do
+      empty = StaticRetriever.new(snippets: [])
+
+      with_empty = ClaudeAdapter.build_prompt("fix it", failing_retr(), retriever: empty)
+      off = ClaudeAdapter.build_prompt("fix it", failing_retr())
+
+      assert with_empty == off
+      refute with_empty =~ @retrieval_heading
+    end
+
+    test "an injected retriever renders snippets in a dedicated section" do
+      retriever =
+        StaticRetriever.new(
+          snippets: [
+            {"def build(x), do: x + 1", source: "lib/target.ex:42"},
+            "a sourceless hint"
+          ]
+        )
+
+      prompt = ClaudeAdapter.build_prompt("fix it", failing_retr(), retriever: retriever)
+
+      assert prompt =~ @retrieval_heading
+      assert prompt =~ "lib/target.ex:42"
+      assert prompt =~ "def build(x), do: x + 1"
+      assert prompt =~ "a sourceless hint"
+    end
+
+    test "the retrieval section sits AFTER the orientation prefix and the evidence body" do
+      retriever = StaticRetriever.new(snippets: [{"snippet body", source: "lib/x.ex"}])
+
+      prompt =
+        ClaudeAdapter.build_prompt("fix it", failing_retr(),
+          workspace: "/fixture/ws",
+          graph_source: StaticGraphSource.new(origin: :graph, files: ["lib/target.ex"]),
+          retriever: retriever
+        )
+
+      {orient, _} = :binary.match(prompt, "# Orientation")
+      {evidence, _} = :binary.match(prompt, "The following predicates are currently failing.")
+      {retr, _} = :binary.match(prompt, @retrieval_heading)
+
+      # Orientation prefix < failing-evidence body < retrieval augmentation.
+      assert orient < evidence
+      assert evidence < retr
+    end
+
+    test "is deterministic given a fixed retriever" do
+      retriever = StaticRetriever.new(snippets: [{"x", source: "lib/a.ex"}, "y"])
+      opts = [retriever: retriever]
+
+      first = ClaudeAdapter.build_prompt("fix it", failing_retr(), opts)
+      second = ClaudeAdapter.build_prompt("fix it", failing_retr(), opts)
+
+      assert first == second
+    end
+
+    test "the retrieval section is purely additive — the pre-retrieval prompt is a prefix of it" do
+      retriever = StaticRetriever.new(snippets: [{"hint", source: "lib/a.ex"}])
+
+      off = ClaudeAdapter.build_prompt("fix it", failing_retr())
+      on = ClaudeAdapter.build_prompt("fix it", failing_retr(), retriever: retriever)
+
+      # Retrieval only appends; everything before it is byte-for-byte the off path.
+      assert String.starts_with?(on, off)
+    end
+  end
+
   describe "run/3 against a stub binary (real subprocess boundary)" do
     test "runs the harness in the target workspace so edits land in place", %{
       workspace: workspace
