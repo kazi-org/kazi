@@ -27,6 +27,14 @@ defmodule Kazi.Goal do
     * `budget` — the hard token / wall-clock / iteration ceiling
       (`Kazi.Budget`).
     * `scope` — the repo and paths agents may touch (`Kazi.Scope`).
+    * `standing` — whether this goal is a STANDING (continuous/maintenance)
+      reconciler (T3.4d, UC-016). When `true` the loop does NOT terminate at
+      convergence; it keeps re-observing on a bounded interval to hold the goal's
+      predicates true forever (concept §10 "standing reconcilers"). Default
+      `false` (a one-shot converge-and-stop goal). Like `mode`, this is authoring
+      intent recorded on the goal — the loop's standing behaviour itself is
+      T3.4a; here the goal just *declares* it so it can be authored in a
+      goal-file and threaded into the loop opts by `Kazi.Runtime`.
 
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
@@ -53,6 +61,7 @@ defmodule Kazi.Goal do
           guards: [Predicate.t()],
           budget: Budget.t(),
           scope: Scope.t(),
+          standing: boolean(),
           metadata: map()
         }
 
@@ -64,16 +73,21 @@ defmodule Kazi.Goal do
             guards: [],
             budget: %Budget{},
             scope: %Scope{},
+            # T3.4d standing wiring: declared standing/maintenance mode (UC-016).
+            # Default false = one-shot converge-and-stop. Appended last so the
+            # existing field order is untouched.
+            standing: false,
             metadata: %{}
 
   @doc """
   Builds a goal.
 
   `id` is required. Optional opts: `:name`, `:mode`, `:predicates`, `:guards`,
-  `:budget`, `:scope`, `:metadata`. `:mode` is `:repair` (default) or `:create`
-  (creation mode — predicates are acceptance criteria, T2.1). `:budget` and
-  `:scope` accept either a struct or a keyword list (forwarded to
-  `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
+  `:budget`, `:scope`, `:standing`, `:metadata`. `:mode` is `:repair` (default)
+  or `:create` (creation mode — predicates are acceptance criteria, T2.1).
+  `:standing` (default `false`) declares a standing/maintenance goal (T3.4d,
+  UC-016). `:budget` and `:scope` accept either a struct or a keyword list
+  (forwarded to `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
 
   ## Examples
 
@@ -85,6 +99,9 @@ defmodule Kazi.Goal do
 
       iex> Kazi.Goal.new("build-widgets", mode: :create).mode
       :create
+
+      iex> Kazi.Goal.new("keep-it-green", standing: true).standing
+      true
   """
   @spec new(id(), keyword()) :: t()
   def new(id, opts \\ []) when not is_nil(id) do
@@ -96,6 +113,8 @@ defmodule Kazi.Goal do
       guards: Keyword.get(opts, :guards, []),
       budget: opts |> Keyword.get(:budget, %Budget{}) |> to_budget(),
       scope: opts |> Keyword.get(:scope, %Scope{}) |> to_scope(),
+      # T3.4d standing wiring: declared standing/maintenance mode (UC-016).
+      standing: Keyword.get(opts, :standing, false),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
@@ -134,6 +153,22 @@ defmodule Kazi.Goal do
   @spec create?(t()) :: boolean()
   def create?(%__MODULE__{mode: :create}), do: true
   def create?(%__MODULE__{}), do: false
+
+  @doc """
+  Returns true if the goal is a STANDING (continuous/maintenance) reconciler
+  (T3.4d, UC-016) — the loop holds its predicates true forever rather than
+  converging and stopping.
+
+  ## Examples
+
+      iex> Kazi.Goal.standing?(Kazi.Goal.new("g", standing: true))
+      true
+
+      iex> Kazi.Goal.standing?(Kazi.Goal.new("g"))
+      false
+  """
+  @spec standing?(t()) :: boolean()
+  def standing?(%__MODULE__{standing: standing}), do: standing == true
 
   @doc """
   Returns the goal's acceptance predicates — the ordinary (non-guard) predicates

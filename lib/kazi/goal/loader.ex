@@ -20,12 +20,22 @@ defmodule Kazi.Goal.Loader do
   | `id`     | string    | yes      | `Goal.id`           |
   | `name`   | string    | no       | `Goal.name`         |
   | `mode`   | string    | no       | `Goal.mode` — `"repair"` (default) or `"create"` |
+  | `standing` | boolean | no       | `Goal.standing` — `true` for a standing/maintenance goal (default `false`) |
   | `metadata` | table   | no       | `Goal.metadata` (string-keyed map, verbatim) |
 
   `mode = "create"` declares a *creation-mode* goal whose predicates are
   acceptance criteria for NEW behavior, authored to fail at t0 (T2.1, concept
   §10 Slice 2). It records authoring intent; it does not change how the loop
   evaluates predicates. An unknown `mode` is a validation error.
+
+  `standing = true` declares a STANDING (continuous/maintenance) reconciler
+  (T3.4d, UC-016): the loop does NOT terminate at convergence but keeps
+  re-observing on a bounded interval to hold the predicates true forever
+  (concept §10 "standing reconcilers"). Omitted (or `false`) is the default
+  one-shot converge-and-stop goal. The standing-mode loop behaviour itself is
+  T3.4a; this key is how a goal *authors* it. The CLI `--standing` flag
+  (`kazi run … --standing`) overrides whatever the goal-file declares. A
+  non-boolean `standing` is a validation error.
 
   ### `[budget]` table (optional, → `Kazi.Budget`)
 
@@ -137,6 +147,8 @@ defmodule Kazi.Goal.Loader do
   def from_map(data) when is_map(data) do
     with {:ok, id} <- fetch_id(data),
          {:ok, mode} <- fetch_mode(data),
+         # T3.4d standing wiring: optional top-level `standing` boolean (UC-016).
+         {:ok, standing} <- fetch_standing(data),
          {:ok, budget} <- build_budget(Map.get(data, "budget", %{})),
          {:ok, scope} <- build_scope(Map.get(data, "scope", %{})),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])) do
@@ -150,6 +162,7 @@ defmodule Kazi.Goal.Loader do
          guards: guards,
          budget: budget,
          scope: scope,
+         standing: standing,
          metadata: Map.get(data, "metadata", %{})
        )}
     end
@@ -201,6 +214,16 @@ defmodule Kazi.Goal.Loader do
 
       _ ->
         {:error, "goal \"mode\" must be a string"}
+    end
+  end
+
+  # T3.4d standing wiring: optional top-level `standing` boolean (UC-016).
+  # Default false (one-shot converge-and-stop); a non-boolean fails loudly at
+  # load time rather than being silently coerced.
+  defp fetch_standing(data) do
+    case Map.get(data, "standing", false) do
+      standing when is_boolean(standing) -> {:ok, standing}
+      _ -> {:error, "goal \"standing\" must be a boolean"}
     end
   end
 

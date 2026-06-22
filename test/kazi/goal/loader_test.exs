@@ -166,6 +166,44 @@ defmodule Kazi.Goal.LoaderTest do
     end
   end
 
+  describe "standing mode (T3.4d) — schema additions" do
+    test "goal standing defaults to false when omitted" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "test_runner"}]}
+      assert {:ok, %Goal{standing: false} = goal} = Loader.from_map(data)
+      refute Goal.standing?(goal)
+    end
+
+    test "standing = true parses to a standing goal" do
+      data = %{
+        "id" => "g",
+        "standing" => true,
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{standing: true} = goal} = Loader.from_map(data)
+      assert Goal.standing?(goal)
+    end
+
+    test "a non-boolean standing is a load-time validation error" do
+      data = %{
+        "id" => "g",
+        "standing" => "yes",
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "standing"
+    end
+
+    test "the checked-in standing example loads as a standing goal" do
+      path = Path.join([File.cwd!(), "priv", "examples", "standing_maintenance.toml"])
+      assert {:ok, %Goal{} = goal} = Loader.load(path)
+      assert goal.id == "standing-maintenance-example"
+      assert Goal.standing?(goal)
+      assert Enum.map(goal.predicates, & &1.id) == ["tests-green", "healthz-live"]
+    end
+  end
+
   describe "prod_log provider (T1.6) — author + dispatch" do
     test "parses a goal declaring the prod_log provider into a :prod_log predicate" do
       toml = """
