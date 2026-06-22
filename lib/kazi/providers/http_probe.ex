@@ -152,7 +152,15 @@ defmodule Kazi.Providers.HttpProbe do
     end
   end
 
-  defp body_matches?(body, expected, :exact), do: body == expected
+  # `:body_match` may arrive as an atom (set programmatically) or as a STRING
+  # ("exact"/"contains") when it comes from a TOML goal-file, which cannot express
+  # atoms (Kazi.Goal.Loader passes config values verbatim). Both spellings of
+  # "exact" mean exact equality; anything else is the default substring-contains.
+  # Without this, a goal-file's `body_match = "exact"` silently degraded to
+  # contains, and e.g. expecting "ok" falsely passed on "not-ok" (substring).
+  defp body_matches?(body, expected, match) when match in [:exact, "exact"],
+    do: body == expected
+
   defp body_matches?(body, expected, _contains), do: String.contains?(body, expected)
 
   defp method(config) do

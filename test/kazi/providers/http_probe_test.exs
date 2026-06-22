@@ -79,6 +79,23 @@ defmodule Kazi.Providers.HttpProbeTest do
       stop.()
     end
 
+    test "body_match as the STRING \"exact\" (goal-file form) is honored → :fail on substring" do
+      # A TOML goal-file can only supply body_match = "exact" (a string, not an
+      # atom). It must mean exact equality, otherwise expecting "ok" falsely
+      # passes against "not-ok" because "not-ok" CONTAINS "ok". Regression for the
+      # T0.12 dogfood false-pass.
+      {port, stop} = start_server(status_line: "200 OK", body: "not-ok")
+
+      predicate =
+        Predicate.new(:live, :http_probe,
+          config: %{url: url(port), expect_body: "ok", body_match: "exact"}
+        )
+
+      assert %PredicateResult{status: :fail} = HttpProbe.evaluate(predicate, %{})
+
+      stop.()
+    end
+
     test "wrong status → :fail with status assertion failure" do
       {port, stop} = start_server(status_line: "500 Internal Server Error", body: "boom")
 
