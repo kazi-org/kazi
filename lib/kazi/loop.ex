@@ -1053,16 +1053,20 @@ defmodule Kazi.Loop do
       "evidence: #{inspect(Map.get(params, :evidence, %{}))}"
   end
 
-  # T4.5 context injection (ADR-0010 §3): prepare the target workspace for the
+  # T4.5/T4.4 context injection (ADR-0010 §3): prepare the target workspace for the
   # imminent stateless dispatch — expose the code-review-graph MCP in its
-  # `.mcp.json` and refresh its code graph if one is present (idempotent). A
-  # nil workspace (loops driven without a target dir) or any prep error is a
-  # no-op for the dispatch: orientation is an optimisation, never a precondition.
+  # `.mcp.json`, refresh its code graph if one is present, and write the
+  # `.kazi/context.md` orientation file from the iteration's failing predicates
+  # (all idempotent). A nil workspace (loops driven without a target dir) or any
+  # prep error is a no-op for the dispatch: orientation is an optimisation, never a
+  # precondition.
   @spec prepare_workspace(Data.t()) :: :ok
   defp prepare_workspace(%Data{workspace: nil}), do: :ok
 
-  defp prepare_workspace(%Data{workspace: workspace, workspace_opts: workspace_opts}) do
-    case Kazi.Workspace.prepare(workspace, workspace_opts) do
+  defp prepare_workspace(%Data{workspace: workspace, workspace_opts: workspace_opts} = data) do
+    opts = Keyword.put_new(workspace_opts, :orientation, {failing_slice(data), []})
+
+    case Kazi.Workspace.prepare(workspace, opts) do
       {:ok, _summary} ->
         :ok
 
@@ -1074,6 +1078,16 @@ defmodule Kazi.Loop do
 
         :ok
     end
+  end
+
+  # The failing slice the orientation builder ranks against: `{id, result}` pairs
+  # for every `:fail` predicate in the current vector (the shape
+  # `Kazi.Context.orientation_pack/3` expects). Empty when there is no vector yet.
+  @spec failing_slice(Data.t()) :: [{Predicate.id(), PredicateResult.t()}]
+  defp failing_slice(%Data{vector: nil}), do: []
+
+  defp failing_slice(%Data{vector: %PredicateVector{results: results}}) do
+    for {id, %PredicateResult{status: :fail} = result} <- results, do: {id, result}
   end
 
   # Context threaded to an action's execute/2 (Kazi.Action.context). A plain map
