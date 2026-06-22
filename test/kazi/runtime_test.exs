@@ -1,0 +1,293 @@
+defmodule Kazi.RuntimeTest do
+  @moduledoc """
+  Tier 2 — the end-to-end assembly test for `Kazi.Runtime` (T0.7b, UC-004).
+
+  This drives the REAL component wiring — the real `TestRunner` and `HttpProbe`
+  providers, the real `ClaudeAdapter` harness, the real `Integrate` and `Deploy`
+  actions, and real SQLite persistence — against a TEMP target. It substitutes
+  nothing in `lib/`; it only points the seams those modules already expose at
+  local stubs:
+
+    * the harness binary (`adapter_opts: [command: stub]`) — a real script that
+      "fixes" the code by writing the marker file the test predicate checks;
+    * the integrate action's `:integrator` seam — a real local rebase-merge into
+      a bare origin (stands in for `gh pr merge --rebase`);
+    * the deploy action's `:deploy_cmd` seam — a stub emulating `gcloud run
+      deploy` that prints the live URL.
+
+  The live `http_probe` predicate makes a REAL HTTP request against a local
+  server, so the loop observes a genuine predicate vector, dispatches the
+  harness, integrates, deploys, and converges only once the whole vector
+  (including the live probe) is satisfied — and every iteration is projected to
+  the test SQLite read-model.
+  """
+  # Real git + real HTTP + the shared SQLite Sandbox connection: serial.
+  use ExUnit.Case, async: false
+
+  alias Kazi.{Goal, Predicate, PredicateVector, ReadModel, Repo, Runtime, Scope}
+
+  @moduletag :tmp_dir
+
+  setup do
+    # The runtime's persistence seam writes through Kazi.ReadModel on the loop's
+    # process. Share this checked-out Sandbox connection with any process so the
+    # loop's writes land in the same transaction the test reads from.
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    :ok
+  end
+
+  test "drives a goal end-to-end through real components to convergence + persists every iteration",
+       %{tmp_dir: tmp_dir} do
+    %{work: work, bare: bare} = setup_repo(tmp_dir)
+
+    # A local HTTP server the live probe really requests. It serves a body file
+    # that starts as "down" so the live predicate FAILS before deploy — forcing
+    # the loop through the full reconcile sequence — and the deploy stub flips it
+    # to "ok" so the probe passes only against the "deployed" service.
+    {server, url, body_file} = start_http_server("down")
+    on_exit(fn -> :inets.stop(:httpd, server) end)
+
+    # The harness stub "fixes" the code: it writes the marker file the test
+    # predicate checks, so the :tests predicate goes red → green across dispatch.
+    harness_stub = write_harness_stub(tmp_dir, work)
+
+    # The deploy stub stands in for `gcloud run deploy`: it "ships" the service
+    # (flips the live body to "ok") and prints the service URL.
+    deploy_stub = write_deploy_stub(tmp_dir, url, body_file)
+
+    # A real local rebase-merge integrator (stands in for `gh pr merge --rebase`).
+    test_pid = self()
+
+    integrator = fn request, _opts ->
+      send(test_pid, {:integrated, request.branch, request.base})
+      merge_commit = local_rebase_merge(bare, request.branch, request.base)
+      {:ok, %{pr: 7, merge_commit: merge_commit}}
+    end
+
+    goal =
+      Goal.new("runtime-e2e",
+        predicates: [
+          # Real test-runner: passes once `fixed.txt` exists in the workspace.
+          Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "test -f fixed.txt"]}),
+          # Real live probe against the running server (deploy-gated by kind).
+          Predicate.new(:live, :http_probe,
+            config: %{url: url, expect_status: 200, expect_body: "ok"}
+          )
+        ],
+        scope: Scope.new(workspace: work)
+      )
+
+    assert {:ok, result} =
+             Runtime.run(goal,
+               workspace: work,
+               adapter_opts: [command: harness_stub],
+               integrator: integrator,
+               deploy_cmd: deploy_stub,
+               deploy_params: %{
+                 service: "kazi-e2e",
+                 project: "kazi-test",
+                 region: "us-central1",
+                 source: work
+               },
+               # Poll the live predicate fast so the test doesn't wait on the
+               # production default interval.
+               reobserve_interval_ms: 5,
+               await_timeout: 10_000
+             )
+
+    # Converged via the real reconcile sequence: dispatch (code red) → integrate
+    # (code green, not landed) → deploy (landed) → converge once the live probe
+    # passes against the deployed service.
+    assert result.outcome == :converged
+    assert result.actions == [:dispatch_agent, :integrate, :deploy]
+
+    # The integrate action's real local git path ran (branch landed on origin).
+    assert_received {:integrated, branch, "main"}
+    assert is_binary(branch)
+    {tree, 0} = System.cmd("git", ["ls-tree", "-r", "--name-only", "main"], cd: bare)
+    assert tree =~ "fixed.txt"
+
+    # The harness really ran in the workspace and created the marker file.
+    assert File.exists?(Path.join(work, "fixed.txt"))
+
+    # Persistence: every observed iteration was projected to the read-model, the
+    # vector round-trips, and the terminal iteration is marked converged.
+    iterations = ReadModel.list_iterations("runtime-e2e")
+    assert length(iterations) == result.iterations
+    assert Enum.map(iterations, & &1.iteration_index) == Enum.to_list(0..(result.iterations - 1))
+
+    last = List.last(iterations)
+    assert last.converged == true
+    refute Enum.any?(Enum.drop(iterations, -1), & &1.converged)
+
+    # The persisted final vector is the satisfied one the loop converged on.
+    final_vector = ReadModel.to_predicate_vector(last)
+    assert PredicateVector.satisfied?(final_vector)
+    assert PredicateVector.get(final_vector, "code").status == :pass
+    assert PredicateVector.get(final_vector, "live").status == :pass
+  end
+
+  test "fails loudly when a predicate names a provider the runtime can't dispatch" do
+    goal =
+      Goal.new("unknown-kind",
+        predicates: [Predicate.new(:p, :browser)]
+      )
+
+    assert {:error, {:unknown_provider_kinds, [:browser]}} = Runtime.run(goal, persist?: false)
+  end
+
+  test "runs without touching the read-model when persistence is disabled", %{tmp_dir: tmp_dir} do
+    %{work: work} = setup_repo(tmp_dir)
+    File.write!(Path.join(work, "fixed.txt"), "already-fixed\n")
+    {server, url, body_file} = start_http_server("ok")
+    on_exit(fn -> :inets.stop(:httpd, server) end)
+
+    deploy_stub = write_deploy_stub(tmp_dir, url, body_file)
+
+    integrator = fn request, _opts ->
+      {:ok, %{pr: 1, merge_commit: local_rebase_merge_origin(work, request.branch, request.base)}}
+    end
+
+    goal =
+      Goal.new("no-persist",
+        predicates: [
+          Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "test -f fixed.txt"]}),
+          Predicate.new(:live, :http_probe, config: %{url: url, expect_status: 200})
+        ],
+        scope: Scope.new(workspace: work)
+      )
+
+    assert {:ok, result} =
+             Runtime.run(goal,
+               workspace: work,
+               persist?: false,
+               adapter_opts: [command: "true"],
+               integrator: integrator,
+               deploy_cmd: deploy_stub,
+               deploy_params: %{
+                 service: "s",
+                 project: "p",
+                 region: "r",
+                 source: work
+               },
+               reobserve_interval_ms: 5,
+               await_timeout: 10_000
+             )
+
+    assert result.outcome == :converged
+    assert ReadModel.list_iterations("no-persist") == []
+  end
+
+  # --- fixtures ----------------------------------------------------------------
+
+  # A local bare "origin" with an initial commit on `main`, plus a working clone.
+  defp setup_repo(tmp_dir) do
+    bare = Path.join(tmp_dir, "origin.git")
+    work = Path.join(tmp_dir, "work")
+
+    {_, 0} = System.cmd("git", ["init", "--bare", "--initial-branch=main", bare])
+    {_, 0} = System.cmd("git", ["clone", bare, work], stderr_to_stdout: true)
+    git_config(work)
+
+    File.write!(Path.join(work, "README.md"), "seed\n")
+    {_, 0} = System.cmd("git", ["add", "-A"], cd: work)
+    {_, 0} = System.cmd("git", ["commit", "-m", "seed"], cd: work)
+    {_, 0} = System.cmd("git", ["push", "origin", "main"], cd: work, stderr_to_stdout: true)
+    {_, 0} = System.cmd("git", ["symbolic-ref", "HEAD", "refs/heads/main"], cd: bare)
+
+    %{bare: bare, work: work}
+  end
+
+  defp git_config(repo) do
+    {_, 0} = System.cmd("git", ["config", "user.email", "kazi-test@example.com"], cd: repo)
+    {_, 0} = System.cmd("git", ["config", "user.name", "kazi test"], cd: repo)
+    {_, 0} = System.cmd("git", ["config", "commit.gpgsign", "false"], cd: repo)
+  end
+
+  # The harness stub: a real executable the ClaudeAdapter shells out to. It
+  # writes the marker file the :tests predicate checks INTO THE WORKSPACE (proving
+  # the adapter ran with cd: workspace), then exits 0.
+  defp write_harness_stub(tmp_dir, _work) do
+    path = Path.join(tmp_dir, "stub_harness.sh")
+
+    File.write!(path, """
+    #!/bin/sh
+    # The agent "fixes" the code by creating the file the test predicate checks.
+    echo "the converged fix" > fixed.txt
+    echo "harness ran in $(pwd)"
+    exit 0
+    """)
+
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  # Stub emulating `gcloud run deploy`: "ship" the service by flipping the live
+  # body to "ok", print progress, then the service URL.
+  defp write_deploy_stub(tmp_dir, url, body_file) do
+    path = Path.join(tmp_dir, "stub_deploy_#{System.unique_integer([:positive])}.sh")
+
+    File.write!(path, """
+    #!/bin/sh
+    echo "Building and deploying from source..."
+    # The deployed service now answers healthy.
+    printf 'ok' > "#{body_file}"
+    echo "#{url}"
+    exit 0
+    """)
+
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  # A minimal local HTTP server (stdlib :inets/:httpd) that answers GET /healthz
+  # with the current contents of the served body file, so the live http_probe
+  # makes a real request whose result tracks the (mutable) file. Returns the
+  # served body-file path so a stub can change what the probe sees.
+  defp start_http_server(body) do
+    docroot = Path.join(System.tmp_dir!(), "kazi_httpd_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(docroot)
+    body_file = Path.join(docroot, "healthz")
+    File.write!(body_file, body)
+
+    {:ok, pid} =
+      :inets.start(:httpd,
+        port: 0,
+        server_name: ~c"kazi-test",
+        server_root: String.to_charlist(docroot),
+        document_root: String.to_charlist(docroot),
+        bind_address: ~c"127.0.0.1",
+        mime_types: [{~c"healthz", ~c"text/plain"}, {~c"", ~c"text/plain"}]
+      )
+
+    info = :httpd.info(pid)
+    port = info[:port]
+    {pid, "http://127.0.0.1:#{port}/healthz", body_file}
+  end
+
+  # Stand-in for `gh pr merge --rebase`: rebase the pushed branch onto base in a
+  # fresh clone of the bare origin and push the result. Returns the new base tip.
+  defp local_rebase_merge(bare, branch, base) do
+    tmp = Path.join(System.tmp_dir!(), "merge-#{System.unique_integer([:positive])}")
+    {_, 0} = System.cmd("git", ["clone", bare, tmp], stderr_to_stdout: true)
+    git_config(tmp)
+
+    {_, 0} = System.cmd("git", ["checkout", base], cd: tmp, stderr_to_stdout: true)
+    {_, 0} = System.cmd("git", ["checkout", branch], cd: tmp, stderr_to_stdout: true)
+    {_, 0} = System.cmd("git", ["rebase", base], cd: tmp, stderr_to_stdout: true)
+    {_, 0} = System.cmd("git", ["checkout", base], cd: tmp, stderr_to_stdout: true)
+    {_, 0} = System.cmd("git", ["merge", "--ff-only", branch], cd: tmp, stderr_to_stdout: true)
+    {_, 0} = System.cmd("git", ["push", "origin", base], cd: tmp, stderr_to_stdout: true)
+
+    {sha, 0} = System.cmd("git", ["rev-parse", base], cd: tmp)
+    File.rm_rf!(tmp)
+    String.trim(sha)
+  end
+
+  # Resolve the bare origin path from a working clone, then rebase-merge there.
+  defp local_rebase_merge_origin(work, branch, base) do
+    {origin, 0} = System.cmd("git", ["remote", "get-url", "origin"], cd: work)
+    local_rebase_merge(String.trim(origin), branch, base)
+  end
+end
