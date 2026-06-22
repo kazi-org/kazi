@@ -24,6 +24,7 @@ defmodule KaziWeb.DashboardLive do
       <p>Read-only projection of the reconciler (ADR-0011). Panels arrive in T3.6b–d.</p>
       <nav>
         <.link navigate={~p"/goals"} id="nav-goal-board">Goal board</.link>
+        <.link navigate={~p"/leases"} id="nav-lease-map">Lease map</.link>
       </nav>
     </main>
     """
