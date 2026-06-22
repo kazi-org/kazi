@@ -108,6 +108,12 @@ defmodule Kazi.Loop do
   # only feeds it the per-iteration history (T1.1) + dispatch log and records the
   # flags it returns (see observe_tick/1).
   alias Kazi.Loop.RegressionDetector
+  # T4.7 working-set digest: the pure, bounded "files touched last iteration"
+  # distiller. The loop reads the harness result's `:touched` working set through
+  # it (map memory ONLY — never the transcript) and threads the digest into the
+  # NEXT dispatch's prompt (see the `:dispatch_agent` ACT clause and
+  # `dispatch_prompt/2`).
+  alias Kazi.Loop.Digest
 
   require Logger
 
@@ -281,7 +287,19 @@ defmodule Kazi.Loop do
               # green_iteration, red_iteration, status, attributed_dispatch.
               # Recomputed each observation over the full history; surfaced in
               # snapshot/1 and projected to the read-model via on_iteration.
-              regressions: []
+              regressions: [],
+              # --- T4.7 working-set digest: map memory across iterations -------
+              # The bounded "files touched last iteration" digest (a
+              # `Kazi.Loop.Digest`) distilled from the PREVIOUS agent dispatch's
+              # touched working set (T4.1 json), threaded into the NEXT dispatch's
+              # prompt so a stateless `claude -p` iteration starts knowing WHERE
+              # prior work landed without re-exploring (ADR-0010 §4, UC-022).
+              # Strictly map memory: it carries file paths only, never the agent's
+              # transcript/reasoning/result text — carrying those would re-anchor
+              # the agent on a prior approach (ADR-0008). Empty until the first
+              # dispatch reports a touched set, so the first iteration's prompt is
+              # unchanged. Appended last so the existing field order is untouched.
+              working_set_digest: Digest.empty()
   end
 
   # =============================================================================
@@ -585,6 +603,15 @@ defmodule Kazi.Loop do
     # T1.4 budget: accumulate this run's token estimate (if the harness reported
     # one) into the running total the budget guard checks next tick.
     data = accumulate_tokens(data, result)
+
+    # T4.7 working-set digest: distill a BOUNDED, transcript-free note of the
+    # files this iteration touched (map memory ONLY — `Digest.from_result/2`
+    # reads the result's `:touched` set and nothing else, never the agent's
+    # transcript/result text) and carry it forward so the NEXT dispatch's prompt
+    # starts oriented to WHERE prior work landed (ADR-0010 §4). A run that reports
+    # no touched set leaves the prior digest untouched, so the carried map memory
+    # is the most recent iteration that actually reported one.
+    data = record_working_set(data, result)
 
     # The code changed under us: any prior land/deploy is now stale. Re-observe
     # on the poll interval (not zero) so a goal whose code predicate never goes
@@ -1045,12 +1072,25 @@ defmodule Kazi.Loop do
   # (concept §5). The concrete claude -p adapter (T0.6) owns prompt shaping; here
   # we hand it a deterministic, evidence-bearing string the test doubles can
   # observe.
+  #
+  # T4.7 map memory: a bounded "files touched last iteration" digest is PREPENDED
+  # when one exists (a prior dispatch reported a touched working set). It carries
+  # WHERE prior work landed — file paths only, never the agent's transcript — so
+  # the next stateless iteration starts oriented without re-exploring (ADR-0010
+  # §4). On the FIRST iteration the digest is empty and renders to nothing, so the
+  # prompt is exactly the evidence string above (back-compat).
   @spec dispatch_prompt(Action.t(), Data.t()) :: String.t()
-  defp dispatch_prompt(%Action{params: params}, %Data{goal: goal}) do
+  defp dispatch_prompt(%Action{params: params}, %Data{goal: goal} = data) do
     failing = Map.get(params, :failing, [])
 
-    "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}\n" <>
-      "evidence: #{inspect(Map.get(params, :evidence, %{}))}"
+    evidence_prompt =
+      "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}\n" <>
+        "evidence: #{inspect(Map.get(params, :evidence, %{}))}"
+
+    case Digest.render(data.working_set_digest) do
+      "" -> evidence_prompt
+      note -> note <> "\n\n" <> evidence_prompt
+    end
   end
 
   # T4.5/T4.4 context injection (ADR-0010 §3): prepare the target workspace for the
@@ -1347,6 +1387,28 @@ defmodule Kazi.Loop do
     do: tokens
 
   defp token_estimate(_), do: 0
+
+  # =============================================================================
+  # T4.7 working-set digest: map memory across iterations
+  # =============================================================================
+
+  # Distill this dispatch's BOUNDED working-set digest from the harness result and
+  # carry it forward for the NEXT dispatch's prompt. `Digest.from_result/2` reads
+  # the result's `:touched` working set and NOTHING else — never the agent's
+  # `:result`/`:output` transcript — so the carried map memory cannot contain
+  # conversation memory (ADR-0008 anti-anchoring), by construction.
+  #
+  # A result that reports a touched set replaces the digest; a result that reports
+  # NONE (an error, or a success envelope without `:touched`) leaves the prior
+  # digest untouched, so the loop keeps orienting the next iteration with the most
+  # recent working set that was actually reported rather than dropping it.
+  @spec record_working_set(Data.t(), Kazi.HarnessAdapter.result()) :: Data.t()
+  defp record_working_set(%Data{} = data, result) do
+    case Digest.from_result(result) do
+      %Digest{files: []} -> data
+      %Digest{} = digest -> %Data{data | working_set_digest: digest}
+    end
+  end
 
   # =============================================================================
   # Misc helpers
