@@ -17,10 +17,13 @@ defmodule Kazi.ReadModel do
   *projecting an already-true event*, not as deciding anything.
   """
 
+  @behaviour Kazi.Context.Cache
+
   import Ecto.Query, only: [from: 2]
 
+  alias Kazi.Context.Pack
   alias Kazi.{Action, PredicateResult, PredicateVector, Repo}
-  alias Kazi.ReadModel.Iteration
+  alias Kazi.ReadModel.{Iteration, OrientationPackCache}
 
   @typedoc """
   Attributes for `record_iteration/1`. `:goal_ref` and `:iteration_index` are
@@ -196,6 +199,88 @@ defmodule Kazi.ReadModel do
       {id, PredicateResult.new(deserialize_status(status), Map.get(entry, "evidence", %{}))}
     end)
     |> PredicateVector.new()
+  end
+
+  # --- orientation-pack cache (T4.6, ADR-0010 §4) ----------------------------
+
+  @doc """
+  Caches an orientation `Kazi.Context.Pack` under `cache_key`
+  (`Kazi.Context.cache_key/3`), recording the `workspace`/`git_sha` it was built at
+  and the pack's blast radius (`Kazi.Context.Pack.blast_radius/1`) for incremental
+  invalidation (T4.6, ADR-0010 §4).
+
+  Upserts: re-storing under the same key replaces the prior entry (a refreshed pack
+  at the same `(workspace, git-SHA, failing-set)` whose blast radius changed). The
+  pack is serialized via `Kazi.Context.Pack.to_serializable/1`; `get_cached_pack/2`
+  rehydrates it.
+
+  Returns `{:ok, row}` or `{:error, changeset}`.
+  """
+  @impl Kazi.Context.Cache
+  @spec put_cached_pack(String.t(), String.t(), String.t(), Pack.t()) ::
+          {:ok, OrientationPackCache.t()} | {:error, Ecto.Changeset.t()}
+  def put_cached_pack(cache_key, workspace, git_sha, %Pack{} = pack)
+      when is_binary(cache_key) and is_binary(workspace) and is_binary(git_sha) do
+    attrs = %{
+      cache_key: cache_key,
+      workspace: workspace,
+      git_sha: git_sha,
+      pack: Pack.to_serializable(pack),
+      blast_radius: Pack.blast_radius(pack)
+    }
+
+    %OrientationPackCache{}
+    |> OrientationPackCache.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: {:replace, [:workspace, :git_sha, :pack, :blast_radius, :updated_at]},
+      conflict_target: :cache_key
+    )
+  end
+
+  @doc """
+  Fetches the cached orientation `Kazi.Context.Pack` for `cache_key`, applying
+  incremental blast-radius invalidation (T4.6, ADR-0010 §4).
+
+  Returns the rehydrated pack only on a **fresh hit**: an entry exists *and* its
+  stored blast radius equals `current_blast_radius` (the impacted files/symbols the
+  pack would be scoped to now). On a miss, or when the blast radius changed (the
+  cached pack is stale), returns `nil` so the caller rebuilds.
+
+  Pass `current_blast_radius` as the already-sorted set the fresh survey yields
+  (`Kazi.Context.Pack.blast_radius/1`); equality is set-wise on the stored,
+  sorted column.
+  """
+  @impl Kazi.Context.Cache
+  @spec get_cached_pack(String.t(), [String.t()]) :: Pack.t() | nil
+  def get_cached_pack(cache_key, current_blast_radius)
+      when is_binary(cache_key) and is_list(current_blast_radius) do
+    case Repo.get_by(OrientationPackCache, cache_key: cache_key) do
+      nil ->
+        nil
+
+      %OrientationPackCache{blast_radius: stored, pack: serialized} ->
+        if Enum.sort(stored) == Enum.sort(current_blast_radius) do
+          Pack.from_serializable(serialized)
+        else
+          # Blast radius changed at the same key: the cached pack is stale. Treat
+          # as a miss; the caller rebuilds and re-stores (upsert) the fresh pack.
+          nil
+        end
+    end
+  end
+
+  @doc """
+  Deletes the cached orientation pack for `cache_key`, if any. Returns the number
+  of rows removed (`0` or `1`). Used to explicitly evict an entry; routine
+  invalidation is handled inline by `get_cached_pack/2` (a blast-radius mismatch
+  is a miss, and the next `put_cached_pack/4` overwrites the stale row).
+  """
+  @spec invalidate_cached_pack(String.t()) :: non_neg_integer()
+  def invalidate_cached_pack(cache_key) when is_binary(cache_key) do
+    {count, _} =
+      Repo.delete_all(from(c in OrientationPackCache, where: c.cache_key == ^cache_key))
+
+    count
   end
 
   # --- serialization helpers -------------------------------------------------

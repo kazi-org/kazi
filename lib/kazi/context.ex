@@ -60,12 +60,16 @@ defmodule Kazi.Context do
       workspace.
     * `render/1` — render a pack to deterministic prompt text.
     * `cache_key/3` — the stable cache key for `(workspace, git_sha, failing)`.
+    * `cached_orientation_pack/4` — `orientation_pack/3` behind the SHA-keyed
+      read-model cache (T4.6): reuse on a fresh hit, build + store on a miss or a
+      blast-radius change.
   """
 
   alias Kazi.Context.{Pack, RepoMapSource, Symbol}
   alias Kazi.{Predicate, PredicateResult}
 
   @default_token_budget 4_000
+  @default_cache Kazi.ReadModel
 
   @typedoc """
   The failing slice handed in each iteration: `{predicate_id, result}` pairs (the
@@ -169,6 +173,71 @@ defmodule Kazi.Context do
 
     payload = Enum.join([workspace, git_sha, failing_ids], "\n")
     :crypto.hash(:sha256, payload) |> Base.encode16(case: :lower)
+  end
+
+  @typedoc """
+  Options for `cached_orientation_pack/4`. Extends `t:opts/0` with the cache seam:
+
+    * `:cache` — a module implementing `Kazi.Context.Cache` (defaults to
+      `Kazi.ReadModel`, the SQLite read-model). Injected for hermetic tests.
+    * `:on_build` — a 0-arity function called each time the pure builder runs (a
+      cache miss), so tests can assert a hit did **not** rebuild. Defaults to a
+      no-op.
+
+  Plus every option `orientation_pack/3` accepts (`:token_budget`,
+  `:graph_source`), forwarded to the builder on a miss.
+  """
+  @type cache_opts ::
+          [
+            cache: module(),
+            on_build: (-> any())
+          ]
+          | opts()
+
+  @doc """
+  `orientation_pack/3` behind the SHA-keyed read-model cache (T4.6, ADR-0010 §4).
+
+  Caching is an optional layer over the pure builder. The flow:
+
+    1. key = `cache_key(workspace, git_sha, failing)`.
+    2. `Cache.get_cached_pack(key, current_blast_radius)` — on a **fresh hit** (an
+       entry exists *and* its stored blast radius equals `current_blast_radius`)
+       the cached pack is returned and the builder is **not** invoked.
+    3. On a miss — no entry, or the blast radius changed (the cached pack is stale)
+       — the pure builder runs, the fresh pack is stored under `key`, and returned.
+
+  `current_blast_radius` is the impacted files/symbols the pack is scoped to *now*
+  (e.g. the changed working set from the last iteration, T4.1, sorted). It is what
+  drives incremental invalidation: at the same `(workspace, git-SHA, failing-set)`
+  the key is identical, so a changed blast radius is what marks the cached pack
+  stale and forces a rebuild.
+
+  The cache is injected via `opts[:cache]` (default `Kazi.ReadModel`); tests pass
+  an in-memory double, keeping this hermetic. The pure `orientation_pack/3` is
+  unchanged and still usable directly when no cache is wanted.
+  """
+  @spec cached_orientation_pack(failing(), String.t(), [String.t()], cache_opts()) :: Pack.t()
+  def cached_orientation_pack(failing, workspace, git_sha_and_radius, opts \\ [])
+
+  def cached_orientation_pack(failing, workspace, {git_sha, current_blast_radius}, opts)
+      when is_list(failing) and is_binary(workspace) and is_binary(git_sha) and
+             is_list(current_blast_radius) and is_list(opts) do
+    cache = Keyword.get(opts, :cache, @default_cache)
+    on_build = Keyword.get(opts, :on_build, fn -> :ok end)
+    builder_opts = Keyword.drop(opts, [:cache, :on_build])
+
+    key = cache_key(workspace, git_sha, failing)
+
+    case cache.get_cached_pack(key, current_blast_radius) do
+      %Pack{} = cached ->
+        cached
+
+      nil ->
+        on_build.()
+        pack = orientation_pack(failing, workspace, builder_opts)
+        _ = cache.put_cached_pack(key, workspace, git_sha, pack)
+        pack
+    end
   end
 
   # --- ranking & evidence extraction -------------------------------------------
