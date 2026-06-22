@@ -4,6 +4,46 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-22 — E7: registry adapter + goal-set (`kazi init --registry`), ADR-0015
+
+**What shipped.** `kazi init` grew a second deterministic source: a capability
+registry (`capabilities.json`) -> a goal SET, one goal-file per capability
+(ADR-0015). Delivered in PR #75 alongside the two prerequisites that did not yet
+exist on main — the goal-file writer `Kazi.Adopt.to_toml/1` (T5.3) and the `kazi
+init` CLI verb (T5.5). New modules: `Kazi.Adopt.Writer` (deterministic hand-rolled
+TOML renderer + commented `http_probe` live-predicate scaffold; no TOML-encoder
+dep) and `Kazi.Adopt.Registry` (`parse/2`, `to_goal_set/2`). JSON decode via the
+existing `jason` dep. Suite 741 -> 785.
+
+**The cardinality decision (ADR-0015).** One goal-file PER capability, not one
+goal carrying a predicate matrix. A goal is the unit of convergence/budget/status;
+a capability is the unit of "what the product does" and the status we want
+computed. A predicate matrix would couple N capabilities into one convergence unit
+(one failure => whole goal stuck; shared budget; per-capability status lost). The
+goal set is what makes status loop-computed per capability — the point of the
+feature.
+
+**Boundaries enforced mechanically.** Prose `.md` is rejected before reading
+("generated views, not registry inputs" — bakes JSON-is-truth into the tool).
+Source-inferred bindings stay behind `--enrich` (off by default), filling only
+gaps, never overriding a declared binding. Live predicates are commented TODO
+scaffolds, never guessed.
+
+**Independent verification (not the subagent's word).** Ran the fixture
+`capabilities.json` (3 capabilities) through `Registry.parse` -> `to_goal_set` ->
+`Kazi.Goal.Loader.from_map` myself: all 3 goals load; a multi-binding capability
+yields multiple `test_runner` predicates; prose `.md` rejected with a clear
+message. The convergence test (`adopt_registry_convergence_test.exs`) drives a
+registry-derived goal through the REAL `Kazi.Runtime` with the same stub seams
+`Kazi.RuntimeTest` uses and reaches `:converged` — proving a registry-derived goal
+is runnable, not merely loadable.
+
+**Plan note.** E7 listed T5.3/T5.5 as prereqs and also (accidentally) duplicated
+their WBS lines; reconciled to single entries under E5, marked done. T6.2 (Burrito
+wrap, PR #74) merged its config/wiring but is left UNCHECKED: the host binary
+could not be linked locally (Zig 0.15.2 vs macOS-26 SDK); it completes on the T6.3
+CI matrix (macOS-15/Ubuntu runners), not this machine.
+
 ## 2026-06-21 — Slice-2 creation dogfood (T2.5): kazi BUILDS a small real feature from failing acceptance criteria to green-and-live
 
 **What was exercised.** The Slice-2 creation acceptance dogfood (UC-010, D2) —
