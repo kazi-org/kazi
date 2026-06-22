@@ -83,6 +83,30 @@ defmodule Kazi.Actions.Deploy do
 
   Only tests substitute the stub; lib/ carries the real deploy logic
   (zero-stub policy).
+
+  ## Release tagging (T3.3c, UC-015)
+
+  On a **successful** deploy the action records a **release ref** for the
+  deployed artifact — a durable identifier (a git tag by default) that names
+  *what* was shipped, distinct from the `deploy_ref` (the live service URL). The
+  release ref is added to the deploy result as `:release_ref` and is what the
+  loop persists to `Kazi.ReadModel` as evidence of the release.
+
+  Like the deployer, the tagger is **injectable** so tests never touch a real
+  repo or remote. The real default is genuine `git` (`git tag <ref>`); tests
+  point it at a stub. The tagger command is resolved, in order, from:
+
+    1. `params[:tag_cmd]` on the action,
+    2. `context[:tag_cmd]`,
+    3. application env `:kazi, Kazi.Actions.Deploy, :tag_cmd`,
+    4. the real default `"git"`.
+
+  The release ref itself is taken from `params[:release_ref]` when supplied,
+  otherwise derived from the deploy (a timestamped `release-<service>-<ts>`
+  tag). Tagging is best-effort relative to the *deploy*: the deploy already
+  succeeded, so a tagger failure is surfaced as `:release_error` in the result
+  rather than turning the whole deploy into a failure. NO push to a remote is
+  performed (`git tag` is local-only); promotion to a remote is a later concern.
   """
 
   @behaviour Kazi.Action
@@ -92,6 +116,8 @@ defmodule Kazi.Actions.Deploy do
   @default_cmd "gcloud"
   @default_source "."
   @default_port 8080
+  # T3.3c tagging: the real tagger is local `git tag`.
+  @default_tag_cmd "git"
 
   @impl true
   def execute(%Action{kind: :deploy} = action, context) do
@@ -106,7 +132,7 @@ defmodule Kazi.Actions.Deploy do
       cmd = resolve_cmd(params, context)
       args = build_args(service, project, region, source, port, allow_unauth?)
 
-      run(cmd, args, %{service: service, project: project, region: region})
+      run(cmd, args, %{service: service, project: project, region: region}, params, context)
     end
   end
 
@@ -273,17 +299,21 @@ defmodule Kazi.Actions.Deploy do
     ]
   end
 
-  defp run(cmd, args, meta) do
+  defp run(cmd, args, meta, params, context) do
     case System.cmd(cmd, args, stderr_to_stdout: true) do
       {output, 0} ->
         ref = parse_ref(output)
 
-        {:ok,
-         Map.merge(meta, %{
-           deploy_ref: ref,
-           url: ref,
-           output: String.trim(output)
-         })}
+        result =
+          Map.merge(meta, %{
+            deploy_ref: ref,
+            url: ref,
+            output: String.trim(output)
+          })
+
+        # T3.3c tagging: the deploy succeeded — record a release tag/ref for the
+        # artifact and fold it into the result.
+        {:ok, Map.merge(result, tag_release(meta, params, context))}
 
       {output, code} ->
         {:error, {:deploy_failed, code, String.trim(output)}}
@@ -293,6 +323,50 @@ defmodule Kazi.Actions.Deploy do
     # result so the loop branches rather than crashing.
     e in [ErlangError, ArgumentError] ->
       {:error, {:deploy_command_error, Exception.message(e)}}
+  end
+
+  # T3.3c tagging: create/record a release tag for the just-deployed artifact via
+  # the injectable tagger seam, and return the fields to merge into the deploy
+  # result. Tagging is best-effort relative to the (already-successful) deploy:
+  # a tagger failure becomes `:release_error` in the result, not a deploy error.
+  defp tag_release(meta, params, context) do
+    release_ref = release_ref(params, meta)
+    tag_cmd = resolve_tag_cmd(params, context)
+
+    case System.cmd(tag_cmd, ["tag", release_ref], stderr_to_stdout: true) do
+      {_output, 0} ->
+        %{release_ref: release_ref}
+
+      {output, code} ->
+        %{release_ref: release_ref, release_error: {:tag_failed, code, String.trim(output)}}
+    end
+  rescue
+    # A missing/failing tagger must not crash a deploy that already succeeded.
+    e in [ErlangError, ArgumentError] ->
+      %{
+        release_ref: release_ref(params, meta),
+        release_error: {:tag_command_error, Exception.message(e)}
+      }
+  end
+
+  # The release ref: an explicit `params[:release_ref]` when given, otherwise a
+  # timestamped tag derived from the deployed service so each release is unique.
+  defp release_ref(params, meta) do
+    case params[:release_ref] do
+      ref when is_binary(ref) and ref != "" ->
+        ref
+
+      _ ->
+        service = Map.get(meta, :service, "kazi")
+        "release-#{service}-#{System.os_time(:second)}"
+    end
+  end
+
+  defp resolve_tag_cmd(params, context) do
+    params[:tag_cmd] ||
+      context[:tag_cmd] ||
+      Application.get_env(:kazi, __MODULE__, [])[:tag_cmd] ||
+      @default_tag_cmd
   end
 
   # The deploy ref is the service URL gcloud prints. `value(status.url)` yields a

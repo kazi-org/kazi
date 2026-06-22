@@ -200,4 +200,75 @@ defmodule Kazi.ReadModelTest do
 
     assert ReadModel.regressions("clean") == []
   end
+
+  # --- Release tagging round-trip (T3.3c, UC-015) ----------------------------
+
+  test "a release ref from a successful deploy persists and reads back (T3.3c)" do
+    # Drive a real (stubbed) deploy so the release ref under test is the one the
+    # action actually produces, then persist it through the read-model and read
+    # it back — the full deploy → record → query round-trip, hermetically.
+    dir = Path.join(System.tmp_dir!(), "kazi_release_rt_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    deploy_stub = Path.join(dir, "gcloud_ok")
+
+    File.write!(deploy_stub, """
+    #!/bin/sh
+    echo "https://kazi-rt-uc.a.run.app"
+    exit 0
+    """)
+
+    File.chmod!(deploy_stub, 0o755)
+
+    tagger = Path.join(dir, "git_ok")
+    File.write!(tagger, "#!/bin/sh\nexit 0\n")
+    File.chmod!(tagger, 0o755)
+
+    deploy_action =
+      Action.new(:deploy,
+        params: %{
+          cmd: deploy_stub,
+          tag_cmd: tagger,
+          release_ref: "release-kazi-rt-1",
+          service: "kazi-rt",
+          project: "p",
+          region: "r",
+          source: "."
+        }
+      )
+
+    assert {:ok, %{release_ref: release_ref}} =
+             Kazi.Actions.Deploy.execute(deploy_action, %{})
+
+    assert release_ref == "release-kazi-rt-1"
+
+    # Persist the deploy iteration carrying the release ref.
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "shipped",
+               iteration_index: 0,
+               predicate_vector: sample_vector(),
+               action: deploy_action,
+               release_ref: release_ref
+             })
+
+    # The release ref round-trips through SQLite on the iteration row.
+    fetched = ReadModel.get_iteration("shipped", 0)
+    assert fetched.release_ref == "release-kazi-rt-1"
+
+    # And it is queryable across the goal's history.
+    assert [{0, "release-kazi-rt-1"}] = ReadModel.release_refs("shipped")
+  end
+
+  test "release_refs/1 omits iterations with no release ref (T3.3c)" do
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "no-deploy",
+               iteration_index: 0,
+               predicate_vector: sample_vector()
+             })
+
+    assert ReadModel.release_refs("no-deploy") == []
+  end
 end

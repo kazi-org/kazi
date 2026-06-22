@@ -18,6 +18,8 @@ defmodule Kazi.ReadModel.Iteration do
     * `action_kind` / `action_params` — the action the loop decided to take.
     * `regressions` — the green→red regression flags detected at this observation
       (T1.2), each with its attributed dispatch; empty list when none.
+    * `release_ref` — the release ref recorded on a successful deploy this
+      iteration (T3.3c, UC-015); `nil` for non-deploy iterations.
     * `observed_at` — when the predicates were evaluated.
   """
 
@@ -38,13 +40,16 @@ defmodule Kazi.ReadModel.Iteration do
     # %{"predicate_id", "green_iteration", "red_iteration", "status",
     # "attributed_dispatch"} (string-keyed on disk). Empty list when none.
     field(:regressions, {:array, :map}, default: [])
+    # T3.3c release tagging: the release ref recorded on a successful deploy this
+    # iteration (a git tag by default); nil for non-deploy iterations.
+    field(:release_ref, :string)
     field(:observed_at, :utc_datetime_usec)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:goal_ref, :iteration_index, :predicate_vector, :observed_at]
-  @optional [:converged, :action_kind, :action_params, :regressions]
+  @optional [:converged, :action_kind, :action_params, :regressions, :release_ref]
 
   @doc """
   Builds a changeset for inserting an iteration row.

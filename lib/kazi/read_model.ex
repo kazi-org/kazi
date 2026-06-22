@@ -34,6 +34,7 @@ defmodule Kazi.ReadModel do
           optional(:action) => Action.t() | nil,
           optional(:converged) => boolean(),
           optional(:regressions) => [map()],
+          optional(:release_ref) => String.t() | nil,
           optional(:observed_at) => DateTime.t()
         }
 
@@ -65,6 +66,8 @@ defmodule Kazi.ReadModel do
       action_params: serialize_action_params(action),
       # T1.2 regression: serialize the green→red flags for this observation.
       regressions: serialize_regressions(Map.get(attrs, :regressions, [])),
+      # T3.3c release tagging: the release ref recorded on a successful deploy.
+      release_ref: Map.get(attrs, :release_ref),
       observed_at: observed_at
     }
 
@@ -128,6 +131,29 @@ defmodule Kazi.ReadModel do
       case regressions || [] do
         [] -> []
         flags -> [{index, flags}]
+      end
+    end)
+  end
+
+  @doc """
+  Returns the goal's recorded release refs (T3.3c, UC-015) across all
+  iterations, in ascending `iteration_index` order: a list of
+  `{iteration_index, release_ref}` for every iteration that recorded one.
+  Iterations with no release ref are omitted (empty result means the goal never
+  deployed an artifact whose release was tagged).
+
+  This is the queryable surface acceptance #2 requires — a release tagged on a
+  successful deploy is readable back from the read-model.
+  """
+  @spec release_refs(Kazi.Goal.id()) :: [{non_neg_integer(), String.t()}]
+  def release_refs(goal_ref) do
+    goal_ref
+    |> list_iterations()
+    |> Enum.flat_map(fn %Iteration{iteration_index: index, release_ref: ref} ->
+      case ref do
+        nil -> []
+        "" -> []
+        ref -> [{index, ref}]
       end
     end)
   end
