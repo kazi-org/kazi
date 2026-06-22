@@ -16,6 +16,8 @@ defmodule Kazi.ReadModel.Iteration do
     * `converged` — whether the controller judged the full vector satisfied
       (objective termination, T0.8).
     * `action_kind` / `action_params` — the action the loop decided to take.
+    * `regressions` — the green→red regression flags detected at this observation
+      (T1.2), each with its attributed dispatch; empty list when none.
     * `observed_at` — when the predicates were evaluated.
   """
 
@@ -32,13 +34,17 @@ defmodule Kazi.ReadModel.Iteration do
     field(:converged, :boolean, default: false)
     field(:action_kind, :string)
     field(:action_params, :map, default: %{})
+    # T1.2 regression: the green→red flags detected at this observation, each
+    # %{"predicate_id", "green_iteration", "red_iteration", "status",
+    # "attributed_dispatch"} (string-keyed on disk). Empty list when none.
+    field(:regressions, {:array, :map}, default: [])
     field(:observed_at, :utc_datetime_usec)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:goal_ref, :iteration_index, :predicate_vector, :observed_at]
-  @optional [:converged, :action_kind, :action_params]
+  @optional [:converged, :action_kind, :action_params, :regressions]
 
   @doc """
   Builds a changeset for inserting an iteration row.
