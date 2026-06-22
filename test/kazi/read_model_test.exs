@@ -271,4 +271,86 @@ defmodule Kazi.ReadModelTest do
 
     assert ReadModel.release_refs("no-deploy") == []
   end
+
+  # --- Goal board summary (T3.6b, UC-018) ------------------------------------
+
+  describe "list_goals/0 (goal board)" do
+    test "returns an empty list when no iterations are recorded" do
+      assert ReadModel.list_goals() == []
+    end
+
+    test "summarises each goal with status, latest vector, and iteration count" do
+      failing =
+        PredicateVector.new(%{
+          unit: PredicateResult.pass(%{exit: 0}),
+          probe: PredicateResult.fail(%{http_status: 503})
+        })
+
+      converged =
+        PredicateVector.new(%{
+          unit: PredicateResult.pass(%{exit: 0}),
+          probe: PredicateResult.pass(%{http_status: 200})
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "board-a",
+          iteration_index: 0,
+          predicate_vector: failing
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "board-a",
+          iteration_index: 1,
+          predicate_vector: converged,
+          converged: true
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "board-b",
+          iteration_index: 0,
+          predicate_vector: failing
+        })
+
+      by_ref = Map.new(ReadModel.list_goals(), &{&1.goal_ref, &1})
+
+      a = by_ref["board-a"]
+      assert a.status == :converged
+      assert a.iteration_count == 2
+      # The latest vector is the converged one → 2/2 passing.
+      assert Kazi.ReadModel.GoalSummary.predicate_summary(a) == {2, 2}
+
+      b = by_ref["board-b"]
+      assert b.status == :in_progress
+      assert b.iteration_count == 1
+      assert Kazi.ReadModel.GoalSummary.predicate_summary(b) == {1, 2}
+    end
+
+    test "orders goals by last observation, most recent first" do
+      vector = PredicateVector.new(%{unit: PredicateResult.pass(%{exit: 0})})
+      older = ~U[2026-06-22 10:00:00.000000Z]
+      newer = ~U[2026-06-22 11:00:00.000000Z]
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "older-goal",
+          iteration_index: 0,
+          predicate_vector: vector,
+          observed_at: older
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "newer-goal",
+          iteration_index: 0,
+          predicate_vector: vector,
+          observed_at: newer
+        })
+
+      assert ["newer-goal", "older-goal"] ==
+               Enum.map(ReadModel.list_goals(), & &1.goal_ref)
+    end
+  end
 end
