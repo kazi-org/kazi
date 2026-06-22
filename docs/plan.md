@@ -139,12 +139,12 @@ predicates before build. Intentionally low-granularity.
 - [x] T3.3a Multi-env deploy config: `Kazi.Actions.Deploy` accepts an `env` + per-env target (service/project/region) from action params and selects it  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T2.6]  acc: deploying with env :staging vs :prod invokes the injectable stub deployer with env-appropriate args; asserted via stub, hermetic (no real gcloud/network)
 - [x] T3.3b Rollback: a deploy rollback via the injectable deployer seam, returning the prior revision/deploy ref  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a]  acc: rollback invokes the stub deployer with rollback args and returns the prior ref; hermetic test
 - [x] T3.3c Release tagging: on a successful deploy, create/record a release tag/ref for the artifact, persisted in the deploy result + `Kazi.ReadModel`  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a]  acc: deploy produces a release tag via an injectable git/tagger stub, recorded in the result + read-model; hermetic test
-- [ ] T3.3d Wire env/rollback/tagging into `Kazi.Runtime`/CLI + ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a, T3.3b, T3.3c]  acc: runtime/CLI expose env + rollback options; mix test green; all hermetic
+- [x] T3.3d Wire env/rollback/tagging into `Kazi.Runtime`/CLI + ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a, T3.3b, T3.3c]  acc: runtime/CLI expose env + rollback options; mix test green; all hermetic
 **T3.4 Standing/continuous reconciler mode (verifies UC-016) -- EXPANDED into T3.4a-d (re-planned 2026-06-22). Build on `Kazi.Loop` (:gen_statem); all hermetic with injectable clock/doubles.**
 - [x] T3.4a Standing-mode loop option: `Kazi.Loop`/`Kazi.Runtime` support a standing mode that, instead of terminating at :converged, keeps observing on a bounded interval  Owner: TBD  Est: 1.5h  verifies: [UC-016]  deps: [T2.6]  acc: in standing mode the loop does not terminate at converged; it re-observes on an injectable-clock interval; doubles test
 - [x] T3.4b Re-trigger on drift: when a satisfied predicate regresses in standing mode, the loop re-dispatches and re-converges (reuses the convergence machinery)  Owner: TBD  Est: 1.5h  verifies: [UC-016]  deps: [T3.4a]  acc: a double whose predicate flips green->red post-converge causes re-dispatch + re-converge; persisted; hermetic
 - [x] T3.4c Graceful stop + supervision safety for standing goals: clean stop signal, bounded interval, no busy-spin  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a]  acc: stop/await semantics tested; interval respected via injectable clock; no tight loop
-- [ ] T3.4d Author standing mode via goal-file/CLI flag + end-to-end ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a, T3.4b, T3.4c]  acc: a goal can declare standing mode; hermetic e2e test; mix test green
+- [x] T3.4d Author standing mode via goal-file/CLI flag + end-to-end ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a, T3.4b, T3.4c]  acc: a goal can declare standing mode; hermetic e2e test; mix test green
 - [ ] T3.5 Idea -> acceptance-predicate authoring front-end (agent proposes, human approves)  Owner: TBD  Est: TBD  verifies: [UC-017]  blocked-by: [T2.6]
 - [ ] T3.6 Phoenix LiveView dashboard (goal board, presence, lease map, history)  Owner: TBD  Est: TBD  verifies: [UC-018]  blocked-by: [T3.1]
 - [ ] T3.7 Telegram goal-in / ping-out  Owner: TBD  Est: TBD  verifies: [UC-019]  blocked-by: [T2.6]
@@ -329,6 +329,17 @@ different directories in one commit. Add tests with every implementation task
   granular, hermetically-testable subtasks (Waves 10-12). Deferred T3.1/T3.2/
   T3.5/T3.6/T3.7 (NATS/graph/frontend/LiveView/Telegram) as coarse backlog.
   /apply --pool now has well-formed candidates again: T3.3a, T3.4a.
+- 2026-06-22 E3-DEEPENING DONE: Wave 10 T3.3a/T3.4a (#33/#34), Wave 11 T3.3b/c +
+  T3.4b/c (#35/#36/#37/#38, keep-both on deploy.ex + loop.ex), Wave 12 T3.3d/T3.4d
+  (#39/#40). T3.3 (deploy: multi-env + rollback + release tagging, wired through
+  Runtime/CLI) and T3.4 (standing reconciler: re-observe + drift re-trigger +
+  graceful stop, authored via goal-file/CLI --standing) are COMPLETE. 372 tests
+  on main (43 doctests, 329 tests), CI green. 40 PRs merged total this run.
+- /apply --pool DRAINED again: no agent-eligible candidates remain. Outstanding
+  work is all human-gated or deferred-by-choice: T0.6h (human GCP) -> T0.12 (live
+  prod dogfood); and deferred E3 T3.1 NATS, T3.2 graph, T3.5 idea->predicate
+  front-end, T3.6 LiveView dashboard, T3.7 Telegram (each needs re-plan + some
+  introduce heavy deps). Next direction is a human decision.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
