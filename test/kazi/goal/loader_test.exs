@@ -50,6 +50,122 @@ defmodule Kazi.Goal.LoaderTest do
     end
   end
 
+  describe "creation mode (T2.1) — the checked-in create-feature example" do
+    @create_path Path.join([File.cwd!(), "priv", "examples", "create_feature.toml"])
+
+    test "parses priv/examples/create_feature.toml into a create-mode Goal" do
+      assert {:ok, %Goal{} = goal} = Loader.load(@create_path)
+
+      assert goal.id == "create-widgets-api"
+      assert goal.name =~ "Creation mode"
+      assert goal.mode == :create
+      assert Goal.create?(goal)
+    end
+
+    test "the example's predicates are http_probe acceptance criteria" do
+      assert {:ok, goal} = Loader.load(@create_path)
+
+      # All ordinary predicates (no guards), all acceptance criteria over the
+      # http_probe provider — the create-mode authoring pattern.
+      assert goal.guards == []
+      assert length(goal.predicates) == 2
+      assert Enum.all?(goal.predicates, &(&1.kind == :http_probe))
+      assert Enum.all?(goal.predicates, & &1.acceptance?)
+
+      acceptance_ids = goal |> Goal.acceptance_predicates() |> Enum.map(& &1.id)
+      assert acceptance_ids == ["widgets-list-200", "widgets-list-body"]
+
+      # The acceptance config is carried verbatim to the http_probe provider: the
+      # criteria are "GET /widgets returns 200 (with the expected body)" — failing
+      # at t0 because the endpoint does not exist yet.
+      [list, body] = goal.predicates
+      assert list.config[:path] == "/widgets"
+      assert list.config[:expect_status] == 200
+      assert body.config[:expect_body] == "widgets"
+    end
+  end
+
+  describe "creation mode (T2.1) — schema additions" do
+    test "goal mode defaults to :repair when omitted" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "http_probe"}]}
+      assert {:ok, %Goal{mode: :repair}} = Loader.from_map(data)
+    end
+
+    test "mode = \"create\" parses to :create" do
+      data = %{
+        "id" => "g",
+        "mode" => "create",
+        "predicate" => [%{"id" => "p", "provider" => "http_probe", "acceptance" => true}]
+      }
+
+      assert {:ok, %Goal{mode: :create} = goal} = Loader.from_map(data)
+      assert Goal.create?(goal)
+    end
+
+    test "an unknown mode is a load-time validation error" do
+      data = %{
+        "id" => "g",
+        "mode" => "destroy",
+        "predicate" => [%{"id" => "p", "provider" => "http_probe"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "mode"
+      assert reason =~ "destroy"
+    end
+
+    test "a non-string mode is rejected" do
+      data = %{
+        "id" => "g",
+        "mode" => 1,
+        "predicate" => [%{"id" => "p", "provider" => "http_probe"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "mode"
+    end
+
+    test "acceptance = true marks a predicate as an acceptance criterion" do
+      data = %{
+        "id" => "g",
+        "predicate" => [%{"id" => "p", "provider" => "http_probe", "acceptance" => true}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{id: "p", acceptance?: true}] = goal.predicates
+    end
+
+    test "acceptance defaults to false and is not collected into config" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "http_probe"}]}
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{acceptance?: false, config: config}] = goal.predicates
+      refute Map.has_key?(config, :acceptance)
+    end
+
+    test "a non-boolean acceptance is rejected" do
+      data = %{
+        "id" => "g",
+        "predicate" => [%{"id" => "p", "provider" => "http_probe", "acceptance" => "yes"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "acceptance"
+    end
+
+    test "a predicate may not be both a guard and an acceptance predicate" do
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "p", "provider" => "http_probe", "guard" => true, "acceptance" => true}
+        ]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "guard"
+      assert reason =~ "acceptance"
+    end
+  end
+
   describe "prod_log provider (T1.6) — author + dispatch" do
     test "parses a goal declaring the prod_log provider into a :prod_log predicate" do
       toml = """
