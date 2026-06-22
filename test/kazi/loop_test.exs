@@ -346,6 +346,117 @@ defmodule Kazi.LoopTest do
     assert result.actions == [:integrate, :deploy]
   end
 
+  # ===========================================================================
+  # Per-iteration vector history (T1.1, UC-007)
+  #
+  # The loop keeps an in-state, ordered history of the FULL predicate vector for
+  # every iteration, exposed via snapshot/1 (`:history`) and history/1. This is
+  # the read seam the regression (T1.2) and stuck (T1.5) detectors consume.
+  # ===========================================================================
+
+  test "accumulates the full per-iteration vector history in observation order (T1.1)" do
+    # code: :fail then :pass drives several observations before convergence, so
+    # the history captures the trajectory (code red → code green → live up).
+    script_pid = start_scripted(%{code: [:fail, :pass]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:code, :tests), Predicate.new(:live, :http_probe)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: ScriptedProvider, http_probe: DeployGatedLiveProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :converged
+
+    history = Kazi.Loop.history(loop)
+
+    # One entry per observation, indices ascending and contiguous from 0.
+    indices = Enum.map(history, fn {index, _vector} -> index end)
+    assert indices == Enum.to_list(0..(result.iterations - 1))
+
+    # Every entry carries the WHOLE vector (both predicate ids), not just the
+    # failing/changed one.
+    assert Enum.all?(history, fn {_index, vector} ->
+             MapSet.new(Map.keys(vector.results)) == MapSet.new([:code, :live])
+           end)
+
+    # The trajectory is faithful: the first observation has code failing (and the
+    # live probe down, since it is deploy-gated); the final observation is fully
+    # satisfied (the convergence vector).
+    {0, first} = hd(history)
+    assert MapSet.new(Kazi.PredicateVector.failing(first)) == MapSet.new([:code, :live])
+
+    {_last_index, last} = List.last(history)
+    assert Kazi.PredicateVector.satisfied?(last)
+    assert last == result.vector
+
+    # snapshot/1 exposes the same history.
+    assert Kazi.Loop.snapshot(loop).history == history
+  end
+
+  test "history grows by one full vector per observation, oldest-first (T1.1)" do
+    # Never converges (code stays red) so we can observe the history accumulating
+    # across multiple ticks before stopping the loop.
+    script_pid = start_scripted(%{code: [:fail]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:code, :tests), Predicate.new(:live, :http_probe)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: ScriptedProvider, http_probe: DeployGatedLiveProvider}, self())
+
+    # Let it churn through several dispatch cycles.
+    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+
+    snap = Kazi.Loop.snapshot(loop)
+    history = snap.history
+
+    # history length tracks the iteration count exactly.
+    assert length(history) == snap.iterations
+    assert snap.iterations >= 2
+
+    # Oldest-first, contiguous indices from 0.
+    indices = Enum.map(history, fn {index, _vector} -> index end)
+    assert indices == Enum.sort(indices)
+    assert indices == Enum.to_list(0..(snap.iterations - 1))
+
+    # Code is failing in every observed vector (it never went green).
+    assert Enum.all?(history, fn {_index, vector} ->
+             :code in Kazi.PredicateVector.failing(vector)
+           end)
+
+    :ok = Kazi.Loop.stop(loop)
+  end
+
+  test "history is empty only before the first observation, then non-empty (T1.1)" do
+    script_pid = start_scripted(%{code: [:pass], live: [:pass]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:code, :tests), Predicate.new(:live, :tests)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} = start_loop(goal, %{tests: ScriptedProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop)
+    assert result.outcome == :converged
+
+    # Converged on the first observation → exactly one history entry, the
+    # satisfied vector.
+    assert [{0, vector}] = Kazi.Loop.history(loop)
+    assert Kazi.PredicateVector.satisfied?(vector)
+  end
+
   test "start_link fails when a required dependency option is missing" do
     Process.flag(:trap_exit, true)
     script_pid = start_scripted(%{code: [:pass]})
