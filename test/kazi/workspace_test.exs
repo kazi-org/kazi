@@ -8,7 +8,10 @@ defmodule Kazi.WorkspaceTest do
 
   @moduletag :tmp_dir
 
+  alias Kazi.Context.StaticGraphSource
+  alias Kazi.PredicateResult
   alias Kazi.Workspace
+  alias Kazi.Workspace.Orientation
 
   @server_key "code-review-graph"
 
@@ -115,6 +118,32 @@ defmodule Kazi.WorkspaceTest do
     end
   end
 
+  describe "prepare/2 — orientation file (T4.4)" do
+    test "skips the orientation file when no :orientation opt is supplied", %{tmp_dir: dir} do
+      assert {:ok, %{orientation: :skipped}} = Workspace.prepare(dir, graph_cmd: never_called())
+      refute File.exists?(orientation_path(dir))
+    end
+
+    test "writes .kazi/context.md from the supplied failing predicates", %{tmp_dir: dir} do
+      assert {:ok, %{orientation: :created}} =
+               Workspace.prepare(dir,
+                 graph_cmd: never_called(),
+                 orientation: orientation_opt("boom in lib/foo.ex", ["lib/foo.ex"])
+               )
+
+      content = File.read!(orientation_path(dir))
+      assert content =~ "# Orientation"
+      assert content =~ "lib/foo.ex"
+    end
+
+    test "is idempotent: unchanged inputs report :unchanged and do not rewrite", %{tmp_dir: dir} do
+      opts = [graph_cmd: never_called(), orientation: orientation_opt("x", ["lib/a.ex"])]
+
+      assert {:ok, %{orientation: :created}} = Workspace.prepare(dir, opts)
+      assert {:ok, %{orientation: :unchanged}} = Workspace.prepare(dir, opts)
+    end
+  end
+
   describe "prepare/2 — default seam" do
     test "default graph_cmd is real (degrades to :error, not a stub) with a graph present", %{
       tmp_dir: dir
@@ -161,6 +190,17 @@ defmodule Kazi.WorkspaceTest do
     File.mkdir_p!(db_dir)
     File.write!(Path.join(db_dir, "graph.db"), "")
   end
+
+  # The `:orientation` opt prepare/2 forwards to Kazi.Workspace.Orientation: a
+  # `{failing, context_opts}` pair, with the graph seam injected so it stays
+  # hermetic (no real graph / network).
+  defp orientation_opt(evidence_output, files) do
+    failing = [{:unit, PredicateResult.fail(%{output: evidence_output})}]
+    context_opts = [graph_source: StaticGraphSource.new(origin: :graph, files: files)]
+    {failing, context_opts}
+  end
+
+  defp orientation_path(dir), do: Path.join(dir, Orientation.rel_path())
 
   defp write_mcp(dir, config) do
     File.write!(Path.join(dir, ".mcp.json"), Jason.encode!(config))
