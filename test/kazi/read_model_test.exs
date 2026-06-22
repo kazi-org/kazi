@@ -155,4 +155,49 @@ defmodule Kazi.ReadModelTest do
     refute changeset.valid?
     assert Keyword.has_key?(changeset.errors, :iteration_index)
   end
+
+  test "records + reads back regression flags (T1.2), with the attributed dispatch" do
+    flag = %{
+      predicate_id: :keep,
+      green_iteration: 0,
+      red_iteration: 1,
+      status: :fail,
+      attributed_dispatch: Action.new(:dispatch_agent, params: %{failing: [:fix]})
+    }
+
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "regressed",
+               iteration_index: 0,
+               predicate_vector: sample_vector()
+             })
+
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "regressed",
+               iteration_index: 1,
+               predicate_vector: sample_vector(),
+               regressions: [flag]
+             })
+
+    # Only the iteration that flagged a regression is returned, keyed by index.
+    assert [{1, [stored]}] = ReadModel.regressions("regressed")
+    assert stored["predicate_id"] == "keep"
+    assert stored["green_iteration"] == 0
+    assert stored["red_iteration"] == 1
+    assert stored["status"] == "fail"
+    # The attributed dispatch survives the JSON round-trip, flattened to its kind.
+    assert stored["attributed_dispatch"]["kind"] == "dispatch_agent"
+  end
+
+  test "regressions/1 is empty when no iteration flagged a regression (T1.2)" do
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "clean",
+               iteration_index: 0,
+               predicate_vector: sample_vector()
+             })
+
+    assert ReadModel.regressions("clean") == []
+  end
 end

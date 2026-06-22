@@ -227,7 +227,10 @@ defmodule Kazi.Runtime do
         goal_ref: goal_ref,
         iteration_index: index,
         predicate_vector: vector,
-        converged: converged?
+        converged: converged?,
+        # T1.2 regression: project the observation's green→red flags so they are
+        # queryable from the read-model (Kazi.ReadModel.regressions/1).
+        regressions: Map.get(payload, :regressions, [])
       }
       |> maybe_put_budget_stop(Map.get(payload, :stop_reason))
 

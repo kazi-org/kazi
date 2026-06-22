@@ -33,6 +33,7 @@ defmodule Kazi.ReadModel do
           optional(:predicate_vector) => PredicateVector.t() | map(),
           optional(:action) => Action.t() | nil,
           optional(:converged) => boolean(),
+          optional(:regressions) => [map()],
           optional(:observed_at) => DateTime.t()
         }
 
@@ -62,6 +63,8 @@ defmodule Kazi.ReadModel do
       converged: converged,
       action_kind: action && to_string(action.kind),
       action_params: serialize_action_params(action),
+      # T1.2 regression: serialize the green→red flags for this observation.
+      regressions: serialize_regressions(Map.get(attrs, :regressions, [])),
       observed_at: observed_at
     }
 
@@ -103,6 +106,29 @@ defmodule Kazi.ReadModel do
     |> list_iterations()
     |> Enum.map(fn %Iteration{iteration_index: index} = iteration ->
       {index, to_predicate_vector(iteration)}
+    end)
+  end
+
+  @doc """
+  Returns the goal's recorded regression flags (T1.2) across all iterations, in
+  ascending `iteration_index` order: a list of `{iteration_index, [flag]}` for
+  every iteration that flagged at least one regression. Iterations with no
+  regression are omitted (empty result means the goal never regressed).
+
+  Each flag is the string-keyed on-disk form of `Kazi.Loop.RegressionDetector`'s
+  flag: `%{"predicate_id", "green_iteration", "red_iteration", "status",
+  "attributed_dispatch"}`. This is the queryable surface acceptance #2 requires —
+  a regression recorded by the loop is readable back from the read-model.
+  """
+  @spec regressions(Kazi.Goal.id()) :: [{non_neg_integer(), [map()]}]
+  def regressions(goal_ref) do
+    goal_ref
+    |> list_iterations()
+    |> Enum.flat_map(fn %Iteration{iteration_index: index, regressions: regressions} ->
+      case regressions || [] do
+        [] -> []
+        flags -> [{index, flags}]
+      end
     end)
   end
 
@@ -161,6 +187,34 @@ defmodule Kazi.ReadModel do
 
   defp serialize_action_params(nil), do: %{}
   defp serialize_action_params(%Action{params: params}), do: params
+
+  # T1.2 regression: serialize the detector's flags into JSON-safe maps. Each
+  # flag's :attributed_dispatch is a %Kazi.Action{} (or nil); it is flattened to
+  # its kind/params/metadata so the whole flag survives the JSON round-trip, and
+  # all keys are stringified (atoms don't survive JSON). Already-serialized
+  # (string-keyed) flags pass through unchanged so re-recording is idempotent.
+  defp serialize_regressions(flags) when is_list(flags) do
+    Enum.map(flags, &serialize_regression/1)
+  end
+
+  defp serialize_regression(%{predicate_id: _} = flag) do
+    %{
+      "predicate_id" => to_string(flag.predicate_id),
+      "green_iteration" => flag.green_iteration,
+      "red_iteration" => flag.red_iteration,
+      "status" => to_string(flag.status),
+      "attributed_dispatch" => serialize_dispatch(Map.get(flag, :attributed_dispatch))
+    }
+  end
+
+  # An already string-keyed flag (e.g. read back and re-recorded): pass through.
+  defp serialize_regression(%{} = flag), do: flag
+
+  defp serialize_dispatch(nil), do: nil
+
+  defp serialize_dispatch(%Action{kind: kind, params: params, metadata: metadata}) do
+    %{"kind" => to_string(kind), "params" => params, "metadata" => metadata}
+  end
 
   defp deserialize_status(status) when is_binary(status) do
     valid = Enum.map(PredicateResult.statuses(), &to_string/1)
