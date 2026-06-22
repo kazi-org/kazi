@@ -31,3 +31,13 @@ Artifact Registry push, and log write):
 The project number is in the error string. This is distinct from L-0001 (that one
 is the DEPLOY SA needing AR admin; this one is the BUILD SA needing build roles).
 (T0.6h / T0.12, 2026-06-22.)
+
+### L-0003 #deploy #cloudrun #fixture #livecheck -- Cloud Run intercepts the exact path `/healthz`
+Cloud Run's front end swallows the EXACT request path `/healthz`: it returns a
+Google-branded 404 and the request never reaches the container (no entry in
+`gcloud run services logs read`). Every other path -- `/`, `/health`, `/healthzz`,
+`/HEALTHZ` -- reaches the app normally. So a service that exposes its liveness
+endpoint at `/healthz` is unprobeable through its Cloud Run URL. Fix: use a
+non-reserved path (we moved the fixture's health route to `/livez`). This bit the
+T0.12 dogfood: the deploy + public-access were fine, but the live `http_probe`
+against `/healthz` always 404'd from the edge. (T0.12, 2026-06-22.)
