@@ -49,10 +49,15 @@ defmodule Kazi.CLI do
   OPTIONS:
       --workspace <path>     Target workspace where edits/integrate/deploy run.
                              Falls back to the goal-file's [scope] workspace.
+      --env <name>           Deploy environment to target, e.g. staging / prod
+                             (T3.3d). Selects the goal/deploy's per-env target;
+                             requires the goal-file's deploy config to define an
+                             `envs` map for that environment.
       --help                 Show this help and exit.
 
   EXAMPLES:
       kazi run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
+      kazi run priv/examples/deploy_target.toml --workspace ./target --env prod
   """
 
   @doc """
@@ -115,14 +120,16 @@ defmodule Kazi.CLI do
 
     * `{:help, opts}` — `--help` was requested.
     * `{:run, goal_file, opts}` — the `run` subcommand with its positional
-      goal-file and `opts` (currently `[workspace: path | nil]`).
+      goal-file and `opts` (`[workspace: path | nil, env: name | nil]`; `:env`
+      is the T3.3d deploy-environment selector).
     * `{:error, message}` — a usage error (unknown command, missing goal-file).
   """
   @spec parse([String.t()]) :: parsed()
   def parse(argv) when is_list(argv) do
     {flags, positionals, invalid} =
       OptionParser.parse(argv,
-        strict: [workspace: :string, help: :boolean],
+        # T3.3d deploy wiring: --env picks the deploy environment (staging/prod).
+        strict: [workspace: :string, env: :string, help: :boolean],
         aliases: [h: :help]
       )
 
@@ -140,7 +147,8 @@ defmodule Kazi.CLI do
 
   defp parse_command(["run", goal_file | rest], flags) do
     case rest do
-      [] -> {:run, goal_file, workspace: flags[:workspace]}
+      # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
+      [] -> {:run, goal_file, workspace: flags[:workspace], env: flags[:env]}
       extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
@@ -186,6 +194,11 @@ defmodule Kazi.CLI do
       runtime_opts
       |> Keyword.put_new(:persist?, persist?)
       |> Keyword.put(:workspace, workspace)
+      # T3.3d deploy wiring: fold the operator's --env selection into the deploy
+      # action's params, so the deepened deploy (T3.3a) selects that environment's
+      # per-env target. Merged OVER any caller-supplied :deploy_params so tests
+      # passing their own deploy_params keep working and an explicit --env wins.
+      |> maybe_put_deploy_env(opts[:env])
 
     case Runtime.run(goal, run_opts) do
       {:ok, %{outcome: :converged} = result} ->
@@ -200,6 +213,22 @@ defmodule Kazi.CLI do
         IO.puts(:stderr, "error: run failed: #{format_run_error(reason)}")
         1
     end
+  end
+
+  # T3.3d deploy wiring: merge the operator's --env into the deploy action's
+  # params. No --env leaves deploy_params untouched (back-compat single-target).
+  # With --env, the env atom is set on a deploy_params map merged OVER any
+  # caller-supplied one, so the deepened deploy (T3.3a) selects that
+  # environment's per-env target from its `envs` map.
+  defp maybe_put_deploy_env(run_opts, nil), do: run_opts
+
+  defp maybe_put_deploy_env(run_opts, env) when is_binary(env) do
+    deploy_params =
+      run_opts
+      |> Keyword.get(:deploy_params, %{})
+      |> Map.put(:env, String.to_atom(env))
+
+    Keyword.put(run_opts, :deploy_params, deploy_params)
   end
 
   defp format_run_error({:unknown_provider_kinds, kinds}) do
@@ -315,9 +344,19 @@ defmodule Kazi.CLI do
     IO.puts(outcome_line(goal, outcome, result))
     IO.puts("iterations: #{result.iterations}")
     IO.puts("actions:    #{format_actions(result.actions)}")
+    # T3.3d deploy wiring: surface the release ref of the artifact deployed this
+    # run (T3.3c tagging) so the operator sees WHAT was shipped, not just the
+    # outcome. Omitted when nothing was deployed (no release ref).
+    maybe_report_release(result)
     IO.puts("\npredicate vector:")
     IO.puts(format_vector(result.vector))
   end
+
+  # Print the release ref line only when a deploy produced one this run.
+  defp maybe_report_release(%{release_ref: ref}) when is_binary(ref),
+    do: IO.puts("release:    #{ref}")
+
+  defp maybe_report_release(_result), do: :ok
 
   defp outcome_line(%Goal{id: id}, :converged, _result),
     do: "CONVERGED  goal=#{id} — every predicate is satisfied."
