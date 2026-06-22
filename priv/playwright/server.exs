@@ -22,6 +22,13 @@ Sandbox.mode(Kazi.Repo, {:shared, self()})
 # Start empty: the first spec to seed/reset sets the state it needs.
 Kazi.Repo.delete_all(Kazi.ReadModel.Iteration)
 
+# T3.6c lease map: point the lease-map LiveView at the in-memory fixture source and
+# start it empty. The fixture is a plain GenServer (no DB), so the /test/leases/*
+# endpoints push snapshots the subscribed view renders — hermetic, no NATS. The
+# lease-map specs seed/release through those endpoints; the view starts empty.
+Application.put_env(:kazi, :lease_map_source, KaziWeb.CoordinationFixtureSource)
+{:ok, _} = KaziWeb.CoordinationFixtureSource.start_link([])
+
 # Block this (owner) process for the lifetime of the Playwright run so the shared
 # checkout never reverts to :manual. `mix run --no-halt` would otherwise let the
 # script process finish while the node stays up — terminating the owner.
