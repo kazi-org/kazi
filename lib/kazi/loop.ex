@@ -69,6 +69,10 @@ defmodule Kazi.Loop do
   # set). The loop only feeds it the T1.1 history and fires the human-escalation
   # hook + terminal stop on its verdict (see observe_tick/1).
   alias Kazi.Loop.StuckDetector
+  # T1.2 regression: the pure green→red detector + dispatch attribution. The loop
+  # only feeds it the per-iteration history (T1.1) + dispatch log and records the
+  # flags it returns (see observe_tick/1).
+  alias Kazi.Loop.RegressionDetector
 
   require Logger
 
@@ -188,7 +192,23 @@ defmodule Kazi.Loop do
               # the failing set the loop stopped stuck on (surfaced in snapshot/1).
               stuck_iterations: nil,
               on_escalation: nil,
-              stuck_failing: nil
+              stuck_failing: nil,
+              # --- T1.2 regression: dispatch log + flagged regressions --------
+              # Append-only log of {iteration_index, %Action{}} for every agent
+              # dispatch, where iteration_index is the observation index the loop
+              # had reached when it decided the dispatch (data.iterations - 1 at
+              # record time — the observation whose failing work-list seeded it).
+              # The regression detector attributes a green→red edge to the most
+              # recent dispatch in its [green, red) window. Newest-first in `data`
+              # for O(1) prepend; the detector sorts by index. Appended last so the
+              # existing field order is untouched.
+              dispatch_log: [],
+              # The current list of flagged regressions (the detector's output for
+              # the latest observation): each a map of predicate_id,
+              # green_iteration, red_iteration, status, attributed_dispatch.
+              # Recomputed each observation over the full history; surfaced in
+              # snapshot/1 and projected to the read-model via on_iteration.
+              regressions: []
   end
 
   # =============================================================================
@@ -302,8 +322,10 @@ defmodule Kazi.Loop do
   oldest-first; see `history/1` for the same data without the rest of the
   snapshot. Also includes `:quarantine` — the list of predicate ids currently
   quarantined as flaky (T1.3), which are excluded from the convergence/work
-  calculus — and `:stuck_failing` — the list of predicate ids the loop stopped
-  stuck on (T1.5), or `nil` if it did not stop stuck.
+  calculus; `:stuck_failing` — the list of predicate ids the loop stopped stuck
+  on (T1.5), or `nil` if it did not stop stuck; and `:regressions` (T1.2) — the
+  green→red predicate flags detected over the history so far, each with the
+  dispatch it is attributed to (see `Kazi.Loop.RegressionDetector`).
   """
   @spec snapshot(:gen_statem.server_ref()) :: %{
           state: atom(),
@@ -316,7 +338,8 @@ defmodule Kazi.Loop do
           quarantine: [Kazi.Predicate.id()],
           tokens_used: non_neg_integer(),
           budget_reason: Budget.reason() | nil,
-          stuck_failing: [Kazi.Predicate.id()] | nil
+          stuck_failing: [Kazi.Predicate.id()] | nil,
+          regressions: [RegressionDetector.flag()]
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
@@ -416,6 +439,10 @@ defmodule Kazi.Loop do
     # on the poll interval (not zero) so a goal whose code predicate never goes
     # green polls rather than busy-spinning, and stays interruptible by `:stop`.
     data = record_action(data, action, landed?: false, deployed?: false)
+    # T1.2 regression: log this dispatch keyed by the observation index that
+    # seeded it (data.iterations - 1, the last completed observation), so the
+    # detector can attribute a later green→red edge to it.
+    data = log_dispatch(data, action)
     reobserve(data, data.reobserve_interval_ms)
   end
 
@@ -483,7 +510,10 @@ defmodule Kazi.Loop do
       budget_reason: data.budget_reason,
       # T1.5 stuck: the persistent failing set the loop stopped stuck on, or nil
       # if it did not stop stuck.
-      stuck_failing: stuck_failing_list(data.stuck_failing)
+      stuck_failing: stuck_failing_list(data.stuck_failing),
+      # T1.2 regression: the green→red flags detected over the history so far,
+      # each with its attributed dispatch (see Kazi.Loop.RegressionDetector).
+      regressions: data.regressions
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -520,6 +550,13 @@ defmodule Kazi.Loop do
           history: [{index, vector} | data.history],
           iterations: data.iterations + 1
       }
+
+    # T1.2 regression: after observe (using the just-updated history), run the
+    # pure detector over the full per-iteration history + dispatch log and record
+    # any green→red flags (with their attributed dispatch) into state. Additive:
+    # it does not touch the convergence guard, budget, or flake logic — decide/2
+    # below is unchanged. The flags are surfaced via snapshot/1 and the read-model.
+    data = %Data{data | regressions: detect_regressions(data)}
 
     log_diff(data)
     notify_iteration(data)
@@ -817,6 +854,22 @@ defmodule Kazi.Loop do
   @spec ordered_history(Data.t()) :: history()
   defp ordered_history(%Data{history: history}), do: Enum.reverse(history)
 
+  # T1.2 regression: run the pure detector over the full per-iteration history
+  # (oldest-first) and the dispatch log, returning the current green→red flags.
+  @spec detect_regressions(Data.t()) :: [RegressionDetector.flag()]
+  defp detect_regressions(%Data{} = data) do
+    RegressionDetector.detect(ordered_history(data), Enum.reverse(data.dispatch_log))
+  end
+
+  # T1.2 regression: record an agent dispatch in the (newest-first) dispatch log,
+  # keyed by the observation index that seeded it (the last completed
+  # observation, data.iterations - 1).
+  @spec log_dispatch(Data.t(), Action.t()) :: Data.t()
+  defp log_dispatch(%Data{} = data, %Action{} = action) do
+    index = max(data.iterations - 1, 0)
+    %Data{data | dispatch_log: [{index, action} | data.dispatch_log]}
+  end
+
   # Record an executed action in history and apply any progress-flag changes.
   defp record_action(%Data{} = data, %Action{kind: kind}, flags) do
     %Data{
@@ -1045,7 +1098,10 @@ defmodule Kazi.Loop do
       # 0-based per-goal index matching the read-model's iteration_index column.
       iteration: data.iterations - 1,
       vector: data.vector,
-      converged?: PredicateVector.satisfied?(data.vector)
+      converged?: PredicateVector.satisfied?(data.vector),
+      # T1.2 regression: the green→red flags for this observation, so the runtime
+      # projects them into the read-model (making the regression queryable).
+      regressions: data.regressions
     }
 
     try do
