@@ -16,3 +16,4 @@ decision, write a new ADR that supersedes the old one (and update
 | [0007](0007-build-strategy-walking-skeleton.md) | Build strategy: walking skeleton (idea → production) | Accepted |
 | [0008](0008-harness-invocation-and-context.md) | Harness invocation: headless, stateless per iteration; kazi owns context | Accepted |
 | [0009](0009-prompt-construction-thin-evidence-projection.md) | Prompt construction: a thin, deterministic evidence projection | Accepted |
+| [0010](0010-context-injection-reexploration-mitigation.md) | Context injection to mitigate per-iteration re-exploration | Accepted |
