@@ -1,0 +1,183 @@
+defmodule Kazi.Providers.HttpProbeTest do
+  # Tier 2: real HTTP boundary against a local loopback server, no external
+  # network. Each test spins a tiny :gen_tcp listener on 127.0.0.1:<ephemeral>
+  # that returns one canned HTTP/1.1 response, points the probe at it, and tears
+  # it down. async: false because :httpc shares a default profile process.
+  use ExUnit.Case, async: false
+
+  alias Kazi.{Predicate, PredicateResult}
+  alias Kazi.Providers.HttpProbe
+
+  setup do
+    :inets.start()
+    :ssl.start()
+    :ok
+  end
+
+  describe "matching response" do
+    test "status and body both match → :pass" do
+      {port, stop} = start_server(status_line: "200 OK", body: "ok")
+
+      predicate =
+        Predicate.new(:live, :http_probe,
+          config: %{url: url(port), expect_status: 200, expect_body: "ok"}
+        )
+
+      result = HttpProbe.evaluate(predicate, %{})
+
+      assert %PredicateResult{status: :pass, evidence: evidence} = result
+      assert evidence.http_status == 200
+      assert evidence.body == "ok"
+      assert evidence.url == url(port)
+
+      stop.()
+    end
+
+    test "body substring (default :contains) matches within a larger body → :pass" do
+      {port, stop} = start_server(status_line: "200 OK", body: ~s({"status":"ok","v":1}))
+
+      predicate =
+        Predicate.new(:live, :http_probe,
+          config: %{url: url(port), expect_body: "\"status\":\"ok\""}
+        )
+
+      assert %PredicateResult{status: :pass} = HttpProbe.evaluate(predicate, %{})
+
+      stop.()
+    end
+  end
+
+  describe "failing assertions" do
+    test "wrong body → :fail with evidence" do
+      {port, stop} = start_server(status_line: "200 OK", body: "service unavailable")
+
+      predicate =
+        Predicate.new(:live, :http_probe,
+          config: %{url: url(port), expect_status: 200, expect_body: "ok"}
+        )
+
+      result = HttpProbe.evaluate(predicate, %{})
+
+      assert %PredicateResult{status: :fail, evidence: evidence} = result
+      assert evidence.http_status == 200
+      assert evidence.body == "service unavailable"
+      assert [%{assertion: :body, expected: "ok"}] = evidence.assertion_failures
+
+      stop.()
+    end
+
+    test "exact body match fails when body merely contains the expected value → :fail" do
+      {port, stop} = start_server(status_line: "200 OK", body: "ok now")
+
+      predicate =
+        Predicate.new(:live, :http_probe,
+          config: %{url: url(port), expect_body: "ok", body_match: :exact}
+        )
+
+      assert %PredicateResult{status: :fail} = HttpProbe.evaluate(predicate, %{})
+
+      stop.()
+    end
+
+    test "wrong status → :fail with status assertion failure" do
+      {port, stop} = start_server(status_line: "500 Internal Server Error", body: "boom")
+
+      predicate =
+        Predicate.new(:live, :http_probe, config: %{url: url(port), expect_status: 200})
+
+      result = HttpProbe.evaluate(predicate, %{})
+
+      assert %PredicateResult{status: :fail, evidence: evidence} = result
+      assert evidence.http_status == 500
+      assert [%{assertion: :status, expected: 200, actual: 500}] = evidence.assertion_failures
+
+      stop.()
+    end
+  end
+
+  describe "request errors" do
+    test "connection refused (no server listening) → :error, not :fail" do
+      # Reserve a port, then close it so the connect is refused.
+      {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false])
+      {:ok, port} = :inet.port(socket)
+      :gen_tcp.close(socket)
+
+      predicate =
+        Predicate.new(:live, :http_probe,
+          config: %{url: url(port), expect_status: 200, timeout_ms: 1_000}
+        )
+
+      result = HttpProbe.evaluate(predicate, %{})
+
+      assert %PredicateResult{status: :error, evidence: evidence} = result
+      assert evidence.url == url(port)
+      assert is_binary(evidence.reason)
+    end
+
+    test "missing url in config → :error" do
+      predicate = Predicate.new(:live, :http_probe, config: %{expect_status: 200})
+
+      assert %PredicateResult{status: :error, evidence: %{reason: :missing_url}} =
+               HttpProbe.evaluate(predicate, %{})
+    end
+  end
+
+  test "unsupported predicate kind → :error" do
+    predicate = Predicate.new(:x, :mystery)
+    assert %PredicateResult{status: :error} = HttpProbe.evaluate(predicate, %{})
+  end
+
+  # --- local HTTP/1.1 server -------------------------------------------------
+
+  defp url(port), do: "http://127.0.0.1:#{port}/healthz"
+
+  # Spawns a one-shot loopback listener that answers each accepted connection
+  # with the canned response, then loops for the next. Returns {port, stop_fun}.
+  defp start_server(opts) do
+    status_line = Keyword.fetch!(opts, :status_line)
+    body = Keyword.fetch!(opts, :body)
+
+    {:ok, listen} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        ip: {127, 0, 0, 1}
+      ])
+
+    {:ok, port} = :inet.port(listen)
+
+    response =
+      "HTTP/1.1 #{status_line}\r\n" <>
+        "Content-Type: text/plain\r\n" <>
+        "Content-Length: #{byte_size(body)}\r\n" <>
+        "Connection: close\r\n\r\n" <>
+        body
+
+    server =
+      spawn_link(fn -> accept_loop(listen, response) end)
+
+    stop = fn ->
+      Process.unlink(server)
+      Process.exit(server, :kill)
+      :gen_tcp.close(listen)
+    end
+
+    {port, stop}
+  end
+
+  defp accept_loop(listen, response) do
+    case :gen_tcp.accept(listen) do
+      {:ok, conn} ->
+        # Drain the request line/headers (we don't route on them).
+        _ = :gen_tcp.recv(conn, 0, 1_000)
+        :gen_tcp.send(conn, response)
+        :gen_tcp.close(conn)
+        accept_loop(listen, response)
+
+      {:error, _} ->
+        :ok
+    end
+  end
+end
