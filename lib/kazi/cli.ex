@@ -12,6 +12,22 @@ defmodule Kazi.CLI do
   CLI composes in scripts and CI the same way the loop's own contract reads
   (concept §1, §5).
 
+  ## Authoring surface (T3.5c, UC-017, ADR-0011)
+
+  The CLI also exposes the idea → acceptance-predicate authoring flow over
+  `Kazi.Authoring` (T3.5a/b): a human hands kazi a prose idea, reviews the drafted
+  goal, and approves it into a runnable goal.
+
+      kazi propose "<idea>"        # draft a goal from a prose idea (status proposed)
+      kazi list-proposed           # review the proposal queue
+      kazi approve <proposal-ref>  # proposed → approved (then runnable by `kazi run`)
+      kazi reject <proposal-ref>   # proposed → rejected (declined, kept for audit)
+
+  These commands never reach into a running reconciliation; they only drive the
+  one WRITE path the operator surfaces share (ADR-0011 §2). `propose` and `approve`
+  print the `proposal-ref` an operator pipes between the steps; `approve` returns a
+  goal `kazi run` then drives to convergence.
+
   ## Building & running (escript)
 
       mix escript.build          # produces the ./kazi binary
@@ -32,7 +48,8 @@ defmodule Kazi.CLI do
   returns the exit code instead of halting so it can be exercised end-to-end.
   """
 
-  alias Kazi.{Goal, Runtime}
+  alias Kazi.{Authoring, Goal, ReadModel, Runtime}
+  alias Kazi.ReadModel.ProposedGoal
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
   @type exit_code :: non_neg_integer()
@@ -42,13 +59,22 @@ defmodule Kazi.CLI do
 
   USAGE:
       kazi run <goal-file> --workspace <path> [options]
+      kazi propose "<idea>" [--workspace <path>]
+      kazi list-proposed [--status <proposed|approved|rejected>]
+      kazi approve <proposal-ref>
+      kazi reject <proposal-ref>
 
   ARGUMENTS:
       <goal-file>            Path to a TOML goal-file (see Kazi.Goal.Loader).
+      <idea>                 A prose idea to draft into a goal of acceptance
+                             predicates (T3.5a, UC-017).
+      <proposal-ref>         A proposal's review handle (printed by `propose`).
 
   OPTIONS:
-      --workspace <path>     Target workspace where edits/integrate/deploy run.
-                             Falls back to the goal-file's [scope] workspace.
+      --workspace <path>     Target workspace where edits/integrate/deploy run
+                             (or, for `propose`, where the harness drafts the
+                             goal). Falls back to the goal-file's [scope]
+                             workspace.
       --env <name>           Deploy environment to target, e.g. staging / prod
                              (T3.3d). Selects the goal/deploy's per-env target;
                              requires the goal-file's deploy config to define an
@@ -58,12 +84,17 @@ defmodule Kazi.CLI do
                              stopping, hold the goal's predicates true forever,
                              re-converging whenever one drifts. Overrides the
                              goal-file's `standing` field.
+      --status <state>       Filter `list-proposed` to one lifecycle state
+                             (proposed / approved / rejected). Default: all.
       --help                 Show this help and exit.
 
   EXAMPLES:
       kazi run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
       kazi run priv/examples/deploy_target.toml --workspace ./target --env prod
       kazi run priv/examples/standing_maintenance.toml --workspace ./svc --standing
+      kazi propose "a /healthz endpoint that returns 200"
+      kazi list-proposed --status proposed
+      kazi approve prop-a-healthz-endpoint-3f9c1a2b4d5e
   """
 
   @doc """
@@ -82,25 +113,42 @@ defmodule Kazi.CLI do
   result, and return the exit code (without halting). `IO` is used directly so
   tests can capture stdout via `ExUnit.CaptureIO`.
 
-  `runtime_opts` are extra options merged into `Kazi.Runtime.run/2` for the
-  `run` command. Production callers (the escript `main/1` and `mix kazi.run`)
-  pass none; the Tier-2 boundary test uses them to point the runtime's existing
-  injectable seams (`:adapter_opts`, `:integrator`, `:deploy_cmd`,
-  `:deploy_params`, …) at local stubs — exactly as `Kazi.RuntimeTest` does —
-  without the CLI ever naming a concrete harness/action.
+  `inject_opts` are extra options the CLI threads into its underlying API for the
+  `run` and `propose` commands. Production callers (the escript `main/1` and
+  `mix kazi.run`) pass none; the Tier-2 boundary tests use them to point the
+  existing injectable seams at local stubs — exactly as `Kazi.RuntimeTest` /
+  `Kazi.AuthoringTest` do — without the CLI ever naming a concrete harness/action:
 
-  Returns `0` on convergence, a non-zero code on a stopped loop, a load/usage
-  error, or an internal failure.
+    * for `run`, merged into `Kazi.Runtime.run/2` (`:adapter_opts`, `:integrator`,
+      `:deploy_cmd`, `:deploy_params`, …).
+    * for `propose`, merged into `Kazi.Authoring.propose/2` (`:harness`,
+      `:adapter_opts`), so the e2e test drafts via a stub harness with no real
+      `claude`.
+
+  Returns `0` on success (convergence / a recorded proposal / approval), a
+  non-zero code on a stopped loop, a load/usage error, or an internal failure.
   """
   @spec run([String.t()], keyword()) :: exit_code()
-  def run(argv, runtime_opts \\ []) when is_list(argv) and is_list(runtime_opts) do
+  def run(argv, inject_opts \\ []) when is_list(argv) and is_list(inject_opts) do
     case parse(argv) do
       {:help, _} ->
         IO.puts(@usage)
         0
 
       {:run, goal_file, opts} ->
-        execute_run(goal_file, opts, runtime_opts)
+        execute_run(goal_file, opts, inject_opts)
+
+      {:propose, idea, opts} ->
+        execute_propose(idea, opts, inject_opts)
+
+      {:list_proposed, opts} ->
+        execute_list_proposed(opts)
+
+      {:approve, proposal_ref} ->
+        execute_approve(proposal_ref)
+
+      {:reject, proposal_ref} ->
+        execute_reject(proposal_ref)
 
       {:error, message} ->
         IO.puts(:stderr, "error: #{message}\n")
@@ -117,6 +165,10 @@ defmodule Kazi.CLI do
   @type parsed ::
           {:help, keyword()}
           | {:run, Path.t(), keyword()}
+          | {:propose, String.t(), keyword()}
+          | {:list_proposed, keyword()}
+          | {:approve, String.t()}
+          | {:reject, String.t()}
           | {:error, String.t()}
 
   @doc """
@@ -131,6 +183,12 @@ defmodule Kazi.CLI do
       `:env` is the T3.3d deploy-environment selector. `:standing` is `nil` when
       `--standing` was not given (the goal-file's own `standing` field then
       decides); `true` forces standing mode (T3.4d).
+    * `{:propose, idea, opts}` — the `propose` subcommand (T3.5c) with its
+      positional prose idea and `opts` (`[workspace: path | nil]`).
+    * `{:list_proposed, opts}` — the `list-proposed` subcommand with `opts`
+      (`[status: state | nil]`, an optional lifecycle-state filter).
+    * `{:approve, proposal_ref}` / `{:reject, proposal_ref}` — the approval
+      transitions over a proposal's review handle (T3.5b).
     * `{:error, message}` — a usage error (unknown command, missing goal-file).
   """
   @spec parse([String.t()]) :: parsed()
@@ -140,7 +198,14 @@ defmodule Kazi.CLI do
         # T3.3d deploy wiring: --env picks the deploy environment (staging/prod).
         # T3.4d standing wiring: --standing authors a standing-mode run from the
         # CLI (overrides the goal-file's `standing`).
-        strict: [workspace: :string, env: :string, standing: :boolean, help: :boolean],
+        # T3.5c authoring: --status filters the `list-proposed` review queue.
+        strict: [
+          workspace: :string,
+          env: :string,
+          standing: :boolean,
+          status: :string,
+          help: :boolean
+        ],
         aliases: [h: :help]
       )
 
@@ -172,11 +237,54 @@ defmodule Kazi.CLI do
   defp parse_command(["run"], _flags),
     do: {:error, "the `run` command requires a <goal-file> argument"}
 
+  # T3.5c authoring: `propose "<idea>"` drafts a goal from a prose idea. The idea
+  # is a single positional argument (quote it in the shell); only --workspace is
+  # carried through (where the harness drafts the goal).
+  defp parse_command(["propose", idea | rest], flags) do
+    case rest do
+      [] -> {:propose, idea, workspace: flags[:workspace]}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_command(["propose"], _flags),
+    do: {:error, "the `propose` command requires an <idea> argument (quote it)"}
+
+  # T3.5c authoring: `list-proposed` lists the proposal queue, optionally filtered
+  # by --status (proposed / approved / rejected).
+  defp parse_command(["list-proposed" | rest], flags) do
+    case rest do
+      [] -> {:list_proposed, status: flags[:status]}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  # T3.5c authoring: `approve <proposal-ref>` / `reject <proposal-ref>` drive the
+  # T3.5b transitions over a proposal's review handle.
+  defp parse_command(["approve", proposal_ref | rest], _flags),
+    do: approval_command(:approve, proposal_ref, rest)
+
+  defp parse_command(["approve"], _flags),
+    do: {:error, "the `approve` command requires a <proposal-ref> argument"}
+
+  defp parse_command(["reject", proposal_ref | rest], _flags),
+    do: approval_command(:reject, proposal_ref, rest)
+
+  defp parse_command(["reject"], _flags),
+    do: {:error, "the `reject` command requires a <proposal-ref> argument"}
+
   defp parse_command([other | _], _flags),
-    do: {:error, "unknown command #{inspect(other)} (did you mean `run`?)"}
+    do:
+      {:error,
+       "unknown command #{inspect(other)} (try `run`, `propose`, `list-proposed`, `approve`, or `reject`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `run <goal-file> --workspace <path>`)"}
+
+  defp approval_command(command, proposal_ref, []), do: {command, proposal_ref}
+
+  defp approval_command(_command, _proposal_ref, extra),
+    do: {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
 
   defp format_invalid(invalid) do
     Enum.map_join(invalid, ", ", fn {opt, _value} -> opt end)
@@ -274,6 +382,161 @@ defmodule Kazi.CLI do
     do: "the loop did not reach a terminal state within the await timeout"
 
   defp format_run_error(other), do: inspect(other)
+
+  # =============================================================================
+  # authoring commands (T3.5c, UC-017): propose / list-proposed / approve / reject
+  # =============================================================================
+  #
+  # Each drives `Kazi.Authoring` (T3.5a/b) — the one WRITE path the operator
+  # surfaces share — over the read-model the loop also persists to. They need a
+  # live read-model (proposals are persisted/queried), so each ensures it first
+  # and refuses cleanly if it is unavailable rather than crashing.
+
+  # `propose "<idea>"`: draft a goal from a prose idea, persist it as `proposed`,
+  # and print the proposal-ref the operator approves against. `inject_opts` carries
+  # the test-only `:harness`/`:adapter_opts` seam (default the real adapter), so
+  # production never names a concrete harness.
+  defp execute_propose(idea, opts, inject_opts) do
+    with_read_model(fn ->
+      propose_opts =
+        inject_opts
+        |> Keyword.take([:harness, :adapter_opts])
+        |> Keyword.put(:workspace, opts[:workspace] || ".")
+
+      case Authoring.propose(idea, propose_opts) do
+        {:ok, draft} ->
+          report_proposed(draft)
+          0
+
+        {:error, reason} ->
+          IO.puts(:stderr, "error: could not propose goal: #{format_authoring_error(reason)}")
+          1
+      end
+    end)
+  end
+
+  # `list-proposed [--status <state>]`: print the proposal queue, newest first.
+  defp execute_list_proposed(opts) do
+    with_read_model(fn ->
+      rows = ReadModel.list_proposed_goals(list_filter(opts[:status]))
+      report_proposed_list(rows, opts[:status])
+      0
+    end)
+  end
+
+  defp list_filter(nil), do: []
+  defp list_filter(status), do: [status: status]
+
+  # `approve <proposal-ref>`: transition proposed → approved. On success the goal
+  # is now runnable by `kazi run`; we print that next step.
+  defp execute_approve(proposal_ref) do
+    with_read_model(fn ->
+      case Authoring.approve(proposal_ref) do
+        {:ok, %Goal{} = goal} ->
+          IO.puts("APPROVED   proposal=#{proposal_ref} goal=#{goal.id}")
+          IO.puts("The goal is now runnable: kazi run <goal-file> --workspace <path>")
+          0
+
+        {:error, reason} ->
+          IO.puts(
+            :stderr,
+            "error: could not approve #{proposal_ref}: " <> format_authoring_error(reason)
+          )
+
+          1
+      end
+    end)
+  end
+
+  # `reject <proposal-ref>`: transition proposed → rejected (declined, audited).
+  defp execute_reject(proposal_ref) do
+    with_read_model(fn ->
+      case Authoring.reject(proposal_ref) do
+        {:ok, _draft} ->
+          IO.puts("REJECTED   proposal=#{proposal_ref}")
+          0
+
+        {:error, reason} ->
+          IO.puts(
+            :stderr,
+            "error: could not reject #{proposal_ref}: " <> format_authoring_error(reason)
+          )
+
+          1
+      end
+    end)
+  end
+
+  # The authoring commands all require a live read-model (they persist/query
+  # proposals); unlike `run` they cannot degrade to no-persistence. Ensure it, run
+  # the command, or refuse cleanly with exit 1 if the DB is unavailable.
+  defp with_read_model(fun) do
+    if ensure_read_model() do
+      fun.()
+    else
+      IO.puts(:stderr, "error: the read-model is unavailable; authoring requires persistence")
+      1
+    end
+  end
+
+  defp report_proposed(draft) do
+    IO.puts("PROPOSED   goal=#{draft.goal.id}")
+    IO.puts("proposal:  #{draft.proposal_ref}")
+    IO.puts("idea:      #{draft.idea}")
+    IO.puts("\npredicates (acceptance criteria):")
+    IO.puts(format_proposed_predicates(draft.goal))
+    IO.puts("\nReview, then: kazi approve #{draft.proposal_ref}")
+  end
+
+  defp format_proposed_predicates(%Goal{} = goal) do
+    goal
+    |> Goal.all_predicates()
+    |> Enum.map_join("\n", fn predicate ->
+      "  - #{predicate.id} (#{predicate.kind})" <> describe_predicate(predicate)
+    end)
+  end
+
+  defp describe_predicate(%{description: description})
+       when is_binary(description) and description != "",
+       do: ": #{description}"
+
+  defp describe_predicate(_predicate), do: ""
+
+  defp report_proposed_list([], status) do
+    IO.puts("(no #{status_label(status)} proposals)")
+  end
+
+  defp report_proposed_list(rows, status) do
+    IO.puts("#{length(rows)} #{status_label(status)} proposal(s):\n")
+
+    Enum.each(rows, fn %ProposedGoal{} = row ->
+      IO.puts("  #{row.status}\t#{row.proposal_ref}\t#{row.goal_id}")
+      IO.puts("    idea: #{row.idea}")
+    end)
+  end
+
+  defp status_label(nil), do: "proposed-goal"
+  defp status_label(status), do: status
+
+  defp format_authoring_error(:empty_idea), do: "the idea was blank"
+  defp format_authoring_error(:not_found), do: "no proposal carries that ref"
+
+  defp format_authoring_error({:invalid_transition, from, to}),
+    do: "cannot transition a #{from} proposal to #{to}"
+
+  defp format_authoring_error({:harness_failed, reason}),
+    do: "the authoring harness could not run: #{inspect(reason)}"
+
+  defp format_authoring_error({:invalid_proposal, reason}),
+    do: "the harness produced no usable acceptance predicate (#{reason})"
+
+  defp format_authoring_error({:invalid_goal, reason}),
+    do: "the stored goal no longer loads: #{inspect(reason)}"
+
+  defp format_authoring_error(%Ecto.Changeset{} = changeset),
+    do: "could not persist the proposal: #{inspect(changeset.errors)}"
+
+  defp format_authoring_error(other), do: inspect(other)
 
   # =============================================================================
   # read-model startup (boot the app + ensure DB exists & is migrated)
