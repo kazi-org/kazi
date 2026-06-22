@@ -1,0 +1,67 @@
+# Deploy the kazi Slice 0 deploy-target fixture to Cloud Run.
+#
+# IMPORTANT: this workflow is MANUAL / release only. It is intentionally NOT
+# triggered on push or pull_request, so it never runs in PR CI and never fails a
+# PR before the GCP project + credentials exist (plan task T0.6h). The fixture
+# also ships a DELIBERATELY FAILING unit test (the convergence target), so it
+# must stay out of any automatic pipeline.
+#
+# Required repository secrets (documented in fixtures/deploy-target/README.md):
+#   GCP_PROJECT  - the GCP project id that hosts the Cloud Run service
+#   GCP_REGION   - the Cloud Run region (e.g. us-central1)
+#   GCP_SA_KEY   - JSON key for a service account with run.admin +
+#                  artifactregistry.writer + iam.serviceAccountUser
+name: deploy-fixture
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Cloud Run service name"
+        required: false
+        default: "kazi-deploy-target"
+  release:
+    types: [published]
+
+# The fixture lives in its own directory; nothing else in the repo affects it.
+defaults:
+  run:
+    working-directory: fixtures/deploy-target
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SERVICE_NAME: ${{ github.event.inputs.service_name || 'kazi-deploy-target' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
+
+      - name: Deploy to Cloud Run (build from source)
+        run: |
+          gcloud run deploy "$SERVICE_NAME" \
+            --source . \
+            --project "${{ secrets.GCP_PROJECT }}" \
+            --region "${{ secrets.GCP_REGION }}" \
+            --allow-unauthenticated \
+            --port 8080 \
+            --quiet
+
+      - name: Print service URL
+        run: |
+          gcloud run services describe "$SERVICE_NAME" \
+            --project "${{ secrets.GCP_PROJECT }}" \
+            --region "${{ secrets.GCP_REGION }}" \
+            --format 'value(status.url)'
