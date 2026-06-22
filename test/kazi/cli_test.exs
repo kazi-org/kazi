@@ -205,8 +205,61 @@ defmodule Kazi.CLITest do
   end
 
   # ===========================================================================
+  # Tier 2 — vacuous goal rejected through the CLI (T2.3, R3)
+  # ===========================================================================
+
+  describe "run/2 — vacuous goal" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    test "a goal whose predicates all pass at t0 exits non-zero with a clear message",
+         %{tmp_dir: tmp_dir} do
+      %{work: work} = setup_repo(tmp_dir)
+
+      # The code predicate already passes at t0 (the marker file exists), so the
+      # whole vector is satisfied before kazi does anything: the goal is vacuous.
+      File.write!(Path.join(work, "fixed.txt"), "already there\n")
+      goal_file = write_vacuous_goal_file(tmp_dir, work)
+
+      {code, stderr} =
+        with_io(:stderr, fn ->
+          Kazi.CLI.run(["run", goal_file, "--workspace", work])
+        end)
+
+      # Non-zero exit + a clear vacuous-goal message; the loop never started.
+      assert code == 1
+      assert stderr =~ "vacuous"
+      assert stderr =~ "at t0"
+      assert ReadModel.list_iterations("cli-vacuous") == []
+    end
+  end
+
+  # ===========================================================================
   # helpers
   # ===========================================================================
+
+  # A goal-file with a single code predicate that passes at t0 (the marker file
+  # already exists) — the whole vector is satisfied before kazi acts, so the goal
+  # is vacuous (T2.3). No live predicate: the t0 vector is fully green.
+  defp write_vacuous_goal_file(tmp_dir, work) do
+    path = Path.join(tmp_dir, "vacuous_goal.toml")
+
+    File.write!(path, """
+    id = "cli-vacuous"
+    name = "Vacuous goal — all predicates pass at t0"
+
+    [scope]
+    workspace = "#{work}"
+
+    [[predicate]]
+    id = "code"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+    """)
+
+    path
+  end
 
   defp checkout_sandbox(_ctx) do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)

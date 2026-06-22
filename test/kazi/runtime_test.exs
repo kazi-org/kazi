@@ -140,7 +140,9 @@ defmodule Kazi.RuntimeTest do
   test "runs without touching the read-model when persistence is disabled", %{tmp_dir: tmp_dir} do
     %{work: work} = setup_repo(tmp_dir)
     File.write!(Path.join(work, "fixed.txt"), "already-fixed\n")
-    {server, url, body_file} = start_http_server("ok")
+    # The live probe starts "down" so the goal is NOT vacuous at t0 (its live
+    # predicate fails before deploy, T2.3); the deploy stub flips it to "ok".
+    {server, url, body_file} = start_http_server("down")
     on_exit(fn -> :inets.stop(:httpd, server) end)
 
     deploy_stub = write_deploy_stub(tmp_dir, url, body_file)
@@ -153,7 +155,9 @@ defmodule Kazi.RuntimeTest do
       Goal.new("no-persist",
         predicates: [
           Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "test -f fixed.txt"]}),
-          Predicate.new(:live, :http_probe, config: %{url: url, expect_status: 200})
+          Predicate.new(:live, :http_probe,
+            config: %{url: url, expect_status: 200, expect_body: "ok"}
+          )
         ],
         scope: Scope.new(workspace: work)
       )
@@ -218,6 +222,80 @@ defmodule Kazi.RuntimeTest do
     # read back as its string form.
     assert to_string(budget_stop.action_params["reason"]) == "max_iterations"
     refute budget_stop.converged
+  end
+
+  test "rejects a vacuous goal whose predicates all pass at t0 and never starts the loop (T2.3, R3)",
+       %{tmp_dir: tmp_dir} do
+    %{work: work} = setup_repo(tmp_dir)
+
+    # Make the code predicate already pass at t0: the marker file exists before
+    # the run, so `test -f fixed.txt` is green before kazi does anything. With the
+    # WHOLE vector satisfied at t0, the goal is vacuous / underspecified.
+    File.write!(Path.join(work, "fixed.txt"), "already there\n")
+
+    goal =
+      Goal.new("vacuous",
+        predicates: [
+          Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "test -f fixed.txt"]})
+        ],
+        scope: Scope.new(workspace: work)
+      )
+
+    # Rejected at the t0 guard — before the loop starts.
+    assert {:error, :vacuous_goal} =
+             Runtime.run(goal,
+               workspace: work,
+               # A harness that would crash the run if it were ever dispatched —
+               # proving the loop never started.
+               adapter_opts: [command: "/nonexistent/should-not-run"]
+             )
+
+    # The loop never ran, so nothing was persisted as converged (no iterations).
+    assert ReadModel.list_iterations("vacuous") == []
+  end
+
+  test "a non-vacuous goal with a failing predicate at t0 is NOT rejected and proceeds (T2.3)",
+       %{tmp_dir: tmp_dir} do
+    %{work: work, bare: bare} = setup_repo(tmp_dir)
+
+    # The code predicate FAILS at t0 (no marker file yet); the harness stub
+    # creates it, so the goal proceeds through the normal reconcile path instead
+    # of being rejected as vacuous.
+    harness_stub = write_harness_stub(tmp_dir, work)
+
+    # A no-op deploy stub: the goal has no live predicate, so once code is landed
+    # the loop deploys and converges; the stub stands in for `gcloud run deploy`.
+    deploy_stub = Path.join(tmp_dir, "noop_deploy.sh")
+    File.write!(deploy_stub, "#!/bin/sh\necho deployed\nexit 0\n")
+    File.chmod!(deploy_stub, 0o755)
+
+    integrator = fn request, _opts ->
+      {:ok, %{pr: 1, merge_commit: local_rebase_merge(bare, request.branch, request.base)}}
+    end
+
+    goal =
+      Goal.new("non-vacuous",
+        predicates: [
+          Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "test -f fixed.txt"]})
+        ],
+        scope: Scope.new(workspace: work)
+      )
+
+    assert {:ok, result} =
+             Runtime.run(goal,
+               workspace: work,
+               adapter_opts: [command: harness_stub],
+               integrator: integrator,
+               deploy_cmd: deploy_stub,
+               deploy_params: %{service: "s", project: "p", region: "r", source: work},
+               reobserve_interval_ms: 5,
+               await_timeout: 10_000
+             )
+
+    # It proceeded normally: the loop ran, dispatched the agent, and converged.
+    assert result.outcome == :converged
+    assert :dispatch_agent in result.actions
+    assert result.iterations > 0
   end
 
   # --- fixtures ----------------------------------------------------------------
