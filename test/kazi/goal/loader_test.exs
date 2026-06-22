@@ -39,14 +39,17 @@ defmodule Kazi.Goal.LoaderTest do
       assert tests.description =~ "go test"
     end
 
-    test "the LIVE predicate is an http_probe asserting /healthz returns \"ok\"" do
+    test "the LIVE predicate is an http_probe asserting /livez returns \"ok\" (exact)" do
       assert {:ok, goal} = Loader.load(@example_path)
       assert [_tests, live] = goal.predicates
 
-      assert %Predicate{id: "healthz-live", kind: :http_probe, guard?: false} = live
-      assert live.config[:path] == "/healthz"
+      # /livez, not /healthz: Cloud Run intercepts /healthz (L-0003); and an exact
+      # body match, because "ok" is a substring of the failing "not-ok" (L-0004).
+      assert %Predicate{id: "livez-live", kind: :http_probe, guard?: false} = live
+      assert live.config[:url] =~ "/livez"
       assert live.config[:expect_status] == 200
       assert live.config[:expect_body] == "ok"
+      assert live.config[:body_match] == "exact"
     end
   end
 

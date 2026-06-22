@@ -127,7 +127,7 @@ defmodule Kazi.CLITest do
     test "loads cleanly via Kazi.Goal.Loader (the path the CLI uses)" do
       assert {:ok, goal} = Kazi.Goal.Loader.load(@example_goal)
       assert goal.id == "deploy-target-slice0"
-      assert Enum.map(goal.predicates, & &1.id) == ["go-tests", "healthz-live"]
+      assert Enum.map(goal.predicates, & &1.id) == ["go-tests", "livez-live"]
     end
   end
 
