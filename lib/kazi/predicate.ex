@@ -16,6 +16,20 @@ defmodule Kazi.Predicate do
   a predicate by deleting the check (ADR-0002, concept §4). `guard?` marks a
   predicate as a guard; the loop enforces guards as invariants rather than goals
   to reach.
+
+  ## Acceptance predicates (creation mode, T2.1, concept §10 Slice 2)
+
+  In *creation mode* a goal is authored as **acceptance criteria**: predicates
+  describing desired NEW behavior that FAIL at t0 (the feature does not exist
+  yet) and pass once kazi builds it. An acceptance predicate is an ordinary
+  predicate — the same `:fail → work-list → dispatch → re-observe` convergence
+  machinery applies; nothing about evaluation changes. `acceptance?` is purely a
+  declarative marker recording the author's intent ("this is expected to fail at
+  t0"), so creation goals are self-describing and tooling (e.g. the vacuous-goal
+  guard, T2.3) can reason about author intent. It does **not** alter how the loop
+  evaluates the predicate. A guard predicate is never an acceptance predicate
+  (guards are invariants, not goals to reach); the two flags are independent but
+  the loader rejects a predicate marked both.
   """
 
   @typedoc """
@@ -41,7 +55,8 @@ defmodule Kazi.Predicate do
           kind: provider_kind(),
           description: String.t() | nil,
           config: config(),
-          guard?: boolean()
+          guard?: boolean(),
+          acceptance?: boolean()
         }
 
   @enforce_keys [:id, :kind]
@@ -49,13 +64,16 @@ defmodule Kazi.Predicate do
             kind: nil,
             description: nil,
             config: %{},
-            guard?: false
+            guard?: false,
+            acceptance?: false
 
   @doc """
   Builds a predicate.
 
-  `id` and `kind` are required; `:config`, `:description`, and `:guard?` are
-  optional opts.
+  `id` and `kind` are required; `:config`, `:description`, `:guard?`, and
+  `:acceptance?` are optional opts. `:acceptance?` marks the predicate as an
+  acceptance criterion expected to fail at t0 (creation mode, T2.1); it is a
+  declarative marker only and does not change evaluation.
 
   ## Examples
 
@@ -65,6 +83,9 @@ defmodule Kazi.Predicate do
 
       iex> Kazi.Predicate.new(:live, :http_probe, guard?: false).guard?
       false
+
+      iex> Kazi.Predicate.new(:widgets, :http_probe, acceptance?: true).acceptance?
+      true
   """
   @spec new(id(), provider_kind(), keyword()) :: t()
   def new(id, kind, opts \\ []) when not is_nil(id) and is_atom(kind) do
@@ -73,7 +94,8 @@ defmodule Kazi.Predicate do
       kind: kind,
       description: Keyword.get(opts, :description),
       config: Keyword.get(opts, :config, %{}),
-      guard?: Keyword.get(opts, :guard?, false)
+      guard?: Keyword.get(opts, :guard?, false),
+      acceptance?: Keyword.get(opts, :acceptance?, false)
     }
   end
 
@@ -88,4 +110,20 @@ defmodule Kazi.Predicate do
   """
   @spec guard?(t()) :: boolean()
   def guard?(%__MODULE__{guard?: guard?}), do: guard?
+
+  @doc """
+  Returns true if the predicate is an acceptance criterion — desired NEW
+  behavior expected to fail at t0 and pass once kazi builds the feature
+  (creation mode, T2.1, concept §10 Slice 2).
+
+  ## Examples
+
+      iex> Kazi.Predicate.acceptance?(Kazi.Predicate.new(:widgets, :http_probe, acceptance?: true))
+      true
+
+      iex> Kazi.Predicate.acceptance?(Kazi.Predicate.new(:unit, :tests))
+      false
+  """
+  @spec acceptance?(t()) :: boolean()
+  def acceptance?(%__MODULE__{acceptance?: acceptance?}), do: acceptance?
 end

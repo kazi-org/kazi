@@ -19,7 +19,13 @@ defmodule Kazi.Goal.Loader do
   |----------|-----------|----------|---------------------|
   | `id`     | string    | yes      | `Goal.id`           |
   | `name`   | string    | no       | `Goal.name`         |
+  | `mode`   | string    | no       | `Goal.mode` — `"repair"` (default) or `"create"` |
   | `metadata` | table   | no       | `Goal.metadata` (string-keyed map, verbatim) |
+
+  `mode = "create"` declares a *creation-mode* goal whose predicates are
+  acceptance criteria for NEW behavior, authored to fail at t0 (T2.1, concept
+  §10 Slice 2). It records authoring intent; it does not change how the loop
+  evaluates predicates. An unknown `mode` is a validation error.
 
   ### `[budget]` table (optional, → `Kazi.Budget`)
 
@@ -51,11 +57,17 @@ defmodule Kazi.Goal.Loader do
   | `provider`    | string    | yes      | `Predicate.kind` (see below) |
   | `description` | string    | no       | `Predicate.description` |
   | `guard`       | boolean   | no       | `Predicate.guard?` (default `false`) |
+  | `acceptance`  | boolean   | no       | `Predicate.acceptance?` (default `false`) |
   | *(any other)* | any       | no       | `Predicate.config` (atom-keyed, verbatim) |
 
-  Every key on a `[[predicate]]` table other than the four reserved keys above is
+  Every key on a `[[predicate]]` table other than the five reserved keys above is
   collected, verbatim, into the predicate's `config` map (with atom keys). That
   config is handed untouched to the provider that evaluates the predicate.
+
+  `acceptance = true` marks a predicate as an acceptance criterion (creation
+  mode, T2.1) — desired NEW behavior expected to fail at t0. It is a declarative
+  marker only; evaluation is unchanged. A predicate may not be both a `guard` and
+  an `acceptance` predicate (a guard is an invariant, not a goal to reach).
 
   #### Provider kinds
 
@@ -94,7 +106,10 @@ defmodule Kazi.Goal.Loader do
 
   # Reserved keys on a [[predicate]] table; everything else falls through to
   # the predicate's `config`.
-  @predicate_reserved_keys ~w(id provider description guard)
+  @predicate_reserved_keys ~w(id provider description guard acceptance)
+
+  # goal-file `mode` string -> Goal.mode atom (T2.1 creation mode).
+  @goal_modes %{"repair" => :repair, "create" => :create}
 
   @doc """
   Reads the TOML goal-file at `path` and parses it into a `Kazi.Goal`.
@@ -119,6 +134,7 @@ defmodule Kazi.Goal.Loader do
   @spec from_map(map()) :: {:ok, Goal.t()} | {:error, String.t()}
   def from_map(data) when is_map(data) do
     with {:ok, id} <- fetch_id(data),
+         {:ok, mode} <- fetch_mode(data),
          {:ok, budget} <- build_budget(Map.get(data, "budget", %{})),
          {:ok, scope} <- build_scope(Map.get(data, "scope", %{})),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])) do
@@ -127,6 +143,7 @@ defmodule Kazi.Goal.Loader do
       {:ok,
        Goal.new(id,
          name: Map.get(data, "name"),
+         mode: mode,
          predicates: predicates,
          guards: guards,
          budget: budget,
@@ -161,6 +178,27 @@ defmodule Kazi.Goal.Loader do
       id when is_binary(id) and id != "" -> {:ok, id}
       nil -> {:error, "goal-file is missing required key \"id\""}
       _ -> {:error, "goal \"id\" must be a non-empty string"}
+    end
+  end
+
+  # T2.1: optional goal `mode` ("repair" default | "create"). An unknown mode is
+  # a validation error so a typo fails loudly at load time.
+  defp fetch_mode(data) do
+    case Map.get(data, "mode") do
+      nil ->
+        {:ok, :repair}
+
+      mode when is_binary(mode) ->
+        case Map.fetch(@goal_modes, mode) do
+          {:ok, atom} ->
+            {:ok, atom}
+
+          :error ->
+            {:error, "goal \"mode\" must be one of #{known_modes()} (got #{inspect(mode)})"}
+        end
+
+      _ ->
+        {:error, "goal \"mode\" must be a string"}
     end
   end
 
@@ -214,11 +252,14 @@ defmodule Kazi.Goal.Loader do
   defp build_predicate(raw, index) when is_map(raw) do
     with {:ok, id} <- fetch_predicate_id(raw, index),
          {:ok, kind} <- fetch_provider_kind(raw, id),
-         {:ok, guard?} <- fetch_guard(raw, id) do
+         {:ok, guard?} <- fetch_guard(raw, id),
+         {:ok, acceptance?} <- fetch_acceptance(raw, id),
+         :ok <- reject_guard_acceptance(guard?, acceptance?, id) do
       {:ok,
        Predicate.new(id, kind,
          description: Map.get(raw, "description"),
          guard?: guard?,
+         acceptance?: acceptance?,
          config: predicate_config(raw)
        )}
     end
@@ -263,6 +304,21 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T2.1: optional `acceptance` boolean marking an acceptance criterion.
+  defp fetch_acceptance(raw, id) do
+    case Map.get(raw, "acceptance", false) do
+      acceptance? when is_boolean(acceptance?) -> {:ok, acceptance?}
+      _ -> {:error, "predicate #{inspect(id)} \"acceptance\" must be a boolean"}
+    end
+  end
+
+  # A guard is an invariant that must not regress, not a goal to reach; an
+  # acceptance criterion is a goal to reach. They are mutually exclusive.
+  defp reject_guard_acceptance(true, true, id),
+    do: {:error, "predicate #{inspect(id)} may not be both a guard and an acceptance predicate"}
+
+  defp reject_guard_acceptance(_guard?, _acceptance?, _id), do: :ok
+
   # Every non-reserved key on the predicate table becomes config, atom-keyed,
   # handed verbatim to the provider.
   defp predicate_config(raw) do
@@ -298,5 +354,9 @@ defmodule Kazi.Goal.Loader do
 
   defp known_providers do
     @provider_kinds |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
+  end
+
+  defp known_modes do
+    @goal_modes |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
   end
 end
