@@ -12,6 +12,10 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
   # envelope, and one whose JSON is deliberately malformed (degradation path).
   @json_stub Path.expand("../../support/stub_claude_json.sh", __DIR__)
   @bad_json_stub Path.expand("../../support/stub_claude_bad_json.sh", __DIR__)
+  # T4.8: a stub echoing every argv element so a test can assert the claw-code
+  # hygiene flags (per-dispatch budget ceiling + minimal tool/permission set)
+  # reached the harness over the real System.cmd boundary.
+  @args_stub Path.expand("../../support/stub_claude_args.sh", __DIR__)
 
   setup do
     workspace =
@@ -178,5 +182,189 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
       refute Map.has_key?(result, :tokens)
       refute Map.has_key?(result, :cost)
     end
+  end
+
+  describe "truncate_evidence/2 (pure, T4.8, UC-009/UC-022)" do
+    test "returns input verbatim when within the byte budget" do
+      assert ClaudeAdapter.truncate_evidence("short evidence", max_bytes: 1_024) ==
+               "short evidence"
+    end
+
+    test "returns input verbatim when exactly at the budget" do
+      blob = String.duplicate("a", 64)
+      assert ClaudeAdapter.truncate_evidence(blob, max_bytes: 64) == blob
+    end
+
+    test "truncates oversized evidence to the byte budget with a marker" do
+      big = String.duplicate("x", 10_000)
+      out = ClaudeAdapter.truncate_evidence(big, max_bytes: 200)
+
+      assert byte_size(out) <= 200
+      assert out =~ "…truncated…"
+    end
+
+    test "keeps a head and a tail around the marker (both signals survive)" do
+      # A distinctive lead-in (the failure) and tail-end (its resolution context)
+      # must both survive a head+tail truncation.
+      body = String.duplicate("-", 5_000)
+      evidence = "FAILURE_HEAD" <> body <> "RESOLUTION_TAIL"
+
+      out = ClaudeAdapter.truncate_evidence(evidence, max_bytes: 200)
+
+      assert out =~ "FAILURE_HEAD"
+      assert out =~ "RESOLUTION_TAIL"
+      assert out =~ "…truncated…"
+      assert byte_size(out) <= 200
+    end
+
+    test "defaults to the module's evidence budget when no max_bytes given" do
+      big = String.duplicate("y", 100_000)
+      out = ClaudeAdapter.truncate_evidence(big)
+
+      # Bounded well below the input, and still legible as a truncation.
+      assert byte_size(out) < byte_size(big)
+      assert byte_size(out) <= 8_192
+      assert out =~ "…truncated…"
+    end
+
+    test "degrades to a head-only cut when the budget is too small for the marker" do
+      out = ClaudeAdapter.truncate_evidence(String.duplicate("z", 1_000), max_bytes: 4)
+
+      # Never larger than asked; no room for the marker so it is omitted.
+      assert byte_size(out) <= 4
+      refute out =~ "…truncated…"
+    end
+
+    test "never splits a multi-byte UTF-8 codepoint (valid strings out)" do
+      # 4-byte emoji repeated — a naive byte slice would land mid-codepoint.
+      evidence = String.duplicate("🔥", 1_000)
+      out = ClaudeAdapter.truncate_evidence(evidence, max_bytes: 101)
+
+      assert byte_size(out) <= 101
+      assert String.valid?(out)
+    end
+  end
+
+  describe "run/3 claw-code hygiene flags (T4.8, UC-009/UC-022)" do
+    test "passes the per-dispatch budget ceiling as --max-budget-usd", %{workspace: workspace} do
+      assert {:ok, result} =
+               ClaudeAdapter.run("do work", workspace, command: @args_stub, max_budget_usd: 0.5)
+
+      args = parse_args(result.output)
+      assert pair_present?(args, "--max-budget-usd", "0.5")
+    end
+
+    test "passes the minimal tool set as --allowed-tools (least privilege)", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} =
+               ClaudeAdapter.run("do work", workspace,
+                 command: @args_stub,
+                 allowed_tools: ["Read", "Edit", "Bash"]
+               )
+
+      args = parse_args(result.output)
+      assert "--allowed-tools" in args
+      assert "Read" in args
+      assert "Edit" in args
+      assert "Bash" in args
+    end
+
+    test "accepts a comma/space-delimited tool string", %{workspace: workspace} do
+      assert {:ok, result} =
+               ClaudeAdapter.run("do work", workspace,
+                 command: @args_stub,
+                 allowed_tools: "Read, Edit Bash"
+               )
+
+      args = parse_args(result.output)
+      assert "--allowed-tools" in args
+      assert "Read" in args
+      assert "Edit" in args
+      assert "Bash" in args
+    end
+
+    test "passes the minimal permission mode as --permission-mode", %{workspace: workspace} do
+      assert {:ok, result} =
+               ClaudeAdapter.run("do work", workspace,
+                 command: @args_stub,
+                 permission_mode: "default"
+               )
+
+      args = parse_args(result.output)
+      assert pair_present?(args, "--permission-mode", "default")
+    end
+
+    test "accepts an atom permission mode", %{workspace: workspace} do
+      assert {:ok, result} =
+               ClaudeAdapter.run("do work", workspace,
+                 command: @args_stub,
+                 permission_mode: :acceptEdits
+               )
+
+      args = parse_args(result.output)
+      assert pair_present?(args, "--permission-mode", "acceptEdits")
+    end
+
+    test "combines all hygiene flags alongside the base -p/json args", %{workspace: workspace} do
+      assert {:ok, result} =
+               ClaudeAdapter.run("do work", workspace,
+                 command: @args_stub,
+                 max_budget_usd: 1.25,
+                 allowed_tools: ["Read"],
+                 permission_mode: "default"
+               )
+
+      args = parse_args(result.output)
+      # Base args (T4.1) still present.
+      assert "-p" in args
+      assert pair_present?(args, "--output-format", "json")
+      # Hygiene args (T4.8) appended.
+      assert pair_present?(args, "--max-budget-usd", "1.25")
+      assert pair_present?(args, "--allowed-tools", "Read")
+      assert pair_present?(args, "--permission-mode", "default")
+    end
+
+    test "emits no hygiene flags by default (byte-for-byte pre-T4.8 args)", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} = ClaudeAdapter.run("do work", workspace, command: @args_stub)
+
+      args = parse_args(result.output)
+      assert args == ["-p", "do work", "--output-format", "json"]
+    end
+
+    test "ignores a non-positive budget and empty tool set", %{workspace: workspace} do
+      assert {:ok, result} =
+               ClaudeAdapter.run("do work", workspace,
+                 command: @args_stub,
+                 max_budget_usd: 0,
+                 allowed_tools: [],
+                 permission_mode: ""
+               )
+
+      args = parse_args(result.output)
+      refute "--max-budget-usd" in args
+      refute "--allowed-tools" in args
+      refute "--permission-mode" in args
+    end
+  end
+
+  # Parse the args-echoing stub's stdout ("arg: <value>" per line) back into the
+  # argv list the harness received, in order.
+  defp parse_args(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.flat_map(fn
+      "arg: " <> arg -> [arg]
+      _ -> []
+    end)
+  end
+
+  # Assert a flag is immediately followed by the expected value in the argv.
+  defp pair_present?(args, flag, value) do
+    args
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.any?(fn [a, b] -> a == flag and b == value end)
   end
 end
