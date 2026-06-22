@@ -63,6 +63,8 @@ defmodule Kazi.Loop do
   # T1.3 flake: the pure re-run/quarantine policy lives in its own module; the
   # loop only routes failing-predicate evaluation through it (see observe/1).
   alias Kazi.Loop.Flake
+  # T1.4 budget: the pure budget-ceiling guard (iterations / wall-clock / tokens).
+  alias Kazi.Loop.Budget
 
   require Logger
 
@@ -77,14 +79,24 @@ defmodule Kazi.Loop do
   @typedoc """
   The terminal outcome reported when the loop stops.
 
-    * `:converged` — the whole predicate vector is satisfied (success).
-    * `:stopped`   — the loop was asked to stop before converging.
+    * `:converged`   — the whole predicate vector is satisfied (success).
+    * `:stopped`     — the loop was asked to stop before converging.
+    * `:over_budget` — a hard budget ceiling was hit (T1.4): the loop stopped
+      itself rather than burn more iterations / wall-clock / tokens (concept §5,
+      ADR-0002). The exceeded dimension is in the result's `:reason`.
   """
-  @type outcome :: :converged | :stopped
+  @type outcome :: :converged | :stopped | :over_budget
 
-  @typedoc "The final result handed to `await/2` waiters when the loop stops."
+  @typedoc """
+  The final result handed to `await/2` waiters when the loop stops.
+
+  `:reason` names the budget dimension that forced an `:over_budget` stop (T1.4),
+  e.g. `:max_iterations`, `:wall_clock`, or `:token_budget`; it is `nil` for the
+  `:converged` and `:stopped` outcomes.
+  """
   @type result :: %{
           outcome: outcome(),
+          reason: Budget.reason() | nil,
           vector: PredicateVector.t() | nil,
           actions: [Action.kind()],
           iterations: non_neg_integer()
@@ -132,6 +144,23 @@ defmodule Kazi.Loop do
               history: [],
               actions: [],
               iterations: 0,
+              # --- T1.4 budget: usage tracking + the hard ceiling -------------
+              # The goal's hard ceiling (iterations / wall-clock / tokens),
+              # cached from the goal at init; the budget guard is checked once at
+              # the start of every tick before more work is dispatched.
+              budget: nil,
+              # Injectable monotonic clock (`:now_fn` opt) so the wall-clock
+              # dimension is deterministically testable without sleeping. Returns
+              # a millisecond reading; elapsed = now_fn.() - started_at_ms.
+              now_fn: nil,
+              started_at_ms: nil,
+              # Accumulated token estimate across harness invocations (the budget
+              # token dimension). Each :dispatch_agent result that carries a token
+              # estimate adds to this running total.
+              tokens_used: 0,
+              # The budget dimension that forced an :over_budget stop, if any
+              # (surfaced in snapshot/1 and the terminal result).
+              budget_reason: nil,
               # cached terminal result + await/2 waiters
               result: nil,
               waiters: [],
@@ -183,6 +212,13 @@ defmodule Kazi.Loop do
       seam the runtime (T0.7b) uses to project each iteration into the read-model;
       it must not influence convergence (its return value is ignored), and a
       raising callback is contained. Default `nil` (no-op).
+    * `:budget` — a `Kazi.Budget` hard ceiling to enforce (T1.4); overrides the
+      goal's own `budget`. The loop stops with `:over_budget` once any dimension
+      (iterations / wall-clock / tokens) is crossed. Default: the goal's budget.
+    * `:now_fn` — a 0-arity function returning a monotonic millisecond reading,
+      used for the wall-clock budget dimension (T1.4). Injectable so the
+      wall-clock ceiling is deterministically testable without sleeping. Default
+      `fn -> System.monotonic_time(:millisecond) end`.
     * `:name` — register the process under a name.
   """
   @spec start_link(keyword()) :: :gen_statem.start_ret()
@@ -246,7 +282,9 @@ defmodule Kazi.Loop do
           iterations: non_neg_integer(),
           landed?: boolean(),
           deployed?: boolean(),
-          quarantine: [Kazi.Predicate.id()]
+          quarantine: [Kazi.Predicate.id()],
+          tokens_used: non_neg_integer(),
+          budget_reason: Budget.reason() | nil
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
@@ -274,8 +312,13 @@ defmodule Kazi.Loop do
 
   @impl :gen_statem
   def init(opts) do
+    goal = fetch!(opts, :goal)
+    # T1.4 budget: an injectable monotonic clock (ms) so the wall-clock dimension
+    # is deterministically testable; capture the start instant once at init.
+    now_fn = Keyword.get(opts, :now_fn, fn -> System.monotonic_time(:millisecond) end)
+
     data = %Data{
-      goal: fetch!(opts, :goal),
+      goal: goal,
       providers: fetch!(opts, :providers),
       harness: fetch!(opts, :harness),
       integrate: fetch!(opts, :integrate),
@@ -290,7 +333,11 @@ defmodule Kazi.Loop do
       extra_action_context: Map.new(Keyword.get(opts, :extra_action_context, %{})),
       # T1.3 flake: how many extra evaluations to spend distinguishing a real
       # failure from a flake (default Kazi.Loop.Flake.max_retries/0).
-      flake_max_retries: Keyword.get(opts, :flake_max_retries, Flake.max_retries())
+      flake_max_retries: Keyword.get(opts, :flake_max_retries, Flake.max_retries()),
+      # T1.4 budget: cache the hard ceiling + clock and start the wall-clock.
+      budget: Keyword.get(opts, :budget, goal.budget),
+      now_fn: now_fn,
+      started_at_ms: now_fn.()
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -306,38 +353,28 @@ defmodule Kazi.Loop do
   # iteration.
   @impl :gen_statem
   def handle_event(:internal, :observe, :observing, %Data{} = data) do
-    # T1.3 flake: observe now also evolves the quarantine set (a failing
-    # predicate is re-run via the real provider path and may be classified flaky).
-    {vector, quarantine} = observe(data)
+    # T1.4 budget: the hard ceiling is checked ONCE at the start of every tick,
+    # BEFORE observing/dispatching more work. If a dimension is exceeded the loop
+    # makes a hard stop here — it does not dispatch another agent / integrate /
+    # deploy — terminating as :over_budget with the exceeded dimension as reason.
+    case budget_check(data) do
+      {:stop, reason} ->
+        terminate_over_budget(reason, data)
 
-    # 0-based per-goal iteration index for this observation (matches the
-    # read-model's iteration_index and the on_iteration payload's :iteration).
-    index = data.iterations
-
-    data =
-      %Data{
-        data
-        | prev_vector: data.vector,
-          vector: vector,
-          # T1.3 flake: carry the (sticky) quarantine set forward.
-          quarantine: quarantine,
-          # Prepend this observation's full vector to the in-state history
-          # (newest-first; read APIs reverse to oldest-first). T1.1.
-          history: [{index, vector} | data.history],
-          iterations: data.iterations + 1
-      }
-
-    log_diff(data)
-    notify_iteration(data)
-
-    decide(vector, data)
+      :ok ->
+        observe_tick(data)
+    end
   end
 
   # --- ACT: dispatch the coding agent against failing-predicate evidence -------
   def handle_event(:internal, {:act, %Action{kind: :dispatch_agent} = action}, :acting, data) do
     prompt = dispatch_prompt(action, data)
 
-    _ = data.harness.run(prompt, data.workspace, data.adapter_opts)
+    result = data.harness.run(prompt, data.workspace, data.adapter_opts)
+
+    # T1.4 budget: accumulate this run's token estimate (if the harness reported
+    # one) into the running total the budget guard checks next tick.
+    data = accumulate_tokens(data, result)
 
     # The code changed under us: any prior land/deploy is now stale. Re-observe
     # on the poll interval (not zero) so a goal whose code predicate never goes
@@ -377,7 +414,7 @@ defmodule Kazi.Loop do
 
   # --- stop / await / snapshot (handled in any state) --------------------------
   def handle_event(:cast, :stop, state, %Data{} = data)
-      when state not in [:converged, :stopped] do
+      when state not in [:converged, :stopped, :over_budget] do
     terminate_with(:stopped, data)
   end
 
@@ -385,7 +422,7 @@ defmodule Kazi.Loop do
 
   # In a terminal state the result is cached in data; reply to await immediately.
   def handle_event({:call, from}, :await, state, %Data{} = data)
-      when state in [:converged, :stopped] do
+      when state in [:converged, :stopped, :over_budget] do
     {:keep_state_and_data, [{:reply, from, {:ok, data.result}}]}
   end
 
@@ -403,7 +440,11 @@ defmodule Kazi.Loop do
       landed?: data.landed?,
       deployed?: data.deployed?,
       # T1.3 flake: the predicate ids currently quarantined as flaky.
-      quarantine: MapSet.to_list(data.quarantine)
+      quarantine: MapSet.to_list(data.quarantine),
+      # T1.4 budget: current token spend + the dimension that stopped the loop
+      # (nil unless it stopped :over_budget).
+      tokens_used: data.tokens_used,
+      budget_reason: data.budget_reason
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -416,6 +457,36 @@ defmodule Kazi.Loop do
   # =============================================================================
   # OBSERVE
   # =============================================================================
+
+  # The normal observe → diff → decide tick, reached only when the budget guard
+  # passed (T1.4).
+  defp observe_tick(%Data{} = data) do
+    # T1.3 flake: observe now also evolves the quarantine set (a failing
+    # predicate is re-run via the real provider path and may be classified flaky).
+    {vector, quarantine} = observe(data)
+
+    # 0-based per-goal iteration index for this observation (matches the
+    # read-model's iteration_index and the on_iteration payload's :iteration).
+    index = data.iterations
+
+    data =
+      %Data{
+        data
+        | prev_vector: data.vector,
+          vector: vector,
+          # T1.3 flake: carry the (sticky) quarantine set forward.
+          quarantine: quarantine,
+          # Prepend this observation's full vector to the in-state history
+          # (newest-first; read APIs reverse to oldest-first). T1.1.
+          history: [{index, vector} | data.history],
+          iterations: data.iterations + 1
+      }
+
+    log_diff(data)
+    notify_iteration(data)
+
+    decide(vector, data)
+  end
 
   # Evaluate every predicate the goal carries (predicates ++ guards) via its
   # registered provider, building the PredicateVector for this observation.
@@ -690,11 +761,11 @@ defmodule Kazi.Loop do
   # Termination
   # =============================================================================
 
-  # Transition to a terminal state (`:converged` | `:stopped`) and stay alive,
-  # caching the final result and flushing it to every pending await waiter. The
-  # process is left running (not stopped) so late `await/2` and `snapshot/1`
-  # calls still succeed; the operator/owner tears it down. Terminal states accept
-  # no further observe/act events.
+  # Transition to a terminal state (`:converged` | `:stopped` | `:over_budget`)
+  # and stay alive, caching the final result and flushing it to every pending
+  # await waiter. The process is left running (not stopped) so late `await/2` and
+  # `snapshot/1` calls still succeed; the operator/owner tears it down. Terminal
+  # states accept no further observe/act events.
   defp terminate_with(outcome, %Data{} = data) do
     result = build_result(outcome, data)
     replies = for from <- data.waiters, do: {:reply, from, {:ok, result}}
@@ -704,15 +775,70 @@ defmodule Kazi.Loop do
 
   @spec build_result(atom(), Data.t()) :: result()
   defp build_result(state, %Data{} = data) do
-    outcome = if state == :converged, do: :converged, else: :stopped
+    outcome =
+      case state do
+        :converged -> :converged
+        :over_budget -> :over_budget
+        _ -> :stopped
+      end
 
     %{
       outcome: outcome,
+      # T1.4 budget: the exceeded dimension, only set on an :over_budget stop.
+      reason: data.budget_reason,
       vector: data.vector,
       actions: Enum.reverse(data.actions),
       iterations: data.iterations
     }
   end
+
+  # =============================================================================
+  # T1.4 budget: usage tracking + the hard ceiling
+  # =============================================================================
+
+  # Check the goal's hard budget ceiling against current usage. Pure decision
+  # lives in `Kazi.Loop.Budget`; here we only assemble the usage from loop state
+  # (iterations so far, elapsed wall-clock via the injectable clock, accumulated
+  # token estimate) and pass it through.
+  @spec budget_check(Data.t()) :: :ok | {:stop, Budget.reason()}
+  defp budget_check(%Data{budget: nil}), do: :ok
+
+  defp budget_check(%Data{budget: budget} = data) do
+    Budget.check(budget, %{
+      iterations: data.iterations,
+      elapsed_ms: elapsed_ms(data),
+      tokens: data.tokens_used
+    })
+  end
+
+  # Wall-clock elapsed since the loop started, in ms, via the injectable clock.
+  @spec elapsed_ms(Data.t()) :: non_neg_integer()
+  defp elapsed_ms(%Data{now_fn: now_fn, started_at_ms: started_at_ms}) do
+    max(now_fn.() - started_at_ms, 0)
+  end
+
+  # Hard budget stop: record the exceeded dimension, project the stop into the
+  # read-model / persistence seam, then transition to the terminal :over_budget
+  # state. No further agent/integrate/deploy is dispatched (concept §5).
+  defp terminate_over_budget(reason, %Data{} = data) do
+    data = %Data{data | budget_reason: reason}
+    notify_budget_stop(data)
+    terminate_with(:over_budget, data)
+  end
+
+  # Add a harness run's token estimate to the running total. The estimate is read
+  # from the result's cost map (`%{cost: %{tokens: n}}`, the HarnessAdapter
+  # contract); a result without a token estimate contributes nothing.
+  @spec accumulate_tokens(Data.t(), Kazi.HarnessAdapter.result()) :: Data.t()
+  defp accumulate_tokens(%Data{} = data, result) do
+    %Data{data | tokens_used: data.tokens_used + token_estimate(result)}
+  end
+
+  @spec token_estimate(Kazi.HarnessAdapter.result()) :: non_neg_integer()
+  defp token_estimate({:ok, %{cost: %{tokens: tokens}}}) when is_integer(tokens) and tokens >= 0,
+    do: tokens
+
+  defp token_estimate(_), do: 0
 
   # =============================================================================
   # Misc helpers
@@ -760,6 +886,37 @@ defmodule Kazi.Loop do
       error ->
         Logger.warning(fn ->
           "kazi.loop on_iteration callback raised: #{Exception.message(error)}"
+        end)
+    end
+
+    :ok
+  end
+
+  # T1.4 budget: project the hard budget stop through the SAME persistence seam
+  # (`on_iteration`) so the stop — and the exceeded dimension — is recorded in the
+  # iteration log, making the budget terminal visible there (acceptance #4). It
+  # reuses the last observed vector at a fresh iteration index (one past the last
+  # observation) and carries the budget reason as `:stop_reason`. Side-effect
+  # only and contained, exactly like `notify_iteration/1`.
+  defp notify_budget_stop(%Data{on_iteration: nil}), do: :ok
+
+  defp notify_budget_stop(%Data{on_iteration: callback, budget_reason: reason} = data)
+       when is_function(callback, 1) do
+    payload = %{
+      goal: data.goal,
+      # A fresh index beyond the last observation: the budget-stop record.
+      iteration: data.iterations,
+      vector: data.vector || PredicateVector.new(),
+      converged?: false,
+      stop_reason: reason
+    }
+
+    try do
+      callback.(payload)
+    rescue
+      error ->
+        Logger.warning(fn ->
+          "kazi.loop on_iteration (budget stop) callback raised: #{Exception.message(error)}"
         end)
     end
 

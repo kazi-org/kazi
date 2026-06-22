@@ -32,7 +32,8 @@ defmodule Kazi.Runtime do
       {:ok, result} = Kazi.Runtime.run(goal, workspace: "/path/to/target")
 
   `run/2` starts the loop, blocks until it reaches a terminal state, and returns
-  the loop's `t:Kazi.Loop.result/0` (`:converged` | `:stopped`). Predicate
+  the loop's `t:Kazi.Loop.result/0` (`:converged` | `:stopped` | `:over_budget`,
+  the last carrying the exceeded budget dimension as `:reason`, T1.4). Predicate
   configs may name their own provider (a goal authored against a not-yet-shipped
   provider fails loudly here, not silently at dispatch).
   """
@@ -209,17 +210,28 @@ defmodule Kazi.Runtime do
   # Project one iteration. Best-effort: a read-model write must never stall or
   # alter convergence (the loop already contains the callback, but we also keep
   # the error local and logged rather than surfaced).
-  defp persist_iteration(goal_ref, %{
-         iteration: index,
-         vector: vector,
-         converged?: converged?
-       }) do
-    case ReadModel.record_iteration(%{
-           goal_ref: goal_ref,
-           iteration_index: index,
-           predicate_vector: vector,
-           converged: converged?
-         }) do
+  #
+  # T1.4 budget: an optional `:stop_reason` (present only on the loop's budget-stop
+  # projection) is recorded as a `budget_stop` action so the exceeded dimension is
+  # visible in the persisted iteration log.
+  defp persist_iteration(
+         goal_ref,
+         %{
+           iteration: index,
+           vector: vector,
+           converged?: converged?
+         } = payload
+       ) do
+    attrs =
+      %{
+        goal_ref: goal_ref,
+        iteration_index: index,
+        predicate_vector: vector,
+        converged: converged?
+      }
+      |> maybe_put_budget_stop(Map.get(payload, :stop_reason))
+
+    case ReadModel.record_iteration(attrs) do
       {:ok, _iteration} ->
         :ok
 
@@ -231,6 +243,14 @@ defmodule Kazi.Runtime do
 
         :ok
     end
+  end
+
+  # T1.4 budget: stamp a budget-stop iteration with the action that ended the run
+  # so the persisted log names the exceeded dimension.
+  defp maybe_put_budget_stop(attrs, nil), do: attrs
+
+  defp maybe_put_budget_stop(attrs, reason) do
+    Map.put(attrs, :action, Kazi.Action.new(:budget_stop, params: %{reason: reason}))
   end
 
   # =============================================================================
