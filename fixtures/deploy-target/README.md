@@ -14,18 +14,18 @@ Cloud Run deployment** in the Slice 0 dogfood (plan task **T0.12**).
 
 | Method & path | Behaviour |
 |---------------|-----------|
-| `GET /healthz` | Returns `200` with a plain-text body. **The live probe checks this.** |
+| `GET /livez` | Returns `200` with a plain-text body. **The live probe checks this.** |
 | `GET /` | Returns `200` with `kazi deploy-target fixture` (sanity route). |
 
 ## The deliberate failure (the convergence target)
 
-`GET /healthz` is supposed to return the body **`ok`**. It currently returns
+`GET /livez` is supposed to return the body **`ok`**. It currently returns
 **`not-ok`** (see the `healthBody` constant in `main.go`).
 
 - The unit test `TestHealthzReturnsOK` (in `main_test.go`) asserts the body is
   `ok` → it **FAILS** today, on purpose.
 - The live `http_probe` predicate (plan task T0.5b) asserts the deployed
-  `/healthz` returns `ok` → a deployed instance would **FAIL** the live probe.
+  `/livez` returns `ok` → a deployed instance would **FAIL** the live probe.
 
 **Converged** means a single edit lands: change `healthBody` in `main.go` from
 `"not-ok"` to `"ok"`. Once that happens:
@@ -45,7 +45,7 @@ go test ./...
 
 # Run the service locally:
 PORT=8080 go run .
-curl -s localhost:8080/healthz   # -> "not-ok" (pre-convergence), "ok" once converged
+curl -s localhost:8080/livez   # -> "not-ok" (pre-convergence), "ok" once converged
 curl -s localhost:8080/          # -> "kazi deploy-target fixture"
 ```
 
@@ -57,7 +57,7 @@ podman build -t kazi-deploy-target .        # or: docker build -t kazi-deploy-ta
 
 # Run (Cloud Run-style, honouring $PORT):
 podman run --rm -e PORT=8080 -p 8080:8080 kazi-deploy-target
-curl -s localhost:8080/healthz
+curl -s localhost:8080/livez
 ```
 
 The image is a distroless static binary listening on `$PORT` (default `8080`),

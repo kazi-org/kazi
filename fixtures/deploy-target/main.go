@@ -13,7 +13,7 @@ import (
 	"os"
 )
 
-// healthBody is the body returned by GET /healthz.
+// healthBody is the body returned by GET /livez.
 //
 // The live probe (the http_probe predicate, plan task T0.5b) and the unit test
 // both assert that this endpoint returns "ok". It currently returns "not-ok",
@@ -38,7 +38,11 @@ func rootHandler(w http.ResponseWriter, _ *http.Request) {
 // the handlers without binding a real port.
 func newMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthzHandler)
+	// NOTE: the liveness route is /livez, NOT /healthz. Cloud Run's front end
+	// intercepts the exact path /healthz (returns its own 404; the request never
+	// reaches the container), so the live probe could never see it. See
+	// docs/lore.md L-0003.
+	mux.HandleFunc("/livez", healthzHandler)
 	mux.HandleFunc("/", rootHandler)
 	return mux
 }
