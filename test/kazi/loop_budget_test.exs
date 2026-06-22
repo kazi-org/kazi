@@ -70,7 +70,12 @@ defmodule Kazi.LoopBudgetTest do
       deploy: NoopDeploy,
       # Poll fast so the budget trips quickly rather than waiting on the prod
       # default re-observe interval.
-      reobserve_interval_ms: 1
+      reobserve_interval_ms: 1,
+      # T1.5 stuck: these tests isolate the BUDGET dimension with a never-
+      # converging code predicate (a constant failing set), which the stuck
+      # detector would otherwise escalate first. Disable it here so the budget
+      # is the sole terminator; stuck is exercised in Kazi.StuckLoopTest.
+      stuck_iterations: 0
     ]
 
     Kazi.Loop.start_link(Keyword.merge(base, opts))

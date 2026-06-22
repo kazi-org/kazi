@@ -173,7 +173,13 @@ defmodule Kazi.LoopTest do
         # observation consumes exactly one scripted status and those across-
         # observation flips are not (correctly!) read as within-observation
         # flakes. The dedicated flake tests below opt the policy back in.
-        flake_max_retries: 0
+        flake_max_retries: 0,
+        # T1.5 stuck: disable stuck detection for these lifecycle tests. Several
+        # deliberately hold a code predicate failing across many observations
+        # (e.g. "stays running while a code predicate keeps failing"), which the
+        # stuck detector would otherwise (correctly) escalate. The dedicated
+        # stuck tests (Kazi.StuckLoopTest) opt it back on.
+        stuck_iterations: 0
       ]
       |> Keyword.merge(opts)
     )
