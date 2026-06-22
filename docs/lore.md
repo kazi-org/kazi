@@ -41,3 +41,14 @@ endpoint at `/healthz` is unprobeable through its Cloud Run URL. Fix: use a
 non-reserved path (we moved the fixture's health route to `/livez`). This bit the
 T0.12 dogfood: the deploy + public-access were fine, but the live `http_probe`
 against `/healthz` always 404'd from the edge. (T0.12, 2026-06-22.)
+
+### L-0004 #provider #http_probe #goalfile #livecheck -- body_match="exact" string + "ok"⊂"not-ok" false-pass
+A TOML goal-file can only supply `body_match = "exact"` as a STRING (TOML has no
+atoms; `Kazi.Goal.Loader` passes config values verbatim). The http_probe provider
+originally matched only the `:exact` ATOM, so a goal-file's `"exact"` silently
+degraded to the default substring-contains. Combined with the fixture body, that
+caused a FALSE PASS: expecting `"ok"` matched `"not-ok"` because "not-ok" CONTAINS
+"ok". Two lessons: (1) providers must accept string config values from goal-files,
+not only atoms (fixed: `body_matches?` accepts `:exact` and `"exact"`); (2) never
+pick a liveness sentinel that is a substring of the success value — use exact match
+or a non-overlapping token. Surfaced by the T0.12 dogfood. (2026-06-22.)
