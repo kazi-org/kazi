@@ -68,6 +68,7 @@ defmodule KaziWeb.GoalBoardLive do
             <th>Status</th>
             <th>Predicates</th>
             <th>Iterations</th>
+            <th>History</th>
           </tr>
         </thead>
         <tbody>
@@ -83,6 +84,11 @@ defmodule KaziWeb.GoalBoardLive do
             </td>
             <td class="iterations" data-iterations={goal.iteration_count}>
               {goal.iteration_count}
+            </td>
+            <td class="history">
+              <.link navigate={~p"/goals/#{goal.goal_ref}/history"} class="history-link">
+                Timeline
+              </.link>
             </td>
           </tr>
         </tbody>
