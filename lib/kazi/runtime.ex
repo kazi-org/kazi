@@ -33,7 +33,9 @@ defmodule Kazi.Runtime do
 
   `run/2` starts the loop, blocks until it reaches a terminal state, and returns
   the loop's `t:Kazi.Loop.result/0` (`:converged` | `:stopped` | `:over_budget`,
-  the last carrying the exceeded budget dimension as `:reason`, T1.4). Predicate
+  the last carrying the exceeded budget dimension as `:reason`, T1.4). The result
+  also carries `:release_ref` (T3.3d) — the release ref of the artifact deployed
+  during the run (T3.3c tagging), or `nil` if nothing was deployed. Predicate
   configs may name their own provider (a goal authored against a not-yet-shipped
   provider fails loudly here, not silently at dispatch).
   """
@@ -78,6 +80,26 @@ defmodule Kazi.Runtime do
     * `:integrate_params` / `:deploy_params` — extra params merged into the
       integrate / deploy actions (e.g. the Cloud Run `service`/`project`/`region`
       the deploy action requires).
+
+      T3.3d deploy wiring: `:deploy_params` is also how the deepened deploy
+      (T3.3a-c) is driven through the runtime — it is forwarded VERBATIM to the
+      `Kazi.Actions.Deploy` action, so:
+
+        * multi-environment selection (T3.3a): pass `env:` + an `envs:` map of
+          per-environment targets, e.g.
+          `deploy_params: %{env: :prod, envs: %{staging: %{...}, prod: %{...}}}`;
+          the action selects the env's `service`/`project`/`region`;
+        * release tagging (T3.3c) happens automatically on a successful deploy;
+          its release ref is surfaced in the run outcome (the result's
+          `:release_ref`) and the loop snapshot, and projected to the read-model's
+          `release_ref` column (queryable via `Kazi.ReadModel.release_refs/1`).
+          Override the tag with `deploy_params: %{release_ref: "v1.2.3"}` (or
+          inject a tagger seam with `:tag_cmd` in tests).
+
+      Rollback (T3.3b) is a distinct `:rollback` action the deploy module also
+      implements; it is invoked directly (`Kazi.Actions.Deploy.execute(...)`) with
+      the same env-aware params rather than as a step of the convergence loop,
+      which never rolls back a successful reconcile.
     * `:persist?` — project each iteration into the read-model (default `true`).
       Set `false` to run without touching SQLite.
     * `:goal_ref` — the read-model `goal_ref` (default `goal.id`).
@@ -303,6 +325,10 @@ defmodule Kazi.Runtime do
         # queryable from the read-model (Kazi.ReadModel.regressions/1).
         regressions: Map.get(payload, :regressions, [])
       }
+      # T3.3d deploy wiring: project the release ref recorded on a successful
+      # deploy (T3.3c) into the read-model's `release_ref` column so the shipped
+      # artifact is queryable via Kazi.ReadModel.release_refs/1.
+      |> maybe_put_release_ref(Map.get(payload, :release_ref))
       |> maybe_put_budget_stop(Map.get(payload, :stop_reason))
 
     case ReadModel.record_iteration(attrs) do
@@ -318,6 +344,14 @@ defmodule Kazi.Runtime do
         :ok
     end
   end
+
+  # T3.3d deploy wiring: stamp the iteration with the release ref of the deployed
+  # artifact (T3.3c) when present, so it lands in the read-model's `release_ref`
+  # column. A nil ref (nothing deployed yet) is omitted, leaving the column NULL.
+  defp maybe_put_release_ref(attrs, nil), do: attrs
+
+  defp maybe_put_release_ref(attrs, ref) when is_binary(ref),
+    do: Map.put(attrs, :release_ref, ref)
 
   # T1.4 budget: stamp a budget-stop iteration with the action that ended the run
   # so the persisted log names the exceeded dimension.
