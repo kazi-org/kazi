@@ -23,8 +23,9 @@ defmodule Kazi.TelegramTest do
   alias Kazi.Telegram.Message
 
   # Pure parsing doctests (the `ingest/2` example persists, so it is covered by the
-  # Tier-2 tests below rather than as a doctest).
-  doctest Kazi.Telegram, only: [parse_idea: 1]
+  # Tier-2 tests below rather than as a doctest). `notify/3` is pure transport over
+  # the in-memory double, so its doctest runs here too.
+  doctest Kazi.Telegram, only: [parse_idea: 1, notify: 3]
   doctest Kazi.Telegram.Message
 
   # An injected stub harness (the authoring seam): returns a fixed JSON proposal
@@ -148,6 +149,117 @@ defmodule Kazi.TelegramTest do
 
       assert {:error, :timeout} =
                Telegram.poll(client: UnreachableClient, authoring: [harness: StubHarness])
+    end
+  end
+
+  describe "notify/3 — egress: one terminal-event ping via the client seam (T3.7b)" do
+    # Each terminal loop outcome must yield EXACTLY ONE outbound message captured
+    # by the in-memory double, routed to the chat, with the right status text.
+    # Hermetic: the client is the double (no token, no network); no loop is run —
+    # the bridge is decoupled and only consumes the terminal result (ADR-0011 §1).
+
+    test "converged: one ping with the success status" do
+      client = InMemoryClient.start()
+
+      assert {:ok, _sent} =
+               Telegram.notify(42, %{outcome: :converged, reason: nil}, client: client)
+
+      assert [{42, text, []}] = InMemoryClient.sent()
+      assert text =~ "converged"
+    end
+
+    test "stuck (:stopped with reason :stuck): one ping with the stuck status" do
+      client = InMemoryClient.start()
+
+      assert {:ok, _sent} =
+               Telegram.notify(7, %{outcome: :stopped, reason: :stuck}, client: client)
+
+      assert [{7, text, []}] = InMemoryClient.sent()
+      assert text =~ "stuck"
+    end
+
+    test "operator stop (:stopped, no reason): one ping distinct from the stuck status" do
+      client = InMemoryClient.start()
+
+      assert {:ok, _sent} =
+               Telegram.notify(7, %{outcome: :stopped, reason: nil}, client: client)
+
+      assert [{7, text, []}] = InMemoryClient.sent()
+      assert text =~ "stopped"
+      refute text =~ "stuck"
+    end
+
+    test "over budget: one ping naming the exceeded budget dimension" do
+      client = InMemoryClient.start()
+
+      assert {:ok, _sent} =
+               Telegram.notify(9, %{outcome: :over_budget, reason: :max_iterations},
+                 client: client
+               )
+
+      assert [{9, text, []}] = InMemoryClient.sent()
+      assert text =~ "budget"
+      assert text =~ "max iterations"
+    end
+
+    test "each distinct terminal outcome renders a distinct status line" do
+      texts =
+        for result <- [
+              %{outcome: :converged, reason: nil},
+              %{outcome: :stopped, reason: :stuck},
+              %{outcome: :stopped, reason: nil},
+              %{outcome: :over_budget, reason: :wall_clock}
+            ] do
+          client = InMemoryClient.start()
+          assert {:ok, _} = Telegram.notify(1, result, client: client)
+          assert [{1, text, []}] = InMemoryClient.sent()
+          text
+        end
+
+      # No two terminal outcomes collapse to the same ping.
+      assert length(Enum.uniq(texts)) == length(texts)
+    end
+
+    test "exactly one ping per terminal event — no duplicates" do
+      client = InMemoryClient.start()
+
+      assert {:ok, _} = Telegram.notify(42, %{outcome: :converged, reason: nil}, client: client)
+
+      # One terminal event drove one notify/3 call; the double recorded one send.
+      assert length(InMemoryClient.sent()) == 1
+    end
+
+    test "accepts a bare outcome atom (no reason to convey)" do
+      client = InMemoryClient.start()
+
+      assert {:ok, _} = Telegram.notify(3, :converged, client: client)
+      assert [{3, text, []}] = InMemoryClient.sent()
+      assert text =~ "converged"
+    end
+
+    test "routes to the message's chat_id and forwards :client_opts" do
+      client = InMemoryClient.start()
+
+      assert {:ok, _} =
+               Telegram.notify(123, %{outcome: :converged, reason: nil},
+                 client: client,
+                 client_opts: [parse_mode: "MarkdownV2"]
+               )
+
+      assert [{123, _text, [parse_mode: "MarkdownV2"]}] = InMemoryClient.sent()
+    end
+
+    test "surfaces a client that could not be reached, without crashing" do
+      defmodule UnreachableEgress do
+        @behaviour Kazi.Telegram.Client
+        @impl true
+        def fetch_updates(_opts), do: {:error, :timeout}
+        @impl true
+        def send_message(_chat, _text, _opts), do: {:error, :timeout}
+      end
+
+      assert {:error, :timeout} =
+               Telegram.notify(1, %{outcome: :converged, reason: nil}, client: UnreachableEgress)
     end
   end
 
