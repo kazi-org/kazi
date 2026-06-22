@@ -412,6 +412,21 @@ defmodule Kazi.Adopt do
     end
   end
 
+  @doc """
+  Renders an adopted goal **map** (the `Kazi.Goal.Loader.from_map/1` shape) to a
+  TOML goal-file STRING (T5.3, ADR-0013, ADR-0015).
+
+  Delegates to `Kazi.Adopt.Writer.to_toml/1` — the deterministic hand-renderer
+  that emits the goal-file subset `kazi init` writes (top-level `id`/`name`, an
+  optional `[scope]`, the `[[predicate]]` blocks incl. guards) and appends a
+  COMMENTED live-predicate scaffold (an `http_probe` with `TODO` placeholders for
+  a human to fill in). Pure and deterministic: the same map renders
+  byte-identically, and decoding the uncommented part round-trips through
+  `Kazi.Goal.Loader.from_map/1`.
+  """
+  @spec to_toml(map()) :: String.t()
+  defdelegate to_toml(map), to: Kazi.Adopt.Writer
+
   # Drive the injectable harness for live-predicate proposals. Any failure path
   # (harness error, unparseable payload, no usable predicate) yields `[]` — the
   # deterministic detection always stands, so enrichment can only ever ADD.
