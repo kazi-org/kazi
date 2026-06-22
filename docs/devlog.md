@@ -212,3 +212,40 @@ waves, 8 PRs, all rebase-merged with green CI and verified on integrated main.
 
 **Next:** either (a) complete T0.6h (human GCP setup) to unblock the T0.12 dogfood,
 or (b) `/plan` the Slice-3 epic (T3.1/T3.5/T3.7) into granular tasks for a new pool wave.
+
+## 2026-06-22 — Slice-3 epic (E3) shipped via pool; all plannable agent work done
+
+**Session:** continuation of `/loop /apply --pool`. After granularizing the coarse
+Slice-3 backlog into 16 hermetic subtasks (see the plan Change Summary + ADR-0011),
+executed them end-to-end across Waves 15-18, 16 PRs (#49-#64), all rebase-merged
+with green CI and verified on integrated main.
+
+- **Wave 15:** T3.1a (lease behaviour + in-memory backend + shared conformance suite),
+  T3.5a (`Kazi.Authoring.propose`), T3.6a (Phoenix LiveView skeleton + Playwright).
+- **Wave 16:** T3.1b (real NATS JetStream KV lease backend; integration test gated on
+  `NATS_URL`, excluded by default so `mix test` stays hermetic — added `gnat`),
+  T3.1c (presence/intent snapshot), T3.2a (`Kazi.Partition` blast-radius partitioning
+  reusing the T4.2 graph seam), T3.5b (approve/reject/edit workflow), T3.6b (goal board
+  LiveView), T3.7a (Telegram ingress via client seam).
+- **Wave 17:** T3.1d (acquire lease before dispatch), T3.2b (partition->lease-key map),
+  T3.5c (CLI propose/approve), T3.6c (presence + lease-map LiveView), T3.6d (history
+  timeline LiveView), T3.7b (egress pings on terminal loop events). T3.6c/T3.6d shared
+  `router.ex` — merged T3.6c first; T3.6d rebased with a manual one-line router conflict
+  resolution (kept both routes), re-verified green before merge.
+- **Wave 18:** T3.7c (end-to-end ingress->authoring->approval->run->egress test).
+- **Tests:** 372 (session start) -> 650 passing (+278 across E4 + E3), 17 `:nats`
+  integration tests excluded by default; format + warnings-as-errors clean at every merge.
+- **ADR-0011** added: Slice-3 operator surfaces (LiveView dashboard + Telegram bridge)
+  are READ projections over the read-model + NATS and never couple into the core loop;
+  both sit behind injectable seams for hermetic tests.
+
+**Pool drained — all plannable agent work in the plan is now complete (E0-E4 + E3).**
+Remaining incomplete tasks are NOT pool-eligible:
+- **T0.6h** (`kind: human`) — GCP project/billing/Cloud Run provisioning. Still the
+  single critical-path blocker for **T0.12**, the headline Slice-0 dogfood (idea -> live
+  production probe) that is the project's success bar.
+- **T4.9** — deferred semantic-retrieval/RAG adapter (ADR-0005); off by default,
+  un-deferring is a deliberate user decision (adds an embeddings dependency surface).
+
+**Next:** complete T0.6h (human GCP setup) to unblock the T0.12 live dogfood; OR opt in
+to building the deferred T4.9. No other autonomous pool work remains.
