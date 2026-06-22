@@ -213,6 +213,23 @@ binary (no Erlang prerequisite) with the FULL read-model (NIF bundled), and
 - [ ] T6.4 Homebrew tap: create `kazi-org/homebrew-tap` with a `kazi` formula that downloads the platform artifact + verifies its checksum; `brew install kazi-org/tap/kazi` installs a working `kazi`  Owner: TBD  Est: 1.5h  verifies: [UC-024]  kind: any  deps: [T6.3]  acc: `brew install kazi-org/tap/kazi` on macOS installs a runnable `kazi`; `brew audit --strict` passes; `kazi --help` works post-install
 - [ ] T6.5 Docs: README install section leads with `brew install` + the prebuilt binary; note the runtime requirement that a coding agent (`claude`) must be on PATH; reframe the escript as a contributor convenience  Owner: TBD  Est: 0.5h  verifies: [UC-024]  deps: [T6.4]  acc: README documents brew + binary install and the harness-on-PATH requirement; links the GitHub Releases page
 
+### E7 -- init source/output model: registry adapter + goal-set (P2, see ADR-0015)
+
+Acceptance: `kazi init --registry <file.json>` deterministically turns a capability
+registry into a LOADABLE, RUNNABLE goal SET (one goal-file per capability), code
+predicates derived from declared test bindings, live predicates scaffolded as commented
+TODOs, prose (`.md`) inputs rejected, `--enrich` off by default. Folds into the existing
+`kazi init` verb (no new subcommand). Reuses the `Kazi.Adopt` `:file_reader` seam and
+`Kazi.Goal.Loader`. NOTE: T5.3 (goal-file writer) and T5.5 (the `init` CLI verb) are
+prerequisites; this epic completes them as it lands.
+
+- [ ] T5.3 `Kazi.Adopt.to_toml/1`: render a detected goal (test_runner + guards + a COMMENTED `http_probe` predicate with TODO url/expected placeholders) to a goal-file that round-trips through `Kazi.Goal.Loader` + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1, T5.2]  acc: generated TOML loads cleanly via `Kazi.Goal.Loader`; the live predicate is present-but-commented with TODO placeholders; deterministic byte output; hermetic
+- [ ] T7.1 `Kazi.Adopt.Registry.parse/2`: decode a JSON capability registry through the `:file_reader` seam into a validated `[capability]` list (minimal contract: `id`, `name`, optional `test`/`tests` binding(s), optional `scope`); REJECT prose (`.md`) inputs with a clear error; hermetic fixture registries  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [T5.1]  acc: a valid registry parses to capabilities; a malformed/empty registry yields a clear error; a `.md` path is rejected as "prose, not a registry"; deterministic; hermetic
+- [ ] T7.2 `Kazi.Adopt.Registry.to_goal_set/2`: map each capability to a goal MAP (declared test binding -> `test_runner` acceptance predicate; missing binding -> commented TODO gap; a scaffolded commented `http_probe`/`browser` live predicate per goal); every goal round-trips through `Kazi.Goal.Loader` + tests  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [T7.1, T5.3]  acc: a registry yields one goal per capability, each loadable; gaps are commented TODOs; deterministic byte output; hermetic
+- [ ] T5.5 CLI `kazi init <path> [--enrich] [--out <file>]` (stack-detection mode): wire detect -> guards -> (optional enrich) -> write; print the written path + a review hint + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1, T5.2, T5.3, T5.4]  acc: `kazi init` on a fixture writes a loadable goal-file and prints the path; `--out` honored; CLI parse/exec tested; hermetic
+- [ ] T7.3 `kazi init --registry <file> [--enrich] [--out <dir>]` (registry mode, folded into the `init` verb): dispatch repo-vs-registry by input; write a goal SET under `--out/<scope>/<id>.toml`; `--enrich` (off by default) fills only gap bindings via the harness seam; print written paths + review hint; CLI parse/exec tests  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [T7.2, T5.5]  acc: registry input writes a loadable goal set; repo input still writes one goal-file; prose rejected; `--enrich` default-off proven; hermetic
+- [ ] T7.4 e2e + convergence + docs: a fixture `capabilities.json` produces a loadable goal set AND a small fixture catalog CONVERGES through `Kazi.Runtime`; README "adopt a capability registry" snippet  Owner: TBD  Est: 1.5h  verifies: [UC-025]  deps: [T7.3]  acc: e2e asserts the generated goal set loads + names the declared test commands; a fixture catalog converges; README shows the registry adopt flow; `mix test` green; hermetic
+
 ## Parallel Work
 
 Behaviours-first (T0.3 defines the provider/adapter/action contracts) lets the
