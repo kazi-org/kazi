@@ -11,6 +11,9 @@ erl_crash.dump
 .elixir_ls/
 kazi-*.tar
 
+# Built escript binary (`mix escript.build` — do not commit, T0.10)
+/kazi
+
 # SQLite local read-model
 *.db
 *.db-shm

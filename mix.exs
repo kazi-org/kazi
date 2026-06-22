@@ -8,8 +8,15 @@ defmodule Kazi.MixProject do
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
+      escript: escript(),
       deps: deps()
     ]
+  end
+
+  # `mix escript.build` produces the operator-facing `kazi` binary (T0.10). Its
+  # entry is Kazi.CLI.main/1 (`kazi run <goal-file> --workspace <path>`).
+  defp escript do
+    [main_module: Kazi.CLI, name: "kazi"]
   end
 
   # Run "mix help compile.app" to learn about applications.
