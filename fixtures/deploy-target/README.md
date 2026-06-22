@@ -76,7 +76,13 @@ credentials exist.
 |--------|---------|
 | `GCP_PROJECT` | GCP project id hosting the Cloud Run service |
 | `GCP_REGION` | Cloud Run region (e.g. `us-central1`) |
-| `GCP_SA_KEY` | JSON key for a service account with `run.admin`, `artifactregistry.writer`, and `iam.serviceAccountUser` |
+| `GCP_SA_KEY` | JSON key for a service account with `run.admin`, `artifactregistry.admin`, `iam.serviceAccountUser`, `cloudbuild.builds.editor`, and `storage.admin` |
+
+> **First-deploy gotcha.** `gcloud run deploy --source .` auto-creates an Artifact
+> Registry repo (`cloud-run-source-deploy`) on the first run, which needs
+> `artifactregistry.repositories.create` — present in `roles/artifactregistry.admin`
+> but NOT in `roles/artifactregistry.writer`. Use `admin` (or pre-create the repo:
+> `gcloud artifacts repositories create cloud-run-source-deploy --repository-format=docker --location=$REGION`).
 
 These are provisioned by the human task **T0.6h** (GCP project + Cloud Run
 service + deploy credentials). The workflow builds the container from source
