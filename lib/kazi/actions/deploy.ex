@@ -36,6 +36,27 @@ defmodule Kazi.Actions.Deploy do
     * `:port` — container port (default `8080`, matching the fixture)
     * `:allow_unauthenticated` — pass `--allow-unauthenticated` (default `true`)
 
+  ## Multi-environment targets (T3.3a, UC-015)
+
+  Slice 3 deepens deploy so one action can target *different environments*
+  (staging vs prod) without re-architecting (ADR-0007: deepen, don't
+  re-architect). Two **additive** params drive it:
+
+    * `:env` — the environment to deploy, e.g. `:staging` / `:prod` (an atom or
+      a string). When given, its per-environment target is selected.
+    * `:envs` — a map from environment to a map of per-env target overrides,
+      e.g. `%{staging: %{service: "kazi-staging", project: "p-staging",
+      region: "us-central1"}, prod: %{...}}`. The env's overrides are merged
+      *over* the top-level params, so shared settings (`:source`, `:port`,
+      `:cmd`, …) can stay at the top level and only the differing target fields
+      need to live under each env.
+
+  Selection is **back-compatible**: with neither `:env` nor `:envs` the action
+  behaves exactly as before — the top-level `:service`/`:project`/`:region` are
+  used. Supplying `:env` for an environment absent from `:envs` (or `:env`
+  without any `:envs` map) returns a clear `{:error, {:unknown_env, env}}`
+  result rather than raising.
+
   ## Injectable deployer (the test seam)
 
   The deployer command is **injectable** so tests never make a real cloud call.
@@ -62,9 +83,8 @@ defmodule Kazi.Actions.Deploy do
 
   @impl true
   def execute(%Action{kind: :deploy} = action, context) do
-    params = action.params
-
-    with {:ok, service} <- fetch(params, :service),
+    with {:ok, params} <- select_env_params(action.params),
+         {:ok, service} <- fetch(params, :service),
          {:ok, project} <- fetch(params, :project),
          {:ok, region} <- fetch(params, :region) do
       source = Map.get(params, :source, @default_source)
@@ -79,6 +99,29 @@ defmodule Kazi.Actions.Deploy do
   end
 
   def execute(%Action{kind: kind}, _context), do: {:error, {:unsupported_kind, kind}}
+
+  # Resolve the effective params for the chosen environment (T3.3a, UC-015).
+  #
+  # Back-compat: with no `:env` the params pass through unchanged, so the
+  # single-target behaviour is exactly as before. With `:env`, its per-env
+  # overrides from `:envs` are merged *over* the top-level params (env-specific
+  # target fields win; shared fields like `:source`/`:cmd` are inherited). An
+  # `:env` with no matching entry under `:envs` is a clear error, not a crash.
+  defp select_env_params(params) do
+    case Map.get(params, :env) do
+      nil ->
+        {:ok, params}
+
+      env ->
+        case Map.fetch(Map.get(params, :envs, %{}), env) do
+          {:ok, overrides} when is_map(overrides) ->
+            {:ok, params |> Map.drop([:env, :envs]) |> Map.merge(overrides)}
+
+          _ ->
+            {:error, {:unknown_env, env}}
+        end
+    end
+  end
 
   # Build the `gcloud run deploy` argument vector. `--format value(status.url)`
   # makes gcloud emit only the service URL on stdout, which becomes the deploy

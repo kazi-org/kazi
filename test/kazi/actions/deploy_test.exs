@@ -148,4 +148,91 @@ defmodule Kazi.Actions.DeployTest do
     assert {:error, {:unsupported_kind, :integrate}} =
              Deploy.execute(Action.new(:integrate), %{})
   end
+
+  # --- Multi-environment deploy config (T3.3a, UC-015) -----------------------
+
+  # An action whose env-specific targets live under `:envs`, with shared
+  # settings (`:cmd`, `:source`) at the top level. Selecting an env merges its
+  # target (service/project/region) over the shared params.
+  defp multi_env_action(cmd, env) do
+    params = %{
+      cmd: cmd,
+      env: env,
+      source: "fixtures/deploy-target",
+      envs: %{
+        staging: %{
+          service: "kazi-staging",
+          project: "proj-staging",
+          region: "us-central1"
+        },
+        prod: %{
+          service: "kazi-prod",
+          project: "proj-prod",
+          region: "europe-west1"
+        }
+      }
+    }
+
+    Action.new(:deploy, params: params)
+  end
+
+  test "env :staging selects the staging service/project/region",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    assert {:ok, result} = Deploy.execute(multi_env_action(stub, :staging), %{})
+    assert result.service == "kazi-staging"
+    assert result.project == "proj-staging"
+    assert result.region == "us-central1"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert ["run", "deploy", "kazi-staging" | rest] = args
+    assert "proj-staging" in rest
+    assert "us-central1" in rest
+    # Shared, non-env-specific settings are still applied.
+    assert "fixtures/deploy-target" in rest
+    refute "kazi-prod" in args
+    refute "europe-west1" in args
+  end
+
+  test "env :prod selects the prod service/project/region",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    assert {:ok, result} = Deploy.execute(multi_env_action(stub, :prod), %{})
+    assert result.service == "kazi-prod"
+    assert result.project == "proj-prod"
+    assert result.region == "europe-west1"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert ["run", "deploy", "kazi-prod" | rest] = args
+    assert "proj-prod" in rest
+    assert "europe-west1" in rest
+    refute "kazi-staging" in args
+    refute "us-central1" in args
+  end
+
+  test "an unknown env returns a clear error result (no exception)",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    assert {:error, {:unknown_env, :qa}} =
+             Deploy.execute(multi_env_action(stub, :qa), %{})
+
+    # An :env with no :envs map at all is also a clear error, not a crash.
+    action = Action.new(:deploy, params: %{cmd: stub, env: :staging})
+    assert {:error, {:unknown_env, :staging}} = Deploy.execute(action, %{})
+  end
+
+  test "back-compat: no env/envs behaves as a single-target deploy",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    # The original single-target action (no :env, no :envs) is unchanged.
+    assert {:ok, result} = Deploy.execute(deploy_action(stub), %{})
+    assert result.service == "kazi-deploy-target"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert ["run", "deploy", "kazi-deploy-target" | _rest] = args
+  end
 end
