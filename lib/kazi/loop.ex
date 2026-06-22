@@ -105,6 +105,15 @@ defmodule Kazi.Loop do
               adapter_opts: [],
               live_kinds: nil,
               reobserve_interval_ms: nil,
+              # side-effect-only per-iteration callback (persistence seam, T0.7b)
+              on_iteration: nil,
+              # static params/context threaded to integrate/deploy actions so the
+              # runtime (T0.7b) can configure the real actions (deploy needs
+              # service/project/region; the integrate/deploy test seams take an
+              # integrator / deploy_cmd) without the loop naming them.
+              integrate_params: %{},
+              deploy_params: %{},
+              extra_action_context: %{},
               # progress facts not captured by the predicate vector
               landed?: false,
               deployed?: false,
@@ -145,6 +154,13 @@ defmodule Kazi.Loop do
       (default `[]`).
     * `:live_kinds` — list of predicate kinds treated as *live* (only pass after
       deploy); default `#{inspect(@default_live_kinds)}`.
+    * `:on_iteration` — an optional side-effect-only callback invoked once per
+      observation, *after* the vector is built and *before* `decide`, as
+      `fun.(%{goal: goal, iteration: index, vector: vector, converged?: boolean})`
+      (`index` is the 0-based per-goal iteration counter). It is the persistence
+      seam the runtime (T0.7b) uses to project each iteration into the read-model;
+      it must not influence convergence (its return value is ignored), and a
+      raising callback is contained. Default `nil` (no-op).
     * `:name` — register the process under a name.
   """
   @spec start_link(keyword()) :: :gen_statem.start_ret()
@@ -216,7 +232,11 @@ defmodule Kazi.Loop do
       workspace: Keyword.get(opts, :workspace),
       adapter_opts: Keyword.get(opts, :adapter_opts, []),
       live_kinds: MapSet.new(Keyword.get(opts, :live_kinds, @default_live_kinds)),
-      reobserve_interval_ms: Keyword.get(opts, :reobserve_interval_ms, @default_reobserve_ms)
+      reobserve_interval_ms: Keyword.get(opts, :reobserve_interval_ms, @default_reobserve_ms),
+      on_iteration: Keyword.get(opts, :on_iteration),
+      integrate_params: Map.new(Keyword.get(opts, :integrate_params, %{})),
+      deploy_params: Map.new(Keyword.get(opts, :deploy_params, %{})),
+      extra_action_context: Map.new(Keyword.get(opts, :extra_action_context, %{}))
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -243,6 +263,7 @@ defmodule Kazi.Loop do
       }
 
     log_diff(data)
+    notify_iteration(data)
 
     decide(vector, data)
   end
@@ -369,11 +390,11 @@ defmodule Kazi.Loop do
 
       # 3. Code green but not landed: integrate.
       not data.landed? ->
-        act(Action.new(:integrate), data)
+        act(Action.new(:integrate, params: data.integrate_params), data)
 
       # 4. Landed but not deployed: deploy, then re-observe live predicates.
       not data.deployed? ->
-        act(Action.new(:deploy), data)
+        act(Action.new(:deploy, params: data.deploy_params), data)
 
       # 5. Landed + deployed, code green, but the whole vector still isn't
       #    satisfied (a live predicate is still :fail / :error / :unknown).
@@ -448,14 +469,17 @@ defmodule Kazi.Loop do
   # so the contract stays decoupled from the loop's internal state shape.
   @spec action_context(Action.t(), Data.t()) :: map()
   defp action_context(_action, %Data{} = data) do
-    %{
+    # Caller-supplied static context (e.g. the integrate :integrator seam, the
+    # deploy :deploy_cmd seam) is merged UNDER the loop's own keys so the loop's
+    # facts (goal/workspace/vector/progress) always win.
+    Map.merge(data.extra_action_context, %{
       goal: data.goal,
       workspace: data.workspace,
       vector: data.vector,
       failing: PredicateVector.failing(data.vector),
       landed?: data.landed?,
       deployed?: data.deployed?
-    }
+    })
   end
 
   # Context threaded to a provider's evaluate/2 (Kazi.PredicateProvider.context).
@@ -532,6 +556,33 @@ defmodule Kazi.Loop do
       {:ok, value} -> value
       :error -> raise ArgumentError, "Kazi.Loop requires the #{inspect(key)} option"
     end
+  end
+
+  # Fire the optional per-iteration persistence seam (T0.7b). Side-effect only:
+  # it observes the freshly-built vector and reports whether the WHOLE vector is
+  # satisfied — it cannot influence `decide`, and a nil/raising callback is
+  # contained so persistence trouble never stalls or alters convergence.
+  defp notify_iteration(%Data{on_iteration: nil}), do: :ok
+
+  defp notify_iteration(%Data{on_iteration: callback} = data) when is_function(callback, 1) do
+    payload = %{
+      goal: data.goal,
+      # 0-based per-goal index matching the read-model's iteration_index column.
+      iteration: data.iterations - 1,
+      vector: data.vector,
+      converged?: PredicateVector.satisfied?(data.vector)
+    }
+
+    try do
+      callback.(payload)
+    rescue
+      error ->
+        Logger.warning(fn ->
+          "kazi.loop on_iteration callback raised: #{Exception.message(error)}"
+        end)
+    end
+
+    :ok
   end
 
   defp log_diff(%Data{vector: vector, prev_vector: prev} = data) do
