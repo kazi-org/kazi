@@ -13,9 +13,17 @@ defmodule Kazi.Application do
     # the repo there would crash-loop the supervisor on a missing NIF; instead the
     # CLI degrades to a non-persistent run (see `Kazi.CLI`). `mix kazi.run` and any
     # real release boot with the NIF present, so the read-model starts normally.
+    #
+    # The Slice-3 operator dashboard (ADR-0011, T3.6) is supervised alongside the
+    # read-model it projects: Phoenix.PubSub (LiveView diff transport) then the
+    # KaziWeb.Endpoint. Both are gated on the same NIF check so the `kazi`
+    # escript / CLI never tries to stand up an HTTP server it doesn't need — only
+    # the full app (`mix kazi.run`, releases, dev, test) boots the web tree. The
+    # endpoint reads the read-model and NATS state only; it never couples into
+    # Kazi.Loop or Kazi.Harness (ADR-0011).
     children =
       if sqlite_nif_available?() do
-        [Kazi.Repo]
+        [Kazi.Repo, {Phoenix.PubSub, name: Kazi.PubSub}, KaziWeb.Endpoint]
       else
         []
       end
