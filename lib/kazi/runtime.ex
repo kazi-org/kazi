@@ -85,6 +85,10 @@ defmodule Kazi.Runtime do
       `:infinity`).
     * `:providers` — override the predicate-kind → provider-module map (advanced;
       defaults to the built-in Slice-0 map).
+    * `:standing` — run as a standing (continuous/maintenance) reconciler (T3.4a,
+      UC-016): the loop does not terminate at convergence but keeps re-observing
+      on the bounded interval to hold the goal's predicates true. Forwarded
+      verbatim to `Kazi.Loop.start_link/1`; default `false` (converge-and-stop).
     * any other option (`:live_kinds`, `:reobserve_interval_ms`, `:name`) is
       forwarded verbatim to `Kazi.Loop.start_link/1`.
 

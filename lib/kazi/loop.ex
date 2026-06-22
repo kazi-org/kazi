@@ -42,6 +42,26 @@ defmodule Kazi.Loop do
   code. The set is injectable via the `:live_kinds` option so the loop stays
   decoupled from any concrete provider.
 
+  ## Standing (continuous) mode (T3.4a, UC-016)
+
+  By default the loop is a *converge-and-stop* reconciler: the FIRST time the
+  whole vector is satisfied it transitions to the terminal `:converged` state and
+  reports success (clause 1 of decide, the T0.8 guard). A **standing** loop
+  (`standing: true`) is instead a *maintenance reconciler*: when the whole vector
+  is satisfied it does NOT terminate — it records the converged observation,
+  enters a steady observing state, and keeps re-observing on the bounded
+  `:reobserve_interval_ms` interval, staying alive to hold the goal's predicates
+  true forever (concept §10, "standing reconcilers"). Everything else about the
+  tick is unchanged: while a code predicate is failing it still dispatches, while
+  not landed it integrates, etc. Only the success edge differs — converge-and-keep
+  rather than converge-and-stop.
+
+  Standing mode is the FOUNDATION for re-trigger-on-drift (T3.4b) and graceful
+  stop (T3.4c): because the loop keeps observing past convergence, a satisfied
+  predicate that later regresses will be seen on the next observation and routed
+  back through the ordinary decide machinery. This task lays the steady-observe
+  foundation only; it does not itself add drift re-trigger or supervision.
+
   ## Dependency injection
 
   Everything the loop touches the outside world through is passed IN at start, as
@@ -140,6 +160,20 @@ defmodule Kazi.Loop do
               adapter_opts: [],
               live_kinds: nil,
               reobserve_interval_ms: nil,
+              # T3.4a standing mode: when true the loop is a maintenance
+              # reconciler — it does NOT terminate at :converged but records the
+              # converged observation and keeps re-observing on
+              # `reobserve_interval_ms`. Default false (converge-and-stop, the
+              # T0.8 path). `steady?` is true once a standing loop has reached a
+              # satisfied observation (its current observe state is "steady,
+              # holding the predicates"); `steady_observations` counts the
+              # satisfied observations seen while standing (surfaced in
+              # snapshot/1 so a test can assert the loop re-observed past
+              # convergence). Both appended last so the existing field order is
+              # untouched.
+              standing: false,
+              steady?: false,
+              steady_observations: 0,
               # side-effect-only per-iteration callback (persistence seam, T0.7b)
               on_iteration: nil,
               # static params/context threaded to integrate/deploy actions so the
@@ -245,6 +279,12 @@ defmodule Kazi.Loop do
       (default `[]`).
     * `:live_kinds` — list of predicate kinds treated as *live* (only pass after
       deploy); default `#{inspect(@default_live_kinds)}`.
+    * `:standing` — run as a STANDING (continuous/maintenance) reconciler (T3.4a,
+      UC-016). When `true`, satisfying the whole vector does NOT terminate the
+      loop: it records the converged observation, enters a steady observing
+      state, and keeps re-observing on `:reobserve_interval_ms` to hold the
+      predicates true forever. When `false` (default) the loop converges-and-stops
+      exactly as the T0.8 guard prescribes.
     * `:flake_max_retries` — extra evaluations spent re-running a failing
       predicate to tell a real failure from a flake (T1.3); default
       `Kazi.Loop.Flake.max_retries/0`. `0` disables flake detection (a single
@@ -325,6 +365,15 @@ defmodule Kazi.Loop do
   Returns a snapshot of the loop's current vector, action history, and iteration
   count without blocking on termination. Useful for inspection / tests.
 
+  Includes `:mode` (T3.4a) — `:standing` for a continuous/maintenance reconciler
+  or `:converge` for the default converge-and-stop loop — and `:steady?` — whether
+  a standing loop is currently in a steady observing state (its latest observation
+  satisfied the whole vector and it is holding it true rather than terminating).
+  `:steady_observations` counts the satisfied observations seen while standing, so
+  a test can confirm the loop re-observed PAST convergence (it grows past 1). For
+  the default loop `:mode` is `:converge`, `:steady?` is `false`, and
+  `:steady_observations` is `0`.
+
   Includes `:history` — the full ordered per-iteration vector history (T1.1),
   oldest-first; see `history/1` for the same data without the rest of the
   snapshot. Also includes `:quarantine` — the list of predicate ids currently
@@ -336,6 +385,9 @@ defmodule Kazi.Loop do
   """
   @spec snapshot(:gen_statem.server_ref()) :: %{
           state: atom(),
+          mode: :standing | :converge,
+          steady?: boolean(),
+          steady_observations: non_neg_integer(),
           vector: PredicateVector.t() | nil,
           history: history(),
           actions: [Action.kind()],
@@ -389,6 +441,9 @@ defmodule Kazi.Loop do
       adapter_opts: Keyword.get(opts, :adapter_opts, []),
       live_kinds: MapSet.new(Keyword.get(opts, :live_kinds, @default_live_kinds)),
       reobserve_interval_ms: Keyword.get(opts, :reobserve_interval_ms, @default_reobserve_ms),
+      # T3.4a standing mode: opt the loop into the continuous-maintenance
+      # behaviour (default false = converge-and-stop).
+      standing: Keyword.get(opts, :standing, false),
       on_iteration: Keyword.get(opts, :on_iteration),
       integrate_params: Map.new(Keyword.get(opts, :integrate_params, %{})),
       deploy_params: Map.new(Keyword.get(opts, :deploy_params, %{})),
@@ -503,6 +558,11 @@ defmodule Kazi.Loop do
   def handle_event({:call, from}, :snapshot, state, data) do
     reply = %{
       state: state,
+      # T3.4a standing mode: the loop's mode + whether a standing loop is in a
+      # steady observing state, and how many satisfied observations it has made.
+      mode: if(data.standing, do: :standing, else: :converge),
+      steady?: data.steady?,
+      steady_observations: data.steady_observations,
       vector: data.vector,
       history: ordered_history(data),
       actions: Enum.reverse(data.actions),
@@ -552,6 +612,13 @@ defmodule Kazi.Loop do
           vector: vector,
           # T1.3 flake: carry the (sticky) quarantine set forward.
           quarantine: quarantine,
+          # T3.4a standing mode: clear the steady flag for this fresh
+          # observation. `converge_or_stay/1` (decide clause 1) re-sets it to
+          # true iff THIS observation is satisfied, so `steady?` always reflects
+          # the current observation — it drops to false the moment a standing
+          # loop sees an unsatisfied vector (the T3.4b drift seam). A no-op for
+          # the default loop, which never reads it.
+          steady?: false,
           # Prepend this observation's full vector to the in-state history
           # (newest-first; read APIs reverse to oldest-first). T1.1.
           history: [{index, vector} | data.history],
@@ -699,13 +766,20 @@ defmodule Kazi.Loop do
   @spec decide(PredicateVector.t(), Data.t()) :: :gen_statem.event_handler_result(atom())
   defp decide(vector, %Data{} = data) do
     cond do
-      # 1. Whole vector satisfied (incl. live predicates): converged, stop.
+      # 1. Whole vector satisfied (incl. live predicates).
       #    `:converged` is reachable through this clause and no other — the
       #    objective-termination guard (T0.8, UC-005). T1.3 flake: quarantined
       #    predicates are EXCLUDED from this check (they carry no convergence
       #    claim), so a flake neither counts toward nor blocks convergence.
+      #
+      #    T3.4a standing mode: in a STANDING loop satisfaction does NOT
+      #    terminate — `converge_or_stay/1` records the converged observation,
+      #    marks the loop steady, and re-observes on the bounded interval so it
+      #    keeps holding the predicates true (UC-016). In the DEFAULT loop this is
+      #    exactly `terminate_with(:converged, data)` — the T0.8 path is
+      #    unchanged.
       all_satisfied?(vector, data.quarantine) ->
-        terminate_with(:converged, data)
+        converge_or_stay(data)
 
       # 2. Code predicates failing: dispatch the agent with failing evidence.
       code_failing?(vector, data) ->
@@ -770,6 +844,30 @@ defmodule Kazi.Loop do
   # not an immediate internal event).
   defp reobserve(%Data{} = data, delay_ms) do
     {:next_state, :observing, data, [{{:timeout, :reobserve}, delay_ms, :reobserve}]}
+  end
+
+  # T3.4a standing mode: the success edge of decide.
+  #
+  #   * DEFAULT loop (`standing: false`) — converge and STOP: transition to the
+  #     terminal `:converged` state exactly as the T0.8 guard prescribes. This
+  #     path is byte-for-byte the old `terminate_with(:converged, data)`, so the
+  #     default contract (and every existing test) is unchanged.
+  #   * STANDING loop (`standing: true`) — converge and STAY: record this
+  #     satisfied observation (mark the loop steady, bump the steady counter),
+  #     then re-observe on the bounded `reobserve_interval_ms` instead of
+  #     terminating. The loop remains alive in `:observing`, holding the
+  #     predicates true forever (UC-016) and ready to see a later regression
+  #     (the T3.4b drift seam) on its next tick. The interval is the same
+  #     injectable-clock-friendly state timeout the loop already uses for live
+  #     polling, so there is no busy-spin and `:stop` stays drainable.
+  @spec converge_or_stay(Data.t()) :: :gen_statem.event_handler_result(atom())
+  defp converge_or_stay(%Data{standing: false} = data) do
+    terminate_with(:converged, data)
+  end
+
+  defp converge_or_stay(%Data{standing: true} = data) do
+    data = %Data{data | steady?: true, steady_observations: data.steady_observations + 1}
+    reobserve(data, data.reobserve_interval_ms)
   end
 
   # True iff at least one *code* predicate (non-live kind) is failing. Live
