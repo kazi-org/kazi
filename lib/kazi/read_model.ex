@@ -23,7 +23,7 @@ defmodule Kazi.ReadModel do
 
   alias Kazi.Context.Pack
   alias Kazi.{Action, PredicateResult, PredicateVector, Repo}
-  alias Kazi.ReadModel.{Iteration, OrientationPackCache}
+  alias Kazi.ReadModel.{Iteration, OrientationPackCache, ProposedGoal}
 
   @typedoc """
   Attributes for `record_iteration/1`. `:goal_ref` and `:iteration_index` are
@@ -185,6 +185,64 @@ defmodule Kazi.ReadModel do
         limit: 1
       )
     )
+  end
+
+  # --- proposed-goal store (T3.5a authoring / T3.5b approval) ----------------
+
+  @doc """
+  Fetches one proposed-goal row by its `proposal_ref` (the review handle), or
+  `nil`. The approval workflow (T3.5b) reads the current row through this to know
+  the proposal's lifecycle state before transitioning it.
+  """
+  @spec get_proposed_goal(String.t()) :: ProposedGoal.t() | nil
+  def get_proposed_goal(proposal_ref) when is_binary(proposal_ref) do
+    Repo.get_by(ProposedGoal, proposal_ref: proposal_ref)
+  end
+
+  @doc """
+  Lists proposed-goal rows, newest first, optionally filtered by lifecycle
+  `status` (`"proposed"` / `"approved"` / `"rejected"`).
+
+  This is the queryable surface an operator surface (the CLI T3.5c, the Telegram
+  bridge T3.7a) reviews proposals through: with no `:status` it returns every
+  proposal; `status: "proposed"` is the review queue, `status: "approved"` the
+  goals now runnable by `Kazi.Runtime`.
+  """
+  @spec list_proposed_goals(keyword()) :: [ProposedGoal.t()]
+  def list_proposed_goals(opts \\ []) when is_list(opts) do
+    base = from(p in ProposedGoal, order_by: [desc: p.inserted_at, desc: p.id])
+
+    query =
+      case Keyword.get(opts, :status) do
+        nil -> base
+        status -> from(p in base, where: p.status == ^to_string(status))
+      end
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Persists an approval-workflow transition (T3.5b) on the proposed-goal row
+  identified by `proposal_ref`: a new `status` and the (possibly refreshed)
+  serialized `goal` payload.
+
+  Returns `{:ok, row}`, `{:error, :not_found}` when no proposal carries that ref,
+  or `{:error, changeset}` on a validation failure. The valid-transition guard is
+  enforced by `Kazi.Authoring`; this only writes the already-validated state.
+  """
+  @spec transition_proposed_goal(String.t(), String.t(), map()) ::
+          {:ok, ProposedGoal.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def transition_proposed_goal(proposal_ref, status, goal)
+      when is_binary(proposal_ref) and is_binary(status) and is_map(goal) do
+    case get_proposed_goal(proposal_ref) do
+      nil ->
+        {:error, :not_found}
+
+      %ProposedGoal{} = row ->
+        row
+        |> ProposedGoal.transition_changeset(%{status: status, goal: goal})
+        |> Repo.update()
+    end
   end
 
   @doc """

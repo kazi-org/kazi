@@ -68,4 +68,22 @@ defmodule Kazi.ReadModel.ProposedGoal do
     |> validate_inclusion(:status, @statuses)
     |> unique_constraint(:proposal_ref, name: :proposed_goals_proposal_ref_index)
   end
+
+  @doc """
+  Builds a changeset for an approval-workflow transition (T3.5b): a `status`
+  change (`approve`/`reject`) and/or a refreshed `goal` payload (`edit`).
+
+  Casts only the mutable lifecycle fields — `proposal_ref`, `idea` and `goal_id`
+  are immutable once proposed — and validates `status` is a recognised state. The
+  state-machine guard (which prior states may transition to which) is enforced by
+  `Kazi.Authoring` before this changeset is built; this only validates the shape
+  of the resulting row.
+  """
+  @spec transition_changeset(t(), map()) :: Ecto.Changeset.t()
+  def transition_changeset(row, attrs) do
+    row
+    |> cast(attrs, [:status, :goal])
+    |> validate_required([:status, :goal])
+    |> validate_inclusion(:status, @statuses)
+  end
 end
