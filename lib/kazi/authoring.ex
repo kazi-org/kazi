@@ -54,10 +54,31 @@ defmodule Kazi.Authoring do
   `Kazi.Goal.Loader.from_map/1` accepts (`serialize_goal/1`). That lets the
   approval workflow (T3.5b) rehydrate a proposal into a runnable goal through the
   same validated loader the CLI uses, instead of a bespoke deserialiser.
+
+  ## The approval workflow (`approve/2`, `reject/2`, `edit/3`)
+
+  A proposed goal is reviewed and then transitioned (T3.5b, ADR-0011). Surfaces
+  drive these against the proposal's `proposal_ref`:
+
+    * `approve/2` — `proposed → approved`. Rehydrates the stored goal-file map
+      into a runnable `Kazi.Goal` through `Kazi.Goal.Loader.from_map/1` (the same
+      loader the CLI uses), persists status `approved`, and **returns the goal**
+      so the caller (the CLI T3.5c) hands it straight to `Kazi.Runtime.run/2`.
+    * `reject/2` — `proposed → rejected`. Records the proposal as declined; it
+      stays queryable but never runs.
+    * `edit/3` — `proposed → proposed`. Replaces the draft's goal payload (e.g. a
+      reviewer fixes a predicate) through the same validated loader, so an edit
+      can only persist a goal the runtime would accept.
+
+  The transitions enforce a small state machine: only a `proposed` goal may be
+  approved, rejected, or edited. Approving an already-`approved`/`rejected` goal
+  (or editing a terminal one) is an `{:error, {:invalid_transition, from, to}}` —
+  a clear refusal, not a silent overwrite.
   """
 
-  alias Kazi.{Goal, Predicate}
+  alias Kazi.{Goal, Predicate, ReadModel}
   alias Kazi.Authoring.Draft
+  alias Kazi.Goal.Loader
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.Repo
 
@@ -117,6 +138,129 @@ defmodule Kazi.Authoring do
          {:ok, goal} <- parse_proposal(proposal, idea_to_goal_id(idea)),
          {:ok, draft} <- persist(idea, goal, opts) do
       {:ok, draft}
+    end
+  end
+
+  # --- approval workflow (T3.5b) ---------------------------------------------
+
+  @doc """
+  Approves the proposed goal identified by `proposal_ref`: transitions it
+  `proposed → approved` and returns the **runnable** `Kazi.Goal`.
+
+  Only a `proposed` goal may be approved (the state-machine guard). On approve the
+  stored goal-file map is rehydrated through `Kazi.Goal.Loader.from_map/1` — the
+  same validated loader the CLI uses — so the returned goal is exactly what
+  `Kazi.Runtime.run/2` accepts; the caller (the CLI T3.5c) hands it straight to
+  the runtime. The row's status is persisted as `approved` first, so the
+  transition is durable before the goal is handed back.
+
+  Returns `{:ok, %Kazi.Goal{}}`, or `{:error, reason}`:
+
+    * `{:error, :not_found}` — no proposal carries that `proposal_ref`.
+    * `{:error, {:invalid_transition, from, :approved}}` — the proposal is not in
+      the `:proposed` state (e.g. already approved or rejected).
+    * `{:error, {:invalid_goal, reason}}` — the stored goal-file map no longer
+      rehydrates into a runnable goal.
+    * `{:error, %Ecto.Changeset{}}` — the transition could not be persisted.
+
+  ## Examples
+
+      iex> {:ok, draft} = Kazi.Authoring.propose("a health endpoint", harness: OneShotHarness)
+      iex> {:ok, %Kazi.Goal{} = goal} = Kazi.Authoring.approve(draft.proposal_ref)
+      iex> goal.mode
+      :create
+  """
+  @spec approve(String.t(), opts()) :: {:ok, Goal.t()} | {:error, term()}
+  def approve(proposal_ref, opts \\ []) when is_binary(proposal_ref) and is_list(opts) do
+    with {:ok, row} <- fetch_proposed(proposal_ref),
+         :ok <- check_transition(row.status, "approved"),
+         {:ok, goal} <- rehydrate(row.goal),
+         {:ok, _row} <- ReadModel.transition_proposed_goal(proposal_ref, "approved", row.goal) do
+      {:ok, goal}
+    end
+  end
+
+  @doc """
+  Rejects the proposed goal identified by `proposal_ref`: transitions it
+  `proposed → rejected` and returns the updated `Kazi.Authoring.Draft`.
+
+  Only a `proposed` goal may be rejected. A rejected proposal stays queryable
+  (`Kazi.ReadModel.list_proposed_goals(status: "rejected")`) for audit but never
+  runs. The goal payload is left untouched.
+
+  Returns `{:ok, %Kazi.Authoring.Draft{}}` (status `:rejected`), or `{:error,
+  reason}`: `{:error, :not_found}`, `{:error, {:invalid_transition, from,
+  :rejected}}`, or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec reject(String.t(), opts()) :: {:ok, Draft.t()} | {:error, term()}
+  def reject(proposal_ref, opts \\ []) when is_binary(proposal_ref) and is_list(opts) do
+    with {:ok, row} <- fetch_proposed(proposal_ref),
+         :ok <- check_transition(row.status, "rejected"),
+         {:ok, updated} <-
+           ReadModel.transition_proposed_goal(proposal_ref, "rejected", row.goal),
+         {:ok, goal} <- rehydrate(updated.goal) do
+      {:ok, Draft.from_row(updated, goal)}
+    end
+  end
+
+  @doc """
+  Edits the proposed goal identified by `proposal_ref`: replaces its draft goal
+  with `changes` (a goal-file map) and keeps it `proposed` for re-review.
+
+  Only a `proposed` goal may be edited (an approved or rejected proposal is
+  terminal). The `changes` map must rehydrate through `Kazi.Goal.Loader.from_map/1`
+  — so an edit can only persist a goal the runtime would accept; a malformed edit
+  is `{:error, {:invalid_goal, reason}}` and nothing is written. The edited goal
+  is re-serialized to the canonical shape before persisting, so it round-trips
+  identically to a freshly proposed one.
+
+  Returns `{:ok, %Kazi.Authoring.Draft{}}` (status `:proposed`, carrying the
+  edited goal), or `{:error, reason}`: `{:error, :not_found}`, `{:error,
+  {:invalid_transition, from, :proposed}}`, `{:error, {:invalid_goal, reason}}`,
+  or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec edit(String.t(), map(), opts()) :: {:ok, Draft.t()} | {:error, term()}
+  def edit(proposal_ref, changes, opts \\ [])
+      when is_binary(proposal_ref) and is_map(changes) and is_list(opts) do
+    with {:ok, row} <- fetch_proposed(proposal_ref),
+         :ok <- check_transition(row.status, "proposed"),
+         {:ok, goal} <- rehydrate(changes),
+         serialized = serialize_goal(goal),
+         {:ok, updated} <-
+           ReadModel.transition_proposed_goal(proposal_ref, "proposed", serialized) do
+      {:ok, Draft.from_row(updated, goal)}
+    end
+  end
+
+  # Fetch the proposed-goal row by its review handle, or `{:error, :not_found}`.
+  @spec fetch_proposed(String.t()) :: {:ok, ProposedGoal.t()} | {:error, :not_found}
+  defp fetch_proposed(proposal_ref) do
+    case ReadModel.get_proposed_goal(proposal_ref) do
+      nil -> {:error, :not_found}
+      %ProposedGoal{} = row -> {:ok, row}
+    end
+  end
+
+  # The approval state machine: only a `proposed` proposal may transition. A
+  # transition out of any other (terminal) state is refused with the from/to
+  # states named, so a surface can report a clear "already approved/rejected"
+  # rather than silently overwriting a terminal decision.
+  @spec check_transition(String.t(), String.t()) ::
+          :ok | {:error, {:invalid_transition, atom(), atom()}}
+  defp check_transition("proposed", _to), do: :ok
+
+  defp check_transition(from, to) do
+    {:error, {:invalid_transition, String.to_existing_atom(from), String.to_existing_atom(to)}}
+  end
+
+  # Rehydrate a stored goal-file map into a runnable `Kazi.Goal` through the same
+  # validated loader the CLI uses, so an approved/edited goal is exactly what
+  # `Kazi.Runtime.run/2` accepts. A map that no longer loads is `:invalid_goal`.
+  @spec rehydrate(map()) :: {:ok, Goal.t()} | {:error, {:invalid_goal, term()}}
+  defp rehydrate(goal_map) when is_map(goal_map) do
+    case Loader.from_map(goal_map) do
+      {:ok, %Goal{} = goal} -> {:ok, goal}
+      {:error, reason} -> {:error, {:invalid_goal, reason}}
     end
   end
 
