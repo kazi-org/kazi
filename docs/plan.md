@@ -85,7 +85,7 @@ duplicate status. Status `kind: agent` is implicit unless noted.
 Acceptance: D0 met; T0.12 dogfood drives the fixture to a live, verified
 production deployment.
 
-- [ ] T0.1 Initialize Elixir mix app `kazi` (supervision tree, `.formatter.exs`, `.gitignore`, mix.exs deps pinned)  Owner: TBD  Est: 1h  verifies: [infrastructure]
+- [x] T0.1 Initialize Elixir mix app `kazi` (supervision tree, `.formatter.exs`, `.gitignore`, mix.exs deps pinned)  Owner: TBD  Est: 1h  verifies: [infrastructure]  done: 2026-06-21 PR #3
 - [ ] T0.2 CI: GitHub Actions running `mix format --check-formatted` and `mix test`  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T0.1]
 - [ ] T0.3 Core domain types AND behaviours: `Goal`, `Predicate`, `PredicateResult{status,evidence}`, `PredicateVector`, `Action`; plus the `PredicateProvider`, `HarnessAdapter`, and `Action` behaviours (contracts only) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.1]
 - [ ] T0.4 Goal loader + goal-file TOML schema + an example goal fixture (code predicates + a live predicate) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.3]
@@ -224,6 +224,13 @@ different directories in one commit. Add tests with every implementation task
   Updated `.claude/scratch/usecases-manifest.json` (added UC-020, UC-021; moved
   UC-011, UC-015 to Slice 0).
 - No code yet. Next: Wave 1 (T0.1 scaffold), then drive E0 to M0.
+
+### 2026-06-21 -- Wave progress (pool)
+- Wave 1 DONE: T0.1 Elixir OTP scaffold merged (PR #3, `bc4ba8b`). Verified on main:
+  `mix compile --warnings-as-errors` clean, `mix format --check-formatted` clean,
+  `mix test` 2 passed. Toolchain: Elixir 1.20.1 / Erlang OTP 29 (Homebrew).
+- Next: Wave 2 (T0.2 CI, T0.3 domain types+behaviours, T0.13 deployable fixture);
+  kick off T0.6h (human, GCP) out-of-band.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
