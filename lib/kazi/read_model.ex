@@ -23,7 +23,13 @@ defmodule Kazi.ReadModel do
 
   alias Kazi.Context.Pack
   alias Kazi.{Action, PredicateResult, PredicateVector, Repo}
-  alias Kazi.ReadModel.{Iteration, OrientationPackCache, ProposedGoal}
+  alias Kazi.ReadModel.{GoalSummary, Iteration, OrientationPackCache, ProposedGoal}
+
+  # The PubSub topic the read-model broadcasts an iteration record on (T3.6b,
+  # ADR-0011). The goal board LiveView subscribes to it so a freshly recorded
+  # iteration pushes a live update without polling. The payload is
+  # `{:iteration_recorded, goal_ref}`. Exposed via `goal_board_topic/0`.
+  @goal_board_topic "read_model:goal_board"
 
   @typedoc """
   Attributes for `record_iteration/1`. `:goal_ref` and `:iteration_index` are
@@ -74,9 +80,46 @@ defmodule Kazi.ReadModel do
       observed_at: observed_at
     }
 
-    %Iteration{}
-    |> Iteration.changeset(row)
-    |> Repo.insert()
+    result =
+      %Iteration{}
+      |> Iteration.changeset(row)
+      |> Repo.insert()
+
+    # T3.6b (ADR-0011): on a successful record, broadcast on the goal-board topic
+    # so a subscribed dashboard LiveView re-reads and pushes a live diff. This is
+    # an additive, fire-and-forget projection signal — the loop neither waits on
+    # nor depends on a subscriber, so the read path stays decoupled from the core
+    # (the dashboard subscribes; the loop does not call into it). Broadcasting is
+    # best-effort: a missing PubSub (e.g. the escript, which boots no web tree)
+    # must not fail a record.
+    with {:ok, iteration} <- result do
+      broadcast_iteration_recorded(iteration.goal_ref)
+    end
+
+    result
+  end
+
+  @doc """
+  The Phoenix.PubSub topic the read-model broadcasts iteration records on
+  (T3.6b). Subscribe to it to receive `{:iteration_recorded, goal_ref}` whenever
+  `record_iteration/1` persists a new iteration.
+  """
+  @spec goal_board_topic() :: String.t()
+  def goal_board_topic, do: @goal_board_topic
+
+  defp broadcast_iteration_recorded(goal_ref) do
+    # The dashboard's PubSub server is supervised only when the web tree boots
+    # (Kazi.Application). When it isn't running (escript / non-web contexts), the
+    # broadcast is a no-op rather than a crash.
+    if Process.whereis(Kazi.PubSub) do
+      Phoenix.PubSub.broadcast(
+        Kazi.PubSub,
+        @goal_board_topic,
+        {:iteration_recorded, goal_ref}
+      )
+    end
+
+    :ok
   end
 
   @doc """
@@ -244,6 +287,69 @@ defmodule Kazi.ReadModel do
         |> Repo.update()
     end
   end
+
+  @doc """
+  Summarises every goal that has at least one recorded iteration, newest-active
+  first — the goal board's data source (T3.6b, UC-018, ADR-0011).
+
+  Each `Kazi.ReadModel.GoalSummary` carries the goal ref, a derived lifecycle
+  `status`, the goal's latest `Kazi.PredicateVector`, the iteration count, and
+  when it was last observed. The board renders one row per summary; an empty list
+  is the board's empty state.
+
+  Goals are ordered by `last_observed_at` descending (most-recently-active
+  first), so a freshly recorded iteration floats its goal to the top. This is a
+  pure read over the iterations projection — it never touches the loop or harness.
+  """
+  @spec list_goals() :: [GoalSummary.t()]
+  def list_goals do
+    # One pass over the projection grouped by goal_ref: count, latest index, and
+    # latest observation per goal. SQLite has no DISTINCT ON, so we fetch the
+    # per-goal aggregates first, then load each goal's latest iteration row to
+    # rehydrate its vector and converged flag.
+    aggregates =
+      Repo.all(
+        from(i in Iteration,
+          group_by: i.goal_ref,
+          select: %{
+            goal_ref: i.goal_ref,
+            iteration_count: count(i.id),
+            latest_index: max(i.iteration_index),
+            last_observed_at: max(i.observed_at)
+          }
+        )
+      )
+
+    aggregates
+    |> Enum.map(&build_goal_summary/1)
+    |> Enum.sort_by(& &1.last_observed_at, {:desc, DateTime})
+  end
+
+  defp build_goal_summary(%{
+         goal_ref: goal_ref,
+         iteration_count: iteration_count,
+         latest_index: latest_index,
+         last_observed_at: last_observed_at
+       }) do
+    latest = get_iteration(goal_ref, latest_index)
+    vector = to_predicate_vector(latest)
+
+    %GoalSummary{
+      goal_ref: goal_ref,
+      status: derive_status(latest, vector),
+      latest_vector: vector,
+      iteration_count: iteration_count,
+      last_observed_at: last_observed_at
+    }
+  end
+
+  # The board's lifecycle status is derived from the latest iteration, not stored:
+  # a converged latest iteration is :converged; otherwise the goal is still
+  # :in_progress. (Richer states — :stuck, :over_budget — are a later read once
+  # the loop persists its terminal reason; the board surfaces the objective
+  # convergence signal it already records, T0.8.)
+  defp derive_status(%Iteration{converged: true}, _vector), do: :converged
+  defp derive_status(%Iteration{}, _vector), do: :in_progress
 
   @doc """
   Rehydrates a stored row's `predicate_vector` back into a
