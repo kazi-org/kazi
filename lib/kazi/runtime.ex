@@ -73,6 +73,11 @@ defmodule Kazi.Runtime do
       omitted, falls back to `goal.scope.workspace`.
     * `:adapter_opts` — keyword opts forwarded to the harness adapter (e.g.
       `[command: "/path/to/stub"]` in tests, model/flags in production).
+    * `:workspace_opts` — keyword opts forwarded verbatim to
+      `Kazi.Workspace.prepare/2`, which runs once before each agent dispatch to
+      expose the `code-review-graph` MCP in the target's `.mcp.json` and refresh
+      its code graph (T4.5, ADR-0010 §3). Tests inject the `:graph_cmd` seam here
+      so freshness needs no real binary; empty in production (real binary).
     * `:integrator` — the PR/merge seam forwarded to the integrate action
       (`context.integrator`); defaults to the real `gh`-based integrator.
     * `:deploy_cmd` — the deploy command forwarded to the deploy action
