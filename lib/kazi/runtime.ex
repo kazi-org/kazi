@@ -48,7 +48,8 @@ defmodule Kazi.Runtime do
   @provider_modules %{
     tests: Kazi.Providers.TestRunner,
     http_probe: Kazi.Providers.HttpProbe,
-    prod_log: Kazi.Providers.ProdLog
+    prod_log: Kazi.Providers.ProdLog,
+    browser: Kazi.Providers.Browser
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams.
