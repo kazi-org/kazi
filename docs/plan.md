@@ -135,8 +135,16 @@ predicates before build. Intentionally low-granularity.
 
 - [ ] T3.1 NATS JetStream resource leases (KV CAS + per-key TTL) + presence/intent subjects  Owner: TBD  Est: TBD  verifies: [UC-013]  blocked-by: [T2.6]
 - [ ] T3.2 Graph-aware blast-radius partitioning via code-review-graph  Owner: TBD  Est: TBD  verifies: [UC-014]  blocked-by: [T3.1]
-- [ ] T3.3 Deepen the deploy action: multi-env, rollback, release tagging  Owner: TBD  Est: TBD  verifies: [UC-015]  blocked-by: [T2.6]
-- [ ] T3.4 Standing/continuous reconciler mode (maintenance goals that run forever)  Owner: TBD  Est: TBD  verifies: [UC-016]  blocked-by: [T2.6]
+**T3.3 Deepen the deploy action: multi-env, rollback, release tagging (verifies UC-015) -- EXPANDED into T3.3a-d (re-planned 2026-06-22). Build on `Kazi.Actions.Deploy`; all hermetic via the injectable deployer seam.**
+- [ ] T3.3a Multi-env deploy config: `Kazi.Actions.Deploy` accepts an `env` + per-env target (service/project/region) from action params and selects it  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T2.6]  acc: deploying with env :staging vs :prod invokes the injectable stub deployer with env-appropriate args; asserted via stub, hermetic (no real gcloud/network)
+- [ ] T3.3b Rollback: a deploy rollback via the injectable deployer seam, returning the prior revision/deploy ref  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a]  acc: rollback invokes the stub deployer with rollback args and returns the prior ref; hermetic test
+- [ ] T3.3c Release tagging: on a successful deploy, create/record a release tag/ref for the artifact, persisted in the deploy result + `Kazi.ReadModel`  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a]  acc: deploy produces a release tag via an injectable git/tagger stub, recorded in the result + read-model; hermetic test
+- [ ] T3.3d Wire env/rollback/tagging into `Kazi.Runtime`/CLI + ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a, T3.3b, T3.3c]  acc: runtime/CLI expose env + rollback options; mix test green; all hermetic
+**T3.4 Standing/continuous reconciler mode (verifies UC-016) -- EXPANDED into T3.4a-d (re-planned 2026-06-22). Build on `Kazi.Loop` (:gen_statem); all hermetic with injectable clock/doubles.**
+- [ ] T3.4a Standing-mode loop option: `Kazi.Loop`/`Kazi.Runtime` support a standing mode that, instead of terminating at :converged, keeps observing on a bounded interval  Owner: TBD  Est: 1.5h  verifies: [UC-016]  deps: [T2.6]  acc: in standing mode the loop does not terminate at converged; it re-observes on an injectable-clock interval; doubles test
+- [ ] T3.4b Re-trigger on drift: when a satisfied predicate regresses in standing mode, the loop re-dispatches and re-converges (reuses the convergence machinery)  Owner: TBD  Est: 1.5h  verifies: [UC-016]  deps: [T3.4a]  acc: a double whose predicate flips green->red post-converge causes re-dispatch + re-converge; persisted; hermetic
+- [ ] T3.4c Graceful stop + supervision safety for standing goals: clean stop signal, bounded interval, no busy-spin  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a]  acc: stop/await semantics tested; interval respected via injectable clock; no tight loop
+- [ ] T3.4d Author standing mode via goal-file/CLI flag + end-to-end ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a, T3.4b, T3.4c]  acc: a goal can declare standing mode; hermetic e2e test; mix test green
 - [ ] T3.5 Idea -> acceptance-predicate authoring front-end (agent proposes, human approves)  Owner: TBD  Est: TBD  verifies: [UC-017]  blocked-by: [T2.6]
 - [ ] T3.6 Phoenix LiveView dashboard (goal board, presence, lease map, history)  Owner: TBD  Est: TBD  verifies: [UC-018]  blocked-by: [T3.1]
 - [ ] T3.7 Telegram goal-in / ping-out  Owner: TBD  Est: TBD  verifies: [UC-019]  blocked-by: [T2.6]
@@ -171,8 +179,14 @@ Waves reference task IDs; toggle the single checkbox in the WBS above. Run
 - **Wave 7 (5 agents):** T1.1, T1.3, T1.4, T1.5, T1.6   (T1.2 after T1.1)
 - **Wave 8 (2 agents):** T1.2, T1.7   -> then T1.8 dogfood
 - **Wave 9 (3 agents):** T2.1, T2.2, T2.3   -> then T2.4 tests, T2.5 dogfood, T2.6 cutover
+- **Wave 10 (2 agents):** T3.3a, T3.4a   (foundational; deps met by T2.6)
+- **Wave 11 (4 agents):** T3.3b, T3.3c, T3.4b, T3.4c
+- **Wave 12 (2 agents):** T3.3d, T3.4d
 
-Slice 3+ (E3) is re-planned per item when reached; no fixed waves.
+T3.3/T3.4 were re-planned into granular hermetic subtasks (2026-06-22). The rest
+of E3 -- T3.1 (NATS leases), T3.2 (graph partitioning), T3.5 (idea->predicate
+front-end), T3.6 (LiveView dashboard), T3.7 (Telegram) -- remains coarse and is
+re-planned per item when reached; no fixed waves.
 
 ## Timeline and Milestones
 
@@ -310,6 +324,11 @@ different directories in one commit. Add tests with every implementation task
   SELF-HOSTED kazi goals (kazi builds kazi; first goal authored in T2.6).
   Running the self-hosted goal drives the REAL claude harness against this repo
   and opens PRs — needs explicit human go-ahead.
+- 2026-06-22 RE-PLAN (user chose "re-plan + build safe E3 items"): expanded T3.3
+  (deepen deploy) into T3.3a-d and T3.4 (standing reconciler) into T3.4a-d as
+  granular, hermetically-testable subtasks (Waves 10-12). Deferred T3.1/T3.2/
+  T3.5/T3.6/T3.7 (NATS/graph/frontend/LiveView/Telegram) as coarse backlog.
+  /apply --pool now has well-formed candidates again: T3.3a, T3.4a.
 
 ### 2026-06-21 -- Change Summary (revision 1)
 - Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
