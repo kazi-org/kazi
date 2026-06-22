@@ -4,6 +4,105 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-21 — Slice-2 creation dogfood (T2.5): kazi BUILDS a small real feature from failing acceptance criteria to green-and-live
+
+**What was exercised.** The Slice-2 creation acceptance dogfood (UC-010, D2) —
+the creation analog of the Slice-0 full-loop dogfood (T0.11/T0.12) and the
+Slice-1 regression dogfood (T1.8). Where Slice 1 proves kazi catches a BAD fix,
+this proves kazi makes a GOOD one: it does not just REPAIR regressed behavior, it
+CREATES behavior that did not exist before. Driven end-to-end through the REAL
+`Kazi.Runtime`/`Kazi.Loop` with the REAL providers (`Kazi.Providers.TestRunner`
+over a real temp workspace; `Kazi.Providers.HttpProbe` over a REAL local server),
+the REAL `Kazi.Harness.ClaudeAdapter` (pointed at a real local "build" binary via
+its `:command` seam), the REAL `Kazi.Actions.Integrate` (a real local
+rebase-merge into a bare `origin`, no GitHub) and `Kazi.Actions.Deploy` (a stub
+emulating `gcloud run deploy`, no gcloud), and real SQLite read-model
+persistence. Test: `test/kazi/slice2_dogfood_test.exs`. Hermetic: own Sandbox
+connection, a real harness binary, a real temp git repo, a real local HTTP
+server — no Go, no external network, no GitHub, no GCP, no real browser.
+
+**The feature spec (as failing acceptance predicates).** A tiny real feature —
+*GET /greeting returns 200 with a body containing `hello, kazi`* — authored as a
+create-mode goal (`mode: :create`) whose three acceptance criteria are all
+designed to FAIL at t0:
+
+- `feature_built` (`tests`, acceptance): the feature source exists
+  (`grep -q '^built$' greeting.feature`). RED at t0 (marker `absent`). This CODE
+  criterion is what carries the loop past dispatch into integrate/deploy.
+- `greeting_endpoint` (`http_probe`, acceptance): `GET /greeting` returns 200. A
+  REAL request against a running stdlib `:inets`/`:httpd` server. RED at t0 — the
+  route does not exist yet, so the server genuinely **404s** (the
+  `create_feature.toml` "no such route yet" shape).
+- `greeting_body` (`http_probe`, acceptance): `GET /greeting` body contains
+  `hello, kazi`. The precise behavior kazi must CREATE. RED at t0 (no endpoint).
+
+The "live" check is a REAL http_probe request against an actually-running local
+server whose response the deploy step rewrites — "live" here means a genuinely
+running service the probe hits over `127.0.0.1`, NOT Cloud Run. A pre-flight
+assertion confirms all three criteria genuinely fail against the real world at t0
+(so the vacuous-goal guard, T2.3, does not trip — there is real work to do).
+
+**How the build happens (over the real seams, zero-stub in lib/).** The harness
+binary is the coding agent: it performs the genuine build by writing the feature
+source marker (`built`) into the workspace, flipping `feature_built` red → green.
+The integrate action's `:integrator` seam really rebase-merges the built feature
+onto origin's `main`. The deploy action's `:deploy_cmd` seam "ships" the feature
+by creating the server's backing resource serving the greeting, so the route
+comes into being live — the live http_probe criteria pass only against the
+deployed feature.
+
+**What kazi did (observed, not expected).** The recorded trajectory:
+
+```
+outcome=converged  iterations=4
+actions=[:dispatch_agent, :integrate, :deploy]
+  iter 0: feature_built=fail greeting_endpoint=fail greeting_body=fail  converged=false  # honest start: feature absent, route 404s
+  iter 1: feature_built=pass greeting_endpoint=fail greeting_body=fail  converged=false  # agent BUILT the source; route still absent
+  iter 2: feature_built=pass greeting_endpoint=fail greeting_body=fail  converged=false  # landed; still not deployed -> live still 404
+  iter 3: feature_built=pass greeting_endpoint=pass greeting_body=pass  converged=true   # deployed -> route live -> whole acceptance vector holds
+```
+
+1. **Failed at t0, non-vacuously.** Every acceptance criterion was RED before
+   kazi did anything (feature absent, endpoint 404). The goal was real work, not
+   a vacuous "already done" — the t0 guard let it through and the first persisted
+   observation is all-fail.
+2. **Built the feature.** The agent dispatch made `feature_built` go green
+   (`greeting.feature` = `built` in the real workspace); integrate landed it on
+   origin's `main` (`git ls-tree main` shows `greeting.feature`); deploy created
+   the live route serving the greeting. The full creation arc:
+   dispatch (BUILD) → integrate (LAND) → deploy (SHIP).
+3. **Did NOT converge before the feature existed.** The objective-termination
+   guard (T0.8) held for CREATION exactly as for repair: there are observed
+   states (iters 1–2) where the built CODE acceptance passed but the LIVE
+   greeting had not yet flipped — and the loop did NOT converge in any of them.
+   Convergence was gated on the live feature, not on code-green.
+4. **Converged green-and-live, persisted in order.** Only the LAST iteration is
+   marked converged; the terminal vector is objectively satisfied; a final REAL
+   `:httpc` request confirms the running endpoint serves `hello, kazi`.
+
+**Evidence.** `result.outcome == :converged`,
+`result.actions == [:dispatch_agent, :integrate, :deploy]`; the workspace file
+`greeting.feature` = `built`; `greeting.feature` present on origin's `main`; a
+direct `:httpc` GET against the live server returning the greeting; the persisted
+read-model history (4 iterations) showing the all-fail t0 start, the
+code-green-but-live-red gate, and exactly one converged iteration at the end.
+
+**Conclusion: D2 acceptance holds (hermetically).** kazi builds one small real
+feature from failing acceptance predicates to green-and-live: the criteria fail
+at t0, kazi dispatches a build, lands it, ships it, and converges only once the
+live endpoint genuinely serves the new behavior — never declaring the feature
+done before it is live.
+
+**Honesty note — the Cloud-Run caveat.** This dogfood proves the creation arc
+*hermetically*: the "live" surface is a real local `:inets` server, and the
+deploy step is a stub emulating `gcloud run deploy`. Production-Cloud-Run-live
+(an http_probe passing against a real Cloud Run URL after a real `gcloud`
+deploy) remains **T0.12**, which is human/GCP-gated and out of scope here by
+design (the task forbids Go/GCP/external network so CI stays self-contained).
+So D2's "to live" is met in the local-running-service sense, not yet against
+production Cloud Run; that final step is tracked by T0.12. Everything behaved as
+designed on the first real run; no `lib/` change was needed.
+
 ## 2026-06-21 — Slice-1 dogfood (T1.8): naive fix regresses a coupled predicate; kazi detects + escalates
 
 **What was exercised.** The Slice-1 acceptance dogfood (UC-007), the
