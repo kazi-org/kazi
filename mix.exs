@@ -19,24 +19,47 @@ defmodule Kazi.MixProject do
   # `_build/prod/rel/kazi` (T6.1, ADR-0014). Unlike the escript, a release bundles
   # ERTS *and* compiled NIFs — so the released binary has the full SQLite
   # read-model (the escript silently degrades because it can't carry the exqlite
-  # NIF). This release is the foundation Burrito (T6.2) wraps into a single-file
-  # per-platform binary; it adds no Burrito config here.
+  # NIF).
   #
-  # The CLI is invoked through the release's `eval` command, which runs a function
-  # in a booted-but-not-started VM and propagates its exit code:
+  # Burrito (T6.2, ADR-0014) wraps this release into a single self-contained
+  # per-platform binary: `steps: [:assemble, &Burrito.wrap/1]` runs the wrapper
+  # after the normal assemble step, and the `burrito:` block declares the four
+  # targets (macOS aarch64/x86_64 + Linux aarch64/x86_64). Building a cross-target
+  # needs Zig + xz; only the HOST target needs building in any given environment,
+  # the others are declared so CI (T6.3) can fan a build matrix over them.
   #
+  # A Burrito binary boots the release rather than taking an `eval` argument, so
+  # the operator's argv (`kazi run goal.toml ...`) reaches the CLI through
+  # `Burrito.Util.Args.argv()`; `Kazi.Application.start/2` detects the Burrito run
+  # and hands it to `Kazi.Release.burrito_main/0`. The release also keeps the
+  # `eval` entry working for a plain (un-wrapped) `mix release`:
+  #
+  #     # Burrito binary (single self-contained file):
+  #     ./burrito_out/kazi_<target> --help
+  #     ./burrito_out/kazi_<target> run goal.toml --workspace .
+  #
+  #     # Plain `mix release` (no Burrito), via the eval command:
   #     _build/prod/rel/kazi/bin/kazi eval 'Kazi.Release.cli(["--help"])'
   #     _build/prod/rel/kazi/bin/kazi eval \
   #       'Kazi.Release.cli(["run", "goal.toml", "--workspace", "."])'
   #
-  # `Kazi.Release.cli/1` dispatches to the same `Kazi.CLI` core every other entry
-  # (escript, `mix kazi.run`) shares, so `run`/`propose`/`list-proposed`/`approve`/
-  # `reject`/`--help` behave identically.
+  # `Kazi.Release.{cli,burrito_main}` and the escript all dispatch to the same
+  # `Kazi.CLI` core, so `run`/`propose`/`list-proposed`/`approve`/`reject`/`--help`
+  # behave identically across every entry.
   defp releases do
     [
       kazi: [
         include_executables_for: [:unix],
-        applications: [kazi: :permanent]
+        applications: [kazi: :permanent],
+        steps: [:assemble, &Burrito.wrap/1],
+        burrito: [
+          targets: [
+            macos_aarch64: [os: :darwin, cpu: :aarch64],
+            macos_x86_64: [os: :darwin, cpu: :x86_64],
+            linux_aarch64: [os: :linux, cpu: :aarch64],
+            linux_x86_64: [os: :linux, cpu: :x86_64]
+          ]
+        ]
       ]
     ]
   end
@@ -83,7 +106,15 @@ defmodule Kazi.MixProject do
       # (`Kazi.Coordination.Lease.Nats`, T3.1b, ADR-0004; UC-013). Used only by
       # that backend and its integration-tagged test; the default in-memory
       # backend needs no NATS server, so default `mix test` stays hermetic.
-      {:gnat, "~> 1.9"}
+      {:gnat, "~> 1.9"},
+      # Burrito wraps the `mix release` into a single self-contained per-platform
+      # binary that bundles ERTS + the exqlite NIF, giving the shipped binary the
+      # full SQLite read-model the escript can't carry (T6.2, ADR-0014). It runs
+      # as a release wrapper step (`steps:` in `releases/0`) and the WRAPPED binary
+      # reads its argv at runtime via `Burrito.Util.Args.argv()` — so it must be a
+      # normal runtime dependency (its modules ship inside the binary), not
+      # `runtime: false`.
+      {:burrito, "~> 1.5"}
     ]
   end
 
