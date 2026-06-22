@@ -30,6 +30,23 @@ defmodule Kazi.Release do
   the CLI's computed exit code (`0` on convergence / a recorded proposal /
   approval, non-zero otherwise) so the release composes in scripts and CI exactly
   like the escript and the Mix task.
+
+  ## The Burrito binary entry (T6.2, ADR-0014)
+
+  Burrito wraps this same release into a single self-contained per-platform
+  binary (`kazi`), bundling ERTS *and* the compiled exqlite NIF — so the binary
+  has the full SQLite read-model the escript can't carry. A Burrito binary does
+  NOT take an `eval` argument; running it just boots the release, so the binary's
+  argv (`kazi run goal.toml --workspace .`) arrives through
+  `Burrito.Util.Args.argv()`, not `System.argv()`. `Kazi.Application.start/2`
+  detects a Burrito run (`Burrito.Util.running_standalone?/0`, set via the
+  `__BURRITO` env var) and hands control here to `burrito_main/0`, which reads
+  that argv and dispatches it through the same `Kazi.CLI` core. So the binary
+  behaves identically to the escript and the Mix task:
+
+      kazi --help
+      kazi run goal.toml --workspace .
+      kazi list-proposed
   """
 
   @doc """
@@ -53,6 +70,33 @@ defmodule Kazi.Release do
     end
 
     argv
+    |> Kazi.CLI.run()
+    |> System.halt()
+  end
+
+  @doc """
+  Burrito binary entry point (T6.2, ADR-0014). Called by `Kazi.Application.start/2`
+  when the release is running as a Burrito-wrapped binary
+  (`Burrito.Util.running_standalone?/0`).
+
+  A Burrito binary boots the release instead of running `eval`, so the CLI args
+  the operator typed (`kazi run goal.toml --workspace .`) reach the VM as
+  Burrito's argv, NOT `System.argv()`. This reads them via
+  `Burrito.Util.Args.argv()` and dispatches through the shared `Kazi.CLI` core,
+  then halts the VM with the CLI's exit code — so the binary composes in scripts
+  and CI exactly like the escript and the Mix task.
+
+  Unlike `cli/1` (the `eval` path), this does NOT call
+  `Application.ensure_all_started/1`: it is invoked from inside `start/2`, where
+  the app is still starting, so waiting on its own start would deadlock. The
+  shared `Kazi.CLI` core already ensures the SQLite read-model on its own
+  (`Kazi.CLI.run/1` → `ensure_read_model`, which starts `Kazi.Repo` transiently
+  for the migration and queries) — and because the Burrito binary bundles the
+  exqlite NIF, that read-model is fully available (no escript degradation).
+  """
+  @spec burrito_main() :: no_return()
+  def burrito_main do
+    Burrito.Util.Args.argv()
     |> Kazi.CLI.run()
     |> System.halt()
   end
