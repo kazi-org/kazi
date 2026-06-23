@@ -25,6 +25,19 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Gated OFF until the operator completes the one-time activation (see
+    # docs/plan.md E6 / ADR-0017). Set the repo VARIABLE `RELEASE_AUTOMATION=true`
+    # to turn the whole pipeline on. Until then this job is skipped (no red runs),
+    # because release-please ALSO needs the org setting "Allow GitHub Actions to
+    # create and approve pull requests" enabled -- without it the action errors.
+    # Activation checklist:
+    #   1. Org/repo: enable "Allow GitHub Actions to create and approve pull
+    #      requests" (Settings > Actions > General), OR pass a PAT as the action's
+    #      `token:` input.
+    #   2. Add the `HOMEBREW_TAP_TOKEN` secret (fine-grained PAT, contents:write on
+    #      kazi-org/homebrew-tap) so the tap-bump job can push the formula.
+    #   3. Set repo variable `RELEASE_AUTOMATION=true`.
+    if: ${{ vars.RELEASE_AUTOMATION == 'true' }}
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
