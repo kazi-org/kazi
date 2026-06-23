@@ -4,6 +4,32 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-23 — sirerun dogfood: capability-manifest adjudication (motivates E12)
+
+Dogfooded kazi's reconciliation thesis against sire's `docs/capabilities.json`
+(`sire-capability-manifest/v1`): 317 capabilities across 9 pillars, each carrying
+machine-checkable evidence (`file:line`). One-off code-level adjudication (no
+running sire) -- does each capability's CLAIMED evidence still exist?
+
+- **Claimed (manifest):** WIRED 205, BACKEND_ONLY 55, FLAG_GATED 48, REMOVED 6,
+  PLANNED 1.
+- **kazi-verified (evidence exists now):** 307 built, 6 partial, 3 drift, 1
+  no-evidence. The manifest is largely HONEST at the file-existence level.
+- **Real production-readiness gaps are not "is the code there" (it mostly is)** but
+  48 FLAG_GATED (not GA), 55 BACKEND_ONLY (no UI), and the manifest's own 178
+  `with_drift` -- contract/behavior drift a file-existence check CANNOT see.
+- Specific finds: **UC-242** evidence points at a transient `.claude/worktrees/...`
+  path (never merged to main, or manifest built against a worktree); **UC-220**
+  `referral.go` gone; **5 duplicate capability rows** (UC-095/096/178/209/210).
+
+Lessons baked into ADR-0020 / E12: (1) the natural hierarchy is pillar -> domain ->
+capability and the manifest already declares pillars as a closed list -> grouping
+must reference a DECLARED taxonomy by id, not free text; (2) per-pillar budgets fall
+out of per-group budgets + existing partitioning (no sub-goals needed); (3) the
+honest next step to answer "production ready" is LIVE predicates against a running
+sire (needs an instance + test creds) -- code-existence != "it works". Output: an
+Obsidian vault at `sirerun/tmp/sire-state-vault/` (gitignored scratch).
+
 ## 2026-06-23 — E11 interactive `propose`: clarify phase verified live (T11.9)
 
 Built the interactive clarify phase for `kazi propose` (E11, UC-029, ADR-0019):
