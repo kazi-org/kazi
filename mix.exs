@@ -4,7 +4,12 @@ defmodule Kazi.MixProject do
   def project do
     [
       app: :kazi,
-      version: "0.1.0", # x-release-please-version
+
+      # x-release-please-start-version
+
+      version: "0.1.0",
+
+      # x-release-please-end-version
       elixir: "~> 1.20",
       name: "kazi",
       description:
