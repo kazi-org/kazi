@@ -10,48 +10,46 @@ predicates are objectively true, stuck, or over budget. It drives harnesses
 The walking-skeleton build (idea -> production) and every epic through it are
 COMPLETE and merged on `main`:
 
-- **E0-E4** (convergence loop to a live Cloud Run deploy; regression/flake/budget/
-  stuck/prod-log; creation mode + self-hosting; NATS leases, graph partitioning,
-  standing reconcilers, idea->predicate authoring, LiveView, Telegram; context
-  injection + pluggable retrieval-memory) -- all done and merged.
-- **E5** (`kazi init` adopt, ADR-0013) -- DONE. T5.1-T5.5 plus T5.6 (hermetic
-  stack-mode e2e + committed worked example + README snippet) merged (T5.6 = PR
-  #76).
-- **E7** (registry adapter + goal-set) -- built, then WITHDRAWN before the
-  open-source release (ADR-0015): the `capabilities.json` input was bespoke and did
-  not generalize.
+- **E0-E5** -- the convergence loop to a live Cloud Run deploy; regression/flake/
+  budget/stuck/prod-log; creation mode + self-hosting; NATS leases, graph
+  partitioning, standing reconcilers, idea->predicate authoring, LiveView,
+  Telegram; context injection + pluggable retrieval-memory; and `kazi init` adopt
+  (E5, ADR-0013) -- all merged.
+- **E7** (registry adapter) -- built, then WITHDRAWN before open-source release
+  (ADR-0015): the `capabilities.json` input was bespoke and did not generalize.
+- **E8** (generic multi-harness support, ADR-0016) -- COMPLETE (PRs
+  #80/#82/#83/#84/#86/#87/#88/#90/#92/#93). The single `Kazi.Harness.ClaudeAdapter`
+  was generalized into config-driven harness **profiles** + a
+  `Kazi.Harness.CliAdapter` + `Kazi.Harness.resolve/1`, so `kazi run --harness
+  opencode --model <m>` drives the operator's local Qwen3.6-on-DGX (and any CLI
+  harness drops in as profile DATA, no new module). Details in `docs/devlog.md`;
+  the decision is ADR-0016.
 
 State of `main`: **853 tests pass** (66 doctests, 787 tests), 19 excluded
 (`:nats`/`:graphify`/`:opencode_live` tags); `mix format --check-formatted` clean;
-`mix compile --warnings-as-errors` clean. **E8 is COMPLETE** -- all of T8.1-T8.10
-merged (PRs #80/#82/#83/#84/#86/#87/#88/#90/#92/#93). `kazi run --harness opencode
---model <m>` is wired, documented, and covered; the live opencode->DGX smoke is an
-honest-skip (excluded by default, see devlog).
+`mix compile --warnings-as-errors` clean.
 
 **What remains (the entire content of this plan):**
 
-1. **E6 (T6.2-T6.5)** -- binary distribution via Burrito + Homebrew (ADR-0014):
-   ship `brew install kazi-org/tap/kazi` as a single self-contained binary with
-   the full SQLite read-model (NIF bundled), superseding the escript. T6.1 (the
-   `mix release` foundation) is merged; the Burrito wrap config is merged but its
-   host binary has not been built (Risk R-E6-1). Environment-sensitive; drive the
-   build through CI, not this macOS-26 host. With repo creation now agent-doable
-   (`kazi-org` admin via `gh`), E6 is fully agent-completable once the CI Burrito
-   build lands. **This is the only epic left.**
-2. ~~**E8 (T8.1-T8.10)**~~ -- generic multi-harness support (ADR-0016): DONE. The
-   single `Kazi.Harness.ClaudeAdapter` was generalized into config-driven harness
-   profiles + a `Kazi.Harness.CliAdapter` + `Kazi.Harness.resolve/1`, so kazi drives
-   **opencode** (and any CLI harness) by declaring a profile -- no core code change.
+1. **E6 -- automated brew release pipeline (T6.2-T6.9, ADR-0014 + ADR-0017).** The
+   focus of this plan. Ship `brew install kazi-org/tap/kazi` as a single
+   self-contained binary AND make releasing it **fully automatic**: merge
+   Conventional Commits -> release-please cuts a version -> CI builds the four
+   Burrito binaries -> the GitHub Release publishes them + checksums -> the
+   Homebrew tap formula auto-updates. No manual tag, no hand-edited checksum.
+2. **T8.11 -- E8 heterogeneous-harness dogfood** (the one open E8 item): Claude
+   authors a tiny broken goal, opencode->DGX drives convergence. Independent of E6.
 
 **Frozen design (do NOT relitigate):** `docs/concept.md` (canonical architecture +
-source of truth) and ADRs `0001`..`0016`. To change a decision, write a superseding
+source of truth) and ADRs `0001`..`0017`. To change a decision, write a superseding
 ADR.
 
 ## Use Case Summary
 
 All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work:
 
-- **UC-024** (install kazi as a single binary via Homebrew, ADR-0014) -- OPEN; E6.
+- **UC-024** (install kazi as a single binary via Homebrew, ADR-0014; now with the
+  fully-automated release pipeline of ADR-0017) -- OPEN; E6.
 
 UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
 delivered and verified on `main`. UC-025 (import a standard spec into a goal set)
@@ -62,155 +60,123 @@ is **deferred backlog** (ADR-0015).
 The WBS below is the single checkable source of truth; toggle `[ ]` to `[x]`.
 Status `kind: agent` is implicit unless noted.
 
-### E6 -- Binary distribution: Burrito + Homebrew (P2, see ADR-0014)
+### E6 -- Automated brew release pipeline: Burrito + Homebrew (P2, ADR-0014 + ADR-0017)
 
-Acceptance: `brew install kazi-org/tap/kazi` installs a single self-contained
-binary (no Erlang prerequisite) with the FULL read-model (NIF bundled), and
-`kazi --help` / a fixture `kazi run` work from it. Supersedes
-escript-as-distribution. **T6.1 (mix release) is merged.** The Burrito dep + wrap
-config + arg-shim (`Kazi.Release.burrito_main/0`) are merged too, but a
-fully-linked host binary has NOT been produced yet (Risk R-E6-1) -- T6.2's
-acceptance is best proven on the T6.3 CI matrix (macOS-15 / Ubuntu runners) or a
-macOS-15-or-earlier machine, not on this macOS-26 host.
+Acceptance: merging Conventional Commits to `main` and merging the resulting
+release PR causes, with NO further manual steps, a `vX.Y.Z` GitHub Release whose
+assets are the four Burrito binaries (macOS `aarch64`/`x86_64`, Linux
+`x86_64`/`aarch64`) each with a `.sha256`, and a `kazi-org/homebrew-tap` `kazi`
+formula auto-updated to that release so `brew install kazi-org/tap/kazi` (and
+`brew upgrade`) install a working single binary with the FULL read-model (no
+Erlang prerequisite, NIF bundled). **T6.1 (`mix release`) and the Burrito wrap
+config are merged.** The host binary cannot be linked on this macOS-26 dev box
+(R-E6-1) -- the build is CI-driven by design.
 
-- [ ] T6.2 Burrito wrap -- produce a built binary: the merged config declares targets macOS `aarch64`/`x86_64` + Linux `x86_64`/`aarch64`; build a binary for a supported host that bundles ERTS + the `exqlite` NIF; smoke-run it converging a fixture goal to prove the read-model persists (no escript degradation)  Owner: TBD  Est: 1.5h  verifies: [UC-024]  deps: []  acc: a Burrito binary for a supported host runs `kazi run` against a fixture and PERSISTS iterations to SQLite (read-model present); `--help` works; the build command + output documented. The config/dep/code wiring is already merged; this task is the actual build + smoke-run on a Zig-compatible runner (see R-E6-1).
-- [ ] T6.3 Release CI + release-please: tag-triggered GitHub Actions matrix builds Burrito binaries on macOS + Ubuntu runners, uploads them + `.sha256` checksums to GitHub Releases; release-please manages versioning from Conventional Commits  Owner: TBD  Est: 2h  verifies: [UC-024]  deps: [T6.2]  acc: a release tag produces per-platform binaries + a `.sha256` each as Release assets; the workflow is green on a dry-run/test tag. This is also the most reliable way to satisfy T6.2's host-binary build (the runners are Zig-compatible).
-- [ ] T6.4 Homebrew tap: create the `kazi-org/homebrew-tap` repo with a `kazi` formula that downloads the platform artifact + verifies its checksum; `brew install kazi-org/tap/kazi` installs a working `kazi`  Owner: TBD  Est: 1.5h  verifies: [UC-024]  deps: [T6.3]  acc: `brew install kazi-org/tap/kazi` on macOS installs a runnable `kazi`; `brew audit --strict` passes; `kazi --help` works post-install. Repo creation is AGENT-DOABLE (the session has `kazi-org` admin via `gh`) — no longer human-gated; the only remaining prerequisite is a published GitHub Release with artifacts from T6.3 to point the formula at.
-- [ ] T6.5 Docs: README install section leads with `brew install` + the prebuilt binary; note the runtime requirement that a coding agent (`claude`) must be on PATH; reframe the escript as a contributor convenience  Owner: TBD  Est: 0.5h  verifies: [UC-024]  deps: [T6.4]  acc: README documents brew + binary install and the harness-on-PATH requirement; links the GitHub Releases page.
+- [ ] T6.2 Burrito build proven on CI: confirm `mix release` produces a runnable Burrito binary for at least one target on a Zig-compatible runner that bundles ERTS + the `exqlite` NIF, and a fixture `kazi run` PERSISTS iterations to SQLite (read-model present, no escript degradation)  Owner: TBD  Est: 1h  verifies: [UC-024]  deps: []  acc: a CI job (the T6.3 workflow on a test tag) yields a `burrito_out/kazi_<target>` that runs `--help` and converges/persists a fixture goal; evidence captured in the run log. Folded into T6.3's first green run rather than a separate local build (R-E6-1).
+- [ ] T6.3 Release build workflow: `.github/workflows/release.yml` -- on a `v*` tag, a matrix builds the four Burrito targets (macOS on `macos-15` per R-E6-1, Linux on `ubuntu-latest`) with Zig 0.15.2 + xz, generates a `.sha256` per binary, and uploads all as GitHub Release assets  Owner: David (WIP, this session)  Est: 2h  verifies: [UC-024]  deps: []  acc: pushing a test tag (`v0.0.0-test1`) produces four `kazi_*` binaries + four `.sha256` as Release assets; the workflow is green; both macOS and Linux jobs succeed. A WIP `release.yml` is committed; this task is making it actually green on a test tag (the real validation -- expect CI iteration on BEAM/Zig/Burrito setup).
+- [ ] T6.6 release-please versioning: add the release-please GitHub Action + config (manifest + `release-please-config.json`) so Conventional Commits on `main` maintain a release PR that bumps `mix.exs` version + `CHANGELOG.md` and, on merge, creates the `vX.Y.Z` tag + GitHub Release (which fires T6.3)  Owner: TBD  Est: 1.5h  verifies: [UC-024]  deps: []  acc: a `feat:`/`fix:` commit to `main` causes release-please to open/update a release PR with the correct semver bump; merging it tags + creates a Release; the version in `mix.exs` matches the tag. Validated on a real (or dry-run) cycle.
+- [ ] T6.4 Homebrew tap repo + formula: create `kazi-org/homebrew-tap` (agent-doable -- session has `kazi-org` admin) with a `kazi` formula that, per platform, downloads the Release asset, verifies its `.sha256`, and installs the binary onto PATH; `brew install kazi-org/tap/kazi` installs a working `kazi`  Owner: TBD  kind: any  Est: 1.5h  verifies: [UC-024]  deps: [T6.3]  acc: `brew install kazi-org/tap/kazi` on macOS installs a runnable `kazi` (`kazi --help` works post-install); `brew audit --strict --tap kazi-org/homebrew-tap` passes. Needs a real T6.3 Release to point at; repo creation is no longer human-gated (R-E6-2).
+- [ ] T6.7 Tap auto-bump workflow: a workflow (in `kazi-org/kazi`, triggered on `release: published`) regenerates the tap's `kazi` formula -- new version, per-platform asset URLs, and the published `.sha256` values -- and pushes it to `kazi-org/homebrew-tap`, authenticated with a fine-grained `HOMEBREW_TAP_TOKEN` secret (contents:write on the tap only). So `brew upgrade` serves the latest with zero manual steps (ADR-0017)  Owner: TBD  Est: 1.5h  verifies: [UC-024]  deps: [T6.4]  acc: publishing a Release updates the tap formula's version/urls/sha256 automatically (verified on a test release); the secret is scoped to the tap repo; a follow-up `brew upgrade` pulls the new version. Use a maintained action (e.g. `dawidd6/action-homebrew-bump-formula`) or an inline generator -- documented.
+- [ ] T6.5 Docs: README install section leads with `brew install kazi-org/tap/kazi` + the prebuilt binary; note the runtime requirement that a coding agent (`claude`/`opencode`/...) must be on PATH; reframe the escript as a contributor convenience; link the GitHub Releases page and the auto-release flow (ADR-0017)  Owner: TBD  Est: 0.5h  verifies: [UC-024]  deps: [T6.4]  acc: README documents brew + binary install, the harness-on-PATH requirement, and how releases are cut (merge the release PR); links Releases + ADR-0017.
 
-### E8 -- Generic multi-harness support: harness profiles (P2, see ADR-0016)
+### E8 dogfood -- heterogeneous harness (Claude plans, opencode/DGX implements)
 
-Acceptance: kazi can drive a non-Claude CLI harness without a bespoke adapter
-module. Concretely, `kazi run <goal> --harness opencode --model <provider/model>`
-converges a goal by driving `opencode run` against the operator's local Qwen3.6 on
-the DGX; the Claude path is byte-for-byte unchanged; and adding a further harness
-(Codex, gemini-cli) is a profile DATA entry, not new core code. The boundary stays
-headless + stateless per iteration (ADR-0008) and harness-agnostic (ADR-0001 R4).
+The capstone live exercise for E8: prove kazi's core division of labor -- a strong
+model authors the predicate set (the "direction"), a cheap LOCAL model drives the
+convergence loop (the "keystrokes"), and objective termination keeps the weak
+implementer honest. Completes the live verification the T8.9 smoke deferred.
 
-Grounding (verified this session): `Kazi.HarnessAdapter` is a clean behaviour
-(`run/3`); `Kazi.Loop` is already generic over the `:harness` module
-(`loop.ex:1164`). The Claude coupling is only in the single concrete adapter and in
-`Kazi.Runtime`'s hard-coded `@harness` (`runtime.ex:58`). opencode is installed
-here (v1.17.9); its non-interactive surface is `opencode run "<msg>"` with
-`--model provider/model` and `--format json` (a NDJSON **event stream**, not
-Claude's single envelope; `opencode stats` reports usage).
-
-- [x] T8.1 Harness profile struct + registry: add `Kazi.Harness.Profile` (a struct: `id`, `command`, the argv-template spec for prompt/model/output-format/extra flags, the parser-strategy ref, and the set of supported optional hygiene flags) and a built-in registry whose `:claude` profile captures TODAY's exact claude argv (`-p`, `--output-format json`, the `--max-budget-usd`/`--allowed-tools`/`--permission-mode` hygiene flags) and envelope parser. Pure, no IO.  Owner: David  Done: 2026-06-22 (PR #80)  verifies: [UC-027]  deps: []  acc: `Kazi.Harness.Profile` + `Kazi.Harness.Registry.fetch(:claude)` return a profile whose rendered argv for a given (prompt, opts) equals the current `ClaudeAdapter` argv byte-for-byte (golden unit test); `mix format`/`--warnings-as-errors` clean.
-- [x] T8.2 Generic CLI adapter: add `Kazi.Harness.CliAdapter` implementing `Kazi.HarnessAdapter`, parameterized by a resolved profile via `:profile`/`:harness` opt. It assembles argv from the profile, runs `System.cmd` with `cd:` workspace (ADR-0008, `stderr_to_stdout`), and maps stdout to the normalized result map (`output/exit/result/tokens/cost_usd/touched/cost: %{tokens}`) via the profile's parser; missing-binary -> `{:error, {:command_not_found, cmd}}`, empty prompt -> `{:error, :empty_prompt}`.  Owner: David  Done: 2026-06-22 (PR #82)  verifies: [UC-027]  deps: [T8.1]  acc: a Tier-2 test drives CliAdapter with the `:claude` profile against a stub binary and asserts the SAME result map shape + the same argv the legacy ClaudeAdapter produced (golden); a stub-binary missing case returns `{:error, {:command_not_found, _}}`; `mix test` green.
-- [x] T8.3 Neutral prompt construction: extract `build_prompt/2,3`, `render_retrieval_section/1`, and `truncate_evidence/2` from `Kazi.Harness.ClaudeAdapter` into a harness-neutral `Kazi.Harness.Prompt`; have `ClaudeAdapter` (now a thin `:claude`-profile shim over CliAdapter) and `Kazi.Loop` call the neutral module, removing `loop.ex`'s `alias Kazi.Harness.ClaudeAdapter` coupling (`loop.ex:1238`).  Owner: David  Done: 2026-06-22 (PR #86)  verifies: [UC-027]  deps: [T8.2]  acc: every existing prompt/retrieval/truncation doctest + test passes unchanged against `Kazi.Harness.Prompt`; `Kazi.Loop` no longer references `ClaudeAdapter`; build green, no behavior change (golden prompt strings identical).
-- [x] T8.4 opencode profile: add the `:opencode` built-in profile -- `opencode run "<prompt>" --model <provider/model> --format json` run with `cd:` workspace; a parser strategy that consumes opencode's NDJSON event stream to extract the final assistant/result text and (when present) token/cost, mapping to the normalized result map and degrading the token dimension to estimate when usage is absent (ADR-0008). Confirm the real flags against the installed opencode (v1.17.9), NOT assumed.  Owner: David  Done: 2026-06-22 (PR #84)  verifies: [UC-026]  deps: [T8.1]  acc: a Tier-2 test drives CliAdapter+`:opencode` against a stub `opencode` binary emitting a representative `--format json` event stream and asserts the result map carries the final result text (and tokens when the stub emits usage); the rendered argv matches `opencode run <prompt> --model <m> --format json`; documented from `opencode run --help`.
-- [x] T8.5 Harness resolution seam: add `Kazi.Harness.resolve/1` returning `{adapter_module, adapter_opts}` with fixed precedence -- explicit `:harness` opt > goal-file `[harness]` table > app config `:kazi, :harness` > default `:claude`; carries `:profile`, `:model`, and any provider/endpoint env (so opencode points at the DGX model). Unknown harness id -> a clear `{:error, {:unknown_harness, id}}`.  Owner: David  Done: 2026-06-22 (PR #83)  verifies: [UC-027]  deps: [T8.1]  acc: unit tests cover each precedence rung (opt beats goal-file beats config beats default), the default returns the `:claude` profile, and an unknown id errors clearly; pure, no IO.
-- [x] T8.6 Goal-file `[harness]` table: extend `Kazi.Goal` (additive field) + `Kazi.Goal.Loader.from_map/1` to load an optional `[harness]` table (`id`, optional `model`, optional `command` override), and `Kazi.Adopt.Writer` to optionally emit it; absent table -> today's behavior (default `:claude`).  Owner: David  Done: 2026-06-22 (PR #87)  verifies: [UC-026, UC-027]  deps: [T8.5]  acc: a goal-file with `[harness] id = "opencode" model = "dgx/qwen3.6"` loads into the Goal and `Kazi.Harness.resolve/1` selects opencode + that model; a goal-file with no `[harness]` loads exactly as before (round-trip test); loader rejects an unknown-typed table with a clear error.
-- [x] T8.7 Wire Runtime + CLI + authoring/adopt: replace `Kazi.Runtime`'s hard-coded `@harness` with `Kazi.Harness.resolve/1` over (goal, config, opts); add `kazi run --harness <id> --model <m>` flags to `Kazi.CLI` threaded into `adapter_opts`; route `Kazi.Authoring` and `Kazi.Adopt.enrich` default harness through the same seam.  Owner: David  Done: 2026-06-22 (PR #90)  verifies: [UC-026, UC-027]  deps: [T8.2, T8.4, T8.5, T8.6]  acc: `kazi run <fixture-goal> --harness opencode --model <m>` resolves CliAdapter+opencode and dispatches (verified against a stub harness in a Tier-2 CLI test); with no `--harness`, behavior is byte-identical to today (claude); CLI `--help` documents the flags; `mix test` green.
-- [x] T8.8 Local-provider config + env: support pointing opencode at the DGX-hosted Qwen via the profile (pass `--model <provider/model>` and any required env such as a base URL / `OPENCODE_*` var); document that opencode's own provider config (already wired by the operator) is the source of truth and kazi only selects the model.  Owner: David  Done: 2026-06-22 (PR #88)  verifies: [UC-026]  deps: [T8.4]  acc: a test asserts the resolved opencode `adapter_opts` carry the configured model and forward declared env to `System.cmd`; README documents the DGX/Qwen setup expectation (opencode provider pre-configured; kazi selects `--model`).
-- [x] T8.9 Tests incl. live opencode smoke: full coverage -- unit (profile/registry/resolution/parsers), Tier-2 (CliAdapter per profile against stub binaries; golden claude-argv; opencode NDJSON parse), and a Tier-4 LIVE smoke that runs `kazi run <hermetic fixture goal> --harness opencode` end-to-end against the operator's DGX-hosted Qwen and asserts convergence + a persisted iteration; honestly SKIP (not fake-pass) with a logged reason when the DGX endpoint is unreachable.  Owner: David  Done: 2026-06-22 (PR #93)  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: stub-driven tests are green and hermetic in CI; the live smoke either converges a fixture goal through opencode->DGX (evidence recorded: iteration count + final vector) or is reported SKIPPED with the unreachable-endpoint reason -- never silently passed.
-- [x] T8.10 Docs + ADR reference: README gains a "Use a different coding harness" section -- claude is the default; `--harness opencode --model <provider/model>` for the local DGX model; the goal-file `[harness]` table; and "add a harness = declare a profile" pointing at `Kazi.Harness.Registry`; link ADR-0016. Update `docs/concept.md` only where the harness boundary is described (general terms, no model names).  Owner: David  Done: 2026-06-22 (PR #92)  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: README documents harness selection (flag, goal-file, config) + how to add a profile + the harness-on-PATH runtime requirement; ADR-0016 linked; concept.md harness section reflects multi-harness neutrality; no model-specific detail leaks into Tier-1 docs.
+- [ ] T8.11 Heterogeneous-harness dogfood: Claude authors a tiny deliberately-broken fixture goal-file (a single `test_runner` predicate failing at t0); `kazi run <goal> --harness opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0 --workspace <trusted repo>` drives the DGX-hosted Qwen to converge it; record the result in `docs/devlog.md`  Owner: David (in progress, this session)  Est: 1h  verifies: [UC-026, UC-027]  deps: []  acc: a real `kazi run` converges a broken fixture driven ENTIRELY by opencode->DGX (Claude only authored the goal); evidence recorded (iterations, final vector); OR an honest failure with the environmental cause (per the T8.9 finding: opencode auto-rejects edits outside a trusted workspace -- fixed with a project-local `opencode.json` permission grant -- and the 35B model is slow). Throwaway workspace; not committed to the kazi repo.
 
 ### Waves
 
-E6 is a strict chain (T6.2 -> T6.3 -> T6.4 -> T6.5). E8 starts with a foundation
-pair, then fans out, then converges on wiring + verification. E6 and E8 are
-independent and can proceed in parallel.
+E6 is the automated-release pipeline; the two independent entry points (T6.3 build
+workflow, T6.6 release-please) can go in parallel, then converge on the tap. T8.11
+is independent of E6 and already running.
 
-- ~~**Wave A:** T5.6~~ -- DONE (PR #76).
-- **Wave B (E6):** T6.2   (build + smoke-run a Burrito host binary on a Zig-compatible runner; or fold into T6.3 CI) -> T6.3 -> **(human-gated)** T6.4 -> T6.5.
-- ~~**Wave E8-1a:** T8.1~~ -- DONE (PR #80): profile struct + registry, `:claude` pinned byte-for-byte by a golden test.
-- ~~**Wave E8-1b/2:** T8.2, T8.4, T8.5~~ -- DONE (PRs #82/#84/#83): generic CliAdapter, opencode profile, resolution seam.
-- ~~**Wave E8-3:** T8.3, T8.6, T8.8~~ -- DONE (PRs #86/#87/#88): neutral prompt module + ClaudeAdapter shim; goal-file `[harness]` table; opencode local-provider model + env forwarding.
-- ~~**Wave E8-4:** T8.7~~ -- DONE (PR #90): Runtime resolves the harness; `kazi run --harness/--model` wired; authoring/adopt route through the seam.
-- ~~**Wave E8-5:** T8.9, T8.10~~ -- DONE (PRs #93/#92): harness coverage + honest-skip live opencode->DGX smoke; harness-selection docs + ADR link. **E8 complete.**
-- **Wave E8-5 (verify+ship):** T8.9, T8.10   (tests incl. live opencode->DGX smoke; docs + ADR link; deps T8.7).
-- **Wave E8-3 (integrate):** T8.6 -> T8.7, T8.8   (goal-file table; Runtime/CLI/authoring/adopt wiring; local-provider config).
-- **Wave E8-4 (verify + ship):** T8.9, T8.10   (tests incl. live opencode->DGX smoke; docs + ADR link).
+- **Wave E6-1 (parallel entry points):** T6.3 (release build workflow -- make it green on a test tag; this also proves T6.2) and T6.6 (release-please versioning). Independent.
+- **Wave E6-2 (tap):** T6.4 (create `kazi-org/homebrew-tap` + formula; needs a real T6.3 Release) -> T6.7 (auto-bump workflow + `HOMEBREW_TAP_TOKEN`).
+- **Wave E6-3 (docs):** T6.5 (README install + auto-release flow). deps T6.4.
+- **Dogfood (running):** T8.11 -- opencode->DGX converging a broken fixture.
 
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
 |----|------|--------|------------|------------|
-| R-E6-1 | Burrito host binary cannot be linked on the dev machine (Zig 0.15.2, pinned by Burrito 1.5.0, fails to link against the macOS 26 / Xcode 26 SDK; Zig 0.16 links but is API-incompatible with Burrito 1.5.0's `build.zig`). | Med | High (observed) | Build on the T6.3 CI matrix (GitHub macOS-15 / Ubuntu runners are Zig-compatible) or a macOS-15-or-earlier host. Do NOT block E6 on a local build. |
-| R-E6-2 | T6.4 needs a second repo (`kazi-org/homebrew-tap`) and a published GitHub Release before `brew install` can work. | Low | Med | Repo creation is no longer a blocker -- the session has `kazi-org` admin via `gh` and can create `homebrew-tap` directly. Sequence T6.4 after T6.3 produces real Release artifacts; with repo creation agent-doable, E6 is fully agent-completable once the CI Burrito build lands. |
-| R-E6-3 | The shipped binary still requires the user's coding agent (`claude`/Codex/opencode) on PATH at runtime (kazi drives a harness by design, ADR-0001). | Low | High (inherent) | Document the runtime dependency in T6.5/T8.10; packaging does not solve it. |
-| R-E8-1 | opencode's exact non-interactive flags / `--format json` event schema differ from the assumption, breaking the parser. | Med | Med | opencode is installed here (v1.17.9); T8.4 confirms flags against `opencode run --help` and captures a REAL sample event stream as the parser fixture, not an assumed shape. |
-| R-E8-2 | The DGX-hosted Qwen endpoint is unreachable from CI / this host, so the live smoke (T8.9) cannot run. | Med | Med | Stub-driven Tier-2 tests are hermetic and gate CI; the live smoke is a Tier-4 probe that SKIPS honestly with a logged reason when the endpoint is down -- never a silent pass (definition of done reported honestly). |
-| R-E8-3 | opencode does not report token usage in a form kazi can read, so the budget ceiling's token dimension is unavailable. | Low | Med | ADR-0008 already permits degrading to an estimate; T8.4 surfaces "tokens: estimate" honestly rather than fabricating a count. |
-| R-E8-4 | Generalizing the adapter silently regresses the Claude path. | High | Low | T8.1/T8.2 pin the `:claude` profile with a golden argv + result-map test; T8.3 keeps every existing prompt doctest byte-identical; default resolution stays `:claude`. |
+| R-E6-1 | Burrito host binary cannot be linked on the dev machine (Zig 0.15.2, pinned by Burrito 1.5.0, fails to link against macOS 26 / Xcode 26; Zig 0.16 links but is API-incompatible with Burrito 1.5.0's `build.zig`). | Med | High (observed) | The build is CI-driven by design (ADR-0017): T6.3 builds on `macos-15` + `ubuntu-latest`. Do NOT attempt a local build on this macOS-26 host. |
+| R-E6-2 | T6.4 needs a second repo (`kazi-org/homebrew-tap`) and a published Release. | Low | Med | Repo creation is agent-doable (session has `kazi-org` admin via `gh`); no longer human-gated. Sequence T6.4 after T6.3 produces real Release artifacts. |
+| R-E6-3 | The shipped binary still requires the user's coding agent (`claude`/`opencode`/...) on PATH at runtime (kazi drives a harness by design, ADR-0001). | Low | High (inherent) | Documented in T6.5; packaging does not solve it. |
+| R-E6-4 | `erlef/setup-beam` / Zig 0.15.2 / Burrito setup is fragile on the macOS-15 runner (BEAM install, xz, the Zig link). | Med | Med | Validate T6.3 on a throwaway `v*-test` tag and iterate on the runner (the only place it can be proven, R-E6-1); pin exact Elixir/OTP/Zig versions; `fail-fast: false` so macOS and Linux jobs report independently. |
+| R-E6-5 | The cross-repo formula push needs auth the default `GITHUB_TOKEN` lacks. | Med | High (inherent) | A fine-grained `HOMEBREW_TAP_TOKEN` PAT scoped to `contents:write` on `homebrew-tap` only (ADR-0017); created + stored as a repo secret as part of T6.7. Rotate like any deploy credential. |
+| R-E6-6 | release-please computes the wrong version from a mistyped commit. | Low | Med | Conventional Commits are already mandated (operating procedure); release-please's release PR is the human review gate before a tag is cut. |
 
 ## Operating Procedure
 
-Definition of done (all must hold): ExUnit tests written and green for the change;
-`mix format --check-formatted` clean; `mix compile --warnings-as-errors` clean; PR
-merged to `main` via **rebase** (not squash, not a merge commit) with CI green; for
-any user-facing/production surface, deployed and verified live (a live probe
-passes), reported honestly. Make many small focused commits; never commit files
-from different directories in one commit. Add tests with every implementation task.
+Definition of done (all must hold): for code changes, ExUnit tests written and
+green; `mix format --check-formatted` clean; `mix compile --warnings-as-errors`
+clean; PR merged to `main` via **rebase** (not squash, not a merge commit) with CI
+green. For CI/release workflows, the workflow is proven GREEN on a real trigger
+(a test tag / a dry-run release), not just authored. For any user-facing surface,
+verified live and reported honestly. Make many small focused commits; never commit
+files from different directories in one commit.
 
 Execution model: work the plan with `/apply --pool` (atomic git-ref claims at
 `refs/claims/*` via the global `~/.claude/skills/claim/scripts/claim.sh`). The WBS
 above is the single checkable source of truth.
 
-House rules for E8: do NOT relitigate ADR-0001/0008 (stateless, headless,
-harness-agnostic) -- E8 FULFILLS them. Keep each iteration a fresh subprocess; no
-`--continue`/`--resume`/`--session` by default. The Claude path must stay
-byte-for-byte unchanged (golden test). A new harness is profile DATA, not a new
-adapter module.
+House rules for E6: the binary build is CI-only (R-E6-1) -- never claim a release
+works without a green CI run that produced the assets. Validate workflows on a
+throwaway `v*-test` tag before wiring them into the release-please flow. Keep the
+`HOMEBREW_TAP_TOKEN` minimal-scope (ADR-0017). Conventional Commits are
+load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
 
-### 2026-06-22 -- Change Summary (add E8: generic multi-harness support)
-- **Added E8 (T8.1-T8.10)** to drive non-Claude CLI harnesses generically
-  (ADR-0016). Trigger: the operator wired `opencode` (installed v1.17.9) to a local
-  Qwen3.6 35B-A3B on the DGX and wants kazi to drive it, generalized so Codex /
-  gemini-cli / antigravity / claw-code drop in by declaring a profile.
-- **Discovery (this session):** `Kazi.HarnessAdapter` is a clean behaviour and
-  `Kazi.Loop` is already generic over the `:harness` module (`loop.ex:1164`); the
-  only Claude coupling is the single concrete adapter's argv/parser/default-command
-  and `Kazi.Runtime`'s hard-coded `@harness` (`runtime.ex:58`). opencode's real
-  non-interactive surface was probed: `opencode run "<msg>" --model provider/model
-  --format json` emits a NDJSON event stream (not Claude's single envelope), so a
-  profile must carry both an argv template AND a parser strategy.
-- **ADR created:** `docs/adr/0016-generic-harness-profiles.md` -- the config-driven
-  profile + generic `Kazi.Harness.CliAdapter` + `Kazi.Harness.resolve/1` resolution
-  order; preserves ADR-0001/0008 (stateless, neutral) and keeps Claude byte-for-byte.
-- **Use cases added:** UC-026 (drive opencode + local DGX model), UC-027 (select
-  the harness generically; add one by declaring a profile). Manifest updated.
-- E6 (Burrito/Homebrew) is unchanged and still open; E6 and E8 are independent.
+### 2026-06-22 -- Change Summary (auto-release the brew packages: E6 -> ADR-0017)
+- **Reframed E6 as a fully-automated release pipeline** (ADR-0017): release-please
+  versioning (T6.6) + the tag-triggered Burrito build workflow (T6.3) + a tap
+  auto-bump workflow (T6.7) so merging Conventional Commits ships brew packages with
+  no manual tag/checksum/formula edits. T6.2 folded into T6.3's first green run;
+  T6.4 (tap repo) reclassified agent-doable; T6.5 docs updated to cover the flow.
+- **ADR created:** `docs/adr/0017-automated-brew-release-pipeline.md` -- the
+  release-please -> CI build -> tap auto-bump design, the `HOMEBREW_TAP_TOKEN`
+  cross-repo secret, and why the release PR stays a human gate.
+- **A WIP `release.yml`** (T6.3) is committed this session; making it green on a
+  test tag is the next step (CI iteration expected on BEAM/Zig/Burrito setup).
+- **Trimmed the completed E8 epic** (T8.1-T8.10, all merged) out of the WBS to a
+  one-line Context record; the full narrative is in `docs/devlog.md` and ADR-0016.
+  Kept T8.11 (the dogfood, in progress).
 
-### 2026-06-22 -- Change Summary (T5.6 done, E5 closed)
-- **T5.6 merged (PR #76):** hermetic `kazi init` e2e against `fixtures/deploy-target`
-  + committed worked example `priv/examples/adopt_deploy_target.goal.toml` + README
-  worked-example snippet. UC-023 fully delivered; E5 closed. Suite 755 -> 760.
+### 2026-06-22 -- Change Summary (E8 complete; multi-harness shipped)
+- **E8 (generic multi-harness support) merged end to end** (ADR-0016): harness
+  profiles, `Kazi.Harness.CliAdapter`, `Kazi.Harness.resolve/1`, the `:opencode`
+  profile (NDJSON parser), goal-file `[harness]` table, env forwarding, and the
+  Runtime/CLI/authoring/adopt wiring. `kazi run --harness opencode --model <m>`
+  works. The live opencode->DGX smoke is an honest-skip (excluded by default;
+  finding in `docs/devlog.md`). Suite 760 -> 853. UC-026/UC-027 delivered.
 
 ## Hand-off Notes (cold start for a new session)
 
-1. **Verify the baseline first:** `mix test` should report 760 passing, 18 excluded;
-   `mix format --check-formatted` and `mix compile --warnings-as-errors` clean. If
-   not, stop and diagnose before building.
-2. **E8 is the most actionable next work** and is fully local/hermetic for most
-   tasks. Start at T8.1 -> T8.2 (the profile + generic CLI adapter, with the
-   `:claude` profile pinned by a golden argv test), then fan out (T8.3 neutral
-   prompt refactor, T8.4 opencode profile, T8.5 resolution). opencode is installed
-   (v1.17.9) -- confirm its flags against `opencode run --help` and capture a REAL
-   `--format json` event stream as the parser fixture. The ONLY non-hermetic step
-   is the T8.9 live smoke against the DGX-hosted Qwen, which must SKIP honestly if
-   the endpoint is unreachable.
-3. **E8 must not regress Claude.** The default harness stays `:claude`; T8.1/T8.2
-   keep the claude argv + result map byte-for-byte; T8.3 keeps every prompt doctest
-   identical. Read ADR-0016 (and ADR-0001/0008) before touching the harness layer;
-   do not enable session continuity by default.
-4. **E6 is a chain and environment-sensitive.** Do not build the Burrito host binary
-   on a macOS-26 machine (R-E6-1, Zig link fails). Drive T6.2 through the T6.3 CI
-   matrix. T6.4 (`brew install`) needs a new `kazi-org/homebrew-tap` repo + a
-   published Release; human-gated.
-5. **Do not relitigate frozen design** -- read `docs/concept.md` and the relevant
+1. **Verify the baseline first:** `mix test` should report 853 passing, 19 excluded;
+   `mix format --check-formatted` and `mix compile --warnings-as-errors` clean.
+2. **E6 is the only epic left, and it is CI-driven.** Do NOT build the Burrito host
+   binary on this macOS-26 box (R-E6-1). The path: get `release.yml` (T6.3) green on
+   a throwaway `v*-test` tag (this proves T6.2 too), add release-please (T6.6), then
+   create `kazi-org/homebrew-tap` (agent-doable -- `kazi-org` admin) + the formula
+   (T6.4) and the auto-bump workflow + `HOMEBREW_TAP_TOKEN` (T6.7), then docs (T6.5).
+   Read ADR-0014 + ADR-0017 before touching the pipeline.
+3. **T8.11 dogfood** (Claude plans, opencode/DGX implements) is in progress this
+   session; record its outcome in `docs/devlog.md`. It is independent of E6.
+4. **Do not relitigate frozen design** -- read `docs/concept.md` and the relevant
    ADR before touching an area; write a superseding ADR to change a decision.
 
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0016` (index at `docs/adr/README.md`)
+- Decisions: `docs/adr/0001`..`0017` (index at `docs/adr/README.md`); the release
+  pipeline is ADR-0014 (distribution) + ADR-0017 (automation).
 - Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
-- Harness layer (for E8): `lib/kazi/harness_adapter.ex` (behaviour),
-  `lib/kazi/harness/claude_adapter.ex` (current sole adapter),
-  `lib/kazi/runtime.ex:58` (hard-coded `@harness`), `lib/kazi/loop.ex:1164` (the
-  generic `data.harness.run/3` call site).
+- Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),
+  `lib/kazi/release.ex` (`cli/1`, `burrito_main/0`), `.github/workflows/release.yml`
+  (T6.3, WIP), `.github/workflows/ci.yml` (the test workflow to mirror setup from).
