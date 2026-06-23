@@ -52,3 +52,19 @@ caused a FALSE PASS: expecting `"ok"` matched `"not-ok"` because "not-ok" CONTAI
 not only atoms (fixed: `body_matches?` accepts `:exact` and `"exact"`); (2) never
 pick a liveness sentinel that is a substring of the success value — use exact match
 or a non-overlapping token. Surfaced by the T0.12 dogfood. (2026-06-22.)
+
+## Release / CI / Burrito
+
+### L-0005 #release #ci #burrito #cache -- cache a release `_build` and `mix release` skips the Burrito wrap
+The release workflow (`.github/workflows/release.yml`) caches `deps` + `_build`
+across runs. The FIRST run (cold cache) built fine; a LATER run with the warm
+cache failed at the checksum step with `cd: burrito_out: No such file or
+directory`. Root cause: `mix release` saw the already-assembled
+`_build/prod/rel/kazi` from the restored cache and -- non-interactive, no
+overwrite -- SKIPPED re-assembly and the Burrito wrap step, so `burrito_out/` was
+never produced. The failure surfaces one step LATER (checksum), masking the real
+cause. Fix: `mix release --overwrite` forces a fresh assemble + wrap every run
+while keeping the cache for compile speed. The container arm64 job never hit this
+because it has no cache step. Landmine: ALSO mind that deleting a GitHub Release
+before its replacement has built leaves the Homebrew formula pointing at missing
+assets -- build the new release FIRST, then swap. (E6 / T6.3, 2026-06-22.)
