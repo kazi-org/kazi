@@ -51,6 +51,8 @@ All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work
 
 - **UC-024** (install kazi as a single binary via Homebrew, ADR-0014; now with the
   fully-automated release pipeline of ADR-0017) -- OPEN; E6.
+- **UC-029** (interactive `propose`: kazi asks clarifying questions before drafting
+  a goal so acceptance predicates are precise, ADR-0019) -- OPEN; E11.
 
 UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
 delivered and verified on `main`. UC-025 (import a standard spec into a goal set)
@@ -118,11 +120,47 @@ tests) + content (the copy, reused from `README.md`/`docs/concept.md`).
 - [x] T9.8 Enhance the README for website coherence (content): make `README.md` and the site one coherent story from a single source (ADR-0018). (a) Add a prominent website link/badge in the header (under the wordmark) pointing to `https://kazi.sire.run`. (b) Make the SHARED CANONICAL STRINGS verbatim-consistent across README + site: the one-line positioning/hero ("the missing outer loop for coding agents" / "Kubernetes for coding goals"), the install command `brew install kazi-org/tap/kazi`, the 60-second mental model, and the harness list. (c) Reframe the README as the developer companion to the marketing site -- same pitch up top, then install/quickstarts/harness config/contributor build -- with NO contradictions of the site (claims, commands, version). Do NOT delete the contributor build detail; the site is the newcomer surface, the README the full reference.  Owner: David  Done: 2026-06-23  delivers: [a README coherent with kazi.sire.run; shared canonical strings aligned]  deps: [T9.2]  acc: every shared canonical string is byte-identical in `README.md` and the site content; the README header links the site; a newcomer reading either surface gets the same positioning + install; no claim on one contradicts the other.
 - [x] T9.9 Coherence drift-check (CI guardrail): add a tiny check (a shell/JS script or a Playwright/unit assertion run in the `site`/pages CI) that asserts the shared canonical strings (the install command, the positioning one-liner, the harness list) appear IDENTICALLY in `README.md` and the site's content source; fail CI if they diverge.  Owner: David  Done: 2026-06-23  verifies: [UC-028, infrastructure]  deps: [T9.8]  acc: the check is green when README + site agree; deliberately editing one canonical string in only one file makes the check (and CI) RED; wired into the pages workflow or a `site` CI job.
 
+### E11 -- Interactive clarify phase for `kazi propose` (P3, ADR-0019)
+
+Acceptance: `kazi propose "<idea>"` asks 2-4 high-leverage clarifying questions
+BEFORE drafting, so the resulting acceptance predicates are precise (especially a
+live-verification predicate), then drafts the goal + an inline rationale and lets
+the operator refine before it runs -- matching or beating the operator's current
+Claude-Code-CLI authoring of plans/ADRs, but ending in an executable,
+machine-checkable goal. Decided in ADR-0019: question generation is **HYBRID**
+(harness drafts candidate questions; kazi enforces a deterministic, unit-tested
+floor of gap-checks), the surface is the **CLI TTY first** (non-interactive/piped/
+`--yes` skips clarification and drafts best-effort; `--strict` fails loudly when
+too underspecified), and the rationale is **inline by default** with an optional
+`--adr` flag that also writes an ADR-lite doc. This EXTENDS the Authoring write
+path (ADR-0011) and predicates-as-done (ADR-0002); the clarify phase sits strictly
+before the existing `proposed` state and the approval state machine is unchanged.
+It reuses the injectable harness seam (`Kazi.Authoring` `:harness` opt -> `run/3`)
+so every new harness interaction is stubbable -- no real `claude`/network in tests.
+Telegram/dashboard clarify surfaces are OUT OF SCOPE (deferred follow-ups); the
+core is built surface-agnostic.
+
+- [ ] T11.1 Clarify core + question schema (`Kazi.Authoring.Clarify`): define the pure data shapes -- a clarifying question (`id`, `prompt`, `options` [label/value], `recommended`, `allow_free_text`) and an answer -- plus a pure `fold_answers/2` that deterministically merges answers into the draft-prompt context. No I/O.  Owner: TBD  Est: 1h  verifies: [UC-029]  deps: []  acc: ExUnit covers building/serializing a question set and folding answers into a prompt string DETERMINISTICALLY (same answers -> same prompt); pure functions, no harness call, no stdin; `mix format`/`--warnings-as-errors` clean.
+- [ ] T11.2 Deterministic gap-detection floor (`gaps/1`): a pure function over (idea, optional harness draft) returning the MANDATORY floor questions -- always ask the live-verification target and the scope boundary when absent; derive provider-specific gaps from the known provider set (`test_runner`/`http_probe`/`prod_log`/`browser`) and missing predicate `config`.  Owner: TBD  Est: 1.5h  verifies: [UC-029]  deps: [T11.1]  acc: ExUnit -- an idea with no live target yields a live-verification question; an idea naming an HTTP endpoint yields a status/auth question; a fully-specified idea yields zero floor questions; pure (no harness, no I/O).
+- [ ] T11.3 Harness-drafted candidate questions (same seam): extend the clarify core to drive the injectable harness (`run/3` behind the `:harness` opt, mirroring `drive_harness/2`) with a prompt asking for candidate clarifying questions as a JSON array matching the T11.1 schema; parse + validate; MERGE with the deterministic floor (floor is authoritative; dedup).  Owner: TBD  Est: 1.5h  verifies: [UC-029]  deps: [T11.1, T11.2]  acc: ExUnit with a STUB harness -- candidate questions are parsed, validated, and merged with the floor; a malformed/empty harness response degrades to the floor alone (fail-soft); no real `claude`/network.
+- [ ] T11.4 Two-phase `propose/2` wiring: thread the clarify phase into `Kazi.Authoring.propose/2` BEFORE the draft -- gather questions (T11.2+T11.3), accept answers via an INJECTED `:ask` callback (the CLI supplies interactive I/O; tests inject a function), fold answers into the draft prompt, then run the existing draft+persist path. Add an `interactive?: false`/answers-supplied path that skips clarification.  Owner: TBD  Est: 1.5h  verifies: [UC-029]  deps: [T11.1, T11.2, T11.3]  acc: ExUnit -- propose with an injected ask-callback persists a draft whose predicates reflect the answers; `interactive?: false` with no answers drafts best-effort (current one-shot behavior preserved); existing `propose` tests stay green; harness seam still stubbable.
+- [ ] T11.5 Inline rationale on the draft goal: capture a concise rationale (why these predicates / what is deliberately out of scope) from the draft and store it on `goal.metadata` so `serialize_goal/1` round-trips it through `Kazi.Goal.Loader.from_map/1`; surface it at review time.  Owner: TBD  Est: 1h  verifies: [UC-029]  deps: [T11.4]  acc: ExUnit -- a proposal carrying a rationale persists it in `goal.metadata` and it round-trips through the loader; the review output prints the rationale.
+- [ ] T11.6 CLI interactive rendering + flags (`lib/kazi/cli.ex`): render the clarify questions as terminal multiple-choice (numbered options + a free-text escape), wire answers back as the `:ask` callback; add `--strict` (exit non-zero when the idea is too underspecified) and `--adr` (also write an ADR-lite doc); honor `--yes`/non-TTY (skip clarification, draft best-effort). Detect a non-interactive stdin and never block on it.  Owner: TBD  Est: 2h  verifies: [UC-029]  deps: [T11.4, T11.5]  acc: integration over CLI parse + scripted stdin -- interactive run asks then drafts; `--yes`/piped stdin drafts WITHOUT asking; `--strict` on an empty/underspecified idea exits non-zero with a clear message; `--adr` writes a `docs/adr/` file.
+- [ ] T11.7 `--adr` ADR-lite writer: a small module that renders the proposal's rationale into the repo's ADR format under `docs/adr/` (next sequence number), only when `--adr` is passed.  Owner: TBD  Est: 1h  verifies: [UC-029]  deps: [T11.5]  acc: ExUnit -- given a draft with a rationale, the writer produces a well-formed ADR markdown file at the next number; idempotent for the same `proposal_ref`; absent without the flag.
+- [ ] T11.8 Review loop (refine via `edit/3`): after the draft is shown, offer "looks right / too much / too little / refine"; "refine" re-prompts with a sharper sentence and re-runs clarify+draft, persisting via the existing `edit/3` transition (stays `proposed`).  Owner: TBD  Est: 1.5h  verifies: [UC-029]  deps: [T11.6]  acc: ExUnit with injected I/O -- "refine" with a new sentence updates the proposed goal via `edit/3` (stays `proposed`); "looks right" leaves it `proposed` for `approve`; golden path covered.
+- [ ] T11.9 Docs + LIVE CLI verification: update the README/`docs/concept.md` authoring section to describe interactive `propose`; run `kazi propose "<idea>"` in a REAL TTY (stub or real harness) and observe questions -> draft -> rationale, plus the `--yes` non-interactive path and `--strict` on an underspecified idea; record the transcript evidence in `docs/devlog.md`.  Owner: TBD  Est: 1h  verifies: [UC-029]  deps: [T11.6, T11.8]  acc: observed-not-expected evidence (a terminal transcript) for the interactive path, the non-interactive path, and the `--strict` failure; README authoring section matches behavior; `mix format --check-formatted` + `mix compile --warnings-as-errors` clean.
+
 ### Waves
 
-E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; only T6.7
-(human-gated on `HOMEBREW_TAP_TOKEN`) remains in E6. **E9 (the website) is the
-primary open work.**
+E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; E9 (website)
+is LIVE at https://kazi.sire.run with the auto-release pipeline active (only T9.5
+Playwright + T9.6 perf/a11y polish remain). **E11 (interactive `propose`) is the
+primary open feature work.**
+
+- **Wave E11-1 (pure core):** T11.1 (schema + `fold_answers`) -> T11.2 (deterministic gap floor). Pure, fully unit-tested, no I/O.
+- **Wave E11-2 (seam + wiring):** T11.3 (harness-drafted candidates on the stub seam), T11.4 (two-phase `propose/2`), T11.5 (inline rationale) -- after the core.
+- **Wave E11-3 (CLI + flags):** T11.6 (interactive rendering + `--strict`/`--adr`/`--yes`), T11.7 (`--adr` writer), T11.8 (refine loop via `edit/3`).
+- **Wave E11-4 (verify live):** T11.9 (docs + real-TTY verification, transcript in `docs/devlog.md`).
 
 - ~~**E6 / E8**~~ -- DONE except T6.7 (tap auto-bump, operator secret) -- see the WBS.
 - **Wave E9-1 (foundation):** T9.1 (scaffold Astro+Tailwind in `site/`) -> then T9.3 (deploy workflow) and T9.2 (landing content) can proceed in parallel.
@@ -144,6 +182,9 @@ primary open work.**
 | R-E9-1 | `kazi.sire.run` needs a DNS `CNAME` record at the `sire.run` provider, which the session does not control. | Med | High (inherent) | T9.4 is `kind: any` (operator). Until the record exists, the site is still LIVE at the default `kazi-org.github.io/kazi` URL (T9.3) -- the custom domain is the last, non-blocking step. The CNAME file + repo Pages setting are agent-doable; only the DNS record is operator-gated. |
 | R-E9-2 | Website copy drifts from what kazi actually does (claims a feature it lacks). | Med | Med | Copy is DERIVED from `README.md`/`docs/concept.md` (T9.2 acc forbids invented features); the site lives in the same repo so a docs change and a site change land together. The install command on the page is the real `brew install` string, smoke-tested by T9.5. |
 | R-E9-3 | GitHub Pages must be enabled with source = "GitHub Actions" for the deploy workflow to publish. | Low | Med | T9.3 enables it (repo Settings -> Pages); agent-doable via `gh api` or the UI. The first deploy run surfaces this immediately if missing. |
+| R-E11-1 | Interactive stdin in the CLI is hard to unit-test and risks blocking. | Med | Med | The clarify CORE takes an injected `:ask` callback, so it is tested with a function (no real TTY); only the thin rendering layer (T11.6) needs a scripted-stdin integration test. |
+| R-E11-2 | Harness-drafted candidate questions are non-deterministic and may be malformed. | Med | Med | The deterministic floor (T11.2) is AUTHORITATIVE; harness questions are merged on top and fail-soft -- a malformed/empty harness response degrades to the floor alone (T11.3). |
+| R-E11-3 | A non-interactive/piped `propose` must never block waiting on stdin. | High | Med | Explicit `--yes`/no-TTY path drafts best-effort without asking; `--strict` fails loudly instead. Both get dedicated tests (T11.6). |
 
 ## Operating Procedure
 
@@ -166,6 +207,27 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (add E11: interactive clarify phase for `propose`)
+- **Added E11 (T11.1-T11.9)** -- an interactive clarify phase for `kazi propose`:
+  it asks 2-4 high-leverage clarifying questions BEFORE drafting so acceptance
+  predicates (especially a live-verification predicate) are precise, drafts the
+  goal + an inline rationale, and lets the operator refine before it runs. Built as
+  a walking skeleton: pure clarify core + deterministic gap floor first (E11-1),
+  then harness-drafted candidate questions on the existing stub seam + two-phase
+  `propose/2` wiring + inline rationale (E11-2), then CLI interactive rendering +
+  `--strict`/`--adr`/`--yes` flags + the refine loop (E11-3), then live-TTY
+  verification (E11-4).
+- **ADR created:** `docs/adr/0019-interactive-clarify-phase-for-propose.md` --
+  records the three operator decisions (HYBRID question generation = harness
+  candidates + a deterministic unit-tested floor; CLI-TTY-first surface with a
+  non-interactive `--yes`/no-TTY fallback and a `--strict` fail-loud; inline
+  rationale by default + an optional `--adr` doc). Extends ADR-0011 (the Authoring
+  write path; the clarify phase sits before the existing `proposed` state, state
+  machine unchanged) and ADR-0002 (predicates make "done" machine-checkable).
+  Telegram/dashboard clarify surfaces are deferred; the core is surface-agnostic.
+- **Use case added:** UC-029 (interactive propose). Manifest updated.
+- No code changed yet -- this is the plan + ADR for E11; build with `/apply --pool`.
 
 ### 2026-06-23 -- Change Summary (E9: README <-> website coherence)
 - **Added T9.8 + T9.9** to E9: enhance `README.md` so it and the website are one
@@ -239,8 +301,9 @@ load-bearing for versioning -- type every commit correctly.
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0017` (index at `docs/adr/README.md`); the release
-  pipeline is ADR-0014 (distribution) + ADR-0017 (automation).
+- Decisions: `docs/adr/0001`..`0019` (index at `docs/adr/README.md`); the release
+  pipeline is ADR-0014 (distribution) + ADR-0017 (automation); the website is
+  ADR-0018; interactive `propose` is ADR-0019.
 - Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
 - Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),
