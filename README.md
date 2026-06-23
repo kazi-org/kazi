@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/kazi-wordmark-dark.svg">
+    <img alt="kazi" src="assets/logo/kazi-wordmark.svg" width="260">
+  </picture>
+</p>
+
 # kazi
 
 **Describe what "done" looks like. kazi makes it true — and proves it.**
