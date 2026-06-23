@@ -22,3 +22,4 @@ decision, write a new ADR that supersedes the old one (and update
 | [0013](0013-adopt-reverse-engineer-goals.md) | Adopting kazi on an existing project (`kazi init` reverse-engineers a goal-file) | Accepted |
 | [0014](0014-binary-distribution-burrito-homebrew.md) | Binary distribution via Burrito + Homebrew (supersedes escript-as-distribution) | Accepted |
 | [0015](0015-init-source-output-model-registry-goal-set.md) | Withdraw the capability-registry adapter; a future spec importer (OpenAPI/gherkin) instead | Accepted |
+| [0016](0016-generic-harness-profiles.md) | Generic harness profiles: config-driven multi-harness support (opencode, Codex, ...) | Accepted |
