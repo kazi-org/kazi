@@ -98,7 +98,7 @@ defmodule Kazi.Loop do
   # T4.9c retrieval opt-in (ADR-0012): the loop appends the goal-declared
   # retriever's snippets to the dispatch prompt, reusing the adapter's render so
   # the section is byte-identical to `build_prompt/3`'s (see `dispatch_prompt/2`).
-  alias Kazi.Harness.ClaudeAdapter
+  alias Kazi.Harness.Prompt
   # T3.1d resource lease: the per-key lease substrate (acquire/renew/release via
   # CAS + TTL on an injected clock, ADR-0006). The loop leases the goal's resource
   # key before dispatch so contending instances serialize (see the dispatch-prep
@@ -1235,7 +1235,7 @@ defmodule Kazi.Loop do
 
     case Retrieval.retrieve(failing_slice(data), ws, retrieval_opts(adapter_opts)) do
       [] -> nil
-      snippets when is_list(snippets) -> ClaudeAdapter.render_retrieval_section(snippets)
+      snippets when is_list(snippets) -> Prompt.render_retrieval_section(snippets)
     end
   end
 
