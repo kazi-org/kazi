@@ -77,6 +77,7 @@ defmodule Kazi.Authoring do
   """
 
   alias Kazi.{Goal, Predicate, ReadModel}
+  alias Kazi.Authoring.Clarify
   alias Kazi.Authoring.Draft
   alias Kazi.Goal.Loader
   alias Kazi.ReadModel.ProposedGoal
@@ -134,12 +135,57 @@ defmodule Kazi.Authoring do
   @spec propose(idea(), opts()) :: {:ok, Draft.t()} | {:error, term()}
   def propose(idea, opts \\ []) when is_binary(idea) and is_list(opts) do
     with {:ok, idea} <- validate_idea(idea),
-         {:ok, proposal} <- drive_harness(idea, opts),
+         {:ok, clarifications} <- run_clarify(idea, opts),
+         {:ok, proposal} <- drive_harness(idea, clarifications, opts),
          {:ok, goal} <- parse_proposal(proposal, idea_to_goal_id(idea)),
          {:ok, draft} <- persist(idea, goal, opts) do
       {:ok, draft}
     end
   end
+
+  # --- clarify phase (T11.4, ADR-0019) ---------------------------------------
+
+  # The clarify phase runs ONLY when an `:ask` callback is injected (the CLI
+  # supplies interactive I/O; tests inject a function). Without it, propose stays
+  # the one-shot it always was, so existing callers are unchanged. When present,
+  # gather the questions (the deterministic floor merged with harness-drafted
+  # candidates), ask them, and fold the answers into a clarifications block for the
+  # draft prompt.
+  @spec run_clarify(idea(), opts()) :: {:ok, String.t()}
+  defp run_clarify(idea, opts) do
+    case Keyword.get(opts, :ask) do
+      ask when is_function(ask, 1) ->
+        questions = clarify_questions(idea, opts)
+        answers = normalize_answers(ask.(questions))
+        {:ok, Clarify.fold_answers(questions, answers)}
+
+      _ ->
+        {:ok, ""}
+    end
+  end
+
+  # The questions to ask: the deterministic floor (`Clarify.gaps/2`) merged with
+  # harness-drafted candidates (T11.3), the floor authoritative. Candidate drafting
+  # is fail-soft -- a harness error or malformed response degrades to the floor.
+  defp clarify_questions(idea, opts) do
+    Clarify.merge(Clarify.gaps(idea), drive_candidates(idea, opts))
+  end
+
+  defp drive_candidates(idea, opts) do
+    {harness, harness_opts} = resolve_harness(opts)
+    workspace = Keyword.get(opts, :workspace, ".")
+    adapter_opts = Keyword.merge(Keyword.get(opts, :adapter_opts, []), harness_opts)
+
+    case harness.run(Clarify.candidate_prompt(idea), workspace, adapter_opts) do
+      {:ok, result} when is_map(result) -> Clarify.parse_candidates(proposal_payload(result))
+      _ -> []
+    end
+  end
+
+  # An `:ask` callback may return a string-keyed answers map; anything else is
+  # treated as no answers, so a misbehaving caller cannot crash the draft.
+  defp normalize_answers(answers) when is_map(answers), do: answers
+  defp normalize_answers(_), do: %{}
 
   # --- approval workflow (T3.5b) ---------------------------------------------
 
@@ -270,9 +316,12 @@ defmodule Kazi.Authoring do
 
   Pure and total so it can be tested directly. It instructs the harness to emit a
   single JSON object — `{"name", "predicates": [{"id", "provider", "description",
-  "config"}]}` — describing checkable acceptance criteria, deliberately NOT prose
-  the agent self-grades: the controller, not the agent, decides "done" (concept
-  §1).
+  "config"}], "rationale"}` — describing checkable acceptance criteria,
+  deliberately NOT prose the agent self-grades: the controller, not the agent,
+  decides "done" (concept §1). The optional `clarifications` block (T11.4,
+  ADR-0019) carries the author's answers to the clarify-phase questions so the
+  drafted predicates reflect them; `rationale` is the inline "why these predicates
+  / what is out of scope" the draft surfaces at review (T11.5).
 
   ## Examples
 
@@ -280,8 +329,9 @@ defmodule Kazi.Authoring do
       iex> prompt =~ "a health endpoint that returns 200" and prompt =~ "acceptance"
       true
   """
-  @spec build_prompt(idea()) :: String.t()
-  def build_prompt(idea) when is_binary(idea) do
+  @spec build_prompt(idea(), String.t()) :: String.t()
+  def build_prompt(idea, clarifications \\ "")
+      when is_binary(idea) and is_binary(clarifications) do
     """
     Translate the following software idea into a kazi goal: a set of
     machine-checkable acceptance predicates whose conjunction means the idea is
@@ -290,7 +340,7 @@ defmodule Kazi.Authoring do
 
     Idea:
     #{idea}
-
+    #{clarifications_section(clarifications)}
     Respond with a SINGLE JSON object and nothing else, of the shape:
 
       {
@@ -298,7 +348,8 @@ defmodule Kazi.Authoring do
         "predicates": [
           {"id": "<stable_id>", "provider": "<provider>",
            "description": "<what must become true>", "config": { }}
-        ]
+        ],
+        "rationale": "<one or two sentences: why these predicates, and what is deliberately out of scope>"
       }
 
     Author at least one predicate. These are acceptance criteria for NEW
@@ -306,18 +357,23 @@ defmodule Kazi.Authoring do
     """
   end
 
+  # The clarifications block (the author's clarify-phase answers) inserted between
+  # the idea and the response shape; empty when nothing was asked/answered.
+  defp clarifications_section(""), do: ""
+  defp clarifications_section(clarifications), do: "\n#{clarifications}\n"
+
   # --- harness drive ---------------------------------------------------------
 
   # Drive the injectable harness adapter with the authoring prompt, in the target
   # workspace, forwarding the caller's adapter opts. The same `run/3` seam the
   # convergence loop uses — a stub adapter is injected via `:harness` in tests, so
   # no real `claude` and no network are touched.
-  @spec drive_harness(idea(), opts()) :: {:ok, term()} | {:error, term()}
-  defp drive_harness(idea, opts) do
+  @spec drive_harness(idea(), String.t(), opts()) :: {:ok, term()} | {:error, term()}
+  defp drive_harness(idea, clarifications, opts) do
     {harness, harness_opts} = resolve_harness(opts)
     workspace = Keyword.get(opts, :workspace, ".")
     adapter_opts = Keyword.merge(Keyword.get(opts, :adapter_opts, []), harness_opts)
-    prompt = build_prompt(idea)
+    prompt = build_prompt(idea, clarifications)
 
     case harness.run(prompt, workspace, adapter_opts) do
       {:ok, result} when is_map(result) -> {:ok, proposal_payload(result)}
@@ -375,8 +431,20 @@ defmodule Kazi.Authoring do
          name: optional_string(Map.get(map, "name")),
          mode: :create,
          predicates: predicates,
-         metadata: %{"source" => "authoring", "proposed" => true}
+         metadata: draft_metadata(Map.get(map, "rationale"))
        )}
+    end
+  end
+
+  # The drafted goal's metadata: the authoring provenance plus the optional inline
+  # rationale (T11.5, ADR-0019) -- "why these predicates / what is out of scope" --
+  # which `serialize_goal/1` round-trips so the review surface can print it.
+  defp draft_metadata(rationale) do
+    base = %{"source" => "authoring", "proposed" => true}
+
+    case optional_string(rationale) do
+      nil -> base
+      text -> Map.put(base, "rationale", text)
     end
   end
 

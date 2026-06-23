@@ -153,6 +153,84 @@ defmodule Kazi.AuthoringTest do
     end
   end
 
+  describe "propose/2 — clarify phase (T11.4, T11.5, ADR-0019)" do
+    # A stub that distinguishes the two harness calls of an interactive propose:
+    # the candidate-question call (no candidates here, so the floor is used) and
+    # the draft call, whose drafted provider keys off whether the folded answer
+    # ("Production logs" = prod_log) reached the draft prompt. This lets a test
+    # assert the author's answer actually shaped the draft.
+    defmodule ClarifyStub do
+      @behaviour Kazi.HarnessAdapter
+
+      @impl true
+      def run(prompt, _workspace, _opts) do
+        cond do
+          prompt =~ "clarifying questions" ->
+            {:ok, %{result: "[]"}}
+
+          prompt =~ "Production logs" ->
+            {:ok,
+             %{
+               result:
+                 ~s({"name":"G","predicates":[{"id":"p","provider":"prod_log"}],"rationale":"probe the runtime; tests-only is out of scope"})
+             }}
+
+          true ->
+            {:ok, %{result: ~s({"name":"G","predicates":[{"id":"h","provider":"http_probe"}]})}}
+        end
+      end
+    end
+
+    test "an injected :ask callback folds answers so the draft reflects them" do
+      # The author picks prod_log for the live-verification target.
+      ask = fn _questions -> %{"live-target" => "prod_log", "scope" => "core"} end
+
+      assert {:ok, %Draft{goal: goal}} =
+               Authoring.propose("add a widgets feature", harness: ClarifyStub, ask: ask)
+
+      assert [predicate] = goal.predicates
+      assert predicate.kind == :prod_log
+    end
+
+    test "the :ask callback receives the deterministic floor questions" do
+      ask = fn questions ->
+        send(self(), {:asked, Enum.map(questions, & &1.id)})
+        %{}
+      end
+
+      assert {:ok, _draft} =
+               Authoring.propose("add a widgets feature", harness: ClarifyStub, ask: ask)
+
+      assert_received {:asked, ids}
+      assert "live-target" in ids
+      assert "scope" in ids
+    end
+
+    test "without an :ask callback, propose stays the one-shot it always was" do
+      # No clarify phase: the draft prompt never carries "Production logs", so the
+      # stub drafts the default http_probe predicate.
+      assert {:ok, %Draft{goal: goal}} =
+               Authoring.propose("add a widgets feature", harness: ClarifyStub)
+
+      assert [predicate] = goal.predicates
+      assert predicate.kind == :http_probe
+    end
+
+    test "the inline rationale is stored on the goal metadata and round-trips" do
+      ask = fn _questions -> %{"live-target" => "prod_log"} end
+
+      assert {:ok, %Draft{goal: goal} = draft} =
+               Authoring.propose("add a widgets feature", harness: ClarifyStub, ask: ask)
+
+      assert goal.metadata["rationale"] =~ "out of scope"
+
+      # Round-trips through the canonical loader the approval workflow uses.
+      row = Repo.get_by(ProposedGoal, proposal_ref: draft.proposal_ref)
+      assert {:ok, %Goal{} = rehydrated} = Kazi.Goal.Loader.from_map(row.goal)
+      assert rehydrated.metadata["rationale"] =~ "out of scope"
+    end
+  end
+
   describe "propose/2 — error paths" do
     test "rejects a blank idea" do
       assert {:error, :empty_idea} = Authoring.propose("   ", harness: StubHarness)
