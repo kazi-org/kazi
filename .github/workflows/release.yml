@@ -116,6 +116,18 @@ jobs:
       - name: Build Burrito binaries
         run: mix release --overwrite
 
+      - name: Smoke-test the binary (it must execute on its native arch)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="burrito_out/kazi_${BURRITO_TARGET}"
+          chmod +x "$bin"
+          # A broken/wrong-arch binary or a missing NIF would fail here BEFORE we
+          # publish it. `--help` boots the wrapped release and dispatches the CLI.
+          out="$("$bin" --help 2>&1)"
+          echo "$out" | head -5
+          echo "$out" | grep -q "kazi" || { echo "smoke-test failed: --help did not run"; exit 1; }
+
       - name: Generate checksums
         shell: bash
         run: |
@@ -172,6 +184,12 @@ jobs:
           mix local.hex --force && mix local.rebar --force
           mix deps.get --only prod
           mix release --overwrite
+
+          # Smoke-test: the arm64 binary must execute on this arm64 runner before
+          # we publish it (catches a broken build / missing NIF).
+          chmod +x burrito_out/kazi_linux_aarch64
+          burrito_out/kazi_linux_aarch64 --help 2>&1 | head -5 | grep -q "kazi" \
+            || { echo "smoke-test failed: arm64 --help did not run"; exit 1; }
 
           cd burrito_out
           sha256sum kazi_linux_aarch64 | tee kazi_linux_aarch64.sha256
