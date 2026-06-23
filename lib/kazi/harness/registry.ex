@@ -22,6 +22,7 @@ defmodule Kazi.Harness.Registry do
   """
   @spec fetch(atom()) :: {:ok, Profile.t()} | {:error, {:unknown_harness, atom()}}
   def fetch(:claude), do: {:ok, claude()}
+  def fetch(:opencode), do: {:ok, opencode()}
   def fetch(id) when is_atom(id), do: {:error, {:unknown_harness, id}}
 
   @doc """
@@ -38,7 +39,7 @@ defmodule Kazi.Harness.Registry do
 
   @doc "The ids of all built-in harnesses."
   @spec ids() :: [atom()]
-  def ids, do: [:claude]
+  def ids, do: [:claude, :opencode]
 
   # The :claude profile — the default. Its argv + parser are the canonical
   # Claude-specific boundary logic (`Kazi.Harness.Profiles.Claude`), pinned
@@ -54,6 +55,22 @@ defmodule Kazi.Harness.Registry do
       build_args: &Profiles.Claude.build_args/2,
       parse: &Profiles.Claude.parse/1,
       supported_opts: [:command, :max_budget_usd, :allowed_tools, :permission_mode]
+    }
+  end
+
+  # The :opencode profile (T8.4, ADR-0016). argv is `run <prompt> --format json`
+  # plus an optional `--model <provider/model>`; the parser consumes opencode's
+  # NDJSON event stream (`Kazi.Harness.Profiles.Opencode`). supported_opts are the
+  # per-run `:command` override (the test-stub seam) and `:model` — opencode does
+  # NOT understand Claude's hygiene flags, so resolution (T8.5) drops them.
+  @spec opencode() :: Profile.t()
+  defp opencode do
+    %Profile{
+      id: :opencode,
+      command: "opencode",
+      build_args: &Profiles.Opencode.build_args/2,
+      parse: &Profiles.Opencode.parse/1,
+      supported_opts: [:command, :model]
     }
   end
 end
