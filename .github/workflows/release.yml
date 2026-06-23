@@ -1,0 +1,100 @@
+name: Release
+
+# T6.3 (ADR-0014): build the Burrito single-file binaries on Zig-compatible CI
+# runners and publish them as GitHub Release assets with checksums. This is also
+# how T6.2's host-binary build is satisfied -- the dev machine (macOS 26) cannot
+# link the Burrito binary (Risk R-E6-1), but the macOS-15 / Ubuntu runners can.
+#
+# Trigger: pushing a tag like `v0.1.0` (release-please creates these on merge of
+# its release PR; a `v*-test` tag can be pushed by hand to dry-run the workflow).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the Release and upload assets
+
+env:
+  ELIXIR_VERSION: "1.20.1"
+  OTP_VERSION: "28.0"
+  # Burrito 1.5 pins Zig 0.15.2; newer Zig is API-incompatible with its build.zig.
+  ZIG_VERSION: "0.15.2"
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }} binaries
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS targets must build on macOS (the Apple SDK is not cross-linkable
+          # from Linux). Pin macos-15 -- macos-26 fails the Zig link (R-E6-1).
+          - runner: macos-15
+            label: macOS
+            burrito_targets: "macos_aarch64,macos_x86_64"
+          # Linux targets build on Ubuntu; Zig cross-compiles aarch64<->x86_64.
+          - runner: ubuntu-latest
+            label: Linux
+            burrito_targets: "linux_aarch64,linux_x86_64"
+    env:
+      MIX_ENV: prod
+      # Restrict Burrito to this runner's OS targets (Burrito reads BURRITO_TARGET
+      # as a comma-separated allow-list of target names from mix.exs `targets:`).
+      BURRITO_TARGET: ${{ matrix.burrito_targets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang/OTP and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Set up Zig ${{ env.ZIG_VERSION }} (Burrito cross-compiler)
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install xz (Burrito payload compression)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y xz-utils
+          else
+            brew list xz >/dev/null 2>&1 || brew install xz
+          fi
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-release-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+
+      - name: Fetch dependencies
+        run: mix deps.get --only prod
+
+      - name: Build Burrito binaries
+        run: mix release
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd burrito_out
+          for f in kazi_*; do
+            [ -f "$f" ] || continue
+            shasum -a 256 "$f" | tee "$f.sha256"
+          done
+          ls -la
+
+      - name: Upload Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            burrito_out/kazi_*
+          fail_on_unmatched_files: true
