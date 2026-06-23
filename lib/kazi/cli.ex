@@ -58,7 +58,7 @@ defmodule Kazi.CLI do
   kazi — drive a goal to convergence against a target workspace.
 
   USAGE:
-      kazi run <goal-file> --workspace <path> [options]
+      kazi run <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
       kazi init <repo-dir> [--out <file>] [--enrich]
       kazi propose "<idea>" [--workspace <path>]
       kazi list-proposed [--status <proposed|approved|rejected>]
@@ -94,12 +94,20 @@ defmodule Kazi.CLI do
                              goal-file's `standing` field.
       --status <state>       Filter `list-proposed` to one lifecycle state
                              (proposed / approved / rejected). Default: all.
+      --harness <id>         Coding harness to drive (T8.7, ADR-0016): `claude`
+                             (default) or `opencode`. Overrides the goal-file's
+                             [harness] table and the app config.
+      --model <provider/model>
+                             Model the harness should use, e.g.
+                             `dgx/qwen3.6` for opencode. Overrides the goal-file's
+                             [harness] model.
       --help                 Show this help and exit.
 
   EXAMPLES:
       kazi run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
       kazi run priv/examples/deploy_target.toml --workspace ./target --env prod
       kazi run priv/examples/standing_maintenance.toml --workspace ./svc --standing
+      kazi run my.goal.toml --workspace ./svc --harness opencode --model dgx/qwen3.6
       kazi init ./my-service --out my-service.goal.toml
       kazi propose "a /healthz endpoint that returns 200"
       kazi list-proposed --status proposed
@@ -221,6 +229,10 @@ defmodule Kazi.CLI do
           # (off by default); --out is the output goal-file.
           enrich: :boolean,
           out: :string,
+          # T8.7 harness selection (ADR-0016): --harness picks the coding harness
+          # (claude / opencode / ...); --model picks the harness's model.
+          harness: :string,
+          model: :string,
           help: :boolean
         ],
         aliases: [h: :help]
@@ -242,9 +254,14 @@ defmodule Kazi.CLI do
     case rest do
       # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
       # T3.4d standing wiring: carry the --standing flag through to the run.
+      # T8.7 harness wiring: carry --harness/--model through to the resolved adapter.
       [] ->
         {:run, goal_file,
-         workspace: flags[:workspace], env: flags[:env], standing: flags[:standing]}
+         workspace: flags[:workspace],
+         env: flags[:env],
+         standing: flags[:standing],
+         harness: flags[:harness],
+         model: flags[:model]}
 
       extra ->
         {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
@@ -362,6 +379,11 @@ defmodule Kazi.CLI do
       # passing their own deploy_params keep working and an explicit --env wins.
       |> maybe_put_deploy_env(opts[:env])
       |> maybe_put_standing(opts[:standing])
+      # T8.7 harness wiring: forward --harness/--model to Kazi.Runtime, which
+      # resolves the adapter (Kazi.Harness.resolve/1). Only set when given, so the
+      # default path (no flags) stays byte-identical to the pre-T8.7 claude path.
+      |> maybe_put(:harness, opts[:harness])
+      |> maybe_put(:model, opts[:model])
 
     case Runtime.run(goal, run_opts) do
       {:ok, %{outcome: :converged} = result} ->
@@ -400,9 +422,21 @@ defmodule Kazi.CLI do
   defp maybe_put_standing(run_opts, true), do: Keyword.put(run_opts, :standing, true)
   defp maybe_put_standing(run_opts, _), do: run_opts
 
+  # Set a run opt only when the value is present (a CLI flag was given). Keeping
+  # absent flags unset means the default path is byte-identical to pre-T8.7.
+  defp maybe_put(run_opts, _key, nil), do: run_opts
+  defp maybe_put(run_opts, key, value), do: Keyword.put(run_opts, key, value)
+
   defp format_run_error({:unknown_provider_kinds, kinds}) do
     "goal names provider kind(s) this build can't evaluate: " <>
       Enum.map_join(kinds, ", ", &inspect/1)
+  end
+
+  # T8.7 (ADR-0016): an unknown --harness id (or goal-file/config harness) — name
+  # the offending id and the harnesses that ARE available.
+  defp format_run_error({:unknown_harness, id}) do
+    "unknown harness #{inspect(id)}; available: " <>
+      Enum.map_join(Kazi.Harness.Registry.ids(), ", ", &to_string/1)
   end
 
   defp format_run_error(:vacuous_goal),

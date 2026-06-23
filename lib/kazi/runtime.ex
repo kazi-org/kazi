@@ -54,8 +54,10 @@ defmodule Kazi.Runtime do
     browser: Kazi.Providers.Browser
   }
 
-  # The real Slice-0 behaviour implementations bound to the loop's seams.
-  @harness Kazi.Harness.ClaudeAdapter
+  # The real Slice-0 behaviour implementations bound to the loop's seams. The
+  # harness adapter is no longer hard-coded here: it is resolved per run via
+  # `Kazi.Harness.resolve/1` (T8.7, ADR-0016) so a goal/CLI/config can select
+  # opencode or any other harness.
   @integrate Kazi.Actions.Integrate
   @deploy Kazi.Actions.Deploy
 
@@ -143,7 +145,8 @@ defmodule Kazi.Runtime do
     workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
     await_timeout = Keyword.get(opts, :await_timeout, :infinity)
 
-    with {:ok, providers} <- resolve_providers(goal, opts),
+    with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
+         {:ok, providers} <- resolve_providers(goal, opts),
          :ok <- guard_not_vacuous(goal, providers, workspace) do
       loop_opts =
         opts
@@ -159,6 +162,9 @@ defmodule Kazi.Runtime do
           :providers,
           :adapter_opts,
           :extra_action_context,
+          # T8.7 harness selection: consumed by resolve_harness/2 below, not a Loop opt.
+          :harness,
+          :model,
           # T3.4d standing wiring: dropped here and re-set in the merge below so
           # the loop's standing mode defaults to the goal-file's declared
           # `standing`, overridable by an explicit `:standing` opt (CLI flag).
@@ -167,11 +173,15 @@ defmodule Kazi.Runtime do
         |> Keyword.merge(
           goal: goal,
           providers: providers,
-          harness: @harness,
+          # T8.7 (ADR-0016): the harness adapter is RESOLVED (CLI `--harness`/`--model`
+          # > goal-file `[harness]` > config > default `:claude`), not hard-coded. The
+          # resolved `harness_opts` (the profile, model) are merged INTO adapter_opts so
+          # the prompt-construction opts (`:retriever` etc.) survive alongside them.
+          harness: adapter_module,
           integrate: @integrate,
           deploy: @deploy,
           workspace: workspace,
-          adapter_opts: build_adapter_opts(goal, opts),
+          adapter_opts: build_adapter_opts(goal, opts, harness_opts),
           on_iteration: build_on_iteration(goal, opts),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
@@ -288,13 +298,44 @@ defmodule Kazi.Runtime do
   # central constraint). A goal that declares one wires it into the dispatch path.
   # The caller's explicit `:adapter_opts` still wins (it is merged last), so a
   # test/operator can override or disable the goal-declared retriever.
-  defp build_adapter_opts(%Goal{} = goal, opts) do
+  defp build_adapter_opts(%Goal{} = goal, opts, harness_opts) do
     caller_opts = Keyword.get(opts, :adapter_opts, [])
 
-    case goal_retriever(goal) do
-      nil -> caller_opts
-      retriever -> Keyword.merge([retriever: retriever], caller_opts)
-    end
+    base =
+      case goal_retriever(goal) do
+        nil -> caller_opts
+        retriever -> Keyword.merge([retriever: retriever], caller_opts)
+      end
+
+    # T8.7: fold the resolved harness opts (the profile, and the resolved model)
+    # over the prompt-construction opts, so `:retriever`/`:context_pack` survive
+    # ALONGSIDE the harness selection. A goal-file `[harness] command` override
+    # (T8.6) is applied only when nothing already set `:command` (caller/test stub
+    # wins), keeping it the lowest-precedence command source.
+    base
+    |> Keyword.merge(harness_opts)
+    |> maybe_put_goal_command(goal)
+  end
+
+  defp maybe_put_goal_command(adapter_opts, %Goal{harness: %{command: cmd}})
+       when is_binary(cmd) and cmd != "",
+       do: Keyword.put_new(adapter_opts, :command, cmd)
+
+  defp maybe_put_goal_command(adapter_opts, _goal), do: adapter_opts
+
+  # T8.7 (ADR-0016): resolve which harness adapter drives this run. Precedence is
+  # the CLI `--harness`/`--model` opts > the goal-file `[harness]` table (T8.6) >
+  # app config > the `:claude` default — exactly the order `Kazi.Harness.resolve/1`
+  # encodes. Returns `{adapter_module, harness_opts}` or surfaces an
+  # `{:error, {:unknown_harness, id}}` that aborts the run with a clear message.
+  defp resolve_harness(%Goal{harness: goal_harness}, opts) do
+    gh = goal_harness || %{}
+
+    Kazi.Harness.resolve(
+      harness: Keyword.get(opts, :harness),
+      goal_harness: Map.get(gh, :id),
+      model: Keyword.get(opts, :model) || Map.get(gh, :model)
+    )
   end
 
   # The retriever a goal DECLARES, if any, for per-goal retrieval opt-in (T4.9c).

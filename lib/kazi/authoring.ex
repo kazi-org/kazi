@@ -314,15 +314,32 @@ defmodule Kazi.Authoring do
   # no real `claude` and no network are touched.
   @spec drive_harness(idea(), opts()) :: {:ok, term()} | {:error, term()}
   defp drive_harness(idea, opts) do
-    harness = Keyword.get(opts, :harness, @default_harness)
+    {harness, harness_opts} = resolve_harness(opts)
     workspace = Keyword.get(opts, :workspace, ".")
-    adapter_opts = Keyword.get(opts, :adapter_opts, [])
+    adapter_opts = Keyword.merge(Keyword.get(opts, :adapter_opts, []), harness_opts)
     prompt = build_prompt(idea)
 
     case harness.run(prompt, workspace, adapter_opts) do
       {:ok, result} when is_map(result) -> {:ok, proposal_payload(result)}
       {:error, reason} -> {:error, {:harness_failed, reason}}
       other -> {:error, {:harness_failed, other}}
+    end
+  end
+
+  # T8.7 (ADR-0016): pick the harness adapter. An explicitly injected `:harness`
+  # MODULE (the test seam) is used as-is; otherwise the default is RESOLVED via
+  # `Kazi.Harness.resolve/1` so app config can select opencode for authoring too.
+  # On a resolve error the legacy `@default_harness` stands (no behaviour change).
+  defp resolve_harness(opts) do
+    case Keyword.get(opts, :harness) do
+      nil ->
+        case Kazi.Harness.resolve(model: Keyword.get(opts, :model)) do
+          {:ok, {module, harness_opts}} -> {module, harness_opts}
+          {:error, _reason} -> {@default_harness, []}
+        end
+
+      module ->
+        {module, []}
     end
   end
 

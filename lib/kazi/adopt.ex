@@ -431,8 +431,8 @@ defmodule Kazi.Adopt do
   # (harness error, unparseable payload, no usable predicate) yields `[]` — the
   # deterministic detection always stands, so enrichment can only ever ADD.
   defp drive_enrichment(path, detection, opts) do
-    harness = Keyword.get(opts, :harness, @default_harness)
-    adapter_opts = Keyword.get(opts, :adapter_opts, [])
+    {harness, harness_opts} = resolve_harness(opts)
+    adapter_opts = Keyword.merge(Keyword.get(opts, :adapter_opts, []), harness_opts)
     prompt = enrich_prompt(detection)
 
     case harness.run(prompt, path, adapter_opts) do
@@ -441,6 +441,23 @@ defmodule Kazi.Adopt do
 
       _ ->
         []
+    end
+  end
+
+  # T8.7 (ADR-0016): pick the enrichment harness. An explicitly injected `:harness`
+  # MODULE (the test seam) is used as-is; otherwise the default is RESOLVED via
+  # `Kazi.Harness.resolve/1` so app config can select opencode for enrichment too.
+  # On a resolve error the legacy `@default_harness` stands (no behaviour change).
+  defp resolve_harness(opts) do
+    case Keyword.get(opts, :harness) do
+      nil ->
+        case Kazi.Harness.resolve(model: Keyword.get(opts, :model)) do
+          {:ok, {module, harness_opts}} -> {module, harness_opts}
+          {:error, _reason} -> {@default_harness, []}
+        end
+
+      module ->
+        {module, []}
     end
   end
 
