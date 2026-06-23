@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="kazi">
+  <title>kazi</title>
+  <defs>
+    <!-- Vibrant reconcile-loop gradient: an electric sweep from cyan through blue
+         to violet — energy + motion around the loop and into the check. -->
+    <linearGradient id="kaziGrad" gradientUnits="userSpaceOnUse" x1="16" y1="16" x2="80" y2="80">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.5" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+  <!-- the reconcile loop: an open ring (a cycle, gap at top) ... -->
+  <path d="M 63 22 A 30 30 0 1 1 33 22"
+        fill="none" stroke="url(#kaziGrad)" stroke-width="8.5" stroke-linecap="round"/>
+  <!-- ... converging to a checkmark: predicates become objectively true -->
+  <path d="M 32 49 L 44 60 L 66 33"
+        fill="none" stroke="url(#kaziGrad)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

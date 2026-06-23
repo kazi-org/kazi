@@ -1,0 +1,223 @@
+---
+import Layout from "../layouts/Layout.astro";
+import {
+  INSTALL_CMD,
+  POSITIONING,
+  KUBERNETES_LINE,
+  HARNESSES,
+} from "../canonical.mjs";
+
+const REPO = "https://github.com/kazi-org/kazi";
+
+const features = [
+  {
+    title: "Objective termination",
+    body: "kazi cannot declare success while any predicate is failing. “Done” means tests pass, the endpoint answers, the change is deployed — not an agent's say-so.",
+  },
+  {
+    title: "Drives any coding agent",
+    body: `It conducts a harness; it is not one. Today it drives ${HARNESSES.join(" and ")}; add Codex or any CLI agent by declaring a profile — no core change.`,
+  },
+  {
+    title: "Stops honestly",
+    body: "If it can't converge, it tells you why — stuck on the same failure, or out of budget — instead of pretending it finished.",
+  },
+  {
+    title: "One self-contained binary",
+    body: "brew install and go. The binary bundles the runtime and a SQLite read-model, so every iteration and decision is persisted — no Erlang prerequisite.",
+  },
+];
+
+const loop = [
+  ["Observe", "evaluate every predicate against reality"],
+  ["Diff", "compare desired vs actual state"],
+  ["Dispatch", "hand the failing slice to a coding agent"],
+  ["Re-observe", "re-check the predicates"],
+  ["Decide", "converged, stuck, or over budget"],
+];
+---
+
+<Layout>
+  <!-- Nav -->
+  <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+    <a href="/" class="flex items-center gap-2" aria-label="kazi home">
+      <img src="/logo/kazi-mark.svg" alt="" width="34" height="34" />
+      <span class="text-xl font-bold tracking-tight text-white">kazi</span>
+    </a>
+    <nav class="flex items-center gap-6 text-sm">
+      <a href="#how" class="text-slate-300 hover:text-white">How it works</a>
+      <a href="#install" class="text-slate-300 hover:text-white">Install</a>
+      <a
+        href={REPO}
+        class="rounded-lg border border-white/15 px-3 py-1.5 font-medium text-white hover:bg-white/5"
+        >GitHub</a
+      >
+    </nav>
+  </header>
+
+  <!-- Hero -->
+  <main>
+    <section class="relative overflow-hidden">
+      <div
+        class="kazi-gradient pointer-events-none absolute -top-40 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full opacity-20 blur-[120px]"
+      >
+      </div>
+      <div class="mx-auto max-w-4xl px-6 pb-16 pt-16 text-center sm:pt-24">
+        <a
+          href={REPO}
+          class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:bg-white/10"
+        >
+          <span class="kazi-text font-semibold">Open source</span>
+          <span class="text-slate-500">Apache-2.0 &middot; v0.1.1</span>
+        </a>
+        <h1 class="mt-6 text-balance text-4xl font-extrabold tracking-tight text-white sm:text-6xl">
+          Describe what <span class="kazi-text">&ldquo;done&rdquo;</span> looks like.<br />
+          kazi makes it true &mdash; and proves it.
+        </h1>
+        <p class="mx-auto mt-6 max-w-2xl text-pretty text-lg text-slate-300">
+          <em>kazi</em> is <strong class="text-white">{POSITIONING}</strong>. Tell it the
+          outcome you want &mdash; in plain English or a short goal-file &mdash; and it
+          drives a coding agent in a loop until that outcome is <em>objectively</em> real:
+          tests pass, the endpoint is live, the change is deployed.
+        </p>
+
+        <!-- Install CTA -->
+        <div class="mx-auto mt-8 flex max-w-xl flex-col items-center gap-3">
+          <button
+            id="copy-install"
+            class="group flex w-full items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0f172a] px-5 py-4 text-left font-mono text-sm text-slate-100 hover:border-white/20"
+            data-cmd={INSTALL_CMD}
+          >
+            <span><span class="text-slate-500">$ </span>{INSTALL_CMD}</span>
+            <span
+              class="shrink-0 rounded-md border border-white/10 px-2 py-1 text-xs text-slate-400 group-hover:text-white"
+              id="copy-label">copy</span
+            >
+          </button>
+          <div class="flex flex-wrap items-center justify-center gap-3">
+            <a
+              href="#install"
+              class="kazi-gradient rounded-xl px-5 py-3 font-semibold text-[#06101f] shadow-lg shadow-blue-500/20 hover:opacity-95"
+              >Get started</a
+            >
+            <a
+              href={REPO}
+              class="rounded-xl border border-white/15 px-5 py-3 font-semibold text-white hover:bg-white/5"
+              >Star on GitHub</a
+            >
+          </div>
+        </div>
+
+        <p class="mt-8 text-sm text-slate-400">
+          Think of it like <strong class="text-slate-200">{KUBERNETES_LINE}</strong>: you
+          declare desired state, kazi watches actual state, and it closes the gap until the
+          two match.
+        </p>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="mx-auto max-w-6xl px-6 py-12">
+      <div class="grid gap-4 sm:grid-cols-2">
+        {
+          features.map((f) => (
+            <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+              <h3 class="text-lg font-semibold text-white">{f.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-slate-300">{f.body}</p>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <!-- 60-second mental model -->
+    <section id="how" class="mx-auto max-w-6xl px-6 py-12">
+      <h2 class="text-center text-3xl font-bold tracking-tight text-white">
+        The 60-second mental model
+      </h2>
+      <p class="mx-auto mt-3 max-w-2xl text-center text-slate-300">
+        A reconciliation loop for software goals. It runs until the predicates are
+        objectively true, stuck, or over budget.
+      </p>
+      <ol class="mx-auto mt-10 grid max-w-4xl gap-3 sm:grid-cols-5">
+        {
+          loop.map(([step, desc], i) => (
+            <li class="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-center">
+              <div class="kazi-text text-2xl font-extrabold">{i + 1}</div>
+              <div class="mt-1 font-semibold text-white">{step}</div>
+              <div class="mt-1 text-xs text-slate-400">{desc}</div>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <!-- Install + first goal -->
+    <section id="install" class="mx-auto max-w-4xl px-6 py-12">
+      <h2 class="text-3xl font-bold tracking-tight text-white">Install and run a goal</h2>
+      <div class="mt-6 space-y-6">
+        <div>
+          <p class="text-sm font-semibold text-slate-300">1. Install</p>
+          <pre class="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-[#0f172a] p-4 font-mono text-sm text-slate-100"><code>{INSTALL_CMD}</code></pre>
+          <p class="mt-2 text-xs text-slate-400">
+            A coding agent (<code class="text-slate-300">claude</code> or
+            <code class="text-slate-300">opencode</code>) must be on your PATH &mdash; kazi
+            drives one, it does not bundle one.
+          </p>
+        </div>
+        <div>
+          <p class="text-sm font-semibold text-slate-300">2. Describe what you want</p>
+          <pre class="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-[#0f172a] p-4 font-mono text-sm text-slate-100"><code>kazi propose "a /healthz endpoint that returns 200"
+kazi approve &lt;proposal-ref&gt;</code></pre>
+        </div>
+        <div>
+          <p class="text-sm font-semibold text-slate-300">3. Drive it to convergence</p>
+          <pre class="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-[#0f172a] p-4 font-mono text-sm text-slate-100"><code>kazi run my-goal.toml --workspace ./my-project</code></pre>
+          <p class="mt-2 text-xs text-slate-400">
+            kazi loops &mdash; observe, dispatch, re-observe &mdash; and exits 0 only when
+            every predicate is objectively true.
+          </p>
+        </div>
+      </div>
+      <div class="mt-8">
+        <a href={`${REPO}#readme`} class="kazi-text font-semibold hover:underline"
+          >Read the full docs and quickstarts on GitHub &rarr;</a
+        >
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-white/10">
+    <div
+      class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-slate-400 sm:flex-row"
+    >
+      <div class="flex items-center gap-2">
+        <img src="/logo/kazi-mark.svg" alt="" width="22" height="22" />
+        <span>kazi &middot; Apache-2.0 &middot; &copy; Sire Run, Inc.</span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href={REPO} class="hover:text-white">GitHub</a>
+        <a href={`${REPO}/releases`} class="hover:text-white">Releases</a>
+        <a href={`${REPO}/blob/main/docs/concept.md`} class="hover:text-white">Concept</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const btn = document.getElementById("copy-install");
+    const label = document.getElementById("copy-label");
+    btn?.addEventListener("click", async () => {
+      const cmd = btn.getAttribute("data-cmd") ?? "";
+      try {
+        await navigator.clipboard.writeText(cmd);
+        if (label) {
+          label.textContent = "copied!";
+          setTimeout(() => (label.textContent = "copy"), 1500);
+        }
+      } catch {
+        /* clipboard unavailable; no-op */
+      }
+    });
+  </script>
+</Layout>
