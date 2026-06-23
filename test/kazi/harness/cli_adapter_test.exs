@@ -20,6 +20,7 @@ defmodule Kazi.Harness.CliAdapterTest do
 
   @args_stub Path.expand("../../support/stub_claude_args.sh", __DIR__)
   @json_stub Path.expand("../../support/stub_claude_json.sh", __DIR__)
+  @env_stub Path.expand("../../support/stub_env_echo.sh", __DIR__)
 
   setup do
     workspace =
@@ -113,6 +114,62 @@ defmodule Kazi.Harness.CliAdapterTest do
 
       assert "-p" in captured_argv(output)
       assert "--output-format" in captured_argv(output)
+    end
+  end
+
+  # Recover the single `env: <value>` line the env-echo stub printed.
+  defp captured_env(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.find_value(fn
+      "env: " <> value -> value
+      _ -> false
+    end)
+  end
+
+  describe "provider env forwarding (opts[:env], T8.8)" do
+    test "opts[:env] reaches System.cmd so the harness sees it", %{workspace: workspace} do
+      assert {:ok, %{output: output, exit: 0}} =
+               CliAdapter.run("do X", workspace,
+                 harness: :opencode,
+                 model: "m",
+                 env: [{"KAZI_TEST_ENV", "xyz"}],
+                 command: @env_stub
+               )
+
+      assert captured_env(output) == "xyz"
+    end
+
+    test "an :env map is normalized to pairs and forwarded", %{workspace: workspace} do
+      assert {:ok, %{output: output}} =
+               CliAdapter.run("do X", workspace,
+                 harness: :opencode,
+                 env: %{"KAZI_TEST_ENV" => "from-map"},
+                 command: @env_stub
+               )
+
+      assert captured_env(output) == "from-map"
+    end
+
+    test "malformed :env entries are dropped, not crashed", %{workspace: workspace} do
+      assert {:ok, %{output: output, exit: 0}} =
+               CliAdapter.run("do X", workspace,
+                 harness: :opencode,
+                 env: [{"KAZI_TEST_ENV", "kept"}, {:bad, 123}, "garbage"],
+                 command: @env_stub
+               )
+
+      assert captured_env(output) == "kept"
+    end
+
+    test "no :env opt runs unchanged (the var is unset, run still succeeds)", %{
+      workspace: workspace
+    } do
+      assert {:ok, %{output: output, exit: 0}} =
+               CliAdapter.run("do X", workspace, harness: :opencode, command: @env_stub)
+
+      # No :env forwarded -> the stub sees an unset var (empty line).
+      assert captured_env(output) == ""
     end
   end
 
