@@ -317,6 +317,38 @@ Pass `--enrich` (off by default) to have your coding agent propose live
 predicates from discovered endpoints; the deterministic detection always stands.
 Review the goal-file, fill in the live TODO, then `kazi run` it.
 
+### Worked example
+
+Run it against the Go fixture that ships with this repo:
+
+```sh
+kazi init fixtures/deploy-target --out my.goal.toml
+```
+
+It detects the `go.mod` and writes
+[`priv/examples/adopt_deploy_target.goal.toml`](priv/examples/adopt_deploy_target.goal.toml):
+
+```toml
+id = "adopt-deploy-target"
+name = "Adopted baseline for deploy-target"
+[scope]
+workspace = "fixtures/deploy-target"
+
+[[predicate]]
+id = "tests-pass"
+provider = "test_runner"
+description = "project test suite passes"
+args = ["test", "./..."]
+cmd = "go"
+
+# ... a `tests-pass-baseline` guard, then a COMMENTED live-predicate TODO
+# you uncomment and point at the real deployed endpoint.
+```
+
+The acceptance predicate names the detected `go test ./...`; the live predicate
+is left as a commented scaffold for you to fill in. A hermetic end-to-end test
+pins this output, so the example never drifts from what the tool produces.
+
 ---
 
 ## Watch it work (and steer from your phone)
