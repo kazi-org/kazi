@@ -13,7 +13,7 @@ Think of it like **Kubernetes for coding goals**: you declare desired state, kaz
 watches actual state, and it keeps closing the gap until the two match.
 
 ```
-You: "the /health endpoint should return 200 with body ok, live in production"
+You: "build a URL-shortener web service and ship it live in production"
             │
             ▼
 kazi:  observe ──► what's failing? ──► dispatch an agent to fix it
@@ -145,40 +145,47 @@ escript, every iteration and proposal is persisted — the NIF is bundled.
 
 ---
 
-## Quickstart 1 — describe a goal in plain English
+## Quickstart 1 — describe what you want in plain English
 
-You don't have to write a goal-file by hand. Tell kazi the outcome you want and it
-drafts the machine-checkable predicates for you (using your coding agent), then
-holds them for your review — **nothing runs until you approve**:
+You don't have to write a goal-file by hand, and you don't have to break the work
+down yourself. Tell kazi the *app* (or feature) you want — as high-level as
+"build an X" — and it drafts the machine-checkable predicates that define "done"
+for you (using your coding agent), then holds them for your review. **Nothing runs
+until you approve**, and you can trim or edit what it drafted:
 
 ```sh
-# 1. Describe "done" in natural language. kazi proposes acceptance predicates:
-kazi propose "the /health endpoint should return 200 with the body ok" \
-  --workspace ./my-service
+# 1. Describe the app you want. kazi expands it into acceptance predicates:
+kazi propose "create a URL-shortener web service" --workspace ./shortener
 #
-#   PROPOSED  proposal=prop-health-endpoint-3f9c1a2b  goal=health-endpoint
+#   PROPOSED  proposal=prop-url-shortener-3f9c1a2b  goal=url-shortener
 #     • go test ./... passes
-#     • GET /health returns 200 with body "ok"
+#     • POST /shorten returns 201 with a short code for a submitted URL
+#     • GET /<code> redirects (302) to the original URL
+#     • GET / renders a form to submit a URL
 
-# 2. Review what it drafted (you're the approver — agents propose, humans dispose):
+# 2. Review what it drafted (you're the approver — agents propose, humans dispose).
+#    Too much? Too little? Re-propose with a sharper sentence, or edit the goal-file.
 kazi list-proposed
-#   prop-health-endpoint-3f9c1a2b   proposed   health-endpoint   (2 predicates)
+#   prop-url-shortener-3f9c1a2b   proposed   url-shortener   (4 predicates)
 
 # 3. Approve the goal you want kazi to pursue:
-kazi approve prop-health-endpoint-3f9c1a2b
-#   APPROVED   proposal=prop-health-endpoint-3f9c1a2b  goal=health-endpoint
+kazi approve prop-url-shortener-3f9c1a2b
+#   APPROVED   proposal=prop-url-shortener-3f9c1a2b  goal=url-shortener
 #   The goal is now runnable: kazi run <goal-file> --workspace <path>
 ```
 
 `propose` / `approve` are the natural-language **front door** (an agent drafts,
 a human approves — the only write path the dashboard and Telegram bridge share too).
-Approving blesses the goal; to drive it, hand `kazi run` a goal-file (next section) —
-the same predicates, captured as a file you can version and re-run.
+The higher-level the idea, the more predicates kazi drafts — and the more you'll
+want to curate them before approving, because every predicate becomes a wall kazi
+won't declare "done" until it's objectively true. Approving blesses the goal; to
+drive it, hand `kazi run` a goal-file (next section) — the same predicates, captured
+as a file you can version and re-run.
 
-> More natural-language ideas kazi can draft predicates for:
-> - `kazi propose "the login form must reject an empty password with a 422"`
-> - `kazi propose "add a /metrics endpoint and keep test coverage from dropping"`
-> - `kazi propose "the checkout API p95 latency should be under 300ms"`
+> More "build an app for X" ideas kazi can draft predicates for:
+> - `kazi propose "create a paste-bin app with a create-paste API and a raw view"`
+> - `kazi propose "build a webhook receiver that validates signatures and stores events"`
+> - `kazi propose "create a REST API for a to-do list with the usual CRUD endpoints"`
 
 ---
 
