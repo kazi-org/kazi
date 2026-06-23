@@ -2,8 +2,10 @@
 
 The mark is a **reconcile loop converging to a checkmark**: an open ring (the
 control loop — observe, diff, dispatch, re-observe) wrapped around a bold check
-(predicates become *objectively true*). The color is the green of a passing
-check, because turning checks green is literally what kazi does.
+(predicates become *objectively true*). The mark is drawn in a **vibrant
+teal → emerald → lime gradient** that sweeps around the loop and into the check —
+the color literally progresses toward "green / converged", which is what kazi
+does.
 
 ## Files
 
@@ -17,9 +19,16 @@ check, because turning checks green is literally what kazi does.
 
 ## Colors
 
-- **Emerald** `#10B981` — the mark ("converged / green").
-- **Slate ink** `#0F172A` — wordmark text on light; badge background.
+The mark is a gradient (`id="kaziGrad"`), a diagonal sweep across the loop:
+
+- **Teal** `#2DD4BF` → **Emerald** `#10B981` → **Lime-green** `#4ADE80` — the mark.
+  On dark surfaces the start is nudged to emerald `#34D399` for contrast.
+- **Slate ink** `#0F172A` — wordmark text on light.
 - **Slate-100** `#F1F5F9` — wordmark text on dark.
+- **Badge background** — a subtle slate gradient `#1E293B` → `#0F172A` (`id="kaziBg"`).
+
+The single-color `kazi-mark-mono.svg` deliberately stays flat `currentColor` (no
+gradient) so it inherits the surrounding text color for light/dark themes.
 
 ## Notes
 
