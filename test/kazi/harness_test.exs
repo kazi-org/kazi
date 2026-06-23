@@ -114,6 +114,31 @@ defmodule Kazi.HarnessTest do
 
       assert adapter_opts[:command] == "/path/to/stub"
     end
+
+    test "always keeps :env (provider/endpoint vars) even if not a harness flag" do
+      assert {:ok, {CliAdapter, adapter_opts}} =
+               Kazi.Harness.resolve(
+                 harness: :opencode,
+                 adapter_opts: [env: [{"OPENCODE_PROVIDER", "dgx"}]]
+               )
+
+      assert adapter_opts[:env] == [{"OPENCODE_PROVIDER", "dgx"}]
+    end
+
+    test "opencode carries :model and declared :env through to adapter_opts (T8.8, DGX)" do
+      # The local-provider path: --harness opencode --model <provider/model> plus
+      # forwarded env points opencode at the operator's DGX-hosted Qwen3.6 model.
+      assert {:ok, {CliAdapter, adapter_opts}} =
+               Kazi.Harness.resolve(
+                 harness: :opencode,
+                 model: "dgx/qwen3.6",
+                 adapter_opts: [env: [{"FOO", "bar"}]]
+               )
+
+      assert %Profile{id: :opencode} = adapter_opts[:profile]
+      assert adapter_opts[:model] == "dgx/qwen3.6"
+      assert adapter_opts[:env] == [{"FOO", "bar"}]
+    end
   end
 
   describe "resolve/1 unknown harness" do
