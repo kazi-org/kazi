@@ -12,6 +12,15 @@ on:
   push:
     tags:
       - "v*"
+  # Callable by the release-please workflow so a release-please-created release
+  # gets its binaries built WITHOUT a PAT (GITHUB_TOKEN-created tags do not
+  # trigger `push: tags`, but a workflow_call chains in the same run).
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to attach the built assets to.
+        required: true
+        type: string
 
 permissions:
   contents: write # create the Release and upload assets
@@ -124,6 +133,9 @@ jobs:
       - name: Upload Release assets
         uses: softprops/action-gh-release@v2
         with:
+          # On a direct tag push, github.ref_name is the tag; when called by
+          # release-please, take the tag from the input.
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
             burrito_out/kazi_*
           fail_on_unmatched_files: true
