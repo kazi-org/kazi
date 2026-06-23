@@ -63,6 +63,11 @@ defmodule Kazi.CLITest do
       assert {:help, _} = Kazi.CLI.parse(["run", "goal.toml", "--help"])
     end
 
+    test "--version (and -v) is recognized" do
+      assert {:version, _} = Kazi.CLI.parse(["--version"])
+      assert {:version, _} = Kazi.CLI.parse(["-v"])
+    end
+
     test "missing goal-file for run is an error" do
       assert {:error, message} = Kazi.CLI.parse(["run"])
       assert message =~ "requires a <goal-file>"
@@ -110,6 +115,11 @@ defmodule Kazi.CLITest do
   describe "run/1 — help and usage" do
     test "--help prints usage and exits 0" do
       assert capture_io(fn -> assert Kazi.CLI.run(["--help"]) == 0 end) =~ "USAGE:"
+    end
+
+    test "--version prints `kazi <vsn>` and exits 0" do
+      out = capture_io(fn -> assert Kazi.CLI.run(["--version"]) == 0 end)
+      assert out =~ ~r/^kazi \d+\.\d+\.\d+/
     end
 
     test "a usage error prints to stderr and exits 2" do
