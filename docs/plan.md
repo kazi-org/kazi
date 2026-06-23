@@ -21,11 +21,15 @@ every epic through it are COMPLETE and merged on `main`:
   including the un-deferred pluggable retrieval-memory adapter (T4.9, ADR-0012).
 - **E5** (`kazi init` adopt, ADR-0013) -- T5.1-T5.5 done; only **T5.6** (a
   stack-mode e2e + README "adopt an existing project" snippet) remains.
-- **E7** (registry adapter + goal-set, ADR-0015) -- done; `kazi init --registry
-  <file.json>` turns a capability registry into a runnable goal SET, verified to
-  `:converged` through the real `Kazi.Runtime`.
+- **E7** (registry adapter + goal-set) -- built, then **WITHDRAWN** before the
+  open-source release: the `capabilities.json` input was a bespoke artifact of one
+  internal product and did not generalize (ADR-0015). The `--registry` mode,
+  `Kazi.Adopt.Registry`, and the goal-set writer were removed; stack-detection
+  `kazi init <repo-dir>` and the goal-file writer remain. A future generalizable
+  importer (OpenAPI/gherkin -> goals) is deferred backlog (UC-025), to get its own
+  ADR if there is demand.
 
-State of `main` at handover: **785 tests pass** (62 doctests, 723 tests), 18
+State of `main`: **755 tests pass** (62 doctests, 693 tests), 18
 excluded (`:nats`/`:graphify` integration tags); `mix format --check-formatted`
 clean; `mix compile --warnings-as-errors` clean. Distribution PRs #70-#75 merged
 this session.
@@ -56,7 +60,10 @@ have open work:
 - **UC-024** (install kazi as a single binary via Homebrew, ADR-0014) -- OPEN;
   the whole of E6 below.
 
-UC-001..UC-022 and UC-025 are delivered and verified on `main`.
+UC-001..UC-022 are delivered and verified on `main`. UC-025 (import a standard
+spec into a goal set) is **deferred backlog** -- the bespoke capability-registry
+version was withdrawn (ADR-0015); a generalizable OpenAPI/gherkin importer would
+get its own ADR if prioritized.
 
 ## Checkable Work Breakdown
 
@@ -70,7 +77,7 @@ goal-file capturing the project's test command + guard invariants, with TODO
 placeholders for live predicates. T5.1-T5.5 are done (merged); only the worked
 example remains.
 
-- [ ] T5.6 End-to-end + example: `kazi init` against the `fixtures/deploy-target` repo produces a goal-file whose test_runner + guards load and whose live predicate is a TODO stub; commit a worked example + README "adopt an existing project" snippet  Owner: TBD  Est: 1h  verifies: [UC-023]  deps: []  acc: a hermetic e2e test asserts the generated goal loads via `Kazi.Goal.Loader` + names the detected `go test ./...` command for `fixtures/deploy-target`; the live predicate is a commented TODO; README shows the stack-detection adopt flow (distinct from the E7 registry snippet already in the README); `mix test` green; hermetic. NOTE: the CLI (`kazi init <path>`, T5.5), the writer (`Kazi.Adopt.to_toml/1`, T5.3), `Kazi.Adopt.detect/1` (T5.1), and `guards/1` (T5.2) are all merged on `main` -- this task only adds the e2e + example.
+- [ ] T5.6 End-to-end + example: `kazi init` against the `fixtures/deploy-target` repo produces a goal-file whose test_runner + guards load and whose live predicate is a TODO stub; commit a worked example + README "adopt an existing project" snippet  Owner: TBD  Est: 1h  verifies: [UC-023]  deps: []  acc: a hermetic e2e test asserts the generated goal loads via `Kazi.Goal.Loader` + names the detected `go test ./...` command for `fixtures/deploy-target`; the live predicate is a commented TODO; README already has an "Adopt an existing project" stack-detection section (this task adds the e2e test + a committed worked example); `mix test` green; hermetic. NOTE: the CLI (`kazi init <path>`, T5.5), the writer (`Kazi.Adopt.to_toml/1`, T5.3), `Kazi.Adopt.detect/1` (T5.1), and `guards/1` (T5.2) are all merged on `main` -- this task only adds the e2e + example.
 
 ### E6 -- Binary distribution: Burrito + Homebrew (P2, see ADR-0014)
 
@@ -121,6 +128,21 @@ Execution model: work the plan with `/apply --pool` (atomic git-ref claims at
 WBS above is the single checkable source of truth.
 
 ## Progress Log
+
+### 2026-06-22 -- Change Summary (withdraw E7 registry adapter)
+- **Removed the capability-registry adapter** (E7, shipped in PR #75) before the
+  open-source release: `capabilities.json` was a bespoke artifact of one internal
+  product and did not generalize. Deleted `Kazi.Adopt.Registry`, the `--registry`
+  CLI mode + its tests, the `capabilities.json` fixture, and the goal-set writer
+  path. Kept stack-detection `kazi init <repo-dir>` (ADR-0013) and the goal-file
+  writer (`Kazi.Adopt.to_toml/1`) -- both general.
+- **ADR-0015 rewritten** to record the withdrawal and point at the generalizable
+  replacement: a future importer for a STANDARD spec (OpenAPI paths -> http_probe;
+  gherkin scenarios -> acceptance predicates), to get its own ADR when there is
+  demand. UC-025 re-scoped to that, marked DEFERRED. README registry section
+  replaced with an "Adopt an existing project" stack-detection section.
+- Suite: 785 -> **755** (the ~30 removed are the registry tests); `mix format`
+  clean, `mix compile --warnings-as-errors` clean.
 
 ### 2026-06-22 -- Change Summary (HANDOVER trim)
 - **Trimmed all completed epics out of the plan** (E0-E4, E7, and E5 T5.1-T5.5).

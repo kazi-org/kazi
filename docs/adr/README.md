@@ -21,4 +21,4 @@ decision, write a new ADR that supersedes the old one (and update
 | [0012](0012-pluggable-retrieval-memory-adapter.md) | Pluggable semantic-retrieval memory adapter (off by default) | Accepted |
 | [0013](0013-adopt-reverse-engineer-goals.md) | Adopting kazi on an existing project (`kazi init` reverse-engineers a goal-file) | Accepted |
 | [0014](0014-binary-distribution-burrito-homebrew.md) | Binary distribution via Burrito + Homebrew (supersedes escript-as-distribution) | Accepted |
-| [0015](0015-init-source-output-model-registry-goal-set.md) | init source/output model: registry adapter + goal-set output (refines 0013) | Accepted |
+| [0015](0015-init-source-output-model-registry-goal-set.md) | Withdraw the capability-registry adapter; a future spec importer (OpenAPI/gherkin) instead | Accepted |

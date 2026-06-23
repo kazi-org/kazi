@@ -4,6 +4,21 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-22 — WITHDRAWN: the E7 registry adapter (the entry below is now history)
+
+The capability-registry adapter described in the next entry was **removed** before
+the open-source release. `capabilities.json` was a bespoke artifact of one internal
+product; it did not generalize, and shipping a `--registry` flag whose input format
+nothing public produces is a liability for a v1 OSS tool. Deleted
+`Kazi.Adopt.Registry`, the `kazi init --registry` CLI mode + tests, the
+`capabilities.json` fixture, and the goal-set writer path. Kept the general pieces:
+stack-detection `kazi init <repo-dir>` (ADR-0013) and the goal-file writer
+`Kazi.Adopt.to_toml/1`. ADR-0015 rewritten to record the withdrawal and to point at
+the generalizable replacement — a future importer for a STANDARD spec (OpenAPI
+paths → `http_probe`; gherkin scenarios → acceptance predicates) under its own ADR
+when there is demand (UC-025, deferred). Suite 785 → 755. The entry below remains as
+a record of what was built and why the cardinality decision was made.
+
 ## 2026-06-22 — E7: registry adapter + goal-set (`kazi init --registry`), ADR-0015
 
 **What shipped.** `kazi init` grew a second deterministic source: a capability
