@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 96" role="img" aria-label="kazi">
+  <title>kazi</title>
+  <!-- Mark: the reconcile loop converging to a checkmark -->
+  <g>
+    <path d="M 63 22 A 30 30 0 1 1 33 22"
+          fill="none" stroke="#10B981" stroke-width="8.5" stroke-linecap="round"/>
+    <path d="M 32 49 L 44 60 L 66 33"
+          fill="none" stroke="#10B981" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- Wordmark. For production, outline this text to paths so it renders identically
+       everywhere; the system-font stack is a faithful stand-in for a geometric sans. -->
+  <text x="108" y="64"
+        font-family="'Inter', 'Helvetica Neue', 'Segoe UI', Arial, sans-serif"
+        font-size="56" font-weight="700" letter-spacing="-2" fill="#0F172A">kazi</text>
+</svg>
