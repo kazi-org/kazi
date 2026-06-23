@@ -4,6 +4,39 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-22 — T8.11 heterogeneous dogfood: wiring proven, local 35B too slow to converge
+
+**Setup.** The capstone E8 exercise: Claude (the planner) authored a tiny broken Go
+fixture goal (`Add` used subtraction; `go test ./...` fails), and kazi drove
+`opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0` (the implementer) to converge it.
+The T8.9 finding was addressed first: a project-local `opencode.json` in the
+workspace granting `permission.edit/bash` = `allow`, in a REAL git repo (not a
+`/tmp` scratch), so opencode would no longer auto-reject edits.
+
+**What was PROVEN (the heterogeneous loop works end to end).** kazi observed the
+objective failure (`go test` exit 1, recorded the FAIL output), persisted iteration
+0 to the SQLite read-model, and dispatched opencode->the DGX. Objective termination
+held throughout: kazi could not and did not declare success while the predicate
+failed. The plan/implement split (strong model authors the predicate set, cheap
+local model drives the loop, predicates keep it honest) is demonstrated.
+
+**What did NOT happen (the honest result).** opencode ran for ~40 minutes on
+iteration 1 against the 35B-a3b-q8_0 and never produced an edit to `add.go`, so the
+goal did not converge in a usable window. The bottleneck is the LOCAL MODEL's
+agentic throughput, not kazi: opencode's loop makes several model calls per turn
+(survey the repo, reason, propose the edit), each very slow on the q8_0 35B, and the
+permission fix meant the blocker this time was purely speed (no auto-reject). The run
+was capped manually.
+
+**Takeaway / landmine.** "Claude plans, local model implements" is mechanically
+sound and kazi's correctness guarantee holds regardless of implementer quality. Its
+PRACTICALITY is gated by local-model speed: the DGX 35B-q8_0 via opencode is too slow
+for an interactive convergence loop. To make this dogfood converge, use a faster
+local model (smaller/lower-quant, or a faster server), or accept long wall-clock for
+batch-style runs. The throwaway workspace is `~/kazi-dogfood` (a single-predicate
+`go test` goal); rerun `kazi run ~/kazi-dogfood/dogfood.goal.toml --harness opencode
+--model <faster-model> --workspace ~/kazi-dogfood` to retry.
+
 ## 2026-06-22 — E8 generic multi-harness support shipped; opencode->DGX live smoke skips
 
 **What shipped (ADR-0016).** The single `Kazi.Harness.ClaudeAdapter` was generalized
