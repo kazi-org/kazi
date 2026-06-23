@@ -178,6 +178,70 @@ defmodule Kazi.Authoring.Clarify do
     end
   end
 
+  @doc """
+  Renders a `question` as a terminal multiple-choice block (T11.6).
+
+  Pure: returns the prompt, the numbered options (the recommended one starred),
+  and a free-text line when allowed -- so the CLI just prints this string and the
+  rendering is unit-tested without a TTY.
+  """
+  @spec render_question(Question.t()) :: String.t()
+  def render_question(%Question{} = q) do
+    options =
+      q.options
+      |> Enum.with_index(1)
+      |> Enum.map_join("\n", fn {%Option{label: label, value: value}, i} ->
+        star = if value == q.recommended, do: " *", else: ""
+        "  #{i}) #{label}#{star}"
+      end)
+
+    free = if q.allow_free_text, do: "\n  f) something else (type your answer)", else: ""
+
+    "#{q.prompt}\n#{options}#{free}"
+  end
+
+  @doc """
+  Resolves an author's raw `input` line to an answer value for `question` (T11.6).
+
+  Pure and total -- the tricky parsing the CLI delegates here so it is unit-tested:
+
+    * a blank line -> the recommended option (or the first option's value);
+    * a number `N` -> the Nth option's value (1-based, in range);
+    * an exact option label or value -> that value;
+    * otherwise, when free text is allowed, the input verbatim (a leading `"f "`
+      prefix is stripped); else the recommended/first value as a safe default.
+  """
+  @spec resolve_answer(Question.t(), String.t()) :: String.t()
+  def resolve_answer(%Question{} = q, "") do
+    q.recommended || default_value(q)
+  end
+
+  def resolve_answer(%Question{} = q, input) when is_binary(input) do
+    cond do
+      value = option_at(q, input) -> value
+      value = matched_value(q, input) -> value
+      q.allow_free_text -> String.replace_prefix(input, "f ", "")
+      true -> q.recommended || default_value(q)
+    end
+  end
+
+  defp option_at(%Question{options: options}, input) do
+    case Integer.parse(input) do
+      {n, ""} when n >= 1 and n <= length(options) -> Enum.at(options, n - 1).value
+      _ -> nil
+    end
+  end
+
+  defp matched_value(%Question{options: options}, input) do
+    case Enum.find(options, fn %Option{label: l, value: v} -> l == input or v == input end) do
+      %Option{value: value} -> value
+      nil -> nil
+    end
+  end
+
+  defp default_value(%Question{options: [%Option{value: value} | _]}), do: value
+  defp default_value(%Question{}), do: ""
+
   # Resolve the chosen value to its option label when it matches a known option;
   # otherwise the raw answer is free text and passes through verbatim.
   defp answer_label(%Question{options: options}, value) do

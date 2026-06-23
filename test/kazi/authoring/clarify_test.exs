@@ -179,4 +179,74 @@ defmodule Kazi.Authoring.ClarifyTest do
     assert prompt =~ "add billing"
     assert prompt =~ "JSON array"
   end
+
+  describe "render_question/1 (T11.6) -- terminal rendering" do
+    test "renders the prompt and numbered options, starring the recommended one" do
+      q =
+        Question.new("live-target", "What is the live-verification target?",
+          options: [
+            Option.new("A deployed URL", "http_probe"),
+            Option.new("Prod logs", "prod_log")
+          ],
+          recommended: "prod_log"
+        )
+
+      assert Clarify.render_question(q) ==
+               """
+               What is the live-verification target?
+                 1) A deployed URL
+                 2) Prod logs *\
+               """
+    end
+
+    test "adds a free-text line when allowed" do
+      q = Question.new("x", "Pick", options: [Option.new("A", "a")], allow_free_text: true)
+      assert Clarify.render_question(q) =~ "f) something else"
+    end
+  end
+
+  describe "resolve_answer/2 (T11.6) -- choice resolution" do
+    setup do
+      q =
+        Question.new("q", "Pick",
+          options: [Option.new("First", "one"), Option.new("Second", "two")],
+          recommended: "two"
+        )
+
+      {:ok, q: q}
+    end
+
+    test "a blank line resolves to the recommended option", %{q: q} do
+      assert Clarify.resolve_answer(q, "") == "two"
+    end
+
+    test "a blank line falls back to the first option when nothing is recommended" do
+      q = Question.new("q", "Pick", options: [Option.new("First", "one")])
+      assert Clarify.resolve_answer(q, "") == "one"
+    end
+
+    test "a number selects that option (1-based)", %{q: q} do
+      assert Clarify.resolve_answer(q, "1") == "one"
+      assert Clarify.resolve_answer(q, "2") == "two"
+    end
+
+    test "an out-of-range number falls back to recommended", %{q: q} do
+      assert Clarify.resolve_answer(q, "9") == "two"
+    end
+
+    test "an exact label or value matches", %{q: q} do
+      assert Clarify.resolve_answer(q, "First") == "one"
+      assert Clarify.resolve_answer(q, "two") == "two"
+    end
+
+    test "free text passes through (with the f-prefix stripped) when allowed" do
+      q = Question.new("q", "Pick", options: [Option.new("A", "a")], allow_free_text: true)
+      assert Clarify.resolve_answer(q, "f my own answer") == "my own answer"
+      assert Clarify.resolve_answer(q, "literally anything") == "literally anything"
+    end
+
+    test "unmatched input without free text falls back to recommended", %{q: q} do
+      assert Clarify.resolve_answer(q, "garbage") == "two"
+    end
+  end
 end
