@@ -21,6 +21,8 @@ defmodule Kazi.Harness.CliAdapterTest do
   @args_stub Path.expand("../../support/stub_claude_args.sh", __DIR__)
   @json_stub Path.expand("../../support/stub_claude_json.sh", __DIR__)
   @env_stub Path.expand("../../support/stub_env_echo.sh", __DIR__)
+  @opencode_stub Path.expand("../../support/stub_opencode_json.sh", __DIR__)
+  @argv_stub Path.expand("../../support/stub_harness_argv.sh", __DIR__)
 
   setup do
     workspace =
@@ -170,6 +172,111 @@ defmodule Kazi.Harness.CliAdapterTest do
 
       # No :env forwarded -> the stub sees an unset var (empty line).
       assert captured_env(output) == ""
+    end
+  end
+
+  # Recover the argv the argv-recording stub wrote to harness_argv.txt in the
+  # workspace (one arg per line) — proves which profile assembled the dispatch.
+  defp recorded_argv(workspace) do
+    workspace |> Path.join("harness_argv.txt") |> File.read!() |> String.split("\n", trim: true)
+  end
+
+  describe "end-to-end: CliAdapter drives the :opencode profile (T8.9, UC-026/UC-027)" do
+    # The assertion the T8.4 agent deferred because CliAdapter was not yet merged:
+    # drive `CliAdapter.run(..., harness: :opencode, model: ..., command: <stub>)`
+    # against the REAL opencode NDJSON stub and confirm (a) the parsed result map
+    # carries the final :result text plus the summed tokens/cost from the event
+    # stream, and (b) the dispatched argv is the opencode shape — not Claude's.
+
+    test "parses the opencode NDJSON stream into :result/:tokens/:cost_usd", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} =
+               CliAdapter.run("make the failing test pass", workspace,
+                 harness: :opencode,
+                 model: "dgx-ollama/qwen3.6:35b-a3b-q8_0",
+                 command: @opencode_stub
+               )
+
+      # The stub really ran in the workspace (its edit landed there via cd:).
+      assert File.exists?(Path.join(workspace, "stub_edit.txt"))
+
+      # The final assistant TEXT part is the :result.
+      assert result.result == "Made the failing unit test pass."
+      # input 120 + output 340 + reasoning 40 + cache.read 900 + cache.write 0.
+      assert result.tokens == 120 + 340 + 40 + 900 + 0
+      assert result.cost == %{tokens: 1400}
+      assert result.cost_usd == 0.0042
+
+      # The base map still carries the resolved command + workspace.
+      assert result.command == @opencode_stub
+      assert result.workspace == workspace
+    end
+
+    test "with overridden usage env, the budget consumes the exact stub totals", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} =
+               CliAdapter.run("fix it", workspace,
+                 harness: :opencode,
+                 command: @opencode_stub,
+                 env: [
+                   {"STUB_INPUT_TOKENS", "11"},
+                   {"STUB_OUTPUT_TOKENS", "22"},
+                   {"STUB_REASONING_TOKENS", "0"},
+                   {"STUB_CACHE_READ_TOKENS", "0"},
+                   {"STUB_CACHE_WRITE_TOKENS", "0"},
+                   {"STUB_COST_USD", "0.99"}
+                 ]
+               )
+
+      assert result.tokens == 33
+      assert result.cost == %{tokens: 33}
+      assert result.cost_usd == 0.99
+    end
+
+    test "a no-usage opencode run degrades cleanly (no fabricated tokens)", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} =
+               CliAdapter.run("fix it", workspace,
+                 harness: :opencode,
+                 command: @opencode_stub,
+                 env: [{"STUB_NO_USAGE", "1"}]
+               )
+
+      # The result text is still additive...
+      assert result.result == "Made the failing unit test pass."
+      # ...but with no usage event the budget's token dimension falls back to an
+      # estimate (ADR-0008) rather than a fabricated count.
+      refute Map.has_key?(result, :tokens)
+      refute Map.has_key?(result, :cost)
+      refute Map.has_key?(result, :cost_usd)
+    end
+
+    test "the dispatched argv is the opencode shape: run <prompt> --format json --model <m>",
+         %{workspace: workspace} do
+      assert {:ok, %{exit: 0}} =
+               CliAdapter.run("do the thing", workspace,
+                 harness: :opencode,
+                 model: "dgx-ollama/qwen3.6:35b-a3b-q8_0",
+                 command: @argv_stub
+               )
+
+      argv = recorded_argv(workspace)
+
+      assert argv == [
+               "run",
+               "do the thing",
+               "--format",
+               "json",
+               "--model",
+               "dgx-ollama/qwen3.6:35b-a3b-q8_0"
+             ]
+
+      # Emphatically NOT the claude shape.
+      refute "-p" in argv
+      refute "--output-format" in argv
     end
   end
 

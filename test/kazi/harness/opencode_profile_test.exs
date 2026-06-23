@@ -149,5 +149,68 @@ defmodule Kazi.Harness.OpencodeProfileTest do
 
       assert Profile.parse(profile, stream).result == "final answer"
     end
+
+    # A RICHER, multi-event fixture (T8.9): a realistic interleaved opencode
+    # `--format json` turn — session/step lifecycle events, tool-call parts, two
+    # assistant text parts, TWO `message.updated` usage events (incremental then
+    # final), and a trailing non-JSON plain-text echo. It exercises the parser's
+    # tolerance (skip-unrecognised), last-wins for text AND usage, and that
+    # tool/lifecycle noise contributes nothing — beyond the simple two-line
+    # streams already covered above.
+    test "rich interleaved stream: skips noise, takes last text + last usage (last-wins)" do
+      profile = Registry.fetch!(:opencode)
+
+      stream =
+        Enum.join(
+          [
+            # Lifecycle + an unrecognised top-level event — ignored.
+            ~s({"type":"session.created","properties":{"info":{"id":"ses_x"}}}),
+            ~s({"type":"message.part.updated","properties":{"part":{"id":"p0","type":"step-start"}}}),
+            # A tool-call part (not text) — contributes no :result.
+            ~s({"type":"message.part.updated","properties":{"part":{"id":"p1","type":"tool","tool":"edit","state":{"status":"completed"}}}}),
+            # First assistant text part (superseded by the later one).
+            ~s({"type":"message.part.updated","properties":{"part":{"id":"p2","type":"text","text":"working on it"}}}),
+            # An INCREMENTAL usage event — superseded by the final one below.
+            ~s({"type":"message.updated","properties":{"info":{"role":"assistant","cost":0.001,"tokens":{"input":5,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}}}),
+            # The FINAL assistant text part — this is the :result.
+            ~s({"type":"message.part.updated","properties":{"part":{"id":"p3","type":"text","text":"Done. The test is green."}}}),
+            # The FINAL usage event — last-wins for tokens AND cost.
+            ~s({"type":"message.updated","properties":{"info":{"role":"assistant","cost":0.0211,"tokens":{"input":700,"output":120,"reasoning":33,"cache":{"read":2000,"write":50}}}}}),
+            # A trailing non-JSON plain-text echo of the final part (non-TTY mode).
+            "Done. The test is green."
+          ],
+          "\n"
+        )
+
+      parsed = Profile.parse(profile, stream)
+
+      assert parsed.result == "Done. The test is green."
+      # Final usage wins: 700 + 120 + 33 + 2000 + 50.
+      assert parsed.tokens == 700 + 120 + 33 + 2000 + 50
+      assert parsed.cost == %{tokens: 2903}
+      assert parsed.cost_usd == 0.0211
+    end
+
+    test "usage carried on a step-finish part (not message.updated) is still summed" do
+      # Robustness to shape drift (ADR-0016 moduledoc): tokens may arrive on a
+      # `part` rather than `info`. The parser scans both wrappings.
+      profile = Registry.fetch!(:opencode)
+
+      stream =
+        Enum.join(
+          [
+            ~s({"type":"message.part.updated","properties":{"part":{"type":"text","text":"ok"}}}),
+            ~s({"type":"message.part.updated","properties":{"part":{"type":"step-finish","cost":0.003,"tokens":{"input":10,"output":2,"reasoning":0,"cache":{"read":0,"write":0}}}}})
+          ],
+          "\n"
+        )
+
+      parsed = Profile.parse(profile, stream)
+
+      assert parsed.result == "ok"
+      assert parsed.tokens == 12
+      assert parsed.cost == %{tokens: 12}
+      assert parsed.cost_usd == 0.003
+    end
   end
 end
