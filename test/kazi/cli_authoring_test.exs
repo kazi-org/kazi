@@ -150,6 +150,135 @@ defmodule Kazi.CLIAuthoringTest do
     end
   end
 
+  # ===========================================================================
+  # Tier 2 — interactive clarify phase (T11.6/T11.8, ADR-0019)
+  # ===========================================================================
+
+  # A stub that records the draft prompt and varies the live predicate by whether
+  # the folded answer ("Production logs") reached it -- so a test can confirm the
+  # injected answer shaped the draft. The candidate-question call returns no extra
+  # questions, so the deterministic floor is what gets asked.
+  defmodule ClarifyCliStub do
+    @behaviour Kazi.HarnessAdapter
+
+    @impl true
+    def run(prompt, _workspace, _opts) do
+      cond do
+        prompt =~ "clarifying questions" ->
+          {:ok, %{result: "[]"}}
+
+        prompt =~ "Production logs" ->
+          {:ok,
+           %{
+             result:
+               ~s({"name":"G","predicates":[{"id":"p","provider":"prod_log","config":{}}],"rationale":"probe the runtime; tests-only is out of scope"})
+           }}
+
+        true ->
+          {:ok, %{result: ~s({"name":"G","predicates":[{"id":"h","provider":"http_probe"}]})}}
+      end
+    end
+  end
+
+  describe "propose — interactive clarify phase (T11.6/T11.8)" do
+    test "an injected :ask is invoked with the floor and folds answers into the draft" do
+      test_pid = self()
+
+      ask = fn questions ->
+        send(test_pid, {:asked, Enum.map(questions, & &1.id)})
+        %{"live-target" => "prod_log", "scope" => "core"}
+      end
+
+      {code, out} =
+        with_io(fn ->
+          Kazi.CLI.run(["propose", "add a widgets feature"], harness: ClarifyCliStub, ask: ask)
+        end)
+
+      assert code == 0
+      assert_received {:asked, ids}
+      assert "live-target" in ids
+      assert out =~ "PROPOSED"
+      assert out =~ "prod_log"
+      assert out =~ "rationale: probe the runtime"
+    end
+
+    test "--strict refuses an underspecified idea non-interactively (exit 1)" do
+      {code, stderr} =
+        with_io(:stderr, fn ->
+          Kazi.CLI.run(["propose", "add a widgets feature", "--strict"],
+            harness: ClarifyCliStub,
+            tty: false
+          )
+        end)
+
+      assert code == 1
+      assert stderr =~ "underspecified"
+      assert stderr =~ "live-target"
+    end
+
+    test "--strict allows a fully-specified idea through" do
+      idea = "GET /healthz returns 200 with no auth on https://app.example.com; scope: that only"
+
+      {code, _out} =
+        with_io(fn ->
+          Kazi.CLI.run(["propose", idea, "--strict"], harness: ClarifyCliStub, tty: false)
+        end)
+
+      assert code == 0
+    end
+
+    test "--adr writes an ADR-lite doc to the injected dir" do
+      dir = Path.join(System.tmp_dir!(), "kazi-cli-adr-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf(dir) end)
+      ask = fn _q -> %{"live-target" => "prod_log"} end
+
+      {code, out} =
+        with_io(fn ->
+          Kazi.CLI.run(["propose", "add a widgets feature", "--adr"],
+            harness: ClarifyCliStub,
+            ask: ask,
+            adr_dir: dir
+          )
+        end)
+
+      assert code == 0
+      assert out =~ "ADR written:"
+      assert [adr] = Path.wildcard(Path.join(dir, "*.md"))
+      assert File.read!(adr) =~ "Goal proposal"
+    end
+
+    test "an injected :review that refines re-drafts and upserts the same proposal" do
+      test_pid = self()
+      # Refine once (with a sharper sentence), then accept.
+      review = fn _draft ->
+        receive_count = Process.get(:reviews, 0)
+        Process.put(:reviews, receive_count + 1)
+
+        case receive_count do
+          0 -> {:refine, "GET /healthz returns 200 on https://app.example.com; scope: only that"}
+          _ -> :accept
+        end
+      end
+
+      ask = fn _q -> %{"live-target" => "prod_log"} end
+
+      {code, _out} =
+        with_io(fn ->
+          Kazi.CLI.run(["propose", "add a widgets feature"],
+            harness: ClarifyCliStub,
+            ask: ask,
+            review: review
+          )
+        end)
+
+      assert code == 0
+      send(test_pid, :done)
+      assert_received :done
+      # Exactly one proposal row -- the refine UPSERTED rather than duplicating.
+      assert [%ProposedGoal{}] = ReadModel.list_proposed_goals(status: "proposed")
+    end
+  end
+
   describe "list-proposed — Tier 2" do
     test "renders the queue and the empty state" do
       # Empty queue.

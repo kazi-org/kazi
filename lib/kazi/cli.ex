@@ -49,6 +49,9 @@ defmodule Kazi.CLI do
   """
 
   alias Kazi.{Adopt, Authoring, Goal, ReadModel, Runtime}
+  alias Kazi.Authoring.Clarify
+  alias Kazi.Authoring.Clarify.{Option, Question}
+  alias Kazi.Authoring.RationaleAdr
   alias Kazi.ReadModel.ProposedGoal
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -60,7 +63,7 @@ defmodule Kazi.CLI do
   USAGE:
       kazi run <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
       kazi init <repo-dir> [--out <file>] [--enrich]
-      kazi propose "<idea>" [--workspace <path>]
+      kazi propose "<idea>" [--workspace <path>] [--yes] [--strict] [--adr]
       kazi list-proposed [--status <proposed|approved|rejected>]
       kazi approve <proposal-ref>
       kazi reject <proposal-ref>
@@ -94,6 +97,15 @@ defmodule Kazi.CLI do
                              goal-file's `standing` field.
       --status <state>       Filter `list-proposed` to one lifecycle state
                              (proposed / approved / rejected). Default: all.
+      --yes                  `propose` only: skip the interactive clarify
+                             questions and draft best-effort (also implied when
+                             no TTY is attached, e.g. piped/CI).
+      --strict               `propose` only: when run non-interactively, refuse an
+                             underspecified idea (exit non-zero) instead of
+                             guessing. Interactively, the clarify questions resolve
+                             it.
+      --adr                  `propose` only: additionally write an ADR-lite
+                             rationale doc under docs/adr/ for the drafted goal.
       --harness <id>         Coding harness to drive (T8.7, ADR-0016): `claude`
                              (default) or `opencode`. Overrides the goal-file's
                              [harness] table and the app config.
@@ -239,6 +251,13 @@ defmodule Kazi.CLI do
           # (claude / opencode / ...); --model picks the harness's model.
           harness: :string,
           model: :string,
+          # T11.6 interactive propose (ADR-0019): --yes skips the clarify phase
+          # (draft best-effort, no prompts); --strict fails when the idea is too
+          # underspecified to draft non-interactively; --adr also writes an
+          # ADR-lite rationale doc.
+          yes: :boolean,
+          strict: :boolean,
+          adr: :boolean,
           help: :boolean,
           version: :boolean
         ],
@@ -302,8 +321,15 @@ defmodule Kazi.CLI do
   # carried through (where the harness drafts the goal).
   defp parse_command(["propose", idea | rest], flags) do
     case rest do
-      [] -> {:propose, idea, workspace: flags[:workspace]}
-      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+      [] ->
+        {:propose, idea,
+         workspace: flags[:workspace],
+         yes: flags[:yes] || false,
+         strict: flags[:strict] || false,
+         adr: flags[:adr] || false}
+
+      extra ->
+        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
 
@@ -558,24 +584,203 @@ defmodule Kazi.CLI do
   # and print the proposal-ref the operator approves against. `inject_opts` carries
   # the test-only `:harness`/`:adapter_opts` seam (default the real adapter), so
   # production never names a concrete harness.
+  # T11.6 (ADR-0019): `propose` runs the interactive clarify phase when a TTY is
+  # attached (and not `--yes`), so the author answers high-leverage questions
+  # before the draft. `--yes`/no-TTY drafts best-effort; `--strict` refuses an
+  # underspecified idea non-interactively; `--adr` also writes an ADR-lite doc.
+  # Tests inject `:ask`/`:review` via `inject_opts` instead of touching stdin.
   defp execute_propose(idea, opts, inject_opts) do
     with_read_model(fn ->
-      propose_opts =
+      base =
         inject_opts
         |> Keyword.take([:harness, :adapter_opts])
         |> Keyword.put(:workspace, opts[:workspace] || ".")
 
-      case Authoring.propose(idea, propose_opts) do
-        {:ok, draft} ->
-          report_proposed(draft)
-          0
+      ask = propose_ask(opts, inject_opts)
 
-        {:error, reason} ->
-          IO.puts(:stderr, "error: could not propose goal: #{format_authoring_error(reason)}")
-          1
+      if strict_block?(idea, ask, opts) do
+        IO.puts(
+          :stderr,
+          "error: idea is underspecified (missing: #{strict_missing(idea)}); " <>
+            "answer the clarify questions interactively or add detail to the idea"
+        )
+
+        1
+      else
+        do_propose(idea, maybe_ask(base, ask), opts, inject_opts)
       end
     end)
   end
+
+  defp do_propose(idea, propose_opts, opts, inject_opts) do
+    case Authoring.propose(idea, propose_opts) do
+      {:ok, draft} ->
+        draft = maybe_refine(draft, propose_opts, opts, inject_opts)
+        report_proposed(draft)
+        maybe_write_adr(draft, opts, inject_opts)
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, "error: could not propose goal: #{format_authoring_error(reason)}")
+        1
+    end
+  end
+
+  # The clarify `:ask` callback: an injected one (tests) wins; otherwise interactive
+  # terminal prompting when a TTY is attached and `--yes` was not passed. `nil`
+  # means non-interactive -- propose stays a one-shot draft.
+  defp propose_ask(opts, inject_opts) do
+    cond do
+      is_function(inject_opts[:ask], 1) -> inject_opts[:ask]
+      opts[:yes] -> nil
+      interactive?(inject_opts) -> &terminal_ask/1
+      true -> nil
+    end
+  end
+
+  # Interactive when a TTY is attached, unless a test forces it via `:tty` in
+  # inject_opts (so a clarify test never blocks on real stdin).
+  defp interactive?(inject_opts), do: Keyword.get(inject_opts, :tty, tty?())
+
+  defp maybe_ask(propose_opts, nil), do: propose_opts
+  defp maybe_ask(propose_opts, ask), do: Keyword.put(propose_opts, :ask, ask)
+
+  # `--strict` with no way to clarify (non-interactive) and an idea that still has
+  # floor gaps is a hard refusal rather than a guessed draft.
+  defp strict_block?(idea, ask, opts) do
+    opts[:strict] and is_nil(ask) and Clarify.gaps(idea) != []
+  end
+
+  defp strict_missing(idea) do
+    idea |> Clarify.gaps() |> Enum.map_join(", ", & &1.id)
+  end
+
+  # T11.8 review loop: after the draft, an interactive review may "refine" with a
+  # sharper sentence, which re-runs clarify+draft and UPSERTS the same proposal
+  # (same proposal_ref), keeping it `proposed`. An injected `:review` drives this
+  # in tests; in production a terminal review runs only when a TTY is attached.
+  defp maybe_refine(draft, propose_opts, opts, inject_opts) do
+    case propose_review(opts, inject_opts) do
+      nil ->
+        draft
+
+      review ->
+        case review.(draft) do
+          {:refine, sharper} when is_binary(sharper) and sharper != "" ->
+            refine_opts = Keyword.put(propose_opts, :proposal_ref, draft.proposal_ref)
+
+            case Authoring.propose(sharper, refine_opts) do
+              {:ok, refined} -> maybe_refine(refined, propose_opts, opts, inject_opts)
+              {:error, _reason} -> draft
+            end
+
+          _ ->
+            draft
+        end
+    end
+  end
+
+  defp propose_review(opts, inject_opts) do
+    cond do
+      is_function(inject_opts[:review], 1) -> inject_opts[:review]
+      opts[:yes] -> nil
+      interactive?(inject_opts) -> &terminal_review/1
+      true -> nil
+    end
+  end
+
+  defp maybe_write_adr(draft, opts, inject_opts) do
+    if opts[:adr] do
+      adr_opts = if dir = inject_opts[:adr_dir], do: [dir: dir], else: []
+
+      case RationaleAdr.write(draft, adr_opts) do
+        {:ok, path} -> IO.puts("ADR written: #{path}")
+        {:error, reason} -> IO.puts(:stderr, "warning: could not write ADR: #{inspect(reason)}")
+      end
+    end
+  end
+
+  # --- interactive terminal I/O (T11.6/T11.8) --------------------------------
+
+  # Prompt each clarify question as numbered multiple-choice (plus a free-text
+  # escape when allowed), read the author's choice from stdin, and return the
+  # answers map keyed by question id. The recommended option is starred and is the
+  # default on an empty line.
+  defp terminal_ask(questions) do
+    IO.puts("\nA few questions to make the goal precise (press Enter for the default):\n")
+    Enum.reduce(questions, %{}, fn %Question{} = q, acc -> Map.put(acc, q.id, ask_one(q)) end)
+  end
+
+  defp ask_one(%Question{} = q) do
+    IO.puts(q.prompt)
+
+    q.options
+    |> Enum.with_index(1)
+    |> Enum.each(fn {opt, i} -> IO.puts(format_option(q, opt, i)) end)
+
+    if q.allow_free_text, do: IO.puts("  f) something else (type your answer)")
+
+    resolve_choice(q, read_line())
+  end
+
+  defp format_option(%Question{recommended: rec}, %Option{label: label, value: value}, i) do
+    star = if value == rec, do: " *", else: ""
+    "  #{i}) #{label}#{star}"
+  end
+
+  # Resolve a typed line to an option value: empty -> the recommended (or first)
+  # option; a number -> that option's value; "f <text>" or free text -> the text
+  # when free text is allowed; an option label/value match -> that value.
+  defp resolve_choice(%Question{} = q, "") do
+    q.recommended || default_value(q)
+  end
+
+  defp resolve_choice(%Question{} = q, line) do
+    cond do
+      value = option_at(q, line) -> value
+      q.allow_free_text -> String.replace_prefix(line, "f ", "")
+      true -> matched_value(q, line) || q.recommended || default_value(q)
+    end
+  end
+
+  defp option_at(%Question{options: options}, line) do
+    case Integer.parse(line) do
+      {n, ""} when n >= 1 and n <= length(options) -> Enum.at(options, n - 1).value
+      _ -> nil
+    end
+  end
+
+  defp matched_value(%Question{options: options}, line) do
+    case Enum.find(options, fn %Option{label: l, value: v} -> l == line or v == line end) do
+      %Option{value: value} -> value
+      nil -> nil
+    end
+  end
+
+  defp default_value(%Question{options: [%Option{value: value} | _]}), do: value
+  defp default_value(%Question{}), do: ""
+
+  # The terminal review after a draft: accept / refine with a sharper sentence.
+  defp terminal_review(_draft) do
+    IO.puts("\nRefine this draft? Enter a sharper one-line idea, or press Enter to accept it.")
+
+    case read_line() do
+      "" -> :accept
+      sharper -> {:refine, sharper}
+    end
+  end
+
+  defp read_line do
+    case IO.gets("> ") do
+      :eof -> ""
+      {:error, _} -> ""
+      line -> String.trim(line)
+    end
+  end
+
+  # A TTY is attached when the IO server reports terminal geometry; piped/CI
+  # stdio reports an error, so we default to non-interactive there.
+  defp tty?, do: match?({:ok, _}, :io.rows())
 
   # `list-proposed [--status <state>]`: print the proposal queue, newest first.
   defp execute_list_proposed(opts) do
@@ -647,7 +852,17 @@ defmodule Kazi.CLI do
     IO.puts("idea:      #{draft.idea}")
     IO.puts("\npredicates (acceptance criteria):")
     IO.puts(format_proposed_predicates(draft.goal))
+    report_rationale(draft.goal)
     IO.puts("\nReview, then: kazi approve #{draft.proposal_ref}")
+  end
+
+  # T11.5 (ADR-0019): surface the inline rationale ("why these predicates / what is
+  # out of scope") the harness recorded on the draft, when present.
+  defp report_rationale(%Goal{metadata: metadata}) do
+    case Map.get(metadata, "rationale") do
+      text when is_binary(text) and text != "" -> IO.puts("\nrationale: #{text}")
+      _ -> :ok
+    end
   end
 
   defp format_proposed_predicates(%Goal{} = goal) do
