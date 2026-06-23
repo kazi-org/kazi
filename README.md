@@ -254,17 +254,27 @@ for you (using your coding agent), then holds them for your review. **Nothing ru
 until you approve**, and you can trim or edit what it drafted:
 
 ```sh
-# 1. Describe the app you want. kazi expands it into acceptance predicates:
+# 1. Describe the app you want. In a terminal, kazi asks a few sharp clarifying
+#    questions FIRST (so "done" is precise — especially the live-verification
+#    target), then drafts the acceptance predicates and an inline rationale:
 kazi propose "create a URL-shortener web service" --workspace ./shortener
 #
+#   A few questions to make the goal precise (press Enter for the default):
+#   What is the live-verification target for this goal?
+#     1) A deployed URL probed over HTTP *
+#     2) Production logs / a runtime signal
+#     3) None for now — green tests are enough
+#   > 1
+#   ...
 #   PROPOSED  proposal=prop-url-shortener-3f9c1a2b  goal=url-shortener
 #     • go test ./... passes
 #     • POST /shorten returns 201 with a short code for a submitted URL
 #     • GET /<code> redirects (302) to the original URL
 #     • GET / renders a form to submit a URL
+#   rationale: probe the deployed shortener over HTTP; auth is out of scope for v1
 
 # 2. Review what it drafted (you're the approver — agents propose, humans dispose).
-#    Too much? Too little? Re-propose with a sharper sentence, or edit the goal-file.
+#    Too much? Too little? Refine inline with a sharper sentence when prompted.
 kazi list-proposed
 #   prop-url-shortener-3f9c1a2b   proposed   url-shortener   (4 predicates)
 
@@ -273,6 +283,13 @@ kazi approve prop-url-shortener-3f9c1a2b
 #   APPROVED   proposal=prop-url-shortener-3f9c1a2b  goal=url-shortener
 #   The goal is now runnable: kazi run <goal-file> --workspace <path>
 ```
+
+The clarify phase is a HYBRID (ADR-0019): a deterministic floor of gap-checks kazi
+always runs (it insists on a live-verification target and a scope boundary) plus
+questions your coding agent drafts for the specific idea. Scripting it? `--yes` (or
+any non-TTY pipe) skips the questions and drafts best-effort; `--strict` refuses an
+underspecified idea instead of guessing; `--adr` also writes an ADR-lite rationale
+doc under `docs/adr/`.
 
 `propose` / `approve` are the natural-language **front door** (an agent drafts,
 a human approves — the only write path the dashboard and Telegram bridge share too).
