@@ -1,520 +1,176 @@
-# kazi -- Build Plan (Walking Skeleton, idea -> production)
+# kazi -- Build Plan (handover: remaining work)
 
 ## Context
 
-**Problem.** Existing prose-driven Claude Code skills (brainstorm -> plan ->
-apply -> verify -> qualify) can take a simple system from idea to production, but
-not reliably: "done" is the agent's opinion, verification is skippable, and
-parallel sessions collide. kazi replaces that with a reconciliation controller --
-declare a goal as machine-checkable predicates; kazi drives a coding agent in a
-loop until the predicates are objectively true, stuck, or over budget.
+kazi is a reconciliation controller for software goals: declare a goal as
+machine-checkable predicates; kazi drives a coding agent in a loop until the
+predicates are objectively true, stuck, or over budget. It drives harnesses
+(Claude Code, Codex); it is not a harness.
 
-**This plan** builds kazi as a **walking skeleton**: thin vertical slices
-end-to-end through all lifecycle phases, deepened slice by slice -- never one
-whole phase at a time. The skeleton spans **idea -> production from Slice 0**:
-every lifecycle phase gets its thinnest version on day one (including integrate +
-deploy + verify-live), and later slices DEEPEN phases rather than add missing
-ones. Start from the convergence core (the pain and the only objectively testable
-part). See `docs/adr/0007-build-strategy-walking-skeleton.md`.
+**This plan is a HANDOVER.** The walking-skeleton build (idea -> production) and
+every epic through it are COMPLETE and merged on `main`:
 
-**Frozen design** (do not relitigate here): `docs/concept.md` + ADRs 0001-0006.
-Runtime Elixir/OTP + Phoenix LiveView; coordination NATS JetStream (KV leases
-CAS+TTL, event stream); local read-model SQLite/WAL; Git owns code;
-harness-agnostic via subprocess adapter (`claude -p` first).
+- **E0 Slice 0** (convergence loop to a live, verified Cloud Run deploy) -- done;
+  the T0.12 dogfood converged idea -> production live (PR #69).
+- **E1 Slice 1** (regression / flake / budget / stuck / prod-log) -- done.
+- **E2 Slice 2** (creation mode + self-hosting cutover) -- done.
+- **E3 Slice 3** (NATS leases, graph partitioning, deploy deepening, standing
+  reconcilers, idea->predicate authoring, LiveView dashboard, Telegram bridge)
+  -- done.
+- **E4** (context injection / re-exploration mitigation, ADR-0010) -- done,
+  including the un-deferred pluggable retrieval-memory adapter (T4.9, ADR-0012).
+- **E5** (`kazi init` adopt, ADR-0013) -- T5.1-T5.5 done; only **T5.6** (a
+  stack-mode e2e + README "adopt an existing project" snippet) remains.
+- **E7** (registry adapter + goal-set, ADR-0015) -- done; `kazi init --registry
+  <file.json>` turns a capability registry into a runnable goal SET, verified to
+  `:converged` through the real `Kazi.Runtime`.
 
-**Objectives.**
-- Slice 0: a working convergence loop that takes a tiny fixture from a failing
-  test to a live, verified production deployment, and cannot declare success
-  while any predicate -- code OR live -- fails.
-- Slice 1: trustworthy loops (regression, flake, budget, stuck-escalation,
-  prod-log predicate).
-- Slice 2: creation mode -- kazi can build features, not only repair them.
-- Slice 3+: DEEPEN (leases, partitioning, richer deploy, maintenance, front-end,
-  UI) only as a slice needs it; from Slice 2 onward kazi builds kazi.
+State of `main` at handover: **785 tests pass** (62 doctests, 723 tests), 18
+excluded (`:nats`/`:graphify` integration tags); `mix format --check-formatted`
+clean; `mix compile --warnings-as-errors` clean. Distribution PRs #70-#75 merged
+this session.
 
-**Non-goals.** Replacing the harness (kazi drives Claude Code/Codex, never
-becomes one). Product prioritization / "what to build" (human judgment).
-A vector DB in the core (deferred pluggable memory adapter). Building a lifecycle
-phase because the SDLC diagram lists it (a phase is built only when a slice needs
-it).
+**What remains (the entire content of this plan):**
 
-**Constraints / assumptions.** Elixir/OTP; stdlib + Phoenix/Ecto ecosystem; tests
-in ExUnit; `mix format` as formatter; Podman for container builds; Cloud Run for
-the deploy target; GitHub Actions for CI/CD. Slices 0-2 are bootstrapped with
-existing Claude Code skills. NATS and Phoenix LiveView are not introduced until
-Slice 3; deploy IS in Slice 0 (thin).
+1. **T5.6** -- finish E5 with a hermetic stack-mode `kazi init` end-to-end test
+   against `fixtures/deploy-target` plus a README adopt snippet. Fully hermetic,
+   no external dependency -- the easiest next pickup.
+2. **E6 (T6.2-T6.5)** -- binary distribution via Burrito + Homebrew (ADR-0014):
+   ship `brew install kazi-org/tap/kazi` as a single self-contained binary with
+   the full SQLite read-model (NIF bundled), superseding the escript. T6.1 (the
+   `mix release` foundation) is already merged; the Burrito wrap config is merged
+   but its host binary has not been built (see Risk R-E6-1).
 
-**Success metric (the bar for the whole iteration).** kazi converges a goal that
-a prose brainstorm->plan->apply->verify->qualify pipeline left subtly broken,
-measured by the Slice 0/Slice 1 dogfood fixtures (T0.12, T1.8), including a live
-production probe.
+**Frozen design (do NOT relitigate):** `docs/concept.md` (canonical architecture
++ source of truth -- this project keeps Tier-1 architecture here, not in a
+separate design.md) and ADRs `0001`..`0015`. To change a decision, write a
+superseding ADR.
 
-## Discovery Summary
+## Use Case Summary
 
-Greenfield repo: only `docs/` exists (concept + ADRs 0001-0007); no source yet.
-Engineering work type. 21 use cases discovered, all PLANNED, mapped to slices by
-priority: P0 Slice 0 (UC-001..006, UC-011, UC-015, UC-020), P1 Slice 1
-(UC-007..009, UC-021), P2 Slice 2 (UC-010, UC-012), P3 Slice 3+ (UC-013..019).
-Wiring status: nothing wired (no code). Reference:
-`.claude/scratch/usecases-manifest.json`.
+All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Only two
+have open work:
 
-## Scope and Deliverables
+- **UC-023** (adopt an existing project via `kazi init`) -- delivered except the
+  T5.6 worked example/e2e.
+- **UC-024** (install kazi as a single binary via Homebrew, ADR-0014) -- OPEN;
+  the whole of E6 below.
 
-In scope: Slices 0-2 in full detail; Slice 3+ as a coarse backlog to be
-re-planned (self-hosted) when reached.
-
-Out of scope: NATS/leases, graph partitioning, standing reconcilers, dashboard,
-notifications, multi-env/rollback deploy until Slice 3; harness replacement;
-product prioritization.
-
-| ID | Deliverable | Owner | Acceptance |
-|----|-------------|-------|------------|
-| D0 | idea -> production convergence loop (Slice 0) | TBD | `kazi run <goal> --workspace <path>` takes a fixture from a failing test to a live, verified Cloud Run deployment; refuses :converged while tests OR the live probe fail; evidence in SQLite |
-| D1 | Trustworthy loop (Slice 1) | TBD | regression flagged, flakes quarantined, budget+stuck escalate to human, prod-log predicate works |
-| D2 | Creation mode (Slice 2) | TBD | kazi builds one small real feature from failing acceptance predicates to live; vacuous goal rejected |
-| D3 | Slice 3+ backlog | TBD | each item re-planned as a self-hosted kazi goal when reached |
+UC-001..UC-022 and UC-025 are delivered and verified on `main`.
 
 ## Checkable Work Breakdown
 
-Layout: monolithic (single file); the WBS below is the single checkable source of
-truth. The Waves section references task IDs only (no checkboxes) to avoid
-duplicate status. Status `kind: agent` is implicit unless noted.
-
-### E0 -- Scaffold + Slice 0 Walking Skeleton (idea -> production) (P0)
-
-Acceptance: D0 met; T0.12 dogfood drives the fixture to a live, verified
-production deployment.
-
-- [x] T0.1 Initialize Elixir mix app `kazi` (supervision tree, `.formatter.exs`, `.gitignore`, mix.exs deps pinned)  Owner: TBD  Est: 1h  verifies: [infrastructure]  done: 2026-06-21 PR #3
-- [x] T0.2 CI: GitHub Actions running `mix format --check-formatted` and `mix test`  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T0.1]  done: 2026-06-21 PR #4
-- [x] T0.3 Core domain types AND behaviours: `Goal`, `Predicate`, `PredicateResult{status,evidence}`, `PredicateVector`, `Action`; plus the `PredicateProvider`, `HarnessAdapter`, and `Action` behaviours (contracts only) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.1]  done: 2026-06-21 PR #6
-- [x] T0.4 Goal loader + goal-file TOML schema + an example goal fixture (code predicates + a live predicate) + tests  Owner: TBD  Est: 2h  verifies: [UC-001]  deps: [T0.3]
-- [x] T0.5 Test-runner predicate provider (runs configurable cmd in the target workspace, maps exit/output -> `PredicateResult`) + tests  Owner: TBD  Est: 2h  verifies: [UC-002]  deps: [T0.3]
-- [x] T0.5b Live http_probe predicate provider (request a URL, assert status/body) + tests  Owner: TBD  Est: 1.5h  verifies: [UC-011]  deps: [T0.3]
-- [x] T0.6 Harness-adapter behaviour impl: `claude -p` adapter that runs the harness IN THE TARGET WORKSPACE so edits land in place; focused prompt seeded with failing-predicate evidence; capture result. Tests use a stub binary  Owner: TBD  Est: 2h  verifies: [UC-003]  deps: [T0.3]
-- [x] T0.9 SQLite read-model: Ecto SQLite3 repo + migration for iteration/evidence log; persist each iteration  Owner: TBD  Est: 2h  verifies: [UC-006]  deps: [T0.3]
-- [x] T0.7 Convergence state machine (GenStateMachine) against the behaviours/test-doubles: observe -> diff -> decide-next-action -> {dispatch agent | integrate | deploy} -> re-observe; converge-and-stop  Owner: TBD  Est: 3h  verifies: [UC-004]  deps: [T0.3]
-- [x] T0.10a Integrate action: land a converged fix (branch -> commit -> push -> open PR -> rebase-merge) in the target workspace + tests with a fixture repo  Owner: TBD  Est: 2.5h  verifies: [UC-020]  deps: [T0.3]
-- [x] T0.10b Deploy action: trigger a release/deploy of the target (`gcloud run deploy` or GitHub Actions dispatch); return a deploy ref; tests with a stub deployer  Owner: TBD  Est: 2h  verifies: [UC-015]  deps: [T0.3]
-- [x] T0.13 Deployable target fixture: a tiny containerized web service (Podman build) with one failing unit test AND a behaviour the live probe checks, plus a Cloud Run deploy workflow  Owner: TBD  Est: 2.5h  verifies: [infrastructure]  deps: [T0.1]  done: 2026-06-21 PR #5 (Go service, isolated from kazi CI)
-- [x] T0.6h Provision GCP project + Cloud Run service + deploy credentials for the fixture  Owner: TBD  Est: 2h  verifies: [infrastructure]  kind: human  done: 2026-06-22 (GCP project kazi-deploy + deploy SA + GH secrets; roles per lore L-0001/L-0002)
-- [x] T0.7b Integration: wire concrete providers + adapter + integrate/deploy actions into the loop (replace test-doubles)  Owner: TBD  Est: 2h  verifies: [UC-004]  deps: [T0.5, T0.5b, T0.6, T0.7, T0.10a, T0.10b]
-- [x] T0.8 Objective-termination guard: `:converged` reachable only when the FULL vector (code + live) is true; explicit test that a failing live probe blocks success  Owner: TBD  Est: 1h  verifies: [UC-005]  deps: [T0.7]
-- [x] T0.10 CLI entry `kazi run <goal-file> --workspace <path>` wiring loader + loop + actions against an explicit target workspace  Owner: TBD  Est: 1.5h  verifies: [UC-004]  deps: [T0.7]
-- [x] T0.11 Full-loop integration test incl. a deliberately-failing-test fixture, with deploy + probe stubbed  Owner: TBD  Est: 2h  verifies: [UC-005]  deps: [T0.7b, T0.8, T0.10]
-- [x] T0.12 Dogfood Slice 0 (idea -> production): run kazi against the deployable fixture; confirm it takes a failing test to a LIVE, verified production deployment and refuses success while tests OR the live probe fail; record result in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-005]  deps: [T0.11, T0.10a, T0.10b, T0.13, T0.6h]  done: 2026-06-22 (converged in 4 iters: dispatch->integrate(PR #69)->deploy->live /livez="ok"; see devlog)
-
-### E1 -- Slice 1: Trustworthy Loop (P1)
-
-Acceptance: D1 met; T1.8 dogfood passes.
-
-- [x] T1.1 Track the full predicate vector across iterations (in state + SQLite history)  Owner: TBD  Est: 1.5h  verifies: [UC-007]  deps: [T0.9]
-- [x] T1.2 Regression detector: flag a predicate that went green -> red, attributed to the last dispatch  Owner: TBD  Est: 2h  verifies: [UC-007]  deps: [T1.1]
-- [x] T1.3 Flake handling: re-run policy + quarantine list so a nondeterministic fail is not treated as work  Owner: TBD  Est: 2h  verifies: [UC-008]  deps: [T0.7b]
-- [x] T1.4 Budget ceiling (iterations / wall-clock / token estimate) enforced as a hard stop  Owner: TBD  Est: 1.5h  verifies: [UC-009]  deps: [T0.7b]
-- [x] T1.5 Stuck detector (N iterations, same failing set) + human-escalation hook  Owner: TBD  Est: 1.5h  verifies: [UC-009]  deps: [T0.7b]
-- [x] T1.6 Prod-log predicate provider (query prod logs for 5xx/panics over a window) + tests  Owner: TBD  Est: 2h  verifies: [UC-021]  deps: [T0.3]
-- [x] T1.7 ExUnit tests for regression, flake, budget, stuck, prod-log  Owner: TBD  Est: 2h  verifies: [UC-007, UC-008, UC-009, UC-021]  deps: [T1.2, T1.3, T1.4, T1.5, T1.6]
-- [x] T1.8 Dogfood Slice 1: goal where the naive fix regresses another predicate; confirm detection + escalation; record in `docs/devlog.md`  Owner: TBD  Est: 1h  verifies: [UC-007]  deps: [T1.7]
-
-### E2 -- Slice 2: Creation Mode + Self-Hosting Cutover (P2)
-
-Acceptance: D2 met; kazi builds one real feature from acceptance predicates to live.
-
-- [x] T2.1 Acceptance-predicate support: goals authored as failing acceptance criteria over the http_probe provider + tests  Owner: TBD  Est: 2h  verifies: [UC-010]  deps: [T0.4]
-- [x] T2.2 Browser predicate provider (Playwright via Port) + test (golden path + 1 edge case)  Owner: TBD  Est: 2.5h  verifies: [UC-012]  deps: [T0.5]
-- [x] T2.3 Vacuous-goal guard: reject a goal whose predicates all pass at t0 (underspecified) + test  Owner: TBD  Est: 1h  verifies: [UC-010]  deps: [T0.4]
-- [x] T2.4 ExUnit tests for creation mode end-to-end  Owner: TBD  Est: 1.5h  verifies: [UC-010, UC-012]  deps: [T2.1, T2.2, T2.3]
-- [x] T2.5 Dogfood Slice 2: give kazi a small real feature as failing acceptance predicates; confirm it builds to green and live; record in `docs/devlog.md`  Owner: TBD  Est: 1.5h  verifies: [UC-010]  deps: [T2.4]
-- [x] T2.6 Self-hosting cutover: document the kazi-builds-kazi loop; author the first self-hosted kazi goal for an E3 item  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T2.5]
-
-### E3 -- Slice 3+ (P3, self-hosted)
-
-Acceptance: each item is a hermetic, checkable subtask (re-planned 2026-06-22).
-NATS JetStream and Phoenix LiveView are permitted Slice-3 dependencies; operator
-surfaces stay decoupled from the core reconciler (ADR-0011). Scheduled as Waves
-15-18 for /apply --pool. T3.3/T3.4 already shipped.
-
-**T3.1 NATS JetStream resource leases (verifies UC-013) -- EXPANDED into T3.1a-d (re-planned 2026-06-22, see ADR-0004/0006). All hermetic via an injectable lease/transport seam with an in-memory double; real NATS exercised only by an integration-tagged test.**
-- [x] T3.1a `Kazi.Coordination.Lease` behaviour (acquire via CAS / renew / release, per-key TTL) + an in-memory test-double backend + a shared behaviour-conformance test suite  Owner: TBD  Est: 1.5h  verifies: [UC-013]  deps: [T2.6]  acc: acquire is mutually exclusive per key (second acquirer loses), TTL expiry frees the key on an injectable clock, renew extends it; the in-memory double passes the shared contract; hermetic (no NATS)  done: 2026-06-22 PR #49
-- [x] T3.1b Real NATS JetStream KV lease backend implementing the behaviour (CAS via KV revision, TTL via bucket max-age) + integration-tagged test that runs the shared contract against a real NATS when `NATS_URL` is set, skipped otherwise  Owner: TBD  Est: 2h  verifies: [UC-013]  deps: [T3.1a]  acc: the NATS backend passes the SAME shared behaviour-conformance suite as the double; the integration test is tagged and skipped without `NATS_URL` so default `mix test` stays hermetic  done: 2026-06-22 PR #56
-- [x] T3.1c Presence + work-intent subjects: publish/subscribe presence and per-resource intent on NATS subjects behind the transport seam + in-memory double; aggregate to a current presence/intent snapshot  Owner: TBD  Est: 1.5h  verifies: [UC-013]  deps: [T3.1a]  acc: publishing presence/intent from two doubles yields a merged snapshot listing both; stale entries age out on the injectable clock; hermetic via the double  done: 2026-06-22 PR #52
-- [x] T3.1d Wire leases into goal dispatch: a kazi instance acquires the resource lease before working a goal, renews on the clock, releases on terminate; contention defers rather than collides + tests  Owner: TBD  Est: 1.5h  verifies: [UC-013]  deps: [T3.1a, T3.1c]  acc: with the in-memory double, two instances targeting the same resource key serialize (one works, one defers); lease released on stop/await; hermetic  done: 2026-06-22 PR #61
-- [x] T3.2a `Kazi.Partition`: compute disjoint blast-radius partitions for a set of goals/changed files via the code-review-graph impact radius (reuse T4.2's `Kazi.Context` graph-source seam) + tests with a stub graph  Owner: TBD  Est: 1.5h  verifies: [UC-014]  deps: [T3.1a, T4.2]  acc: given a fixture graph + two goals with overlapping vs disjoint blast radii, returns one merged partition vs two; deterministic; hermetic (stub graph, no MCP)  done: 2026-06-22 PR #53
-- [x] T3.2b Map partitions to lease keys so overlapping blast radii contend on one lease while disjoint partitions proceed in parallel (integrate T3.1 leases) + tests  Owner: TBD  Est: 1h  verifies: [UC-014]  deps: [T3.2a, T3.1a]  acc: overlapping-partition goals derive the same lease key (serialize); disjoint goals derive distinct keys (parallel); asserted via the in-memory lease double; hermetic  done: 2026-06-22 PR #58
-**T3.3 Deepen the deploy action: multi-env, rollback, release tagging (verifies UC-015) -- EXPANDED into T3.3a-d (re-planned 2026-06-22). Build on `Kazi.Actions.Deploy`; all hermetic via the injectable deployer seam.**
-- [x] T3.3a Multi-env deploy config: `Kazi.Actions.Deploy` accepts an `env` + per-env target (service/project/region) from action params and selects it  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T2.6]  acc: deploying with env :staging vs :prod invokes the injectable stub deployer with env-appropriate args; asserted via stub, hermetic (no real gcloud/network)
-- [x] T3.3b Rollback: a deploy rollback via the injectable deployer seam, returning the prior revision/deploy ref  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a]  acc: rollback invokes the stub deployer with rollback args and returns the prior ref; hermetic test
-- [x] T3.3c Release tagging: on a successful deploy, create/record a release tag/ref for the artifact, persisted in the deploy result + `Kazi.ReadModel`  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a]  acc: deploy produces a release tag via an injectable git/tagger stub, recorded in the result + read-model; hermetic test
-- [x] T3.3d Wire env/rollback/tagging into `Kazi.Runtime`/CLI + ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-015]  deps: [T3.3a, T3.3b, T3.3c]  acc: runtime/CLI expose env + rollback options; mix test green; all hermetic
-**T3.4 Standing/continuous reconciler mode (verifies UC-016) -- EXPANDED into T3.4a-d (re-planned 2026-06-22). Build on `Kazi.Loop` (:gen_statem); all hermetic with injectable clock/doubles.**
-- [x] T3.4a Standing-mode loop option: `Kazi.Loop`/`Kazi.Runtime` support a standing mode that, instead of terminating at :converged, keeps observing on a bounded interval  Owner: TBD  Est: 1.5h  verifies: [UC-016]  deps: [T2.6]  acc: in standing mode the loop does not terminate at converged; it re-observes on an injectable-clock interval; doubles test
-- [x] T3.4b Re-trigger on drift: when a satisfied predicate regresses in standing mode, the loop re-dispatches and re-converges (reuses the convergence machinery)  Owner: TBD  Est: 1.5h  verifies: [UC-016]  deps: [T3.4a]  acc: a double whose predicate flips green->red post-converge causes re-dispatch + re-converge; persisted; hermetic
-- [x] T3.4c Graceful stop + supervision safety for standing goals: clean stop signal, bounded interval, no busy-spin  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a]  acc: stop/await semantics tested; interval respected via injectable clock; no tight loop
-- [x] T3.4d Author standing mode via goal-file/CLI flag + end-to-end ExUnit tests  Owner: TBD  Est: 1h  verifies: [UC-016]  deps: [T3.4a, T3.4b, T3.4c]  acc: a goal can declare standing mode; hermetic e2e test; mix test green
-**T3.5 Idea -> acceptance-predicate authoring (verifies UC-017) -- EXPANDED into T3.5a-c (re-planned 2026-06-22, see ADR-0011). Walking-skeleton: CLI + read-model first; surfaces (T3.6/T3.7) consume the same `Kazi.Authoring` API. All hermetic via a stub harness adapter.**
-- [x] T3.5a `Kazi.Authoring.propose/2`: from a prose idea, drive the harness adapter to draft a `Kazi.Goal` (acceptance predicates) returned as a structured reviewable artifact; persist it as status `proposed` in the read-model + tests with a stub adapter  Owner: TBD  Est: 2h  verifies: [UC-017]  deps: [T2.6]  acc: a fixture idea yields a structured draft goal (>=1 predicate) persisted as `proposed`; the harness is the injectable stub (no real claude); deterministic shape; hermetic  done: 2026-06-22 PR #50
-- [x] T3.5b Approval workflow: `approve`/`reject`/`edit` a proposed goal; on approve it transitions to an executable goal persisted as `approved`; reject/edit recorded; + tests  Owner: TBD  Est: 1.5h  verifies: [UC-017]  deps: [T3.5a]  acc: approve makes the goal runnable by `Kazi.Runtime`; reject/edit transitions persisted and queryable; invalid transitions rejected; hermetic  done: 2026-06-22 PR #54
-- [x] T3.5c CLI authoring surface + end-to-end ExUnit: `kazi propose <idea>` -> review -> `kazi approve <id>` -> runnable goal  Owner: TBD  Est: 1h  verifies: [UC-017]  deps: [T3.5a, T3.5b]  acc: CLI exposes propose/list-proposed/approve; e2e test drives idea->proposed->approved->run with stub adapter; `mix test` green; hermetic  done: 2026-06-22 PR #60
-- [x] T3.6a Phoenix + LiveView skeleton: add deps, endpoint/router/supervision, a `/healthz` route, and a Playwright harness (`playwright.config.ts` + smoke test)  Owner: TBD  Est: 2h  verifies: [UC-018]  deps: [T2.6]  acc: the app boots under the supervision tree, `/healthz` returns 200, `mix test` green incl. an LiveView smoke test, and `npx playwright test` loads the root page; hermetic (no NATS/harness)  done: 2026-06-22 PR #51
-- [x] T3.6b Goal board LiveView: list goals with status + latest predicate vector + iteration count from `Kazi.ReadModel`, live-updating; + LiveView test + Playwright (golden path + empty state)  Owner: TBD  Est: 2h  verifies: [UC-018]  deps: [T3.6a]  acc: seeded read-model renders the goal board; an injected update pushes a live change; empty-state renders; Playwright covers golden path + empty state; hermetic via fixture read-model  done: 2026-06-22 PR #57
-- [x] T3.6c Presence + lease map LiveView: render live presence/intent (T3.1c) and active leases (T3.1) from an injected source; + LiveView test + Playwright  Owner: TBD  Est: 1.5h  verifies: [UC-018]  deps: [T3.6a, T3.1c]  acc: injected presence/lease fixtures render as a presence list + lease map; a simulated lease release updates the view; Playwright asserts the rendered map; hermetic (no NATS)  done: 2026-06-22 PR #63
-- [x] T3.6d History view LiveView: per-goal iteration/evidence timeline from the read-model + Playwright test  Owner: TBD  Est: 1h  verifies: [UC-018]  deps: [T3.6b]  acc: a goal with N persisted iterations renders an ordered timeline with evidence; Playwright asserts the sequence; hermetic via fixture read-model  done: 2026-06-22 PR #62
-- [x] T3.7a `Kazi.Telegram` ingress behind an injectable client seam: parse an inbound message into a draft goal via `Kazi.Authoring.propose` + in-memory double tests  Owner: TBD  Est: 1.5h  verifies: [UC-019]  deps: [T2.6, T3.5a]  acc: a fixture inbound message produces a `proposed` goal through the authoring API; the Telegram client is the in-memory double (no token/network); hermetic  done: 2026-06-22 PR #55
-- [x] T3.7b `Kazi.Telegram` egress: send ping/notification on loop terminal events (converged / stuck / over-budget) through the client seam + tests  Owner: TBD  Est: 1h  verifies: [UC-019]  deps: [T3.7a]  acc: each terminal loop event yields exactly one outbound message captured by the double with the right status; no duplicate pings; hermetic  done: 2026-06-22 PR #59
-- [x] T3.7c Wire ingress -> authoring/approval and loop-events -> egress; end-to-end ExUnit  Owner: TBD  Est: 1h  verifies: [UC-019]  deps: [T3.7a, T3.7b]  acc: e2e test: inbound message -> proposed goal -> approve -> run -> terminal event -> outbound ping, all via doubles; `mix test` green; hermetic  done: 2026-06-22 PR #64
-
-### E4 -- Context injection / re-exploration mitigation (P3, see ADR-0010)
-
-Acceptance: each stateless `claude -p` iteration starts ORIENTED (blast-radius
-map injected) instead of re-discovering structure, without reintroducing
-conversation memory (ADR-0008/0009 preserved). Hermetically testable: stub the
-graph/repo-map + harness; use fixture repos; no real network. Build on
-`Kazi.Harness.ClaudeAdapter`, `Kazi.Runtime`, `Kazi.ReadModel`, and the
-`code-review-graph`/`graphify` tooling.
-
-- [x] T4.1 `claude -p --output-format json` in the adapter: capture structured result + real token/cost + touched working set; feed token usage into the T1.4 budget. Tests use a stub binary emitting JSON  Owner: TBD  Est: 1.5h  verifies: [UC-009, UC-022]  deps: [T0.6]  acc: adapter parses json result incl. token usage; budget consumes it; hermetic stub  done: 2026-06-22 PR #41
-- [x] T4.2 `Kazi.Context` orientation-pack builder: from failing predicates + workspace produce a bounded, ranked pack (impacted files/symbols + failing test source + callers/callees) via code-review-graph when present else a tree-sitter repo map + tests  Owner: TBD  Est: 2.5h  verifies: [UC-022]  deps: [T0.3]  acc: given a fixture repo + failing predicate, returns a token-bounded ranked pack; deterministic; hermetic  done: 2026-06-22 PR #43
-- [x] T4.3 Inject the orientation pack into `build_prompt/2` as a STABLE cacheable prefix (keep the failing-evidence section) + tests  Owner: TBD  Est: 1h  verifies: [UC-022, UC-003]  deps: [T4.2]  acc: prompt carries an orientation prefix that is byte-identical across iterations for the same (sha, failing-set); evidence section unchanged  done: 2026-06-22 PR #44
-- [x] T4.4 Workspace orientation file: kazi generates/refreshes `CLAUDE.md`/`.kazi/context.md` in the target from the code graph/graphify + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022]  deps: [T4.2]  acc: a fixture target gets an up-to-date orientation file; regenerated on change; hermetic  done: 2026-06-22 PR #46
-- [x] T4.5 Wire `code-review-graph` MCP into the target workspace `.mcp.json` + ensure graph freshness before dispatch + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022]  deps: [T0.6]  acc: dispatch ensures a fresh graph + the workspace exposes the graph MCP; verified via stub; hermetic  done: 2026-06-22 PR #42
-- [x] T4.6 SHA-keyed orientation-pack cache in the read-model, incremental invalidation on the changed blast radius + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022, UC-006]  deps: [T4.2, T0.9]  acc: pack cached by (workspace, git-sha, failing-set); reused when unchanged; invalidated on blast-radius change; SQLite round-trip test  done: 2026-06-22 PR #47
-- [x] T4.7 Bounded working-set digest across iterations (from T4.1 json) distilled into the next prompt -- map memory, NOT conversation + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022]  deps: [T4.1, T4.3]  acc: next prompt carries a compact files-touched/what-changed note; no transcript carried; hermetic doubles  done: 2026-06-22 PR #48
-- [x] T4.8 claw-code hygiene in the adapter: per-dispatch token ceiling + evidence/tool-result truncation + minimal per-goal tool/permission set + tests  Owner: TBD  Est: 1h  verifies: [UC-009, UC-022]  deps: [T0.6]  acc: a dispatch is capped + evidence truncated to a budget; asserted via stub  done: 2026-06-22 PR #45
-**T4.9 Pluggable semantic-retrieval memory adapter (verifies UC-022) -- UN-DEFERRED + EXPANDED into T4.9a-c (re-planned 2026-06-22, see ADR-0012). Off by default; the deterministic orientation pack (ADR-0010) + thin evidence (ADR-0009) remain the contract; retrieval only augments. Hermetic via a stub retriever; the real graphify-embeddings backend is integration-tagged/excluded by default.**
-- [x] T4.9a `Kazi.Retrieval` behaviour (`retrieve/3` -> top-k snippets) + a default NO-OP backend (returns []) + inject snippets into `build_prompt/3` as a clearly-delimited optional section, OFF by default + tests  Owner: TBD  Est: 2h  verifies: [UC-022]  deps: [T4.2, T4.3]  acc: with retrieval disabled (default) `build_prompt` output is byte-identical to today; with an injected stub retriever, top-k snippets render in a dedicated section AFTER the orientation prefix + evidence body; deterministic given a fixed retriever; hermetic  done: 2026-06-22 PR #65
-- [x] T4.9b Graphify-embeddings backend implementing `Kazi.Retrieval`: embed the target + similarity-search the failing predicate's evidence terms for top-k snippets + a tagged integration test (the SAME behaviour-conformance shape as the stub) excluded by default  Owner: TBD  Est: 2.5h  verifies: [UC-022]  deps: [T4.9a]  acc: the backend returns top-k snippets for a query against a fixture index; the integration test is tagged and skipped without the graphify tooling so default `mix test` stays hermetic  done: 2026-06-22 PR #66
-- [x] T4.9c Opt-in wiring + cache reuse: enable retrieval per-goal via config/opts; reuse the T4.6 SHA-keyed cache to avoid re-embedding an unchanged target; assert the core loop is unchanged when off + tests  Owner: TBD  Est: 1.5h  verifies: [UC-022, UC-006]  deps: [T4.9a, T4.6]  acc: a goal/config can enable retrieval; off-by-default leaves the loop + prompt unchanged; enabling injects retrieved snippets; the SHA-keyed cache is reused when the target is unchanged; hermetic  done: 2026-06-22 PR #67
+The WBS below is the single checkable source of truth; toggle `[ ]` to `[x]`.
+Status `kind: agent` is implicit unless noted.
 
 ### E5 -- Adopt kazi on an existing project: `kazi init` (P2, see ADR-0013)
 
 Acceptance: pointing `kazi init` at a working repo emits a loadable starter
 goal-file capturing the project's test command + guard invariants, with TODO
-placeholders for live predicates. Deterministic stack detection; optional harness
-enrichment off by default. Hermetic via fixture repos + a stub harness. Builds on
-`Kazi.Context.RepoMapSource`, the provider registry, and `Kazi.Goal.Loader`.
+placeholders for live predicates. T5.1-T5.5 are done (merged); only the worked
+example remains.
 
-- [x] T5.1 `Kazi.Adopt.detect/1`: deterministic stack + test-command detection from marker files (`go.mod`->`go test ./...`, `mix.exs`->`mix test`, `package.json` test script, `pyproject.toml`/`setup.cfg`->`pytest`) returning a `test_runner` predicate spec + stack metadata; reuse the `Kazi.Context.RepoMapSource` introspection seam + tests with fixture repos  Owner: TBD  Est: 2h  verifies: [UC-023]  deps: [T4.2]  acc: each fixture stack yields the right `cmd`/`args`; unknown stack yields a clear no-detection result; deterministic; hermetic (no network)
-- [x] T5.2 `Kazi.Adopt.guards/1`: derive conservative guard predicates from the detected stack (coverage-ratchet guard when a coverage tool is detectable; else a tests-pass/test-count baseline) + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1]  acc: a stack with coverage yields a coverage guard; one without yields only the baseline; never emits a guard it cannot evaluate; hermetic
-- [x] T5.3 `Kazi.Adopt.to_toml/1`: render a detected goal (test_runner + guards + a COMMENTED `http_probe` predicate with TODO url/expected placeholders) to a goal-file that round-trips through `Kazi.Goal.Loader` + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1, T5.2]  acc: generated TOML loads cleanly via `Kazi.Goal.Loader`; the live predicate is present-but-commented with TODO placeholders; deterministic byte output; hermetic
-- [x] T5.4 Optional harness enrichment: behind an explicit flag, drive the harness (injectable seam) to propose `http_probe`/`browser` predicates from discovered endpoints; OFF by default + tests with a stub harness  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1]  acc: with enrichment off the output is the deterministic detection only; with a stub harness on, proposed live predicates are merged; hermetic (no real agent)
-- [x] T5.5 CLI `kazi init <path> [--enrich] [--out <file>]`: wire detect -> guards -> (optional enrich) -> write; print the written path + a "review then approve" hint + tests  Owner: TBD  Est: 1.5h  verifies: [UC-023]  deps: [T5.1, T5.2, T5.3, T5.4]  acc: `kazi init` on a fixture writes a loadable goal-file and prints the path; `--out` honored; CLI parse/exec tested; hermetic
-- [ ] T5.6 End-to-end + example: `kazi init` against the `fixtures/deploy-target` repo produces a goal-file whose test_runner + guards load and whose live predicate is a TODO stub; commit a worked example + README "adopt an existing project" snippet  Owner: TBD  Est: 1h  verifies: [UC-023]  deps: [T5.5]  acc: e2e test asserts the generated goal loads + names the detected go test command; README shows the adopt flow; `mix test` green; hermetic
+- [ ] T5.6 End-to-end + example: `kazi init` against the `fixtures/deploy-target` repo produces a goal-file whose test_runner + guards load and whose live predicate is a TODO stub; commit a worked example + README "adopt an existing project" snippet  Owner: TBD  Est: 1h  verifies: [UC-023]  deps: []  acc: a hermetic e2e test asserts the generated goal loads via `Kazi.Goal.Loader` + names the detected `go test ./...` command for `fixtures/deploy-target`; the live predicate is a commented TODO; README shows the stack-detection adopt flow (distinct from the E7 registry snippet already in the README); `mix test` green; hermetic. NOTE: the CLI (`kazi init <path>`, T5.5), the writer (`Kazi.Adopt.to_toml/1`, T5.3), `Kazi.Adopt.detect/1` (T5.1), and `guards/1` (T5.2) are all merged on `main` -- this task only adds the e2e + example.
 
 ### E6 -- Binary distribution: Burrito + Homebrew (P2, see ADR-0014)
 
 Acceptance: `brew install kazi-org/tap/kazi` installs a single self-contained
 binary (no Erlang prerequisite) with the FULL read-model (NIF bundled), and
-`kazi --help` / a fixture `kazi run` work from it. Supersedes escript-as-distribution.
+`kazi --help` / a fixture `kazi run` work from it. Supersedes
+escript-as-distribution. **T6.1 (mix release) is merged.** The Burrito dep +
+wrap config + arg-shim (`Kazi.Release.burrito_main/0`) are merged too, but a
+fully-linked host binary has NOT been produced yet (Risk R-E6-1) -- T6.2's
+acceptance is best proven on the T6.3 CI matrix (macOS-15 / Ubuntu runners) or a
+macOS-15-or-earlier machine, not on this macOS-26 host.
 
-- [x] T6.1 `mix release` config: add a `releases:` block for a `kazi` release exposing the CLI entrypoint; `MIX_ENV=prod mix release` builds; smoke-run the release's `kazi --help` in CI  Owner: TBD  Est: 1.5h  verifies: [UC-024]  deps: [infrastructure]  acc: `mix release` builds a `kazi` release; the released `bin/kazi eval`/start runs `--help` and exits 0; documented in the repo
-- [ ] T6.2 Burrito wrap: add Burrito with targets macOS `aarch64`/`x86_64` + Linux `x86_64`/`aarch64`; a built binary bundles ERTS + the `ecto_sqlite3` NIF; smoke-run a locally-built binary converging a fixture goal to prove the read-model works (no escript degradation)  Owner: TBD  Est: 2.5h  verifies: [UC-024]  deps: [T6.1]  acc: a Burrito binary for the host platform runs `kazi run` against a fixture and PERSISTS iterations to SQLite (read-model present); `--help` works; documented
-- [ ] T6.3 Release CI + release-please: tag-triggered GitHub Actions matrix builds Burrito binaries on macOS + Ubuntu runners, uploads them + checksums to GitHub Releases; release-please manages versioning from Conventional Commits  Owner: TBD  Est: 2h  verifies: [UC-024]  deps: [T6.2]  acc: a release tag produces per-platform binaries + a `.sha256` each as Release assets; the workflow is green on a dry-run/test tag
-- [ ] T6.4 Homebrew tap: create `kazi-org/homebrew-tap` with a `kazi` formula that downloads the platform artifact + verifies its checksum; `brew install kazi-org/tap/kazi` installs a working `kazi`  Owner: TBD  Est: 1.5h  verifies: [UC-024]  kind: any  deps: [T6.3]  acc: `brew install kazi-org/tap/kazi` on macOS installs a runnable `kazi`; `brew audit --strict` passes; `kazi --help` works post-install
-- [ ] T6.5 Docs: README install section leads with `brew install` + the prebuilt binary; note the runtime requirement that a coding agent (`claude`) must be on PATH; reframe the escript as a contributor convenience  Owner: TBD  Est: 0.5h  verifies: [UC-024]  deps: [T6.4]  acc: README documents brew + binary install and the harness-on-PATH requirement; links the GitHub Releases page
-
-### E7 -- init source/output model: registry adapter + goal-set (P2, see ADR-0015)
-
-Acceptance: `kazi init --registry <file.json>` deterministically turns a capability
-registry into a LOADABLE, RUNNABLE goal SET (one goal-file per capability), code
-predicates derived from declared test bindings, live predicates scaffolded as commented
-TODOs, prose (`.md`) inputs rejected, `--enrich` off by default. Folds into the existing
-`kazi init` verb (no new subcommand). Reuses the `Kazi.Adopt` `:file_reader` seam and
-`Kazi.Goal.Loader`. NOTE: T5.3 (goal-file writer) and T5.5 (the `init` CLI verb) are
-prerequisites; this epic completes them as it lands.
-
-  (T5.3 the goal-file writer and T5.5 the `init` CLI verb are listed under E5 above;
-  PR #75 delivered both as part of this epic.)
-- [x] T7.1 `Kazi.Adopt.Registry.parse/2`: decode a JSON capability registry through the `:file_reader` seam into a validated `[capability]` list (minimal contract: `id`, `name`, optional `test`/`tests` binding(s), optional `scope`); REJECT prose (`.md`) inputs with a clear error; hermetic fixture registries  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [T5.1]  acc: a valid registry parses to capabilities; a malformed/empty registry yields a clear error; a `.md` path is rejected as "prose, not a registry"; deterministic; hermetic
-- [x] T7.2 `Kazi.Adopt.Registry.to_goal_set/2`: map each capability to a goal MAP (declared test binding -> `test_runner` acceptance predicate; missing binding -> commented TODO gap; a scaffolded commented `http_probe`/`browser` live predicate per goal); every goal round-trips through `Kazi.Goal.Loader` + tests  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [T7.1, T5.3]  acc: a registry yields one goal per capability, each loadable; gaps are commented TODOs; deterministic byte output; hermetic
-- [x] T7.3 `kazi init --registry <file> [--enrich] [--out <dir>]` (registry mode, folded into the `init` verb): dispatch repo-vs-registry by input; write a goal SET under `--out/<scope>/<id>.toml`; `--enrich` (off by default) fills only gap bindings via the harness seam; print written paths + review hint; CLI parse/exec tests  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [T7.2, T5.5]  acc: registry input writes a loadable goal set; repo input still writes one goal-file; prose rejected; `--enrich` default-off proven; hermetic
-- [x] T7.4 e2e + convergence + docs: a fixture `capabilities.json` produces a loadable goal set AND a small fixture catalog CONVERGES through `Kazi.Runtime`; README "adopt a capability registry" snippet  Owner: TBD  Est: 1.5h  verifies: [UC-025]  deps: [T7.3]  acc: e2e asserts the generated goal set loads + names the declared test commands; a fixture catalog converges; README shows the registry adopt flow; `mix test` green; hermetic
-
-## Parallel Work
-
-Behaviours-first (T0.3 defines the provider/adapter/action contracts) lets the
-providers, the adapter, the actions, and the loop all build in parallel against
-contracts; the only hard serialization is the state machine spine and final
-wiring (T0.7b).
-
-| Track | Tasks | Notes |
-|-------|-------|-------|
-| A: Domain + behaviours | T0.3 | unblocks all of Slice 0 |
-| B: Providers | T0.4, T0.5, T0.5b, T0.9 | build against behaviours |
-| C: Adapter + actions | T0.6, T0.10a, T0.10b | build against behaviours |
-| D: Loop core | T0.7, T0.8, T0.10 | state machine spine |
-| E: Target fixture + infra | T0.13, T0.6h (human) | deploy target |
-| F: Integration + validation | T0.7b, T0.11, T0.12 | converge tracks |
+- [ ] T6.2 Burrito wrap -- produce a built binary: the merged config declares targets macOS `aarch64`/`x86_64` + Linux `x86_64`/`aarch64`; build a binary for a supported host that bundles ERTS + the `exqlite` NIF; smoke-run it converging a fixture goal to prove the read-model persists (no escript degradation)  Owner: TBD  Est: 1.5h  verifies: [UC-024]  deps: []  acc: a Burrito binary for a supported host runs `kazi run` against a fixture and PERSISTS iterations to SQLite (read-model present); `--help` works; the build command + output documented. The config/dep/code wiring is already merged; this task is the actual build + smoke-run on a Zig-compatible runner (see R-E6-1).
+- [ ] T6.3 Release CI + release-please: tag-triggered GitHub Actions matrix builds Burrito binaries on macOS + Ubuntu runners, uploads them + `.sha256` checksums to GitHub Releases; release-please manages versioning from Conventional Commits  Owner: TBD  Est: 2h  verifies: [UC-024]  deps: [T6.2]  acc: a release tag produces per-platform binaries + a `.sha256` each as Release assets; the workflow is green on a dry-run/test tag. This is also the most reliable way to satisfy T6.2's host-binary build (the runners are Zig-compatible).
+- [ ] T6.4 Homebrew tap: create the `kazi-org/homebrew-tap` repo with a `kazi` formula that downloads the platform artifact + verifies its checksum; `brew install kazi-org/tap/kazi` installs a working `kazi`  Owner: TBD  Est: 1.5h  verifies: [UC-024]  kind: any  deps: [T6.3]  acc: `brew install kazi-org/tap/kazi` on macOS installs a runnable `kazi`; `brew audit --strict` passes; `kazi --help` works post-install. NEEDS the new `kazi-org/homebrew-tap` repo + a published GitHub Release to point the formula at (human-gated: repo creation + a real release).
+- [ ] T6.5 Docs: README install section leads with `brew install` + the prebuilt binary; note the runtime requirement that a coding agent (`claude`) must be on PATH; reframe the escript as a contributor convenience  Owner: TBD  Est: 0.5h  verifies: [UC-024]  deps: [T6.4]  acc: README documents brew + binary install and the harness-on-PATH requirement; links the GitHub Releases page.
 
 ### Waves
 
-Waves reference task IDs; toggle the single checkbox in the WBS above. Run
-`T0.6h` (human, GCP setup) out-of-band starting at Wave 2; T0.12 waits on it.
+Only the remaining tasks. T5.6 is independent and hermetic -- start it now in
+parallel with E6. E6 is a strict chain (T6.2 -> T6.3 -> T6.4 -> T6.5).
 
-- **Wave 1 (1 agent):** T0.1
-- **Wave 2 (3 agents):** T0.2, T0.3, T0.13   (kick off T0.6h human in parallel)
-- **Wave 3 (8 agents):** T0.4, T0.5, T0.5b, T0.6, T0.9, T0.7, T0.10a, T0.10b
-- **Wave 4 (3 agents):** T0.7b, T0.8, T0.10
-- **Wave 5 (1 agent):** T0.11
-- **Wave 6 (1 agent):** T0.12   (gated on T0.6h + T0.13)
-- **Wave 7 (5 agents):** T1.1, T1.3, T1.4, T1.5, T1.6   (T1.2 after T1.1)
-- **Wave 8 (2 agents):** T1.2, T1.7   -> then T1.8 dogfood
-- **Wave 9 (3 agents):** T2.1, T2.2, T2.3   -> then T2.4 tests, T2.5 dogfood, T2.6 cutover
-- **Wave 10 (2 agents):** T3.3a, T3.4a   (foundational; deps met by T2.6)
-- **Wave 11 (4 agents):** T3.3b, T3.3c, T3.4b, T3.4c
-- **Wave 12 (2 agents):** T3.3d, T3.4d
-- **Wave 13 (3 agents):** T4.1, T4.2, T4.5   (foundational context-injection; deps met)
-- **Wave 14 (4 agents):** T4.3, T4.4, T4.6, T4.8   -> then T4.7 digest; T4.9 deferred (ADR-0005)
-- **Wave 15 (3 agents):** T3.1a, T3.5a, T3.6a   (Slice-3 foundations: lease behaviour, authoring, Phoenix skeleton; deps met by T2.6)
-- **Wave 16 (6 agents):** T3.1b, T3.1c, T3.2a, T3.5b, T3.6b, T3.7a
-- **Wave 17 (6 agents):** T3.1d, T3.2b, T3.5c, T3.6c, T3.6d, T3.7b
-- **Wave 18 (1 agent):** T3.7c   (final ingress->authoring->egress e2e)
-- **Wave 19 (1 agent):** T4.9a   (retrieval behaviour + no-op default + build_prompt opt-in section)
-- **Wave 20 (2 agents):** T4.9b, T4.9c   (graphify-embeddings backend; opt-in wiring + cache reuse)
-- **Wave 21 (2 agents):** T5.1, T6.1   (adopt: stack detection; binary: mix release config — independent epics)
-- **Wave 22 (4 agents):** T5.2, T5.3, T5.4, T6.2   (adopt: guards/writer/enrich; binary: Burrito wrap)
-- **Wave 23 (2 agents):** T5.5, T6.3   (adopt: `kazi init` CLI; binary: release CI + release-please)
-- **Wave 24 (2 agents):** T5.6, T6.4   (adopt: e2e + example; binary: Homebrew tap) -> then T6.5 docs
-
-E5 (adopt, ADR-0013) and E6 (binary distribution, ADR-0014) are independent and
-run in parallel across Waves 21-24. E5 is fully hermetic (fixture repos + stub
-harness). E6's later tasks need real release artifacts: T6.3 verifies on a test
-tag, and T6.4 (`brew install`) is `kind: any` — it needs the `kazi-org/homebrew-tap`
-repo and a published GitHub Release, so it completes against a real release rather
-than a stub.
-
-T3.3/T3.4 (deploy deepening, standing mode) and now T3.1/T3.2/T3.5/T3.6/T3.7
-(NATS leases, graph partitioning, idea->predicate authoring, LiveView dashboard,
-Telegram bridge) are re-planned into granular hermetic subtasks (2026-06-22; see
-ADR-0011 for the operator-surface decoupling decision). Waves 15-18 honor real
-deps: the lease behaviour T3.1a underpins partitioning (T3.2) and the dashboard's
-lease/presence map (T3.6c); authoring T3.5a underpins both the dashboard's write
-path and the Telegram ingress (T3.7a). All subtasks are hermetic, so /apply --pool
-can pick them up now. T4.9 (semantic-retrieval memory adapter) stays deferred
-(ADR-0005).
-
-E4 (context injection, ADR-0010) is granular and hermetic (Waves 13-14); deps are
-already met, so /apply --pool can pick it up. T4.9 (semantic-retrieval memory
-adapter) is the ADR-0005 deferred item -- left coarse.
-
-## Timeline and Milestones
-
-| Milestone | Exit criteria | Depends on |
-|-----------|---------------|------------|
-| M0 Skeleton reaches production | T0.1-T0.12 done; D0 acceptance (live verified deploy) | -- |
-| M1 Loop is trustworthy | T1.1-T1.8 done; D1 acceptance | M0 |
-| M2 kazi can create + self-host | T2.1-T2.6 done; D2 acceptance | M1 |
-| M3 Deepening underway | first E3 item built as a self-hosted kazi goal | M2 |
+- **Wave A (1 agent, now):** T5.6   (hermetic; no external dependency)
+- **Wave B:** T6.2   (build + smoke-run a Burrito host binary on a Zig-compatible runner; or fold into T6.3 CI)
+- **Wave C:** T6.3   (release CI + release-please; green on a test tag)
+- **Wave D (kind: any, human-gated):** T6.4   (create `kazi-org/homebrew-tap` + cut a real Release) -> then T6.5 docs
 
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
 |----|------|--------|------------|------------|
-| R1 | Loop oscillates (fix A breaks B) forever | High | High | Slice 1 regression detector + budget/stuck escalation (T1.2, T1.4, T1.5) |
-| R2 | Flaky predicates poison the loop | High | Med | Re-run/quarantine (T1.3) before counting a fail as work |
-| R3 | Vacuous goal "converges" having built nothing | High | Med | Vacuous-goal guard (T2.3); creation goals must have a predicate failing at t0 |
-| R4 | `claude -p` interface drift breaks the adapter | Med | Med | Adapter behind a behaviour (T0.3/T0.6); stub binary in tests; harness-agnostic by design |
-| R5 | Scope creep into a full SDLC platform | High | Med | ADR-0007: build a phase only when a slice needs it; convergence/maintenance is the defensible core |
-| R6 | Self-hosting too early (kazi cannot yet build itself) | Med | Med | Cutover gated at T2.6; Slices 0-2 bootstrapped with existing skills |
-| R7 | GCP/Cloud Run setup blocks the Slice 0 dogfood | Med | Med | T0.6h is `kind: human`, started at Wave 2; deploy action behind a stub (T0.10b) so all other E0 tasks proceed without it |
+| R-E6-1 | Burrito host binary cannot be linked on the dev machine (Zig 0.15.2, the version Burrito 1.5.0 pins, fails to link against the macOS 26 / Xcode 26 SDK; Zig 0.16 links but is API-incompatible with Burrito 1.5.0's `build.zig`). | Med | High (observed this session) | Build on the T6.3 CI matrix (GitHub macOS-15 / Ubuntu runners are Zig-compatible) or a macOS-15-or-earlier host. The release assembles + bundles ERTS/NIFs fully; only the final Zig link fails on macOS 26. Do NOT block E6 on a local build. |
+| R-E6-2 | T6.4 needs a second repo (`kazi-org/homebrew-tap`) and a published GitHub Release before `brew install` can work. | Med | Med | Sequence T6.4 after T6.3 produces real Release artifacts; repo creation + first release is human-gated (`kind: any`). |
+| R-E6-3 | The shipped binary still requires the user's coding agent (`claude`/Codex) on PATH at runtime (kazi drives a harness by design, ADR-0001). | Low | High (inherent) | Document the runtime dependency in T6.5; it is not solved by packaging. |
 
 ## Operating Procedure
 
-Definition of done (all must hold): ExUnit tests written and green for the change;
-`mix format --check-formatted` clean; PR merged to main via rebase with CI green;
-for any user-facing/production surface, deployed to Cloud Run and verified live
-there (a live probe passes), not staging-only; reported honestly (state what was
-observed in production). Make many small focused commits; never commit files from
-different directories in one commit. Add tests with every implementation task
-(API/http_probe test for any endpoint, Playwright test for any UI).
+Definition of done (all must hold): ExUnit tests written and green for the
+change; `mix format --check-formatted` clean; `mix compile --warnings-as-errors`
+clean; PR merged to `main` via **rebase** (not squash, not a merge commit) with
+CI green; for any user-facing/production surface, deployed and verified live (a
+live probe passes), reported honestly. Make many small focused commits; never
+commit files from different directories in one commit. Add tests with every
+implementation task.
+
+Execution model: work the plan with `/apply --pool` (atomic git-ref claims at
+`refs/claims/*` via the global `~/.claude/skills/claim/scripts/claim.sh`). The
+WBS above is the single checkable source of truth.
 
 ## Progress Log
 
-### 2026-06-22 -- Change Summary (E5 adopt + E6 binary distribution)
-- T0.12 dogfood CONVERGED live (idea -> production); T0.12 + T0.6h marked done.
-  Every prior task in the plan is now [x].
-- Added two new epics for adoption + distribution:
-  - E5 (`kazi init`, ADR-0013): reverse-engineer a starter goal-file from an existing
-    repo. T5.1 deterministic stack detection (reusing `Kazi.Context.RepoMapSource`),
-    T5.2 conservative guards, T5.3 goal-file writer (loadable, TODO live stubs), T5.4
-    optional harness enrichment (off by default), T5.5 `kazi init` CLI, T5.6 e2e +
-    example. New UC-023.
-  - E6 (Burrito + Homebrew, ADR-0014): ship a single self-contained binary. T6.1 mix
-    release, T6.2 Burrito wrap (bundles ERTS + the SQLite NIF, fixing the escript
-    read-model gap), T6.3 release CI + release-please, T6.4 Homebrew tap, T6.5 docs.
-    New UC-024. Supersedes escript-as-distribution.
-- Scheduled Waves 21-24 (E5 and E6 run in parallel). New ADR-0013, ADR-0014.
+### 2026-06-22 -- Change Summary (HANDOVER trim)
+- **Trimmed all completed epics out of the plan** (E0-E4, E7, and E5 T5.1-T5.5).
+  Every trimmed task was already `[x]` and merged; this plan now contains ONLY the
+  open work: T5.6 and E6 (T6.2-T6.5).
+- Knowledge routing (already in place; nothing lost by the trim):
+  - **Tier-1 architecture** lives in `docs/concept.md` (this project's canonical
+    architecture doc + source of truth; there is no separate `design.md` by
+    convention).
+  - **Tier-2 decisions** are ADRs `0001`..`0015` (`docs/adr/`). ADR-0015 (init
+    source/output model: registry adapter + goal-set) was added this session.
+  - **Tier-3 operations** are in `docs/devlog.md` (newest first), including the
+    E7 registry-adapter entry and the T0.12 idea->production convergence; landmines
+    in `docs/lore.md` (L-0001..L-0004).
+- This session's merges (context for the next session): PRs #70 (T6.1 mix
+  release), #71 (T5.1 detect), #72 (T5.2 guards), #73 (T5.4 enrichment), #74
+  (T6.2 Burrito config/wiring -- binary NOT yet built, see R-E6-1), #75 (E7
+  registry adapter + goal-set, which also delivered the T5.3 writer and T5.5 `init`
+  CLI verb). ADR-0015 written; UC-025 added.
+- Older Progress Log / Wave-history entries were removed per the trim policy; the
+  full build history is reconstructable from `docs/devlog.md` and the merged PRs.
 
-### 2026-06-22 -- Change Summary (T4.9 un-deferred)
-- E3 Slice-3 epic shipped end-to-end (T3.1a-d, T3.2a-b, T3.5a-c, T3.6a-d, T3.7a-c;
-  PRs #49-#64). Tests 372 -> 650.
-- Un-deferred T4.9 (per user direction) and granularized it into T4.9a-c (ADR-0012):
-  a `Kazi.Retrieval` behaviour with a no-op default + optional build_prompt section
-  (T4.9a), a graphify-embeddings backend integration-gated like the NATS test (T4.9b),
-  and opt-in wiring + T4.6 cache reuse (T4.9c). Off by default; deterministic
-  orientation (ADR-0010) + thin evidence (ADR-0009) remain the contract.
-- Scheduled Waves 19-20. New ADR-0012 (pluggable retrieval-memory adapter).
+## Hand-off Notes (cold start for a new session)
 
-### 2026-06-22 -- Change Summary (Slice-3 granularization)
-- E4 context-injection epic shipped: T4.1-T4.8 merged (PRs #41-#48), T4.9 deferred
-  (ADR-0005). Tests 372 -> 495.
-- Granularized the remaining E3/Slice-3 epic from coarse `Est: TBD` placeholders
-  into hermetic, checkable subtasks: T3.1 -> T3.1a-d (NATS lease behaviour + double,
-  real JetStream KV backend, presence/intent, dispatch wiring; UC-013); T3.2 ->
-  T3.2a-b (graph blast-radius partitioning reusing the T4.2 graph seam + lease-key
-  mapping; UC-014); T3.5 -> T3.5a-c (`Kazi.Authoring` propose/approve + CLI; UC-017);
-  T3.6 -> T3.6a-d (Phoenix LiveView skeleton, goal board, presence/lease map,
-  history; UC-018); T3.7 -> T3.7a-c (Telegram ingress/egress bridge; UC-019).
-- Scheduled Waves 15-18 for /apply --pool, honoring deps (T3.1a underpins T3.2 and
-  T3.6c; T3.5a underpins T3.6 write-path and T3.7a). All subtasks hermetic.
-- New ADR-0011 (Slice-3 operator surfaces): Phoenix LiveView for the dashboard;
-  dashboard + Telegram are READ projections over the read-model + NATS and never
-  couple into the core loop; surfaces sit behind injectable seams for hermetic tests.
-
-### 2026-06-21 -- Change Summary (revision 2)
-- Revised the plan to make Slice 0 reach production (idea -> production walking
-  skeleton). Added integrate (T0.10a, UC-020), deploy (T0.10b, UC-015), live
-  http_probe (T0.5b, UC-011), and a deployable target fixture (T0.13) plus the
-  GCP human task (T0.6h). State machine now decides non-agent actions
-  (integrate/deploy), not just agent dispatch (T0.7).
-- Fixed parallelism: behaviours defined first (T0.3) so providers/adapter/actions/
-  loop build in parallel; added wiring task T0.7b. Wave 3 now saturates 8 agents.
-- Fixed duplicate checkboxes: Waves reference task IDs only; the WBS is the single
-  checkable source of truth.
-- Closed under-specs: goal-file TOML schema + fixture (T0.4); target workspace as
-  an explicit CLI arg (T0.10); fix lands via the integrate action (T0.10a).
-- Amended `docs/adr/0007-build-strategy-walking-skeleton.md` (skeleton spans idea
-  -> production; later slices deepen). Updated `docs/concept.md` build order.
-  Updated `.claude/scratch/usecases-manifest.json` (added UC-020, UC-021; moved
-  UC-011, UC-015 to Slice 0).
-- No code yet. Next: Wave 1 (T0.1 scaffold), then drive E0 to M0.
-
-### 2026-06-21 -- Wave progress (pool)
-- Wave 1 DONE: T0.1 Elixir OTP scaffold merged (PR #3, `bc4ba8b`). Verified on main:
-  `mix compile --warnings-as-errors` clean, `mix format --check-formatted` clean,
-  `mix test` 2 passed. Toolchain: Elixir 1.20.1 / Erlang OTP 29 (Homebrew).
-- Next: Wave 2 (T0.2 CI, T0.3 domain types+behaviours, T0.13 deployable fixture);
-  kick off T0.6h (human, GCP) out-of-band.
-- Wave 2 DONE: T0.2 (PR #4, CI green on PR + main), T0.3 (PR #6, core types +
-  PredicateProvider/HarnessAdapter/Action behaviours, +Budget/+Scope helpers),
-  T0.13 (PR #5, Go convergence fixture under fixtures/deploy-target/, isolated).
-  Verified on main: compile clean (warnings-as-errors), format clean, 68 tests
-  pass (18 doctests, 50 tests), CI green.
-- Next: Wave 3 (8 agents): T0.4, T0.5, T0.5b, T0.6, T0.9, T0.7, T0.10a, T0.10b
-  (all build against T0.3 behaviours). Reminder: T0.6h human task still open.
-- Wave 3 DONE (all 8 merged, CI green): T0.4 goal loader+TOML (#11), T0.5
-  test-runner provider (#7), T0.5b http_probe provider (#8), T0.6 claude -p
-  adapter (#9), T0.9 SQLite read-model (#13), T0.7 convergence :gen_statem loop
-  (#14), T0.10a integrate action (#12), T0.10b deploy action (#10). Verified on
-  main: compile clean (warnings-as-errors, 21 lib files), format clean, 130 tests
-  pass (18 doctests, 112 tests). Deps added additively: toml, ecto_sql,
-  ecto_sqlite3, jason. Providers/adapter/actions implement the T0.3 behaviours;
-  loop is real :gen_statem (no hex dep). Components built against contracts/doubles
-  — not yet assembled (that is T0.7b).
-- Next: Wave 4: T0.7b (wire real components into the loop), T0.8 (objective-
-  termination guard) in parallel; then T0.10 (CLI) after T0.7b so the CLI wires
-  the real runtime (avoids a stubbed CLI). T0.6h (human GCP) still gates T0.12.
-- Wave 4A DONE: T0.8 termination guard (#15) + T0.7b runtime wiring (#16), CI
-  green, loop.ex changes composed cleanly (T0.7b additive on T0.8's guard).
-  Verified on main: compile clean, format clean, 135 tests (18 doctests, 117).
-  Guard: `Kazi.PredicateVector.satisfied?/1` is the only path to :converged
-  (live predicate blocks success). Runtime: `Kazi.Runtime.run/2` wires real
-  providers (`:tests`→TestRunner, `:http_probe`→HttpProbe), claude adapter,
-  integrate+deploy actions, and per-iteration SQLite persistence. End-to-end
-  wire check PASS: example goal kinds covered by runtime dispatch.
-- Wave 4B: T0.10 CLI `kazi run <goal-file> --workspace <path>` over Kazi.Runtime.
-  Then Wave 5 (T0.11 full-loop integration test), Wave 6 (T0.12 dogfood, gated on
-  human T0.6h). T0.6h (GCP) STILL OPEN — blocks T0.12 only.
-- Wave 4B DONE: T0.10 CLI (#17), CI green. `mix kazi.run` + an escript `kazi`
-  (main_module Kazi.CLI). Exercised: --help; exit codes (usage→2, bad goal→1,
-  help→0); example goal loads. Escript can't bundle the SQLite NIF → degrades to
-  no-persistence with a warning (use `mix kazi.run` for persistence). 148 tests
-  on main (18 doctests, 130 tests). WAVE 4 COMPLETE.
-- Next: Wave 5 (T0.11 full-loop integration test, deploy+probe stubbed) — single
-  agent. Then Wave 6 T0.12 dogfood is BLOCKED on human T0.6h (GCP/Cloud Run) +
-  real harness; the autonomous loop drives everything through T0.11.
-- Wave 5 DONE: T0.11 full-loop integration test (#18), CI green. test/kazi/
-  full_loop_test.exs drives real Runtime→Loop→providers→actions→SQLite with
-  harness/deploy/probe stubbed; hermetic (no Go, no network); proves the T0.8
-  live-gate (no converge while live probe red). 150 tests on main. SLICE 0 (E0)
-  CODE-COMPLETE — only T0.12 dogfood remains, BLOCKED on human T0.6h (GCP).
-- Slice 1 (E1) started while T0.12 waits on the human: T1.1 (vector history) +
-  T1.6 (prod-log provider) dispatched first (no mutual conflict); loop-touching
-  T1.2/T1.3/T1.4/T1.5 sequenced after T1.1 to avoid loop.ex contention. T0.11 is
-  the regression guard for all Slice-1 loop changes.
-- Slice 1 COMPONENTS DONE: T1.1 history (#19), T1.6 prod-log (#20), T1.3 flake/
-  quarantine (#21), T1.4 budget ceiling (#22), T1.5 stuck+escalation (#23), T1.2
-  regression detector (#24). All four loop detectors (Budget, Flake, Stuck,
-  Regression) compose in loop.ex via keep-both merges (verified: no silent
-  revert; snapshot exposes quarantine/budget_reason/regressions). 266 tests on
-  main (33 doctests, 233 tests), CI green.
-- Next: T1.7 (cross-cutting ExUnit tests for all Slice-1 features), then T1.8
-  (hermetic Slice-1 dogfood: naive fix regresses another predicate -> detect +
-  escalate; record in devlog). Slice 1 completes fully autonomously (no GCP).
-
-### 2026-06-22 -- Slices 1 & 2 complete (M1, M2); autonomous /apply drained
-- Slice 1 (E1) DONE: T1.7 cross-cutting tests (#25), T1.8 dogfood (#26, devlog).
-  M1 reached — D1 acceptance met (regression flagged, flakes quarantined,
-  budget+stuck escalate, prod-log works).
-- Slice 2 (E2) DONE: T2.1 acceptance predicates (#28), T2.2 browser provider
-  (#29, hermetic stub Playwright Port), T2.3 vacuous-goal guard (#27), T2.4
-  creation-mode e2e tests (#30), T2.5 creation dogfood (#31, devlog), T2.6
-  self-hosting cutover (#32: docs/self-hosting.md + first self-hosted goal
-  priv/goals/e3-t3.4-standing-reconciler.toml + parse test). M2 reached — D2
-  acceptance met (kazi builds a feature from failing acceptance criteria to
-  green-and-live, hermetic; production Cloud Run live is still T0.12).
-- State on main: 326 tests pass (40 doctests, 286 tests), compile clean
-  (warnings-as-errors), format clean, CI green. 32 PRs merged this run.
-- Two ADRs added (0008 harness invocation/context, 0009 prompt construction);
-  ADR index now lists 0007-0009.
-- AUTONOMOUS /apply COMPLETE for all concretely-specified tasks. Remaining work
-  is NOT agent-fannable: (a) T0.6h human GCP provisioning -> unblocks T0.12 (the
-  live production dogfood, the only gap to full M0/D0); (b) E3 backlog (T3.1-T3.7)
-  — intentionally coarse, "re-plan when reached", designed to be built as
-  SELF-HOSTED kazi goals (kazi builds kazi; first goal authored in T2.6).
-  Running the self-hosted goal drives the REAL claude harness against this repo
-  and opens PRs — needs explicit human go-ahead.
-- 2026-06-22 RE-PLAN (user chose "re-plan + build safe E3 items"): expanded T3.3
-  (deepen deploy) into T3.3a-d and T3.4 (standing reconciler) into T3.4a-d as
-  granular, hermetically-testable subtasks (Waves 10-12). Deferred T3.1/T3.2/
-  T3.5/T3.6/T3.7 (NATS/graph/frontend/LiveView/Telegram) as coarse backlog.
-  /apply --pool now has well-formed candidates again: T3.3a, T3.4a.
-- 2026-06-22 E3-DEEPENING DONE: Wave 10 T3.3a/T3.4a (#33/#34), Wave 11 T3.3b/c +
-  T3.4b/c (#35/#36/#37/#38, keep-both on deploy.ex + loop.ex), Wave 12 T3.3d/T3.4d
-  (#39/#40). T3.3 (deploy: multi-env + rollback + release tagging, wired through
-  Runtime/CLI) and T3.4 (standing reconciler: re-observe + drift re-trigger +
-  graceful stop, authored via goal-file/CLI --standing) are COMPLETE. 372 tests
-  on main (43 doctests, 329 tests), CI green. 40 PRs merged total this run.
-- /apply --pool DRAINED again: no agent-eligible candidates remain. Outstanding
-  work is all human-gated or deferred-by-choice: T0.6h (human GCP) -> T0.12 (live
-  prod dogfood); and deferred E3 T3.1 NATS, T3.2 graph, T3.5 idea->predicate
-  front-end, T3.6 LiveView dashboard, T3.7 Telegram (each needs re-plan + some
-  introduce heavy deps). Next direction is a human decision.
-- 2026-06-22 ADDED EPIC E4 (context injection, ADR-0010): after a research-backed
-  brainstorm on mitigating per-iteration re-exploration (aider repo map, the
-  Codebase-Memory code-graph paper, claw-code compaction, prompt caching), added
-  T4.1-T4.9 + Waves 13-14. Strategy: inject blast-radius orientation + externalize
-  map-memory to the workspace; keep statelessness/anti-anchoring (ADR-0008/0009).
-  New ADR-0010; new UC-022. Deps already met, so /apply --pool can build E4.
-
-### 2026-06-21 -- Change Summary (revision 1)
-- Created the initial walking-skeleton plan (E0-E3, use-case manifest, ADR-0007).
-
-## Hand-off Notes
-
-- Read `docs/concept.md` and ADRs 0001-0007 before starting; the design is frozen
-  there and must not be relitigated in the plan.
-- Slices 0-2 are built with the existing Claude Code skills. From T2.6 onward,
-  build E3 items as kazi goals (failing acceptance predicates) -- kazi builds kazi.
-- Slice 0 spans idea -> production: the dogfood (T0.12) must reach a LIVE verified
-  Cloud Run deployment, not just green tests.
-- T0.6h (GCP/Cloud Run provisioning) is the one human task and gates T0.12; start
-  it early. The deploy action is behind a stub (T0.10b) so the rest of E0 proceeds
-  without it.
-- NATS and Phoenix LiveView are NOT dependencies until Slice 3.
+1. **Verify the baseline first:** `mix test` should report ~785 passing, 18
+   excluded; `mix format --check-formatted` and `mix compile
+   --warnings-as-errors` clean. If not, stop and diagnose before building.
+2. **Easiest next task: T5.6** -- fully hermetic, no external dependency. The
+   `kazi init <path>` CLI, the `Kazi.Adopt` detect/guards/writer, and the
+   `fixtures/deploy-target` Go repo all already exist on `main`. Add an e2e test
+   that runs `kazi init` against that fixture and asserts the generated goal loads
+   and names `go test ./...`, plus a README "adopt an existing project" snippet
+   (the registry snippet from E7 is already in the README -- this is the
+   stack-detection sibling).
+3. **E6 is a chain, and the binary build is environment-sensitive.** Do not try to
+   build the Burrito host binary on a macOS 26 machine -- it will fail at the Zig
+   link step (R-E6-1). Drive T6.2's build through the T6.3 CI matrix (macOS-15 /
+   Ubuntu runners) instead, or use a macOS-15-or-earlier host. T6.4 (`brew
+   install`) needs a new `kazi-org/homebrew-tap` repo and a published GitHub
+   Release; that is human-gated.
+4. **Distribution context:** the escript stays as a contributor convenience
+   (ADR-0014 keeps it); the binary becomes the shipping artifact. The binary fixes
+   the escript's read-model gap (escripts cannot bundle the `exqlite` NIF; the
+   release/binary can).
+5. **Do not relitigate frozen design** -- read `docs/concept.md` and the relevant
+   ADR before touching an area; write a superseding ADR to change a decision.
 
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0007`
+- Decisions: `docs/adr/0001`..`0015` (index at `docs/adr/README.md`)
+- Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
