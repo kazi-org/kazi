@@ -50,10 +50,20 @@ sessions are mutually aware, not merely mutually exclusive.
 
 ## 3. Positioning: drive harnesses, never become one
 
-kazi is **harness-agnostic** (ADR-0001). It shells out to whatever coding agent
-you have — `claude -p`, Codex, future ones — through a thin adapter. This is the
-deliberate refusal to compete with Claude Code / Codex / claw-code. As those
-harnesses improve, kazi improves for free.
+kazi is **harness-agnostic** (ADR-0001). It shells out to whatever CLI coding
+agent you have — Claude Code, Codex, future ones — through a thin, stateless
+subprocess boundary (ADR-0008). This is the deliberate refusal to compete with
+Claude Code / Codex / claw-code. As those harnesses improve, kazi improves for
+free.
+
+The boundary is generic: any CLI harness is described as a **profile** — how its
+argv is assembled and how its output is parsed — and one shared adapter drives
+every profile (ADR-0016). Adding a harness is declaring a profile, not writing a
+new adapter; a fully custom harness can be configured without changing kazi.
+Which harness runs is resolved by a fixed precedence — an explicit run-time
+selection, then the goal's preference, then a configured default, then the
+built-in default — so a goal can pin its harness while a single flag still
+overrides it. `claude` is the default; doing nothing keeps today's behaviour.
 
 What kazi owns is the layer none of them own: the **convergence + coordination +
 truth** outer loop. Analogy: CI tells you what is broken but does not fix it;
