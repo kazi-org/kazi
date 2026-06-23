@@ -4,6 +4,41 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-23 — E11 interactive `propose`: clarify phase verified live (T11.9)
+
+Built the interactive clarify phase for `kazi propose` (E11, UC-029, ADR-0019):
+a deterministic gap-detection FLOOR (`Kazi.Authoring.Clarify.gaps/2`) merged with
+harness-drafted candidate questions on the existing stub seam, asked before the
+draft, with answers folded into the draft prompt; an inline rationale on the goal
+metadata (`--adr` also writes an ADR-lite doc); a refine loop via the existing
+upsert. Suite 855 -> 899 (+44 tests).
+
+LIVE VERIFICATION (real app, real SQLite read-model):
+
+- **Strict, non-interactive, harness-free** — `propose "add a widgets feature"
+  --strict` piped (no TTY): exit 1, `error: idea is underspecified (missing:
+  live-target, scope); answer the clarify questions interactively or add detail`.
+  The gap floor + `--strict` short-circuit fire BEFORE the harness.
+- **Interactive clarify (forced via the `tty:` inject seam, answers over stdin)**
+  — the real `terminal_ask` rendered the live-target question (3 numbered options,
+  recommended starred `*`), read `2` (Production logs) from stdin, then the scope
+  question (Enter = default), then the refine prompt (Enter = accept). The drafted
+  predicate came back `live (prod_log)` — i.e. the chosen answer FOLDED into the
+  draft (render -> IO.gets -> resolve_answer -> fold_answers -> draft), and the
+  rationale printed. Proposal persisted (`prop-add-a-widgets-feature-...`).
+
+CAVEAT (honest): the `:io.rows()` TTY AUTODETECT (`tty?/0`, the one line that
+decides whether to enter the interactive path) could not be exercised in this dev
+env — `mix run` runs the BEAM in noshell mode so `:io.rows()` returns
+`{:error,:enotsup}`, the escript cannot bundle the SQLite NIF (so authoring has no
+read-model there), and the Burrito binary cannot build on this macOS-26 host
+(R-E6-1). In a real terminal launching the binary, `:io.rows()` returns `{:ok,_}`
+and the verified flow runs. The rendering + choice-resolution it gates are pure
+and fully unit-tested (`Clarify.render_question/1`, `Clarify.resolve_answer/2`);
+the real claude harness, driven live, produced non-strict-JSON on the DRAFT call
+(`proposal is not valid JSON`) — a PRE-EXISTING one-shot-parser limitation, not
+E11; the clarify wiring around it ran correctly.
+
 ## 2026-06-22 — brew distribution lifecycle proven end to end (v0.1.0 -> v0.1.1)
 
 The full release-to-upgrade chain was exercised against the live tap (E6,
