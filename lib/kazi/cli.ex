@@ -101,7 +101,8 @@ defmodule Kazi.CLI do
                              Model the harness should use, e.g.
                              `dgx/qwen3.6` for opencode. Overrides the goal-file's
                              [harness] model.
-      --help                 Show this help and exit.
+      --help, -h             Show this help and exit.
+      --version, -v          Print the kazi version and exit.
 
   EXAMPLES:
       kazi run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
@@ -152,6 +153,10 @@ defmodule Kazi.CLI do
         IO.puts(@usage)
         0
 
+      {:version, _} ->
+        IO.puts("kazi #{version()}")
+        0
+
       {:run, goal_file, opts} ->
         execute_run(goal_file, opts, inject_opts)
 
@@ -184,6 +189,7 @@ defmodule Kazi.CLI do
   @typedoc false
   @type parsed ::
           {:help, keyword()}
+          | {:version, keyword()}
           | {:run, Path.t(), keyword()}
           | {:init, Path.t(), keyword()}
           | {:propose, String.t(), keyword()}
@@ -233,14 +239,18 @@ defmodule Kazi.CLI do
           # (claude / opencode / ...); --model picks the harness's model.
           harness: :string,
           model: :string,
-          help: :boolean
+          help: :boolean,
+          version: :boolean
         ],
-        aliases: [h: :help]
+        aliases: [h: :help, v: :version]
       )
 
     cond do
       flags[:help] ->
         {:help, flags}
+
+      flags[:version] ->
+        {:version, flags}
 
       invalid != [] ->
         {:error, "unknown option #{format_invalid(invalid)}"}
@@ -338,6 +348,17 @@ defmodule Kazi.CLI do
 
   defp format_invalid(invalid) do
     Enum.map_join(invalid, ", ", fn {opt, _value} -> opt end)
+  end
+
+  # The kazi version, read from the loaded application spec (set from mix.exs at
+  # build time). Works in the release and the escript (both embed the app spec);
+  # falls back to "unknown" if the app is not loaded (it always is in practice).
+  @spec version() :: String.t()
+  defp version do
+    case Application.spec(:kazi, :vsn) do
+      nil -> "unknown"
+      vsn -> to_string(vsn)
+    end
   end
 
   # =============================================================================
