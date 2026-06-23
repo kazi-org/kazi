@@ -106,6 +106,15 @@ Claude's single envelope; `opencode stats` reports usage).
 - [x] T8.9 Tests incl. live opencode smoke: full coverage -- unit (profile/registry/resolution/parsers), Tier-2 (CliAdapter per profile against stub binaries; golden claude-argv; opencode NDJSON parse), and a Tier-4 LIVE smoke that runs `kazi run <hermetic fixture goal> --harness opencode` end-to-end against the operator's DGX-hosted Qwen and asserts convergence + a persisted iteration; honestly SKIP (not fake-pass) with a logged reason when the DGX endpoint is unreachable.  Owner: David  Done: 2026-06-22 (PR #93)  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: stub-driven tests are green and hermetic in CI; the live smoke either converges a fixture goal through opencode->DGX (evidence recorded: iteration count + final vector) or is reported SKIPPED with the unreachable-endpoint reason -- never silently passed.
 - [x] T8.10 Docs + ADR reference: README gains a "Use a different coding harness" section -- claude is the default; `--harness opencode --model <provider/model>` for the local DGX model; the goal-file `[harness]` table; and "add a harness = declare a profile" pointing at `Kazi.Harness.Registry`; link ADR-0016. Update `docs/concept.md` only where the harness boundary is described (general terms, no model names).  Owner: David  Done: 2026-06-22 (PR #92)  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: README documents harness selection (flag, goal-file, config) + how to add a profile + the harness-on-PATH runtime requirement; ADR-0016 linked; concept.md harness section reflects multi-harness neutrality; no model-specific detail leaks into Tier-1 docs.
 
+### E8 dogfood -- heterogeneous harness (Claude plans, opencode/DGX implements)
+
+The capstone live exercise for E8: prove kazi's core division of labor -- a strong
+model authors the predicate set (the "direction"), a cheap LOCAL model drives the
+convergence loop (the "keystrokes"), and objective termination keeps the weak
+implementer honest. Completes the live verification the T8.9 smoke deferred.
+
+- [ ] T8.11 Heterogeneous-harness dogfood: Claude authors a tiny deliberately-broken fixture goal-file (a single `test_runner` predicate failing at t0); `kazi run <goal> --harness opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0 --workspace <trusted repo>` drives the DGX-hosted Qwen to converge it; record the result in `docs/devlog.md`.  Owner: David  Est: 1h  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: a real `kazi run` converges a broken fixture driven ENTIRELY by opencode->DGX (Claude only authored the goal); evidence recorded (iterations, final vector); OR an honest failure with the environmental cause (per the T8.9 finding: opencode auto-rejects edits outside a trusted workspace -- fixed with a project-local `opencode.json` permission grant -- and the 35B model is slow). Throwaway workspace; not committed to the kazi repo.
+
 ### Waves
 
 E6 is a strict chain (T6.2 -> T6.3 -> T6.4 -> T6.5). E8 starts with a foundation
