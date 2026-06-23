@@ -47,8 +47,10 @@ defmodule Kazi.Harness do
 
     * every key NOT in the resolved profile's `supported_opts` is DROPPED, so a
       Claude-only hygiene flag (e.g. `:permission_mode`) is never forwarded to a
-      harness that does not understand it. The keys `:profile`, `:model` and
-      `:command` are ALWAYS kept (they are adapter-level, not harness flags);
+      harness that does not understand it. The keys `:profile`, `:model`,
+      `:command` and `:env` are ALWAYS kept (they are adapter-level, not harness
+      flags): `:env` carries provider/endpoint vars the CliAdapter forwards to
+      `System.cmd`, so e.g. opencode can be pointed at the operator's DGX model;
     * `:profile` is set to the resolved `%Kazi.Harness.Profile{}` (overwriting any
       passed-through value);
     * `:model` is set from `opts[:model]` when present (a non-nil top-level
@@ -70,8 +72,10 @@ defmodule Kazi.Harness do
   # profile's `supported_opts` (they are not harness CLI flags):
   #   * :profile — the resolved profile the generic adapter is parameterized by;
   #   * :model   — the model id (provider/model) the adapter passes to the harness;
-  #   * :command — the per-run binary override (the test-stub seam, ADR-0008).
-  @always_kept_opts [:profile, :model, :command]
+  #   * :command — the per-run binary override (the test-stub seam, ADR-0008);
+  #   * :env     — provider/endpoint env forwarded to System.cmd, so a harness can
+  #     be pointed at a local model (e.g. opencode -> the DGX, ADR-0016 item 3).
+  @always_kept_opts [:profile, :model, :command, :env]
 
   @typedoc "The loop-ready harness binding: the generic adapter plus its opts."
   @type binding :: {module(), keyword()}
