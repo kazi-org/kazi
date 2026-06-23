@@ -49,7 +49,6 @@ defmodule Kazi.CLI do
   """
 
   alias Kazi.{Adopt, Authoring, Goal, ReadModel, Runtime}
-  alias Kazi.Adopt.Registry
   alias Kazi.ReadModel.ProposedGoal
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -61,7 +60,6 @@ defmodule Kazi.CLI do
   USAGE:
       kazi run <goal-file> --workspace <path> [options]
       kazi init <repo-dir> [--out <file>] [--enrich]
-      kazi init --registry <file.json> [--out <dir>] [--enrich]
       kazi propose "<idea>" [--workspace <path>]
       kazi list-proposed [--status <proposed|approved|rejected>]
       kazi approve <proposal-ref>
@@ -80,16 +78,11 @@ defmodule Kazi.CLI do
                              (or, for `propose`, where the harness drafts the
                              goal). Falls back to the goal-file's [scope]
                              workspace.
-      --registry <file.json> Adopt a capability REGISTRY (JSON) instead of a repo:
-                             kazi writes one goal-file per capability (a goal SET,
-                             T7.3, ADR-0015). A prose .md path is rejected — it is
-                             a generated view, not a registry input.
-      --out <path>           `init` output: a FILE in stack mode
-                             (default <repo>/kazi.goal.toml) or a DIRECTORY in
-                             registry mode (default ./kazi-goals).
+      --out <path>           `init` output goal-file (default
+                             <repo>/kazi.goal.toml).
       --enrich               `init` only: opt into harness enrichment (OFF by
-                             default) to propose live predicates / fill gap
-                             bindings. The deterministic detection always stands.
+                             default) to propose live predicates from discovered
+                             endpoints. The deterministic detection always stands.
       --env <name>           Deploy environment to target, e.g. staging / prod
                              (T3.3d). Selects the goal/deploy's per-env target;
                              requires the goal-file's deploy config to define an
@@ -108,7 +101,6 @@ defmodule Kazi.CLI do
       kazi run priv/examples/deploy_target.toml --workspace ./target --env prod
       kazi run priv/examples/standing_maintenance.toml --workspace ./svc --standing
       kazi init ./my-service --out my-service.goal.toml
-      kazi init --registry capabilities.json --out kazi-goals/
       kazi propose "a /healthz endpoint that returns 200"
       kazi list-proposed --status proposed
       kazi approve prop-a-healthz-endpoint-3f9c1a2b4d5e
@@ -185,7 +177,7 @@ defmodule Kazi.CLI do
   @type parsed ::
           {:help, keyword()}
           | {:run, Path.t(), keyword()}
-          | {:init, Path.t() | nil, keyword()}
+          | {:init, Path.t(), keyword()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t()}
@@ -225,11 +217,8 @@ defmodule Kazi.CLI do
           env: :string,
           standing: :boolean,
           status: :string,
-          # T5.5 / T7.3 adopt: `kazi init` flags. --registry selects the registry
-          # source (vs stack-detection); --enrich opts into harness enrichment
-          # (off by default); --out is the output file (stack mode) or dir
-          # (registry mode).
-          registry: :string,
+          # T5.5 adopt: `kazi init` flags. --enrich opts into harness enrichment
+          # (off by default); --out is the output goal-file.
           enrich: :boolean,
           out: :string,
           help: :boolean
@@ -265,42 +254,21 @@ defmodule Kazi.CLI do
   defp parse_command(["run"], _flags),
     do: {:error, "the `run` command requires a <goal-file> argument"}
 
-  # T5.5 / T7.3 adopt: `kazi init` reverse-engineers a starter goal (ADR-0013,
-  # ADR-0015). The SOURCE is selected by input, not a subcommand:
-  #
-  #   * `kazi init --registry <file.json>` — registry source -> a goal SET.
-  #   * `kazi init <repo-dir>`             — stack-detection source -> one goal.
-  #
-  # --out is the output file (stack mode) or directory (registry mode); --enrich
-  # opts into harness enrichment (off by default). When --registry is given, a
-  # positional repo-dir is unexpected (the source is the registry).
-  defp parse_command(["init" | rest], flags) do
-    init_opts = [
-      registry: flags[:registry],
-      out: flags[:out],
-      enrich: flags[:enrich],
-      workspace: flags[:workspace]
-    ]
+  # T5.5 adopt: `kazi init <repo-dir>` reverse-engineers a starter goal-file by
+  # deterministic stack detection (ADR-0013). --out is the output file; --enrich
+  # opts into harness enrichment (off by default).
+  defp parse_command(["init", repo_dir | rest], flags) do
+    case rest do
+      [] ->
+        {:init, repo_dir, out: flags[:out], enrich: flags[:enrich], workspace: flags[:workspace]}
 
-    case {flags[:registry], rest} do
-      {registry, []} when is_binary(registry) ->
-        {:init, nil, init_opts}
-
-      {registry, _extra} when is_binary(registry) ->
-        {:error,
-         "`init --registry <file.json>` takes no positional repo-dir " <>
-           "(the source is the registry)"}
-
-      {nil, [repo_dir]} ->
-        {:init, repo_dir, init_opts}
-
-      {nil, []} ->
-        {:error, "the `init` command requires a <repo-dir> argument or --registry <file.json>"}
-
-      {nil, extra} ->
+      extra ->
         {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
+
+  defp parse_command(["init"], _flags),
+    do: {:error, "the `init` command requires a <repo-dir> argument"}
 
   # T3.5c authoring: `propose "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
@@ -449,32 +417,22 @@ defmodule Kazi.CLI do
   defp format_run_error(other), do: inspect(other)
 
   # =============================================================================
-  # init command (T5.5 / T7.3, UC-023, ADR-0013/0015): adopt a repo or a registry
+  # init command (T5.5, UC-023, ADR-0013): adopt a repo by stack detection
   # =============================================================================
   #
-  # `kazi init` reverse-engineers a starter goal. The pure mapping
-  # (detect/guards/to_goal_set/to_toml) lives in Kazi.Adopt(.Registry); this CLI
-  # layer threads the test-only `:harness`/`:adapter_opts` seam for --enrich (so
-  # enrichment is hermetically testable with a stub, never a real `claude`) and
-  # owns the file IO, keeping the pure core hermetic.
+  # `kazi init <repo-dir>` reverse-engineers a starter goal-file. The pure mapping
+  # (detect/guards/to_toml) lives in Kazi.Adopt; this CLI layer threads the
+  # test-only `:harness`/`:adapter_opts` seam for --enrich (so enrichment is
+  # hermetically testable with a stub, never a real `claude`) and owns the file
+  # IO, keeping the pure core hermetic.
 
   @default_stack_out "kazi.goal.toml"
-  @default_registry_out "kazi-goals"
-
-  # Dispatch repo-vs-registry by whether --registry was given. `source` is the
-  # positional repo-dir (stack mode) or nil (registry mode).
-  defp execute_init(source, opts, inject_opts) do
-    enrich_opts = Keyword.take(inject_opts, [:harness, :adapter_opts])
-
-    case opts[:registry] do
-      registry when is_binary(registry) -> execute_init_registry(registry, opts, enrich_opts)
-      nil -> execute_init_stack(source, opts, enrich_opts)
-    end
-  end
 
   # Stack-detection source (T5.5): detect -> guards -> (optional --enrich) ->
   # to_toml -> write ONE goal-file. Default --out is <repo>/kazi.goal.toml.
-  defp execute_init_stack(repo_dir, opts, enrich_opts) do
+  defp execute_init(repo_dir, opts, inject_opts) do
+    enrich_opts = Keyword.take(inject_opts, [:harness, :adapter_opts])
+
     adopt_opts =
       enrich_opts
       |> Keyword.put(:enrich, opts[:enrich] == true)
@@ -491,7 +449,7 @@ defmodule Kazi.CLI do
           :stderr,
           "error: could not detect a stack in #{repo_dir} " <>
             "(no go.mod / mix.exs / package.json / pyproject.toml / setup.cfg). " <>
-            "Provide a recognised marker file, or use --registry <file.json>."
+            "Provide a repo with a recognised marker file."
         )
 
         1
@@ -513,60 +471,6 @@ defmodule Kazi.CLI do
       "scope" => %{"workspace" => opts[:workspace] || repo_dir},
       "predicate" => [adoption.predicate | guards] ++ proposed
     }
-  end
-
-  # Registry source (T7.3): parse -> to_goal_set -> write a goal SET, one file per
-  # capability under --out/<scope>/<id>.toml (scope subdir only when present).
-  # Default --out dir is ./kazi-goals.
-  defp execute_init_registry(registry, opts, enrich_opts) do
-    case Registry.parse(registry) do
-      {:ok, capabilities} ->
-        out_dir = opts[:out] || @default_registry_out
-
-        goal_set_opts =
-          enrich_opts
-          |> Keyword.put(:enrich, opts[:enrich] == true)
-          |> Keyword.put(:workspace, opts[:workspace] || ".")
-
-        capabilities
-        |> Registry.to_goal_set(goal_set_opts)
-        |> write_goal_set(out_dir)
-
-      {:error, reason} ->
-        IO.puts(:stderr, "error: could not adopt registry #{registry}: #{reason}")
-        1
-    end
-  end
-
-  # Write a goal SET: one file per capability under out_dir/<scope>/<id>.toml.
-  # Reports each written path + the review hint. Returns 0 on success, 1 if any
-  # write fails.
-  defp write_goal_set(plans, out_dir) do
-    results = Enum.map(plans, &write_goal_plan(&1, out_dir))
-
-    if Enum.all?(results, &(&1 == :ok)) do
-      IO.puts("\nWrote #{length(plans)} goal-file(s) under #{out_dir}/.")
-      IO.puts("Review each file's commented live-predicate TODO, then run:")
-      IO.puts("  kazi run #{out_dir}/<scope>/<id>.toml --workspace <path>")
-      0
-    else
-      1
-    end
-  end
-
-  defp write_goal_plan(%{id: id, scope: scope, goal_map: goal_map}, out_dir) do
-    dir = if scope, do: Path.join(out_dir, scope), else: out_dir
-    path = Path.join(dir, "#{id}.toml")
-
-    with :ok <- File.mkdir_p(dir),
-         :ok <- File.write(path, Adopt.to_toml(goal_map)) do
-      IO.puts("WROTE  #{path}")
-      :ok
-    else
-      {:error, reason} ->
-        IO.puts(:stderr, "error: could not write #{path}: #{:file.format_error(reason)}")
-        :error
-    end
   end
 
   # Write a single goal-file (stack mode) and print the path + review hint.

@@ -1,11 +1,10 @@
 defmodule Kazi.Adopt.Writer do
   @moduledoc """
   Renders an adopted goal **map** (the `Kazi.Goal.Loader.from_map/1` shape) to a
-  TOML *goal-file* STRING (T5.3, ADR-0013, ADR-0015): the final, deterministic
-  step of `kazi init`. Detection (`Kazi.Adopt.detect/1`), guards
-  (`Kazi.Adopt.guards/1`), and the registry adapter (`Kazi.Adopt.Registry`) all
-  produce goal *maps*; this module is the one place those maps become the
-  on-disk authoring format the loader reads back.
+  TOML *goal-file* STRING (T5.3, ADR-0013): the final, deterministic step of
+  `kazi init`. Detection (`Kazi.Adopt.detect/1`) and guards
+  (`Kazi.Adopt.guards/1`) produce goal *maps*; this module is the one place those
+  maps become the on-disk authoring format the loader reads back.
 
   ## What it emits
 
@@ -70,10 +69,10 @@ defmodule Kazi.Adopt.Writer do
   The commented live-predicate scaffold appended to every generated goal-file: a
   `# [[predicate]]` `http_probe` block with `TODO` placeholders for a human to
   fill in (URL, expected status, expected body). It is a COMMENT, so it does not
-  parse — the intended product output (ADR-0013 §3, ADR-0015 §3): live
-  predicates are scaffolded, never guessed.
+  parse — the intended product output (ADR-0013 §3): live predicates are
+  scaffolded, never guessed.
 
-  Exposed so the registry adapter and tests can reference the exact scaffold.
+  Exposed so tests can reference the exact scaffold.
   """
   @spec live_predicate_scaffold() :: String.t()
   def live_predicate_scaffold do
