@@ -70,6 +70,87 @@ defmodule Kazi.Authoring.Clarify do
   end
 
   @doc """
+  Builds the prompt asking the harness to DRAFT candidate clarifying questions
+  for `idea` (T11.3, ADR-0019).
+
+  Pure and total. The harness is asked for a JSON array matching the
+  `Kazi.Authoring.Clarify.Question` shape, which `parse_candidates/1` validates
+  and `merge/2` folds onto the deterministic floor (the floor wins). Used by
+  `Kazi.Authoring` to drive the injectable harness; kept here so the contract and
+  its parser live together.
+  """
+  @spec candidate_prompt(String.t()) :: String.t()
+  def candidate_prompt(idea) when is_binary(idea) do
+    """
+    A software idea is being turned into a kazi goal -- a set of machine-checkable
+    acceptance predicates. BEFORE drafting them, propose up to 3 short clarifying
+    questions whose answers would make the predicates precise (e.g. the exact
+    acceptance condition, the live-verification target, scope boundaries). Ask only
+    what you cannot infer; prefer multiple-choice.
+
+    Idea:
+    #{idea}
+
+    Respond with a SINGLE JSON array and nothing else, of the shape:
+
+      [
+        {"id": "<stable-id>", "prompt": "<question>",
+         "options": [{"label": "<shown>", "value": "<stable>"}],
+         "recommended": "<option value or null>", "allow_free_text": false}
+      ]
+
+    Return an empty array [] if the idea is already fully specified.
+    """
+  end
+
+  @doc """
+  Parses a harness `payload` (a JSON array string or an already-decoded list) into
+  candidate `Kazi.Authoring.Clarify.Question`s (T11.3).
+
+  Pure, total, and FAIL-SOFT: any item missing a non-empty `id`/`prompt` is
+  dropped, and a payload that is not a JSON array (a decode error, an object, nil,
+  garbage) yields `[]` -- so a malformed or empty harness response degrades to the
+  deterministic floor alone rather than failing the proposal.
+  """
+  @spec parse_candidates(term()) :: [Question.t()]
+  def parse_candidates(payload) when is_binary(payload) do
+    case Jason.decode(payload) do
+      {:ok, list} when is_list(list) -> parse_candidates(list)
+      _ -> []
+    end
+  end
+
+  def parse_candidates(list) when is_list(list) do
+    list |> Enum.map(&candidate_question/1) |> Enum.reject(&is_nil/1)
+  end
+
+  def parse_candidates(_payload), do: []
+
+  @doc """
+  Merges the deterministic `floor` with harness `candidates`, the floor
+  AUTHORITATIVE (T11.3).
+
+  Floor questions come first and in order; a candidate whose `id` collides with a
+  floor question (or with an earlier candidate) is dropped, so the floor's
+  must-ask gaps are never shadowed and ids stay unique.
+  """
+  @spec merge([Question.t()], [Question.t()]) :: [Question.t()]
+  def merge(floor, candidates) when is_list(floor) and is_list(candidates) do
+    floor_ids = MapSet.new(floor, & &1.id)
+
+    {extra, _seen} =
+      Enum.reduce(candidates, {[], floor_ids}, fn %Question{} = q, {acc, seen} ->
+        if MapSet.member?(seen, q.id) do
+          {acc, seen}
+        else
+          {[q | acc], MapSet.put(seen, q.id)}
+        end
+      end)
+
+    floor ++ Enum.reverse(extra)
+  end
+
+  @doc """
   Folds `answers` into a deterministic clarifications block for the draft prompt.
 
   `questions` is the asked set (the floor plus any harness candidates); `answers`
@@ -105,6 +186,39 @@ defmodule Kazi.Authoring.Clarify do
       nil -> value
     end
   end
+
+  # --- candidate parsing (T11.3) ---------------------------------------------
+
+  # One candidate question from a decoded harness item. Requires a non-empty
+  # string id and prompt; options are parsed leniently (well-formed {label,value}
+  # entries only). A non-map, or an item missing id/prompt, is dropped (nil).
+  defp candidate_question(%{"id" => id, "prompt" => prompt} = raw)
+       when is_binary(id) and id != "" and is_binary(prompt) and prompt != "" do
+    Question.new(id, prompt,
+      options: parse_options(Map.get(raw, "options")),
+      recommended: optional_string(Map.get(raw, "recommended")),
+      allow_free_text: Map.get(raw, "allow_free_text") == true
+    )
+  end
+
+  defp candidate_question(_raw), do: nil
+
+  defp parse_options(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      %{"label" => label, "value" => value} when is_binary(label) and is_binary(value) ->
+        Option.new(label, value)
+
+      _ ->
+        nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp parse_options(_), do: []
+
+  defp optional_string(value) when is_binary(value) and value != "", do: value
+  defp optional_string(_value), do: nil
 
   # --- floor questions -------------------------------------------------------
 
