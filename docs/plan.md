@@ -31,17 +31,18 @@ State of `main`: **853 tests pass** (66 doctests, 787 tests), 19 excluded
 
 **What remains (the entire content of this plan):**
 
-1. **E6 -- automated brew release pipeline (T6.2-T6.9, ADR-0014 + ADR-0017).** The
-   focus of this plan. Ship `brew install kazi-org/tap/kazi` as a single
-   self-contained binary AND make releasing it **fully automatic**: merge
-   Conventional Commits -> release-please cuts a version -> CI builds the four
-   Burrito binaries -> the GitHub Release publishes them + checksums -> the
-   Homebrew tap formula auto-updates. No manual tag, no hand-edited checksum.
-2. **T8.11 -- E8 heterogeneous-harness dogfood** (the one open E8 item): Claude
-   authors a tiny broken goal, opencode->DGX drives convergence. Independent of E6.
+1. **E9 -- the public website (T9.1-T9.7, ADR-0018).** The PRIMARY open work: a
+   live Astro + Tailwind landing site at **https://kazi.sire.run** (GitHub Pages),
+   explaining kazi and getting a visitor to `brew install` + a first goal. Mixed
+   engineering + content; on-brand (the Electric Blue logo). The only operator-gated
+   step is one DNS `CNAME` record.
+2. **E6 / E8 -- DONE** except **T6.7** (tap auto-bump), which is implemented but
+   blocked on the operator-created `HOMEBREW_TAP_TOKEN` secret + the org
+   "Actions-can-create-PRs" activation (R-E6-7). `brew install kazi-org/tap/kazi`
+   is LIVE (v0.1.1, 3 platforms); the auto-release pipeline is wired and gated.
 
 **Frozen design (do NOT relitigate):** `docs/concept.md` (canonical architecture +
-source of truth) and ADRs `0001`..`0017`. To change a decision, write a superseding
+source of truth) and ADRs `0001`..`0018`. To change a decision, write a superseding
 ADR.
 
 ## Use Case Summary
@@ -93,16 +94,36 @@ implementer honest. Completes the live verification the T8.9 smoke deferred.
 
 - [x] T8.11 Heterogeneous-harness dogfood: Claude authors a tiny deliberately-broken fixture goal-file (a single `test_runner` predicate failing at t0); `kazi run <goal> --harness opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0 --workspace <trusted repo>` drives the DGX-hosted Qwen to converge it; record the result in `docs/devlog.md`  Owner: David  Done: 2026-06-22 (wiring proven; honest non-convergence -- local 35B too slow; see devlog)  Est: 1h  verifies: [UC-026, UC-027]  deps: []  acc: a real `kazi run` converges a broken fixture driven ENTIRELY by opencode->DGX (Claude only authored the goal); evidence recorded (iterations, final vector); OR an honest failure with the environmental cause (per the T8.9 finding: opencode auto-rejects edits outside a trusted workspace -- fixed with a project-local `opencode.json` permission grant -- and the 35B model is slow). Throwaway workspace; not committed to the kazi repo.
 
+### E9 -- Public website: Astro + Tailwind on GitHub Pages at kazi.sire.run (P2, ADR-0018)
+
+Acceptance: a live, fast, single-page (with room to grow) marketing/landing site
+at **https://kazi.sire.run** that explains kazi ("the outer loop existing agents
+lack"), shows the 60-second mental model, and gets a visitor to `brew install
+kazi-org/tap/kazi` + a first goal -- on-brand (Electric Blue, the logo assets),
+deployed automatically from `main` via GitHub Actions, HTTPS-enforced, Lighthouse
+>= 90, and linked from the repo README. Stack/hosting/domain decided in ADR-0018
+(Astro + Tailwind, site in `site/`, GitHub Pages, `kazi.sire.run` -- free, single
+DNS CNAME, reversible). This is **mixed work**: engineering (scaffold, deploy,
+tests) + content (the copy, reused from `README.md`/`docs/concept.md`).
+
+- [ ] T9.1 Scaffold the Astro + Tailwind site in `site/`: `npm create astro` (minimal/empty template), add `@astrojs/tailwind`, a base `Layout.astro` with the kazi brand (Electric Blue gradient, import the SVGs from `assets/logo/`), meta/OG tags, and a favicon generated from `kazi-badge.svg`. Set `site`/`base` in `astro.config` for the custom domain (base `/`).  Owner: TBD  Est: 1.5h  verifies: [UC-028]  deps: []  acc: `npm --prefix site run build` produces a static `site/dist/`; `npm --prefix site run dev` serves a branded empty page locally; `.gitignore` excludes `site/node_modules` and `site/dist`.
+- [ ] T9.2 Landing page sections (content + UI): build `index.astro` with hero (headline + subhead + primary `brew install` CTA + GitHub link), the 60-second mental model (the loop -> checkmark, reuse the README diagram/idea), a features/why-kazi grid (objective termination, multi-harness, single-binary install), an install + first-goal quickstart (copy-pasteable), and a footer (Apache-2.0, Sire Run, GitHub, links). Copy is DERIVED from `README.md`/`docs/concept.md` and must stay accurate.  Owner: TBD  Est: 2.5h  verifies: [UC-028]  delivers: [kazi landing-page copy + sections]  deps: [T9.1]  acc: every claim on the page is true to the README/concept (no invented features); the install command is the real `brew install kazi-org/tap/kazi`; responsive (mobile + desktop) and works in light AND dark; no Lorem Ipsum.
+- [ ] T9.3 Deploy workflow (GitHub Actions -> Pages): add `.github/workflows/pages.yml` -- on push to `main` touching `site/**`, build Astro and deploy via `actions/upload-pages-artifact` + `actions/deploy-pages` (with the `pages: write`/`id-token: write` permissions + a `github-pages` environment). Enable Pages (source = GitHub Actions) in repo settings.  Owner: TBD  Est: 1.5h  verifies: [UC-028, infrastructure]  deps: [T9.1]  acc: a push to `main` deploys the built site; the run is green; the site is reachable at the default `kazi-org.github.io/kazi` URL before the custom domain is wired.
+- [ ] T9.4 Custom domain kazi.sire.run + HTTPS: commit `site/public/CNAME` containing `kazi.sire.run`; set the custom domain in repo Pages settings; **operator adds one DNS `CNAME` record `kazi -> kazi-org.github.io` at the sire.run provider** (human-gated, like the other infra secrets); enable "Enforce HTTPS".  Owner: TBD  kind: any  Est: 0.5h (+ DNS propagation)  verifies: [UC-028, infrastructure]  deps: [T9.3]  acc: `https://kazi.sire.run` serves the site with a valid auto-provisioned certificate; the apex/`www` is not claimed (subdomain only); the GitHub Pages "DNS check" passes. Operator step: the CNAME DNS record (the session does not control sire.run DNS).
+- [ ] T9.5 Playwright smoke test: add a minimal Playwright project under `site/` that loads the built site (or the live URL) and asserts the hero headline, the `brew install` command text, the GitHub link, and at least one edge case (mobile viewport renders the nav/CTA; no console errors).  Owner: TBD  Est: 1h  verifies: [UC-028]  deps: [T9.2]  acc: `npx playwright test` green against `site/dist` (served) and, when live, against `https://kazi.sire.run`; the test is wired into the pages workflow (or a `site` CI job) so a broken page fails CI.
+- [ ] T9.6 Polish + perf + a11y: Lighthouse >= 90 on performance/accessibility/best-practices/SEO; semantic HTML + alt text + sufficient contrast (the Electric Blue gradient on slate/white); OpenGraph/Twitter-card image (render from the logo); `<title>`/meta description; prefers-color-scheme support.  Owner: TBD  Est: 1.5h  verifies: [UC-028]  deps: [T9.2]  acc: a Lighthouse run (CI or local) reports >= 90 in all four categories on the deployed site; the OG image renders in a link-preview check.
+- [ ] T9.7 Verify live + link from README: load `https://kazi.sire.run` in a real browser (agent-browser), exercise the golden path (read hero -> copy the install command) plus one edge case (mobile), confirm no console errors and the cert is valid; then add the website link to the repo `README.md` header/badges.  Owner: TBD  Est: 0.5h  verifies: [UC-028]  deps: [T9.4]  acc: observed-not-expected evidence (a screenshot of the live `kazi.sire.run` + the install command working); `README.md` links the site; reported honestly.
+
 ### Waves
 
-E6 is the automated-release pipeline; the two independent entry points (T6.3 build
-workflow, T6.6 release-please) can go in parallel, then converge on the tap. T8.11
-is independent of E6 and already running.
+E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; only T6.7
+(human-gated on `HOMEBREW_TAP_TOKEN`) remains in E6. **E9 (the website) is the
+primary open work.**
 
-- **Wave E6-1 (parallel entry points):** T6.3 (release build workflow -- make it green on a test tag; this also proves T6.2) and T6.6 (release-please versioning). Independent.
-- **Wave E6-2 (tap):** T6.4 (create `kazi-org/homebrew-tap` + formula; needs a real T6.3 Release) -> T6.7 (auto-bump workflow + `HOMEBREW_TAP_TOKEN`).
-- **Wave E6-3 (docs):** T6.5 (README install + auto-release flow). deps T6.4.
-- **Dogfood (running):** T8.11 -- opencode->DGX converging a broken fixture.
+- ~~**E6 / E8**~~ -- DONE except T6.7 (tap auto-bump, operator secret) -- see the WBS.
+- **Wave E9-1 (foundation):** T9.1 (scaffold Astro+Tailwind in `site/`) -> then T9.3 (deploy workflow) and T9.2 (landing content) can proceed in parallel.
+- **Wave E9-2 (build out):** T9.2 (landing sections), T9.5 (Playwright), T9.6 (polish/perf/a11y) -- parallel after T9.1.
+- **Wave E9-3 (go live):** T9.4 (custom domain + DNS -- **operator adds the CNAME record**) -> T9.7 (verify live at `kazi.sire.run` + link from README).
 
 ## Risk Register
 
@@ -115,6 +136,9 @@ is independent of E6 and already running.
 | R-E6-5 | The cross-repo formula push needs auth the default `GITHUB_TOKEN` lacks. | Med | High (inherent) | A fine-grained `HOMEBREW_TAP_TOKEN` PAT scoped to `contents:write` on `homebrew-tap` only (ADR-0017); created + stored as a repo secret as part of T6.7. Rotate like any deploy credential. |
 | R-E6-6 | release-please computes the wrong version from a mistyped commit. | Low | Med | Conventional Commits are already mandated (operating procedure); release-please's release PR is the human review gate before a tag is cut. |
 | R-E6-7 | release-please cannot open its release PR: `kazi-org` disables "Allow GitHub Actions to create and approve pull requests" org-wide (verified -- the repo + org API return `can_approve_pull_request_reviews: false`, and the repo PUT is rejected with "the organization does not allow..."). | High (blocks auto-release) | High (current state) | Flipping an org-wide security setting is the operator's decision, not the session's. Two unblock paths: enable that org/repo setting, OR pass a fine-grained PAT as release-please's `token:`. The workflow is gated `if: vars.RELEASE_AUTOMATION == 'true'` so it does not fail red while disabled. |
+| R-E9-1 | `kazi.sire.run` needs a DNS `CNAME` record at the `sire.run` provider, which the session does not control. | Med | High (inherent) | T9.4 is `kind: any` (operator). Until the record exists, the site is still LIVE at the default `kazi-org.github.io/kazi` URL (T9.3) -- the custom domain is the last, non-blocking step. The CNAME file + repo Pages setting are agent-doable; only the DNS record is operator-gated. |
+| R-E9-2 | Website copy drifts from what kazi actually does (claims a feature it lacks). | Med | Med | Copy is DERIVED from `README.md`/`docs/concept.md` (T9.2 acc forbids invented features); the site lives in the same repo so a docs change and a site change land together. The install command on the page is the real `brew install` string, smoke-tested by T9.5. |
+| R-E9-3 | GitHub Pages must be enabled with source = "GitHub Actions" for the deploy workflow to publish. | Low | Med | T9.3 enables it (repo Settings -> Pages); agent-doable via `gh api` or the UI. The first deploy run surfaces this immediately if missing. |
 
 ## Operating Procedure
 
@@ -137,6 +161,23 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (add E9: public website at kazi.sire.run)
+- **Added E9 (T9.1-T9.7)** -- a public Astro + Tailwind landing site on GitHub
+  Pages at `kazi.sire.run`, explaining kazi and driving to `brew install` + a first
+  goal. Mixed engineering + content; on-brand with the Electric Blue logo. Copy is
+  derived from `README.md`/`docs/concept.md` (no invented features).
+- **ADR created:** `docs/adr/0018-website-stack-hosting-domain.md` -- chose Astro +
+  Tailwind, site in `site/` of this repo, GitHub Pages via Actions, and the domain
+  `kazi.sire.run`. The domain recommendation (the operator's question): YES for v1
+  -- free + already owned (Sire Run owns `sire.run`), the simplest GitHub Pages
+  setup (one DNS CNAME vs apex A/AAAA), honest `<product>.<company>` branding, and
+  fully reversible if kazi later wants a standalone domain. Trade-off noted: a
+  subdomain frames kazi as a Sire Run product rather than an independent project.
+- **Use case added:** UC-028 (the website). Manifest updated.
+- The only operator-gated E9 step is one DNS `CNAME` record (R-E9-1); everything
+  else (scaffold, deploy workflow, content, tests, Pages enablement) is agent-doable.
+- E6/E8 are otherwise done (only T6.7 remains, gated on the operator).
 
 ### 2026-06-22 -- Change Summary (auto-release the brew packages: E6 -> ADR-0017)
 - **Reframed E6 as a fully-automated release pipeline** (ADR-0017): release-please
