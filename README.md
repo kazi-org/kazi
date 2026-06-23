@@ -91,25 +91,74 @@ mix escript.build          # produces ./kazi
 ./kazi --help
 ```
 
-### Point opencode at a local model (e.g. a DGX-hosted Qwen3.6)
+### Use a different coding harness
 
-kazi drives whatever coding CLI you already have installed and configured — it
-does not reimplement provider plumbing ([ADR-0016](docs/adr/0016-generic-harness-profiles.md)).
-If you run [`opencode`](https://opencode.ai) wired to a local model (the operator
-here points it at a DGX-hosted **Qwen3.6 35B-A3B**), **opencode's own provider
-config is the source of truth** for the endpoint and credentials. kazi just
-selects the harness and the model:
+`claude` (Claude Code) is the **default** harness — if you do nothing, kazi
+shells out to `claude` exactly as before. But kazi drives whatever CLI coding
+agent you already have installed and configured; it does not reimplement provider
+plumbing ([ADR-0016](docs/adr/0016-generic-harness-profiles.md)). Pick another
+harness per-run with a flag:
 
 ```sh
 kazi run <goal-file> --workspace <path> \
   --harness opencode --model dgx-ollama/qwen3.6:35b-a3b
 ```
 
-`--model` is opencode's `provider/model` string. The provider (`dgx-ollama`
-above) and its base URL live in your opencode config, not in kazi. kazi can also
-forward provider/endpoint environment variables to the harness subprocess when a
-local setup expects them — declare them as the harness `:env` and kazi passes
-them straight through to the underlying call.
+`--harness <id>` selects the harness (`claude` or `opencode` today); `--model
+<provider/model>` selects the model that harness should use.
+
+**Point opencode at a local model (e.g. a DGX-hosted Qwen3.6).** If you run
+[`opencode`](https://opencode.ai) wired to a local model (the operator here
+points it at a DGX-hosted **Qwen3.6 35B-A3B**), **opencode's own provider config
+is the source of truth** for the endpoint and credentials. `--model` is
+opencode's `provider/model` string — the provider (`dgx-ollama` above) and its
+base URL live in your opencode config, not in kazi. kazi can also forward
+provider/endpoint environment variables to the harness subprocess when a local
+setup expects them — declare them as the harness `:env` and kazi passes them
+straight through to the underlying call.
+
+#### A per-goal or global default
+
+You don't have to pass `--harness`/`--model` on every run. A goal-file can carry
+its own preferred harness in an optional `[harness]` table:
+
+```toml
+[harness]
+id = "opencode"                            # a KNOWN harness id (claude / opencode / ...)
+model = "dgx-ollama/qwen3.6:35b-a3b"       # optional provider/model override
+command = "opencode"                       # optional binary override
+```
+
+Or set a machine-wide default in app config:
+
+```elixir
+# config/config.exs
+config :kazi, :harness, :opencode
+```
+
+kazi resolves the harness with a fixed **precedence** (highest first):
+
+1. the **`--harness` / `--model` CLI flags**;
+2. the goal-file **`[harness]` table**;
+3. the **app config** `config :kazi, :harness`;
+4. the default, **`claude`**.
+
+So a CLI flag always wins; absent every layer, kazi drives `claude`.
+
+#### Add a harness = declare a profile
+
+There is no new adapter module per harness. A harness is a **profile** — a value
+in [`Kazi.Harness.Registry`](lib/kazi/harness/registry.ex) built from
+[`Kazi.Harness.Profile`](lib/kazi/harness/profile.ex): a `command`, an argv
+renderer (`build_args`), and a stdout parser (`parse`), plus the set of optional
+flags the harness understands. One generic adapter (`Kazi.Harness.CliAdapter`)
+runs every profile. Adding `codex`, `gemini-cli`, etc. is profile DATA — often
+reusing an existing parser — not a new module; a fully custom harness can be
+declared in config without touching kazi.
+
+> **Runtime requirement.** The chosen harness binary (`claude`, `opencode`, …)
+> must be installed and on your `PATH`. kazi shells out to it as a subprocess; it
+> does not bundle or install harnesses.
 
 ### Build a self-contained release (full read-model)
 
