@@ -49,14 +49,10 @@ jobs:
             target: macos_aarch64
           - runner: ubuntu-24.04
             target: linux_x86_64
-          # DEFERRED targets (CI runner/setup limitations, not kazi):
-          #  * macos_x86_64 (Intel macOS): GitHub's macos-13 Intel runners are
-          #    deprecated/scarce -- the job queues indefinitely. Needs a paid larger
-          #    runner or accepting long queue times. Intel Macs are a shrinking
-          #    minority for a dev tool, so deferred.
-          #  * linux_aarch64 (ARM Linux): erlef/setup-beam has no arm64-Linux OTP
-          #    (rejects ImageOS=ubuntu24-arm64) -- needs a container-based Erlang.
-          # The two dominant platforms (Apple Silicon macOS, x86_64 Linux) ship now.
+          # linux_aarch64 (ARM Linux) builds in the separate container job below
+          # (setup-beam has no arm64-Linux OTP). DEFERRED: macos_x86_64 (Intel macOS)
+          # -- GitHub's macos-13 Intel runners are deprecated/scarce and the job
+          # queues indefinitely; Intel Macs are a shrinking minority for a dev tool.
     env:
       MIX_ENV: prod
       # A single Burrito target for this native-arch job.
