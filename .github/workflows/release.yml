@@ -118,7 +118,7 @@ jobs:
         run: mix deps.get --only prod
 
       - name: Build Burrito binaries
-        run: mix release
+        run: mix release --overwrite
 
       - name: Generate checksums
         shell: bash
@@ -175,7 +175,7 @@ jobs:
           cd src
           mix local.hex --force && mix local.rebar --force
           mix deps.get --only prod
-          mix release
+          mix release --overwrite
 
           cd burrito_out
           sha256sum kazi_linux_aarch64 | tee kazi_linux_aarch64.sha256
