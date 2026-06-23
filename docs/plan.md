@@ -19,8 +19,10 @@ every epic through it are COMPLETE and merged on `main`:
   -- done.
 - **E4** (context injection / re-exploration mitigation, ADR-0010) -- done,
   including the un-deferred pluggable retrieval-memory adapter (T4.9, ADR-0012).
-- **E5** (`kazi init` adopt, ADR-0013) -- T5.1-T5.5 done; only **T5.6** (a
-  stack-mode e2e + README "adopt an existing project" snippet) remains.
+- **E5** (`kazi init` adopt, ADR-0013) -- DONE. T5.1-T5.5 plus **T5.6** (a
+  hermetic stack-mode e2e against `fixtures/deploy-target` + a committed worked
+  example `priv/examples/adopt_deploy_target.goal.toml` + a README worked-example
+  snippet) all merged (T5.6 = PR #76).
 - **E7** (registry adapter + goal-set) -- built, then **WITHDRAWN** before the
   open-source release: the `capabilities.json` input was a bespoke artifact of one
   internal product and did not generalize (ADR-0015). The `--registry` mode,
@@ -29,16 +31,16 @@ every epic through it are COMPLETE and merged on `main`:
   importer (OpenAPI/gherkin -> goals) is deferred backlog (UC-025), to get its own
   ADR if there is demand.
 
-State of `main`: **755 tests pass** (62 doctests, 693 tests), 18
+State of `main`: **760 tests pass** (62 doctests, 698 tests), 18
 excluded (`:nats`/`:graphify` integration tags); `mix format --check-formatted`
 clean; `mix compile --warnings-as-errors` clean. Distribution PRs #70-#75 merged
-this session.
+this session; T5.6 (PR #76) closed E5.
 
 **What remains (the entire content of this plan):**
 
-1. **T5.6** -- finish E5 with a hermetic stack-mode `kazi init` end-to-end test
-   against `fixtures/deploy-target` plus a README adopt snippet. Fully hermetic,
-   no external dependency -- the easiest next pickup.
+1. ~~**T5.6**~~ -- DONE (PR #76): hermetic stack-mode `kazi init` e2e against
+   `fixtures/deploy-target`, a committed worked example, and a README snippet. E5
+   is fully closed.
 2. **E6 (T6.2-T6.5)** -- binary distribution via Burrito + Homebrew (ADR-0014):
    ship `brew install kazi-org/tap/kazi` as a single self-contained binary with
    the full SQLite read-model (NIF bundled), superseding the escript. T6.1 (the
@@ -55,8 +57,8 @@ superseding ADR.
 All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Only two
 have open work:
 
-- **UC-023** (adopt an existing project via `kazi init`) -- delivered except the
-  T5.6 worked example/e2e.
+- **UC-023** (adopt an existing project via `kazi init`) -- DELIVERED (T5.6 e2e +
+  worked example merged, PR #76).
 - **UC-024** (install kazi as a single binary via Homebrew, ADR-0014) -- OPEN;
   the whole of E6 below.
 
@@ -77,7 +79,7 @@ goal-file capturing the project's test command + guard invariants, with TODO
 placeholders for live predicates. T5.1-T5.5 are done (merged); only the worked
 example remains.
 
-- [ ] T5.6 End-to-end + example: `kazi init` against the `fixtures/deploy-target` repo produces a goal-file whose test_runner + guards load and whose live predicate is a TODO stub; commit a worked example + README "adopt an existing project" snippet  Owner: TBD  Est: 1h  verifies: [UC-023]  deps: []  acc: a hermetic e2e test asserts the generated goal loads via `Kazi.Goal.Loader` + names the detected `go test ./...` command for `fixtures/deploy-target`; the live predicate is a commented TODO; README already has an "Adopt an existing project" stack-detection section (this task adds the e2e test + a committed worked example); `mix test` green; hermetic. NOTE: the CLI (`kazi init <path>`, T5.5), the writer (`Kazi.Adopt.to_toml/1`, T5.3), `Kazi.Adopt.detect/1` (T5.1), and `guards/1` (T5.2) are all merged on `main` -- this task only adds the e2e + example.
+- [x] T5.6 End-to-end + example: `kazi init` against the `fixtures/deploy-target` repo produces a goal-file whose test_runner + guards load and whose live predicate is a TODO stub; commit a worked example + README "adopt an existing project" snippet  Owner: David  Done: 2026-06-22 (PR #76)  verifies: [UC-023]  deps: []  acc: a hermetic e2e test asserts the generated goal loads via `Kazi.Goal.Loader` + names the detected `go test ./...` command for `fixtures/deploy-target`; the live predicate is a commented TODO; README already has an "Adopt an existing project" stack-detection section (this task adds the e2e test + a committed worked example); `mix test` green; hermetic. NOTE: the CLI (`kazi init <path>`, T5.5), the writer (`Kazi.Adopt.to_toml/1`, T5.3), `Kazi.Adopt.detect/1` (T5.1), and `guards/1` (T5.2) are all merged on `main` -- this task only adds the e2e + example.
 
 ### E6 -- Binary distribution: Burrito + Homebrew (P2, see ADR-0014)
 
@@ -97,10 +99,9 @@ macOS-15-or-earlier machine, not on this macOS-26 host.
 
 ### Waves
 
-Only the remaining tasks. T5.6 is independent and hermetic -- start it now in
-parallel with E6. E6 is a strict chain (T6.2 -> T6.3 -> T6.4 -> T6.5).
+Only the remaining tasks. E6 is a strict chain (T6.2 -> T6.3 -> T6.4 -> T6.5).
 
-- **Wave A (1 agent, now):** T5.6   (hermetic; no external dependency)
+- ~~**Wave A (1 agent):** T5.6~~ -- DONE (PR #76).
 - **Wave B:** T6.2   (build + smoke-run a Burrito host binary on a Zig-compatible runner; or fold into T6.3 CI)
 - **Wave C:** T6.3   (release CI + release-please; green on a test tag)
 - **Wave D (kind: any, human-gated):** T6.4   (create `kazi-org/homebrew-tap` + cut a real Release) -> then T6.5 docs
@@ -167,16 +168,13 @@ WBS above is the single checkable source of truth.
 
 ## Hand-off Notes (cold start for a new session)
 
-1. **Verify the baseline first:** `mix test` should report ~785 passing, 18
+1. **Verify the baseline first:** `mix test` should report 760 passing, 18
    excluded; `mix format --check-formatted` and `mix compile
    --warnings-as-errors` clean. If not, stop and diagnose before building.
-2. **Easiest next task: T5.6** -- fully hermetic, no external dependency. The
-   `kazi init <path>` CLI, the `Kazi.Adopt` detect/guards/writer, and the
-   `fixtures/deploy-target` Go repo all already exist on `main`. Add an e2e test
-   that runs `kazi init` against that fixture and asserts the generated goal loads
-   and names `go test ./...`, plus a README "adopt an existing project" snippet
-   (the registry snippet from E7 is already in the README -- this is the
-   stack-detection sibling).
+2. **Next task: E6 (T6.2).** T5.6 is DONE (PR #76) -- E5 is fully closed. The
+   next pickup is the Burrito binary build, which is environment-sensitive (see
+   item 3): do NOT build it on this macOS-26 host; drive it through the T6.3 CI
+   matrix.
 3. **E6 is a chain, and the binary build is environment-sensitive.** Do not try to
    build the Burrito host binary on a macOS 26 machine -- it will fail at the Zig
    link step (R-E6-1). Drive T6.2's build through the T6.3 CI matrix (macOS-15 /
