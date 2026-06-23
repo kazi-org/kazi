@@ -4,6 +4,21 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-22 — brew distribution lifecycle proven end to end (v0.1.0 -> v0.1.1)
+
+The full release-to-upgrade chain was exercised against the live tap (E6,
+ADR-0014/0017): bump `mix.exs` + the release-please manifest -> push `vX.Y.Z` ->
+`release.yml` builds the three native-arch Burrito binaries (macOS arm64, Linux
+x86_64, Linux arm64), SMOKE-TESTS each (`kazi_<target> --help` on its own arch)
+before publishing, uploads them + `.sha256` -> regenerate `Formula/kazi.rb` ->
+`brew upgrade kazi-org/tap/kazi`. Verified live: `brew upgrade` moved 0.1.0 ->
+0.1.1 and the upgraded binary reports `kazi 0.1.1` (the new `kazi --version`
+flag added this session). Shipping platforms: 3; only Intel macOS deferred
+(GitHub macos-13 runner scarcity). The auto-release pipeline (release-please ->
+build -> tap auto-bump) is wired but gated on the operator enabling
+Actions-create-PRs + a `HOMEBREW_TAP_TOKEN` secret; until then releases are this
+manual bump+tag. See lore L-0005 for the `mix release --overwrite` cache gotcha.
+
 ## 2026-06-22 — T8.11 heterogeneous dogfood: wiring proven, local 35B too slow to converge
 
 **Setup.** The capstone E8 exercise: Claude (the planner) authored a tiny broken Go
