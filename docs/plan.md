@@ -101,7 +101,9 @@ at **https://kazi.sire.run** that explains kazi ("the outer loop existing agents
 lack"), shows the 60-second mental model, and gets a visitor to `brew install
 kazi-org/tap/kazi` + a first goal -- on-brand (Electric Blue, the logo assets),
 deployed automatically from `main` via GitHub Actions, HTTPS-enforced, Lighthouse
->= 90, and linked from the repo README. Stack/hosting/domain decided in ADR-0018
+>= 90, and **coherent with `README.md`** (shared canonical strings verbatim, the
+README links the site, a CI drift-check guards against divergence -- T9.8/T9.9).
+Stack/hosting/domain decided in ADR-0018
 (Astro + Tailwind, site in `site/`, GitHub Pages, `kazi.sire.run` -- free, single
 DNS CNAME, reversible). This is **mixed work**: engineering (scaffold, deploy,
 tests) + content (the copy, reused from `README.md`/`docs/concept.md`).
@@ -112,7 +114,9 @@ tests) + content (the copy, reused from `README.md`/`docs/concept.md`).
 - [ ] T9.4 Custom domain kazi.sire.run + HTTPS: commit `site/public/CNAME` containing `kazi.sire.run`; set the custom domain in repo Pages settings; **operator adds one DNS `CNAME` record `kazi -> kazi-org.github.io` at the sire.run provider** (human-gated, like the other infra secrets); enable "Enforce HTTPS".  Owner: TBD  kind: any  Est: 0.5h (+ DNS propagation)  verifies: [UC-028, infrastructure]  deps: [T9.3]  acc: `https://kazi.sire.run` serves the site with a valid auto-provisioned certificate; the apex/`www` is not claimed (subdomain only); the GitHub Pages "DNS check" passes. Operator step: the CNAME DNS record (the session does not control sire.run DNS).
 - [ ] T9.5 Playwright smoke test: add a minimal Playwright project under `site/` that loads the built site (or the live URL) and asserts the hero headline, the `brew install` command text, the GitHub link, and at least one edge case (mobile viewport renders the nav/CTA; no console errors).  Owner: TBD  Est: 1h  verifies: [UC-028]  deps: [T9.2]  acc: `npx playwright test` green against `site/dist` (served) and, when live, against `https://kazi.sire.run`; the test is wired into the pages workflow (or a `site` CI job) so a broken page fails CI.
 - [ ] T9.6 Polish + perf + a11y: Lighthouse >= 90 on performance/accessibility/best-practices/SEO; semantic HTML + alt text + sufficient contrast (the Electric Blue gradient on slate/white); OpenGraph/Twitter-card image (render from the logo); `<title>`/meta description; prefers-color-scheme support.  Owner: TBD  Est: 1.5h  verifies: [UC-028]  deps: [T9.2]  acc: a Lighthouse run (CI or local) reports >= 90 in all four categories on the deployed site; the OG image renders in a link-preview check.
-- [ ] T9.7 Verify live + link from README: load `https://kazi.sire.run` in a real browser (agent-browser), exercise the golden path (read hero -> copy the install command) plus one edge case (mobile), confirm no console errors and the cert is valid; then add the website link to the repo `README.md` header/badges.  Owner: TBD  Est: 0.5h  verifies: [UC-028]  deps: [T9.4]  acc: observed-not-expected evidence (a screenshot of the live `kazi.sire.run` + the install command working); `README.md` links the site; reported honestly.
+- [ ] T9.7 Verify live: load `https://kazi.sire.run` in a real browser (agent-browser), exercise the golden path (read hero -> copy the install command) plus one edge case (mobile), confirm no console errors and the cert is valid.  Owner: TBD  Est: 0.5h  verifies: [UC-028]  deps: [T9.4]  acc: observed-not-expected evidence (a screenshot of the live `kazi.sire.run` + the install command working); reported honestly.
+- [ ] T9.8 Enhance the README for website coherence (content): make `README.md` and the site one coherent story from a single source (ADR-0018). (a) Add a prominent website link/badge in the header (under the wordmark) pointing to `https://kazi.sire.run`. (b) Make the SHARED CANONICAL STRINGS verbatim-consistent across README + site: the one-line positioning/hero ("the missing outer loop for coding agents" / "Kubernetes for coding goals"), the install command `brew install kazi-org/tap/kazi`, the 60-second mental model, and the harness list. (c) Reframe the README as the developer companion to the marketing site -- same pitch up top, then install/quickstarts/harness config/contributor build -- with NO contradictions of the site (claims, commands, version). Do NOT delete the contributor build detail; the site is the newcomer surface, the README the full reference.  Owner: TBD  Est: 1.5h  delivers: [a README coherent with kazi.sire.run; shared canonical strings aligned]  deps: [T9.2]  acc: every shared canonical string is byte-identical in `README.md` and the site content; the README header links the site; a newcomer reading either surface gets the same positioning + install; no claim on one contradicts the other.
+- [ ] T9.9 Coherence drift-check (CI guardrail): add a tiny check (a shell/JS script or a Playwright/unit assertion run in the `site`/pages CI) that asserts the shared canonical strings (the install command, the positioning one-liner, the harness list) appear IDENTICALLY in `README.md` and the site's content source; fail CI if they diverge.  Owner: TBD  Est: 1h  verifies: [UC-028, infrastructure]  deps: [T9.8]  acc: the check is green when README + site agree; deliberately editing one canonical string in only one file makes the check (and CI) RED; wired into the pages workflow or a `site` CI job.
 
 ### Waves
 
@@ -123,7 +127,8 @@ primary open work.**
 - ~~**E6 / E8**~~ -- DONE except T6.7 (tap auto-bump, operator secret) -- see the WBS.
 - **Wave E9-1 (foundation):** T9.1 (scaffold Astro+Tailwind in `site/`) -> then T9.3 (deploy workflow) and T9.2 (landing content) can proceed in parallel.
 - **Wave E9-2 (build out):** T9.2 (landing sections), T9.5 (Playwright), T9.6 (polish/perf/a11y) -- parallel after T9.1.
-- **Wave E9-3 (go live):** T9.4 (custom domain + DNS -- **operator adds the CNAME record**) -> T9.7 (verify live at `kazi.sire.run` + link from README).
+- **Wave E9-3 (coherence):** T9.8 (enhance the README to be coherent with the site -- shared canonical strings, website link, dev-companion framing) -> T9.9 (CI drift-check so README + site can't diverge). Pairs with T9.2.
+- **Wave E9-4 (go live):** T9.4 (custom domain + DNS -- **operator adds the CNAME record**) -> T9.7 (verify live at `kazi.sire.run`).
 
 ## Risk Register
 
@@ -161,6 +166,20 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (E9: README <-> website coherence)
+- **Added T9.8 + T9.9** to E9: enhance `README.md` so it and the website are one
+  coherent story (T9.8 -- shared canonical strings verbatim, a prominent website
+  link in the header, README reframed as the developer companion to the marketing
+  site, no contradictions), and a CI drift-check (T9.9) that fails when the shared
+  canonical strings (install command, positioning one-liner, harness list) diverge
+  between `README.md` and the site content. T9.7 narrowed to live-verify only (the
+  README link moved to T9.8). New wave E9-3 (coherence) before E9-4 (go live).
+- **ADR-0018 updated** with a "README <-> website coherence" section: README +
+  concept are the canonical source the site derives from; shared strings are
+  verbatim; the surfaces are complementary (site = newcomer pitch, README = full
+  reference incl. contributor build); a drift-check guards them. No new ADR.
+- Same use case (UC-028) -- coherence is part of "explain kazi + drive to install".
 
 ### 2026-06-23 -- Change Summary (add E9: public website at kazi.sire.run)
 - **Added E9 (T9.1-T9.7)** -- a public Astro + Tailwind landing site on GitHub
