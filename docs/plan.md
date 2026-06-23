@@ -118,6 +118,22 @@ tests) + content (the copy, reused from `README.md`/`docs/concept.md`).
 - [x] T9.8 Enhance the README for website coherence (content): make `README.md` and the site one coherent story from a single source (ADR-0018). (a) Add a prominent website link/badge in the header (under the wordmark) pointing to `https://kazi.sire.run`. (b) Make the SHARED CANONICAL STRINGS verbatim-consistent across README + site: the one-line positioning/hero ("the missing outer loop for coding agents" / "Kubernetes for coding goals"), the install command `brew install kazi-org/tap/kazi`, the 60-second mental model, and the harness list. (c) Reframe the README as the developer companion to the marketing site -- same pitch up top, then install/quickstarts/harness config/contributor build -- with NO contradictions of the site (claims, commands, version). Do NOT delete the contributor build detail; the site is the newcomer surface, the README the full reference.  Owner: David  Done: 2026-06-23  delivers: [a README coherent with kazi.sire.run; shared canonical strings aligned]  deps: [T9.2]  acc: every shared canonical string is byte-identical in `README.md` and the site content; the README header links the site; a newcomer reading either surface gets the same positioning + install; no claim on one contradicts the other.
 - [x] T9.9 Coherence drift-check (CI guardrail): add a tiny check (a shell/JS script or a Playwright/unit assertion run in the `site`/pages CI) that asserts the shared canonical strings (the install command, the positioning one-liner, the harness list) appear IDENTICALLY in `README.md` and the site's content source; fail CI if they diverge.  Owner: David  Done: 2026-06-23  verifies: [UC-028, infrastructure]  deps: [T9.8]  acc: the check is green when README + site agree; deliberately editing one canonical string in only one file makes the check (and CI) RED; wired into the pages workflow or a `site` CI job.
 
+### E10 -- Move the website to a dedicated kazi-org/website repo (P2, ADR-0019)
+
+Acceptance: the website lives in its own `kazi-org/website` repo with its own CI +
+Pages deploy, still serving `https://kazi.sire.run` over HTTPS at root (same Astro +
+Tailwind, same domain, ADR-0018); the kazi product repo no longer carries `site/`;
+the README <-> site coherence check survives as a CROSS-REPO check; and the live
+site is verified after the one-time domain cutover. The DNS `CNAME` in
+`sirerun/foundation` is unchanged (it already points at GitHub Pages).
+
+- [ ] T10.1 Create the `kazi-org/website` repo (public; description + topics) and move the existing `site/` tree into it (keep history where easy, else a clean import commit). The Astro project, `public/CNAME`, and `public/logo/` carry over unchanged.  Owner: TBD  kind: any (repo create -- agent-doable via `gh`)  Est: 1h  verifies: [UC-028, infrastructure]  deps: []  acc: `kazi-org/website` exists with the Astro project at its root; `npm ci && npm run build` is green in the new repo; the brand assets are present.
+- [ ] T10.2 Pages deploy in the new repo: port `pages.yml` to `kazi-org/website` (build Astro -> `actions/upload-pages-artifact` -> `actions/deploy-pages`), enable Pages (source = GitHub Actions). The trigger is now just `push` to `main` (no `site/**` path filter).  Owner: TBD  Est: 1h  verifies: [UC-028, infrastructure]  deps: [T10.1]  acc: a push to `kazi-org/website` `main` deploys; the run is green; the site is reachable at the default `kazi-org.github.io/website` URL before the domain cutover.
+- [ ] T10.3 Domain cutover (one deliberate step): in `kazi-org/kazi` Pages settings REMOVE the `kazi.sire.run` custom domain, then SET it on `kazi-org/website` Pages (a domain attaches to one repo). Wait for GitHub to re-provision the cert, then enforce HTTPS. DNS is unchanged.  Owner: TBD  kind: any  Est: 0.5h (+ cert provisioning)  verifies: [UC-028, infrastructure]  deps: [T10.2]  acc: `https://kazi.sire.run` serves from `kazi-org/website` with a valid cert + HTTPS enforced; brief downtime during the hand-off is expected and acceptable.
+- [ ] T10.4 Cross-repo coherence check (ADR-0019): in the `website` repo, update the drift-check to fetch kazi's `README.md` via `raw.githubusercontent.com/kazi-org/kazi/main/README.md` and assert the shared canonical strings still match; wire it into the website CI so a divergence fails the deploy.  Owner: TBD  Est: 1h  verifies: [UC-028, infrastructure]  deps: [T10.1]  acc: the website CI fails if kazi's README and the site's `canonical.mjs` diverge on a shared string; green when they agree.
+- [ ] T10.5 Decommission `site/` from `kazi-org/kazi`: delete `site/` and `.github/workflows/pages.yml`; keep the README's `https://kazi.sire.run` link. Note the move in `docs/devlog.md`.  Owner: TBD  Est: 0.5h  verifies: [infrastructure]  deps: [T10.3]  acc: the kazi repo has no `site/` or pages workflow; `mix test` + CI green; the README still links the live site.
+- [ ] T10.6 Verify live from the new repo: load `https://kazi.sire.run` in a browser (agent-browser), confirm it serves the new repo's build at root with a valid cert and no console errors.  Owner: TBD  Est: 0.25h  verifies: [UC-028]  deps: [T10.3]  acc: observed-not-expected evidence (a live screenshot) that kazi.sire.run serves correctly post-migration.
+
 ### Waves
 
 E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; only T6.7
@@ -166,6 +182,11 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (website live; auto-release ON; E10 dedicated-repo plan)
+- **Website LIVE** at https://kazi.sire.run (E9 T9.1-T9.4, T9.7-T9.9 done): Astro+Tailwind, HTTPS, DNS via sirerun/foundation #120.
+- **Auto-release pipeline ACTIVATED**: HOMEBREW_TAP_TOKEN org secret + org Actions-can-create-PRs + RELEASE_AUTOMATION=true. T6.7 unblocked; release-please now opens release PRs on push to main.
+- **Added E10 (T10.1-T10.6, ADR-0019)**: move the website into a dedicated kazi-org/website repo (own CI/Pages, same Astro+Tailwind + kazi.sire.run domain). Supersedes ADR-0018 LOCATION only; the README<->site coherence check becomes cross-repo.
 
 ### 2026-06-23 -- Change Summary (E9: README <-> website coherence)
 - **Added T9.8 + T9.9** to E9: enhance `README.md` so it and the website are one
