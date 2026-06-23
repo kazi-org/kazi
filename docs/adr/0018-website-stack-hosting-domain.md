@@ -70,6 +70,24 @@ better, which can help OSS adoption. For a v1 launch the cost/simplicity/honesty
 `kazi.sire.run` wins, and the choice is reversible -- so we take it now and can
 revisit if kazi outgrows the company framing.
 
+### README <-> website coherence
+
+`README.md` and the website serve the same two audiences from one source of truth.
+To keep them coherent and prevent drift:
+
+- **`README.md` + `docs/concept.md` are the canonical content**; the site's copy is
+  DERIVED from them (T9.2). The page never invents a feature the README lacks.
+- **Shared canonical strings are verbatim** across both surfaces: the one-line
+  positioning/hero ("the missing outer loop for coding agents" / "Kubernetes for
+  coding goals"), the install command (`brew install kazi-org/tap/kazi`), the
+  60-second mental model, and the harness list. A small drift-check (T9.9) asserts
+  these strings appear identically in `README.md` and the site content, so editing
+  one without the other fails CI.
+- **Complementary, not redundant:** the website is the polished *what + why + first
+  goal* for a newcomer; the README stays the developer companion (the same pitch up
+  top, then install, quickstarts, harness config, and the full contributor build
+  detail). The README links prominently to the site; the site links to the repo.
+
 ## Consequences
 
 - **Ships fast, free, low-risk.** One DNS record + a CNAME file + a deploy
