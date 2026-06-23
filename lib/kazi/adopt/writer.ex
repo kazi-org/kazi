@@ -15,6 +15,9 @@ defmodule Kazi.Adopt.Writer do
 
     * the top-level `id`/`name` (when present),
     * an optional `[scope]` table when the map carries `"scope"`,
+    * an optional `[harness]` table when the map carries `"harness"` (T8.6,
+      ADR-0016) — only the recognized keys (`id`, `model`, `command`), in that
+      stable order; a nil/empty harness emits nothing,
     * one `[[predicate]]` block per predicate, reserved keys first in a stable
       order, then config keys sorted by name, and
     * a COMMENTED live-predicate scaffold — a `# [[predicate]]` `http_probe`
@@ -57,6 +60,7 @@ defmodule Kazi.Adopt.Writer do
     [
       render_header(map),
       render_scope(Map.get(map, "scope")),
+      render_harness(Map.get(map, "harness")),
       render_predicates(Map.get(map, "predicate", [])),
       live_predicate_scaffold()
     ]
@@ -125,6 +129,31 @@ defmodule Kazi.Adopt.Writer do
   end
 
   defp render_scope(_other), do: ""
+
+  # An optional `[harness]` table (T8.6, ADR-0016). Only the loader-recognised
+  # keys are emitted, in a deterministic order (id, model, command); anything
+  # else is ignored so the output round-trips. A nil/empty harness emits nothing.
+  # The harness `id` may be an atom (from a loaded Goal) or a string; either
+  # renders to the same TOML string the loader maps back to a known id.
+  defp render_harness(nil), do: ""
+  defp render_harness(harness) when map_size(harness) == 0, do: ""
+
+  defp render_harness(%{} = harness) do
+    lines =
+      [
+        optional_kv("id", Map.get(harness, "id")),
+        optional_kv("model", Map.get(harness, "model")),
+        optional_kv("command", Map.get(harness, "command"))
+      ]
+      |> Enum.reject(&(&1 == ""))
+
+    case lines do
+      [] -> ""
+      kvs -> "[harness]\n" <> Enum.join(kvs, "\n")
+    end
+  end
+
+  defp render_harness(_other), do: ""
 
   # Render each predicate as its own `[[predicate]]` block, in input order
   # (deterministic). A non-list or empty predicate list renders nothing here —
