@@ -5,11 +5,18 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://kazi.sire.run"><b>Website</b></a> &nbsp;&middot;&nbsp;
+  <a href="docs/concept.md">Concept</a> &nbsp;&middot;&nbsp;
+  <a href="https://github.com/kazi-org/kazi/releases">Releases</a> &nbsp;&middot;&nbsp;
+  <a href="https://github.com/kazi-org/homebrew-tap">Homebrew tap</a>
+</p>
+
 # kazi
 
 **Describe what "done" looks like. kazi makes it true — and proves it.**
 
-*kazi* (Swahili: *work / a job*) is the missing **outer loop** for coding agents.
+*kazi* (Swahili: *work / a job*) is **the missing outer loop for coding agents**.
 You tell it the outcome you want — in plain English or as a short goal-file — and
 kazi drives a coding agent (Claude Code, Codex, …) in a loop until that outcome is
 *objectively* real: tests pass, the endpoint is live, the change is deployed. If it
