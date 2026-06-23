@@ -21,12 +21,12 @@ COMPLETE and merged on `main`:
   open-source release (ADR-0015): the `capabilities.json` input was bespoke and did
   not generalize.
 
-State of `main`: **844 tests pass** (66 doctests, 778 tests), 18 excluded
-(`:nats`/`:graphify` integration tags); `mix format --check-formatted` clean;
-`mix compile --warnings-as-errors` clean. E8 is nearly done: T8.1-T8.8 merged
-(PRs #80/#82/#84/#83/#86/#87/#88/#90) -- `kazi run --harness opencode --model <m>`
-is wired end to end. Only **T8.9** (verify incl. live opencode->DGX smoke) and
-**T8.10** (docs) remain; both are now unblocked.
+State of `main`: **853 tests pass** (66 doctests, 787 tests), 19 excluded
+(`:nats`/`:graphify`/`:opencode_live` tags); `mix format --check-formatted` clean;
+`mix compile --warnings-as-errors` clean. **E8 is COMPLETE** -- all of T8.1-T8.10
+merged (PRs #80/#82/#83/#84/#86/#87/#88/#90/#92/#93). `kazi run --harness opencode
+--model <m>` is wired, documented, and covered; the live opencode->DGX smoke is an
+honest-skip (excluded by default, see devlog).
 
 **What remains (the entire content of this plan):**
 
@@ -35,13 +35,13 @@ is wired end to end. Only **T8.9** (verify incl. live opencode->DGX smoke) and
    the full SQLite read-model (NIF bundled), superseding the escript. T6.1 (the
    `mix release` foundation) is merged; the Burrito wrap config is merged but its
    host binary has not been built (Risk R-E6-1). Environment-sensitive; drive the
-   build through CI, not this macOS-26 host.
-2. **E8 (T8.1-T8.10)** -- generic multi-harness support (ADR-0016): generalize the
-   single `Kazi.Harness.ClaudeAdapter` into a config-driven, profile-parameterized
-   CLI adapter so kazi can drive **opencode** (wired to a local Qwen3.6 35B-A3B on
-   the DGX) and any other CLI harness (Codex, gemini-cli, antigravity, claw-code)
-   by declaring a profile -- no core code change. This is the live trigger: the
-   operator has opencode installed (v1.17.9) and wants kazi to drive it.
+   build through CI, not this macOS-26 host. With repo creation now agent-doable
+   (`kazi-org` admin via `gh`), E6 is fully agent-completable once the CI Burrito
+   build lands. **This is the only epic left.**
+2. ~~**E8 (T8.1-T8.10)**~~ -- generic multi-harness support (ADR-0016): DONE. The
+   single `Kazi.Harness.ClaudeAdapter` was generalized into config-driven harness
+   profiles + a `Kazi.Harness.CliAdapter` + `Kazi.Harness.resolve/1`, so kazi drives
+   **opencode** (and any CLI harness) by declaring a profile -- no core code change.
 
 **Frozen design (do NOT relitigate):** `docs/concept.md` (canonical architecture +
 source of truth) and ADRs `0001`..`0016`. To change a decision, write a superseding
@@ -52,13 +52,10 @@ ADR.
 All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work:
 
 - **UC-024** (install kazi as a single binary via Homebrew, ADR-0014) -- OPEN; E6.
-- **UC-026** (drive convergence with opencode + a local model on the DGX, ADR-0016)
-  -- OPEN; E8.
-- **UC-027** (select/configure the coding harness generically; add a harness by
-  declaring a profile, ADR-0016) -- OPEN; E8.
 
-UC-001..UC-023 are delivered and verified on `main`. UC-025 (import a standard
-spec into a goal set) is **deferred backlog** (ADR-0015).
+UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
+delivered and verified on `main`. UC-025 (import a standard spec into a goal set)
+is **deferred backlog** (ADR-0015).
 
 ## Checkable Work Breakdown
 
@@ -106,8 +103,8 @@ Claude's single envelope; `opencode stats` reports usage).
 - [x] T8.6 Goal-file `[harness]` table: extend `Kazi.Goal` (additive field) + `Kazi.Goal.Loader.from_map/1` to load an optional `[harness]` table (`id`, optional `model`, optional `command` override), and `Kazi.Adopt.Writer` to optionally emit it; absent table -> today's behavior (default `:claude`).  Owner: David  Done: 2026-06-22 (PR #87)  verifies: [UC-026, UC-027]  deps: [T8.5]  acc: a goal-file with `[harness] id = "opencode" model = "dgx/qwen3.6"` loads into the Goal and `Kazi.Harness.resolve/1` selects opencode + that model; a goal-file with no `[harness]` loads exactly as before (round-trip test); loader rejects an unknown-typed table with a clear error.
 - [x] T8.7 Wire Runtime + CLI + authoring/adopt: replace `Kazi.Runtime`'s hard-coded `@harness` with `Kazi.Harness.resolve/1` over (goal, config, opts); add `kazi run --harness <id> --model <m>` flags to `Kazi.CLI` threaded into `adapter_opts`; route `Kazi.Authoring` and `Kazi.Adopt.enrich` default harness through the same seam.  Owner: David  Done: 2026-06-22 (PR #90)  verifies: [UC-026, UC-027]  deps: [T8.2, T8.4, T8.5, T8.6]  acc: `kazi run <fixture-goal> --harness opencode --model <m>` resolves CliAdapter+opencode and dispatches (verified against a stub harness in a Tier-2 CLI test); with no `--harness`, behavior is byte-identical to today (claude); CLI `--help` documents the flags; `mix test` green.
 - [x] T8.8 Local-provider config + env: support pointing opencode at the DGX-hosted Qwen via the profile (pass `--model <provider/model>` and any required env such as a base URL / `OPENCODE_*` var); document that opencode's own provider config (already wired by the operator) is the source of truth and kazi only selects the model.  Owner: David  Done: 2026-06-22 (PR #88)  verifies: [UC-026]  deps: [T8.4]  acc: a test asserts the resolved opencode `adapter_opts` carry the configured model and forward declared env to `System.cmd`; README documents the DGX/Qwen setup expectation (opencode provider pre-configured; kazi selects `--model`).
-- [ ] T8.9 Tests incl. live opencode smoke: full coverage -- unit (profile/registry/resolution/parsers), Tier-2 (CliAdapter per profile against stub binaries; golden claude-argv; opencode NDJSON parse), and a Tier-4 LIVE smoke that runs `kazi run <hermetic fixture goal> --harness opencode` end-to-end against the operator's DGX-hosted Qwen and asserts convergence + a persisted iteration; honestly SKIP (not fake-pass) with a logged reason when the DGX endpoint is unreachable.  Owner: TBD  Est: 2h  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: stub-driven tests are green and hermetic in CI; the live smoke either converges a fixture goal through opencode->DGX (evidence recorded: iteration count + final vector) or is reported SKIPPED with the unreachable-endpoint reason -- never silently passed.
-- [ ] T8.10 Docs + ADR reference: README gains a "Use a different coding harness" section -- claude is the default; `--harness opencode --model <provider/model>` for the local DGX model; the goal-file `[harness]` table; and "add a harness = declare a profile" pointing at `Kazi.Harness.Registry`; link ADR-0016. Update `docs/concept.md` only where the harness boundary is described (general terms, no model names).  Owner: TBD  Est: 1h  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: README documents harness selection (flag, goal-file, config) + how to add a profile + the harness-on-PATH runtime requirement; ADR-0016 linked; concept.md harness section reflects multi-harness neutrality; no model-specific detail leaks into Tier-1 docs.
+- [x] T8.9 Tests incl. live opencode smoke: full coverage -- unit (profile/registry/resolution/parsers), Tier-2 (CliAdapter per profile against stub binaries; golden claude-argv; opencode NDJSON parse), and a Tier-4 LIVE smoke that runs `kazi run <hermetic fixture goal> --harness opencode` end-to-end against the operator's DGX-hosted Qwen and asserts convergence + a persisted iteration; honestly SKIP (not fake-pass) with a logged reason when the DGX endpoint is unreachable.  Owner: David  Done: 2026-06-22 (PR #93)  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: stub-driven tests are green and hermetic in CI; the live smoke either converges a fixture goal through opencode->DGX (evidence recorded: iteration count + final vector) or is reported SKIPPED with the unreachable-endpoint reason -- never silently passed.
+- [x] T8.10 Docs + ADR reference: README gains a "Use a different coding harness" section -- claude is the default; `--harness opencode --model <provider/model>` for the local DGX model; the goal-file `[harness]` table; and "add a harness = declare a profile" pointing at `Kazi.Harness.Registry`; link ADR-0016. Update `docs/concept.md` only where the harness boundary is described (general terms, no model names).  Owner: David  Done: 2026-06-22 (PR #92)  verifies: [UC-026, UC-027]  deps: [T8.7]  acc: README documents harness selection (flag, goal-file, config) + how to add a profile + the harness-on-PATH runtime requirement; ADR-0016 linked; concept.md harness section reflects multi-harness neutrality; no model-specific detail leaks into Tier-1 docs.
 
 ### Waves
 
@@ -121,7 +118,7 @@ independent and can proceed in parallel.
 - ~~**Wave E8-1b/2:** T8.2, T8.4, T8.5~~ -- DONE (PRs #82/#84/#83): generic CliAdapter, opencode profile, resolution seam.
 - ~~**Wave E8-3:** T8.3, T8.6, T8.8~~ -- DONE (PRs #86/#87/#88): neutral prompt module + ClaudeAdapter shim; goal-file `[harness]` table; opencode local-provider model + env forwarding.
 - ~~**Wave E8-4:** T8.7~~ -- DONE (PR #90): Runtime resolves the harness; `kazi run --harness/--model` wired; authoring/adopt route through the seam.
-- **Wave E8-5 (now, verify+ship):** T8.9, T8.10   (tests incl. live opencode->DGX smoke; docs + ADR link -- both deps T8.7, parallel).
+- ~~**Wave E8-5:** T8.9, T8.10~~ -- DONE (PRs #93/#92): harness coverage + honest-skip live opencode->DGX smoke; harness-selection docs + ADR link. **E8 complete.**
 - **Wave E8-5 (verify+ship):** T8.9, T8.10   (tests incl. live opencode->DGX smoke; docs + ADR link; deps T8.7).
 - **Wave E8-3 (integrate):** T8.6 -> T8.7, T8.8   (goal-file table; Runtime/CLI/authoring/adopt wiring; local-provider config).
 - **Wave E8-4 (verify + ship):** T8.9, T8.10   (tests incl. live opencode->DGX smoke; docs + ADR link).
