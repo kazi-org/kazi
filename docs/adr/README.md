@@ -25,4 +25,3 @@ decision, write a new ADR that supersedes the old one (and update
 | [0016](0016-generic-harness-profiles.md) | Generic harness profiles: config-driven multi-harness support (opencode, Codex, ...) | Accepted |
 | [0017](0017-automated-brew-release-pipeline.md) | Automated brew release pipeline (release-please -> CI build -> tap auto-bump) | Accepted |
 | [0018](0018-website-stack-hosting-domain.md) | kazi website: Astro + Tailwind on GitHub Pages at kazi.sire.run | Accepted |
-| [0019](0019-website-dedicated-repo.md) | Move the website to a dedicated kazi-org/website repo (supersedes 0018 location) | Accepted |
