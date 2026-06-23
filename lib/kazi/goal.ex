@@ -35,6 +35,15 @@ defmodule Kazi.Goal do
       intent recorded on the goal — the loop's standing behaviour itself is
       T3.4a; here the goal just *declares* it so it can be authored in a
       goal-file and threaded into the loop opts by `Kazi.Runtime`.
+    * `harness` — the goal's harness selection (T8.6, ADR-0016): which coding
+      harness this goal prefers to be driven by, declared in the goal-file's
+      `[harness]` table. A plain map `%{id: atom|nil, model: String.t()|nil,
+      command: String.t()|nil}` — `id` is the harness id (e.g. `:opencode`),
+      `model` an optional provider/model override, `command` an optional binary
+      override. Default `nil` (no goal-level preference; resolution falls through
+      to config/default, ADR-0016). Like `mode`/`standing`, this is authoring
+      intent recorded on the goal; threading the loaded `id` into
+      `Kazi.Harness.resolve/1` as `:goal_harness` is T8.7.
 
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
@@ -53,6 +62,16 @@ defmodule Kazi.Goal do
   """
   @type mode :: :repair | :create
 
+  @typedoc """
+  A goal's harness selection (T8.6, ADR-0016): the harness `id` it prefers,
+  plus optional `model`/`command` overrides. Any field may be `nil`.
+  """
+  @type harness :: %{
+          id: atom() | nil,
+          model: String.t() | nil,
+          command: String.t() | nil
+        }
+
   @type t :: %__MODULE__{
           id: id(),
           name: String.t() | nil,
@@ -62,6 +81,7 @@ defmodule Kazi.Goal do
           budget: Budget.t(),
           scope: Scope.t(),
           standing: boolean(),
+          harness: harness() | nil,
           metadata: map()
         }
 
@@ -77,17 +97,23 @@ defmodule Kazi.Goal do
             # Default false = one-shot converge-and-stop. Appended last so the
             # existing field order is untouched.
             standing: false,
+            # T8.6 harness selection (ADR-0016): the goal's preferred harness as
+            # a `%{id:, model:, command:}` map, authored in the goal-file's
+            # `[harness]` table. Default nil = no goal-level preference. Appended
+            # additively so the existing field order is untouched.
+            harness: nil,
             metadata: %{}
 
   @doc """
   Builds a goal.
 
   `id` is required. Optional opts: `:name`, `:mode`, `:predicates`, `:guards`,
-  `:budget`, `:scope`, `:standing`, `:metadata`. `:mode` is `:repair` (default)
-  or `:create` (creation mode — predicates are acceptance criteria, T2.1).
-  `:standing` (default `false`) declares a standing/maintenance goal (T3.4d,
-  UC-016). `:budget` and `:scope` accept either a struct or a keyword list
-  (forwarded to `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
+  `:budget`, `:scope`, `:standing`, `:harness`, `:metadata`. `:mode` is
+  `:repair` (default) or `:create` (creation mode — predicates are acceptance
+  criteria, T2.1). `:standing` (default `false`) declares a standing/maintenance
+  goal (T3.4d, UC-016). `:harness` (default `nil`) is the goal's harness
+  selection map (T8.6, ADR-0016). `:budget` and `:scope` accept either a struct
+  or a keyword list (forwarded to `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
 
   ## Examples
 
@@ -115,6 +141,8 @@ defmodule Kazi.Goal do
       scope: opts |> Keyword.get(:scope, %Scope{}) |> to_scope(),
       # T3.4d standing wiring: declared standing/maintenance mode (UC-016).
       standing: Keyword.get(opts, :standing, false),
+      # T8.6 harness selection (ADR-0016): the goal's preferred harness map.
+      harness: Keyword.get(opts, :harness),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
