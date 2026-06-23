@@ -91,6 +91,26 @@ mix escript.build          # produces ./kazi
 ./kazi --help
 ```
 
+### Point opencode at a local model (e.g. a DGX-hosted Qwen3.6)
+
+kazi drives whatever coding CLI you already have installed and configured — it
+does not reimplement provider plumbing ([ADR-0016](docs/adr/0016-generic-harness-profiles.md)).
+If you run [`opencode`](https://opencode.ai) wired to a local model (the operator
+here points it at a DGX-hosted **Qwen3.6 35B-A3B**), **opencode's own provider
+config is the source of truth** for the endpoint and credentials. kazi just
+selects the harness and the model:
+
+```sh
+kazi run <goal-file> --workspace <path> \
+  --harness opencode --model dgx-ollama/qwen3.6:35b-a3b
+```
+
+`--model` is opencode's `provider/model` string. The provider (`dgx-ollama`
+above) and its base URL live in your opencode config, not in kazi. kazi can also
+forward provider/endpoint environment variables to the harness subprocess when a
+local setup expects them — declare them as the harness `:env` and kazi passes
+them straight through to the underlying call.
+
 ### Build a self-contained release (full read-model)
 
 The escript can't bundle the native SQLite NIF, so it runs **without** the
