@@ -6,12 +6,29 @@ defmodule Kazi.MixProject do
       app: :kazi,
       version: "0.1.0",
       elixir: "~> 1.20",
+      name: "kazi",
+      description:
+        "An outer-loop reconciliation controller for software goals: declare a goal " <>
+          "as machine-checkable predicates and kazi drives a coding agent in a loop " <>
+          "until they are objectively true, stuck, or over budget.",
+      source_url: "https://github.com/kazi-org/kazi",
+      homepage_url: "https://github.com/kazi-org/kazi",
+      package: package(),
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       escript: escript(),
       releases: releases(),
       deps: deps()
+    ]
+  end
+
+  # Open-source package metadata (Apache-2.0; see LICENSE + NOTICE).
+  defp package do
+    [
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => "https://github.com/kazi-org/kazi"},
+      files: ~w(lib priv mix.exs README.md LICENSE NOTICE)
     ]
   end
 

@@ -417,4 +417,5 @@ adapter is an optional augmentation, never the foundation).
 
 ## License
 
-MIT.
+Licensed under the [Apache License, Version 2.0](LICENSE). See the [NOTICE](NOTICE)
+file for attribution. Copyright 2026 Sire Run, Inc.
