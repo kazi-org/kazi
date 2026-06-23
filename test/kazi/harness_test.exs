@@ -141,6 +141,41 @@ defmodule Kazi.HarnessTest do
     end
   end
 
+  describe "resolve/1 goal-file harness precedence (T8.6/T8.7 interaction)" do
+    # These mirror exactly the shape Kazi.Runtime.resolve_harness/2 builds from a
+    # loaded goal-file `[harness]` table: it passes goal_harness: gh.id and folds
+    # the goal-file model in as a fallback under any explicit --model. We assert the
+    # precedence at the resolve/1 seam those calls land on — the combination, not
+    # the individual rungs already covered above.
+
+    test "goal-file [harness] selects the harness when no explicit --harness" do
+      # `goal_harness: :opencode` (from the goal-file) wins over the :claude default
+      # and carries the goal-file model through.
+      assert {:ok, {CliAdapter, adapter_opts}} =
+               Kazi.Harness.resolve(goal_harness: :opencode, model: "dgx/qwen3.6")
+
+      assert %Profile{id: :opencode} = adapter_opts[:profile]
+      assert adapter_opts[:model] == "dgx/qwen3.6"
+    end
+
+    test "explicit --harness overrides the goal-file [harness] id" do
+      # The operator's --harness claude beats a goal-file that declared opencode.
+      assert {:ok, {CliAdapter, adapter_opts}} =
+               Kazi.Harness.resolve(harness: :claude, goal_harness: :opencode)
+
+      assert %Profile{id: :claude} = adapter_opts[:profile]
+    end
+
+    test "explicit --model overrides the goal-file model (Runtime folds it as fallback)" do
+      # Runtime.resolve_harness passes `model: opts[:model] || gh.model`; the
+      # resolved :model is therefore the explicit one when present.
+      assert {:ok, {CliAdapter, adapter_opts}} =
+               Kazi.Harness.resolve(goal_harness: :opencode, model: "operator/override")
+
+      assert adapter_opts[:model] == "operator/override"
+    end
+  end
+
   describe "resolve/1 unknown harness" do
     test "an unknown atom id returns {:error, {:unknown_harness, id}}" do
       assert {:error, {:unknown_harness, :nope}} = Kazi.Harness.resolve(harness: :nope)
