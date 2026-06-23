@@ -8,9 +8,9 @@
     </linearGradient>
     <!-- Vibrant mark gradient (brightened for contrast on dark slate). -->
     <linearGradient id="kaziGrad" gradientUnits="userSpaceOnUse" x1="16" y1="16" x2="80" y2="80">
-      <stop offset="0" stop-color="#2DD4BF"/>
-      <stop offset="0.5" stop-color="#34D399"/>
-      <stop offset="1" stop-color="#4ADE80"/>
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.5" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
     </linearGradient>
   </defs>
   <!-- App-icon / favicon / avatar badge: rounded square in slate, vibrant mark. -->

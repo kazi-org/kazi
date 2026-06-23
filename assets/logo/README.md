@@ -3,26 +3,25 @@
 The mark is a **reconcile loop converging to a checkmark**: an open ring (the
 control loop — observe, diff, dispatch, re-observe) wrapped around a bold check
 (predicates become *objectively true*). The mark is drawn in a **vibrant
-teal → emerald → lime gradient** that sweeps around the loop and into the check —
-the color literally progresses toward "green / converged", which is what kazi
-does.
+electric gradient — cyan → blue → violet** that sweeps around the loop and into
+the check, for an energetic, modern feel.
 
 ## Files
 
 | File | Use |
 |------|-----|
-| `kazi-mark.svg` | Icon only (emerald). Primary mark. |
+| `kazi-mark.svg` | Icon only (electric gradient). Primary mark. |
 | `kazi-mark-mono.svg` | Icon in `currentColor` — inherits the surrounding text color for light/dark themes. |
 | `kazi-wordmark.svg` | Mark + "kazi" wordmark, for light backgrounds. |
 | `kazi-wordmark-dark.svg` | Wordmark for dark backgrounds. |
-| `kazi-badge.svg` | Rounded-square app icon / favicon / avatar (emerald mark on slate). |
+| `kazi-badge.svg` | Rounded-square app icon / favicon / avatar (gradient mark on slate). |
 
 ## Colors
 
 The mark is a gradient (`id="kaziGrad"`), a diagonal sweep across the loop:
 
-- **Teal** `#2DD4BF` → **Emerald** `#10B981` → **Lime-green** `#4ADE80` — the mark.
-  On dark surfaces the start is nudged to emerald `#34D399` for contrast.
+- **Cyan** `#22D3EE` → **Blue** `#3B82F6` → **Violet** `#8B5CF6` — the mark
+  (same on light and dark; it pops on both).
 - **Slate ink** `#0F172A` — wordmark text on light.
 - **Slate-100** `#F1F5F9` — wordmark text on dark.
 - **Badge background** — a subtle slate gradient `#1E293B` → `#0F172A` (`id="kaziBg"`).
