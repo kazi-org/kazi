@@ -160,6 +160,60 @@ defmodule Kazi.AdoptWriterTest do
     end
   end
 
+  describe "to_toml/1 — optional [harness] table (T8.6, ADR-0016)" do
+    test "emits nothing for a map with no harness (existing output unchanged)" do
+      with_harness = Writer.to_toml(Map.put(goal_map(), "harness", nil))
+      without = Writer.to_toml(goal_map())
+
+      refute with_harness =~ "[harness]"
+      assert with_harness == without
+    end
+
+    test "emits a [harness] table with only the recognized keys, in stable order" do
+      map =
+        Map.put(goal_map(), "harness", %{
+          "id" => "opencode",
+          "model" => "dgx/qwen3.6",
+          "command" => "/usr/local/bin/opencode",
+          # an unrecognized key must NOT be emitted (so output round-trips).
+          "ignored" => "drop-me"
+        })
+
+      toml = Writer.to_toml(map)
+
+      assert toml =~ "[harness]"
+      assert toml =~ ~s(id = "opencode")
+      assert toml =~ ~s(model = "dgx/qwen3.6")
+      assert toml =~ ~s(command = "/usr/local/bin/opencode")
+      refute toml =~ "ignored"
+      refute toml =~ "drop-me"
+
+      # id before model before command (deterministic order).
+      id_at = :binary.match(toml, "id = \"opencode\"") |> elem(0)
+      model_at = :binary.match(toml, "model =") |> elem(0)
+      command_at = :binary.match(toml, "command =") |> elem(0)
+      assert id_at < model_at and model_at < command_at
+    end
+
+    test "an empty harness map emits nothing" do
+      assert Writer.to_toml(Map.put(goal_map(), "harness", %{})) == Writer.to_toml(goal_map())
+    end
+
+    test "is deterministic — same harness map renders byte-identically" do
+      map = Map.put(goal_map(), "harness", %{"id" => "opencode", "model" => "dgx/qwen3.6"})
+      assert Writer.to_toml(map) == Writer.to_toml(map)
+    end
+
+    test "round-trips: a harness table renders and re-loads to the same values" do
+      map = Map.put(goal_map(), "harness", %{"id" => "opencode", "model" => "dgx/qwen3.6"})
+
+      toml = Writer.to_toml(map)
+      assert {:ok, decoded} = Toml.decode(toml)
+      assert {:ok, %Goal{harness: harness}} = Loader.from_map(decoded)
+      assert harness == %{id: :opencode, model: "dgx/qwen3.6", command: nil}
+    end
+  end
+
   describe "live_predicate_scaffold/0" do
     test "is a comment block that does NOT parse as a predicate" do
       scaffold = Writer.live_predicate_scaffold()
