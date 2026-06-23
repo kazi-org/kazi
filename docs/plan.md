@@ -64,13 +64,18 @@ Status `kind: agent` is implicit unless noted.
 
 Acceptance: merging Conventional Commits to `main` and merging the resulting
 release PR causes, with NO further manual steps, a `vX.Y.Z` GitHub Release whose
-assets are the four Burrito binaries (macOS `aarch64`/`x86_64`, Linux
-`x86_64`/`aarch64`) each with a `.sha256`, and a `kazi-org/homebrew-tap` `kazi`
-formula auto-updated to that release so `brew install kazi-org/tap/kazi` (and
-`brew upgrade`) install a working single binary with the FULL read-model (no
-Erlang prerequisite, NIF bundled). **T6.1 (`mix release`) and the Burrito wrap
-config are merged.** The host binary cannot be linked on this macOS-26 dev box
-(R-E6-1) -- the build is CI-driven by design.
+assets are the Burrito binaries each with a `.sha256`, and a
+`kazi-org/homebrew-tap` `kazi` formula auto-updated to that release so
+`brew install kazi-org/tap/kazi` (and `brew upgrade`) install a working single
+binary with the FULL read-model (no Erlang prerequisite, NIF bundled). **T6.1
+(`mix release`) and the Burrito wrap config are merged.** The host binary cannot
+be linked on this macOS-26 dev box (R-E6-1) -- the build is CI-driven by design.
+
+**SHIPPED:** `brew install kazi-org/tap/kazi` is live (verified) for **3
+platforms** -- macOS `aarch64`, Linux `x86_64`, Linux `aarch64` -- on the `v0.1.0`
+Release. macOS `x86_64` (Intel) is the only deferred target (GitHub's macos-13
+Intel runners are deprecated/scarce). The full auto-release chain is wired but
+gated on the one-time human activation in T6.6/T6.7.
 
 - [x] T6.2 Burrito build proven on CI: confirm `mix release` produces a runnable Burrito binary for at least one target on a Zig-compatible runner that bundles ERTS + the `exqlite` NIF, and a fixture `kazi run` PERSISTS iterations to SQLite (read-model present, no escript degradation)  Owner: David  Done: 2026-06-22 (CI run on v0.1.0)  verifies: [UC-024]  deps: []  acc: a CI job (the T6.3 workflow on a test tag) yields a `burrito_out/kazi_<target>` that runs `--help` and converges/persists a fixture goal; evidence captured in the run log. Folded into T6.3's first green run rather than a separate local build (R-E6-1).
 - [x] T6.3 Release build workflow: `.github/workflows/release.yml` -- on a `v*` tag, a matrix builds the four Burrito targets (macOS on `macos-15` per R-E6-1, Linux on `ubuntu-latest`) with Zig 0.15.2 + xz, generates a `.sha256` per binary, and uploads all as GitHub Release assets  Owner: David  Done: 2026-06-22 (PR #98; validated on v0.0.0-test5 + v0.1.0)  verifies: [UC-024]  deps: []  acc: pushing a test tag (`v0.0.0-test1`) produces four `kazi_*` binaries + four `.sha256` as Release assets; the workflow is green; both macOS and Linux jobs succeed. A WIP `release.yml` is committed; this task is making it actually green on a test tag (the real validation -- expect CI iteration on BEAM/Zig/Burrito setup).
