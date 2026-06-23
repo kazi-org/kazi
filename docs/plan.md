@@ -52,7 +52,9 @@ All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work
 - **UC-024** (install kazi as a single binary via Homebrew, ADR-0014; now with the
   fully-automated release pipeline of ADR-0017) -- OPEN; E6.
 - **UC-029** (interactive `propose`: kazi asks clarifying questions before drafting
-  a goal so acceptance predicates are precise, ADR-0019) -- OPEN; E11.
+  a goal so acceptance predicates are precise, ADR-0019) -- DELIVERED (E11, v0.3.0).
+- **UC-030** (hierarchical predicate grouping via a declared taxonomy + capability
+  import + Obsidian/Mermaid export of intended/built/pending, ADR-0020) -- OPEN; E12.
 
 UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
 delivered and verified on `main`. UC-025 (import a standard spec into a goal set)
@@ -150,12 +152,40 @@ core is built surface-agnostic.
 - [x] T11.8 Review loop (refine via `edit/3`): after the draft is shown, offer "looks right / too much / too little / refine"; "refine" re-prompts with a sharper sentence and re-runs clarify+draft, persisting via the existing `edit/3` transition (stays `proposed`).  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.6]  acc: ExUnit with injected I/O -- "refine" with a new sentence updates the proposed goal via `edit/3` (stays `proposed`); "looks right" leaves it `proposed` for `approve`; golden path covered.  NOTE (deviation): implemented as a propose-UPSERT on the same `proposal_ref` (re-runs clarify+draft, row stays `proposed`) rather than a literal `edit/3` call -- equivalent end-state, fewer moving parts; covered by a CLI test asserting a single proposal row after a refine.
 - [x] T11.9 Docs + LIVE CLI verification: update the README/`docs/concept.md` authoring section to describe interactive `propose`; run `kazi propose "<idea>"` in a REAL TTY (stub or real harness) and observe questions -> draft -> rationale, plus the `--yes` non-interactive path and `--strict` on an underspecified idea; record the transcript evidence in `docs/devlog.md`.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.6, T11.8]  acc: observed-not-expected evidence (a terminal transcript) for the interactive path, the non-interactive path, and the `--strict` failure; README authoring section matches behavior; `mix format --check-formatted` + `mix compile --warnings-as-errors` clean.
 
+### E12 -- Hierarchical predicate grouping + capability import + Obsidian export (P3, ADR-0020)
+
+Acceptance: a `Kazi.Goal` can organize hundreds of predicates as a validated tree
+(e.g. pillar -> domain -> capability), so a goal representing a whole product's
+desired state is legible, sliceable, budgetable per group, and exportable to a
+visualization tool (Obsidian) showing each node's state (intended / built /
+pending). Grouping references a DECLARED taxonomy by id (NOT free text), validated
+at load -- the structural guard against text drift (ADR-0020). Motivated by the
+sirerun dogfood (`docs/devlog.md` 2026-06-23): sire's `capabilities.json` is 317
+capabilities across 9 pillars; the one-off analysis proved the value and revealed
+the requirements. Backward compatible: `group`/`[[group]]` are optional; an
+ungrouped goal behaves exactly as today.
+
+- [ ] T12.1 Declared `[[group]]` taxonomy in the goal-file + loader parsing: extend `Kazi.Goal.Loader.from_map/1` to parse a `[[group]]` array of `{id, name, parent?, budget?}` into a group set on the goal; ids are slugs, `name` is the display label.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: []  acc: ExUnit -- a goal-file with `[[group]]` entries loads a validated group set; ids normalize (case/whitespace/`&`); a duplicate group id is a load error; round-trips through the loader.
+- [ ] T12.2 `Predicate.group` field + reference validation (the drift guard): add an optional `group :: String.t() | nil` to `Kazi.Predicate` (a declared group id, appended additively); the loader REJECTS a predicate whose `group` is not a declared id, a group whose `parent` is undeclared, and a parent cycle.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.1]  acc: ExUnit -- a predicate referencing a declared group loads; an UNKNOWN group id is `{:error, ...}` at parse time (the typo guard); an undeclared parent and a cycle are load errors; `group: nil` is unchanged (backward compatible).
+- [ ] T12.3 Group tree + per-group status rollup (pure): build the tree from `parent` links and roll up predicate verdicts (acceptance-not-yet-true vs passing) into per-group intended/built/pending counts.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.2]  acc: ExUnit -- pure functions reconstruct the tree to arbitrary depth and roll up counts per group; deterministic; no I/O.
+- [ ] T12.4 Per-group budgets / reconciliation: attach an optional per-group budget and scope convergence + reporting to a group's predicate partition (rides the graph partitioning of ADR-0006), delivering per-pillar reconciliation without a separate `Goal`.  Owner: TBD  Est: 2h  verifies: [UC-030]  deps: [T12.2]  acc: ExUnit -- a group with a budget bounds its partition's iterations independently; the loop reports per-group status; an ungrouped goal is unaffected.
+- [ ] T12.5 `kazi init --from-capabilities <manifest.json>` importer (resurrects UC-025): deterministically map a `sire-capability-manifest/v1` (or generic spec) -- pillars -> root groups, domains -> child groups, capabilities -> leaf groups with one predicate per machine-checkable evidence item; the taxonomy is generated from the manifest's canonical pillar list (consistent by construction).  Owner: TBD  Est: 2h  verifies: [UC-030, UC-025]  deps: [T12.2]  acc: ExUnit on a fixture manifest -- a grouped goal-file is produced with the pillar/domain/capability taxonomy and evidence predicates; deterministic (same manifest -> same goal-file); re-import upserts.
+- [ ] T12.6 Obsidian/Mermaid exporter: `kazi export --obsidian <dir>` walks the group tree + predicate verdicts into a vault (one note per group/predicate, `[[wikilinked]]`, tagged intended/built/pending) and a Mermaid rollup.  Owner: TBD  Est: 2h  verifies: [UC-030]  deps: [T12.3]  acc: ExUnit -- the exporter writes a vault for a fixture grouped goal; notes link parent<->child; tags reflect verdicts; an overview note carries per-group rollups. Live: open the vault in Obsidian and confirm the graph renders.
+- [ ] T12.7 `kazi lint` near-duplicate group-name warning (advisory second net): fuzzy-compare declared group NAMES and warn on near-duplicates (e.g. "Identity & Access" vs "Identity and Access") without failing the load.  Owner: TBD  Est: 1h  verifies: [UC-030]  deps: [T12.1]  acc: ExUnit -- near-duplicate names emit a warning; exact/distinct names do not; advisory only (exit 0).
+- [ ] T12.8 Re-run the sirerun dogfood through kazi proper + docs: import `sirerun/docs/capabilities.json` via T12.5, export via T12.6, and verify the Obsidian vault matches the one-off analysis (`docs/devlog.md` 2026-06-23). Note the LIVE-predicate escalation (http_probe/browser against a running sire -- needs an instance + test creds) as deferred future work.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.5, T12.6]  acc: observed evidence that `kazi init --from-capabilities` + `kazi export --obsidian` reproduce the pillar->capability->verdict vault for sire; `mix format`/`--warnings-as-errors` clean; the live-predicate follow-on recorded.
+
 ### Waves
 
 E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; E9 (website)
 is LIVE at https://kazi.sire.run with the auto-release pipeline active (only T9.5
-Playwright + T9.6 perf/a11y polish remain). **E11 (interactive `propose`) is the
-primary open feature work.**
+Playwright + T9.6 perf/a11y polish remain). **E11 (interactive `propose`) is
+DONE and shipped (v0.3.0); E12 (hierarchical predicate grouping) is the primary
+open feature work.**
+
+- **Wave E12-1 (model + guard):** T12.1 (declared `[[group]]` taxonomy) -> T12.2 (`Predicate.group` + reference/cycle validation -- the drift guard). Pure loader work.
+- **Wave E12-2 (tree + budgets):** T12.3 (tree + per-group rollup), T12.4 (per-group budgets/reconciliation) -- after the model.
+- **Wave E12-3 (import + export):** T12.5 (`--from-capabilities` importer), T12.6 (Obsidian/Mermaid exporter), T12.7 (lint near-duplicate names).
+- **Wave E12-4 (dogfood):** T12.8 (re-run sirerun through kazi; note the live-predicate escalation).
 
 - **Wave E11-1 (pure core):** T11.1 (schema + `fold_answers`) -> T11.2 (deterministic gap floor). Pure, fully unit-tested, no I/O.
 - **Wave E11-2 (seam + wiring):** T11.3 (harness-drafted candidates on the stub seam), T11.4 (two-phase `propose/2`), T11.5 (inline rationale) -- after the core.
@@ -207,6 +237,26 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (E11 shipped v0.3.0; add E12: hierarchical predicate grouping)
+- **E11 SHIPPED.** Interactive `propose` (PR #119) merged; release-please cut
+  **v0.3.0** (PR #120) and the auto-release chain built + tap-bumped it; verified
+  live: `brew upgrade` -> `kazi 0.3.0`.
+- **sirerun dogfood (one-off).** Adjudicated sire's `capabilities.json` (317 caps /
+  9 pillars) at the code level; 307 evidence-present, ~10 partial/drift; the real
+  production gaps are 48 FLAG_GATED + 55 BACKEND_ONLY + 178 manifest `with_drift`
+  (needs live predicates). Findings in `docs/devlog.md`; Obsidian vault at
+  `sirerun/tmp/sire-state-vault/`.
+- **Added E12 (T12.1-T12.8)** -- hierarchical predicate grouping via a DECLARED
+  group taxonomy (referenced by id, validated at load -- the guard against text
+  drift), per-group budgets (per-pillar reconciliation without sub-goals), a
+  `kazi init --from-capabilities` importer (resurrects UC-025), and an Obsidian/
+  Mermaid exporter. Walking skeleton: model+guard -> tree+budgets -> import+export
+  -> re-run the sirerun dogfood through kazi.
+- **ADR created:** `docs/adr/0020-hierarchical-predicate-grouping.md` -- declare
+  the taxonomy once, reference by id, validate at parse time; per-group budgets
+  ride ADR-0006 partitioning; importer + exporter; live-predicate escalation noted
+  as future work. **Use case added:** UC-030.
 
 ### 2026-06-23 -- Change Summary (E11 BUILT: interactive `propose` shipped on a feature branch)
 - **E11 (T11.1-T11.9) implemented, tested, and verified** on `feat/e11-interactive-propose`
@@ -317,9 +367,9 @@ load-bearing for versioning -- type every commit correctly.
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0019` (index at `docs/adr/README.md`); the release
+- Decisions: `docs/adr/0001`..`0020` (index at `docs/adr/README.md`); the release
   pipeline is ADR-0014 (distribution) + ADR-0017 (automation); the website is
-  ADR-0018; interactive `propose` is ADR-0019.
+  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020.
 - Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
 - Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),
