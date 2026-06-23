@@ -50,7 +50,7 @@ defmodule Kazi.CLI do
 
   alias Kazi.{Adopt, Authoring, Goal, ReadModel, Runtime}
   alias Kazi.Authoring.Clarify
-  alias Kazi.Authoring.Clarify.{Option, Question}
+  alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
   alias Kazi.ReadModel.ProposedGoal
 
@@ -711,54 +711,13 @@ defmodule Kazi.CLI do
     Enum.reduce(questions, %{}, fn %Question{} = q, acc -> Map.put(acc, q.id, ask_one(q)) end)
   end
 
+  # Render the question (pure, in Clarify), read one line, and resolve it to an
+  # answer value (pure, in Clarify). Only the print/read glue lives here, so the
+  # rendering and the choice resolution are unit-tested without a TTY.
   defp ask_one(%Question{} = q) do
-    IO.puts(q.prompt)
-
-    q.options
-    |> Enum.with_index(1)
-    |> Enum.each(fn {opt, i} -> IO.puts(format_option(q, opt, i)) end)
-
-    if q.allow_free_text, do: IO.puts("  f) something else (type your answer)")
-
-    resolve_choice(q, read_line())
+    IO.puts(Clarify.render_question(q))
+    Clarify.resolve_answer(q, read_line())
   end
-
-  defp format_option(%Question{recommended: rec}, %Option{label: label, value: value}, i) do
-    star = if value == rec, do: " *", else: ""
-    "  #{i}) #{label}#{star}"
-  end
-
-  # Resolve a typed line to an option value: empty -> the recommended (or first)
-  # option; a number -> that option's value; "f <text>" or free text -> the text
-  # when free text is allowed; an option label/value match -> that value.
-  defp resolve_choice(%Question{} = q, "") do
-    q.recommended || default_value(q)
-  end
-
-  defp resolve_choice(%Question{} = q, line) do
-    cond do
-      value = option_at(q, line) -> value
-      q.allow_free_text -> String.replace_prefix(line, "f ", "")
-      true -> matched_value(q, line) || q.recommended || default_value(q)
-    end
-  end
-
-  defp option_at(%Question{options: options}, line) do
-    case Integer.parse(line) do
-      {n, ""} when n >= 1 and n <= length(options) -> Enum.at(options, n - 1).value
-      _ -> nil
-    end
-  end
-
-  defp matched_value(%Question{options: options}, line) do
-    case Enum.find(options, fn %Option{label: l, value: v} -> l == line or v == line end) do
-      %Option{value: value} -> value
-      nil -> nil
-    end
-  end
-
-  defp default_value(%Question{options: [%Option{value: value} | _]}), do: value
-  defp default_value(%Question{}), do: ""
 
   # The terminal review after a draft: accept / refine with a sharper sentence.
   defp terminal_review(_draft) do
