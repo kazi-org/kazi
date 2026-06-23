@@ -24,26 +24,30 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.label }} binaries
+    name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
+        # ONE target per job on its NATIVE-arch runner. Two reasons:
+        #  * Burrito's BURRITO_TARGET accepts a SINGLE target name, not a list.
+        #  * the bundled exqlite NIF is a native artifact compiled for the BUILD
+        #    host's arch -- cross-compiling it would ship the wrong-arch NIF, so each
+        #    target must build on a runner of that arch.
+        # macos-15 (not 26) for the Zig link (R-E6-1); macos-13 is the Intel runner.
         include:
-          # macOS targets must build on macOS (the Apple SDK is not cross-linkable
-          # from Linux). Pin macos-15 -- macos-26 fails the Zig link (R-E6-1).
           - runner: macos-15
-            label: macOS
-            burrito_targets: "macos_aarch64,macos_x86_64"
-          # Linux targets build on Ubuntu; Zig cross-compiles aarch64<->x86_64.
-          - runner: ubuntu-latest
-            label: Linux
-            burrito_targets: "linux_aarch64,linux_x86_64"
+            target: macos_aarch64
+          - runner: macos-13
+            target: macos_x86_64
+          - runner: ubuntu-24.04
+            target: linux_x86_64
+          - runner: ubuntu-24.04-arm
+            target: linux_aarch64
     env:
       MIX_ENV: prod
-      # Restrict Burrito to this runner's OS targets (Burrito reads BURRITO_TARGET
-      # as a comma-separated allow-list of target names from mix.exs `targets:`).
-      BURRITO_TARGET: ${{ matrix.burrito_targets }}
+      # A single Burrito target for this native-arch job.
+      BURRITO_TARGET: ${{ matrix.target }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,7 +99,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-release-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: ${{ matrix.target }}-release-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
 
       - name: Fetch dependencies
         run: mix deps.get --only prod
