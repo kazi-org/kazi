@@ -43,16 +43,19 @@ defmodule Kazi.HarnessTest do
     end
 
     test ":goal_harness is used when no explicit :harness opt" do
-      # :opencode is not a built-in yet (T8.4) -> the unknown-harness error proves
-      # the goal_harness rung was the id selected, not the :claude default.
-      assert {:error, {:unknown_harness, :opencode}} =
+      # Resolving to the :opencode profile (not the :claude default) proves the
+      # goal_harness rung was the id selected.
+      assert {:ok, {CliAdapter, adapter_opts}} =
                Kazi.Harness.resolve(goal_harness: :opencode)
+
+      assert %Profile{id: :opencode} = adapter_opts[:profile]
     end
 
     test "app config is used when neither :harness nor :goal_harness present" do
       Application.put_env(:kazi, :harness, :opencode)
 
-      assert {:error, {:unknown_harness, :opencode}} = Kazi.Harness.resolve([])
+      assert {:ok, {CliAdapter, adapter_opts}} = Kazi.Harness.resolve([])
+      assert %Profile{id: :opencode} = adapter_opts[:profile]
     end
 
     test "defaults to :claude when nothing is set" do
