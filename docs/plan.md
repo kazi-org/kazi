@@ -21,9 +21,10 @@ COMPLETE and merged on `main`:
   open-source release (ADR-0015): the `capabilities.json` input was bespoke and did
   not generalize.
 
-State of `main`: **760 tests pass** (62 doctests, 698 tests), 18 excluded
+State of `main`: **771 tests pass** (62 doctests, 709 tests), 18 excluded
 (`:nats`/`:graphify` integration tags); `mix format --check-formatted` clean;
-`mix compile --warnings-as-errors` clean.
+`mix compile --warnings-as-errors` clean. E8 T8.1 (harness profiles + registry)
+merged (PR #80); T8.2/T8.4/T8.5 now unblocked.
 
 **What remains (the entire content of this plan):**
 
@@ -95,7 +96,7 @@ here (v1.17.9); its non-interactive surface is `opencode run "<msg>"` with
 `--model provider/model` and `--format json` (a NDJSON **event stream**, not
 Claude's single envelope; `opencode stats` reports usage).
 
-- [ ] T8.1 Harness profile struct + registry: add `Kazi.Harness.Profile` (a struct: `id`, `command`, the argv-template spec for prompt/model/output-format/extra flags, the parser-strategy ref, and the set of supported optional hygiene flags) and a built-in registry whose `:claude` profile captures TODAY's exact claude argv (`-p`, `--output-format json`, the `--max-budget-usd`/`--allowed-tools`/`--permission-mode` hygiene flags) and envelope parser. Pure, no IO.  Owner: TBD  Est: 1.5h  verifies: [UC-027]  deps: []  acc: `Kazi.Harness.Profile` + `Kazi.Harness.Registry.fetch(:claude)` return a profile whose rendered argv for a given (prompt, opts) equals the current `ClaudeAdapter` argv byte-for-byte (golden unit test); `mix format`/`--warnings-as-errors` clean.
+- [x] T8.1 Harness profile struct + registry: add `Kazi.Harness.Profile` (a struct: `id`, `command`, the argv-template spec for prompt/model/output-format/extra flags, the parser-strategy ref, and the set of supported optional hygiene flags) and a built-in registry whose `:claude` profile captures TODAY's exact claude argv (`-p`, `--output-format json`, the `--max-budget-usd`/`--allowed-tools`/`--permission-mode` hygiene flags) and envelope parser. Pure, no IO.  Owner: David  Done: 2026-06-22 (PR #80)  verifies: [UC-027]  deps: []  acc: `Kazi.Harness.Profile` + `Kazi.Harness.Registry.fetch(:claude)` return a profile whose rendered argv for a given (prompt, opts) equals the current `ClaudeAdapter` argv byte-for-byte (golden unit test); `mix format`/`--warnings-as-errors` clean.
 - [ ] T8.2 Generic CLI adapter: add `Kazi.Harness.CliAdapter` implementing `Kazi.HarnessAdapter`, parameterized by a resolved profile via `:profile`/`:harness` opt. It assembles argv from the profile, runs `System.cmd` with `cd:` workspace (ADR-0008, `stderr_to_stdout`), and maps stdout to the normalized result map (`output/exit/result/tokens/cost_usd/touched/cost: %{tokens}`) via the profile's parser; missing-binary -> `{:error, {:command_not_found, cmd}}`, empty prompt -> `{:error, :empty_prompt}`.  Owner: TBD  Est: 2h  verifies: [UC-027]  deps: [T8.1]  acc: a Tier-2 test drives CliAdapter with the `:claude` profile against a stub binary and asserts the SAME result map shape + the same argv the legacy ClaudeAdapter produced (golden); a stub-binary missing case returns `{:error, {:command_not_found, _}}`; `mix test` green.
 - [ ] T8.3 Neutral prompt construction: extract `build_prompt/2,3`, `render_retrieval_section/1`, and `truncate_evidence/2` from `Kazi.Harness.ClaudeAdapter` into a harness-neutral `Kazi.Harness.Prompt`; have `ClaudeAdapter` (now a thin `:claude`-profile shim over CliAdapter) and `Kazi.Loop` call the neutral module, removing `loop.ex`'s `alias Kazi.Harness.ClaudeAdapter` coupling (`loop.ex:1238`).  Owner: TBD  Est: 1.5h  verifies: [UC-027]  deps: [T8.2]  acc: every existing prompt/retrieval/truncation doctest + test passes unchanged against `Kazi.Harness.Prompt`; `Kazi.Loop` no longer references `ClaudeAdapter`; build green, no behavior change (golden prompt strings identical).
 - [ ] T8.4 opencode profile: add the `:opencode` built-in profile -- `opencode run "<prompt>" --model <provider/model> --format json` run with `cd:` workspace; a parser strategy that consumes opencode's NDJSON event stream to extract the final assistant/result text and (when present) token/cost, mapping to the normalized result map and degrading the token dimension to estimate when usage is absent (ADR-0008). Confirm the real flags against the installed opencode (v1.17.9), NOT assumed.  Owner: TBD  Est: 2h  verifies: [UC-026]  deps: [T8.1]  acc: a Tier-2 test drives CliAdapter+`:opencode` against a stub `opencode` binary emitting a representative `--format json` event stream and asserts the result map carries the final result text (and tokens when the stub emits usage); the rendered argv matches `opencode run <prompt> --model <m> --format json`; documented from `opencode run --help`.
@@ -114,8 +115,9 @@ independent and can proceed in parallel.
 
 - ~~**Wave A:** T5.6~~ -- DONE (PR #76).
 - **Wave B (E6):** T6.2   (build + smoke-run a Burrito host binary on a Zig-compatible runner; or fold into T6.3 CI) -> T6.3 -> **(human-gated)** T6.4 -> T6.5.
-- **Wave E8-1 (foundation, now; 1 agent serial-ish):** T8.1 -> T8.2   (profile/registry + the generic CLI adapter, claude pinned by a golden test).
-- **Wave E8-2 (fan-out, after T8.1/T8.2):** T8.3, T8.4, T8.5   (neutral prompt refactor; opencode profile; resolution seam -- independent, parallel).
+- ~~**Wave E8-1a:** T8.1~~ -- DONE (PR #80): profile struct + registry, `:claude` pinned byte-for-byte by a golden test.
+- **Wave E8-1b (now):** T8.2   (the generic CLI adapter over profiles; claude golden via stub).
+- **Wave E8-2 (fan-out, after T8.1):** T8.4, T8.5   (opencode profile; resolution seam -- independent, parallel; both deps T8.1 only). T8.3 (neutral prompt refactor) deps T8.2.
 - **Wave E8-3 (integrate):** T8.6 -> T8.7, T8.8   (goal-file table; Runtime/CLI/authoring/adopt wiring; local-provider config).
 - **Wave E8-4 (verify + ship):** T8.9, T8.10   (tests incl. live opencode->DGX smoke; docs + ADR link).
 
