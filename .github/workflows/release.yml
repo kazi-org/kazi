@@ -139,3 +139,55 @@ jobs:
           files: |
             burrito_out/kazi_*
           fail_on_unmatched_files: true
+
+  # ARM Linux (linux_aarch64) builds inside an arm64 glibc Erlang/Elixir container,
+  # because erlef/setup-beam has no arm64-Linux OTP. The hexpm/elixir slim image has
+  # no Node, so JS actions (checkout/cache/upload) can't run -- every step is plain
+  # bash: clone the tag, install Zig, `mix release`, and upload via the GitHub API.
+  # Runs after `build` so the Release already exists to attach assets to.
+  build-linux-arm64:
+    name: Build linux_aarch64
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    container: hexpm/elixir:1.20.1-erlang-28.0-debian-trixie-20260610-slim
+    env:
+      MIX_ENV: prod
+      BURRITO_TARGET: linux_aarch64
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Build and upload the arm64 Linux binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates xz-utils jq build-essential
+
+          # Zig (arm64 Linux) for the Burrito wrap.
+          curl -fsSL --retry 5 --retry-all-errors \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-aarch64-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
+          mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+          export PATH="/opt/zig:${PATH}"
+          zig version
+
+          # The container starts empty (no JS checkout); clone the tagged source.
+          git clone --depth 1 --branch "${TAG}" https://github.com/kazi-org/kazi src
+          cd src
+          mix local.hex --force && mix local.rebar --force
+          mix deps.get --only prod
+          mix release
+
+          cd burrito_out
+          sha256sum kazi_linux_aarch64 | tee kazi_linux_aarch64.sha256
+
+          # Upload via the GitHub API (no JS actions available in this container).
+          rel_id="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/kazi-org/kazi/releases/tags/${TAG}" | jq -r .id)"
+          for f in kazi_linux_aarch64 kazi_linux_aarch64.sha256; do
+            echo "Uploading ${f} to release ${rel_id}"
+            curl -fsSL -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/kazi-org/kazi/releases/${rel_id}/assets?name=${f}" \
+              --data-binary @"${f}"
+          done
