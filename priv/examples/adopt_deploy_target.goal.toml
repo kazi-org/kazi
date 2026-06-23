@@ -1,0 +1,28 @@
+id = "adopt-deploy-target"
+name = "Adopted baseline for deploy-target"
+[scope]
+workspace = "fixtures/deploy-target"
+[[predicate]]
+id = "tests-pass"
+provider = "test_runner"
+description = "project test suite passes"
+args = ["test", "./..."]
+cmd = "go"
+
+[[predicate]]
+id = "tests-pass-baseline"
+provider = "test_runner"
+description = "project test suite keeps passing (baseline regression guard)"
+guard = true
+args = ["test", "./..."]
+cmd = "go"
+# TODO: scaffold a LIVE predicate so convergence is proven against the real,
+# deployed service — not just green tests. Uncomment, fill the placeholders,
+# and (for a browser flow) switch provider to "browser".
+# [[predicate]]
+# id = "live-probe"
+# provider = "http_probe"
+# description = "TODO: what must be true of the deployed service"
+# url = "TODO: https://your-service.example.com/healthz"
+# expect_status = 200
+# expect_body = "TODO: expected response body (or remove this line)"
