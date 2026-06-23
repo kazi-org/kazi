@@ -123,4 +123,60 @@ defmodule Kazi.Authoring.ClarifyTest do
       assert Clarify.fold_answers(questions, answers) == Clarify.fold_answers(questions, answers)
     end
   end
+
+  describe "parse_candidates/1 (T11.3) -- fail-soft" do
+    test "parses a well-formed JSON array of questions" do
+      json =
+        ~s([{"id":"acct","prompt":"Per-account or global?","options":[{"label":"Per account","value":"acct"}],"recommended":"acct","allow_free_text":true}])
+
+      assert [%Question{} = q] = Clarify.parse_candidates(json)
+      assert q.id == "acct"
+      assert q.recommended == "acct"
+      assert q.allow_free_text
+      assert [%Option{label: "Per account", value: "acct"}] = q.options
+    end
+
+    test "drops items missing a non-empty id or prompt" do
+      json = ~s([{"id":"","prompt":"x"},{"prompt":"no id"},{"id":"ok","prompt":"keep"}])
+      assert [%Question{id: "ok"}] = Clarify.parse_candidates(json)
+    end
+
+    test "a non-array payload (object, garbage, nil) yields []" do
+      assert Clarify.parse_candidates(~s({"id":"x"})) == []
+      assert Clarify.parse_candidates("not json") == []
+      assert Clarify.parse_candidates(nil) == []
+      assert Clarify.parse_candidates(42) == []
+    end
+
+    test "accepts an already-decoded list" do
+      assert [%Question{id: "x"}] = Clarify.parse_candidates([%{"id" => "x", "prompt" => "p"}])
+    end
+  end
+
+  describe "merge/2 (T11.3) -- floor authoritative" do
+    test "floor comes first; a candidate colliding with a floor id is dropped" do
+      floor = [Question.new("scope", "floor scope")]
+
+      candidates = [
+        Question.new("scope", "candidate scope"),
+        Question.new("acct", "per account?")
+      ]
+
+      merged = Clarify.merge(floor, candidates)
+      assert Enum.map(merged, & &1.id) == ["scope", "acct"]
+      # the floor's prompt wins, not the candidate's
+      assert hd(merged).prompt == "floor scope"
+    end
+
+    test "dedups candidates among themselves by id" do
+      merged = Clarify.merge([], [Question.new("a", "1"), Question.new("a", "2")])
+      assert Enum.map(merged, & &1.id) == ["a"]
+    end
+  end
+
+  test "candidate_prompt/1 asks for a JSON array and embeds the idea" do
+    prompt = Clarify.candidate_prompt("add billing")
+    assert prompt =~ "add billing"
+    assert prompt =~ "JSON array"
+  end
 end
