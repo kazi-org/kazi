@@ -4,6 +4,38 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-22 — E8 generic multi-harness support shipped; opencode->DGX live smoke skips
+
+**What shipped (ADR-0016).** The single `Kazi.Harness.ClaudeAdapter` was generalized
+into config-driven harness **profiles**: `Kazi.Harness.Profile` (a `command` + a pure
+argv renderer + a pure stdout parser + supported opts), a `Kazi.Harness.Registry`
+(`:claude`, `:opencode`), one generic `Kazi.Harness.CliAdapter`, and a
+`Kazi.Harness.resolve/1` seam (CLI `--harness`/`--model` > goal-file `[harness]`
+table > `config :kazi, :harness` > default `:claude`). `Kazi.Runtime`, `Kazi.CLI`,
+`Kazi.Authoring`, and `Kazi.Adopt.enrich` all route through it; the Claude path is
+pinned byte-for-byte by a golden test (CliAdapter+claude == the old adapter). Adding a
+harness is now profile DATA, not a new module. Suite 755 → 853.
+
+**opencode specifics.** opencode's non-interactive surface is
+`opencode run "<msg>" --model <provider/model> --format json`, where `--format json`
+emits an **NDJSON event stream** (not Claude's single envelope) — which is exactly
+why a profile carries a parser strategy, not just an argv template.
+
+**Live opencode->DGX smoke: ATTEMPTED, did not converge, SKIPS honestly.** With
+opencode v1.17.9 wired to the DGX-hosted Qwen3.6 35B-A3B, a `kazi run --harness
+opencode` against a fixture goal returned `{:error, :await_timeout}` after ~480s. The
+endpoint and model were reachable (~100s/turn via a direct probe); the non-convergence
+is environmental, not a kazi defect, with two causes:
+1. the 35B model on the DGX is slow (~100s/turn), so a multi-iteration converge blows
+   the loop's await window;
+2. **opencode auto-rejects tool calls when run in an external/scratch workspace** —
+   `external_directory; auto-rejecting` — so the agent never edits and the predicate
+   never flips. The target workspace must be one opencode's permission policy treats
+   as in-scope (not a bare `/tmp` dir).
+The live test is tagged `:opencode_live` and EXCLUDED by default (it never gates CI);
+run it manually with `mix test --only opencode_live` against a responsive endpoint and
+a permitted workspace. No convergence was claimed.
+
 ## 2026-06-22 — WITHDRAWN: the E7 registry adapter (the entry below is now history)
 
 The capability-registry adapter described in the next entry was **removed** before
