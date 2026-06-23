@@ -64,18 +64,35 @@ the same checks keep failing (`stuck` → escalate to you), or the budget runs o
 
 ---
 
-## Prerequisites
+## Install
 
-- **Elixir / Erlang** (OTP 26+) and `mix` — to run kazi.
-- **A coding agent on your PATH** — the default harness is `claude` (Claude Code);
-  any `-p`-style agent works. kazi shells out to it to make edits.
-- **git** — kazi commits and opens PRs in your target repo.
-- *(optional, for live deploys)* **gcloud** / a deploy command, and `gh` for PRs.
+The fastest way — a single self-contained binary via Homebrew (no Erlang
+prerequisite; ERTS and the SQLite NIF are bundled, so you get the full read-model):
+
+```sh
+brew install kazi-org/tap/kazi
+kazi --help
+```
+
+Prebuilt binaries are published for **Apple Silicon macOS** and **x86_64 Linux**
+on each [GitHub Release](https://github.com/kazi-org/kazi/releases) (Intel macOS
+and ARM Linux are not yet built — build from source, below). The binary is a
+Burrito wrap of a `mix release` ([ADR-0014](docs/adr/0014-binary-distribution-burrito-homebrew.md)),
+so unlike the escript it carries the native `exqlite` NIF and persists every
+iteration.
+
+> **Runtime requirement:** kazi DRIVES a coding agent ([ADR-0001](docs/adr/0001-positioning-outer-loop-reconciler.md));
+> it does not bundle one. A harness binary — `claude` (default) or `opencode` —
+> must be on your `PATH` to actually run a goal.
+
+To build from source instead, you need **Elixir / Erlang** (OTP 26+) and `mix`,
+plus **git** (kazi commits/opens PRs in your target repo) and *(optional, for live
+deploys)* **gcloud** / a deploy command and `gh`:
 
 ```sh
 git clone https://github.com/kazi-org/kazi && cd kazi
 mix deps.get
-mix test          # ~700 hermetic tests, should be green
+mix test          # ~850 hermetic tests, should be green
 ```
 
 Two ways to invoke kazi (same behavior):
