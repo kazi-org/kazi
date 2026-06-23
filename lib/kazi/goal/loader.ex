@@ -55,6 +55,21 @@ defmodule Kazi.Goal.Loader do
   | `repo`      | string           | `Scope.repo`     |
   | `paths`     | array of strings | `Scope.paths`    |
 
+  ### `[harness]` table (optional, → `Goal.harness`, T8.6/ADR-0016)
+
+  Declares which coding harness this goal prefers to be driven by. Absent → the
+  goal's `harness` stays `nil` (no goal-level preference; resolution falls
+  through to config/default). Loaded as a `%{id:, model:, command:}` map.
+
+  | Key       | TOML type | Maps to              |
+  |-----------|-----------|----------------------|
+  | `id`      | string    | `harness.id` — a KNOWN harness id atom (`"claude"`, `"opencode"`, …); an unknown id is a validation error (never `String.to_atom/1`, so a typo cannot leak an atom) |
+  | `model`   | string    | `harness.model` — optional provider/model override |
+  | `command` | string    | `harness.command` — optional binary override |
+
+  `id` is required when a `[harness]` table is present. The loaded `id` threads
+  into `Kazi.Harness.resolve/1` as `:goal_harness` (the wiring itself is T8.7).
+
   ### `[[predicate]]` array of tables (→ `Kazi.Predicate` list)
 
   At least one is required. A predicate flagged `guard = true` is sorted into the
@@ -106,6 +121,7 @@ defmodule Kazi.Goal.Loader do
   """
 
   alias Kazi.{Budget, Goal, Predicate, Scope}
+  alias Kazi.Harness.Registry
 
   # provider string -> Predicate.kind atom. Adding a provider kind here is the
   # only change needed to author goals against a new provider (ADR-0002).
@@ -151,6 +167,8 @@ defmodule Kazi.Goal.Loader do
          {:ok, standing} <- fetch_standing(data),
          {:ok, budget} <- build_budget(Map.get(data, "budget", %{})),
          {:ok, scope} <- build_scope(Map.get(data, "scope", %{})),
+         # T8.6 harness selection (ADR-0016): optional `[harness]` table.
+         {:ok, harness} <- build_harness(Map.get(data, "harness")),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])) do
       {predicates, guards} = Enum.split_with(all, &(not &1.guard?))
 
@@ -163,6 +181,7 @@ defmodule Kazi.Goal.Loader do
          budget: budget,
          scope: scope,
          standing: standing,
+         harness: harness,
          metadata: Map.get(data, "metadata", %{})
        )}
     end
@@ -254,6 +273,44 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_scope(_), do: {:error, "[scope] must be a table"}
+
+  # T8.6 harness selection (ADR-0016): the optional `[harness]` table. Absent
+  # (nil) → the goal carries no harness preference (`nil`), loading exactly as
+  # before. Present → a `%{id:, model:, command:}` map. `id` is required and must
+  # name a KNOWN harness (mapped via Registry.ids/0, never String.to_atom/1, so a
+  # typo fails loudly at load time instead of leaking an atom). `model`/`command`
+  # are optional strings. Modeled on the `[scope]` handling above.
+  defp build_harness(nil), do: {:ok, nil}
+
+  defp build_harness(harness) when is_map(harness) do
+    with {:ok, id} <- fetch_harness_id(harness),
+         {:ok, model} <- optional_string(harness, "model", "harness"),
+         {:ok, command} <- optional_string(harness, "command", "harness") do
+      {:ok, %{id: id, model: model, command: command}}
+    end
+  end
+
+  defp build_harness(_), do: {:error, "[harness] must be a table"}
+
+  defp fetch_harness_id(harness) do
+    case Map.get(harness, "id") do
+      nil ->
+        {:error, "[harness] is missing required key \"id\""}
+
+      id when is_binary(id) ->
+        case Enum.find(Registry.ids(), &(Atom.to_string(&1) == id)) do
+          nil ->
+            {:error,
+             "harness.id has unknown harness #{inspect(id)} (known: #{known_harnesses()})"}
+
+          known ->
+            {:ok, known}
+        end
+
+      _ ->
+        {:error, "harness.id must be a string"}
+    end
+  end
 
   defp build_predicates([]), do: {:error, "goal-file must declare at least one [[predicate]]"}
 
@@ -383,5 +440,12 @@ defmodule Kazi.Goal.Loader do
 
   defp known_modes do
     @goal_modes |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
+  end
+
+  defp known_harnesses do
+    Registry.ids()
+    |> Enum.map(&Atom.to_string/1)
+    |> Enum.sort()
+    |> Enum.map_join(", ", &inspect/1)
   end
 end

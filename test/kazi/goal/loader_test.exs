@@ -207,6 +207,148 @@ defmodule Kazi.Goal.LoaderTest do
     end
   end
 
+  describe "harness selection (T8.6, ADR-0016) — [harness] table" do
+    test "goal harness stays nil when no [harness] table is present (back-compat)" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "test_runner"}]}
+      assert {:ok, %Goal{harness: nil}} = Loader.from_map(data)
+    end
+
+    test "an absent [harness] loads identically to a goal authored before T8.6" do
+      # A goal-file with no [harness] must load EXACTLY as it did before this
+      # field existed: the harness field is nil and nothing else is perturbed.
+      data = %{
+        "id" => "legacy",
+        "name" => "Legacy goal",
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert goal.harness == nil
+      assert goal.id == "legacy"
+      assert goal.name == "Legacy goal"
+      assert goal.mode == :repair
+      assert goal.standing == false
+      assert [%Predicate{id: "p", kind: :tests}] = goal.predicates
+    end
+
+    test "a [harness] table with id + model parses into the harness map" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "opencode", "model" => "dgx/qwen3.6"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: harness}} = Loader.from_map(data)
+      assert harness == %{id: :opencode, model: "dgx/qwen3.6", command: nil}
+    end
+
+    test "a [harness] id-only table parses with nil model/command" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{id: :claude, model: nil, command: nil}}} =
+               Loader.from_map(data)
+    end
+
+    test "the loaded harness id threads into Kazi.Harness.resolve/1 as :goal_harness" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "opencode"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{id: :opencode}}} = Loader.from_map(data)
+
+      # The loaded id selects the matching profile (resolution wiring into
+      # Runtime is T8.7; here we just prove the field feeds resolution).
+      assert {:ok, {_adapter, adapter_opts}} =
+               Kazi.Harness.resolve(goal_harness: :opencode)
+
+      assert adapter_opts[:profile].id == :opencode
+    end
+
+    test "a non-table [harness] is a load-time validation error" do
+      data = %{
+        "id" => "g",
+        "harness" => "opencode",
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "[harness] must be a table"
+    end
+
+    test "a [harness] table missing id is a validation error" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"model" => "dgx/qwen3.6"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "missing required key \"id\""
+    end
+
+    test "a [harness] id that is not a string is a validation error" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => 42},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "harness.id must be a string"
+    end
+
+    test "an unknown [harness] id fails loudly (no atom leak)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "nope-not-a-harness"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "unknown harness"
+    end
+
+    test "a non-string harness.model is a validation error" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "opencode", "model" => 7},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "harness.model must be a string"
+    end
+
+    test "the full [harness] table parses from TOML text" do
+      toml = """
+      id = "g"
+
+      [harness]
+      id = "opencode"
+      model = "dgx/qwen3.6"
+      command = "/usr/local/bin/opencode"
+
+      [[predicate]]
+      id = "p"
+      provider = "test_runner"
+      """
+
+      assert {:ok, %Goal{harness: harness}} = Loader.from_map(Toml.decode!(toml))
+
+      assert harness == %{
+               id: :opencode,
+               model: "dgx/qwen3.6",
+               command: "/usr/local/bin/opencode"
+             }
+    end
+  end
+
   describe "prod_log provider (T1.6) — author + dispatch" do
     test "parses a goal declaring the prod_log provider into a :prod_log predicate" do
       toml = """
