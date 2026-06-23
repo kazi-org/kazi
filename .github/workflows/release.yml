@@ -42,8 +42,11 @@ jobs:
             target: macos_x86_64
           - runner: ubuntu-24.04
             target: linux_x86_64
-          - runner: ubuntu-24.04-arm
-            target: linux_aarch64
+          # NOTE: linux_aarch64 (ARM Linux / Graviton) is DEFERRED. erlef/setup-beam
+          # has no arm64-Linux OTP build (it rejects ImageOS=ubuntu24-arm64), so that
+          # target needs a container-based Erlang (hexpm/elixir arm64 image) -- a
+          # follow-up. The three dominant platforms (Apple Silicon + Intel macOS,
+          # x86_64 Linux) are built here.
     env:
       MIX_ENV: prod
       # A single Burrito target for this native-arch job.
