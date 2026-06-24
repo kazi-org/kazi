@@ -120,6 +120,69 @@ defmodule Kazi.Scheduler.RunGoalsTest do
     assert length(result.partitions) == 1
   end
 
+  test "the :integrate phase merges converged partitions; collective reflects the merge (T21.5)",
+       ctx do
+    source = TermSource.new(%{"a" => ["lib/a.ex"], "b" => ["lib/b.ex"]})
+    goals = [goal("g1", ["a"]), goal("g2", ["b"])]
+    test_pid = self()
+
+    # A stub integrator (no real git/gh): records every merge, all clean.
+    integrator = fn request, _opts ->
+      send(test_pid, {:integrated, request.key})
+      {:ok, %{pr: request.key}}
+    end
+
+    assert {:ok, result} =
+             Scheduler.run_goals(goals,
+               workspace: ctx.repo,
+               graph_source: source,
+               reconciler: fn _part, _path -> :converged end,
+               supervisor: ctx.sup,
+               reconcile_timeout: 5_000,
+               lease: [backend: Memory, lease_opts: [store: ctx.store]],
+               worktree: [repo: ctx.repo, base_dir: ctx.base],
+               integrate: [integrator: integrator]
+             )
+
+    assert result.collective == :converged
+    assert length(result.integration.integrated) == 2
+    assert result.integration.collective == :converged
+    # Both partitions integrated.
+    assert_receive {:integrated, _}
+    assert_receive {:integrated, _}
+  end
+
+  test "a clean reconcile that fails to MERGE downgrades the collective to stuck (T21.5)", ctx do
+    source = TermSource.new(%{"a" => ["lib/a.ex"], "b" => ["lib/b.ex"]})
+    goals = [goal("g1", ["a"]), goal("g2", ["b"])]
+
+    # One partition cannot merge (a persistent cross-partition conflict).
+    integrator = fn
+      %{partition: %{goals: [%{id: "g2"}]}}, _opts -> {:error, {:conflict, :stubborn}}
+      request, _opts -> {:ok, %{pr: request.key}}
+    end
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:ok, result} =
+               Scheduler.run_goals(goals,
+                 workspace: ctx.repo,
+                 graph_source: source,
+                 reconciler: fn _part, _path -> :converged end,
+                 supervisor: ctx.sup,
+                 reconcile_timeout: 5_000,
+                 lease: [backend: Memory, lease_opts: [store: ctx.store]],
+                 worktree: [repo: ctx.repo, base_dir: ctx.base],
+                 integrate: [integrator: integrator, max_attempts: 2]
+               )
+
+      # Reconcile was green everywhere, but the merged whole is NOT — so the
+      # collective is :stuck.
+      assert result.collective == :stuck
+      assert result.integration.collective == :stuck
+      assert [{_p, {:conflict, _}}] = result.integration.conflicts
+    end)
+  end
+
   test "overlapping goals collapse to one partition (one lease, one worktree)", ctx do
     source = TermSource.new(%{"a" => ["lib/shared.ex"], "b" => ["lib/shared.ex"]})
     goals = [goal("g1", ["a"]), goal("g2", ["b"])]
