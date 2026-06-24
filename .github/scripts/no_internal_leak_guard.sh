@@ -153,14 +153,29 @@ gather() {
   fi
 
   if [ "${SCAN_TREE}" = "1" ]; then
-    # Full-tree scan (post-T29.3). Honor excludes.
-    local f
-    git ls-files | while IFS= read -r f; do
-      excluded_path "${f}" && continue
-      grep -nIE '.' -- "${f}" 2>/dev/null | while IFS= read -r m; do
-        printf '%s:%s\n' "${f}" "${m}"
+    # Full-tree scan (post-T29.3). Pre-filter the whole tree with ONE `git grep`
+    # for the broad leak patterns (fast: only candidate lines come back), then
+    # is_leak_line() in the main loop confirms each against the allow-list. This
+    # avoids spawning the per-line subprocess matrix for every line in the repo
+    # (the naive line-by-line scan took minutes and timed out). Case-insensitive
+    # pre-filter -- it only widens candidates; is_leak_line is the authoritative,
+    # case-correct confirmer. Emit "path:lineno\tcontent" (TAB) for the main loop.
+    local prefilter="${PRIVATE_IP_RE}|${HOME_PATH_RE}"
+    if [ "${#INTERNAL_NAMES[@]}" -gt 0 ]; then
+      local name
+      for name in "${INTERNAL_NAMES[@]}"; do
+        [ -z "${name}" ] && continue
+        prefilter="${prefilter}|${name}"
       done
-    done
+    fi
+    git grep -nIiE "${prefilter}" 2>/dev/null | while IFS= read -r m; do
+      # git grep -n yields "path:lineno:content".
+      local path rest
+      path="${m%%:*}"
+      rest="${m#*:}"
+      excluded_path "${path}" && continue
+      printf '%s:%s\t%s\n' "${path}" "${rest%%:*}" "${rest#*:}"
+    done || true
     return 0
   fi
 
