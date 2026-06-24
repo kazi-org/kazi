@@ -108,6 +108,9 @@ Open work:
   collapses onto a kazi skill router: `kazi plan` authors a goal-set and `kazi apply`
   converges it -- subsuming loop+apply+qualify for code goals -- with `/plan`
   re-seated as the intent layer and `/tidy` kept as hygiene, ADR-0031) -- E26.
+- **UC-041** (one verb per concept across the agent prompt, the skill, and the CLI:
+  the CLI commands are `kazi plan` (was `propose`) and `kazi apply` (was `run`), with
+  `run`/`propose` as deprecated aliases, ADR-0032) -- E27.
 
 ## Checkable Work Breakdown
 
@@ -481,6 +484,25 @@ rename (`kazi run` stays). Per the global-skills rule, enhance the skill in plac
 - [ ] T26.5 Coherence + retire loop/qualify from the code on-ramp: extend the skill<->CLI coherence guard (T16.4) to the router's sub-skills; the kazi on-ramp (README/AGENTS.md/skill) no longer routes code goals to `loop`/`qualify` (kept as general skills for non-code). `/plan` + `/tidy` references re-seated per ADR-0031.  Owner: TBD  Est: 1h  verifies: [UC-040, infrastructure]  deps: [T26.2, T26.3, T26.4]  acc: the coherence test covers every sub-skill verb -> real command; the code on-ramp shows plan/apply/status/adopt, not loop/qualify; `/plan` is shown as the intent layer, `/tidy` as hygiene.
 - [ ] T26.6 LIVE dogfood + subsumption gate: in a real Claude Code session, drive a fixture goal end-to-end through the router (`kazi plan` -> approve -> `kazi apply`) with NO `/loop`,`/apply`,`/qualify`; record evidence in `docs/devlog.md`. Assert the "`kazi apply` replaces `/apply --pool`" claim ONLY after the E21/E23 dogfoods (T21.12/T23.9) pass; otherwise mark it "coming" (ADR-0031 decision 6).  Owner: TBD  Est: 2h  verifies: [UC-040]  deps: [T26.5, T21.12, T23.9]  acc: observed evidence that the router drives a goal to objective done with no legacy skills; the subsumption claim is gated on the dogfoods; honest result.
 
+### E27 -- Rename the CLI verbs: run -> apply, propose -> plan (P1, ADR-0032)
+
+Unify the human/skill/CLI vocabulary: the CLI verbs become `apply` (was `run`) and
+`plan` (was `propose`), so the word is the same at the agent prompt, the skill, and
+the CLI. `run`/`propose` stay as DEPRECATED ALIASES (back-compat for the shipped
+JSON contract + skill/MCP). Broad, mechanical, well-specified ENGINEERING work the
+apply pool can execute autonomously -- and it refills the pool's queue (which was
+starved of pure-code tasks). This SIMPLIFIES E26 (router verbs now equal CLI verbs
+1:1; T26.1's verb-map becomes an identity + the alias note).
+
+- [ ] T27.1 CLI: `apply`/`plan` as primary verbs + `run`/`propose` as deprecated aliases: in `lib/kazi/cli.ex` add `apply`/`plan` parsing dispatching to the same handlers as `run`/`propose`; keep `run`/`propose` working but emit a one-line deprecation hint to STDERR (never into `--json` stdout). Unit tests: both new and old verbs resolve identically; `--json` stdout stays pure under the alias.  Owner: TBD  Est: 1.5h  verifies: [UC-041, UC-033]  deps: []  acc: ExUnit -- `kazi apply <goal>` and `kazi run <goal>` dispatch identically; `kazi plan "<idea>"` == `kazi propose "<idea>"`; the deprecation hint is stderr-only; `--json` output is unchanged + prose-free.
+- [ ] T27.2 `mix kazi.apply` task (+ `mix kazi.run` deprecated alias): add `Mix.Tasks.Kazi.Apply` delegating to the same entrypoint as `Mix.Tasks.Kazi.Run`; keep `mix kazi.run` as a deprecated alias task. Update internal/doc references to the new task name.  Owner: TBD  Est: 1h  verifies: [UC-041, infrastructure]  deps: []  acc: ExUnit/CLI -- `mix kazi.apply <goal>` runs the loop; `mix kazi.run` still works with a deprecation note; both reach the same `Kazi.CLI` core.
+- [ ] T27.3 JSON result contract + `schema_version` bump: rename the contract's command key `run`->`apply`, `propose`->`plan` in `docs/schemas` + the emitter; bump `schema_version`; document the old names as deprecated aliases. Update the conformance + self-conformance (T15.7) fixtures.  Owner: TBD  Est: 1.5h  verifies: [UC-041, UC-033]  deps: [T27.1]  acc: ExUnit -- `kazi apply --json` emits the documented object keyed `apply` with the bumped `schema_version`; the schema doc lists the alias; self-conformance (T15.7) passes against the new schema.
+- [ ] T27.4 `kazi help --json` + `kazi schema` updated (generated): `help --json` lists `apply`/`plan` as primary and `run`/`propose` as deprecated aliases; `schema apply`/`schema plan` resolve (with `run`/`propose` aliased). Generated from the real command table, not hand-maintained.  Owner: TBD  Est: 1h  verifies: [UC-041, UC-034]  deps: [T27.1, T27.3]  acc: ExUnit -- `help --json` shows the 4 primary verbs + the 2 deprecated aliases; `schema apply` returns the run-result schema; both parse.
+- [ ] T27.5 Skill + `AGENTS.md` + `kazi mcp` to the new verbs (E26 alignment): update the `install-skill` SKILL.md (router sub-skills now map 1:1 to CLI `apply`/`plan`), `AGENTS.md`, and the `kazi mcp` tool names to `apply`/`plan`; keep alias mentions. Coherence guard (T16.4) covers the new verbs.  Owner: TBD  Est: 1.5h  verifies: [UC-041, UC-040, UC-034]  deps: [T27.4]  acc: skill/`AGENTS.md`/MCP reference `apply`/`plan` (aliases noted); the skill<->CLI coherence test (T16.4) passes; E26's verb-map note reflects the 1:1 identity.
+- [ ] T27.6 README/site/concept/docs to the new verbs: replace `kazi run`/`kazi propose` with `kazi apply`/`kazi plan` across README, site, `docs/concept.md`, and `docs/` guides (note the aliases once); update `site/src/canonical.mjs` if any verb is canonical; README<->site coherence (T9.9) green; deploy + verify live.  Owner: TBD  Est: 1.5h  verifies: [UC-041, UC-035]  deps: [T27.4]  acc: no `kazi run`/`kazi propose` as the PRIMARY verb in docs (aliases mentioned once); coherence (T9.9) green; site deployed + verified live at https://kazi.sire.run.
+- [ ] T27.7 Deprecation policy note: a short `docs/` note (or CHANGELOG entry) stating `run`/`propose`/`mix kazi.run` are deprecated aliases, why (verb unification, ADR-0032), and the planned removal version.  Owner: TBD  Est: 0.5h  verifies: [UC-041]  delivers: [a documented deprecation window for run/propose]  deps: [T27.1]  acc: the note names the aliases, the rationale (ADR-0032), and a concrete removal version; linked from the CHANGELOG.
+- [ ] T27.8 LIVE verify: drive a fixture goal via `kazi plan` -> approve -> `kazi apply` end to end on the built binary; confirm `kazi run`/`kazi propose` still work (with the deprecation hint); record in `docs/devlog.md`. `mix format --check-formatted` + `--warnings-as-errors` clean.  Owner: TBD  Est: 1h  verifies: [UC-041]  deps: [T27.1, T27.2, T27.3]  acc: a real run converges via the new verbs; the aliases still converge with a stderr hint; format + warnings-as-errors clean; devlog updated.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -523,6 +545,9 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E25-3 (launch):** T25.9 (OG + Show HN/X kit) -> T25.10 (accuracy gate + live publish). Supersedes the messaging of the open E17 + E22 README/site tasks (execute those per ADR-0030 here).
 - **Wave E26-1 (router):** T26.1 (router SKILL.md + dispatch) -> T26.2 (`kazi plan`), T26.3 (`kazi apply`), T26.4 (`status`/`adopt`) in parallel -> T26.5 (coherence + retire loop/qualify from the code on-ramp).
 - **Wave E26-2 (prove):** T26.6 (live router dogfood; subsumption claim gated on T21.12/T23.9).
+- **Wave E27-1 (CLI rename, autonomous -- start now):** T27.1 (verbs + aliases) -> T27.3 (schema bump) -> T27.4 (help/schema); T27.2 (mix task) in parallel after T27.1.
+- **Wave E27-2 (surfaces):** T27.5 (skill/AGENTS/MCP), T27.6 (README/site/docs), T27.7 (deprecation note) in parallel after T27.4.
+- **Wave E27-3 (prove):** T27.8 (live verify new verbs + aliases) after T27.1-T27.3.
 
 ## Risk Register
 
@@ -564,6 +589,9 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E26-1 | The router claims `kazi apply` replaces `/apply --pool` before the native scheduler is proven at scale (E21/E23 dogfoods open). | High | Med | ADR-0031 decision 6 + T26.6: the subsumption claim is GATED on T21.12/T23.9 passing; until then the on-ramp marks it "coming" and keeps `/apply --pool` as the documented interop fallback (ADR-0026). |
 | R-E26-2 | Skill-verb vs CLI-verb mismatch (apply->run, plan->propose) confuses users or drifts from the CLI. | Med | Med | The verb map is documented in the router SKILL.md (T26.1); the skill<->CLI coherence guard (T16.4/T26.5) asserts every sub-skill routes to a real `kazi help --json` command; `kazi run` is not renamed. |
 | R-E26-3 | Retiring loop/qualify from the code on-ramp loses capability for non-code or edge cases. | Low | Med | They are retired only from the CODE on-ramp; both remain general skills for non-code work; `/plan` (intent) + `/tidy` (hygiene) are explicitly kept (ADR-0031). |
+| R-E27-1 | The verb rename breaks the shipped agent-drivable JSON contract / skill / MCP for existing callers. | High | Low | `run`/`propose` (+ `mix kazi.run`) stay as DEPRECATED ALIASES dispatching identically (T27.1/T27.2); the `schema_version` bump (T27.3) makes the contract change explicit; a deprecation-window note (T27.7); alias tests pin back-compat. |
+| R-E27-2 | A broad rename misses a reference, leaving an inconsistent surface. | Med | Med | Coherence guards cover it: skill<->CLI (T16.4), README<->site (T9.9), self-conformance (T15.7); `kazi help --json` is generated from the real command table; T27.8 live-verifies both verbs. |
+| R-E27-3 | The `schema_version` bump breaks orchestrators pinning the old version. | Med | Low | Documented as a breaking contract change (ADR-0032/T27.3), not silent; the old command names remain valid aliases so only the pinned version (not the call) must update. |
 
 ## Operating Procedure
 
@@ -589,6 +617,28 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E27: rename CLI verbs run->apply, propose->plan, P1 + ADR-0032)
+- **Created ADR-0032** (rename the CLI verbs): `kazi run` -> `kazi apply`,
+  `kazi propose` -> `kazi plan` (+ `mix kazi.run` -> `mix kazi.apply`), so the verb is
+  the same at the agent prompt, the skill, and the CLI. SUPERSEDES ADR-0031's
+  skill-verb!=CLI-verb map (now 1:1). `run`/`propose` kept as DEPRECATED ALIASES for
+  back-compat with the shipped JSON contract + skill/MCP; result-contract
+  `schema_version` bumped.
+- **Added E27** (P1, ADR-0032, UC-041): T27.1 CLI verbs + aliases, T27.2 `mix
+  kazi.apply` (+ alias), T27.3 schema + `schema_version` bump, T27.4 help/schema,
+  T27.5 skill/AGENTS.md/MCP, T27.6 README/site/docs, T27.7 deprecation note, T27.8
+  live verify. Waves E27-1..3; risks R-E27-1..3 (contract break, missed reference,
+  schema pin). Broad, autonomous ENGINEERING work the apply pool can execute.
+- **Operator directive (2026-06-24):** unify the human-friendly verbs end to end --
+  the reason for the rename beyond ADR-0031's skill-only naming.
+- **Work-availability check:** all recent ADRs (0025-0031) HAVE plan epics (E17-E26);
+  on main 42 tasks open, 6 immediately claimable. The pool likely stalled because the
+  unblocked-but-open tasks are content/docs/live-dogfood (need human input or a live
+  env); E27 refills the queue with pure, autonomously-applyable code tasks.
+- **UC-041** added; E26 noted to simplify (router verbs now equal CLI verbs 1:1).
+  ADR created: `docs/adr/0032-rename-cli-verbs-run-apply-propose-plan.md` (+ index).
+  Authored in an isolated git worktree (lore L-0014). No trim (concurrent pool edits).
 
 ### 2026-06-24 -- Change Summary (E26: kazi skill becomes a router, P1 + ADR-0031)
 - **Created ADR-0031** (kazi skill as a router; `kazi apply` subsumes loop+apply+
