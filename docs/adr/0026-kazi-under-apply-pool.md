@@ -1,7 +1,11 @@
 # ADR 0026: kazi under /apply --pool (objective-done + coordination layer beneath pooled sessions)
 
 ## Status
-Accepted
+Accepted -- parallelization stance SUPERSEDED IN PART by ADR-0027 (kazi now owns a
+native parallel scheduler; the scheduler is no longer external). This ADR is
+RETAINED as the INTEROP story: how kazi behaves as a good citizen UNDER an existing
+external orchestrator (the operator's `/apply --pool`, a CI matrix, etc.). For
+kazi-native parallelism, see ADR-0027.
 
 ## Date
 2026-06-24
