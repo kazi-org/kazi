@@ -148,7 +148,10 @@ defmodule Kazi.Scheduler.Integration do
   Returns `{:ok, t:result/0}`. The collective is `:converged` ONLY when every
   partition merged within its budget; any residual conflict ⇒ `:stuck`.
   """
-  @spec integrate([Kazi.Scheduler.partition() | {Kazi.Scheduler.partition(), Path.t()}], keyword()) ::
+  @spec integrate(
+          [Kazi.Scheduler.partition() | {Kazi.Scheduler.partition(), Path.t()}],
+          keyword()
+        ) ::
           {:ok, result()}
   def integrate(entries, opts \\ []) when is_list(entries) and is_list(opts) do
     integrator = Keyword.get(opts, :integrator, &__MODULE__.ActionIntegrator.integrate/2)
