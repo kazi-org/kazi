@@ -37,6 +37,12 @@ jobs:
     #   2. Add the `HOMEBREW_TAP_TOKEN` secret (fine-grained PAT, contents:write on
     #      kazi-org/homebrew-tap) so the tap-bump job can push the formula.
     #   3. Set repo variable `RELEASE_AUTOMATION=true`.
+    #   4. (Optional, for HANDS-OFF releases) Add the `RELEASE_PLEASE_PAT` secret
+    #      (fine-grained PAT, contents:write + pull-requests:write on this repo) and
+    #      enable repo auto-merge. The "Auto-merge the release PR" step then merges
+    #      each release PR automatically, so every merge to main that carries
+    #      releasable commits ships without a human. Without the PAT the release PR
+    #      is left for manual merge (the pipeline still works).
     if: ${{ vars.RELEASE_AUTOMATION == 'true' }}
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
@@ -47,6 +53,43 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Hands-off releases: auto-merge the release PR that release-please just
+      # opened/updated, so every merge to main that carries releasable commits
+      # ships without a human merging the release PR by hand.
+      #
+      # This REQUIRES a PAT (RELEASE_PLEASE_PAT): a GITHUB_TOKEN-performed merge
+      # does NOT re-fire the `push: main` event, so release-please would never run
+      # again to cut the vX.Y.Z tag/Release -- the release would stall at "PR
+      # merged, no tag". A PAT push DOES trigger this workflow, closing the loop.
+      # The PAT must be a fine-grained token with `contents: write` +
+      # `pull-requests: write` on this repo, added as the RELEASE_PLEASE_PAT secret.
+      #
+      # Without the secret the step SKIPS with a warning, so the pipeline keeps
+      # working exactly as before (the operator merges the release PR manually).
+      - name: Auto-merge the release PR
+        if: ${{ steps.rp.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
+          PR_JSON: ${{ steps.rp.outputs.pr }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::RELEASE_PLEASE_PAT not set -- the release PR is left for manual merge. Add a fine-grained PAT (contents:write + pull-requests:write on this repo) as the RELEASE_PLEASE_PAT secret to make every merge release hands-off."
+            exit 0
+          fi
+          num="$(printf '%s' "$PR_JSON" | jq -r '.number // empty')"
+          if [ -z "$num" ]; then
+            echo "release-please reported no release PR number; nothing to auto-merge."
+            exit 0
+          fi
+          echo "Enabling auto-merge (rebase) on release PR #${num}."
+          # Prefer GitHub auto-merge (waits for any required checks); fall back to an
+          # immediate rebase merge when the branch has no required checks to wait on.
+          gh pr merge "$num" --auto --rebase --repo "$REPO" \
+            || gh pr merge "$num" --rebase --repo "$REPO"
 
   # Build + upload the binaries to the freshly-created Release (reuses release.yml).
   build:
