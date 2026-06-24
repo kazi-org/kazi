@@ -34,12 +34,23 @@ defmodule Kazi.Application do
     # the full app (`mix kazi.run`, releases, dev, test) boots the web tree. The
     # endpoint reads the read-model and NATS state only; it never couples into
     # Kazi.Loop or Kazi.Harness (ADR-0011).
+    # The parallel-scheduler supervision anchor (T21.1, ADR-0027): the
+    # DynamicSupervisor that owns one reconciler per partition of a native
+    # parallel run. It is always supervised (no NIF/web dependency) so a
+    # `kazi run` over a partitioned goal-set can spawn its reconciler population
+    # in one BEAM, NATS-free. It sits empty until a `Kazi.Scheduler` run starts
+    # children under it.
+    scheduler_children = [
+      {Kazi.Scheduler.PartitionSupervisor, name: Kazi.Scheduler.PartitionSupervisor}
+    ]
+
     children =
-      if sqlite_nif_available?() do
-        [Kazi.Repo, {Phoenix.PubSub, name: Kazi.PubSub}, KaziWeb.Endpoint]
-      else
-        []
-      end
+      scheduler_children ++
+        if sqlite_nif_available?() do
+          [Kazi.Repo, {Phoenix.PubSub, name: Kazi.PubSub}, KaziWeb.Endpoint]
+        else
+          []
+        end
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
