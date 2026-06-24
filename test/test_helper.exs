@@ -48,6 +48,22 @@ opencode_live_excluded = [:opencode_live]
 # (never fails, never fake-passes) when either is unavailable.
 codex_live_excluded = [:codex_live]
 
+# The live antigravity smoke test (tagged `:antigravity_live`, T14.3/ADR-0022)
+# drives the operator's REAL `antigravity`/`agy` CLI with the #76 non-TTY
+# workaround (`antigravity run --prompt-file … --output json --yes`) wired to
+# Google via `GEMINI_API_KEY` / `ANTIGRAVITY_API_KEY`. Like `:codex_live` it is
+# NON-hermetic and EXCLUDED by default so the standard `mix test` and CI stay
+# hermetic (no network, no creds). Opt in explicitly:
+#
+#     mix test --only antigravity_live test/kazi/antigravity_live_test.exs
+#
+# The test itself probes the `antigravity`/`agy` binary + auth first and SKIPS
+# HONESTLY (never fails, never fake-passes) when either is unavailable.
+antigravity_live_excluded = [:antigravity_live]
+
 ExUnit.start(
-  exclude: nats_excluded ++ graphify_excluded ++ opencode_live_excluded ++ codex_live_excluded
+  exclude:
+    nats_excluded ++
+      graphify_excluded ++
+      opencode_live_excluded ++ codex_live_excluded ++ antigravity_live_excluded
 )

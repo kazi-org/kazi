@@ -15,7 +15,7 @@ defmodule Kazi.Harness.ConformanceTest do
 
   import Kazi.Harness.Conformance
 
-  alias Kazi.Harness.Conformance
+  alias Kazi.Harness.{Conformance, Profile, Registry}
 
   describe ":claude golden-transcript conformance" do
     test "argv + JSON-envelope parse against the recorded transcript" do
@@ -136,6 +136,71 @@ defmodule Kazi.Harness.ConformanceTest do
           cost: %{tokens: 2400}
         }
       )
+    end
+  end
+
+  describe ":antigravity golden-transcript conformance (T14.3, ADR-0022)" do
+    # The #76 non-TTY workaround: argv carries the prompt via --prompt-file (the
+    # CliAdapter materializes the temp file and threads its path as
+    # opts[:prompt_file]), NEVER the bare -p/--prompt that drops stdout under a
+    # non-TTY subprocess. The conformance helper hands opts straight to build_args,
+    # so the case supplies the temp path explicitly. The recorded prompt argument
+    # is intentionally absent from the argv (it travels via the file).
+    test "argv uses --prompt-file + --output json --yes + parses the JSON envelope" do
+      assert_profile_conformance(:antigravity,
+        prompt: "fix the failing test",
+        opts: [prompt_file: "/tmp/kazi-prompt-1.txt", model: "gemini-2.5-pro"],
+        expected_argv: [
+          "run",
+          "--prompt-file",
+          "/tmp/kazi-prompt-1.txt",
+          "--output",
+          "json",
+          "--yes",
+          "--model",
+          "gemini-2.5-pro"
+        ],
+        transcript: "harness/antigravity_run.json",
+        expected_parse: %{
+          # usage: input 1500 + output 400.
+          result: "Made the failing unit test pass.",
+          tokens: 1900,
+          cost: %{tokens: 1900}
+        }
+      )
+    end
+
+    test "argv without a model omits the --model flag (same recorded parse)" do
+      assert_profile_conformance(:antigravity,
+        prompt: "fix the failing test",
+        opts: [prompt_file: "/tmp/kazi-prompt-2.txt"],
+        expected_argv: [
+          "run",
+          "--prompt-file",
+          "/tmp/kazi-prompt-2.txt",
+          "--output",
+          "json",
+          "--yes"
+        ],
+        transcript: "harness/antigravity_run.json",
+        expected_parse: %{
+          result: "Made the failing unit test pass.",
+          tokens: 1900,
+          cost: %{tokens: 1900}
+        }
+      )
+    end
+
+    # NEVER the bug-prone bare-prompt form: the argv must not contain -p/--prompt.
+    test "argv NEVER uses the bare -p/--prompt that drops stdout under a non-TTY (#76)" do
+      profile = Registry.fetch!(:antigravity)
+      argv = Profile.build_args(profile, "do the thing", prompt_file: "/tmp/p.txt")
+
+      refute "-p" in argv
+      refute "--prompt" in argv
+      assert "--prompt-file" in argv
+      assert ["--output", "json"] -- argv == []
+      assert "--yes" in argv
     end
   end
 
