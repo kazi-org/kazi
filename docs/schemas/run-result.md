@@ -1,6 +1,6 @@
-# `kazi run --json` result contract (schema_version 1)
+# `kazi apply --json` result contract (schema_version 2)
 
-The single, **versioned** JSON object `kazi run --json` emits to stdout on
+The single, **versioned** JSON object `kazi apply --json` emits to stdout on
 termination (ADR-0023 decision 2). It is the machine surface an orchestrating
 agent branches on — it parses this object, never prose. Human output stays the
 default; `--json` is opt-in and additive.
@@ -11,6 +11,15 @@ emitted on stdout and the process exits `0` on convergence, non-zero otherwise.
 The exit code is the same on both surfaces; `--json` chooses only the output
 shape.
 
+## Command key (`apply`, with `run` as a deprecated alias)
+
+The verb that produces this object is **`apply`** (`kazi apply --json`). The old
+verb **`run`** (`kazi run --json`) is a **deprecated alias** (ADR-0032): it
+dispatches identically and emits this **same** result object at the same
+`schema_version`, so existing callers keep working through the deprecation
+window. The aliases (`run`, plus `propose` for `plan`) are scheduled for removal
+in a later minor; new recipes should call `apply`.
+
 ## Compatibility
 
 `schema_version` is a compatibility surface. An additive change (a new field)
@@ -18,13 +27,16 @@ leaves it unchanged; a **breaking** change (a removed/renamed field, a changed
 type or meaning) bumps it. An orchestrator recipe should pin or check
 `schema_version`.
 
-Current version: **1**.
+Current version: **2**. (Bumped from 1 by ADR-0032: the contract's command verb
+was renamed `run` -> `apply`; an orchestrator pinning the old version must
+update. The result-object SHAPE is unchanged — only the producing verb and the
+version differ.)
 
 ## Shape
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "goal_id": "cli-e2e",
   "status": "converged",
   "predicates": [
@@ -91,7 +103,7 @@ surface and branches on the non-zero exit:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "goal_id": "cli-vacuous",
   "status": "error",
   "error": "goal is vacuous — every predicate already passes at t0 ...",
@@ -100,15 +112,15 @@ surface and branches on the non-zero exit:
 }
 ```
 
-## Streaming progress (JSONL) — `run --json --stream` (T15.4, ADR-0023 decision 3)
+## Streaming progress (JSONL) — `apply --json --stream` (T15.4, ADR-0023 decision 3)
 
-`kazi run --json --stream` emits a **JSONL stream** instead of a single object:
-one JSON object **per line** per loop iteration, **terminated** by the
-single run-result object above. Each line parses **independently**, so an
-orchestrator monitors a long convergence line-by-line without blocking — mirroring
-how kazi itself parses opencode/codex JSONL.
+`kazi apply --json --stream` (alias `kazi run --json --stream`) emits a **JSONL
+stream** instead of a single object: one JSON object **per line** per loop
+iteration, **terminated** by the single result object above. Each line parses
+**independently**, so an orchestrator monitors a long convergence line-by-line
+without blocking — mirroring how kazi itself parses opencode/codex JSONL.
 
-Without `--stream`, `run --json` emits exactly the one terminal result object
+Without `--stream`, `apply --json` emits exactly the one terminal result object
 (unchanged); `--stream` is opt-in and additive and only changes what precedes that
 object.
 
@@ -117,7 +129,7 @@ object.
 Each progress line is a `Kazi.Loop` observation rendered as:
 
 ```json
-{ "schema_version": 1, "event": "iteration", "iteration": 0, "predicates": [ { "id": "code", "verdict": "fail" }, { "id": "live", "verdict": "fail" } ], "converged": false, "release_ref": null }
+{ "schema_version": 2, "event": "iteration", "iteration": 0, "predicates": [ { "id": "code", "verdict": "fail" }, { "id": "live", "verdict": "fail" } ], "converged": false, "release_ref": null }
 ```
 
 | Field            | Type             | Meaning |
@@ -135,9 +147,9 @@ Each progress line is a `Kazi.Loop` observation rendered as:
 { "event": "iteration", "iteration": 0, ... }   ← one per observation
 { "event": "iteration", "iteration": 1, ... }
 ...
-{ "schema_version": 1, "status": "converged", ... }   ← the terminal result object (no "event"), the stream terminator
+{ "schema_version": 2, "status": "converged", ... }   ← the terminal result object (no "event"), the stream terminator
 ```
 
 The consumer reads lines until it sees the object **without** an `event` field —
-that is the terminal `run --json` result documented above, carrying the final
+that is the terminal `apply --json` result documented above, carrying the final
 `status` / `next_action` / `budget_spent` the orchestrator branches on.

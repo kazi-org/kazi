@@ -1,19 +1,20 @@
-# `kazi status --json` schema (schema_version 1)
+# `kazi status --json` schema (schema_version 2)
 
 The single, **versioned** JSON object `kazi status <ref> --json` emits to stdout
 (T15.5, ADR-0023 decision 2). `status` is a **pure read** of the read-model — no
 loop is driven and nothing is mutated — that reports the CURRENT state of a run or
 a proposal so an orchestrator can poll where a run/proposal stands between steps of
-the propose → approve → run state machine.
+the plan → approve → apply state machine (`plan`/`apply` are the primary verbs;
+`propose`/`run` are deprecated aliases, ADR-0032).
 
 Human output stays the default; `--json` is opt-in and additive. The exit code is
 the same on both surfaces: `0` when the ref resolves, non-zero on an unknown ref.
 
 ## Compatibility
 
-`schema_version` is shared with the `run --json` contract (`docs/schemas/run-result.md`):
+`schema_version` is shared with the `apply --json` contract (`docs/schemas/run-result.md`):
 a breaking change to any `--json` surface bumps the one number an orchestrator
-pins. Current version: **1**.
+pins. Current version: **2** (bumped by ADR-0032 with the apply/plan verb rename).
 
 ## Ref resolution
 
@@ -30,7 +31,7 @@ An unknown ref is the error object below with a non-zero exit.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "run",
   "ref": "cli-e2e",
   "status": "in_progress",
@@ -52,7 +53,7 @@ An unknown ref is the error object below with a non-zero exit.
 | `status`         | string (enum)    | The derived lifecycle: `converged` (the latest iteration converged) or `in_progress`. |
 | `converged`      | boolean          | Whether the latest recorded iteration was judged converged (T0.8). |
 | `iteration`      | integer          | The latest recorded 0-based iteration index. |
-| `predicates`     | array of objects | The predicate **vector** at the latest observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as `run --json`. |
+| `predicates`     | array of objects | The predicate **vector** at the latest observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as `apply --json`. |
 | `release_ref`    | string \| null   | The release ref recorded on the latest iteration (T3.3c), or `null`. |
 | `observed_at`    | string (ISO 8601)| When the latest iteration's predicates were evaluated. |
 | `schema_version` | integer          | The contract version. |
@@ -61,7 +62,7 @@ An unknown ref is the error object below with a non-zero exit.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "proposal",
   "ref": "prop-ship-a-healthz-endpoint-3f9c1a2b4d5e",
   "status": "proposed",
@@ -86,7 +87,7 @@ orchestrator parses one surface and branches on the non-zero exit):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "error": "no run or proposal found for ref \"does-not-exist\" ..."
 }
 ```

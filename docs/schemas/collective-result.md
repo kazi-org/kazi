@@ -1,11 +1,13 @@
-# `kazi run --parallel --json` collective result contract (schema_version 1)
+# `kazi apply --parallel --json` collective result contract (schema_version 2)
 
-The single, **versioned** JSON object `kazi run --parallel --json` emits to stdout
-on termination (T21.8, ADR-0027 + ADR-0023). It is the COLLECTIVE companion to the
-serial `run --json` contract (`docs/schemas/run-result.md`): where that object
-reports ONE goal's loop result, this object reports the **collective verdict over a
-partitioned goal-set** — the parallel scheduler's `%{collective:, partitions:}`
-result rendered and versioned.
+The single, **versioned** JSON object `kazi apply --parallel --json` emits to
+stdout on termination (T21.8, ADR-0027 + ADR-0023). It is the COLLECTIVE companion
+to the serial `apply --json` contract (`docs/schemas/run-result.md`): where that
+object reports ONE goal's loop result, this object reports the **collective verdict
+over a partitioned goal-set** — the parallel scheduler's `%{collective:,
+partitions:}` result rendered and versioned. (`apply` is the primary verb;
+`kazi run --parallel --json` is the deprecated alias, ADR-0032, emitting the same
+object.)
 
 `--parallel` drives the native parallel scheduler (`Kazi.Scheduler.run_goals/2`):
 it partitions the goal-set by blast radius, spawns one supervised reconciler per
@@ -28,18 +30,18 @@ the same path serves one goal and N.
 
 ## Compatibility
 
-`schema_version` is a compatibility surface shared with the serial `run --json`
+`schema_version` is a compatibility surface shared with the serial `apply --json`
 contract (one number an orchestrator pins). An additive change (a new field) leaves
 it unchanged; a **breaking** change (a removed/renamed field, a changed type or
 meaning) bumps it.
 
-Current version: **1**.
+Current version: **2** (bumped by ADR-0032 with the apply/plan verb rename).
 
 ## Shape
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "goal_id": "cli-parallel",
   "collective": "converged",
   "partitions": [
@@ -103,7 +105,7 @@ re-derives the branch from the per-partition vector:
 | `over_budget` | `raise_budget` |
 | `stuck`       | `investigate`  |
 
-This is the SAME hint vocabulary the serial `run --json` result uses (ADR-0023),
+This is the SAME hint vocabulary the serial `apply --json` result uses (ADR-0023),
 so an orchestrator branches on `next_action` identically across the serial and
 collective surfaces.
 
@@ -117,7 +119,7 @@ its state) and `blocked` (the unsatisfiable sub-DAG) in place of `partitions`:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "goal_id": "cli-chain",
   "collective": "stuck",
   "schedule": [
@@ -163,9 +165,10 @@ observable). `[]` when nothing is blocked.
 | `blocked_by` | string        | The nearest transitive `needs` dep in a non-converging terminal state that makes this group unsatisfiable. |
 | `reason`     | string (enum) | That blocking dep's state — `stuck`, `over_budget`, or `blocked`. |
 
-## `run --explain` / `--dry-run`: the schedule, dispatched nothing (T23.6)
+## `apply --explain` / `--dry-run`: the schedule, dispatched nothing (T23.6)
 
-`kazi run <goal> --explain` (alias `--dry-run`) is PURE PLANNING: it computes the
+`kazi apply <goal> --explain` (alias `--dry-run`; `kazi run --explain` is the
+deprecated verb alias) is PURE PLANNING: it computes the
 wave schedule — the topological `needs`-DAG frontiers + the blast-radius
 PARTITIONING within each frontier — PRINTS it, exits `0`, and **dispatches
 nothing** (no reconciler, harness, lease, or worktree is touched). It makes
@@ -174,7 +177,7 @@ into many one-group frontiers. Under `--json` it emits a single schedule object:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "goal_id": "cli-chain",
   "mode": "explain",
   "dispatched": false,
@@ -199,7 +202,7 @@ into many one-group frontiers. Under `--json` it emits a single schedule object:
 
 ## Human surface
 
-Without `--json`, `run --parallel` prints a legible collective block instead of
+Without `--json`, `apply --parallel` prints a legible collective block instead of
 the JSON object. For a FLAT goal — the overall verdict and one line per partition:
 
 ```
@@ -222,7 +225,7 @@ blocked: 2
   c blocked by a (stuck)
 ```
 
-`run --explain` prints the dry-run schedule and dispatches nothing:
+`apply --explain` prints the dry-run schedule and dispatches nothing:
 
 ```
 SCHEDULE (dry-run, nothing dispatched)  goal=cli-chain
