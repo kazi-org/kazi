@@ -4,6 +4,137 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-24 — E13 reconciliation dogfood (T13.6): kazi's own A \ I, importer demo, sire-is-Go reality check
+
+Ran the E13 intended-vs-actual pipeline (ADR-0021) end to end as a USAGE
+exercise — no lib changes, the E13 modules are done. Two parts ran for real, one
+is an honest limitation. Reproduce with `priv/scripts/t13_6_dogfood.exs`
+(`mix run priv/scripts/t13_6_dogfood.exs`).
+
+### 1. Scanner + coverage on an Elixir target kazi CAN handle: kazi itself
+
+`Kazi.Reconcile.SurfaceScanner.scan/2` over kazi's own `lib/` (the workspace
+root) found **290 public-surface elements**: 289 `:exported_function` + 1
+`:mix_task` (`mix kazi.run`). (Reflection / string-dispatch entry points are
+invisible to the static scan — ADR-0021's documented approximation, `docs/lore.md`
+L-0006 — so 290 is a floor, not the whole truth.)
+
+I then ran `Kazi.Reconcile.Coverage.check/3` with a REAL, representative intended
+set `I`: the self-hosted goal `priv/goals/e3-t3.4-standing-reconciler.toml` (its
+two `test_runner` predicates — an acceptance test + the full-suite guard). Result:
+
+| metric | value |
+|---|---|
+| status | `:fail` |
+| surface `A` | 290 |
+| owned | 2 |
+| allowed (allow-list) | 0 |
+| **unowned (`A \ I`)** | **288** |
+
+A few example unowned (candidate dead/undocumented) elements:
+
+- `Kazi.Actions.Deploy.execute/2` (`lib/kazi/actions/deploy.ex`)
+- `Kazi.Actions.Integrate.execute/2` (`lib/kazi/actions/integrate.ex`)
+- `Kazi.Adopt.adopt/2` (`lib/kazi/adopt.ex:380`)
+- `Kazi.Authoring.Clarify.candidate_prompt/1` (`lib/kazi/authoring/clarify.ex`)
+- `Kazi.Application.start/2` (`lib/kazi/application.ex`)
+
+Unowned, bucketed by top-level module (top of the list): `Kazi.Loop` 45,
+`Kazi.Harness` 25, `Kazi.ReadModel` 25, `Kazi.Authoring` 21,
+`Kazi.Coordination` 21, `Kazi.Context` 17, `Kazi.Reconcile` 17, `Kazi.Goal` 14.
+
+### Honest read of the result: this number is a measurement of THIS goal, not "288 dead functions"
+
+`A \ I = 288` is real but must be read as ADR-0021 frames it: it is the surface
+NOT owned by the *chosen* intended set. The standing-reconciler goal's `I` is two
+generic `mix test` predicates — it intends "the suite passes", not "these 290
+symbols exist". So nearly the whole surface is correctly *unowned by that goal*.
+The pipeline did exactly what it should; the 288 is "surface this particular goal
+does not justify", a candidate list for a human, NOT a dead-code verdict. A real
+dead-code pass needs an `I` authored to OWN the live surface (an OpenAPI/gherkin
+import for an HTTP project, or hand-written acceptance predicates per capability),
+plus an allow-list for the legitimately un-predicated (`Application.start/2`,
+internal helpers).
+
+The matcher is also demonstrably APPROXIMATE (as documented), and the dogfood
+exposed both directions of noise in the 2 "owned" matches:
+
+- `mix kazi.run` — owned only because the predicate's `cmd: "mix"` substring-
+  matches the task identifier. Coincidental, not real ownership.
+- `Kazi.ReadModel.latest_iteration/1` — owned only because the token `"test"`
+  (from `args: ["test"]`) is a substring of "la**test**_iteration". A textbook
+  false positive: `String.contains?("latest_iteration", "test") == true`.
+
+So even the 2 "owned" are spurious; against this goal the honest A \ I is
+effectively all 290. This is the intended-vs-actual loop working AND a fair
+illustration of why ADR-0021 mandates "warn, don't auto-delete" + an allow-list:
+the substring matcher trades false positives (acceptable) to avoid false
+negatives (trust-eroding), and a coverage `:fail` is a review queue, not a
+delete list.
+
+### 2. OpenApiImporter demonstration (the importer path works)
+
+`Kazi.Reconcile.OpenApiImporter.import_map/2` over the committed T13.1 fixture
+(`test/fixtures/reconcile/petstore.openapi.json`) produced a create-mode goal
+map: **6 `http_probe` acceptance predicates across 3 groups**
+(`pets`, `identity-access`, `ungrouped`) —
+
+```
+get_healthz   [ungrouped]        GET  /healthz                   -> 200
+get_pets      [pets]             GET  /pets                      -> 200
+post_pets     [pets]             POST /pets                      -> 201
+get_pets-petid[pets]             GET  /pets/{petId}              -> 200
+get_users     [identity-access]  GET  /users                     -> 200
+post_users... [identity-access]  POST /users/{userId}/sessions   -> 200
+```
+
+`import_goal/2` round-trips the same input straight through `Kazi.Goal.Loader`
+into a `%Kazi.Goal{mode: :create}` with 6 predicates + 3 declared groups. The
+deterministic spec->intent backbone of ADR-0021 §1 works as specified: a machine
+spec becomes a grouped intended set with no bespoke deserialiser.
+
+### 3. Honest limitation: the original "dogfood sirerun" target is GO, not Elixir
+
+Plan T13.6 said "dogfood sirerun via the general path". Reality check: sire's API
+is a **Go** codebase (`/Users/dndungu/Code/sirerun/api`, `internal/openapi`,
+zero `.ex` files), and `Kazi.Reconcile.SurfaceScanner` is **Elixir-only** (it
+parses `.ex`/`.exs` with `Code.string_to_quoted/2`). It therefore CANNOT scan
+sire's Go surface — so the scanner+coverage half of T13.6 was dogfooded on kazi
+itself (part 1) instead, which is a legitimate Elixir target and a real result.
+
+Concrete follow-ups to actually reconcile sire:
+
+- **(a) A Go surface scanner** — a sibling provider that inventories Go exported
+  identifiers / HTTP route registrations, emitting the same `SurfaceElement`s the
+  coverage meta-predicate already consumes. This is the unblock for `A \ I` on
+  sire.
+- **(b) Consume sire's published OpenAPI spec.** Sire DOES publish one:
+  `/Users/dndungu/Code/sirerun/docs/openapi.yaml` (~3.2k lines, OpenAPI 3.0.3,
+  title "Sire API"). The importer accepts it in principle — BUT it is **YAML**,
+  and `OpenApiImporter` is **JSON-only** (YAML deferred behind its own dep ADR,
+  per the module's own docs). So the path is: `yq -o=json docs/openapi.yaml | ...`
+  out-of-band, then `import_map/2`. This yields sire's intended `I` (HTTP probes
+  grouped by tag) even without a Go scanner.
+- **(c) Prose importer over sire's ADRs** (`Kazi.Reconcile.ProseImporter`,
+  T13.3) — sire has a large `docs/adr/` tree; the harness-drafted, human-reviewed
+  path can capture intent that lives only in prose.
+
+The **live-predicate escalation** (probing a RUNNING sire to assert the imported
+`http_probe`s actually pass) remains **deferred** — it needs a running instance +
+test credentials, out of scope here.
+
+### Bottom line
+
+The E13 pipeline runs end to end and produces a real, valuable result on an
+Elixir target (kazi: `A \ I = 288` against a representative goal, with the
+matcher's approximation honestly visible in 2 spurious "owned" hits). The
+importer's deterministic spec->intent path works (6 grouped predicates from the
+petstore fixture). The "dogfood sirerun" goal as literally written is blocked on
+language: sire is Go, the scanner is Elixir — so it needs a Go scanner, a
+YAML->JSON front-end to ingest sire's existing OpenAPI spec, or the prose path,
+none of which were built here. Reported as not-yet-done for sire specifically;
+done and verified for the Elixir half.
+
 ## 2026-06-24 — token benchmark (T15.9): kazi adds ~0% overhead vs vanilla Claude
 
 First real A/B/C token measurement (the benchmark ADR-0010 promised; the
