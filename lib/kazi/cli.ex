@@ -316,12 +316,18 @@ defmodule Kazi.CLI do
       # T3.4d standing wiring: carry the --standing flag through to the run.
       # T8.7 harness wiring: carry --harness/--model through to the resolved adapter.
       [] ->
-        {:run, goal_file,
-         workspace: flags[:workspace],
-         env: flags[:env],
-         standing: flags[:standing],
-         harness: flags[:harness],
-         model: flags[:model]}
+        {
+          :run,
+          goal_file,
+          # T15.3 (ADR-0023 decision 2): --json switches `run` to its machine
+          # surface — the versioned result contract instead of the human report.
+          workspace: flags[:workspace],
+          env: flags[:env],
+          standing: flags[:standing],
+          harness: flags[:harness],
+          model: flags[:model],
+          json: flags[:json] || false
+        }
 
       extra ->
         {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
@@ -523,19 +529,62 @@ defmodule Kazi.CLI do
       |> maybe_put(:harness, opts[:harness])
       |> maybe_put(:model, opts[:model])
 
+    json? = opts[:json] == true
+
+    # T15.3 (ADR-0023 decision 2): map the loop's terminal result to the surface.
+    # The loop's outcome/reason are reused verbatim — `:converged`, `:over_budget`,
+    # and `:stopped` (which carries `reason: :stuck` for a stuck stop, T1.5) — and
+    # rendered as the versioned JSON contract under --json or the human report
+    # otherwise. The exit code is the same on both surfaces: 0 only on convergence.
     case Runtime.run(goal, run_opts) do
       {:ok, %{outcome: :converged} = result} ->
-        report(goal, :converged, result)
+        report_outcome(goal, :converged, result, json?)
         0
 
+      {:ok, %{outcome: :over_budget} = result} ->
+        report_outcome(goal, :over_budget, result, json?)
+        1
+
       {:ok, %{outcome: :stopped} = result} ->
-        report(goal, :stopped, result)
+        report_outcome(goal, :stopped, result, json?)
         1
 
       {:error, reason} ->
-        IO.puts(:stderr, "error: run failed: #{format_run_error(reason)}")
+        report_run_error(goal, reason, json?)
         1
     end
+  end
+
+  # Render the loop's terminal result on the requested surface (T15.3): the
+  # versioned JSON result object under --json, the existing human report
+  # otherwise. Both share the SAME loop result; only the OUTPUT shape differs.
+  defp report_outcome(%Goal{} = goal, outcome, result, json?) do
+    emit(json?, run_result_json(goal, outcome, result), fn ->
+      report(goal, human_outcome(outcome), result)
+    end)
+  end
+
+  # The human report (T0.10) knows only `:converged` / `:stopped`. An
+  # `:over_budget` stop is a non-converged terminal stop, so it renders through
+  # the existing `:stopped` human line (the JSON surface carries the precise
+  # `over_budget` status + the exceeded dimension in `next_action`/`budget_spent`).
+  defp human_outcome(:converged), do: :converged
+  defp human_outcome(_), do: :stopped
+
+  # A pre-loop run error (an unknown provider/harness, a vacuous goal, an await
+  # timeout) on the requested surface: the versioned JSON error object under
+  # --json (so the orchestrator parses ONE stdout surface and branches on the
+  # non-zero exit), the existing human stderr line otherwise.
+  defp report_run_error(%Goal{} = goal, reason, json?) do
+    message = format_run_error(reason)
+
+    if json? do
+      IO.puts(Jason.encode!(run_error_json(goal, reason, message)))
+    else
+      IO.puts(:stderr, "error: run failed: #{message}")
+    end
+
+    :ok
   end
 
   # T3.3d deploy wiring: merge the operator's --env into the deploy action's
@@ -1347,4 +1396,119 @@ defmodule Kazi.CLI do
   defp status_glyph(:fail), do: "[fail]"
   defp status_glyph(:error), do: "[err ]"
   defp status_glyph(_), do: "[ ?  ]"
+
+  # =============================================================================
+  # run --json result schema (T15.3, ADR-0023 decision 2)
+  # =============================================================================
+  #
+  # The single, VERSIONED JSON object `kazi run --json` emits on termination. It
+  # renders the loop's OWN terminal result (Kazi.Loop.result/0) — nothing is
+  # re-derived or re-run — into the orchestrator-facing contract documented in
+  # `docs/schemas/run-result.md`:
+  #
+  #   * `status`         — the terminal status the orchestrator branches on, one of
+  #                        "converged" / "stuck" / "over_budget" / "error". Derived
+  #                        from the loop outcome + reason: `:converged` →
+  #                        "converged"; `:over_budget` → "over_budget"; a `:stopped`
+  #                        loop with `reason: :stuck` → "stuck"; any other
+  #                        non-converged stop → "stuck" as well (an operator/await
+  #                        stop is a non-converged halt the orchestrator should
+  #                        investigate). A pre-loop failure renders "error" via
+  #                        `run_error_json/3` instead.
+  #   * `predicates`     — the PREDICATE VECTOR: one `{id, verdict}` per predicate
+  #                        at the terminal observation, sorted by id for a stable
+  #                        diff. `verdict` is the predicate status string
+  #                        (pass / fail / error / unknown).
+  #   * `iterations`     — the loop's observation count.
+  #   * `budget_spent`   — what the run consumed: iterations, and the exceeded
+  #                        dimension when the stop was `over_budget` (else nil).
+  #   * `next_action`    — a single hint the orchestrator branches on:
+  #                        "done" (converged), "investigate" (stuck / non-converged),
+  #                        "raise_budget" (over_budget). NOT a kazi action — an
+  #                        orchestration hint, per ADR-0023 ("the orchestrator owns
+  #                        the policy; kazi stays a pure tool").
+  #   * `reason`         — the loop's stop reason (the budget dimension, or "stuck"),
+  #                        as a string, or nil on a clean converge.
+  #   * `release_ref`    — WHAT was shipped (the T3.3c release tag), or nil.
+  #   * `schema_version` — the contract version; a breaking change bumps it.
+  @run_schema_version 1
+
+  @spec run_result_json(Goal.t(), :converged | :stopped | :over_budget, map()) :: map()
+  defp run_result_json(%Goal{id: id}, outcome, result) do
+    status = run_status(outcome, result)
+
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(id),
+      status: status,
+      predicates: predicate_vector_json(result.vector),
+      iterations: result.iterations,
+      budget_spent: budget_spent_json(result),
+      next_action: next_action(status),
+      reason: reason_string(Map.get(result, :reason)),
+      release_ref: Map.get(result, :release_ref)
+    }
+  end
+
+  # A pre-loop run error (vacuous goal, unknown provider/harness, await timeout):
+  # the SAME envelope shape, with `status: "error"` and a `next_action` of
+  # "investigate", so an orchestrator parses ONE stdout surface across success and
+  # failure and branches on the non-zero exit code, never on prose.
+  @spec run_error_json(Goal.t(), term(), String.t()) :: map()
+  defp run_error_json(%Goal{id: id}, reason, message) do
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(id),
+      status: "error",
+      error: message,
+      reason: reason_string(reason),
+      next_action: "investigate"
+    }
+  end
+
+  # Map the loop outcome (+ reason) to the contract's terminal status. A stuck
+  # stop is a `:stopped` loop carrying `reason: :stuck` (T1.5); any other
+  # non-converged stop (operator/await) is also surfaced as "stuck" — a
+  # non-converged halt the orchestrator should investigate, never a success.
+  defp run_status(:converged, _result), do: "converged"
+  defp run_status(:over_budget, _result), do: "over_budget"
+  defp run_status(:stopped, _result), do: "stuck"
+
+  # The orchestrator's branch hint, derived purely from the terminal status.
+  defp next_action("converged"), do: "done"
+  defp next_action("over_budget"), do: "raise_budget"
+  defp next_action(_), do: "investigate"
+
+  # The predicate vector as a list of `{id, verdict}` objects, sorted by id for a
+  # stable, diffable order. An absent/empty vector renders as `[]`.
+  @spec predicate_vector_json(Kazi.PredicateVector.t() | nil) :: [map()]
+  defp predicate_vector_json(nil), do: []
+
+  defp predicate_vector_json(%Kazi.PredicateVector{results: results}) do
+    results
+    |> Enum.sort_by(fn {id, _} -> to_string(id) end)
+    |> Enum.map(fn {id, result} ->
+      %{id: to_string(id), verdict: to_string(result.status)}
+    end)
+  end
+
+  # What the run consumed. `iterations` always; `exceeded` names the budget
+  # dimension only when the stop was over-budget, else nil (a clean converge or a
+  # stuck stop did not exceed a budget dimension).
+  defp budget_spent_json(result) do
+    %{
+      iterations: result.iterations,
+      exceeded: budget_exceeded(result)
+    }
+  end
+
+  defp budget_exceeded(%{outcome: :over_budget, reason: reason}), do: reason_string(reason)
+  defp budget_exceeded(_result), do: nil
+
+  # Render a loop stop reason (an atom dimension, `:stuck`, a tuple, or nil) as a
+  # JSON-friendly string, or nil when there is no reason (a clean converge).
+  defp reason_string(nil), do: nil
+  defp reason_string(reason) when is_atom(reason), do: to_string(reason)
+  defp reason_string(reason) when is_binary(reason), do: reason
+  defp reason_string(reason), do: inspect(reason)
 end
