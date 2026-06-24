@@ -99,8 +99,10 @@ defmodule Kazi.MCP.ServerTest do
 
       # The result-shape descriptor is REUSED from Kazi.CLI.Schema (T16.1), so the
       # MCP tool docs and the CLI --json contract cannot drift. The descriptor is
-      # the atom-keyed schema map Kazi.CLI.Schema emits.
-      assert tools["kazi_run"]["inputSchema"]["resultSchema"].command == "run"
+      # the atom-keyed schema map Kazi.CLI.Schema emits. T27.4 (ADR-0032) renamed
+      # the result-schema command key `run` -> `apply` (the `kazi_run` MCP tool
+      # still fetches via the `run` alias; the tool itself is renamed in T27.5).
+      assert tools["kazi_run"]["inputSchema"]["resultSchema"].command == "apply"
       assert tools["kazi_status"]["inputSchema"]["resultSchema"].command == "status"
 
       assert tools["kazi_run"]["inputSchema"]["resultSchema"].schema_version ==
