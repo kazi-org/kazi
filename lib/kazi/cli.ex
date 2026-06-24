@@ -960,7 +960,7 @@ defmodule Kazi.CLI do
 
     IO.puts(
       :stderr,
-      "note: `kazi #{verb}` is deprecated; use `kazi #{primary}` (removed in v0.5.0)"
+      "note: `kazi #{verb}` is deprecated; use `kazi #{primary}` (removed in v0.6.0)"
     )
   end
 
