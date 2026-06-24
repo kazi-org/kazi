@@ -223,9 +223,10 @@ requirement that drove ADR-0004/0005).
 
 ## 9. Human interface — off the context window
 
-The human sets *direction*, not keystrokes. A goal can be declared from a phone
-(Telegram / Discord); kazi pings back on `converged`, `stuck`, or
-`needs-decision`. Status routing lives outside the agent's context window so the
+The human sets *direction*, not keystrokes. The human's interface is the
+orchestrating agent (Claude): they say "build X with kazi" and the agent drives
+`propose` → `approve` → `run` and pings back on `converged`, `stuck`, or
+`needs-decision`. Status routing lives outside kazi's context window so the
 agent stays focused on implementation. The LiveView dashboard is for inspection
 (goal board, agent presence, lease map, convergence history), not for driving.
 
@@ -260,7 +261,7 @@ later slices *deepen* phases rather than add missing ones (ADR-0007).
   provider + vacuous-goal guard); kazi builds features, not only repairs.
 - **MVP-3 (Slice 3+)** — deepen: JetStream leases + presence, graph-aware
   partitioning, richer deploy (multi-env/rollback), standing reconcilers,
-  idea→predicate front-end, LiveView dashboard, Telegram goal-in / ping-out.
+  idea→predicate front-end, LiveView dashboard.
 
 Dogfood on real repos through MVP-2 before any world-facing claim; from creation
 mode onward, kazi builds kazi.
