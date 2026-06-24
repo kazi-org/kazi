@@ -99,3 +99,45 @@ surface and branches on the non-zero exit:
   "next_action": "investigate"
 }
 ```
+
+## Streaming progress (JSONL) — `run --json --stream` (T15.4, ADR-0023 decision 3)
+
+`kazi run --json --stream` emits a **JSONL stream** instead of a single object:
+one JSON object **per line** per loop iteration, **terminated** by the
+single run-result object above. Each line parses **independently**, so an
+orchestrator monitors a long convergence line-by-line without blocking — mirroring
+how kazi itself parses opencode/codex JSONL.
+
+Without `--stream`, `run --json` emits exactly the one terminal result object
+(unchanged); `--stream` is opt-in and additive and only changes what precedes that
+object.
+
+### Iteration event
+
+Each progress line is a `Kazi.Loop` observation rendered as:
+
+```json
+{ "schema_version": 1, "event": "iteration", "iteration": 0, "predicates": [ { "id": "code", "verdict": "fail" }, { "id": "live", "verdict": "fail" } ], "converged": false, "release_ref": null }
+```
+
+| Field            | Type             | Meaning |
+|------------------|------------------|---------|
+| `event`          | string           | Always `"iteration"`. **Distinguishes a progress line from the terminal result object**, which carries NO `event` field. |
+| `iteration`      | integer          | The 0-based observation index (matches the read-model's `iteration_index`). Non-decreasing across the stream. |
+| `predicates`     | array of objects | The predicate **vector** at this observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as the terminal result. |
+| `converged`      | boolean          | Whether the whole vector was satisfied at this observation. |
+| `release_ref`    | string \| null   | The release ref recorded so far this run (T3.3c), or `null`. |
+| `schema_version` | integer          | The contract version, same as the result object. |
+
+### Stream shape
+
+```
+{ "event": "iteration", "iteration": 0, ... }   ← one per observation
+{ "event": "iteration", "iteration": 1, ... }
+...
+{ "schema_version": 1, "status": "converged", ... }   ← the terminal result object (no "event"), the stream terminator
+```
+
+The consumer reads lines until it sees the object **without** an `event` field —
+that is the terminal `run --json` result documented above, carrying the final
+`status` / `next_action` / `budget_spent` the orchestrator branches on.
