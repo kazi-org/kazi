@@ -99,6 +99,11 @@ Open work:
 - **UC-038** (kazi computes + executes a dependency-aware, pipelined, objectively-
   gated wave schedule from declared predicate-group `needs` edges + blast-radius
   partitioning -- codifies `/plan`'s `deps:` + `/apply`'s Waves, ADR-0028) -- E23.
+- **UC-039** (a newcomer landing on the README / `kazi.sire.run` understands and
+  adopts the AGENT-DRIVES-KAZI paradigm in one screen -- chat with Claude Code, it
+  drives kazi -- via research-grounded content: paradigm-led copy, a loop-transcript
+  hero, without/with proof, an agent-voiced testimonial, a memorable invocation, and
+  a dogfood "done" leaderboard, ADR-0030) -- E25.
 
 ## Checkable Work Breakdown
 
@@ -426,6 +431,33 @@ is kazi's own no-dead-code thesis (ADR-0021) applied to itself.
 - [x] T24.1 Remove the bridge modules + tests: delete `lib/kazi/telegram.ex`, `lib/kazi/telegram/client.ex`, `lib/kazi/telegram/message.ex`, `test/support/in_memory_telegram_client.ex`, `test/kazi/telegram_test.exs`, `test/kazi/telegram_e2e_test.exs`; remove any supervision-tree start/registration of the bridge in `lib/kazi/application.ex` + config.  Owner: pool  Done: 2026-06-24  verifies: [infrastructure]  deps: []  acc: the files are gone; `mix compile --warnings-as-errors` + `mix test` green (suite shrinks by the Telegram tests, nothing else breaks); no dangling references (grep for `Kazi.Telegram` is clean outside the ADRs).
 - [x] T24.2 Scrub Telegram from moduledocs + docs + surfaces: remove the "Telegram" surface mentions in `Kazi.Authoring`, `Kazi.ReadModel`, `lib/kazi/authoring/draft.ex`, `lib/kazi/read_model/proposed_goal.ex` moduledocs; drop Telegram from the operator-surfaces list in `docs/concept.md`, `README.md`, and the site (KEEP the LiveView dashboard); the agent-driven on-ramp states the mobile interface is Claude.  Owner: pool  Done: 2026-06-24  verifies: [infrastructure]  deps: [T24.1]  acc: no "Telegram" reference remains except the historical ADR-0011/0029 records; README<->site coherence (T9.9) green; `mix format --check-formatted` + `--warnings-as-errors` clean.
 
+### E25 -- Content-marketing refocus: lead with the agent-drives-kazi paradigm (P1, ADR-0030)
+
+The research-grounded content rewrite. The shipped paradigm is "you CHAT with Claude
+Code and the AGENT drives kazi" (the skill / `kazi mcp` / `--json` CLI -- E16 shipped),
+but the README/site still LEAD with the legacy human -> kazi route. Deep research of
+the fastest-growing OSS AI tools (docs/devlog.md 2026-06-24; ADR-0030) gives the
+playbook: kazi's analogs are agent-FACING tools the user does not operate (Serena,
+Context7) + Astral's proof discipline. This epic applies ADR-0030 to every surface.
+
+It is the CANONICAL content epic: it SUPERSEDES the messaging in the still-open
+E17 content tasks (T17.1/T17.2/T17.4/T17.5 -- which predate the research and the
+shipped skill/mcp) and the README/site tasks of E22; execute those per ADR-0030
+here. ADR-0025's lead-order (agent first, vanilla as reference) holds. No invented
+features -- agent-driving (skill/mcp/`--json`) is REAL now; promised work labelled
+"coming" (ADR-0025). Mixed content + engineering.
+
+- [ ] T25.1 Tagline + noun decision (the hook): choose kazi's line-1 tagline in the HUMAN's noun + a BORROWED frame for graspability (e.g. "CI for coding agents" / "make your coding agent actually finish"), NOT "reconciliation controller"; name the agent kazi drives; lead with the outcome. Provide 3 candidates + a recommendation; update `site/src/canonical.mjs` + README in lockstep (T9.9).  Owner: TBD  Est: 1.5h  verifies: [UC-039]  delivers: [the chosen agent-paradigm tagline + canonical strings, with 2 alternates]  deps: []  acc: a committed tagline that names the agent + the outcome, jargon-free in line 1, with the precise category as the second beat; canonical strings byte-identical across README/site (coherence green).
+- [ ] T25.2 Hero asset -- the loop transcript (highest-leverage): record a real `claude -> kazi -> harness` run with PREDICATES flipping false -> true ending at "goal objectively true"; export as asciinema/SVG (crisp, lightweight); a styled static fallback is acceptable until a live cast exists, HONESTLY labelled. This is kazi's benchmark-chart equivalent.  Owner: TBD  Est: 2h  verifies: [UC-039]  delivers: [an asciinema/SVG hero showing the loop reaching objective-true]  deps: []  acc: the asset shows the reconcile loop driving an agent to predicate-true; reused in README (above install) + site hero; if a fallback, it is labelled as a mockup, never as a recorded run.
+- [ ] T25.3 README rewrite to the paradigm (supersedes T17.1): lead = tagline (T25.1) -> hero transcript (T25.2) -> a "without kazi / with kazi" before-after block (Context7 device) -> "give your agent X" framing + the invocation phrase (T25.6) -> copy-paste wiring (the skill/`mcp` one-liner) -> agent-native social-proof row. Vanilla `kazi run` demoted to "Reference". No "coming" shown as working.  Owner: TBD  Est: 2h  verifies: [UC-039, UC-035]  delivers: [a README whose first screen sells the agent-drives-kazi paradigm]  deps: [T25.1, T25.2, T25.6]  acc: the first screen shows the agent paradigm + hero + before-after; human -> kazi appears only under "Reference"; every command verified against `kazi help --json`; coherence green; renders on GitHub.
+- [ ] T25.4 Website rewrite to match (supersedes T17.2): hero = the transcript (T25.2) + the tagline; a primary "Chat with Claude Code, it drives kazi" section; without/with block; an agent-voiced testimonial (T25.5); two-layer proof (heavier on the site); vanilla demoted. Update `canonical.mjs` + coherence; deploy + verify live.  Owner: TBD  Est: 2.5h  verifies: [UC-039, UC-035]  delivers: [a website hero that leads with the agent paradigm]  deps: [T25.3, T25.5]  acc: hero + primary section render the agent paradigm + hero asset; README<->site coherence (T9.9) green; Playwright smoke (T9.5) passes incl. mobile + the new sections; deployed + verified live at https://kazi.sire.run.
+- [ ] T25.5 Agent-voiced testimonial(s) (Serena pattern, uniquely on-brand): capture a coding agent describing -- in its own words -- what kazi lets it do (e.g. "I stop claiming done when it isn't"); HONEST + labelled as agent-authored. Use on README social-proof row + site.  Owner: TBD  Est: 1h  verifies: [UC-039]  delivers: [1-2 agent-authored testimonials, labelled]  deps: []  acc: the testimonial is clearly attributed to the agent that produced it; not fabricated human quotes; renders on both surfaces.
+- [ ] T25.6 The invocation phrase (Context7 "use context7" pattern): define + document the exact phrase a human types at Claude Code to invoke kazi (e.g. "use kazi to ..."); ensure the shipped skill (`kazi install-skill`) + `AGENTS.md` teach the same phrase so it actually triggers.  Owner: TBD  Est: 1h  verifies: [UC-039, UC-034]  delivers: [a documented, working invocation phrase]  deps: []  acc: the phrase appears in README/site/skill/`AGENTS.md` identically; a real Claude Code session given the phrase drives kazi (or honest "coming" if the skill trigger is not wired yet); coherence (T16.4) green.
+- [ ] T25.7 Dogfood "done" leaderboard/gallery (the recurring growth engine): a page/section listing goals a prose pipeline left subtly broken that kazi converged -- built from the dogfood fixtures (T0.12/T1.8) + the live production probe -- with a REPRODUCIBLE methodology (the number must hold up; risk #1). Self-updating where feasible; each new fixture = a new entry.  Owner: TBD  Est: 2h  verifies: [UC-039]  delivers: [a dogfood "done" gallery/leaderboard page + methodology]  deps: []  acc: the page shows >=2 real converged cases with before/after evidence + a reproducible method; no unverifiable claims; linked from README + site.
+- [ ] T25.8 Docs quickstart-first (tutorial-then-reference): the first `docs/` page is a Quickstart that wires kazi into Claude Code (`install-skill`/`mcp`) and converges ONE real goal end-to-end via the agent; reference (predicate DSL, budget/stuck, `--json` schemas) follows. Cross-linked from a `docs/` index.  Owner: TBD  Est: 1.5h  verifies: [UC-039, UC-033]  delivers: [an agent-first Quickstart as the docs entry page]  deps: [T25.6]  acc: a reader follows the Quickstart and drives kazi from Claude Code end-to-end on the current release; reference pages follow; only real commands.
+- [ ] T25.9 Launch kit + OG card (HN-first): an OG/Twitter card showing the agent paradigm (wire into `site/src/layouts/Layout.astro`); a Show HN title (`kazi - drive your coding agent in a loop until the goal is objectively true`) + post draft + an X thread, framed against "agents claim done but aren't"; honest, no unshipped command as working.  Owner: TBD  Est: 1.5h  verifies: [UC-039, UC-035]  delivers: [an OG card + a Show HN/X launch kit draft]  deps: [T25.3, T25.7]  acc: a link-preview check renders the card; the launch kit leads with the agent paradigm + a reproducible hook; Lighthouse SEO stays >= 90; ready for the operator to post.
+- [ ] T25.10 Accuracy gate + live publish: every command across README/docs/site verified against `kazi help --json`; README<->site coherence (T9.9) + skill/`AGENTS.md` coherence (T16.4) green; version current; no dead links; deploy + verify live at https://kazi.sire.run and README renders on GitHub. Record the publish honestly.  Owner: TBD  Est: 1.5h  verifies: [UC-039, infrastructure]  deps: [T25.3, T25.4, T25.7, T25.8, T25.9]  acc: zero unshipped-command references; coherence green; live site shows the agent paradigm; README renders on GitHub; any skipped item flagged, not hidden.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -463,6 +495,9 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E23-2 (scheduling):** T23.3 (topological + spatial, pipelined) -> T23.4 (regression re-gating), T23.5 (blocked-dep escalation). Needs E21 (T21.1/T21.2).
 - **Wave E23-3 (surface):** T23.6 (CLI/`--json`/`--explain`), T23.7 (DAG dashboard).
 - **Wave E23-4 (position + prove):** T23.8 (docs/positioning) -> T23.9 (live dep-DAG dogfood).
+- **Wave E25-1 (assets, parallel -- can start now):** T25.1 (tagline/noun), T25.2 (hero transcript), T25.5 (agent-voiced testimonial), T25.6 (invocation phrase), T25.7 (dogfood "done" leaderboard) are independent and run in parallel.
+- **Wave E25-2 (surfaces):** T25.3 (README) -> T25.4 (website) ; T25.8 (docs quickstart) alongside.
+- **Wave E25-3 (launch):** T25.9 (OG + Show HN/X kit) -> T25.10 (accuracy gate + live publish). Supersedes the messaging of the open E17 + E22 README/site tasks (execute those per ADR-0030 here).
 
 ## Risk Register
 
@@ -496,6 +531,11 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E23-2 | Over-declaring `needs` re-serializes and loses kazi's parallelism advantage. | Med | Med | Declare only true precedence; T23.6 `--explain` + T23.7 dashboard show realized parallelism; spatial partitioning still parallelizes within each frontier. |
 | R-E23-3 | A cycle or a stuck dep makes a sub-DAG unsatisfiable / hangs dependents. | Med | Low | Cycles rejected at load (T23.1, like ADR-0020's parent-cycle guard); a stuck/over-budget dep escalates and is NAMED (T23.5), never a silent hang. |
 | R-E23-4 | E23 depends on E21 (the scheduler), which is not built yet. | High | Low | Sequencing is explicit: T23.3+ deps T21.1/T21.2; E23-1 (the pure model T23.1/T23.2) can proceed against E12 alone, ahead of the scheduler. |
+| R-E25-1 | "Done" is harder to make falsifiable than "fast" (research risk #1) -- the agent-paradigm pitch misfires without a reproducible number. | High | Med | T25.7 builds the dogfood "done" leaderboard with a REPRODUCIBLE methodology (the number must hold up, the Ruff lesson); the hero transcript (T25.2) makes "objective done" visible; lead with the outcome, not the abstraction. |
+| R-E25-2 | "Reconciliation controller" is a new category (education tax); the agent-driven framing may read as me-too in a crowded harness field. | Med | Med | ADR-0030: borrowed frame ("CI for coding agents") in line 1 with the precise category as the second beat; position as a different LAYER (verification), not another harness. |
+| R-E25-3 | E25 duplicates/contradicts the open E17 + E22 README/site tasks. | Med | Med | E25 is the CANONICAL content epic and SUPERSEDES the messaging of T17.1/2/4/5 + E22's README/site tasks (execute per ADR-0030); the wave note + this row record it so a pool session does not run both. |
+| R-E25-4 | The hero transcript (T25.2) needs a real recordable end-to-end run; if unavailable, a mockup could mislead. | Low | Med | A static fallback is allowed ONLY if HONESTLY labelled as a mockup (ADR-0030); never presented as a recorded run; replace with a real asciinema cast once a clean run exists (the E18 re-verify shows clean runs are now achievable). |
+| R-E25-5 | Distribution rides the Claude Code / MCP host; a host change breaks the install/invocation story. | Med | Low | Keep multi-harness (Codex/opencode) in the on-ramp (the Cline lesson); the invocation phrase (T25.6) is documented + coherence-checked (T16.4); instrument downloads/retention, not stars. |
 
 ## Operating Procedure
 
@@ -521,6 +561,36 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E25: content-marketing refocus on the agent-drives-kazi paradigm, P1 + ADR-0030)
+- **Deep research** (two sourced passes, ~15 fast-growing OSS AI tools + the
+  agent-native/MCP tier + HN launch data) into how they won stars; distilled to
+  `docs/devlog.md` (2026-06-24 "Content-marketing research") and **ADR-0030**.
+  Verdict: kazi's analogs are agent-FACING tools the user does not operate (Serena
+  "give your agent X", Context7 "use context7" + before/after) + Astral's proof
+  discipline (a falsifiable number + a living leaderboard).
+- **Created ADR-0030** (content-marketing + agent-native positioning; refines
+  ADR-0025): lead every surface with the agent-drives-kazi paradigm + a human-noun/
+  borrowed-frame tagline; hero = a transcript of the loop reaching objective-true;
+  without/with before-after; agent-voiced proof + a memorable invocation; ONE
+  recurring growth engine (a dogfood "done" leaderboard); HN-first launch kit.
+- **Review finding:** the README/site still LEAD with the legacy human -> kazi route
+  even though the agent-driving surfaces (skill/`mcp`/`--json`, E16) are shipped;
+  E25 fixes the lead to the agent paradigm.
+- **Added E25** (P1, ADR-0030, UC-039): T25.1 tagline/noun, T25.2 hero transcript,
+  T25.3 README, T25.4 website, T25.5 agent-voiced testimonial, T25.6 invocation
+  phrase, T25.7 dogfood "done" leaderboard (the growth engine), T25.8 docs
+  quickstart-first, T25.9 launch kit + OG card, T25.10 accuracy gate + live publish.
+  Waves E25-1..3; risks R-E25-1..5 (falsifiable-"done", category tax, E17/E22
+  overlap, mockup honesty, host dependence).
+- **Supersession:** E25 is the canonical content epic; it SUPERSEDES the messaging
+  of the still-open E17 content tasks (T17.1/2/4/5) and E22's README/site tasks
+  (execute per ADR-0030). Recorded in the E25 wave note + R-E25-3 so concurrent pool
+  sessions do not run both.
+- **UC-039** added. ADR created: `docs/adr/0030-content-marketing-agent-native-positioning.md`
+  (+ README index). No trim (heavy concurrent /apply --pool edits; plan trimmed 2026-06-23).
+  Authored in an isolated git worktree after a concurrent session reset the shared
+  `main` working tree and wiped an earlier uncommitted draft of this change.
 
 ### 2026-06-24 -- Change Summary (E23: dependency-aware partitioning / predicate-graph waves, P2 + ADR-0028)
 - **Created ADR-0028** (dependency-aware partitioning, "predicate-graph waves"): the
