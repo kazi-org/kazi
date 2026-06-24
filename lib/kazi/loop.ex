@@ -123,6 +123,14 @@ defmodule Kazi.Loop do
   # NEXT dispatch's prompt (see the `:dispatch_agent` ACT clause and
   # `dispatch_prompt/2`).
   alias Kazi.Loop.Digest
+  # T19.1 orientation prefix (ADR-0010 §3, realizing T4.3): the live dispatch
+  # prompt carries kazi's pre-computed map memory (the ranked blast-radius pack)
+  # as a STABLE, cacheable PREFIX ahead of the failing-evidence body — so each
+  # stateless `claude -p` starts oriented instead of re-exploring. The pack is a
+  # pure function of `(failing-slice, workspace, graph_source)`, so its rendered
+  # prefix is byte-identical across iterations whose blast radius is unchanged.
+  alias Kazi.Context
+  alias Kazi.Context.Pack
 
   require Logger
 
@@ -1205,6 +1213,18 @@ defmodule Kazi.Loop do
   # replacing it). Retrieval is OFF by default: with no `:retriever` the resolved
   # default is the no-op (returns `[]`), so NOTHING is appended and the prompt is
   # byte-identical to the pre-retrieval path (ADR-0012's central constraint).
+  #
+  # T19.1 orientation prefix (ADR-0010 §3, realizing the unwired T4.3): the ranked
+  # blast-radius orientation pack (`Kazi.Context`) is PREPENDED as a stable,
+  # cacheable PREFIX ahead of the digest + failing-evidence body — so each
+  # stateless dispatch starts oriented to WHERE the work lives without the file
+  # being the only carrier (the `.kazi/context.md` written in `prepare_workspace/1`
+  # remains, as the fallback for file-reading harnesses). The prefix is built from
+  # the SAME `(failing-slice, workspace, graph_source)` inputs every iteration, so
+  # it is byte-identical across iterations whose blast radius is unchanged
+  # (maximising the inner harness's prompt cache; T19.2). It is purely additive:
+  # when there is NO graph/repo-map the pack is empty and NO prefix is added, so
+  # the prompt is byte-identical to the pre-T19.1 path (backward compatible).
   @spec dispatch_prompt(Action.t(), Data.t()) :: String.t()
   defp dispatch_prompt(%Action{params: params}, %Data{goal: goal} = data) do
     failing = Map.get(params, :failing, [])
@@ -1213,10 +1233,16 @@ defmodule Kazi.Loop do
       "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}\n" <>
         "evidence: #{inspect(Map.get(params, :evidence, %{}))}"
 
-    prompt =
+    body =
       case Digest.render(data.working_set_digest) do
         "" -> evidence_prompt
         note -> note <> "\n\n" <> evidence_prompt
+      end
+
+    prompt =
+      case orientation_prefix(data) do
+        nil -> body
+        prefix -> prefix <> "\n\n" <> body
       end
 
     case retrieval_section(data) do
@@ -1224,6 +1250,42 @@ defmodule Kazi.Loop do
       section -> prompt <> "\n\n" <> section
     end
   end
+
+  # The stable orientation PREFIX for the live dispatch (T19.1, ADR-0010 §3). Builds
+  # the ranked blast-radius pack from the current failing slice + workspace and
+  # renders it as the cacheable head of the prompt. Returns `nil` — adding NO prefix
+  # — when there is no workspace, or when the graph/repo-map produced an EMPTY pack
+  # (no impacted files/symbols/test sources): the no-graph case stays byte-identical
+  # to the pre-T19.1 prompt rather than emitting an empty-orientation marker.
+  #
+  # The graph/repo-map source is threaded from `adapter_opts[:graph_source]` (the
+  # same hermetic seam `Kazi.Workspace.prepare/2` uses), so tests inject a fixture
+  # source with no network or live-MCP access; in production the resolved default
+  # (`Kazi.Context.RepoMapSource`) detects a real graph, else an aider-style repo
+  # map. The pack is a pure function of its inputs, so the rendered prefix is
+  # byte-identical across iterations whose blast radius is unchanged (T19.2).
+  @spec orientation_prefix(Data.t()) :: String.t() | nil
+  defp orientation_prefix(%Data{workspace: workspace}) when not is_binary(workspace), do: nil
+
+  defp orientation_prefix(%Data{workspace: workspace, adapter_opts: adapter_opts} = data) do
+    pack =
+      Context.orientation_pack(failing_slice(data), workspace, orientation_opts(adapter_opts))
+
+    if empty_pack?(pack), do: nil, else: Context.render(pack)
+  end
+
+  # A pack with no impacted files, symbols, or test sources carries no orientation —
+  # the source found nothing (no graph/repo-map). Suppress the prefix so the no-graph
+  # dispatch is byte-identical to the pre-T19.1 prompt (the backward-compat seam).
+  @spec empty_pack?(Pack.t()) :: boolean()
+  defp empty_pack?(%Pack{files: [], symbols: [], test_sources: []}), do: true
+  defp empty_pack?(%Pack{}), do: false
+
+  # Forward only the orientation-builder opts to `Kazi.Context.orientation_pack/3`
+  # (the graph source + token budget), ignoring the rest of the adapter opts. Absent
+  # a `:graph_source` the builder's resolved default detects a real graph/repo-map.
+  defp orientation_opts(adapter_opts),
+    do: Keyword.take(adapter_opts, [:graph_source, :token_budget])
 
   # The optional retrieval augmentation for the dispatch prompt (T4.9c, ADR-0012).
   # Resolves the goal-declared retriever from `adapter_opts` and renders any
