@@ -1,0 +1,6 @@
+{"type":"session.created","properties":{"info":{"id":"ses_golden"}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_step","messageID":"msg_a","sessionID":"ses_golden","type":"step-start"}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_tool","messageID":"msg_a","sessionID":"ses_golden","type":"tool","tool":"edit","state":{"status":"completed"}}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_text","messageID":"msg_a","sessionID":"ses_golden","type":"text","text":"Made the failing unit test pass."}}}
+{"type":"message.updated","properties":{"info":{"id":"msg_a","role":"assistant","sessionID":"ses_golden","modelID":"qwen3.6:35b-a3b-q8_0","providerID":"dgx-ollama","cost":0.0042,"tokens":{"input":120,"output":340,"reasoning":40,"cache":{"read":900,"write":0}}}}}
+Made the failing unit test pass.
