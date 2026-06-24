@@ -71,7 +71,56 @@ agents fix things but do not know when to stop; kazi closes the loop.
 
 ---
 
-## 4. The goal contract (ADR-0002)
+## 4. Positioning, the other direction: a three-layer stack (ADR-0023)
+
+Section 3 looks *downward* — kazi drives a harness. kazi is also good to drive
+*from above*: an orchestrating agent should be able to run kazi programmatically
+through the whole loop (plan -> author predicates -> converge -> validate ->
+release). That puts kazi in the **middle of a three-layer stack** (ADR-0023):
+
+```
+  orchestrator agent  (claude code -- HIGH reasoning: plan/design, author predicates)
+        |  drives kazi as a tool
+        v
+      kazi             (the controller -- objective predicates + convergence loop)
+        |  drives the inner harness
+        v
+  cheap implementer    (claw -> local Qwen, opencode, codex, ... -- the keystrokes)
+```
+
+The point is **two-tier economics.** Spend expensive reasoning *once* on the part
+that needs judgment — what "done" means: the plan and the acceptance predicates —
+and spend cheap, local compute on the iterative grind of editing until those
+predicates pass. kazi's objective termination is what makes the split safe: the
+cheap implementer cannot declare victory on plausible-but-wrong work, because
+truth lives in the controller (section 2, Gap 1), not in the model doing the
+keystrokes. The expensive brain sets the bar; the cheap brain reaches for it;
+kazi holds the bar still.
+
+**This extends ADR-0001 without contradicting it.** ADR-0001 says kazi is the
+*outer loop, not a harness* — kazi must never become the thing you type at. That
+still holds: kazi does not type at the orchestrator, and the orchestrator is not
+*inside* kazi. kazi is the outer loop **for the coding harness** below it and a
+well-behaved inner **tool for the orchestrator** above it — friendly in both
+directions at once. Being drivable as a tool is not the same as being a harness;
+a harness runs the agent loop a human types into, while kazi exposes a structured
+command surface an agent calls and parses. Both roles are the *same* kazi: the
+controller that owns convergence, coordination, and objective truth.
+
+Mechanically this is just symmetry. kazi already drives harnesses by emitting a
+focused prompt and parsing structured output (ADR-0001, ADR-0016); being drivable
+means kazi's own commands emit structured (`--json`) output an orchestrator parses
+instead of screen-scraping prose — the same conformance bar kazi imposes on the
+harnesses it drives, now applied to itself. The orchestrator owns the per-phase
+model policy ("strong brain to author predicates, cheap brain to converge"); kazi
+stays a pure tool and bakes none of that tiering in (ADR-0023). Predicate
+authoring stays the single sanctioned `kazi propose` path (ADR-0011) regardless of
+which layer calls it, so the deterministic clarify floor and the approve gate are
+never bypassed from above.
+
+---
+
+## 5. The goal contract (ADR-0002)
 
 A **goal** is a declarative document:
 
@@ -88,7 +137,7 @@ The goal's *acceptance* is the conjunction of all predicates. There is no
 
 ---
 
-## 5. The convergence loop
+## 6. The convergence loop
 
 ```
 observe   → evaluate every predicate, attach evidence, record the predicate VECTOR
@@ -121,7 +170,7 @@ deterministic controller, not a checklist an LLM may skip.
 
 ---
 
-## 6. Coordination model (ADR-0006)
+## 7. Coordination model (ADR-0006)
 
 - **Resource leases.** An agent leases its blast radius before editing. Leases
   live in NATS JetStream KV with revision-based CAS (atomic) and per-key TTL (a
@@ -138,7 +187,7 @@ deterministic controller, not a checklist an LLM may skip.
 
 ---
 
-## 7. Architecture & data layers (ADR-0003, ADR-0004, ADR-0005)
+## 8. Architecture & data layers (ADR-0003, ADR-0004, ADR-0005)
 
 **Runtime:** Elixir / OTP. One supervised process per active goal
 (`GenStateMachine`), supervisors per dispatched agent with restart/escalation
@@ -172,7 +221,7 @@ requirement that drove ADR-0004/0005).
 
 ---
 
-## 8. Human interface — off the context window
+## 9. Human interface — off the context window
 
 The human sets *direction*, not keystrokes. A goal can be declared from a phone
 (Telegram / Discord); kazi pings back on `converged`, `stuck`, or
@@ -182,7 +231,7 @@ agent stays focused on implementation. The LiveView dashboard is for inspection
 
 ---
 
-## 9. What kazi is NOT
+## 10. What kazi is NOT
 
 - Not a coding agent, terminal, or IDE. It drives them.
 - Not a "swarm" of fake agents. Concurrency is real OS processes under leases.
@@ -192,7 +241,7 @@ agent stays focused on implementation. The LiveView dashboard is for inspection
 
 ---
 
-## 10. Build order (a vertical slice of the final design, not a different one)
+## 11. Build order (a vertical slice of the final design, not a different one)
 
 Each milestone uses the *final* substrates at n=1; nothing is throwaway. The
 walking skeleton spans idea → production from Slice 0: every lifecycle phase gets
