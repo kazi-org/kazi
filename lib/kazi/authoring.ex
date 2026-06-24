@@ -79,6 +79,7 @@ defmodule Kazi.Authoring do
   alias Kazi.{Goal, Predicate, ReadModel}
   alias Kazi.Authoring.Clarify
   alias Kazi.Authoring.Draft
+  alias Kazi.Goal.Group
   alias Kazi.Goal.Loader
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.Repo
@@ -548,10 +549,26 @@ defmodule Kazi.Authoring do
       "name" => goal.name,
       "mode" => Atom.to_string(goal.mode),
       "standing" => goal.standing,
+      # T12.1 group taxonomy (ADR-0020): serialize back to the `[[group]]` array
+      # the loader parses, so the taxonomy round-trips through
+      # `from_map(serialize_goal(goal))`. Omitted when empty (an ungrouped goal
+      # serializes exactly as before).
+      "group" => Enum.map(goal.groups, &serialize_group/1),
       "metadata" => stringify_keys(goal.metadata),
       "predicate" => predicates
     }
   end
+
+  # A group as a [[group]] table. nil parent/budget are dropped so a re-load is
+  # byte-stable (the loader treats an absent key the same as nil).
+  defp serialize_group(%Group{} = group) do
+    %{"id" => group.id, "name" => group.name}
+    |> maybe_put("parent", group.parent)
+    |> maybe_put("budget", group.budget)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # A predicate as a [[predicate]] table: the reserved keys plus its config
   # spread back out as sibling keys (the loader collects non-reserved keys into

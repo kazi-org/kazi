@@ -44,6 +44,14 @@ defmodule Kazi.Goal do
       to config/default, ADR-0016). Like `mode`/`standing`, this is authoring
       intent recorded on the goal; threading the loaded `id` into
       `Kazi.Harness.resolve/1` as `:goal_harness` is T8.7.
+    * `groups` — the goal's declared **group taxonomy** (T12.1, ADR-0020): a list
+      of `Kazi.Goal.Group` parsed from the goal-file's `[[group]]` array, by which
+      a large goal organizes its predicates into a tree (pillar → domain →
+      capability). Each group is `{id, name, parent?, budget?}` with a normalized
+      slug `id`. Default `[]` (no taxonomy; an ungrouped goal behaves exactly as
+      before). Like `harness`/`standing`, this is appended additively so the
+      existing field order is untouched. Predicates referencing a group, and
+      parent reference / cycle validation, are a separate task (T12.2).
 
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
@@ -51,6 +59,7 @@ defmodule Kazi.Goal do
   """
 
   alias Kazi.{Budget, Predicate, Scope}
+  alias Kazi.Goal.Group
 
   @typedoc "Stable identifier for a goal."
   @type id :: String.t() | atom()
@@ -82,6 +91,7 @@ defmodule Kazi.Goal do
           scope: Scope.t(),
           standing: boolean(),
           harness: harness() | nil,
+          groups: [Group.t()],
           metadata: map()
         }
 
@@ -102,18 +112,25 @@ defmodule Kazi.Goal do
             # `[harness]` table. Default nil = no goal-level preference. Appended
             # additively so the existing field order is untouched.
             harness: nil,
+            # T12.1 group taxonomy (ADR-0020): the declared `[[group]]` set by
+            # which a large goal organizes predicates into a tree. Default [] =
+            # no taxonomy (ungrouped goal, fully backward-compatible). Appended
+            # additively so the existing field order is untouched.
+            groups: [],
             metadata: %{}
 
   @doc """
   Builds a goal.
 
   `id` is required. Optional opts: `:name`, `:mode`, `:predicates`, `:guards`,
-  `:budget`, `:scope`, `:standing`, `:harness`, `:metadata`. `:mode` is
-  `:repair` (default) or `:create` (creation mode — predicates are acceptance
+  `:budget`, `:scope`, `:standing`, `:harness`, `:groups`, `:metadata`. `:mode`
+  is `:repair` (default) or `:create` (creation mode — predicates are acceptance
   criteria, T2.1). `:standing` (default `false`) declares a standing/maintenance
   goal (T3.4d, UC-016). `:harness` (default `nil`) is the goal's harness
-  selection map (T8.6, ADR-0016). `:budget` and `:scope` accept either a struct
-  or a keyword list (forwarded to `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
+  selection map (T8.6, ADR-0016). `:groups` (default `[]`) is the declared group
+  taxonomy (`Kazi.Goal.Group` list, T12.1, ADR-0020). `:budget` and `:scope`
+  accept either a struct or a keyword list (forwarded to `Kazi.Budget.new/1` /
+  `Kazi.Scope.new/1`).
 
   ## Examples
 
@@ -143,6 +160,8 @@ defmodule Kazi.Goal do
       standing: Keyword.get(opts, :standing, false),
       # T8.6 harness selection (ADR-0016): the goal's preferred harness map.
       harness: Keyword.get(opts, :harness),
+      # T12.1 group taxonomy (ADR-0020): the declared `[[group]]` set.
+      groups: Keyword.get(opts, :groups, []),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end

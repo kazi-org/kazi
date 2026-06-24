@@ -70,6 +70,25 @@ defmodule Kazi.Goal.Loader do
   `id` is required when a `[harness]` table is present. The loaded `id` threads
   into `Kazi.Harness.resolve/1` as `:goal_harness` (the wiring itself is T8.7).
 
+  ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
+
+  Declares the goal's *group taxonomy* — the vocabulary by which a large goal
+  organizes its predicates into a tree (pillar → domain → capability). Absent →
+  `Goal.groups` stays `[]` (an ungrouped goal, loading exactly as before).
+
+  | Key      | TOML type | Required | Maps to              |
+  |----------|-----------|----------|----------------------|
+  | `id`     | string    | yes      | `Group.id` — normalized to a canonical slug (case / whitespace / `&` collapse), so loosely-authored variants cannot fragment the tree |
+  | `name`   | string    | no       | `Group.name` — the display label (defaults to the authored `id` when omitted) |
+  | `parent` | string    | no       | `Group.parent` — a parent group id (normalized). PARSED and stored only; its reference / cycle validation is T12.2 |
+  | `budget` | positive integer | no | `Group.budget` — an optional per-group cap (stored verbatim) |
+
+  A DUPLICATE group id (after normalization) is a validation error, so the
+  taxonomy is a set: declaring `"Identity & Access"` and `"identity-access"`
+  twice fails loudly at load time rather than silently colliding. Predicates
+  referencing a group, and parent reference / cycle validation, are a separate
+  task (T12.2); T12.1 is taxonomy parsing + the duplicate-id guard only.
+
   ### `[[predicate]]` array of tables (→ `Kazi.Predicate` list)
 
   At least one is required. A predicate flagged `guard = true` is sorted into the
@@ -121,6 +140,7 @@ defmodule Kazi.Goal.Loader do
   """
 
   alias Kazi.{Budget, Goal, Predicate, Scope}
+  alias Kazi.Goal.Group
   alias Kazi.Harness.Registry
 
   # provider string -> Predicate.kind atom. Adding a provider kind here is the
@@ -169,6 +189,8 @@ defmodule Kazi.Goal.Loader do
          {:ok, scope} <- build_scope(Map.get(data, "scope", %{})),
          # T8.6 harness selection (ADR-0016): optional `[harness]` table.
          {:ok, harness} <- build_harness(Map.get(data, "harness")),
+         # T12.1 group taxonomy (ADR-0020): optional `[[group]]` array.
+         {:ok, groups} <- build_groups(Map.get(data, "group", [])),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])) do
       {predicates, guards} = Enum.split_with(all, &(not &1.guard?))
 
@@ -182,6 +204,7 @@ defmodule Kazi.Goal.Loader do
          scope: scope,
          standing: standing,
          harness: harness,
+         groups: groups,
          metadata: Map.get(data, "metadata", %{})
        )}
     end
@@ -309,6 +332,116 @@ defmodule Kazi.Goal.Loader do
 
       _ ->
         {:error, "harness.id must be a string"}
+    end
+  end
+
+  # T12.1 group taxonomy (ADR-0020): the optional `[[group]]` array. Absent (the
+  # default []) → the goal carries no taxonomy (`groups: []`), loading exactly as
+  # before. Present → each entry parses into a `Kazi.Goal.Group` with a NORMALIZED
+  # id (case / whitespace / `&` collapse, so loosely-authored variants resolve to
+  # one canonical slug). A duplicate id (after normalization) is a load error, so
+  # the taxonomy is a set. `parent` is parsed and stored only; its reference /
+  # cycle validation is T12.2. Modeled on the `[[predicate]]` handling above.
+  defp build_groups([]), do: {:ok, []}
+
+  defp build_groups(groups) when is_list(groups) do
+    groups
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {raw, index}, {:ok, acc} ->
+      case build_group(raw, index, acc) do
+        {:ok, group} -> {:cont, {:ok, [group | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, built} -> {:ok, Enum.reverse(built)}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp build_groups(_), do: {:error, "[[group]] must be an array of tables"}
+
+  # `acc` is the groups parsed so far (newest-first); a normalized id already in
+  # `acc` is a duplicate and a load error.
+  defp build_group(raw, index, acc) when is_map(raw) do
+    with {:ok, id} <- fetch_group_id(raw, index),
+         :ok <- reject_duplicate_group(id, acc, raw),
+         {:ok, name} <- fetch_group_name(raw, id),
+         {:ok, parent} <- fetch_group_parent(raw, id),
+         {:ok, budget} <- fetch_group_budget(raw, id) do
+      {:ok, Group.new(id, name, parent: parent, budget: budget)}
+    end
+  end
+
+  defp build_group(_raw, index, _acc),
+    do: {:error, "[[group]] ##{index} must be a table"}
+
+  # The authored id string (required, non-empty). Group.new/3 normalizes it; the
+  # raw string is returned here so error messages and the duplicate check report
+  # the canonical id the author's value maps to.
+  defp fetch_group_id(raw, index) do
+    case Map.get(raw, "id") do
+      id when is_binary(id) and id != "" ->
+        case Group.normalize_id(id) do
+          "" ->
+            {:error, "[[group]] ##{index} \"id\" #{inspect(id)} normalizes to an empty id"}
+
+          normalized ->
+            {:ok, normalized}
+        end
+
+      nil ->
+        {:error, "[[group]] ##{index} is missing required key \"id\""}
+
+      _ ->
+        {:error, "[[group]] ##{index} \"id\" must be a non-empty string"}
+    end
+  end
+
+  defp reject_duplicate_group(id, acc, raw) do
+    if Enum.any?(acc, &(&1.id == id)) do
+      {:error,
+       "duplicate group id #{inspect(id)}" <>
+         duplicate_group_hint(Map.get(raw, "id"), id)}
+    else
+      :ok
+    end
+  end
+
+  # If the authored value differed from the normalized id, name both so the
+  # author sees WHY two distinct-looking ids collided (the drift guard's point).
+  defp duplicate_group_hint(authored, id) when is_binary(authored) and authored != id,
+    do: " (authored #{inspect(authored)} normalizes to #{inspect(id)})"
+
+  defp duplicate_group_hint(_authored, _id), do: ""
+
+  # Display label. Optional: defaults to the authored id string so a group always
+  # has a name. A non-string name is a validation error.
+  defp fetch_group_name(raw, id) do
+    case Map.get(raw, "name") do
+      nil -> {:ok, Map.get(raw, "id", id)}
+      name when is_binary(name) and name != "" -> {:ok, name}
+      _ -> {:error, "group #{inspect(id)} \"name\" must be a non-empty string"}
+    end
+  end
+
+  # Optional parent group id (normalized via Group.new/3). Parsed and stored
+  # only; T12.2 validates that it references a declared group and is acyclic.
+  defp fetch_group_parent(raw, id) do
+    case Map.get(raw, "parent") do
+      nil -> {:ok, nil}
+      parent when is_binary(parent) and parent != "" -> {:ok, parent}
+      _ -> {:error, "group #{inspect(id)} \"parent\" must be a non-empty string"}
+    end
+  end
+
+  # Optional per-group budget cap. Stored verbatim; a non-positive value fails
+  # loudly, matching the goal `[budget]` table's rule.
+  defp fetch_group_budget(raw, id) do
+    case Map.get(raw, "budget") do
+      nil -> {:ok, nil}
+      value when is_integer(value) and value > 0 -> {:ok, value}
+      _ -> {:error, "group #{inspect(id)} \"budget\" must be a positive integer"}
     end
   end
 
