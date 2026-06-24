@@ -1,0 +1,60 @@
+name: OSS gates
+
+# Contribution gates for this public repo (ADR-0034 / E29):
+#   1. docs-with-code  (T29.1) -- a user-facing surface change must ship docs.
+#                                  Phase 1: strict-but-warn (non-blocking).
+#   2. no-internal-leak (T29.2) -- the PR diff must not introduce private IPs,
+#                                  absolute home paths, or internal codenames.
+#                                  Blocking on a real hit; diff-scoped so the
+#                                  pre-existing leaks (scrubbed by T29.3) do not
+#                                  red every PR.
+#
+# Kept separate from ci.yml on purpose: the gates evolve (warn -> block, diff ->
+# full-tree) independently of the build/test pipeline.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-with-code:
+    name: docs land with code (T29.1, warn)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - name: Run docs-with-code guard
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          # Phase 1: warn only. Flip to "1" to ratchet this gate to blocking.
+          BLOCKING: "0"
+        run: .github/scripts/docs_with_code_guard.sh
+
+  no-internal-leak:
+    name: no internal-info leak (T29.2, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - name: Run no-internal-leak guard
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # Diff-scoped by default. Flip to "1" once T29.3 scrubs the existing
+          # leaks, to also scan the full working tree.
+          SCAN_TREE: "0"
+        run: .github/scripts/no_internal_leak_guard.sh
