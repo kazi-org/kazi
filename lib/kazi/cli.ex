@@ -106,6 +106,12 @@ defmodule Kazi.CLI do
                              it.
       --adr                  `propose` only: additionally write an ADR-lite
                              rationale doc under docs/adr/ for the drafted goal.
+      --json                 Emit a single JSON object to stdout instead of human
+                             prose (the machine surface, ADR-0023). Implies
+                             NON-INTERACTIVE: kazi never prompts/blocks on stdin
+                             under --json; a command that would need interactive
+                             input errors loudly (JSON error + non-zero exit).
+                             Human output is the default.
       --harness <id>         Coding harness to drive (T8.7, ADR-0016): `claude`
                              (default) or `opencode`. Overrides the goal-file's
                              [harness] table and the app config.
@@ -165,8 +171,13 @@ defmodule Kazi.CLI do
         IO.puts(@usage)
         0
 
-      {:version, _} ->
-        IO.puts("kazi #{version()}")
+      {:version, flags} ->
+        # T15.1 (ADR-0023): the first command to prove the --json seam end-to-end.
+        # Human (default): `kazi <vsn>`. Machine (--json): a single JSON object.
+        emit(json?(flags), %{kazi: version(), schema_version: 1}, fn ->
+          IO.puts("kazi #{version()}")
+        end)
+
         0
 
       {:run, goal_file, opts} ->
@@ -258,6 +269,12 @@ defmodule Kazi.CLI do
           yes: :boolean,
           strict: :boolean,
           adr: :boolean,
+          # T15.1 (ADR-0023): --json switches a command to its machine surface —
+          # a single JSON object on stdout instead of human prose. Human output
+          # stays the DEFAULT; --json is opt-in and additive. Under --json kazi is
+          # NON-INTERACTIVE: a command that would prompt errors loudly (clear JSON
+          # error + non-zero exit) rather than blocking on stdin.
+          json: :boolean,
           help: :boolean,
           version: :boolean
         ],
@@ -326,7 +343,8 @@ defmodule Kazi.CLI do
          workspace: flags[:workspace],
          yes: flags[:yes] || false,
          strict: flags[:strict] || false,
-         adr: flags[:adr] || false}
+         adr: flags[:adr] || false,
+         json: flags[:json] || false}
 
       extra ->
         {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
@@ -371,6 +389,46 @@ defmodule Kazi.CLI do
 
   defp approval_command(_command, _proposal_ref, extra),
     do: {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+
+  # =============================================================================
+  # JSON render seam (T15.1, ADR-0023 decision 1)
+  # =============================================================================
+  #
+  # The machine surface is OPT-IN and additive: human-readable output stays the
+  # DEFAULT; `--json` swaps a command to a single JSON object on stdout. The seam
+  # is one helper so each command CAN emit JSON without re-deriving the branch —
+  # `propose`/`run`/`status` grow their own schemas in T15.2/T15.3/T15.5, all on
+  # this same `emit/3`. Exit codes are computed by the caller and stay stable
+  # across `--json`; the renderer only chooses the OUTPUT shape, never the code.
+
+  # Whether the parsed flags requested the machine surface. A boolean switch, so
+  # absent (nil) and `--no-json` both mean human output (the default).
+  @spec json?(keyword()) :: boolean()
+  defp json?(flags), do: flags[:json] == true
+
+  # The render seam: under `--json` print exactly `Jason.encode!(payload)` and a
+  # newline (a single JSON object, no human prose interleaved on stdout);
+  # otherwise run `human_fun`, the command's existing human rendering. Returns
+  # `:ok`; the caller owns the exit code.
+  @spec emit(boolean(), map(), (-> any())) :: :ok
+  defp emit(true, payload, _human_fun) when is_map(payload) do
+    IO.puts(Jason.encode!(payload))
+  end
+
+  defp emit(false, _payload, human_fun) when is_function(human_fun, 0) do
+    _ = human_fun.()
+    :ok
+  end
+
+  # A clear, machine-readable error envelope on stdout for the NON-INTERACTIVE
+  # guarantee: under `--json` a command that would otherwise prompt/block on stdin
+  # emits this instead and the caller returns a non-zero exit. Keeping the error
+  # on the SAME stdout stream as a success object means an orchestrator parses one
+  # surface; the non-zero exit code is what it branches on.
+  @spec emit_json_error(String.t()) :: :ok
+  defp emit_json_error(message) when is_binary(message) do
+    IO.puts(Jason.encode!(%{error: message, schema_version: 1}))
+  end
 
   defp format_invalid(invalid) do
     Enum.map_join(invalid, ", ", fn {opt, _value} -> opt end)
@@ -598,18 +656,43 @@ defmodule Kazi.CLI do
 
       ask = propose_ask(opts, inject_opts)
 
-      if strict_block?(idea, ask, opts) do
-        IO.puts(
-          :stderr,
-          "error: idea is underspecified (missing: #{strict_missing(idea)}); " <>
-            "answer the clarify questions interactively or add detail to the idea"
-        )
+      cond do
+        # T15.1 (ADR-0023): under --json kazi is NON-INTERACTIVE. propose's clarify
+        # phase WOULD prompt for an underspecified idea (gaps, no injected ask, not
+        # --yes); rather than block on stdin we error LOUDLY as a JSON object on
+        # stdout and return non-zero. The orchestrator either supplies --yes
+        # (best-effort) or sharpens the idea — it never hangs.
+        json_block?(idea, ask, opts) ->
+          emit_json_error(
+            "propose requires interactive clarification under --json (idea is " <>
+              "underspecified, missing: #{strict_missing(idea)}); pass --yes to draft " <>
+              "best-effort or add the missing detail to the idea"
+          )
 
-        1
-      else
-        do_propose(idea, maybe_ask(base, ask), opts, inject_opts)
+          1
+
+        strict_block?(idea, ask, opts) ->
+          IO.puts(
+            :stderr,
+            "error: idea is underspecified (missing: #{strict_missing(idea)}); " <>
+              "answer the clarify questions interactively or add detail to the idea"
+          )
+
+          1
+
+        true ->
+          do_propose(idea, maybe_ask(base, ask), opts, inject_opts)
       end
     end)
+  end
+
+  # T15.1 (ADR-0023): the NON-INTERACTIVE guarantee for `propose` under `--json`.
+  # An interactive requirement (clarify gaps, no injected `:ask`, not `--yes`)
+  # cannot be satisfied without prompting, so under `--json` it is a hard, loud
+  # error instead of a stdin block. `--yes` (best-effort) and a gap-free idea both
+  # proceed; an injected `:ask` (tests) also proceeds.
+  defp json_block?(idea, ask, opts) do
+    opts[:json] and is_nil(ask) and not opts[:yes] and Clarify.gaps(idea) != []
   end
 
   defp do_propose(idea, propose_opts, opts, inject_opts) do
@@ -633,6 +716,10 @@ defmodule Kazi.CLI do
     cond do
       is_function(inject_opts[:ask], 1) -> inject_opts[:ask]
       opts[:yes] -> nil
+      # T15.1 (ADR-0023): --json is NON-INTERACTIVE — never attach the terminal
+      # prompt even when a TTY is present. An injected :ask (tests) still wins
+      # above; a real underspecified --json run is caught by `json_block?/3`.
+      opts[:json] -> nil
       interactive?(inject_opts) -> &terminal_ask/1
       true -> nil
     end
@@ -684,6 +771,8 @@ defmodule Kazi.CLI do
     cond do
       is_function(inject_opts[:review], 1) -> inject_opts[:review]
       opts[:yes] -> nil
+      # T15.1 (ADR-0023): --json is NON-INTERACTIVE — no terminal review prompt.
+      opts[:json] -> nil
       interactive?(inject_opts) -> &terminal_review/1
       true -> nil
     end
