@@ -12,25 +12,24 @@ defmodule Kazi.CLI.Schema do
   field-table shape the docs use, so the doc and the emitted schema stay legible
   side by side.
 
-  T27.4 (ADR-0032): the schemas are keyed by the PRIMARY verbs `apply`/`plan`
-  (was `run`/`propose`); the renamed verbs `run`/`propose` resolve as DEPRECATED
-  ALIASES (`@aliases`) so `kazi schema run` still returns the `apply` schema and
-  `kazi schema propose` the `plan` schema through the deprecation window. The
-  alias map is the single source of truth `fetch/1` consults — no per-key
-  duplication — so the alias set can never drift from the command table.
+  T27.4/T27.9 (ADR-0032): the schemas are keyed by the verbs `apply`/`plan` (was
+  `run`/`propose`). The deprecated `run`/`propose` schema aliases were REMOVED in
+  v0.6.0 (T27.9), so `kazi schema run` / `kazi schema propose` no longer resolve;
+  only `apply`/`plan`/`status` are valid schema keys.
   """
 
   # The contract version, shared with `Kazi.CLI`'s `@run_schema_version`. Kept in
   # lockstep: a breaking change to any `--json` result bumps both. Version 2
   # (ADR-0032, T27.3): the result contract's command key was renamed `run` ->
-  # `apply` and `propose` -> `plan`; `run`/`propose` remain deprecated aliases.
+  # `apply` and `propose` -> `plan`; the deprecated `run`/`propose` aliases were
+  # removed in v0.6.0 (T27.9).
   @schema_version 2
 
-  # The result schemas, keyed by the PRIMARY command whose `--json` output they
-  # describe (ADR-0032 verbs). `apply` (the convergence result, docs/schemas/
-  # run-result.md), `plan` (the authoring/draft result), and `status` are the
-  # documented contracts; the order is the order `all/0` emits. The deprecated
-  # verbs `run`/`propose` are NOT keys here — they resolve via `@aliases`.
+  # The result schemas, keyed by the command whose `--json` output they describe
+  # (ADR-0032 verbs). `apply` (the convergence result, docs/schemas/run-result.md),
+  # `plan` (the authoring/draft result), and `status` are the documented contracts;
+  # the order is the order `all/0` emits. The deprecated `run`/`propose` aliases
+  # were removed in v0.6.0 (T27.9) and are no longer valid keys.
   @schemas %{
     "apply" => %{
       schema_version: @schema_version,
@@ -229,27 +228,18 @@ defmodule Kazi.CLI.Schema do
     }
   }
 
-  # The PRIMARY verbs with a documented result schema, in emit order. `all/0`
-  # keys by these; the deprecated `run`/`propose` are reached only via `@aliases`.
+  # The verbs with a documented result schema, in emit order. `all/0` keys by
+  # these. The deprecated `run`/`propose` schema aliases were removed in v0.6.0
+  # (T27.9), so these are the only valid schema keys.
   @ordered_commands ["apply", "plan", "status"]
-
-  # Deprecated verb -> primary verb (ADR-0032). `fetch/1` resolves an alias before
-  # the lookup, so `schema run` returns the `apply` schema and `schema propose` the
-  # `plan` schema. The aliases are NOT emitted by `all/0` (which leads with the
-  # primary verbs) but stay resolvable through the deprecation window.
-  @aliases %{"run" => "apply", "propose" => "plan"}
 
   @doc "The shared `--json` contract version."
   @spec schema_version() :: pos_integer()
   def schema_version, do: @schema_version
 
-  @doc "The PRIMARY commands that have a documented result schema, in emit order."
+  @doc "The commands that have a documented result schema, in emit order."
   @spec commands() :: [String.t()]
   def commands, do: @ordered_commands
-
-  @doc "The deprecated verb -> primary verb alias map (ADR-0032)."
-  @spec aliases() :: %{String.t() => String.t()}
-  def aliases, do: @aliases
 
   @doc """
   Every result schema, keyed by the PRIMARY command, plus the shared
@@ -264,10 +254,10 @@ defmodule Kazi.CLI.Schema do
   end
 
   @doc """
-  Fetch one command's result schema, resolving a deprecated alias (`run` ->
-  `apply`, `propose` -> `plan`) first. Returns `{:ok, schema}` or `:error` for a
-  command with no documented `--json` result.
+  Fetch one command's result schema. Returns `{:ok, schema}` or `:error` for a
+  command with no documented `--json` result (including the removed `run`/`propose`
+  aliases, T27.9).
   """
   @spec fetch(String.t()) :: {:ok, map()} | :error
-  def fetch(command), do: Map.fetch(@schemas, Map.get(@aliases, command, command))
+  def fetch(command), do: Map.fetch(@schemas, command)
 end
