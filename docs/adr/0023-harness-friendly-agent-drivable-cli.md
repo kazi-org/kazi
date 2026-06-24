@@ -23,7 +23,7 @@ This puts kazi in the MIDDLE of a three-layer stack:
       kazi             (the controller -- objective predicates + convergence loop)
         |  drives the inner harness
         v
-  cheap implementer    (claw -> local Qwen3.6/DGX, opencode, ... -- the keystrokes)
+  cheap implementer    (claw -> a local Qwen3.6, opencode, ... -- the keystrokes)
 ```
 
 The economic payoff: spend expensive reasoning ONCE on what needs judgment -- what

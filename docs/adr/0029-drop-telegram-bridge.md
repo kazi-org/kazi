@@ -31,7 +31,7 @@ hand-maintained chat surface is dead weight, and carrying dead code contradicts
 kazi's own intended-vs-actual / no-dead-code thesis (ADR-0021, E13).
 
 One edge case was considered: **fully headless/autonomous kazi** -- a standing
-reconciler running 24/7 (e.g. a cron/CronJob on the DGX) with NO agent session
+reconciler running 24/7 (e.g. a cron/CronJob on a server) with NO agent session
 attached. There is no agent there to push, so that mode would need its own
 out-of-band notification channel. But (a) it is a narrow, not-yet-active use case,
 and (b) the general answer is a **generic webhook**, not Telegram specifically.

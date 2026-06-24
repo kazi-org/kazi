@@ -6,7 +6,7 @@ Accepted
 ## Refines
 ADR-0023 (the orchestrator owns the two-tier model policy) and ADR-0030 (content
 strategy). Those framed the cost win as "plan with a strong model, run the grind with
-a cheap/LOCAL model (Qwen/DGX via opencode)." This ADR keeps the mechanism but
+a cheap/LOCAL model (e.g. Qwen on a local GPU host via opencode)." This ADR keeps the mechanism but
 changes the DEFAULT framing to in-family Claude tiering, because the local-model
 framing has near-zero reach.
 
@@ -15,9 +15,9 @@ framing has near-zero reach.
 kazi's cost thesis is two-tier: spend expensive reasoning ONCE on what needs judgment
 (the predicates), then run the iterative grind on a cheaper model, with objective
 predicates keeping the cheap model honest. So far the "cheap model" has meant a LOCAL
-model (the operator runs Qwen3.6-35B on a DGX via opencode). Two problems:
+model (the operator runs Qwen3.6-35B on a local GPU host via opencode). Two problems:
 
-1. **Reach.** Almost no engineer has a DGX or a local ollama setup. Leading the
+1. **Reach.** Almost no engineer has a dedicated local GPU host or a local ollama setup. Leading the
    "cheaper" story with BYOM/local makes the headline economics inapplicable to the
    mass audience (new Claude Code users) the content rewrite (ADR-0030) targets.
 2. **It barely works.** The local 35B was too slow to converge in a usable window
@@ -28,7 +28,7 @@ anyone with a Claude API key: a frontier model (e.g. Opus) authors the predicate
 ONCE; kazi then drives the N-iteration grind on a CHEAP Claude model (e.g. Haiku, or
 Sonnet for harder work); the predicates gate convergence so the cheap model cannot
 declare a false "done." You pay frontier rates only for planning and cheap rates for
-the bulk of the work -- token economy with NO local model, NO DGX. And because Haiku/
+the bulk of the work -- token economy with NO local model, NO local GPU host. And because Haiku/
 Sonnet are far more capable than a local 35B, the cheap-grind tier is realistic, not
 aspirational.
 
@@ -68,8 +68,8 @@ a cheaper Claude model yet.
 
 ## Consequences
 
-- The "cheaper" pitch becomes applicable to ~every Claude Code user, not just DGX
-  owners -- a far larger adoption surface, and the honest answer to "how do I get
+- The "cheaper" pitch becomes applicable to ~every Claude Code user, not just
+  owners of a local GPU host -- a far larger adoption surface, and the honest answer to "how do I get
   token economy without local models."
 - A small enabler ships (claude `--model` passthrough) that also makes
   per-goal/per-call Claude model choice generally available.
@@ -82,7 +82,7 @@ a cheaper Claude model yet.
 
 ## Alternatives rejected
 
-- **Keep leading with local/BYOM (status quo).** Niche (needs a DGX) and unproven
+- **Keep leading with local/BYOM (status quo).** Niche (needs a local GPU host) and unproven
   (35B too slow); a poor headline for a mass-adoption rewrite.
 - **Drop the cost story until proven.** The economics are the differentiator vs
   vanilla; frame as intended-and-being-measured (honesty gate) rather than omit.

@@ -142,7 +142,7 @@ Run the approved goal-file with the chosen harness. The two-tier split lets the
 session tier the inner loop to a CHEAP/local harness (ADR-0026 L2):
 
 ```sh
-kazi run <goal-file> --workspace <ws> --harness opencode --model dgx/qwen3.6 --json
+kazi run <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json
 ```
 
 `--harness claude` (default) or `--harness opencode`; `--model` overrides the

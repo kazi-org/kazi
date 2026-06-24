@@ -43,9 +43,10 @@ subprocesses or wire protocols, so polyglot cost is near zero.
 
 ## Alternatives rejected
 
-- **Go** — the only serious alternative (NATS-native, single binary, matches the
-  user's Spark stack). Rejected because supervision trees and the live-update
-  layer must be built by hand; chosen as the fallback if OTP is overruled.
+- **Go** — the only serious alternative (NATS-native, single binary, matches an
+  existing Go stack the maintainer runs). Rejected because supervision trees and
+  the live-update layer must be built by hand; chosen as the fallback if OTP is
+  overruled.
 - **Rust** (claw-code's path) — pays async-strictness tax on the parts that
   change most (providers, adapters) to buy performance the loop does not need.
 - **TypeScript / Python** — weaker for a robust always-on supervised daemon.

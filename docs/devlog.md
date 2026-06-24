@@ -236,7 +236,7 @@ LLM cost is the agent dispatch; integrate/deploy are git/HTTP, not tokens.
 |-----|---------|---------|--------------|------|-------------|
 | A — vanilla | `claude -p` (one freeform session) | converged | 326,507 | $0.4790 | 9 |
 | B — kazi→Claude | `mix kazi.run` → `claude` (1 dispatch) | converged | 328,141 | $0.4791 | 9 |
-| C — kazi→local Qwen | `--harness opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0` | did NOT converge in ~6min | — (dispatch in-flight) | $0 (local) | — |
+| C — kazi→local Qwen | `--harness opencode --model local-ollama/qwen3.6:35b-a3b-q8_0` | did NOT converge in ~6min | — (dispatch in-flight) | $0 (local) | — |
 
 Token split was near-identical (A: in 12,972 / out 1,116 / cache-read 288,183;
 B: in 12,843 / out 1,187 / cache-read 290,090).
@@ -256,7 +256,7 @@ B: in 12,843 / out 1,187 / cache-read 290,090).
    orientation-prefix + Anthropic `cache_control` (T4.3, see audit below) would
    cut iters 2..N further. So "N× baseline" is the worst case, not the typical.
 3. **Cost-tiering (arm C) is real in $ structure but gated by local-model speed.**
-   kazi correctly observed the failure and dispatched opencode→DGX-Qwen; the 35B
+   kazi correctly observed the failure and dispatched opencode→the local Qwen; the 35B
    q8_0 simply didn't return within 6 min (reconfirms T8.11). When it does
    converge, the per-dispatch $ is ~0 (local compute) — that is the cheaper story,
    bottlenecked by inner-harness throughput, not kazi.
@@ -295,7 +295,7 @@ one growing context, while kazi re-pays per-iteration orientation N times AND
 adds the orchestrator on top. kazi wins on **cost**, not token count, via two
 levers that are intrinsic, not yet proven:
 1. **Model tiering (ADR-0023).** Expensive model authors predicates ONCE; a cheap
-   LOCAL model (Qwen/DGX via opencode/claw) does the N grind iterations; objective
+   LOCAL model (e.g. Qwen on a local GPU host via opencode/claw) does the N grind iterations; objective
    predicates keep the cheap model honest. The expensive tokens are paid once; the
    N iterations run on near-free compute.
 2. **"Right the first time."** Objective termination removes the hidden cost of a
@@ -465,14 +465,14 @@ manual bump+tag. See lore L-0005 for the `mix release --overwrite` cache gotcha.
 
 **Setup.** The capstone E8 exercise: Claude (the planner) authored a tiny broken Go
 fixture goal (`Add` used subtraction; `go test ./...` fails), and kazi drove
-`opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0` (the implementer) to converge it.
+`opencode --model local-ollama/qwen3.6:35b-a3b-q8_0` (the implementer) to converge it.
 The T8.9 finding was addressed first: a project-local `opencode.json` in the
 workspace granting `permission.edit/bash` = `allow`, in a REAL git repo (not a
 `/tmp` scratch), so opencode would no longer auto-reject edits.
 
 **What was PROVEN (the heterogeneous loop works end to end).** kazi observed the
 objective failure (`go test` exit 1, recorded the FAIL output), persisted iteration
-0 to the SQLite read-model, and dispatched opencode->the DGX. Objective termination
+0 to the SQLite read-model, and dispatched opencode->the local GPU host. Objective termination
 held throughout: kazi could not and did not declare success while the predicate
 failed. The plan/implement split (strong model authors the predicate set, cheap
 local model drives the loop, predicates keep it honest) is demonstrated.
@@ -487,14 +487,14 @@ was capped manually.
 
 **Takeaway / landmine.** "Claude plans, local model implements" is mechanically
 sound and kazi's correctness guarantee holds regardless of implementer quality. Its
-PRACTICALITY is gated by local-model speed: the DGX 35B-q8_0 via opencode is too slow
+PRACTICALITY is gated by local-model speed: a local ~35B-q8_0 via opencode is too slow
 for an interactive convergence loop. To make this dogfood converge, use a faster
 local model (smaller/lower-quant, or a faster server), or accept long wall-clock for
 batch-style runs. The throwaway workspace is `~/kazi-dogfood` (a single-predicate
 `go test` goal); rerun `kazi run ~/kazi-dogfood/dogfood.goal.toml --harness opencode
 --model <faster-model> --workspace ~/kazi-dogfood` to retry.
 
-## 2026-06-22 — E8 generic multi-harness support shipped; opencode->DGX live smoke skips
+## 2026-06-22 — E8 generic multi-harness support shipped; opencode->local-model live smoke skips
 
 **What shipped (ADR-0016).** The single `Kazi.Harness.ClaudeAdapter` was generalized
 into config-driven harness **profiles**: `Kazi.Harness.Profile` (a `command` + a pure
@@ -511,12 +511,12 @@ harness is now profile DATA, not a new module. Suite 755 → 853.
 emits an **NDJSON event stream** (not Claude's single envelope) — which is exactly
 why a profile carries a parser strategy, not just an argv template.
 
-**Live opencode->DGX smoke: ATTEMPTED, did not converge, SKIPS honestly.** With
-opencode v1.17.9 wired to the DGX-hosted Qwen3.6 35B-A3B, a `kazi run --harness
+**Live opencode->local-model smoke: ATTEMPTED, did not converge, SKIPS honestly.** With
+opencode v1.17.9 wired to a locally-hosted Qwen3.6 35B-A3B, a `kazi run --harness
 opencode` against a fixture goal returned `{:error, :await_timeout}` after ~480s. The
 endpoint and model were reachable (~100s/turn via a direct probe); the non-convergence
 is environmental, not a kazi defect, with two causes:
-1. the 35B model on the DGX is slow (~100s/turn), so a multi-iteration converge blows
+1. the local 35B model is slow (~100s/turn), so a multi-iteration converge blows
    the loop's await window;
 2. **opencode auto-rejects tool calls when run in an external/scratch workspace** —
    `external_directory; auto-rejecting` — so the agent never edits and the predicate
