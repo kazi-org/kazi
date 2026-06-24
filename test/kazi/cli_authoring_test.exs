@@ -91,8 +91,11 @@ defmodule Kazi.CLIAuthoringTest do
     end
 
     test "parses `approve <ref>` and `reject <ref>`" do
-      assert {:approve, "prop-x"} = Kazi.CLI.parse(["approve", "prop-x"])
-      assert {:reject, "prop-y"} = Kazi.CLI.parse(["reject", "prop-y"])
+      # T15.6 (ADR-0023): approve/reject carry an opts keyword (the --json flag).
+      assert {:approve, "prop-x", approve_opts} = Kazi.CLI.parse(["approve", "prop-x"])
+      assert approve_opts[:json] == false
+      assert {:reject, "prop-y", reject_opts} = Kazi.CLI.parse(["reject", "prop-y"])
+      assert reject_opts[:json] == false
     end
 
     test "approve/reject without a ref is an error" do
