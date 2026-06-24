@@ -75,7 +75,7 @@ defmodule Kazi.CLIRunJsonTest do
       refute out =~ "CONVERGED"
       refute out =~ "predicate vector:"
 
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["goal_id"] == "cli-e2e"
       assert payload["status"] == "converged"
       assert payload["next_action"] == "done"
@@ -118,7 +118,7 @@ defmodule Kazi.CLIRunJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["status"] == "over_budget"
       assert payload["next_action"] == "raise_budget"
       assert payload["reason"] == "max_iterations"
@@ -157,7 +157,7 @@ defmodule Kazi.CLIRunJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["status"] == "stuck"
       assert payload["next_action"] == "investigate"
       assert payload["reason"] == "stuck"
@@ -189,7 +189,7 @@ defmodule Kazi.CLIRunJsonTest do
       # The error is a JSON object on STDOUT (not stderr prose), so the
       # orchestrator parses one surface and branches on the non-zero exit.
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["goal_id"] == "cli-vacuous"
       assert payload["status"] == "error"
       assert payload["next_action"] == "investigate"

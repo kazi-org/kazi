@@ -124,7 +124,7 @@ defmodule Kazi.CLIProposeJsonTest do
       assert {:ok, draft} = Jason.decode(String.trim(out))
       refute out =~ "PROPOSED"
 
-      assert draft["schema_version"] == 1
+      assert draft["schema_version"] == 2
       assert draft["goal_id"] == "ship-a-healthz-endpoint"
       assert draft["proposal_ref"] =~ "prop-"
       assert draft["status"] == "proposed"
@@ -166,7 +166,7 @@ defmodule Kazi.CLIProposeJsonTest do
       refute_received :harness_invoked
 
       assert {:ok, draft} = Jason.decode(String.trim(out))
-      assert draft["schema_version"] == 1
+      assert draft["schema_version"] == 2
       assert draft["proposal_ref"] =~ "prop-"
 
       # The supplied predicate is accepted.

@@ -23,12 +23,13 @@ defmodule Kazi.Pool.GateTest do
 
   alias Kazi.Pool.Gate
 
-  # A real CONVERGED `kazi run --json` terminal result (schema_version 1), the
-  # exact object the CLI emits on a clean converge (both predicates pass, incl.
-  # the live probe), decoded as the session would after shelling out.
+  # A real CONVERGED `kazi apply --json` terminal result (schema_version 2; `kazi
+  # run --json` is the deprecated alias emitting the same object), the exact object
+  # the CLI emits on a clean converge (both predicates pass, incl. the live probe),
+  # decoded as the session would after shelling out.
   @converged_json """
   {
-    "schema_version": 1,
+    "schema_version": 2,
     "goal_id": "deploy-target-slice0",
     "status": "converged",
     "predicates": [
@@ -47,7 +48,7 @@ defmodule Kazi.Pool.GateTest do
   # persisted across iterations, so kazi stopped without converging.
   @stuck_json """
   {
-    "schema_version": 1,
+    "schema_version": 2,
     "goal_id": "deploy-target-slice0",
     "status": "stuck",
     "predicates": [
@@ -65,7 +66,7 @@ defmodule Kazi.Pool.GateTest do
   # A real `over_budget` result: a hard budget ceiling was hit before convergence.
   @over_budget_json """
   {
-    "schema_version": 1,
+    "schema_version": 2,
     "goal_id": "deploy-target-slice0",
     "status": "over_budget",
     "predicates": [
@@ -84,7 +85,7 @@ defmodule Kazi.Pool.GateTest do
   # when the run could not start.
   @error_json """
   {
-    "schema_version": 1,
+    "schema_version": 2,
     "goal_id": "cli-vacuous",
     "status": "error",
     "error": "goal is vacuous — every predicate already passes at t0, so there is nothing to build or repair.",
@@ -125,7 +126,9 @@ defmodule Kazi.Pool.GateTest do
 
   describe "decide/1 — fails CLOSED on an unexpected result" do
     test "an unexpected schema_version blocks (no stale-field read)" do
-      result = @converged_json |> Jason.decode!() |> Map.put("schema_version", 2)
+      # A version the gate is NOT pinned to (it pins 2): even at status=converged,
+      # a mismatched version must block rather than be read with stale assumptions.
+      result = @converged_json |> Jason.decode!() |> Map.put("schema_version", 3)
       # Even with status=converged, a wrong version must NOT merge — the
       # `{:block, _}` match (not `:merge`) is itself the proof the gate held.
       assert {:block, reason} = Gate.decide(result)

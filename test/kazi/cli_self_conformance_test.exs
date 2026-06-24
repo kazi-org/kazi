@@ -206,29 +206,29 @@ defmodule Kazi.CLISelfConformanceTest do
       payload =
         assert_conformant("version --json", argv: ["--version", "--json"], expected_exit: 0)
 
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["kazi"] =~ ~r/^\d+\.\d+\.\d+/
     end
 
-    test "propose --json (kazi-drafts, headless via --yes)" do
+    test "plan --json (kazi-drafts, headless via --yes)" do
       payload =
-        assert_conformant("propose --json",
-          argv: ["propose", "ship a healthz endpoint", "--json", "--yes"],
+        assert_conformant("plan --json",
+          argv: ["plan", "ship a healthz endpoint", "--json", "--yes"],
           inject: [harness: StubHarness],
           expected_exit: 0
         )
 
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["proposal_ref"] =~ "prop-"
     end
 
-    test "propose --json (caller-drafts, predicates supplied, spawns NO model)" do
+    test "plan --json (caller-drafts, predicates supplied, spawns NO model)" do
       predicates =
         ~s({"predicates":[{"id":"code","provider":"test_runner","config":{}}]})
 
       payload =
-        assert_conformant("propose --json --predicates",
-          argv: ["propose", "--json", "--predicates", predicates],
+        assert_conformant("plan --json --predicates",
+          argv: ["plan", "--json", "--predicates", predicates],
           inject: [harness: SpyHarness, adapter_opts: [spy_pid: self()]],
           expected_exit: 0
         )
@@ -238,18 +238,46 @@ defmodule Kazi.CLISelfConformanceTest do
       assert payload["proposal_ref"] =~ "prop-"
     end
 
-    test "run --json (a fixture run converges)" do
+    test "apply --json (a fixture run converges)" do
       %{work: work, goal_file: goal_file, opts: opts} = converging_run()
 
       payload =
-        assert_conformant("run --json",
+        assert_conformant("apply --json",
+          argv: ["apply", goal_file, "--workspace", work, "--json"],
+          inject: opts,
+          expected_exit: 0
+        )
+
+      assert payload["schema_version"] == 2
+      assert payload["status"] == "converged"
+      assert payload["next_action"] == "done"
+    end
+
+    test "run --json / propose --json (deprecated aliases still emit valid objects)" do
+      # ADR-0032: the old verbs remain DEPRECATED ALIASES — they dispatch
+      # identically and emit the SAME result object at the bumped schema_version,
+      # so callers pinning the alias keep working through the deprecation window.
+      %{work: work, goal_file: goal_file, opts: opts} = converging_run()
+
+      run_alias =
+        assert_conformant("run --json (deprecated alias)",
           argv: ["run", goal_file, "--workspace", work, "--json"],
           inject: opts,
           expected_exit: 0
         )
 
-      assert payload["status"] == "converged"
-      assert payload["next_action"] == "done"
+      assert run_alias["schema_version"] == 2
+      assert run_alias["status"] == "converged"
+
+      propose_alias =
+        assert_conformant("propose --json (deprecated alias)",
+          argv: ["propose", "ship a healthz endpoint", "--json", "--yes"],
+          inject: [harness: StubHarness],
+          expected_exit: 0
+        )
+
+      assert propose_alias["schema_version"] == 2
+      assert propose_alias["proposal_ref"] =~ "prop-"
     end
 
     test "status --json (a persisted run)" do
@@ -317,13 +345,13 @@ defmodule Kazi.CLISelfConformanceTest do
   # ===========================================================================
 
   describe "self-conformance — the JSON-error path (stable non-zero exit)" do
-    test "propose --json blocks would-be interactive clarify as a JSON error (exit 1)" do
+    test "plan --json blocks would-be interactive clarify as a JSON error (exit 1)" do
       # No injected :ask and not --yes: interactively this WOULD prompt. Under
       # --json (with a TTY simulated) it must error LOUDLY as JSON on stdout and
       # return a stable non-zero, never reading stdin.
       payload =
-        assert_conformant("propose --json (interactive-block → error)",
-          argv: ["propose", "add a widgets feature", "--json"],
+        assert_conformant("plan --json (interactive-block → error)",
+          argv: ["plan", "add a widgets feature", "--json"],
           inject: [harness: StubHarness],
           expected_exit: 1
         )
@@ -333,12 +361,12 @@ defmodule Kazi.CLISelfConformanceTest do
       assert ReadModel.list_proposed_goals(status: "proposed") == []
     end
 
-    test "run --json on a vacuous goal is a JSON error envelope (exit 1)" do
+    test "apply --json on a vacuous goal is a JSON error envelope (exit 1)" do
       %{work: work, goal_file: goal_file} = vacuous_run()
 
       payload =
-        assert_conformant("run --json (vacuous → error)",
-          argv: ["run", goal_file, "--workspace", work, "--json"],
+        assert_conformant("apply --json (vacuous → error)",
+          argv: ["apply", goal_file, "--workspace", work, "--json"],
           expected_exit: 1
         )
 
@@ -378,7 +406,7 @@ defmodule Kazi.CLISelfConformanceTest do
       # Simulate the regression: a command that prints a human banner alongside
       # the JSON object (a prose line on the same stdout stream). `refute_prose/2`
       # must flag the non-JSON line.
-      leaky = ~s({"schema_version":1}\nPROPOSED   goal=x)
+      leaky = ~s({"schema_version":2}\nPROPOSED   goal=x)
 
       assert_raise ExUnit.AssertionError, fn ->
         refute_prose("leaky", String.trim(leaky))

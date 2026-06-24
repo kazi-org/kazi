@@ -88,7 +88,7 @@ defmodule Kazi.CLIJsonTest do
       assert {:ok, payload} = Jason.decode(String.trim(out))
       assert is_map(payload)
       assert payload["kazi"] =~ ~r/^\d+\.\d+\.\d+/
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       refute out =~ "kazi 0."
       refute String.starts_with?(out, "kazi ")
     end
@@ -139,7 +139,7 @@ defmodule Kazi.CLIJsonTest do
       # completed headlessly with exit 0 and persisted the proposal without
       # reading stdin.
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["goal_id"] == "ship-a-healthz-endpoint"
       assert payload["proposal_ref"] =~ "prop-"
       refute out =~ "PROPOSED"

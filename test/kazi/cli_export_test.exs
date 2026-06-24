@@ -100,7 +100,7 @@ defmodule Kazi.CLIExportTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["format"] == "obsidian"
       assert payload["goal_id"] == "grouped-taxonomy-example"
       assert payload["vault"] == dir

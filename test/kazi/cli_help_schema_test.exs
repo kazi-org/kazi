@@ -71,7 +71,7 @@ defmodule Kazi.CLIHelpSchemaTest do
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
       assert is_map(payload)
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["kazi"] =~ ~r/^\d+\.\d+\.\d+/
       # JSON-only: the human usage prose is NOT interleaved.
       refute out =~ "USAGE:"
@@ -158,13 +158,13 @@ defmodule Kazi.CLIHelpSchemaTest do
       out = capture_io(fn -> assert Kazi.CLI.run(["schema", "run"]) == 0 end)
 
       assert {:ok, schema} = Jason.decode(String.trim(out))
-      assert schema["schema_version"] == 1
+      assert schema["schema_version"] == 2
       assert schema["command"] == "run"
       # The documented run-result fields are present in the descriptor.
       field_names = schema["fields"] |> Enum.map(& &1["name"]) |> MapSet.new()
       assert MapSet.subset?(MapSet.new(~w(status predicates iterations next_action)), field_names)
       # The example object carries the same schema_version (the contract pin).
-      assert schema["example"]["schema_version"] == 1
+      assert schema["example"]["schema_version"] == 2
       assert schema["example"]["status"] == "converged"
     end
 
@@ -172,7 +172,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       out = capture_io(fn -> assert Kazi.CLI.run(["schema", "status"]) == 0 end)
 
       assert {:ok, schema} = Jason.decode(String.trim(out))
-      assert schema["schema_version"] == 1
+      assert schema["schema_version"] == 2
       assert schema["command"] == "status"
       field_names = schema["fields"] |> Enum.map(& &1["name"]) |> MapSet.new()
       assert MapSet.subset?(MapSet.new(~w(kind ref status predicates)), field_names)
@@ -182,10 +182,10 @@ defmodule Kazi.CLIHelpSchemaTest do
       out = capture_io(fn -> assert Kazi.CLI.run(["schema"]) == 0 end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert Map.has_key?(payload["schemas"], "run")
       assert Map.has_key?(payload["schemas"], "status")
-      assert payload["schemas"]["run"]["schema_version"] == 1
+      assert payload["schemas"]["run"]["schema_version"] == 2
     end
 
     test "an unknown command is a JSON error on stdout with a non-zero exit" do

@@ -73,7 +73,7 @@ defmodule Kazi.CLIAuthoringJsonTest do
         capture_io(fn -> assert Kazi.CLI.run(["list-proposed", "--json"]) == 0 end)
 
       assert {:ok, payload} = Jason.decode(String.trim(empty))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["count"] == 0
       assert payload["proposals"] == []
 
@@ -120,7 +120,7 @@ defmodule Kazi.CLIAuthoringJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["proposal_ref"] == proposal_ref
       assert payload["status"] == "approved"
       assert is_binary(payload["goal_id"])
@@ -153,7 +153,7 @@ defmodule Kazi.CLIAuthoringJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["error"] =~ "could not approve"
       assert payload["error"] =~ "no proposal carries that ref"
     end
