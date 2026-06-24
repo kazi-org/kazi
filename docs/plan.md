@@ -5,165 +5,95 @@
 kazi is a reconciliation controller for software goals: declare a goal as
 machine-checkable predicates; kazi drives a coding agent in a loop until the
 predicates are objectively true, stuck, or over budget. It drives harnesses
-(Claude Code, Codex, opencode, ...); it is not a harness.
+(Claude Code, Codex, opencode, claw, Antigravity, ...); it is not a harness.
 
-The walking-skeleton build (idea -> production) and every epic through it are
-COMPLETE and merged on `main`:
+**Shipped and merged on `main` (DONE -- do NOT replan; knowledge lives in
+`docs/concept.md`, the ADRs, and `docs/devlog.md`):**
 
-- **E0-E5** -- the convergence loop to a live Cloud Run deploy; regression/flake/
-  budget/stuck/prod-log; creation mode + self-hosting; NATS leases, graph
-  partitioning, standing reconcilers, idea->predicate authoring, LiveView,
-  Telegram; context injection + pluggable retrieval-memory; and `kazi init` adopt
-  (E5, ADR-0013) -- all merged.
-- **E7** (registry adapter) -- built, then WITHDRAWN before open-source release
-  (ADR-0015): the `capabilities.json` input was bespoke and did not generalize.
-- **E8** (generic multi-harness support, ADR-0016) -- COMPLETE (PRs
-  #80/#82/#83/#84/#86/#87/#88/#90/#92/#93). The single `Kazi.Harness.ClaudeAdapter`
-  was generalized into config-driven harness **profiles** + a
-  `Kazi.Harness.CliAdapter` + `Kazi.Harness.resolve/1`, so `kazi run --harness
-  opencode --model <m>` drives the operator's local Qwen3.6-on-DGX (and any CLI
-  harness drops in as profile DATA, no new module). Details in `docs/devlog.md`;
-  the decision is ADR-0016.
+- **E0-E5** -- the walking skeleton idea->production: the convergence loop to a
+  live Cloud Run deploy; regression/flake/budget/stuck/prod-log; creation mode +
+  self-hosting; NATS leases + graph partitioning + standing reconcilers;
+  idea->predicate authoring; LiveView + Telegram; context injection + pluggable
+  retrieval-memory; `kazi init` adopt (ADR-0013).
+- **E6** -- the automated brew release pipeline (ADR-0014 + ADR-0017):
+  `brew install kazi-org/tap/kazi` is LIVE for 3 platforms (macOS arm64, Linux
+  x86_64/arm64); release-please -> CI Burrito build -> tap auto-bump runs hands-off
+  and was validated end to end through **v0.3.0** (`brew upgrade` -> `kazi 0.3.0`).
+  Intel macOS is the only deferred target (runner scarcity).
+- **E8** -- generic config-driven harness **profiles** (ADR-0016): `Kazi.Harness.
+  Profile` + `CliAdapter` + `Registry` + `resolve/1`; `kazi run --harness opencode
+  --model <m>` works; a new CLI harness drops in as profile DATA (the basis for E14).
+- **E9 core** -- the public website is LIVE at **https://kazi.sire.run** (Astro +
+  Tailwind on GitHub Pages, HTTPS, README<->site coherence drift-check, ADR-0018).
+  Only T9.5 (Playwright smoke) + T9.6 (perf/a11y) polish remain.
+- **E11** -- interactive `kazi propose` clarify phase (ADR-0019), shipped in v0.3.0.
+- **E7** (registry adapter) was built then WITHDRAWN before release (ADR-0015):
+  its `capabilities.json` input was bespoke and did not generalize.
 
-State of `main`: **853 tests pass** (66 doctests, 787 tests), 19 excluded
-(`:nats`/`:graphify`/`:opencode_live` tags); `mix format --check-formatted` clean;
-`mix compile --warnings-as-errors` clean.
+**State of `main`: 899 tests pass** (68 doctests, 831 tests), 19 excluded
+(`:nats`/`:graphify`/`:opencode_live` tags); `mix format --check-formatted` +
+`mix compile --warnings-as-errors` clean. Latest release: **v0.3.0** (brew).
 
-**What remains (the entire content of this plan):**
+**Open work (the entire content of this plan):**
 
-1. **E9 -- the public website (T9.1-T9.7, ADR-0018).** The PRIMARY open work: a
-   live Astro + Tailwind landing site at **https://kazi.sire.run** (GitHub Pages),
-   explaining kazi and getting a visitor to `brew install` + a first goal. Mixed
-   engineering + content; on-brand (the Electric Blue logo). The only operator-gated
-   step is one DNS `CNAME` record.
-2. **E6 / E8 -- DONE** except **T6.7** (tap auto-bump), which is implemented but
-   blocked on the operator-created `HOMEBREW_TAP_TOKEN` secret + the org
-   "Actions-can-create-PRs" activation (R-E6-7). `brew install kazi-org/tap/kazi`
-   is LIVE (v0.1.1, 3 platforms); the auto-release pipeline is wired and gated.
+- **E9 leftovers** -- T9.5 (Playwright smoke), T9.6 (perf/a11y/OG image).
+- **E12** -- hierarchical predicate grouping + Obsidian/Mermaid export (ADR-0020).
+- **E13** -- intended-vs-actual reconciliation: import the intended set
+  (OpenAPI/gherkin/prose) + detect dead code via a surface-coverage meta-predicate
+  (ADR-0021).
+- **E14** -- onboard more harnesses (Codex / Antigravity / claw-code) as profiles +
+  an "add your own harness" recipe (ADR-0022).
+- **E15** -- harness-friendly, agent-drivable kazi: a `--json` CLI + a versioned
+  result contract (ADR-0023).
+- **E16** -- kazi self-teaching to harnesses: an opt-in Claude Code skill +
+  `help --json`/`schema` + `AGENTS.md` + a `kazi mcp` server (ADR-0024).
+- **E17** -- adoption: README/website/docs lead with the agent-driven workflow.
+
+**Strategic spine for adoption: E15 -> E16 -> E17** (the JSON contract -> the skill
+that teaches agents to drive kazi -> the docs/website that sell the agent-driven
+workflow). **E12 -> E13** (the grouping + intended-vs-actual thesis) and **E14**
+(more harnesses) are independent parallel tracks. See Waves for the full order.
 
 **Frozen design (do NOT relitigate):** `docs/concept.md` (canonical architecture +
-source of truth) and ADRs `0001`..`0018`. To change a decision, write a superseding
+source of truth) and ADRs `0001`..`0024`. To change a decision, write a superseding
 ADR.
 
 ## Use Case Summary
 
-All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work:
+All use cases are tracked in `.claude/scratch/usecases-manifest.json`. **UC-001..
+UC-029 are DELIVERED and verified on `main`** (incl. UC-024 brew install, UC-026/
+UC-027 multi-harness, UC-028 website [live], UC-029 interactive propose [v0.3.0]).
+Open work:
 
-- **UC-024** (install kazi as a single binary via Homebrew, ADR-0014; now with the
-  fully-automated release pipeline of ADR-0017) -- OPEN; E6.
-- **UC-029** (interactive `propose`: kazi asks clarifying questions before drafting
-  a goal so acceptance predicates are precise, ADR-0019) -- DELIVERED (E11, v0.3.0).
+- **UC-028** (public website) -- LIVE; only T9.5/T9.6 polish remain (E9).
 - **UC-030** (hierarchical predicate grouping via a declared taxonomy +
-  Obsidian/Mermaid export of intended/built/pending/dead, ADR-0020) -- OPEN; E12.
+  Obsidian/Mermaid export of intended/built/pending/dead, ADR-0020) -- E12.
 - **UC-025** (import the intended set from a STANDARD spec -- OpenAPI/gherkin --
-  plus prose docs via the harness, ADR-0021) -- OPEN; E13 (no longer deferred).
+  plus prose docs via the harness, ADR-0021) -- E13.
 - **UC-031** (detect dead code / undocumented surface via a surface-coverage
-  meta-predicate -- the `A \ I` half of "no dead code", ADR-0021) -- OPEN; E13.
-- **UC-032** (onboard more CLI coding harnesses -- Codex, Google Antigravity,
-  claw-code, and any major harness -- as profiles per a conformance contract,
-  ADR-0016/0022) -- OPEN; E14.
-- **UC-033** (kazi as a harness-friendly / agent-drivable CLI: `--json` structured
-  output + non-interactive guarantees + a versioned result contract so an
-  orchestrator drives propose->approve->run->release, ADR-0023) -- OPEN; E15.
+  meta-predicate -- the `A \ I` half of "no dead code", ADR-0021) -- E13.
+- **UC-032** (onboard more CLI coding harnesses -- Codex, Antigravity, claw-code,
+  and any major harness -- as profiles per a conformance contract, ADR-0022) -- E14.
+- **UC-033** (kazi as a harness-friendly / agent-drivable CLI: `--json` + a
+  versioned result contract, ADR-0023) -- E15.
 - **UC-034** (kazi is self-teaching to harnesses: `kazi install-skill` +
-  `help --json`/`schema` + `AGENTS.md` + a `kazi mcp` server, ADR-0024) -- OPEN; E16.
+  `help --json`/`schema` + `AGENTS.md` + a `kazi mcp` server, ADR-0024) -- E16.
 - **UC-035** (adoption: README/docs/website lead with the agent-driven workflow +
-  two-tier economics, to grow stars/adoption, ADR-0023/0024) -- OPEN; E17.
-
-UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
-delivered and verified on `main`.
+  two-tier economics, to grow stars/adoption, ADR-0023/0024) -- E17.
 
 ## Checkable Work Breakdown
 
 The WBS below is the single checkable source of truth; toggle `[ ]` to `[x]`.
-Status `kind: agent` is implicit unless noted.
+Status `kind: agent` is implicit unless noted. Completed epics (E0-E8, E11, and the
+E9 core T9.1-T9.4/T9.7-T9.9) are removed from this WBS -- they are done on `main`;
+their narrative lives in the ADRs and `docs/devlog.md`.
 
-### E6 -- Automated brew release pipeline: Burrito + Homebrew (P2, ADR-0014 + ADR-0017)
+### E9 (leftovers) -- Website polish (P2, ADR-0018)
 
-Acceptance: merging Conventional Commits to `main` and merging the resulting
-release PR causes, with NO further manual steps, a `vX.Y.Z` GitHub Release whose
-assets are the Burrito binaries each with a `.sha256`, and a
-`kazi-org/homebrew-tap` `kazi` formula auto-updated to that release so
-`brew install kazi-org/tap/kazi` (and `brew upgrade`) install a working single
-binary with the FULL read-model (no Erlang prerequisite, NIF bundled). **T6.1
-(`mix release`) and the Burrito wrap config are merged.** The host binary cannot
-be linked on this macOS-26 dev box (R-E6-1) -- the build is CI-driven by design.
+The site is LIVE at https://kazi.sire.run (T9.1-T9.4, T9.7-T9.9 DONE). Remaining:
 
-**SHIPPED:** `brew install kazi-org/tap/kazi` is live (verified) for **3
-platforms** -- macOS `aarch64`, Linux `x86_64`, Linux `aarch64` -- on the `v0.1.0`
-Release. macOS `x86_64` (Intel) is the only deferred target (GitHub's macos-13
-Intel runners are deprecated/scarce). The full auto-release chain is wired but
-gated on the one-time human activation in T6.6/T6.7.
-
-- [x] T6.2 Burrito build proven on CI: confirm `mix release` produces a runnable Burrito binary for at least one target on a Zig-compatible runner that bundles ERTS + the `exqlite` NIF, and a fixture `kazi run` PERSISTS iterations to SQLite (read-model present, no escript degradation)  Owner: David  Done: 2026-06-22 (CI run on v0.1.0)  verifies: [UC-024]  deps: []  acc: a CI job (the T6.3 workflow on a test tag) yields a `burrito_out/kazi_<target>` that runs `--help` and converges/persists a fixture goal; evidence captured in the run log. Folded into T6.3's first green run rather than a separate local build (R-E6-1).
-- [x] T6.3 Release build workflow: `.github/workflows/release.yml` -- on a `v*` tag, a matrix builds the four Burrito targets (macOS on `macos-15` per R-E6-1, Linux on `ubuntu-latest`) with Zig 0.15.2 + xz, generates a `.sha256` per binary, and uploads all as GitHub Release assets  Owner: David  Done: 2026-06-22 (PR #98; validated on v0.0.0-test5 + v0.1.0)  verifies: [UC-024]  deps: []  acc: pushing a test tag (`v0.0.0-test1`) produces four `kazi_*` binaries + four `.sha256` as Release assets; the workflow is green; both macOS and Linux jobs succeed. A WIP `release.yml` is committed; this task is making it actually green on a test tag (the real validation -- expect CI iteration on BEAM/Zig/Burrito setup).
-- [x] T6.6 release-please versioning (CONFIGURED; gated OFF pending a human one-time activation): the release-please Action + config + the format-stable `x-release-please-start/end-version` markers in `mix.exs` are merged and the build chain is token-free. **It is gated behind the repo variable `RELEASE_AUTOMATION=true`** because release-please ALSO needs the org/repo setting "Allow GitHub Actions to create and approve pull requests" — currently DISABLED org-wide for `kazi-org` (the session will NOT flip an org-wide security setting). To activate: (1) enable that org/repo setting OR give release-please a PAT `token:`; (2) add the `HOMEBREW_TAP_TOKEN` secret (T6.7); (3) set `RELEASE_AUTOMATION=true`. Owner: David  Done: 2026-06-22 (config); activation = human  verifies: [UC-024]  deps: []  acc: a `feat:`/`fix:` commit to `main` causes release-please to open/update a release PR with the correct semver bump; merging it tags + creates a Release; the version in `mix.exs` matches the tag. Validated on a real (or dry-run) cycle.
-- [x] T6.4 Homebrew tap repo + formula: create `kazi-org/homebrew-tap` (agent-doable -- session has `kazi-org` admin) with a `kazi` formula that, per platform, downloads the Release asset, verifies its `.sha256`, and installs the binary onto PATH; `brew install kazi-org/tap/kazi` installs a working `kazi`  Owner: David  Done: 2026-06-22 (brew install verified live)  verifies: [UC-024]  deps: [T6.3]  acc: `brew install kazi-org/tap/kazi` on macOS installs a runnable `kazi` (`kazi --help` works post-install); `brew audit --strict --tap kazi-org/homebrew-tap` passes. Needs a real T6.3 Release to point at; repo creation is no longer human-gated (R-E6-2).
-- [x] T6.7 Tap auto-bump workflow (IMPLEMENTED; BLOCKED on one human step): the `tap-bump` job in `.github/workflows/release-please.yml` regenerates the tap's `kazi` formula from the published `.sha256` values and pushes it to `kazi-org/homebrew-tap`. **It is fully written and wired into the release chain, but inert until the operator creates a fine-grained `HOMEBREW_TAP_TOKEN` secret** (PAT with contents:write on `kazi-org/homebrew-tap` only) -- the one step the session cannot do (a PAT cannot be minted via `gh`). The job SKIPS with a warning when the secret is absent, so the rest of the pipeline works.  Owner: TBD  blocked: needs HOMEBREW_TAP_TOKEN secret (human)  Est: 0.25h to add the secret  verifies: [UC-024]  deps: [T6.4]  acc: publishing a Release updates the tap formula's version/urls/sha256 automatically (verified on a test release); the secret is scoped to the tap repo; a follow-up `brew upgrade` pulls the new version. Use a maintained action (e.g. `dawidd6/action-homebrew-bump-formula`) or an inline generator -- documented.
-- [x] T6.5 Docs: README install section leads with `brew install kazi-org/tap/kazi` + the prebuilt binary; note the runtime requirement that a coding agent (`claude`/`opencode`/...) must be on PATH; reframe the escript as a contributor convenience; link the GitHub Releases page and the auto-release flow (ADR-0017)  Owner: David  Done: 2026-06-22  verifies: [UC-024]  deps: [T6.4]  acc: README documents brew + binary install, the harness-on-PATH requirement, and how releases are cut (merge the release PR); links Releases + ADR-0017.
-
-### E8 dogfood -- heterogeneous harness (Claude plans, opencode/DGX implements)
-
-The capstone live exercise for E8: prove kazi's core division of labor -- a strong
-model authors the predicate set (the "direction"), a cheap LOCAL model drives the
-convergence loop (the "keystrokes"), and objective termination keeps the weak
-implementer honest. Completes the live verification the T8.9 smoke deferred.
-
-- [x] T8.11 Heterogeneous-harness dogfood: Claude authors a tiny deliberately-broken fixture goal-file (a single `test_runner` predicate failing at t0); `kazi run <goal> --harness opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0 --workspace <trusted repo>` drives the DGX-hosted Qwen to converge it; record the result in `docs/devlog.md`  Owner: David  Done: 2026-06-22 (wiring proven; honest non-convergence -- local 35B too slow; see devlog)  Est: 1h  verifies: [UC-026, UC-027]  deps: []  acc: a real `kazi run` converges a broken fixture driven ENTIRELY by opencode->DGX (Claude only authored the goal); evidence recorded (iterations, final vector); OR an honest failure with the environmental cause (per the T8.9 finding: opencode auto-rejects edits outside a trusted workspace -- fixed with a project-local `opencode.json` permission grant -- and the 35B model is slow). Throwaway workspace; not committed to the kazi repo.
-
-### E9 -- Public website: Astro + Tailwind on GitHub Pages at kazi.sire.run (P2, ADR-0018)
-
-Acceptance: a live, fast, single-page (with room to grow) marketing/landing site
-at **https://kazi.sire.run** that explains kazi ("the outer loop existing agents
-lack"), shows the 60-second mental model, and gets a visitor to `brew install
-kazi-org/tap/kazi` + a first goal -- on-brand (Electric Blue, the logo assets),
-deployed automatically from `main` via GitHub Actions, HTTPS-enforced, Lighthouse
->= 90, and **coherent with `README.md`** (shared canonical strings verbatim, the
-README links the site, a CI drift-check guards against divergence -- T9.8/T9.9).
-Stack/hosting/domain decided in ADR-0018
-(Astro + Tailwind, site in `site/`, GitHub Pages, `kazi.sire.run` -- free, single
-DNS CNAME, reversible). This is **mixed work**: engineering (scaffold, deploy,
-tests) + content (the copy, reused from `README.md`/`docs/concept.md`).
-
-- [x] T9.1 Scaffold the Astro + Tailwind site in `site/`: `npm create astro` (minimal/empty template), add `@astrojs/tailwind`, a base `Layout.astro` with the kazi brand (Electric Blue gradient, import the SVGs from `assets/logo/`), meta/OG tags, and a favicon generated from `kazi-badge.svg`. Set `site`/`base` in `astro.config` for the custom domain (base `/`).  Owner: David  Done: 2026-06-23  verifies: [UC-028]  deps: []  acc: `npm --prefix site run build` produces a static `site/dist/`; `npm --prefix site run dev` serves a branded empty page locally; `.gitignore` excludes `site/node_modules` and `site/dist`.
-- [x] T9.2 Landing page sections (content + UI): build `index.astro` with hero (headline + subhead + primary `brew install` CTA + GitHub link), the 60-second mental model (the loop -> checkmark, reuse the README diagram/idea), a features/why-kazi grid (objective termination, multi-harness, single-binary install), an install + first-goal quickstart (copy-pasteable), and a footer (Apache-2.0, Sire Run, GitHub, links). Copy is DERIVED from `README.md`/`docs/concept.md` and must stay accurate.  Owner: David  Done: 2026-06-23  verifies: [UC-028]  delivers: [kazi landing-page copy + sections]  deps: [T9.1]  acc: every claim on the page is true to the README/concept (no invented features); the install command is the real `brew install kazi-org/tap/kazi`; responsive (mobile + desktop) and works in light AND dark; no Lorem Ipsum.
-- [x] T9.3 Deploy workflow (GitHub Actions -> Pages): add `.github/workflows/pages.yml` -- on push to `main` touching `site/**`, build Astro and deploy via `actions/upload-pages-artifact` + `actions/deploy-pages` (with the `pages: write`/`id-token: write` permissions + a `github-pages` environment). Enable Pages (source = GitHub Actions) in repo settings.  Owner: David  Done: 2026-06-23 (Pages deploy green; kazi-org.github.io/kazi)  verifies: [UC-028, infrastructure]  deps: [T9.1]  acc: a push to `main` deploys the built site; the run is green; the site is reachable at the default `kazi-org.github.io/kazi` URL before the custom domain is wired.
-- [x] T9.4 Custom domain kazi.sire.run + HTTPS: commit `site/public/CNAME` containing `kazi.sire.run`; set the custom domain in repo Pages settings; **operator adds one DNS `CNAME` record `kazi -> kazi-org.github.io` at the sire.run provider** (human-gated, like the other infra secrets); enable "Enforce HTTPS".  Owner: David  Done: 2026-06-23 (DNS via sirerun/foundation PR #120; HTTPS enforced; live)  verifies: [UC-028, infrastructure]  deps: [T9.3]  acc: `https://kazi.sire.run` serves the site with a valid auto-provisioned certificate; the apex/`www` is not claimed (subdomain only); the GitHub Pages "DNS check" passes. Operator step: the CNAME DNS record (the session does not control sire.run DNS).
-- [ ] T9.5 Playwright smoke test: add a minimal Playwright project under `site/` that loads the built site (or the live URL) and asserts the hero headline, the `brew install` command text, the GitHub link, and at least one edge case (mobile viewport renders the nav/CTA; no console errors).  Owner: TBD  Est: 1h  verifies: [UC-028]  deps: [T9.2]  acc: `npx playwright test` green against `site/dist` (served) and, when live, against `https://kazi.sire.run`; the test is wired into the pages workflow (or a `site` CI job) so a broken page fails CI.
-- [ ] T9.6 Polish + perf + a11y: Lighthouse >= 90 on performance/accessibility/best-practices/SEO; semantic HTML + alt text + sufficient contrast (the Electric Blue gradient on slate/white); OpenGraph/Twitter-card image (render from the logo); `<title>`/meta description; prefers-color-scheme support.  Owner: TBD  Est: 1.5h  verifies: [UC-028]  deps: [T9.2]  acc: a Lighthouse run (CI or local) reports >= 90 in all four categories on the deployed site; the OG image renders in a link-preview check.
-- [x] T9.7 Verify live: load `https://kazi.sire.run` in a real browser (agent-browser), exercise the golden path (read hero -> copy the install command) plus one edge case (mobile), confirm no console errors and the cert is valid.  Owner: David  Done: 2026-06-23 (browser-verified at https://kazi.sire.run)  verifies: [UC-028]  deps: [T9.4]  acc: observed-not-expected evidence (a screenshot of the live `kazi.sire.run` + the install command working); reported honestly.
-- [x] T9.8 Enhance the README for website coherence (content): make `README.md` and the site one coherent story from a single source (ADR-0018). (a) Add a prominent website link/badge in the header (under the wordmark) pointing to `https://kazi.sire.run`. (b) Make the SHARED CANONICAL STRINGS verbatim-consistent across README + site: the one-line positioning/hero ("the missing outer loop for coding agents" / "Kubernetes for coding goals"), the install command `brew install kazi-org/tap/kazi`, the 60-second mental model, and the harness list. (c) Reframe the README as the developer companion to the marketing site -- same pitch up top, then install/quickstarts/harness config/contributor build -- with NO contradictions of the site (claims, commands, version). Do NOT delete the contributor build detail; the site is the newcomer surface, the README the full reference.  Owner: David  Done: 2026-06-23  delivers: [a README coherent with kazi.sire.run; shared canonical strings aligned]  deps: [T9.2]  acc: every shared canonical string is byte-identical in `README.md` and the site content; the README header links the site; a newcomer reading either surface gets the same positioning + install; no claim on one contradicts the other.
-- [x] T9.9 Coherence drift-check (CI guardrail): add a tiny check (a shell/JS script or a Playwright/unit assertion run in the `site`/pages CI) that asserts the shared canonical strings (the install command, the positioning one-liner, the harness list) appear IDENTICALLY in `README.md` and the site's content source; fail CI if they diverge.  Owner: David  Done: 2026-06-23  verifies: [UC-028, infrastructure]  deps: [T9.8]  acc: the check is green when README + site agree; deliberately editing one canonical string in only one file makes the check (and CI) RED; wired into the pages workflow or a `site` CI job.
-
-### E11 -- Interactive clarify phase for `kazi propose` (P3, ADR-0019)
-
-Acceptance: `kazi propose "<idea>"` asks 2-4 high-leverage clarifying questions
-BEFORE drafting, so the resulting acceptance predicates are precise (especially a
-live-verification predicate), then drafts the goal + an inline rationale and lets
-the operator refine before it runs -- matching or beating the operator's current
-Claude-Code-CLI authoring of plans/ADRs, but ending in an executable,
-machine-checkable goal. Decided in ADR-0019: question generation is **HYBRID**
-(harness drafts candidate questions; kazi enforces a deterministic, unit-tested
-floor of gap-checks), the surface is the **CLI TTY first** (non-interactive/piped/
-`--yes` skips clarification and drafts best-effort; `--strict` fails loudly when
-too underspecified), and the rationale is **inline by default** with an optional
-`--adr` flag that also writes an ADR-lite doc. This EXTENDS the Authoring write
-path (ADR-0011) and predicates-as-done (ADR-0002); the clarify phase sits strictly
-before the existing `proposed` state and the approval state machine is unchanged.
-It reuses the injectable harness seam (`Kazi.Authoring` `:harness` opt -> `run/3`)
-so every new harness interaction is stubbable -- no real `claude`/network in tests.
-Telegram/dashboard clarify surfaces are OUT OF SCOPE (deferred follow-ups); the
-core is built surface-agnostic.
-
-- [x] T11.1 Clarify core + question schema (`Kazi.Authoring.Clarify`): define the pure data shapes -- a clarifying question (`id`, `prompt`, `options` [label/value], `recommended`, `allow_free_text`) and an answer -- plus a pure `fold_answers/2` that deterministically merges answers into the draft-prompt context. No I/O.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: []  acc: ExUnit covers building/serializing a question set and folding answers into a prompt string DETERMINISTICALLY (same answers -> same prompt); pure functions, no harness call, no stdin; `mix format`/`--warnings-as-errors` clean.
-- [x] T11.2 Deterministic gap-detection floor (`gaps/1`): a pure function over (idea, optional harness draft) returning the MANDATORY floor questions -- always ask the live-verification target and the scope boundary when absent; derive provider-specific gaps from the known provider set (`test_runner`/`http_probe`/`prod_log`/`browser`) and missing predicate `config`.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.1]  acc: ExUnit -- an idea with no live target yields a live-verification question; an idea naming an HTTP endpoint yields a status/auth question; a fully-specified idea yields zero floor questions; pure (no harness, no I/O).
-- [x] T11.3 Harness-drafted candidate questions (same seam): extend the clarify core to drive the injectable harness (`run/3` behind the `:harness` opt, mirroring `drive_harness/2`) with a prompt asking for candidate clarifying questions as a JSON array matching the T11.1 schema; parse + validate; MERGE with the deterministic floor (floor is authoritative; dedup).  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.1, T11.2]  acc: ExUnit with a STUB harness -- candidate questions are parsed, validated, and merged with the floor; a malformed/empty harness response degrades to the floor alone (fail-soft); no real `claude`/network.
-- [x] T11.4 Two-phase `propose/2` wiring: thread the clarify phase into `Kazi.Authoring.propose/2` BEFORE the draft -- gather questions (T11.2+T11.3), accept answers via an INJECTED `:ask` callback (the CLI supplies interactive I/O; tests inject a function), fold answers into the draft prompt, then run the existing draft+persist path. Add an `interactive?: false`/answers-supplied path that skips clarification.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.1, T11.2, T11.3]  acc: ExUnit -- propose with an injected ask-callback persists a draft whose predicates reflect the answers; `interactive?: false` with no answers drafts best-effort (current one-shot behavior preserved); existing `propose` tests stay green; harness seam still stubbable.
-- [x] T11.5 Inline rationale on the draft goal: capture a concise rationale (why these predicates / what is deliberately out of scope) from the draft and store it on `goal.metadata` so `serialize_goal/1` round-trips it through `Kazi.Goal.Loader.from_map/1`; surface it at review time.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.4]  acc: ExUnit -- a proposal carrying a rationale persists it in `goal.metadata` and it round-trips through the loader; the review output prints the rationale.
-- [x] T11.6 CLI interactive rendering + flags (`lib/kazi/cli.ex`): render the clarify questions as terminal multiple-choice (numbered options + a free-text escape), wire answers back as the `:ask` callback; add `--strict` (exit non-zero when the idea is too underspecified) and `--adr` (also write an ADR-lite doc); honor `--yes`/non-TTY (skip clarification, draft best-effort). Detect a non-interactive stdin and never block on it.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.4, T11.5]  acc: integration over CLI parse + scripted stdin -- interactive run asks then drafts; `--yes`/piped stdin drafts WITHOUT asking; `--strict` on an empty/underspecified idea exits non-zero with a clear message; `--adr` writes a `docs/adr/` file.
-- [x] T11.7 `--adr` ADR-lite writer: a small module that renders the proposal's rationale into the repo's ADR format under `docs/adr/` (next sequence number), only when `--adr` is passed.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.5]  acc: ExUnit -- given a draft with a rationale, the writer produces a well-formed ADR markdown file at the next number; idempotent for the same `proposal_ref`; absent without the flag.
-- [x] T11.8 Review loop (refine via `edit/3`): after the draft is shown, offer "looks right / too much / too little / refine"; "refine" re-prompts with a sharper sentence and re-runs clarify+draft, persisting via the existing `edit/3` transition (stays `proposed`).  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.6]  acc: ExUnit with injected I/O -- "refine" with a new sentence updates the proposed goal via `edit/3` (stays `proposed`); "looks right" leaves it `proposed` for `approve`; golden path covered.  NOTE (deviation): implemented as a propose-UPSERT on the same `proposal_ref` (re-runs clarify+draft, row stays `proposed`) rather than a literal `edit/3` call -- equivalent end-state, fewer moving parts; covered by a CLI test asserting a single proposal row after a refine.
-- [x] T11.9 Docs + LIVE CLI verification: update the README/`docs/concept.md` authoring section to describe interactive `propose`; run `kazi propose "<idea>"` in a REAL TTY (stub or real harness) and observe questions -> draft -> rationale, plus the `--yes` non-interactive path and `--strict` on an underspecified idea; record the transcript evidence in `docs/devlog.md`.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.6, T11.8]  acc: observed-not-expected evidence (a terminal transcript) for the interactive path, the non-interactive path, and the `--strict` failure; README authoring section matches behavior; `mix format --check-formatted` + `mix compile --warnings-as-errors` clean.
+- [ ] T9.5 Playwright smoke test: add a minimal Playwright project under `site/` that loads the built site (or the live URL) and asserts the hero headline, the `brew install` command text, the GitHub link, and at least one edge case (mobile viewport renders the nav/CTA; no console errors).  Owner: TBD  Est: 1h  verifies: [UC-028]  deps: []  acc: `npx playwright test` green against `site/dist` (served) and, when live, against `https://kazi.sire.run`; the test is wired into the pages workflow (or a `site` CI job) so a broken page fails CI.
+- [ ] T9.6 Polish + perf + a11y: Lighthouse >= 90 on performance/accessibility/best-practices/SEO; semantic HTML + alt text + sufficient contrast (the Electric Blue gradient on slate/white); OpenGraph/Twitter-card image (render from the logo); `<title>`/meta description; prefers-color-scheme support.  Owner: TBD  Est: 1.5h  verifies: [UC-028]  deps: []  acc: a Lighthouse run (CI or local) reports >= 90 in all four categories on the deployed site; the OG image renders in a link-preview check.
 
 ### E12 -- Hierarchical predicate grouping + Obsidian export (P3, ADR-0020)
 
@@ -181,11 +111,12 @@ ungrouped goal behaves exactly as today.
 - [ ] T12.1 Declared `[[group]]` taxonomy in the goal-file + loader parsing: extend `Kazi.Goal.Loader.from_map/1` to parse a `[[group]]` array of `{id, name, parent?, budget?}` into a group set on the goal; ids are slugs, `name` is the display label.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: []  acc: ExUnit -- a goal-file with `[[group]]` entries loads a validated group set; ids normalize (case/whitespace/`&`); a duplicate group id is a load error; round-trips through the loader.
 - [ ] T12.2 `Predicate.group` field + reference validation (the drift guard): add an optional `group :: String.t() | nil` to `Kazi.Predicate` (a declared group id, appended additively); the loader REJECTS a predicate whose `group` is not a declared id, a group whose `parent` is undeclared, and a parent cycle.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.1]  acc: ExUnit -- a predicate referencing a declared group loads; an UNKNOWN group id is `{:error, ...}` at parse time (the typo guard); an undeclared parent and a cycle are load errors; `group: nil` is unchanged (backward compatible).
 - [ ] T12.3 Group tree + per-group status rollup (pure): build the tree from `parent` links and roll up predicate verdicts (acceptance-not-yet-true vs passing) into per-group intended/built/pending counts.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.2]  acc: ExUnit -- pure functions reconstruct the tree to arbitrary depth and roll up counts per group; deterministic; no I/O.
-- [ ] T12.4 Per-group budgets (DERIVED rollup) + reconciliation: a group's effective budget is the SUM of its descendants' budgets -- never a hand-maintained parent number; declare budgets only at leaves. An explicit `budget` on a non-leaf is a CAP that can only tighten the rollup (`effective = min(cap, sum)`). Scope convergence + reporting to a group's predicate partition (rides ADR-0006 partitioning), delivering per-pillar reconciliation without a separate `Goal`.  Owner: TBD  Est: 2h  verifies: [UC-030]  deps: [T12.2]  acc: ExUnit -- a parent group's budget equals the sum of its descendants' (no stored parent value); a declared parent cap below the sum tightens to the cap; a cap above the sum is a no-op (or a load error -- operator's choice, default: no-op); a leaf budget bounds its partition's iterations; per-group status reported; an ungrouped goal is unaffected.
-- [~] T12.5 WITHDRAWN -- the `--from-capabilities` bespoke importer contradicted ADR-0015 (audience of one). The desired-state importer is now GENERAL (standard specs + prose via the harness) and moved to **E13 / ADR-0021** (T13.1-T13.3). The grouping taxonomy any importer emits is still ADR-0020.
+- [ ] T12.4 Per-group budgets (DERIVED rollup) + reconciliation: a group's effective budget is the SUM of its descendants' budgets -- never a hand-maintained parent number; declare budgets only at leaves. An explicit `budget` on a non-leaf is a CAP that can only tighten the rollup (`effective = min(cap, sum)`). Scope convergence + reporting to a group's predicate partition (rides ADR-0006 partitioning), delivering per-pillar reconciliation without a separate `Goal`.  Owner: TBD  Est: 2h  verifies: [UC-030]  deps: [T12.2]  acc: ExUnit -- a parent group's budget equals the sum of its descendants' (no stored parent value); a declared parent cap below the sum tightens to the cap; a cap above the sum is a no-op (operator's choice, default: no-op); a leaf budget bounds its partition's iterations; per-group status reported; an ungrouped goal is unaffected.
 - [ ] T12.6 Obsidian/Mermaid exporter: `kazi export --obsidian <dir>` walks the group tree + predicate verdicts into a vault (one note per group/predicate, `[[wikilinked]]`, tagged intended/built/pending) and a Mermaid rollup.  Owner: TBD  Est: 2h  verifies: [UC-030]  deps: [T12.3]  acc: ExUnit -- the exporter writes a vault for a fixture grouped goal; notes link parent<->child; tags reflect verdicts; an overview note carries per-group rollups. Live: open the vault in Obsidian and confirm the graph renders.
 - [ ] T12.7 `kazi lint` near-duplicate group-name warning (advisory second net): fuzzy-compare declared group NAMES and warn on near-duplicates (e.g. "Identity & Access" vs "Identity and Access") without failing the load.  Owner: TBD  Est: 1h  verifies: [UC-030]  deps: [T12.1]  acc: ExUnit -- near-duplicate names emit a warning; exact/distinct names do not; advisory only (exit 0).
-- [~] T12.8 MOVED to E13 (T13.6) -- the sirerun dogfood now runs through the GENERAL importer + the surface-coverage meta-predicate (ADR-0021), not the bespoke capabilities importer.
+
+(T12.5 was WITHDRAWN -- the bespoke `--from-capabilities` importer contradicted
+ADR-0015; the general importer is E13. T12.8 MOVED to E13/T13.6.)
 
 ### E13 -- Intended-vs-actual reconciliation: import intent + detect dead code (P3, ADR-0021)
 
@@ -201,8 +132,8 @@ undocumented), surfaced and reconciled like any other predicate, held true by
 standing mode. Both directions feed the grouped view (E12). `kazi init` stays the
 small code-side bootstrap (ADR-0013).
 
-- [ ] T13.1 OpenAPI importer: parse an OpenAPI document into one `http_probe` acceptance predicate per path/operation, grouped (tag -> declared `[[group]]`, ADR-0020). Deterministic and hermetic.  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [E12 T12.1/T12.2]  acc: ExUnit on a fixture spec -- paths/operations become grouped `http_probe` acceptance predicates with method/path/expected-status config; same spec -> same goal-file; re-import upserts.
-- [ ] T13.2 Gherkin importer: parse Cucumber/gherkin feature files into one acceptance predicate per scenario, grouped by feature.  Owner: TBD  Est: 1.5h  verifies: [UC-025]  deps: [E12 T12.1/T12.2]  acc: ExUnit on fixture features -- scenarios become grouped acceptance predicates; deterministic.
+- [ ] T13.1 OpenAPI importer: parse an OpenAPI document into one `http_probe` acceptance predicate per path/operation, grouped (tag -> declared `[[group]]`, ADR-0020). Deterministic and hermetic.  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [T12.1, T12.2]  acc: ExUnit on a fixture spec -- paths/operations become grouped `http_probe` acceptance predicates with method/path/expected-status config; same spec -> same goal-file; re-import upserts.
+- [ ] T13.2 Gherkin importer: parse Cucumber/gherkin feature files into one acceptance predicate per scenario, grouped by feature.  Owner: TBD  Est: 1.5h  verifies: [UC-025]  deps: [T12.1, T12.2]  acc: ExUnit on fixture features -- scenarios become grouped acceptance predicates; deterministic.
 - [ ] T13.3 Prose-doc importer via the harness: drive the existing authoring/clarify path (`Kazi.Authoring`, ADR-0011/0019) over a prose doc (ADR/requirements) to draft candidate predicates, HUMAN-REVIEWED before acceptance; reuses the injectable harness seam (stub in tests).  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: []  acc: ExUnit with a stub harness -- a prose doc yields candidate predicates routed through the review/approve flow; nothing is accepted without approval; no real `claude`/network in tests.
 - [ ] T13.4 Surface-scanner provider: inventory a project's public surface (HTTP routes/handlers, exported symbols, CLI commands) for one language first (Elixir or Go), reusing the repo-introspection seam (ADR-0010).  Owner: TBD  Est: 2h  verifies: [UC-031]  deps: []  acc: ExUnit on a fixture repo -- the scanner returns the public surface inventory; approximate-by-design (reflection/string-dispatch invisible -- documented, `docs/lore.md`).
 - [ ] T13.5 Surface-coverage meta-predicate: assert every scanned surface element is OWNED by >=1 intended predicate (match by route/path/symbol); an unowned element FAILS (dead/undocumented); supports an explicit allow-list; WARN-don't-auto-delete.  Owner: TBD  Est: 2h  verifies: [UC-031]  deps: [T13.4]  acc: ExUnit -- a fixture with an un-predicated endpoint fails the meta-predicate and names it; allow-listed surface passes; a fully-owned surface passes; ungrouped goals unaffected.
@@ -238,12 +169,12 @@ parsing JSON, never prose. kazi SELF-CONFORMS to the harness conformance contrac
 it imposes (ADR-0022): every command has a `--json` mode emitting a single JSON
 object (or JSONL stream for long runs), is non-interactive under `--json`/no-TTY/
 `--yes` (never blocks on stdin), and returns stable exit codes. The two-tier
-economics (strong model authors predicates via `kazi propose --harness claude`;
-cheap model runs the loop via `kazi run --harness claw --model <local>`) live in
-the ORCHESTRATOR, not kazi. **`kazi propose` is the SINGLE agent authoring path**
-(ADR-0023; the operator does not hand-author predicates) -- so the clarify floor +
-review/approve gate are never bypassed. Human-readable output stays the DEFAULT;
-`--json` is the machine surface. MCP server (`kazi mcp`) is a deferred follow-on.
+economics (strong model authors predicates via `kazi propose`; cheap model runs the
+loop via `kazi run --harness claw --model <local>`) live in the ORCHESTRATOR, not
+kazi. **`kazi propose` is the SINGLE agent authoring path** (ADR-0023; no
+hand-authoring) -- so the clarify floor + review/approve gate are never bypassed.
+Human-readable output stays the DEFAULT; `--json` is the machine surface. MCP server
+(`kazi mcp`) is E16.
 
 - [ ] T15.1 JSON output framework + non-interactive guarantee: a `--json` flag + a small renderer seam so each command emits a single JSON object to stdout; under `--json` kazi NEVER prompts/blocks on stdin (it errors loudly if input is required), and exit codes are stable. Unit-tested.  Owner: TBD  Est: 1.5h  verifies: [UC-033, infrastructure]  deps: []  acc: ExUnit -- a command in `--json` mode emits valid JSON only (no human prose interleaved) and never reads stdin; non-`--json` is unchanged; piped/non-TTY `--json` works headlessly.
 - [ ] T15.2 `kazi propose --json` with TWO drive modes (the single authoring path, ADR-0023): emit the draft -- goal id, `proposal_ref`, predicates[], rationale, any clarify questions -- as one JSON object. (a) **kazi-drafts**: `propose "<idea>" --harness <model>` spawns a model to draft (existing). (b) **caller-drafts**: `propose --json` with predicates supplied on stdin/flag -- the orchestrator (which already reasoned) supplies the draft and kazi applies the deterministic FLOOR + persists + gates WITHOUT spawning an inner model (avoids the redundant claude->kazi->claude). Both go through `Kazi.Authoring` (the one write path, ADR-0011); no parallel mechanism.  Owner: TBD  Est: 2h  verifies: [UC-033, UC-029]  deps: [T15.1]  acc: ExUnit with a stub harness -- kazi-drafts returns a parseable draft; caller-drafts accepts supplied predicates, applies the floor (flags a missing live-verification target + scope), persists, and spawns NO inner model; the floor applies in both; no second authoring path.
@@ -251,9 +182,9 @@ review/approve gate are never bypassed. Human-readable output stays the DEFAULT;
 - [ ] T15.4 `kazi run --json --stream` JSONL progress: emit one JSON event per iteration (iteration n, dispatched harness, predicate-vector delta), terminated by the final T15.3 result object, so an orchestrator monitors a long run without blocking. Mirrors how kazi parses opencode/codex JSONL.  Owner: TBD  Est: 1.5h  verifies: [UC-033]  deps: [T15.3]  acc: ExUnit -- a multi-iteration fixture run emits a valid JSONL event stream ending in the result object; each line parses independently.
 - [ ] T15.5 `kazi status --json` (new command): report a run/proposal's current state from the read-model as JSON (status, predicate vector, last iteration, timestamps).  Owner: TBD  Est: 1.5h  verifies: [UC-033]  deps: [T15.1]  acc: ExUnit -- after a propose/run, `status --json <ref>` returns the persisted state; an unknown ref is a clear JSON error + non-zero exit.
 - [ ] T15.6 `kazi list-proposed/approve/reject --json`: structured output for the authoring state machine so the orchestrator drives propose -> approve -> run programmatically.  Owner: TBD  Est: 1h  verifies: [UC-033]  deps: [T15.1]  acc: ExUnit -- each command emits a parseable JSON result; transitions report machine-readable success/error.
-- [ ] T15.7 kazi self-conformance test: assert kazi ITSELF passes the ADR-0022 conformance helper (E14 T14.1) -- non-interactive, JSON-only stdout under `--json`, subprocess-safe under a non-TTY -- so kazi meets the bar it imposes on harnesses.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T15.2, T15.3, T15.5, T15.6, E14 T14.1]  acc: ExUnit -- kazi's `--json` commands satisfy the conformance helper; a regression (prose leaking into `--json`, a stdin block) fails the test.
-- [ ] T15.8 Docs + the orchestrator recipe: document the versioned JSON schemas and a "drive kazi from an agent" recipe -- orchestrator: `kazi propose --json` -> `kazi approve --json` -> `kazi run --harness <cheap> --json [--stream]` -> parse the result -> branch on `next_action`. Note the deferred `kazi mcp` follow-on.  Owner: TBD  Est: 1h  verifies: [UC-033]  deps: [T15.7]  acc: a new orchestrator can drive the full loop from the recipe + schemas; `schema_version` pinning is documented.
-- [ ] T15.9 LIVE nested-loop dogfood (claude -> kazi -> claw/Qwen): as the orchestrator, author a tiny broken fixture goal's predicates via `kazi propose --harness claude --json`, approve, then `kazi run --harness claw --model <DGX-Qwen> --json` to drive the cheap loop; parse the JSON result. Record evidence + the friction (HONEST: claw is best-effort/no-JSON per E14, local Qwen slow per T8.11 -- expect a wiring proof, maybe not fast convergence) in `docs/devlog.md`.  Owner: TBD  Est: 2h  verifies: [UC-033]  deps: [T15.3, E14 T14.4]  acc: observed evidence of the full agent->kazi->cheap-harness loop driven over `--json`; every point where kazi was awkward to drive as a tool is logged as a follow-up; honest result reported.
+- [ ] T15.7 kazi self-conformance test: assert kazi ITSELF passes the ADR-0022 conformance helper (E14 T14.1) -- non-interactive, JSON-only stdout under `--json`, subprocess-safe under a non-TTY -- so kazi meets the bar it imposes on harnesses.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T15.2, T15.3, T15.5, T15.6, T14.1]  acc: ExUnit -- kazi's `--json` commands satisfy the conformance helper; a regression (prose leaking into `--json`, a stdin block) fails the test.
+- [ ] T15.8 Docs + the orchestrator recipe: document the versioned JSON schemas and a "drive kazi from an agent" recipe -- orchestrator: `kazi propose --json` -> `kazi approve --json` -> `kazi run --harness <cheap> --json [--stream]` -> parse the result -> branch on `next_action`. Note the `kazi mcp` follow-on (E16).  Owner: TBD  Est: 1h  verifies: [UC-033]  deps: [T15.7]  acc: a new orchestrator can drive the full loop from the recipe + schemas; `schema_version` pinning is documented.
+- [ ] T15.9 LIVE nested-loop dogfood (claude -> kazi -> claw/Qwen): as the orchestrator, author a tiny broken fixture goal's predicates via `kazi propose --json`, approve, then `kazi run --harness claw --model <DGX-Qwen> --json` to drive the cheap loop; parse the JSON result. Record evidence + the friction (HONEST: claw is best-effort/no-JSON per E14, local Qwen slow per T8.11 -- expect a wiring proof, maybe not fast convergence) in `docs/devlog.md`.  Owner: TBD  Est: 2h  verifies: [UC-033]  deps: [T15.3, T14.4]  acc: observed evidence of the full agent->kazi->cheap-harness loop driven over `--json`; every point where kazi was awkward to drive as a tool is logged as a follow-up; honest result reported.
 
 ### E16 -- kazi self-teaching to harnesses: skill + MCP + machine-readable help (P3, ADR-0024)
 
@@ -264,11 +195,11 @@ CLI; an `AGENTS.md` covers convention-reading harnesses; a `kazi mcp` server is 
 self-describing tool surface. Opt-in, consent-first (no auto-writes to `~/.claude`).
 Depends on the E15 JSON contract.
 
-- [ ] T16.1 `kazi help --json` + `kazi schema`: emit the command/flag surface and the versioned result schemas (ADR-0023) as JSON, GENERATED from the real command table (not hand-maintained).  Owner: TBD  Est: 1.5h  verifies: [UC-034]  deps: [E15 T15.3]  acc: ExUnit -- `help --json` lists every command/flag; `schema run` returns the documented run-result schema with `schema_version`; both parse.
-- [ ] T16.2 The kazi Claude Code skill + `kazi install-skill` (opt-in): `kazi install-skill` writes `~/.claude/skills/kazi/SKILL.md` teaching the recipe (caller-drafts `propose --json` -> `approve` -> `run --harness <cheap> --json [--stream]` -> parse -> branch on `next_action`) + the two-tier economics; `brew install` PRINTS a hint to run it (no auto-write).  Owner: TBD  Est: 2h  verifies: [UC-034]  deps: [E15 T15.8]  acc: `kazi install-skill` writes the SKILL.md to a target dir (injectable in tests); the brew formula caveats the hint; the skill content references only real commands (checked by T16.4).
-- [ ] T16.3 Generic `AGENTS.md` teachability doc: a harness-neutral recipe doc in the repo, droppable into a target repo, for convention-reading harnesses (Cursor rules, etc.).  Owner: TBD  Est: 1h  verifies: [UC-034]  deps: [E15 T15.8]  acc: `AGENTS.md` documents the same recipe + JSON contract; references only real commands.
+- [ ] T16.1 `kazi help --json` + `kazi schema`: emit the command/flag surface and the versioned result schemas (ADR-0023) as JSON, GENERATED from the real command table (not hand-maintained).  Owner: TBD  Est: 1.5h  verifies: [UC-034]  deps: [T15.3]  acc: ExUnit -- `help --json` lists every command/flag; `schema run` returns the documented run-result schema with `schema_version`; both parse.
+- [ ] T16.2 The kazi Claude Code skill + `kazi install-skill` (opt-in): `kazi install-skill` writes `~/.claude/skills/kazi/SKILL.md` teaching the recipe (caller-drafts `propose --json` -> `approve` -> `run --harness <cheap> --json [--stream]` -> parse -> branch on `next_action`) + the two-tier economics; `brew install` PRINTS a hint to run it (no auto-write).  Owner: TBD  Est: 2h  verifies: [UC-034]  deps: [T15.8]  acc: `kazi install-skill` writes the SKILL.md to a target dir (injectable in tests); the brew formula caveats the hint; the skill content references only real commands (checked by T16.4).
+- [ ] T16.3 Generic `AGENTS.md` teachability doc: a harness-neutral recipe doc in the repo, droppable into a target repo, for convention-reading harnesses (Cursor rules, etc.).  Owner: TBD  Est: 1h  verifies: [UC-034]  deps: [T15.8]  acc: `AGENTS.md` documents the same recipe + JSON contract; references only real commands.
 - [ ] T16.4 Skill/AGENTS.md <-> CLI coherence test: assert the skill + `AGENTS.md` reference only commands/flags that `kazi help --json` reports (the drift guard, mirroring T9.9).  Owner: TBD  Est: 1h  verifies: [UC-034, infrastructure]  deps: [T16.1, T16.2, T16.3]  acc: ExUnit/CI -- a command named in the skill but absent from `help --json` fails the check.
-- [ ] T16.5 `kazi mcp` server: expose propose/run/status/approve as self-describing MCP tools (descriptions + schemas) wrapping the JSON CLI, for MCP-native drive (no shelling/parsing).  Owner: TBD  Est: 2.5h  verifies: [UC-034]  deps: [E15 T15.7]  acc: an MCP client lists kazi's tools with descriptions + input/output schemas and can drive propose->approve->run; built on the proven JSON contract.
+- [ ] T16.5 `kazi mcp` server: expose propose/run/status/approve as self-describing MCP tools (descriptions + schemas) wrapping the JSON CLI, for MCP-native drive (no shelling/parsing).  Owner: TBD  Est: 2.5h  verifies: [UC-034]  deps: [T15.7]  acc: an MCP client lists kazi's tools with descriptions + input/output schemas and can drive propose->approve->run; built on the proven JSON contract.
 - [ ] T16.6 LIVE: Claude Code drives kazi via the installed skill: install the skill, then in a real Claude Code session drive a fixture goal end to end (propose -> approve -> run); record evidence.  Owner: TBD  Est: 1.5h  verifies: [UC-034]  deps: [T16.2]  acc: observed evidence that a Claude Code user who ran `kazi install-skill` can drive kazi without further instruction; honest result.
 
 ### E17 -- Adoption: README/docs/website lead with the agent-driven workflow (P2, ADR-0023/0024)
@@ -280,284 +211,146 @@ kazi keeps it honest objectively) as the differentiator, to grow GitHub stars an
 adoption. The goal-file/`kazi run` reference stays, below the agent on-ramp. Mixed
 content + engineering; coherence-checked (T9.9).
 
-- [ ] T17.1 README reframe (content): lead with the agent-driven workflow + `kazi install-skill` + the two-tier economics; keep install/quickstart/harness-config/goal-file below as the reference. No invented features; coherent with the site.  Owner: TBD  Est: 1.5h  verifies: [UC-035]  delivers: [a README that leads with the claude->kazi->cheap-harness on-ramp]  deps: [E16 T16.2]  acc: a newcomer sees the agent on-ramp first; every command shown is real; canonical strings unchanged or updated in lockstep with the site.
-- [ ] T17.2 Website: a "Use kazi with Claude Code" section/page (the on-ramp + the two-tier story), on-brand; update `site/src/canonical.mjs` + the coherence check in lockstep.  Owner: TBD  Est: 2h  verifies: [UC-035]  delivers: [a website section on the agent-driven workflow]  deps: [E16 T16.2]  acc: the page renders the on-ramp + two-tier story; README<->site coherence (T9.9) stays green; deployed live + verified at https://kazi.sire.run.
+- [ ] T17.1 README reframe (content): lead with the agent-driven workflow + `kazi install-skill` + the two-tier economics; keep install/quickstart/harness-config/goal-file below as the reference. No invented features; coherent with the site.  Owner: TBD  Est: 1.5h  verifies: [UC-035]  delivers: [a README that leads with the claude->kazi->cheap-harness on-ramp]  deps: [T16.2]  acc: a newcomer sees the agent on-ramp first; every command shown is real; canonical strings unchanged or updated in lockstep with the site.
+- [ ] T17.2 Website: a "Use kazi with Claude Code" section/page (the on-ramp + the two-tier story), on-brand; update `site/src/canonical.mjs` + the coherence check in lockstep.  Owner: TBD  Est: 2h  verifies: [UC-035]  delivers: [a website section on the agent-driven workflow]  deps: [T16.2]  acc: the page renders the on-ramp + two-tier story; README<->site coherence (T9.9) stays green; deployed live + verified at https://kazi.sire.run.
 - [ ] T17.3 docs/concept positioning: record the 3-layer stack (orchestrator -> kazi -> cheap harness; kazi friendly in both directions, ADR-0023) as the canonical positioning.  Owner: TBD  Est: 1h  verifies: [UC-035]  delivers: [updated concept positioning]  deps: []  acc: `docs/concept.md` describes the 3-layer stack without contradicting ADR-0001 (kazi is still the outer loop for the harness, AND a tool for the orchestrator).
 
 ### Waves
 
-E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; E9 (website)
-is LIVE at https://kazi.sire.run with the auto-release pipeline active (only T9.5
-Playwright + T9.6 perf/a11y polish remain). **E11 (interactive `propose`) is
-DONE and shipped (v0.3.0); E12 (hierarchical predicate grouping) is the primary
-open feature work.**
+Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
+the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 
+- **Wave E9 (polish, parallel):** T9.5 (Playwright smoke), T9.6 (perf/a11y). Independent of everything else.
 - **Wave E12-1 (model + guard):** T12.1 (declared `[[group]]` taxonomy) -> T12.2 (`Predicate.group` + reference/cycle validation -- the drift guard). Pure loader work.
 - **Wave E12-2 (tree + budgets):** T12.3 (tree + per-group rollup), T12.4 (derived per-group budgets) -- after the model.
-- **Wave E12-3 (export):** T12.6 (Obsidian/Mermaid exporter), T12.7 (lint near-duplicate names). (T12.5 withdrawn; the importer moved to E13.)
-- **Wave E13-1 (import intent, ADR-0021):** T13.1 (OpenAPI), T13.2 (gherkin), T13.3 (prose via harness) -- emit grouped predicates (depends on E12 model).
+- **Wave E12-3 (export):** T12.6 (Obsidian/Mermaid exporter), T12.7 (lint near-duplicate names).
+- **Wave E13-1 (import intent):** T13.1 (OpenAPI), T13.2 (gherkin), T13.3 (prose via harness) -- emit grouped predicates (depends on the E12 model: T12.1/T12.2).
 - **Wave E13-2 (dead code):** T13.4 (surface scanner) -> T13.5 (coverage meta-predicate).
 - **Wave E13-3 (dogfood):** T13.6 (sirerun via the general path; note the live-predicate escalation).
 - **Wave E14-1 (harness onboarding):** T14.1 (conformance test helper) -> then T14.2 (Codex), T14.3 (Antigravity), T14.4 (claw-code) in PARALLEL (independent profiles).
 - **Wave E14-2 (wire + document):** T14.5 (CLI + coherence + docs) -> T14.6 (contributor recipe).
 - **Wave E15-1 (JSON surface):** T15.1 (JSON framework + non-interactive guarantee) -> then T15.2 (propose), T15.3 (run result contract), T15.5 (status), T15.6 (authoring state machine) in PARALLEL.
-- **Wave E15-2 (stream + conform):** T15.4 (JSONL streaming) -> T15.7 (kazi self-conformance to ADR-0022).
+- **Wave E15-2 (stream + conform):** T15.4 (JSONL streaming) -> T15.7 (kazi self-conformance; needs T14.1).
 - **Wave E15-3 (recipe + dogfood):** T15.8 (orchestrator recipe + schemas) -> T15.9 (live claude->kazi->claw/Qwen nested loop; honest result).
 - **Wave E16-1 (self-description):** T16.1 (`help --json`/`schema`) -> T16.2 (skill + `install-skill`), T16.3 (`AGENTS.md`) -> T16.4 (coherence guard).
 - **Wave E16-2 (MCP + live):** T16.5 (`kazi mcp`), T16.6 (Claude Code drives kazi via the skill, live).
 - **Wave E17 (adoption docs):** T17.1 (README reframe), T17.2 (website section + coherence + deploy), T17.3 (concept positioning) -- after the skill (T16.2) exists to point at.
 
-- **Wave E11-1 (pure core):** T11.1 (schema + `fold_answers`) -> T11.2 (deterministic gap floor). Pure, fully unit-tested, no I/O.
-- **Wave E11-2 (seam + wiring):** T11.3 (harness-drafted candidates on the stub seam), T11.4 (two-phase `propose/2`), T11.5 (inline rationale) -- after the core.
-- **Wave E11-3 (CLI + flags):** T11.6 (interactive rendering + `--strict`/`--adr`/`--yes`), T11.7 (`--adr` writer), T11.8 (refine loop via `edit/3`).
-- **Wave E11-4 (verify live):** T11.9 (docs + real-TTY verification, transcript in `docs/devlog.md`).
-
-- ~~**E6 / E8**~~ -- DONE except T6.7 (tap auto-bump, operator secret) -- see the WBS.
-- **Wave E9-1 (foundation):** T9.1 (scaffold Astro+Tailwind in `site/`) -> then T9.3 (deploy workflow) and T9.2 (landing content) can proceed in parallel.
-- **Wave E9-2 (build out):** T9.2 (landing sections), T9.5 (Playwright), T9.6 (polish/perf/a11y) -- parallel after T9.1.
-- **Wave E9-3 (coherence):** T9.8 (enhance the README to be coherent with the site -- shared canonical strings, website link, dev-companion framing) -> T9.9 (CI drift-check so README + site can't diverge). Pairs with T9.2.
-- **Wave E9-4 (go live):** T9.4 (custom domain + DNS -- **operator adds the CNAME record**) -> T9.7 (verify live at `kazi.sire.run`).
-
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
 |----|------|--------|------------|------------|
-| R-E6-1 | Burrito host binary cannot be linked on the dev machine (Zig 0.15.2, pinned by Burrito 1.5.0, fails to link against macOS 26 / Xcode 26; Zig 0.16 links but is API-incompatible with Burrito 1.5.0's `build.zig`). | Med | High (observed) | The build is CI-driven by design (ADR-0017): T6.3 builds on `macos-15` + `ubuntu-latest`. Do NOT attempt a local build on this macOS-26 host. |
-| R-E6-2 | T6.4 needs a second repo (`kazi-org/homebrew-tap`) and a published Release. | Low | Med | Repo creation is agent-doable (session has `kazi-org` admin via `gh`); no longer human-gated. Sequence T6.4 after T6.3 produces real Release artifacts. |
-| R-E6-3 | The shipped binary still requires the user's coding agent (`claude`/`opencode`/...) on PATH at runtime (kazi drives a harness by design, ADR-0001). | Low | High (inherent) | Documented in T6.5; packaging does not solve it. |
-| R-E6-4 | `erlef/setup-beam` / Zig 0.15.2 / Burrito setup is fragile on the macOS-15 runner (BEAM install, xz, the Zig link). | Med | Med | Validate T6.3 on a throwaway `v*-test` tag and iterate on the runner (the only place it can be proven, R-E6-1); pin exact Elixir/OTP/Zig versions; `fail-fast: false` so macOS and Linux jobs report independently. |
-| R-E6-5 | The cross-repo formula push needs auth the default `GITHUB_TOKEN` lacks. | Med | High (inherent) | A fine-grained `HOMEBREW_TAP_TOKEN` PAT scoped to `contents:write` on `homebrew-tap` only (ADR-0017); created + stored as a repo secret as part of T6.7. Rotate like any deploy credential. |
-| R-E6-6 | release-please computes the wrong version from a mistyped commit. | Low | Med | Conventional Commits are already mandated (operating procedure); release-please's release PR is the human review gate before a tag is cut. |
-| R-E6-7 | release-please cannot open its release PR: `kazi-org` disables "Allow GitHub Actions to create and approve pull requests" org-wide (verified -- the repo + org API return `can_approve_pull_request_reviews: false`, and the repo PUT is rejected with "the organization does not allow..."). | High (blocks auto-release) | High (current state) | Flipping an org-wide security setting is the operator's decision, not the session's. Two unblock paths: enable that org/repo setting, OR pass a fine-grained PAT as release-please's `token:`. The workflow is gated `if: vars.RELEASE_AUTOMATION == 'true'` so it does not fail red while disabled. |
-| R-E9-1 | `kazi.sire.run` needs a DNS `CNAME` record at the `sire.run` provider, which the session does not control. | Med | High (inherent) | T9.4 is `kind: any` (operator). Until the record exists, the site is still LIVE at the default `kazi-org.github.io/kazi` URL (T9.3) -- the custom domain is the last, non-blocking step. The CNAME file + repo Pages setting are agent-doable; only the DNS record is operator-gated. |
-| R-E9-2 | Website copy drifts from what kazi actually does (claims a feature it lacks). | Med | Med | Copy is DERIVED from `README.md`/`docs/concept.md` (T9.2 acc forbids invented features); the site lives in the same repo so a docs change and a site change land together. The install command on the page is the real `brew install` string, smoke-tested by T9.5. |
-| R-E9-3 | GitHub Pages must be enabled with source = "GitHub Actions" for the deploy workflow to publish. | Low | Med | T9.3 enables it (repo Settings -> Pages); agent-doable via `gh api` or the UI. The first deploy run surfaces this immediately if missing. |
-| R-E11-1 | Interactive stdin in the CLI is hard to unit-test and risks blocking. | Med | Med | The clarify CORE takes an injected `:ask` callback, so it is tested with a function (no real TTY); only the thin rendering layer (T11.6) needs a scripted-stdin integration test. |
-| R-E11-2 | Harness-drafted candidate questions are non-deterministic and may be malformed. | Med | Med | The deterministic floor (T11.2) is AUTHORITATIVE; harness questions are merged on top and fail-soft -- a malformed/empty harness response degrades to the floor alone (T11.3). |
-| R-E11-3 | A non-interactive/piped `propose` must never block waiting on stdin. | High | Med | Explicit `--yes`/no-TTY path drafts best-effort without asking; `--strict` fails loudly instead. Both get dedicated tests (T11.6). |
+| R-E12-1 | Free-text grouping fragments the hierarchy on inconsistent spelling. | Med | Med | The taxonomy is DECLARED and referenced by id, validated at load (T12.1/T12.2); slug normalization + a `kazi lint` near-duplicate-name warning (T12.7) are the second net. ADR-0020. |
+| R-E13-1 | The prose->predicate path (T13.3) is non-deterministic (an LLM extracts intent). | Med | High (inherent) | Route through the existing HUMAN-REVIEWED authoring/clarify flow (nothing accepted without approval); the deterministic spec path (OpenAPI/gherkin) is the trustworthy backbone. ADR-0021. |
+| R-E13-2 | The surface scanner (T13.4) is language-specific and blind to reflection/string-dispatch, risking false dead-code flags. | Med | High (inherent) | Approximate-by-design + an explicit allow-list + WARN-don't-auto-delete (T13.5); documented in `docs/lore.md`. ADR-0021. |
+| R-E14-1 | Antigravity `agy -p` SILENTLY drops stdout under a non-TTY subprocess (issue #76) -- exactly kazi's mode. | High | High (observed in research) | T14.3 uses the `--prompt-file` + `--output json` (read a file) workaround, NOT bare `-p`; pin a version; record the landmine in `docs/lore.md`. ADR-0022. |
+| R-E14-2 | claw-code emits no structured output ("museum exhibit"), so cost/parse fidelity is degraded. | Low | High (inherent) | T14.4 is BEST-EFFORT only (raw-stdout parse, no invented cost), explicitly labelled demo-grade. ADR-0022. |
+| R-E15-1 | The `--json` result schema is a compatibility surface an orchestrator pins against; a breaking change silently breaks callers. | Med | Med | Version it (`schema_version`, T15.3); the orchestrator recipe documents pinning; a self-conformance test (T15.7) guards regressions. ADR-0023. |
+| R-E15/16-1 | End-to-end value needs a capable, FAST-ENOUGH inner harness; claw->local Qwen is best-effort/slow (T8.11). | Med | High (known) | The JSON contract makes kazi drivable regardless; convergence speed is the inner harness's problem. T15.9/T16.6 report honestly (wiring proof vs fast convergence). |
+| R-E16-1 | The shipped skill/`AGENTS.md` drift from the real CLI. | Med | Med | `help --json` is GENERATED from the command table (T16.1); a coherence test (T16.4) fails CI when the skill names a command `help --json` does not report. ADR-0024. |
+| R-E17-1 | Website/README copy drifts from what kazi actually does. | Med | Med | Copy DERIVES from README/concept; the README<->site canonical-string drift-check (T9.9) fails CI on divergence; T17.1/T17.2 update both in lockstep. |
 
 ## Operating Procedure
 
 Definition of done (all must hold): for code changes, ExUnit tests written and
 green; `mix format --check-formatted` clean; `mix compile --warnings-as-errors`
 clean; PR merged to `main` via **rebase** (not squash, not a merge commit) with CI
-green. For CI/release workflows, the workflow is proven GREEN on a real trigger
-(a test tag / a dry-run release), not just authored. For any user-facing surface,
-verified live and reported honestly. Make many small focused commits; never commit
-files from different directories in one commit.
+green. For any user-facing surface (the website, the brew packages), verified live
+and reported honestly. Many small focused commits; **never commit files from
+different directories in one commit**.
 
 Execution model: work the plan with `/apply --pool` (atomic git-ref claims at
 `refs/claims/*` via the global `~/.claude/skills/claim/scripts/claim.sh`). The WBS
-above is the single checkable source of truth.
+above is the single checkable source of truth; toggle `[ ]` to `[x]` as tasks land.
 
-House rules for E6: the binary build is CI-only (R-E6-1) -- never claim a release
-works without a green CI run that produced the assets. Validate workflows on a
-throwaway `v*-test` tag before wiring them into the release-please flow. Keep the
-`HOMEBREW_TAP_TOKEN` minimal-scope (ADR-0017). Conventional Commits are
-load-bearing for versioning -- type every commit correctly.
+Releases are AUTOMATIC: merging Conventional Commits to `main` lets release-please
+open a release PR; merging that PR cuts a `vX.Y.Z` tag -> the Burrito build + tap
+auto-bump run hands-off (validated through v0.3.0). Type every commit correctly --
+Conventional Commits are load-bearing for versioning.
+
+**Concurrent sessions share this working tree.** Before a full-file rewrite (e.g.
+`docs/plan.md`), `/claim R-plan-md`, re-read, write, release. When committing,
+stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP is
+never swept into your commit.
 
 ## Progress Log
 
+### 2026-06-23 -- Change Summary (close-out trim: plan ready for a fresh `/apply` session)
+- **Trimmed the completed epics** out of the WBS: E0-E8, E11, and the E9 core
+  (T9.1-T9.4, T9.7-T9.9) are DONE on `main` and removed -- their knowledge lives in
+  ADRs `0001`..`0024`, `docs/concept.md`, and `docs/devlog.md`. Only the OPEN work
+  remains: E9 leftovers (T9.5/T9.6), E12, E13, E14, E15, E16, E17.
+- **Rewrote Context, the Use Case Summary, the Risk Register, the Waves, and the
+  Hand-off Notes** to the true current state: `main` at **899 tests**, latest
+  release **v0.3.0** (brew, live). The stale "E6 is the only epic left" / "853
+  tests" / "T8.11 in progress" notes are gone.
+- **Risk Register** now carries only OPEN risks (E12-E17); the done R-E6-*/R-E9-1/
+  R-E11-* risks were dropped.
+- No new ADR; no code change. Build the open epics with `/apply --pool` -- the
+  adoption spine is **E15 -> E16 -> E17**.
+
 ### 2026-06-23 -- Change Summary (E16 self-teaching + E17 adoption; propose two drive modes)
-- **Refined ADR-0023 + T15.2** to resolve the "claude -> kazi -> claude" confusion:
-  `kazi propose` has TWO drive modes -- **kazi-drafts** (kazi spawns a model) and
-  **caller-drafts** (the orchestrator supplies predicates; kazi applies the
-  deterministic floor + persists + gates, NO inner model). kazi's value is the
-  floor + gate, not the LLM drafting, so a capable orchestrator pays for reasoning
-  ONCE. Still the single authoring path (`Kazi.Authoring`).
-- **Added E16 (T16.1-T16.6)** -- kazi self-teaching: `kazi help --json`/`schema`,
-  an opt-in Claude Code skill (`kazi install-skill`), a generic `AGENTS.md`, a
-  skill<->CLI coherence guard, a `kazi mcp` server, and a live "Claude Code drives
-  kazi via the skill" dogfood. **ADR created:** `docs/adr/0024-kazi-self-teaching-
-  to-harnesses.md` (skill opt-in/consent-first; machine-readable self-description;
-  MCP as the richest tier).
-- **Added E17 (T17.1-T17.3)** -- adoption: README/website/concept lead with the
-  agent-driven (claude->kazi->cheap-harness) workflow + the two-tier economics, to
-  grow GitHub stars/adoption. **Use cases:** UC-034, UC-035.
+- **Refined ADR-0023 + T15.2**: `kazi propose` has TWO drive modes -- kazi-drafts
+  (kazi spawns a model) and caller-drafts (the orchestrator supplies predicates;
+  kazi applies the floor + persists + gates, NO inner model). Resolves the
+  "claude -> kazi -> claude" redundancy: kazi's value is the floor + gate, not the
+  drafting LLM, so a capable orchestrator pays for reasoning ONCE.
+- **ADR-0024** + **E16** (kazi self-teaching: `install-skill`, `help --json`/
+  `schema`, `AGENTS.md`, `kazi mcp`) and **E17** (adoption docs/website). UC-034/035.
 
-### 2026-06-23 -- Change Summary (add E15: harness-friendly, agent-drivable kazi)
-- **Added E15 (T15.1-T15.9)** -- make kazi a CLI an orchestrating agent (claude
-  code) can drive end to end over JSON: a `--json` mode on every command +
-  non-interactive guarantees + a versioned `kazi run` result contract (status +
-  predicate vector + next_action) + JSONL streaming + a new `status --json` +
-  a self-conformance test (kazi meets the ADR-0022 bar it imposes) + a live
-  claude->kazi->claw/Qwen nested-loop dogfood. The two-tier economics (strong
-  model authors predicates, cheap model runs the loop) live in the ORCHESTRATOR;
-  kazi stays a pure tool.
-- **ADR created:** `docs/adr/0023-harness-friendly-agent-drivable-cli.md` --
-  kazi self-conforms to ADR-0022; positions kazi as the MIDDLE of a 3-layer stack
-  (orchestrator above, cheap harness below); the orchestrator owns the two-tier
-  policy; **`kazi propose` is the single sanctioned agent authoring path** (no
-  hand-authoring), so the clarify floor + approve gate are never bypassed; MCP
-  server deferred. Extends ADR-0001/0011/0016/0019/0022.
-- **Use case added:** UC-033.
+### 2026-06-23 -- Change Summary (E15 agent-drivable; E13/E14 added; E12 grouping)
+- **ADR-0023 + E15** -- harness-friendly, agent-drivable kazi (`--json` + a
+  versioned result contract; kazi self-conforms to ADR-0022). UC-033.
+- **ADR-0022 + E14** -- onboard Codex/Antigravity/claw-code as profiles per a
+  conformance contract (non-TTY subprocess-safe, structured stdout). UC-032.
+- **ADR-0021 + E13** -- intended-vs-actual reconciliation: import intent
+  (OpenAPI/gherkin/prose) + dead-code coverage meta-predicate; corrected an
+  ADR-0015 contradiction (the bespoke capabilities importer was withdrawn). UC-025
+  (un-deferred), UC-031.
+- **ADR-0020 + E12** -- hierarchical predicate grouping via a declared taxonomy;
+  per-group budgets are a DERIVED rollup. UC-030. Motivated by the sirerun dogfood
+  (`docs/devlog.md`).
 
-### 2026-06-23 -- Change Summary (add E14: onboard Codex / Antigravity / claw-code harnesses)
-- **Added E14 (T14.1-T14.6)** -- onboard Codex CLI, Google Antigravity CLI (`agy`),
-  and claw-code as harness PROFILES (ADR-0016 already makes a harness data, not a
-  module), each meeting the conformance contract of the new ADR-0022. A reusable
-  conformance test helper (T14.1) + golden transcripts + per-harness `:<id>_live`
-  smokes; Codex first (fully conformant, JSONL like opencode), Antigravity with the
-  non-TTY-stdout workaround, claw-code best-effort (no JSON). T14.5 keeps the
-  README + `site/src/canonical.mjs` harness list coherent (T9.9 drift-check); T14.6
-  is the "add your own harness" recipe.
-- **ADR created:** `docs/adr/0022-harness-onboarding-conformance.md` -- the profile
-  conformance contract (non-interactive, structured stdout, CORRECT under a non-TTY
-  subprocess), the add-a-harness recipe, and tiered support (Codex fully / Antigravity
-  with workaround / claw-code best-effort). Extends ADR-0016. Research findings (the
-  three tools' CLI contracts + the Antigravity #76 non-TTY bug) in `docs/devlog.md`.
-- **Use case added:** UC-032.
+### 2026-06-23 -- Change Summary (E11 shipped v0.3.0)
+- **E11 SHIPPED.** Interactive `propose` (ADR-0019) merged; release-please cut
+  **v0.3.0** and the auto-release chain built + tap-bumped it; verified live:
+  `brew upgrade` -> `kazi 0.3.0`. Suite 855 -> 899.
 
-### 2026-06-23 -- Change Summary (correct the import direction: ADR-0021 + E13)
-- **Corrected an ADR-0015 contradiction.** ADR-0020's draft proposed a bespoke
-  `kazi init --from-capabilities` importer -- exactly the "audience of one" input
-  ADR-0015 withdrew. T12.5 is WITHDRAWN; the importer is re-scoped GENERAL.
-- **ADR created:** `docs/adr/0021-intended-vs-actual-reconciliation.md`. Framing:
-  "correct software, no dead code" = a two-way diff between intended (I) and actual
-  (A). Import I from STANDARD specs (OpenAPI/gherkin, deterministic) + prose docs
-  via the harness (human-reviewed); detect dead code (`A \ I`) via a
-  surface-coverage META-PREDICATE (a scanner inventories the public surface; a
-  predicate asserts each element is owned by an intended predicate). `kazi init`
-  stays the small CODE-side bootstrap (ADR-0013).
-- **Added E13 (T13.1-T13.6)** -- OpenAPI/gherkin/prose importers, a surface-scanner
-  provider, the coverage meta-predicate, and the sirerun dogfood via the general
-  path. **E12 re-scoped** to just grouping + export (T12.5/T12.8 moved/withdrawn).
-- **Use cases:** UC-025 un-deferred (now E13); UC-031 added (dead-code coverage).
+## Hand-off Notes (cold start for a new session running `/apply --pool`)
 
-### 2026-06-23 -- Change Summary (E11 shipped v0.3.0; add E12: hierarchical predicate grouping)
-- **E11 SHIPPED.** Interactive `propose` (PR #119) merged; release-please cut
-  **v0.3.0** (PR #120) and the auto-release chain built + tap-bumped it; verified
-  live: `brew upgrade` -> `kazi 0.3.0`.
-- **sirerun dogfood (one-off).** Adjudicated sire's `capabilities.json` (317 caps /
-  9 pillars) at the code level; 307 evidence-present, ~10 partial/drift; the real
-  production gaps are 48 FLAG_GATED + 55 BACKEND_ONLY + 178 manifest `with_drift`
-  (needs live predicates). Findings in `docs/devlog.md`; Obsidian vault at
-  `sirerun/tmp/sire-state-vault/`.
-- **Added E12 (T12.1-T12.8)** -- hierarchical predicate grouping via a DECLARED
-  group taxonomy (referenced by id, validated at load -- the guard against text
-  drift), per-group budgets (per-pillar reconciliation without sub-goals), a
-  `kazi init --from-capabilities` importer (resurrects UC-025), and an Obsidian/
-  Mermaid exporter. Walking skeleton: model+guard -> tree+budgets -> import+export
-  -> re-run the sirerun dogfood through kazi.
-- **ADR created:** `docs/adr/0020-hierarchical-predicate-grouping.md` -- declare
-  the taxonomy once, reference by id, validate at parse time; per-group budgets
-  ride ADR-0006 partitioning; importer + exporter; live-predicate escalation noted
-  as future work. **Use case added:** UC-030.
-
-### 2026-06-23 -- Change Summary (E11 BUILT: interactive `propose` shipped on a feature branch)
-- **E11 (T11.1-T11.9) implemented, tested, and verified** on `feat/e11-interactive-propose`
-  (suite 855 -> 899, +44 tests; `mix format`/`--warnings-as-errors` clean). Pure clarify
-  core + deterministic gap floor (`Kazi.Authoring.Clarify`), harness-drafted candidate
-  questions on the existing stub seam, two-phase `propose/2` with answers folded into the
-  draft, inline rationale on `goal.metadata`, the `--adr` ADR-lite writer
-  (`Kazi.Authoring.RationaleAdr`), and CLI `--yes`/`--strict`/`--adr` + a refine loop.
-- **Live-verified** (real app + SQLite): the `--strict` non-interactive refusal, and the
-  interactive clarify phase (questions rendered, a stdin answer folded into a `prod_log`
-  predicate, rationale printed, proposal persisted). One honest caveat -- the `:io.rows()`
-  TTY autodetect could not be exercised in this dev env (mix-run noshell / escript no-NIF /
-  Burrito can't build on macOS-26, R-E6-1); the rendering it gates is pure + unit-tested.
-  Evidence in `docs/devlog.md`.
-- **T11.8 deviation**: the refine loop upserts the same `proposal_ref` rather than calling
-  `edit/3` literally -- equivalent end-state, fewer moving parts.
-
-### 2026-06-23 -- Change Summary (add E11: interactive clarify phase for `propose`)
-- **Added E11 (T11.1-T11.9)** -- an interactive clarify phase for `kazi propose`:
-  it asks 2-4 high-leverage clarifying questions BEFORE drafting so acceptance
-  predicates (especially a live-verification predicate) are precise, drafts the
-  goal + an inline rationale, and lets the operator refine before it runs. Built as
-  a walking skeleton: pure clarify core + deterministic gap floor first (E11-1),
-  then harness-drafted candidate questions on the existing stub seam + two-phase
-  `propose/2` wiring + inline rationale (E11-2), then CLI interactive rendering +
-  `--strict`/`--adr`/`--yes` flags + the refine loop (E11-3), then live-TTY
-  verification (E11-4).
-- **ADR created:** `docs/adr/0019-interactive-clarify-phase-for-propose.md` --
-  records the three operator decisions (HYBRID question generation = harness
-  candidates + a deterministic unit-tested floor; CLI-TTY-first surface with a
-  non-interactive `--yes`/no-TTY fallback and a `--strict` fail-loud; inline
-  rationale by default + an optional `--adr` doc). Extends ADR-0011 (the Authoring
-  write path; the clarify phase sits before the existing `proposed` state, state
-  machine unchanged) and ADR-0002 (predicates make "done" machine-checkable).
-  Telegram/dashboard clarify surfaces are deferred; the core is surface-agnostic.
-- **Use case added:** UC-029 (interactive propose). Manifest updated.
-- No code changed yet -- this is the plan + ADR for E11; build with `/apply --pool`.
-
-### 2026-06-23 -- Change Summary (E9: README <-> website coherence)
-- **Added T9.8 + T9.9** to E9: enhance `README.md` so it and the website are one
-  coherent story (T9.8 -- shared canonical strings verbatim, a prominent website
-  link in the header, README reframed as the developer companion to the marketing
-  site, no contradictions), and a CI drift-check (T9.9) that fails when the shared
-  canonical strings (install command, positioning one-liner, harness list) diverge
-  between `README.md` and the site content. T9.7 narrowed to live-verify only (the
-  README link moved to T9.8). New wave E9-3 (coherence) before E9-4 (go live).
-- **ADR-0018 updated** with a "README <-> website coherence" section: README +
-  concept are the canonical source the site derives from; shared strings are
-  verbatim; the surfaces are complementary (site = newcomer pitch, README = full
-  reference incl. contributor build); a drift-check guards them. No new ADR.
-- Same use case (UC-028) -- coherence is part of "explain kazi + drive to install".
-
-### 2026-06-23 -- Change Summary (add E9: public website at kazi.sire.run)
-- **Added E9 (T9.1-T9.7)** -- a public Astro + Tailwind landing site on GitHub
-  Pages at `kazi.sire.run`, explaining kazi and driving to `brew install` + a first
-  goal. Mixed engineering + content; on-brand with the Electric Blue logo. Copy is
-  derived from `README.md`/`docs/concept.md` (no invented features).
-- **ADR created:** `docs/adr/0018-website-stack-hosting-domain.md` -- chose Astro +
-  Tailwind, site in `site/` of this repo, GitHub Pages via Actions, and the domain
-  `kazi.sire.run`. The domain recommendation (the operator's question): YES for v1
-  -- free + already owned (Sire Run owns `sire.run`), the simplest GitHub Pages
-  setup (one DNS CNAME vs apex A/AAAA), honest `<product>.<company>` branding, and
-  fully reversible if kazi later wants a standalone domain. Trade-off noted: a
-  subdomain frames kazi as a Sire Run product rather than an independent project.
-- **Use case added:** UC-028 (the website). Manifest updated.
-- The only operator-gated E9 step is one DNS `CNAME` record (R-E9-1); everything
-  else (scaffold, deploy workflow, content, tests, Pages enablement) is agent-doable.
-- E6/E8 are otherwise done (only T6.7 remains, gated on the operator).
-
-### 2026-06-22 -- Change Summary (auto-release the brew packages: E6 -> ADR-0017)
-- **Reframed E6 as a fully-automated release pipeline** (ADR-0017): release-please
-  versioning (T6.6) + the tag-triggered Burrito build workflow (T6.3) + a tap
-  auto-bump workflow (T6.7) so merging Conventional Commits ships brew packages with
-  no manual tag/checksum/formula edits. T6.2 folded into T6.3's first green run;
-  T6.4 (tap repo) reclassified agent-doable; T6.5 docs updated to cover the flow.
-- **ADR created:** `docs/adr/0017-automated-brew-release-pipeline.md` -- the
-  release-please -> CI build -> tap auto-bump design, the `HOMEBREW_TAP_TOKEN`
-  cross-repo secret, and why the release PR stays a human gate.
-- **A WIP `release.yml`** (T6.3) is committed this session; making it green on a
-  test tag is the next step (CI iteration expected on BEAM/Zig/Burrito setup).
-- **Trimmed the completed E8 epic** (T8.1-T8.10, all merged) out of the WBS to a
-  one-line Context record; the full narrative is in `docs/devlog.md` and ADR-0016.
-  Kept T8.11 (the dogfood, in progress).
-
-### 2026-06-22 -- Change Summary (E8 complete; multi-harness shipped)
-- **E8 (generic multi-harness support) merged end to end** (ADR-0016): harness
-  profiles, `Kazi.Harness.CliAdapter`, `Kazi.Harness.resolve/1`, the `:opencode`
-  profile (NDJSON parser), goal-file `[harness]` table, env forwarding, and the
-  Runtime/CLI/authoring/adopt wiring. `kazi run --harness opencode --model <m>`
-  works. The live opencode->DGX smoke is an honest-skip (excluded by default;
-  finding in `docs/devlog.md`). Suite 760 -> 853. UC-026/UC-027 delivered.
-
-## Hand-off Notes (cold start for a new session)
-
-1. **Verify the baseline first:** `mix test` should report 853 passing, 19 excluded;
-   `mix format --check-formatted` and `mix compile --warnings-as-errors` clean.
-2. **E6 is the only epic left, and it is CI-driven.** Do NOT build the Burrito host
-   binary on this macOS-26 box (R-E6-1). The path: get `release.yml` (T6.3) green on
-   a throwaway `v*-test` tag (this proves T6.2 too), add release-please (T6.6), then
-   create `kazi-org/homebrew-tap` (agent-doable -- `kazi-org` admin) + the formula
-   (T6.4) and the auto-bump workflow + `HOMEBREW_TAP_TOKEN` (T6.7), then docs (T6.5).
-   Read ADR-0014 + ADR-0017 before touching the pipeline.
-3. **T8.11 dogfood** (Claude plans, opencode/DGX implements) is in progress this
-   session; record its outcome in `docs/devlog.md`. It is independent of E6.
-4. **Do not relitigate frozen design** -- read `docs/concept.md` and the relevant
-   ADR before touching an area; write a superseding ADR to change a decision.
+1. **Verify the baseline first:** `mix test` should report **899 passing, 19
+   excluded** (`:nats`/`:graphify`/`:opencode_live`); `mix format --check-formatted`
+   and `mix compile --warnings-as-errors` clean. `git pull` `main` before starting.
+2. **What is DONE (do NOT rebuild):** E0-E11 and the E6 release pipeline are
+   shipped; `brew install kazi-org/tap/kazi` is live at **v0.3.0**; the website is
+   live at https://kazi.sire.run. Releases are automatic (merge Conventional Commits
+   -> merge the release PR -> tag + build + tap-bump).
+3. **What is OPEN (this plan):** E9 leftovers (T9.5/T9.6), E12, E13, E14, E15, E16,
+   E17. The **adoption spine is E15 -> E16 -> E17** (JSON contract -> the skill that
+   teaches agents -> the docs/website). **E12 -> E13** and **E14** are independent
+   parallel tracks. Cross-epic deps: T13.1/T13.2 need the E12 model (T12.1/T12.2);
+   T15.7 needs T14.1; T16.* need the E15 JSON contract; T17.* need the skill (T16.2).
+4. **Build order tip for a single pool:** start with **E15-1 + E14-1 + E12-1 + E9**
+   (all dependency-free or near it), then follow the waves. Pure/loader tasks
+   (T12.1-T12.3, T15.1, T14.1) are the safe first claims.
+5. **House rules:** rebase-merge only; many small commits; never commit files from
+   different directories together; **stage only your files** (a sibling session
+   shares this tree). `/claim R-plan-md` before any full plan rewrite. The Burrito
+   host binary CANNOT build on this macOS-26 box (R-E6-1) -- but E6 is done, so this
+   only matters if you touch the release workflow.
+6. **Do not relitigate frozen design** -- read `docs/concept.md` and the relevant
+   ADR (`0001`..`0024`) before touching an area; write a superseding ADR to change a
+   decision. Landmines are in `docs/lore.md`; findings in `docs/devlog.md`.
 
 ## Appendix
 
-- Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0024` (index at `docs/adr/README.md`); the release
-  pipeline is ADR-0014 (distribution) + ADR-0017 (automation); the website is
-  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021; harness onboarding is ADR-0022; agent-drivable kazi is ADR-0023; self-teaching is ADR-0024.
-- Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
-- Use-case manifest: `.claude/scratch/usecases-manifest.json`
-- Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),
-  `lib/kazi/release.ex` (`cli/1`, `burrito_main/0`), `.github/workflows/release.yml`
-  (T6.3, WIP), `.github/workflows/ci.yml` (the test workflow to mirror setup from).
+- Concept and architecture: `docs/concept.md` (frozen source of truth).
+- Decisions: `docs/adr/0001`..`0024` (index at `docs/adr/README.md`). The open epics
+  map to: E12 -> ADR-0020; E13 -> ADR-0021; E14 -> ADR-0016 + ADR-0022; E15 ->
+  ADR-0023; E16 -> ADR-0024; E17 -> ADR-0023/0024.
+- Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`.
+- Use-case manifest: `.claude/scratch/usecases-manifest.json`.
+- Harness layer (for E14/E15): `lib/kazi/harness/` (`profile.ex`, `registry.ex`,
+  `cli_adapter.ex`, `profiles/`); authoring (for E13/E15): `lib/kazi/authoring.ex`
+  + `lib/kazi/authoring/clarify.ex`; goal loader (for E12): `lib/kazi/goal/loader.ex`;
+  CLI (for E15/E16): `lib/kazi/cli.ex`.
