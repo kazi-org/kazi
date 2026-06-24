@@ -31,6 +31,15 @@ defmodule Kazi.PredicateTest do
       p = Predicate.new(:coverage, :coverage, guard?: true)
       assert Predicate.guard?(p)
     end
+
+    test "group defaults to nil (ungrouped, backward-compatible)" do
+      assert Predicate.new(:unit, :tests).group == nil
+    end
+
+    test "accepts an optional declared group id (T12.2)" do
+      p = Predicate.new(:signup, :browser, group: "identity-access")
+      assert p.group == "identity-access"
+    end
   end
 
   test "enforces id and kind keys on direct struct construction" do

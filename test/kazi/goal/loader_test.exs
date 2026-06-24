@@ -579,19 +579,21 @@ defmodule Kazi.Goal.LoaderTest do
       assert Enum.map(goal.groups, & &1.name) == ["Identity & Access", "Sign Up"]
     end
 
-    test "a parent reference is parsed and stored (normalized), not validated" do
-      # T12.1 stores parent verbatim (normalized); referencing an UNDECLARED
-      # parent is NOT an error here — reference validation is T12.2.
+    test "a parent reference is parsed and stored (normalized)" do
+      # The parent is loosely authored ("Identity & Access") and stored
+      # normalized. The parent IS declared, so it passes the T12.2 reference
+      # guard; the undeclared-parent path is covered in the drift-guard block.
       data = %{
         "id" => "g",
         "group" => [
+          %{"id" => "identity-access", "name" => "Identity & Access"},
           %{"id" => "sign-up", "name" => "Sign Up", "parent" => "Identity & Access"}
         ],
         "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
       }
 
       assert {:ok, goal} = Loader.from_map(data)
-      assert [%Group{id: "sign-up", parent: "identity-access"}] = goal.groups
+      assert %Group{id: "sign-up", parent: "identity-access"} = Enum.at(goal.groups, 1)
     end
 
     test "name defaults to the authored id when omitted" do
@@ -735,6 +737,209 @@ defmodule Kazi.Goal.LoaderTest do
       assert Enum.map(goal.groups, & &1.id) == ["identity-access", "sign-up", "billing"]
       assert Enum.find(goal.groups, &(&1.id == "sign-up")).parent == "identity-access"
       assert Enum.find(goal.groups, &(&1.id == "sign-up")).budget == 5
+    end
+  end
+
+  describe "group references — the drift guard (T12.2, ADR-0020)" do
+    test "a predicate referencing a DECLARED group id loads" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
+        "predicate" => [
+          %{"id" => "signup", "provider" => "browser", "group" => "identity-access"}
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{id: "signup", group: "identity-access"}] = goal.predicates
+    end
+
+    test "a predicate group is normalized the same way group ids are" do
+      # The reference is loosely authored ("Identity & Access"); it must resolve
+      # to the canonical declared slug, not fail as unknown.
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
+        "predicate" => [
+          %{"id" => "signup", "provider" => "browser", "group" => "Identity & Access"}
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{group: "identity-access"}] = goal.predicates
+    end
+
+    test "an UNKNOWN group id on a predicate is a load error (the typo guard)" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
+        "predicate" => [
+          %{"id" => "signup", "provider" => "browser", "group" => "identty-access"}
+        ]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "predicate \"signup\" references unknown group"
+      assert reason =~ "identty-access"
+      # The error names the declared ids so the author can spot the typo.
+      assert reason =~ "identity-access"
+    end
+
+    test "a group id referenced with no [[group]] declared at all is a load error" do
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "signup", "provider" => "browser", "group" => "identity-access"}
+        ]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "references unknown group"
+      assert reason =~ "declared: none"
+    end
+
+    test "an undeclared parent on a group is a load error" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "sign-up", "name" => "Sign Up", "parent" => "identity-access"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "group \"sign-up\" references unknown parent"
+      assert reason =~ "identity-access"
+    end
+
+    test "a declared parent (forward-referenced) loads — order is irrelevant" do
+      # The child is declared BEFORE its parent; validation runs once the whole
+      # taxonomy is parsed, so declaration order does not matter.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "sign-up", "name" => "Sign Up", "parent" => "identity-access"},
+          %{"id" => "identity-access", "name" => "Identity & Access"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.find(goal.groups, &(&1.id == "sign-up")).parent == "identity-access"
+    end
+
+    test "a direct parent cycle is a load error" do
+      # a → b → a.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "a", "name" => "A", "parent" => "b"},
+          %{"id" => "b", "name" => "B", "parent" => "a"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "cyclic parent chain"
+    end
+
+    test "a self-parent is a cycle and a load error" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "a", "name" => "A", "parent" => "a"}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "group \"a\" has a cyclic parent chain"
+    end
+
+    test "a longer (3-node) parent cycle is a load error" do
+      # a → b → c → a.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "a", "name" => "A", "parent" => "b"},
+          %{"id" => "b", "name" => "B", "parent" => "c"},
+          %{"id" => "c", "name" => "C", "parent" => "a"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "cyclic parent chain"
+    end
+
+    test "a deep acyclic chain (pillar → domain → capability) loads" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "pillar", "name" => "Pillar"},
+          %{"id" => "domain", "name" => "Domain", "parent" => "pillar"},
+          %{"id" => "capability", "name" => "Capability", "parent" => "domain"}
+        ],
+        "predicate" => [
+          %{"id" => "p", "provider" => "test_runner", "group" => "capability"}
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.map(goal.groups, & &1.parent) == [nil, "pillar", "domain"]
+    end
+
+    test "no group on a predicate (and no [[group]]) is unchanged — back-compat" do
+      # The whole point of the additive field: a goal authored before T12.2 must
+      # load EXACTLY as before — group is nil, no validation perturbs it.
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "p", "provider" => "test_runner"},
+          %{"id" => "q", "provider" => "http_probe", "guard" => true}
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{id: "p", group: nil}] = goal.predicates
+      assert [%Predicate{id: "q", group: nil}] = goal.guards
+    end
+
+    test "an empty-string predicate group is a validation error" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner", "group" => ""}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ ~s(predicate "p" "group" must be a non-empty string)
+    end
+
+    test "a guard predicate may reference a declared group" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "billing", "name" => "Billing"}],
+        "predicate" => [
+          %{"id" => "cov", "provider" => "test_runner", "guard" => true, "group" => "billing"}
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{id: "cov", group: "billing"}] = goal.guards
+    end
+
+    test "a grouped predicate round-trips through serialize_goal/1" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
+        "predicate" => [
+          %{"id" => "signup", "provider" => "browser", "group" => "identity-access"}
+        ]
+      }
+
+      assert {:ok, loaded} = Loader.from_map(data)
+      reloaded_map = Kazi.Authoring.serialize_goal(loaded)
+      assert {:ok, reloaded} = Loader.from_map(reloaded_map)
+      assert reloaded.predicates == loaded.predicates
     end
   end
 end
