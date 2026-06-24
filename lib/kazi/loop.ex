@@ -381,7 +381,11 @@ defmodule Kazi.Loop do
     * `:workspace` — target workspace path threaded to providers / harness /
       actions (default `nil`).
     * `:adapter_opts` — keyword opts forwarded to the harness adapter
-      (default `[]`).
+      (default `[]`). Also carries dispatch-prompt toggles read by the loop:
+      `:orientation_prefix` (T19.4) — when `false`, the T19.1 orientation prefix
+      is NOT prepended to the dispatch prompt (the pre-T19.1, evidence-only body;
+      the benchmark's arm B). Defaults to `true` (prefix on — the T19.1/arm-C
+      default, unchanged).
     * `:live_kinds` — list of predicate kinds treated as *live* (only pass after
       deploy); default `#{inspect(@default_live_kinds)}`.
     * `:standing` — run as a STANDING (continuous/maintenance) reconciler (T3.4a,
@@ -1303,14 +1307,37 @@ defmodule Kazi.Loop do
   # (`Kazi.Context.RepoMapSource`) detects a real graph, else an aider-style repo
   # map. The pack is a pure function of its inputs, so the rendered prefix is
   # byte-identical across iterations whose blast radius is unchanged (T19.2).
+  #
+  # T19.4 no-prefix flag (the benchmark's arm B): the prefix is gated on
+  # `orientation_prefix?/1`, which reads an ADDITIVE `:orientation_prefix` opt
+  # (from `adapter_opts`, defaulting to `true` — the T19.1 default). When set
+  # `false`, NO orientation pack is built or rendered, so the dispatch prompt is
+  # the pre-T19.1 evidence-only body — the exact baseline the multi-iteration
+  # benchmark (T19.4/T19.5) measures arm C (prefix on) against. The flag is the
+  # ONLY behaviour change: with it absent or `true` the path is byte-identical to
+  # before, so every existing T19.1/T19.2/T19.3 contract is unchanged.
   @spec orientation_prefix(Data.t()) :: String.t() | nil
   defp orientation_prefix(%Data{workspace: workspace}) when not is_binary(workspace), do: nil
 
-  defp orientation_prefix(%Data{workspace: workspace, adapter_opts: adapter_opts} = data) do
+  defp orientation_prefix(%Data{adapter_opts: adapter_opts} = data) do
+    if orientation_prefix?(adapter_opts), do: build_orientation_prefix(data), else: nil
+  end
+
+  @spec build_orientation_prefix(Data.t()) :: String.t() | nil
+  defp build_orientation_prefix(%Data{workspace: workspace, adapter_opts: adapter_opts} = data) do
     pack =
       Context.orientation_pack(failing_slice(data), workspace, orientation_opts(adapter_opts))
 
     if empty_pack?(pack), do: nil, else: Context.render(pack)
+  end
+
+  # The additive `:orientation_prefix` toggle (T19.4). DEFAULTS to `true` so the
+  # T19.1 orientation prefix is on unless an arm explicitly disables it (arm B of
+  # the benchmark sets `orientation_prefix: false`). Only an explicit `false`
+  # disables it; any other value (including absent) keeps the prefix on.
+  @spec orientation_prefix?(keyword()) :: boolean()
+  defp orientation_prefix?(adapter_opts) do
+    Keyword.get(adapter_opts, :orientation_prefix, true) != false
   end
 
   # A pack with no impacted files, symbols, or test sources carries no orientation —
