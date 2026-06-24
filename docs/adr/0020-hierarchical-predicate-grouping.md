@@ -45,8 +45,15 @@ time -- so text drift cannot silently fragment the tree.
    - `parent` -- an optional parent group id; the parent chain reconstructs the
      tree to arbitrary depth (pillar -> domain -> capability) without nesting in
      the file.
-   - `budget` -- an optional per-group budget (iterations / cost), enabling
-     per-group reconciliation.
+   - `budget` -- an optional **cap** (iterations / cost). A group's effective
+     budget is DERIVED, not stored: it is the SUM of its descendants' budgets, so
+     a parent total is never hand-maintained and can never drift from its
+     children. Declare budgets only where the work lives (leaves); a `budget`
+     declared on a non-leaf group acts as a ceiling that can only TIGHTEN the
+     rollup (`effective = min(cap, sum-of-descendants)`), never inflate it. So a
+     parent budget is either absent (= the sum) or a deliberate cap -- nothing to
+     keep in sync, the same "derive what you can, store only the irreducible"
+     principle as the id-referenced taxonomy itself.
 
 2. **Predicates reference a group by id.** `Kazi.Predicate` gains an optional
    `group :: String.t() | nil` -- a declared group id, NOT a free-text path. Nil =
@@ -61,11 +68,16 @@ time -- so text drift cannot silently fragment the tree.
    A separate `kazi lint` fuzzy-warns on near-duplicate group NAMES as a second
    net (advisory, not a hard error).
 
-4. **Per-group budgets/reconciliation ride on existing partitioning.** A group is
-   a partition key. The loop can scope a budget and convergence to a group's
-   predicates (the graph partitioning of ADR-0006), and report per-group status.
-   This delivers the operator's "per-pillar budgets/reconciliation" WITHOUT a
-   separate `Goal` per pillar -- confirming the operator's hunch. Composable
+4. **Per-group budgets/reconciliation ride on existing partitioning, with DERIVED
+   budgets.** A group is a partition key. The loop scopes convergence to a group's
+   predicate partition (the graph partitioning of ADR-0006) and reports per-group
+   status. A group's budget is the SUM of its descendants' budgets (derived, not
+   stored -- see decision 1), tightened by an explicit cap where one is declared;
+   so per-pillar budgets aggregate automatically and a parent total never needs
+   maintaining. This delivers the operator's "per-pillar budgets/reconciliation"
+   WITHOUT a separate `Goal` per pillar -- confirming the operator's hunch (both
+   that grouping suffices, and that the budget should be a calculated rollup).
+   Composable
    sub-goals (a `Goal` per pillar, ADR-0011-style independent lifecycle) remain a
    future option only if independent approval/lifecycle per group is ever needed.
 
