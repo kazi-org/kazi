@@ -107,6 +107,13 @@ defmodule Kazi.CLIHarnessTest do
 
     assert code == 1
     assert stderr =~ "unknown harness"
-    assert stderr =~ "claude"
+
+    # T14.5 (ADR-0022): the `available:` list is derived from `Registry.ids/0`, so
+    # it must name every built-in harness — claude, opencode, codex, antigravity,
+    # claw — not just the original two. This pins the auto-derivation: registering
+    # a new profile in `ids/0` surfaces it in the CLI error with no cli.ex change.
+    for id <- ~w(claude opencode codex antigravity claw) do
+      assert stderr =~ id
+    end
   end
 end
