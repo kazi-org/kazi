@@ -140,7 +140,7 @@ defmodule Kazi.CLIStatusJsonTest do
     test "returns the proposal's lifecycle state for a proposal_ref" do
       {0, propose_out} =
         with_io(fn ->
-          Kazi.CLI.run(["propose", "ship a healthz endpoint"], harness: StubHarness)
+          Kazi.CLI.run(["plan", "ship a healthz endpoint"], harness: StubHarness)
         end)
 
       proposal_ref = parse_proposal_ref(propose_out)

@@ -51,12 +51,12 @@ defmodule Kazi.CLIHelpSchemaTest do
       assert {:schema, nil, _opts} = Kazi.CLI.parse(["schema"])
     end
 
-    test "`schema run` carries the positional command" do
-      assert {:schema, "run", _opts} = Kazi.CLI.parse(["schema", "run"])
+    test "`schema apply` carries the positional command" do
+      assert {:schema, "apply", _opts} = Kazi.CLI.parse(["schema", "apply"])
     end
 
     test "`schema` rejects extra positionals" do
-      assert {:error, message} = Kazi.CLI.parse(["schema", "run", "extra"])
+      assert {:error, message} = Kazi.CLI.parse(["schema", "apply", "extra"])
       assert message =~ "unexpected argument"
     end
   end
@@ -87,11 +87,11 @@ defmodule Kazi.CLIHelpSchemaTest do
       # actually dispatches (parse/1 does NOT return an unknown-command error for
       # it), and the known commands must all be reported. This is what makes the
       # surface "generated, not hand-maintained" (ADR-0024).
-      # T27.1 (ADR-0032): `apply`/`plan` are the PRIMARY verbs; `run`/`propose` are
-      # kept as DEPRECATED ALIASES, so the table (and help --json) lists all four.
+      # T27.9 (ADR-0032): `apply`/`plan` are the ONLY verbs; the `run`/`propose`
+      # aliases were removed in v0.6.0, so the table (and help --json) omits them.
       expected =
         MapSet.new(
-          ~w(apply run status init install-skill plan propose list-proposed approve reject export lint help schema version)
+          ~w(apply status init install-skill plan list-proposed approve reject export lint help schema version)
         )
 
       assert reported == expected,
@@ -103,29 +103,28 @@ defmodule Kazi.CLIHelpSchemaTest do
       end
     end
 
-    test "marks apply/plan as PRIMARY and run/propose as DEPRECATED aliases (ADR-0032)" do
+    test "apply/plan are the only verbs; run/propose are absent (T27.9, ADR-0032)" do
       out = capture_io(fn -> Kazi.CLI.run(["help", "--json"]) end)
       {:ok, payload} = Jason.decode(String.trim(out))
 
       by_name = Map.new(payload["commands"], &{&1["name"], &1})
 
-      # The 4 PRIMARY verbs are not deprecated and carry no alias_of.
-      for primary <- ~w(apply plan status init) do
-        cmd = by_name[primary]
-        assert cmd["deprecated"] == false, "#{primary} should be a primary (non-deprecated) verb"
-        refute Map.has_key?(cmd, "alias_of"), "#{primary} should not carry alias_of"
+      # The verbs are not deprecated and carry no alias_of.
+      for verb <- ~w(apply plan status init) do
+        cmd = by_name[verb]
+        assert cmd["deprecated"] == false, "#{verb} should be a (non-deprecated) verb"
+        refute Map.has_key?(cmd, "alias_of"), "#{verb} should not carry alias_of"
       end
 
-      # The 2 DEPRECATED aliases are flagged and name the primary they forward to.
-      assert by_name["run"]["deprecated"] == true
-      assert by_name["run"]["alias_of"] == "apply"
-      assert by_name["propose"]["deprecated"] == true
-      assert by_name["propose"]["alias_of"] == "plan"
+      # The removed `run`/`propose` aliases (T27.9) are no longer in the surface.
+      refute Map.has_key?(by_name, "run")
+      refute Map.has_key?(by_name, "propose")
 
-      # Every command object carries the boolean `deprecated` field (generated from
-      # the table, so a new alias is reflected automatically).
+      # Every command object still carries the boolean `deprecated` field (generated
+      # from the table); with no aliases left, all are false.
       for cmd <- payload["commands"] do
         assert is_boolean(cmd["deprecated"])
+        assert cmd["deprecated"] == false
       end
     end
 
@@ -133,15 +132,15 @@ defmodule Kazi.CLIHelpSchemaTest do
       out = capture_io(fn -> Kazi.CLI.run(["help", "--json"]) end)
       {:ok, payload} = Jason.decode(String.trim(out))
 
-      run = Enum.find(payload["commands"], &(&1["name"] == "run"))
-      flag_names = Enum.map(run["flags"], & &1["name"])
+      apply_cmd = Enum.find(payload["commands"], &(&1["name"] == "apply"))
+      flag_names = Enum.map(apply_cmd["flags"], & &1["name"])
 
-      # `run` accepts these flags in the real switch table; help --json reports them.
+      # `apply` accepts these flags in the real switch table; help --json reports them.
       assert "--workspace" in flag_names
       assert "--json" in flag_names
       assert "--stream" in flag_names
 
-      for flag <- run["flags"] do
+      for flag <- apply_cmd["flags"] do
         assert is_binary(flag["name"]) and String.starts_with?(flag["name"], "--")
         assert flag["type"] in ["string", "boolean"]
         assert is_binary(flag["description"]) and flag["description"] != ""
@@ -204,16 +203,16 @@ defmodule Kazi.CLIHelpSchemaTest do
       assert MapSet.subset?(MapSet.new(~w(proposal_ref goal_id predicates clarify)), field_names)
     end
 
-    test "schema run / schema propose still resolve as deprecated aliases (ADR-0032)" do
-      # The renamed verbs forward to their primary's schema, so a caller pinning the
-      # old verb keeps resolving through the deprecation window.
-      apply_out = capture_io(fn -> assert Kazi.CLI.run(["schema", "apply"]) == 0 end)
-      run_out = capture_io(fn -> assert Kazi.CLI.run(["schema", "run"]) == 0 end)
-      assert Jason.decode!(String.trim(run_out)) == Jason.decode!(String.trim(apply_out))
+    test "schema run / schema propose NO LONGER resolve (removed in v0.6.0, T27.9)" do
+      # The removed aliases now hit the unknown-command branch: a JSON error on
+      # stdout with a non-zero exit, not the apply/plan schema.
+      run_out = capture_io(fn -> assert Kazi.CLI.run(["schema", "run"]) == 1 end)
+      assert {:ok, run_err} = Jason.decode(String.trim(run_out))
+      assert run_err["error"] =~ "no result schema"
 
-      plan_out = capture_io(fn -> assert Kazi.CLI.run(["schema", "plan"]) == 0 end)
-      propose_out = capture_io(fn -> assert Kazi.CLI.run(["schema", "propose"]) == 0 end)
-      assert Jason.decode!(String.trim(propose_out)) == Jason.decode!(String.trim(plan_out))
+      propose_out = capture_io(fn -> assert Kazi.CLI.run(["schema", "propose"]) == 1 end)
+      assert {:ok, propose_err} = Jason.decode(String.trim(propose_out))
+      assert propose_err["error"] =~ "no result schema"
     end
 
     test "schema status returns the status schema with schema_version; parses" do
@@ -253,7 +252,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       # Captured with NO stdin supplied; it must complete without blocking.
       out =
         capture_io("", fn ->
-          assert Kazi.CLI.run(["schema", "run"]) == 0
+          assert Kazi.CLI.run(["schema", "apply"]) == 0
         end)
 
       assert {:ok, _} = Jason.decode(String.trim(out))
@@ -274,11 +273,11 @@ defmodule Kazi.CLIHelpSchemaTest do
   defp dispatch_probe(name) do
     argv =
       case name do
-        n when n in ~w(apply run init status approve reject plan propose export lint) ->
+        n when n in ~w(apply init status approve reject plan export lint) ->
           [n, "dummy"]
 
         n when n in ~w(schema) ->
-          [n, "run"]
+          [n, "apply"]
 
         n ->
           [n]

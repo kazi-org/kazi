@@ -39,29 +39,29 @@ defmodule Kazi.CLITest do
   # ===========================================================================
 
   describe "parse/1" do
-    test "parses `run <goal-file> --workspace <path>`" do
+    test "parses `apply <goal-file> --workspace <path>`" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
 
       assert opts[:workspace] == "/tmp/ws"
     end
 
     test "accepts the goal-file and workspace in either order" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "--workspace", "/tmp/ws", "goal.toml"])
+               Kazi.CLI.parse(["apply", "--workspace", "/tmp/ws", "goal.toml"])
 
       assert opts[:workspace] == "/tmp/ws"
     end
 
     test "workspace is optional (falls back to the goal-file scope)" do
-      assert {:run, "goal.toml", opts} = Kazi.CLI.parse(["run", "goal.toml"])
+      assert {:run, "goal.toml", opts} = Kazi.CLI.parse(["apply", "goal.toml"])
       assert opts[:workspace] == nil
     end
 
     test "--help (and -h) is recognized" do
       assert {:help, _} = Kazi.CLI.parse(["--help"])
       assert {:help, _} = Kazi.CLI.parse(["-h"])
-      assert {:help, _} = Kazi.CLI.parse(["run", "goal.toml", "--help"])
+      assert {:help, _} = Kazi.CLI.parse(["apply", "goal.toml", "--help"])
     end
 
     test "--version (and -v) is recognized" do
@@ -69,8 +69,8 @@ defmodule Kazi.CLITest do
       assert {:version, _} = Kazi.CLI.parse(["-v"])
     end
 
-    test "missing goal-file for run is an error" do
-      assert {:error, message} = Kazi.CLI.parse(["run"])
+    test "missing goal-file for apply is an error" do
+      assert {:error, message} = Kazi.CLI.parse(["apply"])
       assert message =~ "requires a <goal-file>"
     end
 
@@ -79,13 +79,27 @@ defmodule Kazi.CLITest do
       assert message =~ "unknown command"
     end
 
+    # T27.9 (ADR-0032): the removed `run`/`propose` aliases are now UNKNOWN
+    # commands — a helpful error, NOT a silent dispatch.
+    test "the removed `run` alias is an unknown command (T27.9)" do
+      assert {:error, message} = Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws"])
+      assert message =~ "unknown command"
+      assert message =~ "run"
+    end
+
+    test "the removed `propose` alias is an unknown command (T27.9)" do
+      assert {:error, message} = Kazi.CLI.parse(["propose", "an idea"])
+      assert message =~ "unknown command"
+      assert message =~ "propose"
+    end
+
     test "no command is an error" do
       assert {:error, message} = Kazi.CLI.parse([])
       assert message =~ "no command"
     end
 
     test "an unknown option is an error" do
-      assert {:error, message} = Kazi.CLI.parse(["run", "goal.toml", "--bogus", "x"])
+      assert {:error, message} = Kazi.CLI.parse(["apply", "goal.toml", "--bogus", "x"])
       assert message =~ "unknown option"
     end
 
@@ -110,23 +124,25 @@ defmodule Kazi.CLITest do
   end
 
   # ===========================================================================
-  # Tier 1 — apply/plan PRIMARY verbs + run/propose DEPRECATED ALIASES (T27.1, ADR-0032)
+  # Tier 1 — apply/plan are the ONLY verbs; run/propose were REMOVED (T27.9, ADR-0032)
   # ===========================================================================
 
-  describe "parse/1 — apply/plan primary verbs, run/propose deprecated aliases" do
-    test "`apply` parses to the SAME {:run, ...} tuple as `run` (apply == run)" do
+  describe "parse/1 — apply/plan are the only verbs (run/propose removed)" do
+    test "`apply` parses to the internal {:run, ...} tuple" do
       assert {:run, "goal.toml", apply_opts} =
                Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
 
-      assert {:run, "goal.toml", run_opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws"])
-
-      # Identical save for the deprecation marker: `apply` is the primary (silent),
-      # `run` carries `deprecated: "run"` so the dispatcher prints the stderr hint.
       assert apply_opts[:workspace] == "/tmp/ws"
-      assert apply_opts[:deprecated] == nil
-      assert run_opts[:deprecated] == "run"
-      assert Keyword.delete(apply_opts, :deprecated) == Keyword.delete(run_opts, :deprecated)
+      # T27.9: no `:deprecated` marker survives — the alias machinery is gone.
+      refute Keyword.has_key?(apply_opts, :deprecated)
+    end
+
+    test "the removed `run`/`propose` aliases no longer parse (T27.9)" do
+      assert {:error, run_msg} = Kazi.CLI.parse(["run", "goal.toml"])
+      assert run_msg =~ "unknown command"
+
+      assert {:error, propose_msg} = Kazi.CLI.parse(["propose", "an idea"])
+      assert propose_msg =~ "unknown command"
     end
 
     test "`apply` carries the run flags through (env / standing / harness / json / parallel)" do
@@ -157,17 +173,13 @@ defmodule Kazi.CLITest do
       assert message =~ "the `apply` command requires a <goal-file>"
     end
 
-    test "`plan \"<idea>\"` parses to the SAME {:propose, ...} tuple as `propose` (plan == propose)" do
+    test "`plan \"<idea>\"` parses to the internal {:propose, ...} tuple" do
       assert {:propose, "an idea", plan_opts} =
                Kazi.CLI.parse(["plan", "an idea", "--workspace", "/w"])
 
-      assert {:propose, "an idea", propose_opts} =
-               Kazi.CLI.parse(["propose", "an idea", "--workspace", "/w"])
-
       assert plan_opts[:workspace] == "/w"
-      assert plan_opts[:deprecated] == nil
-      assert propose_opts[:deprecated] == "propose"
-      assert Keyword.delete(plan_opts, :deprecated) == Keyword.delete(propose_opts, :deprecated)
+      # T27.9: no `:deprecated` marker survives — the alias machinery is gone.
+      refute Keyword.has_key?(plan_opts, :deprecated)
     end
 
     test "`plan` carries the propose flags (yes / strict / adr / predicates / json)" do
@@ -185,7 +197,7 @@ defmodule Kazi.CLITest do
       assert {:propose, "", opts} = Kazi.CLI.parse(["plan", "--json", "--predicates", preds])
       assert opts[:predicates] == preds
       assert opts[:json] == true
-      assert opts[:deprecated] == nil
+      refute Keyword.has_key?(opts, :deprecated)
     end
 
     test "a missing idea for plan is an error" do
@@ -224,7 +236,7 @@ defmodule Kazi.CLITest do
     test "a missing goal-file prints a clear message and exits non-zero" do
       stderr =
         capture_io(:stderr, fn ->
-          assert Kazi.CLI.run(["run", "/does/not/exist.toml", "--workspace", "/tmp"]) == 1
+          assert Kazi.CLI.run(["apply", "/does/not/exist.toml", "--workspace", "/tmp"]) == 1
         end)
 
       assert stderr =~ "could not load goal-file"
@@ -296,7 +308,7 @@ defmodule Kazi.CLITest do
 
       {code, out} =
         with_io(fn ->
-          Kazi.CLI.run(["run", goal_file, "--workspace", work], runtime_opts)
+          Kazi.CLI.run(["apply", goal_file, "--workspace", work], runtime_opts)
         end)
 
       assert code == 0
@@ -320,14 +332,14 @@ defmodule Kazi.CLITest do
   end
 
   # ===========================================================================
-  # Tier 2 — apply behaves identically to run; run is a deprecated alias (T27.1)
+  # Tier 2 — `apply` converges; the removed `run` alias errors (T27.9, ADR-0032)
   # ===========================================================================
 
-  describe "run/2 — apply == run end-to-end + the deprecated run alias hint" do
+  describe "run/2 — apply converges; the removed run alias errors as unknown" do
     setup :checkout_sandbox
     @describetag :tmp_dir
 
-    test "`apply <goal>` converges identically to `run`, printing no deprecation hint",
+    test "`apply <goal>` converges, printing no deprecation hint",
          %{tmp_dir: tmp_dir} do
       %{opts: opts, goal_file: goal_file, work: work} = converging_fixture(tmp_dir)
 
@@ -343,52 +355,24 @@ defmodule Kazi.CLITest do
           assert out =~ "cli-e2e"
         end)
 
-      # stderr: the PRIMARY verb is SILENT (no deprecation hint).
+      # No deprecation surface remains anywhere (T27.9).
       refute stderr =~ "deprecated"
     end
 
-    test "`run <goal>` STILL WORKS but prints a one-line deprecation hint to stderr",
+    test "`run <goal>` is now an UNKNOWN command (helpful error, exit 2), NOT a silent dispatch",
          %{tmp_dir: tmp_dir} do
       %{opts: opts, goal_file: goal_file, work: work} = converging_fixture(tmp_dir)
 
-      stderr =
-        capture_io(:stderr, fn ->
-          {code, out} =
-            with_io(fn -> Kazi.CLI.run(["run", goal_file, "--workspace", work], opts) end)
-
-          assert code == 0
-          assert out =~ "CONVERGED"
-          # The hint NEVER leaks onto stdout (only stderr carries it).
-          refute out =~ "deprecated"
+      {code, stderr} =
+        with_io(:stderr, fn ->
+          Kazi.CLI.run(["run", goal_file, "--workspace", work], opts)
         end)
 
-      assert stderr =~ "`kazi run` is deprecated"
-      assert stderr =~ "use `kazi apply`"
-      # T27.7 (ADR-0032): the hint names the concrete removal version.
-      assert stderr =~ "removed in v0.6.0"
-    end
-
-    test "under --json the deprecated `run` alias emits NO hint into stdout (stdout stays JSON)",
-         %{tmp_dir: tmp_dir} do
-      %{opts: opts, goal_file: goal_file, work: work} = converging_fixture(tmp_dir)
-
-      stderr =
-        capture_io(:stderr, fn ->
-          {code, out} =
-            with_io(fn ->
-              Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], opts)
-            end)
-
-          assert code == 0
-          # The WHOLE of stdout is a single JSON object — the deprecation hint did
-          # NOT leak in (the T15.7 self-conformance contract: --json stdout is
-          # JSON-only regardless of which verb/alias was typed).
-          assert {:ok, payload} = Jason.decode(String.trim(out))
-          assert payload["status"] == "converged"
-        end)
-
-      # The hint went to stderr, off the JSON stdout stream.
-      assert stderr =~ "`kazi run` is deprecated"
+      assert code == 2
+      assert stderr =~ "unknown command"
+      assert stderr =~ "run"
+      # The reconcile never ran — no deprecation hint, no convergence.
+      refute stderr =~ "deprecated"
     end
   end
 
@@ -438,7 +422,7 @@ defmodule Kazi.CLITest do
         capture_log(fn ->
           {c, out} =
             with_io(fn ->
-              Kazi.CLI.run(["run", goal_file, "--workspace", work], runtime_opts)
+              Kazi.CLI.run(["apply", goal_file, "--workspace", work], runtime_opts)
             end)
 
           send(self(), {:result, c, out})
@@ -453,7 +437,7 @@ defmodule Kazi.CLITest do
       # JSON surface: a parseable over_budget result object, also exit 1, no raise.
       {json_code, json_out} =
         with_io(fn ->
-          Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], runtime_opts)
+          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts)
         end)
 
       assert json_code == 1
@@ -481,7 +465,7 @@ defmodule Kazi.CLITest do
 
       {code, stderr} =
         with_io(:stderr, fn ->
-          Kazi.CLI.run(["run", goal_file, "--workspace", work])
+          Kazi.CLI.run(["apply", goal_file, "--workspace", work])
         end)
 
       # Non-zero exit + a clear vacuous-goal message; the loop never started.

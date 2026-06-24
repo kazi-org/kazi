@@ -65,20 +65,20 @@ defmodule Kazi.CLIAuthoringTest do
   describe "parse/1 — authoring commands" do
     test "parses `propose \"<idea>\"`" do
       assert {:propose, "a health endpoint", opts} =
-               Kazi.CLI.parse(["propose", "a health endpoint"])
+               Kazi.CLI.parse(["plan", "a health endpoint"])
 
       assert opts[:workspace] == nil
     end
 
     test "propose carries --workspace" do
       assert {:propose, "an idea", opts} =
-               Kazi.CLI.parse(["propose", "an idea", "--workspace", "/tmp/ws"])
+               Kazi.CLI.parse(["plan", "an idea", "--workspace", "/tmp/ws"])
 
       assert opts[:workspace] == "/tmp/ws"
     end
 
     test "a missing idea for propose is an error" do
-      assert {:error, message} = Kazi.CLI.parse(["propose"])
+      assert {:error, message} = Kazi.CLI.parse(["plan"])
       assert message =~ "requires an <idea>"
     end
 
@@ -111,8 +111,8 @@ defmodule Kazi.CLIAuthoringTest do
     end
 
     test "an unknown command names the authoring commands in its hint" do
-      # T27.1 (ADR-0032): the hint now points at the PRIMARY verb `plan` (the
-      # deprecated `propose` alias still works but is not advertised in the hint).
+      # T27.9 (ADR-0032): the hint points at the verb `plan`; the removed `propose`
+      # alias is gone entirely.
       assert {:error, message} = Kazi.CLI.parse(["frobnicate"])
       assert message =~ "plan"
       assert message =~ "list-proposed"
@@ -127,7 +127,7 @@ defmodule Kazi.CLIAuthoringTest do
     test "drafts a goal from an idea, prints the proposal-ref, persists proposed" do
       {code, out} =
         with_io(fn ->
-          Kazi.CLI.run(["propose", "ship a healthz endpoint"], harness: StubHarness)
+          Kazi.CLI.run(["plan", "ship a healthz endpoint"], harness: StubHarness)
         end)
 
       assert code == 0
@@ -147,7 +147,7 @@ defmodule Kazi.CLIAuthoringTest do
     test "a blank idea is refused with a clear message and exit 1" do
       {code, stderr} =
         with_io(:stderr, fn ->
-          Kazi.CLI.run(["propose", "   "], harness: StubHarness)
+          Kazi.CLI.run(["plan", "   "], harness: StubHarness)
         end)
 
       assert code == 1
@@ -196,7 +196,7 @@ defmodule Kazi.CLIAuthoringTest do
 
       {code, out} =
         with_io(fn ->
-          Kazi.CLI.run(["propose", "add a widgets feature"], harness: ClarifyCliStub, ask: ask)
+          Kazi.CLI.run(["plan", "add a widgets feature"], harness: ClarifyCliStub, ask: ask)
         end)
 
       assert code == 0
@@ -210,7 +210,7 @@ defmodule Kazi.CLIAuthoringTest do
     test "--strict refuses an underspecified idea non-interactively (exit 1)" do
       {code, stderr} =
         with_io(:stderr, fn ->
-          Kazi.CLI.run(["propose", "add a widgets feature", "--strict"],
+          Kazi.CLI.run(["plan", "add a widgets feature", "--strict"],
             harness: ClarifyCliStub,
             tty: false
           )
@@ -226,7 +226,7 @@ defmodule Kazi.CLIAuthoringTest do
 
       {code, _out} =
         with_io(fn ->
-          Kazi.CLI.run(["propose", idea, "--strict"], harness: ClarifyCliStub, tty: false)
+          Kazi.CLI.run(["plan", idea, "--strict"], harness: ClarifyCliStub, tty: false)
         end)
 
       assert code == 0
@@ -239,7 +239,7 @@ defmodule Kazi.CLIAuthoringTest do
 
       {code, out} =
         with_io(fn ->
-          Kazi.CLI.run(["propose", "add a widgets feature", "--adr"],
+          Kazi.CLI.run(["plan", "add a widgets feature", "--adr"],
             harness: ClarifyCliStub,
             ask: ask,
             adr_dir: dir
@@ -269,7 +269,7 @@ defmodule Kazi.CLIAuthoringTest do
 
       {code, _out} =
         with_io(fn ->
-          Kazi.CLI.run(["propose", "add a widgets feature"],
+          Kazi.CLI.run(["plan", "add a widgets feature"],
             harness: ClarifyCliStub,
             ask: ask,
             review: review
@@ -292,7 +292,7 @@ defmodule Kazi.CLIAuthoringTest do
       assert out =~ "no"
 
       # After a proposal, it shows up; filtering by a foreign status hides it.
-      {0, _} = with_io(fn -> Kazi.CLI.run(["propose", "a listed idea"], harness: StubHarness) end)
+      {0, _} = with_io(fn -> Kazi.CLI.run(["plan", "a listed idea"], harness: StubHarness) end)
 
       {0, listed} = with_io(fn -> Kazi.CLI.run(["list-proposed", "--status", "proposed"]) end)
       assert listed =~ "a listed idea"
@@ -339,7 +339,7 @@ defmodule Kazi.CLIAuthoringTest do
       #    `proposed`. Capture the printed proposal-ref to pipe to approve.
       {0, propose_out} =
         with_io(fn ->
-          Kazi.CLI.run(["propose", "ship a healthz endpoint", "--workspace", work], harness: stub)
+          Kazi.CLI.run(["plan", "ship a healthz endpoint", "--workspace", work], harness: stub)
         end)
 
       proposal_ref = parse_proposal_ref(propose_out)
@@ -352,7 +352,7 @@ defmodule Kazi.CLIAuthoringTest do
       # 3) approve — proposed → approved; the CLI prints the next step.
       {0, approve_out} = with_io(fn -> Kazi.CLI.run(["approve", proposal_ref]) end)
       assert approve_out =~ "APPROVED"
-      assert approve_out =~ "kazi run"
+      assert approve_out =~ "kazi apply"
 
       assert %ProposedGoal{status: "approved"} = row = ReadModel.get_proposed_goal(proposal_ref)
 

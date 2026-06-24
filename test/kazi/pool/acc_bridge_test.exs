@@ -194,7 +194,7 @@ defmodule Kazi.Pool.AccBridgeTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json", "--predicates", predicates_json],
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", predicates_json],
                    # The harness is injected but MUST NOT be invoked in caller-drafts.
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()]
@@ -240,7 +240,7 @@ defmodule Kazi.Pool.AccBridgeTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json", "--predicates", Jason.encode!(payload)],
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", Jason.encode!(payload)],
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()]
                  ) == 0

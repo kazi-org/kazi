@@ -76,7 +76,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
   describe "parse/1 — run --parallel" do
     test "run carries --parallel through to its opts" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws", "--parallel"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws", "--parallel"])
 
       assert opts[:parallel] == true
       assert opts[:parallelism] == nil
@@ -84,7 +84,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
 
     test "run --parallel N records the optional concurrency hint" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws", "--parallel", "4"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws", "--parallel", "4"])
 
       assert opts[:parallel] == true
       assert opts[:parallelism] == 4
@@ -92,7 +92,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
 
     test "without --parallel the flag defaults to false (serial is the default)" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
 
       assert opts[:parallel] == false
     end
@@ -100,7 +100,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
     test "a bare integer after --parallel is consumed, not left as a stray positional" do
       assert {:run, "goal.toml", opts} =
                Kazi.CLI.parse([
-                 "run",
+                 "apply",
                  "goal.toml",
                  "--parallel",
                  "2",
@@ -130,7 +130,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
                    parallel_inject_opts(:converged)
                  ) == 0
         end)
@@ -165,7 +165,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
                    parallel_inject_opts(:stuck)
                  ) == 1
         end)
@@ -189,7 +189,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
                    parallel_inject_opts(:over_budget)
                  ) == 1
         end)
@@ -216,7 +216,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel"],
                    parallel_inject_opts(:converged)
                  ) == 0
         end)

@@ -53,7 +53,16 @@ defmodule Kazi.CLIHarnessTest do
     {code, _io} =
       with_io(fn ->
         Kazi.CLI.run(
-          ["run", goal, "--workspace", work, "--harness", "opencode", "--model", "local/qwen3.6"],
+          [
+            "apply",
+            goal,
+            "--workspace",
+            work,
+            "--harness",
+            "opencode",
+            "--model",
+            "local/qwen3.6"
+          ],
           adapter_opts: [command: @stub],
           persist?: false
         )
@@ -80,7 +89,7 @@ defmodule Kazi.CLIHarnessTest do
 
     {code, _io} =
       with_io(fn ->
-        Kazi.CLI.run(["run", goal, "--workspace", work],
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
           adapter_opts: [command: @stub],
           persist?: false
         )
@@ -102,7 +111,7 @@ defmodule Kazi.CLIHarnessTest do
 
     {code, stderr} =
       with_io(:stderr, fn ->
-        Kazi.CLI.run(["run", goal, "--workspace", work, "--harness", "nope"], persist?: false)
+        Kazi.CLI.run(["apply", goal, "--workspace", work, "--harness", "nope"], persist?: false)
       end)
 
     assert code == 1

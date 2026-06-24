@@ -65,13 +65,13 @@ defmodule Kazi.CLIJsonTest do
 
     test "propose carries --json through to its opts" do
       assert {:propose, "an idea", opts} =
-               Kazi.CLI.parse(["propose", "an idea", "--json"])
+               Kazi.CLI.parse(["plan", "an idea", "--json"])
 
       assert opts[:json] == true
     end
 
     test "without --json the propose flag defaults to false (human is the default)" do
-      assert {:propose, "an idea", opts} = Kazi.CLI.parse(["propose", "an idea"])
+      assert {:propose, "an idea", opts} = Kazi.CLI.parse(["plan", "an idea"])
       assert opts[:json] == false
     end
   end
@@ -111,7 +111,7 @@ defmodule Kazi.CLIJsonTest do
       # blocking on stdin — captured WITHOUT supplying any stdin input.
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "add a widgets feature", "--json"],
+          assert Kazi.CLI.run(["plan", "add a widgets feature", "--json"],
                    harness: StubHarness,
                    # A TTY is "attached" — proves --json overrides the TTY check
                    # and stays non-interactive (no terminal prompt).
@@ -129,7 +129,7 @@ defmodule Kazi.CLIJsonTest do
     test "--json --yes drafts best-effort without prompting (proves headless path)" do
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "ship a healthz endpoint", "--json", "--yes"],
+          assert Kazi.CLI.run(["plan", "ship a healthz endpoint", "--json", "--yes"],
                    harness: StubHarness
                  ) == 0
         end)

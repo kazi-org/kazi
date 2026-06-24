@@ -233,7 +233,7 @@ defmodule Kazi.DeployWiringTest do
 
     {code, out} =
       with_io(fn ->
-        Kazi.CLI.run(["run", goal_file, "--workspace", work, "--env", "staging"], runtime_opts)
+        Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--env", "staging"], runtime_opts)
       end)
 
     assert code == 0
@@ -251,13 +251,13 @@ defmodule Kazi.DeployWiringTest do
 
   test "CLI: parse/1 accepts --env and carries it in the run opts" do
     assert {:run, "goal.toml", opts} =
-             Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws", "--env", "prod"])
+             Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws", "--env", "prod"])
 
     assert opts[:workspace] == "/tmp/ws"
     assert opts[:env] == "prod"
 
     # --env is optional: omitting it leaves env nil (back-compat single-target).
-    assert {:run, "goal.toml", base_opts} = Kazi.CLI.parse(["run", "goal.toml"])
+    assert {:run, "goal.toml", base_opts} = Kazi.CLI.parse(["apply", "goal.toml"])
     assert base_opts[:env] == nil
   end
 

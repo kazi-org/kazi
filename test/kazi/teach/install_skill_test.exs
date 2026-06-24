@@ -61,8 +61,13 @@ defmodule Kazi.Teach.InstallSkillTest do
     end
 
     # `adopt` is the one human alias (-> kazi init); the other three are identities
-    # after ADR-0032. The deprecated CLI aliases are flagged as such, not taught.
-    assert content =~ "DEPRECATED ALIAS" or content =~ "deprecated alias"
+    # after ADR-0032. The old run/propose aliases were REMOVED in v0.6.0 (T27.9):
+    # the SKILL must say so, and must NOT teach the command forms `` `kazi run` ``
+    # / `` `kazi propose` `` (the backticked code references the coherence guard
+    # scans). Narrative prose like "have kazi run the loop" is fine.
+    assert content =~ "REMOVED" or content =~ "removed in v0.6.0"
+    refute content =~ "`kazi run`"
+    refute content =~ "`kazi propose`"
   end
 
   test "a non-kazi repo degrades cleanly to /plan + /apply", %{dir: dir} do

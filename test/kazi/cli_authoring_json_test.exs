@@ -78,7 +78,7 @@ defmodule Kazi.CLIAuthoringJsonTest do
       assert payload["proposals"] == []
 
       # After a proposal it shows up in the list.
-      {0, _} = with_io(fn -> Kazi.CLI.run(["propose", "a listed idea"], harness: StubHarness) end)
+      {0, _} = with_io(fn -> Kazi.CLI.run(["plan", "a listed idea"], harness: StubHarness) end)
 
       out =
         capture_io(fn -> assert Kazi.CLI.run(["list-proposed", "--json"]) == 0 end)
@@ -93,7 +93,7 @@ defmodule Kazi.CLIAuthoringJsonTest do
     end
 
     test "the --status filter is reflected in the JSON" do
-      {0, _} = with_io(fn -> Kazi.CLI.run(["propose", "filtered"], harness: StubHarness) end)
+      {0, _} = with_io(fn -> Kazi.CLI.run(["plan", "filtered"], harness: StubHarness) end)
 
       out =
         capture_io(fn ->
@@ -181,7 +181,7 @@ defmodule Kazi.CLIAuthoringJsonTest do
       {code, out} = with_io(fn -> Kazi.CLI.run(["approve", proposal_ref]) end)
       assert code == 0
       assert out =~ "APPROVED"
-      assert out =~ "kazi run"
+      assert out =~ "kazi apply"
       refute out =~ "schema_version"
     end
   end
@@ -191,7 +191,7 @@ defmodule Kazi.CLIAuthoringJsonTest do
   # ===========================================================================
 
   defp propose_one do
-    {0, out} = with_io(fn -> Kazi.CLI.run(["propose", "an idea"], harness: StubHarness) end)
+    {0, out} = with_io(fn -> Kazi.CLI.run(["plan", "an idea"], harness: StubHarness) end)
     parse_proposal_ref(out)
   end
 

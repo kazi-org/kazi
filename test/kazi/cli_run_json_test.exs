@@ -33,14 +33,14 @@ defmodule Kazi.CLIRunJsonTest do
   describe "parse/1 — run --json" do
     test "run carries --json through to its opts" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws", "--json"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws", "--json"])
 
       assert opts[:json] == true
     end
 
     test "without --json the run flag defaults to false (human is the default)" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
 
       assert opts[:json] == false
     end
@@ -66,7 +66,7 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
                    0
         end)
 
@@ -113,7 +113,7 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
                    1
         end)
 
@@ -152,7 +152,7 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
                    1
         end)
 
@@ -183,7 +183,7 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"]) == 1
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"]) == 1
         end)
 
       # The error is a JSON object on STDOUT (not stderr prose), so the
