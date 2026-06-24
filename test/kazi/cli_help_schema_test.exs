@@ -88,7 +88,9 @@ defmodule Kazi.CLIHelpSchemaTest do
       # it), and the known commands must all be reported. This is what makes the
       # surface "generated, not hand-maintained" (ADR-0024).
       expected =
-        MapSet.new(~w(run status init propose list-proposed approve reject help schema version))
+        MapSet.new(
+          ~w(run status init propose list-proposed approve reject export help schema version)
+        )
 
       assert reported == expected,
              "help --json command set drifted: missing #{inspect(MapSet.difference(expected, reported))}, extra #{inspect(MapSet.difference(reported, expected))}"
@@ -218,7 +220,7 @@ defmodule Kazi.CLIHelpSchemaTest do
   defp dispatch_probe(name) do
     argv =
       case name do
-        n when n in ~w(run init status approve reject propose) -> [n, "dummy"]
+        n when n in ~w(run init status approve reject propose export) -> [n, "dummy"]
         n when n in ~w(schema) -> [n, "run"]
         n -> [n]
       end
