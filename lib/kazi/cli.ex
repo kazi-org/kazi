@@ -64,6 +64,148 @@ defmodule Kazi.CLI do
   # the module can reference it.
   @run_schema_version 1
 
+  # =============================================================================
+  # command table — the SINGLE source of truth for the command/flag surface
+  # =============================================================================
+  #
+  # T16.1 (ADR-0024 decision 2): `kazi help --json` is GENERATED from this table,
+  # not hand-maintained, so adding a command/flag here automatically updates the
+  # machine-readable surface every agent introspects (the coherence guard T16.4
+  # keeps the skill/AGENTS.md honest against it). The same two structures drive the
+  # parser:
+  #
+  #   * `@switches` IS the `OptionParser` `strict:` keyword list `parse/1` uses, so
+  #     a flag's type is declared exactly once.
+  #   * `@commands` lists each command with its positional args and the SUBSET of
+  #     `@switches` it accepts; `help --json` joins the two (a flag's type comes
+  #     from `@switches`) so the emitted surface can never drift from what the
+  #     parser actually recognizes.
+  #
+  # Adding a command: add a `@commands` entry. Adding a flag: add it to `@switches`
+  # and list its atom on the commands that accept it. `help --json` updates with no
+  # extra work.
+  @switches [
+    workspace: :string,
+    env: :string,
+    standing: :boolean,
+    status: :string,
+    enrich: :boolean,
+    out: :string,
+    harness: :string,
+    model: :string,
+    yes: :boolean,
+    strict: :boolean,
+    adr: :boolean,
+    predicates: :string,
+    json: :boolean,
+    stream: :boolean,
+    help: :boolean,
+    version: :boolean
+  ]
+
+  @aliases [h: :help, v: :version]
+
+  # One-line flag descriptions for the machine surface. Every flag a command lists
+  # in `@commands` MUST have an entry here (the help-json test asserts this), so
+  # `help --json` never emits a flag with no documentation.
+  @flag_docs %{
+    workspace:
+      "Target workspace where edits/integrate/deploy run (falls back to the goal-file's [scope] workspace).",
+    env:
+      "Deploy environment to target (e.g. staging / prod); selects the goal/deploy's per-env target.",
+    standing:
+      "Run as a STANDING (continuous/maintenance) reconciler instead of converging and stopping.",
+    status:
+      "Filter `list-proposed` to one lifecycle state (proposed / approved / rejected). Default: all.",
+    enrich:
+      "`init` only: opt into harness enrichment (off by default) to propose live predicates.",
+    out: "`init` output goal-file (default <repo>/kazi.goal.toml).",
+    harness:
+      "Coding harness to drive: claude (default) or opencode. Overrides the goal-file/app config.",
+    model:
+      "Model the harness should use, e.g. dgx/qwen3.6. Overrides the goal-file's [harness] model.",
+    yes: "`propose` only: skip the interactive clarify questions and draft best-effort.",
+    strict:
+      "`propose` only: refuse an underspecified idea non-interactively instead of guessing.",
+    adr:
+      "`propose` only: also write an ADR-lite rationale doc under docs/adr/ for the drafted goal.",
+    predicates:
+      "`propose` only (caller-drafts): a proposal payload the caller already authored; kazi spawns no model.",
+    json:
+      "Emit a single JSON object to stdout instead of human prose (the machine surface; NON-INTERACTIVE).",
+    stream: "`run --json` only: emit a JSONL progress stream, one event per loop iteration.",
+    help: "Show this help and exit.",
+    version: "Print the kazi version and exit."
+  }
+
+  # The command table. Each entry: a one-line summary, the positional args (name +
+  # whether required), and the flags (the `@switches` atoms) it accepts. `help
+  # --json` renders this verbatim; the parser dispatches on the same names below.
+  @commands [
+    %{
+      name: "run",
+      summary: "Drive a goal-file to convergence against a target workspace.",
+      args: [%{name: "goal-file", required: true}],
+      flags: [:workspace, :env, :standing, :harness, :model, :json, :stream]
+    },
+    %{
+      name: "status",
+      summary: "Report a run/proposal's current state from the read-model (a pure read).",
+      args: [%{name: "ref", required: true}],
+      flags: [:json]
+    },
+    %{
+      name: "init",
+      summary: "Adopt a repo by stack detection and write a starter goal-file.",
+      args: [%{name: "repo-dir", required: true}],
+      flags: [:out, :enrich, :workspace]
+    },
+    %{
+      name: "propose",
+      summary:
+        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates).",
+      args: [%{name: "idea", required: false}],
+      flags: [:workspace, :yes, :strict, :adr, :json, :predicates]
+    },
+    %{
+      name: "list-proposed",
+      summary: "List the proposal queue, optionally filtered by lifecycle state.",
+      args: [],
+      flags: [:status, :json]
+    },
+    %{
+      name: "approve",
+      summary: "Transition a proposal proposed → approved (then runnable by `kazi run`).",
+      args: [%{name: "proposal-ref", required: true}],
+      flags: [:json]
+    },
+    %{
+      name: "reject",
+      summary: "Transition a proposal proposed → rejected (declined, kept for audit).",
+      args: [%{name: "proposal-ref", required: true}],
+      flags: [:json]
+    },
+    %{
+      name: "help",
+      summary: "Show usage. With --json, emit the command/flag surface as a single JSON object.",
+      args: [],
+      flags: [:json]
+    },
+    %{
+      name: "schema",
+      summary:
+        "Emit the versioned result schema(s) for --json output, optionally for one command.",
+      args: [%{name: "command", required: false}],
+      flags: [:json]
+    },
+    %{
+      name: "version",
+      summary: "Print the kazi version.",
+      args: [],
+      flags: [:json]
+    }
+  ]
+
   @usage """
   kazi — drive a goal to convergence against a target workspace.
 
@@ -77,6 +219,8 @@ defmodule Kazi.CLI do
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
+      kazi help [--json]                          # --json: the command/flag surface
+      kazi schema [<command>]                      # the versioned --json result schema(s)
 
   ARGUMENTS:
       <goal-file>            Path to a TOML goal-file (see Kazi.Goal.Loader).
@@ -192,9 +336,19 @@ defmodule Kazi.CLI do
   @spec run([String.t()], keyword()) :: exit_code()
   def run(argv, inject_opts \\ []) when is_list(argv) and is_list(inject_opts) do
     case parse(argv) do
-      {:help, _} ->
-        IO.puts(@usage)
+      {:help, flags} ->
+        # T16.1 (ADR-0024 decision 2): under --json emit the command/flag surface
+        # GENERATED from the command table (so any agent can introspect kazi at
+        # runtime); the human usage prose otherwise (the default).
+        emit(json?(flags), help_json(), fn -> IO.puts(@usage) end)
         0
+
+      {:schema, command, _flags} ->
+        # T16.1 (ADR-0024 decision 2): emit the versioned result schema(s) for
+        # `--json` output. `schema` is JSON-only — it has no human prose surface —
+        # so it always emits the schema object (the `--json` flag is accepted but
+        # redundant).
+        execute_schema(command)
 
       {:version, flags} ->
         # T15.1 (ADR-0023): the first command to prove the --json seam end-to-end.
@@ -240,6 +394,7 @@ defmodule Kazi.CLI do
   @typedoc false
   @type parsed ::
           {:help, keyword()}
+          | {:schema, String.t() | nil, keyword()}
           | {:version, keyword()}
           | {:run, Path.t(), keyword()}
           | {:status, String.t(), keyword()}
@@ -273,55 +428,12 @@ defmodule Kazi.CLI do
   """
   @spec parse([String.t()]) :: parsed()
   def parse(argv) when is_list(argv) do
+    # The `strict:` switch table and `aliases:` are the `@switches`/`@aliases`
+    # data structures (the single source of truth `help --json` also reads, T16.1),
+    # so a flag is declared exactly once and the documented surface cannot drift
+    # from what the parser actually recognizes.
     {flags, positionals, invalid} =
-      OptionParser.parse(argv,
-        # T3.3d deploy wiring: --env picks the deploy environment (staging/prod).
-        # T3.4d standing wiring: --standing authors a standing-mode run from the
-        # CLI (overrides the goal-file's `standing`).
-        # T3.5c authoring: --status filters the `list-proposed` review queue.
-        strict: [
-          workspace: :string,
-          env: :string,
-          standing: :boolean,
-          status: :string,
-          # T5.5 adopt: `kazi init` flags. --enrich opts into harness enrichment
-          # (off by default); --out is the output goal-file.
-          enrich: :boolean,
-          out: :string,
-          # T8.7 harness selection (ADR-0016): --harness picks the coding harness
-          # (claude / opencode / ...); --model picks the harness's model.
-          harness: :string,
-          model: :string,
-          # T11.6 interactive propose (ADR-0019): --yes skips the clarify phase
-          # (draft best-effort, no prompts); --strict fails when the idea is too
-          # underspecified to draft non-interactively; --adr also writes an
-          # ADR-lite rationale doc.
-          yes: :boolean,
-          strict: :boolean,
-          adr: :boolean,
-          # T15.2 (ADR-0023 decision 4): caller-drafts. --predicates carries a
-          # proposal payload (JSON object/array the caller already authored)
-          # inline, an alternative to supplying it on stdin. When present (or
-          # when stdin under --json carries one), kazi does NOT spawn a model to
-          # draft — it applies the floor + the gate over the supplied predicates.
-          predicates: :string,
-          # T15.1 (ADR-0023): --json switches a command to its machine surface —
-          # a single JSON object on stdout instead of human prose. Human output
-          # stays the DEFAULT; --json is opt-in and additive. Under --json kazi is
-          # NON-INTERACTIVE: a command that would prompt errors loudly (clear JSON
-          # error + non-zero exit) rather than blocking on stdin.
-          json: :boolean,
-          # T15.4 (ADR-0023 decision 3): --stream switches `run --json` to a JSONL
-          # PROGRESS STREAM — one JSON event per loop iteration on stdout,
-          # terminated by the final T15.3 run-result object — so an orchestrator
-          # monitors a long convergence without blocking. Only meaningful with
-          # --json; ignored on the human surface.
-          stream: :boolean,
-          help: :boolean,
-          version: :boolean
-        ],
-        aliases: [h: :help, v: :version]
-      )
+      OptionParser.parse(argv, strict: @switches, aliases: @aliases)
 
     cond do
       flags[:help] ->
@@ -368,6 +480,40 @@ defmodule Kazi.CLI do
 
   defp parse_command(["run"], _flags),
     do: {:error, "the `run` command requires a <goal-file> argument"}
+
+  # T16.1 (ADR-0024 decision 2): `kazi help` is the positional form of `--help`
+  # (the leading `--help` flag is already handled in `parse/1`). Under --json it
+  # emits the command/flag surface — derived from the command table — so any agent
+  # can introspect kazi at runtime.
+  defp parse_command(["help" | rest], flags) do
+    case rest do
+      [] -> {:help, json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  # `kazi version` is the positional form of `--version`/`-v` (the leading flag is
+  # already handled in `parse/1`). Listed in the command table so `help --json`
+  # reports it; dispatched here so the table stays honest (the coherence guard
+  # T16.4 fails if a listed command is not really dispatched).
+  defp parse_command(["version" | rest], flags) do
+    case rest do
+      [] -> {:version, flags}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  # T16.1 (ADR-0024 decision 2): `kazi schema [<command>]` emits the versioned
+  # result schema(s) for `--json` output (the schemas under docs/schemas/). With a
+  # command it emits that command's schema; with none it emits all of them. The
+  # optional positional <command> is the command whose schema to return.
+  defp parse_command(["schema" | rest], flags) do
+    case rest do
+      [] -> {:schema, nil, json: flags[:json] || false}
+      [command] -> {:schema, command, json: flags[:json] || false}
+      [_ | extra] -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
 
   # T15.5 (ADR-0023 decision 2): `status <ref>` reports a run/proposal's current
   # state from the read-model. The positional <ref> is a goal_ref (a run's goal
@@ -455,7 +601,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `propose`, `list-proposed`, `approve`, or `reject`)"}
+       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `propose`, `list-proposed`, `approve`, `reject`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `run <goal-file> --workspace <path>`)"}
@@ -531,6 +677,84 @@ defmodule Kazi.CLI do
     case Application.spec(:kazi, :vsn) do
       nil -> "unknown"
       vsn -> to_string(vsn)
+    end
+  end
+
+  # =============================================================================
+  # help --json + schema (T16.1, ADR-0024 decision 2): kazi self-describes
+  # =============================================================================
+  #
+  # `help --json` and `schema` are the machine-readable teachability surface: an
+  # agent introspects the command/flag table and the versioned result schemas at
+  # runtime, no external docs. `help --json` is GENERATED from the `@commands` /
+  # `@switches` / `@flag_docs` data the parser also reads, so it can never drift
+  # from the real surface (ADR-0024 consequences: "generated, not hand-maintained").
+
+  # The full command/flag surface as a single JSON object (`help --json`). It walks
+  # the command table, joining each command's flags against `@switches` (for the
+  # type) and `@flag_docs` (for the description), so every command + flag the parser
+  # recognizes is reported. `schema_version` ties it to the result-schema contract.
+  @spec help_json() :: map()
+  defp help_json do
+    %{
+      schema_version: @run_schema_version,
+      kazi: version(),
+      commands: Enum.map(@commands, &command_json/1)
+    }
+  end
+
+  defp command_json(command) do
+    %{
+      name: command.name,
+      summary: command.summary,
+      args: Enum.map(command.args, &arg_json/1),
+      flags: Enum.map(command.flags, &command_flag_json/1)
+    }
+  end
+
+  defp arg_json(arg), do: %{name: arg.name, required: arg.required}
+
+  # One flag entry: its long name, type (from `@switches`, the parser's own table),
+  # description (from `@flag_docs`), and aliases (e.g. -h for --help, from
+  # `@aliases`). Joining against the parser's tables is what keeps the surface true.
+  defp command_flag_json(flag) do
+    %{
+      name: "--#{flag |> to_string() |> String.replace("_", "-")}",
+      type: to_string(Keyword.fetch!(@switches, flag)),
+      description: Map.fetch!(@flag_docs, flag),
+      aliases: flag_aliases(flag)
+    }
+  end
+
+  defp flag_aliases(flag) do
+    @aliases
+    |> Enum.filter(fn {_alias, target} -> target == flag end)
+    |> Enum.map(fn {alias_char, _target} -> "-#{alias_char}" end)
+  end
+
+  # `schema [<command>]` (T16.1): emit the versioned result schema(s) for `--json`
+  # output. With a command, that command's schema; with none, every schema keyed by
+  # command. An unknown command is a clear JSON error with a non-zero exit, so an
+  # orchestrator branches on the exit code, never on prose. JSON-only by design.
+  @spec execute_schema(String.t() | nil) :: exit_code()
+  defp execute_schema(nil) do
+    IO.puts(Jason.encode!(Kazi.CLI.Schema.all()))
+    0
+  end
+
+  defp execute_schema(command) do
+    case Kazi.CLI.Schema.fetch(command) do
+      {:ok, schema} ->
+        IO.puts(Jason.encode!(schema))
+        0
+
+      :error ->
+        emit_json_error(
+          "no result schema for #{inspect(command)} " <>
+            "(schemas exist for: #{Enum.join(Kazi.CLI.Schema.commands(), ", ")})"
+        )
+
+        1
     end
   end
 
