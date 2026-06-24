@@ -5,6 +5,29 @@
 > v0.6.0**. Use `kazi apply`, `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the rationale and migration.
 
+## [0.5.0](https://github.com/kazi-org/kazi/compare/v0.4.0...v0.5.0) (2026-06-24)
+
+
+### Features
+
+* **cli:** apply/plan primary verbs, run/propose deprecated aliases (T27.1) ([b000fc0](https://github.com/kazi-org/kazi/commit/b000fc0bf59489b7448b6383160109408fc97a90))
+* **cli:** bump JSON result schema_version 1-&gt;2 + apply/plan command key (T27.3) ([aae6f84](https://github.com/kazi-org/kazi/commit/aae6f84627d083b7f45aa3ab32598a2d85b78d0e))
+* **cli:** help --json marks apply/plan primary, run/propose deprecated (T27.4) ([bd5fba0](https://github.com/kazi-org/kazi/commit/bd5fba0667491666519c620a02181333b54f6698))
+* **cli:** mix kazi.apply task + mix kazi.run deprecated alias (T27.2) ([1c63a8c](https://github.com/kazi-org/kazi/commit/1c63a8c5629f0ee17a474b4f52bb623bb150f2d1))
+* **cli:** name the v0.5.0 removal in the deprecation hints (T27.7) ([aa42dd9](https://github.com/kazi-org/kazi/commit/aa42dd9a560df7e8f2b817a9f07e718ea83b2ba0))
+* **cli:** schema resolves apply/plan; run/propose aliased (T27.4) ([4ca364a](https://github.com/kazi-org/kazi/commit/4ca364aca732c90eec1acfd1a59bd0c4d41a328d))
+* **harness:** claude profile renders --model for in-family tiering (T19.6) ([302b18d](https://github.com/kazi-org/kazi/commit/302b18dd85862fa4f30843e2c7939edd9cf82cb8))
+* **teach:** flesh out the `apply` sub-skill recipe (T26.3) ([389c1b1](https://github.com/kazi-org/kazi/commit/389c1b14b262ed560678d058c96071544ba299e4))
+* **teach:** flesh out the `plan` sub-skill recipe (T26.2) ([d19a8e0](https://github.com/kazi-org/kazi/commit/d19a8e0d45b40e44dc1df506d8537066481c4dda))
+* **teach:** flesh out the `status` + `adopt` sub-skill recipes (T26.4) ([b49736d](https://github.com/kazi-org/kazi/commit/b49736d63ed21e57884840dc726760d9db1b878d))
+* **teach:** install-skill writes a plan/apply/status/adopt router SKILL.md (T26.1) ([360aeab](https://github.com/kazi-org/kazi/commit/360aeab63ebc34b4152ca28a67b8dbc9a7d80bb9))
+* **teach:** rename MCP tools kazi_run-&gt;kazi_apply, kazi_propose-&gt;kazi_plan (T27.5) ([d0deee3](https://github.com/kazi-org/kazi/commit/d0deee357e8f0131ec8ede406fbac71fb8ce831a))
+
+
+### Bug Fixes
+
+* **cli:** deprecation hint names v0.6.0 as the removal version ([fa9c147](https://github.com/kazi-org/kazi/commit/fa9c147e14e34e5796fc17bfa09e7f1a37e76e18))
+
 ## [0.4.0](https://github.com/kazi-org/kazi/compare/v0.3.0...v0.4.0) (2026-06-24)
 
 
