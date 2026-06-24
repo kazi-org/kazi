@@ -549,9 +549,27 @@ defmodule Kazi.ReadModel do
   # strings (atoms don't survive a JSON round-trip).
   defp serialize_vector(%PredicateVector{results: results}) do
     Map.new(results, fn {id, %PredicateResult{status: status, evidence: evidence}} ->
-      {to_string(id), %{"status" => to_string(status), "evidence" => evidence}}
+      {to_string(id), %{"status" => to_string(status), "evidence" => sanitize_evidence(evidence)}}
     end)
   end
+
+  # T18.2: make evidence JSON-safe before it hits the Ecto `:map` column. A
+  # PredicateResult's evidence is provider-supplied and, for an `:error` result,
+  # carries non-encodable terms -- e.g. `reason: {:cmd_unrunnable, "..."}` (a
+  # tuple) and atom keys. Stored verbatim those fail the `:map` cast and
+  # `record_iteration/1` raises (the iteration is silently lost). Deep-sanitize:
+  # stringify keys, keep JSON scalars, stringify atoms, and render any other term
+  # (tuples, structs, pids) via `inspect/1`. Idempotent on an already-sanitized map
+  # (string keys stay strings; scalars unchanged), so re-recording is safe.
+  defp sanitize_evidence(v) when is_binary(v) or is_number(v) or is_boolean(v) or is_nil(v), do: v
+  defp sanitize_evidence(v) when is_atom(v), do: to_string(v)
+  defp sanitize_evidence(v) when is_list(v), do: Enum.map(v, &sanitize_evidence/1)
+
+  defp sanitize_evidence(v) when is_map(v) and not is_struct(v) do
+    Map.new(v, fn {k, val} -> {to_string(k), sanitize_evidence(val)} end)
+  end
+
+  defp sanitize_evidence(v), do: inspect(v)
 
   defp serialize_action_params(nil), do: %{}
   defp serialize_action_params(%Action{params: params}), do: params
