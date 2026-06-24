@@ -93,7 +93,7 @@ defmodule Kazi.ReadModel do
     result =
       %Iteration{}
       |> Iteration.changeset(row)
-      |> Repo.insert()
+      |> Repo.insert(insert_opts(attrs))
 
     # T3.6b (ADR-0011): on a successful record, broadcast on the goal-board topic
     # so a subscribed dashboard LiveView re-reads and pushes a live diff. This is
@@ -107,6 +107,35 @@ defmodule Kazi.ReadModel do
     end
 
     result
+  end
+
+  # T18.3: a terminal projection (the loop's stuck-stop reuses the LAST observed
+  # `iteration_index`; see Kazi.Loop.notify_stuck_stop) re-records an index that
+  # the normal observation already wrote, hitting the `(goal_ref, iteration_index)`
+  # unique index and erroring. When the caller marks the record `upsert?: true`
+  # (the terminal/budget-stop path does, keyed off `:stop_reason`), replace the
+  # mutable columns so the final state lands idempotently. Normal records omit the
+  # flag and keep the duplicate-rejecting contract.
+  @upsert_replace_columns [
+    :predicate_vector,
+    :converged,
+    :action_kind,
+    :action_params,
+    :regressions,
+    :release_ref,
+    :observed_at,
+    :updated_at
+  ]
+
+  defp insert_opts(attrs) do
+    if Map.get(attrs, :upsert?, false) do
+      [
+        on_conflict: {:replace, @upsert_replace_columns},
+        conflict_target: [:goal_ref, :iteration_index]
+      ]
+    else
+      []
+    end
   end
 
   @doc """
