@@ -35,7 +35,10 @@ defmodule Kazi.Goal.LoaderTest do
       assert [tests, _live] = goal.predicates
 
       assert %Predicate{id: "go-tests", kind: :tests, guard?: false} = tests
-      assert tests.config[:cmd] == "go test ./..."
+      # cmd is the executable; args is the arg list (T18.1 / L-0012). A whole
+      # command line in cmd ("go test ./...") fails System.cmd/3 with :enoent.
+      assert tests.config[:cmd] == "go"
+      assert tests.config[:args] == ["test", "./..."]
       assert tests.description =~ "go test"
     end
 

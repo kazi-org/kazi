@@ -42,4 +42,5 @@ name = "Billing"
 id = "placeholder"
 provider = "test_runner"
 description = "a placeholder predicate so the goal-file is valid"
-cmd = "mix test"
+cmd = "mix"
+args = ["test"]
