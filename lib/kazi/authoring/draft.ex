@@ -4,8 +4,8 @@ defmodule Kazi.Authoring.Draft do
   the structured artifact `Kazi.Authoring.propose/2` returns.
 
   A draft pairs the persisted proposal's review handle and lifecycle state with
-  the in-memory `Kazi.Goal` it drafted, so a caller (the CLI T3.5c, the Telegram
-  bridge T3.7a, the dashboard) can present the predicates for review and later
+  the in-memory `Kazi.Goal` it drafted, so a caller (the CLI T3.5c or the
+  dashboard) can present the predicates for review and later
   approve/reject it (T3.5b) against `proposal_ref`. It is a read-side view of a
   `Kazi.ReadModel.ProposedGoal` row with the goal already rehydrated.
 

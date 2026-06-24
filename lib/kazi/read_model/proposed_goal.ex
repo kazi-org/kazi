@@ -5,7 +5,7 @@ defmodule Kazi.ReadModel.ProposedGoal do
   artifact before any human approves it.
 
   This is a read-model projection like `Kazi.ReadModel.Iteration` — it records a
-  proposal so an operator surface (the CLI T3.5c, the Telegram bridge T3.7a) can
+  proposal so an operator surface (the CLI T3.5c or the dashboard) can
   list it, review it, and later approve/reject it (T3.5b). It is authoritative for
   nothing once a proposal is approved into an executable goal.
 

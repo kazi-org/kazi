@@ -3,7 +3,7 @@ defmodule Kazi.Authoring do
   Idea → acceptance-predicate authoring (T3.5a, UC-017, ADR-0011).
 
   `Kazi.Authoring` is the one WRITE path the Slice-3 operator surfaces share. A
-  human (via the CLI T3.5c, the Telegram bridge T3.7a, or the dashboard) hands
+  human (via the CLI T3.5c or the dashboard) hands
   kazi a *prose idea*; kazi drives the coding harness to draft that idea into a
   `Kazi.Goal` whose **acceptance predicates** make "done" machine-checkable
   (ADR-0002), and persists the draft as a reviewable artifact with status
