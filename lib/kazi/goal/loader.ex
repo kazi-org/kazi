@@ -82,18 +82,32 @@ defmodule Kazi.Goal.Loader do
   | `name`   | string    | no       | `Group.name` — the display label (defaults to the authored `id` when omitted) |
   | `parent` | string    | no       | `Group.parent` — a parent group id (normalized). Validated to reference a DECLARED group, and the parent chain to be acyclic (T12.2) |
   | `budget` | positive integer | no | `Group.budget` — an optional per-group cap (stored verbatim) |
+  | `needs`  | array of strings | no | `Group.needs` — the group's dependency edges (T23.1, ADR-0028): ids that must converge BEFORE this group. Normalized; validated to reference DECLARED groups, with no self-edge and no cycle (a DAG). Absent → `[]` (fully parallel) |
 
   A DUPLICATE group id (after normalization) is a validation error, so the
   taxonomy is a set: declaring `"Identity & Access"` and `"identity-access"`
   twice fails loudly at load time rather than silently colliding.
 
-  T12.2 adds the *drift guard* — three cross-references validated after the
-  taxonomy and predicates are both parsed (ADR-0020 §Decision 3):
+  `needs` is the *execution-order* relation (T23.1, ADR-0028), DISTINCT from
+  `parent`: `parent` drives budget rollup + reporting (ADR-0020); `needs`
+  declares "must-converge-before" precedence for the predicate-graph waves (E23).
+  The two are INDEPENDENT — a group may carry a `parent` AND `needs`, unrelated
+  to each other. `needs` ABSENT means the group has no dependencies and is fully
+  parallel (the ADR-0027 default; backward compatible). This is loader-only: it
+  parses, stores, and validates the `needs` DAG; the scheduler's topological
+  execution over it is T23.3.
+
+  T12.2 adds the *drift guard* — cross-references validated after the taxonomy
+  and predicates are both parsed (ADR-0020 §Decision 3); T23.1 (ADR-0028) extends
+  it with the `needs` DAG checks:
 
     * a predicate whose `group` is not a declared id is a load error (catches the
       typo immediately, rather than fragmenting the tree silently);
     * a group whose `parent` is not a declared id is a load error;
-    * a cycle in the `parent` chain is a load error.
+    * a cycle in the `parent` chain is a load error;
+    * a group whose `needs` references an undeclared id is a load error;
+    * a group that `needs` ITSELF (a self-edge) is a load error;
+    * a cycle over the `needs` graph is a load error (a DAG is required).
 
   ### `[[predicate]]` array of tables (→ `Kazi.Predicate` list)
 
@@ -381,8 +395,9 @@ defmodule Kazi.Goal.Loader do
          :ok <- reject_duplicate_group(id, acc, raw),
          {:ok, name} <- fetch_group_name(raw, id),
          {:ok, parent} <- fetch_group_parent(raw, id),
-         {:ok, budget} <- fetch_group_budget(raw, id) do
-      {:ok, Group.new(id, name, parent: parent, budget: budget)}
+         {:ok, budget} <- fetch_group_budget(raw, id),
+         {:ok, needs} <- fetch_group_needs(raw, id) do
+      {:ok, Group.new(id, name, parent: parent, budget: budget, needs: needs)}
     end
   end
 
@@ -458,23 +473,56 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
-  # T12.2 the drift guard (ADR-0020 §Decision 3). Run after the taxonomy AND the
-  # predicates are both parsed, so every cross-reference can be checked against
-  # the declared id set. Three checks, short-circuiting on the first failure:
+  # T23.1 (ADR-0028): optional `needs` — the group's dependency edges, an array
+  # of group ids that must converge BEFORE this group. Absent → [] (no
+  # dependencies, fully parallel). Parsed here as a list of non-empty strings
+  # (each normalized via Group.new/3 to match declared ids consistently); its
+  # reference / self-edge / cycle validation is the `needs` DAG guard, run once
+  # the whole taxonomy is known (validate_group_references/2).
+  defp fetch_group_needs(raw, id) do
+    case Map.get(raw, "needs") do
+      nil ->
+        {:ok, []}
+
+      needs when is_list(needs) ->
+        if Enum.all?(needs, &(is_binary(&1) and &1 != "")) do
+          {:ok, needs}
+        else
+          {:error, "group #{inspect(id)} \"needs\" must be an array of non-empty strings"}
+        end
+
+      _ ->
+        {:error, "group #{inspect(id)} \"needs\" must be an array of non-empty strings"}
+    end
+  end
+
+  # The drift guard. Run after the taxonomy AND the predicates are both parsed,
+  # so every cross-reference can be checked against the declared id set.
+  # Short-circuits on the first failure:
   #
+  # T12.2 (ADR-0020 §Decision 3) — the `parent` relation:
   #   1. every predicate `group` references a DECLARED id (the typo guard — a
   #      misspelled group would otherwise silently fragment the tree);
   #   2. every group `parent` references a DECLARED id;
   #   3. the `parent` chain is acyclic.
   #
-  # Ids are already normalized at parse time (predicate group and group parent
-  # both via Group.normalize_id/1), so set membership is an exact compare.
+  # T23.1 (ADR-0028) — the `needs` relation (an INDEPENDENT DAG):
+  #   4. every group `needs` edge references a DECLARED id;
+  #   5. no group `needs` ITSELF (no self-edge);
+  #   6. the `needs` graph is acyclic (a DAG is required).
+  #
+  # Ids are already normalized at parse time (predicate group, group parent, and
+  # each group `needs` edge all via Group.normalize_id/1), so set membership is
+  # an exact compare.
   defp validate_group_references(groups, predicates) do
     declared = MapSet.new(groups, & &1.id)
 
     with :ok <- validate_predicate_groups(predicates, declared),
-         :ok <- validate_group_parents(groups, declared) do
-      validate_no_group_cycle(groups)
+         :ok <- validate_group_parents(groups, declared),
+         :ok <- validate_no_group_cycle(groups),
+         :ok <- validate_group_needs(groups, declared),
+         :ok <- validate_no_group_self_need(groups) do
+      validate_no_needs_cycle(groups)
     end
   end
 
@@ -539,6 +587,72 @@ defmodule Kazi.Goal.Loader do
       {:cycle, id}
     else
       walk_parent_chain(Map.get(parents, id), parents, MapSet.put(seen, id))
+    end
+  end
+
+  # T23.1 (ADR-0028): every `needs` edge must reference a DECLARED group — the
+  # same typo guard as `parent`, but on the independent dependency relation. An
+  # unknown edge target is a load error naming the declared ids.
+  defp validate_group_needs(groups, declared) do
+    Enum.reduce_while(groups, :ok, fn group, :ok ->
+      case Enum.find(group.needs, &(not MapSet.member?(declared, &1))) do
+        nil ->
+          {:cont, :ok}
+
+        unknown ->
+          {:halt,
+           {:error,
+            "group #{inspect(group.id)} needs unknown group " <>
+              "#{inspect(unknown)} (declared: #{known_groups(declared)})"}}
+      end
+    end)
+  end
+
+  # T23.1 (ADR-0028): a group may not depend on ITSELF — a self-edge is a
+  # degenerate one-node cycle and is rejected with a pointed message (separate
+  # from the general cycle check so the author sees the exact mistake).
+  defp validate_no_group_self_need(groups) do
+    Enum.reduce_while(groups, :ok, fn group, :ok ->
+      if group.id in group.needs do
+        {:halt, {:error, "group #{inspect(group.id)} needs itself (a self-edge is not allowed)"}}
+      else
+        {:cont, :ok}
+      end
+    end)
+  end
+
+  # T23.1 (ADR-0028): the `needs` graph must be a DAG. Unlike `parent` (a single
+  # pointer per node, a simple chain-walk), a group may declare MANY `needs`
+  # edges, so this is a depth-first cycle detection over the full edge set: a
+  # node revisited on the current DFS stack closes a cycle. Edge targets are
+  # guaranteed to be declared by validate_group_needs/2, which runs first.
+  defp validate_no_needs_cycle(groups) do
+    needs_by_id = Map.new(groups, &{&1.id, &1.needs})
+
+    Enum.reduce_while(groups, :ok, fn group, :ok ->
+      case walk_needs(group.id, needs_by_id, MapSet.new()) do
+        :ok -> {:cont, :ok}
+        {:cycle, id} -> {:halt, {:error, "group #{inspect(id)} has a cyclic needs chain"}}
+      end
+    end)
+  end
+
+  defp walk_needs(id, needs_by_id, stack) do
+    cond do
+      MapSet.member?(stack, id) ->
+        {:cycle, id}
+
+      true ->
+        stack = MapSet.put(stack, id)
+
+        needs_by_id
+        |> Map.get(id, [])
+        |> Enum.reduce_while(:ok, fn dep, :ok ->
+          case walk_needs(dep, needs_by_id, stack) do
+            :ok -> {:cont, :ok}
+            {:cycle, _} = cycle -> {:halt, cycle}
+          end
+        end)
     end
   end
 
