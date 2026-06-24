@@ -247,6 +247,47 @@ defmodule Kazi.Goal.DepGraphTest do
     end
   end
 
+  describe "dependents_of/2 — the re-gating closure (T23.4)" do
+    test "transitive dependents are returned in DECLARED order, excluding the seed" do
+      # a → b → c chain plus a disjoint x: a's dependents are b and c; c has none.
+      groups = [
+        Group.new("a", "A"),
+        Group.new("b", "B", needs: ["a"]),
+        Group.new("c", "C", needs: ["b"]),
+        Group.new("x", "X")
+      ]
+
+      goal = Goal.new("chain", groups: groups)
+
+      assert DepGraph.dependents_of(goal, "a") == ["b", "c"]
+      assert DepGraph.dependents_of(goal, "b") == ["c"]
+      assert DepGraph.dependents_of(goal, "c") == []
+      assert DepGraph.dependents_of(goal, "x") == []
+    end
+
+    test "a diamond join is reported once, in declared order" do
+      # In the diamond, a's dependents are b, c (direct) and d (via both) — d
+      # appears ONCE despite two paths, in declared order.
+      goal = diamond_goal()
+      assert DepGraph.dependents_of(goal, "a") == ["b", "c", "d"]
+      assert DepGraph.dependents_of(goal, "b") == ["d"]
+      assert DepGraph.dependents_of(goal, "d") == []
+    end
+
+    test "order follows declaration, not dependency distance" do
+      # Declared out of dependency order; dependents come back in DECLARED order.
+      groups = [
+        Group.new("z", "Z", needs: ["root"]),
+        Group.new("m", "M", needs: ["z"]),
+        Group.new("root", "Root"),
+        Group.new("a", "A", needs: ["root"])
+      ]
+
+      goal = Goal.new("g", groups: groups)
+      assert DepGraph.dependents_of(goal, "root") == ["z", "m", "a"]
+    end
+  end
+
   describe "pure + deterministic" do
     test "the same goal + states always yield the same evaluation" do
       goal = diamond_goal()
