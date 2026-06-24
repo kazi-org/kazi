@@ -1,9 +1,11 @@
 # Changelog
 
-> **Deprecations:** the CLI aliases `kazi run`, `kazi propose`, and `mix kazi.run`
-> are deprecated (verb unification under ADR-0032) and will be **removed in
-> v0.6.0**. Use `kazi apply`, `kazi plan`, and `mix kazi.apply` instead. See
-> [docs/deprecations.md](docs/deprecations.md) for the rationale and migration.
+> **Breaking (v0.6.0):** the deprecated CLI aliases `kazi run`, `kazi propose`,
+> and `mix kazi.run` were **removed** (verb unification under ADR-0032). They no
+> longer parse: `kazi run` / `kazi propose` now error as unknown commands, and the
+> MCP server no longer advertises `kazi_run` / `kazi_propose`. Use `kazi apply`,
+> `kazi plan`, and `mix kazi.apply` instead. See
+> [docs/deprecations.md](docs/deprecations.md) for the migration.
 
 ## [0.5.0](https://github.com/kazi-org/kazi/compare/v0.4.0...v0.5.0) (2026-06-24)
 
