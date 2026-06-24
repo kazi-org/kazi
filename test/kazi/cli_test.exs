@@ -28,6 +28,7 @@ defmodule Kazi.CLITest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
+  import ExUnit.CaptureLog
 
   alias Kazi.{ReadModel, Repo}
 
@@ -230,6 +231,76 @@ defmodule Kazi.CLITest do
       iterations = ReadModel.list_iterations("cli-e2e")
       assert iterations != []
       assert List.last(iterations).converged == true
+    end
+  end
+
+  # ===========================================================================
+  # Tier 2 — over-budget run exits cleanly, no CaseClauseError (T18.4)
+  # ===========================================================================
+
+  describe "run/2 — over-budget (max_iterations) terminal stop" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    test "an unconvergeable goal exits 1 and reports over-budget, never raises",
+         %{tmp_dir: tmp_dir} do
+      %{work: work} = setup_repo(tmp_dir)
+
+      # A code predicate that can NEVER pass (the marker file is never created) +
+      # a 1-iteration budget, so the loop terminates :over_budget after one dispatch.
+      goal_file = Path.join(tmp_dir, "unconvergeable.toml")
+
+      File.write!(goal_file, """
+      id = "over-budget-e2e"
+      name = "never converges"
+
+      [budget]
+      max_iterations = 1
+
+      [scope]
+      workspace = "#{work}"
+
+      [[predicate]]
+      id = "code"
+      provider = "test_runner"
+      cmd = "sh"
+      args = ["-c", "test -f never-created.txt"]
+      """)
+
+      # A no-op harness: it runs but never satisfies the predicate.
+      noop_harness = Path.join(tmp_dir, "noop_harness.sh")
+      File.write!(noop_harness, "#!/bin/sh\nexit 0\n")
+      File.chmod!(noop_harness, 0o755)
+
+      runtime_opts = [adapter_opts: [command: noop_harness], reobserve_interval_ms: 5]
+
+      # Human surface: exit 1, over-budget reported, NO raise (the T18.4 regression)
+      # AND no unique-constraint persistence warning (the T18.3 idempotency goal).
+      log =
+        capture_log(fn ->
+          {c, out} =
+            with_io(fn ->
+              Kazi.CLI.run(["run", goal_file, "--workspace", work], runtime_opts)
+            end)
+
+          send(self(), {:result, c, out})
+        end)
+
+      assert_received {:result, code, out}
+      assert code == 1
+      assert out =~ "over"
+      refute log =~ "has already been taken"
+      refute log =~ "failed to persist"
+
+      # JSON surface: a parseable over_budget result object, also exit 1, no raise.
+      {json_code, json_out} =
+        with_io(fn ->
+          Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], runtime_opts)
+        end)
+
+      assert json_code == 1
+      assert {:ok, decoded} = Jason.decode(json_out)
+      assert decoded["status"] == "over_budget"
     end
   end
 
