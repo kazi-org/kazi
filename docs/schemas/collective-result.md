@@ -60,8 +60,15 @@ Current version: **1**.
 | `schema_version` | integer          | The contract version (shared with `run-result.md`). Bumped on a breaking change. |
 | `goal_id`        | string           | The goal-set's goal id — the run's handle. |
 | `collective`     | string (enum)    | The COLLECTIVE verdict — one of `converged`, `stuck`, `over_budget`. The orchestrator's primary branch. |
-| `partitions`     | array of objects | One entry per partition, in the scheduler's input order. A single-partition goal-set yields exactly one entry (the serial degenerate). |
+| `partitions`     | array of objects | **FLAT goals only.** One entry per partition, in the scheduler's input order. A single-partition goal-set yields exactly one entry (the serial degenerate). |
+| `schedule`       | array of objects | **DAG goals only (T23.6).** The TOPOLOGICAL frontiers the scheduler took — one entry per wave, in order, each naming the groups that ran in it and their convergence state. Present iff the goal declares `needs` edges (ADR-0028). |
+| `blocked`        | array of objects | **DAG goals only (T23.6).** The BLOCKED sub-DAG: one entry per group an unsatisfiable `needs` dependency poisoned, naming the blocking dep. `[]` when nothing is blocked. |
 | `next_action`    | string (enum)    | An orchestration **hint** derived from `collective` — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
+
+A goal carries EITHER `partitions` (flat, no `needs`) OR `schedule` + `blocked`
+(a `needs`-DAG over its groups), never both. Both shapes share `schema_version`,
+`goal_id`, `collective`, and `next_action`, so an orchestrator branches on those
+identically regardless of shape.
 
 ### `partitions[]`
 
@@ -100,15 +107,135 @@ This is the SAME hint vocabulary the serial `run --json` result uses (ADR-0023),
 so an orchestrator branches on `next_action` identically across the serial and
 collective surfaces.
 
+## DAG goals: the `schedule` + `blocked` shape (T23.6, ADR-0028)
+
+When the goal declares `needs` edges over its `[[group]]` taxonomy (ADR-0028), the
+scheduler runs the groups TOPOLOGICALLY — frontier by frontier, with blast-radius
+parallelism inside each frontier — instead of one flat partition pass. The
+collective object then carries `schedule` (the frontier order each group ran in +
+its state) and `blocked` (the unsatisfiable sub-DAG) in place of `partitions`:
+
+```json
+{
+  "schema_version": 1,
+  "goal_id": "cli-chain",
+  "collective": "stuck",
+  "schedule": [
+    { "frontier": 0, "groups": [{ "group": "a", "state": "stuck" }] },
+    { "frontier": 1, "groups": [{ "group": "b", "state": "blocked" }] },
+    { "frontier": 2, "groups": [{ "group": "c", "state": "blocked" }] }
+  ],
+  "blocked": [
+    { "group": "b", "blocked_by": "a", "reason": "stuck" },
+    { "group": "c", "blocked_by": "a", "reason": "stuck" }
+  ],
+  "next_action": "investigate"
+}
+```
+
+### `schedule[]`
+
+The topological FRONTIERS the scheduler took — the PURE `needs`-DAG layering
+(`Kazi.Goal.DepGraph`): frontier 0 is every group with no `needs`; each later
+frontier is the groups whose every `needs` dep converged in an earlier frontier. A
+goal with NO `needs` is a single frontier (every group parallel); a chain is N
+frontiers (one group each).
+
+| Field      | Type            | Meaning |
+|------------|-----------------|---------|
+| `frontier` | integer         | The 0-based wave index, in topological order. |
+| `groups`   | array of object | The groups that ran in this frontier, in declared order — each `{group, state}`. |
+
+`groups[].state` is the group's observed convergence state — one of `converged`,
+`stuck`, `over_budget`, `blocked`, `pending`, `running` (terminal once the run
+ends). A group never dispatched because a dep blocked it is `blocked`.
+
+### `blocked[]`
+
+The BLOCKED sub-DAG (`Kazi.Goal.DepGraph.blocked/2`): one entry per group an
+unsatisfiable `needs` dependency poisoned, so the report NAMES the blocking dep
+rather than hanging silently (the `/apply` wave-stall failure mode, made
+observable). `[]` when nothing is blocked.
+
+| Field        | Type          | Meaning |
+|--------------|---------------|---------|
+| `group`      | string        | The blocked dependent's group id. |
+| `blocked_by` | string        | The nearest transitive `needs` dep in a non-converging terminal state that makes this group unsatisfiable. |
+| `reason`     | string (enum) | That blocking dep's state — `stuck`, `over_budget`, or `blocked`. |
+
+## `run --explain` / `--dry-run`: the schedule, dispatched nothing (T23.6)
+
+`kazi run <goal> --explain` (alias `--dry-run`) is PURE PLANNING: it computes the
+wave schedule — the topological `needs`-DAG frontiers + the blast-radius
+PARTITIONING within each frontier — PRINTS it, exits `0`, and **dispatches
+nothing** (no reconciler, harness, lease, or worktree is touched). It makes
+over-constraint visible BEFORE a run: too many `needs` edges serialize everything
+into many one-group frontiers. Under `--json` it emits a single schedule object:
+
+```json
+{
+  "schema_version": 1,
+  "goal_id": "cli-chain",
+  "mode": "explain",
+  "dispatched": false,
+  "frontiers": [
+    {
+      "frontier": 0,
+      "groups": ["a"],
+      "partitions": [{ "partition_id": "k-…", "goal_ids": ["a"] }]
+    },
+    { "frontier": 1, "groups": ["b"], "partitions": [{ "partition_id": "k-…", "goal_ids": ["b"] }] }
+  ],
+  "next_action": "schedule"
+}
+```
+
+| Field        | Type            | Meaning |
+|--------------|-----------------|---------|
+| `mode`       | string          | `"explain"` — distinguishes the dry-run object from a real collective result. |
+| `dispatched` | boolean         | Always `false` — the no-execution contract, machine-checkable. |
+| `frontiers`  | array of object | The computed waves: each `{frontier, groups, partitions}`. `partitions` is the blast-radius parallelism WITHIN that frontier (one entry = one parallel unit; overlapping groups share one). |
+| `next_action`| string          | Always `"schedule"` — this was a plan, not a run. |
+
 ## Human surface
 
 Without `--json`, `run --parallel` prints a legible collective block instead of
-the JSON object — the overall verdict and one line per partition:
+the JSON object. For a FLAT goal — the overall verdict and one line per partition:
 
 ```
 COLLECTIVE CONVERGED  goal=cli-parallel
 partitions: 1
   [0] k-a1b2c3: converged
+```
+
+For a DAG goal — the verdict and the per-frontier schedule (plus a blocked block
+when a sub-DAG is poisoned):
+
+```
+COLLECTIVE STUCK  goal=cli-chain
+frontiers: 3
+  frontier 0: a(stuck)
+  frontier 1: b(blocked)
+  frontier 2: c(blocked)
+blocked: 2
+  b blocked by a (stuck)
+  c blocked by a (stuck)
+```
+
+`run --explain` prints the dry-run schedule and dispatches nothing:
+
+```
+SCHEDULE (dry-run, nothing dispatched)  goal=cli-chain
+frontiers: 3
+  frontier 0: a
+    parallelism: 1 partition(s)
+    [0] k-a1b2c3: a
+  frontier 1: b
+    parallelism: 1 partition(s)
+    [0] k-d4e5f6: b
+  frontier 2: c
+    parallelism: 1 partition(s)
+    [0] k-7a8b9c: c
 ```
 
 The exit code is identical on both surfaces; `--json` chooses only the shape.
