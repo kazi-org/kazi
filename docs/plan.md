@@ -80,6 +80,12 @@ Open work:
   `help --json`/`schema` + `AGENTS.md` + a `kazi mcp` server, ADR-0024) -- E16.
 - **UC-035** (adoption: README/docs/website lead with the agent-driven workflow +
   two-tier economics, to grow stars/adoption, ADR-0023/0024) -- E17.
+- **Reliability** (no new UC) -- E18: bug fixes from the T15.9 benchmark hardening
+  the run loop's read-model persistence + the shipped example (UC-024/UC-033
+  robustness).
+- **Token efficiency** (no new UC) -- E19: realize the unwired orientation-prefix +
+  stable-prefix caching (ADR-0010) and a multi-iteration benchmark to earn (or
+  refute) the "cheaper" claim (UC-033 + infrastructure).
 
 ## Checkable Work Breakdown
 
@@ -215,6 +221,47 @@ content + engineering; coherence-checked (T9.9).
 - [ ] T17.2 Website: a "Use kazi with Claude Code" section/page (the on-ramp + the two-tier story), on-brand; update `site/src/canonical.mjs` + the coherence check in lockstep.  Owner: TBD  Est: 2h  verifies: [UC-035]  delivers: [a website section on the agent-driven workflow]  deps: [T16.2]  acc: the page renders the on-ramp + two-tier story; README<->site coherence (T9.9) stays green; deployed live + verified at https://kazi.sire.run.
 - [x] T17.3 docs/concept positioning: record the 3-layer stack (orchestrator -> kazi -> cheap harness; kazi friendly in both directions, ADR-0023) as the canonical positioning.  Owner: pool  Done: 2026-06-23  verifies: [UC-035]  delivers: [updated concept positioning]  deps: []  acc: `docs/concept.md` describes the 3-layer stack without contradicting ADR-0001 (kazi is still the outer loop for the harness, AND a tool for the orchestrator).
 
+### E18 -- Bug fixes from the T15.9 token-benchmark dogfood (P2, no ADR)
+
+Acceptance: the four defects surfaced while running the token benchmark
+(`docs/devlog.md` 2026-06-24, "token benchmark (T15.9)") are fixed with regression
+tests, so the run loop persists errored and terminal iterations without crashing
+and the shipped example goal-file actually runs. These are reliability fixes to
+DELIVERED capability (the convergence core + read-model that `kazi run --json` /
+`status --json` build on); no ADR (bug fixes, per the ADR policy). T18.1-T18.4 are
+independent (different files) and run in parallel; T18.5 verifies after.
+
+- [ ] T18.1 Fix the stale shipped example + add a runnability guard: in `priv/examples/deploy_target.toml` change the `test_runner` predicate from `cmd = "go test ./..."` (the whole command parsed as one executable -> `System.cmd` `{:cmd_unrunnable, :enoent}`) to `cmd = "go"`, `args = ["test", "./..."]`; audit every file under `priv/examples/` for the same multi-word-`cmd` antipattern and fix. Add an ExUnit test that loads each shipped example goal-file and asserts every `test_runner` predicate's `cmd` resolves via `System.find_executable/1` with `args` as a list.  Owner: TBD  Est: 1h  verifies: [UC-024, infrastructure]  deps: []  acc: ExUnit -- each `priv/examples/*.toml` loads; no example uses a multi-word `cmd`; the guard fails if a future example reintroduces `cmd = "go test ./..."`; `mix format` clean.
+- [ ] T18.2 Deep-sanitize read-model evidence so errored predicates persist: `Kazi.ReadModel.serialize_vector/1` (`read_model.ex:550`) stores `evidence` verbatim, so an `:error` `PredicateResult` whose evidence holds a tuple (`reason: {:cmd_unrunnable, ...}`) or atom keys fails the `Iteration.predicate_vector` `:map` Ecto cast and `record_iteration/1` raises (observed in the benchmark). Make serialization JSON-safe (stringify atom keys; render tuples/non-encodable terms to strings) and preserve the deserialize round-trip (`read_model.ex:373`).  Owner: TBD  Est: 1.5h  verifies: [UC-033, infrastructure]  deps: []  acc: ExUnit -- recording an iteration whose vector has an `:error` result with tuple evidence returns `{:ok, _}` (no raise) and round-trips to a JSON-safe map; existing `:pass`/`:fail` serialization stays byte-compatible.
+- [ ] T18.3 Make terminal/budget-stop iteration persistence idempotent: the loop's per-iteration callback AND the terminal/budget-stop callback both persist the SAME `(goal_ref, iteration_index)`, so the second insert hits `iterations_goal_ref_iteration_index_index` ("has already been taken") and is logged as a failure (observed in the benchmark). Either skip re-recording an already-recorded index or use `Repo.insert(..., on_conflict: {:replace, [...]}, conflict_target: [:goal_ref, :iteration_index])` so the terminal state upserts.  Owner: TBD  Est: 1.5h  verifies: [UC-033, infrastructure]  deps: []  acc: ExUnit -- a run that fires the terminal/budget-stop callback persists each `iteration_index` exactly once with the final state; no unique-constraint error is logged; a deliberate double-record is an idempotent upsert, not a crash.
+- [ ] T18.4 Reproduce + close the over-budget CLI crash: with `max_iterations = 1` on an unconvergeable fixture goal, confirm whether `Kazi.CLI.run_goal/4` still raises `CaseClauseError` on the `{:ok, %{outcome: :over_budget, reason: :max_iterations, ...}}` result (observed during the benchmark). `cli.ex:544` now HAS an `:over_budget` clause, so this may already be fixed by T15.3 -- if it reproduces, fix the case; either way add a regression test.  Owner: TBD  Est: 1h  verifies: [UC-033]  deps: [T18.2]  acc: ExUnit/CLI -- an over-budget run prints the over-budget verdict, exits 1, raises nothing; under `--json` it emits the versioned `over_budget` result object; a regression that drops the clause fails the test.
+- [ ] T18.5 Re-verify on the benchmark fixture + lint: after T18.1-T18.4, re-run the code-only benchmark goal (a broken Go fixture, `mix kazi.run`) end to end and confirm convergence with zero persistence warnings, plus an over-budget variant exits cleanly. Run `mix format --check-formatted` and `mix compile --warnings-as-errors`. Record the clean re-run in `docs/devlog.md`.  Owner: TBD  Est: 0.5h  verifies: [infrastructure]  deps: [T18.1, T18.2, T18.3, T18.4]  acc: a real `mix kazi.run` on the fixture converges with no `failed to persist` warning, no `:map` cast error, no unique-constraint log; format + warnings-as-errors clean; devlog updated.
+
+### E19 -- Realize the unwired token-efficiency levers + measure (P2, ADR-0010)
+
+Context: the token audit (`docs/devlog.md` 2026-06-23) + benchmark (2026-06-24)
+found kazi adds ~0% overhead vs vanilla at single-dispatch, but the orientation
+pack ships as a `.kazi/context.md` FILE the agent must READ rather than a stable
+prompt PREFIX, and the live dispatch path renders evidence via raw `inspect/1`
+(bypassing `truncate_evidence/2`). ADR-0010 decided prefix-injection (T4.3) +
+caching; the prefix path (`Kazi.Harness.Prompt.build_prompt/3`) is built and tested
+but the live loop's `dispatch_prompt/2` (`loop.ex:1208`) does not call it. KEY
+CONSTRAINT: kazi drives `claude -p` as a SUBPROCESS and makes no raw Anthropic API
+calls, so it CANNOT set `cache_control` headers; the caching win is realized by
+making the injected prefix BYTE-STABLE across iterations so the inner harness's OWN
+prompt cache (5-min TTL) hits across kazi's separate dispatches (ADR-0010 already
+frames caching as stable-prefix-dependent -- no new ADR). The multi-iteration
+benchmark TESTS whether the wiring is net-positive (the prefix adds per-dispatch
+input tokens; the win is fewer orientation tool-calls + cross-iteration cache hits)
+-- a hypothesis to MEASURE, not assume; T19.5 may recommend reverting if C is not a
+net win.
+
+- [ ] T19.1 Wire the cached orientation pack into the live dispatch prompt (realize T4.3): route `dispatch_prompt/2` (`loop.ex:1208`) through `Kazi.Harness.Prompt.build_prompt/3`'s prefix path (or prepend `Kazi.Context.cached_orientation_pack/4` output) so each stateless dispatch carries the ranked blast-radius pack as a prefix, keeping the failing-evidence + working-set-digest sections. Keep `.kazi/context.md` as the fallback for file-reading harnesses.  Owner: TBD  Est: 2h  verifies: [UC-033, infrastructure]  deps: [T18.2]  acc: ExUnit -- a dispatch on a fixture with a graph/repo-map injects the orientation pack as a prefix; the prefix is byte-identical for the same `(workspace, git-SHA, failing-set)` across iterations; evidence + digest sections still present; nil-workspace/no-graph degrades to today's prompt.
+- [ ] T19.2 Stable-prefix discipline for inner-harness cache hits: front-load the prompt (orientation + work-item first, volatile evidence/digest last) and keep ordering deterministic so the inner harness's own prompt cache maximally hits across successive `claude -p` dispatches within the TTL. (kazi sets no `cache_control` -- it drives a CLI; this is purely prefix stability.) Document the constraint at the `build_prompt` seam.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T19.1]  acc: ExUnit -- for two iterations with the same failing-set + SHA the prompt's leading bytes (orientation + work-item) are identical; reordering volatile sections does not perturb the stable head; a moduledoc note records the subprocess-cache rationale (ADR-0010).
+- [ ] T19.3 Use `truncate_evidence/2` on the live dispatch path: `dispatch_prompt/2` renders evidence via raw `inspect/1`, so large evidence bypasses the T4.8 cap. Render evidence through `Kazi.Harness.Prompt.truncate_evidence/2` (default 8 KiB, head+tail window) on the live path.  Owner: TBD  Est: 0.5h  verifies: [UC-033, infrastructure]  deps: [T19.1]  acc: ExUnit -- a dispatch with oversized predicate evidence truncates to the cap with a head+tail window; small evidence is unchanged.
+- [ ] T19.4 Multi-iteration benchmark harness: build a repeatable bench (a `mix` task or script under `bench/`) that converges a fixture needing >=3 dispatches three ways -- (A) vanilla `claude -p` session, (B) kazi->claude WITHOUT the prefix (pre-T19.1 behavior behind a flag/config), (C) kazi->claude WITH the prefix + stable head (T19.1/T19.2) -- capturing per-dispatch input/output/cache-read tokens + cost via the harness shim (the docs/devlog.md 2026-06-24 method).  Owner: TBD  Est: 2h  verifies: [infrastructure]  deps: [T19.1, T19.2, T19.3]  acc: the bench runs all three arms on a real fixture and emits a per-arm token + cost + iteration table; the shim captures every dispatch; the method is documented and repeatable.
+- [ ] T19.5 Run the multi-iteration benchmark + record the verdict: run T19.4; compare B vs C (does the stable prefix raise cross-dispatch cache_read / cut cost, and do fewer orientation tool-calls offset the added prefix tokens?) and A vs C (kazi vs vanilla over multiple iterations). Record honest numbers + the net verdict in `docs/devlog.md`; if C is NOT a net win, say so and recommend keeping file-based orientation.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T19.4]  acc: a `docs/devlog.md` entry with the A/B/C multi-iteration table, the B-vs-C cache-hit delta, and a clear keep/revert recommendation for the prefix wiring; honest if inconclusive.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -235,6 +282,9 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E16-1 (self-description):** T16.1 (`help --json`/`schema`) -> T16.2 (skill + `install-skill`), T16.3 (`AGENTS.md`) -> T16.4 (coherence guard).
 - **Wave E16-2 (MCP + live):** T16.5 (`kazi mcp`), T16.6 (Claude Code drives kazi via the skill, live).
 - **Wave E17 (adoption docs):** T17.1 (README reframe), T17.2 (website section + coherence + deploy), T17.3 (concept positioning) -- after the skill (T16.2) exists to point at.
+- **Wave E18 (benchmark bug fixes, parallel):** T18.1, T18.2, T18.3, T18.4 are independent (different files) and run in PARALLEL -> T18.5 (re-verify + lint) after all. Independent of E12-E17; safe to land first since they harden the run loop everything else exercises.
+- **Wave E19-1 (token-efficiency wiring):** T19.1 (inject the cached orientation pack as a stable prompt prefix on the live loop) -> T19.2 (Anthropic `cache_control` on the stable prefix) -> T19.3 (use `truncate_evidence/2` on the live dispatch path). Sequential: each refines `dispatch_prompt`/the adapter.
+- **Wave E19-2 (measure):** T19.4 (multi-iteration benchmark harness) -> T19.5 (run + record A/B/cached numbers). After E18 (clean persistence) and E19-1.
 
 ## Risk Register
 
@@ -249,6 +299,9 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E15/16-1 | End-to-end value needs a capable, FAST-ENOUGH inner harness; claw->local Qwen is best-effort/slow (T8.11). | Med | High (known) | The JSON contract makes kazi drivable regardless; convergence speed is the inner harness's problem. T15.9/T16.6 report honestly (wiring proof vs fast convergence). |
 | R-E16-1 | The shipped skill/`AGENTS.md` drift from the real CLI. | Med | Med | `help --json` is GENERATED from the command table (T16.1); a coherence test (T16.4) fails CI when the skill names a command `help --json` does not report. ADR-0024. |
 | R-E17-1 | Website/README copy drifts from what kazi actually does. | Med | Med | Copy DERIVES from README/concept; the README<->site canonical-string drift-check (T9.9) fails CI on divergence; T17.1/T17.2 update both in lockstep. |
+| R-E18-1 | A read-model serialization change (T18.2) alters the stored shape and breaks the deserialize round-trip / dashboard reads. | Med | Low | T18.2 keeps `:pass`/`:fail` serialization byte-compatible; only non-JSON evidence (the crash case) changes; an ExUnit round-trip pins it. |
+| R-E19-1 | Injecting the orientation prefix (T19.1) ADDS per-dispatch input tokens and may be net-NEGATIVE if it does not save enough exploration / cache. | Med | Med | Treat as a hypothesis: T19.4/T19.5 measure B-vs-C and the verdict may be REVERT (keep file-based orientation). Prefix kept behind a flag so reverting is config, not code. |
+| R-E19-2 | Cross-dispatch prompt-cache hits depend on the inner harness's own cache (kazi sets no `cache_control`) and a <5min TTL between dispatches; slow predicate evaluation can blow the TTL. | Low | Med | T19.2 maximizes the stable head so hits are likely when dispatches are rapid; T19.5 reports the realized cache_read delta honestly rather than assuming the win. |
 
 ## Operating Procedure
 
@@ -274,6 +327,28 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E18 benchmark bug fixes + E19 token-efficiency wiring)
+- Added **E18** (P2, no ADR): four reliability fixes for defects surfaced while
+  running the T15.9 token benchmark (`docs/devlog.md` 2026-06-24): T18.1 stale
+  `priv/examples/deploy_target.toml` `cmd = "go test ./..."` -> `cmd="go"`,
+  `args=[...]` + a shipped-example runnability guard; T18.2 deep-sanitize read-model
+  evidence so errored predicates (tuple evidence) persist instead of crashing
+  `record_iteration/1` (`:map` cast); T18.3 idempotent terminal/budget-stop
+  iteration persistence (no `(goal_ref, iteration_index)` unique collision); T18.4
+  reproduce/close the over-budget `CaseClauseError` (likely already fixed by T15.3
+  at `cli.ex:544`) + a regression test; T18.5 re-verify + lint.
+- Added **E19** (P2, ADR-0010): realize the unwired token-efficiency levers + a
+  multi-iteration benchmark. T19.1 wire the cached orientation pack into the live
+  `dispatch_prompt/2` as a stable prefix (T4.3 is built but unused on the live
+  loop); T19.2 stable-prefix discipline so the inner harness's OWN prompt cache hits
+  across dispatches (kazi drives a subprocess and sets no `cache_control`); T19.3
+  route live evidence through `truncate_evidence/2`; T19.4 a >=3-dispatch benchmark
+  harness; T19.5 run + record an honest A/B/C verdict (may recommend REVERT if the
+  prefix is not a net win).
+- Risk rows R-E18-1, R-E19-1, R-E19-2 added. No ADRs created (E18 = bug fixes;
+  E19 is covered by existing ADR-0010). No new use cases (fixes/measurement map to
+  UC-024 + UC-033 + infrastructure). No trim this pass (plan was trimmed 2026-06-23).
 
 ### 2026-06-23 -- Change Summary (close-out trim: plan ready for a fresh `/apply` session)
 - **Trimmed the completed epics** out of the WBS: E0-E8, E11, and the E9 core
