@@ -9,8 +9,9 @@ defmodule Kazi.Pool.Gate do
   `converged`" decision a pure function of the run-result JSON, so the gate is
   testable in code rather than only described in prose.
 
-  `decide/1` takes a DECODED `kazi run --json` terminal result (the object
-  documented in `docs/schemas/run-result.md`, schema_version 1) and returns:
+  `decide/1` takes a DECODED `kazi apply --json` terminal result (the object
+  documented in `docs/schemas/run-result.md`, schema_version 2; `kazi run --json`
+  is the deprecated alias that emits the same object) and returns:
 
     * `:merge` — the run `converged`; the whole predicate vector held against the
       real world (including any live probe). The session may rebase-merge.
@@ -42,9 +43,10 @@ defmodule Kazi.Pool.Gate do
   """
 
   # The result-schema contract version this gate is written against (ADR-0023
-  # decision 2). The gate pins it: a result at a DIFFERENT version blocks rather
-  # than being read with stale field assumptions.
-  @schema_version 1
+  # decision 2; bumped to 2 by ADR-0032/T27.3 with the apply/plan verb rename).
+  # The gate pins it: a result at a DIFFERENT version blocks rather than being
+  # read with stale field assumptions.
+  @schema_version 2
 
   @typedoc "A decoded `kazi run --json` terminal result object (string-keyed)."
   @type result :: %{optional(String.t()) => term()}
@@ -65,17 +67,17 @@ defmodule Kazi.Pool.Gate do
 
   ## Examples
 
-      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 1, "status" => "converged"})
+      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 2, "status" => "converged"})
       :merge
 
-      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 1, "status" => "stuck", "reason" => "stuck"})
+      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 2, "status" => "stuck", "reason" => "stuck"})
       {:block, "kazi reported status=stuck (next_action=investigate): the same predicate set failed across iterations — investigate the failing predicates; do NOT merge"}
 
-      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 1, "status" => "error", "error" => "goal is vacuous"})
+      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 2, "status" => "error", "error" => "goal is vacuous"})
       {:block, "kazi reported status=error (next_action=investigate): goal is vacuous — fix the goal/harness; do NOT merge"}
 
-      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 2, "status" => "converged"})
-      {:block, "kazi run result schema_version is 2, gate expects 1 — refusing to read an unpinned result; do NOT merge"}
+      iex> Kazi.Pool.Gate.decide(%{"schema_version" => 1, "status" => "converged"})
+      {:block, "kazi run result schema_version is 1, gate expects 2 — refusing to read an unpinned result; do NOT merge"}
   """
   @spec decide(result()) :: decision()
   def decide(result) when is_map(result) do
