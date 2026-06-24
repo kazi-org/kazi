@@ -109,6 +109,12 @@ defmodule Kazi.Runtime do
       which never rolls back a successful reconcile.
     * `:persist?` — project each iteration into the read-model (default `true`).
       Set `false` to run without touching SQLite.
+    * `:stream` — a 1-arity side-effect-only observer invoked once per observation
+      with the loop's `on_iteration` payload (T15.4, ADR-0023 decision 3). Composed
+      OVER the read-model projection on the SAME `on_iteration` seam, so streaming
+      and persistence coexist. The CLI uses it to emit one JSONL progress event per
+      iteration under `run --json --stream`. A raising observer is contained (it
+      never alters convergence). Default `nil` (no streaming).
     * `:goal_ref` — the read-model `goal_ref` (default `goal.id`).
     * `:await_timeout` — how long `run/2` blocks for termination (default
       `:infinity`).
@@ -162,6 +168,10 @@ defmodule Kazi.Runtime do
           :providers,
           :adapter_opts,
           :extra_action_context,
+          # T15.4 (ADR-0023 decision 3): the streaming observer is consumed by
+          # build_on_iteration/2 (composed over the persistence projection), not
+          # a Loop opt.
+          :stream,
           # T8.7 harness selection: consumed by resolve_harness/2 below, not a Loop opt.
           :harness,
           :model,
@@ -369,17 +379,50 @@ defmodule Kazi.Runtime do
 
   # Build the loop's :on_iteration side-effect callback that projects each
   # observed iteration into the SQLite read-model. Returns nil when persistence
-  # is disabled so the loop runs without the seam at all.
+  # is disabled AND no `:stream` observer is supplied, so the loop runs without
+  # the seam at all.
+  #
+  # T15.4 (ADR-0023 decision 3): an optional `:stream` callback is COMPOSED here
+  # over the persistence projection — the loop fires ONE `on_iteration` per
+  # observation, so both the read-model write and the streaming JSONL emit happen
+  # on that single seam. The stream observer runs FIRST (so an event is emitted
+  # even when persistence is off / fails), then the read-model projection. Both
+  # are side-effect only; a raising stream callback is contained here so it never
+  # alters convergence or blocks the projection.
   defp build_on_iteration(goal, opts) do
-    if Keyword.get(opts, :persist?, true) do
-      goal_ref = Keyword.get(opts, :goal_ref, goal.id)
+    stream = Keyword.get(opts, :stream)
+    persist? = Keyword.get(opts, :persist?, true)
+    goal_ref = Keyword.get(opts, :goal_ref, goal.id)
 
-      fn payload ->
-        persist_iteration(goal_ref, payload)
-      end
-    else
-      nil
+    cond do
+      is_function(stream, 1) and persist? ->
+        fn payload ->
+          run_stream_observer(stream, payload)
+          persist_iteration(goal_ref, payload)
+        end
+
+      is_function(stream, 1) ->
+        fn payload -> run_stream_observer(stream, payload) end
+
+      persist? ->
+        fn payload -> persist_iteration(goal_ref, payload) end
+
+      true ->
+        nil
     end
+  end
+
+  # T15.4: run the streaming observer, contained — a raising stream callback must
+  # never alter convergence or block the persistence projection that follows it.
+  defp run_stream_observer(stream, payload) do
+    stream.(payload)
+  rescue
+    error ->
+      Logger.warning(fn ->
+        "kazi.runtime stream observer raised: #{Exception.message(error)}"
+      end)
+
+      :ok
   end
 
   # Project one iteration. Best-effort: a read-model write must never stall or
