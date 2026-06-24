@@ -88,7 +88,11 @@ Open work:
   refute) the "cheaper" claim (UC-033 + infrastructure).
 - **UC-036** (harden a multi-session `/apply --pool` workflow with kazi: objective
   done as a merge gate, blast-radius coordination beneath task-claims, live swarm
-  observability, phone-driven direction, ADR-0026) -- E20.
+  observability, phone-driven direction, ADR-0026) -- E20 (INTEROP).
+- **UC-037** (kazi natively parallelizes a goal-set across disjoint blast-radius
+  partitions to collective convergence -- no external orchestrator, single machine
+  NATS-free; codifies `/apply --pool`+`/claim` into kazi, ADR-0027) -- E21 (PRIMARY
+  parallelization story).
 
 ## Checkable Work Breakdown
 
@@ -316,6 +320,43 @@ ADR-0001 intact (kazi is the inner controller beneath the session-as-orchestrato
 - [ ] T20.10 "Harden /apply --pool with kazi" guide (docs): a `docs/` guide covering the 4 layers, the `/claim`<->lease boundary, NATS-only-at-L3, the failure modes it fixes (false-completion, 5/10 stall, silent logical conflict), and honest maturity (shape b deferred).  Owner: TBD  Est: 1.5h  verifies: [UC-036]  deps: [T20.3, T20.7, T20.8]  acc: a reader can adopt L1 today and understand the path to L3/L4; references only real commands/modules; coherent with ADR-0026.
 - [ ] T20.11 LIVE dogfood (the honest proof): run a REAL multi-session `/apply --pool` with kazi as the L1 gate on a real plan slice (e.g. the E18 bug fixes); record evidence -- did the gate BLOCK a non-converged task? -- in `docs/devlog.md`. After L3, extend to a leasing dogfood (two sessions, overlapping blast radius, serialized).  Owner: TBD  Est: 2h  verifies: [UC-036]  deps: [T20.3]  acc: observed evidence in `docs/devlog.md` that the kazi gate caught (or cleanly passed) real pooled tasks; every claim is observed, not asserted; honest if a layer was skipped.
 
+> **Note (ADR-0027):** E20 is the INTEROP story (kazi as a good citizen under an
+> existing external orchestrator). The PRIMARY parallelization story is now **E21**
+> below -- kazi's own native scheduler -- which codifies `/apply --pool` + `/claim`
+> INTO kazi so new users need no personal skills.
+
+### E21 -- kazi owns parallelization: a native scheduler over a partitioned goal-set (P1, ADR-0027)
+
+This codifies the third and final piece of the founding workflow. kazi already
+codified the Definition of Done (predicates) and the per-task loop (reconcile), and
+built the parallelization SUBSTRATE (`Kazi.Partition` blast-radius partitioning +
+`PartitionLease` leases, ADR-0006) -- but never the SCHEDULER that spawns and drives
+the parallel agents. That scheduler lived in the operator's `/apply --pool` +
+`/claim`. E21 builds it INTO kazi so `kazi run` on a goal-set parallelizes itself --
+no external orchestrator, no personal skills.
+
+Design (ADR-0027): partition by blast radius -> lease each partition -> spawn one
+supervised reconciler (the existing serial per-goal loop) per partition under a
+`DynamicSupervisor`, each in its own git worktree -> drive to COLLECTIVE convergence
+-> integrate with merge convergence -> observe/escalate via the dashboard. SINGLE-NODE
+IS NATS-FREE (in-memory lease `Kazi.Coordination.Lease.Memory`); NATS is the
+multi-machine upgrade only. Single-goal stays the serial simple on-ramp; parallelism
+is opt-in scale. The serial-single-goal design is unchanged -- parallelism is ACROSS
+partitions, each its own serial reconciler.
+
+- [ ] T21.1 Parallel scheduler + `DynamicSupervisor` skeleton: a coordinator process that, given a partitioned goal-set, starts one supervised reconciler per partition, tracks each terminal state, and reports COLLECTIVE status (all `converged` / any `stuck` / any `over_budget`). In-memory lease (single-node, NATS-free).  Owner: TBD  Est: 2.5h  verifies: [UC-037]  deps: []  acc: ExUnit with stub reconcilers -- N partitions start under the supervisor, run concurrently, and the coordinator reports the correct collective verdict; a single-partition goal-set behaves exactly like today's serial run.
+- [ ] T21.2 Wire `Kazi.Partition` into the scheduler: partition the goal-set by blast radius (graph/repo-map `graph_source`) into disjoint partitions, one per reconciler; degenerate to one partition when there is a single goal or no graph.  Owner: TBD  Est: 1.5h  verifies: [UC-037]  deps: [T21.1]  acc: ExUnit -- a multi-goal set with disjoint blast radii yields >=2 partitions each driven concurrently; overlapping radii collapse into one partition (serialized); same input -> same partitioning.
+- [ ] T21.3 Per-partition lease lifecycle: each reconciler acquires its `PartitionLease` on start and releases on terminal; the in-memory backend is the single-node default, the NATS backend is config-selected for multi-node; residual mid-run overlap serializes on the lease.  Owner: TBD  Est: 2h  verifies: [UC-037]  deps: [T21.1]  acc: ExUnit -- concurrent partitions hold distinct leases; a forced overlap serializes; a crashed reconciler's lease frees via TTL; no NATS needed for the memory backend.
+- [ ] T21.4 Isolated git worktree per partition: each parallel fixer works in its own worktree (concept sec 9), created on start and removed on terminal; honor the worktree-guard landmine (never `rm -r` a cwd worktree).  Owner: TBD  Est: 2h  verifies: [UC-037]  deps: [T21.1]  acc: ExUnit/integration on a fixture repo -- N reconcilers edit in N worktrees without touching each other's tree; worktrees are cleaned up on every terminal path (converged/stuck/over_budget/crash).
+- [ ] T21.5 Collective integration + merge convergence: after partitions converge, integrate each (branch -> PR -> rebase-merge) in a safe order; detect residual cross-partition conflicts and re-dispatch the affected partition until the merged whole is green.  Owner: TBD  Est: 2.5h  verifies: [UC-037]  deps: [T21.4]  acc: ExUnit/integration -- two disjoint partitions both merge clean; an injected cross-partition conflict is detected and the affected partition re-dispatched, not silently merged.
+- [ ] T21.6 Dynamic blast-radius overlap policy: when a partition's edits expand its radius into another's (a lease conflict mid-run), serialize the overlapping pair (or re-partition); documented + tested so growth never corrupts a sibling.  Owner: TBD  Est: 1.5h  verifies: [UC-037]  deps: [T21.3]  acc: ExUnit -- a partition that grows into a neighbor's radius blocks on the lease and proceeds only when free; no two reconcilers edit the same file concurrently; the policy is documented.
+- [ ] T21.7 Per-partition budgets (derived rollup, ADR-0020/E12): split the goal budget across partitions; a partition going over-budget ESCALATES without killing siblings; the collective verdict reflects per-partition outcomes.  Owner: TBD  Est: 1.5h  verifies: [UC-037, UC-030]  deps: [T21.1]  acc: ExUnit -- per-partition budgets sum to the goal budget; one partition's `over_budget` does not stop the others; the collective report names which partition escalated.
+- [ ] T21.8 CLI + `--json` collective contract: `kazi run --parallel [N]` (or auto from a multi-partition goal-set) drives the scheduler; `--json` emits a versioned collective result (per-partition status + overall + `next_action`); non-interactive/non-TTY safe (ADR-0022/0023).  Owner: TBD  Est: 1.5h  verifies: [UC-037, UC-033]  deps: [T21.1]  acc: ExUnit -- `--parallel` runs the scheduler; `--json` yields a parseable collective object with each partition's verdict + the overall status + `schema_version`; serial single-goal output is unchanged.
+- [ ] T21.9 Live dashboard for the parallel run: the LiveView console shows the N partition reconcilers + their leases + per-partition convergence in real time (extends the multi-goal dashboard); verified in a browser against a live native-parallel run.  Owner: TBD  Est: 1.5h  verifies: [UC-037]  deps: [T21.1]  acc: the dashboard shows >=2 concurrent partition reconcilers + leases + convergence live; exercised with agent-browser; read-only, decoupled from the loop (ADR-0011).
+- [ ] T21.10 Supervision/restart + escalation: a crashed partition reconciler restarts (or escalates `stuck`) WITHOUT corrupting lease or worktree state; the coordinator survives a child crash.  Owner: TBD  Est: 1.5h  verifies: [UC-037, infrastructure]  deps: [T21.3, T21.4]  acc: ExUnit -- killing a child reconciler triggers clean restart-or-escalate; its lease frees and worktree is reconciled; siblings are unaffected; the coordinator never crashes on a child failure.
+- [ ] T21.11 Docs + positioning (native parallelism is the headline): README/concept/site present kazi as the native parallel reconciler ("kazi parallelizes your plan -- no external orchestrator; single machine, no NATS"); `/apply --pool` (E20) is shown as interop. Coherent with E17/ADR-0025 + ADR-0027.  Owner: TBD  Est: 1.5h  verifies: [UC-037, UC-035]  delivers: [docs/site that lead the parallel story with kazi-native, interop as secondary]  deps: [T21.8]  acc: a newcomer sees "kazi parallelizes for you" (no personal skills); `/apply --pool` is clearly the interop path; canonical strings + coherence (T9.9) intact.
+- [ ] T21.12 LIVE dogfood (the proof): run kazi natively-parallel on a real multi-partition goal in THIS repo on one machine (NATS-free) -- several independent fixes converged concurrently in isolated worktrees, then merged. Record evidence in `docs/devlog.md`: partition count, concurrency observed, collective convergence, merge result; honest if it falls short.  Owner: TBD  Est: 2.5h  verifies: [UC-037]  deps: [T21.5, T21.8]  acc: observed evidence of >=2 partitions converging concurrently under one kazi run with no external orchestrator and no NATS; every claim observed, not asserted.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -344,6 +385,10 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E20-L3 (blast-radius leases, NATS):** T20.6 (per-task lease) -> T20.7 (`/claim`<->lease boundary + deadlock safety).
 - **Wave E20-L4 (observability + direction):** T20.8 (live dashboard/lease map), T20.9 (Telegram direction) in parallel after T20.6/T20.4.
 - **Wave E20-docs:** T20.10 (the adoption guide) after L1+L3+L4 land.
+- **Wave E21-1 (native scheduler core, single-node NATS-free):** T21.1 (scheduler + DynamicSupervisor) -> T21.2 (wire Partition), T21.3 (lease lifecycle), T21.4 (worktree per partition) in parallel after T21.1.
+- **Wave E21-2 (integration + correctness):** T21.5 (merge convergence), T21.6 (overlap policy), T21.7 (per-partition budgets).
+- **Wave E21-3 (surface + resilience):** T21.8 (CLI + `--json` collective), T21.9 (dashboard), T21.10 (supervision/restart).
+- **Wave E21-4 (position + prove):** T21.11 (docs lead with native parallelism) -> T21.12 (live NATS-free multi-partition dogfood).
 
 ## Risk Register
 
@@ -366,6 +411,10 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E20-3 | The cheaper-via-tiering win (T20.5) is gated by local-model speed (T8.11). | Med | High (known) | T20.5 is optional; objective done holds regardless of implementer quality; report wiring-vs-fast-convergence honestly, never a false convergence. |
 | R-E20-4 | The opt-in gate in the GLOBAL `/apply` skill drifts from kazi's CLI (cross-repo). | Med | Med | The skill references only commands `kazi help --json` reports; enhance globally (not project-local, per the skills policy); the recipe pins the JSON contract (`schema_version`). |
 | R-E20-5 | kazi overhead is not worth it for trivial pooled tasks. | Low | Med | The gate is OPT-IN per task (`--verify-with-kazi`); reserve kazi for tasks with real verification surface (live endpoints, regressions, multi-iteration); trivial tasks use the bare pool. |
+| R-E21-1 | Partition QUALITY depends on graph freshness; a false-disjoint partition lets two reconcilers edit coupled code. | High | Med | Leases catch residual overlap and serialize (T21.3/T21.6); the graph is refreshed before dispatch (ADR-0010); merge convergence (T21.5) re-dispatches on a detected conflict -- never a silent merge. |
+| R-E21-2 | Git-worktree-per-partition risks disk pressure and the `rm -r` cwd-worktree landmine. | Med | Med | T21.4 creates/cleans a worktree per terminal path and honors the worktree-guard (never `rm -r` a cwd worktree); cleanup is tested on every exit (converged/stuck/over_budget/crash). |
+| R-E21-3 | A crashed partition reconciler corrupts shared lease/worktree state or takes down the coordinator. | High | Low | T21.10: the coordinator survives child crashes (DynamicSupervisor); a crashed child's lease frees via TTL and its worktree is reconciled; siblings unaffected. |
+| R-E21-4 | Building a scheduler before it is needed (premature) / scope creep vs the shipped serial loop. | Med | Med | E21 REUSES the existing serial per-goal loop (one per partition) -- it adds a supervisor + coordinator, not a new loop; single-goal stays the default; parallelism is opt-in. The substrate (Partition/leases) is already built. |
 
 ## Operating Procedure
 
@@ -391,6 +440,33 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E21: kazi owns parallelization, P1 + ADR-0027; E20 -> interop)
+- **Created ADR-0027** (kazi owns parallelization: a native scheduler over a
+  partitioned goal-set). Diagnosis (verified in code): kazi has the parallelization
+  SUBSTRATE (`Kazi.Partition` + `PartitionLease`, ADR-0006) but NO scheduler --
+  nothing calls them to spawn agents; the loop is serial by design; the spawner
+  lived in the operator's `/apply --pool` + `/claim`. So parallelization -- the
+  piece that birthed kazi -- was never codified. ADR-0027 builds the scheduler INTO
+  kazi: partition by blast radius -> lease each -> spawn N supervised reconcilers
+  (the existing serial loop, one per partition) under a DynamicSupervisor, each in
+  its own worktree -> collective convergence -> merge. SINGLE-NODE IS NATS-FREE
+  (in-memory lease); NATS only for multi-machine.
+- **ADR-0026 superseded IN PART** (parallelization stance) and RETAINED as the
+  INTEROP story (kazi under an existing external orchestrator / CI). ADR README +
+  the ADR-0026 status updated; E20 annotated as interop, E21 is the primary story.
+- **Added E21** (P1, ADR-0027, UC-037): T21.1 scheduler+DynamicSupervisor, T21.2
+  wire Partition, T21.3 lease lifecycle, T21.4 worktree-per-partition, T21.5 merge
+  convergence, T21.6 overlap policy, T21.7 per-partition budgets, T21.8 CLI+`--json`
+  collective, T21.9 dashboard, T21.10 supervision/restart, T21.11 docs/positioning,
+  T21.12 live NATS-free dogfood. Waves E21-1..4; risks R-E21-1..4 (partition quality,
+  worktree hygiene, crash isolation, scope).
+- **UC-037** added. Rationale: closes the founding codification gap -- new users get
+  parallelism from `kazi run` alone (no personal skills, no NATS on one machine),
+  which the fragility/codification concern surfaced. kazi-the-tool was never fragile
+  (single-goal is self-contained); the gap was that the PARALLEL story was BYO-
+  orchestrator. ADR-0001 intact (kazi orchestrates harness dispatches; it is not one).
+- ADR created: `docs/adr/0027-kazi-owns-parallelization-native-scheduler.md`.
 
 ### 2026-06-24 -- Change Summary (E20: kazi under /apply --pool, P1 + ADR-0026)
 - **Created ADR-0026** (kazi UNDER `/apply --pool`, shape a): `/claim` stays the
