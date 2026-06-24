@@ -89,7 +89,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       # surface "generated, not hand-maintained" (ADR-0024).
       expected =
         MapSet.new(
-          ~w(run status init propose list-proposed approve reject export help schema version)
+          ~w(run status init install-skill propose list-proposed approve reject export help schema version)
         )
 
       assert reported == expected,
