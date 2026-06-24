@@ -23,6 +23,7 @@ defmodule Kazi.Harness.Registry do
   @spec fetch(atom()) :: {:ok, Profile.t()} | {:error, {:unknown_harness, atom()}}
   def fetch(:claude), do: {:ok, claude()}
   def fetch(:opencode), do: {:ok, opencode()}
+  def fetch(:codex), do: {:ok, codex()}
   def fetch(id) when is_atom(id), do: {:error, {:unknown_harness, id}}
 
   @doc """
@@ -39,7 +40,7 @@ defmodule Kazi.Harness.Registry do
 
   @doc "The ids of all built-in harnesses."
   @spec ids() :: [atom()]
-  def ids, do: [:claude, :opencode]
+  def ids, do: [:claude, :opencode, :codex]
 
   # The :claude profile — the default. Its argv + parser are the canonical
   # Claude-specific boundary logic (`Kazi.Harness.Profiles.Claude`), pinned
@@ -70,6 +71,25 @@ defmodule Kazi.Harness.Registry do
       command: "opencode",
       build_args: &Profiles.Opencode.build_args/2,
       parse: &Profiles.Opencode.parse/1,
+      supported_opts: [:command, :model]
+    }
+  end
+
+  # The :codex profile (T14.2, ADR-0022) — OpenAI's Codex CLI, the priority
+  # fully-conformant addition. argv is `exec <prompt> --json` plus an optional
+  # `--model <m>`; the parser consumes Codex's JSONL event stream
+  # (`Kazi.Harness.Profiles.Codex`), mirroring the opencode NDJSON path.
+  # supported_opts are the per-run `:command` override (the test-stub seam) and
+  # `:model` — Codex does NOT understand Claude's hygiene flags, so resolution
+  # (T8.5) drops them. Auth is `OPENAI_API_KEY` / `codex login`, supplied by the
+  # operator's environment (not a profile concern).
+  @spec codex() :: Profile.t()
+  defp codex do
+    %Profile{
+      id: :codex,
+      command: "codex",
+      build_args: &Profiles.Codex.build_args/2,
+      parse: &Profiles.Codex.parse/1,
       supported_opts: [:command, :model]
     }
   end
