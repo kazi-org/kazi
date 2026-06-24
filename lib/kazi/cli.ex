@@ -994,13 +994,26 @@ defmodule Kazi.CLI do
     }
   end
 
+  # T27.4 (ADR-0032): the command object carries `deprecated` (always present, a
+  # boolean) and — for a deprecated alias — `alias_of` naming the primary verb it
+  # forwards to, both read straight from the `@commands` table. A primary verb
+  # reports `deprecated: false` and omits `alias_of`; so an orchestrator can tell
+  # the 4 primary verbs from the 2 deprecated aliases (`run`/`propose`) without
+  # parsing prose. Generated from the table — adding/retiring an alias updates the
+  # surface with no edit here.
   defp command_json(command) do
-    %{
+    base = %{
       name: command.name,
       summary: command.summary,
+      deprecated: Map.get(command, :deprecated, false),
       args: Enum.map(command.args, &arg_json/1),
       flags: Enum.map(command.flags, &command_flag_json/1)
     }
+
+    case Map.get(command, :alias_of) do
+      nil -> base
+      primary -> Map.put(base, :alias_of, primary)
+    end
   end
 
   defp arg_json(arg), do: %{name: arg.name, required: arg.required}
