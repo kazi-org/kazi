@@ -73,11 +73,18 @@ defmodule Kazi.CLI do
   @type exit_code :: non_neg_integer()
 
   # The versioned machine-result contract version (ADR-0023 decision 2). Shared by
-  # every --json surface — `run` (T15.3), `status` (T15.5), and the authoring
-  # transitions (T15.6) — so a breaking change to any of them bumps one number an
-  # orchestrator pins. Defined here (before first use) so the helpers throughout
-  # the module can reference it.
-  @run_schema_version 1
+  # every --json surface — `apply`/`run` (T15.3), `status` (T15.5), and the
+  # authoring transitions (T15.6) — so a breaking change to any of them bumps one
+  # number an orchestrator pins. Defined here (before first use) so the helpers
+  # throughout the module can reference it.
+  #
+  # Version 2 (ADR-0032, T27.3): the result contract's command key was renamed
+  # `run` -> `apply` and `propose` -> `plan` (the verbs were unified across the
+  # CLI, skill, and docs). `run`/`propose` remain DEPRECATED ALIASES that dispatch
+  # identically and emit the same result object (carrying the new `apply`/`plan`
+  # command key), so existing callers keep working through the deprecation window
+  # — only the pinned `schema_version` must update, not the call.
+  @run_schema_version 2
 
   # =============================================================================
   # command table — the SINGLE source of truth for the command/flag surface
@@ -498,7 +505,7 @@ defmodule Kazi.CLI do
       {:version, flags} ->
         # T15.1 (ADR-0023): the first command to prove the --json seam end-to-end.
         # Human (default): `kazi <vsn>`. Machine (--json): a single JSON object.
-        emit(json?(flags), %{kazi: version(), schema_version: 1}, fn ->
+        emit(json?(flags), %{kazi: version(), schema_version: @run_schema_version}, fn ->
           IO.puts("kazi #{version()}")
         end)
 
@@ -930,7 +937,7 @@ defmodule Kazi.CLI do
   # surface; the non-zero exit code is what it branches on.
   @spec emit_json_error(String.t()) :: :ok
   defp emit_json_error(message) when is_binary(message) do
-    IO.puts(Jason.encode!(%{error: message, schema_version: 1}))
+    IO.puts(Jason.encode!(%{error: message, schema_version: @run_schema_version}))
   end
 
   defp format_invalid(invalid) do
@@ -2214,10 +2221,11 @@ defmodule Kazi.CLI do
   end
 
   # =============================================================================
-  # propose --json result schema (T15.2, ADR-0023 decision 2)
+  # plan/propose --json result schema (T15.2, ADR-0023 decision 2)
   # =============================================================================
   #
-  # The single JSON object `propose --json` emits: the draft a caller approves on.
+  # The single JSON object `plan --json` (alias `propose --json`) emits: the draft
+  # a caller approves on.
   # It carries the goal id, the proposal_ref (the approve/reject handle), the
   # acceptance predicates, the optional rationale, and the deterministic clarify
   # FLOOR (`Clarify.gaps/2`) computed OVER the draft — so a missing
@@ -2226,7 +2234,7 @@ defmodule Kazi.CLI do
   # caller-drafts) because both produce the same `Kazi.Authoring.Draft` here.
   defp proposed_json(draft) do
     %{
-      schema_version: 1,
+      schema_version: @run_schema_version,
       goal_id: to_string(draft.goal.id),
       proposal_ref: draft.proposal_ref,
       status: to_string(draft.status),

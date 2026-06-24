@@ -14,8 +14,10 @@ defmodule Kazi.CLI.Schema do
   """
 
   # The contract version, shared with `Kazi.CLI`'s `@run_schema_version`. Kept in
-  # lockstep: a breaking change to any `--json` result bumps both.
-  @schema_version 1
+  # lockstep: a breaking change to any `--json` result bumps both. Version 2
+  # (ADR-0032, T27.3): the result contract's command key was renamed `run` ->
+  # `apply` and `propose` -> `plan`; `run`/`propose` remain deprecated aliases.
+  @schema_version 2
 
   # The result schemas, keyed by the command whose `--json` output they describe.
   # `run` and `status` are the documented contracts (docs/schemas/); the order is
