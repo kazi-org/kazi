@@ -53,12 +53,15 @@ All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work
   fully-automated release pipeline of ADR-0017) -- OPEN; E6.
 - **UC-029** (interactive `propose`: kazi asks clarifying questions before drafting
   a goal so acceptance predicates are precise, ADR-0019) -- DELIVERED (E11, v0.3.0).
-- **UC-030** (hierarchical predicate grouping via a declared taxonomy + capability
-  import + Obsidian/Mermaid export of intended/built/pending, ADR-0020) -- OPEN; E12.
+- **UC-030** (hierarchical predicate grouping via a declared taxonomy +
+  Obsidian/Mermaid export of intended/built/pending/dead, ADR-0020) -- OPEN; E12.
+- **UC-025** (import the intended set from a STANDARD spec -- OpenAPI/gherkin --
+  plus prose docs via the harness, ADR-0021) -- OPEN; E13 (no longer deferred).
+- **UC-031** (detect dead code / undocumented surface via a surface-coverage
+  meta-predicate -- the `A \ I` half of "no dead code", ADR-0021) -- OPEN; E13.
 
 UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
-delivered and verified on `main`. UC-025 (import a standard spec into a goal set)
-is **deferred backlog** (ADR-0015).
+delivered and verified on `main`.
 
 ## Checkable Work Breakdown
 
@@ -152,7 +155,7 @@ core is built surface-agnostic.
 - [x] T11.8 Review loop (refine via `edit/3`): after the draft is shown, offer "looks right / too much / too little / refine"; "refine" re-prompts with a sharper sentence and re-runs clarify+draft, persisting via the existing `edit/3` transition (stays `proposed`).  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.6]  acc: ExUnit with injected I/O -- "refine" with a new sentence updates the proposed goal via `edit/3` (stays `proposed`); "looks right" leaves it `proposed` for `approve`; golden path covered.  NOTE (deviation): implemented as a propose-UPSERT on the same `proposal_ref` (re-runs clarify+draft, row stays `proposed`) rather than a literal `edit/3` call -- equivalent end-state, fewer moving parts; covered by a CLI test asserting a single proposal row after a refine.
 - [x] T11.9 Docs + LIVE CLI verification: update the README/`docs/concept.md` authoring section to describe interactive `propose`; run `kazi propose "<idea>"` in a REAL TTY (stub or real harness) and observe questions -> draft -> rationale, plus the `--yes` non-interactive path and `--strict` on an underspecified idea; record the transcript evidence in `docs/devlog.md`.  Owner: David  Done: 2026-06-23  verifies: [UC-029]  deps: [T11.6, T11.8]  acc: observed-not-expected evidence (a terminal transcript) for the interactive path, the non-interactive path, and the `--strict` failure; README authoring section matches behavior; `mix format --check-formatted` + `mix compile --warnings-as-errors` clean.
 
-### E12 -- Hierarchical predicate grouping + capability import + Obsidian export (P3, ADR-0020)
+### E12 -- Hierarchical predicate grouping + Obsidian export (P3, ADR-0020)
 
 Acceptance: a `Kazi.Goal` can organize hundreds of predicates as a validated tree
 (e.g. pillar -> domain -> capability), so a goal representing a whole product's
@@ -169,10 +172,31 @@ ungrouped goal behaves exactly as today.
 - [ ] T12.2 `Predicate.group` field + reference validation (the drift guard): add an optional `group :: String.t() | nil` to `Kazi.Predicate` (a declared group id, appended additively); the loader REJECTS a predicate whose `group` is not a declared id, a group whose `parent` is undeclared, and a parent cycle.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.1]  acc: ExUnit -- a predicate referencing a declared group loads; an UNKNOWN group id is `{:error, ...}` at parse time (the typo guard); an undeclared parent and a cycle are load errors; `group: nil` is unchanged (backward compatible).
 - [ ] T12.3 Group tree + per-group status rollup (pure): build the tree from `parent` links and roll up predicate verdicts (acceptance-not-yet-true vs passing) into per-group intended/built/pending counts.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.2]  acc: ExUnit -- pure functions reconstruct the tree to arbitrary depth and roll up counts per group; deterministic; no I/O.
 - [ ] T12.4 Per-group budgets (DERIVED rollup) + reconciliation: a group's effective budget is the SUM of its descendants' budgets -- never a hand-maintained parent number; declare budgets only at leaves. An explicit `budget` on a non-leaf is a CAP that can only tighten the rollup (`effective = min(cap, sum)`). Scope convergence + reporting to a group's predicate partition (rides ADR-0006 partitioning), delivering per-pillar reconciliation without a separate `Goal`.  Owner: TBD  Est: 2h  verifies: [UC-030]  deps: [T12.2]  acc: ExUnit -- a parent group's budget equals the sum of its descendants' (no stored parent value); a declared parent cap below the sum tightens to the cap; a cap above the sum is a no-op (or a load error -- operator's choice, default: no-op); a leaf budget bounds its partition's iterations; per-group status reported; an ungrouped goal is unaffected.
-- [ ] T12.5 `kazi init --from-capabilities <manifest.json>` importer (resurrects UC-025): deterministically map a `sire-capability-manifest/v1` (or generic spec) -- pillars -> root groups, domains -> child groups, capabilities -> leaf groups with one predicate per machine-checkable evidence item; the taxonomy is generated from the manifest's canonical pillar list (consistent by construction).  Owner: TBD  Est: 2h  verifies: [UC-030, UC-025]  deps: [T12.2]  acc: ExUnit on a fixture manifest -- a grouped goal-file is produced with the pillar/domain/capability taxonomy and evidence predicates; deterministic (same manifest -> same goal-file); re-import upserts.
+- [~] T12.5 WITHDRAWN -- the `--from-capabilities` bespoke importer contradicted ADR-0015 (audience of one). The desired-state importer is now GENERAL (standard specs + prose via the harness) and moved to **E13 / ADR-0021** (T13.1-T13.3). The grouping taxonomy any importer emits is still ADR-0020.
 - [ ] T12.6 Obsidian/Mermaid exporter: `kazi export --obsidian <dir>` walks the group tree + predicate verdicts into a vault (one note per group/predicate, `[[wikilinked]]`, tagged intended/built/pending) and a Mermaid rollup.  Owner: TBD  Est: 2h  verifies: [UC-030]  deps: [T12.3]  acc: ExUnit -- the exporter writes a vault for a fixture grouped goal; notes link parent<->child; tags reflect verdicts; an overview note carries per-group rollups. Live: open the vault in Obsidian and confirm the graph renders.
 - [ ] T12.7 `kazi lint` near-duplicate group-name warning (advisory second net): fuzzy-compare declared group NAMES and warn on near-duplicates (e.g. "Identity & Access" vs "Identity and Access") without failing the load.  Owner: TBD  Est: 1h  verifies: [UC-030]  deps: [T12.1]  acc: ExUnit -- near-duplicate names emit a warning; exact/distinct names do not; advisory only (exit 0).
-- [ ] T12.8 Re-run the sirerun dogfood through kazi proper + docs: import `sirerun/docs/capabilities.json` via T12.5, export via T12.6, and verify the Obsidian vault matches the one-off analysis (`docs/devlog.md` 2026-06-23). Note the LIVE-predicate escalation (http_probe/browser against a running sire -- needs an instance + test creds) as deferred future work.  Owner: TBD  Est: 1.5h  verifies: [UC-030]  deps: [T12.5, T12.6]  acc: observed evidence that `kazi init --from-capabilities` + `kazi export --obsidian` reproduce the pillar->capability->verdict vault for sire; `mix format`/`--warnings-as-errors` clean; the live-predicate follow-on recorded.
+- [~] T12.8 MOVED to E13 (T13.6) -- the sirerun dogfood now runs through the GENERAL importer + the surface-coverage meta-predicate (ADR-0021), not the bespoke capabilities importer.
+
+### E13 -- Intended-vs-actual reconciliation: import intent + detect dead code (P3, ADR-0021)
+
+Acceptance: kazi addresses BOTH halves of "correct software, no dead code" within
+the predicate model. It imports the INTENDED set from GENERAL sources -- standard
+machine specs (OpenAPI -> `http_probe`, gherkin -> acceptance) deterministically,
+and prose docs (ADRs/requirements) drafted into predicates via the harness +
+human review (the `propose`/authoring path, ADR-0011/0019) -- never a bespoke
+catalog (ADR-0015). It detects DEAD code (`A \ I`) via a surface-coverage
+META-PREDICATE: a scanner inventories the public surface and a predicate asserts
+every element is owned by >=1 intended predicate; an unowned element FAILS (dead/
+undocumented), surfaced and reconciled like any other predicate, held true by
+standing mode. Both directions feed the grouped view (E12). `kazi init` stays the
+small code-side bootstrap (ADR-0013).
+
+- [ ] T13.1 OpenAPI importer: parse an OpenAPI document into one `http_probe` acceptance predicate per path/operation, grouped (tag -> declared `[[group]]`, ADR-0020). Deterministic and hermetic.  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: [E12 T12.1/T12.2]  acc: ExUnit on a fixture spec -- paths/operations become grouped `http_probe` acceptance predicates with method/path/expected-status config; same spec -> same goal-file; re-import upserts.
+- [ ] T13.2 Gherkin importer: parse Cucumber/gherkin feature files into one acceptance predicate per scenario, grouped by feature.  Owner: TBD  Est: 1.5h  verifies: [UC-025]  deps: [E12 T12.1/T12.2]  acc: ExUnit on fixture features -- scenarios become grouped acceptance predicates; deterministic.
+- [ ] T13.3 Prose-doc importer via the harness: drive the existing authoring/clarify path (`Kazi.Authoring`, ADR-0011/0019) over a prose doc (ADR/requirements) to draft candidate predicates, HUMAN-REVIEWED before acceptance; reuses the injectable harness seam (stub in tests).  Owner: TBD  Est: 2h  verifies: [UC-025]  deps: []  acc: ExUnit with a stub harness -- a prose doc yields candidate predicates routed through the review/approve flow; nothing is accepted without approval; no real `claude`/network in tests.
+- [ ] T13.4 Surface-scanner provider: inventory a project's public surface (HTTP routes/handlers, exported symbols, CLI commands) for one language first (Elixir or Go), reusing the repo-introspection seam (ADR-0010).  Owner: TBD  Est: 2h  verifies: [UC-031]  deps: []  acc: ExUnit on a fixture repo -- the scanner returns the public surface inventory; approximate-by-design (reflection/string-dispatch invisible -- documented, `docs/lore.md`).
+- [ ] T13.5 Surface-coverage meta-predicate: assert every scanned surface element is OWNED by >=1 intended predicate (match by route/path/symbol); an unowned element FAILS (dead/undocumented); supports an explicit allow-list; WARN-don't-auto-delete.  Owner: TBD  Est: 2h  verifies: [UC-031]  deps: [T13.4]  acc: ExUnit -- a fixture with an un-predicated endpoint fails the meta-predicate and names it; allow-listed surface passes; a fully-owned surface passes; ungrouped goals unaffected.
+- [ ] T13.6 Dogfood sirerun via the GENERAL path: import sire's API surface (OpenAPI if present, else the T13.4 scanner) + key prose ADRs (T13.3); run the coverage meta-predicate to find `A \ I` (dead/undocumented) and compare against the manifest's `undocumented_discovered: 68`; export the grouped view (E12). Note the LIVE-predicate escalation (probe a running sire -- needs an instance + test creds) as deferred.  Owner: TBD  Est: 2h  verifies: [UC-031, UC-030]  deps: [T13.1, T13.4, T13.5]  acc: observed evidence that the general importer + coverage meta-predicate reproduce/compare against the one-off analysis for sire; `mix format`/`--warnings-as-errors` clean; the live-predicate follow-on recorded in `docs/devlog.md`.
 
 ### Waves
 
@@ -183,9 +207,11 @@ DONE and shipped (v0.3.0); E12 (hierarchical predicate grouping) is the primary
 open feature work.**
 
 - **Wave E12-1 (model + guard):** T12.1 (declared `[[group]]` taxonomy) -> T12.2 (`Predicate.group` + reference/cycle validation -- the drift guard). Pure loader work.
-- **Wave E12-2 (tree + budgets):** T12.3 (tree + per-group rollup), T12.4 (per-group budgets/reconciliation) -- after the model.
-- **Wave E12-3 (import + export):** T12.5 (`--from-capabilities` importer), T12.6 (Obsidian/Mermaid exporter), T12.7 (lint near-duplicate names).
-- **Wave E12-4 (dogfood):** T12.8 (re-run sirerun through kazi; note the live-predicate escalation).
+- **Wave E12-2 (tree + budgets):** T12.3 (tree + per-group rollup), T12.4 (derived per-group budgets) -- after the model.
+- **Wave E12-3 (export):** T12.6 (Obsidian/Mermaid exporter), T12.7 (lint near-duplicate names). (T12.5 withdrawn; the importer moved to E13.)
+- **Wave E13-1 (import intent, ADR-0021):** T13.1 (OpenAPI), T13.2 (gherkin), T13.3 (prose via harness) -- emit grouped predicates (depends on E12 model).
+- **Wave E13-2 (dead code):** T13.4 (surface scanner) -> T13.5 (coverage meta-predicate).
+- **Wave E13-3 (dogfood):** T13.6 (sirerun via the general path; note the live-predicate escalation).
 
 - **Wave E11-1 (pure core):** T11.1 (schema + `fold_answers`) -> T11.2 (deterministic gap floor). Pure, fully unit-tested, no I/O.
 - **Wave E11-2 (seam + wiring):** T11.3 (harness-drafted candidates on the stub seam), T11.4 (two-phase `propose/2`), T11.5 (inline rationale) -- after the core.
@@ -237,6 +263,22 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (correct the import direction: ADR-0021 + E13)
+- **Corrected an ADR-0015 contradiction.** ADR-0020's draft proposed a bespoke
+  `kazi init --from-capabilities` importer -- exactly the "audience of one" input
+  ADR-0015 withdrew. T12.5 is WITHDRAWN; the importer is re-scoped GENERAL.
+- **ADR created:** `docs/adr/0021-intended-vs-actual-reconciliation.md`. Framing:
+  "correct software, no dead code" = a two-way diff between intended (I) and actual
+  (A). Import I from STANDARD specs (OpenAPI/gherkin, deterministic) + prose docs
+  via the harness (human-reviewed); detect dead code (`A \ I`) via a
+  surface-coverage META-PREDICATE (a scanner inventories the public surface; a
+  predicate asserts each element is owned by an intended predicate). `kazi init`
+  stays the small CODE-side bootstrap (ADR-0013).
+- **Added E13 (T13.1-T13.6)** -- OpenAPI/gherkin/prose importers, a surface-scanner
+  provider, the coverage meta-predicate, and the sirerun dogfood via the general
+  path. **E12 re-scoped** to just grouping + export (T12.5/T12.8 moved/withdrawn).
+- **Use cases:** UC-025 un-deferred (now E13); UC-031 added (dead-code coverage).
 
 ### 2026-06-23 -- Change Summary (E11 shipped v0.3.0; add E12: hierarchical predicate grouping)
 - **E11 SHIPPED.** Interactive `propose` (PR #119) merged; release-please cut
@@ -367,9 +409,9 @@ load-bearing for versioning -- type every commit correctly.
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0020` (index at `docs/adr/README.md`); the release
+- Decisions: `docs/adr/0001`..`0021` (index at `docs/adr/README.md`); the release
   pipeline is ADR-0014 (distribution) + ADR-0017 (automation); the website is
-  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020.
+  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021.
 - Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
 - Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),

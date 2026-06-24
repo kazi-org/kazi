@@ -82,15 +82,17 @@ time -- so text drift cannot silently fragment the tree.
    future option only if independent approval/lifecycle per group is ever needed.
 
 5. **An importer and an exporter use the taxonomy.**
-   - `kazi init --from-capabilities <manifest.json>` (resurrecting the deferred
-     UC-025 spec-importer, ADR-0015) maps the manifest's CANONICAL pillar list to
-     root groups, domains to child groups, and each capability to a leaf group
-     with one predicate per machine-checkable evidence item. Because the taxonomy
-     is generated from the manifest's enumerated pillars, it is consistent BY
-     CONSTRUCTION -- nobody hand-types a pillar twice.
+   - The desired-state importer that populates the groups is a GENERAL one --
+     standard specs (OpenAPI/gherkin) + prose docs via the harness -- defined in
+     **ADR-0021**, NOT a bespoke `capabilities.json` importer. (An earlier draft of
+     this ADR proposed `kazi init --from-capabilities`; that re-introduced the
+     bespoke input ADR-0015 withdrew and is corrected by ADR-0021.) Whatever the
+     source, importers emit the declared `[[group]]` taxonomy + grouped predicates,
+     so a multi-segment source (e.g. pillar -> domain -> capability) is consistent
+     by construction.
    - An exporter walks the group tree + predicate verdicts into an Obsidian vault
      (one note per group/predicate, `[[wikilinked]]`, tagged intended/built/
-     pending) and/or a Mermaid graph.
+     pending/dead) and/or a Mermaid graph.
 
 ## Consequences
 
