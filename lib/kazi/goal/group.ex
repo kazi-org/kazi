@@ -29,6 +29,15 @@ defmodule Kazi.Goal.Group do
       effective budget is DERIVED (the sum of its descendants' budgets, tightened
       by an explicit cap), not stored hand-maintained; T12.1 only parses and
       stores the declared cap. Default `nil` (no declared cap).
+    * `needs` — the group's *dependency edges* (T23.1, ADR-0028): a list of
+      group ids (each already normalized) that must OBJECTIVELY converge BEFORE
+      this group becomes eligible to dispatch. DISTINCT from `parent`: `parent`
+      is budget rollup + reporting (ADR-0020); `needs` is execution ORDER (the
+      predicate-graph waves of E23). The two relations are independent — a group
+      may have a `parent` AND `needs`, unrelated to one another. The `needs`
+      graph is a DAG (no self-edge, no cycle), validated at load by the loader
+      (the scheduler's topological execution is T23.3). Default `[]` (no
+      dependencies → fully parallel, the ADR-0027 default; backward compatible).
 
   The struct is the in-memory shape the loader (`Kazi.Goal.Loader`) builds the
   taxonomy into and the read-model / exporter (ADR-0020 §Decision 5) build
@@ -50,14 +59,16 @@ defmodule Kazi.Goal.Group do
           id: id(),
           name: String.t(),
           parent: id() | nil,
-          budget: budget()
+          budget: budget(),
+          needs: [id()]
         }
 
   @enforce_keys [:id, :name]
   defstruct id: nil,
             name: nil,
             parent: nil,
-            budget: nil
+            budget: nil,
+            needs: []
 
   @doc """
   Normalizes a loosely-authored group identifier into a canonical slug.
@@ -110,19 +121,26 @@ defmodule Kazi.Goal.Group do
 
   `id` and `name` are required. The `id` is normalized to a canonical slug
   (`normalize_id/1`); `name` is the display label, kept verbatim. Optional opts:
-  `:parent` (a parent group id — normalized; reference-validated in T12.2) and
-  `:budget` (an optional per-group cap, stored verbatim).
+  `:parent` (a parent group id — normalized; reference-validated in T12.2),
+  `:budget` (an optional per-group cap, stored verbatim), and `:needs` (the
+  dependency edges — a list of group ids, each normalized; reference / DAG
+  validated at load in T23.1). `:needs` defaults to `[]` (no dependencies).
 
   ## Examples
 
       iex> g = Kazi.Goal.Group.new("Identity & Access", "Identity & Access")
-      iex> {g.id, g.name}
-      {"identity-access", "Identity & Access"}
+      iex> {g.id, g.name, g.needs}
+      {"identity-access", "Identity & Access", []}
 
       iex> g = Kazi.Goal.Group.new("capability", "Capability",
       ...>   parent: "Identity & Access", budget: 5)
       iex> {g.parent, g.budget}
       {"identity-access", 5}
+
+      iex> g = Kazi.Goal.Group.new("streaming", "Streaming",
+      ...>   needs: ["Result Contract", "auth"])
+      iex> g.needs
+      ["result-contract", "auth"]
   """
   @spec new(String.t(), String.t(), keyword()) :: t()
   def new(id, name, opts \\ []) when is_binary(id) and is_binary(name) do
@@ -130,10 +148,18 @@ defmodule Kazi.Goal.Group do
       id: normalize_id(id),
       name: name,
       parent: normalize_parent(Keyword.get(opts, :parent)),
-      budget: Keyword.get(opts, :budget)
+      budget: Keyword.get(opts, :budget),
+      needs: normalize_needs(Keyword.get(opts, :needs, []))
     }
   end
 
   defp normalize_parent(nil), do: nil
   defp normalize_parent(parent) when is_binary(parent), do: normalize_id(parent)
+
+  # Each `needs` edge is a group id, normalized the same way ids/parents are so
+  # an edge matches its declared target consistently regardless of authoring.
+  defp normalize_needs(nil), do: []
+
+  defp normalize_needs(needs) when is_list(needs),
+    do: Enum.map(needs, &normalize_id/1)
 end
