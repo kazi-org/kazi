@@ -77,7 +77,8 @@ paths = ["main.go"]
 id = "tests-green"
 provider = "test_runner"
 description = "the service's `go test ./...` stays green"
-cmd = "go test ./..."
+cmd = "go"
+args = ["test", "./..."]
 
 # LIVE predicate (http_probe): the deployed /healthz must keep returning 200 "ok".
 # This is the production probe that makes "still healthy" objective, not assumed

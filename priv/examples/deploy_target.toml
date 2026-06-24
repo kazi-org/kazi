@@ -37,7 +37,8 @@ paths = ["main.go"]
 id = "go-tests"
 provider = "test_runner"
 description = "fixtures/deploy-target `go test ./...` passes (TestHealthzReturnsOK green)"
-cmd = "go test ./..."
+cmd = "go"
+args = ["test", "./..."]
 
 # LIVE predicate (http_probe, T0.5b): assert the deployed service's /healthz
 # returns 200 with the body "ok". This is the production probe that makes
