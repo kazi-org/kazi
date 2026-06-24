@@ -134,10 +134,15 @@ defmodule Kazi.CLIJsonTest do
                  ) == 0
         end)
 
-      # Human report still prints today (propose's JSON schema is T15.2) — the
-      # point here is the NON-INTERACTIVE path completed headlessly with exit 0
-      # and persisted the proposal without reading stdin.
-      assert out =~ "PROPOSED"
+      # T15.2 (ADR-0023 decision 2): propose --json emits the draft as a single
+      # JSON object (no human prose). The point here is the NON-INTERACTIVE path
+      # completed headlessly with exit 0 and persisted the proposal without
+      # reading stdin.
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["schema_version"] == 1
+      assert payload["goal_id"] == "ship-a-healthz-endpoint"
+      assert payload["proposal_ref"] =~ "prop-"
+      refute out =~ "PROPOSED"
 
       assert [%ProposedGoal{status: "proposed"} = row] =
                ReadModel.list_proposed_goals(status: "proposed")
