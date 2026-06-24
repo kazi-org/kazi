@@ -88,14 +88,14 @@ const personas = [
   <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
     <a href="/" class="flex items-center gap-2" aria-label="kazi home">
       <img src="/logo/kazi-mark.svg" alt="" width="34" height="34" />
-      <span class="text-xl font-bold tracking-tight text-white">kazi</span>
+      <span class="ui-strong text-xl font-bold tracking-tight">kazi</span>
     </a>
-    <nav class="flex items-center gap-6 text-sm">
-      <a href="#how" class="text-slate-300 hover:text-white">How it works</a>
-      <a href="#install" class="text-slate-300 hover:text-white">Install</a>
+    <nav class="flex items-center gap-6 text-sm" aria-label="Primary">
+      <a href="#how" class="ui-body ui-link">How it works</a>
+      <a href="#install" class="ui-body ui-link">Install</a>
       <a
         href={REPO}
-        class="rounded-lg border border-white/15 px-3 py-1.5 font-medium text-white hover:bg-white/5"
+        class="ui-outline rounded-lg border px-3 py-1.5 font-medium"
         >GitHub</a
       >
     </nav>
@@ -103,25 +103,29 @@ const personas = [
 
   <!-- Hero -->
   <main>
-    <section class="relative overflow-hidden">
+    <section class="relative overflow-hidden" aria-labelledby="hero-heading">
       <div
         class="kazi-gradient pointer-events-none absolute -top-40 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full opacity-20 blur-[120px]"
+        aria-hidden="true"
       >
       </div>
       <div class="mx-auto max-w-4xl px-6 pb-16 pt-16 text-center sm:pt-24">
         <a
           href={REPO}
-          class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:bg-white/10"
+          class="ui-chip inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
         >
           <span class="kazi-text font-semibold">Open source</span>
-          <span class="text-slate-500">Apache-2.0 &middot; v{VERSION}</span>
+          <span class="ui-muted">Apache-2.0 &middot; v{VERSION}</span>
         </a>
-        <h1 class="mt-6 text-balance text-4xl font-extrabold tracking-tight text-white sm:text-6xl">
+        <h1
+          id="hero-heading"
+          class="ui-strong mt-6 text-balance text-4xl font-extrabold tracking-tight sm:text-6xl"
+        >
           Describe what <span class="kazi-text">&ldquo;done&rdquo;</span> looks like.<br />
           kazi makes it true &mdash; and proves it.
         </h1>
-        <p class="mx-auto mt-6 max-w-2xl text-pretty text-lg text-slate-300">
-          <em>kazi</em> is <strong class="text-white">{POSITIONING}</strong>. Tell it the
+        <p class="ui-body mx-auto mt-6 max-w-2xl text-pretty text-lg">
+          <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>. Tell it the
           outcome you want &mdash; in plain English or a short goal-file &mdash; and it
           drives a coding agent in a loop until that outcome is <em>objectively</em> real:
           tests pass, the endpoint is live, the change is deployed.
@@ -131,12 +135,14 @@ const personas = [
         <div class="mx-auto mt-8 flex max-w-xl flex-col items-center gap-3">
           <button
             id="copy-install"
-            class="group flex w-full items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0f172a] px-5 py-4 text-left font-mono text-sm text-slate-100 hover:border-white/20"
+            type="button"
+            class="ui-code group flex w-full items-center justify-between gap-4 rounded-xl border px-5 py-4 text-left font-mono text-sm"
             data-cmd={INSTALL_CMD}
+            title="Copy the install command"
           >
-            <span><span class="text-slate-500">$ </span>{INSTALL_CMD}</span>
+            <span><span class="ui-muted">$ </span>{INSTALL_CMD}</span>
             <span
-              class="shrink-0 rounded-md border border-white/10 px-2 py-1 text-xs text-slate-400 group-hover:text-white"
+              class="ui-chip ui-muted shrink-0 rounded-md border px-2 py-1 text-xs"
               id="copy-label">copy</span
             >
           </button>
@@ -148,14 +154,14 @@ const personas = [
             >
             <a
               href={REPO}
-              class="rounded-xl border border-white/15 px-5 py-3 font-semibold text-white hover:bg-white/5"
+              class="ui-outline rounded-xl border px-5 py-3 font-semibold"
               >Star on GitHub</a
             >
           </div>
         </div>
 
-        <p class="mt-8 text-sm text-slate-400">
-          Think of it like <strong class="text-slate-200">{KUBERNETES_LINE}</strong>: you
+        <p class="ui-muted mt-8 text-sm">
+          Think of it like <strong class="ui-body">{KUBERNETES_LINE}</strong>: you
           declare desired state, kazi watches actual state, and it closes the gap until the
           two match.
         </p>
@@ -165,12 +171,12 @@ const personas = [
           <img
             src="/proof-loop.svg"
             alt="kazi reconcile loop converging: across four iterations the failing predicate set shrinks from [tests, livez] to empty, then go test passes and the deployed GET /livez returns 200 ok — converged."
-            class="w-full rounded-xl border border-white/10 shadow-2xl shadow-black/40"
+            class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
             width="820"
             height="372"
             loading="lazy"
           />
-          <figcaption class="mt-3 text-xs text-slate-500">
+          <figcaption class="ui-muted mt-3 text-xs">
             A real goal &mdash; <em>tests pass and the deployed <code>/livez</code> returns
             ok</em> &mdash; driven to convergence. Done is observed, not asserted.
           </figcaption>
@@ -179,13 +185,14 @@ const personas = [
     </section>
 
     <!-- Features -->
-    <section class="mx-auto max-w-6xl px-6 py-12">
+    <section class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="features-heading">
+      <h2 id="features-heading" class="sr-only">Why kazi</h2>
       <div class="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
         {
           features.map((f) => (
-            <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-              <h3 class="text-lg font-semibold text-white">{f.title}</h3>
-              <p class="mt-2 text-sm leading-relaxed text-slate-300">{f.body}</p>
+            <div class="ui-card rounded-2xl border p-6">
+              <h3 class="ui-strong text-lg font-semibold">{f.title}</h3>
+              <p class="ui-body mt-2 text-sm leading-relaxed">{f.body}</p>
             </div>
           ))
         }
@@ -193,21 +200,21 @@ const personas = [
     </section>
 
     <!-- 60-second mental model -->
-    <section id="how" class="mx-auto max-w-6xl px-6 py-12">
-      <h2 class="text-center text-3xl font-bold tracking-tight text-white">
+    <section id="how" class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="how-heading">
+      <h2 id="how-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
         The 60-second mental model
       </h2>
-      <p class="mx-auto mt-3 max-w-2xl text-center text-slate-300">
+      <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
         A reconciliation loop for software goals. It runs until the predicates are
         objectively true, stuck, or over budget.
       </p>
       <ol class="mx-auto mt-10 grid max-w-4xl gap-3 sm:grid-cols-5">
         {
           loop.map(([step, desc], i) => (
-            <li class="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-center">
+            <li class="ui-card rounded-xl border p-4 text-center">
               <div class="kazi-text text-2xl font-extrabold">{i + 1}</div>
-              <div class="mt-1 font-semibold text-white">{step}</div>
-              <div class="mt-1 text-xs text-slate-400">{desc}</div>
+              <div class="ui-strong mt-1 font-semibold">{step}</div>
+              <div class="ui-muted mt-1 text-xs">{desc}</div>
             </li>
           ))
         }
@@ -215,29 +222,29 @@ const personas = [
     </section>
 
     <!-- With vs. without kazi -->
-    <section class="mx-auto max-w-5xl px-6 py-12">
-      <h2 class="text-center text-3xl font-bold tracking-tight text-white">
+    <section class="mx-auto max-w-5xl px-6 py-12" aria-labelledby="compare-heading">
+      <h2 id="compare-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
         With kazi vs. without
       </h2>
-      <div class="mt-10 overflow-hidden rounded-2xl border border-white/10">
-        <div class="grid grid-cols-2 bg-white/[0.03] text-sm font-semibold">
-          <div class="border-b border-white/10 px-5 py-3 text-slate-400">Without kazi</div>
-          <div class="border-b border-l border-white/10 px-5 py-3 text-white">With kazi</div>
+      <div class="ui-hairline mt-10 overflow-hidden rounded-2xl border">
+        <div class="ui-card grid grid-cols-2 text-sm font-semibold">
+          <div class="ui-hairline ui-muted border-b px-5 py-3">Without kazi</div>
+          <div class="ui-hairline ui-strong border-b border-l px-5 py-3">With kazi</div>
         </div>
         {
           comparison.map(([before, after], i) => (
             <div class="grid grid-cols-2 text-sm">
               <div
                 class:list={[
-                  "px-5 py-4 text-slate-400",
-                  i < comparison.length - 1 && "border-b border-white/10",
+                  "ui-body px-5 py-4",
+                  i < comparison.length - 1 && "ui-hairline border-b",
                 ]}
               >
                 {before}
               </div>
               <div
                 class:list={[
-                  "border-l border-white/10 px-5 py-4 text-slate-200",
+                  "ui-body ui-hairline border-l px-5 py-4",
                   i < comparison.length - 1 && "border-b",
                 ]}
               >
@@ -250,50 +257,50 @@ const personas = [
     </section>
 
     <!-- Who it's for -->
-    <section class="mx-auto max-w-6xl px-6 py-12">
-      <h2 class="text-center text-3xl font-bold tracking-tight text-white">Who it's for</h2>
+    <section class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="who-heading">
+      <h2 id="who-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">Who it's for</h2>
       <div class="mt-10 grid gap-4 sm:grid-cols-3">
         {
           personas.map(([who, why]) => (
-            <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-              <h3 class="text-base font-semibold text-white">{who}</h3>
-              <p class="mt-2 text-sm leading-relaxed text-slate-300">{why}</p>
+            <div class="ui-card rounded-2xl border p-6">
+              <h3 class="ui-strong text-base font-semibold">{who}</h3>
+              <p class="ui-body mt-2 text-sm leading-relaxed">{why}</p>
             </div>
           ))
         }
       </div>
-      <p class="mx-auto mt-8 max-w-2xl text-center text-sm text-slate-400">
-        <strong class="text-slate-300">Not for you (yet)</strong> if you want an agent to
+      <p class="ui-muted mx-auto mt-8 max-w-2xl text-center text-sm">
+        <strong class="ui-body">Not for you (yet)</strong> if you want an agent to
         decide <em>what</em> to build &mdash; that's your call; kazi only drives toward an
         outcome you declare. It also needs a coding harness
-        (<code class="text-slate-300">claude</code>,
-        <code class="text-slate-300">opencode</code>, &hellip;) on your PATH &mdash; kazi
+        (<code class="ui-body">claude</code>,
+        <code class="ui-body">opencode</code>, &hellip;) on your PATH &mdash; kazi
         drives one, it isn't one.
       </p>
     </section>
 
     <!-- Install + first goal -->
-    <section id="install" class="mx-auto max-w-4xl px-6 py-12">
-      <h2 class="text-3xl font-bold tracking-tight text-white">Install and run a goal</h2>
+    <section id="install" class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="install-heading">
+      <h2 id="install-heading" class="ui-strong text-3xl font-bold tracking-tight">Install and run a goal</h2>
       <div class="mt-6 space-y-6">
         <div>
-          <p class="text-sm font-semibold text-slate-300">1. Install</p>
-          <pre class="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-[#0f172a] p-4 font-mono text-sm text-slate-100"><code>{INSTALL_CMD}</code></pre>
-          <p class="mt-2 text-xs text-slate-400">
-            A coding agent (<code class="text-slate-300">claude</code> or
-            <code class="text-slate-300">opencode</code>) must be on your PATH &mdash; kazi
+          <p class="ui-body text-sm font-semibold">1. Install</p>
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>{INSTALL_CMD}</code></pre>
+          <p class="ui-muted mt-2 text-xs">
+            A coding agent (<code class="ui-body">claude</code> or
+            <code class="ui-body">opencode</code>) must be on your PATH &mdash; kazi
             drives one, it does not bundle one.
           </p>
         </div>
         <div>
-          <p class="text-sm font-semibold text-slate-300">2. Describe what you want</p>
-          <pre class="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-[#0f172a] p-4 font-mono text-sm text-slate-100"><code>kazi propose "a /healthz endpoint that returns 200"
+          <p class="ui-body text-sm font-semibold">2. Describe what you want</p>
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi propose "a /healthz endpoint that returns 200"
 kazi approve &lt;proposal-ref&gt;</code></pre>
         </div>
         <div>
-          <p class="text-sm font-semibold text-slate-300">3. Drive it to convergence</p>
-          <pre class="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-[#0f172a] p-4 font-mono text-sm text-slate-100"><code>kazi run my-goal.toml --workspace ./my-project</code></pre>
-          <p class="mt-2 text-xs text-slate-400">
+          <p class="ui-body text-sm font-semibold">3. Drive it to convergence</p>
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi run my-goal.toml --workspace ./my-project</code></pre>
+          <p class="ui-muted mt-2 text-xs">
             kazi loops &mdash; observe, dispatch, re-observe &mdash; and exits 0 only when
             every predicate is objectively true.
           </p>
@@ -308,19 +315,19 @@ kazi approve &lt;proposal-ref&gt;</code></pre>
   </main>
 
   <!-- Footer -->
-  <footer class="border-t border-white/10">
+  <footer class="ui-hairline border-t">
     <div
-      class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-slate-400 sm:flex-row"
+      class="ui-muted mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm sm:flex-row"
     >
       <div class="flex items-center gap-2">
         <img src="/logo/kazi-mark.svg" alt="" width="22" height="22" />
         <span>kazi &middot; Apache-2.0 &middot; &copy; Sire Run, Inc.</span>
       </div>
-      <div class="flex items-center gap-5">
-        <a href={REPO} class="hover:text-white">GitHub</a>
-        <a href={`${REPO}/releases`} class="hover:text-white">Releases</a>
-        <a href={`${REPO}/blob/main/docs/concept.md`} class="hover:text-white">Concept</a>
-      </div>
+      <nav class="flex items-center gap-5" aria-label="Footer">
+        <a href={REPO} class="ui-link">GitHub</a>
+        <a href={`${REPO}/releases`} class="ui-link">Releases</a>
+        <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
+      </nav>
     </div>
   </footer>
 
