@@ -7,6 +7,44 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.0.0](https://github.com/kazi-org/kazi/compare/v0.5.0...v1.0.0) (2026-06-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* repoint run/propose to apply/plan in user-facing docs (T27.9)
+* repoint run/propose to apply/plan; assert aliases now error (T27.9)
+* mark run/propose aliases REMOVED in v0.6.0 (T27.9)
+* **teach:** scrub run/propose from SKILL.md template and AGENTS.md (T27.9)
+* **mcp:** MCP tools kazi_run/kazi_propose are removed; use kazi_apply/kazi_plan.
+* **cli:** kazi schema run/propose no longer resolve.
+* **cli:** kazi run/propose are removed; use kazi apply/plan.
+
+### Features
+
+* **cli:** drop run/propose schema aliases (T27.9) ([07a1578](https://github.com/kazi-org/kazi/commit/07a1578451b27771034a6b67d28ddcc0260378b5))
+* **cli:** remove deprecated run/propose aliases (T27.9) ([160150e](https://github.com/kazi-org/kazi/commit/160150edecdcc2f8b17239cc788d2ecc028a444e))
+* **mcp:** remove kazi_run/kazi_propose tool aliases (T27.9) ([9d11eb6](https://github.com/kazi-org/kazi/commit/9d11eb6d6ae1cd3bd9818c57f676d45f3bbd31f7))
+* **site:** add 'by the team behind Sire' footer attribution link ([00ed31e](https://github.com/kazi-org/kazi/commit/00ed31e70891c615ef7cc38ed8122b012a5db669))
+* **site:** dynamic version badge -- fetch latest release, never stale ([64a09c7](https://github.com/kazi-org/kazi/commit/64a09c7267efe65c2f55e40b05b443eb2dc4dcf9))
+* **teach:** scrub run/propose from SKILL.md template and AGENTS.md (T27.9) ([433e915](https://github.com/kazi-org/kazi/commit/433e915fb0ac76218bf512fafaa18857d64ad461))
+
+
+### Bug Fixes
+
+* **oss-gates:** make the leak guard's full-tree mode actually scan ([f091b5d](https://github.com/kazi-org/kazi/commit/f091b5d8a89104dfe90a91551051a5ba452c9d06))
+
+
+### Documentation
+
+* mark run/propose aliases REMOVED in v0.6.0 (T27.9) ([0e2d537](https://github.com/kazi-org/kazi/commit/0e2d537209bea641f85b72d7e2d288aa6fe33231))
+* repoint run/propose to apply/plan in user-facing docs (T27.9) ([f270548](https://github.com/kazi-org/kazi/commit/f2705485174bde495991110dceb4e945bb36d468))
+
+
+### Tests
+
+* repoint run/propose to apply/plan; assert aliases now error (T27.9) ([782aaaf](https://github.com/kazi-org/kazi/commit/782aaaf94be68f9ca9e57dbd5e5ffe4c080a3a57))
+
 ## [0.5.0](https://github.com/kazi-org/kazi/compare/v0.4.0...v0.5.0) (2026-06-24)
 
 
