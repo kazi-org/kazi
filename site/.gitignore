@@ -3,3 +3,9 @@ dist/
 .astro/
 *.log
 .DS_Store
+
+# Playwright smoke-test output (T9.5)
+test-results/
+playwright-report/
+blob-report/
+.playwright/
