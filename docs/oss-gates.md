@@ -126,13 +126,14 @@ scan so their example markers do not self-trip.
 
 ### Diff-scoped by default (and why)
 
-The repo currently contains a number of pre-existing internal references that a
-separate task (T29.3) scrubs. To avoid reddening every PR on leaks a contributor
-did not introduce, the guard scans only the DIFF of the PR (added lines) versus
-the base ref by default.
+To avoid reddening every PR on leaks a contributor did not introduce, the guard
+scans only the DIFF of the PR (added lines) versus the base ref by default.
 
-Once T29.3 lands and the tree is clean, flip the guard to also scan the full
-working tree:
+The full working tree was scrubbed by T29.3 and is verified clean by the
+full-tree mode (a single `git grep` pre-filter for the leak patterns, then the
+per-line allow-list confirm -- fast enough to run on the whole repo). To also
+scan the full tree (catches a leak that already sits in a committed file, not
+just new diff additions):
 
 - In CI: set `SCAN_TREE: "1"` on the `no-internal-leak` job in
   `.github/workflows/oss-gates.yml`.
