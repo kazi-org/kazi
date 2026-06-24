@@ -173,7 +173,7 @@ defmodule Kazi.AdoptWriterTest do
       map =
         Map.put(goal_map(), "harness", %{
           "id" => "opencode",
-          "model" => "dgx/qwen3.6",
+          "model" => "local/qwen3.6",
           "command" => "/usr/local/bin/opencode",
           # an unrecognized key must NOT be emitted (so output round-trips).
           "ignored" => "drop-me"
@@ -183,7 +183,7 @@ defmodule Kazi.AdoptWriterTest do
 
       assert toml =~ "[harness]"
       assert toml =~ ~s(id = "opencode")
-      assert toml =~ ~s(model = "dgx/qwen3.6")
+      assert toml =~ ~s(model = "local/qwen3.6")
       assert toml =~ ~s(command = "/usr/local/bin/opencode")
       refute toml =~ "ignored"
       refute toml =~ "drop-me"
@@ -200,17 +200,17 @@ defmodule Kazi.AdoptWriterTest do
     end
 
     test "is deterministic — same harness map renders byte-identically" do
-      map = Map.put(goal_map(), "harness", %{"id" => "opencode", "model" => "dgx/qwen3.6"})
+      map = Map.put(goal_map(), "harness", %{"id" => "opencode", "model" => "local/qwen3.6"})
       assert Writer.to_toml(map) == Writer.to_toml(map)
     end
 
     test "round-trips: a harness table renders and re-loads to the same values" do
-      map = Map.put(goal_map(), "harness", %{"id" => "opencode", "model" => "dgx/qwen3.6"})
+      map = Map.put(goal_map(), "harness", %{"id" => "opencode", "model" => "local/qwen3.6"})
 
       toml = Writer.to_toml(map)
       assert {:ok, decoded} = Toml.decode(toml)
       assert {:ok, %Goal{harness: harness}} = Loader.from_map(decoded)
-      assert harness == %{id: :opencode, model: "dgx/qwen3.6", command: nil}
+      assert harness == %{id: :opencode, model: "local/qwen3.6", command: nil}
     end
   end
 

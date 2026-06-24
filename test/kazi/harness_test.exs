@@ -119,24 +119,24 @@ defmodule Kazi.HarnessTest do
       assert {:ok, {CliAdapter, adapter_opts}} =
                Kazi.Harness.resolve(
                  harness: :opencode,
-                 adapter_opts: [env: [{"OPENCODE_PROVIDER", "dgx"}]]
+                 adapter_opts: [env: [{"OPENCODE_PROVIDER", "local"}]]
                )
 
-      assert adapter_opts[:env] == [{"OPENCODE_PROVIDER", "dgx"}]
+      assert adapter_opts[:env] == [{"OPENCODE_PROVIDER", "local"}]
     end
 
-    test "opencode carries :model and declared :env through to adapter_opts (T8.8, DGX)" do
+    test "opencode carries :model and declared :env through to adapter_opts (T8.8, local)" do
       # The local-provider path: --harness opencode --model <provider/model> plus
-      # forwarded env points opencode at the operator's DGX-hosted Qwen3.6 model.
+      # forwarded env points opencode at a locally-hosted model.
       assert {:ok, {CliAdapter, adapter_opts}} =
                Kazi.Harness.resolve(
                  harness: :opencode,
-                 model: "dgx/qwen3.6",
+                 model: "local/qwen3.6",
                  adapter_opts: [env: [{"FOO", "bar"}]]
                )
 
       assert %Profile{id: :opencode} = adapter_opts[:profile]
-      assert adapter_opts[:model] == "dgx/qwen3.6"
+      assert adapter_opts[:model] == "local/qwen3.6"
       assert adapter_opts[:env] == [{"FOO", "bar"}]
     end
   end
@@ -152,10 +152,10 @@ defmodule Kazi.HarnessTest do
       # `goal_harness: :opencode` (from the goal-file) wins over the :claude default
       # and carries the goal-file model through.
       assert {:ok, {CliAdapter, adapter_opts}} =
-               Kazi.Harness.resolve(goal_harness: :opencode, model: "dgx/qwen3.6")
+               Kazi.Harness.resolve(goal_harness: :opencode, model: "local/qwen3.6")
 
       assert %Profile{id: :opencode} = adapter_opts[:profile]
-      assert adapter_opts[:model] == "dgx/qwen3.6"
+      assert adapter_opts[:model] == "local/qwen3.6"
     end
 
     test "explicit --harness overrides the goal-file [harness] id" do

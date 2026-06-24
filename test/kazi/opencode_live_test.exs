@@ -1,9 +1,9 @@
 defmodule Kazi.OpencodeLiveTest do
   @moduledoc """
-  The LIVE opencode -> DGX smoke test (T8.9, ADR-0016; UC-026/UC-027).
+  The LIVE opencode -> local-GPU-host smoke test (T8.9, ADR-0016; UC-026/UC-027).
 
-  This is the ONE non-hermetic test in the suite: it drives the operator's REAL
-  `opencode` CLI (installed, v1.17.9) wired to the DGX-hosted Qwen3.6 35B-A3B model
+  This is the ONE non-hermetic test in the suite: it drives a REAL `opencode`
+  CLI (installed, v1.17.9) wired to a locally-hosted ~35B model on a GPU host
   and asserts kazi can converge a goal through a profile-resolved, real harness —
   the end of the chain the hermetic stub tests can only approximate.
 
@@ -18,13 +18,13 @@ defmodule Kazi.OpencodeLiveTest do
   Before driving anything, the test probes its two real dependencies:
 
     * the `opencode` binary is on PATH, and
-    * the DGX model endpoint (`KAZI_DGX_OPENCODE_URL`, default the operator's
-      `http://192.168.86.250:11434/v1/models`) answers.
+    * the local model endpoint (`KAZI_OPENCODE_BASE_URL`, default a placeholder
+      `http://gpu-host.internal:11434/v1/models`) answers.
 
   If EITHER is unreachable the test SKIPS with a clear reason — it does not fail
   (the dependency is environmental, not a kazi defect) and it does not fake-pass
   (a skip is recorded as a skip, never green). Convergence is asserted ONLY when a
-  real opencode->DGX turn actually ran.
+  real opencode turn against the local model actually ran.
 
   ## What "converged" proves here
 
@@ -37,11 +37,11 @@ defmodule Kazi.OpencodeLiveTest do
 
   ## Honest non-convergence (model too slow / harness policy)
 
-  Even when opencode + the DGX are BOTH reachable, a real turn may not converge
-  inside the window: the DGX-hosted 35B model is slow (~100s/turn observed) and
-  opencode's own permission policy can auto-reject a tool call in a scratch
-  workspace. These are environmental, not kazi defects — and they are NOT a
-  convergence we can claim. So a run that reaches the loop but does NOT converge
+  Even when opencode + the local model are BOTH reachable, a real turn may not
+  converge inside the window: a locally-hosted ~35B model is slow (~100s/turn
+  observed) and opencode's own permission policy can auto-reject a tool call in a
+  scratch workspace. These are environmental, not kazi defects — and they are NOT
+  a convergence we can claim. So a run that reaches the loop but does NOT converge
   (await timeout, or a `:stopped`/`:over_budget` outcome) is reported HONESTLY as
   a skip-with-reason; it never fakes a green. Only an actual `:converged` with the
   marker present asserts success.
@@ -52,17 +52,19 @@ defmodule Kazi.OpencodeLiveTest do
 
   @moduletag :opencode_live
   @moduletag timeout: 900_000
-  # The DGX 35B turn is slow and the loop may take several; give the Sandbox owner
-  # a long lease so the read-model connection is not reclaimed mid-run.
+  # The local ~35B turn is slow and the loop may take several; give the Sandbox
+  # owner a long lease so the read-model connection is not reclaimed mid-run.
   @moduletag ownership_timeout: 900_000
 
-  # The DGX model the operator wired opencode to (opencode `models` lists it as
-  # `dgx-ollama/qwen3.6:35b-a3b-q8_0`; provider baseURL is the DGX ollama endpoint).
-  @model System.get_env("KAZI_OPENCODE_MODEL") || "dgx-ollama/qwen3.6:35b-a3b-q8_0"
+  # The local model the operator wired opencode to (opencode `models` lists it as
+  # e.g. `local-ollama/qwen3.6:35b-a3b-q8_0`; provider baseURL is a local ollama
+  # endpoint).
+  @model System.get_env("KAZI_OPENCODE_MODEL") || "local-ollama/qwen3.6:35b-a3b-q8_0"
 
-  # The OpenAI-compatible models endpoint the dgx-ollama provider points at. A
+  # The OpenAI-compatible models endpoint the local provider points at. A
   # reachability probe only — kept overridable so the test is not host-pinned.
-  @dgx_url System.get_env("KAZI_DGX_OPENCODE_URL") || "http://192.168.86.250:11434/v1/models"
+  @models_url System.get_env("KAZI_OPENCODE_BASE_URL") ||
+                "http://gpu-host.internal:11434/v1/models"
 
   setup do
     # Persistence runs on the loop's process; share the Sandbox connection so the
@@ -72,7 +74,7 @@ defmodule Kazi.OpencodeLiveTest do
     :ok
   end
 
-  test "kazi converges a real goal by driving opencode against the DGX Qwen3.6 model" do
+  test "kazi converges a real goal by driving opencode against a local ~35B model" do
     case preflight() do
       {:skip, reason} ->
         # HONEST SKIP: a live dependency is unreachable. This is NOT a kazi defect
@@ -142,33 +144,33 @@ defmodule Kazi.OpencodeLiveTest do
         assert PredicateVector.satisfied?(final_vector)
 
         IO.puts(
-          "\n[opencode_live] CONVERGED via opencode->DGX (#{@model}): " <>
+          "\n[opencode_live] CONVERGED via opencode -> local model (#{@model}): " <>
             "#{result.iterations} iteration(s), final vector satisfied."
         )
 
       {:ok, %{outcome: other} = result} ->
-        # The loop ran a REAL opencode->DGX turn but did NOT converge in the window
-        # (e.g. :over_budget, or :stopped/:stuck because the model's turn did not
-        # produce the marker — opencode may auto-reject a tool call in a scratch
-        # dir, or the 35B turn ran out of iterations). Honest non-claim: report,
-        # do not fake a pass.
+        # The loop ran a REAL opencode turn against the local model but did NOT
+        # converge in the window (e.g. :over_budget, or :stopped/:stuck because the
+        # model's turn did not produce the marker — opencode may auto-reject a tool
+        # call in a scratch dir, or the ~35B turn ran out of iterations). Honest
+        # non-claim: report, do not fake a pass.
         IO.puts(
           "\n[opencode_live] DID NOT CONVERGE (no success claimed): outcome=#{inspect(other)} " <>
             "reason=#{inspect(result.reason)} after #{result.iterations} iteration(s). " <>
-            "opencode+DGX were reachable; the real turn did not make the predicate pass " <>
-            "in-window (model latency / harness tool-permission policy)."
+            "opencode + the local model were reachable; the real turn did not make the " <>
+            "predicate pass in-window (model latency / harness tool-permission policy)."
         )
 
         :did_not_converge
 
       {:error, :await_timeout} ->
         # The real run exceeded the (already generous) window before terminating —
-        # the DGX 35B model is slow. Environmental, not a kazi defect: report
+        # the local ~35B model is slow. Environmental, not a kazi defect: report
         # honestly, never crash or fake-pass.
         IO.puts(
-          "\n[opencode_live] TIMED OUT (no success claimed): the real opencode->DGX run did " <>
-            "not terminate within the window. The DGX-hosted 35B model is slow (~100s/turn); " <>
-            "this is environmental, not a kazi failure."
+          "\n[opencode_live] TIMED OUT (no success claimed): the real opencode run against " <>
+            "the local model did not terminate within the window. A locally-hosted ~35B " <>
+            "model is slow (~100s/turn); this is environmental, not a kazi failure."
         )
 
         :await_timeout
@@ -188,7 +190,7 @@ defmodule Kazi.OpencodeLiveTest do
   @spec preflight() :: :ok | {:skip, String.t()}
   defp preflight do
     with :ok <- opencode_on_path(),
-         :ok <- dgx_reachable() do
+         :ok <- model_reachable() do
       :ok
     end
   end
@@ -202,22 +204,22 @@ defmodule Kazi.OpencodeLiveTest do
   end
 
   # A cheap HTTP GET against the OpenAI-compatible /models endpoint. We use curl
-  # (universally present on the operator's macOS/Linux) rather than pulling an HTTP
-  # client dep, with a short timeout so a down DGX skips fast instead of hanging.
-  defp dgx_reachable do
+  # (universally present on macOS/Linux) rather than pulling an HTTP client dep,
+  # with a short timeout so a down endpoint skips fast instead of hanging.
+  defp model_reachable do
     case System.find_executable("curl") do
       nil ->
-        {:skip, "curl not available to probe the DGX endpoint #{@dgx_url}"}
+        {:skip, "curl not available to probe the model endpoint #{@models_url}"}
 
       curl ->
         case System.cmd(
                curl,
-               ["-sS", "-m", "6", "-o", "/dev/null", "-w", "%{http_code}", @dgx_url],
+               ["-sS", "-m", "6", "-o", "/dev/null", "-w", "%{http_code}", @models_url],
                stderr_to_stdout: true
              ) do
           {"200", 0} -> :ok
-          {code, 0} -> {:skip, "DGX endpoint #{@dgx_url} returned HTTP #{code}"}
-          {out, _} -> {:skip, "DGX endpoint #{@dgx_url} unreachable: #{String.trim(out)}"}
+          {code, 0} -> {:skip, "model endpoint #{@models_url} returned HTTP #{code}"}
+          {out, _} -> {:skip, "model endpoint #{@models_url} unreachable: #{String.trim(out)}"}
         end
     end
   end

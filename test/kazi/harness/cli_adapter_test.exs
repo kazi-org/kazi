@@ -195,7 +195,7 @@ defmodule Kazi.Harness.CliAdapterTest do
       assert {:ok, result} =
                CliAdapter.run("make the failing test pass", workspace,
                  harness: :opencode,
-                 model: "dgx-ollama/qwen3.6:35b-a3b-q8_0",
+                 model: "local-ollama/qwen3.6:35b-a3b-q8_0",
                  command: @opencode_stub
                )
 
@@ -260,7 +260,7 @@ defmodule Kazi.Harness.CliAdapterTest do
       assert {:ok, %{exit: 0}} =
                CliAdapter.run("do the thing", workspace,
                  harness: :opencode,
-                 model: "dgx-ollama/qwen3.6:35b-a3b-q8_0",
+                 model: "local-ollama/qwen3.6:35b-a3b-q8_0",
                  command: @argv_stub
                )
 
@@ -272,7 +272,7 @@ defmodule Kazi.Harness.CliAdapterTest do
                "--format",
                "json",
                "--model",
-               "dgx-ollama/qwen3.6:35b-a3b-q8_0"
+               "local-ollama/qwen3.6:35b-a3b-q8_0"
              ]
 
       # Emphatically NOT the claude shape.

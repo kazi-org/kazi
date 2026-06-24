@@ -25,14 +25,14 @@ nats_excluded = if System.get_env("NATS_URL"), do: [], else: [:nats]
 # `GRAPHIFY_CMD` for the command (see test/kazi/retrieval/graphify_integration_test.exs).
 graphify_excluded = if System.get_env("GRAPHIFY_CMD"), do: [], else: [:graphify]
 
-# The live opencode->DGX smoke test (tagged `:opencode_live`, T8.9/ADR-0016) is the
-# only NON-hermetic test: it drives the operator's REAL `opencode` CLI wired to the
-# DGX-hosted Qwen3.6 model. It is EXCLUDED by default so the standard `mix test`
-# stays hermetic (no network, no DGX) and CI never runs it. Opt in explicitly:
+# The live opencode smoke test (tagged `:opencode_live`, T8.9/ADR-0016) is the
+# only NON-hermetic test: it drives a REAL `opencode` CLI wired to a locally-hosted
+# ~35B model on a GPU host. It is EXCLUDED by default so the standard `mix test`
+# stays hermetic (no network, no GPU host) and CI never runs it. Opt in explicitly:
 #
 #     mix test --only opencode_live test/kazi/opencode_live_test.exs
 #
-# The test itself probes the DGX endpoint + `opencode` binary first and SKIPS
+# The test itself probes the model endpoint + `opencode` binary first and SKIPS
 # HONESTLY (never fails, never fake-passes) when either is unreachable.
 opencode_live_excluded = [:opencode_live]
 

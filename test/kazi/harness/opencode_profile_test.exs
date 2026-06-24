@@ -52,8 +52,8 @@ defmodule Kazi.Harness.OpencodeProfileTest do
     test "with a model: run <prompt> --format json --model <provider/model>" do
       profile = Registry.fetch!(:opencode)
 
-      assert Profile.build_args(profile, "do X", model: "dgx/qwen3.6") ==
-               ["run", "do X", "--format", "json", "--model", "dgx/qwen3.6"]
+      assert Profile.build_args(profile, "do X", model: "local/qwen3.6") ==
+               ["run", "do X", "--format", "json", "--model", "local/qwen3.6"]
     end
 
     test "without a model: just run <prompt> --format json" do
