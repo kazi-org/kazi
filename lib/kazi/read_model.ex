@@ -285,8 +285,8 @@ defmodule Kazi.ReadModel do
   Lists proposed-goal rows, newest first, optionally filtered by lifecycle
   `status` (`"proposed"` / `"approved"` / `"rejected"`).
 
-  This is the queryable surface an operator surface (the CLI T3.5c, the Telegram
-  bridge T3.7a) reviews proposals through: with no `:status` it returns every
+  This is the queryable surface an operator surface (the CLI T3.5c or the
+  dashboard) reviews proposals through: with no `:status` it returns every
   proposal; `status: "proposed"` is the review queue, `status: "approved"` the
   goals now runnable by `Kazi.Runtime`.
   """
