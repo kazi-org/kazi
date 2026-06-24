@@ -199,4 +199,35 @@ defmodule Kazi.HarnessTest do
       assert %Profile{id: :antigravity, prompt_via: :file} = adapter_opts[:profile]
     end
   end
+
+  describe "resolve/1 all five built-in harnesses (T14.5, ADR-0022)" do
+    # The CLI's `kazi run --harness <id>` threads the string id into resolve/1
+    # (via Runtime), so every built-in harness id MUST resolve to its profile from
+    # both an atom and the string the CLI passes. This pins the CLI<->registry
+    # wireup for all five harnesses — claude, opencode, codex, antigravity, claw —
+    # so a new profile is not registered in `ids/0` but unreachable from `--harness`.
+    for id <- [:claude, :opencode, :codex, :antigravity, :claw] do
+      @harness_id id
+
+      test "--harness #{id} resolves to the #{id} profile (atom and string)" do
+        assert {:ok, {CliAdapter, atom_opts}} = Kazi.Harness.resolve(harness: @harness_id)
+        assert %Profile{id: @harness_id} = atom_opts[:profile]
+
+        assert {:ok, {CliAdapter, string_opts}} =
+                 Kazi.Harness.resolve(harness: Atom.to_string(@harness_id))
+
+        assert %Profile{id: @harness_id} = string_opts[:profile]
+      end
+    end
+
+    test "Registry.ids/0 lists exactly the five built-in harnesses" do
+      assert Kazi.Harness.Registry.ids() == [:claude, :opencode, :codex, :antigravity, :claw]
+    end
+
+    test "each id in Registry.ids/0 fetches a profile (no orphan id)" do
+      for id <- Kazi.Harness.Registry.ids() do
+        assert {:ok, %Profile{id: ^id}} = Kazi.Harness.Registry.fetch(id)
+      end
+    end
+  end
 end
