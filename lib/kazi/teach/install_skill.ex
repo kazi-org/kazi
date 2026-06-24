@@ -109,7 +109,7 @@ defmodule Kazi.Teach.InstallSkill do
     | sub-skill verb | routes to     | what it does                                            |
     |----------------|---------------|---------------------------------------------------------|
     | `plan`         | `kazi plan`   | author/refine the goal's acceptance predicates (authoring path). |
-    | `apply`        | `kazi apply`  | converge the goal -- the reconcile loop (apply + loop + qualify). |
+    | `apply`        | `kazi apply`  | converge the goal -- the reconcile loop (subsumes loop + apply + qualify for code goals; see Step 3, "coming"). |
     | `status`       | `kazi status` | read convergence/proposal state from the read-model (a pure read). |
     | `adopt`        | `kazi init`   | reverse-engineer a starter goal-file from an existing repo.        |
 
@@ -240,7 +240,8 @@ defmodule Kazi.Teach.InstallSkill do
     ### Step 3 -- converge (`apply` verb -> `kazi apply --harness <cheap> --json [--stream]`)
 
     Apply the approved goal with the CHEAP harness (the two-tier split). This is the
-    `apply` verb -- the reconcile loop. `kazi apply` takes a GOAL-FILE path:
+    `apply` verb -- the reconcile loop. `kazi apply` drives the goal to a TERMINAL
+    VERDICT on the current release and takes a GOAL-FILE path:
 
     ```sh
     kazi apply <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
@@ -257,9 +258,40 @@ defmodule Kazi.Teach.InstallSkill do
     kazi apply <goal-file> --workspace <path> --harness opencode --json --stream
     ```
 
-    A read-only `kazi apply --explain` evaluates the predicate vector WITHOUT
-    dispatching a harness -- that is "is this goal already done?" (qualification is a
-    facet of apply, not a separate verb; ADR-0031 decision 1).
+    **Parallel + standing (the native scheduler, ADR-0027).** For a goal-set that
+    partitions by blast radius, add `--parallel` (optionally `--parallel N` for a
+    concurrency hint): kazi drives the NATIVE SCHEDULER -- one supervised reconciler
+    per partition, in `needs`-ordered waves -- to a COLLECTIVE verdict, which
+    `--json` emits as one collective result object you branch on the same way (its
+    `next_action` hint). A single-partition goal-set degrades to the serial loop.
+    Add `--standing` to run as a CONTINUOUS reconciler that holds the predicates true
+    and re-converges on drift, instead of converging once and stopping:
+
+    ```sh
+    kazi apply <goal-file> --workspace <path> --parallel --harness opencode --json
+    kazi apply <goal-file> --workspace <path> --standing --harness opencode --json
+    ```
+
+    **The `--explain` read-only gate.** `kazi apply --explain` (alias `--dry-run`)
+    PRINTS the computed wave schedule -- the topological `needs`-DAG frontiers and
+    the blast-radius parallelism within each -- and EXITS 0 WITHOUT DISPATCHING
+    anything: no harness, no lease, no worktree is touched. Under `--json` the
+    schedule is emitted as JSON. Use it as the read-only pre-flight to see what a run
+    WOULD do (and to catch over-constraint -- too many `needs` edges serializing
+    everything) before committing to a real converge.
+
+    **What `apply` subsumes for CODE goals (coming).** The intent (ADR-0031
+    decision 1) is that for code goals `kazi apply` (with `--parallel`) REPLACES the
+    manual outer loop the operator hand-assembles -- the /loop + /apply --pool
+    parallel pool -- AND the separate /qualify pass: the native scheduler is the
+    parallel wave executor, and "launch-ready" is not a heuristic to infer -- the
+    OBJECTIVE predicate vector (including a live prod probe) IS the launch gate, so
+    qualification is a facet of `apply`, not a separate verb. That subsumption claim
+    is GATED ON PROOF (ADR-0031 decision 6): it is asserted only once the E21/E23
+    live dogfoods (T21.12, T23.9) pass. Until then it is COMING -- the /apply --pool
+    plus /claim outer loop stays the documented interop fallback (ADR-0026), and
+    `kazi apply --parallel` is offered as the native path, not yet the proven
+    replacement.
 
     ### Step 4 -- parse the result and branch on `next_action`
 
