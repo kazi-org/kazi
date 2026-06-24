@@ -64,6 +64,42 @@ defmodule Kazi.ReadModelTest do
     assert fetched.action_params == %{"failing" => ["probe"]}
   end
 
+  test "persists an errored predicate whose evidence holds tuples + atom keys (T18.2)" do
+    # The exact crash from the token benchmark: a test_runner that cannot exec its
+    # cmd yields an :error result whose evidence carries a tuple reason and atom
+    # keys. Stored verbatim this failed the Ecto :map cast and record_iteration/1
+    # raised, silently dropping the iteration. It must now persist + round-trip.
+    vector =
+      PredicateVector.new(%{
+        "go-tests" =>
+          PredicateResult.error(%{
+            reason: {:cmd_unrunnable, "Erlang error: :enoent"},
+            cmd: "go test ./...",
+            args: [],
+            workspace: "/tmp/ws"
+          })
+      })
+
+    assert {:ok, inserted} =
+             ReadModel.record_iteration(%{
+               goal_ref: "errored-goal",
+               iteration_index: 0,
+               predicate_vector: vector,
+               observed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+             })
+
+    fetched = ReadModel.get_iteration("errored-goal", 0)
+    assert fetched.id == inserted.id
+
+    round_tripped = ReadModel.to_predicate_vector(fetched)
+    result = PredicateVector.get(round_tripped, "go-tests")
+    assert result.status == :error
+    # The tuple reason is rendered to a readable string; scalars survive as-is.
+    assert result.evidence["reason"] =~ "cmd_unrunnable"
+    assert result.evidence["cmd"] == "go test ./..."
+    assert result.evidence["args"] == []
+  end
+
   test "defaults converged to whether the full vector is satisfied" do
     all_pass =
       PredicateVector.new(%{
