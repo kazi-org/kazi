@@ -177,6 +177,116 @@ defmodule Kazi.Scheduler do
   end
 
   @doc """
+  Runs a GOAL-SET to a COLLECTIVE verdict, partitioning by blast radius and
+  bracketing each partition with its lease + isolated worktree (T21.2/T21.3/T21.4,
+  ADR-0027).
+
+  This is the production on-ramp over `run/2`: instead of pre-built partitions and
+  a bare reconciler, it takes the raw `goals` and a `workspace`, then:
+
+    1. **partitions** the goals by blast radius
+       (`Kazi.Scheduler.Partitioner.partition/3` over the injected `:graph_source`)
+       into DISJOINT partitions — a single goal / no graph degenerates to one
+       partition, exactly today's serial run (T21.2);
+    2. wraps the inner reconciler so each partition **acquires its
+       `PartitionLease` on start and releases on terminal** — including on crash —
+       with residual overlap SERIALIZING on the lease (T21.3); the in-memory
+       backend is the single-node default (NATS is config-selected, not required);
+    3. wraps it again so each partition runs in its **own git worktree**, created
+       on start and removed on terminal incl. crash, guard-safe (T21.4);
+    4. hands the composed per-partition reconciler to `run/2`, which supervises
+       one per partition and folds the collective verdict.
+
+  The wrappers compose lease-OUTSIDE-worktree: a partition waiting on a contended
+  lease does not create its worktree until it actually holds the lease.
+
+  ## Options
+
+    * `:workspace` — the target repo the goals are partitioned against AND the git
+      repo worktrees branch from (required).
+    * `:graph_source` — forwarded to the partitioner for a hermetic run (a test
+      injects `Kazi.Context.StaticGraphSource`).
+    * `:reconciler` — the INNER reconciler, a 2-arity
+      `(t:Kazi.Scheduler.Partitioner.t/0, worktree_path) -> partition_status`.
+      Production injects nothing (defaults to the real per-goal loop over the
+      partition's goals in its worktree); tests inject a stub.
+    * `:lease` — keyword opts for `Kazi.Scheduler.LeasedReconciler.wrap/2`
+      (notably `:backend` and `:lease_opts` with the in-memory `:store`). When
+      omitted, leasing is skipped (a degenerate single-partition run needs no
+      lease); supply it to bracket partitions with leases.
+    * `:worktree` — keyword opts for `Kazi.Scheduler.Worktree.wrap/2` (notably
+      `:repo`, defaulting to `:workspace`). When omitted, worktree isolation is
+      skipped (the inner reconciler is handed the workspace path directly).
+    * `:supervisor`, `:reconcile_timeout` — forwarded to `run/2`.
+
+  Returns `run/2`'s result, but each `result.partitions` entry is keyed by the
+  `Kazi.Scheduler.Partitioner` partition (not a bare term).
+  """
+  @spec run_goals([Kazi.Goal.t()], keyword()) :: {:ok, result()} | {:error, term()}
+  def run_goals(goals, opts) when is_list(goals) and is_list(opts) do
+    workspace = Keyword.fetch!(opts, :workspace)
+    partition_opts = Keyword.take(opts, [:graph_source])
+
+    partitions = Kazi.Scheduler.Partitioner.partition(goals, workspace, partition_opts)
+
+    inner = Keyword.get(opts, :reconciler, default_goal_reconciler(opts))
+    reconciler = compose_reconciler(inner, workspace, opts)
+
+    run_opts =
+      opts
+      |> Keyword.take([:supervisor, :reconcile_timeout])
+      |> Keyword.put(:reconciler, reconciler)
+
+    run(partitions, run_opts)
+  end
+
+  # Compose the per-partition reconciler chain: lease (outer) → worktree (inner) →
+  # the supplied 2-arity reconciler. Each wrapper is OPTIONAL — omitting its opts
+  # skips that layer — so a degenerate single-partition run can run with neither
+  # lease nor worktree, exactly like today's serial path.
+  defp compose_reconciler(inner, workspace, opts) do
+    worktree_opts = Keyword.get(opts, :worktree)
+    lease_opts = Keyword.get(opts, :lease)
+
+    # Worktree layer: a 1-arity `partition -> status` over the 2-arity inner. When
+    # no worktree opts are given, the inner is handed the workspace path directly
+    # (no isolation), preserving the 2-arity contract.
+    worktree_reconciler =
+      case worktree_opts do
+        nil ->
+          fn partition -> inner.(partition, workspace) end
+
+        wt_opts ->
+          wt_opts = Keyword.put_new(wt_opts, :repo, workspace)
+          Kazi.Scheduler.Worktree.wrap(inner, wt_opts)
+      end
+
+    # Lease layer (outermost): brackets the worktree+reconcile in the partition's
+    # lease so overlap serializes BEFORE a worktree is created.
+    case lease_opts do
+      nil -> worktree_reconciler
+      l_opts -> Kazi.Scheduler.LeasedReconciler.wrap(worktree_reconciler, l_opts)
+    end
+  end
+
+  # The default INNER reconciler for run_goals/2: run each of the partition's
+  # goals' serial loop in the partition's worktree, collapsing to one partition
+  # status. T21.5 deepens cross-goal integration; the skeleton runs the member
+  # goals and folds their statuses with the same collective rule.
+  defp default_goal_reconciler(opts) do
+    run_opts = Keyword.get(opts, :run_opts, [])
+
+    fn %Kazi.Scheduler.Partitioner{goals: goals}, worktree_path ->
+      statuses =
+        Enum.map(goals, fn goal ->
+          reconcile_partition(%{goal: goal}, Keyword.put(run_opts, :workspace, worktree_path))
+        end)
+
+      collective_verdict(statuses)
+    end
+  end
+
+  @doc """
   Folds the per-partition statuses into the COLLECTIVE verdict (a pure function).
 
   Order-independent and total:
