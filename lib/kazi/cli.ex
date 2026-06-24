@@ -53,7 +53,10 @@ defmodule Kazi.CLI do
   alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
   alias Kazi.Export.Obsidian
+  alias Kazi.Goal.DepGraph
+  alias Kazi.Goal.Group
   alias Kazi.Goal.GroupLint
+  alias Kazi.Partition
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.Teach.InstallSkill
 
@@ -106,6 +109,8 @@ defmodule Kazi.CLI do
     stream: :boolean,
     parallel: :boolean,
     parallelism: :integer,
+    explain: :boolean,
+    dry_run: :boolean,
     help: :boolean,
     version: :boolean
   ]
@@ -147,6 +152,10 @@ defmodule Kazi.CLI do
     stream: "`run --json` only: emit a JSONL progress stream, one event per loop iteration.",
     parallel:
       "`run` only: drive the PARALLEL scheduler over the partitioned goal-set instead of the serial loop; under --json emits the collective result. An optional `--parallel N` records a concurrency hint.",
+    explain:
+      "`run` only: PRINT the computed wave schedule (the topological `needs`-DAG frontiers + the blast-radius parallelism within each) and EXIT 0 WITHOUT EXECUTING — dispatches nothing, so over-constraint is visible before a run. Under --json emits the schedule as JSON. Alias of --dry-run.",
+    dry_run:
+      "`run` only: alias of --explain — print the computed schedule and exit 0 without dispatching anything.",
     help: "Show this help and exit.",
     version: "Print the kazi version and exit."
   }
@@ -159,7 +168,18 @@ defmodule Kazi.CLI do
       name: "run",
       summary: "Drive a goal-file to convergence against a target workspace.",
       args: [%{name: "goal-file", required: true}],
-      flags: [:workspace, :env, :standing, :harness, :model, :json, :stream, :parallel]
+      flags: [
+        :workspace,
+        :env,
+        :standing,
+        :harness,
+        :model,
+        :json,
+        :stream,
+        :parallel,
+        :explain,
+        :dry_run
+      ]
     },
     %{
       name: "status",
@@ -247,6 +267,7 @@ defmodule Kazi.CLI do
       kazi run <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
       kazi run <goal-file> --workspace <path> --json [--stream]
       kazi run <goal-file> --workspace <path> --parallel [N] [--json]   # parallel scheduler
+      kazi run <goal-file> --workspace <path> --explain [--json]        # print the schedule, run nothing
       kazi status <ref> [--json]
       kazi init <repo-dir> [--out <file>] [--enrich]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
@@ -333,6 +354,19 @@ defmodule Kazi.CLI do
                              blast radius) degrades to the serial behavior. The
                              optional `N` records a concurrency hint (parallelism is
                              otherwise by partition count).
+      --explain              `run` only (T23.6, ADR-0028): PRINT the computed wave
+      --dry-run              SCHEDULE and exit 0 WITHOUT EXECUTING. kazi computes
+                             the topological `needs`-DAG frontiers (each frontier =
+                             the groups whose every `needs` dep is satisfied by the
+                             prior frontiers) and, within each frontier, the
+                             blast-radius PARTITIONING (the parallelism), then prints
+                             them and dispatches NOTHING — so over-constraint (too
+                             many `needs` edges serializing everything) is VISIBLE
+                             before a run. A goal with NO `needs` shows ONE frontier
+                             (everything parallel); a chain shows N frontiers. Pure
+                             planning: no reconciler/harness/lease is touched. Under
+                             --json the schedule is emitted as a JSON object;
+                             NON-INTERACTIVE. `--dry-run` is an alias of `--explain`.
       --obsidian <dir>       `export` only: write an Obsidian vault to <dir> — one
                              note per group and per predicate, [[wikilinked]]
                              parent↔child, tagged with the verdict (intended/
@@ -569,6 +603,9 @@ defmodule Kazi.CLI do
           # meaningful under --json.
           # T21.8 (ADR-0027): --parallel routes `run` to the parallel scheduler;
           # the optional --parallel N records a concurrency hint (:parallelism).
+          # T23.6 (ADR-0028): --explain / --dry-run is the PURE PLANNING surface —
+          # print the computed wave schedule and dispatch NOTHING. The two spellings
+          # are aliases; either sets :explain so the surface is one branch.
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
@@ -577,7 +614,8 @@ defmodule Kazi.CLI do
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
-          parallelism: flags[:parallelism]
+          parallelism: flags[:parallelism],
+          explain: flags[:explain] || flags[:dry_run] || false
         }
 
       extra ->
@@ -931,10 +969,19 @@ defmodule Kazi.CLI do
   # (one goal / no blast radius) degrades to today's serial behavior. Without
   # `--parallel` the run is byte-identical to the pre-T21.8 serial path.
   defp run_goal(%Goal{} = goal, opts, persist?, runtime_opts) do
-    if opts[:parallel] == true do
-      run_goal_parallel(goal, opts, persist?, runtime_opts)
-    else
-      run_goal_serial(goal, opts, persist?, runtime_opts)
+    cond do
+      # T23.6 (ADR-0028): --explain / --dry-run is PURE PLANNING — compute and print
+      # the wave schedule, dispatch NOTHING, exit 0. Checked FIRST so it never falls
+      # through to a real serial/parallel run (the spy seam asserts no reconciler is
+      # invoked). It runs before any execution branch regardless of --parallel.
+      opts[:explain] == true ->
+        explain_schedule(goal, opts, runtime_opts)
+
+      opts[:parallel] == true ->
+        run_goal_parallel(goal, opts, persist?, runtime_opts)
+
+      true ->
+        run_goal_serial(goal, opts, persist?, runtime_opts)
     end
   end
 
@@ -2474,23 +2521,33 @@ defmodule Kazi.CLI do
   # collective result (T21.8, ADR-0027): render + version the scheduler's verdict
   # =============================================================================
   #
-  # `run --parallel` drives `Kazi.Scheduler.run_goals/2`, whose result is
-  # `%{collective: verdict, partitions: [{partition, status}]}`. The CLI only
-  # RENDERS + VERSIONS that map — it invents no scheduler semantics. Under --json
-  # it emits the versioned COLLECTIVE object (docs/schemas/collective-result.md);
-  # otherwise a human block. Both share the SAME scheduler result; only the OUTPUT
-  # shape differs, exactly like the serial `report_outcome/4`.
+  # `run --parallel` drives `Kazi.Scheduler.run_goals/2`, whose result is one of
+  # two shapes:
+  #
+  #   * FLAT (ADR-0027) — `%{collective:, partitions: [{partition, status}]}` when
+  #     no group declares `needs`; the CLI renders the per-partition view.
+  #   * DAG  (ADR-0028) — `%{collective:, groups: [{group_id, status}], blocked:}`
+  #     when the goal carries a `needs`-DAG over its groups; the CLI renders the
+  #     per-GROUP SCHEDULE (T23.6): the topological frontier each group ran in, its
+  #     convergence state, and any BLOCKED sub-DAG (naming the blocking dep).
+  #
+  # The CLI only RENDERS + VERSIONS the scheduler result — it invents no scheduler
+  # semantics; the frontier layering is a PURE function of the goal's `needs` graph
+  # (mirroring `Kazi.Goal.DepGraph`, the scheduler's own planner). Under --json it
+  # emits the versioned COLLECTIVE object (docs/schemas/collective-result.md);
+  # otherwise a human block. Both share the SAME result; only the shape differs.
   defp report_collective(%Goal{} = goal, result, json?) do
     emit(json?, collective_result_json(goal, result), fn ->
       report_collective_human(goal, result)
     end)
   end
 
-  # The human collective block: the overall verdict + one line per partition. The
-  # machine surface (--json) carries the precise per-partition keys + the
-  # next_action hint; the human block is a legible summary.
-  defp report_collective_human(%Goal{id: id}, %{collective: collective, partitions: partitions}) do
-    IO.puts("COLLECTIVE #{collective |> to_string() |> String.upcase()}  goal=#{id}")
+  # The human collective block. For a FLAT result: the verdict + one line per
+  # partition. For a DAG result (T23.6): the verdict + the per-GROUP schedule
+  # (frontier order + state) + any blocked sub-DAG. The --json surface carries the
+  # precise keys; the human block is a legible summary.
+  defp report_collective_human(%Goal{id: id}, %{partitions: partitions} = result) do
+    IO.puts("COLLECTIVE #{result.collective |> to_string() |> String.upcase()}  goal=#{id}")
     IO.puts("partitions: #{length(partitions)}")
 
     partitions
@@ -2500,29 +2557,76 @@ defmodule Kazi.CLI do
     end)
   end
 
-  # The versioned COLLECTIVE result object (T21.8, ADR-0027,
-  # docs/schemas/collective-result.md):
+  defp report_collective_human(%Goal{id: id} = goal, %{groups: groups} = result) do
+    schedule = schedule_view(goal, groups)
+
+    IO.puts("COLLECTIVE #{result.collective |> to_string() |> String.upcase()}  goal=#{id}")
+    IO.puts("frontiers: #{length(schedule)}")
+    print_schedule_frontiers(schedule)
+    print_blocked_human(Map.get(result, :blocked, []))
+  end
+
+  defp print_schedule_frontiers(schedule) do
+    Enum.each(schedule, fn %{frontier: index, groups: groups} ->
+      line =
+        Enum.map_join(groups, ", ", fn %{group: gid, state: state} ->
+          "#{gid}(#{state})"
+        end)
+
+      IO.puts("  frontier #{index}: #{line}")
+    end)
+  end
+
+  defp print_blocked_human([]), do: :ok
+
+  defp print_blocked_human(blocked) do
+    IO.puts("blocked: #{length(blocked)}")
+
+    Enum.each(blocked, fn %{group: gid, blocked_by: dep, reason: reason} ->
+      IO.puts("  #{gid} blocked by #{dep} (#{reason})")
+    end)
+  end
+
+  # The versioned COLLECTIVE result object (T21.8/T23.6, ADR-0027 + ADR-0028,
+  # docs/schemas/collective-result.md). The FLAT clause carries `partitions`; the
+  # DAG clause carries `schedule` + `blocked`. Both share schema_version /
+  # collective / next_action / goal_id.
   #
   #   * `schema_version` — the shared contract version (`@run_schema_version`).
   #   * `goal_id`        — the goal-set's goal id (the run's handle).
   #   * `collective`     — the COLLECTIVE verdict the scheduler folded:
-  #                        "converged" / "stuck" / "over_budget" (every partition
-  #                        converged ⇒ converged; any over budget ⇒ over_budget;
-  #                        otherwise stuck). The orchestrator's primary branch.
-  #   * `partitions`     — one entry per partition, in the scheduler's input order:
-  #                        `{partition_id, goal_ids, status}`. A single-partition
-  #                        goal-set yields exactly one entry (the serial degenerate).
-  #   * `next_action`    — a single orchestration hint derived from `collective`:
-  #                        "done" / "investigate" / "raise_budget" — the SAME hint
-  #                        vocabulary the serial `run --json` uses (ADR-0023).
-  defp collective_result_json(%Goal{id: id}, %{collective: collective, partitions: partitions}) do
-    collective_str = to_string(collective)
+  #                        "converged" / "stuck" / "over_budget".
+  #   * `partitions`     — (FLAT only) one entry per partition, in input order:
+  #                        `{partition_id, goal_ids, status}`.
+  #   * `schedule`       — (DAG only, T23.6) the topological frontiers taken: one
+  #                        `{frontier, groups: [{group, state}]}` per wave, plus a
+  #                        per-group `frontier` index so a group maps to its wave.
+  #   * `blocked`        — (DAG only, T23.6) the blocked sub-DAG: one
+  #                        `{group, blocked_by, reason}` per group an unsatisfiable
+  #                        dep poisoned (empty when nothing is blocked).
+  #   * `next_action`    — a single orchestration hint derived from `collective`.
+  defp collective_result_json(%Goal{id: id}, %{partitions: partitions} = result) do
+    collective_str = to_string(result.collective)
 
     %{
       schema_version: @run_schema_version,
       goal_id: to_string(id),
       collective: collective_str,
       partitions: partitions_json(partitions),
+      next_action: next_action(collective_str)
+    }
+  end
+
+  defp collective_result_json(%Goal{id: id} = goal, %{groups: groups} = result) do
+    collective_str = to_string(result.collective)
+    blocked = Map.get(result, :blocked, [])
+
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(id),
+      collective: collective_str,
+      schedule: schedule_json(goal, groups),
+      blocked: blocked_json(blocked),
       next_action: next_action(collective_str)
     }
   end
@@ -2559,4 +2663,210 @@ defmodule Kazi.CLI do
 
   defp goal_id_string(%Goal{id: id}), do: to_string(id)
   defp goal_id_string(other), do: to_string(inspect(other))
+
+  # =============================================================================
+  # schedule reporting + --explain / --dry-run (T23.6, ADR-0028)
+  # =============================================================================
+  #
+  # ADR-0028 §Consequences: "the scheduler can PRINT the computed order so
+  # over-constraint is visible". This is that surface — both the schedule embedded
+  # in the collective DAG result AND the standalone `--explain` dry-run. Both share
+  # one PURE function — `frontiers/1` — that mirrors `Kazi.Goal.DepGraph`'s ready-set
+  # logic (the planner the real scheduler drives) to layer the `needs`-DAG into
+  # topological FRONTIERS, without touching the scheduler or dispatching anything.
+
+  # The topological FRONTIERS of a goal's `needs`-DAG: a PURE layering that mirrors
+  # the scheduler's planner (`Kazi.Goal.DepGraph`). Repeatedly take the READY SET
+  # (groups whose every `needs` dep is satisfied by earlier frontiers), emit it as a
+  # frontier, then mark those groups converged and recompute — exactly the order the
+  # pipelined `DepScheduler` WOULD take (we mirror it; we do not call it). A goal with
+  # NO `needs` yields ONE frontier (every group ready at once — fully parallel); a
+  # chain yields N frontiers (one group per wave). Groups that can never become ready
+  # (none, for a valid load-time DAG) are excluded — the `needs` graph is a validated
+  # DAG (T23.1), so the layering terminates and covers every group.
+  #
+  # Returns a list of frontiers, each a list of group ids in DECLARED order.
+  @spec frontiers(Goal.t()) :: [[Group.id()]]
+  defp frontiers(%Goal{groups: []}), do: []
+
+  defp frontiers(%Goal{} = goal) do
+    layer_frontiers(goal, %{}, [])
+  end
+
+  defp layer_frontiers(goal, states, acc) do
+    ready = DepGraph.ready_set(goal, states)
+
+    if ready == [] do
+      Enum.reverse(acc)
+    else
+      # Mark this frontier's groups converged so the NEXT ready-set computation sees
+      # their deps satisfied — the pure topological advance (no dispatch, no I/O).
+      states = Enum.reduce(ready, states, fn id, acc -> Map.put(acc, id, :converged) end)
+      layer_frontiers(goal, states, [ready | acc])
+    end
+  end
+
+  # The per-group SCHEDULE VIEW shared by the human + JSON collective renderers
+  # (T23.6): one entry per frontier, in topological order, each carrying its groups
+  # (in declared order) with the group's observed convergence STATE from the
+  # scheduler's per-group outcomes. `groups` is the result's `[{group_id, status}]`.
+  defp schedule_view(%Goal{} = goal, groups) do
+    states = Map.new(groups, fn {id, status} -> {to_string(id), status} end)
+
+    goal
+    |> frontiers()
+    |> Enum.with_index()
+    |> Enum.map(fn {ids, index} ->
+      %{
+        frontier: index,
+        groups:
+          Enum.map(ids, fn id ->
+            %{group: id, state: to_string(Map.get(states, id, :pending))}
+          end)
+      }
+    end)
+  end
+
+  # The `schedule` JSON value for the collective DAG result (T23.6): the frontier
+  # waves with each group's state, plus a flat `frontier` index per group so an
+  # orchestrator maps a group to its wave without re-deriving the DAG.
+  defp schedule_json(%Goal{} = goal, groups) do
+    schedule_view(goal, groups)
+  end
+
+  # The `blocked` JSON value: one `{group, blocked_by, reason}` per blocked group,
+  # passing through `Kazi.Goal.DepGraph.blocked_entry/0` (the scheduler's own
+  # attribution), so the report NAMES the blocking dep rather than hanging silently.
+  defp blocked_json(blocked) do
+    Enum.map(blocked, fn %{group: group, blocked_by: dep, reason: reason} ->
+      %{group: to_string(group), blocked_by: to_string(dep), reason: to_string(reason)}
+    end)
+  end
+
+  # ---------------------------------------------------------------------------
+  # --explain / --dry-run: print the schedule, dispatch NOTHING, exit 0
+  # ---------------------------------------------------------------------------
+  #
+  # PURE PLANNING (ADR-0028 §Consequences). Computes the `needs`-DAG frontiers
+  # (`frontiers/1`) and, within each frontier, the blast-radius PARTITIONING
+  # (`Kazi.Partition.partition/3` over the injected graph source — the same
+  # disjoint-by-construction grouping the real scheduler uses), prints them, and
+  # returns 0. It dispatches NOTHING: no reconciler, harness, lease, or worktree is
+  # ever invoked — so a spy reconciler in `runtime_opts` is provably never called.
+  # Under --json it emits the schedule as one JSON object; NON-INTERACTIVE.
+  defp explain_schedule(%Goal{} = goal, opts, runtime_opts) do
+    workspace = opts[:workspace] || goal.scope.workspace
+    json? = opts[:json] == true
+
+    frontiers = frontiers(goal)
+    partition_opts = Keyword.take(runtime_opts, [:graph_source])
+
+    schedule = explain_frontiers(goal, frontiers, workspace, partition_opts)
+
+    emit(json?, explain_json(goal, schedule), fn ->
+      explain_human(goal, schedule)
+    end)
+
+    0
+  end
+
+  # For each frontier, expand the groups into their blast-radius partitions (the
+  # parallelism WITHIN the wave). Each group becomes a `Kazi.Partition` input keyed
+  # by its id, carrying the group's predicate terms; overlapping groups land in one
+  # partition (they serialize), disjoint groups in separate partitions (they run in
+  # parallel). A goal with no group-level partition terms yields one singleton
+  # partition per group — still honest: each group is its own parallel unit.
+  defp explain_frontiers(%Goal{} = goal, frontiers, workspace, partition_opts) do
+    frontiers
+    |> Enum.with_index()
+    |> Enum.map(fn {group_ids, index} ->
+      partitions = explain_partition(goal, group_ids, workspace, partition_opts)
+      %{frontier: index, groups: group_ids, partitions: partitions}
+    end)
+  end
+
+  # The blast-radius partitions of one frontier's groups: build a `{group_id, terms}`
+  # input per group (terms = the group's predicate partition terms, falling back to
+  # the group id so a group always has a non-empty radius and is its own unit), then
+  # partition. Pure + hermetic with an injected `:graph_source` (a test stub); the
+  # production default is the repo-map source.
+  defp explain_partition(%Goal{} = goal, group_ids, workspace, partition_opts) do
+    inputs = Enum.map(group_ids, fn id -> {id, group_terms(goal, id)} end)
+
+    Partition.partition(inputs, workspace, partition_opts)
+  end
+
+  # A group's partition terms: the changed-file/symbol terms its predicates declare,
+  # de-duplicated. Falls back to the group id when a group declares none, so every
+  # group expands to a non-empty (singleton) blast radius rather than vanishing.
+  defp group_terms(%Goal{} = goal, group_id) do
+    terms =
+      goal
+      |> Goal.all_predicates()
+      |> Enum.filter(fn pred -> Map.get(pred, :group) == group_id end)
+      |> Enum.flat_map(&predicate_terms/1)
+      |> Enum.uniq()
+
+    case terms do
+      [] -> [group_id]
+      terms -> terms
+    end
+  end
+
+  # A predicate's partition terms, if any — its declared `partition_terms` metadata
+  # (mirroring `Kazi.Partition`'s goal-level seam). Absent ⇒ none (the group id is
+  # the fallback in `group_terms/2`).
+  defp predicate_terms(%{metadata: %{partition_terms: terms}}) when is_list(terms), do: terms
+  defp predicate_terms(_pred), do: []
+
+  # The human dry-run block: the frontier count, then one block per frontier showing
+  # its groups and — within the frontier — the blast-radius partitions (the
+  # parallelism). A single frontier means everything is parallel; N frontiers means
+  # the DAG serializes into N waves (over-constraint made visible).
+  defp explain_human(%Goal{id: id}, schedule) do
+    IO.puts("SCHEDULE (dry-run, nothing dispatched)  goal=#{id}")
+    IO.puts("frontiers: #{length(schedule)}")
+
+    Enum.each(schedule, fn %{frontier: index, groups: groups, partitions: partitions} ->
+      IO.puts("  frontier #{index}: #{Enum.join(groups, ", ")}")
+      IO.puts("    parallelism: #{length(partitions)} partition(s)")
+
+      partitions
+      |> Enum.with_index()
+      |> Enum.each(fn {partition, p_index} ->
+        ids = Enum.join(partition.goal_ids, ", ")
+        IO.puts("    [#{p_index}] #{partition_id(partition, p_index)}: #{ids}")
+      end)
+    end)
+  end
+
+  # The `--explain --json` object (T23.6): the computed schedule as a single JSON
+  # object — the frontiers + the per-frontier partitioning — with `dispatched: false`
+  # making the no-execution contract explicit and machine-checkable.
+  defp explain_json(%Goal{id: id}, schedule) do
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(id),
+      mode: "explain",
+      dispatched: false,
+      frontiers: Enum.map(schedule, &explain_frontier_json/1),
+      next_action: "schedule"
+    }
+  end
+
+  defp explain_frontier_json(%{frontier: index, groups: groups, partitions: partitions}) do
+    %{
+      frontier: index,
+      groups: Enum.map(groups, &to_string/1),
+      partitions:
+        partitions
+        |> Enum.with_index()
+        |> Enum.map(fn {partition, p_index} ->
+          %{
+            partition_id: partition_id(partition, p_index),
+            goal_ids: Enum.map(partition.goal_ids, &to_string/1)
+          }
+        end)
+    }
+  end
 end
