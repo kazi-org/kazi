@@ -284,6 +284,85 @@ defmodule Kazi.Scheduler do
   """
   @spec run_goals([Kazi.Goal.t()], keyword()) :: {:ok, result()} | {:error, term()}
   def run_goals(goals, opts) when is_list(goals) and is_list(opts) do
+    # T23.3 (ADR-0028): when a SINGLE goal carries a non-trivial `needs`-DAG over
+    # its groups, route to the topological + pipelined `DepScheduler` — dispatch
+    # only the ready set, re-evaluate as groups converge, surface blocked
+    # sub-DAGs. When NO group declares `needs` (or the set is not a single
+    # DAG-bearing goal), fall through to the EXACT pre-T23.3 flat parallel path
+    # (`run_goals_flat/2`) — backward compatible; the T21.8 CLI is unaffected.
+    case dag_goal(goals) do
+      {:ok, goal} -> run_goal_dag(goal, opts)
+      :flat -> run_goals_flat(goals, opts)
+    end
+  end
+
+  # Route to the pipelined `DepScheduler` only when the goal-set is EXACTLY one
+  # goal whose groups form a non-trivial `needs`-DAG (some group declares an
+  # edge). Anything else — many goals, a goal with no groups, or groups with no
+  # `needs` — is `:flat`, the fully-parallel ADR-0027 default. This keeps
+  # `run_goals/2` byte-for-byte backward-compatible for every existing caller.
+  defp dag_goal([%Kazi.Goal{} = goal]) do
+    if Kazi.Scheduler.DepScheduler.dag?(goal), do: {:ok, goal}, else: :flat
+  end
+
+  defp dag_goal(_goals), do: :flat
+
+  # Drive a single goal's `needs`-DAG topologically + pipelined (ADR-0028). Each
+  # READY group is reconciled by a GROUP reconciler; the default reconciles the
+  # group's predicate SUB-GOAL through the flat partition path (so a group is
+  # still spatially partitioned + leased + worktree-isolated like any goal), and
+  # the `DepScheduler` orders the groups by `needs`, re-evaluating as each
+  # converges. Tests inject a `:group_reconciler` stub to drive convergence
+  # hermetically. The result is the `DepScheduler` per-group result.
+  defp run_goal_dag(goal, opts) do
+    group_reconciler =
+      Keyword.get_lazy(opts, :group_reconciler, fn ->
+        default_group_reconciler(goal, opts)
+      end)
+
+    dep_opts =
+      opts
+      |> Keyword.take([:supervisor, :reconcile_timeout])
+      |> Keyword.put(:reconciler, group_reconciler)
+
+    Kazi.Scheduler.DepScheduler.run(goal, dep_opts)
+  end
+
+  # The default GROUP reconciler (production): reconcile one group by running its
+  # predicate SUB-GOAL — the parent goal restricted to the predicates that
+  # declare this group — through the flat `run_goals_flat/2` path, so the group's
+  # work is still blast-radius partitioned, leased, and worktree-isolated. The
+  # sub-goal carries NO `needs` (a single group is a leaf), so it takes the flat
+  # path and never recurses into the DAG router. The group's collective verdict
+  # becomes its node status in the `needs`-DAG.
+  defp default_group_reconciler(goal, opts) do
+    flat_opts = Keyword.drop(opts, [:group_reconciler, :reconciler])
+
+    fn group_id ->
+      sub_goal = group_subgoal(goal, group_id)
+
+      case run_goals_flat([sub_goal], flat_opts) do
+        {:ok, %{collective: collective}} -> collective
+        {:error, _reason} -> :stuck
+      end
+    end
+  end
+
+  # Build the predicate SUB-GOAL for a group: the parent goal with its predicates
+  # (and guards) restricted to those declaring `group_id`. Guards are kept (they
+  # are invariants the group's work must not regress); the sub-goal keeps the
+  # parent's budget/scope/harness so the group runs under the same envelope.
+  defp group_subgoal(%Kazi.Goal{} = goal, group_id) do
+    %Kazi.Goal{
+      goal
+      | id: "#{goal.id}::#{group_id}",
+        predicates: Enum.filter(goal.predicates, &(&1.group == group_id)),
+        guards: Enum.filter(goal.guards, &(&1.group in [group_id, nil])),
+        groups: []
+    }
+  end
+
+  defp run_goals_flat(goals, opts) do
     workspace = Keyword.fetch!(opts, :workspace)
     partition_opts = Keyword.take(opts, [:graph_source])
 
