@@ -1,0 +1,65 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Petstore API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://api.petstore.example.com/v1/" }
+  ],
+  "paths": {
+    "/pets": {
+      "get": {
+        "tags": ["Pets"],
+        "summary": "List all pets",
+        "responses": {
+          "200": { "description": "a list of pets" }
+        }
+      },
+      "post": {
+        "tags": ["Pets"],
+        "summary": "Create a pet",
+        "responses": {
+          "201": { "description": "the created pet" },
+          "400": { "description": "invalid input" }
+        }
+      }
+    },
+    "/pets/{petId}": {
+      "get": {
+        "tags": ["Pets"],
+        "summary": "Get a pet by id",
+        "responses": {
+          "200": { "description": "the pet" },
+          "404": { "description": "not found" }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": ["Identity & Access"],
+        "summary": "List users",
+        "responses": {
+          "200": { "description": "a list of users" }
+        }
+      }
+    },
+    "/users/{userId}/sessions": {
+      "post": {
+        "tags": ["Identity and Access"],
+        "summary": "Create a session",
+        "responses": {
+          "default": { "description": "no declared 2xx" }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Liveness probe",
+        "responses": {
+          "200": { "description": "ok" }
+        }
+      }
+    }
+  }
+}
