@@ -87,9 +87,11 @@ defmodule Kazi.CLIHelpSchemaTest do
       # actually dispatches (parse/1 does NOT return an unknown-command error for
       # it), and the known commands must all be reported. This is what makes the
       # surface "generated, not hand-maintained" (ADR-0024).
+      # T27.1 (ADR-0032): `apply`/`plan` are the PRIMARY verbs; `run`/`propose` are
+      # kept as DEPRECATED ALIASES, so the table (and help --json) lists all four.
       expected =
         MapSet.new(
-          ~w(run status init install-skill propose list-proposed approve reject export lint help schema version)
+          ~w(apply run status init install-skill plan propose list-proposed approve reject export lint help schema version)
         )
 
       assert reported == expected,
@@ -220,9 +222,14 @@ defmodule Kazi.CLIHelpSchemaTest do
   defp dispatch_probe(name) do
     argv =
       case name do
-        n when n in ~w(run init status approve reject propose export lint) -> [n, "dummy"]
-        n when n in ~w(schema) -> [n, "run"]
-        n -> [n]
+        n when n in ~w(apply run init status approve reject plan propose export lint) ->
+          [n, "dummy"]
+
+        n when n in ~w(schema) ->
+          [n, "run"]
+
+        n ->
+          [n]
       end
 
     Kazi.CLI.parse(argv)

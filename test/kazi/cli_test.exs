@@ -110,6 +110,91 @@ defmodule Kazi.CLITest do
   end
 
   # ===========================================================================
+  # Tier 1 — apply/plan PRIMARY verbs + run/propose DEPRECATED ALIASES (T27.1, ADR-0032)
+  # ===========================================================================
+
+  describe "parse/1 — apply/plan primary verbs, run/propose deprecated aliases" do
+    test "`apply` parses to the SAME {:run, ...} tuple as `run` (apply == run)" do
+      assert {:run, "goal.toml", apply_opts} =
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
+
+      assert {:run, "goal.toml", run_opts} =
+               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws"])
+
+      # Identical save for the deprecation marker: `apply` is the primary (silent),
+      # `run` carries `deprecated: "run"` so the dispatcher prints the stderr hint.
+      assert apply_opts[:workspace] == "/tmp/ws"
+      assert apply_opts[:deprecated] == nil
+      assert run_opts[:deprecated] == "run"
+      assert Keyword.delete(apply_opts, :deprecated) == Keyword.delete(run_opts, :deprecated)
+    end
+
+    test "`apply` carries the run flags through (env / standing / harness / json / parallel)" do
+      assert {:run, "g.toml", opts} =
+               Kazi.CLI.parse([
+                 "apply",
+                 "g.toml",
+                 "--workspace",
+                 "/w",
+                 "--env",
+                 "prod",
+                 "--standing",
+                 "--harness",
+                 "opencode",
+                 "--json",
+                 "--parallel"
+               ])
+
+      assert opts[:env] == "prod"
+      assert opts[:standing] == true
+      assert opts[:harness] == "opencode"
+      assert opts[:json] == true
+      assert opts[:parallel] == true
+    end
+
+    test "`apply` with no goal-file is an error" do
+      assert {:error, message} = Kazi.CLI.parse(["apply"])
+      assert message =~ "the `apply` command requires a <goal-file>"
+    end
+
+    test "`plan \"<idea>\"` parses to the SAME {:propose, ...} tuple as `propose` (plan == propose)" do
+      assert {:propose, "an idea", plan_opts} =
+               Kazi.CLI.parse(["plan", "an idea", "--workspace", "/w"])
+
+      assert {:propose, "an idea", propose_opts} =
+               Kazi.CLI.parse(["propose", "an idea", "--workspace", "/w"])
+
+      assert plan_opts[:workspace] == "/w"
+      assert plan_opts[:deprecated] == nil
+      assert propose_opts[:deprecated] == "propose"
+      assert Keyword.delete(plan_opts, :deprecated) == Keyword.delete(propose_opts, :deprecated)
+    end
+
+    test "`plan` carries the propose flags (yes / strict / adr / predicates / json)" do
+      assert {:propose, "idea", opts} =
+               Kazi.CLI.parse(["plan", "idea", "--yes", "--strict", "--adr", "--json"])
+
+      assert opts[:yes] == true
+      assert opts[:strict] == true
+      assert opts[:adr] == true
+      assert opts[:json] == true
+    end
+
+    test "`plan --json --predicates` (caller-drafts, no idea) parses like propose" do
+      preds = ~s({"predicates":[]})
+      assert {:propose, "", opts} = Kazi.CLI.parse(["plan", "--json", "--predicates", preds])
+      assert opts[:predicates] == preds
+      assert opts[:json] == true
+      assert opts[:deprecated] == nil
+    end
+
+    test "a missing idea for plan is an error" do
+      assert {:error, message} = Kazi.CLI.parse(["plan"])
+      assert message =~ "requires an <idea>"
+    end
+  end
+
+  # ===========================================================================
   # Tier 1 — run/1 usage + load-error paths
   # ===========================================================================
 
@@ -231,6 +316,77 @@ defmodule Kazi.CLITest do
       iterations = ReadModel.list_iterations("cli-e2e")
       assert iterations != []
       assert List.last(iterations).converged == true
+    end
+  end
+
+  # ===========================================================================
+  # Tier 2 — apply behaves identically to run; run is a deprecated alias (T27.1)
+  # ===========================================================================
+
+  describe "run/2 — apply == run end-to-end + the deprecated run alias hint" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    test "`apply <goal>` converges identically to `run`, printing no deprecation hint",
+         %{tmp_dir: tmp_dir} do
+      %{opts: opts, goal_file: goal_file, work: work} = converging_fixture(tmp_dir)
+
+      # Capture stderr (outer) AND stdout+code (inner) of a SINGLE run — the
+      # reconcile is not idempotent, so the fixture is exercised exactly once.
+      stderr =
+        capture_io(:stderr, fn ->
+          {code, out} =
+            with_io(fn -> Kazi.CLI.run(["apply", goal_file, "--workspace", work], opts) end)
+
+          assert code == 0
+          assert out =~ "CONVERGED"
+          assert out =~ "cli-e2e"
+        end)
+
+      # stderr: the PRIMARY verb is SILENT (no deprecation hint).
+      refute stderr =~ "deprecated"
+    end
+
+    test "`run <goal>` STILL WORKS but prints a one-line deprecation hint to stderr",
+         %{tmp_dir: tmp_dir} do
+      %{opts: opts, goal_file: goal_file, work: work} = converging_fixture(tmp_dir)
+
+      stderr =
+        capture_io(:stderr, fn ->
+          {code, out} =
+            with_io(fn -> Kazi.CLI.run(["run", goal_file, "--workspace", work], opts) end)
+
+          assert code == 0
+          assert out =~ "CONVERGED"
+          # The hint NEVER leaks onto stdout (only stderr carries it).
+          refute out =~ "deprecated"
+        end)
+
+      assert stderr =~ "`kazi run` is deprecated"
+      assert stderr =~ "use `kazi apply`"
+    end
+
+    test "under --json the deprecated `run` alias emits NO hint into stdout (stdout stays JSON)",
+         %{tmp_dir: tmp_dir} do
+      %{opts: opts, goal_file: goal_file, work: work} = converging_fixture(tmp_dir)
+
+      stderr =
+        capture_io(:stderr, fn ->
+          {code, out} =
+            with_io(fn ->
+              Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], opts)
+            end)
+
+          assert code == 0
+          # The WHOLE of stdout is a single JSON object — the deprecation hint did
+          # NOT leak in (the T15.7 self-conformance contract: --json stdout is
+          # JSON-only regardless of which verb/alias was typed).
+          assert {:ok, payload} = Jason.decode(String.trim(out))
+          assert payload["status"] == "converged"
+        end)
+
+      # The hint went to stderr, off the JSON stdout stream.
+      assert stderr =~ "`kazi run` is deprecated"
     end
   end
 
@@ -414,6 +570,43 @@ defmodule Kazi.CLITest do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
     Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
     :ok
+  end
+
+  # The converging end-to-end fixture (T27.1 apply/run equivalence): a real bare
+  # origin + clone, a local HTTP probe that starts "down" and is flipped "ok" by a
+  # deploy stub, a harness stub that creates the marker file, and an integrator
+  # that locally rebase-merges. Returns the runtime `:opts`, the goal-file, and the
+  # workspace — the SAME wiring the `run` converge test uses, so `apply` and `run`
+  # exercise an identical reconcile path.
+  defp converging_fixture(tmp_dir) do
+    %{work: work, bare: bare} = setup_repo(tmp_dir)
+
+    {server, url, body_file} = start_http_server("down")
+    on_exit(fn -> :inets.stop(:httpd, server) end)
+
+    goal_file = write_goal_file(tmp_dir, work, url)
+    harness_stub = write_harness_stub(tmp_dir)
+    deploy_stub = write_deploy_stub(tmp_dir, url, body_file)
+
+    integrator = fn request, _opts ->
+      {:ok, %{pr: 7, merge_commit: local_rebase_merge(bare, request.branch, request.base)}}
+    end
+
+    opts = [
+      adapter_opts: [command: harness_stub],
+      integrator: integrator,
+      deploy_cmd: deploy_stub,
+      deploy_params: %{
+        service: "kazi-cli-e2e",
+        project: "kazi-test",
+        region: "us-central1",
+        source: work
+      },
+      reobserve_interval_ms: 5,
+      await_timeout: 15_000
+    ]
+
+    %{opts: opts, goal_file: goal_file, work: work}
   end
 
   # A goal-file of the same shape as the shipped example, but stub-satisfiable:
