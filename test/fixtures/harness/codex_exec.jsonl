@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"th_golden"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"itm_reason","type":"reasoning","text":"Looking at the failing test."}}
+{"type":"item.completed","item":{"id":"itm_cmd","type":"command_execution","command":"mix test","exit_code":0}}
+{"type":"item.completed","item":{"id":"itm_msg","type":"agent_message","text":"Made the failing unit test pass."}}
+{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":900,"output_tokens":300}}
