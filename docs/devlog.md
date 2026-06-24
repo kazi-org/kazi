@@ -4,6 +4,39 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-24 — E18 shipped: the four benchmark bugs fixed + clean re-verify (T18.5)
+
+Fixed all four defects the token benchmark surfaced (2026-06-24 entry below), each
+with a regression test; full suite green (1353 passed), `mix format` +
+`--warnings-as-errors` clean.
+
+- **T18.1** (stale example): `priv/examples/{deploy_target,standing_maintenance,
+  grouped_taxonomy}.toml` used a whole command line in `cmd` (`"go test ./..."`),
+  which `System.cmd/3` runs as one binary -> `{:cmd_unrunnable, :enoent}`. Split into
+  `cmd` + `args`. New guard `examples_runnable_test` loads every
+  `priv/examples/*.toml` and asserts each `:tests` predicate's `cmd` is a single
+  whitespace-free token with a list `args` (L-0012).
+- **T18.2** (read-model crash): `ReadModel.serialize_vector/1` stored evidence
+  verbatim; an `:error` result's tuple reason + atom keys failed the Ecto `:map`
+  cast so `record_iteration/1` raised and the iteration was lost. Added a recursive
+  `sanitize_evidence/1` (stringify keys, keep JSON scalars, stringify atoms, inspect
+  tuples/structs); idempotent on already-sanitized maps (L-0010).
+- **T18.3** (duplicate-index persist): persistence is a PROJECTION of observed
+  state, so re-projecting an `iteration_index` must be idempotent. The runtime now
+  always upserts from `persist_iteration` (on_conflict replace, conflict_target the
+  unique pair); the stuck-stop projection (reuses `iterations-1`) and budget paths
+  no longer collide on `iterations_goal_ref_iteration_index_index`. The read-model
+  keeps its duplicate-rejecting contract for direct callers (L-0011).
+- **T18.4** (over-budget CaseClauseError): already fixed by T15.3 (`cli.ex` has the
+  `:over_budget` clause). Added a regression test: an unconvergeable goal
+  (`max_iterations=1`, no-op harness) exits 1 + reports `over_budget` on both human
+  and `--json`, raises nothing, and logs no persistence collision.
+- **T18.5** (re-verify): a real `mix kazi.run` on a broken Go fixture (healthBody
+  `not-ok`, NATS-free, in-memory read-model) converged in 2 iterations -- the agent
+  applied the one-line fix, the upsert (`ON CONFLICT DO UPDATE`) fired, and the run
+  was CLEAN: zero `failed to persist`, zero `has already been taken`, zero `:map`
+  cast errors, no raise. The exact symptoms from the benchmark are gone.
+
 ## 2026-06-24 — E13 reconciliation dogfood (T13.6): kazi's own A \ I, importer demo, sire-is-Go reality check
 
 Ran the E13 intended-vs-actual pipeline (ADR-0021) end to end as a USAGE
