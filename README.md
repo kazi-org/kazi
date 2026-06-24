@@ -370,7 +370,7 @@ underspecified idea instead of guessing; `--adr` also writes an ADR-lite rationa
 doc under `docs/adr/`.
 
 `propose` / `approve` are the natural-language **front door** (an agent drafts,
-a human approves — the only write path the dashboard and Telegram bridge share too).
+a human approves — the only write path the dashboard shares too).
 The higher-level the idea, the more predicates kazi drafts — and the more you'll
 want to curate them before approving, because every predicate becomes a wall kazi
 won't declare "done" until it's objectively true. Approving blesses the goal; to
@@ -539,13 +539,11 @@ pins this output, so the example never drifts from what the tool produces.
 
 ---
 
-## Watch it work (and steer from your phone)
+## Watch it work
 
 - **LiveView dashboard** — a goal board, live agent presence, the lease map, and
   per-goal convergence history. Read-only inspection, decoupled from the loop
   ([ADR-0011](docs/adr/0011-slice3-operator-surfaces.md)).
-- **Telegram bridge** — declare a goal from your phone and get pinged on
-  `converged` / `stuck` / `over-budget`. The human sets *direction*, not keystrokes.
 
 ---
 
@@ -600,7 +598,7 @@ works today:
 - **Creation mode** — kazi builds *new* features from failing acceptance predicates,
   not only repairs. From here on, kazi builds kazi.
 - **Coordination & surfaces** — NATS leases + presence, graph partitioning,
-  natural-language authoring, a LiveView dashboard, and a Telegram bridge.
+  natural-language authoring, and a LiveView dashboard.
 - **Context injection** — every stateless iteration starts *oriented* (a
   deterministic blast-radius pack + an optional, off-by-default retrieval adapter),
   without reintroducing conversation memory.
