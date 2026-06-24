@@ -23,6 +23,7 @@ defmodule Kazi.Harness.CliAdapterTest do
   @env_stub Path.expand("../../support/stub_env_echo.sh", __DIR__)
   @opencode_stub Path.expand("../../support/stub_opencode_json.sh", __DIR__)
   @argv_stub Path.expand("../../support/stub_harness_argv.sh", __DIR__)
+  @antigravity_stub Path.expand("../../support/stub_antigravity_json.sh", __DIR__)
 
   setup do
     workspace =
@@ -277,6 +278,100 @@ defmodule Kazi.Harness.CliAdapterTest do
       # Emphatically NOT the claude shape.
       refute "-p" in argv
       refute "--output-format" in argv
+    end
+  end
+
+  describe "end-to-end: CliAdapter drives the :antigravity profile via prompt_via: :file (T14.3)" do
+    # The #76 non-TTY workaround end to end: the adapter must WRITE the prompt to a
+    # temp file in the workspace, thread its path to build_args as --prompt-file,
+    # run the harness, parse the --output json envelope, and DELETE the temp file
+    # afterwards. The stub asserts the prompt-file existed and records both the
+    # argv and the prompt bytes it read.
+
+    test "writes the prompt to a temp file, dispatches the workaround argv, parses JSON", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} =
+               CliAdapter.run("make the failing test pass", workspace,
+                 harness: :antigravity,
+                 model: "gemini-2.5-pro",
+                 command: @antigravity_stub
+               )
+
+      # The stub recorded the argv it received: the workaround shape, NOT bare -p.
+      argv = recorded_argv(workspace)
+      assert "run" in argv
+      assert "--prompt-file" in argv
+      assert ["--output", "json"] -- argv == []
+      assert "--yes" in argv
+      assert ["--model", "gemini-2.5-pro"] -- argv == []
+      refute "-p" in argv
+      refute "--prompt" in argv
+
+      # The adapter wrote the prompt to the file the stub then read back.
+      seen_prompt = workspace |> Path.join("seen_prompt.txt") |> File.read!()
+      assert seen_prompt == "make the failing test pass"
+
+      # The --output json envelope parsed into the additive subset.
+      assert result.result == "Made the failing unit test pass."
+      assert result.tokens == 1500 + 400
+      assert result.cost == %{tokens: 1900}
+
+      # The base map still carries the resolved command + workspace.
+      assert result.command == @antigravity_stub
+      assert result.workspace == workspace
+    end
+
+    test "the temp prompt file is cleaned up after the run (no litter in the workspace)", %{
+      workspace: workspace
+    } do
+      assert {:ok, %{exit: 0}} =
+               CliAdapter.run("clean up after yourself", workspace,
+                 harness: :antigravity,
+                 command: @antigravity_stub
+               )
+
+      # The adapter deletes its `.kazi-prompt-*.txt` temp file after dispatch.
+      leftover =
+        workspace
+        |> File.ls!()
+        |> Enum.filter(&String.starts_with?(&1, ".kazi-prompt-"))
+
+      assert leftover == [], "expected no leftover temp prompt files, found: #{inspect(leftover)}"
+    end
+
+    test "a no-usage antigravity run degrades cleanly (no fabricated tokens)", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} =
+               CliAdapter.run("fix it", workspace,
+                 harness: :antigravity,
+                 command: @antigravity_stub,
+                 env: [{"STUB_NO_USAGE", "1"}]
+               )
+
+      assert result.result == "Made the failing unit test pass."
+      refute Map.has_key?(result, :tokens)
+      refute Map.has_key?(result, :cost)
+    end
+
+    test "the temp file is cleaned up even when the harness binary is missing", %{
+      workspace: workspace
+    } do
+      # prompt_via: :file writes the temp file BEFORE dispatch; a missing binary
+      # must still leave no litter (the cleanup runs in an `after`).
+      assert {:error, {:command_not_found, "/no/such/antigravity"}} =
+               CliAdapter.run("do it", workspace,
+                 harness: :antigravity,
+                 command: "/no/such/antigravity"
+               )
+
+      leftover =
+        workspace
+        |> File.ls!()
+        |> Enum.filter(&String.starts_with?(&1, ".kazi-prompt-"))
+
+      assert leftover == []
     end
   end
 

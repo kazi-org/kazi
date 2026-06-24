@@ -189,5 +189,14 @@ defmodule Kazi.HarnessTest do
       assert {:ok, {CliAdapter, adapter_opts}} = Kazi.Harness.resolve(harness: "claude")
       assert %Profile{id: :claude} = adapter_opts[:profile]
     end
+
+    # T14.3 (ADR-0022): `kazi run --harness antigravity` threads the string
+    # "antigravity" into resolve/1; it must map to the :antigravity profile
+    # (prompt_via: :file, the #76 non-TTY workaround) — proving the CLI flag
+    # resolves the new harness.
+    test "the :antigravity string resolves to the antigravity profile (--harness antigravity)" do
+      assert {:ok, {CliAdapter, adapter_opts}} = Kazi.Harness.resolve(harness: "antigravity")
+      assert %Profile{id: :antigravity, prompt_via: :file} = adapter_opts[:profile]
+    end
   end
 end
