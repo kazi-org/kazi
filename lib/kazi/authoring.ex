@@ -103,6 +103,12 @@ defmodule Kazi.Authoring do
     * `:proposal_ref` — the proposal's review handle. Default: a deterministic id
       derived from the idea, so re-proposing the same idea upserts rather than
       duplicating.
+    * `:proposal` — caller-drafts mode (ADR-0023 decision 4): a proposal payload
+      (the `%{"name", "predicates", "rationale"}` map, or its JSON string) the
+      caller already authored. When present, kazi does NOT spawn a harness/model
+      to draft — it parses, applies the deterministic floor, and persists. The
+      same one write path; only the drafter changes (the caller, not an inner
+      model).
   """
   @type opts :: keyword()
 
@@ -137,10 +143,24 @@ defmodule Kazi.Authoring do
   def propose(idea, opts \\ []) when is_binary(idea) and is_list(opts) do
     with {:ok, idea} <- validate_idea(idea),
          {:ok, clarifications} <- run_clarify(idea, opts),
-         {:ok, proposal} <- drive_harness(idea, clarifications, opts),
+         {:ok, proposal} <- obtain_proposal(idea, clarifications, opts),
          {:ok, goal} <- parse_proposal(proposal, idea_to_goal_id(idea)),
          {:ok, draft} <- persist(idea, goal, opts) do
       {:ok, draft}
+    end
+  end
+
+  # The proposal source: caller-drafts vs kazi-drafts (ADR-0023 decision 4). A
+  # caller-supplied `:proposal` (the orchestrator already reasoned) is used
+  # DIRECTLY — no harness/model is spawned; kazi adds the floor + the gate, not a
+  # duplicate LLM call. Otherwise kazi drives the harness to draft from the idea
+  # (the existing path). Both go through the SAME `parse_proposal` → `persist`
+  # tail, so propose stays the one write path.
+  @spec obtain_proposal(idea(), String.t(), opts()) :: {:ok, term()} | {:error, term()}
+  defp obtain_proposal(idea, clarifications, opts) do
+    case Keyword.get(opts, :proposal) do
+      nil -> drive_harness(idea, clarifications, opts)
+      proposal -> {:ok, proposal}
     end
   end
 
@@ -154,6 +174,18 @@ defmodule Kazi.Authoring do
   # draft prompt.
   @spec run_clarify(idea(), opts()) :: {:ok, String.t()}
   defp run_clarify(idea, opts) do
+    # Caller-drafts (ADR-0023): the caller already supplied the predicates, so
+    # there is nothing to clarify and NO inner harness is driven for candidate
+    # questions — the deterministic floor is reported by the caller (the CLI)
+    # against the parsed draft instead.
+    if Keyword.has_key?(opts, :proposal) do
+      {:ok, ""}
+    else
+      do_run_clarify(idea, opts)
+    end
+  end
+
+  defp do_run_clarify(idea, opts) do
     case Keyword.get(opts, :ask) do
       ask when is_function(ask, 1) ->
         questions = clarify_questions(idea, opts)
