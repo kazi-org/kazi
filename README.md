@@ -611,3 +611,9 @@ adapter is an optional augmentation, never the foundation).
 
 Licensed under the [Apache License, Version 2.0](LICENSE). See the [NOTICE](NOTICE)
 file for attribution. Copyright 2026 Sire Run, Inc.
+
+---
+
+<p align="center">
+  Built by the team behind <a href="https://sire.run"><b>Sire</b></a>.
+</p>
