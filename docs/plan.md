@@ -59,6 +59,9 @@ All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work
   plus prose docs via the harness, ADR-0021) -- OPEN; E13 (no longer deferred).
 - **UC-031** (detect dead code / undocumented surface via a surface-coverage
   meta-predicate -- the `A \ I` half of "no dead code", ADR-0021) -- OPEN; E13.
+- **UC-032** (onboard more CLI coding harnesses -- Codex, Google Antigravity,
+  claw-code, and any major harness -- as profiles per a conformance contract,
+  ADR-0016/0022) -- OPEN; E14.
 
 UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
 delivered and verified on `main`.
@@ -198,6 +201,28 @@ small code-side bootstrap (ADR-0013).
 - [ ] T13.5 Surface-coverage meta-predicate: assert every scanned surface element is OWNED by >=1 intended predicate (match by route/path/symbol); an unowned element FAILS (dead/undocumented); supports an explicit allow-list; WARN-don't-auto-delete.  Owner: TBD  Est: 2h  verifies: [UC-031]  deps: [T13.4]  acc: ExUnit -- a fixture with an un-predicated endpoint fails the meta-predicate and names it; allow-listed surface passes; a fully-owned surface passes; ungrouped goals unaffected.
 - [ ] T13.6 Dogfood sirerun via the GENERAL path: import sire's API surface (OpenAPI if present, else the T13.4 scanner) + key prose ADRs (T13.3); run the coverage meta-predicate to find `A \ I` (dead/undocumented) and compare against the manifest's `undocumented_discovered: 68`; export the grouped view (E12). Note the LIVE-predicate escalation (probe a running sire -- needs an instance + test creds) as deferred.  Owner: TBD  Est: 2h  verifies: [UC-031, UC-030]  deps: [T13.1, T13.4, T13.5]  acc: observed evidence that the general importer + coverage meta-predicate reproduce/compare against the one-off analysis for sire; `mix format`/`--warnings-as-errors` clean; the live-predicate follow-on recorded in `docs/devlog.md`.
 
+### E14 -- Onboard more coding harnesses: Codex, Antigravity, claw-code, + any CLI harness (P3, ADR-0016 + ADR-0022)
+
+Acceptance: `kazi run <goal> --harness <id> [--model <m>]` drives Codex CLI,
+Google Antigravity CLI (`agy`), and claw-code (and any major CLI harness) the same
+way it drives `claude`/`opencode` -- added as PROFILE DATA, not new modules
+(ADR-0016), each meeting the conformance contract (ADR-0022): non-interactive
+single-prompt, machine-parseable stdout, correct under a non-TTY subprocess.
+Researched contracts (`docs/devlog.md` 2026-06-23): **Codex** `codex exec
+"<prompt>" --json [--model]` -> JSONL events (fully conformant; parser mirrors
+opencode); **Antigravity** `agy/antigravity --prompt-file <f> --output json --yes`
+(auth GEMINI_API_KEY/ANTIGRAVITY_API_KEY) but bug #76 drops stdout under non-TTY --
+needs a workaround; **claw-code** `claw prompt "<text>"` (env API keys, NO JSON) --
+best-effort/demo-grade only. Each profile is unit-tested (`build_args`), golden-
+transcript-tested (`parse`), and live-smoked behind an excluded `:<id>_live` tag.
+
+- [ ] T14.1 Profile conformance test helper + golden-transcript pattern: a reusable ExUnit helper that, given a profile + a recorded sample transcript, asserts `build_args` renders the expected argv and `parse` extracts the expected additive fields; mirrors the existing `claude`/`opencode` stub-binary seam (`test/support/stub_claude_args.sh`).  Owner: TBD  Est: 1.5h  verifies: [infrastructure]  deps: []  acc: ExUnit -- the helper drives `:claude` + `:opencode` against fixture transcripts and passes; it is the uniform harness every new profile reuses.
+- [ ] T14.2 Codex profile (`:codex`, fully conformant): add `defp codex` to `Kazi.Harness.Registry` (command `codex`, `build_args` -> `exec <prompt> --json` + optional `--model <m>`, `parse` the JSONL event stream -> `:result`/`:cost` additively, reusing the opencode NDJSON approach); register in `fetch/1` + `ids/0`; unit + golden-transcript tests; a live smoke tagged `:codex_live` (excluded).  Owner: TBD  Est: 2h  verifies: [UC-032]  deps: [T14.1]  acc: ExUnit -- `build_args` yields `["exec", prompt, "--json"]` (+`--model` when given); `parse` extracts the final result + token cost from a recorded codex JSONL sample; `kazi run --harness codex` resolves the profile (resolve/1); `mix format`/`--warnings-as-errors` clean.
+- [ ] T14.3 Antigravity profile (`:antigravity`, conformant WITH workaround): add `defp antigravity` (command `antigravity`/`agy`, `build_args` -> `run --prompt-file <tmp> --output json --yes` writing the prompt to a temp file and reading JSON back to dodge the non-TTY stdout bug #76; env GEMINI_API_KEY/ANTIGRAVITY_API_KEY passthrough); register; unit + golden-transcript tests; live smoke `:antigravity_live`. Document the non-TTY workaround + version pin in `docs/lore.md`.  Owner: TBD  Est: 2.5h  verifies: [UC-032]  deps: [T14.1]  acc: ExUnit -- argv uses the prompt-file + `--output json` workaround (NOT bare `-p`); `parse` reads the JSON result; the non-TTY landmine is recorded in `docs/lore.md`; a maintainer live-smoke converges a fixture (or an honest skip with the cause, like the opencode smoke).
+- [ ] T14.4 claw-code profile (`:claw`, BEST-EFFORT/demo-grade): add `defp claw` (command `claw`, `build_args` -> `prompt <text>`, `parse` = best-effort raw stdout -> `:result`, NO cost/structured extraction since claw emits no JSON); register; unit test + a raw-output golden transcript; mark demo-grade in the profile doc + README.  Owner: TBD  Est: 1.5h  verifies: [UC-032]  deps: [T14.1]  acc: ExUnit -- `build_args` yields `["prompt", text]`; `parse` returns the raw stdout as `:result` with no invented cost; the profile + README label it best-effort/demo-grade (no structured output, per ADR-0022).
+- [ ] T14.5 CLI + coherence + docs: confirm `--harness codex|antigravity|claw` works end to end (resolve precedence, the unknown-harness error lists the new ids); update the README harness section AND `site/src/canonical.mjs` HARNESSES in the SAME change so the T9.9 drift-check stays green; document each harness's auth/setup.  Owner: TBD  Est: 1.5h  verifies: [UC-032, infrastructure]  deps: [T14.2, T14.3, T14.4]  acc: `kazi run --harness <new> --help`/resolve works; the coherence check passes with the expanded harness list; README documents the per-harness auth (OPENAI_API_KEY / GEMINI_API_KEY / claw env keys) and conformance tier.
+- [ ] T14.6 "Add your own harness" contributor recipe: a short doc (README or `docs/`) that walks the ADR-0022 recipe -- author a `defp <id>` profile (build_args + additive parse), register it, add the three tests (build_args unit, golden transcript, `:<id>_live` smoke), update the canonical harness list -- proven by the fact that T14.2-T14.4 each followed it.  Owner: TBD  Est: 1h  verifies: [UC-032]  deps: [T14.5]  acc: a new contributor can add a CLI harness as profile DATA by following the recipe; it references the conformance contract (ADR-0022) and the test helper (T14.1); no architecture change required.
+
 ### Waves
 
 E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; E9 (website)
@@ -212,6 +237,8 @@ open feature work.**
 - **Wave E13-1 (import intent, ADR-0021):** T13.1 (OpenAPI), T13.2 (gherkin), T13.3 (prose via harness) -- emit grouped predicates (depends on E12 model).
 - **Wave E13-2 (dead code):** T13.4 (surface scanner) -> T13.5 (coverage meta-predicate).
 - **Wave E13-3 (dogfood):** T13.6 (sirerun via the general path; note the live-predicate escalation).
+- **Wave E14-1 (harness onboarding):** T14.1 (conformance test helper) -> then T14.2 (Codex), T14.3 (Antigravity), T14.4 (claw-code) in PARALLEL (independent profiles).
+- **Wave E14-2 (wire + document):** T14.5 (CLI + coherence + docs) -> T14.6 (contributor recipe).
 
 - **Wave E11-1 (pure core):** T11.1 (schema + `fold_answers`) -> T11.2 (deterministic gap floor). Pure, fully unit-tested, no I/O.
 - **Wave E11-2 (seam + wiring):** T11.3 (harness-drafted candidates on the stub seam), T11.4 (two-phase `propose/2`), T11.5 (inline rationale) -- after the core.
@@ -263,6 +290,22 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (add E14: onboard Codex / Antigravity / claw-code harnesses)
+- **Added E14 (T14.1-T14.6)** -- onboard Codex CLI, Google Antigravity CLI (`agy`),
+  and claw-code as harness PROFILES (ADR-0016 already makes a harness data, not a
+  module), each meeting the conformance contract of the new ADR-0022. A reusable
+  conformance test helper (T14.1) + golden transcripts + per-harness `:<id>_live`
+  smokes; Codex first (fully conformant, JSONL like opencode), Antigravity with the
+  non-TTY-stdout workaround, claw-code best-effort (no JSON). T14.5 keeps the
+  README + `site/src/canonical.mjs` harness list coherent (T9.9 drift-check); T14.6
+  is the "add your own harness" recipe.
+- **ADR created:** `docs/adr/0022-harness-onboarding-conformance.md` -- the profile
+  conformance contract (non-interactive, structured stdout, CORRECT under a non-TTY
+  subprocess), the add-a-harness recipe, and tiered support (Codex fully / Antigravity
+  with workaround / claw-code best-effort). Extends ADR-0016. Research findings (the
+  three tools' CLI contracts + the Antigravity #76 non-TTY bug) in `docs/devlog.md`.
+- **Use case added:** UC-032.
 
 ### 2026-06-23 -- Change Summary (correct the import direction: ADR-0021 + E13)
 - **Corrected an ADR-0015 contradiction.** ADR-0020's draft proposed a bespoke
@@ -409,9 +452,9 @@ load-bearing for versioning -- type every commit correctly.
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0021` (index at `docs/adr/README.md`); the release
+- Decisions: `docs/adr/0001`..`0022` (index at `docs/adr/README.md`); the release
   pipeline is ADR-0014 (distribution) + ADR-0017 (automation); the website is
-  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021.
+  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021; harness onboarding is ADR-0022.
 - Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
 - Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),

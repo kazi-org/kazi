@@ -28,3 +28,4 @@ decision, write a new ADR that supersedes the old one (and update
 | [0019](0019-interactive-clarify-phase-for-propose.md) | Interactive clarify phase for `kazi propose` (hybrid question-gen, CLI-first, inline + `--adr` rationale) | Accepted |
 | [0020](0020-hierarchical-predicate-grouping.md) | Hierarchical predicate grouping via a declared group taxonomy (referenced by id, validated at load; derived per-group budgets; Obsidian/Mermaid export) | Accepted |
 | [0021](0021-intended-vs-actual-reconciliation.md) | Intended-vs-actual reconciliation: import intent from standard specs (OpenAPI/gherkin) + prose via the harness; detect dead code via a surface-coverage meta-predicate | Accepted |
+| [0022](0022-harness-onboarding-conformance.md) | Onboarding any CLI coding harness: the profile conformance contract (non-TTY subprocess-safe, structured output) + the add-a-harness recipe; Codex/Antigravity/claw-code tiers | Accepted |

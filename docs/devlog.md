@@ -4,6 +4,33 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-23 — harness CLI contracts researched (motivates E14 / ADR-0022)
+
+Researched the CLI contracts of three coding harnesses to onboard as profiles
+(ADR-0016 makes a harness data, not a module). The load-bearing criterion for kazi:
+it drives a harness as a NON-INTERACTIVE SUBPROCESS (no TTY) and parses stdout.
+
+- **Codex** — `codex exec "<prompt>" --json [--model <m>]` (or `codex e`) emits a
+  newline-delimited JSON (JSONL) event stream (`thread.started`, `turn.completed`,
+  `item.*`, `error`); `--output-schema` for a structured final; auth `OPENAI_API_KEY`
+  / `codex login`. FULLY conformant — the parser mirrors the opencode NDJSON path.
+  Priority addition. (developers.openai.com/codex/exec; openai/codex docs/exec.md)
+- **Antigravity** (`agy` / `antigravity`) — non-interactive via `--prompt` / `-p` /
+  `--prompt-file`; structured via `--output json`; `--yes` auto-approves; auth
+  `GEMINI_API_KEY` / `ANTIGRAVITY_API_KEY`. LANDMINE: `agy -p` SILENTLY DROPS stdout
+  under a non-TTY (pipe/subprocess/redirect) — issue google-antigravity/
+  antigravity-cli#76 — exactly kazi's mode. Workaround: `--prompt-file` +
+  `--output json` written to a file we read back; may need version pinning.
+- **claw-code** — `claw prompt "<text>"`, env API keys (ANTHROPIC_API_KEY/
+  OPENAI_API_KEY), NO documented JSON output, no model flag; the repo calls itself
+  "an agent-managed museum exhibit rather than a production tool." Fails the
+  structured-output bar → best-effort/demo-grade profile only (raw-stdout parse, no
+  cost extraction). (github.com/ultraworkers/claw-code)
+
+Decision recorded in ADR-0022 (conformance contract + onboarding recipe + tiered
+support); built as E14. The Antigravity non-TTY landmine should also go to
+docs/lore.md when T14.3 lands.
+
 ## 2026-06-23 — sirerun dogfood: capability-manifest adjudication (motivates E12)
 
 Dogfooded kazi's reconciliation thesis against sire's `docs/capabilities.json`
