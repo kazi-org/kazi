@@ -1,7 +1,9 @@
 # ADR 0011: Slice-3 operator surfaces (LiveView dashboard + Telegram bridge)
 
 ## Status
-Accepted
+Accepted (the Telegram-bridge portion is SUPERSEDED by ADR-0029 -- the bridge is
+dropped because the orchestrating agent is the human's mobile interface; the
+LiveView dashboard and the `Kazi.Authoring` write path are unaffected)
 
 ## Date
 2026-06-22
