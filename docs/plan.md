@@ -96,6 +96,9 @@ Open work:
 - **Pre-publish docs** (no new UC -- documents UC-033..UC-037) -- E22: the launch
   documentation pass; README + `docs/` + website refreshed to the FINAL shipped
   product, gated on E15-E21, with a no-vaporware accuracy audit (ADR-0025/0018).
+- **UC-038** (kazi computes + executes a dependency-aware, pipelined, objectively-
+  gated wave schedule from declared predicate-group `needs` edges + blast-radius
+  partitioning -- codifies `/plan`'s `deps:` + `/apply`'s Waves, ADR-0028) -- E23.
 
 ## Checkable Work Breakdown
 
@@ -387,6 +390,30 @@ deployed live; nothing documents an unshipped feature.
 - [ ] T22.8 Launch checklist + publish (the done gate): a final checklist (every UC documented, all "coming" flipped, coherence + audit green, deployed live, OG renders, README renders on GitHub) and the publish -- merge -> deploy -> verify live at https://kazi.sire.run + the README on GitHub.  Owner: TBD  Est: 1h  verifies: [UC-035]  deps: [T22.6, T22.7]  acc: the checklist is fully green and recorded; the site is live with the final docs; the README renders correctly on GitHub; reported honestly (any skipped item flagged, not hidden).
 - [ ] T22.9 Launch announcement content (adoption push, optional): a short launch blog/announcement + social copy (HN/X/Reddit) reflecting the final feature set and the agent on-ramp, for the star/adoption push.  Owner: TBD  Est: 1.5h  delivers: [a launch announcement draft + social copy]  deps: [T22.8]  acc: a drafted announcement leads with the agent on-ramp + native parallelism + objective done; every claim matches the shipped product; ready for the operator to post.
 
+### E23 -- Dependency-aware partitioning: predicate-graph waves (P2, ADR-0028)
+
+The fourth axis that lets kazi COMPUTE the operator's `/plan` `deps:` + `/apply`
+Waves instead of the operator hand-authoring them. kazi already has objective done
+(ADR-0002), spatial parallelism (blast-radius partitioning, ADR-0006), and the
+native scheduler (ADR-0027) -- but NO semantic ordering: it cannot sequence "group B
+after group A" when B logically depends on A's output. E23 adds a dependency DAG over
+predicate groups (extends the ADR-0020 `[[group]]` taxonomy with `needs` edges) and
+makes the scheduler execute it TOPOLOGICALLY -- blast-radius parallelism inside each
+frontier, objective-convergence as the gate, pipelined (a group runs the moment ITS
+deps converge, no global barrier). Builds on E12 (taxonomy) + E21 (scheduler); no new
+loop. The irreducible input is the authored `needs` edges (semantic precedence is
+human/LLM judgment; kazi computes everything downstream).
+
+- [ ] T23.1 `needs` dependency edges in the group taxonomy (loader): extend the `[[group]]` entry (ADR-0020) with an optional `needs = ["group-id", ...]` "must-converge-before" edge set, DISTINCT from `parent` (budget rollup only). Validate at load: every `needs` id exists, no self-edge, no cycle over `needs`; `needs` absent = fully parallel (ADR-0027 default).  Owner: TBD  Est: 1.5h  verifies: [UC-038]  deps: [T12.1, T12.2]  acc: ExUnit -- a goal-file with `needs` loads a validated edge set; an unknown id / self-edge / cycle is a load error; a goal with no `needs` is unchanged (backward compatible).
+- [ ] T23.2 Dependency DAG + ready-set computation (pure): from `needs` edges + each group's convergence state, compute the READY SET (groups whose every `needs` dep has OBJECTIVELY converged) and identify blocked/unsatisfiable sub-DAGs. Pure, deterministic, no I/O.  Owner: TBD  Est: 1.5h  verifies: [UC-038]  deps: [T23.1]  acc: ExUnit -- ready set is correct as convergence state advances; a blocked dep removes its dependents from ready; topological order is respected; deterministic.
+- [ ] T23.3 Topological + spatial scheduling, pipelined (extends ADR-0027 coordinator): the scheduler dispatches only ELIGIBLE groups (the ready set), partitions that set by blast radius (T21.2), runs partitions concurrently, and RE-EVALUATES the ready set as each group converges -- newly-eligible groups dispatch immediately (no global barrier).  Owner: TBD  Est: 2.5h  verifies: [UC-038]  deps: [T23.2, T21.1, T21.2]  acc: ExUnit + sim -- a DAG with `A -> {B,C}` runs B and C only after A converges, B and C concurrently if disjoint; a downstream group starts the instant its deps converge, not when a sibling does; single-goal/no-`needs` behaves like ADR-0027.
+- [ ] T23.4 Objective re-gating on regression: a converged dep that later REGRESSES (the regression guard fires) re-gates its dependents -- they return to not-ready and re-converge; the DAG is re-evaluated against observed state each cycle.  Owner: TBD  Est: 1.5h  verifies: [UC-038]  deps: [T23.3]  acc: ExUnit -- forcing a converged dep back to failing pauses/re-runs its dependents; once the dep re-converges, dependents resume; no dependent merges against a regressed dep.
+- [ ] T23.5 Blocked-dependency escalation: if a dep group goes `stuck`/`over_budget`, its dependents can never become ready -- escalate the affected sub-DAG and NAME the blocking dep in the collective report (don't hang silently).  Owner: TBD  Est: 1h  verifies: [UC-038]  deps: [T23.3]  acc: ExUnit -- a stuck dep yields a collective verdict that names it and the blocked dependents; the scheduler does not hang; siblings outside the sub-DAG still finish.
+- [ ] T23.6 CLI + `--json` schedule reporting + dry-run: the collective result (T21.8) reports per-group readiness/convergence + the topological order taken + any blocked sub-DAG; add a `kazi run --explain` (or `--dry-run`) that PRINTS the computed wave/partition schedule without executing, so over-constraint is visible.  Owner: TBD  Est: 1.5h  verifies: [UC-038, UC-033]  deps: [T23.3, T21.8]  acc: ExUnit -- `--json` includes the schedule + per-group state; `--explain` prints the frontier order + the parallelism within each frontier without dispatching; non-TTY safe.
+- [ ] T23.7 Dashboard: live dependency-DAG view -- which groups are running / ready / blocked / converged, the edges, and per-group convergence; the live "wave" view.  Owner: TBD  Est: 1.5h  verifies: [UC-038]  deps: [T23.3]  acc: the dashboard renders the DAG with live per-group state during a real run; exercised with agent-browser; read-only (ADR-0011).
+- [ ] T23.8 Docs + positioning: document "predicate-graph waves" as kazi's codification of `/plan`'s `deps:` + `/apply`'s Waves -- authored `needs` edges -> computed, pipelined, objectively-gated schedule; honest about the authored-deps burden + that kazi does not DERIVE semantic order. Tie to E12/E21/E22 + ADR-0028.  Owner: TBD  Est: 1h  verifies: [UC-038, UC-035]  delivers: [docs explaining predicate-graph waves vs /apply waves]  deps: [T23.6]  acc: a reader sees how to express deps as `needs` and what kazi computes from them; references only real commands/fields; coherent with ADR-0028.
+- [ ] T23.9 LIVE dogfood: encode a real multi-group goal with `needs` (e.g. a result-contract group before a streaming group) and show kazi computing + executing the pipelined topological schedule to collective convergence; record evidence in `docs/devlog.md` (order taken, intra-frontier parallelism, a blocked-dep escalation).  Owner: TBD  Est: 2h  verifies: [UC-038]  deps: [T23.6]  acc: observed evidence that kazi sequenced dependent groups correctly AND parallelized disjoint ones, gated objectively; honest if it falls short.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -420,6 +447,10 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E21-3 (surface + resilience):** T21.8 (CLI + `--json` collective), T21.9 (dashboard), T21.10 (supervision/restart).
 - **Wave E21-4 (position + prove):** T21.11 (docs lead with native parallelism) -> T21.12 (live NATS-free multi-partition dogfood).
 - **Wave E22 (pre-publish docs -- LAST, gated on E15-E21):** T22.1 (coverage audit) -> T22.2 (README), T22.3 (concept), T22.4 (docs index) in parallel -> T22.5 (website) -> T22.6 (docs presentation) -> T22.7 (accuracy audit) -> T22.8 (launch+publish) -> T22.9 (announcement). This wave runs only after every feature epic has landed.
+- **Wave E23-1 (dep model):** T23.1 (`needs` edges in the taxonomy) -> T23.2 (DAG + ready-set, pure). Needs E12 (T12.1/T12.2, done).
+- **Wave E23-2 (scheduling):** T23.3 (topological + spatial, pipelined) -> T23.4 (regression re-gating), T23.5 (blocked-dep escalation). Needs E21 (T21.1/T21.2).
+- **Wave E23-3 (surface):** T23.6 (CLI/`--json`/`--explain`), T23.7 (DAG dashboard).
+- **Wave E23-4 (position + prove):** T23.8 (docs/positioning) -> T23.9 (live dep-DAG dogfood).
 
 ## Risk Register
 
@@ -449,6 +480,10 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E22-1 | Publishing docs while a feature epic (E15-E21) is incomplete -> the docs advertise vaporware. | High | Med | E22 is GATED on all feature epics (T22.1 deps list them); T22.7 is a no-vaporware audit (every command verified against `kazi help --json`); T22.8 launch checklist blocks publish until green. |
 | R-E22-2 | Docs drift from the CLI between writing and publishing (the surface is large). | Med | Med | Coherence guards: README<->site (T9.9), skill/`AGENTS.md`<->CLI (T16.4), and T22.7's full audit generated from `kazi help --json` (the source of truth), not hand-maintained lists. |
 | R-E22-3 | E22 duplicates/conflicts with E17 (both touch README/site). | Low | Med | E22 BUILDS ON E17 (T22.2 deps T17.1, T22.5 builds on T17.2/T17.5) -- it adds full coverage + the audit + the launch gate, it does not redo the IA reframe. |
+| R-E23-1 | `needs` edges are AUTHORED (kazi cannot derive semantic order); the burden + the chance of wrong/missing edges fall on the operator. | Med | Med | `needs` is OPTIONAL (absent = full parallel); the edges are the irreducible semantic input (ADR-0028); `--explain` (T23.6) surfaces the resulting order so wrong/over-constrained deps are visible before a run. |
+| R-E23-2 | Over-declaring `needs` re-serializes and loses kazi's parallelism advantage. | Med | Med | Declare only true precedence; T23.6 `--explain` + T23.7 dashboard show realized parallelism; spatial partitioning still parallelizes within each frontier. |
+| R-E23-3 | A cycle or a stuck dep makes a sub-DAG unsatisfiable / hangs dependents. | Med | Low | Cycles rejected at load (T23.1, like ADR-0020's parent-cycle guard); a stuck/over-budget dep escalates and is NAMED (T23.5), never a silent hang. |
+| R-E23-4 | E23 depends on E21 (the scheduler), which is not built yet. | High | Low | Sequencing is explicit: T23.3+ deps T21.1/T21.2; E23-1 (the pure model T23.1/T23.2) can proceed against E12 alone, ahead of the scheduler. |
 
 ## Operating Procedure
 
@@ -474,6 +509,28 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E23: dependency-aware partitioning / predicate-graph waves, P2 + ADR-0028)
+- **Created ADR-0028** (dependency-aware partitioning, "predicate-graph waves"): the
+  fourth axis that lets kazi COMPUTE the operator's `/plan` `deps:` + `/apply` Waves
+  instead of hand-authoring them. kazi has objective done (ADR-0002) + spatial
+  parallelism (ADR-0006) + the native scheduler (ADR-0027) but NO semantic ordering;
+  ADR-0028 adds a dependency DAG over predicate groups (extend the ADR-0020
+  `[[group]]` taxonomy with `needs` edges) executed topologically -- blast-radius
+  parallelism inside each frontier, objective-convergence gating, pipelined (no
+  barrier). Builds on E12 + E21; no new loop. Authored `needs` edges are the
+  irreducible semantic input (kazi does not derive precedence).
+- **Added E23** (P2, ADR-0028, UC-038): T23.1 `needs` edges + validation, T23.2 DAG
+  + ready-set (pure), T23.3 topological+spatial pipelined scheduling, T23.4
+  regression re-gating, T23.5 blocked-dep escalation, T23.6 CLI/`--json`/`--explain`,
+  T23.7 DAG dashboard, T23.8 docs/positioning, T23.9 live dep-DAG dogfood. Waves
+  E23-1..4; risks R-E23-1..4 (authored-deps burden, over-serialization, cycles/stuck,
+  E21 dependency).
+- **UC-038** added. Rationale: the comparison of kazi to the operator's `/plan` +
+  `/apply` waves surfaced that kazi's scheduler is SPATIAL only (no semantic order);
+  E23 closes that, turning "kazi hardens my waves" into "kazi IS my waves." E23-1 (the
+  pure model) can start ahead of E21; E23-2+ needs the E21 scheduler.
+- ADR created: `docs/adr/0028-dependency-aware-partitioning-predicate-graph-waves.md`.
 
 ### 2026-06-24 -- Change Summary (E22: pre-publish documentation refresh, P1, gated on E15-E21)
 - Added **E22** (P1, content + engineering; ADR-0025/0018, no new ADR): the LAUNCH
