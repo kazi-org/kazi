@@ -1,0 +1,15 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 4,
+  "result": "Dispatch 1 (with prefix): made progress, wrote the cacheable prefix.",
+  "session_id": "bench-C-prefix-0001",
+  "total_cost_usd": 0.1600,
+  "usage": {
+    "input_tokens": 4300,
+    "output_tokens": 400,
+    "cache_creation_input_tokens": 96000,
+    "cache_read_input_tokens": 0
+  }
+}

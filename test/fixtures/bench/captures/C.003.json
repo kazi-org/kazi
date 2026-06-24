@@ -1,0 +1,15 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 3,
+  "result": "Dispatch 3 (with prefix): converged, prefix cache hit again.",
+  "session_id": "bench-C-prefix-0003",
+  "total_cost_usd": 0.0380,
+  "usage": {
+    "input_tokens": 1100,
+    "output_tokens": 360,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 95000
+  }
+}
