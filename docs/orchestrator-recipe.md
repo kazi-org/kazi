@@ -45,7 +45,7 @@ output, the propose -> approve -> run state machine) and stays a pure tool.
 ## 2. The agent-driven loop
 
 ```
-  propose --json  ->  (review)  ->  approve --json  ->  run --harness <cheap> --json [--stream]
+  plan --json  ->  (review)  ->  approve --json  ->  apply --harness <cheap> --json [--stream]
                                                               |
                                                   parse result, branch on next_action
                                                               |
@@ -56,9 +56,9 @@ output, the propose -> approve -> run state machine) and stays a pure tool.
                                           predicates       re-run           inspect, fix
 ```
 
-### Step 1 -- propose predicates (`kazi propose --json`)
+### Step 1 -- propose predicates (`kazi plan --json`)
 
-`propose` is the SINGLE sanctioned predicate-authoring path for an agent
+`plan` is the SINGLE sanctioned predicate-authoring path for an agent
 (ADR-0023). It runs the deterministic clarify floor (a live-verification target +
 scope) and persists a reviewable proposal. It has TWO drive modes; both go
 through the same authoring path and the same floor.
@@ -70,7 +70,7 @@ re-draft). Supply the payload inline with `--predicates`, or on stdin under
 `--json`:
 
 ```sh
-kazi propose --json --predicates '{
+kazi plan --json --predicates '{
   "name": "ship a /healthz endpoint",
   "predicates": [
     {"id": "code", "provider": "test_runner", "description": "the route exists and tests pass"},
@@ -80,7 +80,7 @@ kazi propose --json --predicates '{
 }'
 
 # or pipe it on stdin (under --json):
-echo "$PAYLOAD" | kazi propose --json
+echo "$PAYLOAD" | kazi plan --json
 ```
 
 The payload is a `{"name", "predicates": [...], "rationale"}` object (a bare JSON
@@ -91,7 +91,7 @@ idea is OPTIONAL in caller-drafts mode -- the predicates carry the intent.
 kazi only a prose idea; kazi spawns a harness to draft the predicates:
 
 ```sh
-kazi propose "a /healthz endpoint that returns 200" --json --yes
+kazi plan "a /healthz endpoint that returns 200" --json --yes
 ```
 
 Under `--json` kazi is NON-INTERACTIVE: it never prompts or blocks on stdin. If
@@ -112,7 +112,7 @@ an ADR-lite rationale doc).
 ### Step 2 -- review and approve (`kazi approve --json`)
 
 Read the proposed `predicates` and `clarify` gaps. If a gap matters (e.g. no
-live-verification predicate), re-`propose` with the gap closed. When satisfied,
+live-verification predicate), re-`plan` with the gap closed. When satisfied,
 approve the `proposal_ref` from Step 1:
 
 ```sh
@@ -120,23 +120,23 @@ kazi approve <proposal-ref> --json
 ```
 
 `approve --json` emits `{schema_version, proposal_ref, status: "approved",
-goal_id}`. On success the goal is now runnable by `kazi run`. (`kazi reject
+goal_id}`. On success the goal is now runnable by `kazi apply`. (`kazi reject
 <proposal-ref> --json` declines a proposal, kept for audit.)
 
 Browse the queue any time with `kazi list-proposed --json` (optionally
 `--status proposed|approved|rejected`); it emits `{schema_version, status_filter,
 count, proposals: [...]}`.
 
-> Note: `approve` returns the goal id; `kazi run` takes a GOAL-FILE path, not a
-> goal id. `propose`/`approve` persist the approved goal into a loadable
+> Note: `approve` returns the goal id; `kazi apply` takes a GOAL-FILE path, not a
+> goal id. `plan`/`approve` persist the approved goal into a loadable
 > goal-file -- run that file's path in Step 3.
 
-### Step 3 -- converge (`kazi run --harness <cheap> --json [--stream]`)
+### Step 3 -- converge (`kazi apply --harness <cheap> --json [--stream]`)
 
 Run the approved goal with the CHEAP harness (the two-tier split):
 
 ```sh
-kazi run <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
+kazi apply <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
 ```
 
 `run --json` emits ONE terminal result object on termination (the schema below).
@@ -149,7 +149,7 @@ run-result object (the one line with NO `event` field). Read lines until you see
 the object without an `event`; that is the terminal result you branch on:
 
 ```sh
-kazi run <goal-file> --workspace <path> --harness opencode --json --stream
+kazi apply <goal-file> --workspace <path> --harness opencode --json --stream
 ```
 
 ### Step 4 -- parse the result and branch on `next_action`
@@ -194,7 +194,7 @@ object you parse and refuse (or branch) if it is not the version you were writte
 against:
 
 ```sh
-result=$(kazi run "$GOAL" --workspace "$WS" --harness opencode --json)
+result=$(kazi apply "$GOAL" --workspace "$WS" --harness opencode --json)
 ver=$(printf '%s' "$result" | jq -r .schema_version)
 [ "$ver" = "1" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
 next=$(printf '%s' "$result" | jq -r .next_action)
@@ -202,7 +202,7 @@ next=$(printf '%s' "$result" | jq -r .next_action)
 
 The two committed contracts:
 
-- **`docs/schemas/run-result.md`** -- the `kazi run --json` terminal result
+- **`docs/schemas/run-result.md`** -- the `kazi apply --json` terminal result
   (`schema_version`, `goal_id`, `status`, `predicates` [the predicate vector of
   `{id, verdict}`], `iterations`, `budget_spent`, `next_action`, `reason`,
   `release_ref`; an `error` field when `status` is `error`). Also documents the
@@ -246,7 +246,7 @@ trusting a copy of this recipe (ADR-0024):
   from kazi's own command table, so it can never drift from what the parser
   accepts.
 - **`kazi schema [<command>]`** -- the versioned result schema(s) for `--json`
-  output, as data (field rows + an example). With a command (`run` or `status`),
+  output, as data (field rows + an example). With a command (`apply` or `status`),
   that command's schema; with none, all of them. JSON-only by design; an unknown
   command is a JSON error with a non-zero exit.
 
@@ -265,7 +265,7 @@ MCP-speaking harness there is a richer path coming: a **`kazi mcp` server**
 (E16, ADR-0024) that wraps these same commands -- propose / approve / run /
 status -- as self-describing MCP tools (tool descriptions + input/output schemas
 ARE the teaching). An MCP client lists kazi's tools and drives the
-propose -> approve -> run loop natively, with no shelling or JSON parsing.
+plan -> approve -> apply loop natively, with no shelling or JSON parsing.
 
 It is sequenced AFTER this JSON CLI because it consumes the same proven contract.
 Until then -- and for any non-MCP agent -- this recipe plus the two schemas is the

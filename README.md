@@ -167,11 +167,11 @@ Two ways to invoke kazi (same behavior):
 ```sh
 # Mix task — recommended. Boots the full app and persists every iteration to a
 # local SQLite read-model (created + migrated automatically on first run).
-mix kazi.run <goal-file> --workspace <path-to-your-project>
+mix kazi.apply <goal-file> --workspace <path-to-your-project>
 
 # Or build a standalone binary:
 mix escript.build          # produces ./kazi
-./kazi run <goal-file> --workspace <path-to-your-project>
+./kazi apply <goal-file> --workspace <path-to-your-project>
 ./kazi --help
 ```
 
@@ -184,7 +184,7 @@ plumbing ([ADR-0016](docs/adr/0016-generic-harness-profiles.md)). Pick another
 harness per-run with a flag:
 
 ```sh
-kazi run <goal-file> --workspace <path> \
+kazi apply <goal-file> --workspace <path> \
   --harness opencode --model local-ollama/qwen3.6:35b-a3b
 ```
 
@@ -277,12 +277,12 @@ MIX_ENV=prod mix release --overwrite     # builds _build/prod/rel/kazi
 # otherwise) — so the release composes in scripts and CI like the escript:
 _build/prod/rel/kazi/bin/kazi eval 'Kazi.Release.cli(["--help"])'
 _build/prod/rel/kazi/bin/kazi eval \
-  'Kazi.Release.cli(["run", "<goal-file>", "--workspace", "<path>"])'
+  'Kazi.Release.cli(["apply", "<goal-file>", "--workspace", "<path>"])'
 _build/prod/rel/kazi/bin/kazi eval 'Kazi.Release.cli(["list-proposed"])'
 ```
 
 `Kazi.Release.cli/1` dispatches to the same `Kazi.CLI` core as the escript and
-`mix kazi.run`, so every subcommand (`run` / `propose` / `list-proposed` /
+`mix kazi.apply`, so every subcommand (`apply` / `plan` / `list-proposed` /
 `approve` / `reject` / `--help`) behaves identically.
 
 ### Build a single-file native binary (Burrito)
@@ -307,7 +307,7 @@ BURRITO_TARGET=macos_aarch64 MIX_ENV=prod mix release --overwrite
 # The wrapped binary takes the CLI args directly — no `eval`. It reads them via
 # Burrito's argv and dispatches through the same Kazi.CLI core:
 ./burrito_out/kazi_macos_aarch64 --help
-./burrito_out/kazi_macos_aarch64 run <goal-file> --workspace <path>
+./burrito_out/kazi_macos_aarch64 apply <goal-file> --workspace <path>
 ./burrito_out/kazi_macos_aarch64 list-proposed
 ```
 
@@ -335,7 +335,7 @@ until you approve**, and you can trim or edit what it drafted:
 # 1. Describe the app you want. In a terminal, kazi asks a few sharp clarifying
 #    questions FIRST (so "done" is precise — especially the live-verification
 #    target), then drafts the acceptance predicates and an inline rationale:
-kazi propose "create a URL-shortener web service" --workspace ./shortener
+kazi plan "create a URL-shortener web service" --workspace ./shortener
 #
 #   A few questions to make the goal precise (press Enter for the default):
 #   What is the live-verification target for this goal?
@@ -359,7 +359,7 @@ kazi list-proposed
 # 3. Approve the goal you want kazi to pursue:
 kazi approve prop-url-shortener-3f9c1a2b
 #   APPROVED   proposal=prop-url-shortener-3f9c1a2b  goal=url-shortener
-#   The goal is now runnable: kazi run <goal-file> --workspace <path>
+#   The goal is now runnable: kazi apply <goal-file> --workspace <path>
 ```
 
 The clarify phase is a HYBRID (ADR-0019): a deterministic floor of gap-checks kazi
@@ -369,18 +369,18 @@ any non-TTY pipe) skips the questions and drafts best-effort; `--strict` refuses
 underspecified idea instead of guessing; `--adr` also writes an ADR-lite rationale
 doc under `docs/adr/`.
 
-`propose` / `approve` are the natural-language **front door** (an agent drafts,
+`plan` / `approve` are the natural-language **front door** (an agent drafts,
 a human approves — the only write path the dashboard shares too).
 The higher-level the idea, the more predicates kazi drafts — and the more you'll
 want to curate them before approving, because every predicate becomes a wall kazi
 won't declare "done" until it's objectively true. Approving blesses the goal; to
-drive it, hand `kazi run` a goal-file (next section) — the same predicates, captured
+drive it, hand `kazi apply` a goal-file (next section) — the same predicates, captured
 as a file you can version and re-run.
 
 > More "build an app for X" ideas kazi can draft predicates for:
-> - `kazi propose "create a paste-bin app with a create-paste API and a raw view"`
-> - `kazi propose "build a webhook receiver that validates signatures and stores events"`
-> - `kazi propose "create a REST API for a to-do list with the usual CRUD endpoints"`
+> - `kazi plan "create a paste-bin app with a create-paste API and a raw view"`
+> - `kazi plan "build a webhook receiver that validates signatures and stores events"`
+> - `kazi plan "create a REST API for a to-do list with the usual CRUD endpoints"`
 
 ---
 
@@ -426,7 +426,7 @@ body_match = "exact"      # exact, not substring — "ok" is a substring of "not
 Run it:
 
 ```sh
-mix kazi.run my-goal.toml --workspace ./my-service
+mix kazi.apply my-goal.toml --workspace ./my-service
 ```
 
 kazi prints each iteration and a final verdict, and exits `0` only on convergence:
@@ -503,7 +503,7 @@ It detects the stack from marker files (`go.mod` → `go test ./...`, `mix.exs` 
 Detection is deterministic: the same repo always produces the same goal-file.
 Pass `--enrich` (off by default) to have your coding agent propose live
 predicates from discovered endpoints; the deterministic detection always stands.
-Review the goal-file, fill in the live TODO, then `kazi run` it.
+Review the goal-file, fill in the live TODO, then `kazi apply` it.
 
 ### Worked example
 
@@ -551,19 +551,19 @@ pins this output, so the example never drifts from what the tool produces.
 
 ```
 kazi init <repo-dir> [--out <file>] [--enrich]    # adopt a repo -> a goal-file
-kazi propose "<idea>" [--workspace <path>]   # draft predicates from plain English
+kazi plan "<idea>" [--workspace <path>]   # draft predicates from plain English
 kazi list-proposed [--status <state>]        # review drafts (proposed/approved/rejected)
 kazi approve <proposal-ref>                  # bless a drafted goal
 kazi reject  <proposal-ref>                  # discard a draft
-kazi run <goal-file> --workspace <path>      # drive a goal to convergence
+kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
         [--env <name>]                       #   target a deploy environment (staging/prod)
         [--standing]                         #   run continuously (re-converge on drift)
 kazi --help
 ```
 
-`kazi run` exits `0` on convergence, non-zero otherwise — so it composes in CI/scripts.
+`kazi apply` exits `0` on convergence, non-zero otherwise — so it composes in CI/scripts.
 
-> **Read-model note.** The Mix task (`mix kazi.run`) creates and migrates the SQLite
+> **Read-model note.** The Mix task (`mix kazi.apply`) creates and migrates the SQLite
 > read-model on startup, so every iteration is persisted. The standalone escript
 > can't bundle the native SQLite NIF, so it runs without persistence (it still
 > converges; it just won't record history).

@@ -29,7 +29,7 @@ those for the contract; read THIS for how a pool session applies it per task.
 The single most important thing a pool session must internalize:
 
 > kazi's loop RE-DISPATCHES an insufficient first attempt automatically. The
-> session does NOT merge on the first `kazi run`. It merges ONLY when kazi
+> session does NOT merge on the first `kazi apply`. It merges ONLY when kazi
 > reports `status: "converged"` (`next_action: "done"`, exit `0`).
 
 A deliberately-insufficient first dispatch (the cheap implementer leaves a test
@@ -53,13 +53,13 @@ asserted done is replaced by the controller's evidence-backed `converged`.
   acc: line  ->  caller-drafts predicates  (T20.1 bridge -- docs/acc-predicates-bridge.md)
         |
         v
-  kazi propose --json --predicates <payload>   (floor + persist, NO model)
+  kazi plan --json --predicates <payload>   (floor + persist, NO model)
         |  review the clarify gaps; re-propose if a gap matters
         v
   kazi approve <proposal-ref> --json            (proposed -> approved)
         |
         v
-  kazi run <goal-file> --workspace <ws> --harness <h> --json [--stream]
+  kazi apply <goal-file> --workspace <ws> --harness <h> --json [--stream]
         |   kazi's OWN loop converges (re-dispatch on every insufficient pass)
         v
   parse the terminal result  ->  branch on next_action (sec. 3)
@@ -72,7 +72,7 @@ asserted done is replaced by the controller's evidence-backed `converged`.
                                            escalate
 ```
 
-The CLAIM is the outer task lock; the kazi run is the inner objective-done gate.
+The CLAIM is the outer task lock; the kazi apply is the inner objective-done gate.
 Neither replaces the other (ADR-0026 decision 1). Blast-radius LEASING across
 sessions is L3 and needs NATS; this L2 recipe is git-refs only.
 
@@ -105,9 +105,9 @@ next step feeds to kazi.
 ### Step 2 -- propose (caller-drafts: floor + persist, NO model)
 
 ```sh
-kazi propose --json --predicates "$(cat /tmp/acc-predicates.json)"
+kazi plan --json --predicates "$(cat /tmp/acc-predicates.json)"
 #   ...or pipe it (kazi reads stdin under --json):
-mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi propose --json
+mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi plan --json
 ```
 
 caller-drafts is the SINGLE authoring path (ADR-0023): the session supplies the
@@ -132,9 +132,9 @@ Emits `{schema_version, proposal_ref, status: "approved", goal_id}`. The goal is
 now runnable.
 
 > Note (same as the canonical recipe): `approve` returns a goal ID, but
-> `kazi run` takes a GOAL-FILE PATH, not an id. `propose`/`approve` persist the
+> `kazi apply` takes a GOAL-FILE PATH, not an id. `plan`/`approve` persist the
 > approved goal into a loadable goal-file -- run THAT file's path in Step 4.
-> `kazi run` has no `--goal` flag; the goal-file is the positional argument.
+> `kazi apply` has no `--goal` flag; the goal-file is the positional argument.
 
 ### Step 4 -- run to convergence (the objective-done gate)
 
@@ -142,7 +142,7 @@ Run the approved goal-file with the chosen harness. The two-tier split lets the
 session tier the inner loop to a CHEAP/local harness (ADR-0026 L2):
 
 ```sh
-kazi run <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json
+kazi apply <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json
 ```
 
 `--harness claude` (default) or `--harness opencode`; `--model` overrides the
@@ -219,7 +219,7 @@ as a false `converged`:
   dimension in `reason` / `budget_spent.exceeded` (`next_action: "raise_budget"`)
   -- the loop refuses to burn unbounded work.
 
-Together these are why "merge on a single pass" is wrong: the first `kazi run`
+Together these are why "merge on a single pass" is wrong: the first `kazi apply`
 either converges (every predicate genuinely holds) or halts on a guard the
 session must act on. There is no path where an insufficient first attempt is
 reported as done.
@@ -233,14 +233,14 @@ per observation, TERMINATED by the single run-result object (the line with NO
 `event` field), which is the one the session branches on:
 
 ```sh
-kazi run <goal-file> --workspace <ws> --harness opencode --json --stream
+kazi apply <goal-file> --workspace <ws> --harness opencode --json --stream
 ```
 
 Read lines until the object WITHOUT an `event` field; that is the terminal
 result. A minimal monitoring loop (jq):
 
 ```sh
-kazi run "$GOAL_FILE" --workspace "$WS" --harness opencode --json --stream \
+kazi apply "$GOAL_FILE" --workspace "$WS" --harness opencode --json --stream \
 | while IFS= read -r line; do
     event=$(printf '%s' "$line" | jq -r '.event // "result"')
     if [ "$event" = "iteration" ]; then

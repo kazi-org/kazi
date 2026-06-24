@@ -3,7 +3,7 @@
 This is the copy-pasteable, self-contained recipe a `/apply --pool` SESSION runs
 to gate its own merge on OBJECTIVE convergence -- L1 ("verification gate") of
 "kazi under `/apply --pool`" (ADR-0026). Before the session rebase-merges its
-task's PR, it runs the task's acceptance predicates with `kazi run --json` and
+task's PR, it runs the task's acceptance predicates with `kazi apply --json` and
 lands the PR **only when kazi reports `converged`**. On `stuck` / `over_budget` /
 `error` it BLOCKS and ESCALATES -- it does not merge.
 
@@ -32,10 +32,10 @@ wrong work, because "done" lives in the controller, not in the session's opinion
       |  Kazi.Pool.AccBridge.acc_to_predicates/1   (T20.1, priv/scripts/acc_to_predicates.exs)
       v
   caller-drafts predicates JSON
-      |  kazi propose --json --predicates   (caller-drafts; floor + persist, NO model)
+      |  kazi plan --json --predicates   (caller-drafts; floor + persist, NO model)
       v
   kazi approve --json   ->  a runnable goal
-      |  kazi run --harness <h> --json      (the convergence gate)
+      |  kazi apply --harness <h> --json      (the convergence gate)
       v
   decode the terminal result  ->  Kazi.Pool.Gate.decide/1
       |
@@ -49,14 +49,14 @@ The block-unless-converged rule is a pure function -- `Kazi.Pool.Gate.decide/1`
 
 ## Authoring runs on the released `kazi` binary (not the escript)
 
-`propose` / `approve` PERSIST the proposal to the SQLite read-model, so they need
+`plan` / `approve` PERSIST the proposal to the SQLite read-model, so they need
 a kazi build with the native SQLite NIF. The **released `kazi` binary** (the
-Burrito package, T6.2/ADR-0014) bundles it -- use plain `kazi propose` /
-`kazi approve` / `kazi run`. The dev `mix escript.build` `./kazi` CANNOT bundle a
+Burrito package, T6.2/ADR-0014) bundles it -- use plain `kazi plan` /
+`kazi approve` / `kazi apply`. The dev `mix escript.build` `./kazi` CANNOT bundle a
 NIF and will refuse authoring with "the read-model is unavailable; authoring
-requires persistence"; from a source checkout use `mix kazi.run <goal-file> ...`
+requires persistence"; from a source checkout use `mix kazi.apply <goal-file> ...`
 for the RUN step and the released binary (or `iex -S mix` driving `Kazi.CLI.run/1`)
-for `propose`/`approve`. The commands and JSON are identical across deliveries.
+for `plan`/`approve`. The commands and JSON are identical across deliveries.
 
 ## Step 0 -- the task's `acc:` text
 
@@ -97,16 +97,16 @@ See `docs/acc-predicates-bridge.md` for the full clause-classification rules
 
 ## Step 2 -- propose (caller-drafts) and review the floor (T15.8)
 
-Feed the payload to `kazi propose --json --predicates` -- the SINGLE sanctioned
+Feed the payload to `kazi plan --json --predicates` -- the SINGLE sanctioned
 authoring path (ADR-0023). caller-drafts means kazi spawns **NO inner model**: it
 applies the deterministic clarify FLOOR (flags a missing live-verification target
 + scope), persists the proposal, and returns the `proposal_ref` + the open
 `clarify` gaps.
 
 ```sh
-kazi propose --json --predicates "$(cat /tmp/acc-predicates.json)"
+kazi plan --json --predicates "$(cat /tmp/acc-predicates.json)"
 # ...or pipe it on stdin (kazi reads stdin under --json):
-mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi propose --json
+mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi plan --json
 ```
 
 `propose --json` emits one object: `goal_id`, `proposal_ref` (the approve handle),
@@ -114,7 +114,7 @@ mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi propose --js
 `{id, prompt, recommended}`). Read the floor:
 
 ```sh
-DRAFT=$(kazi propose --json --predicates "$(cat /tmp/acc-predicates.json)")
+DRAFT=$(kazi plan --json --predicates "$(cat /tmp/acc-predicates.json)")
 PROPOSAL_REF=$(printf '%s' "$DRAFT" | jq -r .proposal_ref)
 printf '%s' "$DRAFT" | jq '.clarify'    # the open gaps the floor surfaced
 ```
@@ -133,7 +133,7 @@ kazi approve "$PROPOSAL_REF" --json
 `approve --json` emits `{schema_version, proposal_ref, status: "approved",
 goal_id}`. The approved goal is now runnable.
 
-> `kazi run` takes a GOAL-FILE path (positional), NOT `--goal <id>`. From a source
+> `kazi apply` takes a GOAL-FILE path (positional), NOT `--goal <id>`. From a source
 > checkout the cleanest gate is to run the SAME predicates the session authored:
 > keep the bridged predicates in a goal-file the session controls and run that
 > file. Minimal goal-file for the example above (`gate.goal.toml`):
@@ -162,17 +162,17 @@ goal_id}`. The approved goal is now runnable.
 > expect_status = 200
 > ```
 >
-> (`propose`/`approve` give you the reviewed FLOOR -- the live-target check -- on
-> the same predicates; the goal-file is what `run` loads. A `kazi propose
+> (`plan`/`approve` give you the reviewed FLOOR -- the live-target check -- on
+> the same predicates; the goal-file is what `apply` loads. A `kazi plan
 > --from-acc` flag that fuses the approved goal directly is a deliberate
 > follow-up, T20.2+.)
 
-Run it as the merge gate (released binary, or `mix kazi.run` from source):
+Run it as the merge gate (released binary, or `mix kazi.apply` from source):
 
 ```sh
-RESULT=$(kazi run gate.goal.toml --workspace . --harness claude --json)
+RESULT=$(kazi apply gate.goal.toml --workspace . --harness claude --json)
 # from a source checkout:
-# RESULT=$(mix kazi.run gate.goal.toml --workspace . --harness claude --json)
+# RESULT=$(mix kazi.apply gate.goal.toml --workspace . --harness claude --json)
 ```
 
 `run --json` emits ONE terminal result object on termination (the schema in
@@ -229,7 +229,7 @@ malformed result all BLOCK -- a result the gate cannot positively read as
 ## The decision, in code (`Kazi.Pool.Gate`)
 
 The block-unless-converged logic is a tested pure function so the gate is more
-than prose. `Kazi.Pool.Gate.decide/1` takes a DECODED `kazi run --json` result
+than prose. `Kazi.Pool.Gate.decide/1` takes a DECODED `kazi apply --json` result
 and returns `:merge` or `{:block, reason}` (the `reason` is the copy-pasteable
 line a session reports on the PR):
 
@@ -242,7 +242,7 @@ RESULT
 ```
 
 It is covered by `test/kazi/pool/gate_test.exs`, which asserts -- over REAL
-`kazi run --json` JSON fixtures (the exact shapes `cli_run_json_test.exs` checks)
+`kazi apply --json` JSON fixtures (the exact shapes `cli_run_json_test.exs` checks)
 -- that a NON-converged result (`stuck` / `over_budget` / `error`) BLOCKS with a
 clear reason, a `converged` one returns `:merge`, and the gate fails closed on an
 unexpected `schema_version` / missing `status` / non-object input.
@@ -259,7 +259,7 @@ unexpected `schema_version` / missing `status` / non-object input.
   do NOT merge"}`; the shell gate exits non-zero and does NOT merge. `over_budget`
   and `error` block the same way with their own reasons. (Fixtures: `@stuck_json`,
   `@over_budget_json`, `@error_json`.)
-- **Every command verified against `kazi help --json`.** `propose`
+- **Every command verified against `kazi help --json`.** `plan`
   (`--json`/`--predicates`), `approve` (`--json`), `run <goal-file>`
   (`--workspace`/`--harness`/`--model`/`--json`/`--stream`), and `status`
   (`--json`) are exactly the surface the command table emits.
