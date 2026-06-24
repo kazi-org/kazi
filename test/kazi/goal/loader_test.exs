@@ -945,4 +945,205 @@ defmodule Kazi.Goal.LoaderTest do
       assert reloaded.predicates == loaded.predicates
     end
   end
+
+  describe "group needs — the dependency DAG (T23.1, ADR-0028)" do
+    alias Kazi.Goal.Group
+
+    test "a group with no needs loads with needs: [] — back-compat" do
+      # The additive default: a goal authored before T23.1 loads EXACTLY as
+      # before, with the new field defaulting to no dependencies.
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "billing", "name" => "Billing"}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Group{id: "billing", needs: []}] = goal.groups
+    end
+
+    test "a group with needs = [\"other-id\"] loads with the edge stored" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "result-contract", "name" => "Result Contract"},
+          %{"id" => "streaming", "name" => "Streaming", "needs" => ["result-contract"]}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.find(goal.groups, &(&1.id == "streaming")).needs == ["result-contract"]
+    end
+
+    test "needs edges are normalized the same way group ids are" do
+      # A loosely-authored edge ("Result Contract") must resolve to the canonical
+      # declared slug, not fail as unknown.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "result-contract", "name" => "Result Contract"},
+          %{"id" => "streaming", "name" => "Streaming", "needs" => ["Result Contract"]}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.find(goal.groups, &(&1.id == "streaming")).needs == ["result-contract"]
+    end
+
+    test "needs is INDEPENDENT of parent — a group may carry both" do
+      # parent is budget rollup (ADR-0020); needs is execution order (ADR-0028).
+      # The two relations point at different groups and both load.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "api", "name" => "API"},
+          %{"id" => "auth", "name" => "Auth"},
+          %{"id" => "streaming", "name" => "Streaming", "parent" => "api", "needs" => ["auth"]}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      streaming = Enum.find(goal.groups, &(&1.id == "streaming"))
+      assert streaming.parent == "api"
+      assert streaming.needs == ["auth"]
+    end
+
+    test "a forward-referenced needs target loads — order is irrelevant" do
+      # The dependent is declared BEFORE its dependency; validation runs once the
+      # whole taxonomy is parsed, so declaration order does not matter.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "streaming", "name" => "Streaming", "needs" => ["result-contract"]},
+          %{"id" => "result-contract", "name" => "Result Contract"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.find(goal.groups, &(&1.id == "streaming")).needs == ["result-contract"]
+    end
+
+    test "an UNKNOWN needs id is a load error (the typo guard)" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "result-contract", "name" => "Result Contract"},
+          %{"id" => "streaming", "name" => "Streaming", "needs" => ["result-contrakt"]}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "group \"streaming\" needs unknown group"
+      assert reason =~ "result-contrakt"
+      # The error names the declared ids so the author can spot the typo.
+      assert reason =~ "result-contract"
+    end
+
+    test "a self-edge (a group needing itself) is a load error" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "a", "name" => "A", "needs" => ["a"]}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "group \"a\" needs itself"
+    end
+
+    test "a direct needs cycle (a → b → a) is a load error" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "a", "name" => "A", "needs" => ["b"]},
+          %{"id" => "b", "name" => "B", "needs" => ["a"]}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "cyclic needs chain"
+    end
+
+    test "a 3-node needs cycle (a → b → c → a) is a load error" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "a", "name" => "A", "needs" => ["b"]},
+          %{"id" => "b", "name" => "B", "needs" => ["c"]},
+          %{"id" => "c", "name" => "C", "needs" => ["a"]}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "cyclic needs chain"
+    end
+
+    test "a deep acyclic needs DAG loads (multiple edges per node)" do
+      # b and c both need a; d needs b and c. A diamond — valid DAG, parallel
+      # frontiers, no cycle.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "a", "name" => "A"},
+          %{"id" => "b", "name" => "B", "needs" => ["a"]},
+          %{"id" => "c", "name" => "C", "needs" => ["a"]},
+          %{"id" => "d", "name" => "D", "needs" => ["b", "c"]}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.find(goal.groups, &(&1.id == "d")).needs == ["b", "c"]
+    end
+
+    test "a non-array needs is a validation error" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "a", "name" => "A", "needs" => "not-an-array"}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ ~s(group "a" "needs" must be an array of non-empty strings)
+    end
+
+    test "an empty-string needs edge is a validation error" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "a", "name" => "A", "needs" => [""]}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ ~s(group "a" "needs" must be an array of non-empty strings)
+    end
+
+    test "the full needs DAG parses from TOML text" do
+      toml = """
+      id = "g"
+
+      [[group]]
+      id = "result-contract"
+      name = "Result Contract"
+
+      [[group]]
+      id = "streaming"
+      name = "Streaming"
+      needs = ["result-contract"]
+
+      [[predicate]]
+      id = "p"
+      provider = "test_runner"
+      """
+
+      assert {:ok, goal} = Loader.from_map(Toml.decode!(toml))
+      assert Enum.find(goal.groups, &(&1.id == "streaming")).needs == ["result-contract"]
+    end
+  end
 end

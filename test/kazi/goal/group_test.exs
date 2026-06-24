@@ -35,5 +35,23 @@ defmodule Kazi.Goal.GroupTest do
       assert g.parent == "identity-access"
       assert g.budget == 5
     end
+
+    test "defaults needs to [] when no dependency edges are declared (T23.1)" do
+      g = Group.new("billing", "Billing")
+      assert g.needs == []
+    end
+
+    test "normalizes each needs edge the same way ids are (T23.1)" do
+      # The edges are loosely authored; they must collapse to canonical slugs so
+      # they match their declared targets consistently.
+      g = Group.new("streaming", "Streaming", needs: ["Result Contract", "Identity & Access"])
+      assert g.needs == ["result-contract", "identity-access"]
+    end
+
+    test "parent and needs are independent — a group may carry both (T23.1)" do
+      g = Group.new("streaming", "Streaming", parent: "api", needs: ["result-contract"])
+      assert g.parent == "api"
+      assert g.needs == ["result-contract"]
+    end
   end
 end
