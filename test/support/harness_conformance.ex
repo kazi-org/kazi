@@ -30,8 +30,8 @@ defmodule Kazi.Harness.Conformance do
 
       assert_profile_conformance(:opencode,
         prompt: "fix the failing test",
-        opts: [model: "dgx/qwen3.6"],
-        expected_argv: ~w(run fix\\ the\\ failing\\ test --format json --model dgx/qwen3.6),
+        opts: [model: "local/qwen3.6"],
+        expected_argv: ~w(run fix\\ the\\ failing\\ test --format json --model local/qwen3.6),
         transcript: "harness/opencode_run.jsonl",
         expected_parse: %{result: "…", tokens: 1400, cost_usd: 0.0042}
       )

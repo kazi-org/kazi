@@ -237,12 +237,12 @@ defmodule Kazi.Goal.LoaderTest do
     test "a [harness] table with id + model parses into the harness map" do
       data = %{
         "id" => "g",
-        "harness" => %{"id" => "opencode", "model" => "dgx/qwen3.6"},
+        "harness" => %{"id" => "opencode", "model" => "local/qwen3.6"},
         "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
       }
 
       assert {:ok, %Goal{harness: harness}} = Loader.from_map(data)
-      assert harness == %{id: :opencode, model: "dgx/qwen3.6", command: nil}
+      assert harness == %{id: :opencode, model: "local/qwen3.6", command: nil}
     end
 
     test "a [harness] id-only table parses with nil model/command" do
@@ -287,7 +287,7 @@ defmodule Kazi.Goal.LoaderTest do
     test "a [harness] table missing id is a validation error" do
       data = %{
         "id" => "g",
-        "harness" => %{"model" => "dgx/qwen3.6"},
+        "harness" => %{"model" => "local/qwen3.6"},
         "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
       }
 
@@ -334,7 +334,7 @@ defmodule Kazi.Goal.LoaderTest do
 
       [harness]
       id = "opencode"
-      model = "dgx/qwen3.6"
+      model = "local/qwen3.6"
       command = "/usr/local/bin/opencode"
 
       [[predicate]]
@@ -346,7 +346,7 @@ defmodule Kazi.Goal.LoaderTest do
 
       assert harness == %{
                id: :opencode,
-               model: "dgx/qwen3.6",
+               model: "local/qwen3.6",
                command: "/usr/local/bin/opencode"
              }
     end

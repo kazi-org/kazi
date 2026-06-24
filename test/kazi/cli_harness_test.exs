@@ -53,7 +53,7 @@ defmodule Kazi.CLIHarnessTest do
     {code, _io} =
       with_io(fn ->
         Kazi.CLI.run(
-          ["run", goal, "--workspace", work, "--harness", "opencode", "--model", "dgx/qwen3.6"],
+          ["run", goal, "--workspace", work, "--harness", "opencode", "--model", "local/qwen3.6"],
           adapter_opts: [command: @stub],
           persist?: false
         )
@@ -62,14 +62,14 @@ defmodule Kazi.CLIHarnessTest do
     assert code == 0, "expected convergence (exit 0) driving the opencode-profile stub"
 
     # The argv the stub received proves the opencode profile assembled it:
-    # `opencode run <prompt> --model dgx/qwen3.6 --format json` (the command itself
+    # `opencode run <prompt> --model local/qwen3.6 --format json` (the command itself
     # is the stub; argv is everything after it).
     argv = argv_lines(work)
     assert "run" in argv
     assert "--format" in argv
     assert "json" in argv
     assert "--model" in argv
-    assert "dgx/qwen3.6" in argv
+    assert "local/qwen3.6" in argv
     # NOT the claude shape.
     refute "-p" in argv
     refute "--output-format" in argv

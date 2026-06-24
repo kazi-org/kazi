@@ -45,7 +45,7 @@ echo '{"type":"message.part.updated","properties":{"part":{"id":"prt_text","mess
 # Event 3: the assistant message info, carrying tokens + cost (unless suppressed).
 if [ "${STUB_NO_USAGE:-0}" != "1" ]; then
   cat <<JSON
-{"type":"message.updated","properties":{"info":{"id":"msg_a","role":"assistant","sessionID":"ses_a","modelID":"qwen3.6:35b-a3b-q8_0","providerID":"dgx-ollama","cost":${cost_usd},"tokens":{"input":${input_tokens},"output":${output_tokens},"reasoning":${reasoning_tokens},"cache":{"read":${cache_read},"write":${cache_write}}}}}}
+{"type":"message.updated","properties":{"info":{"id":"msg_a","role":"assistant","sessionID":"ses_a","modelID":"qwen3.6:35b-a3b-q8_0","providerID":"local-ollama","cost":${cost_usd},"tokens":{"input":${input_tokens},"output":${output_tokens},"reasoning":${reasoning_tokens},"cache":{"read":${cache_read},"write":${cache_write}}}}}}
 JSON
 fi
 

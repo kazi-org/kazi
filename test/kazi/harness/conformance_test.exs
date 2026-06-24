@@ -116,14 +116,14 @@ defmodule Kazi.Harness.ConformanceTest do
     test "argv + NDJSON event-stream parse against the recorded transcript" do
       assert_profile_conformance(:opencode,
         prompt: "fix the failing test",
-        opts: [model: "dgx/qwen3.6"],
+        opts: [model: "local/qwen3.6"],
         expected_argv: [
           "run",
           "fix the failing test",
           "--format",
           "json",
           "--model",
-          "dgx/qwen3.6"
+          "local/qwen3.6"
         ],
         transcript: "harness/opencode_run.jsonl",
         expected_parse: %{
