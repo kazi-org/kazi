@@ -68,3 +68,24 @@ while keeping the cache for compile speed. The container arm64 job never hit thi
 because it has no cache step. Landmine: ALSO mind that deleting a GitHub Release
 before its replacement has built leaves the Homebrew formula pointing at missing
 assets -- build the new release FIRST, then swap. (E6 / T6.3, 2026-06-22.)
+
+## Reconcile / surface scanner
+
+### L-0006 #reconcile #surface #scanner #deadcode -- the surface scan is APPROXIMATE: reflection and string-dispatch are invisible
+`Kazi.Reconcile.SurfaceScanner` (ADR-0021, decision 3) inventories a project's
+public surface (exported `def`s, Mix tasks) by parsing source ASTs statically. A
+static scan, by construction, CANNOT see surface that is reached dynamically:
+`apply(mod, fun, args)` with a runtime-computed function, a route/command table
+keyed by strings, a `Module.concat/1` or `String.to_existing_atom/1` lookup, a
+behaviour invoked through a registry. Those entry points are real surface but are
+INVISIBLE to the scan -- exactly the same blind spot the code-review-graph has
+(it never sees reflection or string dispatch). Consequence for the
+surface-coverage meta-predicate (T13.5): a dynamically-dispatched entry point will
+look UNOWNED ("dead") even when it is live, and a genuinely-dead `def` is only
+flagged if it is statically defined. This is why ADR-0021 mandates a "warn, don't
+auto-delete" posture and an explicit allow-list for intentional un-predicated /
+dynamic surface -- never let the scanner drive a destructive delete on its own. A
+file that does not parse is silently skipped (its surface is simply unreported),
+so a syntax error degrades coverage rather than crashing the scan. Always grep for
+a symbol as a literal string before trusting "this surface is dead." (T13.4,
+2026-06-23.)
