@@ -21,17 +21,14 @@ defmodule Kazi.MCP.Server do
     * `initialize` — returns the protocol version, server info, and the
       `tools` capability.
     * `tools/list` — returns the kazi tools, each SELF-DESCRIBING: `name`,
-      `description`, and a JSON-Schema `inputSchema`. The five primary tools are
+      `description`, and a JSON-Schema `inputSchema`. The five tools are
       `kazi_plan`, `kazi_approve`, `kazi_apply`, `kazi_status`, and
-      `kazi_list_proposed` — the `plan → approve → apply`/`status` recipe.
-      `kazi_propose`/`kazi_run` remain as DEPRECATED TOOL ALIASES (ADR-0032
-      decision 2): they dispatch to the same functions so a client pinning the
-      old MCP tool name keeps working through the deprecation window. The
-      aliases are NOT listed by `tools/list`; only the primary names are.
+      `kazi_list_proposed` — the `plan → approve → apply`/`status` recipe. The
+      deprecated `kazi_propose`/`kazi_run` tool aliases were REMOVED in v0.6.0
+      (T27.9); only the names above resolve.
     * `tools/call` — dispatches a named tool to the corresponding kazi function
       (`Kazi.Authoring.propose/2`/`approve/2`, `Kazi.Runtime.run/2`, the
       read-model status) and returns its JSON result as the tool's content.
-      The deprecated `kazi_propose`/`kazi_run` aliases dispatch identically.
     * any other method, or an unknown tool, is a JSON-RPC error.
 
   ## Result shapes
@@ -112,8 +109,7 @@ defmodule Kazi.MCP.Server do
             "plan -> approve -> apply recipe. Pass `proposal` to use caller-drafted " <>
             "predicates directly (no inner model is spawned); omit it to have kazi draft " <>
             "from the idea. Returns the proposal_ref to approve against, the drafted goal, " <>
-            "and its lifecycle status (proposed). (Was `kazi_propose`, kept as a " <>
-            "deprecated alias.)",
+            "and its lifecycle status (proposed).",
         "inputSchema" => %{
           "type" => "object",
           "required" => ["idea"],
@@ -160,8 +156,7 @@ defmodule Kazi.MCP.Server do
             "branches on. Step 3 of the recipe. Supply the goal as `goal_file` (a path to a " <>
             "goal-file) OR `goal` (an inline goal-file map). The result mirrors the committed " <>
             "run-result schema: status (converged / stuck / over_budget / error), the predicate " <>
-            "vector, iterations, budget_spent, next_action, reason, release_ref. (Was " <>
-            "`kazi_run`, kept as a deprecated alias.)",
+            "vector, iterations, budget_spent, next_action, reason, release_ref.",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
@@ -298,10 +293,6 @@ defmodule Kazi.MCP.Server do
   # message}` for an unknown tool / bad params (a JSON-RPC protocol error).
   @spec call_tool(term(), map(), opts()) ::
           {:ok, map()} | {:tool_error, map()} | {:error, integer(), String.t()}
-  # `kazi_propose` is the DEPRECATED tool alias of `kazi_plan` (ADR-0032); it
-  # dispatches identically so a client pinning the old MCP tool name keeps working.
-  defp call_tool("kazi_propose", args, opts), do: call_tool("kazi_plan", args, opts)
-
   defp call_tool("kazi_plan", args, opts) do
     case fetch_string(args, "idea") do
       {:ok, idea} ->
@@ -333,9 +324,6 @@ defmodule Kazi.MCP.Server do
         {:error, @invalid_params, "kazi_approve requires a non-empty string `proposal_ref`"}
     end
   end
-
-  # `kazi_run` is the DEPRECATED tool alias of `kazi_apply` (ADR-0032); identical dispatch.
-  defp call_tool("kazi_run", args, opts), do: call_tool("kazi_apply", args, opts)
 
   defp call_tool("kazi_apply", args, opts) do
     with {:ok, goal} <- load_goal(args) do
