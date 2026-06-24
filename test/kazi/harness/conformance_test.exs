@@ -108,6 +108,37 @@ defmodule Kazi.Harness.ConformanceTest do
     end
   end
 
+  describe ":codex golden-transcript conformance (T14.2, ADR-0022)" do
+    test "argv + JSONL event-stream parse against the recorded transcript" do
+      assert_profile_conformance(:codex,
+        prompt: "fix the failing test",
+        opts: [model: "gpt-5-codex"],
+        expected_argv: ["exec", "fix the failing test", "--json", "--model", "gpt-5-codex"],
+        transcript: "harness/codex_exec.jsonl",
+        expected_parse: %{
+          result: "Made the failing unit test pass.",
+          # turn.completed usage: input 1200 + cached_input 900 + output 300.
+          tokens: 2400,
+          cost: %{tokens: 2400}
+        }
+      )
+    end
+
+    test "argv without a model omits the --model flag (same recorded parse)" do
+      assert_profile_conformance(:codex,
+        prompt: "fix the failing test",
+        opts: [],
+        expected_argv: ["exec", "fix the failing test", "--json"],
+        transcript: "harness/codex_exec.jsonl",
+        expected_parse: %{
+          result: "Made the failing unit test pass.",
+          tokens: 2400,
+          cost: %{tokens: 2400}
+        }
+      )
+    end
+  end
+
   describe "helper mechanics (the contract future profiles rely on)" do
     test "expected_parse is asserted as a strict subset: a missing field fails" do
       assert_raise ExUnit.AssertionError, ~r/omitted expected field/, fn ->
