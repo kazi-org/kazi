@@ -111,6 +111,10 @@ Open work:
 - **UC-041** (one verb per concept across the agent prompt, the skill, and the CLI:
   the CLI commands are `kazi plan` (was `propose`) and `kazi apply` (was `run`), with
   `run`/`propose` as deprecated aliases, ADR-0032) -- E27.
+- **UC-042** (the design/architecture docs reflect what kazi IS now: `docs/concept.md`
+  + README describe the native scheduler, predicate-graph waves, the agent-driven
+  router model, and the renamed verbs -- current through ADR-0032, no command
+  referenced that does not exist) -- E28.
 
 ## Checkable Work Breakdown
 
@@ -234,6 +238,12 @@ Depends on the E15 JSON contract.
 - [ ] T16.6 LIVE: Claude Code drives kazi via the installed skill: install the skill, then in a real Claude Code session drive a fixture goal end to end (propose -> approve -> run); record evidence.  Owner: TBD  Est: 1.5h  verifies: [UC-034]  deps: [T16.2]  acc: observed evidence that a Claude Code user who ran `kazi install-skill` can drive kazi without further instruction; honest result.
 
 ### E17 -- Adoption: lead EVERY surface with the agent-driven on-ramp (P1, ADR-0025)
+
+> **SUPERSEDED (do not execute the open content tasks here).** E17's open content
+> tasks (T17.1/T17.2/T17.4/T17.5) are superseded by **E25** (ADR-0030, the
+> research-grounded content rewrite) and the engineering-accuracy sync **E28**;
+> execute the content there. T17.3 is done. Kept for history; the apply pool should
+> SKIP T17.1/2/4/5.
 
 The adoption-first documentation rewrite. Today the README/site lead with VANILLA
 kazi (install -> `mix kazi.run goal.toml` -> `propose`); the agent-driven path
@@ -503,6 +513,29 @@ starved of pure-code tasks). This SIMPLIFIES E26 (router verbs now equal CLI ver
 - [ ] T27.7 Deprecation policy note: a short `docs/` note (or CHANGELOG entry) stating `run`/`propose`/`mix kazi.run` are deprecated aliases, why (verb unification, ADR-0032), and the planned removal version.  Owner: TBD  Est: 0.5h  verifies: [UC-041]  delivers: [a documented deprecation window for run/propose]  deps: [T27.1]  acc: the note names the aliases, the rationale (ADR-0032), and a concrete removal version; linked from the CHANGELOG.
 - [ ] T27.8 LIVE verify: drive a fixture goal via `kazi plan` -> approve -> `kazi apply` end to end on the built binary; confirm `kazi run`/`kazi propose` still work (with the deprecation hint); record in `docs/devlog.md`. `mix format --check-formatted` + `--warnings-as-errors` clean.  Owner: TBD  Est: 1h  verifies: [UC-041]  deps: [T27.1, T27.2, T27.3]  acc: a real run converges via the new verbs; the aliases still converge with a stderr hint; format + warnings-as-errors clean; devlog updated.
 
+### E28 -- Doc-sync: bring concept.md + the architecture docs to current reality (P1, no ADR)
+
+The ENGINEERING-accuracy doc pass, and the answer to "doc work is blocked": E22 is
+gated on whole feature epics, E25's open tasks need human/creative input, and E27's
+doc tasks chain behind the CLI code -- so NO unblocked, autonomous task keeps the
+DESIGN docs honest. `docs/concept.md` stops at ADR-0023 and README's how-it-works at
+ADR-0022, ~10 ADRs behind: they do not describe the native scheduler (E21/ADR-0027),
+predicate-graph waves (E23/ADR-0028), the agent-driven + router model (E16/E26,
+ADR-0024/0031), or the renamed verbs (E27/ADR-0032). E28 syncs them. AUTONOMOUS
+(prose edited to match shipped ADRs/code -- no human decision, no live env), so the
+pool can do it NOW. No new ADR (executes existing decisions 0021-0032).
+
+NON-OVERLAP: E28 is the ONGOING engineering-accuracy sync (now); E22 is the final
+LAUNCH polish (gated, later); E25 is MARKETING content (the agent paradigm, tagline,
+leaderboard); T27.6 owns the literal verb-STRING rename across docs. E28 owns the
+DESIGN NARRATIVE; where commands appear it uses the new verbs and coordinates with
+T27.6 so strings stay consistent.
+
+- [ ] T28.1 concept.md -- native parallel scheduler (E21/ADR-0027): add/replace the parallelism section so it describes the native scheduler (partition by blast radius -> lease each partition -> N supervised reconcilers -> collective convergence -> merge; single-node NATS-free), reconciling the older "one supervised process per active goal / external launcher" framing. Reference ADR-0027.  Owner: TBD  Est: 1.5h  verifies: [UC-042]  delivers: [a concept.md parallelism section matching the shipped scheduler]  deps: []  acc: `docs/concept.md` describes the native scheduler without contradicting ADR-0001; the stale "external launcher only" framing is gone; references ADR-0027; no command-verb literals that T27.6 has not yet renamed (use new verbs or verb-neutral prose).
+- [ ] T28.2 concept.md -- predicate-graph waves + agent-driven/router model: add a "dependency-aware waves" section (E23/ADR-0028: `needs` edges -> topological pipelined scheduling) and an "agent drives kazi" section (E16/E26, ADR-0024/0031: you chat with Claude Code, it drives kazi; the plan/apply/status/adopt router). Confirm Telegram is absent (E24/ADR-0029) and the mobile interface is the agent.  Owner: TBD  Est: 1.5h  verifies: [UC-042]  delivers: [concept.md sections for waves + the agent-driven/router paradigm]  deps: []  acc: concept.md describes `needs`-edge waves + the agent-driven router model; no Telegram surface remains; references ADR-0028/0031; coherent with ADR-0001.
+- [ ] T28.3 README "How it works" + ADR-index summary current through ADR-0032: update README's architecture/how-it-works summary + its ADR reference list to span 0021-0032 (scheduler, waves, agent-drivable, self-teaching, router, verb rename); use the new verbs (`kazi plan`/`kazi apply`), coordinating with T27.6 so verb strings match. Keep canonical strings + README<->site coherence (T9.9).  Owner: TBD  Est: 1.5h  verifies: [UC-042, UC-035]  delivers: [a README architecture summary current to ADR-0032]  deps: [T27.6]  acc: README how-it-works references the current ADRs through 0032 and the new verbs; coherence (T9.9) green; no stale "Telegram bridge"/old-verb mentions.
+- [ ] T28.4 Accuracy + coherence gate: every command/flag in `concept.md` + README + `docs/` matches `kazi help --json` (apply/plan + aliases, --parallel, --explain, status, schema, install-skill, mcp); the README<->site (T9.9) + skill/AGENTS.md (T16.4) coherence checks pass; deploy + verify live if any site-rendered doc changed.  Owner: TBD  Est: 1h  verifies: [UC-042, infrastructure]  deps: [T28.1, T28.2, T28.3]  acc: zero references to non-existent commands; coherence green; if the site changed, deployed + verified live at https://kazi.sire.run.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -548,6 +581,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E27-1 (CLI rename, autonomous -- start now):** T27.1 (verbs + aliases) -> T27.3 (schema bump) -> T27.4 (help/schema); T27.2 (mix task) in parallel after T27.1.
 - **Wave E27-2 (surfaces):** T27.5 (skill/AGENTS/MCP), T27.6 (README/site/docs), T27.7 (deprecation note) in parallel after T27.4.
 - **Wave E27-3 (prove):** T27.8 (live verify new verbs + aliases) after T27.1-T27.3.
+- **Wave E28 (doc-sync, autonomous -- start now):** T28.1 (concept scheduler), T28.2 (concept waves + agent/router) in PARALLEL now (no deps) -> T28.3 (README how-it-works + ADRs, after T27.6 for verb consistency) -> T28.4 (accuracy + coherence gate).
 
 ## Risk Register
 
@@ -617,6 +651,27 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E28: doc-sync to current reality; diagnose blocked doc work)
+- **Diagnosed why doc work is blocked:** E22 is gated on whole feature epics
+  (T22.1 deps E15-E21); E25's open tasks need human/creative input (tagline, hero
+  recording, agent-voiced testimonial); E27's doc tasks chain behind the CLI code;
+  E17 is chained AND superseded by E25. No unblocked, AUTONOMOUS task kept the design
+  docs honest -- `docs/concept.md` stops at ADR-0023, README how-it-works at 0022
+  (~10 ADRs behind: missing the scheduler, waves, agent-driven/router, verb rename).
+- **Added E28** (P1, no ADR -- executes existing decisions): autonomous doc-sync.
+  T28.1 concept.md native scheduler (ADR-0027), T28.2 concept.md predicate-graph
+  waves + agent-driven/router model (ADR-0028/0024/0031, Telegram absent per 0029),
+  T28.3 README how-it-works + ADR-index current through 0032 + new verbs (deps T27.6),
+  T28.4 accuracy + coherence gate. Wave E28; UC-042. T28.1/T28.2 are unblocked NOW --
+  the pure-doc work the pool was missing.
+- **NON-OVERLAP recorded:** E28 = ongoing engineering-accuracy sync (now); E22 =
+  final launch polish (gated); E25 = marketing content; T27.6 = verb-string rename.
+- **Cleaned up E17:** annotated its open content tasks (T17.1/2/4/5) as SUPERSEDED by
+  E25 (ADR-0030) + E28 -- the apply pool should SKIP them (removes the chained/dup
+  doc work that was clogging the queue).
+- **UC-042** added. No new ADR. Authored in an isolated git worktree (lore L-0014);
+  no trim (concurrent /apply --pool edits).
 
 ### 2026-06-24 -- Change Summary (E27: rename CLI verbs run->apply, propose->plan, P1 + ADR-0032)
 - **Created ADR-0032** (rename the CLI verbs): `kazi run` -> `kazi apply`,
