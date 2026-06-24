@@ -19,6 +19,14 @@ const features = [
     body: `It conducts a harness; it is not one. Today it drives ${HARNESSES.join(" and ")}; add Codex or any CLI agent by declaring a profile — no core change.`,
   },
   {
+    title: "Bring Your Own Model",
+    body: "Use cloud models or run entirely locally. Wire kazi to a local model (e.g., Llama 3, Qwen) via opencode for zero data leaks. Your context stays on your hardware.",
+  },
+  {
+    title: "AI-Ready Execution",
+    body: "kazi creates deterministic goals that coding agents can naturally pursue. It understands your codebase and drives agents safely within their allowed blast radius.",
+  },
+  {
     title: "Stops honestly",
     body: "If it can't converge, it tells you why — stuck on the same failure, or out of budget — instead of pretending it finished.",
   },
@@ -118,7 +126,7 @@ const loop = [
 
     <!-- Features -->
     <section class="mx-auto max-w-6xl px-6 py-12">
-      <div class="grid gap-4 sm:grid-cols-2">
+      <div class="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
         {
           features.map((f) => (
             <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
