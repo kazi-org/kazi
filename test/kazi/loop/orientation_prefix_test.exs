@@ -1,16 +1,23 @@
 defmodule Kazi.Loop.OrientationPrefixTest do
   @moduledoc """
-  T19.1 (ADR-0010 §3, realizing the unwired T4.3): the live `dispatch_prompt/2`
-  carries the ranked blast-radius orientation pack as a STABLE, cacheable PREFIX
-  ahead of the failing-evidence + working-set-digest body.
+  T19.1/T19.2/T19.3 (ADR-0010): the live `dispatch_prompt/2` front-loads its
+  sections stable → volatile — orientation pack → work-item → working-set digest
+  → failing evidence — so the WHOLE head up to the evidence is byte-identical
+  across iterations whose blast radius + work-item are unchanged, and the evidence
+  is bounded by the T4.8 cap.
 
   These tests drive a real dispatch through `Kazi.Loop` (the orientation builder
   is fed a hermetic `Kazi.Context.StaticGraphSource` via `adapter_opts`, so no
   filesystem/network access) and capture the exact prompt the harness receives:
 
     * a workspace WITH a graph/repo-map injects the pack ahead of the evidence;
-    * the prefix is byte-identical across iterations whose blast radius is
-      unchanged (the cache-hit discipline T19.2 builds on);
+    * the orientation prefix is byte-identical across iterations whose blast radius
+      is unchanged (T19.1);
+    * the STABLE prefix up to the evidence (orientation → work-item → digest) is
+      byte-identical across iterations; only the trailing evidence moves (T19.2);
+    * the section order is orientation → work-item → digest → evidence (T19.2);
+    * evidence larger than the cap is truncated head+tail; small evidence is
+      unchanged (T19.3, via `Kazi.Harness.Prompt.truncate_evidence/2`);
     * the failing-evidence + working-set-digest sections are PRESERVED;
     * NO graph/repo-map ⇒ NO prefix (byte-identical to the pre-T19.1 prompt).
   """
@@ -41,7 +48,11 @@ defmodule Kazi.Loop.OrientationPrefixTest do
           end
         end)
 
-      Kazi.PredicateResult.new(status, %{output: "boom in lib/widget.ex"})
+      # The failing-predicate evidence `dispatch_prompt/2` renders. Defaults to a
+      # small marker; a test may inject a large `:evidence_output` via goal metadata
+      # to exercise the T19.3 truncation cap.
+      output = Map.get(context.goal.metadata, :evidence_output, "boom in lib/widget.ex")
+      Kazi.PredicateResult.new(status, %{output: output})
     end
   end
 
@@ -81,10 +92,10 @@ defmodule Kazi.Loop.OrientationPrefixTest do
                   test_sources: [{"test/widget_test.exs", source: "assert Widget.render(1)"}]
                 )
 
-  defp goal(script_pid) do
+  defp goal(script_pid, metadata) do
     Goal.new("orientation-prefix-test",
       predicates: [Predicate.new(:code, :tests)],
-      metadata: %{script_pid: script_pid}
+      metadata: Map.merge(%{script_pid: script_pid}, metadata)
     )
   end
 
@@ -99,7 +110,7 @@ defmodule Kazi.Loop.OrientationPrefixTest do
 
     {:ok, loop} =
       Kazi.Loop.start_link(
-        goal: goal(script_pid),
+        goal: goal(script_pid, Keyword.get(opts, :metadata, %{})),
         providers: %{tests: ScriptedProvider},
         harness: RecordingHarness,
         integrate: NoopIntegrate,
@@ -115,19 +126,21 @@ defmodule Kazi.Loop.OrientationPrefixTest do
     :ok
   end
 
-  # The leading "# Orientation …" prefix, isolated from the volatile body. The
-  # body begins at the FIRST of the working-set digest ("# Working set") or the
-  # failing-evidence ("goal=") marker — so cutting at whichever appears first
-  # yields exactly the orientation prefix, independent of whether a digest is
-  # present this iteration.
+  # The leading "# Orientation …" prefix, isolated from the volatile body. With the
+  # T19.2 front-loaded order (orientation → work-item → digest → evidence), the body
+  # begins at the work-item ("goal=") line — the first section AFTER the orientation
+  # pack — so cutting there yields exactly the orientation prefix.
   defp prefix_of(prompt) do
-    cut =
-      ["# Working set", "goal="]
-      |> Enum.map(&:binary.match(prompt, &1))
-      |> Enum.reject(&(&1 == :nomatch))
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.min()
+    {cut, _} = :binary.match(prompt, "goal=")
+    binary_part(prompt, 0, cut)
+  end
 
+  # The STABLE prefix up to the volatile evidence (T19.2): everything ahead of the
+  # "evidence:" marker — orientation → work-item → digest. This is the head the
+  # inner harness's prompt cache hits on; only the trailing evidence moves between
+  # iterations whose blast radius + work-item are unchanged.
+  defp stable_prefix_of(prompt) do
+    {cut, _} = :binary.match(prompt, "evidence:")
     binary_part(prompt, 0, cut)
   end
 
@@ -186,11 +199,14 @@ defmodule Kazi.Loop.OrientationPrefixTest do
       assert second =~ "# Working set (prior iteration, map memory only)"
       assert second =~ "lib/widget.ex"
 
-      # Ordering: orientation prefix, then working-set digest, then evidence.
+      # T19.2 front-loaded order (stable → volatile):
+      #   orientation → work-item ("goal=") → working-set digest → evidence.
       orientation_at = :binary.match(second, "# Orientation") |> elem(0)
+      work_item_at = :binary.match(second, "goal=orientation-prefix-test") |> elem(0)
       digest_at = :binary.match(second, "# Working set") |> elem(0)
-      evidence_at = :binary.match(second, "goal=orientation-prefix-test") |> elem(0)
-      assert orientation_at < digest_at
+      evidence_at = :binary.match(second, "evidence:") |> elem(0)
+      assert orientation_at < work_item_at
+      assert work_item_at < digest_at
       assert digest_at < evidence_at
     end
   end
@@ -211,11 +227,91 @@ defmodule Kazi.Loop.OrientationPrefixTest do
       assert_received {:dispatched, prompt}
 
       refute prompt =~ "# Orientation"
-      # The prompt begins exactly at the evidence body — no empty-prefix garbage.
+      # The prompt begins exactly at the work-item line — no empty-prefix garbage.
       assert String.starts_with?(
                prompt,
                "goal=orientation-prefix-test fix failing predicates: code"
              )
+    end
+  end
+
+  describe "T19.2 stable-prefix discipline (inner-harness cache hits)" do
+    test "the stable head (orientation → work-item → digest) ends exactly at the volatile evidence" do
+      :ok =
+        start_loop(script: %{code: [:fail, :pass]}, adapter_opts: [graph_source: @graph_source])
+
+      assert_received {:dispatched, prompt}
+
+      # The stable head carries the orientation pack and the work item, and ends
+      # precisely at the volatile "evidence:" marker — nothing volatile leaks into
+      # the cacheable prefix.
+      assert stable_prefix_of(prompt) =~ "# Orientation"
+      assert stable_prefix_of(prompt) =~ "goal=orientation-prefix-test"
+      refute stable_prefix_of(prompt) =~ "evidence:"
+    end
+
+    test "across two dispatches with unchanged state the stable prefix is byte-identical" do
+      # Three failures then pass. The digest is recorded after the 1st dispatch and
+      # is unchanged thereafter (the harness reports the SAME touched set each run),
+      # so dispatches #2 and #3 share an identical blast radius, work-item AND
+      # digest — their stable prefixes must be byte-for-byte equal.
+      :ok =
+        start_loop(
+          script: %{code: [:fail, :fail, :fail, :pass]},
+          adapter_opts: [graph_source: @graph_source]
+        )
+
+      assert_received {:dispatched, _first}
+      assert_received {:dispatched, second}
+      assert_received {:dispatched, third}
+
+      # Identical stable head (orientation → work-item → digest) ⇒ inner-harness
+      # prompt-cache hit across the dispatch.
+      assert stable_prefix_of(second) =~ "# Orientation"
+      assert stable_prefix_of(second) =~ "# Working set"
+      assert stable_prefix_of(second) == stable_prefix_of(third)
+
+      # And the trailing evidence is what differs (here identical too, but it is the
+      # only section AFTER the stable boundary).
+      assert second =~ "evidence:"
+      assert third =~ "evidence:"
+    end
+  end
+
+  describe "T19.3 evidence truncation on the live path (T4.8 cap)" do
+    test "evidence larger than the cap is truncated head+tail (default 8 KiB)" do
+      # 32 KiB of recognisable head/tail evidence, well over the 8 KiB default cap.
+      big = String.duplicate("HEAD", 4_096) <> String.duplicate("TAIL", 4_096)
+
+      :ok =
+        start_loop(
+          script: %{code: [:fail, :pass]},
+          adapter_opts: [graph_source: @graph_source],
+          metadata: %{evidence_output: big}
+        )
+
+      assert_received {:dispatched, prompt}
+
+      # The cut is visible (the greppable marker) and both the head and the tail of
+      # the original evidence survive the head+tail window.
+      assert prompt =~ "…truncated…"
+      assert prompt =~ "HEAD"
+      assert prompt =~ "TAIL"
+
+      # The whole 32 KiB did not pass through verbatim: the evidence section is
+      # bounded near the ~8 KiB cap, not the full input length.
+      refute prompt =~ String.duplicate("HEAD", 4_096)
+    end
+
+    test "small evidence is passed through unchanged (no truncation marker)" do
+      :ok =
+        start_loop(script: %{code: [:fail, :pass]}, adapter_opts: [graph_source: @graph_source])
+
+      assert_received {:dispatched, prompt}
+
+      # The default small marker survives verbatim and no cut is applied.
+      assert prompt =~ "boom in lib/widget.ex"
+      refute prompt =~ "…truncated…"
     end
   end
 end
