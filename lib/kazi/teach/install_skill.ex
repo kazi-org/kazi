@@ -158,14 +158,23 @@ defmodule Kazi.Teach.InstallSkill do
 
     ## The loop the verbs sit inside: plan -> approve -> apply
 
-    ### Step 1 -- author predicates (`plan` verb -> `kazi plan --json`)
+    ### Step 1 -- author the goal-set (`plan` verb -> `kazi plan --json`)
 
-    `plan` is the single sanctioned predicate-authoring path. It runs a
-    deterministic clarify floor (it flags a missing live-verification target +
-    scope) and persists a reviewable proposal. As the orchestrator you use
-    CALLER-DRAFTS mode: you already reasoned about the goal, so you supply the
-    candidate predicates and kazi spawns NO inner model. Supply the payload inline
-    with `--predicates`, or on stdin under `--json`:
+    `plan` is the single sanctioned authoring path. It AUTHORS or REFINES a
+    GOAL-SET -- the acceptance `predicates`, plus the optional `[[groups]]` that
+    partition a larger goal and the `needs` edges that order the groups into
+    dependency waves -- and persists it as a reviewable PROPOSAL. The proposal
+    HOLDS for human approval: `plan` itself runs NOTHING and dispatches NO harness,
+    so nothing touches the workspace before you approve (Step 2). It also runs a
+    deterministic clarify FLOOR over the draft -- it flags a missing
+    live-verification target and an unscoped goal -- so an under-specified goal is
+    surfaced in the proposal, never silently accepted.
+
+    As the orchestrator you use CALLER-DRAFTS mode (ADR-0023): you (the strong
+    model) already reasoned about the goal, so YOU supply the candidate predicates
+    and kazi spawns NO second/inner model to re-derive them -- it only validates
+    them, applies the floor, and persists. Supply the payload inline with
+    `--predicates`, or on stdin under `--json`:
 
     ```sh
     kazi plan --json --predicates '{
@@ -185,6 +194,15 @@ defmodule Kazi.Teach.InstallSkill do
     JSON array of predicate entries is also accepted and wrapped for you). A
     positional idea is OPTIONAL in caller-drafts mode -- the predicates carry the
     intent.
+
+    WHERE the predicates come from: if a `/plan` strategy doc already exists for
+    this work, DERIVE the predicates from it rather than inventing them. Each task
+    in a `/plan` WBS carries an `acc:` line -- its machine-checkable acceptance
+    criterion -- and those `acc:` lines ARE the predicate set: read them off the
+    strategy doc, map each to a `{"id", "provider", "description"}` predicate, and
+    draft those (the `/plan` -> goal-set bridge). When NO strategy doc exists, draft
+    the predicates from the idea directly. Either way it stays caller-drafts: you
+    supply the result and kazi spawns no model.
 
     For a human or a thin non-model script that has only a prose idea, kazi-drafts
     mode spawns a harness to draft the predicates instead:
@@ -280,14 +298,14 @@ defmodule Kazi.Teach.InstallSkill do
 
     ## Pin `schema_version`
 
-    Every `--json` object carries a `schema_version` (currently **1**). Read it off
-    the first object you parse and refuse (or branch) if it is not the version you
-    were written against:
+    Every `--json` object carries a `schema_version` (currently **2**, bumped by
+    ADR-0032 when the verbs unified). Read it off the first object you parse and
+    refuse (or branch) if it is not the version you were written against:
 
     ```sh
     result=$(kazi apply "$GOAL" --workspace "$WS" --harness opencode --json)
     ver=$(printf '%s' "$result" | jq -r .schema_version)
-    [ "$ver" = "1" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
+    [ "$ver" = "2" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
     next=$(printf '%s' "$result" | jq -r .next_action)
     ```
 
