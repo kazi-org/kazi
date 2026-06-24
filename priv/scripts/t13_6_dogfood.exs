@@ -12,10 +12,10 @@
 # Part 2 — demonstrate Kazi.Reconcile.OpenApiImporter on the committed T13.1
 #          fixture -> grouped http_probe acceptance predicates.
 #
-# NOTE (honest limitation, see devlog): the original "dogfood sirerun" target is
-# a GO codebase and the scanner is Elixir-only, so the scan half runs on kazi
-# itself here. Follow-ups: a Go scanner, ingest sire's YAML OpenAPI (JSON-only
-# today), or the prose importer over sire's ADRs.
+# NOTE (honest limitation, see devlog): the original "dogfood an external service"
+# target is a GO codebase and the scanner is Elixir-only, so the scan half runs on
+# kazi itself here. Follow-ups: a Go scanner, ingest the service's YAML OpenAPI
+# (JSON-only today), or the prose importer over the service's ADRs.
 
 alias Kazi.Reconcile.{SurfaceScanner, Coverage, OpenApiImporter}
 
