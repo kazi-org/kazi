@@ -156,8 +156,17 @@ kazi schema [run|status]    # the versioned --json result schema(s) as data
 `flags` (`name`, `type`, `description`, `aliases`). `kazi schema` emits the
 versioned result schemas; both are JSON.
 
+## Verifying a pooled task with kazi
+
+In an /apply --pool session, gate your task's MERGE on objective convergence
+(ADR-0026 L1): bridge the task's acc line to predicates, propose/approve, then
+`kazi run --json` -- rebase-merge ONLY when `status` is `converged`; on
+`stuck` / `over_budget` / `error`, escalate and do NOT merge. Full copy-pasteable
+gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
+
 ## See also
 
+- `docs/pool-verification-gate.md` -- the pre-merge verification gate (ADR-0026 L1).
 - `docs/orchestrator-recipe.md` -- the full recipe (source of truth).
 - `docs/schemas/run-result.md`, `docs/schemas/status.md` -- the committed schemas.
 - `docs/adr/0023-harness-friendly-agent-drivable-cli.md` -- the agent-drivable CLI.
