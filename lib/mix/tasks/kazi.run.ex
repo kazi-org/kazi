@@ -20,7 +20,11 @@ defmodule Mix.Tasks.Kazi.Run do
     # T27.2 (ADR-0032): one-line deprecation hint to STDERR (never stdout), then
     # delegate to the canonical `mix kazi.apply` task. The CLI's own stdout (incl.
     # the --json contract) is untouched.
-    IO.puts(:stderr, "note: `mix kazi.run` is deprecated; use `mix kazi.apply`")
+    IO.puts(
+      :stderr,
+      "note: `mix kazi.run` is deprecated; use `mix kazi.apply` (removed in v0.5.0)"
+    )
+
     Mix.Tasks.Kazi.Apply.run(argv)
   end
 end
