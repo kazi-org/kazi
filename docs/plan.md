@@ -86,6 +86,9 @@ Open work:
 - **Token efficiency** (no new UC) -- E19: realize the unwired orientation-prefix +
   stable-prefix caching (ADR-0010) and a multi-iteration benchmark to earn (or
   refute) the "cheaper" claim (UC-033 + infrastructure).
+- **UC-036** (harden a multi-session `/apply --pool` workflow with kazi: objective
+  done as a merge gate, blast-radius coordination beneath task-claims, live swarm
+  observability, phone-driven direction, ADR-0026) -- E20.
 
 ## Checkable Work Breakdown
 
@@ -283,6 +286,36 @@ net win.
 - [ ] T19.4 Multi-iteration benchmark harness: build a repeatable bench (a `mix` task or script under `bench/`) that converges a fixture needing >=3 dispatches three ways -- (A) vanilla `claude -p` session, (B) kazi->claude WITHOUT the prefix (pre-T19.1 behavior behind a flag/config), (C) kazi->claude WITH the prefix + stable head (T19.1/T19.2) -- capturing per-dispatch input/output/cache-read tokens + cost via the harness shim (the docs/devlog.md 2026-06-24 method).  Owner: TBD  Est: 2h  verifies: [infrastructure]  deps: [T19.1, T19.2, T19.3]  acc: the bench runs all three arms on a real fixture and emits a per-arm token + cost + iteration table; the shim captures every dispatch; the method is documented and repeatable.
 - [ ] T19.5 Run the multi-iteration benchmark + record the verdict: run T19.4; compare B vs C (does the stable prefix raise cross-dispatch cache_read / cut cost, and do fewer orientation tool-calls offset the added prefix tokens?) and A vs C (kazi vs vanilla over multiple iterations). Record honest numbers + the net verdict in `docs/devlog.md`; if C is NOT a net win, say so and recommend keeping file-based orientation.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T19.4]  acc: a `docs/devlog.md` entry with the A/B/C multi-iteration table, the B-vs-C cache-hit delta, and a clear keep/revert recommendation for the prefix wiring; honest if inconclusive.
 
+### E20 -- kazi UNDER /apply --pool: objective-done + coordination + observability beneath pooled sessions (P1, ADR-0026)
+
+The operator runs several Claude Code sessions on one tree via `/loop /apply --pool`,
+picking tasks from this plan with `/claim` git-ref locks. That workflow is a
+hand-rolled kazi; ADR-0026 integrates kazi UNDER each pool session (shape a) to
+harden its documented failure modes (session-asserted/false "done", ~5/10 wave
+stalls, silent logical conflicts) WITHOUT replacing `/apply --pool`. Adoption is
+LAYERED: L1 verification gate -> L2 objective-done loop per task -> L3 blast-radius
+leasing across sessions (NATS) -> L4 shared observability + phone direction. L1-L2
+need git-refs only; NATS (ADR-0004) is required only at L3.
+
+Bridge: `/claim` stays the OUTER coordination (task selection); kazi's blast-radius
+leases (`Kazi.Partition.partition/3` + `Kazi.Coordination.PartitionLease.lease_keys/3`,
+ADR-0006) are the INNER coordination. The authoring bridge is caller-drafts
+(`kazi propose --json --predicates <json>`, ADR-0023) turning a task's `acc:` line
+into predicates; `kazi run --json` is the objective-done gate. No new authoring path;
+ADR-0001 intact (kazi is the inner controller beneath the session-as-orchestrator).
+
+- [ ] T20.1 `acc:` -> predicates bridge (L1): a documented procedure + a thin helper (a script under `priv/` or a `kazi` flag) that converts a plan task's `acc:` line into a caller-drafts predicates JSON suitable for `kazi propose --json --predicates`. Deterministic, hermetic.  Owner: TBD  Est: 1.5h  verifies: [UC-036]  deps: []  acc: ExUnit on fixture tasks -- an `acc:` line yields a parseable predicates payload that `propose --json --predicates` accepts (floor applied, no inner model spawned); same input -> same output.
+- [ ] T20.2 Pool verification-gate recipe (L1): a repo-side recipe (`docs/` + an `AGENTS.md` addition) for a pool session to run `kazi run --json` on its task's predicates BEFORE merge and BLOCK the merge unless `converged`; on `stuck`/`over_budget` it escalates (does not merge). Works git-refs only (no NATS).  Owner: TBD  Est: 1h  verifies: [UC-036, UC-033]  deps: [T20.1, T15.8]  acc: a documented, copy-pasteable gate a session runs pre-merge; a fixture non-converged task is BLOCKED with a clear reason; a converged one passes; every command verified against `kazi help --json`.
+- [ ] T20.3 Opt-in kazi gate in the GLOBAL `/apply` skill (L1, cross-repo, enhance-globally): add `/apply --verify-with-kazi` that, after a task's work, runs the T20.2 gate; OFF by default; the skill stays global (`~/.claude/skills/apply`), not project-local. Keep it in sync with kazi via `kazi help --json`.  Owner: TBD  Est: 1.5h  verifies: [UC-036, infrastructure]  deps: [T20.2]  acc: `/apply --verify-with-kazi` blocks a merge when kazi is non-converged and is a no-op without the flag; the skill references only real kazi commands; documented as cross-repo.
+- [ ] T20.4 "Drive kazi for a pooled task" orchestrator recipe (L2): the full per-task loop -- `kazi propose --json --predicates` (caller-drafts) -> `approve` -> `run --json [--stream]` -> branch on `next_action` -- so a session drives kazi to objective done with the loop's guards (stuck/regression/flake/budget), not a single pass. Reuses T15.8/T17.4.  Owner: TBD  Est: 1h  verifies: [UC-036, UC-033]  deps: [T20.1]  acc: a session drives a fixture task end to end via the recipe on the current release; a deliberately-insufficient first dispatch is RE-dispatched by the loop, not merged; honest result.
+- [ ] T20.5 Per-task model tiering (L2, optional): run the inner loop on a cheap/local harness (`--harness opencode/claw --model <local>`) so the pool runs cheaper; objective predicates keep the cheap model honest. HONEST about local-model speed (devlog T8.11/2026-06-24).  Owner: TBD  Est: 1h  verifies: [UC-036]  deps: [T20.4]  acc: a documented tiered invocation; a fixture task converges via a cheap harness OR an honest "wiring proven, too slow" note (like the opencode smoke); no false convergence claim.
+- [ ] T20.6 Per-task blast-radius lease for a pooled run (L3, NATS): a pool session acquires a kazi lease for its task's blast radius (`Kazi.Partition.partition/3` -> `PartitionLease.lease_keys/3`) BEFORE editing; overlapping radii serialize, disjoint run free. Lease is scoped to the run and released on terminal state.  Owner: TBD  Est: 2h  verifies: [UC-036]  deps: [T20.4]  acc: ExUnit + a 2-session sim -- two tasks with overlapping blast radii serialize on the lease; disjoint radii proceed concurrently; lease released on converged/stuck/over_budget; requires a running NATS (skips honestly without one).
+- [ ] T20.7 `/claim` <-> kazi-lease compose-boundary + deadlock safety (L3): document and TEST the contract -- claim (task) acquired first, then the kazi blast-radius lease; lease TTL bounds a crashed holder; release ordering (lease before claim) -- so two sessions each holding a claim + a lease cannot deadlock.  Owner: TBD  Est: 2h  verifies: [UC-036, infrastructure]  deps: [T20.6]  acc: ExUnit -- a constructed cross-acquire scenario does not deadlock (TTL/ordering breaks it); the contract is documented in `docs/` and referenced by the recipe.
+- [ ] T20.8 Live pool observability (L4): point the LiveView dashboard + presence + lease map at a shared kazi instance so every session's leases + per-goal convergence history are visible in real time; verify in a browser against a live 2+ session pool.  Owner: TBD  Est: 1.5h  verifies: [UC-036]  deps: [T20.6]  acc: the dashboard shows >=2 concurrent sessions' leases + convergence live; exercised in a real browser (agent-browser); read-only, decoupled from the loop (ADR-0011).
+- [ ] T20.9 Phone-driven pool direction (L4): use the Telegram bridge to declare/approve goals and receive pings on `converged`/`stuck`/`over_budget` from the pool, fitting the remote setup (phone -> a Mac running the pool).  Owner: TBD  Est: 1h  verifies: [UC-036]  deps: [T20.4]  acc: a declared/approved goal from Telegram runs in the pool and pings the phone on each terminal state; honest result.
+- [ ] T20.10 "Harden /apply --pool with kazi" guide (docs): a `docs/` guide covering the 4 layers, the `/claim`<->lease boundary, NATS-only-at-L3, the failure modes it fixes (false-completion, 5/10 stall, silent logical conflict), and honest maturity (shape b deferred).  Owner: TBD  Est: 1.5h  verifies: [UC-036]  deps: [T20.3, T20.7, T20.8]  acc: a reader can adopt L1 today and understand the path to L3/L4; references only real commands/modules; coherent with ADR-0026.
+- [ ] T20.11 LIVE dogfood (the honest proof): run a REAL multi-session `/apply --pool` with kazi as the L1 gate on a real plan slice (e.g. the E18 bug fixes); record evidence -- did the gate BLOCK a non-converged task? -- in `docs/devlog.md`. After L3, extend to a leasing dogfood (two sessions, overlapping blast radius, serialized).  Owner: TBD  Est: 2h  verifies: [UC-036]  deps: [T20.3]  acc: observed evidence in `docs/devlog.md` that the kazi gate caught (or cleanly passed) real pooled tasks; every claim is observed, not asserted; honest if a layer was skipped.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -306,6 +339,11 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E18 (benchmark bug fixes, parallel):** T18.1, T18.2, T18.3, T18.4 are independent (different files) and run in PARALLEL -> T18.5 (re-verify + lint) after all. Independent of E12-E17; safe to land first since they harden the run loop everything else exercises.
 - **Wave E19-1 (token-efficiency wiring):** T19.1 (inject the cached orientation pack as a stable prompt prefix on the live loop) -> T19.2 (Anthropic `cache_control` on the stable prefix) -> T19.3 (use `truncate_evidence/2` on the live dispatch path). Sequential: each refines `dispatch_prompt`/the adapter.
 - **Wave E19-2 (measure):** T19.4 (multi-iteration benchmark harness) -> T19.5 (run + record A/B/cached numbers). After E18 (clean persistence) and E19-1.
+- **Wave E20-L1 (gate, no NATS -- start here):** T20.1 (`acc:`->predicates) -> T20.2 (pool gate recipe) -> T20.3 (opt-in `/apply --verify-with-kazi`); T20.11 (live L1 dogfood) after T20.3. Independently valuable; ships before any NATS.
+- **Wave E20-L2 (objective-done loop):** T20.4 (orchestrator recipe) -> T20.5 (per-task tiering, optional).
+- **Wave E20-L3 (blast-radius leases, NATS):** T20.6 (per-task lease) -> T20.7 (`/claim`<->lease boundary + deadlock safety).
+- **Wave E20-L4 (observability + direction):** T20.8 (live dashboard/lease map), T20.9 (Telegram direction) in parallel after T20.6/T20.4.
+- **Wave E20-docs:** T20.10 (the adoption guide) after L1+L3+L4 land.
 
 ## Risk Register
 
@@ -323,6 +361,11 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E18-1 | A read-model serialization change (T18.2) alters the stored shape and breaks the deserialize round-trip / dashboard reads. | Med | Low | T18.2 keeps `:pass`/`:fail` serialization byte-compatible; only non-JSON evidence (the crash case) changes; an ExUnit round-trip pins it. |
 | R-E19-1 | Injecting the orientation prefix (T19.1) ADDS per-dispatch input tokens and may be net-NEGATIVE if it does not save enough exploration / cache. | Med | Med | Treat as a hypothesis: T19.4/T19.5 measure B-vs-C and the verdict may be REVERT (keep file-based orientation). Prefix kept behind a flag so reverting is config, not code. |
 | R-E19-2 | Cross-dispatch prompt-cache hits depend on the inner harness's own cache (kazi sets no `cache_control`) and a <5min TTL between dispatches; slow predicate evaluation can blow the TTL. | Low | Med | T19.2 maximizes the stable head so hits are likely when dispatches are rapid; T19.5 reports the realized cache_read delta honestly rather than assuming the win. |
+| R-E20-1 | Running `/claim` (git refs) AND kazi leases (NATS) can deadlock two sessions each holding a claim + a lease. | High | Low | T20.7 fixes the acquire order (claim then lease), bounds a crashed holder with a lease TTL, and orders release (lease before claim); a constructed cross-acquire test proves no deadlock. |
+| R-E20-2 | L3/L4 add a NATS dependency the pool does not have today (CLAUDE.md: NATS not required until Slice 3). | Med | Med | L1-L2 are git-refs-only and ship first; NATS is opt-in, required only at L3 (blast-radius leasing) / L4 (presence). Adopters get value before NATS. |
+| R-E20-3 | The cheaper-via-tiering win (T20.5) is gated by local-model speed (T8.11). | Med | High (known) | T20.5 is optional; objective done holds regardless of implementer quality; report wiring-vs-fast-convergence honestly, never a false convergence. |
+| R-E20-4 | The opt-in gate in the GLOBAL `/apply` skill drifts from kazi's CLI (cross-repo). | Med | Med | The skill references only commands `kazi help --json` reports; enhance globally (not project-local, per the skills policy); the recipe pins the JSON contract (`schema_version`). |
+| R-E20-5 | kazi overhead is not worth it for trivial pooled tasks. | Low | Med | The gate is OPT-IN per task (`--verify-with-kazi`); reserve kazi for tasks with real verification surface (live endpoints, regressions, multi-iteration); trivial tasks use the bare pool. |
 
 ## Operating Procedure
 
@@ -348,6 +391,31 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E20: kazi under /apply --pool, P1 + ADR-0026)
+- **Created ADR-0026** (kazi UNDER `/apply --pool`, shape a): `/claim` stays the
+  outer task-selection coordination; kazi's blast-radius leases
+  (`Kazi.Partition`/`PartitionLease`, ADR-0006) are the inner coordination; the
+  authoring bridge is caller-drafts (`propose --json --predicates`) turning a task's
+  `acc:` into predicates; `run --json` is the objective-done gate. Does NOT replace
+  the pool (shape b deferred); ADR-0001 intact.
+- **Added E20** (P1, ADR-0026): the exhaustive integration, LAYERED so value lands
+  without an up-front NATS dependency:
+  - L1 verification gate (no NATS): T20.1 `acc:`->predicates bridge, T20.2 pool
+    gate recipe, T20.3 opt-in `/apply --verify-with-kazi` (global skill, cross-repo).
+  - L2 objective-done loop: T20.4 orchestrator recipe, T20.5 per-task model tiering.
+  - L3 blast-radius leases (NATS): T20.6 per-task lease, T20.7 `/claim`<->lease
+    compose-boundary + deadlock safety.
+  - L4 observability + direction: T20.8 live dashboard/lease map, T20.9 Telegram.
+  - Cross-cutting: T20.10 adoption guide, T20.11 LIVE multi-session dogfood (the
+    honest proof -- did the gate block a non-converged task?).
+- **UC-036** added (harden multi-session `/apply --pool` with kazi). Waves
+  (E20-L1..L4 + docs) and risk rows R-E20-1..5 added (deadlock, NATS cost,
+  local-model speed, global-skill drift, trivial-task overhead).
+- Rationale: the operator's `/apply --pool` workflow is a hand-rolled kazi; this
+  hardens its documented failure modes (false-completion, ~5/10 wave stalls, silent
+  logical conflicts) as an opt-in layer beneath the sessions they already run.
+- ADR created: `docs/adr/0026-kazi-under-apply-pool.md` (+ README index).
 
 ### 2026-06-24 -- Change Summary (E17 sharpened: adoption-first docs rewrite, P1)
 - **Reframed E17** from "lead with the agent workflow" (P2) to a decisive,
