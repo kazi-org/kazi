@@ -11,14 +11,12 @@ emitted on stdout and the process exits `0` on convergence, non-zero otherwise.
 The exit code is the same on both surfaces; `--json` chooses only the output
 shape.
 
-## Command key (`apply`, with `run` as a deprecated alias)
+## Command key (`apply`)
 
 The verb that produces this object is **`apply`** (`kazi apply --json`). The old
-verb **`run`** (`kazi run --json`) is a **deprecated alias** (ADR-0032): it
-dispatches identically and emits this **same** result object at the same
-`schema_version`, so existing callers keep working through the deprecation
-window. The aliases (`run`, plus `propose` for `plan`) are scheduled for removal
-in a later minor; new recipes should call `apply`.
+verb **`run`** (`kazi run --json`) was a deprecated alias (ADR-0032) and was
+**removed in v0.6.0** (T27.9): `kazi run` / `kazi propose` no longer parse. Call
+`apply` (and `plan` for authoring).
 
 ## Compatibility
 
@@ -114,7 +112,7 @@ surface and branches on the non-zero exit:
 
 ## Streaming progress (JSONL) — `apply --json --stream` (T15.4, ADR-0023 decision 3)
 
-`kazi apply --json --stream` (alias `kazi run --json --stream`) emits a **JSONL
+`kazi apply --json --stream` emits a **JSONL
 stream** instead of a single object: one JSON object **per line** per loop
 iteration, **terminated** by the single result object above. Each line parses
 **independently**, so an orchestrator monitors a long convergence line-by-line

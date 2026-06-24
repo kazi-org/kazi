@@ -70,7 +70,7 @@ authoring path). This is where the expensive reasoning is spent:
 mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" > /tmp/acc-predicates.json
 
 # propose: floor + persist, NO model spawned
-kazi propose --json --predicates "$(cat /tmp/acc-predicates.json)"
+kazi plan --json --predicates "$(cat /tmp/acc-predicates.json)"
 
 # review the clarify gaps (sharpen acc: + re-bridge if a live target is missing),
 # then approve the proposal_ref the propose result returned
@@ -88,10 +88,10 @@ profile; `--model` overrides the goal-file's harness model:
 
 ```sh
 # cheap/local: opencode wired to a locally-hosted model
-kazi run <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json
+kazi apply <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json
 
 # follow a long convergence live (one JSONL line per iteration, terminal object last)
-kazi run <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json --stream
+kazi apply <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json --stream
 ```
 
 `--harness` accepts the registered profile ids: `claude` (default), `opencode`,

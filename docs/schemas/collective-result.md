@@ -5,9 +5,8 @@ stdout on termination (T21.8, ADR-0027 + ADR-0023). It is the COLLECTIVE compani
 to the serial `apply --json` contract (`docs/schemas/run-result.md`): where that
 object reports ONE goal's loop result, this object reports the **collective verdict
 over a partitioned goal-set** — the parallel scheduler's `%{collective:,
-partitions:}` result rendered and versioned. (`apply` is the primary verb;
-`kazi run --parallel --json` is the deprecated alias, ADR-0032, emitting the same
-object.)
+partitions:}` result rendered and versioned. (`apply` is the verb; the deprecated
+`kazi run --parallel --json` alias was removed in v0.6.0, T27.9.)
 
 `--parallel` drives the native parallel scheduler (`Kazi.Scheduler.run_goals/2`):
 it partitions the goal-set by blast radius, spawns one supervised reconciler per
@@ -167,8 +166,7 @@ observable). `[]` when nothing is blocked.
 
 ## `apply --explain` / `--dry-run`: the schedule, dispatched nothing (T23.6)
 
-`kazi apply <goal> --explain` (alias `--dry-run`; `kazi run --explain` is the
-deprecated verb alias) is PURE PLANNING: it computes the
+`kazi apply <goal> --explain` (alias `--dry-run`) is PURE PLANNING: it computes the
 wave schedule — the topological `needs`-DAG frontiers + the blast-radius
 PARTITIONING within each frontier — PRINTS it, exits `0`, and **dispatches
 nothing** (no reconciler, harness, lease, or worktree is touched). It makes

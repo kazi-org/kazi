@@ -81,9 +81,9 @@ file is genuinely absent). It does **not** run the real `claude` harness.
 Point kazi at the goal-file, with the kazi repo as the workspace:
 
 ```sh
-kazi run priv/goals/e3-t3.4-standing-reconciler.toml --workspace /path/to/kazi
+kazi apply priv/goals/e3-t3.4-standing-reconciler.toml --workspace /path/to/kazi
 # or, from a source checkout:
-mix kazi.run priv/goals/e3-t3.4-standing-reconciler.toml --workspace /path/to/kazi
+mix kazi.apply priv/goals/e3-t3.4-standing-reconciler.toml --workspace /path/to/kazi
 ```
 
 `--workspace` is the directory the harness edits and the providers run their

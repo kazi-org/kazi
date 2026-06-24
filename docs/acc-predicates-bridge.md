@@ -27,9 +27,9 @@ persists, and gates.
         |  Kazi.Pool.AccBridge.acc_to_predicates/1   (half 1 — this repo)
         v
   caller-drafts predicates JSON
-        |  kazi propose --json   (caller-drafts; floor + persist, NO model — half 2)
+        |  kazi plan --json   (caller-drafts; floor + persist, NO model — half 2)
         v
-  a proposed goal  →  kazi approve  →  kazi run   (the convergence gate)
+  a proposed goal  →  kazi approve  →  kazi apply   (the convergence gate)
 ```
 
 `Kazi.Pool.AccBridge` (in `lib/kazi/pool/acc_bridge.ex`) is the thin,
@@ -74,9 +74,9 @@ mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" > /tmp/acc-predicat
 # 2. Feed it to kazi caller-drafts. kazi applies the clarify FLOOR (flags a missing
 #    live-verification target + scope), persists the proposal, and spawns NO inner
 #    model. Read the JSON draft (proposal_ref + the clarify gaps).
-kazi propose --json --predicates "$(cat /tmp/acc-predicates.json)"
+kazi plan --json --predicates "$(cat /tmp/acc-predicates.json)"
 #    …or pipe it (kazi reads stdin under --json):
-mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi propose --json
+mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi plan --json
 
 # 3. Review the floor. If `clarify` flags `live-target`, sharpen the acc (name the
 #    deployed URL / add a prod_log clause) and re-bridge — the gate is only honest
@@ -84,7 +84,7 @@ mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi propose --js
 
 # 4. Approve, then run as the MERGE gate. Land the PR only on convergence.
 kazi approve <proposal-ref> --json
-kazi run <goal-file> --json           # gate: merge only when kazi reports converged
+kazi apply <goal-file> --json           # gate: merge only when kazi reports converged
 ```
 
 ## Determinism + hermeticity
@@ -100,6 +100,6 @@ plan task it claimed.
 - It is L1 only — the verification gate. The objective-done loop (L2),
   blast-radius leasing (L3), and shared observability (L4) are later ADR-0026
   layers.
-- It does not add a `kazi` CLI subcommand. A `kazi propose --from-acc` flag (or a
+- It does not add a `kazi` CLI subcommand. A `kazi plan --from-acc` flag (or a
   `/apply --verify-with-kazi` gate in the global skill) is a deliberate follow-up
   (T20.2+).

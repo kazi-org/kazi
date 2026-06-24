@@ -61,7 +61,7 @@ blast-radius lease. The `with`-style entry point releases on EVERY exit path
 goals = [{"T-1234", ["lib/kazi/loop.ex", "Kazi.Loop.observe"]}]
 
 lease_acquire_opts = [
-  holder: run_id,             # REQUIRED: the run identity (e.g. the kazi run id)
+  holder: run_id,             # REQUIRED: the run identity (e.g. the kazi apply id)
   workspace: File.cwd!(),     # where the blast radius is expanded
   # backend: Kazi.Coordination.Lease.NATS,  # multi-machine only; omit for single node
   lease_opts: lease_opts      # backend opts (e.g. store: handle) + injected clock
@@ -69,7 +69,7 @@ lease_acquire_opts = [
 
 result =
   Kazi.Pool.Lease.with_lease(goals, lease_acquire_opts, fn ->
-    # === the edit + kazi run happen here, while the radius is leased ===
+    # === the edit + kazi apply happen here, while the radius is leased ===
     do_the_edit_and_kazi_run()
   end)
 
