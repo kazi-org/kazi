@@ -71,13 +71,13 @@ defmodule Kazi.CLIInstallSkillTest do
       assert File.exists?(Path.join(dir, "SKILL.md"))
     end
 
-    test "the written skill references real commands (propose/approve/run)", %{dir: dir} do
+    test "the written skill references the primary verbs (plan/approve/apply)", %{dir: dir} do
       capture_io(fn -> Kazi.CLI.run(["install-skill", "--dir", dir]) end)
       content = File.read!(Path.join(dir, "SKILL.md"))
 
-      assert content =~ "kazi propose --json"
+      assert content =~ "kazi plan --json"
       assert content =~ "kazi approve"
-      assert content =~ "kazi run"
+      assert content =~ "kazi apply"
       assert content =~ "--harness"
     end
   end

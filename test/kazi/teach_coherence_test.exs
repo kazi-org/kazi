@@ -167,22 +167,31 @@ defmodule Kazi.TeachCoherenceTest do
       assert_coherent(agents_md, cli_surface(), "AGENTS.md")
     end
 
-    test "both surfaces actually reference the core recipe commands (sanity)" do
+    test "the SKILL.md router references the primary recipe commands (sanity)" do
       # Guard against a regex that silently matches NOTHING (a guard asserting an
-      # empty set is vacuously true). Both docs MUST mention the propose ->
-      # approve -> run recipe, so confirm extraction found those commands.
-      for {doc, label} <- [
-            {Kazi.Teach.InstallSkill.skill_md(), "SKILL.md"},
-            {File.read!("AGENTS.md"), "AGENTS.md"}
-          ] do
-        cmds = referenced_commands(doc)
+      # empty set is vacuously true). After ADR-0032 the primary verbs are
+      # `plan`/`apply` (T26.1 router); the SKILL.md routes plan -> approve -> apply,
+      # so confirm extraction found those primary commands.
+      doc = Kazi.Teach.InstallSkill.skill_md()
+      cmds = referenced_commands(doc)
 
-        for required <- ["propose", "approve", "run"] do
-          assert required in cmds,
-                 "#{label} extraction did not find the `#{required}` command — " <>
-                   "the regex may be broken (the guard would be vacuously green)"
-        end
+      for required <- ["plan", "approve", "apply"] do
+        assert required in cmds,
+               "SKILL.md extraction did not find the `#{required}` command — " <>
+                 "the regex may be broken (the guard would be vacuously green)"
       end
+    end
+
+    test "the root AGENTS.md references the core recipe commands (sanity)" do
+      # AGENTS.md is owned by a separate task (T27.5) and may still teach the legacy
+      # `propose`/`run` verbs during the deprecation window; assert only that
+      # extraction is non-vacuous on the approve step both docs share.
+      doc = File.read!("AGENTS.md")
+      cmds = referenced_commands(doc)
+
+      assert "approve" in cmds,
+             "AGENTS.md extraction did not find the `approve` command — " <>
+               "the regex may be broken (the guard would be vacuously green)"
     end
   end
 
