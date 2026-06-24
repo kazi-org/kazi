@@ -1,14 +1,32 @@
 defmodule Kazi.Teach.InstallSkill do
   @moduledoc """
   Writes the kazi Claude Code SKILL.md, opt-in (T16.2, UC-031, ADR-0024
-  decision 1).
+  decision 1; restructured as a ROUTER in T26.1, ADR-0031).
 
-  `kazi install-skill` teaches an orchestrating Claude Code agent the recipe for
-  driving kazi as a tool: caller-drafts `kazi propose --json` -> review ->
-  `kazi approve --json` -> `kazi run --harness <cheap> --json [--stream]` -> parse
-  the result -> branch on `next_action`, plus the two-tier economics (a strong
-  model authors the predicates, a cheap/local model runs the loop, kazi keeps it
-  honest via objective termination).
+  `kazi install-skill` teaches an orchestrating Claude Code agent how to drive
+  kazi as a tool. The SKILL.md is a ROUTER: it recognizes four human-facing
+  sub-skill verbs and routes each to the matching real `kazi` CLI command --
+
+      plan   -> kazi plan    (author/refine the goal's acceptance predicates)
+      apply  -> kazi apply   (converge the goal -- the reconcile loop)
+      status -> kazi status  (read the convergence state from the read-model)
+      adopt  -> kazi init     (reverse-engineer a starter goal-file from a repo)
+
+  ADR-0031 introduced the router with a skill-verb -> CLI-verb MAP; ADR-0032 then
+  renamed the CLI verbs themselves (`run` -> `apply`, `propose` -> `plan`), so the
+  map is now an IDENTITY for plan/apply and a thin alias for adopt -> init. The old
+  CLI verbs `run`/`propose` remain as DEPRECATED ALIASES (ADR-0032 decision 2); the
+  router teaches only the primary verbs.
+
+  The body still teaches the underlying recipe -- caller-drafts `kazi plan --json`
+  -> review -> `kazi approve --json` -> `kazi apply --harness <cheap> --json
+  [--stream]` -> parse the result -> branch on `next_action` -- plus the two-tier
+  economics (a strong model authors the predicates, a cheap/local model runs the
+  loop, kazi keeps it honest via objective termination).
+
+  A NON-KAZI repo degrades cleanly: the router tells the agent to fall back to the
+  generic `/plan` + `/apply` skills when `kazi` is not on PATH, so the global skill
+  never hardcodes a kazi-only assumption (ADR-0031 consequences).
 
   This is CONSENT-FIRST: it writes only when the operator runs the command. A
   normal `kazi` run never touches `~/.claude`, and `brew install` only PRINTS a
@@ -18,9 +36,8 @@ defmodule Kazi.Teach.InstallSkill do
 
   `write/1`'s target directory is INJECTABLE (`:dir`): production defaults to
   `~/.claude/skills/kazi`, but tests pass a tmp dir so they never touch the real
-  `~/.claude`. The SKILL.md body is condensed from `docs/orchestrator-recipe.md`
-  (T15.8) and references ONLY real kazi commands/flags, so the T16.4 coherence
-  guard can assert it never drifts from the actual CLI surface.
+  `~/.claude`. The SKILL.md body references ONLY real kazi commands/flags, so the
+  T16.4 coherence guard can assert it never drifts from the actual CLI surface.
   """
 
   # The default skill directory under the user's Claude config. The SKILL.md is
@@ -62,22 +79,23 @@ defmodule Kazi.Teach.InstallSkill do
   def default_dir, do: Path.expand(@default_dir)
 
   @doc """
-  The SKILL.md document as a string -- the recipe an orchestrating Claude Code
+  The SKILL.md document as a string -- the ROUTER an orchestrating Claude Code
   agent learns. Exposed (not just written) so the T16.4 coherence guard can assert
   it references only real kazi commands/flags without reading the file off disk.
 
-  Condensed from `docs/orchestrator-recipe.md` (T15.8); every command/flag here is
-  a real kazi surface emitted by `kazi help --json`.
+  The router recognizes four sub-skill verbs (`plan`/`apply`/`status`/`adopt`) and
+  routes each to the matching real `kazi` CLI command; every command/flag here is a
+  real kazi surface emitted by `kazi help --json` (T26.1, ADR-0031/0032).
   """
   @spec skill_md() :: String.t()
   def skill_md do
     """
     ---
     name: #{@skill_name}
-    description: Drive kazi -- a reconciliation controller that converges a software goal to machine-checkable acceptance predicates -- as a tool from an orchestrating agent. Use when the user wants to author predicates for a goal, then have a cheap/local model grind until they objectively pass (and not declare victory early). The recipe is propose -> approve -> run, all over kazi's `--json` surface. Triggers include "converge this goal with kazi", "drive kazi", "have kazi run the loop", "author acceptance predicates and reconcile", or any task where you (a strong model) set the bar and a cheaper model should reach it under objective termination.
+    description: Drive kazi -- a reconciliation controller that converges a software goal to machine-checkable acceptance predicates -- as a tool from an orchestrating agent. A ROUTER over four verbs: plan (author the predicates), apply (converge the goal -- the reconcile loop), status (read convergence state), adopt (reverse-engineer a starter goal-file from a repo). Use when the user wants to author predicates for a goal, then have a cheap/local model grind until they objectively pass (and not declare victory early). Triggers include "converge this goal with kazi", "drive kazi", "have kazi run the loop", "plan/apply with kazi", "author acceptance predicates and reconcile", or any task where you (a strong model) set the bar and a cheaper model should reach it under objective termination.
     ---
 
-    # Drive kazi from an orchestrating agent
+    # Drive kazi from an orchestrating agent (router)
 
     kazi is a reconciliation controller: you declare a goal as machine-checkable
     acceptance predicates, and kazi drives a coding harness in a loop until those
@@ -85,10 +103,35 @@ defmodule Kazi.Teach.InstallSkill do
     is NOT a harness -- it drives one. You drive kazi by shelling out and parsing
     its `--json` output (never its prose).
 
+    This skill is a ROUTER. The user (or you) names a sub-skill verb; you route it
+    to the matching real `kazi` CLI command and drive it over `--json`:
+
+    | sub-skill verb | routes to     | what it does                                            |
+    |----------------|---------------|---------------------------------------------------------|
+    | `plan`         | `kazi plan`   | author/refine the goal's acceptance predicates (authoring path). |
+    | `apply`        | `kazi apply`  | converge the goal -- the reconcile loop (apply + loop + qualify). |
+    | `status`       | `kazi status` | read convergence/proposal state from the read-model (a pure read). |
+    | `adopt`        | `kazi init`   | reverse-engineer a starter goal-file from an existing repo.        |
+
+    The verb you TYPE, the skill, and the CLI now read the same: `plan` and `apply`
+    are the primary CLI verbs (ADR-0032). `adopt` is the one human alias -- it routes
+    to `kazi init`. The legacy CLI verbs `kazi run` and `kazi propose` still work as
+    DEPRECATED ALIASES of `apply`/`plan`; prefer the primary verbs. The full recipe
+    that `plan` and `apply` sit inside (author -> approve -> converge) is below.
+
     Confirm the live surface before you drive: `kazi help --json` emits the
     command/flag table and `kazi schema [<command>]` emits the versioned result
     schemas. They are generated from kazi's own command table, so they never drift.
     Prefer them over this document when in doubt.
+
+    ### Not a kazi repo? Degrade cleanly
+
+    The router assumes `kazi` is on PATH. If it is not (a repo that has not adopted
+    kazi, or a non-engineering task), do NOT fabricate a `kazi` invocation. Fall back
+    to the generic skills: use `/plan` to author the intent and `/apply` to execute
+    it. Run `adopt` (`kazi init <repo-dir>`) first only when the user wants to bring
+    kazi into the repo. kazi claims engineering/code goals; content, GTM, and ops work
+    stays on `/plan` + `/apply`.
 
     ## The two-tier economics (why drive kazi at all)
 
@@ -113,11 +156,11 @@ defmodule Kazi.Teach.InstallSkill do
     reaches for it; kazi holds the bar still. You own the per-phase model policy --
     kazi bakes in none of it; it just exposes `--harness` / `--model` per call.
 
-    ## The loop: propose -> approve -> run
+    ## The loop the verbs sit inside: plan -> approve -> apply
 
-    ### Step 1 -- author predicates (`kazi propose --json`)
+    ### Step 1 -- author predicates (`plan` verb -> `kazi plan --json`)
 
-    `propose` is the single sanctioned predicate-authoring path. It runs a
+    `plan` is the single sanctioned predicate-authoring path. It runs a
     deterministic clarify floor (it flags a missing live-verification target +
     scope) and persists a reviewable proposal. As the orchestrator you use
     CALLER-DRAFTS mode: you already reasoned about the goal, so you supply the
@@ -125,7 +168,7 @@ defmodule Kazi.Teach.InstallSkill do
     with `--predicates`, or on stdin under `--json`:
 
     ```sh
-    kazi propose --json --predicates '{
+    kazi plan --json --predicates '{
       "name": "ship a /healthz endpoint",
       "predicates": [
         {"id": "code", "provider": "test_runner", "description": "the route exists and tests pass"},
@@ -135,7 +178,7 @@ defmodule Kazi.Teach.InstallSkill do
     }'
 
     # or pipe it on stdin (under --json):
-    echo "$PAYLOAD" | kazi propose --json
+    echo "$PAYLOAD" | kazi plan --json
     ```
 
     The payload is a `{"name", "predicates": [...], "rationale"}` object (a bare
@@ -147,7 +190,7 @@ defmodule Kazi.Teach.InstallSkill do
     mode spawns a harness to draft the predicates instead:
 
     ```sh
-    kazi propose "a /healthz endpoint that returns 200" --json --yes
+    kazi plan "a /healthz endpoint that returns 200" --json --yes
     ```
 
     Under `--json` kazi is NON-INTERACTIVE: it never prompts or blocks on stdin. If
@@ -155,17 +198,17 @@ defmodule Kazi.Teach.InstallSkill do
     rather than hanging -- pass `--yes` to draft best-effort, supply predicates
     (caller-drafts), or sharpen the idea.
 
-    `propose --json` emits a single JSON object: `goal_id`, `proposal_ref` (the
+    `plan --json` emits a single JSON object: `goal_id`, `proposal_ref` (the
     approve/reject handle), `status`, `predicates`, `rationale`, and a `clarify`
     array (the floor's open gaps, each `{id, prompt, recommended}`). All carry
-    `schema_version`. Useful propose flags: `--workspace <path>`, `--strict` (refuse
+    `schema_version`. Useful plan flags: `--workspace <path>`, `--strict` (refuse
     an underspecified idea non-interactively), `--adr` (also write an ADR-lite doc).
 
     ### Step 2 -- review and approve (`kazi approve --json`)
 
     Read the proposed `predicates` and the `clarify` gaps. If a gap matters (e.g.
-    no live-verification predicate), re-`propose` with it closed. When satisfied,
-    approve the `proposal_ref` from Step 1:
+    no live-verification predicate), re-run `kazi plan` with it closed. When
+    satisfied, approve the `proposal_ref` from Step 1:
 
     ```sh
     kazi approve <proposal-ref> --json
@@ -176,16 +219,16 @@ defmodule Kazi.Teach.InstallSkill do
     declines a proposal, kept for audit.) Browse the queue with
     `kazi list-proposed --json` (optionally `--status proposed|approved|rejected`).
 
-    ### Step 3 -- converge (`kazi run --harness <cheap> --json [--stream]`)
+    ### Step 3 -- converge (`apply` verb -> `kazi apply --harness <cheap> --json [--stream]`)
 
-    Run the approved goal with the CHEAP harness (the two-tier split). `kazi run`
-    takes a GOAL-FILE path:
+    Apply the approved goal with the CHEAP harness (the two-tier split). This is the
+    `apply` verb -- the reconcile loop. `kazi apply` takes a GOAL-FILE path:
 
     ```sh
-    kazi run <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
+    kazi apply <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
     ```
 
-    `run --json` emits ONE terminal result object on termination. The exit code
+    `apply --json` emits ONE terminal result object on termination. The exit code
     mirrors convergence: `0` only on `converged`, non-zero otherwise. For a LONG
     convergence add `--stream` for a JSONL progress stream -- one
     `{"event": "iteration", ...}` line per loop iteration, terminated by the final
@@ -193,12 +236,16 @@ defmodule Kazi.Teach.InstallSkill do
     the object without an `event`; that is the terminal result you branch on:
 
     ```sh
-    kazi run <goal-file> --workspace <path> --harness opencode --json --stream
+    kazi apply <goal-file> --workspace <path> --harness opencode --json --stream
     ```
+
+    A read-only `kazi apply --explain` evaluates the predicate vector WITHOUT
+    dispatching a harness -- that is "is this goal already done?" (qualification is a
+    facet of apply, not a separate verb; ADR-0031 decision 1).
 
     ### Step 4 -- parse the result and branch on `next_action`
 
-    `run --json` gives you both the terminal `status` and a single derived
+    `apply --json` gives you both the terminal `status` and a single derived
     `next_action` hint, so you never re-derive the branch from the predicate vector:
 
     | `status`      | `next_action`  | exit | What you do |
@@ -210,12 +257,26 @@ defmodule Kazi.Teach.InstallSkill do
 
     `next_action` is an orchestration HINT, not a kazi action -- you own the policy.
 
-    ### Polling between steps (`kazi status <ref> --json`)
+    ### The `status` verb -- poll between steps (`kazi status <ref> --json`)
 
     `kazi status <ref> --json` is a PURE read of the read-model (nothing runs or
     mutates). The `<ref>` resolves as a run's goal id first (`kind: "run"`, with the
     latest iteration's predicate vector), else a `proposal_ref` (`kind: "proposal"`,
     the lifecycle state). An unknown ref is a JSON error with a non-zero exit.
+
+    ### The `adopt` verb -- bring kazi into a repo (`kazi init <repo-dir>`)
+
+    `adopt` reverse-engineers a STARTER goal-file from an existing repo by stack
+    detection, so a repo that has not declared predicates gets a runnable first draft.
+    Route it to `kazi init`:
+
+    ```sh
+    kazi init <repo-dir> --out goal.toml
+    ```
+
+    Then review the drafted goal-file, refine it via the `plan` verb, approve, and
+    `apply`. Use `adopt` once per repo to bootstrap; it is the on-ramp, not a step in
+    the per-goal loop.
 
     ## Pin `schema_version`
 
@@ -224,7 +285,7 @@ defmodule Kazi.Teach.InstallSkill do
     were written against:
 
     ```sh
-    result=$(kazi run "$GOAL" --workspace "$WS" --harness opencode --json)
+    result=$(kazi apply "$GOAL" --workspace "$WS" --harness opencode --json)
     ver=$(printf '%s' "$result" | jq -r .schema_version)
     [ "$ver" = "1" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
     next=$(printf '%s' "$result" | jq -r .next_action)
@@ -241,7 +302,7 @@ defmodule Kazi.Teach.InstallSkill do
 
     ```sh
     kazi help --json   | jq '.schema_version, (.commands[].name)'
-    kazi schema run    | jq '.schema_version, .fields[].name'
+    kazi schema apply  | jq '.schema_version, .fields[].name'
     ```
 
     `kazi help --json` lists every command with its `summary`, positional `args`,
