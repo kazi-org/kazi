@@ -76,6 +76,16 @@ defmodule Kazi.AuthoringTest do
     def run(_prompt, _workspace, _opts), do: {:error, {:command_not_found, "claude"}}
   end
 
+  # A stub that RAISES if driven — used to prove caller-drafts (a supplied
+  # `:proposal`) never spawns the harness/model (T15.2, ADR-0023 decision 4).
+  defmodule ExplodingHarness do
+    @behaviour Kazi.HarnessAdapter
+
+    @impl true
+    def run(_prompt, _workspace, _opts),
+      do: raise("caller-drafts must not drive the harness")
+  end
+
   setup do
     # Per-test transaction via the SQLite3 Sandbox — isolates rows between tests.
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
@@ -128,6 +138,39 @@ defmodule Kazi.AuthoringTest do
       assert [predicate] = goal.predicates
       assert predicate.id == "ok"
       assert predicate.kind == :tests
+    end
+
+    # T15.2 (ADR-0023 decision 4): caller-drafts. A `:proposal` supplied by the
+    # caller is used DIRECTLY — the same write path (parse → persist) — and the
+    # harness is NEVER driven, so the orchestrator pays for no second model call.
+    test "caller-drafts: a supplied :proposal bypasses the harness entirely" do
+      proposal = %{
+        "name" => "Caller drafted",
+        "predicates" => [%{"id" => "code", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Draft{} = draft} =
+               Authoring.propose("caller idea",
+                 harness: ExplodingHarness,
+                 proposal: proposal
+               )
+
+      # The supplied predicate was accepted and persisted, with NO harness run.
+      assert [predicate] = draft.goal.predicates
+      assert predicate.id == "code"
+      assert draft.status == :proposed
+
+      assert %ProposedGoal{status: "proposed"} =
+               Repo.get_by(ProposedGoal, proposal_ref: draft.proposal_ref)
+    end
+
+    test "caller-drafts: a supplied :proposal may be a JSON string" do
+      proposal = ~s({"predicates":[{"id":"code","provider":"test_runner"}]})
+
+      assert {:ok, %Draft{goal: goal}} =
+               Authoring.propose("caller idea", harness: ExplodingHarness, proposal: proposal)
+
+      assert [%{id: "code"}] = goal.predicates
     end
 
     test "forwards adapter_opts and workspace to the injected harness" do
