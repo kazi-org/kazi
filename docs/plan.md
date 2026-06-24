@@ -115,6 +115,11 @@ Open work:
   + README describe the native scheduler, predicate-graph waves, the agent-driven
   router model, and the renamed verbs -- current through ADR-0032, no command
   referenced that does not exist) -- E28.
+- **UC-043** (a Claude Code user gets better token economy with NO local model: chat
+  with Claude Code -> it drives kazi -> easy iterations on a cheap Claude model, hard
+  reasoning on a frontier model, predicates keep the cheap model honest; the
+  in-family-tiering cost story + benchmark, ADR-0033) -- E19 (T19.6/T19.7) + E25
+  (T25.11).
 
 ## Checkable Work Breakdown
 
@@ -317,6 +322,8 @@ net win.
 - [x] T19.3 Use `truncate_evidence/2` on the live dispatch path: `dispatch_prompt/2` renders evidence via raw `inspect/1`, so large evidence bypasses the T4.8 cap. Render evidence through `Kazi.Harness.Prompt.truncate_evidence/2` (default 8 KiB, head+tail window) on the live path.  Owner: pool  Done: 2026-06-24  verifies: [UC-033, infrastructure]  deps: [T19.1]  acc: ExUnit -- a dispatch with oversized predicate evidence truncates to the cap with a head+tail window; small evidence is unchanged.
 - [x] T19.4 Multi-iteration benchmark harness: build a repeatable bench (a `mix` task or script under `bench/`) that converges a fixture needing >=3 dispatches three ways -- (A) vanilla `claude -p` session, (B) kazi->claude WITHOUT the prefix (pre-T19.1 behavior behind a flag/config), (C) kazi->claude WITH the prefix + stable head (T19.1/T19.2) -- capturing per-dispatch input/output/cache-read tokens + cost via the harness shim (the docs/devlog.md 2026-06-24 method).  Owner: pool  Done: 2026-06-24 (harness built; live 3-arm run = T19.5)  verifies: [infrastructure]  deps: [T19.1, T19.2, T19.3]  acc: the bench runs all three arms on a real fixture and emits a per-arm token + cost + iteration table; the shim captures every dispatch; the method is documented and repeatable.
 - [ ] T19.5 Run the multi-iteration benchmark + record the verdict: run T19.4; compare B vs C (does the stable prefix raise cross-dispatch cache_read / cut cost, and do fewer orientation tool-calls offset the added prefix tokens?) and A vs C (kazi vs vanilla over multiple iterations). Record honest numbers + the net verdict in `docs/devlog.md`; if C is NOT a net win, say so and recommend keeping file-based orientation.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T19.4]  acc: a `docs/devlog.md` entry with the A/B/C multi-iteration table, the B-vs-C cache-hit delta, and a clear keep/revert recommendation for the prefix wiring; honest if inconclusive.
+- [ ] T19.6 Enable `--model` on the `claude` profile (ADR-0033 enabler): add `:model` to the `claude` profile's `supported_opts` and append `--model <m>` in `build_args` so `kazi apply --harness claude --model <cheap-claude>` selects a cheaper Claude model (Haiku/Sonnet). This unlocks in-family tiering with NO local model.  Owner: TBD  Est: 1h  verifies: [UC-043, UC-032]  deps: []  acc: ExUnit -- `build_args` appends `--model <m>` when given; `kazi apply --harness claude --model claude-haiku-4-5` resolves + passes the model to `claude -p`; absent `--model` the argv is byte-identical to today (back-compat); golden-transcript test updated.
+- [ ] T19.7 Benchmark the in-family Claude-tiering cost arm (ADR-0033, the headline cost-proof): extend the T19.4 harness with a tiering arm -- a frontier model (Opus) authors predicates ONCE via `kazi plan`, then `kazi apply --harness claude --model <cheap-claude>` drives a >=3-dispatch grind -- vs a vanilla-frontier baseline. Capture real $/tokens AND the convergence rate + correctness (a cheaper-but-fails result must be visible). Record the verdict in `docs/devlog.md`.  Owner: TBD  Est: 2h  verifies: [UC-043, UC-033]  deps: [T19.6, T19.4]  acc: a `docs/devlog.md` table comparing frontier-authors->cheap-Claude-grinds vs vanilla-frontier on $/tokens/iterations AND convergence/correctness; honest if the cheap tier fails to converge; local-Qwen arm noted as the secondary (privacy) comparison.
 
 ### E20 -- kazi UNDER /apply --pool: objective-done + coordination + observability beneath pooled sessions (P1, ADR-0026)
 
@@ -474,6 +481,7 @@ features -- agent-driving (skill/mcp/`--json`) is REAL now; promised work labell
 - [ ] T25.8 Docs quickstart-first (tutorial-then-reference): the first `docs/` page is a Quickstart that wires kazi into Claude Code (`install-skill`/`mcp`) and converges ONE real goal end-to-end via the agent; reference (predicate DSL, budget/stuck, `--json` schemas) follows. Cross-linked from a `docs/` index.  Owner: TBD  Est: 1.5h  verifies: [UC-039, UC-033]  delivers: [an agent-first Quickstart as the docs entry page]  deps: [T25.6]  acc: a reader follows the Quickstart and drives kazi from Claude Code end-to-end on the current release; reference pages follow; only real commands.
 - [ ] T25.9 Launch kit + OG card (HN-first): an OG/Twitter card showing the agent paradigm (wire into `site/src/layouts/Layout.astro`); a Show HN title (`kazi - drive your coding agent in a loop until the goal is objectively true`) + post draft + an X thread, framed against "agents claim done but aren't"; honest, no unshipped command as working.  Owner: TBD  Est: 1.5h  verifies: [UC-039, UC-035]  delivers: [an OG card + a Show HN/X launch kit draft]  deps: [T25.3, T25.7]  acc: a link-preview check renders the card; the launch kit leads with the agent paradigm + a reproducible hook; Lighthouse SEO stays >= 90; ready for the operator to post.
 - [ ] T25.10 Accuracy gate + live publish: every command across README/docs/site verified against `kazi help --json`; README<->site coherence (T9.9) + skill/`AGENTS.md` coherence (T16.4) green; version current; no dead links; deploy + verify live at https://kazi.sire.run and README renders on GitHub. Record the publish honestly.  Owner: TBD  Est: 1.5h  verifies: [UC-039, infrastructure]  deps: [T25.3, T25.4, T25.7, T25.8, T25.9]  acc: zero unshipped-command references; coherence green; live site shows the agent paradigm; README renders on GitHub; any skipped item flagged, not hidden.
+- [ ] T25.11 "Token economy without local models" content (ADR-0033, the broad-appeal cost story): a README/site section + a worked example showing the in-family Claude tiering -- you chat with Claude Code, it drives kazi, EASY iterations run on a cheap Claude model (e.g. Haiku 4.5), HARD reasoning on a frontier model (e.g. Opus 4.8), and predicates keep the cheap model honest -- so any Claude Code user gets better token economy with NO local model / DGX. Frame local/BYOM (opencode) as the secondary PRIVACY option. HONEST: the cost number is "designed for / being measured" until T19.7 runs (no unproven figure); model ids checked against the claude-api reference.  Owner: TBD  Est: 1.5h  verifies: [UC-043, UC-039]  delivers: [a "token economy without local models" section + a worked frontier->cheap-Claude example]  deps: [T19.6]  acc: README + site show the in-family tiering example (`kazi plan` with a frontier model -> `kazi apply --harness claude --model <cheap>`); local/BYOM is the secondary privacy note; no unproven cost number stated; commands verified against `kazi help --json`; coherence (T9.9) green.
 
 ### E26 -- The kazi skill becomes a router: plan/apply/status/adopt (P1, ADR-0031)
 
@@ -559,6 +567,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E18 (benchmark bug fixes, parallel):** T18.1, T18.2, T18.3, T18.4 are independent (different files) and run in PARALLEL -> T18.5 (re-verify + lint) after all. Independent of E12-E17; safe to land first since they harden the run loop everything else exercises.
 - **Wave E19-1 (token-efficiency wiring):** T19.1 (inject the cached orientation pack as a stable prompt prefix on the live loop) -> T19.2 (Anthropic `cache_control` on the stable prefix) -> T19.3 (use `truncate_evidence/2` on the live dispatch path). Sequential: each refines `dispatch_prompt`/the adapter.
 - **Wave E19-2 (measure):** T19.4 (multi-iteration benchmark harness) -> T19.5 (run + record A/B/cached numbers). After E18 (clean persistence) and E19-1.
+- **Wave E19-3 (in-family tiering, ADR-0033):** T19.6 (`claude --model` enabler -- unblocked now) -> T19.7 (Claude-tiering cost benchmark: frontier-authors -> cheap-Claude-grinds vs vanilla-frontier).
 - **Wave E20-L1 (gate, no NATS -- start here):** T20.1 (`acc:`->predicates) -> T20.2 (pool gate recipe) -> T20.3 (opt-in `/apply --verify-with-kazi`); T20.11 (live L1 dogfood) after T20.3. Independently valuable; ships before any NATS.
 - **Wave E20-L2 (objective-done loop):** T20.4 (orchestrator recipe) -> T20.5 (per-task tiering, optional).
 - **Wave E20-L3 (blast-radius leases, NATS):** T20.6 (per-task lease) -> T20.7 (`/claim`<->lease boundary + deadlock safety).
@@ -576,6 +585,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E25-1 (assets, parallel -- can start now):** T25.1 (tagline/noun), T25.2 (hero transcript), T25.5 (agent-voiced testimonial), T25.6 (invocation phrase), T25.7 (dogfood "done" leaderboard) are independent and run in parallel.
 - **Wave E25-2 (surfaces):** T25.3 (README) -> T25.4 (website) ; T25.8 (docs quickstart) alongside.
 - **Wave E25-3 (launch):** T25.9 (OG + Show HN/X kit) -> T25.10 (accuracy gate + live publish). Supersedes the messaging of the open E17 + E22 README/site tasks (execute those per ADR-0030 here).
+- **Wave E25-4 (token economy, ADR-0033):** T25.11 ("token economy without local models" content) after T19.6 (the `claude --model` enabler); the cost number stays "designed for / being measured" until T19.7.
 - **Wave E26-1 (router):** T26.1 (router SKILL.md + dispatch) -> T26.2 (`kazi plan`), T26.3 (`kazi apply`), T26.4 (`status`/`adopt`) in parallel -> T26.5 (coherence + retire loop/qualify from the code on-ramp).
 - **Wave E26-2 (prove):** T26.6 (live router dogfood; subsumption claim gated on T21.12/T23.9).
 - **Wave E27-1 (CLI rename, autonomous -- start now):** T27.1 (verbs + aliases) -> T27.3 (schema bump) -> T27.4 (help/schema); T27.2 (mix task) in parallel after T27.1.
@@ -651,6 +661,27 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (ADR-0033: cheaper via in-family Claude tiering, no local model)
+- **Created ADR-0033.** Operator insight: the "cheaper" story assumed a LOCAL model
+  (Qwen/DGX), which almost no engineer has (and the 35B was too slow, T8.11). The same
+  two-tier economics work IN-FAMILY: a frontier Claude model (Opus) authors predicates
+  once -> kazi drives the grind on a CHEAP Claude model (Haiku/Sonnet) -> predicates
+  keep it honest. Token economy for any Claude Code user, no DGX. Refines ADR-0023/0030;
+  local/BYOM demoted to the privacy add-on.
+- **Enabler gap found:** the `claude` harness profile omits `:model` from its
+  `supported_opts`, so `--harness claude --model <cheap>` can't select a cheaper Claude
+  model today. Added **T19.6** to fix it.
+- **Added tasks:** T19.6 (`claude --model` passthrough, unblocked now), T19.7 (the
+  in-family Claude-tiering COST benchmark -- frontier-authors -> cheap-Claude-grinds vs
+  vanilla-frontier; report $/tokens AND convergence/correctness), T25.11 ("token economy
+  without local models" content; cost stays "being measured" until T19.7). Waves E19-3,
+  E25-4. UC-043.
+- **Harness inventory (answered):** 5 supported -- claude (default), opencode, codex,
+  antigravity, claw -- all config-driven profiles (ADR-0016); `--harness`/`--model` per
+  call.
+- No trim (concurrent /apply --pool edits). Authored in an isolated git worktree
+  (lore L-0014). ADR: `docs/adr/0033-cheaper-via-in-family-claude-tiering.md` (+ index).
 
 ### 2026-06-24 -- Change Summary (operator decisions bake out the human-gated content tasks)
 - The operator made the four decisions that were blocking the content work; baked
