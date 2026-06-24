@@ -10,7 +10,7 @@ defmodule Kazi.Harness.Profiles.Opencode do
 
     * **argv** — `opencode run <prompt> --format json [--model <provider/model>]`
       (verified against the installed `opencode` CLI, v1.17.9: `opencode run
-      --help`). `--model` is `provider/model` (e.g. `dgx-ollama/qwen3.6:35b-a3b`).
+      --help`). `--model` is `provider/model` (e.g. `local-ollama/qwen3.6:35b-a3b`).
     * **stdout** — unlike Claude's single JSON envelope, `--format json` emits a
       **stream of JSON events, one per line (NDJSON)**: server-bus MessageV2
       events such as `message.part.updated` (carrying a `part`) and
@@ -24,7 +24,7 @@ defmodule Kazi.Harness.Profiles.Opencode do
   The parser was built against opencode's real MessageV2 schema — confirmed by
   inspecting the installed binary's embedded zod schemas and one live `step_start`
   event captured from `opencode run … --format json`, NOT a full live transcript
-  (the operator's DGX-hosted 35B model did not complete a turn inside the capture
+  (a locally-hosted 35B model did not complete a turn inside the capture
   window; Risk R-E8-1). Concretely, each NDJSON line is one of:
 
     * `{"type":"message.part.updated","properties":{"part":{"type":"text",
