@@ -113,10 +113,24 @@ defmodule Kazi.Scheduler do
     * `:partitions`  — one `{partition, partition_status}` per input partition,
       in input order (a single-partition list yields exactly that partition's
       status — the serial degenerate case).
+
+  `run_goals/2` may additionally carry (additive, present only when opted into):
+
+    * `:integration`       — the `Kazi.Scheduler.Integration.result/0` (when
+      `:integrate` was supplied, T21.5);
+    * `:budget_spent`      — the COLLECTIVE derived spend rollup (the dimension-wise
+      SUM across partitions) when a `:budget` was split (T21.7);
+    * `:partitions_budget` — one `{partition, status, spent}` per partition (its
+      share's actual spend) when a `:budget` was split (T21.7).
   """
   @type result :: %{
-          collective: collective(),
-          partitions: [{partition(), partition_status()}]
+          :collective => collective(),
+          :partitions => [{partition(), partition_status()}],
+          optional(:integration) => Kazi.Scheduler.Integration.result(),
+          optional(:budget_spent) => Kazi.Scheduler.Budget.spent(),
+          optional(:partitions_budget) => [
+            {partition(), partition_status(), Kazi.Scheduler.Budget.spent()}
+          ]
         }
 
   # The default per-partition reconcile timeout. Production runs are long; the
@@ -240,6 +254,16 @@ defmodule Kazi.Scheduler do
       skipped (the inner reconciler is handed the workspace path directly).
     * `:max_restarts` — per-partition crash restart budget (T21.10) forwarded to
       `run/2`. Default `0` (a crashed partition escalates immediately).
+    * `:budget` — OPT-IN per-partition budgets (T21.7, ADR-0027 step 3). When a
+      `Kazi.Budget` is supplied, the goal budget is SPLIT across the partitions
+      (`Kazi.Scheduler.Budget.split/2` — derived shares that sum back to the
+      whole) and each partition runs under its SHARE. A partition that exhausts
+      its share reports `:over_budget` and ESCALATES without aborting its
+      siblings (each is its own supervised task), so the collective verdict
+      reflects per-partition outcomes. The result then carries `:budget_spent`
+      (the collective derived rollup — the SUM of per-partition spend) and
+      `:partitions_budget` (each `{partition, status, spent}`). When omitted, no
+      split happens and the result shape is unchanged (backward-compatible).
     * `:integrate` — OPT-IN collective integration (T21.5, ADR-0027 step 4). When
       supplied (a keyword list of `Kazi.Scheduler.Integration.integrate/2` opts —
       notably `:integrator`, `:base`, `:max_attempts`, `:redispatcher`), the
@@ -265,7 +289,26 @@ defmodule Kazi.Scheduler do
 
     partitions = Kazi.Scheduler.Partitioner.partition(goals, workspace, partition_opts)
 
-    inner = Keyword.get(opts, :reconciler, default_goal_reconciler(opts))
+    # T21.7: the DEFAULT inner is budget-aware (3-arity) when a `:budget` is
+    # supplied, so the share reaches the real loop; otherwise the pre-T21.7
+    # 2-arity default. A custom `:reconciler` is used as-is (its arity decides
+    # whether it sees the share — a 2-arity stub simply ignores budgets).
+    inner =
+      Keyword.get_lazy(opts, :reconciler, fn ->
+        if Keyword.has_key?(opts, :budget) do
+          default_goal_reconciler_budgeted(opts)
+        else
+          default_goal_reconciler(opts)
+        end
+      end)
+
+    # T21.7: when a `:budget` is supplied, split it across the partitions and
+    # bracket the inner reconciler so each partition runs under its SHARE and
+    # records its spend; `budget_ctx` carries the per-partition shares + the spend
+    # accumulator the rollup reads after `run/2`. Returns `nil` when no `:budget`
+    # is given (the budget-unaware path, backward-compatible).
+    {inner, budget_ctx} = maybe_split_budget(inner, partitions, opts)
+
     reconciler = compose_reconciler(inner, workspace, opts)
 
     run_opts =
@@ -274,8 +317,99 @@ defmodule Kazi.Scheduler do
       |> Keyword.put(:reconciler, reconciler)
 
     with {:ok, result} <- run(partitions, run_opts) do
-      maybe_integrate(result, opts)
+      result
+      |> maybe_rollup_budget(budget_ctx)
+      |> maybe_integrate(opts)
     end
+  end
+
+  # T21.7: split a goal `:budget` across the partitions (derived shares) and wrap
+  # the inner reconciler so each partition runs under its share and records its
+  # spend. Returns `{wrapped_inner, budget_ctx}`, or `{inner, nil}` when no
+  # `:budget` was supplied (the budget-unaware path is untouched — backward
+  # compatible).
+  #
+  # Each partition is assigned a share BY IDENTITY (its stable lease `:key`), so a
+  # partition reconciled (and re-dispatched) more than once keeps the same share.
+  # The inner is handed its share under `run_opts[:budget]` and a `report_spent`
+  # seam; the spend it reports is accumulated per key for the rollup.
+  defp maybe_split_budget(inner, partitions, opts) do
+    case Keyword.get(opts, :budget) do
+      nil ->
+        {inner, nil}
+
+      %Kazi.Budget{} = budget ->
+        n = max(length(partitions), 1)
+        shares = Kazi.Scheduler.Budget.split(budget, n)
+
+        # key → share, so the wrapper assigns each partition its own share.
+        share_by_key =
+          partitions
+          |> Enum.zip(shares)
+          |> Map.new(fn {partition, share} -> {partition.key, share} end)
+
+        {:ok, spent} = Agent.start_link(fn -> %{} end)
+
+        wrapped = budget_aware_inner(inner, share_by_key, spent)
+
+        {wrapped, %{shares: share_by_key, spent: spent}}
+    end
+  end
+
+  # Wrap the inner reconciler so each partition runs under its budget SHARE and
+  # records its spend, WITHOUT mutating the partition struct (the worktree +
+  # integration layers pattern-match the `Kazi.Scheduler.Partitioner` shape).
+  #
+  # The budget + a `report_spent/1` seam are threaded by ARITY: a budget-aware
+  # inner takes `(partition, worktree, budget)` where `budget` is a
+  # `t:budget_share/0` (`%{budget: share, report_spent: fn}`); a budget-UNAWARE
+  # 2-arity inner (a plain test stub, or the pre-T21.7 default) is called as
+  # `(partition, worktree)` and simply never sees its share. The default goal
+  # reconciler is 3-arity and threads the share into `Kazi.Runtime.run/2`.
+  defp budget_aware_inner(inner, share_by_key, spent) do
+    fn partition, worktree ->
+      share = Map.get(share_by_key, partition.key)
+
+      report_spent = fn used when is_map(used) ->
+        Agent.update(spent, fn acc ->
+          Map.update(acc, partition.key, used, &Kazi.Scheduler.Budget.rollup([&1, used]))
+        end)
+      end
+
+      budget = %{budget: share, report_spent: report_spent}
+
+      cond do
+        is_function(inner, 3) -> inner.(partition, worktree, budget)
+        true -> inner.(partition, worktree)
+      end
+    end
+  end
+
+  # T21.7 rollup: after `run/2`, attach per-partition `:budget_spent` (keyed like
+  # `result.partitions`) and the collective `:budget_spent` (the derived SUM) to
+  # the result. A no-op when no budget was split (`budget_ctx == nil`), keeping the
+  # result shape unchanged for budget-unaware runs.
+  defp maybe_rollup_budget(result, nil), do: result
+
+  defp maybe_rollup_budget(result, %{spent: spent}) do
+    by_key = Agent.get(spent, & &1)
+    Agent.stop(spent)
+
+    per_partition =
+      Enum.map(result.partitions, fn {partition, status} ->
+        used = Map.get(by_key, partition.key, %{})
+        {partition, status, Kazi.Scheduler.Budget.rollup([used])}
+      end)
+
+    collective_spent =
+      per_partition
+      |> Enum.map(fn {_p, _s, used} -> used end)
+      |> Kazi.Scheduler.Budget.rollup()
+
+    Map.merge(result, %{
+      budget_spent: collective_spent,
+      partitions_budget: per_partition
+    })
   end
 
   # T21.5: when `:integrate` is supplied, run collective integration over the
@@ -341,17 +475,67 @@ defmodule Kazi.Scheduler do
   # goals' serial loop in the partition's worktree, collapsing to one partition
   # status. T21.5 deepens cross-goal integration; the skeleton runs the member
   # goals and folds their statuses with the same collective rule.
+  # The 2-arity (budget-unaware) default: run each goal under the shared run_opts.
+  # Unchanged from the pre-T21.7 path. The budget-aware variant
+  # (`default_goal_reconciler_budgeted/1`) is selected by `maybe_split_budget/3`
+  # only when a `:budget` is supplied.
   defp default_goal_reconciler(opts) do
     run_opts = Keyword.get(opts, :run_opts, [])
 
     fn %Kazi.Scheduler.Partitioner{goals: goals}, worktree_path ->
-      statuses =
-        Enum.map(goals, fn goal ->
-          reconcile_partition(%{goal: goal}, Keyword.put(run_opts, :workspace, worktree_path))
-        end)
-
-      collective_verdict(statuses)
+      run_partition_goals(goals, run_opts, worktree_path)
     end
+  end
+
+  # The 3-arity (budget-aware) default, T21.7: the partition's budget SHARE
+  # overrides the goal's own budget for this run (so the partition is bounded by
+  # its share), and the loop's terminal usage is reported back via `report_spent`
+  # so the rollup sums it into the collective spend.
+  defp default_goal_reconciler_budgeted(opts) do
+    run_opts = Keyword.get(opts, :run_opts, [])
+
+    fn %Kazi.Scheduler.Partitioner{goals: goals},
+       worktree_path,
+       %{
+         budget: share,
+         report_spent: report_spent
+       } ->
+      goal_run_opts =
+        case share do
+          %Kazi.Budget{} -> Keyword.put(run_opts, :budget, share)
+          nil -> run_opts
+        end
+
+      {status, spent} = run_partition_goals_with_spend(goals, goal_run_opts, worktree_path)
+      report_spent.(spent)
+      status
+    end
+  end
+
+  # Run a partition's member goals' serial loops in its worktree, folding their
+  # statuses with the collective rule (no spend tracking — the budget-unaware path).
+  defp run_partition_goals(goals, run_opts, worktree_path) do
+    statuses =
+      Enum.map(goals, fn goal ->
+        reconcile_partition(%{goal: goal}, Keyword.put(run_opts, :workspace, worktree_path))
+      end)
+
+    collective_verdict(statuses)
+  end
+
+  # As `run_partition_goals/3`, but also accumulate the loops' terminal budget
+  # usage so the partition can report its spend (T21.7 rollup). Returns
+  # `{partition_status, spent}`.
+  defp run_partition_goals_with_spend(goals, run_opts, worktree_path) do
+    {statuses, spents} =
+      goals
+      |> Enum.map(fn goal ->
+        opts = Keyword.put(run_opts, :workspace, worktree_path)
+        reconcile_partition_with_spend(%{goal: goal}, opts)
+      end)
+      |> Enum.unzip()
+
+    {collective_verdict(statuses), Kazi.Scheduler.Budget.rollup(spents)}
   end
 
   @doc """
@@ -672,6 +856,31 @@ defmodule Kazi.Scheduler do
 
       :error ->
         :stuck
+    end
+  end
+
+  # As `reconcile_partition/2`, but also extract the loop's terminal budget SPEND
+  # (T21.7) so the partition can report it for the collective rollup. Returns
+  # `{partition_status, spent}`; the loop result surfaces `:iterations` (the
+  # deterministic, hermetically-testable dimension), so spend is reported on the
+  # iterations axis (tokens/wall-clock are not yet surfaced by the loop result —
+  # T1.4 deepening, not this task). A partition with no resolvable goal, or a run
+  # error, spends nothing.
+  @spec reconcile_partition_with_spend(partition(), keyword()) ::
+          {partition_status(), Kazi.Scheduler.Budget.spent()}
+  defp reconcile_partition_with_spend(partition, run_opts) do
+    case partition_goal(partition) do
+      {:ok, goal} ->
+        case Kazi.Runtime.run(goal, run_opts) do
+          {:ok, result} ->
+            {result_to_status(result), %{iterations: Map.get(result, :iterations, 0)}}
+
+          {:error, _reason} ->
+            {:stuck, %{}}
+        end
+
+      :error ->
+        {:stuck, %{}}
     end
   end
 
