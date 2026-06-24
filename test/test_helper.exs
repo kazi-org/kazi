@@ -36,4 +36,18 @@ graphify_excluded = if System.get_env("GRAPHIFY_CMD"), do: [], else: [:graphify]
 # HONESTLY (never fails, never fake-passes) when either is unreachable.
 opencode_live_excluded = [:opencode_live]
 
-ExUnit.start(exclude: nats_excluded ++ graphify_excluded ++ opencode_live_excluded)
+# The live codex smoke test (tagged `:codex_live`, T14.2/ADR-0022) drives the
+# operator's REAL `codex` CLI (`codex exec … --json`) wired to OpenAI via
+# `OPENAI_API_KEY` / `codex login`. Like `:opencode_live` it is NON-hermetic and
+# EXCLUDED by default so the standard `mix test` and CI stay hermetic (no network,
+# no creds). Opt in explicitly:
+#
+#     mix test --only codex_live test/kazi/codex_live_test.exs
+#
+# The test itself probes the `codex` binary + auth first and SKIPS HONESTLY
+# (never fails, never fake-passes) when either is unavailable.
+codex_live_excluded = [:codex_live]
+
+ExUnit.start(
+  exclude: nats_excluded ++ graphify_excluded ++ opencode_live_excluded ++ codex_live_excluded
+)
