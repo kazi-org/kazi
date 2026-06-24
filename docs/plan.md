@@ -322,7 +322,7 @@ ADR-0001 intact (kazi is the inner controller beneath the session-as-orchestrato
 - [x] T20.6 Per-task blast-radius lease for a pooled run (L3, NATS): a pool session acquires a kazi lease for its task's blast radius (`Kazi.Partition.partition/3` -> `PartitionLease.lease_keys/3`) BEFORE editing; overlapping radii serialize, disjoint run free. Lease is scoped to the run and released on terminal state.  Owner: pool  Done: 2026-06-24  verifies: [UC-036]  deps: [T20.4]  acc: ExUnit + a 2-session sim -- two tasks with overlapping blast radii serialize on the lease; disjoint radii proceed concurrently; lease released on converged/stuck/over_budget; requires a running NATS (skips honestly without one).
 - [ ] T20.7 `/claim` <-> kazi-lease compose-boundary + deadlock safety (L3): document and TEST the contract -- claim (task) acquired first, then the kazi blast-radius lease; lease TTL bounds a crashed holder; release ordering (lease before claim) -- so two sessions each holding a claim + a lease cannot deadlock.  Owner: TBD  Est: 2h  verifies: [UC-036, infrastructure]  deps: [T20.6]  acc: ExUnit -- a constructed cross-acquire scenario does not deadlock (TTL/ordering breaks it); the contract is documented in `docs/` and referenced by the recipe.
 - [ ] T20.8 Live pool observability (L4): point the LiveView dashboard + presence + lease map at a shared kazi instance so every session's leases + per-goal convergence history are visible in real time; verify in a browser against a live 2+ session pool.  Owner: TBD  Est: 1.5h  verifies: [UC-036]  deps: [T20.6]  acc: the dashboard shows >=2 concurrent sessions' leases + convergence live; exercised in a real browser (agent-browser); read-only, decoupled from the loop (ADR-0011).
-- [ ] T20.9 Phone-driven pool direction (L4): use the Telegram bridge to declare/approve goals and receive pings on `converged`/`stuck`/`over_budget` from the pool, fitting the remote setup (phone -> a Mac running the pool).  Owner: TBD  Est: 1h  verifies: [UC-036]  deps: [T20.4]  acc: a declared/approved goal from Telegram runs in the pool and pings the phone on each terminal state; honest result.
+- [~] T20.9 WITHDRAWN (ADR-0029): phone-driven pool via Telegram is redundant -- the orchestrating agent (Claude) is the human's mobile interface, and the agent's own push pings the phone on terminal states. The Telegram bridge is being REMOVED (E24); a headless-autonomous pinger, if ever needed, is a future generic webhook, not Telegram.
 - [ ] T20.10 "Harden /apply --pool with kazi" guide (docs): a `docs/` guide covering the 4 layers, the `/claim`<->lease boundary, NATS-only-at-L3, the failure modes it fixes (false-completion, 5/10 stall, silent logical conflict), and honest maturity (shape b deferred).  Owner: TBD  Est: 1.5h  verifies: [UC-036]  deps: [T20.3, T20.7, T20.8]  acc: a reader can adopt L1 today and understand the path to L3/L4; references only real commands/modules; coherent with ADR-0026.
 - [ ] T20.11 LIVE dogfood (the honest proof): run a REAL multi-session `/apply --pool` with kazi as the L1 gate on a real plan slice (e.g. the E18 bug fixes); record evidence -- did the gate BLOCK a non-converged task? -- in `docs/devlog.md`. After L3, extend to a leasing dogfood (two sessions, overlapping blast radius, serialized).  Owner: TBD  Est: 2h  verifies: [UC-036]  deps: [T20.3]  acc: observed evidence in `docs/devlog.md` that the kazi gate caught (or cleanly passed) real pooled tasks; every claim is observed, not asserted; honest if a layer was skipped.
 
@@ -414,6 +414,18 @@ human/LLM judgment; kazi computes everything downstream).
 - [ ] T23.8 Docs + positioning: document "predicate-graph waves" as kazi's codification of `/plan`'s `deps:` + `/apply`'s Waves -- authored `needs` edges -> computed, pipelined, objectively-gated schedule; honest about the authored-deps burden + that kazi does not DERIVE semantic order. Tie to E12/E21/E22 + ADR-0028.  Owner: TBD  Est: 1h  verifies: [UC-038, UC-035]  delivers: [docs explaining predicate-graph waves vs /apply waves]  deps: [T23.6]  acc: a reader sees how to express deps as `needs` and what kazi computes from them; references only real commands/fields; coherent with ADR-0028.
 - [ ] T23.9 LIVE dogfood: encode a real multi-group goal with `needs` (e.g. a result-contract group before a streaming group) and show kazi computing + executing the pipelined topological schedule to collective convergence; record evidence in `docs/devlog.md` (order taken, intra-frontier parallelism, a blocked-dep escalation).  Owner: TBD  Est: 2h  verifies: [UC-038]  deps: [T23.6]  acc: observed evidence that kazi sequenced dependent groups correctly AND parallelized disjoint ones, gated objectively; honest if it falls short.
 
+### E24 -- Remove the Telegram bridge (P2, ADR-0029; cleanup)
+
+Acceptance: the Telegram bridge is removed so the codebase matches the agent-driven
+architecture (Claude is the human's mobile interface, ADR-0029). The LiveView
+dashboard and the `Kazi.Authoring` write path (ADR-0011) are UNAFFECTED. There is
+no Telegram-specific dependency, so `mix.exs` does not change; `mix test` stays
+green (the suite shrinks only by the Telegram tests). Removing a now-dead surface
+is kazi's own no-dead-code thesis (ADR-0021) applied to itself.
+
+- [ ] T24.1 Remove the bridge modules + tests: delete `lib/kazi/telegram.ex`, `lib/kazi/telegram/client.ex`, `lib/kazi/telegram/message.ex`, `test/support/in_memory_telegram_client.ex`, `test/kazi/telegram_test.exs`, `test/kazi/telegram_e2e_test.exs`; remove any supervision-tree start/registration of the bridge in `lib/kazi/application.ex` + config.  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: []  acc: the files are gone; `mix compile --warnings-as-errors` + `mix test` green (suite shrinks by the Telegram tests, nothing else breaks); no dangling references (grep for `Kazi.Telegram` is clean outside the ADRs).
+- [ ] T24.2 Scrub Telegram from moduledocs + docs + surfaces: remove the "Telegram" surface mentions in `Kazi.Authoring`, `Kazi.ReadModel`, `lib/kazi/authoring/draft.ex`, `lib/kazi/read_model/proposed_goal.ex` moduledocs; drop Telegram from the operator-surfaces list in `docs/concept.md`, `README.md`, and the site (KEEP the LiveView dashboard); the agent-driven on-ramp states the mobile interface is Claude.  Owner: TBD  Est: 1h  verifies: [infrastructure]  deps: [T24.1]  acc: no "Telegram" reference remains except the historical ADR-0011/0029 records; README<->site coherence (T9.9) green; `mix format --check-formatted` + `--warnings-as-errors` clean.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -440,7 +452,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E20-L1 (gate, no NATS -- start here):** T20.1 (`acc:`->predicates) -> T20.2 (pool gate recipe) -> T20.3 (opt-in `/apply --verify-with-kazi`); T20.11 (live L1 dogfood) after T20.3. Independently valuable; ships before any NATS.
 - **Wave E20-L2 (objective-done loop):** T20.4 (orchestrator recipe) -> T20.5 (per-task tiering, optional).
 - **Wave E20-L3 (blast-radius leases, NATS):** T20.6 (per-task lease) -> T20.7 (`/claim`<->lease boundary + deadlock safety).
-- **Wave E20-L4 (observability + direction):** T20.8 (live dashboard/lease map), T20.9 (Telegram direction) in parallel after T20.6/T20.4.
+- **Wave E20-L4 (observability):** T20.8 (live dashboard/lease map) after T20.6/T20.4. (T20.9 Telegram WITHDRAWN -- ADR-0029, removed in E24.)
 - **Wave E20-docs:** T20.10 (the adoption guide) after L1+L3+L4 land.
 - **Wave E21-1 (native scheduler core, single-node NATS-free):** T21.1 (scheduler + DynamicSupervisor) -> T21.2 (wire Partition), T21.3 (lease lifecycle), T21.4 (worktree per partition) in parallel after T21.1.
 - **Wave E21-2 (integration + correctness):** T21.5 (merge convergence), T21.6 (overlap policy), T21.7 (per-partition budgets).
@@ -591,7 +603,7 @@ never swept into your commit.
   - L2 objective-done loop: T20.4 orchestrator recipe, T20.5 per-task model tiering.
   - L3 blast-radius leases (NATS): T20.6 per-task lease, T20.7 `/claim`<->lease
     compose-boundary + deadlock safety.
-  - L4 observability + direction: T20.8 live dashboard/lease map, T20.9 Telegram.
+  - L4 observability: T20.8 live dashboard/lease map. (T20.9 Telegram dropped -- ADR-0029, removed in E24.)
   - Cross-cutting: T20.10 adoption guide, T20.11 LIVE multi-session dogfood (the
     honest proof -- did the gate block a non-converged task?).
 - **UC-036** added (harden multi-session `/apply --pool` with kazi). Waves
