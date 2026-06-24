@@ -30,6 +30,28 @@ defmodule Kazi.Scheduler.DepScheduler do
        NAMING the blocking dep (via `DepGraph.blocked/2`), and the loop does NOT
        hang waiting for it. Siblings outside the blocked sub-DAG still finish.
 
+  ## Objective re-gating on regression (T23.4, ADR-0028 §Decision 4)
+
+  Because readiness is defined by OBJECTIVE convergence and the state map is the
+  single source of truth re-evaluated each cycle, a dep that LATER REGRESSES — its
+  convergence becomes false again (the loop's regression guard fires, like
+  standing mode) — RE-GATES its dependents. A `{:regress, group_id, status}`
+  message flips a `:converged` group back to a non-converged state; its TRANSITIVE
+  dependents (`DepGraph.dependents_of/2`) that had become ready/converged on it are
+  RESET to `:pending` and re-dispatched once the dep re-converges. No dependent
+  integrates or merges against a regressed dep: it leaves the ready set the instant
+  the dep flips, and re-converges only after the dep does.
+
+  ## Blocked-dependency escalation (T23.5, ADR-0028 §Decision 5)
+
+  A `:stuck`/`:over_budget` dep poisons every group transitively behind it. Beyond
+  the flat `:blocked` entries, the result carries an `:escalations` view that
+  GROUPS the blocked sub-DAG BY its blocking dep — one entry per blocker NAMING it,
+  its reason, and the LIST of blocked dependents — so the collective verdict
+  explicitly escalates the affected sub-DAG rather than leaving the reader to
+  re-derive it. Siblings OUTSIDE every blocked sub-DAG still finish and the run
+  terminates (no silent hang).
+
   When NO group declares `needs`, every group is ready at the first frontier, so
   the loop dispatches them all at once — behaving EXACTLY like the flat parallel
   coordinator (ADR-0027 default). `Kazi.Scheduler.run_goals/2` routes here only
@@ -70,6 +92,9 @@ defmodule Kazi.Scheduler.DepScheduler do
     * `:blocked` — the `Kazi.Goal.DepGraph.blocked_entry/0` list, each NAMING the
       blocking dep, so the report says WHY a sub-DAG never ran rather than
       hanging silently.
+    * `:escalations` — the blocked sub-DAG GROUPED by blocking dep (T23.5): one
+      `t:escalation/0` per blocker, naming it, its reason, and the LIST of blocked
+      dependents — the explicit collective escalation of the affected sub-DAG.
   """
 
   use GenServer
@@ -85,9 +110,37 @@ defmodule Kazi.Scheduler.DepScheduler do
   its own supervised process per dispatched group. Returning a non-status term is
   normalized to `:stuck`; an exit/crash is recorded `:crashed` (mirrors
   `Kazi.Scheduler`'s reconciler seam, but keyed by group id).
+
+  A 2-arity reconciler `(group_id, scheduler_pid) -> group_status` is ALSO
+  accepted: it is additionally handed the SCHEDULER's pid so it can message the
+  loop directly — notably `send(scheduler_pid, {:regress, dep_id, status})` to
+  drive a regression (T23.4). The arity is detected at call time, so a plain
+  1-arity stub is unaffected (backward compatible).
   """
   @type reconciler ::
           (Group.id() -> Scheduler.partition_status() | {:error, term()})
+          | (Group.id(), pid() -> Scheduler.partition_status() | {:error, term()})
+
+  @typedoc """
+  One escalation of a blocked sub-DAG (T23.5, ADR-0028 §Decision 5): a blocking
+  dep, its reason, and the dependents it poisoned.
+
+    * `:blocker` — the id of the `:stuck`/`:over_budget`/`:blocked` dep that
+      poisoned the sub-DAG;
+    * `:reason`  — that blocker's terminal/blocking state (`:stuck` /
+      `:over_budget` / `:blocked`);
+    * `:blocked` — the ids of the dependents that can never run because of it, in
+      declared order.
+
+  The collective verdict carries one escalation per blocking dep, so a reader sees
+  WHICH dep failed AND the WHOLE sub-DAG it stalled — not just a flat list to
+  re-group by hand.
+  """
+  @type escalation :: %{
+          blocker: Group.id(),
+          reason: DepGraph.state(),
+          blocked: [Group.id()]
+        }
 
   @typedoc """
   The pipelined collective result:
@@ -99,11 +152,15 @@ defmodule Kazi.Scheduler.DepScheduler do
       that never dispatched because a `needs` dep blocked it carries `:blocked`.
     * `:blocked` — the blocked entries (`Kazi.Goal.DepGraph.blocked_entry/0`),
       each naming the blocking dep and its reason.
+    * `:escalations` — the blocked sub-DAG grouped by blocking dep
+      (`t:escalation/0`): one entry per blocker, naming it, its reason, and the
+      list of blocked dependents.
   """
   @type result :: %{
           collective: Scheduler.collective(),
           groups: [{Group.id(), DepGraph.state()}],
-          blocked: [DepGraph.blocked_entry()]
+          blocked: [DepGraph.blocked_entry()],
+          escalations: [escalation()]
         }
 
   @default_reconcile_timeout :infinity
@@ -223,6 +280,27 @@ defmodule Kazi.Scheduler.DepScheduler do
     {:noreply, state}
   end
 
+  # A previously-:converged dep REGRESSED (T23.4, ADR-0028 §Decision 4): its
+  # convergence became false again (the regression guard fired). Flip it back to a
+  # non-converged state and RESET its transitive dependents that had become
+  # ready/converged ON it to :pending, so they leave the ready set and re-converge.
+  # Then re-evaluate: the regressed dep re-dispatches (it is :pending again) and,
+  # once it re-converges, its dependents follow. A regress on a group that is not
+  # currently :converged is a no-op (nothing to re-gate).
+  def handle_info({:regress, group_id, status}, state) do
+    state =
+      if Map.get(state.states, group_id) == :converged do
+        state
+        |> regress(group_id, status)
+        |> dispatch_ready()
+        |> maybe_reply()
+      else
+        state
+      end
+
+    {:noreply, state}
+  end
+
   # A group's reconciler process exited. If it already reported a terminal status
   # (normal exit after {:group_done, ...}), nothing to do; else an abnormal exit
   # with no recorded status is a crash → record :crashed (folds to :stuck) and
@@ -311,13 +389,25 @@ defmodule Kazi.Scheduler.DepScheduler do
   # is total. The reconciler runs in a nested Task purely so the timeout can
   # interrupt it without crashing this supervised child.
   defp run_reconciler(coordinator, reconciler, group_id, timeout) do
-    status = invoke_reconciler(reconciler, group_id, timeout)
+    status = invoke_reconciler(coordinator, reconciler, group_id, timeout)
     send(coordinator, {:group_done, group_id, status})
     status
   end
 
-  defp invoke_reconciler(reconciler, group_id, timeout) do
-    task = Task.async(fn -> reconciler.(group_id) end)
+  # Invoke the (possibly stub) reconciler under a timeout. A 1-arity reconciler is
+  # called `(group_id)` — the common case. A 2-arity reconciler is also handed the
+  # SCHEDULER pid `(group_id, scheduler)` so it can message the loop directly —
+  # notably to drive a regression hermetically (`send(scheduler, {:regress, dep,
+  # status})`), the seam T23.4 exercises (mirrors `Kazi.Scheduler`'s arity-keyed
+  # budget seam). Either way the return is the group's terminal status.
+  defp invoke_reconciler(coordinator, reconciler, group_id, timeout) do
+    task =
+      Task.async(fn ->
+        cond do
+          is_function(reconciler, 2) -> reconciler.(group_id, coordinator)
+          true -> reconciler.(group_id)
+        end
+      end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
       {:ok, status} -> normalize_status(status)
@@ -355,6 +445,78 @@ defmodule Kazi.Scheduler.DepScheduler do
         outcomes: Map.put(state.outcomes, group_id, observed),
         running: Map.delete(state.running, group_id),
         ref_to_group: if(ref, do: Map.delete(state.ref_to_group, ref), else: state.ref_to_group)
+    }
+  end
+
+  # Re-gate a regressed dep (T23.4). The dep itself flips from :converged to the
+  # observed non-converged planner state (a regressed dep is FRESH WORK again, so
+  # it is reset to :pending and re-dispatches; a regression INTO a terminal state —
+  # :stuck/:over_budget — leaves it terminal and blocks dependents instead). Its
+  # transitive dependents (DepGraph.dependents_of/2) that had reached a
+  # non-:pending state are RESET to :pending so they leave the ready set and
+  # re-converge once the dep does; their stale outcomes are dropped so the per-group
+  # result reflects the RE-RUN, not the pre-regression convergence.
+  defp regress(state, group_id, status) do
+    state = regress_dep(state, group_id, status)
+
+    Enum.reduce(DepGraph.dependents_of(state.goal, group_id), state, fn dependent, acc ->
+      regate_dependent(acc, dependent)
+    end)
+  end
+
+  # Flip the regressed dep out of :converged according to WHAT it regressed to:
+  #
+  #   * a still-convergeable regression (a `:pending`-like status, e.g. the loop
+  #     went green→red but is still working) re-enters the dep as FRESH :pending
+  #     work — it re-dispatches and re-converges, then its dependents follow;
+  #   * a regression STRAIGHT INTO a non-converging terminal (:stuck / :over_budget
+  #     / crash / stop) leaves the dep terminal — it is now the CAUSE of a blocked
+  #     sub-DAG, so the raw outcome is recorded (it appears in the per-group result
+  #     and names the sub-DAG it blocks) rather than dropped.
+  defp regress_dep(state, _group_id, :converged), do: state
+
+  defp regress_dep(state, group_id, :pending),
+    do: reset_group(state, group_id, :pending)
+
+  defp regress_dep(state, group_id, status),
+    do: record_terminal(state, group_id, status)
+
+  # Re-gate ONE transitive dependent of a regressed dep. A dependent that had
+  # CONVERGED on the dep is reset to :pending so it leaves the ready set and
+  # re-converges once the dep does (it must NOT stay green against a regressed
+  # ancestor). A dependent still :running is left in flight — it has not converged,
+  # so there is nothing to un-converge, and resetting it to :pending would
+  # double-dispatch it; its in-flight result is reconciled against the
+  # then-current state when it lands. A :pending / terminal-blocking dependent is
+  # untouched.
+  defp regate_dependent(state, dependent) do
+    case Map.get(state.states, dependent) do
+      :converged -> reset_group(state, dependent, :pending)
+      _other -> state
+    end
+  end
+
+  # Reset a group to fresh :pending work, dropping any stale outcome so a
+  # re-dispatch starts clean (the per-group result reflects the RE-RUN, not the
+  # pre-regression convergence). Only ever applied to :converged groups, which
+  # carry no `running`/`ref_to_group` bookkeeping (cleared on their terminal), so
+  # those maps need no update.
+  defp reset_group(state, group_id, new_state) do
+    %{
+      state
+      | states: Map.put(state.states, group_id, new_state),
+        outcomes: Map.delete(state.outcomes, group_id)
+    }
+  end
+
+  # A regressed dep that landed in a non-converging terminal: store its planner
+  # state and RAW outcome so the per-group result reports it as the CAUSE (not
+  # :blocked) of the sub-DAG it now blocks.
+  defp record_terminal(state, group_id, status) do
+    %{
+      state
+      | states: Map.put(state.states, group_id, planner_state(status)),
+        outcomes: Map.put(state.outcomes, group_id, status)
     }
   end
 
@@ -415,11 +577,40 @@ defmodule Kazi.Scheduler.DepScheduler do
     # as non-converged (it never converged), keeping the collective non-green.
     statuses = Enum.map(groups, fn {_id, status} -> fold_status(status) end)
 
+    blocked = DepGraph.blocked(state.goal, state.states)
+
     %{
       collective: Scheduler.collective_verdict(statuses),
       groups: groups,
-      blocked: DepGraph.blocked(state.goal, state.states)
+      blocked: blocked,
+      escalations: escalations(blocked)
     }
+  end
+
+  # T23.5: group the flat blocked entries BY their blocking dep into explicit
+  # escalations — one `t:escalation/0` per blocker, naming it, its reason, and the
+  # FULL list of blocked dependents it stalled. This is the collective verdict's
+  # explicit escalation of each affected sub-DAG: a reader sees WHICH dep failed
+  # and the WHOLE sub-DAG behind it, instead of re-grouping the flat list by hand.
+  # Blockers are emitted in the order they first appear in the (declared-order)
+  # blocked list; each blocker's dependents preserve that order.
+  defp escalations(blocked) do
+    {order, by_blocker} =
+      Enum.reduce(blocked, {[], %{}}, fn %{group: group, blocked_by: blocker, reason: reason},
+                                         {order, acc} ->
+        case Map.get(acc, blocker) do
+          nil ->
+            {order ++ [blocker], Map.put(acc, blocker, %{reason: reason, blocked: [group]})}
+
+          %{blocked: groups} = entry ->
+            {order, Map.put(acc, blocker, %{entry | blocked: groups ++ [group]})}
+        end
+      end)
+
+    Enum.map(order, fn blocker ->
+      %{reason: reason, blocked: groups} = Map.fetch!(by_blocker, blocker)
+      %{blocker: blocker, reason: reason, blocked: groups}
+    end)
   end
 
   # The reported per-group outcome: the RAW reconciler status when the group was
