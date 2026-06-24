@@ -86,8 +86,28 @@ kazi should satisfy the bar it imposes.
    predicates). Goal-files remain a loadable artifact -- propose persists/approves
    INTO one -- but the agent's authoring entry point is always propose, so the
    clarify floor (a live-verification target + scope) and the review/approve gate
-   are never bypassed. Then `kazi run --harness claw --model <local>` runs the cheap
-   convergence loop.
+   are never bypassed.
+
+   **Avoiding the redundant "claude -> kazi -> claude": propose has TWO drive
+   modes.** kazi's value in `propose` is NOT the LLM drafting (any capable model
+   drafts predicates) -- it is the DETERMINISTIC floor + the approve gate +
+   persistence. So when a CAPABLE orchestrator already holds the context it should
+   not pay for a second model call:
+   - **kazi-drafts** (`kazi propose "<idea>" --harness <model>`): kazi spawns a
+     model to draft predicates from a prose idea. For a human at the CLI or a thin
+     non-model script. (The existing path.)
+   - **caller-drafts** (`kazi propose --json` with predicates supplied on
+     stdin/flag): the orchestrating model -- which already reasoned about the idea --
+     supplies the candidate predicates, and kazi applies the deterministic floor,
+     persists, and gates approval WITHOUT spawning an inner model. The expensive
+     reasoning happens ONCE (in the orchestrator); kazi adds discipline, not a
+     duplicate LLM call.
+   Both modes go through `Kazi.Authoring` + the floor, so "propose is the single
+   authoring path" holds. In the claude -> kazi -> claude picture the orchestrator
+   uses caller-drafts: there is no second claude -- the outer claude's reasoning IS
+   the drafter, and kazi contributes the floor + the gate, not a re-draft.
+
+   Then `kazi run --harness claw --model <local>` runs the cheap convergence loop.
 
 5. **An MCP server is a deferred follow-on.** Once the JSON CLI contract is proven,
    a `kazi mcp` server can wrap the same commands as MCP tools for claude-code-

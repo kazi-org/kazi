@@ -65,6 +65,10 @@ All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work
 - **UC-033** (kazi as a harness-friendly / agent-drivable CLI: `--json` structured
   output + non-interactive guarantees + a versioned result contract so an
   orchestrator drives propose->approve->run->release, ADR-0023) -- OPEN; E15.
+- **UC-034** (kazi is self-teaching to harnesses: `kazi install-skill` +
+  `help --json`/`schema` + `AGENTS.md` + a `kazi mcp` server, ADR-0024) -- OPEN; E16.
+- **UC-035** (adoption: README/docs/website lead with the agent-driven workflow +
+  two-tier economics, to grow stars/adoption, ADR-0023/0024) -- OPEN; E17.
 
 UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
 delivered and verified on `main`.
@@ -242,7 +246,7 @@ review/approve gate are never bypassed. Human-readable output stays the DEFAULT;
 `--json` is the machine surface. MCP server (`kazi mcp`) is a deferred follow-on.
 
 - [ ] T15.1 JSON output framework + non-interactive guarantee: a `--json` flag + a small renderer seam so each command emits a single JSON object to stdout; under `--json` kazi NEVER prompts/blocks on stdin (it errors loudly if input is required), and exit codes are stable. Unit-tested.  Owner: TBD  Est: 1.5h  verifies: [UC-033, infrastructure]  deps: []  acc: ExUnit -- a command in `--json` mode emits valid JSON only (no human prose interleaved) and never reads stdin; non-`--json` is unchanged; piped/non-TTY `--json` works headlessly.
-- [ ] T15.2 `kazi propose --json` (the single authoring path): emit the draft -- goal id, `proposal_ref`, predicates[], rationale, and any clarify questions asked -- as one JSON object; `--json` implies non-interactive (clarify answers pre-supplied via a flag/stdin-JSON, or the deterministic floor is recorded unanswered). Reuses `Kazi.Authoring` (the one write path, ADR-0011); no parallel authoring mechanism.  Owner: TBD  Est: 1.5h  verifies: [UC-033, UC-029]  deps: [T15.1]  acc: ExUnit with a stub harness -- `propose --json` returns a parseable draft object; the clarify floor still applies; no second authoring path is introduced.
+- [ ] T15.2 `kazi propose --json` with TWO drive modes (the single authoring path, ADR-0023): emit the draft -- goal id, `proposal_ref`, predicates[], rationale, any clarify questions -- as one JSON object. (a) **kazi-drafts**: `propose "<idea>" --harness <model>` spawns a model to draft (existing). (b) **caller-drafts**: `propose --json` with predicates supplied on stdin/flag -- the orchestrator (which already reasoned) supplies the draft and kazi applies the deterministic FLOOR + persists + gates WITHOUT spawning an inner model (avoids the redundant claude->kazi->claude). Both go through `Kazi.Authoring` (the one write path, ADR-0011); no parallel mechanism.  Owner: TBD  Est: 2h  verifies: [UC-033, UC-029]  deps: [T15.1]  acc: ExUnit with a stub harness -- kazi-drafts returns a parseable draft; caller-drafts accepts supplied predicates, applies the floor (flags a missing live-verification target + scope), persists, and spawns NO inner model; the floor applies in both; no second authoring path.
 - [ ] T15.3 `kazi run --json` result contract (versioned): on termination emit a JSON object with `status` (`converged`/`stuck`/`over_budget`/`error`), the PREDICATE VECTOR (id + verdict per predicate), `iterations`, `budget_spent`, a `next_action` hint, and `schema_version`. Document + version the schema.  Owner: TBD  Est: 2h  verifies: [UC-033]  deps: [T15.1]  acc: ExUnit against fixture runs -- each terminal status yields the documented object with the predicate vector; `schema_version` present; a schema doc is committed.
 - [ ] T15.4 `kazi run --json --stream` JSONL progress: emit one JSON event per iteration (iteration n, dispatched harness, predicate-vector delta), terminated by the final T15.3 result object, so an orchestrator monitors a long run without blocking. Mirrors how kazi parses opencode/codex JSONL.  Owner: TBD  Est: 1.5h  verifies: [UC-033]  deps: [T15.3]  acc: ExUnit -- a multi-iteration fixture run emits a valid JSONL event stream ending in the result object; each line parses independently.
 - [ ] T15.5 `kazi status --json` (new command): report a run/proposal's current state from the read-model as JSON (status, predicate vector, last iteration, timestamps).  Owner: TBD  Est: 1.5h  verifies: [UC-033]  deps: [T15.1]  acc: ExUnit -- after a propose/run, `status --json <ref>` returns the persisted state; an unknown ref is a clear JSON error + non-zero exit.
@@ -250,6 +254,35 @@ review/approve gate are never bypassed. Human-readable output stays the DEFAULT;
 - [ ] T15.7 kazi self-conformance test: assert kazi ITSELF passes the ADR-0022 conformance helper (E14 T14.1) -- non-interactive, JSON-only stdout under `--json`, subprocess-safe under a non-TTY -- so kazi meets the bar it imposes on harnesses.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T15.2, T15.3, T15.5, T15.6, E14 T14.1]  acc: ExUnit -- kazi's `--json` commands satisfy the conformance helper; a regression (prose leaking into `--json`, a stdin block) fails the test.
 - [ ] T15.8 Docs + the orchestrator recipe: document the versioned JSON schemas and a "drive kazi from an agent" recipe -- orchestrator: `kazi propose --json` -> `kazi approve --json` -> `kazi run --harness <cheap> --json [--stream]` -> parse the result -> branch on `next_action`. Note the deferred `kazi mcp` follow-on.  Owner: TBD  Est: 1h  verifies: [UC-033]  deps: [T15.7]  acc: a new orchestrator can drive the full loop from the recipe + schemas; `schema_version` pinning is documented.
 - [ ] T15.9 LIVE nested-loop dogfood (claude -> kazi -> claw/Qwen): as the orchestrator, author a tiny broken fixture goal's predicates via `kazi propose --harness claude --json`, approve, then `kazi run --harness claw --model <DGX-Qwen> --json` to drive the cheap loop; parse the JSON result. Record evidence + the friction (HONEST: claw is best-effort/no-JSON per E14, local Qwen slow per T8.11 -- expect a wiring proof, maybe not fast convergence) in `docs/devlog.md`.  Owner: TBD  Est: 2h  verifies: [UC-033]  deps: [T15.3, E14 T14.4]  acc: observed evidence of the full agent->kazi->cheap-harness loop driven over `--json`; every point where kazi was awkward to drive as a tool is logged as a follow-up; honest result reported.
+
+### E16 -- kazi self-teaching to harnesses: skill + MCP + machine-readable help (P3, ADR-0024)
+
+Acceptance: an orchestrating harness knows how to drive kazi out of the box.
+`brew install kazi-org/tap/kazi && kazi install-skill` teaches Claude Code the
+orchestrator recipe; `kazi help --json`/`kazi schema` let ANY agent introspect the
+CLI; an `AGENTS.md` covers convention-reading harnesses; a `kazi mcp` server is the
+self-describing tool surface. Opt-in, consent-first (no auto-writes to `~/.claude`).
+Depends on the E15 JSON contract.
+
+- [ ] T16.1 `kazi help --json` + `kazi schema`: emit the command/flag surface and the versioned result schemas (ADR-0023) as JSON, GENERATED from the real command table (not hand-maintained).  Owner: TBD  Est: 1.5h  verifies: [UC-034]  deps: [E15 T15.3]  acc: ExUnit -- `help --json` lists every command/flag; `schema run` returns the documented run-result schema with `schema_version`; both parse.
+- [ ] T16.2 The kazi Claude Code skill + `kazi install-skill` (opt-in): `kazi install-skill` writes `~/.claude/skills/kazi/SKILL.md` teaching the recipe (caller-drafts `propose --json` -> `approve` -> `run --harness <cheap> --json [--stream]` -> parse -> branch on `next_action`) + the two-tier economics; `brew install` PRINTS a hint to run it (no auto-write).  Owner: TBD  Est: 2h  verifies: [UC-034]  deps: [E15 T15.8]  acc: `kazi install-skill` writes the SKILL.md to a target dir (injectable in tests); the brew formula caveats the hint; the skill content references only real commands (checked by T16.4).
+- [ ] T16.3 Generic `AGENTS.md` teachability doc: a harness-neutral recipe doc in the repo, droppable into a target repo, for convention-reading harnesses (Cursor rules, etc.).  Owner: TBD  Est: 1h  verifies: [UC-034]  deps: [E15 T15.8]  acc: `AGENTS.md` documents the same recipe + JSON contract; references only real commands.
+- [ ] T16.4 Skill/AGENTS.md <-> CLI coherence test: assert the skill + `AGENTS.md` reference only commands/flags that `kazi help --json` reports (the drift guard, mirroring T9.9).  Owner: TBD  Est: 1h  verifies: [UC-034, infrastructure]  deps: [T16.1, T16.2, T16.3]  acc: ExUnit/CI -- a command named in the skill but absent from `help --json` fails the check.
+- [ ] T16.5 `kazi mcp` server: expose propose/run/status/approve as self-describing MCP tools (descriptions + schemas) wrapping the JSON CLI, for MCP-native drive (no shelling/parsing).  Owner: TBD  Est: 2.5h  verifies: [UC-034]  deps: [E15 T15.7]  acc: an MCP client lists kazi's tools with descriptions + input/output schemas and can drive propose->approve->run; built on the proven JSON contract.
+- [ ] T16.6 LIVE: Claude Code drives kazi via the installed skill: install the skill, then in a real Claude Code session drive a fixture goal end to end (propose -> approve -> run); record evidence.  Owner: TBD  Est: 1.5h  verifies: [UC-034]  deps: [T16.2]  acc: observed evidence that a Claude Code user who ran `kazi install-skill` can drive kazi without further instruction; honest result.
+
+### E17 -- Adoption: README/docs/website lead with the agent-driven workflow (P2, ADR-0023/0024)
+
+Acceptance: the README, website, and docs lead with the EASY on-ramp -- `brew
+install + kazi install-skill`, then "tell Claude Code to build X with kazi" -- and
+the two-tier economics (plan with a strong model, code with a cheap/local model,
+kazi keeps it honest objectively) as the differentiator, to grow GitHub stars and
+adoption. The goal-file/`kazi run` reference stays, below the agent on-ramp. Mixed
+content + engineering; coherence-checked (T9.9).
+
+- [ ] T17.1 README reframe (content): lead with the agent-driven workflow + `kazi install-skill` + the two-tier economics; keep install/quickstart/harness-config/goal-file below as the reference. No invented features; coherent with the site.  Owner: TBD  Est: 1.5h  verifies: [UC-035]  delivers: [a README that leads with the claude->kazi->cheap-harness on-ramp]  deps: [E16 T16.2]  acc: a newcomer sees the agent on-ramp first; every command shown is real; canonical strings unchanged or updated in lockstep with the site.
+- [ ] T17.2 Website: a "Use kazi with Claude Code" section/page (the on-ramp + the two-tier story), on-brand; update `site/src/canonical.mjs` + the coherence check in lockstep.  Owner: TBD  Est: 2h  verifies: [UC-035]  delivers: [a website section on the agent-driven workflow]  deps: [E16 T16.2]  acc: the page renders the on-ramp + two-tier story; README<->site coherence (T9.9) stays green; deployed live + verified at https://kazi.sire.run.
+- [ ] T17.3 docs/concept positioning: record the 3-layer stack (orchestrator -> kazi -> cheap harness; kazi friendly in both directions, ADR-0023) as the canonical positioning.  Owner: TBD  Est: 1h  verifies: [UC-035]  delivers: [updated concept positioning]  deps: []  acc: `docs/concept.md` describes the 3-layer stack without contradicting ADR-0001 (kazi is still the outer loop for the harness, AND a tool for the orchestrator).
 
 ### Waves
 
@@ -270,6 +303,9 @@ open feature work.**
 - **Wave E15-1 (JSON surface):** T15.1 (JSON framework + non-interactive guarantee) -> then T15.2 (propose), T15.3 (run result contract), T15.5 (status), T15.6 (authoring state machine) in PARALLEL.
 - **Wave E15-2 (stream + conform):** T15.4 (JSONL streaming) -> T15.7 (kazi self-conformance to ADR-0022).
 - **Wave E15-3 (recipe + dogfood):** T15.8 (orchestrator recipe + schemas) -> T15.9 (live claude->kazi->claw/Qwen nested loop; honest result).
+- **Wave E16-1 (self-description):** T16.1 (`help --json`/`schema`) -> T16.2 (skill + `install-skill`), T16.3 (`AGENTS.md`) -> T16.4 (coherence guard).
+- **Wave E16-2 (MCP + live):** T16.5 (`kazi mcp`), T16.6 (Claude Code drives kazi via the skill, live).
+- **Wave E17 (adoption docs):** T17.1 (README reframe), T17.2 (website section + coherence + deploy), T17.3 (concept positioning) -- after the skill (T16.2) exists to point at.
 
 - **Wave E11-1 (pure core):** T11.1 (schema + `fold_answers`) -> T11.2 (deterministic gap floor). Pure, fully unit-tested, no I/O.
 - **Wave E11-2 (seam + wiring):** T11.3 (harness-drafted candidates on the stub seam), T11.4 (two-phase `propose/2`), T11.5 (inline rationale) -- after the core.
@@ -321,6 +357,23 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (E16 self-teaching + E17 adoption; propose two drive modes)
+- **Refined ADR-0023 + T15.2** to resolve the "claude -> kazi -> claude" confusion:
+  `kazi propose` has TWO drive modes -- **kazi-drafts** (kazi spawns a model) and
+  **caller-drafts** (the orchestrator supplies predicates; kazi applies the
+  deterministic floor + persists + gates, NO inner model). kazi's value is the
+  floor + gate, not the LLM drafting, so a capable orchestrator pays for reasoning
+  ONCE. Still the single authoring path (`Kazi.Authoring`).
+- **Added E16 (T16.1-T16.6)** -- kazi self-teaching: `kazi help --json`/`schema`,
+  an opt-in Claude Code skill (`kazi install-skill`), a generic `AGENTS.md`, a
+  skill<->CLI coherence guard, a `kazi mcp` server, and a live "Claude Code drives
+  kazi via the skill" dogfood. **ADR created:** `docs/adr/0024-kazi-self-teaching-
+  to-harnesses.md` (skill opt-in/consent-first; machine-readable self-description;
+  MCP as the richest tier).
+- **Added E17 (T17.1-T17.3)** -- adoption: README/website/concept lead with the
+  agent-driven (claude->kazi->cheap-harness) workflow + the two-tier economics, to
+  grow GitHub stars/adoption. **Use cases:** UC-034, UC-035.
 
 ### 2026-06-23 -- Change Summary (add E15: harness-friendly, agent-drivable kazi)
 - **Added E15 (T15.1-T15.9)** -- make kazi a CLI an orchestrating agent (claude
@@ -500,9 +553,9 @@ load-bearing for versioning -- type every commit correctly.
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0023` (index at `docs/adr/README.md`); the release
+- Decisions: `docs/adr/0001`..`0024` (index at `docs/adr/README.md`); the release
   pipeline is ADR-0014 (distribution) + ADR-0017 (automation); the website is
-  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021; harness onboarding is ADR-0022; agent-drivable kazi is ADR-0023.
+  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021; harness onboarding is ADR-0022; agent-drivable kazi is ADR-0023; self-teaching is ADR-0024.
 - Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
 - Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),
