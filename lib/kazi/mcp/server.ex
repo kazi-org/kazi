@@ -21,12 +21,17 @@ defmodule Kazi.MCP.Server do
     * `initialize` — returns the protocol version, server info, and the
       `tools` capability.
     * `tools/list` — returns the kazi tools, each SELF-DESCRIBING: `name`,
-      `description`, and a JSON-Schema `inputSchema`. The five tools are
-      `kazi_propose`, `kazi_approve`, `kazi_run`, `kazi_status`, and
-      `kazi_list_proposed` — the `propose → approve → run`/`status` recipe.
+      `description`, and a JSON-Schema `inputSchema`. The five primary tools are
+      `kazi_plan`, `kazi_approve`, `kazi_apply`, `kazi_status`, and
+      `kazi_list_proposed` — the `plan → approve → apply`/`status` recipe.
+      `kazi_propose`/`kazi_run` remain as DEPRECATED TOOL ALIASES (ADR-0032
+      decision 2): they dispatch to the same functions so a client pinning the
+      old MCP tool name keeps working through the deprecation window. The
+      aliases are NOT listed by `tools/list`; only the primary names are.
     * `tools/call` — dispatches a named tool to the corresponding kazi function
       (`Kazi.Authoring.propose/2`/`approve/2`, `Kazi.Runtime.run/2`, the
       read-model status) and returns its JSON result as the tool's content.
+      The deprecated `kazi_propose`/`kazi_run` aliases dispatch identically.
     * any other method, or an unknown tool, is a JSON-RPC error.
 
   ## Result shapes
@@ -76,8 +81,8 @@ defmodule Kazi.MCP.Server do
   Options threaded into `handle_request/2` and forwarded to the dispatched kazi
   function — the injection seams that keep the server hermetic:
 
-    * `:harness` — a stub `Kazi.HarnessAdapter` module for `kazi_propose`
-      (and a `kazi_run` that drafts), so no real `claude` is spawned.
+    * `:harness` — a stub `Kazi.HarnessAdapter` module for `kazi_plan`
+      (and a `kazi_apply` that drafts), so no real `claude` is spawned.
     * `:adapter_opts` — keyword opts forwarded verbatim to the harness/runtime
       (e.g. a fixture run's stub `command`, a model, a per-dispatch budget).
     * `:run_opts` — extra keyword opts merged into the `Kazi.Runtime.run/2` call
@@ -100,14 +105,15 @@ defmodule Kazi.MCP.Server do
   def tools do
     [
       %{
-        "name" => "kazi_propose",
+        "name" => "kazi_plan",
         "description" =>
           "Draft a prose idea into a kazi goal — a set of machine-checkable acceptance " <>
             "predicates whose conjunction means the idea is done. Step 1 of the " <>
-            "propose -> approve -> run recipe. Pass `proposal` to use caller-drafted " <>
+            "plan -> approve -> apply recipe. Pass `proposal` to use caller-drafted " <>
             "predicates directly (no inner model is spawned); omit it to have kazi draft " <>
             "from the idea. Returns the proposal_ref to approve against, the drafted goal, " <>
-            "and its lifecycle status (proposed).",
+            "and its lifecycle status (proposed). (Was `kazi_propose`, kept as a " <>
+            "deprecated alias.)",
         "inputSchema" => %{
           "type" => "object",
           "required" => ["idea"],
@@ -142,19 +148,20 @@ defmodule Kazi.MCP.Server do
           "properties" => %{
             "proposal_ref" => %{
               "type" => "string",
-              "description" => "The proposal's review handle (returned by kazi_propose)."
+              "description" => "The proposal's review handle (returned by kazi_plan)."
             }
           }
         }
       },
       %{
-        "name" => "kazi_run",
+        "name" => "kazi_apply",
         "description" =>
           "Drive a goal to convergence and return the terminal result the orchestrator " <>
             "branches on. Step 3 of the recipe. Supply the goal as `goal_file` (a path to a " <>
             "goal-file) OR `goal` (an inline goal-file map). The result mirrors the committed " <>
             "run-result schema: status (converged / stuck / over_budget / error), the predicate " <>
-            "vector, iterations, budget_spent, next_action, reason, release_ref.",
+            "vector, iterations, budget_spent, next_action, reason, release_ref. (Was " <>
+            "`kazi_run`, kept as a deprecated alias.)",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
@@ -172,7 +179,7 @@ defmodule Kazi.MCP.Server do
               "description" => "Target workspace the agent edits / predicates evaluate in."
             }
           },
-          "resultSchema" => result_schema(Schema.fetch("run"))
+          "resultSchema" => result_schema(Schema.fetch("apply"))
         }
       },
       %{
@@ -291,7 +298,11 @@ defmodule Kazi.MCP.Server do
   # message}` for an unknown tool / bad params (a JSON-RPC protocol error).
   @spec call_tool(term(), map(), opts()) ::
           {:ok, map()} | {:tool_error, map()} | {:error, integer(), String.t()}
-  defp call_tool("kazi_propose", args, opts) do
+  # `kazi_propose` is the DEPRECATED tool alias of `kazi_plan` (ADR-0032); it
+  # dispatches identically so a client pinning the old MCP tool name keeps working.
+  defp call_tool("kazi_propose", args, opts), do: call_tool("kazi_plan", args, opts)
+
+  defp call_tool("kazi_plan", args, opts) do
     case fetch_string(args, "idea") do
       {:ok, idea} ->
         propose_opts =
@@ -306,7 +317,7 @@ defmodule Kazi.MCP.Server do
         end
 
       :error ->
-        {:error, @invalid_params, "kazi_propose requires a non-empty string `idea`"}
+        {:error, @invalid_params, "kazi_plan requires a non-empty string `idea`"}
     end
   end
 
@@ -323,7 +334,10 @@ defmodule Kazi.MCP.Server do
     end
   end
 
-  defp call_tool("kazi_run", args, opts) do
+  # `kazi_run` is the DEPRECATED tool alias of `kazi_apply` (ADR-0032); identical dispatch.
+  defp call_tool("kazi_run", args, opts), do: call_tool("kazi_apply", args, opts)
+
+  defp call_tool("kazi_apply", args, opts) do
     with {:ok, goal} <- load_goal(args) do
       run_opts =
         opts
@@ -360,7 +374,7 @@ defmodule Kazi.MCP.Server do
     {:error, @method_not_found, "unknown tool: #{inspect(name)}"}
   end
 
-  # --- goal loading (kazi_run) -----------------------------------------------
+  # --- goal loading (kazi_apply) ---------------------------------------------
 
   # Resolve the run target: a `goal_file` path is loaded through the same loader
   # the CLI uses; an inline `goal` map is rehydrated through `from_map/1`. A
@@ -384,7 +398,7 @@ defmodule Kazi.MCP.Server do
         end
 
       true ->
-        {:error, @invalid_params, "kazi_run requires `goal_file` (a path) or `goal` (a map)"}
+        {:error, @invalid_params, "kazi_apply requires `goal_file` (a path) or `goal` (a map)"}
     end
   end
 

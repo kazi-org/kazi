@@ -9,9 +9,9 @@ defmodule Kazi.MCP.ServerTest do
   functions the tools dispatch to are reached through their existing injection
   seams:
 
-    * `kazi_propose` drives a STUB `Kazi.HarnessAdapter` (the `:harness` seam) —
+    * `kazi_plan` drives a STUB `Kazi.HarnessAdapter` (the `:harness` seam) —
       no real `claude`, no network;
-    * `kazi_run` drives a real fixture run against a temp git workspace with a
+    * `kazi_apply` drives a real fixture run against a temp git workspace with a
       noop harness STUB binary (`:adapter_opts` command) and a tight budget, so
       it terminates deterministically with NO network;
     * `kazi_status` / `kazi_list_proposed` / `kazi_approve` read/transition the
@@ -62,17 +62,20 @@ defmodule Kazi.MCP.ServerTest do
   end
 
   describe "tools/list — self-describing tools" do
-    test "returns the five kazi tools, each with name + description + inputSchema" do
+    test "returns the five primary kazi tools, each with name + description + inputSchema" do
       response = Server.handle_request(request("tools/list", %{}, 2))
       tools = response["result"]["tools"]
 
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
 
+      # T27.5 (ADR-0032): the primary tool names match the renamed CLI verbs —
+      # `kazi_plan`/`kazi_apply` (was `kazi_propose`/`kazi_run`). The deprecated
+      # aliases dispatch (asserted in a Tier-2 test below) but are NOT listed here.
       assert names == [
+               "kazi_apply",
                "kazi_approve",
                "kazi_list_proposed",
-               "kazi_propose",
-               "kazi_run",
+               "kazi_plan",
                "kazi_status"
              ]
 
@@ -86,26 +89,26 @@ defmodule Kazi.MCP.ServerTest do
       end
     end
 
-    test "the propose/approve/status tools declare their required arguments" do
+    test "the plan/approve/status tools declare their required arguments" do
       tools = tools_by_name()
 
-      assert tools["kazi_propose"]["inputSchema"]["required"] == ["idea"]
+      assert tools["kazi_plan"]["inputSchema"]["required"] == ["idea"]
       assert tools["kazi_approve"]["inputSchema"]["required"] == ["proposal_ref"]
       assert tools["kazi_status"]["inputSchema"]["required"] == ["ref"]
     end
 
-    test "run and status tools point at the committed result schemas (Kazi.CLI.Schema)" do
+    test "apply and status tools point at the committed result schemas (Kazi.CLI.Schema)" do
       tools = tools_by_name()
 
       # The result-shape descriptor is REUSED from Kazi.CLI.Schema (T16.1), so the
       # MCP tool docs and the CLI --json contract cannot drift. The descriptor is
       # the atom-keyed schema map Kazi.CLI.Schema emits. T27.4 (ADR-0032) renamed
-      # the result-schema command key `run` -> `apply` (the `kazi_run` MCP tool
-      # still fetches via the `run` alias; the tool itself is renamed in T27.5).
-      assert tools["kazi_run"]["inputSchema"]["resultSchema"].command == "apply"
+      # the result-schema command key `run` -> `apply`; T27.5 renames the tool
+      # `kazi_run` -> `kazi_apply` so it fetches the `apply` schema by its primary key.
+      assert tools["kazi_apply"]["inputSchema"]["resultSchema"].command == "apply"
       assert tools["kazi_status"]["inputSchema"]["resultSchema"].command == "status"
 
-      assert tools["kazi_run"]["inputSchema"]["resultSchema"].schema_version ==
+      assert tools["kazi_apply"]["inputSchema"]["resultSchema"].schema_version ==
                Kazi.CLI.Schema.schema_version()
     end
   end
@@ -133,7 +136,7 @@ defmodule Kazi.MCP.ServerTest do
     test "a tool call missing a required argument is an invalid-params error" do
       response =
         Server.handle_request(
-          request("tools/call", %{"name" => "kazi_propose", "arguments" => %{}}, 11)
+          request("tools/call", %{"name" => "kazi_plan", "arguments" => %{}}, 11)
         )
 
       assert response["error"]["code"] == -32_602
@@ -157,7 +160,7 @@ defmodule Kazi.MCP.ServerTest do
   # Tier 2 — tools/call dispatches to the real kazi functions (hermetic seams)
   # ===========================================================================
 
-  describe "tools/call — kazi_propose (stub harness seam)" do
+  describe "tools/call — kazi_plan (stub harness seam)" do
     setup :checkout_sandbox
 
     test "dispatches to Kazi.Authoring.propose and returns the drafted goal" do
@@ -165,7 +168,7 @@ defmodule Kazi.MCP.ServerTest do
         Server.handle_request(
           request(
             "tools/call",
-            %{"name" => "kazi_propose", "arguments" => %{"idea" => "a health endpoint"}},
+            %{"name" => "kazi_plan", "arguments" => %{"idea" => "a health endpoint"}},
             20
           ),
           harness: StubHarness
@@ -187,7 +190,9 @@ defmodule Kazi.MCP.ServerTest do
       assert decoded == payload
     end
 
-    test "a blank-after-trim idea surfaces a kazi error as an isError tool result" do
+    test "the deprecated `kazi_propose` alias still dispatches (a blank idea surfaces an error)" do
+      # Drives the DEPRECATED tool name on purpose: `kazi_propose` must dispatch
+      # identically to `kazi_plan` through the deprecation window (ADR-0032).
       response =
         Server.handle_request(
           request(
@@ -218,7 +223,7 @@ defmodule Kazi.MCP.ServerTest do
           request(
             "tools/call",
             %{
-              "name" => "kazi_propose",
+              "name" => "kazi_plan",
               "arguments" => %{"idea" => "caller drafts this", "proposal" => proposal}
             },
             22
@@ -240,7 +245,7 @@ defmodule Kazi.MCP.ServerTest do
         Server.handle_request(
           request(
             "tools/call",
-            %{"name" => "kazi_propose", "arguments" => %{"idea" => "approve me please"}},
+            %{"name" => "kazi_plan", "arguments" => %{"idea" => "approve me please"}},
             30
           ),
           harness: StubHarness
@@ -314,7 +319,7 @@ defmodule Kazi.MCP.ServerTest do
     end
   end
 
-  describe "tools/call — kazi_run (fixture run, noop harness stub)" do
+  describe "tools/call — kazi_apply (fixture run, noop harness stub)" do
     setup :checkout_sandbox
     @describetag :tmp_dir
 
@@ -327,7 +332,7 @@ defmodule Kazi.MCP.ServerTest do
           request(
             "tools/call",
             %{
-              "name" => "kazi_run",
+              "name" => "kazi_apply",
               "arguments" => %{"goal_file" => goal_file, "workspace" => work}
             },
             40
@@ -357,7 +362,10 @@ defmodule Kazi.MCP.ServerTest do
       assert vector["code"] == "fail"
     end
 
-    test "a missing goal_file/goal argument is an invalid-params error" do
+    test "the deprecated `kazi_run` alias dispatches (a missing goal is an invalid-params error)" do
+      # Drives the DEPRECATED tool name on purpose: `kazi_run` must dispatch
+      # identically to `kazi_apply` through the deprecation window (ADR-0032), so
+      # it reaches the same goal-loading guard.
       response =
         Server.handle_request(
           request("tools/call", %{"name" => "kazi_run", "arguments" => %{}}, 41)
