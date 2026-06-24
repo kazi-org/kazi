@@ -365,7 +365,7 @@ defmodule Kazi.CLITest do
       assert stderr =~ "`kazi run` is deprecated"
       assert stderr =~ "use `kazi apply`"
       # T27.7 (ADR-0032): the hint names the concrete removal version.
-      assert stderr =~ "removed in v0.5.0"
+      assert stderr =~ "removed in v0.6.0"
     end
 
     test "under --json the deprecated `run` alias emits NO hint into stdout (stdout stays JSON)",
