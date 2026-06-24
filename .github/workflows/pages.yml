@@ -4,6 +4,14 @@ name: Pages
 # Triggers on pushes to main that touch the site (or this workflow), plus manual
 # dispatch. The README <-> website coherence drift-check (T9.9) gates the build,
 # so a divergence between site/src/canonical.mjs and README.md fails the deploy.
+#
+# T9.10: the site bakes its version badge from .release-please-manifest.json at
+# build time (site/astro.config.mjs). A release-please version bump touches that
+# manifest (plus mix.exs/CHANGELOG.md) but NOT site/, so without the manifest in
+# the paths filter the site never redeploys on a release and the live badge goes
+# stale. We add the manifest to paths, and also redeploy on a published Release as
+# a belt-and-suspenders. No job branches on github.event_name, so both triggers
+# feed the same build+deploy with no extra conditions.
 
 on:
   push:
@@ -11,7 +19,10 @@ on:
     paths:
       - "site/**"
       - "README.md"
+      - ".release-please-manifest.json"
       - ".github/workflows/pages.yml"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
