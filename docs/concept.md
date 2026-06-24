@@ -114,9 +114,9 @@ instead of screen-scraping prose — the same conformance bar kazi imposes on th
 harnesses it drives, now applied to itself. The orchestrator owns the per-phase
 model policy ("strong brain to author predicates, cheap brain to converge"); kazi
 stays a pure tool and bakes none of that tiering in (ADR-0023). Predicate
-authoring stays the single sanctioned `kazi propose` path (ADR-0011) regardless of
-which layer calls it, so the deterministic clarify floor and the approve gate are
-never bypassed from above.
+authoring stays the single sanctioned `kazi plan` path (ADR-0011, ADR-0032)
+regardless of which layer calls it, so the deterministic clarify floor and the
+approve gate are never bypassed from above.
 
 ---
 
@@ -232,6 +232,41 @@ supervision, each converging an objective partition. It is not a "swarm of fake
 agents" (section 10): every concurrent unit is a real supervised reconciler over
 a leased blast radius.
 
+### 8a. Dependency-aware waves (ADR-0028)
+
+Blast-radius partitioning gives SPATIAL parallelism (disjoint edits run free). It
+says nothing about SEMANTIC order: when group B logically depends on group A's
+output (the streaming predicates need the result-contract predicates true first),
+two spatially-disjoint groups may still need to run in order. ADR-0028 adds that
+missing axis.
+
+- **Declare `needs` edges.** A predicate group (the `[[group]]` taxonomy,
+  ADR-0020) carries an optional `needs = ["group-id", ...]` -- a
+  "must-converge-before" edge set, distinct from `parent` (which stays
+  budget-rollup only). Edges are validated at load: every id must exist, no
+  self-edge, no cycle. Absent edges mean fully parallel (the section 8 behaviour).
+- **Compute the ready set.** From the `needs` edges plus each group's current
+  convergence state, kazi derives the groups whose every dependency has
+  OBJECTIVELY converged (predicates true with evidence -- not "an agent said
+  done"). This is pure and deterministic.
+- **Topological + spatial, pipelined (no barrier).** The scheduler dispatches only
+  ready groups, partitions that ready set by blast radius, and runs the partitions
+  concurrently. A group becomes ready the MOMENT its specific deps converge -- not
+  when a whole wave finishes -- so there is no slowest-in-wave tax.
+- **Objective re-gating.** Readiness is defined by observed convergence, so a dep
+  that later regresses (the regression guard fires) re-gates its dependents: they
+  return to not-ready and re-converge. The DAG is re-evaluated against observed
+  state each cycle -- the reconciler property, not a one-shot plan.
+- **Blocked-dependency escalation.** If a dep group goes stuck or over budget, its
+  dependents can never become ready; the scheduler escalates the affected sub-DAG
+  and NAMES the blocking dep in the collective status, rather than hanging
+  silently.
+
+The irreducible input is the dependency edges: kazi computes everything
+downstream of them, but it cannot DERIVE logical precedence from code (only
+spatial disjointness). A human (or the planning agent) authors `needs` once; kazi
+derives and re-derives the wave schedule from there.
+
 ---
 
 ## 9. Architecture & data layers (ADR-0003, ADR-0004, ADR-0005)
@@ -269,14 +304,54 @@ requirement that drove ADR-0004/0005).
 
 ---
 
-## 10. Human interface — off the context window
+## 10. The agent drives kazi (ADR-0024, ADR-0031)
 
 The human sets *direction*, not keystrokes. The human's interface is the
-orchestrating agent (Claude): they say "build X with kazi" and the agent drives
-`propose` → `approve` → `run` and pings back on `converged`, `stuck`, or
-`needs-decision`. Status routing lives outside kazi's context window so the
-agent stays focused on implementation. The LiveView dashboard is for inspection
-(goal board, agent presence, lease map, convergence history), not for driving.
+orchestrating agent (Claude Code): they say "build X with kazi" and the agent
+drives `kazi plan` -> `approve` -> `kazi apply`, then pings back on `converged`,
+`stuck`, or `needs-decision`. Status routing lives outside kazi's context window
+so the agent stays focused on implementation. The LiveView dashboard is for
+inspection (goal board, agent presence, lease map, convergence history), not for
+driving.
+
+**The agent is the human's mobile interface.** Because the orchestrating agent is
+the thing the human talks to, the agent app (web/mobile) IS the remote control:
+the human declares and approves goals from their phone by chatting with the agent,
+and the agent's own push notifications report terminal states from the run it is
+already driving. kazi therefore ships **no** separate chat or notification
+surface of its own (ADR-0029); the headless-autonomous case, if it ever
+activates, is served by a future generic webhook, not a bespoke bridge.
+
+**kazi is self-teaching, so the agent already knows how to drive it** (ADR-0024).
+kazi describes itself in machine-readable form (`kazi help --json`,
+`kazi schema`) and ships the integration glue for the dominant harness: an opt-in
+Claude Code skill (`kazi install-skill`), a harness-neutral `AGENTS.md`, and a
+`kazi mcp` tool surface. The on-ramp is "install kazi -> the agent can drive it,"
+not "read the docs first."
+
+**One front door: the router skill** (ADR-0031). The Claude Code skill is a
+ROUTER whose sub-skills are the operator's human verbs, each driving a real kazi
+command:
+
+- `kazi plan <idea>` -- author or refine the goal-set (predicates, `[[groups]]`,
+  `needs` edges) through the single sanctioned authoring path (caller-drafts,
+  ADR-0023), with the deterministic clarify floor and the approve gate intact.
+- `kazi apply [--parallel] [--standing]` -- converge the goal-set via the native
+  scheduler and dependency-aware waves (sections 8, 8a). This subsumes the
+  operator's old loop/apply/qualify glue for code goals: the reconcile loop is
+  internal, `--standing` re-converges on drift, and "launch-ready" is just the
+  predicate vector being objectively satisfied (including a live prod probe), not
+  a heuristic verdict.
+- `kazi status` / `watch` -- convergence state and the LiveView dashboard.
+- `kazi adopt <repo>` (CLI `kazi init`) -- reverse-engineer a starter goal-set
+  from an existing repo.
+
+Verb consistency end to end (ADR-0032): the skill verb, the thing the human types
+at the agent, and the CLI command read the same. `kazi plan` authors intent;
+`kazi apply` converges it -- mirroring `/plan` and `/apply`. (`run`/`propose`
+survive only as deprecated aliases for back-compat; they are not the primary
+verbs.) This keeps kazi an outer-loop tool the agent calls (ADR-0001), not a
+harness the human types into directly.
 
 ---
 
