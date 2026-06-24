@@ -244,6 +244,23 @@ declared in config without touching kazi.
 > must be installed and on your `PATH`. kazi shells out to it as a subprocess; it
 > does not bundle or install harnesses.
 
+#### Tiered harness support (ADR-0022)
+
+Not every CLI agent clears the same bar. kazi drives every harness as a
+non-interactive subprocess and parses its stdout, so a harness is **first-class**
+only when it runs from a single prompt AND emits machine-parseable output
+(JSON/JSONL) correctly under a non-TTY subprocess
+([ADR-0022](docs/adr/0022-harness-onboarding-conformance.md)). Some tools are
+added with a documented workaround, and one is **best-effort only**:
+
+| Harness (`--harness`) | Tier | Notes |
+| --- | --- | --- |
+| `claude` (default) | First-class | single JSON envelope; full cost/token parse. |
+| `opencode` | First-class | NDJSON event stream; point it at a local model. |
+| `codex` | First-class | `codex exec … --json` JSONL stream; auth `OPENAI_API_KEY` / `codex login`. |
+| `antigravity` | Conformant **with a workaround** | non-TTY stdout bug (`antigravity-cli#76`) handled via `--prompt-file --output json`. |
+| `claw` | **Best-effort / demo-grade** | claw-code emits **no** structured output and has no model flag — kazi surfaces its raw stdout as the result with **no cost/token extraction**. It runs, but fidelity is degraded; treat it as a demo ("an agent-managed museum exhibit, not a production tool"), not a budgeted production run. Auth is via env API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). |
+
 ### Build a self-contained release (full read-model)
 
 The escript can't bundle the native SQLite NIF, so it runs **without** the
