@@ -61,9 +61,23 @@ codex_live_excluded = [:codex_live]
 # HONESTLY (never fails, never fake-passes) when either is unavailable.
 antigravity_live_excluded = [:antigravity_live]
 
+# The live claw smoke test (tagged `:claw_live`, T14.4/ADR-0022) drives the
+# operator's REAL `claw` CLI (`claw prompt "<text>"`) wired to a model via env API
+# keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). claw is added BEST-EFFORT /
+# DEMO-GRADE (no structured output — `Kazi.Harness.Profiles.Claw`). Like
+# `:codex_live` it is NON-hermetic and EXCLUDED by default so the standard `mix
+# test` and CI stay hermetic (no network, no creds). Opt in explicitly:
+#
+#     mix test --only claw_live test/kazi/claw_live_test.exs
+#
+# The test itself probes the `claw` binary + auth first and SKIPS HONESTLY (never
+# fails, never fake-passes) when either is unavailable.
+claw_live_excluded = [:claw_live]
+
 ExUnit.start(
   exclude:
     nats_excluded ++
       graphify_excluded ++
-      opencode_live_excluded ++ codex_live_excluded ++ antigravity_live_excluded
+      opencode_live_excluded ++
+      codex_live_excluded ++ antigravity_live_excluded ++ claw_live_excluded
 )
