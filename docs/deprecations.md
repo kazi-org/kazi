@@ -7,7 +7,8 @@ deprecation window so existing callers are not broken mid-flight.
 
 ## Deprecated CLI verbs: `run`, `propose`, and `mix kazi.run`
 
-Status: deprecated (ADR-0032). Removed in **v0.5.0** (the next minor).
+Status: deprecated (ADR-0032). Removed in **v0.6.0** (the minor after the
+rename ships in v0.5.0).
 
 ### What is deprecated
 
@@ -36,8 +37,10 @@ hint when used.
 
 ### Removal version
 
-The aliases are scheduled for removal in **v0.5.0**, the next minor release
-(operator decision, 2026-06-24). After v0.5.0:
+The aliases are scheduled for removal in **v0.6.0** (operator decision,
+2026-06-24). The verb rename itself ships in v0.5.0 with the aliases still
+present, so callers get a full minor-release window to migrate before v0.6.0
+removes them. After v0.6.0:
 
 - `kazi run` and `kazi propose` no longer parse; use `kazi apply` / `kazi plan`.
 - `mix kazi.run` is removed; use `mix kazi.apply`.
@@ -52,7 +55,7 @@ The aliases are scheduled for removal in **v0.5.0**, the next minor release
   documented as deprecated aliases (ADR-0023, ADR-0032).
 
 The runtime hint already points the way: invoking a deprecated alias prints
-`note: \`kazi run\` is deprecated; use \`kazi apply\` (removed in v0.5.0)` to
+`note: \`kazi run\` is deprecated; use \`kazi apply\` (removed in v0.6.0)` to
 stderr (and the analogous line for `propose` / `mix kazi.run`).
 
 See ADR-0032 (`docs/adr/0032-rename-cli-verbs-run-apply-propose-plan.md`) for the
