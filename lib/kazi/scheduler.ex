@@ -505,7 +505,13 @@ defmodule Kazi.Scheduler do
     task = Map.fetch!(state.tasks, slot)
 
     new_task =
-      start_partition_task(state.supervisor, task.partition, state.reconciler, state.timeout, slot)
+      start_partition_task(
+        state.supervisor,
+        task.partition,
+        state.reconciler,
+        state.timeout,
+        slot
+      )
 
     updated = Map.put(new_task, :restarts_left, task.restarts_left - 1)
 
