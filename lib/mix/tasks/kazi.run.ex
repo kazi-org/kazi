@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Kazi.Run do
     # the --json contract) is untouched.
     IO.puts(
       :stderr,
-      "note: `mix kazi.run` is deprecated; use `mix kazi.apply` (removed in v0.5.0)"
+      "note: `mix kazi.run` is deprecated; use `mix kazi.apply` (removed in v0.6.0)"
     )
 
     Mix.Tasks.Kazi.Apply.run(argv)
