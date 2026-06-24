@@ -307,24 +307,37 @@ defmodule Kazi.Teach.InstallSkill do
 
     `next_action` is an orchestration HINT, not a kazi action -- you own the policy.
 
-    ### The `status` verb -- poll between steps (`kazi status <ref> --json`)
+    ### The `status` verb -- report convergence (`kazi status <ref> --json`)
 
-    `kazi status <ref> --json` is a PURE read of the read-model (nothing runs or
-    mutates). The `<ref>` resolves as a run's goal id first (`kind: "run"`, with the
-    latest iteration's predicate vector), else a `proposal_ref` (`kind: "proposal"`,
-    the lifecycle state). An unknown ref is a JSON error with a non-zero exit.
+    `status` REPORTS a goal's convergence state from the read-model -- it never runs
+    or mutates anything, it just reads the persisted projection. `kazi status <ref>
+    --json` resolves `<ref>` as a run's goal id first (`kind: "run"`, with the latest
+    iteration's predicate vector), else as a `proposal_ref` (`kind: "proposal"`, the
+    lifecycle state). An unknown ref is a JSON error with a non-zero exit. Use it to
+    poll a long convergence between steps, or to answer "where did this goal land?"
+    after the fact.
+
+    For a human watching multiple goals at once, the SAME read-model is rendered by
+    kazi's LiveView dashboard: start the app's web endpoint and open its root URL
+    (`http://localhost:4000/` by default) to see the live convergence view instead of
+    polling `status` by hand. The dashboard is a READ of the same projection -- it
+    drives nothing. (There is no separate `kazi` dashboard command; the CLI surface
+    for state is `kazi status`, and the dashboard is the web view of it.)
 
     ### The `adopt` verb -- bring kazi into a repo (`kazi init <repo-dir>`)
 
-    `adopt` reverse-engineers a STARTER goal-file from an existing repo by stack
-    detection, so a repo that has not declared predicates gets a runnable first draft.
-    Route it to `kazi init`:
+    `adopt` reverse-engineers a STARTER goal-set from an existing repo by
+    deterministic stack detection, so a repo that has not declared predicates gets a
+    runnable first draft to refine. Route it to `kazi init`:
 
     ```sh
     kazi init <repo-dir> --out goal.toml
     ```
 
-    Then review the drafted goal-file, refine it via the `plan` verb, approve, and
+    `init` writes a starter goal-file (default `<repo>/kazi.goal.toml`, or `--out
+    <file>`). The detection is deterministic; pass `--enrich` to additionally let a
+    harness propose live predicates from discovered endpoints (off by default).
+    Then review the drafted goal-set, refine it via the `plan` verb, approve, and
     `apply`. Use `adopt` once per repo to bootstrap; it is the on-ramp, not a step in
     the per-goal loop.
 
