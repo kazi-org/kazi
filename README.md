@@ -28,7 +28,7 @@ watches actual state, and it keeps closing the gap until the two match.
 
 ```mermaid
 flowchart TD
-    U([You: "build a URL-shortener web service and ship it live in production"]) --> K
+    U(["You: #quot;build a URL-shortener web service and ship it live in production#quot;"]) --> K
     
     subgraph kazi [kazi reconcile loop]
         O[Observe<br/>What's failing?] --> D[Dispatch<br/>an agent to fix it]
