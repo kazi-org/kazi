@@ -4,6 +4,72 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-24 — token benchmark (T15.9): kazi adds ~0% overhead vs vanilla Claude
+
+First real A/B/C token measurement (the benchmark ADR-0010 promised; the
+audit below flagged it missing). Question: does claude→kazi→claude cost more
+tokens than vanilla Claude?
+
+**Method.** Broken Go fixture (`deploy-target`, `healthBody="not-ok"` → one unit
+test fails). Each arm a separate real git repo under `~/kazi-bench` (NOT `/tmp` —
+opencode auto-rejects scratch dirs, T8.11), with workspace permissions granted
+(`.claude/settings.local.json` accept-edits + `Bash`; `opencode.json` edit/bash
+allow). Tokens captured by a shim wrapping the harness binary, teeing the
+`--output-format json` envelope (kazi captures tokens internally but persists/
+prints none — see bugs). Code-only goal (one `test_runner` predicate), so the
+LLM cost is the agent dispatch; integrate/deploy are git/HTTP, not tokens.
+
+**Results.**
+
+| Arm | Harness | Outcome | Total tokens | Cost | Agent turns |
+|-----|---------|---------|--------------|------|-------------|
+| A — vanilla | `claude -p` (one freeform session) | converged | 326,507 | $0.4790 | 9 |
+| B — kazi→Claude | `mix kazi.run` → `claude` (1 dispatch) | converged | 328,141 | $0.4791 | 9 |
+| C — kazi→local Qwen | `--harness opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0` | did NOT converge in ~6min | — (dispatch in-flight) | $0 (local) | — |
+
+Token split was near-identical (A: in 12,972 / out 1,116 / cache-read 288,183;
+B: in 12,843 / out 1,187 / cache-read 290,090).
+
+**Findings.**
+1. **kazi imposes ~zero token overhead at the same model: +1,634 tokens (+0.5%),
+   +$0.0001.** Both arms invoke the SAME `claude` agent, whose static system
+   prompt + tools + workspace context dominate (~290k cache-read, identical in
+   both). kazi's structured dispatch prompt (digest + failing evidence) is no
+   bigger than a human's freeform ask. **The "claude→kazi→claude is inherently
+   more expensive" fear is false for single-dispatch convergence.**
+2. **The real token risk is MULTI-dispatch, not the wrapper.** kazi is stateless
+   per iteration (ADR-0008), so an N-dispatch convergence re-pays that ~290k
+   baseline N times where a vanilla session amortizes it. Mitigants: (a) the huge
+   `cache_read` shows the agent's static prefix is already server-cached, and the
+   5-min TTL means rapid successive dispatches still hit it; (b) the unwired
+   orientation-prefix + Anthropic `cache_control` (T4.3, see audit below) would
+   cut iters 2..N further. So "N× baseline" is the worst case, not the typical.
+3. **Cost-tiering (arm C) is real in $ structure but gated by local-model speed.**
+   kazi correctly observed the failure and dispatched opencode→DGX-Qwen; the 35B
+   q8_0 simply didn't return within 6 min (reconfirms T8.11). When it does
+   converge, the per-dispatch $ is ~0 (local compute) — that is the cheaper story,
+   bottlenecked by inner-harness throughput, not kazi.
+
+**Bottom line.** kazi is NOT more expensive than vanilla for equivalent work
+(proven, N=1). Its cost win needs model-tiering (gated by local-model speed); its
+correctness win (objective termination = "right the first time") is free. Earned
+claim today: *"kazi adds no token tax over your existing agent."* The *"cheaper"*
+headline still needs a multi-iteration benchmark on a faster local model.
+
+**Bugs surfaced during the run (not yet filed/fixed):**
+- **Stale example:** `priv/examples/deploy_target.toml` uses `cmd = "go test ./..."`
+  (whole command as the executable) → `{:cmd_unrunnable, :enoent}`. `test_runner`
+  wants `cmd = "go"`, `args = ["test","./..."]` (README quickstart 2 is correct).
+- **Read-model crash on errored predicates:** an `:error` PredicateResult whose
+  evidence holds a tuple (`reason: {:cmd_unrunnable, ...}`) fails the
+  `Iteration.predicate_vector` `:map` cast — `record_iteration/1` raises, so an
+  errored predicate is never persisted.
+- **CLI CaseClauseError:** `Kazi.CLI.run_goal/4` (cli.ex:526) has no clause for the
+  `{:ok, %{outcome: :over_budget, reason: :max_iterations, ...}}` shape and crashes
+  instead of printing a clean over-budget verdict.
+- **Unique-constraint warning:** `iterations_goal_ref_iteration_index_index`
+  "has already been taken" on iteration 0 (double persist on a path).
+
 ## 2026-06-23 — token-efficiency audit: is claude→kazi→claude cheaper than vanilla?
 
 Audited whether the orchestrator→kazi→implementer stack (ADR-0023) actually
