@@ -4,6 +4,53 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-24 -- Content-marketing research: how fast-growing OSS AI tools won stars (motivates ADR-0030 / E25)
+
+Two sourced deep-research passes (~15 tools + the agent-native/MCP tier + HN launch
+data) into what the fastest-growing OSS AI dev tools put in their README/site/docs
+and how they won stars. Distilled into ADR-0030 + planned as E25. Key findings:
+
+- **kazi's closest analogs are agent-FACING tools the user doesn't operate:**
+  **Serena** ("The IDE for Your Coding Agent" / "Give your agent the tools it has
+  been asking for"; testimonials authored BY the agents), **Context7** ("Up-to-date
+  docs for any prompt"; invocation IS the marketing -- append "use context7"; ~55-58K
+  stars, fastest in set), and **Astral's Ruff/uv** (benchmark chart as hero, a
+  falsifiable "10-100x" number).
+- **Content patterns correlated with star growth:** (1) a category-defining one-liner
+  in line 1, in the human's noun not the protocol's; (2) lead with a VISUAL that
+  proves the claim (speed tools -> benchmark chart; agent tools -> a transcript of
+  the agent using it); (3) ONE recurring earned-media engine (Aider's leaderboard,
+  Astral's benchmark) beats scattered effort; (4) a theatrical falsifiable number;
+  (5) borrowed credibility / borrowed category; (6) two-layer proof (lean README,
+  proof-heavy site); (7) friction-to-first-use = one copy-paste command/config.
+- **Agent-tool positioning (kazi's hardest problem):** name the human's noun not
+  "MCP server"/"controller"; "give your agent X" (benefit through the agent); lead
+  with the agent's CURRENT pain then show it fixed (Context7's before/after, the
+  most-copied device); show the agent USING the tool; make the invocation a
+  memorable phrase.
+- **Launch mechanics (HN-sourced, high confidence):** HN is the highest-leverage
+  channel; title formula `<Name> - <plain capability>, <differentiator>` (Aider 432
+  pts, uv 647, Tabby "self-hosted Copilot" 627, Zed open-sourcing 1576). Time to a
+  wave (OpenHands rode Devin; Cursor rode Sonnet 3.5; the agent category rode MCP's
+  OpenAI/Google adoption). Ship 1 release/day with "something significant" (Marsh's
+  Ruff playbook). Reddit/Product Hunt returned NO falsifiable data -- unproven, not
+  disproven.
+- **Highest-leverage asset:** a visual that proves the core claim above the install
+  command; for kazi = an asciinema/transcript of claude -> kazi -> harness with
+  predicates flipping false -> true. Evidence: Astral's chart drove Ruff to 5K stars
+  in <5mo; Serena's agent-voiced demo to ~25.7K; Context7's "use context7" to ~55K.
+- **Honest risks:** (#1) "done" is harder to make falsifiable than "fast" -- if it
+  can't be a number a skeptic reproduces in 60s, the hook misfires; the dogfood
+  leaderboard is the mitigation. Category-education tax on "reconciliation
+  controller" -> use a borrowed frame ("CI for coding agents"). AI tool fatigue +
+  crowded harness field -> be unmistakably a different LAYER (verification), not
+  another harness. Host-ecosystem dependence (Claude Code/MCP) -> keep multi-harness.
+  Stars != adoption (fake-stars ~5x weaker, a liability) -> instrument downloads /
+  time-to-second-PR. Maintainer attrition is the empirical #1 OSS killer.
+- Full per-tool table + sources (raw READMEs + HN item IDs + the MCP-adoption and
+  fake-stars papers) are in the session research; the durable distillation is
+  ADR-0030.
+
 ## 2026-06-24 — E18 shipped: the four benchmark bugs fixed + clean re-verify (T18.5)
 
 Fixed all four defects the token benchmark surfaced (2026-06-24 entry below), each
