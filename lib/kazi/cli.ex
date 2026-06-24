@@ -3,7 +3,7 @@ defmodule Kazi.CLI do
   The `kazi` command-line entry point (T0.10, UC-004): load a goal-file and drive
   it to convergence against an explicit target workspace.
 
-      kazi run <goal-file> --workspace <path>
+      kazi apply <goal-file> --workspace <path>
 
   This is the operator-facing seam over the real Slice-0 wiring. It does no
   reconciling itself — it parses argv, loads the goal via `Kazi.Goal.Loader`,
@@ -12,26 +12,35 @@ defmodule Kazi.CLI do
   CLI composes in scripts and CI the same way the loop's own contract reads
   (concept §1, §5).
 
+  ## Verbs (T27.1, ADR-0032)
+
+  `apply` (converge a goal) and `plan` (author intent) are the PRIMARY verbs,
+  matching the operator's `/apply` and `/plan` vocabulary. `run`/`propose` are kept
+  as DEPRECATED ALIASES: they dispatch to the same handlers (`apply` == `run`,
+  `plan` == `propose`) and print a one-line deprecation hint to STDERR — never into
+  `--json` stdout, which stays JSON-only (T15.7). The aliases are scheduled for
+  removal in a later minor (a written deprecation window).
+
   ## Authoring surface (T3.5c, UC-017, ADR-0011)
 
   The CLI also exposes the idea → acceptance-predicate authoring flow over
   `Kazi.Authoring` (T3.5a/b): a human hands kazi a prose idea, reviews the drafted
   goal, and approves it into a runnable goal.
 
-      kazi propose "<idea>"        # draft a goal from a prose idea (status proposed)
+      kazi plan "<idea>"           # draft a goal from a prose idea (status proposed)
       kazi list-proposed           # review the proposal queue
-      kazi approve <proposal-ref>  # proposed → approved (then runnable by `kazi run`)
+      kazi approve <proposal-ref>  # proposed → approved (then runnable by `kazi apply`)
       kazi reject <proposal-ref>   # proposed → rejected (declined, kept for audit)
 
   These commands never reach into a running reconciliation; they only drive the
-  one WRITE path the operator surfaces share (ADR-0011 §2). `propose` and `approve`
+  one WRITE path the operator surfaces share (ADR-0011 §2). `plan` and `approve`
   print the `proposal-ref` an operator pipes between the steps; `approve` returns a
-  goal `kazi run` then drives to convergence.
+  goal `kazi apply` then drives to convergence.
 
   ## Building & running (escript)
 
       mix escript.build          # produces the ./kazi binary
-      ./kazi run priv/examples/deploy_target.toml --workspace /path/to/target
+      ./kazi apply priv/examples/deploy_target.toml --workspace /path/to/target
       ./kazi --help
 
   ## Read-model on startup
@@ -163,10 +172,38 @@ defmodule Kazi.CLI do
   # The command table. Each entry: a one-line summary, the positional args (name +
   # whether required), and the flags (the `@switches` atoms) it accepts. `help
   # --json` renders this verbatim; the parser dispatches on the same names below.
+  #
+  # T27.1 (ADR-0032): `apply`/`plan` are the PRIMARY verbs; `run`/`propose` stay as
+  # DEPRECATED ALIASES (`deprecated: true`, `alias_of:` the primary). They dispatch
+  # to the same handlers (`apply` == `run`, `plan` == `propose`) and emit a
+  # one-line stderr deprecation hint when used; the table keeps both so the
+  # coherence guard (T16.4) and the shipped skill/AGENTS.md (which reference
+  # run/propose) stay valid through the deprecation window. T27.4 fully wires the
+  # primary/alias distinction into `help --json`/`schema`; here apply/plan are real
+  # commands the table knows and the parser dispatches.
   @commands [
     %{
-      name: "run",
+      name: "apply",
       summary: "Drive a goal-file to convergence against a target workspace.",
+      args: [%{name: "goal-file", required: true}],
+      flags: [
+        :workspace,
+        :env,
+        :standing,
+        :harness,
+        :model,
+        :json,
+        :stream,
+        :parallel,
+        :explain,
+        :dry_run
+      ]
+    },
+    %{
+      name: "run",
+      summary: "Deprecated alias of `apply` (drive a goal-file to convergence).",
+      deprecated: true,
+      alias_of: "apply",
       args: [%{name: "goal-file", required: true}],
       flags: [
         :workspace,
@@ -201,9 +238,17 @@ defmodule Kazi.CLI do
       flags: [:dir]
     },
     %{
-      name: "propose",
+      name: "plan",
       summary:
         "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates).",
+      args: [%{name: "idea", required: false}],
+      flags: [:workspace, :yes, :strict, :adr, :json, :predicates]
+    },
+    %{
+      name: "propose",
+      summary: "Deprecated alias of `plan` (draft a goal of acceptance predicates).",
+      deprecated: true,
+      alias_of: "plan",
       args: [%{name: "idea", required: false}],
       flags: [:workspace, :yes, :strict, :adr, :json, :predicates]
     },
@@ -264,15 +309,15 @@ defmodule Kazi.CLI do
   kazi — drive a goal to convergence against a target workspace.
 
   USAGE:
-      kazi run <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
-      kazi run <goal-file> --workspace <path> --json [--stream]
-      kazi run <goal-file> --workspace <path> --parallel [N] [--json]   # parallel scheduler
-      kazi run <goal-file> --workspace <path> --explain [--json]        # print the schedule, run nothing
+      kazi apply <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
+      kazi apply <goal-file> --workspace <path> --json [--stream]
+      kazi apply <goal-file> --workspace <path> --parallel [N] [--json] # parallel scheduler
+      kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
       kazi status <ref> [--json]
       kazi init <repo-dir> [--out <file>] [--enrich]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
-      kazi propose "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
-      kazi propose --json [--predicates <json>]   # caller-drafts (predicates supplied)
+      kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
+      kazi plan --json [--predicates <json>]      # caller-drafts (predicates supplied)
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
@@ -280,6 +325,9 @@ defmodule Kazi.CLI do
       kazi lint <goal-file> [--json]              # advisory near-duplicate group-name warnings
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # the versioned --json result schema(s)
+
+      # `kazi run` and `kazi propose` are DEPRECATED ALIASES of `apply` and `plan`
+      # (ADR-0032): they still work but print a one-line deprecation hint to stderr.
 
   ARGUMENTS:
       <goal-file>            Path to a TOML goal-file (see Kazi.Goal.Loader).
@@ -457,6 +505,10 @@ defmodule Kazi.CLI do
         0
 
       {:run, goal_file, opts} ->
+        # T27.1 (ADR-0032): if the deprecated `run` alias was used, print a one-line
+        # hint to STDERR (never stdout) BEFORE executing, so the --json stdout
+        # contract (T15.7) stays JSON-only.
+        maybe_deprecation_hint(opts[:deprecated])
         execute_run(goal_file, opts, inject_opts)
 
       {:status, ref, opts} ->
@@ -469,6 +521,9 @@ defmodule Kazi.CLI do
         execute_install_skill(opts, inject_opts)
 
       {:propose, idea, opts} ->
+        # T27.1 (ADR-0032): the deprecated `propose` alias prints a one-line stderr
+        # hint before executing; never into --json stdout.
+        maybe_deprecation_hint(opts[:deprecated])
         execute_propose(idea, opts, inject_opts)
 
       {:list_proposed, opts} ->
@@ -587,41 +642,18 @@ defmodule Kazi.CLI do
     |> elem(0)
   end
 
-  defp parse_command(["run", goal_file | rest], flags) do
-    case rest do
-      # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
-      # T3.4d standing wiring: carry the --standing flag through to the run.
-      # T8.7 harness wiring: carry --harness/--model through to the resolved adapter.
-      [] ->
-        {
-          :run,
-          goal_file,
-          # T15.3 (ADR-0023 decision 2): --json switches `run` to its machine
-          # surface — the versioned result contract instead of the human report.
-          # T15.4 (ADR-0023 decision 3): --stream emits the JSONL progress stream
-          # (one event per iteration) before the final run-result object. Only
-          # meaningful under --json.
-          # T21.8 (ADR-0027): --parallel routes `run` to the parallel scheduler;
-          # the optional --parallel N records a concurrency hint (:parallelism).
-          # T23.6 (ADR-0028): --explain / --dry-run is the PURE PLANNING surface —
-          # print the computed wave schedule and dispatch NOTHING. The two spellings
-          # are aliases; either sets :explain so the surface is one branch.
-          workspace: flags[:workspace],
-          env: flags[:env],
-          standing: flags[:standing],
-          harness: flags[:harness],
-          model: flags[:model],
-          json: flags[:json] || false,
-          stream: flags[:stream] || false,
-          parallel: flags[:parallel] || false,
-          parallelism: flags[:parallelism],
-          explain: flags[:explain] || flags[:dry_run] || false
-        }
+  # T27.1 (ADR-0032): `apply` is the PRIMARY verb; `run` is the DEPRECATED ALIAS.
+  # Both parse to the SAME `{:run, ...}` tuple (so the handler/dispatch is shared);
+  # the alias carries `deprecated: "run"` so `run/2` emits a one-line stderr hint
+  # (never into --json stdout). `apply` carries no `:deprecated`, so it is silent.
+  defp parse_command(["apply", goal_file | rest], flags),
+    do: parse_run(goal_file, rest, flags, nil)
 
-      extra ->
-        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
-    end
-  end
+  defp parse_command(["apply"], _flags),
+    do: {:error, "the `apply` command requires a <goal-file> argument"}
+
+  defp parse_command(["run", goal_file | rest], flags),
+    do: parse_run(goal_file, rest, flags, "run")
 
   defp parse_command(["run"], _flags),
     do: {:error, "the `run` command requires a <goal-file> argument"}
@@ -707,26 +739,12 @@ defmodule Kazi.CLI do
   # T15.2 (ADR-0023 decision 4): in caller-drafts mode the predicates are supplied
   # (--predicates / stdin) so the positional idea is OPTIONAL — `kazi propose
   # --json` with predicates and no idea is the orchestrator's entry point.
-  defp parse_command(["propose", idea | rest], flags) do
-    case rest do
-      [] -> {:propose, idea, propose_opts(flags)}
-      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
-    end
-  end
-
-  # No positional idea: only valid in caller-drafts mode, where the predicates are
-  # supplied (--predicates inline, or on stdin under --json). The idea defaults to
-  # "" — `execute_propose` then requires the supplied predicates and refuses an
-  # empty caller-drafts proposal cleanly. Without a caller-drafts signal
-  # (--predicates / --json) a bare `propose` is still the original "missing idea"
-  # usage error, so the existing human surface is unchanged.
-  defp parse_command(["propose"], flags) do
-    if flags[:predicates] || flags[:json] do
-      {:propose, "", propose_opts(flags)}
-    else
-      {:error, "the `propose` command requires an <idea> argument (quote it)"}
-    end
-  end
+  # T27.1 (ADR-0032): `plan` is the PRIMARY verb; `propose` is the DEPRECATED ALIAS.
+  # Both parse to the SAME `{:propose, ...}` tuple; the alias threads
+  # `deprecated: "propose"` into `propose_opts` so the dispatcher emits a one-line
+  # stderr hint (never into --json stdout). `plan` carries no `:deprecated`.
+  defp parse_command(["plan" | rest], flags), do: parse_propose(rest, flags, nil)
+  defp parse_command(["propose" | rest], flags), do: parse_propose(rest, flags, "propose")
 
   # T3.5c authoring: `list-proposed` lists the proposal queue, optionally filtered
   # by --status (proposed / approved / rejected).
@@ -786,10 +804,10 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `install-skill`, `propose`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
-    do: {:error, "no command given (expected `run <goal-file> --workspace <path>`)"}
+    do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
 
   defp approval_command(command, proposal_ref, [], flags),
     do: {command, proposal_ref, json: flags[:json] || false}
@@ -797,16 +815,81 @@ defmodule Kazi.CLI do
   defp approval_command(_command, _proposal_ref, extra, _flags),
     do: {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
 
-  # The shared option bundle for the `propose` subcommand (both modes). T15.2:
-  # `:predicates` carries the caller-drafts payload; `:json` switches the surface.
-  defp propose_opts(flags) do
+  # T27.1 (ADR-0032): shared `apply`/`run` parse body. `deprecated` is `nil` for the
+  # primary verb (`apply`) or the old verb name (`"run"`) for the deprecated alias,
+  # threaded into the parsed `{:run, ...}` opts so the dispatcher can emit the
+  # one-line stderr hint. Both verbs reuse the SAME tuple/handler.
+  defp parse_run(goal_file, rest, flags, deprecated) do
+    case rest do
+      # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
+      # T3.4d standing wiring: carry the --standing flag through to the run.
+      # T8.7 harness wiring: carry --harness/--model through to the resolved adapter.
+      [] ->
+        {
+          :run,
+          goal_file,
+          # T15.3 (ADR-0023 decision 2): --json switches `run` to its machine
+          # surface — the versioned result contract instead of the human report.
+          # T15.4 (ADR-0023 decision 3): --stream emits the JSONL progress stream
+          # (one event per iteration) before the final run-result object. Only
+          # meaningful under --json.
+          # T21.8 (ADR-0027): --parallel routes `run` to the parallel scheduler;
+          # the optional --parallel N records a concurrency hint (:parallelism).
+          # T23.6 (ADR-0028): --explain / --dry-run is the PURE PLANNING surface —
+          # print the computed wave schedule and dispatch NOTHING. The two spellings
+          # are aliases; either sets :explain so the surface is one branch.
+          workspace: flags[:workspace],
+          env: flags[:env],
+          standing: flags[:standing],
+          harness: flags[:harness],
+          model: flags[:model],
+          json: flags[:json] || false,
+          stream: flags[:stream] || false,
+          parallel: flags[:parallel] || false,
+          parallelism: flags[:parallelism],
+          explain: flags[:explain] || flags[:dry_run] || false,
+          deprecated: deprecated
+        }
+
+      extra ->
+        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  # T27.1 (ADR-0032): shared `plan`/`propose` parse body. `deprecated` is `nil`
+  # (primary `plan`) or the old verb name (`"propose"`) for the deprecated alias.
+  # T15.2: with no positional idea, only caller-drafts mode is valid (predicates
+  # supplied via --predicates / stdin under --json); otherwise the missing-idea
+  # usage error stands, so the existing human surface is unchanged.
+  defp parse_propose([idea | rest], flags, deprecated) do
+    case rest do
+      [] -> {:propose, idea, propose_opts(flags, deprecated)}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_propose([], flags, deprecated) do
+    if flags[:predicates] || flags[:json] do
+      {:propose, "", propose_opts(flags, deprecated)}
+    else
+      {:error, "the `plan` command requires an <idea> argument (quote it)"}
+    end
+  end
+
+  # The shared option bundle for the `plan`/`propose` subcommand (both modes).
+  # T15.2: `:predicates` carries the caller-drafts payload; `:json` switches the
+  # surface. T27.1 (ADR-0032): `:deprecated` is the old verb name (`"propose"`) when
+  # the deprecated alias was used, so the dispatcher emits a one-line stderr hint;
+  # `nil` for the primary `plan`.
+  defp propose_opts(flags, deprecated) do
     [
       workspace: flags[:workspace],
       yes: flags[:yes] || false,
       strict: flags[:strict] || false,
       adr: flags[:adr] || false,
       json: flags[:json] || false,
-      predicates: flags[:predicates]
+      predicates: flags[:predicates],
+      deprecated: deprecated
     ]
   end
 
@@ -852,6 +935,22 @@ defmodule Kazi.CLI do
 
   defp format_invalid(invalid) do
     Enum.map_join(invalid, ", ", fn {opt, _value} -> opt end)
+  end
+
+  # T27.1 (ADR-0032): the deprecated-alias hint. When a deprecated verb
+  # (`run` → `apply`, `propose` → `plan`) was used, print ONE line to STDERR
+  # pointing at the primary verb. It is STDERR-ONLY by construction, so it never
+  # leaks into `--json` stdout (the JSON contract / self-conformance T15.7 stays
+  # JSON-only on stdout regardless of which alias was typed). `nil` (the primary
+  # verb) prints nothing.
+  @deprecated_primary %{"run" => "apply", "propose" => "plan"}
+
+  @spec maybe_deprecation_hint(String.t() | nil) :: :ok
+  defp maybe_deprecation_hint(nil), do: :ok
+
+  defp maybe_deprecation_hint(verb) when is_binary(verb) do
+    primary = Map.get(@deprecated_primary, verb, verb)
+    IO.puts(:stderr, "note: `kazi #{verb}` is deprecated; use `kazi #{primary}`")
   end
 
   # The kazi version, read from the loaded application spec (set from mix.exs at
@@ -2278,7 +2377,7 @@ defmodule Kazi.CLI do
   # An escript archive cannot bundle the native exqlite NIF, so under the escript
   # the SQLite driver simply isn't loadable. We detect that cheaply up front and
   # degrade quietly, rather than letting a connection pool crash-loop loudly on a
-  # missing NIF. The `mix kazi.run` task (and any real release) boots the full app
+  # missing NIF. The `mix kazi.apply` task (and any real release) boots the full app
   # with the NIF present, so persistence works there on the default path.
   @spec ensure_read_model() :: boolean()
   defp ensure_read_model do
@@ -2288,7 +2387,7 @@ defmodule Kazi.CLI do
           :stderr,
           "warning: SQLite read-model driver unavailable (running as an escript, " <>
             "which cannot bundle the native NIF); running without persistence. " <>
-            "Use `mix kazi.run` for a persistent read-model."
+            "Use `mix kazi.apply` for a persistent read-model."
         )
 
         false
