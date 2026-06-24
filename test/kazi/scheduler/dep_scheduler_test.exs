@@ -275,6 +275,208 @@ defmodule Kazi.Scheduler.DepSchedulerTest do
     end
   end
 
+  describe "objective re-gating on regression (T23.4, ADR-0028 §Decision 4)" do
+    test "a converged dep forced back to :pending re-gates its dependents; both re-run",
+         %{sup: sup} do
+      # a→b→t chain. `t` (a regressor) needs b, so by the time it runs, b has
+      # OBJECTIVELY converged (the scheduler dispatched t only because b's
+      # group_done was recorded). On its FIRST run `t` posts {:regress, "a",
+      # :pending} — the regression guard firing on a — then converges. a (and its
+      # transitive dependents b, t) must RE-RUN: each runs TWICE. The Agent counts
+      # invocations, and `t`'s flag fires the regress exactly once so the run
+      # terminates instead of looping.
+      test_pid = self()
+      {:ok, counts} = Agent.start_link(fn -> %{} end)
+      {:ok, fired} = Agent.start_link(fn -> false end)
+
+      goal = dag_goal(a: [], b: [:a], t: [:b])
+
+      bump = fn id ->
+        Agent.get_and_update(counts, fn m ->
+          next = Map.get(m, id, 0) + 1
+          {next, Map.put(m, id, next)}
+        end)
+      end
+
+      # 2-arity so `t` can message the SCHEDULER to post the regression.
+      reconciler = fn
+        "t", scheduler ->
+          n = bump.("t")
+          send(test_pid, {:ran, "t", n})
+
+          # Fire the regression exactly ONCE, on t's first run (b is converged now).
+          if not Agent.get(fired, & &1) do
+            Agent.update(fired, fn _ -> true end)
+            send(scheduler, {:regress, "a", :pending})
+          end
+
+          :converged
+
+        id, _scheduler ->
+          send(test_pid, {:ran, id, bump.(id)})
+          :converged
+      end
+
+      assert {:ok, result} =
+               DepScheduler.run(goal, reconciler: reconciler, supervisor: sup)
+
+      # The dep and its dependent b RE-RAN after a regressed: each ran TWICE (b
+      # left the ready set the instant a flipped and re-ran only once a re-converged
+      # — no dependent stayed green against the regressed dep). `t` (which fired the
+      # regress while itself running) was already converged, so it is not re-gated.
+      counts_now = Agent.get(counts, & &1)
+      assert counts_now["a"] == 2
+      assert counts_now["b"] == 2
+
+      assert result.collective == :converged
+      assert result.groups == [{"a", :converged}, {"b", :converged}, {"t", :converged}]
+      assert result.blocked == []
+    end
+
+    test "a dep that regresses INTO a terminal (:stuck) blocks its dependents", %{sup: sup} do
+      # a has two dependents: b and c. c needs a, so when c runs a has objectively
+      # converged. c regresses a straight to :stuck (the regression guard firing
+      # into a non-converging terminal). a can no longer satisfy b's gate, so b is
+      # RE-GATED and, with a now terminal, BLOCKED. a is reported as the cause
+      # (:stuck), not blocked. The regress fires exactly once.
+      {:ok, fired} = Agent.start_link(fn -> false end)
+      goal = dag_goal(a: [], b: [:a], c: [:a])
+
+      reconciler = fn
+        "c", scheduler ->
+          if not Agent.get(fired, & &1) do
+            Agent.update(fired, fn _ -> true end)
+            send(scheduler, {:regress, "a", :stuck})
+          end
+
+          :converged
+
+        _id, _scheduler ->
+          :converged
+      end
+
+      assert {:ok, result} =
+               DepScheduler.run(goal,
+                 reconciler: reconciler,
+                 supervisor: sup,
+                 reconcile_timeout: 1_000
+               )
+
+      # a is the cause (:stuck); b can never re-satisfy its gate → blocked, named
+      # for a. (c, a's other dependent, ran before the regress but its sub-DAG is
+      # now poisoned by a too, so it is escalated under a as well.)
+      assert {"a", :stuck} in result.groups
+      assert {"b", :blocked} in result.groups
+      assert result.collective == :stuck
+      assert %{group: "b", blocked_by: "a", reason: :stuck} in result.blocked
+
+      escalation = Enum.find(result.escalations, &(&1.blocker == "a"))
+      assert escalation.reason == :stuck
+      assert "b" in escalation.blocked
+    end
+
+    test "a regress on a non-converged group is a no-op", %{sup: sup} do
+      # Regressing a group that is not currently :converged must not disturb the run.
+      # `t` needs a; when it runs, a has converged. t posts a regress for `b`, which
+      # is not even a member here... instead it regresses ITSELF (`t`), which is
+      # :running, not :converged — a no-op. The run still converges fully.
+      {:ok, fired} = Agent.start_link(fn -> false end)
+      goal = dag_goal(a: [], t: [:a])
+
+      reconciler = fn
+        "t", scheduler ->
+          if not Agent.get(fired, & &1) do
+            Agent.update(fired, fn _ -> true end)
+            # t is :running (not :converged) → this regress is a no-op.
+            send(scheduler, {:regress, "t", :pending})
+          end
+
+          :converged
+
+        "a", _scheduler ->
+          :converged
+      end
+
+      assert {:ok, result} =
+               DepScheduler.run(goal, reconciler: reconciler, supervisor: sup)
+
+      assert result.collective == :converged
+      assert result.groups == [{"a", :converged}, {"t", :converged}]
+    end
+  end
+
+  describe "blocked-dependency escalation verdict (T23.5, ADR-0028 §Decision 5)" do
+    test "the collective verdict ESCALATES the sub-DAG: names the blocker AND lists its blocked dependents",
+         %{sup: sup} do
+      # a is stuck; b needs a, c needs b ⇒ a poisons {b, c}. A disjoint sibling x
+      # finishes. The escalation groups the blocked sub-DAG BY blocker: a names
+      # [b], b (now :blocked) names [c]. Siblings outside finish; no hang.
+      goal = dag_goal(a: [], b: [:a], c: [:b], x: [])
+
+      statuses = %{"a" => :stuck, "x" => :converged}
+      reconciler = fn group_id -> Map.fetch!(statuses, group_id) end
+
+      assert {:ok, result} =
+               DepScheduler.run(goal,
+                 reconciler: reconciler,
+                 supervisor: sup,
+                 reconcile_timeout: 1_000
+               )
+
+      # The run terminated; siblings outside the sub-DAG finished.
+      assert {"x", :converged} in result.groups
+      assert {"a", :stuck} in result.groups
+      assert result.collective == :stuck
+
+      # The escalations name each blocker AND list the dependents it stalled.
+      assert %{blocker: "a", reason: :stuck, blocked: ["b"]} in result.escalations
+      assert %{blocker: "b", reason: :blocked, blocked: ["c"]} in result.escalations
+      # A converged-everywhere sibling is NOT in any escalation.
+      refute Enum.any?(result.escalations, fn e -> "x" in e.blocked end)
+    end
+
+    test "one blocker with several dependents is escalated as ONE entry listing them all",
+         %{sup: sup} do
+      # a stuck; b, c, d all need a ⇒ one escalation for a listing [b, c, d] in
+      # declared order (not three separate single-dependent escalations).
+      goal = dag_goal(a: [], b: [:a], c: [:a], d: [:a])
+
+      reconciler = fn "a" -> :stuck end
+
+      assert {:ok, result} =
+               DepScheduler.run(goal,
+                 reconciler: reconciler,
+                 supervisor: sup,
+                 reconcile_timeout: 1_000
+               )
+
+      assert result.collective == :stuck
+      assert result.escalations == [%{blocker: "a", reason: :stuck, blocked: ["b", "c", "d"]}]
+    end
+
+    test "an over_budget dep escalates likewise, naming it", %{sup: sup} do
+      goal = dag_goal(a: [], b: [:a])
+      reconciler = fn "a" -> :over_budget end
+
+      assert {:ok, result} =
+               DepScheduler.run(goal, reconciler: reconciler, supervisor: sup)
+
+      assert result.collective == :over_budget
+      assert %{blocker: "a", reason: :over_budget, blocked: ["b"]} in result.escalations
+    end
+
+    test "a fully-converged run has NO escalations", %{sup: sup} do
+      goal = dag_goal(a: [], b: [:a])
+      reconciler = fn _ -> :converged end
+
+      assert {:ok, result} =
+               DepScheduler.run(goal, reconciler: reconciler, supervisor: sup)
+
+      assert result.collective == :converged
+      assert result.escalations == []
+    end
+  end
+
   describe "Scheduler.run_goals/2 routing (ADR-0028 backward compatibility)" do
     test "a SINGLE goal with a needs-DAG routes through the pipelined DepScheduler", %{sup: sup} do
       # run_goals/2 detects the non-trivial needs-DAG and drives it topologically;
