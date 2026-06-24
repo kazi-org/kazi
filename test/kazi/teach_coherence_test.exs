@@ -182,16 +182,60 @@ defmodule Kazi.TeachCoherenceTest do
       end
     end
 
-    test "the root AGENTS.md references the core recipe commands (sanity)" do
-      # AGENTS.md is owned by a separate task (T27.5) and may still teach the legacy
-      # `propose`/`run` verbs during the deprecation window; assert only that
-      # extraction is non-vacuous on the approve step both docs share.
+    test "the root AGENTS.md references the primary recipe commands (sanity)" do
+      # After T27.5 (ADR-0032) AGENTS.md teaches the PRIMARY verbs `plan`/`apply`
+      # (run/propose are mentioned once as deprecated aliases, not as the path).
+      # Assert extraction is non-vacuous on the primary verbs + the shared approve.
       doc = File.read!("AGENTS.md")
       cmds = referenced_commands(doc)
 
-      assert "approve" in cmds,
-             "AGENTS.md extraction did not find the `approve` command — " <>
-               "the regex may be broken (the guard would be vacuously green)"
+      for required <- ["plan", "approve", "apply"] do
+        assert required in cmds,
+               "AGENTS.md extraction did not find the `#{required}` command — " <>
+                 "the regex may be broken (the guard would be vacuously green)"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # T26.5 (ADR-0031): every router sub-skill VERB maps to a REAL CLI command.
+  #
+  # ADR-0031's router fronts four human sub-skill verbs; ADR-0032 made three of
+  # them identical to the CLI verb (plan/apply/status) and kept `adopt` as the one
+  # human alias (-> `kazi init`). This map IS the E26 verb-map note: the SOLE place
+  # a sub-skill verb may diverge from its CLI command. The guard below asserts each
+  # mapped CLI command is REAL (in `kazi help --json`) and is actually referenced
+  # by the rendered SKILL.md — so a sub-skill verb can never route to a command the
+  # CLI does not ship, and the router can never silently drop a verb.
+  # ===========================================================================
+
+  @router_verb_to_cli %{
+    "plan" => "plan",
+    "apply" => "apply",
+    "status" => "status",
+    "adopt" => "init"
+  }
+
+  describe "router sub-skill verbs map to real CLI commands (T26.5)" do
+    test "every router verb routes to a command in the real CLI table" do
+      surface = cli_surface()
+
+      for {verb, cli} <- @router_verb_to_cli do
+        assert MapSet.member?(surface.commands, cli),
+               "router verb `#{verb}` routes to `kazi #{cli}`, which is NOT a real CLI " <>
+                 "command (kazi help --json): " <>
+                 "#{surface.commands |> MapSet.to_list() |> Enum.sort() |> inspect()}"
+      end
+    end
+
+    test "the rendered SKILL.md references each router verb's CLI command" do
+      cmds = referenced_commands(Kazi.Teach.InstallSkill.skill_md())
+
+      for {verb, cli} <- @router_verb_to_cli do
+        assert cli in cmds,
+               "SKILL.md does not reference `kazi #{cli}` — the `#{verb}` sub-skill " <>
+                 "verb must route to a real, referenced CLI command (ADR-0031/0032)"
+      end
     end
   end
 
