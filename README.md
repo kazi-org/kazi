@@ -26,13 +26,25 @@ pretending it's finished.
 Think of it like **Kubernetes for coding goals**: you declare desired state, kazi
 watches actual state, and it keeps closing the gap until the two match.
 
-```
-You: "build a URL-shortener web service and ship it live in production"
-            │
-            ▼
-kazi:  observe ──► what's failing? ──► dispatch an agent to fix it
-            ▲                                      │
-            └──── loop until every check passes ◄──┘  then: integrate · deploy · verify live
+```mermaid
+flowchart TD
+    U([You: "build a URL-shortener web service and ship it live in production"]) --> K
+    
+    subgraph kazi [kazi reconcile loop]
+        O[Observe<br/>What's failing?] --> D[Dispatch<br/>an agent to fix it]
+        D --> C{Every check passes?}
+        C -- No --> O
+        C -- Yes --> I[Integrate<br/>PR / Merge]
+        I --> Dep[Deploy & Verify Live]
+    end
+    
+    style U fill:#1e293b,stroke:#cbd5e1,color:#f8fafc
+    style kazi fill:#0f172a,stroke:#334155,color:#f8fafc
+    style O fill:#334155,stroke:#475569,color:#f8fafc
+    style D fill:#334155,stroke:#475569,color:#f8fafc
+    style C fill:#334155,stroke:#475569,color:#f8fafc
+    style I fill:#334155,stroke:#475569,color:#f8fafc
+    style Dep fill:#334155,stroke:#475569,color:#f8fafc
 ```
 
 It is **not** another coding agent, terminal, or IDE. kazi *drives* the agent you
@@ -51,6 +63,7 @@ Two problems nobody else owns:
 2. **Parallel agents collide.** Locking a *task* doesn't stop two agents editing the
    *same files*. kazi coordinates on **resources** — an agent leases its "blast
    radius" before touching code — so concurrent runs converge instead of conflict.
+3. **Bring Your Own Model (BYOM) & Privacy.** Use cloud models or run entirely locally. Wire kazi to a local model (e.g., Llama 3, Qwen) via `opencode` for zero data leaks. Your code and context never leave your hardware.
 
 ---
 
