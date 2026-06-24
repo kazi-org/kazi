@@ -192,6 +192,40 @@ defmodule Kazi.ReadModelTest do
     assert Keyword.has_key?(changeset.errors, :iteration_index)
   end
 
+  test "upsert? replaces an existing index instead of colliding (T18.3)" do
+    # The terminal/stuck projection reuses the last observed iteration_index. With
+    # upsert? it must replace that row's final state, not error on the unique index.
+    failing = sample_vector()
+
+    assert {:ok, first} =
+             ReadModel.record_iteration(%{
+               goal_ref: "terminal",
+               iteration_index: 0,
+               predicate_vector: failing
+             })
+
+    converged =
+      PredicateVector.new(%{
+        unit: PredicateResult.pass(%{exit: 0}),
+        probe: PredicateResult.pass(%{http_status: 200})
+      })
+
+    assert {:ok, second} =
+             ReadModel.record_iteration(%{
+               goal_ref: "terminal",
+               iteration_index: 0,
+               predicate_vector: converged,
+               action: Kazi.Action.new(:budget_stop, params: %{reason: :max_iterations}),
+               upsert?: true
+             })
+
+    # Same row (same id), replaced state — not a second row, not an error.
+    assert first.id == second.id
+    assert [{0, v0}] = ReadModel.iteration_history("terminal")
+    assert PredicateVector.satisfied?(v0)
+    assert ReadModel.get_iteration("terminal", 0).action_kind == "budget_stop"
+  end
+
   test "records + reads back regression flags (T1.2), with the attributed dispatch" do
     flag = %{
       predicate_id: :keep,
