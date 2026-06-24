@@ -136,7 +136,7 @@ count, proposals: [...]}`.
 Run the approved goal with the CHEAP harness (the two-tier split):
 
 ```sh
-kazi run <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
+kazi run <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
 ```
 
 `run --json` emits ONE terminal result object on termination (the schema below).

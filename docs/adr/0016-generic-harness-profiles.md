@@ -28,8 +28,8 @@ the promise is only half kept. Three things are hard-coded to Claude:
    config. `Kazi.Loop` is already generic over the `:harness` module, but nothing
    feeds it anything but Claude.
 
-The operator now runs `opencode` wired to a local Qwen3.6 35B-A3B on the DGX and
-wants kazi to drive it — and to drive Codex, gemini-cli, antigravity, claw-code,
+The operator now runs `opencode` wired to a local Qwen3.6 35B-A3B on a local GPU
+host and wants kazi to drive it — and to drive Codex, gemini-cli, antigravity, claw-code,
 etc. The blocker is that "a different harness" today means "write a whole new
 adapter module". And the harnesses genuinely differ at the boundary: opencode is
 `opencode run "<msg>" --model provider/model --format json`, where `--format json`
@@ -61,7 +61,7 @@ adapter, plus a harness resolution seam.** Three pieces:
    explicit `:harness` opt (CLI `--harness`) > the goal-file `[harness]` table >
    app config `:kazi, :harness` > default `:claude`. It returns the
    `{adapter_module, adapter_opts}` the loop already consumes, carrying the profile
-   plus a `:model` and any provider/endpoint env (so opencode points at the DGX
+   plus a `:model` and any provider/endpoint env (so opencode points at the local
    model). `Kazi.Runtime`, `Kazi.Authoring`, and `Kazi.Adopt` (enrich) all resolve
    through this seam instead of hard-coding Claude.
 
@@ -103,6 +103,6 @@ the existing estimate — ADR-0008 already permits this.
 - **A network/SDK integration per provider (bypass the CLIs).** Re-introduces
   vendor coupling and loses the "drives whatever the user already has installed and
   authed" property that makes the subprocess boundary valuable (ADR-0001). The user
-  already wired opencode to the DGX; kazi should drive that, not reimplement it.
+  already wired opencode to a local GPU host; kazi should drive that, not reimplement it.
 - **Keep Claude-only, document Codex as future work.** Leaves R4/ADR-0008 unmet and
-  blocks the operator's opencode+DGX setup, which is the concrete trigger.
+  blocks the operator's opencode + local-model setup, which is the concrete trigger.

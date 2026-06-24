@@ -5,13 +5,13 @@
 
 ## Context
 
-kazi coordinates concurrent agents across one or many machines (laptop, DGX,
-cloud). It needs: atomic compare-and-set for leases, automatic expiry of a
+kazi coordinates concurrent agents across one or many machines (laptop, a GPU
+host, cloud). It needs: atomic compare-and-set for leases, automatic expiry of a
 crashed agent's lease, a live pub/sub channel, and a durable event log — and it
 must be the *final* substrate (no "start with X, migrate to Y" — an explicit
 requirement). Git refs (the prior claim primitive) provide CAS but no TTL, no
 live channel, and high latency. The maintainer already runs NATS JetStream for
-the Spark cluster.
+an existing cluster.
 
 ## Decision
 
@@ -36,7 +36,7 @@ Git remains the source of truth for code; JetStream never stores code.
 - A real live channel (git could never provide one) enables presence and intent.
 - Cross-machine coordination is free; no bespoke clustering.
 - NATS is always in the path, even single-machine. Acceptable: already operated
-  for Spark, and the alternative (BEAM-native clustering over real networks) is
+  elsewhere, and the alternative (BEAM-native clustering over real networks) is
   the finicky path.
 
 ## Alternatives rejected

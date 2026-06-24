@@ -87,11 +87,11 @@ Run the approved goal-file with a cheap/local harness. `--harness` selects the
 profile; `--model` overrides the goal-file's harness model:
 
 ```sh
-# cheap/local: opencode wired to a DGX-hosted model
-kazi run <goal-file> --workspace <ws> --harness opencode --model dgx/qwen3.6 --json
+# cheap/local: opencode wired to a locally-hosted model
+kazi run <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json
 
 # follow a long convergence live (one JSONL line per iteration, terminal object last)
-kazi run <goal-file> --workspace <ws> --harness opencode --model dgx/qwen3.6 --json --stream
+kazi run <goal-file> --workspace <ws> --harness opencode --model local/qwen3.6 --json --stream
 ```
 
 `--harness` accepts the registered profile ids: `claude` (default), `opencode`,
@@ -146,16 +146,16 @@ cheap harness's SPEED and quality, not by kazi. This is measured, not
 hypothetical:
 
 - **T8.11 / 2026-06-22 (heterogeneous dogfood).** Claude authored a tiny broken
-  Go fixture; kazi drove `opencode --model dgx-ollama/qwen3.6:35b-a3b-q8_0`. The
+  Go fixture; kazi drove `opencode --model local-ollama/qwen3.6:35b-a3b-q8_0`. The
   WIRING was proven end to end -- kazi observed the objective failure, persisted
-  iteration 0, dispatched opencode -> the DGX, and objective termination held
+  iteration 0, dispatched opencode -> the local GPU host, and objective termination held
   (kazi could not declare success while the predicate failed). But opencode ran
   ~40 min on iteration 1 and never produced an edit, so the goal did NOT converge
   in a usable window. The bottleneck is the LOCAL MODEL's agentic throughput
   (several slow model calls per turn on the q8_0 35B), not kazi.
 
 - **2026-06-24 (A/B/C token benchmark, arm C).** kazi correctly observed the
-  failure and dispatched opencode -> DGX-Qwen, but the 35B q8_0 did not return
+  failure and dispatched opencode -> the local Qwen, but the 35B q8_0 did not return
   within ~6 min (reconfirming T8.11). Per-dispatch cost is ~$0 (local compute) --
   the cheaper story in $ STRUCTURE -- but it is bottlenecked by inner-harness
   throughput. The "cheaper" headline still needs a multi-iteration benchmark on a
@@ -167,7 +167,7 @@ hypothetical:
 **The takeaway (the landmine).** "Strong model plans, cheap/local model
 implements" is mechanically sound and kazi's correctness guarantee holds
 regardless of implementer quality -- but its PRACTICALITY is gated by local-model
-speed. The DGX 35B-q8_0 via opencode was too slow for an interactive convergence
+speed. A local ~35B q8_0 model via opencode was too slow for an interactive convergence
 loop. To make a tiered pool task actually converge cheap, use a FASTER local
 model (smaller / lower-quant, or a faster server), or accept long wall-clock for
 batch-style runs. What you must NOT do is read slowness as a reason to relax the
