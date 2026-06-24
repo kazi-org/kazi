@@ -54,6 +54,7 @@ defmodule Kazi.CLI do
   alias Kazi.Authoring.RationaleAdr
   alias Kazi.Export.Obsidian
   alias Kazi.ReadModel.ProposedGoal
+  alias Kazi.Teach.InstallSkill
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
   @type exit_code :: non_neg_integer()
@@ -92,6 +93,7 @@ defmodule Kazi.CLI do
     status: :string,
     enrich: :boolean,
     out: :string,
+    dir: :string,
     harness: :string,
     model: :string,
     yes: :boolean,
@@ -122,6 +124,8 @@ defmodule Kazi.CLI do
     enrich:
       "`init` only: opt into harness enrichment (off by default) to propose live predicates.",
     out: "`init` output goal-file (default <repo>/kazi.goal.toml).",
+    dir:
+      "`install-skill` only: target skill directory (default ~/.claude/skills/kazi). Injected to a tmp dir in tests.",
     harness:
       "Coding harness to drive: claude (default) or opencode. Overrides the goal-file/app config.",
     model:
@@ -163,6 +167,13 @@ defmodule Kazi.CLI do
       summary: "Adopt a repo by stack detection and write a starter goal-file.",
       args: [%{name: "repo-dir", required: true}],
       flags: [:out, :enrich, :workspace]
+    },
+    %{
+      name: "install-skill",
+      summary:
+        "Write the kazi Claude Code skill (opt-in) so an orchestrating agent knows the recipe.",
+      args: [],
+      flags: [:dir]
     },
     %{
       name: "propose",
@@ -225,6 +236,7 @@ defmodule Kazi.CLI do
       kazi run <goal-file> --workspace <path> --json [--stream]
       kazi status <ref> [--json]
       kazi init <repo-dir> [--out <file>] [--enrich]
+      kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi propose "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
       kazi propose --json [--predicates <json>]   # caller-drafts (predicates supplied)
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
@@ -251,6 +263,10 @@ defmodule Kazi.CLI do
                              workspace.
       --out <path>           `init` output goal-file (default
                              <repo>/kazi.goal.toml).
+      --dir <path>           `install-skill` only: target skill directory
+                             (default ~/.claude/skills/kazi). Opt-in,
+                             consent-first — a normal `kazi` run never writes to
+                             ~/.claude (ADR-0024). Injected to a tmp dir in tests.
       --enrich               `init` only: opt into harness enrichment (OFF by
                              default) to propose live predicates from discovered
                              endpoints. The deterministic detection always stands.
@@ -313,6 +329,7 @@ defmodule Kazi.CLI do
       kazi run priv/examples/standing_maintenance.toml --workspace ./svc --standing
       kazi run my.goal.toml --workspace ./svc --harness opencode --model dgx/qwen3.6
       kazi init ./my-service --out my-service.goal.toml
+      kazi install-skill
       kazi run my.goal.toml --workspace ./svc --json --stream
       kazi status cli-e2e --json
       kazi propose "a /healthz endpoint that returns 200"
@@ -387,6 +404,9 @@ defmodule Kazi.CLI do
       {:init, source, opts} ->
         execute_init(source, opts, inject_opts)
 
+      {:install_skill, opts} ->
+        execute_install_skill(opts, inject_opts)
+
       {:propose, idea, opts} ->
         execute_propose(idea, opts, inject_opts)
 
@@ -421,6 +441,7 @@ defmodule Kazi.CLI do
           | {:run, Path.t(), keyword()}
           | {:status, String.t(), keyword()}
           | {:init, Path.t(), keyword()}
+          | {:install_skill, keyword()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
@@ -567,6 +588,18 @@ defmodule Kazi.CLI do
   defp parse_command(["init"], _flags),
     do: {:error, "the `init` command requires a <repo-dir> argument"}
 
+  # T16.2 (ADR-0024 decision 1): `kazi install-skill` writes the kazi Claude Code
+  # skill so an orchestrating agent already knows the propose → approve → run
+  # recipe. OPT-IN/consent-first — only this explicit command writes, and only
+  # under `--dir` (a tmp dir in tests) or the default ~/.claude/skills/kazi. A
+  # normal `kazi` run never touches ~/.claude.
+  defp parse_command(["install-skill" | rest], flags) do
+    case rest do
+      [] -> {:install_skill, dir: flags[:dir]}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
   # T3.5c authoring: `propose "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
   # carried through (where the harness drafts the goal).
@@ -638,7 +671,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `propose`, `list-proposed`, `approve`, `reject`, `export`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `install-skill`, `propose`, `list-proposed`, `approve`, `reject`, `export`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `run <goal-file> --workspace <path>`)"}
@@ -1180,6 +1213,50 @@ defmodule Kazi.CLI do
         1
     end
   end
+
+  # =============================================================================
+  # install-skill command (T16.2, UC-031, ADR-0024 decision 1): the kazi skill
+  # =============================================================================
+  #
+  # `kazi install-skill` writes the kazi Claude Code SKILL.md so an orchestrating
+  # agent already knows the propose → approve → run recipe (the two-tier
+  # economics + branching on `next_action`). It is OPT-IN/consent-first: only this
+  # explicit command writes, and a normal `kazi` run never touches ~/.claude
+  # (`brew install` only PRINTS a hint to run it — the tap formula's `caveats`).
+  #
+  # The target dir is INJECTABLE so tests never write to the real ~/.claude:
+  # `--dir <path>` wins, else `inject_opts[:skill_dir]` (the same seam pattern as
+  # the other commands), else the default `~/.claude/skills/kazi`.
+  defp execute_install_skill(opts, inject_opts) do
+    write_opts = install_skill_opts(opts, inject_opts)
+
+    case InstallSkill.write(write_opts) do
+      {:ok, path} ->
+        IO.puts("WROTE  #{path}")
+        IO.puts("\nThe kazi skill is installed. In Claude Code, it teaches the recipe:")
+        IO.puts("  propose --json → approve --json → run --harness <cheap> --json [--stream]")
+        IO.puts("then branch on the result's next_action.")
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, "error: could not install the kazi skill: #{format_skill_error(reason)}")
+        1
+    end
+  end
+
+  # Resolve the install target dir, NON-DEFAULT only when given: `--dir` (operator
+  # / tests) wins, else an injected `:skill_dir` (tests), else InstallSkill's own
+  # default (~/.claude/skills/kazi). Returns a keyword list for `InstallSkill.write/1`.
+  defp install_skill_opts(opts, inject_opts) do
+    cond do
+      is_binary(opts[:dir]) -> [dir: opts[:dir]]
+      is_binary(inject_opts[:skill_dir]) -> [dir: inject_opts[:skill_dir]]
+      true -> []
+    end
+  end
+
+  defp format_skill_error(reason) when is_atom(reason), do: :file.format_error(reason)
+  defp format_skill_error(reason), do: inspect(reason)
 
   # =============================================================================
   # export command (T12.6, ADR-0020 decision 5): an Obsidian vault of the group tree
