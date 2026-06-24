@@ -235,6 +235,48 @@ defmodule Kazi.Loop.OrientationPrefixTest do
     end
   end
 
+  describe "T19.4 no-prefix flag (benchmark arm B)" do
+    test "orientation_prefix: false DISABLES the prefix even WITH a graph present" do
+      # Arm B: a graph IS present (so the default would add a prefix), but the
+      # additive `:orientation_prefix` opt is false — the pre-T19.1 behaviour.
+      :ok =
+        start_loop(
+          script: %{code: [:fail, :pass]},
+          adapter_opts: [graph_source: @graph_source, orientation_prefix: false]
+        )
+
+      assert_received {:dispatched, prompt}
+
+      refute prompt =~ "# Orientation"
+      # The prompt begins exactly at the work-item line — the evidence-only body.
+      assert String.starts_with?(
+               prompt,
+               "goal=orientation-prefix-test fix failing predicates: code"
+             )
+    end
+
+    test "orientation_prefix: true (and the default) KEEPS the prefix (arm C)" do
+      # Arm C / current default: the prefix is present, matching T19.1.
+      :ok =
+        start_loop(
+          script: %{code: [:fail, :pass]},
+          adapter_opts: [graph_source: @graph_source, orientation_prefix: true]
+        )
+
+      assert_received {:dispatched, explicit}
+      assert explicit =~ "# Orientation"
+
+      # And the DEFAULT (no opt) is byte-identical to the explicit `true` — the
+      # current behaviour is unchanged by the additive flag.
+      :ok =
+        start_loop(script: %{code: [:fail, :pass]}, adapter_opts: [graph_source: @graph_source])
+
+      assert_received {:dispatched, default}
+      assert default =~ "# Orientation"
+      assert prefix_of(default) == prefix_of(explicit)
+    end
+  end
+
   describe "T19.2 stable-prefix discipline (inner-harness cache hits)" do
     test "the stable head (orientation → work-item → digest) ends exactly at the volatile evidence" do
       :ok =

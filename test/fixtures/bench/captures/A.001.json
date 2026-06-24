@@ -1,0 +1,15 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 9,
+  "result": "Converged the fixture in one freeform session.",
+  "session_id": "bench-A-vanilla-0001",
+  "total_cost_usd": 0.4790,
+  "usage": {
+    "input_tokens": 12972,
+    "output_tokens": 1116,
+    "cache_creation_input_tokens": 24236,
+    "cache_read_input_tokens": 288183
+  }
+}
