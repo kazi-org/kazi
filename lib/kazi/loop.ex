@@ -1216,8 +1216,8 @@ defmodule Kazi.Loop do
   #
   # T19.1 orientation prefix (ADR-0010 §3, realizing the unwired T4.3): the ranked
   # blast-radius orientation pack (`Kazi.Context`) is PREPENDED as a stable,
-  # cacheable PREFIX ahead of the digest + failing-evidence body — so each
-  # stateless dispatch starts oriented to WHERE the work lives without the file
+  # cacheable PREFIX ahead of the work-item + digest + failing-evidence body — so
+  # each stateless dispatch starts oriented to WHERE the work lives without the file
   # being the only carrier (the `.kazi/context.md` written in `prepare_workspace/1`
   # remains, as the fallback for file-reading harnesses). The prefix is built from
   # the SAME `(failing-slice, workspace, graph_source)` inputs every iteration, so
@@ -1225,18 +1225,57 @@ defmodule Kazi.Loop do
   # (maximising the inner harness's prompt cache; T19.2). It is purely additive:
   # when there is NO graph/repo-map the pack is empty and NO prefix is added, so
   # the prompt is byte-identical to the pre-T19.1 path (backward compatible).
+  #
+  # T19.2 stable-prefix discipline (ADR-0010 §4): the sections are FRONT-LOADED
+  # stable→volatile so the WHOLE head up to the evidence is byte-identical across
+  # iterations whose blast radius + work-item are unchanged, maximising the inner
+  # `claude -p`'s OWN prompt cache (kazi sets no `cache_control` — the harness is a
+  # subprocess; the only lever is a deterministic, stable prefix). The order is:
+  #
+  #   1. orientation pack    — stable across same-blast-radius iterations (T19.1)
+  #   2. work-item line      — the goal + failing-predicate ids (stable per attempt)
+  #   3. working-set digest  — map memory of WHERE prior work landed (T4.7); changes
+  #                            only when a prior iteration reports a new touched set
+  #   4. failing evidence    — the most volatile content, last (changes every tick)
+  #   5. retrieval section   — optional augmentation, appended after (T4.9c)
+  #
+  # The work-item line is HOISTED ahead of the digest (it was fused with the
+  # evidence before) so the stable goal/predicate header is part of the cacheable
+  # prefix and only the trailing evidence/digest move when state changes.
+  #
+  # T19.3 evidence cap (ADR-0010 §6, T4.8): the evidence is rendered through
+  # `Kazi.Harness.Prompt.truncate_evidence/2` (default 8 KiB, head+tail window) so a
+  # runaway log/diff is bounded at the seam before it reaches the prompt body; small
+  # evidence is returned verbatim, so the small-evidence path is unchanged.
   @spec dispatch_prompt(Action.t(), Data.t()) :: String.t()
   defp dispatch_prompt(%Action{params: params}, %Data{goal: goal} = data) do
     failing = Map.get(params, :failing, [])
 
-    evidence_prompt =
-      "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}\n" <>
-        "evidence: #{inspect(Map.get(params, :evidence, %{}))}"
+    # STABLE: the work item — goal id + the failing-predicate ids. Identical across
+    # iterations sharing the same failing set, so it belongs in the cacheable head.
+    work_item =
+      "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}"
 
+    # VOLATILE: the failing evidence, capped (T19.3/T4.8) so a runaway log/diff is
+    # bounded at the seam by a head+tail window. `inspect/1`'s default `limit`
+    # would itself truncate large evidence — but head-ONLY, losing the tail signal
+    # and at an opaque element count, not a byte budget. Render in FULL
+    # (`limit: :infinity`) so the T4.8 cap is the single governing bound and keeps
+    # both the failure head and its resolution tail. Small evidence is under the cap
+    # and returned verbatim, so the small-evidence path is unchanged.
+    evidence =
+      "evidence: " <>
+        Prompt.truncate_evidence(
+          inspect(Map.get(params, :evidence, %{}), limit: :infinity, printable_limit: :infinity)
+        )
+
+    # Front-load stable→volatile: orientation → work-item → digest → evidence. The
+    # digest sits BETWEEN the stable work-item and the volatile evidence (it is map
+    # memory that changes only when a prior iteration reports a new touched set).
     body =
       case Digest.render(data.working_set_digest) do
-        "" -> evidence_prompt
-        note -> note <> "\n\n" <> evidence_prompt
+        "" -> work_item <> "\n" <> evidence
+        note -> work_item <> "\n\n" <> note <> "\n\n" <> evidence
       end
 
     prompt =
