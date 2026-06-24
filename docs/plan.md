@@ -147,8 +147,9 @@ desired state is legible, sliceable, budgetable per group, and exportable to a
 visualization tool (Obsidian) showing each node's state (intended / built /
 pending). Grouping references a DECLARED taxonomy by id (NOT free text), validated
 at load -- the structural guard against text drift (ADR-0020). Motivated by the
-sirerun dogfood (`docs/devlog.md` 2026-06-23): sire's `capabilities.json` is 317
-capabilities across 9 pillars; the one-off analysis proved the value and revealed
+external-service dogfood (`docs/devlog.md` 2026-06-23): that service's
+`capabilities.json` is 317 capabilities across 9 pillars; the one-off analysis
+proved the value and revealed
 the requirements. Backward compatible: `group`/`[[group]]` are optional; an
 ungrouped goal behaves exactly as today.
 
@@ -181,7 +182,7 @@ small code-side bootstrap (ADR-0013).
 - [x] T13.3 Prose-doc importer via the harness: drive the existing authoring/clarify path (`Kazi.Authoring`, ADR-0011/0019) over a prose doc (ADR/requirements) to draft candidate predicates, HUMAN-REVIEWED before acceptance; reuses the injectable harness seam (stub in tests).  Owner: pool  Done: 2026-06-23  verifies: [UC-025]  deps: []  acc: ExUnit with a stub harness -- a prose doc yields candidate predicates routed through the review/approve flow; nothing is accepted without approval; no real `claude`/network in tests.
 - [x] T13.4 Surface-scanner provider: inventory a project's public surface (HTTP routes/handlers, exported symbols, CLI commands) for one language first (Elixir or Go), reusing the repo-introspection seam (ADR-0010).  Owner: pool  Done: 2026-06-23  verifies: [UC-031]  deps: []  acc: ExUnit on a fixture repo -- the scanner returns the public surface inventory; approximate-by-design (reflection/string-dispatch invisible -- documented, `docs/lore.md`).
 - [x] T13.5 Surface-coverage meta-predicate: assert every scanned surface element is OWNED by >=1 intended predicate (match by route/path/symbol); an unowned element FAILS (dead/undocumented); supports an explicit allow-list; WARN-don't-auto-delete.  Owner: pool  Done: 2026-06-23  verifies: [UC-031]  deps: [T13.4]  acc: ExUnit -- a fixture with an un-predicated endpoint fails the meta-predicate and names it; allow-listed surface passes; a fully-owned surface passes; ungrouped goals unaffected.
-- [x] T13.6 Dogfood sirerun via the GENERAL path: import sire's API surface (OpenAPI if present, else the T13.4 scanner) + key prose ADRs (T13.3); run the coverage meta-predicate to find `A \ I` (dead/undocumented) and compare against the manifest's `undocumented_discovered: 68`; export the grouped view (E12). Note the LIVE-predicate escalation (probe a running sire -- needs an instance + test creds) as deferred.  Owner: pool  Done: 2026-06-24  verifies: [UC-031, UC-030]  deps: [T13.1, T13.4, T13.5]  acc: observed evidence that the general importer + coverage meta-predicate reproduce/compare against the one-off analysis for sire; `mix format`/`--warnings-as-errors` clean; the live-predicate follow-on recorded in `docs/devlog.md`.
+- [x] T13.6 Dogfood an external service via the GENERAL path: import that service's API surface (OpenAPI if present, else the T13.4 scanner) + key prose ADRs (T13.3); run the coverage meta-predicate to find `A \ I` (dead/undocumented) and compare against the manifest's `undocumented_discovered: 68`; export the grouped view (E12). Note the LIVE-predicate escalation (probe a running service -- needs an instance + test creds) as deferred.  Owner: pool  Done: 2026-06-24  verifies: [UC-031, UC-030]  deps: [T13.1, T13.4, T13.5]  acc: observed evidence that the general importer + coverage meta-predicate reproduce/compare against the one-off analysis for that service; `mix format`/`--warnings-as-errors` clean; the live-predicate follow-on recorded in `docs/devlog.md`.
 
 ### E14 -- Onboard more coding harnesses: Codex, Antigravity, claw-code, + any CLI harness (P3, ADR-0016 + ADR-0022)
 
@@ -572,7 +573,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E12-3 (export):** T12.6 (Obsidian/Mermaid exporter), T12.7 (lint near-duplicate names).
 - **Wave E13-1 (import intent):** T13.1 (OpenAPI), T13.2 (gherkin), T13.3 (prose via harness) -- emit grouped predicates (depends on the E12 model: T12.1/T12.2).
 - **Wave E13-2 (dead code):** T13.4 (surface scanner) -> T13.5 (coverage meta-predicate).
-- **Wave E13-3 (dogfood):** T13.6 (sirerun via the general path; note the live-predicate escalation).
+- **Wave E13-3 (dogfood):** T13.6 (an external service via the general path; note the live-predicate escalation).
 - **Wave E14-1 (harness onboarding):** T14.1 (conformance test helper) -> then T14.2 (Codex), T14.3 (Antigravity), T14.4 (claw-code) in PARALLEL (independent profiles).
 - **Wave E14-2 (wire + document):** T14.5 (CLI + coherence + docs) -> T14.6 (contributor recipe).
 - **Wave E15-1 (JSON surface):** T15.1 (JSON framework + non-interactive guarantee) -> then T15.2 (propose), T15.3 (run result contract), T15.5 (status), T15.6 (authoring state machine) in PARALLEL.
@@ -1024,7 +1025,7 @@ never swept into your commit.
   ADR-0015 contradiction (the bespoke capabilities importer was withdrawn). UC-025
   (un-deferred), UC-031.
 - **ADR-0020 + E12** -- hierarchical predicate grouping via a declared taxonomy;
-  per-group budgets are a DERIVED rollup. UC-030. Motivated by the sirerun dogfood
+  per-group budgets are a DERIVED rollup. UC-030. Motivated by the external-service dogfood
   (`docs/devlog.md`).
 
 ### 2026-06-23 -- Change Summary (E11 shipped v0.3.0)
