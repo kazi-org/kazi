@@ -93,6 +93,9 @@ Open work:
   partitions to collective convergence -- no external orchestrator, single machine
   NATS-free; codifies `/apply --pool`+`/claim` into kazi, ADR-0027) -- E21 (PRIMARY
   parallelization story).
+- **Pre-publish docs** (no new UC -- documents UC-033..UC-037) -- E22: the launch
+  documentation pass; README + `docs/` + website refreshed to the FINAL shipped
+  product, gated on E15-E21, with a no-vaporware accuracy audit (ADR-0025/0018).
 
 ## Checkable Work Breakdown
 
@@ -357,6 +360,33 @@ partitions, each its own serial reconciler.
 - [ ] T21.11 Docs + positioning (native parallelism is the headline): README/concept/site present kazi as the native parallel reconciler ("kazi parallelizes your plan -- no external orchestrator; single machine, no NATS"); `/apply --pool` (E20) is shown as interop. Coherent with E17/ADR-0025 + ADR-0027.  Owner: TBD  Est: 1.5h  verifies: [UC-037, UC-035]  delivers: [docs/site that lead the parallel story with kazi-native, interop as secondary]  deps: [T21.8]  acc: a newcomer sees "kazi parallelizes for you" (no personal skills); `/apply --pool` is clearly the interop path; canonical strings + coherence (T9.9) intact.
 - [ ] T21.12 LIVE dogfood (the proof): run kazi natively-parallel on a real multi-partition goal in THIS repo on one machine (NATS-free) -- several independent fixes converged concurrently in isolated worktrees, then merged. Record evidence in `docs/devlog.md`: partition count, concurrency observed, collective convergence, merge result; honest if it falls short.  Owner: TBD  Est: 2.5h  verifies: [UC-037]  deps: [T21.5, T21.8]  acc: observed evidence of >=2 partitions converging concurrently under one kazi run with no external orchestrator and no NATS; every claim observed, not asserted.
 
+### E22 -- Pre-publish documentation refresh: README + docs + website reflect the FINAL shipped product (P1, ADR-0025/0018; content + engineering)
+
+The launch documentation pass. ASSUMES all feature + ADR work has LANDED before
+publishing: E15 (agent-drivable JSON CLI), E16 (skill/MCP/self-teaching), E17
+(adoption-first IA), E18 (benchmark bug fixes), E19 (token-efficiency wiring), E20
+(/apply --pool interop), E21 (native parallelization). At that point the README,
+`docs/`, and website are refreshed to reflect the COMPLETE product accurately and
+publishably: every shipped capability documented, every "coming" tag flipped to
+"available" (no vaporware -- everything is real by now), native parallelization is
+the headline parallel story, coherence/version/links audited, deployed + verified
+live. Builds ON E17 (does NOT redo T17.x); adds full coverage + the launch gate.
+
+Acceptance for the epic: a newcomer landing on the README or `kazi.sire.run` can
+understand and adopt the full product (agent on-ramp, native parallelism, objective
+done, BYOM) with every command real; `mix`/coherence/Lighthouse checks green;
+deployed live; nothing documents an unshipped feature.
+
+- [ ] T22.1 Feature-coverage audit (the map): enumerate every shipped capability from the use-case manifest (UC-001..UC-037) + ADRs 0001-0027 and map each to where it MUST appear (README section / `docs/` file / website section); produce a coverage matrix and flag gaps. Gates the rest of E22.  Owner: TBD  Est: 1.5h  delivers: [a doc-coverage matrix: capability -> README/docs/site location, with gaps]  deps: [E15, E16, E18, E19, E20, E21]  acc: a committed matrix in `docs/` (or the devlog) covering every UC + ADR; each row marks present/missing across README, docs, site; the gap list seeds T22.2-T22.5.
+- [ ] T22.2 README final pass (build on T17.1): after the adoption-first rewrite (T17.1) lands, ADD the native-parallelization section (E21: "kazi parallelizes your plan -- single machine, no NATS"), refresh the FULL CLI reference (all `--json` commands, `status`, `schema`, `help --json`, `run --parallel`, `install-skill`, `mcp`, propose caller-drafts), and FLIP every "coming" tag to "available". Canonical strings locked; coherence (T9.9) green.  Owner: TBD  Est: 2h  verifies: [UC-035, UC-037, UC-034]  deps: [T22.1, T17.1]  acc: README documents native parallelism + the complete CLI; no "coming" tags remain; every command verified against `kazi help --json`; canonical strings byte-identical; renders on GitHub.
+- [ ] T22.3 `docs/concept.md` update to the final architecture: reflect the NATIVE parallel scheduler (E21/ADR-0027) as the parallelization model -- supersede the "one process per goal / external launcher" framing -- plus the agent-drivable + self-teaching stack (E15/E16) and the 3-layer + `/apply --pool` interop (E20/ADR-0026).  Owner: TBD  Est: 1.5h  verifies: [UC-037, UC-033]  deps: [T22.1]  acc: `docs/concept.md` describes the native scheduler (partition -> lease -> supervised reconcilers -> merge), single-node-NATS-free, without contradicting ADR-0001; references ADRs 0023/0026/0027; no stale "external orchestrator only" claim.
+- [ ] T22.4 `docs/` guide set complete + indexed: ensure the orchestrator recipe (T15.8), `install-skill` guide (T16.2), `AGENTS.md` (T16.3), the `/apply --pool` interop guide (T20.10), the native-parallelization guide (T21.11), and the JSON `docs/schemas` are present, accurate, and cross-linked from a `docs/README.md` index.  Owner: TBD  Est: 1.5h  verifies: [UC-033, UC-034, UC-036, UC-037]  deps: [T22.1]  acc: a `docs/` index links every guide; each guide references only real commands (checked against `kazi help --json`); no orphan/missing guide for a shipped capability.
+- [ ] T22.5 Website comprehensive refresh (build on T17.2/T17.5): fold the adoption-first hero (T17.2) + ADD a native-parallelization section + a feature overview reflecting the full set + the updated recipe/CLI + the OG card (T17.5); version sourced from the manifest; `site/src/canonical.mjs` + coherence in lockstep; deploy + verify live.  Owner: TBD  Est: 2.5h  verifies: [UC-035, UC-037]  deps: [T22.2]  acc: the site renders the agent on-ramp + native parallelism + the full feature set; README<->site coherence (T9.9) green; Playwright smoke (T9.5) passes incl. mobile + the new sections; deployed + verified live at https://kazi.sire.run.
+- [ ] T22.6 Docs-presentation decision (+ optional `/docs` on the site): decide whether `docs/` stays repo-only or gets a rendered `/docs` section on `kazi.sire.run` (Ruff-style); if rendered, build it from the `docs/` guides. Write an ADR if the choice is non-trivial.  Owner: TBD  Est: 2h  verifies: [UC-035]  deps: [T22.4, T22.5]  acc: a recorded decision (plan note or ADR); if a `/docs` section is built, it renders the guides, is linked from the nav, and deploys live; if repo-only, the README/site clearly point to `docs/`.
+- [ ] T22.7 Accuracy + coherence + freshness audit (the no-vaporware gate): every command shown across README/docs/site verified against `kazi help --json`; the README<->site coherence check green; version current; no dead links; the proof-of-convergence visual still matches real output; the skill/`AGENTS.md` coherence (T16.4) green.  Owner: TBD  Est: 1.5h  verifies: [UC-035, infrastructure]  deps: [T22.2, T22.3, T22.4, T22.5]  acc: a CI/script pass reports zero unshipped-command references, zero coherence failures, zero dead links, current version; a regression (a doc naming a non-existent command) fails the check.
+- [ ] T22.8 Launch checklist + publish (the done gate): a final checklist (every UC documented, all "coming" flipped, coherence + audit green, deployed live, OG renders, README renders on GitHub) and the publish -- merge -> deploy -> verify live at https://kazi.sire.run + the README on GitHub.  Owner: TBD  Est: 1h  verifies: [UC-035]  deps: [T22.6, T22.7]  acc: the checklist is fully green and recorded; the site is live with the final docs; the README renders correctly on GitHub; reported honestly (any skipped item flagged, not hidden).
+- [ ] T22.9 Launch announcement content (adoption push, optional): a short launch blog/announcement + social copy (HN/X/Reddit) reflecting the final feature set and the agent on-ramp, for the star/adoption push.  Owner: TBD  Est: 1.5h  delivers: [a launch announcement draft + social copy]  deps: [T22.8]  acc: a drafted announcement leads with the agent on-ramp + native parallelism + objective done; every claim matches the shipped product; ready for the operator to post.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -389,6 +419,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E21-2 (integration + correctness):** T21.5 (merge convergence), T21.6 (overlap policy), T21.7 (per-partition budgets).
 - **Wave E21-3 (surface + resilience):** T21.8 (CLI + `--json` collective), T21.9 (dashboard), T21.10 (supervision/restart).
 - **Wave E21-4 (position + prove):** T21.11 (docs lead with native parallelism) -> T21.12 (live NATS-free multi-partition dogfood).
+- **Wave E22 (pre-publish docs -- LAST, gated on E15-E21):** T22.1 (coverage audit) -> T22.2 (README), T22.3 (concept), T22.4 (docs index) in parallel -> T22.5 (website) -> T22.6 (docs presentation) -> T22.7 (accuracy audit) -> T22.8 (launch+publish) -> T22.9 (announcement). This wave runs only after every feature epic has landed.
 
 ## Risk Register
 
@@ -415,6 +446,9 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E21-2 | Git-worktree-per-partition risks disk pressure and the `rm -r` cwd-worktree landmine. | Med | Med | T21.4 creates/cleans a worktree per terminal path and honors the worktree-guard (never `rm -r` a cwd worktree); cleanup is tested on every exit (converged/stuck/over_budget/crash). |
 | R-E21-3 | A crashed partition reconciler corrupts shared lease/worktree state or takes down the coordinator. | High | Low | T21.10: the coordinator survives child crashes (DynamicSupervisor); a crashed child's lease frees via TTL and its worktree is reconciled; siblings unaffected. |
 | R-E21-4 | Building a scheduler before it is needed (premature) / scope creep vs the shipped serial loop. | Med | Med | E21 REUSES the existing serial per-goal loop (one per partition) -- it adds a supervisor + coordinator, not a new loop; single-goal stays the default; parallelism is opt-in. The substrate (Partition/leases) is already built. |
+| R-E22-1 | Publishing docs while a feature epic (E15-E21) is incomplete -> the docs advertise vaporware. | High | Med | E22 is GATED on all feature epics (T22.1 deps list them); T22.7 is a no-vaporware audit (every command verified against `kazi help --json`); T22.8 launch checklist blocks publish until green. |
+| R-E22-2 | Docs drift from the CLI between writing and publishing (the surface is large). | Med | Med | Coherence guards: README<->site (T9.9), skill/`AGENTS.md`<->CLI (T16.4), and T22.7's full audit generated from `kazi help --json` (the source of truth), not hand-maintained lists. |
+| R-E22-3 | E22 duplicates/conflicts with E17 (both touch README/site). | Low | Med | E22 BUILDS ON E17 (T22.2 deps T17.1, T22.5 builds on T17.2/T17.5) -- it adds full coverage + the audit + the launch gate, it does not redo the IA reframe. |
 
 ## Operating Procedure
 
@@ -440,6 +474,24 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E22: pre-publish documentation refresh, P1, gated on E15-E21)
+- Added **E22** (P1, content + engineering; ADR-0025/0018, no new ADR): the LAUNCH
+  documentation pass. README + `docs/` + website refreshed to the FINAL shipped
+  product, ASSUMING all feature/ADR work (E15-E21) lands first. T22.1 feature-coverage
+  audit (the map) -> T22.2 README final pass (native parallelism + full CLI ref, flip
+  every "coming" tag to "available") / T22.3 concept.md (native scheduler architecture)
+  / T22.4 docs index + guide completeness -> T22.5 website comprehensive refresh ->
+  T22.6 docs-presentation decision (optional `/docs` on the site, maybe an ADR) ->
+  T22.7 no-vaporware accuracy/coherence/freshness audit -> T22.8 launch checklist +
+  publish (the done gate) -> T22.9 launch announcement (optional).
+- **Builds ON E17** (does not redo T17.x): T22.2 deps T17.1, T22.5 builds on
+  T17.2/T17.5. E22 adds full feature coverage (esp. E21 native parallelization, which
+  E17 predated), the accuracy audit, and the publish gate.
+- No new use cases (E22 documents UC-033..UC-037; the pass serves UC-035). Wave E22
+  (gated, LAST) + risk rows R-E22-1..3 added. No trim this pass (concurrent /apply
+  --pool sessions are editing the plan; the plan was trimmed 2026-06-23). No new ADR
+  (T22.6 may produce a docs-presentation ADR if a `/docs` site is chosen).
 
 ### 2026-06-24 -- Change Summary (E21: kazi owns parallelization, P1 + ADR-0027; E20 -> interop)
 - **Created ADR-0027** (kazi owns parallelization: a native scheduler over a
