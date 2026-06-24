@@ -42,3 +42,22 @@ Per the global definition of done: tests green, `mix format` clean, PR
 rebase-merged with CI green, and -- for any production surface -- deployed and
 verified live (a live predicate passes), reported honestly. Many small commits;
 do not commit files from different directories in one commit.
+
+## Docs land with the code (ADR-0034)
+
+A user-facing or behavioral change is not done until its docs are done in the SAME
+change. If you add or change a command, flag, CLI/API surface, predicate provider,
+config, or public capability, update the matching docs (README / `docs/` / `kazi
+help` text / the relevant ADR) before the task is complete. Code without its doc
+counterpart is unfinished. Exception: a trivial internal refactor with no surface
+change. Enforced as an `/apply` wave gate and a CI check (E29).
+
+## Open source repo -- never leak internal info (ADR-0034)
+
+This repo is public. Do NOT put internal-only details into code, comments, docs,
+commit messages, issues, or PRs: private IPs/hostnames (`192.168.*` etc.), internal
+infrastructure or tool names, internal company/project codenames, personal usernames
+or absolute home paths, or "how we run it internally" process detail. Genericize
+(say "a local model" / "a deploy target", not the specific internal host) or omit.
+Honest engineering findings + benchmarks are fine once scrubbed of internal
+specifics. A CI guard scans the diff for these markers (E29).
