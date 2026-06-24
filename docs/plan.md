@@ -62,6 +62,9 @@ All use cases are tracked in `.claude/scratch/usecases-manifest.json`. Open work
 - **UC-032** (onboard more CLI coding harnesses -- Codex, Google Antigravity,
   claw-code, and any major harness -- as profiles per a conformance contract,
   ADR-0016/0022) -- OPEN; E14.
+- **UC-033** (kazi as a harness-friendly / agent-drivable CLI: `--json` structured
+  output + non-interactive guarantees + a versioned result contract so an
+  orchestrator drives propose->approve->run->release, ADR-0023) -- OPEN; E15.
 
 UC-001..UC-023 and **UC-026/UC-027** (generic multi-harness support, E8) are
 delivered and verified on `main`.
@@ -223,6 +226,31 @@ transcript-tested (`parse`), and live-smoked behind an excluded `:<id>_live` tag
 - [ ] T14.5 CLI + coherence + docs: confirm `--harness codex|antigravity|claw` works end to end (resolve precedence, the unknown-harness error lists the new ids); update the README harness section AND `site/src/canonical.mjs` HARNESSES in the SAME change so the T9.9 drift-check stays green; document each harness's auth/setup.  Owner: TBD  Est: 1.5h  verifies: [UC-032, infrastructure]  deps: [T14.2, T14.3, T14.4]  acc: `kazi run --harness <new> --help`/resolve works; the coherence check passes with the expanded harness list; README documents the per-harness auth (OPENAI_API_KEY / GEMINI_API_KEY / claw env keys) and conformance tier.
 - [ ] T14.6 "Add your own harness" contributor recipe: a short doc (README or `docs/`) that walks the ADR-0022 recipe -- author a `defp <id>` profile (build_args + additive parse), register it, add the three tests (build_args unit, golden transcript, `:<id>_live` smoke), update the canonical harness list -- proven by the fact that T14.2-T14.4 each followed it.  Owner: TBD  Est: 1h  verifies: [UC-032]  deps: [T14.5]  acc: a new contributor can add a CLI harness as profile DATA by following the recipe; it references the conformance contract (ADR-0022) and the test helper (T14.1); no architecture change required.
 
+### E15 -- Harness-friendly, agent-drivable kazi: JSON CLI + result contract (P3, ADR-0023)
+
+Acceptance: an orchestrating agent (claude code today) drives kazi end to end --
+plan/design (`kazi propose`) -> approve -> converge (`kazi run`) -> release -- by
+parsing JSON, never prose. kazi SELF-CONFORMS to the harness conformance contract
+it imposes (ADR-0022): every command has a `--json` mode emitting a single JSON
+object (or JSONL stream for long runs), is non-interactive under `--json`/no-TTY/
+`--yes` (never blocks on stdin), and returns stable exit codes. The two-tier
+economics (strong model authors predicates via `kazi propose --harness claude`;
+cheap model runs the loop via `kazi run --harness claw --model <local>`) live in
+the ORCHESTRATOR, not kazi. **`kazi propose` is the SINGLE agent authoring path**
+(ADR-0023; the operator does not hand-author predicates) -- so the clarify floor +
+review/approve gate are never bypassed. Human-readable output stays the DEFAULT;
+`--json` is the machine surface. MCP server (`kazi mcp`) is a deferred follow-on.
+
+- [ ] T15.1 JSON output framework + non-interactive guarantee: a `--json` flag + a small renderer seam so each command emits a single JSON object to stdout; under `--json` kazi NEVER prompts/blocks on stdin (it errors loudly if input is required), and exit codes are stable. Unit-tested.  Owner: TBD  Est: 1.5h  verifies: [UC-033, infrastructure]  deps: []  acc: ExUnit -- a command in `--json` mode emits valid JSON only (no human prose interleaved) and never reads stdin; non-`--json` is unchanged; piped/non-TTY `--json` works headlessly.
+- [ ] T15.2 `kazi propose --json` (the single authoring path): emit the draft -- goal id, `proposal_ref`, predicates[], rationale, and any clarify questions asked -- as one JSON object; `--json` implies non-interactive (clarify answers pre-supplied via a flag/stdin-JSON, or the deterministic floor is recorded unanswered). Reuses `Kazi.Authoring` (the one write path, ADR-0011); no parallel authoring mechanism.  Owner: TBD  Est: 1.5h  verifies: [UC-033, UC-029]  deps: [T15.1]  acc: ExUnit with a stub harness -- `propose --json` returns a parseable draft object; the clarify floor still applies; no second authoring path is introduced.
+- [ ] T15.3 `kazi run --json` result contract (versioned): on termination emit a JSON object with `status` (`converged`/`stuck`/`over_budget`/`error`), the PREDICATE VECTOR (id + verdict per predicate), `iterations`, `budget_spent`, a `next_action` hint, and `schema_version`. Document + version the schema.  Owner: TBD  Est: 2h  verifies: [UC-033]  deps: [T15.1]  acc: ExUnit against fixture runs -- each terminal status yields the documented object with the predicate vector; `schema_version` present; a schema doc is committed.
+- [ ] T15.4 `kazi run --json --stream` JSONL progress: emit one JSON event per iteration (iteration n, dispatched harness, predicate-vector delta), terminated by the final T15.3 result object, so an orchestrator monitors a long run without blocking. Mirrors how kazi parses opencode/codex JSONL.  Owner: TBD  Est: 1.5h  verifies: [UC-033]  deps: [T15.3]  acc: ExUnit -- a multi-iteration fixture run emits a valid JSONL event stream ending in the result object; each line parses independently.
+- [ ] T15.5 `kazi status --json` (new command): report a run/proposal's current state from the read-model as JSON (status, predicate vector, last iteration, timestamps).  Owner: TBD  Est: 1.5h  verifies: [UC-033]  deps: [T15.1]  acc: ExUnit -- after a propose/run, `status --json <ref>` returns the persisted state; an unknown ref is a clear JSON error + non-zero exit.
+- [ ] T15.6 `kazi list-proposed/approve/reject --json`: structured output for the authoring state machine so the orchestrator drives propose -> approve -> run programmatically.  Owner: TBD  Est: 1h  verifies: [UC-033]  deps: [T15.1]  acc: ExUnit -- each command emits a parseable JSON result; transitions report machine-readable success/error.
+- [ ] T15.7 kazi self-conformance test: assert kazi ITSELF passes the ADR-0022 conformance helper (E14 T14.1) -- non-interactive, JSON-only stdout under `--json`, subprocess-safe under a non-TTY -- so kazi meets the bar it imposes on harnesses.  Owner: TBD  Est: 1h  verifies: [UC-033, infrastructure]  deps: [T15.2, T15.3, T15.5, T15.6, E14 T14.1]  acc: ExUnit -- kazi's `--json` commands satisfy the conformance helper; a regression (prose leaking into `--json`, a stdin block) fails the test.
+- [ ] T15.8 Docs + the orchestrator recipe: document the versioned JSON schemas and a "drive kazi from an agent" recipe -- orchestrator: `kazi propose --json` -> `kazi approve --json` -> `kazi run --harness <cheap> --json [--stream]` -> parse the result -> branch on `next_action`. Note the deferred `kazi mcp` follow-on.  Owner: TBD  Est: 1h  verifies: [UC-033]  deps: [T15.7]  acc: a new orchestrator can drive the full loop from the recipe + schemas; `schema_version` pinning is documented.
+- [ ] T15.9 LIVE nested-loop dogfood (claude -> kazi -> claw/Qwen): as the orchestrator, author a tiny broken fixture goal's predicates via `kazi propose --harness claude --json`, approve, then `kazi run --harness claw --model <DGX-Qwen> --json` to drive the cheap loop; parse the JSON result. Record evidence + the friction (HONEST: claw is best-effort/no-JSON per E14, local Qwen slow per T8.11 -- expect a wiring proof, maybe not fast convergence) in `docs/devlog.md`.  Owner: TBD  Est: 2h  verifies: [UC-033]  deps: [T15.3, E14 T14.4]  acc: observed evidence of the full agent->kazi->cheap-harness loop driven over `--json`; every point where kazi was awkward to drive as a tool is logged as a follow-up; honest result reported.
+
 ### Waves
 
 E6 (brew release pipeline) and E8 (multi-harness + dogfood) are DONE; E9 (website)
@@ -239,6 +267,9 @@ open feature work.**
 - **Wave E13-3 (dogfood):** T13.6 (sirerun via the general path; note the live-predicate escalation).
 - **Wave E14-1 (harness onboarding):** T14.1 (conformance test helper) -> then T14.2 (Codex), T14.3 (Antigravity), T14.4 (claw-code) in PARALLEL (independent profiles).
 - **Wave E14-2 (wire + document):** T14.5 (CLI + coherence + docs) -> T14.6 (contributor recipe).
+- **Wave E15-1 (JSON surface):** T15.1 (JSON framework + non-interactive guarantee) -> then T15.2 (propose), T15.3 (run result contract), T15.5 (status), T15.6 (authoring state machine) in PARALLEL.
+- **Wave E15-2 (stream + conform):** T15.4 (JSONL streaming) -> T15.7 (kazi self-conformance to ADR-0022).
+- **Wave E15-3 (recipe + dogfood):** T15.8 (orchestrator recipe + schemas) -> T15.9 (live claude->kazi->claw/Qwen nested loop; honest result).
 
 - **Wave E11-1 (pure core):** T11.1 (schema + `fold_answers`) -> T11.2 (deterministic gap floor). Pure, fully unit-tested, no I/O.
 - **Wave E11-2 (seam + wiring):** T11.3 (harness-drafted candidates on the stub seam), T11.4 (two-phase `propose/2`), T11.5 (inline rationale) -- after the core.
@@ -290,6 +321,23 @@ throwaway `v*-test` tag before wiring them into the release-please flow. Keep th
 load-bearing for versioning -- type every commit correctly.
 
 ## Progress Log
+
+### 2026-06-23 -- Change Summary (add E15: harness-friendly, agent-drivable kazi)
+- **Added E15 (T15.1-T15.9)** -- make kazi a CLI an orchestrating agent (claude
+  code) can drive end to end over JSON: a `--json` mode on every command +
+  non-interactive guarantees + a versioned `kazi run` result contract (status +
+  predicate vector + next_action) + JSONL streaming + a new `status --json` +
+  a self-conformance test (kazi meets the ADR-0022 bar it imposes) + a live
+  claude->kazi->claw/Qwen nested-loop dogfood. The two-tier economics (strong
+  model authors predicates, cheap model runs the loop) live in the ORCHESTRATOR;
+  kazi stays a pure tool.
+- **ADR created:** `docs/adr/0023-harness-friendly-agent-drivable-cli.md` --
+  kazi self-conforms to ADR-0022; positions kazi as the MIDDLE of a 3-layer stack
+  (orchestrator above, cheap harness below); the orchestrator owns the two-tier
+  policy; **`kazi propose` is the single sanctioned agent authoring path** (no
+  hand-authoring), so the clarify floor + approve gate are never bypassed; MCP
+  server deferred. Extends ADR-0001/0011/0016/0019/0022.
+- **Use case added:** UC-033.
 
 ### 2026-06-23 -- Change Summary (add E14: onboard Codex / Antigravity / claw-code harnesses)
 - **Added E14 (T14.1-T14.6)** -- onboard Codex CLI, Google Antigravity CLI (`agy`),
@@ -452,9 +500,9 @@ load-bearing for versioning -- type every commit correctly.
 ## Appendix
 
 - Concept and architecture: `docs/concept.md`
-- Decisions: `docs/adr/0001`..`0022` (index at `docs/adr/README.md`); the release
+- Decisions: `docs/adr/0001`..`0023` (index at `docs/adr/README.md`); the release
   pipeline is ADR-0014 (distribution) + ADR-0017 (automation); the website is
-  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021; harness onboarding is ADR-0022.
+  ADR-0018; interactive `propose` is ADR-0019; predicate grouping is ADR-0020; intended-vs-actual reconciliation is ADR-0021; harness onboarding is ADR-0022; agent-drivable kazi is ADR-0023.
 - Operations / findings: `docs/devlog.md`; landmines: `docs/lore.md`
 - Use-case manifest: `.claude/scratch/usecases-manifest.json`
 - Release surface (for E6): `mix.exs` (`releases/0` + the `burrito:` targets),
