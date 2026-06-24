@@ -104,6 +104,8 @@ defmodule Kazi.CLI do
     obsidian: :string,
     json: :boolean,
     stream: :boolean,
+    parallel: :boolean,
+    parallelism: :integer,
     help: :boolean,
     version: :boolean
   ]
@@ -143,6 +145,8 @@ defmodule Kazi.CLI do
     json:
       "Emit a single JSON object to stdout instead of human prose (the machine surface; NON-INTERACTIVE).",
     stream: "`run --json` only: emit a JSONL progress stream, one event per loop iteration.",
+    parallel:
+      "`run` only: drive the PARALLEL scheduler over the partitioned goal-set instead of the serial loop; under --json emits the collective result. An optional `--parallel N` records a concurrency hint.",
     help: "Show this help and exit.",
     version: "Print the kazi version and exit."
   }
@@ -155,7 +159,7 @@ defmodule Kazi.CLI do
       name: "run",
       summary: "Drive a goal-file to convergence against a target workspace.",
       args: [%{name: "goal-file", required: true}],
-      flags: [:workspace, :env, :standing, :harness, :model, :json, :stream]
+      flags: [:workspace, :env, :standing, :harness, :model, :json, :stream, :parallel]
     },
     %{
       name: "status",
@@ -242,6 +246,7 @@ defmodule Kazi.CLI do
   USAGE:
       kazi run <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
       kazi run <goal-file> --workspace <path> --json [--stream]
+      kazi run <goal-file> --workspace <path> --parallel [N] [--json]   # parallel scheduler
       kazi status <ref> [--json]
       kazi init <repo-dir> [--out <file>] [--enrich]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
@@ -316,6 +321,18 @@ defmodule Kazi.CLI do
                              JSON event per loop iteration on stdout, terminated by
                              the final run-result object — so an orchestrator
                              monitors a long convergence without blocking (T15.4).
+      --parallel [N]         `run` only (T21.8, ADR-0027): drive the PARALLEL
+                             SCHEDULER (`Kazi.Scheduler.run_goals/2`) over the
+                             goal-set partitioned by blast radius, instead of the
+                             serial single-goal loop — kazi-native parallelism, no
+                             `/apply --pool` needed. Under --json it emits the
+                             VERSIONED COLLECTIVE result (per-partition status + the
+                             collective verdict + a next_action hint) documented in
+                             docs/schemas/collective-result.md; it is NON-INTERACTIVE
+                             under --json. A single-partition goal-set (one goal / no
+                             blast radius) degrades to the serial behavior. The
+                             optional `N` records a concurrency hint (parallelism is
+                             otherwise by partition count).
       --obsidian <dir>       `export` only: write an Obsidian vault to <dir> — one
                              note per group and per predicate, [[wikilinked]]
                              parent↔child, tagged with the verdict (intended/
@@ -490,8 +507,15 @@ defmodule Kazi.CLI do
     # data structures (the single source of truth `help --json` also reads, T16.1),
     # so a flag is declared exactly once and the documented surface cannot drift
     # from what the parser actually recognizes.
+    #
+    # T21.8 (ADR-0027): `--parallel` is a BOOLEAN trigger, but its public form takes
+    # an OPTIONAL integer — `--parallel [N]`. A bare integer immediately after
+    # `--parallel` is rewritten to the internal `--parallelism N` switch so both
+    # `--parallel` and `--parallel 4` parse (and `4` is never mistaken for a stray
+    # positional). The user-facing flag stays `--parallel`; `--parallelism` is the
+    # internal carrier of its optional value.
     {flags, positionals, invalid} =
-      OptionParser.parse(argv, strict: @switches, aliases: @aliases)
+      OptionParser.parse(normalize_parallel(argv), strict: @switches, aliases: @aliases)
 
     cond do
       flags[:help] ->
@@ -508,6 +532,27 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T21.8: rewrite `--parallel N` (N a bare integer) to `--parallel --parallelism N`
+  # so the boolean `--parallel` trigger keeps its optional integer form without N
+  # leaking into the positionals. A lone `--parallel` (no following integer) is left
+  # untouched. Only the FIRST integer immediately after `--parallel` is consumed.
+  defp normalize_parallel(argv) do
+    Enum.flat_map_reduce(argv, false, fn
+      "--parallel", _prev_parallel? ->
+        {["--parallel"], true}
+
+      token, true ->
+        case Integer.parse(token) do
+          {_n, ""} -> {["--parallelism", token], false}
+          _ -> {[token], false}
+        end
+
+      token, false ->
+        {[token], false}
+    end)
+    |> elem(0)
+  end
+
   defp parse_command(["run", goal_file | rest], flags) do
     case rest do
       # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
@@ -522,13 +567,17 @@ defmodule Kazi.CLI do
           # T15.4 (ADR-0023 decision 3): --stream emits the JSONL progress stream
           # (one event per iteration) before the final run-result object. Only
           # meaningful under --json.
+          # T21.8 (ADR-0027): --parallel routes `run` to the parallel scheduler;
+          # the optional --parallel N records a concurrency hint (:parallelism).
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
           harness: flags[:harness],
           model: flags[:model],
           json: flags[:json] || false,
-          stream: flags[:stream] || false
+          stream: flags[:stream] || false,
+          parallel: flags[:parallel] || false,
+          parallelism: flags[:parallelism]
         }
 
       extra ->
@@ -875,7 +924,21 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T21.8 (ADR-0027): `--parallel` routes the run to the PARALLEL SCHEDULER
+  # (`Kazi.Scheduler.run_goals/2`) instead of the serial single-goal loop. The
+  # scheduler partitions the goal-set by blast radius and drives one supervised
+  # reconciler per partition to a COLLECTIVE verdict; a single-partition goal-set
+  # (one goal / no blast radius) degrades to today's serial behavior. Without
+  # `--parallel` the run is byte-identical to the pre-T21.8 serial path.
   defp run_goal(%Goal{} = goal, opts, persist?, runtime_opts) do
+    if opts[:parallel] == true do
+      run_goal_parallel(goal, opts, persist?, runtime_opts)
+    else
+      run_goal_serial(goal, opts, persist?, runtime_opts)
+    end
+  end
+
+  defp run_goal_serial(%Goal{} = goal, opts, persist?, runtime_opts) do
     workspace = opts[:workspace] || goal.scope.workspace
 
     # The caller's static run config; CLI-owned keys (workspace/persist?) win, and
@@ -932,6 +995,77 @@ defmodule Kazi.CLI do
         1
     end
   end
+
+  # =============================================================================
+  # run --parallel (T21.8, ADR-0027): drive the native parallel scheduler
+  # =============================================================================
+  #
+  # Routes the goal-set to `Kazi.Scheduler.run_goals/2` — partition by blast
+  # radius, one supervised reconciler per partition, fold the COLLECTIVE verdict
+  # (`%{collective:, partitions:}`). The CLI only RENDERS + VERSIONS that result;
+  # it invents no scheduler semantics. Under --json it emits the versioned
+  # COLLECTIVE object (docs/schemas/collective-result.md); --parallel is
+  # NON-INTERACTIVE under --json. The exit code mirrors the collective verdict
+  # (0 only when every partition converged), matching the serial run's contract.
+  #
+  # The scheduler's injectable reconciler seam keeps this hermetic: a test injects
+  # `:reconciler` (and a static `:graph_source`) via `inject_opts`, so no real
+  # harness, lease, or worktree is touched. Production injects nothing and the
+  # default per-goal loop runs.
+  defp run_goal_parallel(%Goal{} = goal, opts, persist?, runtime_opts) do
+    workspace = opts[:workspace] || goal.scope.workspace
+    json? = opts[:json] == true
+
+    # Compose the scheduler opts. `:workspace` is required by `run_goals/2`; the
+    # caller's injected seams (`:reconciler`, `:graph_source`, `:lease`,
+    # `:worktree`, `:supervisor`, `:reconcile_timeout`, `:run_opts`, `:integrate`,
+    # `:max_restarts`) pass through verbatim so the boundary test stays hermetic.
+    # `:run_opts` carries the per-goal loop config (persist?/harness/model) the
+    # default reconciler forwards to `Kazi.Runtime.run/2`.
+    scheduler_opts =
+      runtime_opts
+      |> Keyword.put(:workspace, workspace)
+      |> Keyword.update(
+        :run_opts,
+        default_parallel_run_opts(opts, persist?),
+        &merge_parallel_run_opts(&1, opts, persist?)
+      )
+
+    case Kazi.Scheduler.run_goals([goal], scheduler_opts) do
+      {:ok, result} ->
+        report_collective(goal, result, json?)
+        collective_exit_code(result)
+
+      {:error, reason} ->
+        report_run_error(goal, reason, json?)
+        1
+    end
+  end
+
+  # The per-goal loop opts the default scheduler reconciler forwards to
+  # `Kazi.Runtime.run/2`: persistence + any --harness/--model overrides, mirroring
+  # the serial path so a single-partition parallel run behaves like the serial run.
+  defp default_parallel_run_opts(opts, persist?) do
+    [persist?: persist?]
+    |> maybe_put(:harness, opts[:harness])
+    |> maybe_put(:model, opts[:model])
+  end
+
+  # Merge the CLI-owned per-goal opts OVER any caller-supplied `:run_opts` (tests),
+  # so an explicit injected `:run_opts` keeps its keys while persistence/harness are
+  # still threaded.
+  defp merge_parallel_run_opts(injected, opts, persist?) when is_list(injected) do
+    injected
+    |> Keyword.put_new(:persist?, persist?)
+    |> maybe_put(:harness, opts[:harness])
+    |> maybe_put(:model, opts[:model])
+  end
+
+  # The collective run's exit code: 0 only when the whole goal-set collectively
+  # converged, non-zero otherwise — the same convergence-mirrors-exit contract the
+  # serial run honors (concept §1, §5).
+  defp collective_exit_code(%{collective: :converged}), do: 0
+  defp collective_exit_code(_result), do: 1
 
   # Render the loop's terminal result on the requested surface (T15.3): the
   # versioned JSON result object under --json, the existing human report
@@ -2335,4 +2469,94 @@ defmodule Kazi.CLI do
   defp reason_string(reason) when is_atom(reason), do: to_string(reason)
   defp reason_string(reason) when is_binary(reason), do: reason
   defp reason_string(reason), do: inspect(reason)
+
+  # =============================================================================
+  # collective result (T21.8, ADR-0027): render + version the scheduler's verdict
+  # =============================================================================
+  #
+  # `run --parallel` drives `Kazi.Scheduler.run_goals/2`, whose result is
+  # `%{collective: verdict, partitions: [{partition, status}]}`. The CLI only
+  # RENDERS + VERSIONS that map — it invents no scheduler semantics. Under --json
+  # it emits the versioned COLLECTIVE object (docs/schemas/collective-result.md);
+  # otherwise a human block. Both share the SAME scheduler result; only the OUTPUT
+  # shape differs, exactly like the serial `report_outcome/4`.
+  defp report_collective(%Goal{} = goal, result, json?) do
+    emit(json?, collective_result_json(goal, result), fn ->
+      report_collective_human(goal, result)
+    end)
+  end
+
+  # The human collective block: the overall verdict + one line per partition. The
+  # machine surface (--json) carries the precise per-partition keys + the
+  # next_action hint; the human block is a legible summary.
+  defp report_collective_human(%Goal{id: id}, %{collective: collective, partitions: partitions}) do
+    IO.puts("COLLECTIVE #{collective |> to_string() |> String.upcase()}  goal=#{id}")
+    IO.puts("partitions: #{length(partitions)}")
+
+    partitions
+    |> Enum.with_index()
+    |> Enum.each(fn {{partition, status}, index} ->
+      IO.puts("  [#{index}] #{partition_id(partition, index)}: #{status}")
+    end)
+  end
+
+  # The versioned COLLECTIVE result object (T21.8, ADR-0027,
+  # docs/schemas/collective-result.md):
+  #
+  #   * `schema_version` — the shared contract version (`@run_schema_version`).
+  #   * `goal_id`        — the goal-set's goal id (the run's handle).
+  #   * `collective`     — the COLLECTIVE verdict the scheduler folded:
+  #                        "converged" / "stuck" / "over_budget" (every partition
+  #                        converged ⇒ converged; any over budget ⇒ over_budget;
+  #                        otherwise stuck). The orchestrator's primary branch.
+  #   * `partitions`     — one entry per partition, in the scheduler's input order:
+  #                        `{partition_id, goal_ids, status}`. A single-partition
+  #                        goal-set yields exactly one entry (the serial degenerate).
+  #   * `next_action`    — a single orchestration hint derived from `collective`:
+  #                        "done" / "investigate" / "raise_budget" — the SAME hint
+  #                        vocabulary the serial `run --json` uses (ADR-0023).
+  defp collective_result_json(%Goal{id: id}, %{collective: collective, partitions: partitions}) do
+    collective_str = to_string(collective)
+
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(id),
+      collective: collective_str,
+      partitions: partitions_json(partitions),
+      next_action: next_action(collective_str)
+    }
+  end
+
+  defp partitions_json(partitions) do
+    partitions
+    |> Enum.with_index()
+    |> Enum.map(fn {{partition, status}, index} ->
+      %{
+        partition_id: partition_id(partition, index),
+        goal_ids: partition_goal_ids(partition),
+        status: to_string(status)
+      }
+    end)
+  end
+
+  # A partition's stable id for the result: the `Kazi.Scheduler.Partitioner` lease
+  # `:key` (overlapping partitions share it, disjoint differ). A bare/unkeyed
+  # partition term falls back to its index so the surface is always total.
+  defp partition_id(%Kazi.Scheduler.Partitioner{key: key}, _index) when is_binary(key), do: key
+  defp partition_id(%{key: key}, _index) when is_binary(key), do: key
+  defp partition_id(_partition, index), do: "partition-#{index}"
+
+  # The ids of the goals a partition carries (the member `%Kazi.Goal{}` structs),
+  # so an orchestrator can map a partition's verdict back to its goals. A partition
+  # term that carries no goals renders an empty list.
+  defp partition_goal_ids(%Kazi.Scheduler.Partitioner{goals: goals}) when is_list(goals),
+    do: Enum.map(goals, &goal_id_string/1)
+
+  defp partition_goal_ids(%{goals: goals}) when is_list(goals),
+    do: Enum.map(goals, &goal_id_string/1)
+
+  defp partition_goal_ids(_partition), do: []
+
+  defp goal_id_string(%Goal{id: id}), do: to_string(id)
+  defp goal_id_string(other), do: to_string(inspect(other))
 end
