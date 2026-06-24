@@ -124,6 +124,17 @@ defmodule Kazi.Scheduler do
   # pass a short, deterministic value).
   @default_reconcile_timeout :infinity
 
+  # The default per-partition RESTART budget (T21.10, ADR-0027): how many times a
+  # crashed partition reconciler is re-spawned before the partition ESCALATES to
+  # `:crashed` (a hard, contained failure that folds into the collective `:stuck`
+  # verdict). Default 0 — a crash escalates immediately, the pre-T21.10 behavior —
+  # so existing `run/2` callers (and the CLI via `run_goals/2`) are unchanged
+  # unless they opt into restarts with `:max_restarts`. A restart re-runs the SAME
+  # injectable reconciler on the SAME partition; the `try/after` lease+worktree
+  # cleanup (T21.3/T21.4) already ran as the crashed child unwound, so a restart
+  # never inherits a dangling lease or leaked worktree.
+  @default_max_restarts 0
+
   @doc """
   Runs the partitioned goal-set to a COLLECTIVE verdict and returns the result.
 
@@ -148,6 +159,14 @@ defmodule Kazi.Scheduler do
       timeout is set).
     * `:run_opts` — keyword opts forwarded to the default reconciler's
       `Kazi.Runtime.run/2` (ignored when a custom `:reconciler` is injected).
+    * `:max_restarts` — per-partition RESTART budget (T21.10, ADR-0027): how many
+      times a CRASHED reconciler is re-spawned before the partition escalates to
+      `:crashed`. Default `0` (a crash escalates immediately — the pre-T21.10
+      behavior). A restart re-runs the same reconciler on the same partition; the
+      crashed child's `try/after` lease + worktree cleanup already ran as it
+      unwound, so a restart never inherits dangling lease/worktree state. The
+      coordinator survives every child crash regardless of this budget
+      (`:one_for_one`).
 
   Returns `{:ok, result}` (see `t:result/0`) once every partition is terminal, or
   `{:error, reason}` if the coordinator could not be started.
@@ -157,12 +176,14 @@ defmodule Kazi.Scheduler do
     reconciler = Keyword.get(opts, :reconciler, default_reconciler(opts))
     supervisor = Keyword.get(opts, :supervisor, PartitionSupervisor)
     timeout = Keyword.get(opts, :reconcile_timeout, @default_reconcile_timeout)
+    max_restarts = Keyword.get(opts, :max_restarts, @default_max_restarts)
 
     init_arg = %{
       partitions: partitions,
       reconciler: reconciler,
       supervisor: supervisor,
-      timeout: timeout
+      timeout: timeout,
+      max_restarts: max_restarts
     }
 
     case GenServer.start_link(__MODULE__, init_arg) do
@@ -217,10 +238,25 @@ defmodule Kazi.Scheduler do
     * `:worktree` — keyword opts for `Kazi.Scheduler.Worktree.wrap/2` (notably
       `:repo`, defaulting to `:workspace`). When omitted, worktree isolation is
       skipped (the inner reconciler is handed the workspace path directly).
+    * `:max_restarts` — per-partition crash restart budget (T21.10) forwarded to
+      `run/2`. Default `0` (a crashed partition escalates immediately).
+    * `:integrate` — OPT-IN collective integration (T21.5, ADR-0027 step 4). When
+      supplied (a keyword list of `Kazi.Scheduler.Integration.integrate/2` opts —
+      notably `:integrator`, `:base`, `:max_attempts`, `:redispatcher`), the
+      CONVERGED partitions are integrated into the shared base in a safe order
+      AFTER reconcile, residual cross-partition conflicts re-dispatch the affected
+      partition, and the collective is green ONLY when the merged whole is. The
+      result then carries an `:integration` key (`t:Kazi.Scheduler.Integration.result/0`)
+      and `:collective` reflects the INTEGRATED verdict (a clean reconcile that
+      fails to merge is `:stuck`). When omitted, `run_goals/2` returns exactly
+      `run/2`'s result (the pre-T21.5 behavior — backward-compatible for the CLI,
+      T21.8).
     * `:supervisor`, `:reconcile_timeout` — forwarded to `run/2`.
 
   Returns `run/2`'s result, but each `result.partitions` entry is keyed by the
-  `Kazi.Scheduler.Partitioner` partition (not a bare term).
+  `Kazi.Scheduler.Partitioner` partition (not a bare term). With `:integrate`, the
+  result additionally carries `:integration` and a collective verdict that
+  accounts for the merge.
   """
   @spec run_goals([Kazi.Goal.t()], keyword()) :: {:ok, result()} | {:error, term()}
   def run_goals(goals, opts) when is_list(goals) and is_list(opts) do
@@ -234,10 +270,42 @@ defmodule Kazi.Scheduler do
 
     run_opts =
       opts
-      |> Keyword.take([:supervisor, :reconcile_timeout])
+      |> Keyword.take([:supervisor, :reconcile_timeout, :max_restarts])
       |> Keyword.put(:reconciler, reconciler)
 
-    run(partitions, run_opts)
+    with {:ok, result} <- run(partitions, run_opts) do
+      maybe_integrate(result, opts)
+    end
+  end
+
+  # T21.5: when `:integrate` is supplied, run collective integration over the
+  # CONVERGED partitions and fold the merge verdict into the collective; otherwise
+  # return `run/2`'s result unchanged (backward-compatible). Only partitions that
+  # actually converged are integrated — a partition that did not converge has
+  # nothing to merge, and the collective is already non-green.
+  defp maybe_integrate(result, opts) do
+    case Keyword.get(opts, :integrate) do
+      nil ->
+        {:ok, result}
+
+      integrate_opts when is_list(integrate_opts) ->
+        converged =
+          for {partition, :converged} <- result.partitions, do: partition
+
+        {:ok, integration} = Kazi.Scheduler.Integration.integrate(converged, integrate_opts)
+
+        # The collective is green ONLY when reconcile converged everywhere AND the
+        # merged whole is green. A reconcile-stuck partition keeps the collective
+        # non-green; a clean reconcile that fails to merge downgrades to :stuck.
+        collective =
+          case {result.collective, integration.collective} do
+            {:converged, :converged} -> :converged
+            {:converged, :stuck} -> :stuck
+            {other, _} -> other
+          end
+
+        {:ok, Map.merge(result, %{collective: collective, integration: integration})}
+    end
   end
 
   # Compose the per-partition reconciler chain: lease (outer) → worktree (inner) →
@@ -326,21 +394,32 @@ defmodule Kazi.Scheduler do
   @impl true
   def init(%{partitions: partitions} = arg) do
     %{reconciler: reconciler, supervisor: supervisor, timeout: timeout} = arg
+    max_restarts = Map.get(arg, :max_restarts, @default_max_restarts)
 
     # Start one supervised reconciler per partition under the DynamicSupervisor
     # BEFORE awaiting any of them, so the population overlaps — a serial-only
     # design would deadlock a stub that waits on a sibling. Each task is keyed by
-    # its monitor ref; its body sends {:partition_done, ref, status} on completion
-    # and a {:DOWN, ref, ...} confirms (or, on a crash, supplies) its terminal
-    # status. `order` preserves input order for the result.
-    tasks =
-      Enum.map(partitions, fn partition ->
-        start_partition_task(supervisor, partition, reconciler, timeout)
+    # a stable SLOT id (so a restart of the same partition keeps its position in
+    # `order` and result), and its body sends {:partition_done, slot, status} on
+    # completion; a {:DOWN, ref, ...} confirms (or, on a crash, supplies) its
+    # terminal status. `order` preserves input order for the result.
+    slots =
+      partitions
+      |> Enum.with_index()
+      |> Enum.map(fn {partition, slot} ->
+        task = start_partition_task(supervisor, partition, reconciler, timeout, slot)
+        Map.put(task, :restarts_left, max_restarts)
       end)
 
     state = %{
-      tasks: Map.new(tasks, fn task -> {task.ref, task} end),
-      order: Enum.map(tasks, & &1.ref),
+      supervisor: supervisor,
+      reconciler: reconciler,
+      timeout: timeout,
+      # tasks keyed by SLOT id; each carries its current monitor ref + restart budget.
+      tasks: Map.new(slots, fn task -> {task.slot, task} end),
+      # ref → slot, so a {:DOWN, ref, ...} resolves to the slot it belongs to.
+      ref_to_slot: Map.new(slots, fn task -> {task.ref, task.slot} end),
+      order: Enum.map(slots, & &1.slot),
       collected: %{},
       awaiting: nil
     }
@@ -358,27 +437,84 @@ defmodule Kazi.Scheduler do
 
   @impl true
   # A reconciler reports its terminal status here (its Task body sends this before
-  # returning). We record it; the matching {:DOWN, ...} then drops the monitor.
-  def handle_info({:partition_done, ref, status}, state) do
-    {:noreply, collect(state, ref, status)}
+  # returning, tagged with its SLOT). We record it; the matching {:DOWN, ...} then
+  # drops the monitor.
+  def handle_info({:partition_done, slot, status}, state) do
+    {:noreply, collect(state, slot, status)}
   end
 
-  # A reconciler process exited. A normal exit means it already reported a status
-  # via {:partition_done, ...}; an abnormal exit with no recorded status is a
-  # crash — recorded :crashed so the collective fold accounts for it. The
-  # coordinator survives the child crash (DynamicSupervisor :one_for_one).
+  # A reconciler process exited. We resolve the ref to its slot:
+  #
+  #   * if the slot already has a collected status (a normal exit after it reported
+  #     via {:partition_done, ...}), nothing to do;
+  #   * else an abnormal exit with no recorded status is a CRASH. If the slot has
+  #     RESTART budget left (T21.10), re-spawn the SAME reconciler on the SAME
+  #     partition (the crashed child's try/after lease+worktree cleanup already
+  #     ran), decrementing the budget; otherwise escalate to :crashed so the
+  #     collective fold accounts for it.
+  #
+  # The coordinator survives every child crash (it traps nothing — the child runs
+  # under the DynamicSupervisor :one_for_one and we only hold a monitor).
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     state =
-      if Map.has_key?(state.collected, ref) do
-        state
-      else
-        collect(state, ref, down_status(reason))
+      case Map.get(state.ref_to_slot, ref) do
+        nil ->
+          state
+
+        slot ->
+          state = %{state | ref_to_slot: Map.delete(state.ref_to_slot, ref)}
+          handle_down(state, slot, reason)
       end
 
     {:noreply, state}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # A monitored child went DOWN. If its slot already reported a terminal status,
+  # ignore. A crash with budget left restarts; a crash with no budget escalates to
+  # :crashed.
+  defp handle_down(state, slot, reason) do
+    cond do
+      Map.has_key?(state.collected, slot) ->
+        state
+
+      crashed?(reason) and restarts_left?(state, slot) ->
+        restart_slot(state, slot)
+
+      true ->
+        collect(state, slot, down_status(reason))
+    end
+  end
+
+  defp crashed?(:normal), do: false
+  defp crashed?(_abnormal), do: true
+
+  defp restarts_left?(state, slot) do
+    case Map.fetch(state.tasks, slot) do
+      {:ok, %{restarts_left: n}} -> n > 0
+      :error -> false
+    end
+  end
+
+  # Re-spawn the slot's reconciler on the same partition, decrementing its restart
+  # budget and re-keying the new monitor ref to the slot. Idempotent w.r.t. the
+  # result: the slot keeps its position in `order`, so a restarted partition's
+  # eventual status lands in the same place.
+  defp restart_slot(state, slot) do
+    task = Map.fetch!(state.tasks, slot)
+
+    new_task =
+      start_partition_task(state.supervisor, task.partition, state.reconciler, state.timeout, slot)
+
+    updated = Map.put(new_task, :restarts_left, task.restarts_left - 1)
+
+    %{
+      state
+      | tasks: Map.put(state.tasks, slot, updated),
+        ref_to_slot: Map.put(state.ref_to_slot, updated.ref, slot)
+    }
+  end
 
   # =============================================================================
   # Internals
@@ -387,9 +523,9 @@ defmodule Kazi.Scheduler do
   # Start one supervised reconciler Task for a partition under the DynamicSupervisor
   # and monitor it. The task body runs the (possibly stub) reconciler — contained,
   # so a status return passes through and a crash/non-status return is normalized —
-  # and sends the terminal status back keyed by the monitor ref. Siblings run
-  # concurrently (a DynamicSupervisor imposes no ordering).
-  defp start_partition_task(supervisor, partition, reconciler, timeout) do
+  # and sends the terminal status back keyed by the task's SLOT (stable across a
+  # restart). Siblings run concurrently (a DynamicSupervisor imposes no ordering).
+  defp start_partition_task(supervisor, partition, reconciler, timeout, slot) do
     coordinator = self()
 
     spec =
@@ -401,22 +537,29 @@ defmodule Kazi.Scheduler do
     {:ok, pid} = PartitionSupervisor.start_child(supervisor, spec)
     ref = Process.monitor(pid)
 
-    # Hand the task its own monitor ref so it can tag the status it sends back.
-    send(pid, {:coordinator, coordinator, ref})
+    # Hand the task its slot so it can tag the status it sends back; the slot is
+    # stable across restarts, so a restarted partition reports into the same slot.
+    send(pid, {:coordinator, coordinator, slot})
 
-    %{ref: ref, partition: partition, pid: pid}
+    %{slot: slot, ref: ref, partition: partition, pid: pid}
   end
 
   # Run the injected reconciler, contained, and report the terminal status to the
-  # coordinator tagged with this task's monitor ref. A finite timeout bounds a
-  # wedged reconciler; a crash or non-status return is normalized so the collective
-  # fold is total. The reconciler runs in a nested Task purely so the timeout can
+  # coordinator tagged with this task's SLOT. A finite timeout bounds a wedged
+  # reconciler; a crash or non-status return is normalized so the collective fold
+  # is total. The reconciler runs in a nested Task purely so the timeout can
   # interrupt it without crashing this supervised child.
+  #
+  # IMPORTANT for T21.10: if the reconciler RAISES (a real crash), no
+  # {:partition_done, ...} is sent and this child exits abnormally — the
+  # coordinator sees the {:DOWN, ...} and applies the restart/escalate policy. The
+  # nested-Task timeout path returns :stuck/:crashed as a normal status (a wedged
+  # or self-killed reconciler is contained, not a child crash to restart).
   defp run_reconciler(reconciler, partition, timeout) do
     receive do
-      {:coordinator, coordinator, ref} ->
+      {:coordinator, coordinator, slot} ->
         status = invoke_reconciler(reconciler, partition, timeout)
-        send(coordinator, {:partition_done, ref, status})
+        send(coordinator, {:partition_done, slot, status})
         status
     end
   end
@@ -445,10 +588,10 @@ defmodule Kazi.Scheduler do
   defp down_status(:normal), do: :stuck
   defp down_status(_abnormal), do: :crashed
 
-  # Record a partition's terminal status and reply to a waiting :await if the run
-  # is now finished.
-  defp collect(state, ref, status) do
-    state = %{state | collected: Map.put_new(state.collected, ref, status)}
+  # Record a partition's terminal status (keyed by its stable SLOT) and reply to a
+  # waiting :await if the run is now finished.
+  defp collect(state, slot, status) do
+    state = %{state | collected: Map.put_new(state.collected, slot, status)}
     maybe_reply(state)
   end
 
@@ -465,12 +608,14 @@ defmodule Kazi.Scheduler do
     end
   end
 
-  # The result once EVERY ordered partition has a collected status, else nil.
+  # The result once EVERY ordered slot has a collected status, else nil. Keyed by
+  # slot (stable across restarts), so a restarted partition's eventual status still
+  # lands in its original input position.
   defp finished_result(state) do
     if Enum.all?(state.order, &Map.has_key?(state.collected, &1)) do
       partitions =
-        Enum.map(state.order, fn ref ->
-          {Map.fetch!(state.tasks, ref).partition, Map.fetch!(state.collected, ref)}
+        Enum.map(state.order, fn slot ->
+          {Map.fetch!(state.tasks, slot).partition, Map.fetch!(state.collected, slot)}
         end)
 
       statuses = Enum.map(partitions, fn {_p, status} -> status end)
