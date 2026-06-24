@@ -111,8 +111,10 @@ defmodule Kazi.CLIAuthoringTest do
     end
 
     test "an unknown command names the authoring commands in its hint" do
+      # T27.1 (ADR-0032): the hint now points at the PRIMARY verb `plan` (the
+      # deprecated `propose` alias still works but is not advertised in the hint).
       assert {:error, message} = Kazi.CLI.parse(["frobnicate"])
-      assert message =~ "propose"
+      assert message =~ "plan"
       assert message =~ "list-proposed"
     end
   end
