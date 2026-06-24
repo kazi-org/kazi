@@ -204,6 +204,34 @@ defmodule Kazi.Harness.ConformanceTest do
     end
   end
 
+  describe ":claw golden-transcript conformance (T14.4, ADR-0022) — BEST-EFFORT" do
+    # claw-code is DEMO-GRADE: it emits NO JSON, so its "golden transcript" is just
+    # the RAW stdout text the tool printed, and `parse` surfaces it verbatim as
+    # :result with NO cost/token extraction (the structured-output bar it does not
+    # meet). The fixture carries the recorded trailing newline, so :result keeps it.
+    test "argv is the bare `prompt <prompt>` and parse returns the RAW stdout as :result" do
+      assert_profile_conformance(:claw,
+        prompt: "fix the failing test",
+        opts: [],
+        expected_argv: ["prompt", "fix the failing test"],
+        transcript: "harness/claw_prompt.txt",
+        # The whole recorded stdout (trailing newline included) is the :result, and
+        # NOTHING structured (no tokens/cost) is invented.
+        expected_parse: %{result: "Made the failing unit test pass.\n"}
+      )
+    end
+
+    test "opts are ignored — claw has no model flag (argv unchanged, same raw parse)" do
+      assert_profile_conformance(:claw,
+        prompt: "fix the failing test",
+        opts: [model: "ignored-by-claw"],
+        expected_argv: ["prompt", "fix the failing test"],
+        transcript: "harness/claw_prompt.txt",
+        expected_parse: %{result: "Made the failing unit test pass.\n"}
+      )
+    end
+  end
+
   describe "helper mechanics (the contract future profiles rely on)" do
     test "expected_parse is asserted as a strict subset: a missing field fails" do
       assert_raise ExUnit.AssertionError, ~r/omitted expected field/, fn ->
