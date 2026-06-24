@@ -66,6 +66,50 @@ defmodule Kazi.Harness.ConformanceTest do
         }
       )
     end
+
+    # T19.6 (ADR-0033): in-family Claude tiering. A cheap Claude model selected via
+    # `--model <m>` is appended to the argv; the same recorded envelope parses, so
+    # only the argv differs.
+    test "argv appends --model when a cheap in-family model is given (T19.6)" do
+      assert_profile_conformance(:claude,
+        prompt: "Make the suite green",
+        opts: [model: "claude-haiku-4-5"],
+        expected_argv: [
+          "-p",
+          "Make the suite green",
+          "--output-format",
+          "json",
+          "--model",
+          "claude-haiku-4-5"
+        ],
+        transcript: "harness/claude_envelope.json",
+        expected_parse: %{
+          result: "Made the failing unit test pass.",
+          tokens: 5350,
+          cost: %{tokens: 5350},
+          cost_usd: 0.0123,
+          touched: ["lib/app/widget.ex", "test/app/widget_test.exs"]
+        }
+      )
+    end
+
+    # Back-compat: with NO model the argv is byte-for-byte the pre-T19.6 shape (no
+    # `--model` token); an empty-string model is likewise treated as no model.
+    test "argv WITHOUT a model is byte-identical to today (omits --model, T19.6)" do
+      profile = Registry.fetch!(:claude)
+      base = ["-p", "Make the suite green", "--output-format", "json"]
+
+      assert Profile.build_args(profile, "Make the suite green", []) == base
+      assert Profile.build_args(profile, "Make the suite green", model: "") == base
+      refute "--model" in Profile.build_args(profile, "Make the suite green", [])
+    end
+
+    # :model is declared in supported_opts so the profile's advertised surface is
+    # honest (ADR-0022 conformance), even though Kazi.Harness always keeps :model.
+    test "the :claude profile declares :model in supported_opts (T19.6)" do
+      profile = Registry.fetch!(:claude)
+      assert :model in profile.supported_opts
+    end
   end
 
   describe ":opencode golden-transcript conformance" do
