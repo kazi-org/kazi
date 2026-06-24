@@ -13,6 +13,14 @@ source of truth.
 > Every command and flag below is real. Confirm the live surface with
 > `kazi help --json` and `kazi schema` rather than trusting a stale copy.
 
+For a CODE goal the on-ramp is two verbs: `kazi plan` authors the acceptance
+predicates and `kazi apply` converges them (ADR-0031/0032). `kazi apply` IS the
+reconcile loop -- you do NOT wrap it in a separate loop/qualify pass for code
+work. The strategy layer above kazi is `/plan` (ADRs, use cases, the WBS, the
+intent); kazi turns that intent into objective predicates and executes them.
+`/tidy` stays orthogonal hygiene (git/worktree/scratch sweeping), not part of the
+converge loop.
+
 ## Two-tier economics (why)
 
 Spend expensive reasoning ONCE on what "done" means -- the acceptance predicates.
@@ -22,24 +30,28 @@ victory on plausible-but-wrong work, because truth lives in the predicates, not
 in the model doing the keystrokes. You (strong model) AUTHOR predicates; a cheap
 harness (`--harness <cheap> --model <m>`) RUNS the loop; kazi holds the bar still.
 
-## The loop: propose -> approve -> run -> branch
+## The loop: plan -> approve -> apply -> branch
 
 ```
-propose --json -> (review) -> approve --json -> run --harness <cheap> --json [--stream]
-                                                       |
-                                          parse result, branch on next_action
+plan --json -> (review) -> approve --json -> apply --harness <cheap> --json [--stream]
+                                                    |
+                                       parse result, branch on next_action
 ```
 
-### 1. propose predicates -- `kazi propose --json`
+> The primary verbs are `kazi plan` and `kazi apply` (ADR-0032). The old verbs
+> `kazi propose` and `kazi run` still work as DEPRECATED ALIASES that print a
+> one-line stderr hint; prefer `plan`/`apply` and never the aliases in new recipes.
 
-`propose` is the single sanctioned predicate-authoring path. Under `--json` kazi
+### 1. author predicates -- `kazi plan --json`
+
+`plan` is the single sanctioned predicate-authoring path. Under `--json` kazi
 is NON-INTERACTIVE: it never prompts or blocks on stdin. Two modes:
 
 caller-drafts (the agent's mode -- you already reasoned about the idea, so supply
 the predicates; kazi spawns NO inner model):
 
 ```sh
-kazi propose --json --predicates '{
+kazi plan --json --predicates '{
   "name": "ship a /healthz endpoint",
   "predicates": [
     {"id": "code", "provider": "test_runner", "description": "route exists and tests pass"},
@@ -49,32 +61,35 @@ kazi propose --json --predicates '{
 }'
 
 # or pipe the payload on stdin (under --json):
-echo "$PAYLOAD" | kazi propose --json
+echo "$PAYLOAD" | kazi plan --json
 ```
 
 The payload is a `{"name", "predicates": [...], "rationale"}` object (a bare JSON
 array of predicate entries is also accepted). A positional idea is OPTIONAL here.
 
+If a `/plan` strategy doc already exists for this work, DERIVE the predicates from
+its `acc:` lines rather than inventing them -- those lines ARE the predicate set.
+
 kazi-drafts (hand kazi only a prose idea; it drafts the predicates for you):
 
 ```sh
-kazi propose "a /healthz endpoint that returns 200" --json --yes
+kazi plan "a /healthz endpoint that returns 200" --json --yes
 ```
 
 If the idea is underspecified, kazi-drafts emits a JSON error and exits non-zero
 rather than hanging -- pass `--yes`, supply predicates, or sharpen the idea.
 
-`propose --json` emits one object: `goal_id`, `proposal_ref` (the approve/reject
+`plan --json` emits one object: `goal_id`, `proposal_ref` (the approve/reject
 handle), `status`, `predicates`, `rationale`, and a `clarify` array of open gaps
 (each `{id, prompt, recommended}` from the deterministic floor -- e.g. a missing
 live-verification target). All carry `schema_version`.
 
-Other propose flags: `--workspace <path>`, `--strict`, `--adr`.
+Other plan flags: `--workspace <path>`, `--strict`, `--adr`.
 
 ### 2. review and approve -- `kazi approve --json`
 
-Read the proposed `predicates` and `clarify` gaps. If a gap matters, re-`propose`
-with it closed. When satisfied, approve the `proposal_ref` from step 1:
+Read the proposed `predicates` and `clarify` gaps. If a gap matters, re-run
+`kazi plan` with it closed. When satisfied, approve the `proposal_ref` from step 1:
 
 ```sh
 kazi approve <proposal-ref> --json
@@ -84,16 +99,16 @@ Emits `{schema_version, proposal_ref, status: "approved", goal_id}`. `kazi rejec
 <proposal-ref> --json` declines (kept for audit). Browse the queue with
 `kazi list-proposed [--status proposed|approved|rejected] --json`.
 
-> `approve` returns a goal id, but `kazi run` takes a GOAL-FILE path, not the id.
-> propose/approve persist the approved goal into a loadable goal-file; run that
+> `approve` returns a goal id, but `kazi apply` takes a GOAL-FILE path, not the id.
+> plan/approve persist the approved goal into a loadable goal-file; apply that
 > file's path in step 3.
 
-### 3. converge -- `kazi run --harness <cheap> --json [--stream]`
+### 3. converge -- `kazi apply --harness <cheap> --json [--stream]`
 
-Run the approved goal with the cheap harness:
+Apply the approved goal with the cheap harness:
 
 ```sh
-kazi run <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
+kazi apply <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
 ```
 
 Emits ONE terminal result object. Exit code mirrors convergence: `0` only on
@@ -106,8 +121,8 @@ object without an `event`; that is the terminal result you branch on.
 
 ### 4. parse and branch on `next_action`
 
-`run --json` gives the terminal `status` plus a derived `next_action` hint, so you
-never re-derive the branch from the predicate vector:
+`apply --json` gives the terminal `status` plus a derived `next_action` hint, so
+you never re-derive the branch from the predicate vector:
 
 | `status`      | `next_action`  | exit | Do |
 |---------------|----------------|------|----|
@@ -127,15 +142,16 @@ ref is a JSON error with a non-zero exit.
 
 ## Pin `schema_version`
 
-Every `--json` object carries `schema_version` (currently **1**) -- one shared
-compatibility number across all surfaces. An additive change leaves it unchanged;
-a breaking change bumps it. Read it off the first object you parse and refuse (or
-branch) if it is not the version you were written against:
+Every `--json` object carries `schema_version` (currently **2**, bumped by
+ADR-0032 when the verbs unified) -- one shared compatibility number across all
+surfaces. An additive change leaves it unchanged; a breaking change bumps it. Read
+it off the first object you parse and refuse (or branch) if it is not the version
+you were written against:
 
 ```sh
-result=$(kazi run "$GOAL" --workspace "$WS" --harness opencode --json)
+result=$(kazi apply "$GOAL" --workspace "$WS" --harness opencode --json)
 ver=$(printf '%s' "$result" | jq -r .schema_version)
-[ "$ver" = "1" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
+[ "$ver" = "2" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
 next=$(printf '%s' "$result" | jq -r .next_action)
 ```
 
@@ -148,19 +164,20 @@ exit code -- makes regression and partial progress legible.
 kazi self-describes; confirm the surface at runtime instead of trusting this copy:
 
 ```sh
-kazi help --json            # the command/flag surface (generated from kazi's command table)
-kazi schema [run|status]    # the versioned --json result schema(s) as data
+kazi help --json              # the command/flag surface (generated from kazi's command table)
+kazi schema [apply|status]    # the versioned --json result schema(s) as data
 ```
 
 `kazi help --json` lists every command with its `summary`, positional `args`, and
-`flags` (`name`, `type`, `description`, `aliases`). `kazi schema` emits the
+`flags` (`name`, `type`, `description`, `aliases`) -- including the primary verbs
+`apply`/`plan` and the `run`/`propose` deprecated aliases. `kazi schema` emits the
 versioned result schemas; both are JSON.
 
 ## Verifying a pooled task with kazi
 
 In an /apply --pool session, gate your task's MERGE on objective convergence
-(ADR-0026 L1): bridge the task's acc line to predicates, propose/approve, then
-`kazi run --json` -- rebase-merge ONLY when `status` is `converged`; on
+(ADR-0026 L1): bridge the task's acc line to predicates, plan/approve, then
+`kazi apply --json` -- rebase-merge ONLY when `status` is `converged`; on
 `stuck` / `over_budget` / `error`, escalate and do NOT merge. Full copy-pasteable
 gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 
@@ -171,3 +188,5 @@ gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 - `docs/schemas/run-result.md`, `docs/schemas/status.md` -- the committed schemas.
 - `docs/adr/0023-harness-friendly-agent-drivable-cli.md` -- the agent-drivable CLI.
 - `docs/adr/0024-kazi-self-teaching-to-harnesses.md` -- self-teaching surfaces.
+- `docs/adr/0031-kazi-skill-router-subsumes-loop-apply-qualify.md` -- the router on-ramp.
+- `docs/adr/0032-rename-cli-verbs-run-apply-propose-plan.md` -- the verb rename.
