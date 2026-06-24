@@ -185,18 +185,18 @@ harness per-run with a flag:
 
 ```sh
 kazi run <goal-file> --workspace <path> \
-  --harness opencode --model dgx-ollama/qwen3.6:35b-a3b
+  --harness opencode --model local-ollama/qwen3.6:35b-a3b
 ```
 
 `--harness <id>` selects the harness (`claude`, `opencode`, `codex`,
 `antigravity`, or `claw` today — see the [tier table](#tiered-harness-support-adr-0022)
 below); `--model <provider/model>` selects the model that harness should use.
 
-**Point opencode at a local model (e.g. a DGX-hosted Qwen3.6).** If you run
-[`opencode`](https://opencode.ai) wired to a local model (the operator here
-points it at a DGX-hosted **Qwen3.6 35B-A3B**), **opencode's own provider config
+**Point opencode at a local model (e.g. a locally-hosted Qwen3.6).** If you run
+[`opencode`](https://opencode.ai) wired to a local model (for example a
+**Qwen3.6 35B-A3B** on a local GPU host), **opencode's own provider config
 is the source of truth** for the endpoint and credentials. `--model` is
-opencode's `provider/model` string — the provider (`dgx-ollama` above) and its
+opencode's `provider/model` string — the provider (`local-ollama` above) and its
 base URL live in your opencode config, not in kazi. kazi can also forward
 provider/endpoint environment variables to the harness subprocess when a local
 setup expects them — declare them as the harness `:env` and kazi passes them
@@ -210,7 +210,7 @@ its own preferred harness in an optional `[harness]` table:
 ```toml
 [harness]
 id = "opencode"                            # a KNOWN harness id (claude / opencode / codex / antigravity / claw)
-model = "dgx-ollama/qwen3.6:35b-a3b"       # optional provider/model override
+model = "local-ollama/qwen3.6:35b-a3b"       # optional provider/model override
 command = "opencode"                       # optional binary override
 ```
 
