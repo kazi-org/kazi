@@ -124,6 +124,26 @@ defmodule Kazi.Teach.InstallSkill do
     schemas. They are generated from kazi's own command table, so they never drift.
     Prefer them over this document when in doubt.
 
+    ### Where /plan and /tidy sit (the code on-ramp)
+
+    For a CODE goal the on-ramp is exactly these four verbs -- `plan` / `apply` /
+    `status` / `adopt`. Do NOT route a code goal through a separate `/loop` or
+    `/qualify` pass: `kazi apply` IS the reconcile loop, and "launch-ready" is the
+    OBJECTIVE predicate vector (including any live prod probe), not a heuristic to
+    infer afterward (ADR-0031). Two general skills stay OUTSIDE kazi and keep their
+    own roles:
+
+    - `/plan` is the INTENT layer ABOVE kazi -- it authors the strategy (ADRs, use
+      cases, the WBS) and each task's `acc:` line. Those `acc:` lines feed the
+      `plan` verb: derive the predicates from them (the `/plan` -> goal-set bridge
+      in Step 1). `/plan` decides WHAT to build; kazi makes it objective and runs it.
+    - `/tidy` is HYGIENE, orthogonal to convergence -- git/worktree/scratch sweeping.
+      It is not part of the converge loop; run it when you want repo hygiene, not to
+      reach "done".
+
+    (`/loop` and `/qualify` remain available as GENERAL skills for non-code work;
+    the kazi code on-ramp simply does not route to them.)
+
     ### Not a kazi repo? Degrade cleanly
 
     The router assumes `kazi` is on PATH. If it is not (a repo that has not adopted
