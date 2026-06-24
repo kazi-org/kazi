@@ -4,6 +4,81 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-23 — token-efficiency audit: is claude→kazi→claude cheaper than vanilla?
+
+Audited whether the orchestrator→kazi→implementer stack (ADR-0023) actually
+beats vanilla Claude on cost, and where kazi leaks tokens today. Verified against
+the live dispatch path (`lib/kazi/loop.ex:1208 dispatch_prompt/2`), not the ADR
+prose.
+
+**The honest framing.** "Cheaper" ≠ "fewer tokens". The naive setup — claude →
+kazi → claude with the SAME big model on every layer, stateless per iteration
+(ADR-0008) — is *more* tokens than vanilla: vanilla amortizes orientation across
+one growing context, while kazi re-pays per-iteration orientation N times AND
+adds the orchestrator on top. kazi wins on **cost**, not token count, via two
+levers that are intrinsic, not yet proven:
+1. **Model tiering (ADR-0023).** Expensive model authors predicates ONCE; a cheap
+   LOCAL model (Qwen/DGX via opencode/claw) does the N grind iterations; objective
+   predicates keep the cheap model honest. The expensive tokens are paid once; the
+   N iterations run on near-free compute.
+2. **"Right the first time."** Objective termination removes the hidden cost of a
+   human re-prompting an agent that *thought* it was done. That cost is real but
+   uncounted in a naive token diff.
+
+**What's already shipped well (verified):** real token/cost capture from
+`claude --output-format json` (`harness/profiles/claude.ex`); code-review-graph
+MCP registered + refreshed in the target `.mcp.json` before every dispatch
+(`workspace.ex` — gives the inner agent ~10× cheaper structural queries per
+ADR-0010 research); bounded working-set digest carried across iterations as map
+memory (`loop/digest.ex`); graphify retrieval adapter present (off by default,
+SHA-cached); SHA-keyed orientation-pack cache keyed on `(workspace, git_sha,
+failing_set)` (`context.ex:165`).
+
+**Where kazi leaks tokens TODAY (gaps found):**
+1. **Orientation pack is delivered as a file, not a cached prompt prefix.** The
+   live loop's `dispatch_prompt/2` builds digest + `inspect(evidence)` + optional
+   retrieval, and writes the pack to `.kazi/context.md`. The inner agent must READ
+   that file (tool calls + input tokens, no cache discount) instead of receiving
+   it as a stable, prompt-cacheable prefix. The prefix-injection path
+   (`Harness.Prompt.build_prompt/3`, T4.3 — marked done, tested) EXISTS but is NOT
+   called by the loop. Wiring it + Anthropic `cache_control` on the stable prefix
+   is the single highest-leverage fix and the code is already written — realizes
+   the 50–90% input savings ADR-0010 cites. **Landmine: T4.3 is "done" but unwired
+   on the live path.**
+2. **No Anthropic prompt caching (`cache_control`) anywhere.** Even the workspace
+   file approach forfeits the cache discount on the stable goal/orientation prefix.
+3. **Evidence rendered via raw `inspect/1`** in `dispatch_prompt/2`, bypassing
+   `Prompt.truncate_evidence/2` (T4.8) — large evidence maps go in untruncated on
+   the live path.
+4. **caller-drafts mode absent (T15.2 open).** If `propose` spawns its own model to
+   draft predicates while the orchestrator already reasoned about the idea, that is
+   the redundant expensive call ADR-0023 §4 warns about. T15.2 caller-drafts
+   removes it; until then the agent-drivable path double-pays authoring.
+5. **No benchmark exists.** The "cheaper" claim is UNMEASURED — there are zero
+   token A/B numbers in this repo. ADR-0010 promised "the first self-hosted run
+   becomes the benchmark"; T15.9 (live claude→kazi→claw/Qwen dogfood) is the slot
+   and is still open. Until run, "cheaper" must NOT appear on the README/site.
+
+**Prioritized levers (brainstorm, not yet decided):**
+- **P0 — Run the benchmark (T15.9).** Same broken fixture converged three ways:
+  (a) vanilla Claude, (b) claude→kazi→Opus, (c) Opus-authors→kazi→local-Qwen.
+  Record input/output/cache tokens, $, iterations, and correctness. This turns
+  "we think it's cheaper" into the headline marketing line — or exposes the leaks.
+- **P0 — Wire the orientation prefix + prompt caching** (realize T4.3 on the live
+  loop; add `cache_control`). Highest token-per-hour win; code largely exists.
+- **P1 — Ship caller-drafts (T15.2)** to kill the redundant authoring call.
+- **P1 — Feed more blast-radius from the graph INTO the prompt** (impact radius /
+  detect-changes symbols) so the cheap agent never greps to orient.
+- **P2 — Auto-enable graphify retrieval above a repo-size threshold** (cache built);
+  differential evidence (send only the delta vs last iteration); predicate-level
+  memoization so expensive live/browser predicates don't re-run when their blast
+  radius is unchanged.
+
+**Bottom line:** the architecture is DESIGNED to be cheaper and the hard parts
+(graph integration, token capture, caching infra) are built — but the two levers
+that prove it (prompt-cache prefix, caller-drafts) are unwired and the benchmark
+is unrun. "Cheaper" is the right north star; it is not yet earned in numbers.
+
 ## 2026-06-23 — harness CLI contracts researched (motivates E14 / ADR-0022)
 
 Researched the CLI contracts of three coding harnesses to onboard as profiles
