@@ -91,19 +91,19 @@ defmodule Kazi.CLIProposeJsonTest do
   describe "parse/1 — caller-drafts options" do
     test "propose --predicates carries the payload and allows no idea" do
       assert {:propose, "", opts} =
-               Kazi.CLI.parse(["propose", "--predicates", @caller_predicates, "--json"])
+               Kazi.CLI.parse(["plan", "--predicates", @caller_predicates, "--json"])
 
       assert opts[:predicates] == @caller_predicates
       assert opts[:json] == true
     end
 
     test "propose --json with no idea parses (stdin caller-drafts)" do
-      assert {:propose, "", opts} = Kazi.CLI.parse(["propose", "--json"])
+      assert {:propose, "", opts} = Kazi.CLI.parse(["plan", "--json"])
       assert opts[:json] == true
     end
 
     test "a bare propose with neither idea nor caller-drafts signal is still an error" do
-      assert {:error, message} = Kazi.CLI.parse(["propose"])
+      assert {:error, message} = Kazi.CLI.parse(["plan"])
       assert message =~ "requires an <idea>"
     end
   end
@@ -116,7 +116,7 @@ defmodule Kazi.CLIProposeJsonTest do
     test "emits a single parseable draft object (no human prose), exit 0" do
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "ship a healthz endpoint", "--json", "--yes"],
+          assert Kazi.CLI.run(["plan", "ship a healthz endpoint", "--json", "--yes"],
                    harness: DraftHarness
                  ) == 0
         end)
@@ -155,7 +155,7 @@ defmodule Kazi.CLIProposeJsonTest do
     test "accepts supplied predicates, applies the floor, persists, spawns NO model" do
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json", "--predicates", @caller_predicates],
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", @caller_predicates],
                    # The harness is injected but MUST NOT be invoked in caller-drafts.
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()]
@@ -192,7 +192,7 @@ defmodule Kazi.CLIProposeJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json"],
+          assert Kazi.CLI.run(["plan", "--json"],
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()],
                    stdin: stdin
@@ -214,7 +214,7 @@ defmodule Kazi.CLIProposeJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json", "--predicates", payload],
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", payload],
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()]
                  ) == 0
@@ -234,7 +234,7 @@ defmodule Kazi.CLIProposeJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json", "--predicates", payload],
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", payload],
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()]
                  ) == 1
@@ -249,7 +249,7 @@ defmodule Kazi.CLIProposeJsonTest do
     test "malformed caller predicates are a clear JSON error, exit 1" do
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json", "--predicates", "not json at all"],
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", "not json at all"],
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()]
                  ) == 1
@@ -271,7 +271,7 @@ defmodule Kazi.CLIProposeJsonTest do
       # nothing supplied. Under --json this must error as JSON (non-zero), not hang.
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["propose", "--json"],
+          assert Kazi.CLI.run(["plan", "--json"],
                    harness: SpyHarness,
                    adapter_opts: [spy_pid: self()],
                    stdin: ""

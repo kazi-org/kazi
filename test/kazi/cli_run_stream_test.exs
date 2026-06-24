@@ -31,7 +31,7 @@ defmodule Kazi.CLIRunStreamTest do
     test "run carries --stream through to its opts" do
       assert {:run, "goal.toml", opts} =
                Kazi.CLI.parse([
-                 "run",
+                 "apply",
                  "goal.toml",
                  "--workspace",
                  "/tmp/ws",
@@ -45,7 +45,7 @@ defmodule Kazi.CLIRunStreamTest do
 
     test "without --stream the run flag defaults to false (a single result object)" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws", "--json"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws", "--json"])
 
       assert opts[:stream] == false
     end
@@ -72,7 +72,7 @@ defmodule Kazi.CLIRunStreamTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", work, "--json", "--stream"],
+                   ["apply", goal_file, "--workspace", work, "--json", "--stream"],
                    runtime_opts
                  ) == 0
         end)
@@ -136,7 +136,7 @@ defmodule Kazi.CLIRunStreamTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["run", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
                    0
         end)
 

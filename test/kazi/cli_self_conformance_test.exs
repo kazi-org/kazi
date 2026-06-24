@@ -253,33 +253,6 @@ defmodule Kazi.CLISelfConformanceTest do
       assert payload["next_action"] == "done"
     end
 
-    test "run --json / propose --json (deprecated aliases still emit valid objects)" do
-      # ADR-0032: the old verbs remain DEPRECATED ALIASES — they dispatch
-      # identically and emit the SAME result object at the bumped schema_version,
-      # so callers pinning the alias keep working through the deprecation window.
-      %{work: work, goal_file: goal_file, opts: opts} = converging_run()
-
-      run_alias =
-        assert_conformant("run --json (deprecated alias)",
-          argv: ["run", goal_file, "--workspace", work, "--json"],
-          inject: opts,
-          expected_exit: 0
-        )
-
-      assert run_alias["schema_version"] == 2
-      assert run_alias["status"] == "converged"
-
-      propose_alias =
-        assert_conformant("propose --json (deprecated alias)",
-          argv: ["propose", "ship a healthz endpoint", "--json", "--yes"],
-          inject: [harness: StubHarness],
-          expected_exit: 0
-        )
-
-      assert propose_alias["schema_version"] == 2
-      assert propose_alias["proposal_ref"] =~ "prop-"
-    end
-
     test "status --json (a persisted run)" do
       vector =
         PredicateVector.new(%{code: PredicateResult.pass(), live: PredicateResult.fail()})
@@ -304,7 +277,7 @@ defmodule Kazi.CLISelfConformanceTest do
 
     test "list-proposed --json" do
       {0, _} =
-        with_io(fn -> Kazi.CLI.run(["propose", "a listed idea"], harness: StubHarness) end)
+        with_io(fn -> Kazi.CLI.run(["plan", "a listed idea"], harness: StubHarness) end)
 
       payload =
         assert_conformant("list-proposed --json",
@@ -487,7 +460,7 @@ defmodule Kazi.CLISelfConformanceTest do
   end
 
   defp propose_one do
-    {0, out} = with_io(fn -> Kazi.CLI.run(["propose", "an idea"], harness: StubHarness) end)
+    {0, out} = with_io(fn -> Kazi.CLI.run(["plan", "an idea"], harness: StubHarness) end)
 
     out
     |> String.split("\n")

@@ -243,12 +243,12 @@ defmodule Kazi.StandingE2ETest do
   describe "CLI --standing flag authoring" do
     test "parse/1 carries --standing through the run command" do
       assert {:run, "g.toml", opts} =
-               Kazi.CLI.parse(["run", "g.toml", "--workspace", "/tmp/ws", "--standing"])
+               Kazi.CLI.parse(["apply", "g.toml", "--workspace", "/tmp/ws", "--standing"])
 
       assert opts[:standing] == true
 
       # Absent flag → nil, so the goal-file's own `standing` decides downstream.
-      assert {:run, "g.toml", no_flag} = Kazi.CLI.parse(["run", "g.toml"])
+      assert {:run, "g.toml", no_flag} = Kazi.CLI.parse(["apply", "g.toml"])
       assert no_flag[:standing] == nil
     end
 

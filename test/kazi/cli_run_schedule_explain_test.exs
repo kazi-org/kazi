@@ -66,21 +66,21 @@ defmodule Kazi.CLIRunScheduleExplainTest do
   describe "parse/1 — run --explain / --dry-run" do
     test "--explain carries through to opts" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws", "--explain"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws", "--explain"])
 
       assert opts[:explain] == true
     end
 
     test "--dry-run is an alias of --explain" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws", "--dry-run"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws", "--dry-run"])
 
       assert opts[:explain] == true
     end
 
     test "without --explain/--dry-run the flag defaults to false" do
       assert {:run, "goal.toml", opts} =
-               Kazi.CLI.parse(["run", "goal.toml", "--workspace", "/tmp/ws"])
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
 
       assert opts[:explain] == false
     end
@@ -101,7 +101,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
                    converging_dag_inject_opts()
                  ) == 0
         end)
@@ -143,7 +143,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
                    converging_dag_inject_opts()
                  ) == 0
         end)
@@ -176,7 +176,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel", "--json"],
                    inject
                  ) == 1
         end)
@@ -208,7 +208,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--parallel"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--parallel"],
                    converging_dag_inject_opts()
                  ) == 0
         end)
@@ -236,7 +236,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--explain"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--explain"],
                    spy_inject_opts(spy)
                  ) == 0
         end)
@@ -261,7 +261,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--explain"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--explain"],
                    spy_inject_opts(spy)
                  ) == 0
         end)
@@ -277,7 +277,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--dry-run"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--dry-run"],
                    spy_inject_opts(spy)
                  ) == 0
         end)
@@ -299,7 +299,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--explain", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--explain", "--json"],
                    spy_inject_opts(spy)
                  ) == 0
         end)
@@ -332,7 +332,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["run", goal_file, "--workspace", tmp_dir, "--explain", "--json"],
+                   ["apply", goal_file, "--workspace", tmp_dir, "--explain", "--json"],
                    spy_inject_opts(spy)
                  ) == 0
         end)

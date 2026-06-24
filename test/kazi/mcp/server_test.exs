@@ -68,9 +68,9 @@ defmodule Kazi.MCP.ServerTest do
 
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
 
-      # T27.5 (ADR-0032): the primary tool names match the renamed CLI verbs —
+      # T27.5/T27.9 (ADR-0032): the tool names match the CLI verbs —
       # `kazi_plan`/`kazi_apply` (was `kazi_propose`/`kazi_run`). The deprecated
-      # aliases dispatch (asserted in a Tier-2 test below) but are NOT listed here.
+      # `kazi_propose`/`kazi_run` tool aliases were REMOVED in v0.6.0 (T27.9).
       assert names == [
                "kazi_apply",
                "kazi_approve",
@@ -190,9 +190,9 @@ defmodule Kazi.MCP.ServerTest do
       assert decoded == payload
     end
 
-    test "the deprecated `kazi_propose` alias still dispatches (a blank idea surfaces an error)" do
-      # Drives the DEPRECATED tool name on purpose: `kazi_propose` must dispatch
-      # identically to `kazi_plan` through the deprecation window (ADR-0032).
+    test "the removed `kazi_propose` alias is now an unknown tool (T27.9, ADR-0032)" do
+      # The deprecated `kazi_propose` tool alias was removed in v0.6.0: it no longer
+      # dispatches to `kazi_plan` and is a JSON-RPC unknown-tool error instead.
       response =
         Server.handle_request(
           request(
@@ -203,13 +203,8 @@ defmodule Kazi.MCP.ServerTest do
           harness: StubHarness
         )
 
-      # "   " is a non-empty string, so it passes the protocol gate and reaches
-      # Kazi.Authoring.propose, which rejects it as :empty_idea — surfaced AS a
-      # tool result (isError), not a protocol error, so the client branches on it.
-      assert response["result"]["isError"]
-      payload = response["result"]["structuredContent"]
-      assert payload["status"] == "error"
-      assert payload["error"] =~ "blank"
+      assert response["error"]["code"] == -32_601
+      assert response["error"]["message"] =~ "unknown tool"
     end
 
     test "caller-drafts mode parses a supplied proposal with no harness" do
@@ -362,17 +357,16 @@ defmodule Kazi.MCP.ServerTest do
       assert vector["code"] == "fail"
     end
 
-    test "the deprecated `kazi_run` alias dispatches (a missing goal is an invalid-params error)" do
-      # Drives the DEPRECATED tool name on purpose: `kazi_run` must dispatch
-      # identically to `kazi_apply` through the deprecation window (ADR-0032), so
-      # it reaches the same goal-loading guard.
+    test "the removed `kazi_run` alias is now an unknown tool (T27.9, ADR-0032)" do
+      # The deprecated `kazi_run` tool alias was removed in v0.6.0: it no longer
+      # dispatches to `kazi_apply` and is a JSON-RPC unknown-tool error instead.
       response =
         Server.handle_request(
           request("tools/call", %{"name" => "kazi_run", "arguments" => %{}}, 41)
         )
 
-      assert response["error"]["code"] == -32_602
-      assert response["error"]["message"] =~ "goal_file"
+      assert response["error"]["code"] == -32_601
+      assert response["error"]["message"] =~ "unknown tool"
     end
   end
 
