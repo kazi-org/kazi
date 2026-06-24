@@ -176,3 +176,20 @@ with workspace permissions granted (`.claude/settings.local.json` accept-edits +
 auto-rejects edits in external/scratch dirs, T8.11). macOS has no `timeout`; background
 the run and poll. Single-dispatch result (2026-06-24): kazi adds ~0% tokens vs vanilla
 claude; the multi-dispatch case is the open question (E19/T19.4). (2026-06-24.)
+
+## Concurrency / shared working tree
+
+### L-0014 #concurrency #git #worktree #landmine -- the operator runs many sessions in ONE shared working dir; uncommitted edits get wiped
+The operator runs several Claude Code sessions via `/loop /apply --pool` in the SAME
+working directory on `main`. Those sessions `git checkout` / `git pull --ff-only` /
+`git reset` the SHARED tree. So any UNCOMMITTED edits you hold -- and any UNTRACKED
+new file (a new ADR, a new test) -- can be discarded at any moment by a sibling
+process (observed 2026-06-24: a sibling reset wiped an in-progress ADR-0030 + plan +
+devlog draft; reflog showed `reset: moving to HEAD`). Branch checkouts do NOT protect
+you, because all branches share the one working tree in this dir.
+Fix: for any multi-file edit (a plan/ADR/docs change), work in an ISOLATED
+`git worktree add -b <branch> <path> origin/main`, edit + commit + push THERE, then
+PR. Within the worktree your tree is private to that path. If you must edit in the
+shared dir, commit immediately after each file (smallest possible uncommitted
+window); never hold uncommitted work across tool calls. This is the textual companion
+to the PreToolUse worktree hook + the CLAUDE.md Worktree Guardrail.
