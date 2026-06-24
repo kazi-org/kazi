@@ -208,18 +208,39 @@ Depends on the E15 JSON contract.
 - [ ] T16.5 `kazi mcp` server: expose propose/run/status/approve as self-describing MCP tools (descriptions + schemas) wrapping the JSON CLI, for MCP-native drive (no shelling/parsing).  Owner: TBD  Est: 2.5h  verifies: [UC-034]  deps: [T15.7]  acc: an MCP client lists kazi's tools with descriptions + input/output schemas and can drive propose->approve->run; built on the proven JSON contract.
 - [ ] T16.6 LIVE: Claude Code drives kazi via the installed skill: install the skill, then in a real Claude Code session drive a fixture goal end to end (propose -> approve -> run); record evidence.  Owner: TBD  Est: 1.5h  verifies: [UC-034]  deps: [T16.2]  acc: observed evidence that a Claude Code user who ran `kazi install-skill` can drive kazi without further instruction; honest result.
 
-### E17 -- Adoption: README/docs/website lead with the agent-driven workflow (P2, ADR-0023/0024)
+### E17 -- Adoption: lead EVERY surface with the agent-driven on-ramp (P1, ADR-0025)
 
-Acceptance: the README, website, and docs lead with the EASY on-ramp -- `brew
-install + kazi install-skill`, then "tell Claude Code to build X with kazi" -- and
-the two-tier economics (plan with a strong model, code with a cheap/local model,
-kazi keeps it honest objectively) as the differentiator, to grow GitHub stars and
-adoption. The goal-file/`kazi run` reference stays, below the agent on-ramp. Mixed
-content + engineering; coherence-checked (T9.9).
+The adoption-first documentation rewrite. Today the README/site lead with VANILLA
+kazi (install -> `mix kazi.run goal.toml` -> `propose`); the agent-driven path
+(claude -> kazi -> claude/cheap-harness, ADR-0023) -- the lowest-friction, most
+likely way people adopt, since they already live in Claude Code (often remotely:
+phone -> a Mac in the office) -- is absent. ADR-0025 fixes the lead order.
 
-- [ ] T17.1 README reframe (content): lead with the agent-driven workflow + `kazi install-skill` + the two-tier economics; keep install/quickstart/harness-config/goal-file below as the reference. No invented features; coherent with the site.  Owner: TBD  Est: 1.5h  verifies: [UC-035]  delivers: [a README that leads with the claude->kazi->cheap-harness on-ramp]  deps: [T16.2]  acc: a newcomer sees the agent on-ramp first; every command shown is real; canonical strings unchanged or updated in lockstep with the site.
-- [ ] T17.2 Website: a "Use kazi with Claude Code" section/page (the on-ramp + the two-tier story), on-brand; update `site/src/canonical.mjs` + the coherence check in lockstep.  Owner: TBD  Est: 2h  verifies: [UC-035]  delivers: [a website section on the agent-driven workflow]  deps: [T16.2]  acc: the page renders the on-ramp + two-tier story; README<->site coherence (T9.9) stays green; deployed live + verified at https://kazi.sire.run.
+Acceptance: README, website, and the docs entry all LEAD with the on-ramp -- keep
+Claude Code, add kazi so its work is OBJECTIVELY done and the grind runs CHEAP. The
+first code block is the on-ramp (`brew install` + `kazi install-skill`, then "in
+Claude Code: use kazi to build X"); vanilla `kazi run`/`propose`/harness-config/
+build-from-source become the REFERENCE tier below. Cost framing is HONEST per the
+benchmark (`docs/devlog.md` 2026-06-24): no token overhead vs vanilla at the same
+model; "cheaper" is model-tiering, gated by local-model speed -- no unearned number.
+Canonical strings locked; README<->site coherence (T9.9) green; deployed + verified
+live. PROMISING PLANNED WORK IS OK (operator decision 2026-06-24): the docs may lead
+with the one-command `kazi install-skill` / `kazi mcp` on-ramp BEFORE it ships,
+clearly MARKED as the intended/coming experience (e.g. a "coming in vNext" tag),
+with the works-today recipe (T17.4) shown alongside so a reader can act now. The
+guard is honesty-by-labelling, not omission: never present unshipped commands as
+already working. Mixed content + engineering.
+
+E17 is P1 -- the star/adoption lever -- and is UNBLOCKED now (it no longer waits on
+T16.2/T16.5). T16.2 (`install-skill`), T16.3 (`AGENTS.md`), and T16.5 (`kazi mcp`)
+upgrade the on-ramp from promised to one-command as they land; the docs flip the
+"coming" tag to "available" at that point.
+
+- [ ] T17.1 README rewrite to the adoption-first IA (ADR-0025): new lead = (1) one-line value (KEEP the locked positioning canonical string), (2) the on-ramp code block, (3) the 3-layer story + the remote vignette (drive Claude Code from anywhere; kazi rides along on the same machine), (4) the proof-of-convergence SVG, (5) with/without + who-it's-for, then (6) a "Reference" section that DEMOTES the current Install/Quickstart/harness/build content (kept verbatim, reordered below). An honest cost paragraph links the benchmark devlog.  Owner: TBD  Est: 2h  verifies: [UC-035]  delivers: [a README whose first screen is the claude->kazi->cheap-harness on-ramp]  deps: [T17.4]  acc: the first code block is the agent on-ramp -- it may PROMISE `kazi install-skill` marked "coming" with the T17.4 works-today recipe alongside (no command presented as working unless it is); vanilla `kazi run` appears only under "Reference"; canonical strings byte-identical (T9.9 green); the cost claim matches the devlog; every command labelled available is verified against `kazi help --json`.
+- [ ] T17.2 Website rewrite to match (ADR-0025): hero leads with the on-ramp + "keep Claude Code, add provable done + cheap grind"; a PRIMARY "Use kazi with Claude Code" section (recipe / `install-skill` + the 3-layer diagram + the remote vignette); vanilla install demoted to a secondary section; reuse the proof SVG. Update `site/src/canonical.mjs` + the coherence check in lockstep.  Owner: TBD  Est: 2.5h  verifies: [UC-035]  delivers: [a website whose hero is the agent on-ramp]  deps: [T17.1]  acc: hero + primary section render the agent on-ramp; vanilla is secondary; README<->site coherence (T9.9) green; deployed + verified live at https://kazi.sire.run (golden path + mobile viewport, no console errors).
 - [x] T17.3 docs/concept positioning: record the 3-layer stack (orchestrator -> kazi -> cheap harness; kazi friendly in both directions, ADR-0023) as the canonical positioning.  Owner: pool  Done: 2026-06-23  verifies: [UC-035]  delivers: [updated concept positioning]  deps: []  acc: `docs/concept.md` describes the 3-layer stack without contradicting ADR-0001 (kazi is still the outer loop for the harness, AND a tool for the orchestrator).
+- [ ] T17.4 "Drive kazi from Claude Code" quickstart (works TODAY): a docs section + a top-of-README link giving the copy-paste recipe that runs on the SHIPPED JSON CLI -- `kazi propose --json` (caller-drafts) -> `kazi approve` -> `kazi run --harness <cheap> --json [--stream]` -> branch on `next_action` -- so a reader drives kazi from any agent BEFORE `install-skill` exists. Becomes the interim on-ramp for T17.1/T17.2.  Owner: TBD  Est: 1h  verifies: [UC-033, UC-035]  delivers: [a copy-paste agent recipe that works on today's CLI]  deps: [T15.8]  acc: a reader pastes the recipe into a Claude Code session and drives a fixture goal end to end on the current release; every command verified against `kazi help --json`.
+- [ ] T17.5 Link-preview / OG card for sharing (adoption): render an OG/Twitter card that shows the agent on-ramp (not just the logo) so HN/X/Reddit shares preview the easy path; wire into `site/src/layouts/Layout.astro`.  Owner: TBD  Est: 1h  verifies: [UC-035]  delivers: [an OG image that previews the agent on-ramp]  deps: [T17.2]  acc: a link-preview check renders the new card; Lighthouse SEO stays >= 90; deployed live.
 
 ### E18 -- Bug fixes from the T15.9 token-benchmark dogfood (P2, no ADR)
 
@@ -281,7 +302,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E15-3 (recipe + dogfood):** T15.8 (orchestrator recipe + schemas) -> T15.9 (live claude->kazi->claw/Qwen nested loop; honest result).
 - **Wave E16-1 (self-description):** T16.1 (`help --json`/`schema`) -> T16.2 (skill + `install-skill`), T16.3 (`AGENTS.md`) -> T16.4 (coherence guard).
 - **Wave E16-2 (MCP + live):** T16.5 (`kazi mcp`), T16.6 (Claude Code drives kazi via the skill, live).
-- **Wave E17 (adoption docs):** T17.1 (README reframe), T17.2 (website section + coherence + deploy), T17.3 (concept positioning) -- after the skill (T16.2) exists to point at.
+- **Wave E17 (adoption rewrite, P1 -- can start NOW):** T17.4 (the works-today recipe) -> T17.1 (README rewrite, leads with the on-ramp; promised commands marked "coming") -> T17.2 (website rewrite + coherence + deploy) -> T17.5 (OG card). NOT gated on T16.2/T16.5: the docs may PROMISE the one-command on-ramp ahead of shipping (clearly marked), with the working recipe shown alongside (operator decision 2026-06-24; ADR-0025).
 - **Wave E18 (benchmark bug fixes, parallel):** T18.1, T18.2, T18.3, T18.4 are independent (different files) and run in PARALLEL -> T18.5 (re-verify + lint) after all. Independent of E12-E17; safe to land first since they harden the run loop everything else exercises.
 - **Wave E19-1 (token-efficiency wiring):** T19.1 (inject the cached orientation pack as a stable prompt prefix on the live loop) -> T19.2 (Anthropic `cache_control` on the stable prefix) -> T19.3 (use `truncate_evidence/2` on the live dispatch path). Sequential: each refines `dispatch_prompt`/the adapter.
 - **Wave E19-2 (measure):** T19.4 (multi-iteration benchmark harness) -> T19.5 (run + record A/B/cached numbers). After E18 (clean persistence) and E19-1.
@@ -327,6 +348,31 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E17 sharpened: adoption-first docs rewrite, P1)
+- **Reframed E17** from "lead with the agent workflow" (P2) to a decisive,
+  adoption-first DOCUMENTATION REWRITE (P1): README, website, and docs entry all
+  LEAD with the claude->kazi->cheap-harness on-ramp ("keep Claude Code, add provable
+  done + cheap grind"); vanilla `kazi run`/`propose`/harness/build demoted to a
+  Reference tier. Motivated by the operator: people adopt kazi from INSIDE Claude
+  Code (often remotely -- phone -> a Mac in the office), so leading with vanilla kazi
+  is a friction wall.
+- **Created ADR-0025** (docs lead with the agent-driven on-ramp) -- sets the
+  information architecture + messaging hierarchy; vanilla is the reference tier;
+  cost framing honest per the 2026-06-24 benchmark.
+- **Operator decision (2026-06-24): promising planned work is OK** -- the docs may
+  lead with the one-command `kazi install-skill`/`mcp` on-ramp BEFORE it ships,
+  clearly marked "coming," with the works-today recipe alongside. So E17 is
+  UNBLOCKED (no longer gated on T16.2/T16.5). ADR-0025 sec 2 + alternatives updated.
+- **Tasks:** T17.1 (README rewrite to the new IA), T17.2 (website rewrite to match),
+  T17.4 (the works-today "drive kazi from Claude Code" recipe, on the shipped JSON
+  CLI), T17.5 (OG/social card previewing the on-ramp); T17.3 stays done. Wave E17
+  rewritten (can start now; T17.4 -> T17.1 -> T17.2 -> T17.5).
+- Current shipped state confirmed via `git pull`: E15 (agent-drivable JSON CLI) is
+  DONE through T15.7; T16.1 (`help --json`/`schema`) done; T16.2/T16.3/T16.5 (skill/
+  AGENTS.md/mcp) still open -- hence the "promise + label" approach.
+- ADR created: `docs/adr/0025-docs-lead-with-agent-driven-onramp.md` (+ README index).
+  No new use cases (maps to UC-035).
 
 ### 2026-06-24 -- Change Summary (E18 benchmark bug fixes + E19 token-efficiency wiring)
 - Added **E18** (P2, no ADR): four reliability fixes for defects surfaced while
