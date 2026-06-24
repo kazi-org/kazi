@@ -84,7 +84,7 @@ mix run --no-start priv/scripts/acc_to_predicates.exs "$ACC" | kazi propose --js
 
 # 4. Approve, then run as the MERGE gate. Land the PR only on convergence.
 kazi approve <proposal-ref> --json
-kazi run --goal <goal-id> --json      # gate: merge only when kazi reports converged
+kazi run <goal-file> --json           # gate: merge only when kazi reports converged
 ```
 
 ## Determinism + hermeticity
