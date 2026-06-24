@@ -455,11 +455,14 @@ defmodule Kazi.Runtime do
       # artifact is queryable via Kazi.ReadModel.release_refs/1.
       |> maybe_put_release_ref(Map.get(payload, :release_ref))
       |> maybe_put_budget_stop(Map.get(payload, :stop_reason))
-      # T18.3: a terminal projection (stuck stop) reuses the last observed
-      # iteration_index; mark it an upsert so it replaces that row's final state
-      # instead of colliding on the unique index. Keyed off :stop_reason, which is
-      # present only on the loop's terminal (stuck/budget) projections.
-      |> maybe_mark_upsert(Map.get(payload, :stop_reason))
+      # T18.3: persistence is a PROJECTION of observed state, so re-projecting an
+      # iteration_index must be idempotent. A terminal projection (stuck stop
+      # reuses iterations-1; some budget paths re-touch the last index) otherwise
+      # collides on the (goal_ref, iteration_index) unique index and the iteration
+      # is logged as a failed insert. Always upsert from the runtime projection
+      # (replace the row's final state); the read-model keeps its duplicate-
+      # rejecting contract for direct callers.
+      |> Map.put(:upsert?, true)
 
     case ReadModel.record_iteration(attrs) do
       {:ok, _iteration} ->
@@ -490,11 +493,6 @@ defmodule Kazi.Runtime do
   defp maybe_put_budget_stop(attrs, reason) do
     Map.put(attrs, :action, Kazi.Action.new(:budget_stop, params: %{reason: reason}))
   end
-
-  # T18.3: terminal projections (carrying a :stop_reason) upsert so re-recording
-  # the final index is idempotent; normal observations keep the default insert.
-  defp maybe_mark_upsert(attrs, nil), do: attrs
-  defp maybe_mark_upsert(attrs, _stop_reason), do: Map.put(attrs, :upsert?, true)
 
   # =============================================================================
   # Result normalization
