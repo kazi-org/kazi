@@ -120,6 +120,9 @@ Open work:
   reasoning on a frontier model, predicates keep the cheap model honest; the
   in-family-tiering cost story + benchmark, ADR-0033) -- E19 (T19.6/T19.7) + E25
   (T25.11).
+- **UC-044** (the public repo enforces OSS contribution gates: docs land with code,
+  and no internal-info leaks -- CI guards + a one-time scrub keep the docs honest and
+  the repo free of internal IPs/hosts/codenames/personal paths, ADR-0034) -- E29.
 
 ## Checkable Work Breakdown
 
@@ -544,6 +547,18 @@ T27.6 so strings stay consistent.
 - [ ] T28.3 README "How it works" + ADR-index summary current through ADR-0032: update README's architecture/how-it-works summary + its ADR reference list to span 0021-0032 (scheduler, waves, agent-drivable, self-teaching, router, verb rename); use the new verbs (`kazi plan`/`kazi apply`), coordinating with T27.6 so verb strings match. Keep canonical strings + README<->site coherence (T9.9).  Owner: TBD  Est: 1.5h  verifies: [UC-042, UC-035]  delivers: [a README architecture summary current to ADR-0032]  deps: [T27.6]  acc: README how-it-works references the current ADRs through 0032 and the new verbs; coherence (T9.9) green; no stale "Telegram bridge"/old-verb mentions.
 - [ ] T28.4 Accuracy + coherence gate: every command/flag in `concept.md` + README + `docs/` matches `kazi help --json` (apply/plan + aliases, --parallel, --explain, status, schema, install-skill, mcp); the README<->site (T9.9) + skill/AGENTS.md (T16.4) coherence checks pass; deploy + verify live if any site-rendered doc changed.  Owner: TBD  Est: 1h  verifies: [UC-042, infrastructure]  deps: [T28.1, T28.2, T28.3]  acc: zero references to non-existent commands; coherence green; if the site changed, deployed + verified live at https://kazi.sire.run.
 
+### E29 -- OSS contribution gates: docs-with-code + no-internal-leak (P1, ADR-0034)
+
+Enforce the two contribution rules (ADR-0034) for the PUBLIC repo. The rules are
+already in the local + global CLAUDE.md and the `/apply` wave gate; E29 adds the CI
+guards that make them stick, plus a one-time scrub of the existing leaks (~48 hits in
+`docs/` + README found 2026-06-24: private IPs, an internal GPU host, internal
+tool/codenames, personal paths).
+
+- [ ] T29.1 Docs-with-code CI guard: a CI check (script + GitHub Actions step) that FAILS a PR which changes a user-facing/behavioral surface in `lib/` (a command/flag in `cli.ex`, a predicate provider, a public API) without a corresponding `docs/`/README/`kazi help` change -- unless the PR carries a justified `[no-docs]` marker. Start strict-but-warn, then ratchet to blocking.  Owner: TBD  Est: 2h  verifies: [UC-044, infrastructure]  deps: []  acc: a PR that adds a CLI flag with no doc change fails (or warns, phase 1); a `[no-docs]` justified PR passes; a docs-included PR passes; the check is documented.
+- [ ] T29.2 No-internal-leak CI guard: a CI check that greps the diff (and optionally the tree) for internal-marker patterns -- private IPs (`192.168.*`, `10.*`, `172.16-31.*`), internal infra/tool/codenames, personal usernames + absolute home paths -- and FAILS on a hit, with an allow-list for legitimate cases (e.g. RFC-5737 example IPs in a fixture). Tune to avoid false positives.  Owner: TBD  Est: 2h  verifies: [UC-044, infrastructure]  deps: []  acc: a diff introducing `192.168.x.x` or an internal hostname fails; an allow-listed example IP passes; the marker list + allow-list are documented; runs in CI on every PR.
+- [ ] T29.3 Scrub existing leaks from public docs/code: replace the ~48 internal-specific references in `docs/` (devlog, pool-model-tiering, drive-kazi-pooled-task, lore, concept) + README with generic terms ("a local model", "a deploy target", "an internal host") WITHOUT losing the honest engineering finding; keep history accurate. Re-run T29.2 to confirm zero hits.  Owner: TBD  Est: 2h  verifies: [UC-044]  deps: [T29.2]  acc: the no-leak guard (T29.2) reports zero hits across the repo; the engineering findings (e.g. "a local 35B was too slow") survive in genericized form; no internal IP/host/codename/personal-path remains.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -592,6 +607,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E27-2 (surfaces):** T27.5 (skill/AGENTS/MCP), T27.6 (README/site/docs), T27.7 (deprecation note) in parallel after T27.4.
 - **Wave E27-3 (prove):** T27.8 (live verify new verbs + aliases) after T27.1-T27.3.
 - **Wave E28 (doc-sync, autonomous -- start now):** T28.1 (concept scheduler), T28.2 (concept waves + agent/router) in PARALLEL now (no deps) -> T28.3 (README how-it-works + ADRs, after T27.6 for verb consistency) -> T28.4 (accuracy + coherence gate).
+- **Wave E29 (OSS gates, autonomous):** T29.1 (docs-with-code CI guard), T29.2 (no-leak CI guard) in PARALLEL -> T29.3 (scrub existing leaks, after T29.2). Independent of feature epics; safe to land early.
 
 ## Risk Register
 
@@ -661,6 +677,22 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (ADR-0034 + E29: OSS contribution gates; CLAUDE.md + apply-skill enforcement)
+- **Created ADR-0034** (OSS contribution gates): (1) docs land with the code in the
+  same change; (2) no internal-info leakage in the public repo. Motivated by the
+  ~10-ADR doc lag (E28) and ~48 internal-leak hits found in `docs/`+README.
+- **Enforced at three layers:** added both rules to the local `CLAUDE.md` (this repo)
+  AND the operator's global `CLAUDE.md`; added a docs-land check + a no-leak diff scan
+  to the `/apply` skill's verification gate (global skill).
+- **Added E29** (P1, ADR-0034, UC-044): T29.1 docs-with-code CI guard, T29.2
+  no-internal-leak CI guard (IPs/hosts/codenames/personal paths, with an allow-list),
+  T29.3 one-time scrub of the existing leaks (keep the honest finding, drop the
+  specifics). Wave E29 (autonomous; safe early). UC-044.
+- **Also filed** ultraworkers/claw-code#3262 (request structured/JSON output so kazi's
+  `claw` profile can parse cost/result) -- enables a future fully-conformant `claw`.
+- No trim (concurrent /apply --pool edits). Authored in an isolated git worktree
+  (lore L-0014). ADR: `docs/adr/0034-oss-contribution-gates-docs-with-code-no-leak.md`.
 
 ### 2026-06-24 -- Change Summary (ADR-0033: cheaper via in-family Claude tiering, no local model)
 - **Created ADR-0033.** Operator insight: the "cheaper" story assumed a LOCAL model
