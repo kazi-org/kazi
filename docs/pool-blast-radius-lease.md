@@ -41,8 +41,12 @@ task (selection -> PR -> merge); the blast-radius lease is held only across the
 edit and is released the moment the run reaches a terminal state.
 
 > The deeper deadlock-safety contract of this boundary (global acquire order,
-> multi-key ordering, TTL/release ordering across the whole pool) is T20.7, a
-> separate task. T20.6 is just the lease.
+> TTL liveness, release ordering across BOTH locks) is T20.7. It is documented in
+> `docs/pool-claim-lease-deadlock-safety.md` and pinned in code by
+> `Kazi.Pool.Compose` (`lib/kazi/pool/compose.ex`): claim FIRST, then lease;
+> release lease BEFORE claim; the lease TTL bounds a crashed holder -- a
+> consistent global lock order plus TTL liveness, so two sessions each holding a
+> claim + a lease cannot deadlock. T20.6 (this recipe) is just the inner lease.
 
 ## Usage from a pool session
 
