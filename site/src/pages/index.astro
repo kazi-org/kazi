@@ -121,7 +121,7 @@ const personas = [
           class="ui-chip inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
         >
           <span class="kazi-text font-semibold">Open source</span>
-          <span class="ui-muted">Apache-2.0 &middot; v{VERSION}</span>
+          <span class="ui-muted">Apache-2.0 &middot; v<span id="kazi-version">{VERSION}</span></span>
         </a>
         <h1
           id="hero-heading"
@@ -352,5 +352,43 @@ kazi approve &lt;proposal-ref&gt;</code></pre>
         /* clipboard unavailable; no-op */
       }
     });
+
+    // Dynamic version: the build-time value (from .release-please-manifest.json) is
+    // the fallback; on load we fetch the latest GitHub release so the badge is never
+    // stale between deploys -- no site rebuild needed on a version bump. Cached in
+    // localStorage (1h TTL) to stay well under the unauthenticated API rate limit;
+    // any failure silently keeps the baked-in fallback.
+    (async () => {
+      const el = document.getElementById("kazi-version");
+      if (!el) return;
+      const KEY = "kazi-latest-version";
+      const TTL = 3600000;
+      try {
+        const c = JSON.parse(localStorage.getItem(KEY) || "null");
+        if (c && c.v && Date.now() - c.t < TTL) {
+          el.textContent = c.v;
+          return;
+        }
+      } catch {
+        /* ignore cache read errors */
+      }
+      try {
+        const r = await fetch(
+          "https://api.github.com/repos/kazi-org/kazi/releases/latest",
+        );
+        if (!r.ok) return;
+        const data = await r.json();
+        const v = (data.tag_name ?? "").replace(/^v/, "");
+        if (!v) return;
+        el.textContent = v;
+        try {
+          localStorage.setItem(KEY, JSON.stringify({ v, t: Date.now() }));
+        } catch {
+          /* ignore cache write errors */
+        }
+      } catch {
+        /* offline / rate-limited: keep the build-time fallback */
+      }
+    })();
   </script>
 </Layout>
