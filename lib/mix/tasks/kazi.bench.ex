@@ -17,10 +17,10 @@ defmodule Mix.Tasks.Kazi.Bench do
     * **A — vanilla** `claude -p` (no kazi): one freeform `claude -p
       --output-format json` session over the fixture. The amortized baseline.
     * **B — kazi WITHOUT the prefix** (`orientation_prefix: false`, the pre-T19.1
-      behaviour): `mix kazi.run` drives `claude`, but the dispatch prompt is the
+      behaviour): `mix kazi.apply` drives `claude`, but the dispatch prompt is the
       evidence-only body — no orientation pack prefix.
     * **C — kazi WITH the prefix** (`orientation_prefix: true`, the current
-      default; T19.1 stable head + T19.2 stable-prefix discipline): `mix kazi.run`
+      default; T19.1 stable head + T19.2 stable-prefix discipline): `mix kazi.apply`
       drives `claude` with the ranked orientation pack as a cacheable prefix.
 
   Arm B vs arm C isolates the prefix's cost; both vs arm A isolate kazi's

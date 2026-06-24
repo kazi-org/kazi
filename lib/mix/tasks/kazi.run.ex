@@ -1,46 +1,26 @@
 defmodule Mix.Tasks.Kazi.Run do
-  @shortdoc "Drive a goal-file to convergence (kazi run <goal-file> --workspace <path>)"
+  @shortdoc "Deprecated alias of `mix kazi.apply` (drive a goal-file to convergence)"
 
   @moduledoc """
-  The `mix` entry point for kazi (T0.10, UC-004):
+  DEPRECATED ALIAS of `mix kazi.apply` (T27.2, ADR-0032).
 
-      mix kazi.run <goal-file> --workspace <path>
+      mix kazi.run <goal-file> --workspace <path>   # use `mix kazi.apply` instead
 
-  This is the *persistent* default delivery for `kazi run`. Unlike the escript
-  (`mix escript.build` → `./kazi`), this task boots the full `:kazi` OTP
-  application — including the native SQLite (exqlite) NIF that an escript archive
-  cannot bundle — so the read-model is created, migrated, and every iteration is
-  persisted on the default path (acceptance T0.10 §3). The escript is preferred
-  for ergonomics and exercises the same `Kazi.CLI` core, but degrades to
-  non-persistent because NIFs cannot live inside an escript; use this task when
-  persistence matters.
-
-  Both entries share `Kazi.CLI` — argv parsing, goal loading, the run, and the
-  outcome report all live there. This task only ensures the app is started and
-  forwards `argv`, then exits the VM with the CLI's computed exit code (`0`
-  converged, non-zero otherwise).
+  The CLI verbs were renamed `run` → `apply` (ADR-0032). This task is kept as a
+  back-compat alias through the deprecation window: it prints a one-line hint to
+  stderr and delegates to `Mix.Tasks.Kazi.Apply`, which owns the real entrypoint
+  (boot the app, forward argv to `Kazi.CLI`, halt with the computed exit code).
+  Prefer `mix kazi.apply`; this alias is scheduled for removal in a later minor.
   """
 
   use Mix.Task
 
   @impl Mix.Task
   def run(argv) do
-    # Boot the app so Kazi.Repo (and the exqlite NIF) are up before the CLI runs;
-    # the read-model then persists on the default path.
-    Mix.Task.run("app.start")
-
-    # The task name *is* the `run` command (`mix kazi.run <goal-file> …`), so the
-    # remaining argv has no `run` token — prepend it so the shared `Kazi.CLI`
-    # parser sees the same shape as the escript's `kazi run <goal-file> …`.
-    argv
-    |> prepend_run()
-    |> Kazi.CLI.run()
-    |> System.halt()
+    # T27.2 (ADR-0032): one-line deprecation hint to STDERR (never stdout), then
+    # delegate to the canonical `mix kazi.apply` task. The CLI's own stdout (incl.
+    # the --json contract) is untouched.
+    IO.puts(:stderr, "note: `mix kazi.run` is deprecated; use `mix kazi.apply`")
+    Mix.Tasks.Kazi.Apply.run(argv)
   end
-
-  # `--help` must still reach the parser as a bare flag (not `run --help`), so the
-  # help command resolves rather than a "run requires a goal-file" error.
-  defp prepend_run(["--help" | _] = argv), do: argv
-  defp prepend_run(["-h" | _] = argv), do: argv
-  defp prepend_run(argv), do: ["run" | argv]
 end

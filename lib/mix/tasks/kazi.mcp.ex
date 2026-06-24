@@ -13,14 +13,14 @@ defmodule Mix.Tasks.Kazi.Mcp do
   corresponding kazi function and returns its JSON result. No shelling out, no
   stdout parsing.
 
-  Like `mix kazi.run`, this task boots the full `:kazi` OTP application first —
+  Like `mix kazi.apply`, this task boots the full `:kazi` OTP application first —
   including the native SQLite (exqlite) NIF an escript cannot bundle — so the
   read-model is up and `status`/`list-proposed` read real persisted state. The
   protocol logic lives in the pure `Kazi.MCP.Server.handle_request/2`; this task
   only starts the app and pumps the stdio loop (`Kazi.MCP.Server.serve/1`).
 
   A thin `kazi mcp` CLI subcommand can be added later as a tiny follow-up; this
-  Mix task is the persistent entrypoint, mirroring `Mix.Tasks.Kazi.Run`.
+  Mix task is the persistent entrypoint, mirroring `Mix.Tasks.Kazi.Apply`.
 
   ## Configure an MCP client
 
