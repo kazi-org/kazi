@@ -28,7 +28,7 @@ one internal product... an audience of one") and deferred a GENERAL importer to
 standard formats "as its own ADR" (UC-025). A same-session draft of ADR-0020 then
 re-introduced exactly that bespoke importer (`kazi init --from-capabilities`) --
 this ADR corrects that and is the deferred general decision, plus the dead-code
-half ADR-0015 did not consider. (Observed: sirerun's own `capabilities.json` IS an
+half ADR-0015 did not consider. (Observed: an external service's own `capabilities.json` IS an
 I-vs-A diff -- 249 documented UCs, 68 undocumented-discovered, 178 with-drift --
 which is the artifact kazi should COMPUTE, not ingest. See `docs/devlog.md`
 2026-06-23.)

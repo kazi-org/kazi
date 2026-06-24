@@ -10,10 +10,11 @@ Accepted
 
 A `Kazi.Goal` holds a FLAT list of `Kazi.Predicate`s. That is fine for a small
 goal, but a goal that represents a whole product's desired state has hundreds of
-predicates with no way to organize them. The motivating exercise (the sirerun
-dogfood, `docs/devlog.md` 2026-06-23) drove this: sire's `capabilities.json` is
-317 capabilities across 9 pillars, each capability carrying machine-checkable
-evidence. To answer "where is sire -- what is intended, built, pending" you need
+predicates with no way to organize them. The motivating exercise (the
+external-service dogfood, `docs/devlog.md` 2026-06-23) drove this: that service's
+`capabilities.json` is 317 capabilities across 9 pillars, each capability carrying
+machine-checkable evidence. To answer "where is the service -- what is intended,
+built, pending" you need
 the predicates organized as **pillar -> domain -> capability**, and you need to
 push that hierarchy to a visualization tool (Obsidian) showing each node's state.
 
@@ -109,7 +110,7 @@ time -- so text drift cannot silently fragment the tree.
   the existing partitioning; no new goal-lifecycle machinery.
 - **Code-level evidence predicates are weak on their own.** The dogfood verified
   evidence EXISTENCE, not behavior; the manifest's 178 `with_drift` rows need LIVE
-  predicates (`http_probe`/`browser` against a running sire) to adjudicate. The
+  predicates (`http_probe`/`browser` against a running service) to adjudicate. The
   grouping is what makes that scale legible; the live predicates are the deeper
   follow-on (future work, needs a running instance + test credentials).
 - **A small loader/evaluator surface to touch.** The loader gains taxonomy

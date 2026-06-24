@@ -84,7 +84,7 @@ with a regression test; full suite green (1353 passed), `mix format` +
   was CLEAN: zero `failed to persist`, zero `has already been taken`, zero `:map`
   cast errors, no raise. The exact symptoms from the benchmark are gone.
 
-## 2026-06-24 — E13 reconciliation dogfood (T13.6): kazi's own A \ I, importer demo, sire-is-Go reality check
+## 2026-06-24 — E13 reconciliation dogfood (T13.6): kazi's own A \ I, importer demo, external-service-is-Go reality check
 
 Ran the E13 intended-vs-actual pipeline (ADR-0021) end to end as a USAGE
 exercise — no lib changes, the E13 modules are done. Two parts ran for real, one
@@ -173,33 +173,33 @@ into a `%Kazi.Goal{mode: :create}` with 6 predicates + 3 declared groups. The
 deterministic spec->intent backbone of ADR-0021 §1 works as specified: a machine
 spec becomes a grouped intended set with no bespoke deserialiser.
 
-### 3. Honest limitation: the original "dogfood sirerun" target is GO, not Elixir
+### 3. Honest limitation: the original "dogfood an external service" target is GO, not Elixir
 
-Plan T13.6 said "dogfood sirerun via the general path". Reality check: sire's API
-is a **Go** codebase (`/Users/dndungu/Code/sirerun/api`, `internal/openapi`,
+Plan T13.6 said "dogfood an external service via the general path". Reality
+check: that service's API is a **Go** codebase (`<repo>/api`, `internal/openapi`,
 zero `.ex` files), and `Kazi.Reconcile.SurfaceScanner` is **Elixir-only** (it
 parses `.ex`/`.exs` with `Code.string_to_quoted/2`). It therefore CANNOT scan
-sire's Go surface — so the scanner+coverage half of T13.6 was dogfooded on kazi
+that service's Go surface — so the scanner+coverage half of T13.6 was dogfooded on kazi
 itself (part 1) instead, which is a legitimate Elixir target and a real result.
 
-Concrete follow-ups to actually reconcile sire:
+Concrete follow-ups to actually reconcile such a service:
 
 - **(a) A Go surface scanner** — a sibling provider that inventories Go exported
   identifiers / HTTP route registrations, emitting the same `SurfaceElement`s the
-  coverage meta-predicate already consumes. This is the unblock for `A \ I` on
-  sire.
-- **(b) Consume sire's published OpenAPI spec.** Sire DOES publish one:
-  `/Users/dndungu/Code/sirerun/docs/openapi.yaml` (~3.2k lines, OpenAPI 3.0.3,
-  title "Sire API"). The importer accepts it in principle — BUT it is **YAML**,
-  and `OpenApiImporter` is **JSON-only** (YAML deferred behind its own dep ADR,
-  per the module's own docs). So the path is: `yq -o=json docs/openapi.yaml | ...`
-  out-of-band, then `import_map/2`. This yields sire's intended `I` (HTTP probes
-  grouped by tag) even without a Go scanner.
-- **(c) Prose importer over sire's ADRs** (`Kazi.Reconcile.ProseImporter`,
-  T13.3) — sire has a large `docs/adr/` tree; the harness-drafted, human-reviewed
-  path can capture intent that lives only in prose.
+  coverage meta-predicate already consumes. This is the unblock for `A \ I` on a
+  Go service.
+- **(b) Consume the service's published OpenAPI spec.** When a service publishes
+  one (`<repo>/docs/openapi.yaml`, e.g. ~3.2k lines, OpenAPI 3.0.3), the importer
+  accepts it in principle — BUT if it is **YAML**, and `OpenApiImporter` is
+  **JSON-only** (YAML deferred behind its own dep ADR, per the module's own docs).
+  So the path is: `yq -o=json docs/openapi.yaml | ...` out-of-band, then
+  `import_map/2`. This yields the service's intended `I` (HTTP probes grouped by
+  tag) even without a Go scanner.
+- **(c) Prose importer over the service's ADRs** (`Kazi.Reconcile.ProseImporter`,
+  T13.3) — a service with a large `docs/adr/` tree lets the harness-drafted,
+  human-reviewed path capture intent that lives only in prose.
 
-The **live-predicate escalation** (probing a RUNNING sire to assert the imported
+The **live-predicate escalation** (probing a RUNNING service to assert the imported
 `http_probe`s actually pass) remains **deferred** — it needs a running instance +
 test credentials, out of scope here.
 
@@ -209,11 +209,11 @@ The E13 pipeline runs end to end and produces a real, valuable result on an
 Elixir target (kazi: `A \ I = 288` against a representative goal, with the
 matcher's approximation honestly visible in 2 spurious "owned" hits). The
 importer's deterministic spec->intent path works (6 grouped predicates from the
-petstore fixture). The "dogfood sirerun" goal as literally written is blocked on
-language: sire is Go, the scanner is Elixir — so it needs a Go scanner, a
-YAML->JSON front-end to ingest sire's existing OpenAPI spec, or the prose path,
-none of which were built here. Reported as not-yet-done for sire specifically;
-done and verified for the Elixir half.
+petstore fixture). The "dogfood an external service" goal as literally written is
+blocked on language: that service is Go, the scanner is Elixir — so it needs a Go
+scanner, a YAML->JSON front-end to ingest the service's existing OpenAPI spec, or
+the prose path, none of which were built here. Reported as not-yet-done for the Go
+service specifically; done and verified for the Elixir half.
 
 ## 2026-06-24 — token benchmark (T15.9): kazi adds ~0% overhead vs vanilla Claude
 
@@ -383,12 +383,13 @@ Decision recorded in ADR-0022 (conformance contract + onboarding recipe + tiered
 support); built as E14. The Antigravity non-TTY landmine should also go to
 docs/lore.md when T14.3 lands.
 
-## 2026-06-23 — sirerun dogfood: capability-manifest adjudication (motivates E12)
+## 2026-06-23 — external-service dogfood: capability-manifest adjudication (motivates E12)
 
-Dogfooded kazi's reconciliation thesis against sire's `docs/capabilities.json`
-(`sire-capability-manifest/v1`): 317 capabilities across 9 pillars, each carrying
-machine-checkable evidence (`file:line`). One-off code-level adjudication (no
-running sire) -- does each capability's CLAIMED evidence still exist?
+Dogfooded kazi's reconciliation thesis against an external service's
+`docs/capabilities.json` (a `<service>-capability-manifest/v1`): 317 capabilities
+across 9 pillars, each carrying machine-checkable evidence (`file:line`). One-off
+code-level adjudication (no running service) -- does each capability's CLAIMED
+evidence still exist?
 
 - **Claimed (manifest):** WIRED 205, BACKEND_ONLY 55, FLAG_GATED 48, REMOVED 6,
   PLANNED 1.
@@ -397,17 +398,18 @@ running sire) -- does each capability's CLAIMED evidence still exist?
 - **Real production-readiness gaps are not "is the code there" (it mostly is)** but
   48 FLAG_GATED (not GA), 55 BACKEND_ONLY (no UI), and the manifest's own 178
   `with_drift` -- contract/behavior drift a file-existence check CANNOT see.
-- Specific finds: **UC-242** evidence points at a transient `.claude/worktrees/...`
-  path (never merged to main, or manifest built against a worktree); **UC-220**
-  `referral.go` gone; **5 duplicate capability rows** (UC-095/096/178/209/210).
+- Specific finds: one capability's evidence pointed at a transient
+  `.claude/worktrees/...` path (never merged to main, or manifest built against a
+  worktree); one capability's referenced source file was gone; several duplicate
+  capability rows.
 
 Lessons baked into ADR-0020 / E12: (1) the natural hierarchy is pillar -> domain ->
 capability and the manifest already declares pillars as a closed list -> grouping
 must reference a DECLARED taxonomy by id, not free text; (2) per-pillar budgets fall
 out of per-group budgets + existing partitioning (no sub-goals needed); (3) the
 honest next step to answer "production ready" is LIVE predicates against a running
-sire (needs an instance + test creds) -- code-existence != "it works". Output: an
-Obsidian vault at `sirerun/tmp/sire-state-vault/` (gitignored scratch).
+service (needs an instance + test creds) -- code-existence != "it works". Output: an
+Obsidian vault at `<repo>/tmp/state-vault/` (gitignored scratch).
 
 ## 2026-06-23 — E11 interactive `propose`: clarify phase verified live (T11.9)
 
