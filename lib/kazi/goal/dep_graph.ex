@@ -217,6 +217,69 @@ defmodule Kazi.Goal.DepGraph do
     %{ready: ready_set(goal, states), blocked: blocked(goal, states)}
   end
 
+  @doc """
+  Computes the TRANSITIVE DEPENDENTS of a group — every group that reaches `id`
+  by following `needs` edges, in the goal's DECLARED order (excluding `id`
+  itself).
+
+  This is the re-gating half of ADR-0028 §Decision 4 ("objective, adaptive
+  re-gating"): when a previously-`:converged` dep REGRESSES (its convergence
+  becomes false again — the loop's regression guard fires, like standing mode),
+  the scheduler must RE-GATE the dependents that became ready/converged ON that
+  dep. They return to NOT-READY and re-converge. The set of groups to re-gate is
+  exactly `id`'s transitive dependents — pure to compute, so the scheduler stays
+  a re-evaluate-against-observed-state loop with no hidden ordering.
+
+  The `needs` graph is a validated DAG (T23.1); a `visited` set still guards the
+  walk so it is total regardless.
+
+  ## Examples
+
+      iex> a = Kazi.Goal.Group.new("a", "A")
+      iex> b = Kazi.Goal.Group.new("b", "B", needs: ["a"])
+      iex> c = Kazi.Goal.Group.new("c", "C", needs: ["b"])
+      iex> goal = Kazi.Goal.new("g", groups: [a, b, c])
+      iex> Kazi.Goal.DepGraph.dependents_of(goal, "a")
+      ["b", "c"]
+      iex> Kazi.Goal.DepGraph.dependents_of(goal, "c")
+      []
+  """
+  @spec dependents_of(Goal.t(), Group.id()) :: [Group.id()]
+  def dependents_of(%Goal{groups: groups}, id) when is_binary(id) do
+    # Reverse adjacency: dep_id → [groups that directly `needs` it].
+    direct_dependents =
+      Enum.reduce(groups, %{}, fn %Group{id: gid, needs: needs}, acc ->
+        Enum.reduce(needs, acc, fn dep, inner ->
+          Map.update(inner, dep, [gid], &[gid | &1])
+        end)
+      end)
+
+    reachable = collect_dependents([id], direct_dependents, MapSet.new([id]), MapSet.new())
+
+    # Return in DECLARED order so re-gating is deterministic, excluding `id`.
+    for %Group{id: gid} <- groups, MapSet.member?(reachable, gid), do: gid
+  end
+
+  # Breadth-first closure over the reverse-`needs` adjacency: every group that
+  # transitively depends on a seed id. `visited` guards the walk; `acc` collects
+  # the dependents found (the seeds themselves are excluded from `acc`).
+  defp collect_dependents([], _direct, _visited, acc), do: acc
+
+  defp collect_dependents([id | rest], direct, visited, acc) do
+    dependents = Map.get(direct, id, [])
+
+    {visited, acc, queue} =
+      Enum.reduce(dependents, {visited, acc, rest}, fn dep, {v, a, q} ->
+        if MapSet.member?(v, dep) do
+          {v, a, q}
+        else
+          {MapSet.put(v, dep), MapSet.put(a, dep), [dep | q]}
+        end
+      end)
+
+    collect_dependents(queue, direct, visited, acc)
+  end
+
   # --- internals ---
 
   # The NEAREST blocking group on `id`'s `needs` ANCESTRY (its transitive
