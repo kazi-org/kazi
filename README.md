@@ -35,16 +35,16 @@ watches actual state, and it keeps closing the gap until the two match.
 
 ```mermaid
 flowchart TD
-    U(["You: #quot;build a URL-shortener web service and ship it live in production#quot;"]) --> K
-    
+    U(["You: 'build a URL-shortener web service and ship it live in production'"]) --> K
+
     subgraph kazi [kazi reconcile loop]
-        O[Observe<br/>What's failing?] --> D[Dispatch<br/>an agent to fix it]
-        D --> C{Every check passes?}
+        O["Observe<br/>What's failing?"] --> D["Dispatch<br/>an agent to fix it"]
+        D --> C{"Every check passes?"}
         C -- No --> O
-        C -- Yes --> I[Integrate<br/>PR / Merge]
-        I --> Dep[Deploy & Verify Live]
+        C -- Yes --> I["Integrate<br/>PR / Merge"]
+        I --> Dep["Deploy and Verify Live"]
     end
-    
+
     style U fill:#1e293b,stroke:#cbd5e1,color:#f8fafc
     style kazi fill:#0f172a,stroke:#334155,color:#f8fafc
     style O fill:#334155,stroke:#475569,color:#f8fafc
