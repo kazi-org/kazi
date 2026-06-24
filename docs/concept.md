@@ -172,9 +172,11 @@ deterministic controller, not a checklist an LLM may skip.
 
 ## 7. Coordination model (ADR-0006)
 
-- **Resource leases.** An agent leases its blast radius before editing. Leases
-  live in NATS JetStream KV with revision-based CAS (atomic) and per-key TTL (a
-  crashed agent's lease auto-expires — no manual prune).
+- **Resource leases.** An agent leases its blast radius before editing, with
+  revision-based CAS (atomic) and per-key TTL (a crashed agent's lease
+  auto-expires -- no manual prune). On a single machine the lease is in-memory and
+  NATS-free; multi-machine backs it with NATS JetStream KV. The lease behaviour is
+  the same either way; only the substrate changes (ADR-0027).
 - **Graph-aware partitioning.** A task's blast radius is computed from
   `code-review-graph` (already deployed across the user's repos). kazi hands
   parallel agents *non-overlapping* blast radii by construction → conflict-free
@@ -187,13 +189,59 @@ deterministic controller, not a checklist an LLM may skip.
 
 ---
 
-## 8. Architecture & data layers (ADR-0003, ADR-0004, ADR-0005)
+## 8. Native parallel scheduler (ADR-0027)
 
-**Runtime:** Elixir / OTP. One supervised process per active goal
-(`GenStateMachine`), supervisors per dispatched agent with restart/escalation
-strategies, watchers for leases and predicates. Phoenix LiveView for the live
-console. The domain *is* "a supervised population of fallible concurrent
-processes," which is the BEAM's purpose.
+Coordination (section 7) is the substrate -- leases and graph-aware blast-radius
+partitioning. The scheduler is what consumes that substrate to run many goals at
+once, and it lives INSIDE kazi. kazi does not assume an external launcher spawns
+the N goals; kazi owns the parallelization itself (ADR-0027).
+
+Given a goal-set, `kazi apply` parallelizes by reconciling, not by forking a
+swarm:
+
+```
+partition  -> split the goal-set by blast radius (the code-review-graph /
+              repo-map) into DISJOINT partitions -- conflict-free parallelism by
+              construction, not reactive collision detection. A single goal, or
+              no graph, degenerates to one partition (serial, today's behaviour).
+lease      -> take a PartitionLease for the life of each partition's run. Residual
+              overlap (a partition's edits expand its radius) serializes on the
+              lease.
+spawn      -> start one supervised reconciler per partition under a
+              DynamicSupervisor. Each reconciler is the SAME per-goal serial
+              convergence loop (section 6) -- parallelism is ACROSS partitions,
+              the inner loop is unchanged.
+converge   -> a coordinator process tracks every partition's terminal state and
+              reports COLLECTIVE status: all converged | any stuck | over budget.
+merge      -> each fixer works in its own git worktree; integration is itself a
+              reconcile sub-step (merge convergence). Disjoint blast radii make
+              conflicts rare; a residual conflict re-dispatches the affected
+              partition.
+```
+
+Single-node parallelism is **NATS-free**: an in-memory lease
+(`Kazi.Coordination.Lease.Memory`) plus the `DynamicSupervisor` coordinate N
+reconcilers in one BEAM. JetStream (ADR-0004) is reserved for the multi-machine
+case and is selected by config, not required to parallelize on one machine.
+
+Parallelism is OPT-IN scale (`kazi apply --parallel [N]`, or automatic from a
+multi-partition goal-set); single-goal stays the simple serial on-ramp. This is
+the outer-loop role (ADR-0001) taken to its conclusion: kazi still drives
+harnesses and is not one -- it now orchestrates several harness dispatches under
+supervision, each converging an objective partition. It is not a "swarm of fake
+agents" (section 10): every concurrent unit is a real supervised reconciler over
+a leased blast radius.
+
+---
+
+## 9. Architecture & data layers (ADR-0003, ADR-0004, ADR-0005)
+
+**Runtime:** Elixir / OTP. Each active goal/partition is a supervised reconciler
+(`GenStateMachine`); a coordinator supervises the population of reconcilers (the
+native scheduler, section 8), with supervisors per dispatched agent under
+restart/escalation strategies and watchers for leases and predicates. Phoenix
+LiveView for the live console. The domain *is* "a supervised population of
+fallible concurrent processes," which is the BEAM's purpose.
 
 **Four stores, each authoritative for exactly one thing — so none ever has to
 grow into another's role:**
@@ -221,7 +269,7 @@ requirement that drove ADR-0004/0005).
 
 ---
 
-## 9. Human interface — off the context window
+## 10. Human interface — off the context window
 
 The human sets *direction*, not keystrokes. The human's interface is the
 orchestrating agent (Claude): they say "build X with kazi" and the agent drives
@@ -232,7 +280,7 @@ agent stays focused on implementation. The LiveView dashboard is for inspection
 
 ---
 
-## 10. What kazi is NOT
+## 11. What kazi is NOT
 
 - Not a coding agent, terminal, or IDE. It drives them.
 - Not a "swarm" of fake agents. Concurrency is real OS processes under leases.
@@ -242,7 +290,7 @@ agent stays focused on implementation. The LiveView dashboard is for inspection
 
 ---
 
-## 11. Build order (a vertical slice of the final design, not a different one)
+## 12. Build order (a vertical slice of the final design, not a different one)
 
 Each milestone uses the *final* substrates at n=1; nothing is throwaway. The
 walking skeleton spans idea → production from Slice 0: every lifecycle phase gets
