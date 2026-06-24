@@ -63,7 +63,8 @@ defmodule Kazi.CLI do
   USAGE:
       kazi run <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
       kazi init <repo-dir> [--out <file>] [--enrich]
-      kazi propose "<idea>" [--workspace <path>] [--yes] [--strict] [--adr]
+      kazi propose "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
+      kazi propose --json [--predicates <json>]   # caller-drafts (predicates supplied)
       kazi list-proposed [--status <proposed|approved|rejected>]
       kazi approve <proposal-ref>
       kazi reject <proposal-ref>
@@ -106,6 +107,13 @@ defmodule Kazi.CLI do
                              it.
       --adr                  `propose` only: additionally write an ADR-lite
                              rationale doc under docs/adr/ for the drafted goal.
+      --predicates <json>    `propose` only (caller-drafts, ADR-0023): a proposal
+                             payload — {"name","predicates":[...],"rationale"} —
+                             the CALLER already authored. kazi spawns NO model:
+                             it applies the deterministic clarify floor (flags a
+                             missing live-verification target + scope), persists,
+                             and gates approval. Alternatively supply it on stdin
+                             under --json. The orchestrator's drive mode.
       --json                 Emit a single JSON object to stdout instead of human
                              prose (the machine surface, ADR-0023). Implies
                              NON-INTERACTIVE: kazi never prompts/blocks on stdin
@@ -269,6 +277,12 @@ defmodule Kazi.CLI do
           yes: :boolean,
           strict: :boolean,
           adr: :boolean,
+          # T15.2 (ADR-0023 decision 4): caller-drafts. --predicates carries a
+          # proposal payload (JSON object/array the caller already authored)
+          # inline, an alternative to supplying it on stdin. When present (or
+          # when stdin under --json carries one), kazi does NOT spawn a model to
+          # draft — it applies the floor + the gate over the supplied predicates.
+          predicates: :string,
           # T15.1 (ADR-0023): --json switches a command to its machine surface —
           # a single JSON object on stdout instead of human prose. Human output
           # stays the DEFAULT; --json is opt-in and additive. Under --json kazi is
@@ -336,23 +350,29 @@ defmodule Kazi.CLI do
   # T3.5c authoring: `propose "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
   # carried through (where the harness drafts the goal).
+  # T15.2 (ADR-0023 decision 4): in caller-drafts mode the predicates are supplied
+  # (--predicates / stdin) so the positional idea is OPTIONAL — `kazi propose
+  # --json` with predicates and no idea is the orchestrator's entry point.
   defp parse_command(["propose", idea | rest], flags) do
     case rest do
-      [] ->
-        {:propose, idea,
-         workspace: flags[:workspace],
-         yes: flags[:yes] || false,
-         strict: flags[:strict] || false,
-         adr: flags[:adr] || false,
-         json: flags[:json] || false}
-
-      extra ->
-        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+      [] -> {:propose, idea, propose_opts(flags)}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
 
-  defp parse_command(["propose"], _flags),
-    do: {:error, "the `propose` command requires an <idea> argument (quote it)"}
+  # No positional idea: only valid in caller-drafts mode, where the predicates are
+  # supplied (--predicates inline, or on stdin under --json). The idea defaults to
+  # "" — `execute_propose` then requires the supplied predicates and refuses an
+  # empty caller-drafts proposal cleanly. Without a caller-drafts signal
+  # (--predicates / --json) a bare `propose` is still the original "missing idea"
+  # usage error, so the existing human surface is unchanged.
+  defp parse_command(["propose"], flags) do
+    if flags[:predicates] || flags[:json] do
+      {:propose, "", propose_opts(flags)}
+    else
+      {:error, "the `propose` command requires an <idea> argument (quote it)"}
+    end
+  end
 
   # T3.5c authoring: `list-proposed` lists the proposal queue, optionally filtered
   # by --status (proposed / approved / rejected).
@@ -389,6 +409,19 @@ defmodule Kazi.CLI do
 
   defp approval_command(_command, _proposal_ref, extra),
     do: {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+
+  # The shared option bundle for the `propose` subcommand (both modes). T15.2:
+  # `:predicates` carries the caller-drafts payload; `:json` switches the surface.
+  defp propose_opts(flags) do
+    [
+      workspace: flags[:workspace],
+      yes: flags[:yes] || false,
+      strict: flags[:strict] || false,
+      adr: flags[:adr] || false,
+      json: flags[:json] || false,
+      predicates: flags[:predicates]
+    ]
+  end
 
   # =============================================================================
   # JSON render seam (T15.1, ADR-0023 decision 1)
@@ -647,43 +680,115 @@ defmodule Kazi.CLI do
   # before the draft. `--yes`/no-TTY drafts best-effort; `--strict` refuses an
   # underspecified idea non-interactively; `--adr` also writes an ADR-lite doc.
   # Tests inject `:ask`/`:review` via `inject_opts` instead of touching stdin.
+  #
+  # T15.2 (ADR-0023 decision 4): propose has TWO drive modes, both over this one
+  # `Kazi.Authoring` write path. caller-drafts — predicates supplied
+  # (--predicates / stdin under --json) — skips the harness entirely; kazi only
+  # applies the deterministic floor + the gate. kazi-drafts — the existing path —
+  # spawns the harness to draft. Either mode emits a single JSON object under
+  # --json; human prose otherwise.
   defp execute_propose(idea, opts, inject_opts) do
     with_read_model(fn ->
-      base =
-        inject_opts
-        |> Keyword.take([:harness, :adapter_opts])
-        |> Keyword.put(:workspace, opts[:workspace] || ".")
-
-      ask = propose_ask(opts, inject_opts)
-
-      cond do
-        # T15.1 (ADR-0023): under --json kazi is NON-INTERACTIVE. propose's clarify
-        # phase WOULD prompt for an underspecified idea (gaps, no injected ask, not
-        # --yes); rather than block on stdin we error LOUDLY as a JSON object on
-        # stdout and return non-zero. The orchestrator either supplies --yes
-        # (best-effort) or sharpens the idea — it never hangs.
-        json_block?(idea, ask, opts) ->
-          emit_json_error(
-            "propose requires interactive clarification under --json (idea is " <>
-              "underspecified, missing: #{strict_missing(idea)}); pass --yes to draft " <>
-              "best-effort or add the missing detail to the idea"
-          )
-
-          1
-
-        strict_block?(idea, ask, opts) ->
-          IO.puts(
-            :stderr,
-            "error: idea is underspecified (missing: #{strict_missing(idea)}); " <>
-              "answer the clarify questions interactively or add detail to the idea"
-          )
-
-          1
-
-        true ->
-          do_propose(idea, maybe_ask(base, ask), opts, inject_opts)
+      case caller_proposal(opts, inject_opts) do
+        {:ok, payload} -> caller_drafts(idea, payload, opts, inject_opts)
+        :none -> kazi_drafts(idea, opts, inject_opts)
+        {:error, message} -> propose_input_error(message, opts)
       end
     end)
+  end
+
+  # The kazi-drafts path (the existing one): drive the harness to draft predicates
+  # from the prose idea, after the interactive/floor gating.
+  defp kazi_drafts(idea, opts, inject_opts) do
+    base =
+      inject_opts
+      |> Keyword.take([:harness, :adapter_opts])
+      |> Keyword.put(:workspace, opts[:workspace] || ".")
+
+    ask = propose_ask(opts, inject_opts)
+
+    cond do
+      # T15.1 (ADR-0023): under --json kazi is NON-INTERACTIVE. propose's clarify
+      # phase WOULD prompt for an underspecified idea (gaps, no injected ask, not
+      # --yes); rather than block on stdin we error LOUDLY as a JSON object on
+      # stdout and return non-zero. The orchestrator either supplies --yes
+      # (best-effort), supplies predicates (caller-drafts), or sharpens the idea —
+      # it never hangs.
+      json_block?(idea, ask, opts) ->
+        emit_json_error(
+          "propose requires interactive clarification under --json (idea is " <>
+            "underspecified, missing: #{strict_missing(idea)}); pass --yes to draft " <>
+            "best-effort, supply predicates (--predicates / stdin), or add the " <>
+            "missing detail to the idea"
+        )
+
+        1
+
+      strict_block?(idea, ask, opts) ->
+        IO.puts(
+          :stderr,
+          "error: idea is underspecified (missing: #{strict_missing(idea)}); " <>
+            "answer the clarify questions interactively or add detail to the idea"
+        )
+
+        1
+
+      true ->
+        do_propose(idea, maybe_ask(base, ask), opts, inject_opts)
+    end
+  end
+
+  # The caller-drafts path (T15.2): the caller already authored the predicates, so
+  # kazi spawns NO inner harness/model — it routes the supplied proposal through
+  # the SAME `Kazi.Authoring.propose/2` write path via the `:proposal` opt, then
+  # surfaces the deterministic floor (`Clarify.gaps/2`) over the parsed draft so a
+  # missing live-verification target + scope is flagged, never silently accepted.
+  defp caller_drafts(idea, payload, opts, inject_opts) do
+    case normalize_caller_payload(payload) do
+      {:ok, proposal} ->
+        propose_opts =
+          inject_opts
+          |> Keyword.take([:harness, :adapter_opts])
+          |> Keyword.put(:workspace, opts[:workspace] || ".")
+          |> Keyword.put(:proposal, proposal)
+
+        case Authoring.propose(caller_idea(idea), propose_opts) do
+          {:ok, draft} ->
+            report_drafted(draft, opts)
+            maybe_write_adr(draft, opts, inject_opts)
+            0
+
+          {:error, reason} ->
+            propose_error(reason, opts)
+        end
+
+      {:error, message} ->
+        propose_input_error(message, opts)
+    end
+  end
+
+  # Normalize a caller-supplied payload into the proposal map `Kazi.Authoring`
+  # parses. Two shapes are accepted: the full proposal object
+  # ({"name","predicates":[...],"rationale"}) — passed through — or a BARE JSON
+  # array of predicate entries, wrapped as {"predicates": [...]} for the caller's
+  # convenience. Anything else (a scalar, malformed JSON) is a clear input error.
+  defp normalize_caller_payload(payload) do
+    case Jason.decode(payload) do
+      {:ok, %{} = map} -> {:ok, map}
+      {:ok, list} when is_list(list) -> {:ok, %{"predicates" => list}}
+      {:ok, _other} -> {:error, "supplied predicates must be a JSON object or array"}
+      {:error, _} -> {:error, "supplied predicates are not valid JSON"}
+    end
+  end
+
+  # A caller-drafts idea may be omitted (the predicates carry the intent). A blank
+  # idea would trip `Authoring`'s `:empty_idea` guard / derive an empty goal id, so
+  # default it to a stable placeholder when the caller supplied predicates only.
+  defp caller_idea(idea) do
+    case String.trim(idea) do
+      "" -> "caller-supplied predicates"
+      trimmed -> trimmed
+    end
   end
 
   # T15.1 (ADR-0023): the NON-INTERACTIVE guarantee for `propose` under `--json`.
@@ -699,13 +804,101 @@ defmodule Kazi.CLI do
     case Authoring.propose(idea, propose_opts) do
       {:ok, draft} ->
         draft = maybe_refine(draft, propose_opts, opts, inject_opts)
-        report_proposed(draft)
+        report_drafted(draft, opts)
         maybe_write_adr(draft, opts, inject_opts)
         0
 
       {:error, reason} ->
-        IO.puts(:stderr, "error: could not propose goal: #{format_authoring_error(reason)}")
-        1
+        propose_error(reason, opts)
+    end
+  end
+
+  # Render a successful draft: a single JSON object under --json (the machine
+  # surface, ADR-0023 decision 2), the existing human report otherwise. BOTH modes
+  # share the same `Kazi.Authoring` draft, so the clarify floor and the proposal
+  # are identical; only the OUTPUT shape differs.
+  defp report_drafted(draft, opts) do
+    emit(json?(opts), proposed_json(draft), fn -> report_proposed(draft) end)
+  end
+
+  # A draft-level error: a JSON error envelope on stdout under --json (so the
+  # orchestrator parses one surface and branches on the non-zero exit), the
+  # existing human stderr line otherwise.
+  defp propose_error(reason, opts) do
+    message = format_authoring_error(reason)
+
+    if json?(opts) do
+      emit_json_error("could not propose goal: #{message}")
+    else
+      IO.puts(:stderr, "error: could not propose goal: #{message}")
+    end
+
+    1
+  end
+
+  # An input error before drafting (bad/missing predicates, empty propose): same
+  # split — JSON envelope under --json, human stderr otherwise.
+  defp propose_input_error(message, opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  # =============================================================================
+  # caller-drafts input (T15.2, ADR-0023 decision 4)
+  # =============================================================================
+  #
+  # The caller supplies the proposal payload — the `{"name","predicates",
+  # "rationale"}` object an inner model would otherwise draft — so kazi spawns no
+  # model. Resolution order, all NON-BLOCKING:
+  #
+  #   1. `--predicates <json>` (an inline string), then
+  #   2. stdin, but only under `--json` and only when stdin is PIPED (not a TTY),
+  #      so kazi never blocks waiting for a human to type (the ADR-0023
+  #      non-interactive guarantee). Tests inject stdin via `inject_opts[:stdin]`.
+  #
+  # Returns `{:ok, payload}` (a string the authoring layer decodes), `:none` (no
+  # caller payload — kazi-drafts), or `{:error, message}` (a payload was supplied
+  # but is blank).
+  @spec caller_proposal(keyword(), keyword()) ::
+          {:ok, String.t()} | :none | {:error, String.t()}
+  defp caller_proposal(opts, inject_opts) do
+    cond do
+      is_binary(opts[:predicates]) -> non_blank_payload(opts[:predicates])
+      (raw = read_stdin_payload(opts, inject_opts)) != nil -> non_blank_payload(raw)
+      true -> :none
+    end
+  end
+
+  defp non_blank_payload(raw) do
+    case String.trim(raw) do
+      "" -> {:error, "no predicates supplied (the --predicates / stdin payload was blank)"}
+      trimmed -> {:ok, trimmed}
+    end
+  end
+
+  # Read a caller payload from stdin, NON-BLOCKING. An injected `:stdin` (tests)
+  # wins; otherwise read real stdin only under --json and only when it is PIPED —
+  # a TTY would block, which --json forbids, so a TTY yields nil (→ kazi-drafts).
+  defp read_stdin_payload(opts, inject_opts) do
+    cond do
+      Keyword.has_key?(inject_opts, :stdin) -> inject_opts[:stdin]
+      opts[:json] and not interactive?(inject_opts) -> read_all_stdin()
+      true -> nil
+    end
+  end
+
+  # Drain stdin to EOF. On a piped/empty stdin this returns the content (or "")
+  # immediately; it is only reached when stdin is NOT a TTY, so it cannot block.
+  defp read_all_stdin do
+    case IO.read(:stdio, :eof) do
+      :eof -> nil
+      {:error, _} -> nil
+      data when is_binary(data) -> data
     end
   end
 
@@ -902,6 +1095,60 @@ defmodule Kazi.CLI do
     IO.puts(format_proposed_predicates(draft.goal))
     report_rationale(draft.goal)
     IO.puts("\nReview, then: kazi approve #{draft.proposal_ref}")
+  end
+
+  # =============================================================================
+  # propose --json result schema (T15.2, ADR-0023 decision 2)
+  # =============================================================================
+  #
+  # The single JSON object `propose --json` emits: the draft a caller approves on.
+  # It carries the goal id, the proposal_ref (the approve/reject handle), the
+  # acceptance predicates, the optional rationale, and the deterministic clarify
+  # FLOOR (`Clarify.gaps/2`) computed OVER the draft — so a missing
+  # live-verification target + scope is FLAGGED even when nothing was asked
+  # interactively. The floor applies in BOTH drive modes (kazi-drafts and
+  # caller-drafts) because both produce the same `Kazi.Authoring.Draft` here.
+  defp proposed_json(draft) do
+    %{
+      schema_version: 1,
+      goal_id: to_string(draft.goal.id),
+      proposal_ref: draft.proposal_ref,
+      status: to_string(draft.status),
+      idea: draft.idea,
+      predicates: Enum.map(Goal.all_predicates(draft.goal), &predicate_json/1),
+      rationale: rationale_text(draft.goal),
+      clarify: clarify_json(draft)
+    }
+  end
+
+  defp predicate_json(predicate) do
+    %{
+      id: to_string(predicate.id),
+      provider: to_string(predicate.kind),
+      description: predicate.description,
+      acceptance: predicate.acceptance?,
+      guard: predicate.guard?,
+      config: predicate.config
+    }
+  end
+
+  # The deterministic floor over the DRAFT: a question survives only when the gap
+  # it guards is still open (e.g. no live-verification predicate present), so an
+  # orchestrator sees exactly what is missing. Each question carries its id, prompt,
+  # and recommended answer — enough to re-propose with the gap closed.
+  defp clarify_json(draft) do
+    draft.idea
+    |> Clarify.gaps(draft: draft.goal)
+    |> Enum.map(fn %Question{} = q ->
+      %{id: q.id, prompt: q.prompt, recommended: q.recommended}
+    end)
+  end
+
+  defp rationale_text(%Goal{metadata: metadata}) do
+    case Map.get(metadata, "rationale") do
+      text when is_binary(text) and text != "" -> text
+      _ -> nil
+    end
   end
 
   # T11.5 (ADR-0019): surface the inline rationale ("why these predicates / what is
