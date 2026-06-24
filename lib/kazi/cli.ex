@@ -52,6 +52,7 @@ defmodule Kazi.CLI do
   alias Kazi.Authoring.Clarify
   alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
+  alias Kazi.Export.Obsidian
   alias Kazi.ReadModel.ProposedGoal
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -97,6 +98,7 @@ defmodule Kazi.CLI do
     strict: :boolean,
     adr: :boolean,
     predicates: :string,
+    obsidian: :string,
     json: :boolean,
     stream: :boolean,
     help: :boolean,
@@ -131,6 +133,8 @@ defmodule Kazi.CLI do
       "`propose` only: also write an ADR-lite rationale doc under docs/adr/ for the drafted goal.",
     predicates:
       "`propose` only (caller-drafts): a proposal payload the caller already authored; kazi spawns no model.",
+    obsidian:
+      "`export` only: the target directory for the Obsidian vault (group/predicate notes + Mermaid).",
     json:
       "Emit a single JSON object to stdout instead of human prose (the machine surface; NON-INTERACTIVE).",
     stream: "`run --json` only: emit a JSONL progress stream, one event per loop iteration.",
@@ -186,6 +190,13 @@ defmodule Kazi.CLI do
       flags: [:json]
     },
     %{
+      name: "export",
+      summary:
+        "Export a goal's group tree + verdicts to an Obsidian vault (notes + Mermaid rollup).",
+      args: [%{name: "goal-file", required: true}],
+      flags: [:obsidian, :json]
+    },
+    %{
       name: "help",
       summary: "Show usage. With --json, emit the command/flag surface as a single JSON object.",
       args: [],
@@ -219,6 +230,7 @@ defmodule Kazi.CLI do
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
+      kazi export <goal-file> --obsidian <dir> [--json]   # write an Obsidian vault
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # the versioned --json result schema(s)
 
@@ -279,6 +291,12 @@ defmodule Kazi.CLI do
                              JSON event per loop iteration on stdout, terminated by
                              the final run-result object — so an orchestrator
                              monitors a long convergence without blocking (T15.4).
+      --obsidian <dir>       `export` only: write an Obsidian vault to <dir> — one
+                             note per group and per predicate, [[wikilinked]]
+                             parent↔child, tagged with the verdict (intended/
+                             built/pending), plus an OVERVIEW note carrying the
+                             per-group rollups and a Mermaid diagram (T12.6,
+                             ADR-0020).
       --harness <id>         Coding harness to drive (T8.7, ADR-0016): `claude`
                              (default) or `opencode`. Overrides the goal-file's
                              [harness] table and the app config.
@@ -300,6 +318,7 @@ defmodule Kazi.CLI do
       kazi propose "a /healthz endpoint that returns 200"
       kazi list-proposed --status proposed
       kazi approve prop-a-healthz-endpoint-3f9c1a2b4d5e
+      kazi export priv/examples/grouped_taxonomy.toml --obsidian ./vault
   """
 
   @doc """
@@ -380,6 +399,9 @@ defmodule Kazi.CLI do
       {:reject, proposal_ref, opts} ->
         execute_reject(proposal_ref, opts)
 
+      {:export, goal_file, opts} ->
+        execute_export(goal_file, opts)
+
       {:error, message} ->
         IO.puts(:stderr, "error: #{message}\n")
         IO.puts(:stderr, @usage)
@@ -403,6 +425,7 @@ defmodule Kazi.CLI do
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
           | {:reject, String.t(), keyword()}
+          | {:export, Path.t(), keyword()}
           | {:error, String.t()}
 
   @doc """
@@ -598,10 +621,24 @@ defmodule Kazi.CLI do
   defp parse_command(["reject"], _flags),
     do: {:error, "the `reject` command requires a <proposal-ref> argument"}
 
+  # T12.6 (ADR-0020 decision 5): `export <goal-file> --obsidian <dir>` loads the
+  # goal-file, walks its group tree + predicate verdicts, and writes an Obsidian
+  # vault to <dir>. --obsidian names the target directory (required); --json
+  # switches to a machine-readable summary of what was written.
+  defp parse_command(["export", goal_file | rest], flags) do
+    case rest do
+      [] -> {:export, goal_file, obsidian: flags[:obsidian], json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_command(["export"], _flags),
+    do: {:error, "the `export` command requires a <goal-file> argument"}
+
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `propose`, `list-proposed`, `approve`, `reject`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `propose`, `list-proposed`, `approve`, `reject`, `export`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `run <goal-file> --workspace <path>`)"}
@@ -1142,6 +1179,105 @@ defmodule Kazi.CLI do
         IO.puts(:stderr, "error: could not write #{out}: #{:file.format_error(reason)}")
         1
     end
+  end
+
+  # =============================================================================
+  # export command (T12.6, ADR-0020 decision 5): an Obsidian vault of the group tree
+  # =============================================================================
+  #
+  # `kazi export <goal-file> --obsidian <dir>` loads the goal-file, walks its
+  # declared group taxonomy + predicate verdicts (`Kazi.Goal.GroupTree`), and
+  # writes an Obsidian VAULT to <dir>: one note per group and per predicate,
+  # `[[wikilinked]]` parent↔child and tagged by verdict, an OVERVIEW note carrying
+  # the per-group rollups, and a Mermaid rollup diagram. The vault content is
+  # rendered PURELY by `Kazi.Export.Obsidian.render/2`; only the directory write is
+  # I/O. Without a live run a goal's predicates are all pending, so the export
+  # reflects the static structure. --json switches to a machine-readable summary of
+  # what was written (the same `emit/3` seam as the other commands).
+
+  defp execute_export(goal_file, opts) do
+    case Goal.Loader.load(goal_file) do
+      {:ok, goal} ->
+        export_goal(goal, opts)
+
+      {:error, reason} ->
+        export_load_error(goal_file, reason, opts)
+    end
+  end
+
+  defp export_goal(%Goal{} = goal, opts) do
+    case opts[:obsidian] do
+      dir when is_binary(dir) and dir != "" ->
+        write_obsidian_vault(goal, dir, opts)
+
+      _ ->
+        export_input_error(
+          "the `export` command requires --obsidian <dir> (the vault output directory)",
+          opts
+        )
+    end
+  end
+
+  # Render + write the vault. Without a live run no verdicts are supplied, so the
+  # vault reflects the static structure (every predicate pending) — exactly the
+  # "intended, nothing built yet" reading (ADR-0020 §Decision 5).
+  defp write_obsidian_vault(%Goal{} = goal, dir, opts) do
+    case Obsidian.write(goal, dir) do
+      {:ok, %{dir: written_dir, notes: notes}} ->
+        emit(json?(opts), export_json(goal, written_dir, notes), fn ->
+          report_export(goal, written_dir, notes)
+        end)
+
+        0
+
+      {:error, reason} ->
+        export_input_error(
+          "could not write the Obsidian vault to #{dir}: #{:file.format_error(reason)}",
+          opts
+        )
+    end
+  end
+
+  defp report_export(%Goal{} = goal, dir, notes) do
+    IO.puts("EXPORTED   goal=#{goal.id} vault=#{dir}")
+    IO.puts("notes:     #{length(notes)}")
+    IO.puts("groups:    #{length(goal.groups)}")
+    IO.puts("\nOpen #{dir} as an Obsidian vault to browse the group tree.")
+  end
+
+  # The `export --json` summary: what was written, so an orchestrator confirms the
+  # vault and finds its notes. Carries the goal id, the vault directory, the note
+  # paths, and the group/predicate/note counts, plus `schema_version`.
+  defp export_json(%Goal{} = goal, dir, notes) do
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(goal.id),
+      format: "obsidian",
+      vault: dir,
+      notes: notes,
+      counts: %{
+        notes: length(notes),
+        groups: length(goal.groups),
+        predicates: length(Goal.all_predicates(goal))
+      }
+    }
+  end
+
+  defp export_load_error(goal_file, reason, opts) do
+    export_input_error("could not load goal-file #{goal_file}: #{reason}", opts)
+  end
+
+  # An export error on the requested surface: a JSON error envelope on stdout under
+  # --json (so an orchestrator parses one surface and branches on the non-zero
+  # exit), the existing human stderr line otherwise. Exit non-zero either way.
+  defp export_input_error(message, opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
   end
 
   # =============================================================================
