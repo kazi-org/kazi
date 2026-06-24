@@ -113,3 +113,66 @@ profile -- it will pass a TTY smoke run by hand and then silently no-op under ka
 The `:antigravity_live` smoke is the catch if a future release regresses the
 workaround (a dropped stdout -> no `:result` -> no convergence, reported honestly);
 Antigravity may need version pinning. (T14.3, 2026-06-23.)
+
+## Context / token efficiency
+
+### L-0008 #context #prompt #orientation #landmine -- T4.3 orientation-prefix is built but UNWIRED on the live loop
+The live dispatch path `Kazi.Loop.dispatch_prompt/2` (`lib/kazi/loop.ex:1208`) builds
+its OWN lean prompt -- working-set digest + `inspect(evidence)` + optional retrieval
+-- and does NOT call `Kazi.Harness.Prompt.build_prompt/3`. So the ranked orientation
+pack reaches the agent ONLY as the `.kazi/context.md` workspace file (which the agent
+must READ: tool calls + tokens, no prompt-cache discount), never as a stable prompt
+PREFIX. Do not assume "T4.3 done" (it has unit tests on `build_prompt/3`) means the
+live prompt carries the pack -- it does not. E19/T19.1 wires it. (Verified 2026-06-24
+by reading `dispatch_prompt/2`.)
+
+### L-0009 #context #cache #harness #invariant -- kazi drives a SUBPROCESS, so it cannot set Anthropic cache_control
+kazi shells out to `claude -p` (and opencode/codex) as a subprocess; it makes NO raw
+Anthropic API calls. Therefore kazi cannot attach `cache_control` to the prompt --
+the inner CLI manages its own caching. The ONLY prompt-cache lever kazi has is making
+its injected prefix BYTE-STABLE across iterations so the inner harness's own cache
+(5-min TTL) hits across kazi's separate stateless dispatches. Any claim that "kazi
+enables prompt caching" must mean prefix stability, not headers (ADR-0010 frames it
+this way). (2026-06-24.)
+
+## Read-model / persistence
+
+### L-0010 #readmodel #persistence #predicate #landmine -- errored-predicate evidence (tuples) crashes iteration persistence
+`Kazi.ReadModel.serialize_vector/1` (`read_model.ex:550`) stores a PredicateResult's
+`evidence` VERBATIM under the Ecto `:map` field. An `:error` result's evidence holds
+non-JSON terms -- e.g. `reason: {:cmd_unrunnable, "..."}` (a tuple) and atom keys --
+which fail the `:map` cast, so `record_iteration/1` RAISES and the iteration is never
+recorded (the on_iteration callback log fills with the raise). Evidence must be
+deep-sanitized to JSON-safe before insert. E18/T18.2 fixes it. (Observed in the token
+benchmark, 2026-06-24.)
+
+### L-0011 #readmodel #persistence #loop #landmine -- terminal/budget-stop re-persists the same iteration_index
+The loop's per-iteration callback AND the terminal/budget-stop callback both persist
+the SAME `(goal_ref, iteration_index)`, so the second insert hits the unique index
+`iterations_goal_ref_iteration_index_index` ("has already been taken") and is logged
+as a failure. Terminal persistence must be idempotent (skip-if-recorded or an
+`on_conflict` upsert). E18/T18.3 fixes it. (2026-06-24.)
+
+## Goal-file / providers
+
+### L-0012 #provider #test_runner #goalfile #landmine -- `cmd` is ONE executable, NOT a command line
+A `test_runner` predicate's `cmd` is passed straight to `System.cmd/3` as the
+executable; `args` is the (separate) argument list. `cmd = "go test ./..."` is parsed
+as a single binary named "go test ./..." -> `{:cmd_unrunnable, :enoent}` and the
+predicate ERRORS (not fails). Use `cmd = "go"`, `args = ["test", "./..."]`. The
+shipped `priv/examples/deploy_target.toml` had the wrong single-string form; E18/T18.1
+fixes it + adds a runnability guard over all shipped examples. (README quickstart 2
+already uses the correct split form.) (2026-06-24.)
+
+## Benchmarking
+
+### L-0013 #benchmark #tokens #harness #method -- measure kazi tokens with a harness shim, in a REAL git repo
+kazi captures per-dispatch tokens internally (claude `--output-format json` -> result
+map) but PERSISTS/PRINTS no total, so the measurement seam is a SHIM: a wrapper named
+`claude`/`opencode` on PATH that tees the JSON envelope to a log, then sum
+input/output/cache tokens across `===CALL===` markers. Run each arm in a REAL git repo
+with workspace permissions granted (`.claude/settings.local.json` accept-edits +
+`Bash`; `opencode.json` edit/bash allow) -- NOT a `/tmp` scratch dir (opencode
+auto-rejects edits in external/scratch dirs, T8.11). macOS has no `timeout`; background
+the run and poll. Single-dispatch result (2026-06-24): kazi adds ~0% tokens vs vanilla
+claude; the multi-dispatch case is the open question (E19/T19.4). (2026-06-24.)
