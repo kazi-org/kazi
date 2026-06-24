@@ -104,6 +104,10 @@ Open work:
   drives kazi -- via research-grounded content: paradigm-led copy, a loop-transcript
   hero, without/with proof, an agent-voiced testimonial, a memorable invocation, and
   a dogfood "done" leaderboard, ADR-0030) -- E25.
+- **UC-040** (the operator's `loop -> plan -> apply -> tidy -> qualify` workflow
+  collapses onto a kazi skill router: `kazi plan` authors a goal-set and `kazi apply`
+  converges it -- subsuming loop+apply+qualify for code goals -- with `/plan`
+  re-seated as the intent layer and `/tidy` kept as hygiene, ADR-0031) -- E26.
 
 ## Checkable Work Breakdown
 
@@ -458,6 +462,25 @@ features -- agent-driving (skill/mcp/`--json`) is REAL now; promised work labell
 - [ ] T25.9 Launch kit + OG card (HN-first): an OG/Twitter card showing the agent paradigm (wire into `site/src/layouts/Layout.astro`); a Show HN title (`kazi - drive your coding agent in a loop until the goal is objectively true`) + post draft + an X thread, framed against "agents claim done but aren't"; honest, no unshipped command as working.  Owner: TBD  Est: 1.5h  verifies: [UC-039, UC-035]  delivers: [an OG card + a Show HN/X launch kit draft]  deps: [T25.3, T25.7]  acc: a link-preview check renders the card; the launch kit leads with the agent paradigm + a reproducible hook; Lighthouse SEO stays >= 90; ready for the operator to post.
 - [ ] T25.10 Accuracy gate + live publish: every command across README/docs/site verified against `kazi help --json`; README<->site coherence (T9.9) + skill/`AGENTS.md` coherence (T16.4) green; version current; no dead links; deploy + verify live at https://kazi.sire.run and README renders on GitHub. Record the publish honestly.  Owner: TBD  Est: 1.5h  verifies: [UC-039, infrastructure]  deps: [T25.3, T25.4, T25.7, T25.8, T25.9]  acc: zero unshipped-command references; coherence green; live site shows the agent paradigm; README renders on GitHub; any skipped item flagged, not hidden.
 
+### E26 -- The kazi skill becomes a router: plan/apply/status/adopt (P1, ADR-0031)
+
+Make kazi's day-to-day UX beat the operator's hand-assembled `loop -> plan -> apply
+-> tidy -> qualify` pipeline by collapsing it onto the kazi skill. The five-skill
+loop IS a reconcile loop; kazi now performs it natively (E21 scheduler + E23 waves +
+objective predicates + standing mode). Restructure the GLOBAL `kazi` skill
+(`~/.claude/skills/kazi/`) into a router whose sub-skill verbs match the operator's
+vocabulary (plan/apply) and drive the real CLI commands underneath (propose/run);
+`kazi apply` subsumes loop+apply+qualify for code goals; `/plan` is re-seated as the
+intent layer that emits a goal-set; `/tidy` stays. Skill changes only -- no kazi CLI
+rename (`kazi run` stays). Per the global-skills rule, enhance the skill in place.
+
+- [ ] T26.1 Router SKILL.md + dispatch: rewrite `~/.claude/skills/kazi/SKILL.md` (the one `kazi install-skill` writes) as a router that recognizes `plan`/`apply`/`status`/`adopt` and routes to the matching CLI. Document the skill-verb -> CLI-verb map (plan->`propose`, apply->`run`, status->`status`, adopt->`init`) and that `kazi run` is NOT renamed.  Owner: TBD  Est: 1.5h  verifies: [UC-040, UC-034]  delivers: [a router SKILL.md with the 4 sub-skills + verb map]  deps: []  acc: the skill recognizes the 4 sub-skill verbs and routes each to the correct real CLI command; references only commands `kazi help --json` reports; a non-kazi repo degrades cleanly ("use /plan + /apply").
+- [ ] T26.2 `kazi plan` sub-skill: author/refine a goal-set (predicates + `[[groups]]` + `needs` edges) via `kazi propose --json` caller-drafts (ADR-0023). When a `/plan` strategy doc exists, derive predicates from its `acc:` lines (the E20 T20.1 bridge); else draft from the idea. Holds for human approval.  Owner: TBD  Est: 1.5h  verifies: [UC-040, UC-033]  delivers: [a `kazi plan` sub-skill that emits a reviewable goal-set]  deps: [T26.1]  acc: `kazi plan "<idea>"` produces a parseable proposal via caller-drafts (no second model spawned), floor applied; documented to feed from a `/plan` doc when present; nothing runs pre-approval.
+- [ ] T26.3 `kazi apply` sub-skill (subsumes loop+apply+qualify): drive `kazi run [--parallel] [--standing] --json` to converge the goal-set via the native scheduler; parse the collective result; branch on `next_action`. Document that this replaces `/loop /apply --pool` + the qualify pass for code goals (objective predicates = the launch gate).  Owner: TBD  Est: 1.5h  verifies: [UC-040, UC-037]  delivers: [a `kazi apply` sub-skill that converges + objectively gates]  deps: [T26.1]  acc: `kazi apply` runs `kazi run` to a terminal verdict on the current release; the skill names the loop/apply/qualify subsumption + the `--explain` read-only gate; only real flags.
+- [ ] T26.4 `kazi status`/`watch` + `kazi adopt` sub-skills: `status` reports convergence from the read-model / opens the dashboard; `adopt` wraps `kazi init` to reverse-engineer a starter goal-set. Both reference only real commands.  Owner: TBD  Est: 1h  verifies: [UC-040]  delivers: [`status` and `adopt` sub-skills]  deps: [T26.1]  acc: `kazi status <ref>` returns persisted state (or the dashboard URL); `kazi adopt <repo>` produces a starter goal-set via `kazi init`; coherence-checked.
+- [ ] T26.5 Coherence + retire loop/qualify from the code on-ramp: extend the skill<->CLI coherence guard (T16.4) to the router's sub-skills; the kazi on-ramp (README/AGENTS.md/skill) no longer routes code goals to `loop`/`qualify` (kept as general skills for non-code). `/plan` + `/tidy` references re-seated per ADR-0031.  Owner: TBD  Est: 1h  verifies: [UC-040, infrastructure]  deps: [T26.2, T26.3, T26.4]  acc: the coherence test covers every sub-skill verb -> real command; the code on-ramp shows plan/apply/status/adopt, not loop/qualify; `/plan` is shown as the intent layer, `/tidy` as hygiene.
+- [ ] T26.6 LIVE dogfood + subsumption gate: in a real Claude Code session, drive a fixture goal end-to-end through the router (`kazi plan` -> approve -> `kazi apply`) with NO `/loop`,`/apply`,`/qualify`; record evidence in `docs/devlog.md`. Assert the "`kazi apply` replaces `/apply --pool`" claim ONLY after the E21/E23 dogfoods (T21.12/T23.9) pass; otherwise mark it "coming" (ADR-0031 decision 6).  Owner: TBD  Est: 2h  verifies: [UC-040]  deps: [T26.5, T21.12, T23.9]  acc: observed evidence that the router drives a goal to objective done with no legacy skills; the subsumption claim is gated on the dogfoods; honest result.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -498,6 +521,8 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E25-1 (assets, parallel -- can start now):** T25.1 (tagline/noun), T25.2 (hero transcript), T25.5 (agent-voiced testimonial), T25.6 (invocation phrase), T25.7 (dogfood "done" leaderboard) are independent and run in parallel.
 - **Wave E25-2 (surfaces):** T25.3 (README) -> T25.4 (website) ; T25.8 (docs quickstart) alongside.
 - **Wave E25-3 (launch):** T25.9 (OG + Show HN/X kit) -> T25.10 (accuracy gate + live publish). Supersedes the messaging of the open E17 + E22 README/site tasks (execute those per ADR-0030 here).
+- **Wave E26-1 (router):** T26.1 (router SKILL.md + dispatch) -> T26.2 (`kazi plan`), T26.3 (`kazi apply`), T26.4 (`status`/`adopt`) in parallel -> T26.5 (coherence + retire loop/qualify from the code on-ramp).
+- **Wave E26-2 (prove):** T26.6 (live router dogfood; subsumption claim gated on T21.12/T23.9).
 
 ## Risk Register
 
@@ -536,6 +561,9 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E25-3 | E25 duplicates/contradicts the open E17 + E22 README/site tasks. | Med | Med | E25 is the CANONICAL content epic and SUPERSEDES the messaging of T17.1/2/4/5 + E22's README/site tasks (execute per ADR-0030); the wave note + this row record it so a pool session does not run both. |
 | R-E25-4 | The hero transcript (T25.2) needs a real recordable end-to-end run; if unavailable, a mockup could mislead. | Low | Med | A static fallback is allowed ONLY if HONESTLY labelled as a mockup (ADR-0030); never presented as a recorded run; replace with a real asciinema cast once a clean run exists (the E18 re-verify shows clean runs are now achievable). |
 | R-E25-5 | Distribution rides the Claude Code / MCP host; a host change breaks the install/invocation story. | Med | Low | Keep multi-harness (Codex/opencode) in the on-ramp (the Cline lesson); the invocation phrase (T25.6) is documented + coherence-checked (T16.4); instrument downloads/retention, not stars. |
+| R-E26-1 | The router claims `kazi apply` replaces `/apply --pool` before the native scheduler is proven at scale (E21/E23 dogfoods open). | High | Med | ADR-0031 decision 6 + T26.6: the subsumption claim is GATED on T21.12/T23.9 passing; until then the on-ramp marks it "coming" and keeps `/apply --pool` as the documented interop fallback (ADR-0026). |
+| R-E26-2 | Skill-verb vs CLI-verb mismatch (apply->run, plan->propose) confuses users or drifts from the CLI. | Med | Med | The verb map is documented in the router SKILL.md (T26.1); the skill<->CLI coherence guard (T16.4/T26.5) asserts every sub-skill routes to a real `kazi help --json` command; `kazi run` is not renamed. |
+| R-E26-3 | Retiring loop/qualify from the code on-ramp loses capability for non-code or edge cases. | Low | Med | They are retired only from the CODE on-ramp; both remain general skills for non-code work; `/plan` (intent) + `/tidy` (hygiene) are explicitly kept (ADR-0031). |
 
 ## Operating Procedure
 
@@ -561,6 +589,29 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E26: kazi skill becomes a router, P1 + ADR-0031)
+- **Created ADR-0031** (kazi skill as a router; `kazi apply` subsumes loop+apply+
+  qualify for code goals). Brainstorm with the operator: their `loop -> plan ->
+  apply -> tidy -> qualify` pipeline IS a reconcile loop, which kazi now performs
+  natively (E21 scheduler + E23 waves + objective predicates + standing mode).
+- **Added E26** (P1, ADR-0031, UC-040): restructure the GLOBAL `kazi` skill into a
+  router with sub-skills `plan`/`apply`/`status`/`adopt` whose verbs match the
+  operator's vocabulary and drive the real CLI commands (propose/run/status/init).
+  T26.1 router SKILL.md + verb map, T26.2 `kazi plan` (caller-drafts; feeds from a
+  `/plan` doc when present), T26.3 `kazi apply` (CLI `kazi run`; subsumes loop+apply+
+  qualify), T26.4 `status`/`adopt`, T26.5 coherence + retire loop/qualify from the
+  code on-ramp, T26.6 live router dogfood. Waves E26-1..2; risks R-E26-1..3.
+- **Operator naming decision (2026-06-24):** the execute sub-skill is `apply` (not
+  `run`) for continuity with their `/apply`; it drives the `kazi run` CLI underneath
+  (skill verb != CLI verb, like plan->propose). `kazi run` CLI is NOT renamed.
+- **Decisions:** retire `loop`/`qualify` from the CODE on-ramp (fold into `kazi
+  apply`); re-seat `/plan` as the intent-authoring layer that EMITS a goal-set (not
+  folded); keep `/tidy` as hygiene; scope = code goals only (non-code keeps the
+  general skills). Subsumption messaging GATED on the E21/E23 dogfoods (T21.12/T23.9).
+- **UC-040** added. ADR created: `docs/adr/0031-kazi-skill-router-subsumes-loop-apply-qualify.md`
+  (+ README index). No trim (concurrent /apply --pool edits; plan trimmed 2026-06-23).
+  Authored in an isolated git worktree (shared-tree reset hazard, lore L-0014).
 
 ### 2026-06-24 -- Change Summary (E25: content-marketing refocus on the agent-drives-kazi paradigm, P1 + ADR-0030)
 - **Deep research** (two sourced passes, ~15 fast-growing OSS AI tools + the
