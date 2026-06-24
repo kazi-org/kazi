@@ -53,6 +53,7 @@ defmodule Kazi.CLI do
   alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
   alias Kazi.Export.Obsidian
+  alias Kazi.Goal.GroupLint
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.Teach.InstallSkill
 
@@ -208,6 +209,13 @@ defmodule Kazi.CLI do
       flags: [:obsidian, :json]
     },
     %{
+      name: "lint",
+      summary:
+        "Advisory: warn on near-duplicate group NAMES in a goal-file (exit 0 even with warnings).",
+      args: [%{name: "goal-file", required: true}],
+      flags: [:json]
+    },
+    %{
       name: "help",
       summary: "Show usage. With --json, emit the command/flag surface as a single JSON object.",
       args: [],
@@ -243,6 +251,7 @@ defmodule Kazi.CLI do
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
       kazi export <goal-file> --obsidian <dir> [--json]   # write an Obsidian vault
+      kazi lint <goal-file> [--json]              # advisory near-duplicate group-name warnings
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # the versioned --json result schema(s)
 
@@ -336,6 +345,7 @@ defmodule Kazi.CLI do
       kazi list-proposed --status proposed
       kazi approve prop-a-healthz-endpoint-3f9c1a2b4d5e
       kazi export priv/examples/grouped_taxonomy.toml --obsidian ./vault
+      kazi lint priv/examples/grouped_taxonomy.toml
   """
 
   @doc """
@@ -422,6 +432,9 @@ defmodule Kazi.CLI do
       {:export, goal_file, opts} ->
         execute_export(goal_file, opts)
 
+      {:lint, goal_file, opts} ->
+        execute_lint(goal_file, opts)
+
       {:error, message} ->
         IO.puts(:stderr, "error: #{message}\n")
         IO.puts(:stderr, @usage)
@@ -447,6 +460,7 @@ defmodule Kazi.CLI do
           | {:approve, String.t(), keyword()}
           | {:reject, String.t(), keyword()}
           | {:export, Path.t(), keyword()}
+          | {:lint, Path.t(), keyword()}
           | {:error, String.t()}
 
   @doc """
@@ -668,10 +682,24 @@ defmodule Kazi.CLI do
   defp parse_command(["export"], _flags),
     do: {:error, "the `export` command requires a <goal-file> argument"}
 
+  # T12.7 (ADR-0020 decision 3, the second net): `lint <goal-file>` loads the
+  # goal-file and fuzzy-warns on near-duplicate group NAMES. ADVISORY — it never
+  # fails (exit 0 even with warnings); --json switches to a machine-readable list
+  # of warnings.
+  defp parse_command(["lint", goal_file | rest], flags) do
+    case rest do
+      [] -> {:lint, goal_file, json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_command(["lint"], _flags),
+    do: {:error, "the `lint` command requires a <goal-file> argument"}
+
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `install-skill`, `propose`, `list-proposed`, `approve`, `reject`, `export`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `install-skill`, `propose`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `run <goal-file> --workspace <path>`)"}
@@ -1348,6 +1376,98 @@ defmodule Kazi.CLI do
   # --json (so an orchestrator parses one surface and branches on the non-zero
   # exit), the existing human stderr line otherwise. Exit non-zero either way.
   defp export_input_error(message, opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  # =============================================================================
+  # lint command (T12.7, ADR-0020 decision 3): the advisory SECOND net
+  # =============================================================================
+  #
+  # `kazi lint <goal-file>` loads the goal-file and fuzzy-compares its declared
+  # group NAMES (`Kazi.Goal.GroupLint`), warning on near-duplicates — "Identity &
+  # Access" vs "Identity and Access" — that the loader's id-uniqueness guard (the
+  # FIRST net) cannot catch because the ids differ. It is ADVISORY: it exits 0 even
+  # WITH warnings, because a name near-duplicate is a smell to review, not a load
+  # error. Only a genuine load FAILURE (a missing/malformed goal-file) is a
+  # non-zero exit. --json emits a machine-readable list of warnings (the same
+  # `emit/3` seam as the other commands); human prose otherwise.
+
+  defp execute_lint(goal_file, opts) do
+    case Goal.Loader.load(goal_file) do
+      {:ok, goal} ->
+        report_lint(goal, GroupLint.warnings(goal), opts)
+        # ADVISORY: exit 0 whether or not warnings were emitted — the second net
+        # never fails a goal that loads (ADR-0020 §Decision 3).
+        0
+
+      {:error, reason} ->
+        # A genuine load failure (not a lint finding) is a real error: a JSON
+        # envelope under --json, a human stderr line otherwise. Exit non-zero.
+        lint_load_error(goal_file, reason, opts)
+    end
+  end
+
+  # Render the lint result on the requested surface: under --json a single object
+  # carrying the warning LIST (empty when clean); the human report otherwise. BOTH
+  # share the same `GroupLint.warnings/1`; only the OUTPUT shape differs.
+  defp report_lint(%Goal{} = goal, warnings, opts) do
+    emit(json?(opts), lint_json(goal, warnings), fn -> report_lint_human(goal, warnings) end)
+  end
+
+  # The human report: a clean line when there is nothing to flag, else one line per
+  # near-duplicate PAIR naming BOTH groups (id + verbatim name) and the similarity.
+  defp report_lint_human(%Goal{} = goal, []) do
+    IO.puts(
+      "LINT  goal=#{goal.id} — no near-duplicate group names (#{length(goal.groups)} group(s))."
+    )
+  end
+
+  defp report_lint_human(%Goal{} = goal, warnings) do
+    IO.puts("LINT  goal=#{goal.id} — #{length(warnings)} near-duplicate group name(s):")
+
+    Enum.each(warnings, fn %{group_ids: {id_a, id_b}, names: {name_a, name_b}, similarity: sim} ->
+      IO.puts(
+        "  warning: #{inspect(name_a)} (#{id_a}) ~ #{inspect(name_b)} (#{id_b})" <>
+          " — similarity #{format_similarity(sim)}"
+      )
+    end)
+
+    IO.puts(
+      "\nThese are ADVISORY (the goal still loads). Reconcile the names, or confirm the groups are distinct."
+    )
+  end
+
+  # The `lint --json` result: the warning LIST (each naming both groups + the
+  # similarity), the count, and `schema_version`. An empty list = no near-duplicate
+  # (advisory clean); the exit code is 0 regardless (ADR-0020 §Decision 3).
+  defp lint_json(%Goal{} = goal, warnings) do
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(goal.id),
+      count: length(warnings),
+      warnings: Enum.map(warnings, &lint_warning_json/1)
+    }
+  end
+
+  defp lint_warning_json(%{group_ids: {id_a, id_b}, names: {name_a, name_b}, similarity: sim}) do
+    %{
+      group_ids: [to_string(id_a), to_string(id_b)],
+      names: [name_a, name_b],
+      similarity: sim
+    }
+  end
+
+  defp format_similarity(sim), do: :erlang.float_to_binary(sim, decimals: 3)
+
+  defp lint_load_error(goal_file, reason, opts) do
+    message = "could not load goal-file #{goal_file}: #{reason}"
+
     if json?(opts) do
       emit_json_error(message)
     else
