@@ -56,7 +56,8 @@ defmodule Kazi.Predicate do
           description: String.t() | nil,
           config: config(),
           guard?: boolean(),
-          acceptance?: boolean()
+          acceptance?: boolean(),
+          group: String.t() | nil
         }
 
   @enforce_keys [:id, :kind]
@@ -65,15 +66,25 @@ defmodule Kazi.Predicate do
             description: nil,
             config: %{},
             guard?: false,
-            acceptance?: false
+            acceptance?: false,
+            # T12.2 group taxonomy (ADR-0020): an optional declared group id this
+            # predicate belongs to — a normalized slug referencing the goal's
+            # `[[group]]` taxonomy, NOT a free-text path. Default `nil` (ungrouped;
+            # current behavior, fully backward-compatible). The loader validates
+            # that a non-nil group is a DECLARED id (the typo/drift guard); this
+            # field is appended additively so the existing field order is untouched.
+            group: nil
 
   @doc """
   Builds a predicate.
 
-  `id` and `kind` are required; `:config`, `:description`, `:guard?`, and
-  `:acceptance?` are optional opts. `:acceptance?` marks the predicate as an
-  acceptance criterion expected to fail at t0 (creation mode, T2.1); it is a
-  declarative marker only and does not change evaluation.
+  `id` and `kind` are required; `:config`, `:description`, `:guard?`,
+  `:acceptance?`, and `:group` are optional opts. `:acceptance?` marks the
+  predicate as an acceptance criterion expected to fail at t0 (creation mode,
+  T2.1); it is a declarative marker only and does not change evaluation.
+  `:group` (default `nil`) is the declared group id this predicate belongs to
+  (T12.2, ADR-0020); the loader validates that a non-nil group references a
+  declared `[[group]]` id.
 
   ## Examples
 
@@ -86,6 +97,9 @@ defmodule Kazi.Predicate do
 
       iex> Kazi.Predicate.new(:widgets, :http_probe, acceptance?: true).acceptance?
       true
+
+      iex> Kazi.Predicate.new(:signup, :browser, group: "identity-access").group
+      "identity-access"
   """
   @spec new(id(), provider_kind(), keyword()) :: t()
   def new(id, kind, opts \\ []) when not is_nil(id) and is_atom(kind) do
@@ -95,7 +109,8 @@ defmodule Kazi.Predicate do
       description: Keyword.get(opts, :description),
       config: Keyword.get(opts, :config, %{}),
       guard?: Keyword.get(opts, :guard?, false),
-      acceptance?: Keyword.get(opts, :acceptance?, false)
+      acceptance?: Keyword.get(opts, :acceptance?, false),
+      group: Keyword.get(opts, :group)
     }
   end
 
