@@ -153,7 +153,7 @@ defmodule Kazi.CLI do
     harness:
       "Coding harness to drive: claude (default) or opencode. Overrides the goal-file/app config.",
     model:
-      "Model the harness should use, e.g. dgx/qwen3.6. Overrides the goal-file's [harness] model.",
+      "Model the harness should use, e.g. local/qwen3.6. Overrides the goal-file's [harness] model.",
     yes: "`propose` only: skip the interactive clarify questions and draft best-effort.",
     strict:
       "`propose` only: refuse an underspecified idea non-interactively instead of guessing.",
@@ -433,7 +433,7 @@ defmodule Kazi.CLI do
                              [harness] table and the app config.
       --model <provider/model>
                              Model the harness should use, e.g.
-                             `dgx/qwen3.6` for opencode. Overrides the goal-file's
+                             `local/qwen3.6` for opencode. Overrides the goal-file's
                              [harness] model.
       --help, -h             Show this help and exit.
       --version, -v          Print the kazi version and exit.
@@ -442,7 +442,7 @@ defmodule Kazi.CLI do
       kazi run priv/examples/deploy_target.toml --workspace ./fixtures/deploy-target
       kazi run priv/examples/deploy_target.toml --workspace ./target --env prod
       kazi run priv/examples/standing_maintenance.toml --workspace ./svc --standing
-      kazi run my.goal.toml --workspace ./svc --harness opencode --model dgx/qwen3.6
+      kazi run my.goal.toml --workspace ./svc --harness opencode --model local/qwen3.6
       kazi init ./my-service --out my-service.goal.toml
       kazi install-skill
       kazi run my.goal.toml --workspace ./svc --json --stream

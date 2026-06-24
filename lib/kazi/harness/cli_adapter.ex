@@ -53,8 +53,8 @@ defmodule Kazi.Harness.CliAdapter do
 
   ## Provider env (`opts[:env]`)
 
-  Some harnesses are pointed at a local endpoint (e.g. opencode at the operator's
-  DGX-hosted Qwen3.6 model) via environment variables rather than CLI flags. An
+  Some harnesses are pointed at a local endpoint (e.g. opencode at a locally-hosted
+  Qwen3.6 model on a GPU host) via environment variables rather than CLI flags. An
   optional `opts[:env]` — a list of `{name, value}` string pairs OR a map — is
   normalized to the `[{String.t, String.t}]` shape `System.cmd/3` expects and
   forwarded as its `:env`. Malformed entries (non-string name/value) are dropped.

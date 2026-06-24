@@ -264,7 +264,7 @@ defmodule Kazi.Teach.InstallSkill do
     VERDICT on the current release and takes a GOAL-FILE path:
 
     ```sh
-    kazi apply <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
+    kazi apply <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
     ```
 
     `apply --json` emits ONE terminal result object on termination. The exit code
