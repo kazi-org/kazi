@@ -57,17 +57,26 @@ defmodule Kazi.CLI do
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
   @type exit_code :: non_neg_integer()
 
+  # The versioned machine-result contract version (ADR-0023 decision 2). Shared by
+  # every --json surface — `run` (T15.3), `status` (T15.5), and the authoring
+  # transitions (T15.6) — so a breaking change to any of them bumps one number an
+  # orchestrator pins. Defined here (before first use) so the helpers throughout
+  # the module can reference it.
+  @run_schema_version 1
+
   @usage """
   kazi — drive a goal to convergence against a target workspace.
 
   USAGE:
       kazi run <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
+      kazi run <goal-file> --workspace <path> --json [--stream]
+      kazi status <ref> [--json]
       kazi init <repo-dir> [--out <file>] [--enrich]
       kazi propose "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
       kazi propose --json [--predicates <json>]   # caller-drafts (predicates supplied)
-      kazi list-proposed [--status <proposed|approved|rejected>]
-      kazi approve <proposal-ref>
-      kazi reject <proposal-ref>
+      kazi list-proposed [--status <proposed|approved|rejected>] [--json]
+      kazi approve <proposal-ref> [--json]
+      kazi reject <proposal-ref> [--json]
 
   ARGUMENTS:
       <goal-file>            Path to a TOML goal-file (see Kazi.Goal.Loader).
@@ -76,6 +85,8 @@ defmodule Kazi.CLI do
       <idea>                 A prose idea to draft into a goal of acceptance
                              predicates (T3.5a, UC-017).
       <proposal-ref>         A proposal's review handle (printed by `propose`).
+      <ref>                  `status` only: a run's goal id (recorded iterations)
+                             or a proposal-ref to report the current state of.
 
   OPTIONS:
       --workspace <path>     Target workspace where edits/integrate/deploy run
@@ -120,6 +131,10 @@ defmodule Kazi.CLI do
                              under --json; a command that would need interactive
                              input errors loudly (JSON error + non-zero exit).
                              Human output is the default.
+      --stream               `run --json` only: emit a JSONL progress stream — one
+                             JSON event per loop iteration on stdout, terminated by
+                             the final run-result object — so an orchestrator
+                             monitors a long convergence without blocking (T15.4).
       --harness <id>         Coding harness to drive (T8.7, ADR-0016): `claude`
                              (default) or `opencode`. Overrides the goal-file's
                              [harness] table and the app config.
@@ -136,6 +151,8 @@ defmodule Kazi.CLI do
       kazi run priv/examples/standing_maintenance.toml --workspace ./svc --standing
       kazi run my.goal.toml --workspace ./svc --harness opencode --model dgx/qwen3.6
       kazi init ./my-service --out my-service.goal.toml
+      kazi run my.goal.toml --workspace ./svc --json --stream
+      kazi status cli-e2e --json
       kazi propose "a /healthz endpoint that returns 200"
       kazi list-proposed --status proposed
       kazi approve prop-a-healthz-endpoint-3f9c1a2b4d5e
@@ -191,6 +208,9 @@ defmodule Kazi.CLI do
       {:run, goal_file, opts} ->
         execute_run(goal_file, opts, inject_opts)
 
+      {:status, ref, opts} ->
+        execute_status(ref, opts)
+
       {:init, source, opts} ->
         execute_init(source, opts, inject_opts)
 
@@ -200,11 +220,11 @@ defmodule Kazi.CLI do
       {:list_proposed, opts} ->
         execute_list_proposed(opts)
 
-      {:approve, proposal_ref} ->
-        execute_approve(proposal_ref)
+      {:approve, proposal_ref, opts} ->
+        execute_approve(proposal_ref, opts)
 
-      {:reject, proposal_ref} ->
-        execute_reject(proposal_ref)
+      {:reject, proposal_ref, opts} ->
+        execute_reject(proposal_ref, opts)
 
       {:error, message} ->
         IO.puts(:stderr, "error: #{message}\n")
@@ -222,11 +242,12 @@ defmodule Kazi.CLI do
           {:help, keyword()}
           | {:version, keyword()}
           | {:run, Path.t(), keyword()}
+          | {:status, String.t(), keyword()}
           | {:init, Path.t(), keyword()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
-          | {:approve, String.t()}
-          | {:reject, String.t()}
+          | {:approve, String.t(), keyword()}
+          | {:reject, String.t(), keyword()}
           | {:error, String.t()}
 
   @doc """
@@ -245,8 +266,9 @@ defmodule Kazi.CLI do
       positional prose idea and `opts` (`[workspace: path | nil]`).
     * `{:list_proposed, opts}` — the `list-proposed` subcommand with `opts`
       (`[status: state | nil]`, an optional lifecycle-state filter).
-    * `{:approve, proposal_ref}` / `{:reject, proposal_ref}` — the approval
-      transitions over a proposal's review handle (T3.5b).
+    * `{:approve, proposal_ref, opts}` / `{:reject, proposal_ref, opts}` — the
+      approval transitions over a proposal's review handle (T3.5b); `opts` carries
+      `[json: boolean]` (T15.6, ADR-0023 decision 2).
     * `{:error, message}` — a usage error (unknown command, missing goal-file).
   """
   @spec parse([String.t()]) :: parsed()
@@ -289,6 +311,12 @@ defmodule Kazi.CLI do
           # NON-INTERACTIVE: a command that would prompt errors loudly (clear JSON
           # error + non-zero exit) rather than blocking on stdin.
           json: :boolean,
+          # T15.4 (ADR-0023 decision 3): --stream switches `run --json` to a JSONL
+          # PROGRESS STREAM — one JSON event per loop iteration on stdout,
+          # terminated by the final T15.3 run-result object — so an orchestrator
+          # monitors a long convergence without blocking. Only meaningful with
+          # --json; ignored on the human surface.
+          stream: :boolean,
           help: :boolean,
           version: :boolean
         ],
@@ -321,12 +349,16 @@ defmodule Kazi.CLI do
           goal_file,
           # T15.3 (ADR-0023 decision 2): --json switches `run` to its machine
           # surface — the versioned result contract instead of the human report.
+          # T15.4 (ADR-0023 decision 3): --stream emits the JSONL progress stream
+          # (one event per iteration) before the final run-result object. Only
+          # meaningful under --json.
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
           harness: flags[:harness],
           model: flags[:model],
-          json: flags[:json] || false
+          json: flags[:json] || false,
+          stream: flags[:stream] || false
         }
 
       extra ->
@@ -336,6 +368,19 @@ defmodule Kazi.CLI do
 
   defp parse_command(["run"], _flags),
     do: {:error, "the `run` command requires a <goal-file> argument"}
+
+  # T15.5 (ADR-0023 decision 2): `status <ref>` reports a run/proposal's current
+  # state from the read-model. The positional <ref> is a goal_ref (a run's goal
+  # id) or a proposal_ref; --json switches to the machine surface.
+  defp parse_command(["status", ref | rest], flags) do
+    case rest do
+      [] -> {:status, ref, json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_command(["status"], _flags),
+    do: {:error, "the `status` command requires a <ref> argument (a goal or proposal ref)"}
 
   # T5.5 adopt: `kazi init <repo-dir>` reverse-engineers a starter goal-file by
   # deterministic stack detection (ADR-0013). --out is the output file; --enrich
@@ -382,23 +427,27 @@ defmodule Kazi.CLI do
 
   # T3.5c authoring: `list-proposed` lists the proposal queue, optionally filtered
   # by --status (proposed / approved / rejected).
+  # T15.6 (ADR-0023 decision 2): --json carries through so the queue emits as a
+  # single JSON object an orchestrator drives the state machine on.
   defp parse_command(["list-proposed" | rest], flags) do
     case rest do
-      [] -> {:list_proposed, status: flags[:status]}
+      [] -> {:list_proposed, status: flags[:status], json: flags[:json] || false}
       extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
 
   # T3.5c authoring: `approve <proposal-ref>` / `reject <proposal-ref>` drive the
   # T3.5b transitions over a proposal's review handle.
-  defp parse_command(["approve", proposal_ref | rest], _flags),
-    do: approval_command(:approve, proposal_ref, rest)
+  # T15.6 (ADR-0023 decision 2): --json carries through so the transition reports a
+  # machine-readable success/error.
+  defp parse_command(["approve", proposal_ref | rest], flags),
+    do: approval_command(:approve, proposal_ref, rest, flags)
 
   defp parse_command(["approve"], _flags),
     do: {:error, "the `approve` command requires a <proposal-ref> argument"}
 
-  defp parse_command(["reject", proposal_ref | rest], _flags),
-    do: approval_command(:reject, proposal_ref, rest)
+  defp parse_command(["reject", proposal_ref | rest], flags),
+    do: approval_command(:reject, proposal_ref, rest, flags)
 
   defp parse_command(["reject"], _flags),
     do: {:error, "the `reject` command requires a <proposal-ref> argument"}
@@ -406,14 +455,15 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `run`, `init`, `propose`, `list-proposed`, `approve`, or `reject`)"}
+       "unknown command #{inspect(other)} (try `run`, `status`, `init`, `propose`, `list-proposed`, `approve`, or `reject`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `run <goal-file> --workspace <path>`)"}
 
-  defp approval_command(command, proposal_ref, []), do: {command, proposal_ref}
+  defp approval_command(command, proposal_ref, [], flags),
+    do: {command, proposal_ref, json: flags[:json] || false}
 
-  defp approval_command(_command, _proposal_ref, extra),
+  defp approval_command(_command, _proposal_ref, extra, _flags),
     do: {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
 
   # The shared option bundle for the `propose` subcommand (both modes). T15.2:
@@ -528,6 +578,12 @@ defmodule Kazi.CLI do
       # default path (no flags) stays byte-identical to the pre-T8.7 claude path.
       |> maybe_put(:harness, opts[:harness])
       |> maybe_put(:model, opts[:model])
+      # T15.4 (ADR-0023 decision 3): under --json --stream, thread a per-iteration
+      # streaming observer into the runtime's `:stream` seam, which composes it
+      # OVER the read-model projection (one `on_iteration` fires both). It emits
+      # one JSONL progress event per observation to stdout; the final run-result
+      # object below TERMINATES the stream. Off (no `:stream`) unless both flags.
+      |> maybe_put_stream(opts)
 
     json? = opts[:json] == true
 
@@ -614,6 +670,39 @@ defmodule Kazi.CLI do
   defp maybe_put(run_opts, _key, nil), do: run_opts
   defp maybe_put(run_opts, key, value), do: Keyword.put(run_opts, key, value)
 
+  # T15.4 (ADR-0023 decision 3): install the JSONL streaming observer only when
+  # BOTH --json and --stream were given. Without both, no `:stream` is set and the
+  # run path is byte-identical to the pre-T15.4 (single result object / human)
+  # path. The observer prints ONE JSON line per observation; the run's final
+  # result object (T15.3) terminates the stream.
+  defp maybe_put_stream(run_opts, opts) do
+    if opts[:json] == true and opts[:stream] == true do
+      Keyword.put(run_opts, :stream, &emit_stream_event/1)
+    else
+      run_opts
+    end
+  end
+
+  # The per-iteration stream event (T15.4): one JSON object per LINE (JSONL), each
+  # parsing independently, distinguished from the terminal result by
+  # `event: "iteration"`. It renders the loop's `on_iteration` payload — iteration
+  # index, the predicate VECTOR at this observation, whether the whole vector is
+  # satisfied, the dispatched action (when the loop projects a budget stop), and
+  # the release ref so far — so an orchestrator follows convergence live. Side
+  # effect only; the runtime contains a raising observer.
+  defp emit_stream_event(payload) do
+    event = %{
+      schema_version: @run_schema_version,
+      event: "iteration",
+      iteration: Map.get(payload, :iteration),
+      predicates: predicate_vector_json(Map.get(payload, :vector)),
+      converged: Map.get(payload, :converged?) == true,
+      release_ref: Map.get(payload, :release_ref)
+    }
+
+    IO.puts(Jason.encode!(event))
+  end
+
   defp format_run_error({:unknown_provider_kinds, kinds}) do
     "goal names provider kind(s) this build can't evaluate: " <>
       Enum.map_join(kinds, ", ", &inspect/1)
@@ -636,6 +725,126 @@ defmodule Kazi.CLI do
     do: "the loop did not reach a terminal state within the await timeout"
 
   defp format_run_error(other), do: inspect(other)
+
+  # =============================================================================
+  # status command (T15.5, ADR-0023 decision 2): report a run/proposal's state
+  # =============================================================================
+  #
+  # `kazi status <ref>` reports the CURRENT state of a run or a proposal from the
+  # read-model — no loop is driven, nothing is mutated; it is a pure read. The
+  # <ref> resolves in two ways, checked in order:
+  #
+  #   1. a RUN's goal_ref (a goal id the loop has recorded iterations for): report
+  #      its latest iteration — the predicate vector, last iteration index,
+  #      whether it converged, and the observation timestamp; or
+  #   2. a PROPOSAL's proposal_ref (an authoring handle): report its lifecycle
+  #      state (proposed / approved / rejected), idea, and goal id.
+  #
+  # An unknown ref is a clear error (a JSON error envelope under --json, a human
+  # stderr line otherwise) with a NON-ZERO exit, so an orchestrator branches on
+  # the exit code, never on prose.
+  defp execute_status(ref, opts) do
+    with_read_model(fn ->
+      cond do
+        (iteration = ReadModel.latest_iteration(ref)) != nil ->
+          report_run_status(ref, iteration, opts)
+
+        (proposal = ReadModel.get_proposed_goal(ref)) != nil ->
+          report_proposal_status(proposal, opts)
+
+        true ->
+          status_not_found(ref, opts)
+      end
+    end)
+  end
+
+  # Report a RUN's current state from its latest recorded iteration (T15.5): a
+  # JSON object under --json, a human block otherwise.
+  defp report_run_status(ref, iteration, opts) do
+    vector = ReadModel.to_predicate_vector(iteration)
+
+    emit(json?(opts), run_status_json(ref, iteration, vector), fn ->
+      IO.puts("STATUS     ref=#{ref} kind=run")
+      IO.puts("converged: #{iteration.converged}")
+      IO.puts("iteration: #{iteration.iteration_index}")
+      maybe_status_release(iteration.release_ref)
+      IO.puts("observed:  #{iteration.observed_at}")
+      IO.puts("\npredicate vector:")
+      IO.puts(format_vector(vector))
+    end)
+
+    0
+  end
+
+  # Report a PROPOSAL's current lifecycle state (T15.5): a JSON object under
+  # --json, a human block otherwise.
+  defp report_proposal_status(proposal, opts) do
+    emit(json?(opts), proposal_status_json(proposal), fn ->
+      IO.puts("STATUS     ref=#{proposal.proposal_ref} kind=proposal")
+      IO.puts("state:     #{proposal.status}")
+      IO.puts("goal:      #{proposal.goal_id}")
+      IO.puts("idea:      #{proposal.idea}")
+    end)
+
+    0
+  end
+
+  # An unknown status ref: a clear, machine-readable error under --json (so the
+  # orchestrator parses one stdout surface and branches on the non-zero exit), a
+  # human stderr line otherwise. Exit non-zero either way.
+  defp status_not_found(ref, opts) do
+    message =
+      "no run or proposal found for ref #{inspect(ref)} " <>
+        "(a run appears once it has recorded an iteration; a proposal once proposed)"
+
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  defp maybe_status_release(ref) when is_binary(ref) and ref != "",
+    do: IO.puts("release:   #{ref}")
+
+  defp maybe_status_release(_ref), do: :ok
+
+  # The `status --json` result object for a RUN (T15.5): the persisted run state —
+  # `status` (the lifecycle the board derives: converged / in_progress), the
+  # predicate VECTOR (the same `{id, verdict}` shape as `run --json`), the last
+  # iteration index, the release ref, and the observation timestamp — plus
+  # `schema_version`. `kind: "run"` distinguishes it from a proposal status.
+  defp run_status_json(ref, iteration, vector) do
+    %{
+      schema_version: @run_schema_version,
+      kind: "run",
+      ref: to_string(ref),
+      status: if(iteration.converged, do: "converged", else: "in_progress"),
+      converged: iteration.converged,
+      iteration: iteration.iteration_index,
+      predicates: predicate_vector_json(vector),
+      release_ref: iteration.release_ref,
+      observed_at: status_timestamp(iteration.observed_at)
+    }
+  end
+
+  # The `status --json` result object for a PROPOSAL (T15.5): its lifecycle state,
+  # idea, and goal id. `kind: "proposal"` distinguishes it from a run status.
+  defp proposal_status_json(proposal) do
+    %{
+      schema_version: @run_schema_version,
+      kind: "proposal",
+      ref: proposal.proposal_ref,
+      status: proposal.status,
+      goal_id: proposal.goal_id,
+      idea: proposal.idea
+    }
+  end
+
+  defp status_timestamp(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp status_timestamp(other), do: other
 
   # =============================================================================
   # init command (T5.5, UC-023, ADR-0013): adopt a repo by stack detection
@@ -1072,11 +1281,18 @@ defmodule Kazi.CLI do
   # stdio reports an error, so we default to non-interactive there.
   defp tty?, do: match?({:ok, _}, :io.rows())
 
-  # `list-proposed [--status <state>]`: print the proposal queue, newest first.
+  # `list-proposed [--status <state>] [--json]`: print the proposal queue, newest
+  # first. T15.6 (ADR-0023 decision 2): under --json emit a single JSON object —
+  # the queue as a list an orchestrator drives propose → approve → run on — the
+  # human table otherwise.
   defp execute_list_proposed(opts) do
     with_read_model(fn ->
       rows = ReadModel.list_proposed_goals(list_filter(opts[:status]))
-      report_proposed_list(rows, opts[:status])
+
+      emit(json?(opts), list_proposed_json(rows, opts[:status]), fn ->
+        report_proposed_list(rows, opts[:status])
+      end)
+
       0
     end)
   end
@@ -1084,44 +1300,58 @@ defmodule Kazi.CLI do
   defp list_filter(nil), do: []
   defp list_filter(status), do: [status: status]
 
-  # `approve <proposal-ref>`: transition proposed → approved. On success the goal
-  # is now runnable by `kazi run`; we print that next step.
-  defp execute_approve(proposal_ref) do
+  # `approve <proposal-ref> [--json]`: transition proposed → approved. On success
+  # the goal is now runnable by `kazi run`. T15.6: under --json the transition
+  # reports a machine-readable success object (or a JSON error on the same stdout
+  # surface), the human lines otherwise.
+  defp execute_approve(proposal_ref, opts) do
     with_read_model(fn ->
       case Authoring.approve(proposal_ref) do
         {:ok, %Goal{} = goal} ->
-          IO.puts("APPROVED   proposal=#{proposal_ref} goal=#{goal.id}")
-          IO.puts("The goal is now runnable: kazi run <goal-file> --workspace <path>")
+          emit(json?(opts), approval_json("approved", proposal_ref, goal.id), fn ->
+            IO.puts("APPROVED   proposal=#{proposal_ref} goal=#{goal.id}")
+            IO.puts("The goal is now runnable: kazi run <goal-file> --workspace <path>")
+          end)
+
           0
 
         {:error, reason} ->
-          IO.puts(
-            :stderr,
-            "error: could not approve #{proposal_ref}: " <> format_authoring_error(reason)
-          )
-
-          1
+          transition_error("approve", proposal_ref, reason, opts)
       end
     end)
   end
 
-  # `reject <proposal-ref>`: transition proposed → rejected (declined, audited).
-  defp execute_reject(proposal_ref) do
+  # `reject <proposal-ref> [--json]`: transition proposed → rejected (declined,
+  # audited). T15.6: same JSON/human split as approve.
+  defp execute_reject(proposal_ref, opts) do
     with_read_model(fn ->
       case Authoring.reject(proposal_ref) do
-        {:ok, _draft} ->
-          IO.puts("REJECTED   proposal=#{proposal_ref}")
+        {:ok, draft} ->
+          emit(json?(opts), approval_json("rejected", proposal_ref, draft.goal.id), fn ->
+            IO.puts("REJECTED   proposal=#{proposal_ref}")
+          end)
+
           0
 
         {:error, reason} ->
-          IO.puts(
-            :stderr,
-            "error: could not reject #{proposal_ref}: " <> format_authoring_error(reason)
-          )
-
-          1
+          transition_error("reject", proposal_ref, reason, opts)
       end
     end)
+  end
+
+  # A transition (approve/reject) error on the requested surface (T15.6): a JSON
+  # error envelope on stdout under --json (so the orchestrator parses one surface
+  # and branches on the non-zero exit), the existing human stderr line otherwise.
+  defp transition_error(verb, proposal_ref, reason, opts) do
+    message = "could not #{verb} #{proposal_ref}: " <> format_authoring_error(reason)
+
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
   end
 
   # The authoring commands all require a live read-model (they persist/query
@@ -1238,6 +1468,44 @@ defmodule Kazi.CLI do
 
   defp status_label(nil), do: "proposed-goal"
   defp status_label(status), do: status
+
+  # =============================================================================
+  # authoring --json result schemas (T15.6, ADR-0023 decision 2)
+  # =============================================================================
+  #
+  # The structured JSON an orchestrator drives the propose → approve → run state
+  # machine on. `list-proposed --json` emits the queue (each row's ref, state,
+  # goal id, idea) under the optional status filter; `approve`/`reject --json`
+  # emit a machine-readable transition result. All carry `schema_version`.
+  defp list_proposed_json(rows, status_filter) do
+    %{
+      schema_version: @run_schema_version,
+      status_filter: status_filter,
+      count: length(rows),
+      proposals: Enum.map(rows, &proposed_row_json/1)
+    }
+  end
+
+  defp proposed_row_json(%ProposedGoal{} = row) do
+    %{
+      proposal_ref: row.proposal_ref,
+      status: row.status,
+      goal_id: row.goal_id,
+      idea: row.idea
+    }
+  end
+
+  # The approve/reject transition result (T15.6): the resulting lifecycle state,
+  # the proposal ref, and the goal id, so the orchestrator confirms the transition
+  # and pipes the goal id into the next step.
+  defp approval_json(status, proposal_ref, goal_id) do
+    %{
+      schema_version: @run_schema_version,
+      proposal_ref: proposal_ref,
+      status: status,
+      goal_id: to_string(goal_id)
+    }
+  end
 
   defp format_authoring_error(:empty_idea), do: "the idea was blank"
   defp format_authoring_error(:not_found), do: "no proposal carries that ref"
@@ -1430,9 +1698,8 @@ defmodule Kazi.CLI do
   #   * `reason`         — the loop's stop reason (the budget dimension, or "stuck"),
   #                        as a string, or nil on a clean converge.
   #   * `release_ref`    — WHAT was shipped (the T3.3c release tag), or nil.
-  #   * `schema_version` — the contract version; a breaking change bumps it.
-  @run_schema_version 1
-
+  #   * `schema_version` — the contract version (`@run_schema_version`); a breaking
+  #                        change bumps it.
   @spec run_result_json(Goal.t(), :converged | :stopped | :over_budget, map()) :: map()
   defp run_result_json(%Goal{id: id}, outcome, result) do
     status = run_status(outcome, result)
