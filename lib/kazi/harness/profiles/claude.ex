@@ -25,20 +25,35 @@ defmodule Kazi.Harness.Profiles.Claude do
 
   `-p <prompt> --output-format json` is the always-present non-interactive +
   structured-envelope shape (ADR-0008, T4.1). The claw-code hygiene flags (T4.8)
-  are appended ONLY when their opt is supplied, so with no hygiene opts the argv is
-  byte-for-byte the pre-T4.8 shape:
+  and the in-family model selector (T19.6, ADR-0033) are appended ONLY when their
+  opt is supplied, so with no such opts the argv is byte-for-byte the pre-T4.8
+  shape:
 
     * `:max_budget_usd` -> `--max-budget-usd <amount>`  (per-dispatch ceiling)
     * `:allowed_tools`  -> `--allowed-tools <t> <t> …`  (least-privilege tool set)
     * `:permission_mode`-> `--permission-mode <mode>`   (least-privilege mode)
+    * `:model`          -> `--model <m>`                (in-family Claude tiering)
+
+  `--model <m>` (ADR-0033) selects a CHEAPER in-family Claude model (e.g.
+  Haiku/Sonnet) so a frontier Claude can author the predicates once and kazi
+  drives the grind on a cheap Claude model — NO local model required. It is
+  appended ONLY when `opts[:model]` is a non-empty string; when absent, the argv
+  is byte-for-byte what it was before this flag existed.
   """
   @spec build_args(String.t(), keyword()) :: [String.t()]
   def build_args(prompt, opts) when is_binary(prompt) and is_list(opts) do
-    ["-p", prompt, "--output-format", "json"] ++ hygiene_args(opts)
+    ["-p", prompt, "--output-format", "json"] ++ hygiene_args(opts) ++ model_args(opts)
   end
 
   defp hygiene_args(opts) do
     budget_args(opts) ++ allowed_tools_args(opts) ++ permission_mode_args(opts)
+  end
+
+  defp model_args(opts) do
+    case Keyword.get(opts, :model) do
+      model when is_binary(model) and model != "" -> ["--model", model]
+      _ -> []
+    end
   end
 
   defp budget_args(opts) do

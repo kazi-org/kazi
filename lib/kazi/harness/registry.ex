@@ -47,9 +47,13 @@ defmodule Kazi.Harness.Registry do
   # The :claude profile — the default. Its argv + parser are the canonical
   # Claude-specific boundary logic (`Kazi.Harness.Profiles.Claude`), pinned
   # byte-for-byte against the real `Kazi.Harness.ClaudeAdapter` by a golden test.
-  # supported_opts are the claw-code hygiene flags (T4.8) Claude understands plus
-  # the per-run `:command` override (the test-stub seam); a Claude-only flag is
-  # therefore never forwarded to a different harness.
+  # supported_opts are the claw-code hygiene flags (T4.8) Claude understands, the
+  # per-run `:command` override (the test-stub seam), and `:model` — the in-family
+  # tiering selector (T19.6, ADR-0033) that points Claude at a cheaper in-family
+  # model via `--model`. A Claude-only flag is never forwarded to a different
+  # harness. (`:model` is also an always-kept adapter opt in `Kazi.Harness`, so
+  # the model still reaches `build_args`; declaring it here keeps the profile's
+  # advertised opt surface honest and satisfies the ADR-0022 conformance contract.)
   @spec claude() :: Profile.t()
   defp claude do
     %Profile{
@@ -57,7 +61,7 @@ defmodule Kazi.Harness.Registry do
       command: "claude",
       build_args: &Profiles.Claude.build_args/2,
       parse: &Profiles.Claude.parse/1,
-      supported_opts: [:command, :max_budget_usd, :allowed_tools, :permission_mode]
+      supported_opts: [:command, :max_budget_usd, :allowed_tools, :permission_mode, :model]
     }
   end
 
