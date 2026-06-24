@@ -80,14 +80,20 @@ defmodule Kazi.Goal.Loader do
   |----------|-----------|----------|----------------------|
   | `id`     | string    | yes      | `Group.id` — normalized to a canonical slug (case / whitespace / `&` collapse), so loosely-authored variants cannot fragment the tree |
   | `name`   | string    | no       | `Group.name` — the display label (defaults to the authored `id` when omitted) |
-  | `parent` | string    | no       | `Group.parent` — a parent group id (normalized). PARSED and stored only; its reference / cycle validation is T12.2 |
+  | `parent` | string    | no       | `Group.parent` — a parent group id (normalized). Validated to reference a DECLARED group, and the parent chain to be acyclic (T12.2) |
   | `budget` | positive integer | no | `Group.budget` — an optional per-group cap (stored verbatim) |
 
   A DUPLICATE group id (after normalization) is a validation error, so the
   taxonomy is a set: declaring `"Identity & Access"` and `"identity-access"`
-  twice fails loudly at load time rather than silently colliding. Predicates
-  referencing a group, and parent reference / cycle validation, are a separate
-  task (T12.2); T12.1 is taxonomy parsing + the duplicate-id guard only.
+  twice fails loudly at load time rather than silently colliding.
+
+  T12.2 adds the *drift guard* — three cross-references validated after the
+  taxonomy and predicates are both parsed (ADR-0020 §Decision 3):
+
+    * a predicate whose `group` is not a declared id is a load error (catches the
+      typo immediately, rather than fragmenting the tree silently);
+    * a group whose `parent` is not a declared id is a load error;
+    * a cycle in the `parent` chain is a load error.
 
   ### `[[predicate]]` array of tables (→ `Kazi.Predicate` list)
 
@@ -102,9 +108,10 @@ defmodule Kazi.Goal.Loader do
   | `description` | string    | no       | `Predicate.description` |
   | `guard`       | boolean   | no       | `Predicate.guard?` (default `false`) |
   | `acceptance`  | boolean   | no       | `Predicate.acceptance?` (default `false`) |
+  | `group`       | string    | no       | `Predicate.group` — a declared `[[group]]` id (normalized); an unknown id is a load error (T12.2) |
   | *(any other)* | any       | no       | `Predicate.config` (atom-keyed, verbatim) |
 
-  Every key on a `[[predicate]]` table other than the five reserved keys above is
+  Every key on a `[[predicate]]` table other than the six reserved keys above is
   collected, verbatim, into the predicate's `config` map (with atom keys). That
   config is handed untouched to the provider that evaluates the predicate.
 
@@ -153,8 +160,9 @@ defmodule Kazi.Goal.Loader do
   }
 
   # Reserved keys on a [[predicate]] table; everything else falls through to
-  # the predicate's `config`.
-  @predicate_reserved_keys ~w(id provider description guard acceptance)
+  # the predicate's `config`. `group` (T12.2) is reserved so a declared group
+  # reference does not leak into the provider config.
+  @predicate_reserved_keys ~w(id provider description guard acceptance group)
 
   # goal-file `mode` string -> Goal.mode atom (T2.1 creation mode).
   @goal_modes %{"repair" => :repair, "create" => :create}
@@ -191,7 +199,12 @@ defmodule Kazi.Goal.Loader do
          {:ok, harness} <- build_harness(Map.get(data, "harness")),
          # T12.1 group taxonomy (ADR-0020): optional `[[group]]` array.
          {:ok, groups} <- build_groups(Map.get(data, "group", [])),
-         {:ok, all} <- build_predicates(Map.get(data, "predicate", [])) do
+         {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
+         # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
+         # once both groups and predicates are parsed — every predicate `group`
+         # and every group `parent` must reference a DECLARED id, and the parent
+         # chain must be acyclic.
+         :ok <- validate_group_references(groups, all) do
       {predicates, guards} = Enum.split_with(all, &(not &1.guard?))
 
       {:ok,
@@ -445,6 +458,90 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T12.2 the drift guard (ADR-0020 §Decision 3). Run after the taxonomy AND the
+  # predicates are both parsed, so every cross-reference can be checked against
+  # the declared id set. Three checks, short-circuiting on the first failure:
+  #
+  #   1. every predicate `group` references a DECLARED id (the typo guard — a
+  #      misspelled group would otherwise silently fragment the tree);
+  #   2. every group `parent` references a DECLARED id;
+  #   3. the `parent` chain is acyclic.
+  #
+  # Ids are already normalized at parse time (predicate group and group parent
+  # both via Group.normalize_id/1), so set membership is an exact compare.
+  defp validate_group_references(groups, predicates) do
+    declared = MapSet.new(groups, & &1.id)
+
+    with :ok <- validate_predicate_groups(predicates, declared),
+         :ok <- validate_group_parents(groups, declared) do
+      validate_no_group_cycle(groups)
+    end
+  end
+
+  defp validate_predicate_groups(predicates, declared) do
+    Enum.reduce_while(predicates, :ok, fn predicate, :ok ->
+      case predicate.group do
+        nil ->
+          {:cont, :ok}
+
+        group ->
+          if MapSet.member?(declared, group) do
+            {:cont, :ok}
+          else
+            {:halt,
+             {:error,
+              "predicate #{inspect(predicate.id)} references unknown group " <>
+                "#{inspect(group)} (declared: #{known_groups(declared)})"}}
+          end
+      end
+    end)
+  end
+
+  defp validate_group_parents(groups, declared) do
+    Enum.reduce_while(groups, :ok, fn group, :ok ->
+      case group.parent do
+        nil ->
+          {:cont, :ok}
+
+        parent ->
+          if MapSet.member?(declared, parent) do
+            {:cont, :ok}
+          else
+            {:halt,
+             {:error,
+              "group #{inspect(group.id)} references unknown parent " <>
+                "#{inspect(parent)} (declared: #{known_groups(declared)})"}}
+          end
+      end
+    end)
+  end
+
+  # Walk each group's parent chain; a node revisited within one walk is a cycle.
+  # `parents` maps a group id to its (already-declared) parent id, so the walk is
+  # a simple pointer-chase. Reported with the offending group so the author can
+  # find the loop. Parent existence is guaranteed by validate_group_parents/2,
+  # which runs first.
+  defp validate_no_group_cycle(groups) do
+    parents = Map.new(groups, &{&1.id, &1.parent})
+
+    Enum.reduce_while(groups, :ok, fn group, :ok ->
+      case walk_parent_chain(group.id, parents, MapSet.new()) do
+        :ok -> {:cont, :ok}
+        {:cycle, id} -> {:halt, {:error, "group #{inspect(id)} has a cyclic parent chain"}}
+      end
+    end)
+  end
+
+  defp walk_parent_chain(nil, _parents, _seen), do: :ok
+
+  defp walk_parent_chain(id, parents, seen) do
+    if MapSet.member?(seen, id) do
+      {:cycle, id}
+    else
+      walk_parent_chain(Map.get(parents, id), parents, MapSet.put(seen, id))
+    end
+  end
+
   defp build_predicates([]), do: {:error, "goal-file must declare at least one [[predicate]]"}
 
   defp build_predicates(predicates) when is_list(predicates) do
@@ -469,12 +566,14 @@ defmodule Kazi.Goal.Loader do
          {:ok, kind} <- fetch_provider_kind(raw, id),
          {:ok, guard?} <- fetch_guard(raw, id),
          {:ok, acceptance?} <- fetch_acceptance(raw, id),
-         :ok <- reject_guard_acceptance(guard?, acceptance?, id) do
+         :ok <- reject_guard_acceptance(guard?, acceptance?, id),
+         {:ok, group} <- fetch_predicate_group(raw, id) do
       {:ok,
        Predicate.new(id, kind,
          description: Map.get(raw, "description"),
          guard?: guard?,
          acceptance?: acceptance?,
+         group: group,
          config: predicate_config(raw)
        )}
     end
@@ -534,6 +633,20 @@ defmodule Kazi.Goal.Loader do
 
   defp reject_guard_acceptance(_guard?, _acceptance?, _id), do: :ok
 
+  # T12.2 (ADR-0020 §Decision 2): optional `group` — a declared group id this
+  # predicate belongs to. Absent → nil (ungrouped, unchanged). Present → the
+  # value is NORMALIZED the same way group ids are (Group.normalize_id/1) so a
+  # loosely-authored reference resolves to the canonical slug. Whether the
+  # normalized id is actually DECLARED is checked once the taxonomy is known
+  # (validate_group_references/2); here we only parse and normalize the field.
+  defp fetch_predicate_group(raw, id) do
+    case Map.get(raw, "group") do
+      nil -> {:ok, nil}
+      group when is_binary(group) and group != "" -> {:ok, Group.normalize_id(group)}
+      _ -> {:error, "predicate #{inspect(id)} \"group\" must be a non-empty string"}
+    end
+  end
+
   # Every non-reserved key on the predicate table becomes config, atom-keyed,
   # handed verbatim to the provider.
   defp predicate_config(raw) do
@@ -569,6 +682,16 @@ defmodule Kazi.Goal.Loader do
 
   defp known_providers do
     @provider_kinds |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
+  end
+
+  # The declared group ids, sorted, for an unknown-reference error message. Empty
+  # when no `[[group]]` was declared (so a stray `group =` on a predicate names
+  # exactly that).
+  defp known_groups(declared) do
+    case Enum.sort(declared) do
+      [] -> "none"
+      ids -> Enum.map_join(ids, ", ", &inspect/1)
+    end
   end
 
   defp known_modes do

@@ -581,6 +581,9 @@ defmodule Kazi.Authoring do
       "guard" => predicate.guard?,
       "acceptance" => predicate.acceptance?
     }
+    # T12.2 (ADR-0020): emit the declared group id back to the `[[predicate]]`
+    # table only when set, so an ungrouped predicate round-trips byte-stably.
+    |> maybe_put("group", predicate.group)
     |> Map.merge(stringify_keys(predicate.config))
   end
 
