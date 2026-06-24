@@ -188,8 +188,9 @@ kazi run <goal-file> --workspace <path> \
   --harness opencode --model dgx-ollama/qwen3.6:35b-a3b
 ```
 
-`--harness <id>` selects the harness (`claude` or `opencode` today); `--model
-<provider/model>` selects the model that harness should use.
+`--harness <id>` selects the harness (`claude`, `opencode`, `codex`,
+`antigravity`, or `claw` today — see the [tier table](#tiered-harness-support-adr-0022)
+below); `--model <provider/model>` selects the model that harness should use.
 
 **Point opencode at a local model (e.g. a DGX-hosted Qwen3.6).** If you run
 [`opencode`](https://opencode.ai) wired to a local model (the operator here
@@ -208,7 +209,7 @@ its own preferred harness in an optional `[harness]` table:
 
 ```toml
 [harness]
-id = "opencode"                            # a KNOWN harness id (claude / opencode / ...)
+id = "opencode"                            # a KNOWN harness id (claude / opencode / codex / antigravity / claw)
 model = "dgx-ollama/qwen3.6:35b-a3b"       # optional provider/model override
 command = "opencode"                       # optional binary override
 ```
@@ -258,7 +259,7 @@ added with a documented workaround, and one is **best-effort only**:
 | `claude` (default) | First-class | single JSON envelope; full cost/token parse. |
 | `opencode` | First-class | NDJSON event stream; point it at a local model. |
 | `codex` | First-class | `codex exec … --json` JSONL stream; auth `OPENAI_API_KEY` / `codex login`. |
-| `antigravity` | Conformant **with a workaround** | non-TTY stdout bug (`antigravity-cli#76`) handled via `--prompt-file --output json`. |
+| `antigravity` | Conformant **with a workaround** | non-TTY stdout bug (`antigravity-cli#76`) handled via `--prompt-file --output json`; auth `GEMINI_API_KEY` / `ANTIGRAVITY_API_KEY`. |
 | `claw` | **Best-effort / demo-grade** | claw-code emits **no** structured output and has no model flag — kazi surfaces its raw stdout as the result with **no cost/token extraction**. It runs, but fidelity is degraded; treat it as a demo ("an agent-managed museum exhibit, not a production tool"), not a budgeted production run. Auth is via env API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). |
 
 ### Build a self-contained release (full read-model)
