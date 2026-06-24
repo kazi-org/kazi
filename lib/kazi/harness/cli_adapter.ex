@@ -34,6 +34,23 @@ defmodule Kazi.Harness.CliAdapter do
   test-stub seam, exactly as `ClaudeAdapter` does); absent it, the profile's
   default `command` is used.
 
+  ## Prompt delivery (`profile.prompt_via`)
+
+  Most harnesses take the prompt as an argv argument (`profile.prompt_via ==
+  :argv`, the default): `build_args` renders the prompt text directly and there is
+  no extra IO. A harness that must receive the prompt as a FILE sets
+  `prompt_via: :file`; then this adapter writes the prompt to a TEMP FILE inside
+  the workspace, threads its path to `build_args` as `opts[:prompt_file]`, runs the
+  harness, and DELETES the temp file afterwards (even on error). This keeps
+  `build_args` PURE — the profile only references the path the adapter
+  materialized; the file IO + lifecycle live here.
+
+  This seam exists for Antigravity (ADR-0022, T14.3): under a non-TTY subprocess
+  the bare `--prompt`/`-p` flag silently drops stdout
+  (`google-antigravity/antigravity-cli#76`), so the profile uses `run
+  --prompt-file <tmp> --output json --yes` instead. For every other profile
+  `prompt_via` defaults to `:argv` and this path is byte-identical to before.
+
   ## Provider env (`opts[:env]`)
 
   Some harnesses are pointed at a local endpoint (e.g. opencode at the operator's
@@ -59,9 +76,10 @@ defmodule Kazi.Harness.CliAdapter do
 
   When the harness could not be run at all:
 
-      {:error, :empty_prompt}                  # nothing to dispatch
-      {:error, {:command_not_found, binary()}} # the binary is not on PATH
-      {:error, {:unknown_harness, atom()}}     # no profile for the requested id
+      {:error, :empty_prompt}                       # nothing to dispatch
+      {:error, {:command_not_found, binary()}}      # the binary is not on PATH
+      {:error, {:unknown_harness, atom()}}          # no profile for the requested id
+      {:error, {:prompt_file_write_failed, term()}} # a :file profile's temp write failed
   """
 
   @behaviour Kazi.HarnessAdapter
@@ -78,33 +96,82 @@ defmodule Kazi.Harness.CliAdapter do
       when is_binary(prompt) and is_binary(workspace) and is_list(opts) do
     with {:ok, profile} <- resolve_profile(opts) do
       command = opts[:command] || profile.command
-      args = Profile.build_args(profile, prompt, opts)
-      cmd_opts = cmd_opts(workspace, opts)
 
-      try do
-        {output, exit_status} = System.cmd(command, args, cmd_opts)
-
-        base = %{
-          output: output,
-          exit: exit_status,
-          command: command,
-          workspace: workspace
-        }
-
-        # Best-effort, additive: merge the parsed structured fields over the
-        # always-present base. A non-structured / field-light stdout contributes
-        # nothing, so the result degrades to exactly the base map.
-        {:ok, Map.merge(base, Profile.parse(profile, output))}
-      rescue
-        error in ErlangError ->
-          # :enoent surfaces here when the configured binary is not on PATH —
-          # an inability to run the harness, not failing work for the agent.
-          case error.original do
-            :enoent -> {:error, {:command_not_found, command}}
-            other -> {:error, other}
+      # For a `prompt_via: :file` profile (Antigravity's non-TTY workaround), write
+      # the prompt to a temp file in the workspace and thread its path to
+      # build_args; build_args stays pure (it only reads opts[:prompt_file]). For
+      # the default `:argv` profiles this is a no-op and the path is unchanged.
+      case materialize_prompt(profile, prompt, workspace, opts) do
+        {:ok, build_opts, cleanup} ->
+          try do
+            dispatch(profile, command, prompt, workspace, build_opts)
+          after
+            cleanup.()
           end
+
+        {:error, _reason} = error ->
+          error
       end
     end
+  end
+
+  # Render the argv, run the harness in the workspace, and merge the parsed subset
+  # over the always-present base map. Shared by every prompt-delivery mode.
+  defp dispatch(profile, command, prompt, workspace, build_opts) do
+    args = Profile.build_args(profile, prompt, build_opts)
+    cmd_opts = cmd_opts(workspace, build_opts)
+
+    try do
+      {output, exit_status} = System.cmd(command, args, cmd_opts)
+
+      base = %{
+        output: output,
+        exit: exit_status,
+        command: command,
+        workspace: workspace
+      }
+
+      # Best-effort, additive: merge the parsed structured fields over the
+      # always-present base. A non-structured / field-light stdout contributes
+      # nothing, so the result degrades to exactly the base map.
+      {:ok, Map.merge(base, Profile.parse(profile, output))}
+    rescue
+      error in ErlangError ->
+        # :enoent surfaces here when the configured binary is not on PATH —
+        # an inability to run the harness, not failing work for the agent.
+        case error.original do
+          :enoent -> {:error, {:command_not_found, command}}
+          other -> {:error, other}
+        end
+    end
+  end
+
+  # Prepare prompt delivery for the profile's `:prompt_via` mode, returning the
+  # opts to thread to build_args plus a cleanup thunk run after dispatch (always,
+  # even on error/raise). `:argv` (the default) is a pure no-op. `:file` writes the
+  # prompt to a unique temp file under the workspace and adds `prompt_file: <path>`
+  # so build_args can reference it; the cleanup deletes the file.
+  @spec materialize_prompt(Profile.t(), binary(), binary(), keyword()) ::
+          {:ok, keyword(), (-> any())} | {:error, term()}
+  defp materialize_prompt(%Profile{prompt_via: :file}, prompt, workspace, opts) do
+    path =
+      Path.join(
+        workspace,
+        ".kazi-prompt-#{System.unique_integer([:positive])}.txt"
+      )
+
+    case File.write(path, prompt) do
+      :ok ->
+        cleanup = fn -> File.rm(path) end
+        {:ok, Keyword.put(opts, :prompt_file, path), cleanup}
+
+      {:error, reason} ->
+        {:error, {:prompt_file_write_failed, reason}}
+    end
+  end
+
+  defp materialize_prompt(%Profile{}, _prompt, _workspace, opts) do
+    {:ok, opts, fn -> :ok end}
   end
 
   # Assemble the `System.cmd/3` opts: always run in the workspace with stderr

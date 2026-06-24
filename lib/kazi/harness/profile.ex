@@ -33,6 +33,17 @@ defmodule Kazi.Harness.Profile do
       `:max_budget_usd`/`:allowed_tools`/`:permission_mode`). Lets the resolution
       seam (T8.5) drop opts a harness does not understand instead of passing a
       Claude-only flag to opencode.
+    * `:prompt_via` — how the prompt reaches the harness: `:argv` (the default —
+      the prompt is one of the args `build_args` renders, exactly as
+      Claude/opencode/Codex do) or `:file` (the CliAdapter writes the prompt to a
+      TEMP FILE and threads its path to `build_args` as `opts[:prompt_file]`;
+      `build_args` references that path instead of embedding the prompt text).
+      `:file` exists for the Antigravity non-TTY workaround (ADR-0022, T14.3,
+      `google-antigravity/antigravity-cli#76`): invoking `run --prompt-file <tmp>
+      --output json --yes` sidesteps the bug where the bare `--prompt`/`-p` flag
+      silently DROPS stdout under a non-TTY (pipe/subprocess) — exactly kazi's
+      mode. `build_args` STAYS PURE either way: the adapter owns the temp-file IO
+      and lifecycle; the profile only reads the path the adapter materialized.
 
   Profiles are values, so a built-in profile (`Kazi.Harness.Registry`) and a
   config-declared custom profile (T8.5) share one shape; the latter references a
@@ -45,12 +56,16 @@ defmodule Kazi.Harness.Profile do
   @typedoc "A pure, additive stdout parser: the structured subset of the result map."
   @type parse :: (output :: String.t() -> map())
 
+  @typedoc "How the prompt reaches the harness: an argv arg (default) or a temp file."
+  @type prompt_via :: :argv | :file
+
   @type t :: %__MODULE__{
           id: atom(),
           command: String.t(),
           build_args: build_args(),
           parse: parse(),
-          supported_opts: [atom()]
+          supported_opts: [atom()],
+          prompt_via: prompt_via()
         }
 
   @enforce_keys [:id, :command, :build_args, :parse]
@@ -58,7 +73,8 @@ defmodule Kazi.Harness.Profile do
             command: nil,
             build_args: nil,
             parse: nil,
-            supported_opts: []
+            supported_opts: [],
+            prompt_via: :argv
 
   @doc """
   Renders the subprocess args (everything after the command) for `prompt`/`opts`

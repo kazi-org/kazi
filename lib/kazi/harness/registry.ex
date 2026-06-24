@@ -24,6 +24,7 @@ defmodule Kazi.Harness.Registry do
   def fetch(:claude), do: {:ok, claude()}
   def fetch(:opencode), do: {:ok, opencode()}
   def fetch(:codex), do: {:ok, codex()}
+  def fetch(:antigravity), do: {:ok, antigravity()}
   def fetch(id) when is_atom(id), do: {:error, {:unknown_harness, id}}
 
   @doc """
@@ -40,7 +41,7 @@ defmodule Kazi.Harness.Registry do
 
   @doc "The ids of all built-in harnesses."
   @spec ids() :: [atom()]
-  def ids, do: [:claude, :opencode, :codex]
+  def ids, do: [:claude, :opencode, :codex, :antigravity]
 
   # The :claude profile — the default. Its argv + parser are the canonical
   # Claude-specific boundary logic (`Kazi.Harness.Profiles.Claude`), pinned
@@ -91,6 +92,30 @@ defmodule Kazi.Harness.Registry do
       build_args: &Profiles.Codex.build_args/2,
       parse: &Profiles.Codex.parse/1,
       supported_opts: [:command, :model]
+    }
+  end
+
+  # The :antigravity profile (T14.3, ADR-0022) — Google's Antigravity CLI
+  # (`antigravity`, also installed as `agy`), conformant WITH a workaround. The
+  # bare `--prompt`/`-p` flag silently drops stdout under a non-TTY subprocess
+  # (bug `google-antigravity/antigravity-cli#76`) — exactly kazi's mode — so this
+  # profile sets `prompt_via: :file`: the CliAdapter writes the prompt to a temp
+  # file and `build_args` renders `run --prompt-file <tmp> --output json --yes`
+  # (`Kazi.Harness.Profiles.Antigravity`). The parser reads the `--output json`
+  # envelope. supported_opts are the per-run `:command` override (the test-stub
+  # seam) and `:model` — Antigravity does NOT understand Claude's hygiene flags,
+  # so resolution (T8.5) drops them. Auth is `GEMINI_API_KEY` /
+  # `ANTIGRAVITY_API_KEY`, supplied by the operator's environment (forwarded via
+  # opts[:env], not a profile concern).
+  @spec antigravity() :: Profile.t()
+  defp antigravity do
+    %Profile{
+      id: :antigravity,
+      command: "antigravity",
+      build_args: &Profiles.Antigravity.build_args/2,
+      parse: &Profiles.Antigravity.parse/1,
+      supported_opts: [:command, :model],
+      prompt_via: :file
     }
   end
 end
