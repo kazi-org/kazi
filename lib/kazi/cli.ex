@@ -957,7 +957,11 @@ defmodule Kazi.CLI do
 
   defp maybe_deprecation_hint(verb) when is_binary(verb) do
     primary = Map.get(@deprecated_primary, verb, verb)
-    IO.puts(:stderr, "note: `kazi #{verb}` is deprecated; use `kazi #{primary}`")
+
+    IO.puts(
+      :stderr,
+      "note: `kazi #{verb}` is deprecated; use `kazi #{primary}` (removed in v0.5.0)"
+    )
   end
 
   # The kazi version, read from the loaded application spec (set from mix.exs at
