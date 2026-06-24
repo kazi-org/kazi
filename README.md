@@ -12,6 +12,13 @@
   <a href="https://github.com/kazi-org/homebrew-tap">Homebrew tap</a>
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/github/stars/kazi-org/kazi?style=flat-square&logo=github&color=f1c40f&labelColor=555555" alt="GitHub Stars"/>
+  <a href="https://github.com/kazi-org/kazi/releases/latest"><img src="https://img.shields.io/github/v/release/kazi-org/kazi?style=flat-square" alt="Latest Release"/></a>
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License: Apache-2.0"/>
+  <a href="https://github.com/kazi-org/kazi/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/kazi-org/kazi/ci.yml?branch=main&style=flat-square&label=CI" alt="CI Status"/></a>
+</p>
+
 # kazi
 
 **Describe what "done" looks like. kazi makes it true — and proves it.**
@@ -47,6 +54,13 @@ flowchart TD
     style Dep fill:#334155,stroke:#475569,color:#f8fafc
 ```
 
+That loop on a real goal — *"tests pass **and** the deployed `/livez` returns ok"* —
+drives the failing predicates to zero and only then reports done:
+
+<p align="center">
+  <img src="assets/proof-loop.svg" alt="kazi reconcile loop converging: across four iterations the failing predicate set shrinks from [tests, livez] to [], then go test passes and the deployed GET /livez returns 200 ok — converged." width="760">
+</p>
+
 It is **not** another coding agent, terminal, or IDE. kazi *drives* the agent you
 already use. As that agent gets better, kazi gets better for free.
 
@@ -65,6 +79,12 @@ Two problems nobody else owns:
    radius" before touching code — so concurrent runs converge instead of conflict.
 3. **Bring Your Own Model (BYOM) & Privacy.** Use cloud models or run entirely locally. Wire kazi to a local model (e.g., Llama 3, Qwen) via `opencode` for zero data leaks. Your code and context never leave your hardware.
 
+> **Why now?** Coding agents are finally good enough to do real work — ship
+> features, fix bugs, wire up tests. That is exactly *why* kazi exists: once
+> agents act autonomously, you need a **controller above them** to decide when
+> they are truly done. That layer didn't exist until now, and it's precisely what
+> kazi is.
+
 ---
 
 ## The 60-second mental model
@@ -81,6 +101,33 @@ kazi loops: **observe** every predicate → the failing ones *are* the to-do lis
 **dispatch** an agent to fix them → **integrate** (open a PR, rebase-merge) →
 **deploy** → **re-check**. It stops only when all predicates are true (`converged`),
 the same checks keep failing (`stuck` → escalate to you), or the budget runs out.
+
+---
+
+## With kazi vs. without
+
+| Without kazi | With kazi |
+|---|---|
+| *"The agent says it's done."* You trust it on faith. | **Every predicate verified true**, with stored evidence. Truth lives in the controller, not the agent. |
+| Two parallel agents edit the same files → merge conflicts. | Agents **lease their blast radius** first — disjoint work runs free, overlapping work serializes. |
+| Green tests on a laptop, broken in production. | A **live predicate** probes the *deployed* endpoint. Green-on-my-machine is never enough. |
+| It stops when it *feels* finished. | It stops only on `converged`, `stuck`, or `over-budget` — and tells you which. |
+
+---
+
+## Who it's for
+
+- **Builders who ship fast but need reliability** — if an agent has ever
+  "finished" something that wasn't actually done, objective termination is the
+  guardrail against plausible-but-broken output.
+- **Teams running parallel coding agents** — resource leases coordinate who edits
+  what *before* any file changes, so concurrent runs converge instead of collide.
+- **Engineers who refuse "works on my machine"** — predicates can verify the live,
+  deployed system, not just the local checkout.
+
+**Not for you (yet) if:** you want an agent to decide *what* to build — that's your
+call; kazi only drives toward an outcome you declare. It also needs a coding
+harness (`claude`, `opencode`, …) on your `PATH`; kazi drives one, it isn't one.
 
 ---
 
