@@ -108,7 +108,7 @@ Emits `{schema_version, proposal_ref, status: "approved", goal_id}`. `kazi rejec
 Apply the approved goal with the cheap harness:
 
 ```sh
-kazi apply <goal-file> --workspace <path> --harness opencode --model dgx/qwen3.6 --json
+kazi apply <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
 ```
 
 Emits ONE terminal result object. Exit code mirrors convergence: `0` only on
