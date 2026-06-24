@@ -38,9 +38,9 @@ plan --json -> (review) -> approve --json -> apply --harness <cheap> --json [--s
                                        parse result, branch on next_action
 ```
 
-> The primary verbs are `kazi plan` and `kazi apply` (ADR-0032). The old verbs
-> `kazi propose` and `kazi run` still work as DEPRECATED ALIASES that print a
-> one-line stderr hint; prefer `plan`/`apply` and never the aliases in new recipes.
+> The verbs are `kazi plan` and `kazi apply` (ADR-0032). The old verbs `run` and
+> `propose` were REMOVED in v0.6.0 (T27.9): they no longer parse and now error as
+> unknown commands. Use `plan`/`apply` (and `mix kazi.apply`, not `mix kazi.run`).
 
 ### 1. author predicates -- `kazi plan --json`
 
@@ -169,8 +169,8 @@ kazi schema [apply|status]    # the versioned --json result schema(s) as data
 ```
 
 `kazi help --json` lists every command with its `summary`, positional `args`, and
-`flags` (`name`, `type`, `description`, `aliases`) -- including the primary verbs
-`apply`/`plan` and the `run`/`propose` deprecated aliases. `kazi schema` emits the
+`flags` (`name`, `type`, `description`, `aliases`) -- the verbs are `apply`/`plan`
+(the `run`/`propose` aliases were removed in v0.6.0, T27.9). `kazi schema` emits the
 versioned result schemas; both are JSON.
 
 ## Verifying a pooled task with kazi

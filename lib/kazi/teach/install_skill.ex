@@ -15,8 +15,8 @@ defmodule Kazi.Teach.InstallSkill do
   ADR-0031 introduced the router with a skill-verb -> CLI-verb MAP; ADR-0032 then
   renamed the CLI verbs themselves (`run` -> `apply`, `propose` -> `plan`), so the
   map is now an IDENTITY for plan/apply and a thin alias for adopt -> init. The old
-  CLI verbs `run`/`propose` remain as DEPRECATED ALIASES (ADR-0032 decision 2); the
-  router teaches only the primary verbs.
+  CLI verbs `run`/`propose` were REMOVED in v0.6.0 (T27.9); `apply`/`plan` are the
+  only verbs, and the router teaches them.
 
   The body still teaches the underlying recipe -- caller-drafts `kazi plan --json`
   -> review -> `kazi approve --json` -> `kazi apply --harness <cheap> --json
@@ -114,10 +114,10 @@ defmodule Kazi.Teach.InstallSkill do
     | `adopt`        | `kazi init`   | reverse-engineer a starter goal-file from an existing repo.        |
 
     The verb you TYPE, the skill, and the CLI now read the same: `plan` and `apply`
-    are the primary CLI verbs (ADR-0032). `adopt` is the one human alias -- it routes
-    to `kazi init`. The legacy CLI verbs `kazi run` and `kazi propose` still work as
-    DEPRECATED ALIASES of `apply`/`plan`; prefer the primary verbs. The full recipe
-    that `plan` and `apply` sit inside (author -> approve -> converge) is below.
+    are the CLI verbs (ADR-0032). `adopt` is the one human alias -- it routes to
+    `kazi init`. The legacy CLI verbs `run`/`propose` were REMOVED in v0.6.0 (T27.9):
+    use `apply`/`plan`. The full recipe that `plan` and `apply` sit inside (author
+    -> approve -> converge) is below.
 
     Confirm the live surface before you drive: `kazi help --json` emits the
     command/flag table and `kazi schema [<command>]` emits the versioned result
