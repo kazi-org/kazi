@@ -25,6 +25,7 @@ defmodule Kazi.Harness.Registry do
   def fetch(:opencode), do: {:ok, opencode()}
   def fetch(:codex), do: {:ok, codex()}
   def fetch(:antigravity), do: {:ok, antigravity()}
+  def fetch(:claw), do: {:ok, claw()}
   def fetch(id) when is_atom(id), do: {:error, {:unknown_harness, id}}
 
   @doc """
@@ -41,7 +42,7 @@ defmodule Kazi.Harness.Registry do
 
   @doc "The ids of all built-in harnesses."
   @spec ids() :: [atom()]
-  def ids, do: [:claude, :opencode, :codex, :antigravity]
+  def ids, do: [:claude, :opencode, :codex, :antigravity, :claw]
 
   # The :claude profile — the default. Its argv + parser are the canonical
   # Claude-specific boundary logic (`Kazi.Harness.Profiles.Claude`), pinned
@@ -116,6 +117,27 @@ defmodule Kazi.Harness.Registry do
       parse: &Profiles.Antigravity.parse/1,
       supported_opts: [:command, :model],
       prompt_via: :file
+    }
+  end
+
+  # The :claw profile (T14.4, ADR-0022) — claw-code, added BEST-EFFORT / DEMO-GRADE
+  # only. claw does NOT meet ADR-0022's structured-output bar: it emits no
+  # documented JSON, has no model flag, and is self-described as "an agent-managed
+  # museum exhibit rather than a production tool." argv is the bare `prompt
+  # <prompt>`; the parser surfaces the RAW stdout as `:result` with NO cost/token
+  # extraction (`Kazi.Harness.Profiles.Claw`). supported_opts is just the per-run
+  # `:command` override (the test-stub seam) — claw understands neither Claude's
+  # hygiene flags nor a `:model`, so resolution (T8.5) drops them. Auth is via env
+  # API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`), supplied by the operator's
+  # environment (forwarded via opts[:env], not a profile concern).
+  @spec claw() :: Profile.t()
+  defp claw do
+    %Profile{
+      id: :claw,
+      command: "claw",
+      build_args: &Profiles.Claw.build_args/2,
+      parse: &Profiles.Claw.parse/1,
+      supported_opts: [:command]
     }
   end
 end
