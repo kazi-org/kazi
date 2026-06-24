@@ -517,4 +517,224 @@ defmodule Kazi.Goal.LoaderTest do
       assert reason =~ "scope.workspace must be a string"
     end
   end
+
+  describe "group taxonomy (T12.1, ADR-0020) — [[group]] array" do
+    alias Kazi.Goal.Group
+
+    test "a goal with no [[group]] loads an empty group set (back-compat)" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "test_runner"}]}
+      assert {:ok, %Goal{groups: []}} = Loader.from_map(data)
+    end
+
+    test "an absent [[group]] loads identically to a goal authored before T12.1" do
+      # A goal-file with no [[group]] must load EXACTLY as it did before this
+      # field existed: groups is [] and nothing else is perturbed.
+      toml = """
+      id = "g"
+      name = "n"
+
+      [[predicate]]
+      id = "p"
+      provider = "test_runner"
+      """
+
+      assert {:ok, goal} = Loader.from_map(Toml.decode!(toml))
+      assert goal.groups == []
+      assert goal.id == "g"
+      assert goal.name == "n"
+      assert [%Predicate{id: "p"}] = goal.predicates
+    end
+
+    test "parses a [[group]] array into a validated group set on the goal" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "identity-access", "name" => "Identity & Access"},
+          %{"id" => "billing", "name" => "Billing", "budget" => 5}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{groups: groups}} = Loader.from_map(data)
+
+      assert [
+               %Group{id: "identity-access", name: "Identity & Access", parent: nil, budget: nil},
+               %Group{id: "billing", name: "Billing", parent: nil, budget: 5}
+             ] = groups
+    end
+
+    test "a group id normalizes case / whitespace / & into a canonical slug" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "Identity & Access", "name" => "Identity & Access"},
+          %{"id" => "  Sign  Up  ", "name" => "Sign Up"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert Enum.map(goal.groups, & &1.id) == ["identity-access", "sign-up"]
+      # The display name is kept verbatim; only the id is normalized.
+      assert Enum.map(goal.groups, & &1.name) == ["Identity & Access", "Sign Up"]
+    end
+
+    test "a parent reference is parsed and stored (normalized), not validated" do
+      # T12.1 stores parent verbatim (normalized); referencing an UNDECLARED
+      # parent is NOT an error here — reference validation is T12.2.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "sign-up", "name" => "Sign Up", "parent" => "Identity & Access"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Group{id: "sign-up", parent: "identity-access"}] = goal.groups
+    end
+
+    test "name defaults to the authored id when omitted" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "billing"}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Group{id: "billing", name: "billing"}] = goal.groups
+    end
+
+    test "a duplicate group id is a load error" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "identity-access", "name" => "Identity & Access"},
+          %{"id" => "billing", "name" => "Billing"},
+          %{"id" => "identity-access", "name" => "Identity & Access (again)"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "duplicate group id"
+      assert reason =~ "identity-access"
+    end
+
+    test "a duplicate that collides only AFTER normalization is a load error" do
+      # The drift guard's whole point: "Identity & Access" and "identity-access"
+      # are the SAME group; declaring both must fail loudly, not silently merge.
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "identity-access", "name" => "Identity Access"},
+          %{"id" => "Identity & Access", "name" => "Identity & Access"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "duplicate group id"
+      assert reason =~ "identity-access"
+      # The hint names the authored value and the slug it normalizes to, so the
+      # author sees WHY two distinct-looking ids collided.
+      assert reason =~ ~s(authored "Identity & Access" normalizes to "identity-access")
+    end
+
+    test "a group missing its id is a validation error" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"name" => "Billing"}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ ~s(missing required key "id")
+    end
+
+    test "a non-positive group budget is a validation error" do
+      data = %{
+        "id" => "g",
+        "group" => [%{"id" => "billing", "budget" => 0}],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ ~s(group "billing" "budget" must be a positive integer)
+    end
+
+    test "a non-array [[group]] is a validation error" do
+      data = %{
+        "id" => "g",
+        "group" => "not-an-array",
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "[[group]] must be an array of tables"
+    end
+
+    test "the group set round-trips through the loader (load -> serialize -> load)" do
+      data = %{
+        "id" => "g",
+        "group" => [
+          %{"id" => "Identity & Access", "name" => "Identity & Access"},
+          %{"id" => "sign-up", "name" => "Sign Up", "parent" => "identity-access", "budget" => 5},
+          %{"id" => "billing", "name" => "Billing"}
+        ],
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, loaded} = Loader.from_map(data)
+      # Serialize the loaded goal back to the canonical map, then re-load it; the
+      # group set must be stable (load -> serialize -> load is a fixpoint).
+      reloaded_map = Kazi.Authoring.serialize_goal(loaded)
+      assert {:ok, reloaded} = Loader.from_map(reloaded_map)
+
+      assert reloaded.groups == loaded.groups
+
+      # And a second round-trip is identical — the canonical form is stable.
+      assert {:ok, again} =
+               reloaded |> Kazi.Authoring.serialize_goal() |> Loader.from_map()
+
+      assert again.groups == loaded.groups
+    end
+
+    test "the full [[group]] taxonomy parses from TOML text" do
+      toml = """
+      id = "g"
+
+      [[group]]
+      id = "Identity & Access"
+      name = "Identity & Access"
+
+      [[group]]
+      id = "sign-up"
+      name = "Sign Up"
+      parent = "identity-access"
+      budget = 5
+
+      [[predicate]]
+      id = "p"
+      provider = "test_runner"
+      """
+
+      assert {:ok, goal} = Loader.from_map(Toml.decode!(toml))
+
+      assert [
+               %Group{id: "identity-access", name: "Identity & Access", parent: nil, budget: nil},
+               %Group{id: "sign-up", name: "Sign Up", parent: "identity-access", budget: 5}
+             ] = goal.groups
+    end
+
+    test "the checked-in grouped example loads its taxonomy" do
+      path = Path.join([File.cwd!(), "priv", "examples", "grouped_taxonomy.toml"])
+      assert {:ok, goal} = Loader.load(path)
+      assert goal.id == "grouped-taxonomy-example"
+
+      assert Enum.map(goal.groups, & &1.id) == ["identity-access", "sign-up", "billing"]
+      assert Enum.find(goal.groups, &(&1.id == "sign-up")).parent == "identity-access"
+      assert Enum.find(goal.groups, &(&1.id == "sign-up")).budget == 5
+    end
+  end
 end
