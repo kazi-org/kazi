@@ -89,3 +89,27 @@ file that does not parse is silently skipped (its surface is simply unreported),
 so a syntax error degrades coverage rather than crashing the scan. Always grep for
 a symbol as a literal string before trusting "this surface is dead." (T13.4,
 2026-06-23.)
+
+## Harness / CLI profiles
+
+### L-0007 #harness #antigravity #non-tty #stdout #landmine -- `antigravity -p` SILENTLY DROPS stdout under a non-TTY subprocess (#76); use `--prompt-file`
+kazi drives every harness as a NON-INTERACTIVE SUBPROCESS (no TTY) and parses its
+stdout (ADR-0001/ADR-0022). Google's Antigravity CLI (`antigravity`, also `agy`)
+has a load-bearing bug for exactly this mode: invoked with the bare `-p` /
+`--prompt` flag, it SILENTLY DROPS its stdout when stdout is not a TTY (a
+pipe/redirect/subprocess) -- issue `google-antigravity/antigravity-cli#76`. The
+process exits 0 with EMPTY stdout, so a naive `-p` profile parses nothing and the
+loop concludes the agent "said nothing" -- a fake non-result, not an error. The
+WORKAROUND (the only conformant path, ADR-0022 decision 3): write the prompt to a
+TEMP FILE and invoke `antigravity run --prompt-file <tmp> --output json --yes`
+(`--yes` auto-approves so it stays non-interactive); read the `--output json`
+envelope back. Because `Kazi.Harness.Profile.build_args` is PURE it cannot create
+the temp file mid-call, so the `:antigravity` profile declares `prompt_via: :file`
+and the `Kazi.Harness.CliAdapter` owns the temp-file IO: it writes the prompt to a
+`.kazi-prompt-*.txt` under the workspace, threads the path to `build_args` as
+`opts[:prompt_file]`, and DELETES it after dispatch (in an `after`, so it cleans up
+even on a missing-binary error or a raise). NEVER add a bare-`-p` Antigravity
+profile -- it will pass a TTY smoke run by hand and then silently no-op under kazi.
+The `:antigravity_live` smoke is the catch if a future release regresses the
+workaround (a dropped stdout -> no `:result` -> no convergence, reported honestly);
+Antigravity may need version pinning. (T14.3, 2026-06-23.)
