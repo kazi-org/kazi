@@ -96,7 +96,7 @@ defmodule Kazi.CLIRunStreamTest do
 
       Enum.each(events, fn event ->
         assert event["event"] == "iteration"
-        assert event["schema_version"] == 1
+        assert event["schema_version"] == 2
         assert is_integer(event["iteration"])
         assert is_list(event["predicates"])
         assert is_boolean(event["converged"])
@@ -111,7 +111,7 @@ defmodule Kazi.CLIRunStreamTest do
       # The FINAL line is the T15.3 run-result object (NOT an iteration event): the
       # stream terminator the orchestrator branches on.
       refute Map.has_key?(result, "event")
-      assert result["schema_version"] == 1
+      assert result["schema_version"] == 2
       assert result["goal_id"] == "cli-e2e"
       assert result["status"] == "converged"
       assert result["next_action"] == "done"

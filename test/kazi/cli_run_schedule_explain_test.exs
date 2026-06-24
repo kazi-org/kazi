@@ -107,7 +107,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["collective"] == "converged"
       assert payload["next_action"] == "done"
 
@@ -307,7 +307,7 @@ defmodule Kazi.CLIRunScheduleExplainTest do
       assert {:ok, payload} = Jason.decode(String.trim(out))
       refute out =~ "SCHEDULE (dry-run"
 
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["mode"] == "explain"
       assert payload["dispatched"] == false
       assert payload["next_action"] == "schedule"

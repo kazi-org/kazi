@@ -140,7 +140,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
       refute out =~ "COLLECTIVE"
       refute out =~ "partitions:"
 
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["goal_id"] == "cli-parallel"
       assert payload["collective"] == "converged"
       assert payload["next_action"] == "done"
@@ -171,7 +171,7 @@ defmodule Kazi.CLIRunParallelJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["collective"] == "stuck"
       assert payload["next_action"] == "investigate"
       assert [%{"status" => "stuck"}] = payload["partitions"]

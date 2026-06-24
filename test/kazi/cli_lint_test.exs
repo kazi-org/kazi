@@ -132,7 +132,7 @@ defmodule Kazi.CLILintTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["goal_id"] == "near-dup-names"
       assert payload["count"] == 1
 

@@ -101,7 +101,7 @@ defmodule Kazi.CLIStatusJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["kind"] == "run"
       assert payload["ref"] == "status-run"
       assert payload["status"] == "in_progress"
@@ -152,7 +152,7 @@ defmodule Kazi.CLIStatusJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["kind"] == "proposal"
       assert payload["ref"] == proposal_ref
       assert payload["status"] == "proposed"
@@ -171,7 +171,7 @@ defmodule Kazi.CLIStatusJsonTest do
       # The error is a JSON object on STDOUT (not stderr prose), so the
       # orchestrator parses one surface and branches on the non-zero exit.
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["schema_version"] == 1
+      assert payload["schema_version"] == 2
       assert payload["error"] =~ "no run or proposal found"
     end
   end

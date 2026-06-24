@@ -205,7 +205,7 @@ defmodule Kazi.Pool.AccBridgeTest do
       refute_received :harness_invoked
 
       assert {:ok, draft} = Jason.decode(String.trim(out))
-      assert draft["schema_version"] == 1
+      assert draft["schema_version"] == 2
       assert draft["proposal_ref"] =~ "prop-"
       assert draft["status"] == "proposed"
 
