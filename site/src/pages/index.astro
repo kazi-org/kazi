@@ -13,6 +13,12 @@ const REPO = "https://github.com/kazi-org/kazi";
 // (see astro.config.mjs `define`), so it can never drift from the actual release.
 const VERSION = __KAZI_VERSION__;
 
+// Render the canonical HARNESSES list as readable prose: "a, b and c".
+const harnessList =
+  HARNESSES.length <= 1
+    ? HARNESSES.join("")
+    : `${HARNESSES.slice(0, -1).join(", ")} and ${HARNESSES[HARNESSES.length - 1]}`;
+
 const features = [
   {
     title: "Objective termination",
@@ -20,7 +26,7 @@ const features = [
   },
   {
     title: "Drives any coding agent",
-    body: `It conducts a harness; it is not one. Today it drives ${HARNESSES.join(" and ")}; add Codex or any CLI agent by declaring a profile — no core change.`,
+    body: `It conducts a harness; it is not one. Today it drives ${harnessList}; add any other CLI agent by declaring a profile — no core change.`,
   },
   {
     title: "Bring Your Own Model",
