@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.21.0](https://github.com/kazi-org/kazi/compare/v1.20.0...v1.21.0) (2026-06-25)
+
+
+### Features
+
+* **mcp:** canonical kazi mcp client config + `init --with-mcp` (T33.3) ([df9c8b9](https://github.com/kazi-org/kazi/commit/df9c8b93c20667823e61642336e39737c353754b))
+
 ## [1.20.0](https://github.com/kazi-org/kazi/compare/v1.19.0...v1.20.0) (2026-06-25)
 
 
