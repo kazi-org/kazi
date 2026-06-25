@@ -91,7 +91,8 @@ defmodule Kazi.Harness.Profiles.Codex do
       cached_input_tokens, output_tokens}`) is summed to a token total, surfaced
       as `:tokens` and `:cost => %{tokens: n}`; when no usage is reported the
       token keys are OMITTED (no fabricated counts — the budget falls back to an
-      estimate, ADR-0008).
+      estimate, ADR-0008). The SAME last usage object is mapped onto the per-field
+      economy envelope (`:usage`/`:usage_raw`/`:usage_fidelity`, T34.2 below).
   """
   @spec parse(String.t()) :: map()
   def parse(output) when is_binary(output) do
@@ -120,6 +121,7 @@ defmodule Kazi.Harness.Profiles.Codex do
     acc
     |> maybe_text(event)
     |> maybe_tokens(event)
+    |> maybe_usage_raw(event)
   end
 
   defp maybe_text(acc, event) do
@@ -136,11 +138,67 @@ defmodule Kazi.Harness.Profiles.Codex do
     end
   end
 
-  # Surface the carried token total as both :tokens and :cost => %{tokens: n}.
+  # T34.2 (ADR-0046): carry the LAST-seen raw usage OBJECT (under a private key
+  # stripped in `finalize/1`) so the per-field economy envelope can be mapped
+  # from it. Distinct from `maybe_tokens/2` (which carries the summed total for
+  # the budget rollup): the split needs the un-summed object, last-wins to match
+  # Codex emitting incremental then terminal `turn.completed` usage.
+  defp maybe_usage_raw(acc, event) do
+    case usage_object(event) do
+      %{} = usage -> Map.put(acc, :__usage_raw, usage)
+      _ -> acc
+    end
+  end
+
+  # Surface the carried token total as :cost => %{tokens: n}, and the carried raw
+  # usage object as the per-field economy envelope, stripping the private carry.
   defp finalize(acc) do
+    acc
+    |> finalize_cost()
+    |> finalize_usage()
+  end
+
+  defp finalize_cost(acc) do
     case Map.get(acc, :tokens) do
       total when is_integer(total) and total > 0 -> Map.put(acc, :cost, %{tokens: total})
       _ -> acc
+    end
+  end
+
+  # The Codex usage object → economy-envelope field map (T34.2). Codex reports
+  # the cached/fresh split natively (`cached_input_tokens`), so each field carries
+  # to its own envelope field rather than being summed away; a field the stream
+  # did not report is OMITTED (absent ≠ zero), and a turn with no usage object is
+  # `:usage_fidelity => :none`.
+  @usage_mapping [
+    {"input_tokens", :input_tokens},
+    {"cached_input_tokens", :cached_input_tokens},
+    {"output_tokens", :output_tokens}
+  ]
+
+  defp finalize_usage(acc) do
+    case Map.pop(acc, :__usage_raw) do
+      {nil, acc} -> mark_no_usage(acc)
+      {usage, acc} -> map_usage(acc, usage)
+    end
+  end
+
+  # No usage object anywhere in the stream. Mark `:none` only when a turn was
+  # otherwise parsed (a `:result`): a fully-empty or unrecognized stream stays
+  # `%{}` — there is no harness turn to annotate, matching the additive contract.
+  defp mark_no_usage(acc) when map_size(acc) == 0, do: acc
+  defp mark_no_usage(acc), do: Map.put(acc, :usage_fidelity, :none)
+
+  defp map_usage(acc, usage) do
+    case Kazi.Harness.Usage.map(usage, @usage_mapping) do
+      {_envelope, :none} ->
+        Map.put(acc, :usage_fidelity, :none)
+
+      {envelope, fidelity} ->
+        acc
+        |> Map.put(:usage, envelope)
+        |> Map.put(:usage_raw, usage)
+        |> Map.put(:usage_fidelity, fidelity)
     end
   end
 

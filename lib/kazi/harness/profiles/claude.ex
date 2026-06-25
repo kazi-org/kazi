@@ -212,8 +212,9 @@ defmodule Kazi.Harness.Profiles.Claude do
   surprising harness.
 
   Recognised fields: `result` (final text), `usage` (summed to a token total,
-  surfaced as `:tokens` and `:cost => %{tokens: n}`), `total_cost_usd`
-  (`:cost_usd`), and a touched working set (`:touched`).
+  surfaced as `:tokens` and `:cost => %{tokens: n}`, AND mapped onto the
+  per-field economy envelope — `:usage`/`:usage_raw`/`:usage_fidelity`, T34.2),
+  `total_cost_usd` (`:cost_usd`), and a touched working set (`:touched`).
   """
   @spec parse(String.t()) :: map()
   def parse(output) when is_binary(output) do
@@ -227,6 +228,7 @@ defmodule Kazi.Harness.Profiles.Claude do
     %{}
     |> put_result(envelope)
     |> put_tokens(envelope)
+    |> put_usage(envelope)
     |> put_cost(envelope)
     |> put_touched(envelope)
   end
@@ -244,6 +246,42 @@ defmodule Kazi.Harness.Profiles.Claude do
   end
 
   defp put_tokens(acc, _envelope), do: acc
+
+  # T34.2 (ADR-0046): map the Anthropic usage object onto the per-field economy
+  # envelope `Kazi.CLI.Usage` renders, KEEPING the raw object alongside and
+  # tagging the parse's fidelity. The four Anthropic fields each carry to a
+  # distinct envelope field rather than being summed away by `total_tokens/1`,
+  # so the cached-vs-fresh split survives to the `--json` result:
+  #
+  #   input_tokens                -> :input_tokens         (fresh prompt input)
+  #   output_tokens               -> :output_tokens        (generated output)
+  #   cache_creation_input_tokens -> :cache_write_tokens   (cache writes)
+  #   cache_read_input_tokens     -> :cached_input_tokens  (cache reads)
+  #
+  # A field the provider did not report is OMITTED (absent ≠ zero); a usage
+  # object reporting none of the four — or an envelope with no `usage` at all —
+  # is `:usage_fidelity => :none`, never a zero-filled split.
+  @usage_mapping [
+    {"input_tokens", :input_tokens},
+    {"output_tokens", :output_tokens},
+    {"cache_creation_input_tokens", :cache_write_tokens},
+    {"cache_read_input_tokens", :cached_input_tokens}
+  ]
+
+  defp put_usage(acc, %{"usage" => %{} = usage}) do
+    case Kazi.Harness.Usage.map(usage, @usage_mapping) do
+      {_envelope, :none} ->
+        Map.put(acc, :usage_fidelity, :none)
+
+      {envelope, fidelity} ->
+        acc
+        |> Map.put(:usage, envelope)
+        |> Map.put(:usage_raw, usage)
+        |> Map.put(:usage_fidelity, fidelity)
+    end
+  end
+
+  defp put_usage(acc, _envelope), do: Map.put(acc, :usage_fidelity, :none)
 
   defp put_cost(acc, %{"total_cost_usd" => cost}) when is_number(cost),
     do: Map.put(acc, :cost_usd, cost)
