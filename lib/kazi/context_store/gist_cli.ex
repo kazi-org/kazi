@@ -250,11 +250,17 @@ defmodule Kazi.ContextStore.GistCLI do
   # --- artifact staging ------------------------------------------------------
 
   # gist indexes FILES; stage the content under a temp file whose basename encodes
-  # the (sanitised) label for traceability, then index it.
+  # the (sanitised) label for traceability, then index it. A unique suffix keeps
+  # concurrent indexes of the SAME label from colliding on one staging path (one
+  # call's post-index `File.rm` would otherwise pull the file out from under
+  # another's `gist index`).
   defp write_artifact(label, content) do
     dir = Path.join(System.tmp_dir!(), "kazi-context-store")
     File.mkdir_p!(dir)
-    name = sanitize(label) <> ".md"
+
+    name =
+      sanitize(label) <> "-" <> Integer.to_string(System.unique_integer([:positive])) <> ".md"
+
     path = Path.join(dir, name)
     File.write!(path, content)
     path
