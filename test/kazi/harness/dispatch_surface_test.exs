@@ -117,6 +117,26 @@ defmodule Kazi.Harness.DispatchSurfaceTest do
       {:ok, profile} = Registry.fetch(:claude)
       assert DispatchSurface.minimal_default(nil, profile: profile) == []
     end
+
+    test "the :ambient OFF switch suppresses the minimal surface (T36.5 surface-off arm)" do
+      {:ok, profile} = Registry.fetch(:claude)
+
+      # Surface ON (default) restricts the dispatch; the :ambient switch reverts it
+      # to the pre-T36.2 ambient surface ([] = no restriction), so the benchmark can
+      # measure the tool-surface lever.
+      assert DispatchSurface.minimal_default(@workspace, profile: profile) != []
+
+      assert DispatchSurface.minimal_default(@workspace,
+               profile: profile,
+               dispatch_surface: :ambient
+             ) == []
+    end
+
+    test "surface_mode/1 labels the arm: :minimal by default, :ambient when switched off" do
+      assert DispatchSurface.surface_mode([]) == :minimal
+      assert DispatchSurface.surface_mode(dispatch_surface: :minimal) == :minimal
+      assert DispatchSurface.surface_mode(dispatch_surface: :ambient) == :ambient
+    end
   end
 
   describe "end-to-end: the surface restricts the Claude argv (the acc)" do
