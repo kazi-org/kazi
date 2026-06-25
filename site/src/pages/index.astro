@@ -4,6 +4,8 @@ import {
   INSTALL_CMD,
   POSITIONING,
   KUBERNETES_LINE,
+  HERO_TAGLINE,
+  INVOCATION_PHRASE,
   HARNESSES,
 } from "../canonical.mjs";
 
@@ -127,8 +129,7 @@ const personas = [
           id="hero-heading"
           class="ui-strong mt-6 text-balance text-4xl font-extrabold tracking-tight sm:text-6xl"
         >
-          Describe what <span class="kazi-text">&ldquo;done&rdquo;</span> looks like.<br />
-          kazi makes it true &mdash; and proves it.
+          {HERO_TAGLINE}
         </h1>
         <p class="ui-body mx-auto mt-6 max-w-2xl text-pretty text-lg">
           <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>. Tell it the
@@ -260,6 +261,63 @@ const personas = [
           ))
         }
       </div>
+    </section>
+
+    <!-- Drive kazi from your coding agent (the invocation phrase) -->
+    <section
+      class="mx-auto max-w-3xl px-6 py-12 text-center"
+      aria-labelledby="drive-heading"
+    >
+      <h2 id="drive-heading" class="ui-strong text-3xl font-bold tracking-tight">
+        Drive kazi from your coding agent
+      </h2>
+      <p class="ui-body mx-auto mt-3 max-w-2xl">
+        You don't operate kazi directly &mdash; your coding agent does. Teach
+        Claude Code the kazi skill once with
+        <code class="ui-body">kazi install-skill</code>, then hand it work in plain
+        language:
+      </p>
+      <p
+        class="kazi-text mx-auto mt-6 text-balance text-2xl font-extrabold tracking-tight"
+      >
+        &ldquo;{INVOCATION_PHRASE}&rdquo;
+      </p>
+      <p class="ui-muted mx-auto mt-4 max-w-2xl text-sm">
+        The agent recognizes the phrase, authors the acceptance predicates with
+        <code class="ui-body">kazi plan</code>, and runs
+        <code class="ui-body">kazi apply</code> until they are
+        <em>objectively</em> true &mdash; the same way
+        <code class="ui-body">use context7</code> pulls Context7 into a session.
+        It's a trigger on the kazi skill, so the phrase routes to kazi only once
+        the skill is installed.
+      </p>
+    </section>
+
+    <!-- What a coding agent says (agent-voiced testimonial) -->
+    <section
+      class="mx-auto max-w-3xl px-6 py-12"
+      aria-labelledby="testimonial-heading"
+    >
+      <h2
+        id="testimonial-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        What a coding agent says
+      </h2>
+      <figure class="ui-card mx-auto mt-10 max-w-2xl rounded-2xl border p-8">
+        <blockquote class="ui-body text-lg leading-relaxed">
+          &ldquo;Left to myself, I'll tell you a task is done the moment the code
+          looks right. kazi won't let me &mdash; it holds the predicates and
+          re-checks them against reality, so I stop claiming &lsquo;done&rsquo;
+          when it isn't. I end up shipping the thing you actually asked for, not
+          the thing I hoped was finished.&rdquo;
+        </blockquote>
+        <figcaption class="ui-muted mt-5 text-sm">
+          &mdash; Claude (Anthropic), describing kazi in its own words.
+          <span class="ui-body">Agent-authored</span>, kept verbatim and labelled
+          as such &mdash; not a human testimonial.
+        </figcaption>
+      </figure>
     </section>
 
     <!-- Who it's for -->
