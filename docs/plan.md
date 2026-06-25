@@ -128,6 +128,11 @@ Open work:
   Opus, capped) only when kazi reports the loop stuck -- so easy slices stay cheap
   and hard slices still converge, predicates keeping every tier honest; the policy
   lives in the skill, not kazi, ADR-0035) -- E30 (+ benchmark T19.7, content T25.11).
+- **UC-046** (kazi keeps its OWN plan + docs healthy: a standing goal trims
+  completed work out of the live plan (lossless archive), lifts the durable
+  knowledge into the tier docs, and holds documentation FRESH via machine-checkable
+  predicates in CI -- so the plan stays small/cheap and the docs never go stale; the
+  flagship self-dogfood, ADR-0036) -- E31.
 
 ## Checkable Work Breakdown
 
@@ -593,6 +598,32 @@ and coherent (T9.9, T16.4 green). No auto-tiering inside kazi (ADR-0035 reject).
 - [ ] T30.4 LIVE dogfood: escalation fires and converges: drive a self-contained fixture goal with the recipe -- start on the cheapest model, force/observe a stuck slice, watch the skill escalate the `--model`, and reach objective-true. Report honestly (did escalation trigger? did it converge? what did it cost vs static?). Gated by the feature-complete dogfood policy (run on the released binary).  Owner: TBD  Est: 2h  verifies: [UC-045, UC-033]  deps: [T30.2, T19.7]  acc: a recorded run where the cheap tier stalls, the skill escalates per the ladder, and the goal converges to objective-true; honest result (including if escalation did NOT help); evidence persisted; uses the released binary.
 - [ ] T30.5 Accuracy + coherence gate for the tiering surfaces: every model id across skill/`AGENTS.md`/README/site verified against the claude-api reference (real current ids only -- e.g. Opus 4.8 / Sonnet 4.6 / Haiku 4.5); commands verified against `kazi help --json`; README<->site (T9.9) + skill/`AGENTS.md` (T16.4) coherence green; the cost claim stays "being measured" until T19.7 lands (no unproven number).  Owner: TBD  Est: 1h  verifies: [UC-045, infrastructure]  deps: [T30.1, T30.2, T25.11]  acc: zero invented/stale model ids; zero unshipped-command references; coherence (T9.9 + T16.4) green; no unproven cost figure stated as measured.
 
+### E31 -- Self-maintaining docs: plan trim + freshness as a kazi standing goal (P1, ADR-0036)
+
+The flagship self-dogfood. `plan.md` is kazi's `goal.toml`; as the project grows it
+bloats (1,142 lines, monolithic today) and the stable docs drift. ADR-0036 makes the
+documentation lifecycle a kazi-reconciled standing goal in THREE layers, with the
+logic in the skill + CI layer and kazi only DRIVING it (no doc engine in core).
+kazi's tier map is fixed: architecture -> `concept.md`, decisions -> `docs/adr/`,
+operations/findings -> `devlog.md`, invariants/landmines -> `lore.md`, raw completed
+plan -> `plan-archive.md` (no `design.md`).
+
+Acceptance for the epic: completed+released epics are trimmed from the live plan
+LOSSLESSLY (verbatim in an append-only archive) by a deterministic tool; their
+durable knowledge is lifted to the tier docs via a gated (propose-then-confirm)
+pass; a doc-freshness predicate set fails CI on drift; the whole lifecycle is
+encoded as a kazi standing goal and PROVEN by running it on this repo. No
+doc-specific logic in kazi core (ADR-0036 reject).
+
+- [ ] T31.1 Split-plan migration (master + epic files): convert the monolithic `docs/plan.md` to the master + include-pointer layout the parser already supports (`### ENN -- Title -> docs/plans/ENN.md`), one file per epic, content byte-identical. This is the structural precondition for clean per-epic archival.  Owner: TBD  Est: 2h  verifies: [UC-046, infrastructure]  deps: []  acc: `plan.md` becomes a master index of `### ENN -- Title -> docs/plans/ENN.md` pointers; each epic body lives in its own file; `parse_plan.py` expands them so the GitHub-sync + WBS still parse identically (same task/epic counts as before the split); `mix`/coherence unaffected.
+- [ ] T31.2 Deterministic, lossless trim tool (Layer 1): a script that, for an epic that is 100% `[x]` AND covered by a release tag, moves its block verbatim from the live plan into an append-only, git-tracked `docs/plan-archive.md` (or archives its epic file), leaving a one-line pointer. Idempotent + reversible; refuses to trim an epic with any open/blocked task or no release. Unit-tested on fixtures.  Owner: TBD  Est: 2.5h  verifies: [UC-046]  deps: [T31.1]  acc: running the tool on a done+released epic moves it to the archive verbatim and leaves a pointer; a partially-done or unreleased epic is left untouched; re-running is a no-op; an ExUnit/script test pins lossless round-trip (archive content == original block).
+- [ ] T31.3 Gated knowledge extraction (Layer 2): a propose-then-confirm pass (the `/ingest` pattern) that, AFTER T31.2 archives a block, lifts only durable nuggets to the correct tier -- invariant/landmine -> `lore.md`, finding/benchmark -> `devlog.md`, decision -> `docs/adr/`, architecture -> `concept.md` -- never deleting from the archive. Routing is reviewed before write.  Owner: TBD  Est: 2h  verifies: [UC-046]  deps: [T31.2]  acc: extraction proposes tier-routed edits for human confirm; nothing is removed from `plan-archive.md`; a mis-route loses no knowledge (archive is the backstop); the tier map matches ADR-0036 (concept.md, not design.md).
+- [ ] T31.4 Doc-freshness predicate set (Layer 3, definition): define machine-checkable predicates -- (a) every shipped CLI command appears in README + `kazi help --json`; (b) no doc references a symbol/command absent from the code; (c) every ADR referenced by a doc exists; (d) no `[x]` task older than the last release remains in the live plan; plus the existing README<->site (T9.9) and skill<->CLI (T16.4) checks folded in. Expressed as kazi predicates.  Owner: TBD  Est: 2h  verifies: [UC-046, UC-037]  deps: []  acc: each predicate is a runnable check returning pass/fail with the offending location; the set is documented; a deliberately-stale doc (names a non-existent command) fails; coherence checks (T9.9/T16.4) are subsumed, not duplicated.
+- [ ] T31.5 Freshness CI gate (Layer 3, enforcement): wire the T31.4 predicates into CI -- warn first, then ratchet to blocking (the E29 gate pattern) -- so doc drift fails the build.  Owner: TBD  Est: 1h  verifies: [UC-046, infrastructure]  deps: [T31.4]  acc: a PR that ships a command without documenting it (or names a dead symbol) fails the freshness job; a clean PR passes; the warn->blocking ratchet is documented; runs on every PR.
+- [ ] T31.6 Encode the lifecycle as a kazi STANDING goal: author a standing goal-file whose predicates are "plan trimmed (no done+released epic in the live plan)" + the T31.4 freshness set, with actions wired to the T31.2 trim + T31.3 extraction; Layer 1/3 auto, Layer 2 keeps the human-confirm gate. kazi DRIVES it (no doc logic in core).  Owner: TBD  Est: 2h  verifies: [UC-046]  deps: [T31.2, T31.4]  acc: a committed standing goal-file kazi can reconcile; the predicates are the T31.2/T31.4 checks; Layer-2 writes require confirm; no doc-specific code added to kazi core (the actions shell out to the skill/CI tools).
+- [ ] T31.7 LIVE dogfood -- run the standing goal on THIS repo: drive the E31 standing goal against kazi itself -- trim the already-done+released epics (e.g. E12/E13/E14/E18/E24/E29), extract their knowledge to the tier docs, and bring the freshness predicates green. Report honestly (what trimmed, what extracted, did freshness pass). Uses the released binary per the feature-complete dogfood policy.  Owner: TBD  Est: 2h  verifies: [UC-046, UC-033]  deps: [T31.6]  acc: a recorded run where the live plan shrinks (done epics archived losslessly), knowledge lands in the tier docs, and the freshness gate is green; honest result incl. anything skipped; evidence persisted.
+- [ ] T31.8 Docs + positioning (self-maintaining docs as a kazi capability): document the doc-lifecycle in `concept.md` + README (kazi keeps its own plan/docs healthy -- the dogfood), and cross-link the tier map (ADR-0036). Coherence (T9.9/T16.4) green.  Owner: TBD  Est: 1h  verifies: [UC-046, UC-035]  deps: [T31.7]  acc: `concept.md`/README describe the trim+freshness lifecycle and the tier map; only real commands; coherence green; deployed live if the site changes.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -644,6 +675,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E28 (doc-sync, autonomous -- start now):** T28.1 (concept scheduler), T28.2 (concept waves + agent/router) in PARALLEL now (no deps) -> T28.3 (README how-it-works + ADRs, after T27.6 for verb consistency) -> T28.4 (accuracy + coherence gate).
 - **Wave E29 (OSS gates, autonomous):** T29.1 (docs-with-code CI guard), T29.2 (no-leak CI guard) in PARALLEL -> T29.3 (scrub existing leaks, after T29.2). Independent of feature epics; safe to land early.
 - **Wave E30 (adaptive tiering, skill-driven, ADR-0035):** T30.1 (skill+AGENTS.md default to in-family tiering) + T30.3 (verify `--json` signal sufficiency) in PARALLEL -> T30.2 (escalate-on-stuck recipe) -> T19.7 (3-arm benchmark incl. escalating) -> T30.4 (live escalation dogfood) ; T30.5 (accuracy+coherence gate) + T25.11 (content) after T30.1/T30.2. Skill-layer only; no kazi-core policy. T30.1/T30.3 unblocked now.
+- **Wave E31 (self-maintaining docs, ADR-0036):** T31.1 (split-plan migration) -> T31.2 (deterministic trim tool) -> T31.3 (gated extraction) ; T31.4 (freshness predicates, parallel/unblocked) -> T31.5 (freshness CI gate) ; T31.6 (standing goal) after T31.2+T31.4 -> T31.7 (live dogfood on this repo) -> T31.8 (docs/positioning). Logic in skill+CI; kazi drives. T31.1/T31.4 unblocked now.
 
 ## Risk Register
 
@@ -684,6 +716,10 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E25-5 | Distribution rides the Claude Code / MCP host; a host change breaks the install/invocation story. | Med | Low | Keep multi-harness (Codex/opencode) in the on-ramp (the Cline lesson); the invocation phrase (T25.6) is documented + coherence-checked (T16.4); instrument downloads/retention, not stars. |
 | R-E30-1 | Escalation triggers too eagerly (collapses to always-frontier -> no saving) or too lazily (wastes cheap-tier iterations / never converges). | Med | Med | The ladder is bounded + capped (ADR-0035); the 3-arm benchmark (T19.7) reports $/tokens AND convergence/correctness per arm so a collapse-to-frontier or cheaper-but-fails outcome is VISIBLE; the stuck threshold is a tunable skill knob; predicates make a wrong tier fail to converge, never a false done. |
 | R-E30-2 | Pressure to "just put tiering in kazi core" (auto-select by phase/difficulty) -- the derail ADR-0033/0035 reject. | Low | Med | Policy stays in the skill (orchestrator); kazi only exposes `--model` + reports state; T30.3 permits at most a read-only signal enrichment, never model-selection logic; reviewers cite ADR-0035's rejected-alternative. |
+| R-E31-1 | The deterministic trim (T31.2) mis-judges "released" and archives in-flight work. | Med | Low | Trim requires BOTH all-`[x]` AND a release tag covering the epic; the archive is append-only + git-tracked so any wrong move is reversible; refuses any epic with an open/blocked task. |
+| R-E31-2 | Doc-freshness predicates (T31.4/T31.5) are too strict -> CI thrashes and gets disabled. | Med | Med | Warn-first then ratchet to blocking (the E29 pattern); predicates scoped to SHIPPED surfaces (commands in `help --json`, real symbols); each failure names the exact location so fixes are cheap. |
+| R-E31-3 | An autonomous standing goal (T31.6) churns docs or loops. | Med | Low | Objective convergence (the predicates gate it); Layer-2 extraction keeps a human-confirm gate; kazi's budget/stuck termination bounds it; Layer 1/3 are mechanical/idempotent. |
+| R-E31-4 | Pressure to build a doc engine INTO kazi core -- the derail ADR-0036 rejects. | Low | Med | Trim/extraction/freshness logic lives in the skill + CI layer; the standing goal's actions shell out to those tools; kazi stays a pure controller (ADR-0023 line); reviewers cite ADR-0036's rejected-alternative. |
 | R-E26-1 | The router claims `kazi apply` replaces `/apply --pool` before the native scheduler is proven at scale (E21/E23 dogfoods open). | High | Med | ADR-0031 decision 6 + T26.6: the subsumption claim is GATED on T21.12/T23.9 passing; until then the on-ramp marks it "coming" and keeps `/apply --pool` as the documented interop fallback (ADR-0026). |
 | R-E26-2 | Skill-verb vs CLI-verb mismatch (apply->run, plan->propose) confuses users or drifts from the CLI. | Med | Med | The verb map is documented in the router SKILL.md (T26.1); the skill<->CLI coherence guard (T16.4/T26.5) asserts every sub-skill routes to a real `kazi help --json` command; `kazi run` is not renamed. |
 | R-E26-3 | Retiring loop/qualify from the code on-ramp loses capability for non-code or edge cases. | Low | Med | They are retired only from the CODE on-ramp; both remain general skills for non-code work; `/plan` (intent) + `/tidy` (hygiene) are explicitly kept (ADR-0031). |
@@ -715,6 +751,21 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (E31: self-maintaining docs as a kazi standing goal; ADR-0036)
+- Operator directive (via /plan discussion): plan.md is kazi's goal.toml; it bloats
+  (1,142 lines, monolithic) and docs go stale; the existing trim (/plan step-0,
+  /tidy) is "not working very well." Chosen direction: FULL 3-layer design driven by
+  a kazi STANDING goal, dogfooded via kazi.
+- **Added ADR-0036**: doc lifecycle as a kazi-reconciled standing goal -- (L1)
+  deterministic lossless trim of done+released epics to an append-only archive; (L2)
+  gated knowledge extraction to the tier docs; (L3) doc-freshness predicates in CI.
+  kazi DRIVES; logic stays in the skill+CI layer (no doc engine in core). Fixes the
+  kazi tier map (architecture -> concept.md, NOT design.md).
+- **Added E31** (P1, ADR-0036): T31.1 split-plan migration, T31.2 deterministic trim
+  tool, T31.3 gated extraction, T31.4 freshness predicates, T31.5 freshness CI gate,
+  T31.6 standing goal, T31.7 live dogfood on this repo, T31.8 docs/positioning.
+  Wave E31; UC-046; risks R-E31-1..4. T31.1/T31.4 unblocked now.
 
 ### 2026-06-24 -- Change Summary (T25.12: close all-stars.md growth-playbook gap #10)
 - Audited the `tmp/all-stars.md` growth research (docs/site playbook vs fast-growing
