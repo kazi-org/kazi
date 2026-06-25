@@ -490,7 +490,11 @@ parsed output, not its exit code (the class of "the gate silently passed" bug,
 designed out). See [`docs/custom-script-provider.md`](docs/custom-script-provider.md),
 `kazi schema custom_script`, and the recipes in
 [`priv/examples/`](priv/examples/) (`custom_script_sarif.toml`,
-`custom_script_junit.toml`, `custom_script_mutation.toml`).
+`custom_script_junit.toml`, `custom_script_mutation.toml`). A fuller
+off-the-shelf catalog — contract/schema compat, perf/size, secret scanning, a11y,
+IaC/container scan, visual regression — plus the two evidence tiers and the
+per-tool exit-code gotchas is in
+[`docs/custom-script-recipes.md`](docs/custom-script-recipes.md).
 
 `ratchet` is the **no-regression** mode: a metric passes only while it stays
 within `allowed_regression` of a `baseline`, read through `direction`
