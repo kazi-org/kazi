@@ -55,7 +55,10 @@ defmodule Kazi.Runtime do
     # T32.1 (ADR-0040): the generic command-runner — the sanctioned extension
     # point. A new verification kind is CONFIG (a goal-file verdict), not a kazi
     # release.
-    custom_script: Kazi.Providers.CustomScript
+    custom_script: Kazi.Providers.CustomScript,
+    # T32.3 (ADR-0041): the first-class ratchet mode — signal-vs-baseline within
+    # an allowed regression. Coverage/perf/size are configs of this one provider.
+    ratchet: Kazi.Providers.Ratchet
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The

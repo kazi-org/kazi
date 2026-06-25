@@ -153,6 +153,7 @@ defmodule Kazi.Goal.Loader do
   | `"prod_log"`      | `:prod_log`      | prod-log query (T1.6) |
   | `"browser"`       | `:browser`       | Playwright UI check (T2.2) |
   | `"custom_script"` | `:custom_script` | generic command-runner (T32.1, ADR-0040) |
+  | `"ratchet"`       | `:ratchet`       | signal-vs-baseline ratchet (T32.3, ADR-0041) |
 
   An unknown `provider` is a validation error rather than a silently-accepted
   atom, so a typo fails loudly at load time instead of at dispatch time.
@@ -163,6 +164,13 @@ defmodule Kazi.Goal.Loader do
   `path`/`pass_when`, a malformed `pass_when`, or an `exit_code` verdict without
   `pass_codes` is a load error). See `Kazi.Providers.CustomScript` and
   `kazi schema custom_script` for the full key reference.
+
+  A `ratchet` predicate carries `metric` (an inline table with a `cmd`), a
+  `baseline` (a number, `"stored"`/`"prior"`, or a git ref), a `direction`
+  (`"higher_better"`/`"lower_better"`), and an optional `allowed_regression`,
+  all VALIDATED at load time (a missing `metric.cmd`, an unknown `direction`, or
+  a missing `baseline` is a load error). See `Kazi.Providers.Ratchet` and
+  `kazi schema ratchet`.
 
   ## Example
 
@@ -189,7 +197,11 @@ defmodule Kazi.Goal.Loader do
     # T32.1 (ADR-0040): the generic command-runner. Its verdict/evidence keys are
     # validated below (validate_custom_script/2) so a mis-declared verdict fails
     # loudly at load time, not silently at dispatch.
-    "custom_script" => :custom_script
+    "custom_script" => :custom_script,
+    # T32.3 (ADR-0041): the first-class ratchet mode — signal-vs-baseline within
+    # an allowed regression. Its metric/baseline/direction keys are validated
+    # below so a missing metric command or unknown direction fails at load time.
+    "ratchet" => :ratchet
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -846,7 +858,92 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T32.3 (ADR-0041): a ratchet predicate's metric/baseline/direction keys are
+  # checked so a missing metric command, an unknown direction, a missing baseline,
+  # or a non-numeric allowed_regression fails loudly at load, not at dispatch.
+  defp validate_provider_config(:ratchet, config, id) do
+    with :ok <- validate_ratchet_metric(config, id),
+         :ok <- validate_ratchet_direction(config, id),
+         :ok <- validate_ratchet_baseline(config, id) do
+      validate_ratchet_allowed_regression(config, id)
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  # --- ratchet (T32.3, ADR-0041) ---------------------------------------------
+
+  # The metric is an inline table (string-keyed: the loader only atomizes
+  # top-level predicate keys), and must declare a non-empty `cmd`.
+  defp validate_ratchet_metric(config, id) do
+    case Map.get(config, :metric) do
+      metric when is_map(metric) ->
+        case fetch_either(metric, "cmd") do
+          cmd when is_binary(cmd) and cmd != "" ->
+            :ok
+
+          _ ->
+            {:error,
+             "ratchet predicate #{inspect(id)} requires a metric table with a non-empty " <>
+               "string \"cmd\""}
+        end
+
+      _ ->
+        {:error, "ratchet predicate #{inspect(id)} requires a \"metric\" table"}
+    end
+  end
+
+  defp validate_ratchet_direction(config, id) do
+    case Map.get(config, :direction) do
+      direction when direction in ["higher_better", "lower_better"] ->
+        :ok
+
+      other ->
+        {:error,
+         "ratchet predicate #{inspect(id)} requires \"direction\" of " <>
+           "\"higher_better\" or \"lower_better\" (got #{inspect(other)})"}
+    end
+  end
+
+  # The baseline is a number (a fixed threshold), "stored"/"prior" (the stored
+  # prior value), or a non-empty git ref string.
+  defp validate_ratchet_baseline(config, id) do
+    case Map.get(config, :baseline) do
+      n when is_number(n) ->
+        :ok
+
+      s when is_binary(s) and s != "" ->
+        :ok
+
+      nil ->
+        {:error, "ratchet predicate #{inspect(id)} requires a \"baseline\""}
+
+      other ->
+        {:error, "ratchet predicate #{inspect(id)} \"baseline\" is invalid: #{inspect(other)}"}
+    end
+  end
+
+  defp validate_ratchet_allowed_regression(config, id) do
+    case Map.get(config, :allowed_regression) do
+      nil ->
+        :ok
+
+      n when is_number(n) ->
+        :ok
+
+      other ->
+        {:error,
+         "ratchet predicate #{inspect(id)} \"allowed_regression\" must be a number (got #{inspect(other)})"}
+    end
+  end
+
+  # An inline-table value may arrive string- or atom-keyed depending on authoring;
+  # read whichever is present.
+  defp fetch_either(map, key) do
+    Map.get(map, key) || Map.get(map, String.to_existing_atom(key))
+  rescue
+    ArgumentError -> Map.get(map, key)
+  end
 
   defp validate_custom_script_cmd(config, id) do
     case Map.get(config, :cmd) do

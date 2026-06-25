@@ -132,7 +132,63 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
-  @schemas %{"custom_script" => @custom_script}
+  @ratchet %{
+    kind: "ratchet",
+    title: "ratchet predicate config",
+    description:
+      "The first-class ratchet mode (ADR-0041): a metric passes iff it stays within " <>
+        "allowed_regression of a baseline, interpreted through direction. Coverage, perf, and " <>
+        "size are configs of this one mode. Reports score = signal.",
+    keys: [
+      %{
+        name: "metric",
+        type: "table",
+        required: true,
+        description:
+          "How to produce the signal: a table with cmd (required), args, env, path (a JSONPath " <>
+            "subset over JSON stdout; absent means stdout is the number), timeout_ms."
+      },
+      %{
+        name: "baseline",
+        type: "number | string",
+        required: true,
+        description:
+          "The bar: a number (fixed threshold), \"stored\"/\"prior\" (the metric's own last " <>
+            "passing value, persisted and tightened on a pass; first run seeds it), or a git " <>
+            "ref (\"HEAD~1\", \"main\": the metric recomputed at that ref)."
+      },
+      %{
+        name: "direction",
+        type: "string",
+        required: true,
+        description:
+          "\"higher_better\" (coverage, mutation score: down is worse) or \"lower_better\" " <>
+            "(size, latency, lint count: up is worse)."
+      },
+      %{
+        name: "allowed_regression",
+        type: "number",
+        required: false,
+        description:
+          "The tolerated worsening. Default 0 — \"may only improve\" (the anti-gaming guard " <>
+            "substrate, ADR-0042)."
+      }
+    ],
+    example: %{
+      "id" => "coverage-no-regression",
+      "provider" => "ratchet",
+      "baseline" => "stored",
+      "direction" => "higher_better",
+      "allowed_regression" => 0.0,
+      "metric" => %{
+        "cmd" => "scripts/coverage",
+        "args" => ["--json"],
+        "path" => "$.totals.percent"
+      }
+    }
+  }
+
+  @schemas %{"custom_script" => @custom_script, "ratchet" => @ratchet}
 
   @doc "The provider kinds with a documented config schema, sorted."
   @spec kinds() :: [String.t()]
