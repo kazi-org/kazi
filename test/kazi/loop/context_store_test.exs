@@ -115,6 +115,9 @@ defmodule Kazi.Loop.ContextStoreTest do
         end)
 
       assert prompt =~ "## Indexed evidence (context store)"
+      # T35.9: the inner-harness contract rule travels with the snippets.
+      assert prompt =~ "request a targeted source/query"
+      assert prompt =~ "do not ask for whole logs or whole docs"
     end
 
     test "the secret is redacted everywhere it could egress", %{big: big} do
