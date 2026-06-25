@@ -84,9 +84,61 @@ defmodule Kazi.CLIRunJsonTest do
       assert payload["budget_spent"]["iterations"] == payload["iterations"]
       assert payload["budget_spent"]["exceeded"] == nil
 
+      # ADR-0046 back-compat: `budget_spent.tokens` is always present as the single
+      # rolled-up total — an orchestrator pinning the pre-envelope contract keeps
+      # reading it. This stub harness reports no usage, so the total is 0…
+      assert payload["budget_spent"]["tokens"] == 0
+      # …and the additive `usage` envelope is OMITTED entirely (absent ≠ zero):
+      # a no-usage run is byte-identical to the pre-envelope contract.
+      refute Map.has_key?(payload, "usage")
+
       # The predicate VECTOR: a {id, verdict} per predicate, every one passing.
       vector = Map.new(payload["predicates"], &{&1["id"], &1["verdict"]})
       assert vector == %{"code" => "pass", "live" => "pass"}
+    end
+
+    test "a harness reporting usage emits the additive usage envelope, omitting unreported fields",
+         %{tmp_dir: tmp_dir} do
+      %{work: work, bare: bare} = setup_repo(tmp_dir)
+
+      {server, url, body_file} = start_http_server("down")
+      on_exit(fn -> :inets.stop(:httpd, server) end)
+
+      goal_file = write_goal_file(tmp_dir, work, url)
+
+      # A converge harness that ALSO emits a Claude JSON envelope with a usage
+      # object + total_cost_usd, so the loop accumulates real usage.
+      runtime_opts =
+        converge_runtime_opts(
+          tmp_dir,
+          work,
+          url,
+          body_file,
+          bare,
+          write_json_harness_stub(tmp_dir)
+        )
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+                   0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["schema_version"] == 2
+      assert payload["status"] == "converged"
+
+      # Back-compat: the rolled-up token total is the summed Claude usage
+      # (100 + 250 + 0 + 5000 = 5350 per dispatch), surfaced in budget_spent.tokens.
+      assert payload["budget_spent"]["tokens"] > 0
+
+      # The additive envelope is PRESENT and carries the reported cost…
+      usage = payload["usage"]
+      assert is_map(usage)
+      assert usage["cost_usd"] > 0
+      # …while components the harness did not report as a distinct envelope field
+      # are OMITTED (absent ≠ zero), not zero-filled.
+      refute Map.has_key?(usage, "reasoning_tokens")
     end
   end
 
@@ -201,8 +253,8 @@ defmodule Kazi.CLIRunJsonTest do
   # helpers (mirroring Kazi.CLITest's run-injection style)
   # ===========================================================================
 
-  defp converge_runtime_opts(tmp_dir, work, url, body_file, bare) do
-    harness_stub = write_harness_stub(tmp_dir)
+  defp converge_runtime_opts(tmp_dir, work, url, body_file, bare, harness_stub \\ nil) do
+    harness_stub = harness_stub || write_harness_stub(tmp_dir)
     deploy_stub = write_deploy_stub(tmp_dir, url, body_file)
     test_pid = self()
 
@@ -343,6 +395,27 @@ defmodule Kazi.CLIRunJsonTest do
 
   # A noop harness stub: it runs but never satisfies the code predicate, so the
   # loop keeps dispatching until the budget / stuck ceiling stops it.
+  # A converge harness that satisfies the code predicate (writes fixed.txt) AND
+  # emits a Claude JSON result envelope on stdout — a `usage` object the profile
+  # sums into the token total, plus a `total_cost_usd` the loop surfaces as the
+  # additive `usage.cost_usd`. Used to exercise a POPULATED usage envelope
+  # end-to-end (T34.1, ADR-0046).
+  defp write_json_harness_stub(tmp_dir) do
+    path = Path.join(tmp_dir, "stub_json_harness.sh")
+
+    File.write!(path, """
+    #!/bin/sh
+    echo "the converged fix" > fixed.txt
+    cat <<'JSON'
+    {"type":"result","subtype":"success","is_error":false,"result":"Made the failing test pass.","total_cost_usd":0.0123,"usage":{"input_tokens":100,"output_tokens":250,"cache_creation_input_tokens":0,"cache_read_input_tokens":5000}}
+    JSON
+    exit 0
+    """)
+
+    File.chmod!(path, 0o755)
+    path
+  end
+
   defp write_noop_harness_stub(tmp_dir) do
     path = Path.join(tmp_dir, "stub_noop_harness_#{System.unique_integer([:positive])}.sh")
 
