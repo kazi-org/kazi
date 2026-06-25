@@ -79,6 +79,17 @@ defmodule Mix.Tasks.Kazi.Bench do
       come from the captured envelopes' `total_cost_usd`/`usage`; convergence +
       correctness from the result (a cheaper-but-WRONG arm is VISIBLE, never a
       false done).
+    * `--tier-surface <dir>` — aggregate the recorded TIER × SURFACE arms (T36.5,
+      ADR-0047) into the per-arm `$`/tokens + cost/converged-predicate +
+      convergence/correctness + stuck table: the two inner-harness knobs kazi owns,
+      the context TIER (`Kazi.Context.Tier` 0–4) and the tool-SURFACE
+      (`Kazi.Harness.DispatchSurface` `:minimal`/on vs `:ambient`/off). Arm labels
+      are `t<tier>-<on|off>` (e.g. `t1-on`); each contributes `<arm>.result.json`
+      (its terminal `kazi apply --json`) + its captured per-dispatch
+      `claude --output-format json` envelopes (`<arm>.NNN.json`). The real
+      `$`/tokens come from the envelopes; tier/surface from the label; convergence
+      + correctness + stuck from the result. The benchmark whose verdict SETS the
+      tier/surface defaults (docs/devlog.md).
     * `--help`             — print this usage (the 3 arms + how to run) and exit.
   """
 
@@ -100,6 +111,7 @@ defmodule Mix.Tasks.Kazi.Bench do
           captures: :string,
           kpis: :string,
           tiering: :string,
+          tier_surface: :string,
           help: :boolean
         ],
         aliases: [h: :help]
@@ -108,6 +120,9 @@ defmodule Mix.Tasks.Kazi.Bench do
     cond do
       opts[:help] ->
         Mix.shell().info(usage())
+
+      opts[:tier_surface] ->
+        tier_surface_from_runs(opts[:tier_surface])
 
       opts[:tiering] ->
         tiering_from_runs(opts[:tiering])
@@ -217,6 +232,62 @@ defmodule Mix.Tasks.Kazi.Bench do
     Mix.shell().info(table)
   end
 
+  # T36.5 (ADR-0047): aggregate the recorded TIER × SURFACE arms from `dir` into the
+  # per-arm `$`/tokens + cost/converged-predicate + convergence/correctness + stuck
+  # table — the inner-harness context-budget proof. Each arm contributes
+  # `<arm>.result.json` (its terminal `kazi apply --json` object) and its captured
+  # per-dispatch `claude --output-format json` envelopes (`<arm>.NNN.json`). Arm
+  # labels are `t<tier>-<on|off>`; they sort by tier then surface for a stable
+  # ladder. The real `$`/tokens come from the captured envelopes; tier/surface from
+  # the label; convergence/correctness/stuck from the result. The deterministic
+  # offline path the bench-shaped acceptance exercises.
+  defp tier_surface_from_runs(dir) do
+    report =
+      dir
+      |> arm_labels()
+      |> Enum.map(fn arm -> {arm, read_result(dir, arm), read_envelopes(dir, arm)} end)
+
+    table = report |> Bench.tier_surface_report() |> Bench.render_tier_surface_table()
+    Mix.shell().info("kazi.bench — per-arm tier × surface table (T36.5, ADR-0047)\n")
+    Mix.shell().info(table)
+  end
+
+  # Discover the arm labels in `dir` from the `<arm>.result.json` files, sorted by
+  # (tier, surface) so the ladder reads t0 → t4 and on before off within a tier.
+  defp arm_labels(dir) do
+    dir
+    |> Path.join("*.result.json")
+    |> Path.wildcard()
+    |> Enum.map(&(Path.basename(&1) |> String.replace_suffix(".result.json", "")))
+    |> Enum.sort_by(&arm_sort_key/1)
+  end
+
+  defp arm_sort_key(arm) do
+    tier =
+      case Regex.run(~r/^t(\d+)/, arm) do
+        [_, d] -> String.to_integer(d)
+        _ -> 99
+      end
+
+    surface = if String.ends_with?(arm, "-off"), do: 1, else: 0
+    {tier, surface, arm}
+  end
+
+  defp read_result(dir, arm) do
+    case File.read(Path.join(dir, "#{arm}.result.json")) do
+      {:ok, body} -> Jason.decode!(body)
+      _ -> %{}
+    end
+  end
+
+  defp read_envelopes(dir, arm) do
+    dir
+    |> Path.join("#{arm}.[0-9]*.json")
+    |> Path.wildcard()
+    |> Enum.sort()
+    |> Enum.map(&File.read!/1)
+  end
+
   # Discover the arm labels in `dir` from the `<arm>.result.json` files, ordering
   # the canonical tiering arms first (in ladder order) and any extras alpha-sorted.
   @tiering_canonical ["vanilla-frontier", "static-cheap", "escalating"]
@@ -287,6 +358,12 @@ defmodule Mix.Tasks.Kazi.Bench do
                           static-cheap vs escalating). Each arm: <arm>.result.json
                           (terminal `apply --json`) + captured <arm>.NNN.json
                           `claude --output-format json` envelopes.
+      --tier-surface <dir> aggregate the recorded TIER × SURFACE arms (T36.5,
+                          ADR-0047) into the per-arm $/tokens + cost/converged-
+                          predicate + convergence/correctness + stuck table (the
+                          context tier 0-4 × tool-surface on/off knobs). Arm labels
+                          `t<tier>-<on|off>`; each: <arm>.result.json + captured
+                          <arm>.NNN.json envelopes. Sets the tier/surface defaults.
       --help, -h          print this usage and exit
     """
   end
