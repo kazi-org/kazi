@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.28.0](https://github.com/kazi-org/kazi/compare/v1.27.0...v1.28.0) (2026-06-25)
+
+
+### Features
+
+* **init:** add `kazi init --with-gist` to opt a repo into the Gist context store ([2a3a39e](https://github.com/kazi-org/kazi/commit/2a3a39eb494445ad49ed3d325a014bf94232ce2e))
+
 ## [1.27.0](https://github.com/kazi-org/kazi/compare/v1.26.0...v1.27.0) (2026-06-25)
 
 
