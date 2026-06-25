@@ -71,6 +71,30 @@ test.describe("kazi website smoke", () => {
     await expect(page.locator("pre", { hasText: INSTALL_CMD })).toBeVisible();
   });
 
+  test("nav shows a Docs link to the concept doc", async ({ page }) => {
+    await page.goto("/");
+    // T25.12: the primary nav exposes a Docs entry pointing at concept.md on
+    // GitHub (until a rendered /docs exists — the T22.6 decision).
+    const docsLink = page
+      .getByRole("navigation", { name: "Primary" })
+      .getByRole("link", { name: "Docs", exact: true });
+    await expect(docsLink).toBeVisible();
+    await expect(docsLink).toHaveAttribute(
+      "href",
+      `${REPO}/blob/main/docs/concept.md`,
+    );
+  });
+
+  test("footer links to community help (Discussions)", async ({ page }) => {
+    await page.goto("/");
+    // T25.12: the footer carries a getting-help link to GitHub Discussions.
+    const helpLink = page
+      .getByRole("contentinfo")
+      .getByRole("link", { name: "Discussions", exact: true });
+    await expect(helpLink).toBeVisible();
+    await expect(helpLink).toHaveAttribute("href", `${REPO}/discussions`);
+  });
+
   test("links to the GitHub repo", async ({ page }) => {
     await page.goto("/");
     const repoLinks = page.locator(`a[href="${REPO}"]`);
