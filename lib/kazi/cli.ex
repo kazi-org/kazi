@@ -265,7 +265,7 @@ defmodule Kazi.CLI do
     %{
       name: "schema",
       summary:
-        "Emit the versioned result schema(s) for --json output, optionally for one command.",
+        "Emit the versioned --json result schema(s), or a predicate-provider config schema (e.g. custom_script).",
       args: [%{name: "command", required: false}],
       flags: [:json]
     },
@@ -296,7 +296,7 @@ defmodule Kazi.CLI do
       kazi export <goal-file> --obsidian <dir> [--json]   # write an Obsidian vault
       kazi lint <goal-file> [--json]              # advisory near-duplicate group-name warnings
       kazi help [--json]                          # --json: the command/flag surface
-      kazi schema [<command>]                      # the versioned --json result schema(s)
+      kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
 
   ARGUMENTS:
       <goal-file>            Path to a TOML goal-file (see Kazi.Goal.Loader).
@@ -974,9 +974,29 @@ defmodule Kazi.CLI do
         0
 
       :error ->
+        # T32.1 (ADR-0040): fall back to the predicate-provider config schemas
+        # (`kazi schema custom_script`) before reporting an unknown command, so the
+        # one `schema` surface self-describes both `--json` results AND provider
+        # config keys.
+        execute_provider_schema(command)
+    end
+  end
+
+  # T32.1 (ADR-0040): emit a predicate-provider kind's config-key schema, or a
+  # JSON error (preserving the "no result schema" marker the unknown-command tests
+  # pin) listing both the result-schema commands and the provider kinds.
+  @spec execute_provider_schema(String.t()) :: exit_code()
+  defp execute_provider_schema(command) do
+    case Kazi.Predicate.Schema.fetch(command) do
+      {:ok, schema} ->
+        IO.puts(Jason.encode!(schema))
+        0
+
+      :error ->
         emit_json_error(
           "no result schema for #{inspect(command)} " <>
-            "(schemas exist for: #{Enum.join(Kazi.CLI.Schema.commands(), ", ")})"
+            "(result schemas: #{Enum.join(Kazi.CLI.Schema.commands(), ", ")}; " <>
+            "provider schemas: #{Enum.join(Kazi.Predicate.Schema.kinds(), ", ")})"
         )
 
         1
