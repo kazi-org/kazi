@@ -6,7 +6,8 @@ defmodule Kazi.Predicate.Schema do
   `kazi schema <provider-kind>` emits one of these so any agent can introspect the
   config keys a predicate of that kind accepts — no external docs. Today this
   covers `custom_script` (the generic command-runner whose verdict/evidence keys
-  are config, not code) and the live providers `http_probe`, `browser`, and
+  are config, not code), the `ratchet` mode (ADR-0041), the `static` analysis
+  provider (T32.7, ADR-0043), and the live providers `http_probe`, `browser`, and
   `metrics` (T32.10, ADR-0043); other kinds can be added the same way.
 
   The descriptor is intentionally flat — a `keys` list of
@@ -189,6 +190,90 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @static %{
+    kind: "static",
+    title: "static predicate config",
+    description:
+      "Static analysis / type-check / lint (ADR-0043), Dialyzer-led and generalized to the " <>
+        "polyglot SARIF tools. Gated on PARSED findings (not the exit code); a baseline ratchet " <>
+        "fails only on NEW findings. Reports score = finding count (lower_better).",
+    keys: [
+      %{
+        name: "cmd",
+        type: "string",
+        required: true,
+        description: "The analyzer executable (ONE executable, not a command line; use args)."
+      },
+      %{
+        name: "args",
+        type: "array<string>",
+        required: false,
+        description: "Argument list passed to cmd. Default []."
+      },
+      %{
+        name: "env",
+        type: "table | array<pair>",
+        required: false,
+        description: "Extra environment as a {name = value} table or {name, value} pairs."
+      },
+      %{
+        name: "format",
+        type: "string",
+        required: false,
+        description:
+          "How findings are read from stdout: \"dialyzer\" (default; Dialyzer short-format " <>
+            "lines) or \"sarif\" (a SARIF log via the shared parser). A SARIF parse failure " <>
+            "is :error, never a silent pass."
+      },
+      %{
+        name: "baseline",
+        type: "number | string",
+        required: false,
+        description:
+          "Absent = the zero-findings gate (any finding fails). A number (a fixed finding " <>
+            "budget), \"stored\"/\"prior\" (the finding count's own last passing value, seeded " <>
+            "on the first run and tightened on a pass), or a git ref (\"HEAD~1\", \"main\": the " <>
+            "analyzer re-run at that ref) selects the ratchet gate — fails only on NEW findings."
+      },
+      %{
+        name: "allowed_regression",
+        type: "number",
+        required: false,
+        description: "Ratchet mode: how many NEW findings are tolerated. Default 0."
+      },
+      %{
+        name: "merge_stderr",
+        type: "boolean",
+        required: false,
+        description: "Fold the analyzer's stderr into stdout for parsing/evidence. Default false."
+      },
+      %{
+        name: "error_codes",
+        type: "array<integer>",
+        required: false,
+        description:
+          "Exit codes that mean the analyzer could not run -> :error (infra, not failing work), " <>
+            "checked before findings are read."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description:
+          "Kill the analyzer after this many ms and map it to :error. Default: no timeout."
+      }
+    ],
+    example: %{
+      "id" => "no-new-dialyzer-warnings",
+      "provider" => "static",
+      "cmd" => "mix",
+      "args" => ["dialyzer", "--format", "short"],
+      "format" => "dialyzer",
+      "baseline" => "stored",
+      "allowed_regression" => 0
+    }
+  }
+
   @http_probe %{
     kind: "http_probe",
     title: "http_probe predicate config",
@@ -308,12 +393,6 @@ defmodule Kazi.Predicate.Schema do
         description: "The runner executable (default the shipped node runner)."
       },
       %{
-        name: "args",
-        type: "array<string>",
-        required: false,
-        description: "Argument list for cmd."
-      },
-      %{
         name: "env",
         type: "table | array<pair>",
         required: false,
@@ -410,6 +489,7 @@ defmodule Kazi.Predicate.Schema do
   @schemas %{
     "custom_script" => @custom_script,
     "ratchet" => @ratchet,
+    "static" => @static,
     "http_probe" => @http_probe,
     "browser" => @browser,
     "metrics" => @metrics

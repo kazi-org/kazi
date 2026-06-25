@@ -155,6 +155,7 @@ defmodule Kazi.Goal.Loader do
   | `"metrics"`       | `:metrics`       | live RED/SLO metrics (T32.10, ADR-0043) |
   | `"custom_script"` | `:custom_script` | generic command-runner (T32.1, ADR-0040) |
   | `"ratchet"`       | `:ratchet`       | signal-vs-baseline ratchet (T32.3, ADR-0041) |
+  | `"static"`        | `:static`        | Dialyzer-led static analysis (T32.7, ADR-0043) |
 
   An unknown `provider` is a validation error rather than a silently-accepted
   atom, so a typo fails loudly at load time instead of at dispatch time.
@@ -172,6 +173,12 @@ defmodule Kazi.Goal.Loader do
   all VALIDATED at load time (a missing `metric.cmd`, an unknown `direction`, or
   a missing `baseline` is a load error). See `Kazi.Providers.Ratchet` and
   `kazi schema ratchet`.
+
+  A `static` predicate carries `cmd` (the analyzer), an optional `format`
+  (`"dialyzer"`/`"sarif"`), and an optional `baseline`/`allowed_regression` (the
+  finding-count ratchet), all VALIDATED at load time (a missing `cmd`, an unknown
+  `format`, an invalid `baseline`, or a non-numeric `allowed_regression` is a load
+  error). See `Kazi.Providers.Static` and `kazi schema static`.
 
   ## Example
 
@@ -206,7 +213,11 @@ defmodule Kazi.Goal.Loader do
     # T32.3 (ADR-0041): the first-class ratchet mode — signal-vs-baseline within
     # an allowed regression. Its metric/baseline/direction keys are validated
     # below so a missing metric command or unknown direction fails at load time.
-    "ratchet" => :ratchet
+    "ratchet" => :ratchet,
+    # T32.7 (ADR-0043): the first-class static-analysis provider. Its
+    # cmd/format/baseline keys are validated below so an unknown format or a
+    # missing command fails at load time, not silently at dispatch.
+    "static" => :static
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -886,7 +897,103 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T32.7 (ADR-0043): a static predicate's analyzer/format/baseline keys are
+  # checked so a missing cmd, an unknown format, an invalid baseline, or a
+  # non-numeric allowed_regression fails loudly at load, not at dispatch.
+  defp validate_provider_config(:static, config, id) do
+    with :ok <- validate_static_cmd(config, id),
+         :ok <- validate_static_args(config, id),
+         :ok <- validate_static_format(config, id),
+         :ok <- validate_static_baseline(config, id),
+         :ok <- validate_static_timeout(config, id) do
+      validate_static_allowed_regression(config, id)
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  # --- static (T32.7, ADR-0043) ----------------------------------------------
+
+  # Kept in lockstep with Kazi.Providers.Static.formats/0.
+  @static_formats ~w(dialyzer sarif)
+
+  defp validate_static_cmd(config, id) do
+    case Map.get(config, :cmd) do
+      cmd when is_binary(cmd) and cmd != "" -> :ok
+      _ -> {:error, "static predicate #{inspect(id)} requires a non-empty string \"cmd\""}
+    end
+  end
+
+  defp validate_static_args(config, id) do
+    case Map.get(config, :args) do
+      nil ->
+        :ok
+
+      args when is_list(args) ->
+        if Enum.all?(args, &is_binary/1),
+          do: :ok,
+          else: {:error, "static predicate #{inspect(id)} \"args\" must be an array of strings"}
+
+      _ ->
+        {:error, "static predicate #{inspect(id)} \"args\" must be an array of strings"}
+    end
+  end
+
+  defp validate_static_format(config, id) do
+    case Map.get(config, :format) do
+      nil ->
+        :ok
+
+      format when format in @static_formats ->
+        :ok
+
+      other ->
+        {:error,
+         "static predicate #{inspect(id)} has unknown format #{inspect(other)} " <>
+           "(known: #{known_list(@static_formats)})"}
+    end
+  end
+
+  # The baseline is OPTIONAL (absent = the zero-findings gate). When present it is
+  # a number (a fixed finding budget), "stored"/"prior", or a non-empty git ref.
+  defp validate_static_baseline(config, id) do
+    case Map.get(config, :baseline) do
+      nil ->
+        :ok
+
+      n when is_number(n) ->
+        :ok
+
+      s when is_binary(s) and s != "" ->
+        :ok
+
+      other ->
+        {:error, "static predicate #{inspect(id)} \"baseline\" is invalid: #{inspect(other)}"}
+    end
+  end
+
+  defp validate_static_timeout(config, id) do
+    case Map.get(config, :timeout_ms) do
+      nil -> :ok
+      ms when is_integer(ms) and ms > 0 -> :ok
+      _ -> {:error, "static predicate #{inspect(id)} \"timeout_ms\" must be a positive integer"}
+    end
+  end
+
+  defp validate_static_allowed_regression(config, id) do
+    case Map.get(config, :allowed_regression) do
+      nil ->
+        :ok
+
+      n when is_number(n) ->
+        :ok
+
+      other ->
+        {:error,
+         "static predicate #{inspect(id)} \"allowed_regression\" must be a number " <>
+           "(got #{inspect(other)})"}
+    end
+  end
 
   # --- ratchet (T32.3, ADR-0041) ---------------------------------------------
 
