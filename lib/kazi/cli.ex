@@ -2579,6 +2579,7 @@ defmodule Kazi.CLI do
       release_ref: Map.get(result, :release_ref),
       enforcement: enforcement_json(Map.get(result, :enforcement))
     }
+    |> put_usage(result)
   end
 
   # T32.4 (ADR-0042 §7): surface the anti-gaming guarantees that were ACTIVE for the
@@ -2602,7 +2603,6 @@ defmodule Kazi.CLI do
       path: Map.get(event, :path),
       iteration: Map.get(event, :iteration)
     }
-    |> put_usage(result)
   end
 
   # ADR-0046 economy envelope: attach the additive `usage` object ONLY when the
