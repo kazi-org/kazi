@@ -1,0 +1,24 @@
+# Example kazi goal-file: no Dialyzer warnings (the static provider, ADR-0043).
+#
+# The `static` provider runs an analyzer and gates on its PARSED findings, not its
+# exit code. With no `baseline` it is the zero-findings gate: it passes iff the
+# analyzer reports nothing. Dialyzer (kazi-native, effectively zero false
+# positives) is the lead, so failing on any finding is safe.
+#
+# `format = "dialyzer"` (the default) reads Dialyzer short-format lines
+# (`file:line[:col][:tag] message`) into localized evidence. Run it with:
+#
+#     kazi apply priv/examples/static_dialyzer.toml --workspace .
+#
+# See Kazi.Providers.Static, `kazi schema static`, and docs/static-predicate.md.
+
+id = "static-dialyzer"
+name = "No Dialyzer warnings"
+
+[[predicate]]
+id = "no-dialyzer-warnings"
+provider = "static"
+description = "Dialyzer reports no warnings"
+cmd = "mix"
+args = ["dialyzer", "--format", "short"]
+format = "dialyzer"
