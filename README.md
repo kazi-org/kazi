@@ -21,9 +21,9 @@
 
 # kazi
 
-**Describe what "done" looks like. kazi makes it true — and proves it.**
+**Your coding agent says "done." kazi proves it.**
 
-*kazi* (Swahili: *work / a job*) is **the missing outer loop for coding agents**.
+*kazi* (Swahili: *work / a job*) is **the outer/reconciliation loop for coding agents**.
 You tell it the outcome you want — in plain English or as a short goal-file — and
 kazi drives a coding agent (Claude Code, Codex, …) in a loop until that outcome is
 *objectively* real: tests pass, the endpoint is live, the change is deployed. If it
@@ -112,6 +112,38 @@ the same checks keep failing (`stuck` → escalate to you), or the budget runs o
 | Two parallel agents edit the same files → merge conflicts. | Agents **lease their blast radius** first — disjoint work runs free, overlapping work serializes. |
 | Green tests on a laptop, broken in production. | A **live predicate** probes the *deployed* endpoint. Green-on-my-machine is never enough. |
 | It stops when it *feels* finished. | It stops only on `converged`, `stuck`, or `over-budget` — and tells you which. |
+
+---
+
+## Drive kazi from your coding agent
+
+You don't operate kazi directly — your coding agent does. Teach Claude Code the
+kazi skill once, then hand it work in plain language:
+
+```sh
+kazi install-skill   # writes the kazi skill to ~/.claude/skills/kazi (opt-in)
+```
+
+Then, in your normal Claude Code session, just say:
+
+> **have kazi drive this until done**
+
+The agent recognizes the phrase, authors the acceptance predicates with `kazi
+plan`, and runs `kazi apply` until they are *objectively* true — the same way
+`use context7` pulls Context7 into a session. (It's a trigger on the kazi skill,
+so the phrase only routes to kazi once the skill is installed.)
+
+---
+
+## What a coding agent says
+
+> *"Left to myself, I'll tell you a task is done the moment the code looks
+> right. kazi won't let me — it holds the predicates and re-checks them against
+> reality, so I stop claiming 'done' when it isn't. I end up shipping the thing
+> you actually asked for, not the thing I hoped was finished."*
+>
+> — Claude (Anthropic), describing kazi in its own words. Agent-authored, kept
+> verbatim and labelled as such — not a human testimonial.
 
 ---
 
