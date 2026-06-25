@@ -718,8 +718,10 @@ pins this output, so the example never drifts from what the tool produces.
 
 ## Watch it work
 
-- **LiveView dashboard** — a goal board, live agent presence, the lease map, and
-  per-goal convergence history. Read-only inspection, decoupled from the loop
+- **LiveView dashboard** — a goal board, live agent presence, the lease map, a
+  live dependency-DAG "wave" view (`/dag`: groups by running / ready / blocked /
+  converged, the `needs` edges, per-group convergence), and per-goal convergence
+  history. Read-only inspection, decoupled from the loop
   ([ADR-0011](docs/adr/0011-slice3-operator-surfaces.md)).
 
 ---
