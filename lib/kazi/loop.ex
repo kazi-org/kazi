@@ -137,6 +137,11 @@ defmodule Kazi.Loop do
   # NEXT dispatch's prompt (see the `:dispatch_agent` ACT clause and
   # `dispatch_prompt/2`).
   alias Kazi.Loop.Digest
+  # T34.3 (ADR-0046 §2): per-iteration `context` + `tools` counters. The loop owns
+  # the context (orientation/retrieval cache state + section token estimates,
+  # computed from the prompt it built); the harness result carries the tool-use
+  # stream the `tools` counters are parsed from. Pure — see `Kazi.Loop.Counters`.
+  alias Kazi.Loop.Counters
   # T19.1 orientation prefix (ADR-0010 §3, realizing T4.3): the live dispatch
   # prompt carries kazi's pre-computed map memory (the ranked blast-radius pack)
   # as a STABLE, cacheable PREFIX ahead of the failing-evidence body — so each
@@ -426,7 +431,21 @@ defmodule Kazi.Loop do
               # flagged observation's graded scores so a GAMED apparent improvement
               # is not credited as progress — an ADVISORY downgrade, never a
               # convergence block (the failing-set/boolean stuck logic is untouched).
-              gaming_flagged_iterations: MapSet.new()
+              gaming_flagged_iterations: MapSet.new(),
+              # --- T34.3 (ADR-0046 §2): per-iteration context + tool counters ---
+              # The most recent dispatch's `context`/`tools` counter maps, attached
+              # to the NEXT iteration event (the dispatch's effect is measured by
+              # the observation that follows it). `last_orientation_prefix` /
+              # `last_retrieval_section` carry the PRIOR dispatch's prefix strings
+              # so the next dispatch can decide the orientation/retrieval cache
+              # hit/miss (byte-identical prefix ⇒ "hit", T19.2). All nil/empty until
+              # the first dispatch, so the first observation's event reports the
+              # all-disabled/zero context and absent tools (no work yet). Appended
+              # last so the existing field order is untouched.
+              last_context: nil,
+              last_tools: %{},
+              last_orientation_prefix: nil,
+              last_retrieval_section: nil
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -1396,7 +1415,13 @@ defmodule Kazi.Loop do
   # and re-observe on the poll interval.
   @spec dispatch_agent(Action.t(), Data.t()) :: :gen_statem.event_handler_result(atom())
   defp dispatch_agent(%Action{} = action, data) do
-    prompt = dispatch_prompt(action, data)
+    # T34.3 (ADR-0046 §2): build the prompt SECTIONS once (orientation prefix,
+    # work-item, digest, evidence, retrieval) so the per-iteration `context`
+    # counters are computed from the exact bytes sent — without re-running the
+    # (possibly graph-touching) orientation builder. `assemble_prompt/1` joins them
+    # byte-identically to the pre-T34.3 `dispatch_prompt/2`.
+    parts = dispatch_prompt_parts(action, data)
+    prompt = assemble_prompt(parts)
 
     # T4.5 context injection (ADR-0010 §3): before the stateless `claude -p`
     # dispatch, prepare the workspace so the agent starts oriented — expose the
@@ -1437,6 +1462,13 @@ defmodule Kazi.Loop do
     # cached-vs-fresh token/cost components the harness reported — surfaced in the
     # terminal `--json` result. Only reported components are summed (absent ≠ zero).
     data = accumulate_usage(data, result)
+
+    # T34.3 (ADR-0046 §2): record this dispatch's per-iteration `context` + `tools`
+    # counters on the loop state so the NEXT observation's iteration event carries
+    # them. `context` is computed from the prompt sections just built (orientation/
+    # retrieval cache state vs the PRIOR dispatch + section token estimates);
+    # `tools` from the harness result's tool-use stream where it exposes one.
+    data = record_counters(data, parts, result)
 
     # T4.7 working-set digest: distill a BOUNDED, transcript-free note of the
     # files this iteration touched (map memory ONLY — `Digest.from_result/2`
@@ -1526,8 +1558,22 @@ defmodule Kazi.Loop do
   # `Kazi.Harness.Prompt.truncate_evidence/2` (default 8 KiB, head+tail window) so a
   # runaway log/diff is bounded at the seam before it reaches the prompt body; small
   # evidence is returned verbatim, so the small-evidence path is unchanged.
-  @spec dispatch_prompt(Action.t(), Data.t()) :: String.t()
-  defp dispatch_prompt(%Action{params: params}, %Data{goal: goal} = data) do
+  # T34.3 (ADR-0046 §2): the dispatch prompt's SECTIONS, computed once so a single
+  # dispatch builds (and the per-iteration `context` counters measure) the same
+  # bytes. The orientation/retrieval builders can touch the graph/repo-map, so they
+  # must NOT be re-run for counting — `dispatch_agent` reuses these parts for both
+  # `assemble_prompt/1` and `Counters.context/5`. Returns the rendered orientation
+  # prefix (`nil` when off), the stable work-item line, the rendered working-set
+  # digest note (`""` when empty), the capped evidence, and the retrieval section
+  # (`nil` when off).
+  @spec dispatch_prompt_parts(Action.t(), Data.t()) :: %{
+          orientation: String.t() | nil,
+          work_item: String.t(),
+          digest: String.t(),
+          evidence: String.t(),
+          retrieval: String.t() | nil
+        }
+  defp dispatch_prompt_parts(%Action{params: params}, %Data{goal: goal} = data) do
     failing = Map.get(params, :failing, [])
 
     # STABLE: the work item — goal id + the failing-predicate ids. Identical across
@@ -1548,25 +1594,71 @@ defmodule Kazi.Loop do
           inspect(Map.get(params, :evidence, %{}), limit: :infinity, printable_limit: :infinity)
         )
 
-    # Front-load stable→volatile: orientation → work-item → digest → evidence. The
-    # digest sits BETWEEN the stable work-item and the volatile evidence (it is map
-    # memory that changes only when a prior iteration reports a new touched set).
+    %{
+      orientation: orientation_prefix(data),
+      work_item: work_item,
+      digest: Digest.render(data.working_set_digest),
+      evidence: evidence,
+      retrieval: retrieval_section(data)
+    }
+  end
+
+  # T34.3: join the prompt sections — byte-identical to the pre-T34.3
+  # `dispatch_prompt/2`. Front-load stable→volatile: orientation → work-item →
+  # digest → evidence (the digest sits BETWEEN the stable work-item and the
+  # volatile evidence; it is map memory that changes only when a prior iteration
+  # reports a new touched set), then the optional retrieval section last.
+  @spec assemble_prompt(map()) :: String.t()
+  defp assemble_prompt(%{
+         orientation: orientation,
+         work_item: work_item,
+         digest: digest,
+         evidence: evidence,
+         retrieval: retrieval
+       }) do
     body =
-      case Digest.render(data.working_set_digest) do
+      case digest do
         "" -> work_item <> "\n" <> evidence
         note -> work_item <> "\n\n" <> note <> "\n\n" <> evidence
       end
 
     prompt =
-      case orientation_prefix(data) do
+      case orientation do
         nil -> body
         prefix -> prefix <> "\n\n" <> body
       end
 
-    case retrieval_section(data) do
+    case retrieval do
       nil -> prompt
       section -> prompt <> "\n\n" <> section
     end
+  end
+
+  # T34.3 (ADR-0046 §2): fold this dispatch's per-iteration `context` + `tools`
+  # counters into the loop state (attached to the NEXT iteration event). The
+  # context cache state compares this dispatch's orientation/retrieval prefixes to
+  # the PRIOR dispatch's (carried in `last_orientation_prefix` /
+  # `last_retrieval_section`) — a byte-identical prefix is a "hit" the inner
+  # harness's prompt cache can reuse (T19.2). The prior prefixes are then advanced
+  # to this dispatch's for the next comparison.
+  @spec record_counters(Data.t(), map(), Kazi.HarnessAdapter.result()) :: Data.t()
+  defp record_counters(%Data{} = data, parts, result) do
+    context =
+      Counters.context(
+        parts.orientation,
+        parts.evidence,
+        parts.retrieval,
+        data.last_orientation_prefix,
+        data.last_retrieval_section
+      )
+
+    %Data{
+      data
+      | last_context: context,
+        last_tools: Counters.tools(result),
+        last_orientation_prefix: parts.orientation,
+        last_retrieval_section: parts.retrieval
+    }
   end
 
   # The stable orientation PREFIX for the live dispatch (T19.1, ADR-0010 §3). Builds
@@ -1982,7 +2074,11 @@ defmodule Kazi.Loop do
       iteration: data.iterations - 1,
       vector: data.vector || PredicateVector.new(),
       converged?: false,
-      stop_reason: :stuck
+      stop_reason: :stuck,
+      # T34.3 (ADR-0046 §2): carry the last dispatch's context + tool counters so
+      # the stuck-stop record (which upserts the last observation's row) keeps them.
+      context: data.last_context || Counters.empty_context(),
+      tools: data.last_tools
     }
 
     try do
@@ -2312,7 +2408,13 @@ defmodule Kazi.Loop do
       # run (T3.3c), so the runtime projects it into the read-model's
       # `release_ref` column (queryable via Kazi.ReadModel.release_refs/1). nil
       # until a deploy succeeds with a release ref.
-      release_ref: data.release_ref
+      release_ref: data.release_ref,
+      # T34.3 (ADR-0046 §2): the per-iteration context + tool counters from the
+      # dispatch that fed this observation. `context` is always populated (kazi
+      # owns the prompt — all-disabled/zero before the first dispatch); `tools` is
+      # empty when the harness exposed no tool-use stream (absent ≠ zero).
+      context: data.last_context || Counters.empty_context(),
+      tools: data.last_tools
     }
 
     try do
@@ -2343,7 +2445,11 @@ defmodule Kazi.Loop do
       iteration: data.iterations,
       vector: data.vector || PredicateVector.new(),
       converged?: false,
-      stop_reason: reason
+      stop_reason: reason,
+      # T34.3 (ADR-0046 §2): carry the last dispatch's context + tool counters so
+      # the budget-stop record is attributable too.
+      context: data.last_context || Counters.empty_context(),
+      tools: data.last_tools
     }
 
     try do
