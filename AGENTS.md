@@ -5,10 +5,26 @@ acceptance predicates, and kazi drives a coding harness in a loop until those
 predicates are objectively true, stuck, or over budget. kazi is a TOOL you call,
 not a harness.
 
-If you are an agent operating in this repo, drive kazi over its `--json` CLI:
-parse the JSON, never the prose (ADR-0023). This file is the condensed,
-harness-neutral recipe; `docs/orchestrator-recipe.md` is the full version and the
-source of truth.
+## Drive kazi: MCP first, JSON-CLI fallback
+
+PREFER the MCP server. If you speak MCP, wire kazi as an MCP server and drive its
+self-describing tools -- `kazi_plan`, `kazi_approve`, `kazi_apply`, `kazi_status`,
+`kazi_list_proposed` -- whose input/output schemas teach you the surface at ZERO
+prose cost (ADR-0044). The installed binary serves it over stdio via the `kazi mcp`
+verb; the canonical client config references that binary verb:
+
+```json
+{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }
+```
+
+`kazi init --with-mcp` writes exactly this `.mcp.json` into a repo, and `mix
+kazi.mcp` is the development entry point that starts the SAME server. The CLI
+recipe below maps one-to-one onto these tools.
+
+FALLBACK -- the JSON-CLI shell-out. When MCP is unavailable, drive kazi over its
+`--json` CLI: parse the JSON, never the prose (ADR-0023). This file is the
+condensed, harness-neutral recipe; `docs/orchestrator-recipe.md` is the full
+version and the source of truth.
 
 > Every command and flag below is real. Confirm the live surface with
 > `kazi help --json` and `kazi schema` rather than trusting a stale copy.
@@ -234,10 +250,11 @@ kazi schema [apply|status]    # the versioned --json result schema(s) as data
 (the `run`/`propose` aliases were removed in v0.6.0, T27.9). `kazi schema` emits the
 versioned result schemas; both are JSON.
 
-An MCP-speaking harness can skip the JSON-CLI shell-out entirely: `kazi mcp` starts
-the MCP server over stdio (ADR-0044) -- the same server `mix kazi.mcp` runs -- and
-the plan / approve / apply / status tools self-describe through their schemas. Wire
-it with `{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }`.
+Recap (the MCP-first path at the top of this file): an MCP-speaking harness skips
+the JSON-CLI shell-out entirely. `kazi mcp` starts the MCP server over stdio
+(ADR-0044) -- the same server `mix kazi.mcp` runs -- and the plan / approve / apply
+/ status tools self-describe through their schemas. The canonical client config is
+`{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }`.
 
 ## Verifying a pooled task with kazi
 
