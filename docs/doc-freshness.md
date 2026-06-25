@@ -49,9 +49,9 @@ Elixir runtime -- the checks run in a bare CI shell. If a `kazi` binary is on
 PATH, a maintainer can cross-check with `kazi help --json | jq -r '.commands[].name'`;
 the help-json ExUnit test already pins the two to agree.
 
-The shipped commands today: `apply`, `approve`, `export`, `help`, `init`,
-`install-skill`, `lint`, `list-proposed`, `plan`, `reject`, `schema`, `status`,
-`version`.
+The shipped commands today: `apply`, `approve`, `context`, `export`, `help`,
+`init`, `install-skill`, `lint`, `list-proposed`, `plan`, `reject`, `schema`,
+`status`, `version`.
 
 ## The predicates
 
