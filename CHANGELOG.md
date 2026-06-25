@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.39.0](https://github.com/kazi-org/kazi/compare/v1.38.2...v1.39.0) (2026-06-25)
+
+
+### Features
+
+* **bench:** in-family tiering cost arms + `mix kazi.bench --tiering` (T19.7) ([4a348b8](https://github.com/kazi-org/kazi/commit/4a348b8817890889dfeed921e5453011f73fc7ee))
+
 ## [1.38.2](https://github.com/kazi-org/kazi/compare/v1.38.1...v1.38.2) (2026-06-25)
 
 
