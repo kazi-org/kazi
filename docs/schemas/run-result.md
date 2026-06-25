@@ -30,6 +30,12 @@ was renamed `run` -> `apply`; an orchestrator pinning the old version must
 update. The result-object SHAPE is unchanged — only the producing verb and the
 version differ.)
 
+ADR-0041 (envelope v2) adds OPTIONAL per-predicate fields (`score`, `prior_score`,
+`direction`, `evidence`) to `predicates[]`. These are **additive** — present only
+on a graded result, absent on a boolean one — so `schema_version` stays **2** and
+an orchestrator pinning v2 keeps parsing unchanged. See
+[`predicates[]` — graded fields](#predicates--graded-fields-adr-0041) below.
+
 ## Shape
 
 ```json
@@ -98,6 +104,39 @@ The predicate's status string at the terminal observation: `pass`, `fail`,
 when it genuinely held against the real world (including live predicates, which
 pass only post-deploy). The vector — not a single exit code — is what makes
 regression and partial progress legible (ADR-0002).
+
+### `predicates[]` — graded fields (ADR-0041)
+
+A predicate object MAY carry four additional, **optional** fields when the
+provider returns a graded (non-boolean) result. They are emitted only when
+present, so a boolean predicate stays exactly `{ "id", "verdict" }`:
+
+| Field          | Type                | Meaning |
+|----------------|---------------------|---------|
+| `score`        | number              | The provider's scalar for this predicate (e.g. `47` of 50 tests, mutation `0.82`, an axe-violation count). A dense gradient on top of the boolean verdict; it NEVER moves the convergence gate. |
+| `prior_score`  | number              | The same predicate's `score` from the previous iteration, threaded in by the loop. With `direction` it yields the interpreted progress delta. |
+| `direction`    | string (enum)       | `higher_better` or `lower_better` — which way the score improves, so a consumer reads progress without per-provider knowledge. |
+| `evidence`     | array of objects    | Structured findings, each an LSP-`Diagnostic`-shaped item `{ "file", "line", "col", "rule", "level", "message", "expected", "got" }` (each subfield itself optional). Localized fix-context distilled from SARIF / JUnit / a shrunk counterexample; raw stdout stays in the provider evidence only as a truncated fallback. |
+
+These are **additive** (ADR-0041 decision 5): `:converged` still requires the
+whole vector `:pass`, and `schema_version` stays `2`. An orchestrator that ignores
+them sees the unchanged boolean contract; one that reads them gets the gradient
+and the localized evidence.
+
+A graded predicate object:
+
+```json
+{
+  "id": "lint",
+  "verdict": "fail",
+  "score": 12,
+  "prior_score": 30,
+  "direction": "lower_better",
+  "evidence": [
+    { "file": "lib/a.ex", "line": 7, "rule": "no-unused", "level": "warning", "message": "unused variable x" }
+  ]
+}
+```
 
 ## Error object
 
