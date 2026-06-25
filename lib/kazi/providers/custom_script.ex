@@ -37,15 +37,29 @@ defmodule Kazi.Providers.CustomScript do
         code — so a SARIF scanner that always exits `0` is failed on its findings
         count. A JSON parse failure or a missing path is an `:error`, never a
         silent pass.
+      * `"match_count"` — count the lines of the command's output that match
+        `:match_regex` and compare that COUNT via `:pass_when`. This gates a tool
+        on the textual signal in its output rather than its exit code (e.g. "no
+        `panic` lines", "at most 2 deprecation warnings"). It is the verdict the
+        `:prod_log` preset specialises (T32.1b, ADR-0040 decision 1). An invalid
+        `:match_regex` or `:pass_when` is an `:error`, never a silent pass.
+    * `:match_regex` — for the `"match_count"` verdict: a regex (string) marking a
+      line to count. Required for that verdict.
     * `:path` — for the `"json"` verdict: a JSONPath over the parsed stdout. A
       focused subset is supported: a leading `$`, `.key` segments, and `[index]`
       array subscripts (e.g. `"$.runs[0].results"`, `"$.summary.failures"`). The
       extracted value is coerced to a number for comparison: a number is used
       verbatim; a LIST uses its length (so `path` pointing at a findings array
       compares its COUNT).
-    * `:pass_when` — for the `"json"` verdict: a comparison the extracted number
-      must satisfy to `:pass`, written `"<op> <number>"` where `<op>` is one of
-      `== != < <= > >=` (e.g. `"== 0"`, `">= 0.8"`, `"<= 5"`).
+    * `:pass_when` — for the `"json"` and `"match_count"` verdicts: a comparison
+      the extracted/observed number must satisfy to `:pass`, written
+      `"<op> <number>"` where `<op>` is one of `== != < <= > >=` (e.g. `"== 0"`,
+      `">= 0.8"`, `"<= 5"`).
+    * `:merge_stderr` — when `true`, capture the command's stderr INTO its stdout
+      (`stderr_to_stdout: true`), so the retained `:output` is the same combined
+      stream a developer reads. Optional, defaults `false` (stdout and stderr are
+      separate). The `:tests`/`:prod_log` presets set it `true` to preserve their
+      historical combined-stream evidence.
     * `:error_codes` — a list of exit codes that mean the checker COULD NOT RUN
       (bad config, missing dependency), mapped to `:error` (infra, not failing
       work) BEFORE the verdict is applied. Optional.
@@ -68,20 +82,27 @@ defmodule Kazi.Providers.CustomScript do
   Every result carries the proof a fixer agent needs (ADR-0002): the resolved
   `:cmd`, `:args`, `:workspace`, the `:verdict`, and on a completed run the `:exit`
   code and a truncated `:output`. A `"json"` verdict adds the resolved `:path`,
-  `:pass_when`, and the `:observed` number. An `:evidence_format` of `"sarif"` /
-  `"junit"` adds structured `:findings`. An `:error` result carries a `:reason`.
+  `:pass_when`, and the `:observed` number. A `"match_count"` verdict adds the
+  resolved `:match_regex`, `:pass_when`, the `:observed` count, and a bounded
+  sample of the `:matched_lines`. An `:evidence_format` of `"sarif"` / `"junit"`
+  adds structured `:findings`. An `:error` result carries a `:reason`.
   """
 
   @behaviour Kazi.PredicateProvider
 
   alias Kazi.{Predicate, PredicateResult}
+  alias Kazi.Providers.CommandRunner
 
   # Keep the retained raw output seed-sized: enough to orient a fixer, not a full
   # dump (ADR-0040 decision 3 — raw stdout is a truncated fallback).
   @output_limit 4_000
 
   # The declared verdict strings, mapped to their internal evaluators.
-  @verdicts ~w(exit_zero exit_code json)
+  @verdicts ~w(exit_zero exit_code json match_count)
+
+  # Keep the retained match sample seed-sized: enough lines to orient a fixer, not
+  # a full dump (mirrors the prod_log preset's sample budget).
+  @match_sample_limit 20
 
   # The recognised evidence envelopes for :evidence_format.
   @evidence_formats ~w(sarif junit json raw)
@@ -101,6 +122,22 @@ defmodule Kazi.Providers.CustomScript do
 
   @impl true
   def evaluate(%Predicate{kind: :custom_script, config: config}, context) do
+    evaluate_config(config, context)
+  end
+
+  def evaluate(%Predicate{kind: kind}, _context) do
+    PredicateResult.error(%{reason: {:unsupported_kind, kind}})
+  end
+
+  @doc """
+  Evaluate a custom_script-shaped `config` against `context`, the shared engine the
+  `:tests`/`:prod_log` presets delegate to (T32.1b, ADR-0040 decision 1).
+
+  Exposed so a preset can build its config (e.g. `verdict: "exit_zero"`) and run it
+  through the one engine without constructing a `:custom_script` `Kazi.Predicate`.
+  """
+  @spec evaluate_config(map(), map()) :: PredicateResult.t()
+  def evaluate_config(config, context) when is_map(config) do
     workspace = context[:workspace] || File.cwd!()
 
     with {:ok, cmd, args} <- fetch_cmd(config),
@@ -109,10 +146,6 @@ defmodule Kazi.Providers.CustomScript do
     else
       {:error, reason} -> PredicateResult.error(%{reason: reason, workspace: workspace})
     end
-  end
-
-  def evaluate(%Predicate{kind: kind}, _context) do
-    PredicateResult.error(%{reason: {:unsupported_kind, kind}})
   end
 
   # Resolve the command, rejecting a missing/blank :cmd before we ever shell out
@@ -144,9 +177,9 @@ defmodule Kazi.Providers.CustomScript do
   # broken evidence pipeline is never read as a pass; otherwise the verdict
   # decides. A missing binary / bad cwd is mapped to :error, never :fail.
   defp run(cmd, args, workspace, config, verdict) do
-    opts = [cd: workspace, stderr_to_stdout: false] ++ env_opt(config)
+    opts = [cd: workspace, stderr_to_stdout: merge_stderr?(config)] ++ env_opt(config)
 
-    case run_cmd(cmd, args, opts, Map.get(config, :timeout_ms)) do
+    case CommandRunner.run(cmd, args, opts, Map.get(config, :timeout_ms)) do
       {:ran, output, exit_code} ->
         evidence = base_evidence(cmd, args, workspace, verdict, exit_code, output)
 
@@ -174,34 +207,10 @@ defmodule Kazi.Providers.CustomScript do
     end
   end
 
-  # Execute the command. With no :timeout_ms we run System.cmd/3 directly (the
-  # same boundary the other providers use); with a timeout we run it in a task we
-  # can brutally kill if it overruns, mapping the overrun to a :timeout the caller
-  # turns into an :error. A raise inside the task (missing binary) is captured and
-  # returned tagged rather than crashing the provider.
-  defp run_cmd(cmd, args, opts, nil) do
-    {output, exit_code} = System.cmd(cmd, args, opts)
-    {:ran, output, exit_code}
-  rescue
-    error in [ErlangError, File.Error] -> {:raised, Exception.message(error)}
-  end
-
-  defp run_cmd(cmd, args, opts, timeout_ms) when is_integer(timeout_ms) and timeout_ms > 0 do
-    task =
-      Task.async(fn ->
-        try do
-          {:ok, System.cmd(cmd, args, opts)}
-        rescue
-          error in [ErlangError, File.Error] -> {:raised, Exception.message(error)}
-        end
-      end)
-
-    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, {output, exit_code}}} -> {:ran, output, exit_code}
-      {:ok, {:raised, message}} -> {:raised, message}
-      _ -> {:timeout, timeout_ms}
-    end
-  end
+  # Whether to fold stderr into stdout for the retained evidence. Off by default
+  # (the generic runner keeps the two streams separate); the :tests/:prod_log
+  # presets set it true to preserve their historical combined-stream evidence.
+  defp merge_stderr?(config), do: Map.get(config, :merge_stderr, false) == true
 
   defp base_evidence(cmd, args, workspace, verdict, exit_code, output) do
     %{
@@ -274,8 +283,49 @@ defmodule Kazi.Providers.CustomScript do
     end
   end
 
+  # "match_count": count the output lines matching :match_regex, compare that
+  # COUNT via :pass_when. Gates a tool on the textual signal in its output rather
+  # than its exit code (the verdict the prod_log preset specialises). A bad/missing
+  # regex or pass_when is an :error, never a silent pass.
+  defp apply_verdict("match_count", _exit_code, output, config, evidence) do
+    with {:ok, expr} <- require_string(config, :pass_when),
+         {:ok, {op, operand}} <- parse_pass_when(expr),
+         {:ok, source} <- require_string(config, :match_regex),
+         {:ok, regex} <- compile_regex(source) do
+      matched = matched_lines(output, regex)
+      count = length(matched)
+
+      evidence =
+        Map.merge(evidence, %{
+          match_regex: source,
+          pass_when: expr,
+          observed: count,
+          matched_lines: Enum.take(matched, @match_sample_limit)
+        })
+
+      decide(compare(count, op, operand), evidence)
+    else
+      {:error, reason} -> PredicateResult.error(Map.put(evidence, :reason, reason))
+    end
+  end
+
   defp decide(true, evidence), do: PredicateResult.pass(evidence)
   defp decide(false, evidence), do: PredicateResult.fail(evidence)
+
+  defp matched_lines(output, regex) when is_binary(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.filter(&Regex.match?(regex, &1))
+  end
+
+  defp matched_lines(_output, _regex), do: []
+
+  defp compile_regex(source) do
+    case Regex.compile(source) do
+      {:ok, regex} -> {:ok, regex}
+      {:error, reason} -> {:error, {:invalid_match_regex, reason}}
+    end
+  end
 
   # =============================================================================
   # pass_when comparison
