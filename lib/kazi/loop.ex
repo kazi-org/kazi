@@ -103,6 +103,7 @@ defmodule Kazi.Loop do
   # detection logic lives in `Kazi.Enforcement`; the loop only wires the seams and
   # records the active guarantees + any flagged gaming event for the snapshot/result.
   alias Kazi.Enforcement
+  alias Kazi.Enforcement.DiffGuard
   alias Kazi.Enforcement.Isolation
   # T4.9c retrieval opt-in (ADR-0012): the loop appends the goal-declared
   # retriever's snippets to the dispatch prompt, reusing the adapter's render so
@@ -411,8 +412,21 @@ defmodule Kazi.Loop do
               # compared after the dispatch to flag a write.
               read_only_before: %{},
               # Append-only list of flagged gaming events (a read-only-path write,
-              # ADR-0042 §2), surfaced in snapshot/1 + the terminal result.
-              gaming_events: []
+              # ADR-0042 §2; a diff-inspection hit, ADR-0042 §5/T32.5), surfaced in
+              # snapshot/1 + the terminal result.
+              gaming_events: [],
+              # T32.5 diff-inspection guard (ADR-0042 §5): how the loop obtains the
+              # agent's iteration diff to scan for gaming signatures. A 1-arity fn
+              # `workspace -> diff_text` (a `git diff HEAD` by default), injectable
+              # so a test can feed a canned diff without a git workspace. Only
+              # called when enforcement is active.
+              diff_fn: nil,
+              # T32.5: the set of observation indices whose seeding dispatch the diff
+              # guard flagged. The stuck classifier (`code_history/1`) discounts a
+              # flagged observation's graded scores so a GAMED apparent improvement
+              # is not credited as progress — an ADVISORY downgrade, never a
+              # convergence block (the failing-set/boolean stuck logic is untouched).
+              gaming_flagged_iterations: MapSet.new()
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -729,7 +743,11 @@ defmodule Kazi.Loop do
       # IN by `Kazi.Runtime` (which applies the default-on-for-creation policy);
       # absent it, enforcement is off and every enforcement seam is a no-op, so the
       # default loop is unchanged.
-      enforcement: Keyword.get(opts, :enforcement)
+      enforcement: Keyword.get(opts, :enforcement),
+      # T32.5 diff-inspection guard (ADR-0042 §5): the diff source the guard scans,
+      # defaulting to a `git diff HEAD` of the workspace. Injectable so a test can
+      # feed a canned diff; only invoked when enforcement is active.
+      diff_fn: Keyword.get(opts, :diff_fn, &default_diff_fn/1)
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -990,10 +1008,30 @@ defmodule Kazi.Loop do
     kinds = predicate_kinds(goal)
     live_ids = for {id, kind} <- kinds, MapSet.member?(live_kinds, kind), do: id
     drop_ids = MapSet.union(quarantine, MapSet.new(live_ids))
+    flagged = data.gaming_flagged_iterations
 
     for {index, %PredicateVector{results: results}} <- ordered_history(data) do
-      {index, results |> Map.drop(MapSet.to_list(drop_ids)) |> PredicateVector.new()}
+      results = Map.drop(results, MapSet.to_list(drop_ids))
+      # T32.5 advisory downgrade: an observation the diff guard flagged has its
+      # graded scores stripped here, so the stuck detector's score-progress escape
+      # (ADR-0041) cannot fire on a GAMED apparent improvement — the gamed iteration
+      # is not credited as progress. Only the stuck CLASSIFIER sees this; the stored
+      # vector keeps its real score, and the boolean failing-set logic is untouched,
+      # so convergence is never blocked (advisory, not a hard guard).
+      results = discount_if_flagged(results, MapSet.member?(flagged, index))
+      {index, PredicateVector.new(results)}
     end
+  end
+
+  # Strip graded scores from a flagged observation's results (T32.5). A nil score
+  # makes `PredicateResult.scored?/1` false, so the stuck detector excludes it from
+  # the score-progress escape. A no-op for an unflagged observation.
+  @spec discount_if_flagged(%{optional(Predicate.id()) => PredicateResult.t()}, boolean()) ::
+          %{optional(Predicate.id()) => PredicateResult.t()}
+  defp discount_if_flagged(results, false), do: results
+
+  defp discount_if_flagged(results, true) do
+    Map.new(results, fn {id, %PredicateResult{} = result} -> {id, %{result | score: nil}} end)
   end
 
   # T32.2 / ADR-0041: copy each predicate's score from the previous observation's
@@ -1384,6 +1422,12 @@ defmodule Kazi.Loop do
     # T32.4 read-only lease: re-hash the leased paths and flag any write to one —
     # "a write attempt is a flagged event, not a silent edit" (ADR-0042 §2).
     data = flag_read_only_writes(data, before)
+
+    # T32.5 diff-inspection guard (ADR-0042 §5): scan the agent's iteration diff for
+    # gaming signatures (skip/xfail markers, test-input special-casing, grader
+    # edits). A hit is SURFACED as a gaming event and flags the upcoming observation
+    # so its graded progress is discounted — advisory, never a hard block.
+    data = flag_diff_gaming(data)
 
     # T1.4 budget: accumulate this run's token estimate (if the harness reported
     # one) into the running total the budget guard checks next tick.
@@ -2104,6 +2148,82 @@ defmodule Kazi.Loop do
   end
 
   defp flag_read_only_writes(%Data{} = data, _before), do: data
+
+  # T32.5 diff-inspection guard (ADR-0042 §5, ADVISORY). After a dispatch, scan the
+  # agent's iteration diff for gaming signatures and, on a hit: (1) append each
+  # flagged event to `gaming_events` (surfaced in --json, "flagged with evidence"),
+  # and (2) record the UPCOMING observation index in `gaming_flagged_iterations` so
+  # `code_history/1` discounts that observation's graded scores — a gamed apparent
+  # improvement is not credited as progress. It NEVER blocks convergence (the
+  # boolean failing-set logic is untouched) or crashes the loop (a diff-source
+  # failure degrades to no diff → no events). A no-op when enforcement is off.
+  #
+  # The upcoming observation is index `data.iterations` (observe_tick already
+  # incremented `iterations` to count the observation that SEEDED this dispatch; the
+  # observation reflecting this dispatch's work is the next one). The event itself is
+  # stamped with the seeding observation index (`data.iterations - 1`), matching the
+  # read-only-write convention.
+  @spec flag_diff_gaming(Data.t()) :: Data.t()
+  defp flag_diff_gaming(%Data{enforcement: %Enforcement{enabled: true} = enf} = data) do
+    diff = safe_diff(data)
+
+    case DiffGuard.scan(diff, grader_paths: enf.read_only_paths) do
+      [] ->
+        data
+
+      events ->
+        seeding = max(data.iterations - 1, 0)
+        stamped = Enum.map(events, &Map.put(&1, :iteration, seeding))
+
+        Enum.each(stamped, fn event ->
+          Logger.warning(fn ->
+            "kazi.loop goal=#{data.goal.id} ENFORCEMENT diff-guard flagged " <>
+              "#{event.signature} in #{event.file} (iteration #{event.iteration}): #{event.snippet}"
+          end)
+        end)
+
+        %Data{
+          data
+          | gaming_events: data.gaming_events ++ stamped,
+            gaming_flagged_iterations: MapSet.put(data.gaming_flagged_iterations, data.iterations)
+        }
+    end
+  end
+
+  defp flag_diff_gaming(%Data{} = data), do: data
+
+  # Fetch the agent's iteration diff via the injected `diff_fn`, contained: a raising
+  # or crashing diff source yields "" (no diff → no events), so the advisory guard
+  # can never break the reconcile tick.
+  @spec safe_diff(Data.t()) :: String.t()
+  defp safe_diff(%Data{diff_fn: diff_fn, workspace: ws}) when is_function(diff_fn, 1) do
+    case diff_fn.(ws) do
+      diff when is_binary(diff) -> diff
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  catch
+    _, _ -> ""
+  end
+
+  defp safe_diff(%Data{}), do: ""
+
+  # The default diff source: the agent's uncommitted iteration changes vs HEAD. New
+  # (untracked) files do not appear in `git diff HEAD`; the guard inspects edits to
+  # existing files, which is where the skip/special-case/grader signatures land. A
+  # non-git or missing workspace yields "" (no diff → no events).
+  @spec default_diff_fn(String.t() | nil) :: String.t()
+  defp default_diff_fn(workspace) when is_binary(workspace) do
+    case System.cmd("git", ["-C", workspace, "diff", "HEAD"], stderr_to_stdout: true) do
+      {output, 0} -> output
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  end
+
+  defp default_diff_fn(_workspace), do: ""
 
   # The enforcement status surfaced in snapshot/1 + the terminal result: whether
   # enforcement is active, the ACTUAL active guarantees (the configured set with
