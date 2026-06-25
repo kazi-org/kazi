@@ -88,4 +88,50 @@ defmodule Kazi.Loop.Budget do
   @spec exceeded?(pos_integer() | nil, non_neg_integer()) :: boolean()
   defp exceeded?(nil, _used), do: false
   defp exceeded?(limit, used), do: used >= limit
+
+  @doc """
+  Discount cached reads in the token total fed to the gate (T34.4, ADR-0046 #4).
+
+  This is the *cost arithmetic* that precedes `check/2`, NOT the gate decision —
+  `check/2` is unchanged. Every major provider prices cached-read input far below
+  fresh input, so counting cached reads as fresh would falsely push a cache-hit-
+  heavy run `over_budget`. Given the run's full rolled-up token total (cached
+  reads already counted at full weight, as `budget_spent.tokens` reports) and the
+  cached-read count the usage envelope reported, this rebates the discounted
+  fraction so cached reads bill at `weight` of a fresh token:
+
+      budgeted = raw_total − cached_input_tokens × (1 − weight)
+
+  `weight` is clamped to `0.0..1.0` (a cached read is never *more* than a fresh
+  token and never negative). When `cached_input_tokens` is `0` — no split was
+  reported, or there genuinely were no cached reads — the result equals
+  `raw_total`, so the gate behaves byte-identically to the pre-T34.4 all-equal
+  arithmetic. The result is floored at `0`.
+
+  ## Examples
+
+      iex> Kazi.Loop.Budget.budgeted_tokens(1000, 0, 0.1)
+      1000
+
+      iex> Kazi.Loop.Budget.budgeted_tokens(1000, 900, 0.1)
+      190
+
+      iex> Kazi.Loop.Budget.budgeted_tokens(1000, 900, 1.0)
+      1000
+  """
+  @spec budgeted_tokens(non_neg_integer(), non_neg_integer(), number()) :: non_neg_integer()
+  def budgeted_tokens(raw_total, cached_input_tokens, weight)
+      when is_integer(raw_total) and raw_total >= 0 and
+             is_integer(cached_input_tokens) and cached_input_tokens >= 0 and
+             is_number(weight) do
+    rebate = round(cached_input_tokens * (1.0 - clamp_weight(weight)))
+    max(raw_total - rebate, 0)
+  end
+
+  # Keep the weight a sane fraction of a fresh token: a cached read never costs
+  # more than a fresh one (>1) and never less than nothing (<0).
+  @spec clamp_weight(number()) :: number()
+  defp clamp_weight(weight) when weight < 0.0, do: 0.0
+  defp clamp_weight(weight) when weight > 1.0, do: 1.0
+  defp clamp_weight(weight), do: weight
 end
