@@ -107,6 +107,7 @@ defmodule Kazi.CLITest do
     test "parses `init <repo-dir>` (stack source)" do
       assert {:init, "./repo", opts} = Kazi.CLI.parse(["init", "./repo"])
       assert opts[:enrich] == nil
+      assert opts[:with_mcp] == nil
     end
 
     test "parses `init <repo-dir> --out <file> --enrich`" do
@@ -115,6 +116,12 @@ defmodule Kazi.CLITest do
 
       assert opts[:out] == "g.toml"
       assert opts[:enrich] == true
+    end
+
+    # T33.3 (ADR-0044): `--with-mcp` also writes the canonical kazi MCP client config.
+    test "parses `init <repo-dir> --with-mcp`" do
+      assert {:init, "./repo", opts} = Kazi.CLI.parse(["init", "./repo", "--with-mcp"])
+      assert opts[:with_mcp] == true
     end
 
     test "`init` with no repo-dir is an error" do
@@ -522,6 +529,44 @@ defmodule Kazi.CLITest do
 
       assert code == 1
       assert stderr =~ "could not detect a stack"
+    end
+
+    # T33.3 (ADR-0044): `--with-mcp` also writes the canonical kazi MCP client
+    # config — the BINARY verb `{command: "kazi", args: ["mcp"]}` — into the repo's
+    # `.mcp.json`, so an MCP-speaking harness drives kazi natively.
+    test "`--with-mcp` writes the canonical kazi MCP client config to .mcp.json",
+         %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "go-repo-mcp")
+      File.mkdir_p!(repo)
+      File.write!(Path.join(repo, "go.mod"), "module example.com/app\n")
+      out = Path.join(tmp_dir, "go.goal.toml")
+
+      {code, output} =
+        with_io(fn -> Kazi.CLI.run(["init", repo, "--out", out, "--with-mcp"]) end)
+
+      assert code == 0
+      mcp_path = Path.join(repo, ".mcp.json")
+      assert output =~ mcp_path
+      # the on-ramp prints the canonical inline snippet
+      assert output =~ Kazi.MCP.ClientConfig.inline()
+
+      # the file on disk is exactly the canonical config — the binary verb
+      assert {:ok, config} = Jason.decode(File.read!(mcp_path))
+      assert config == Kazi.MCP.ClientConfig.config()
+      assert config["mcpServers"]["kazi"] == %{"command" => "kazi", "args" => ["mcp"]}
+    end
+
+    # Without the flag, init never touches `.mcp.json` (config emission is opt-in).
+    test "init without `--with-mcp` does not write a .mcp.json", %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "go-repo-no-mcp")
+      File.mkdir_p!(repo)
+      File.write!(Path.join(repo, "go.mod"), "module example.com/app\n")
+      out = Path.join(tmp_dir, "go.goal.toml")
+
+      {code, _output} = with_io(fn -> Kazi.CLI.run(["init", repo, "--out", out]) end)
+
+      assert code == 0
+      refute File.exists?(Path.join(repo, ".mcp.json"))
     end
   end
 
