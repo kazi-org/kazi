@@ -75,8 +75,10 @@ defmodule Kazi.CLI.Schema do
             "ADR-0046 economy envelope: OPTIONAL, ADDITIVE. Present only when the harness " <>
               "reported usage. Fields (each optional, omitted when unreported — absent is " <>
               "NOT zero): input_tokens, cached_input_tokens, cache_write_tokens, " <>
-              "output_tokens, reasoning_tokens (integers), cost_usd (float). Additive, so " <>
-              "schema_version stays 2 (same rule as the ADR-0041 predicate envelope)."
+              "output_tokens, reasoning_tokens (integers), cost_usd (float). cost_usd is the " <>
+              "harness's reported figure when given, else derived from the tokens via a single " <>
+              "dated price map (T34.5) and OMITTED for an unpriced model — never guessed. " <>
+              "Additive, so schema_version stays 2 (same rule as the ADR-0041 predicate envelope)."
         },
         %{
           name: "next_action",

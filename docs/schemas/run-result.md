@@ -184,7 +184,7 @@ envelope plus the harness's own dollar figure.
 | `cache_write_tokens`  | integer | Tokens written to the provider cache this run. |
 | `output_tokens`       | integer | Generated output tokens. |
 | `reasoning_tokens`    | integer | Reasoning/thinking tokens, when the harness reports them separately. |
-| `cost_usd`            | float   | The harness's own reported dollar cost for the run. |
+| `cost_usd`            | float   | The run's dollar cost: the harness's own reported figure when it gives one, else derived from the accounted tokens via the dated price map (T34.5). Omitted for a model the price map does not name — never a guessed cost. |
 
 Rules:
 
@@ -198,6 +198,19 @@ Rules:
 - **`budget_spent.tokens` is the back-compat rollup.** An orchestrator pinning the
   pre-envelope contract keeps reading the single rolled-up total there; `usage`
   carries the un-summed split. The two are consistent but serve different readers.
+- **`cost_usd` — harness figure first, then a dated price map, else omitted (T34.5).**
+  When the harness reports its own dollar figure (Claude's `total_cost_usd`), that
+  is authoritative and used verbatim. Otherwise — a harness that reports tokens but
+  no dollars — kazi derives the cost from the accounted tokens using a single,
+  dated price table (`Kazi.Economy.PriceMap`), pricing each token class
+  independently (fresh input, cached read, cache write, output, reasoning). The
+  price table lives in **one place**, is stamped with the date it was compiled
+  against the providers' published pricing (`Kazi.Economy.PriceMap.as_of/0`), and
+  is the only source of per-token prices in the codebase. For a model the table
+  does **not** name, `cost_usd` is **omitted** entirely — the tokens are still
+  reported, but kazi never guesses a dollar figure (ADR-0046 honest-unknown). To
+  add or reprice a model, edit the entry and `@as_of` together — a CI/compile-time
+  guard keeps the priced token classes in lockstep with this envelope's fields.
 
 T34.1 defines this envelope and its additive wiring; T34.2 maps each provider's
 raw usage onto these fields. The Anthropic (`:claude`) usage object maps as
