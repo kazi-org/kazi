@@ -44,6 +44,7 @@ defmodule Kazi.Harness.DispatchSurface do
   lands — no change to the rendering logic. See `injected_servers/1`.
   """
 
+  alias Kazi.Context.Tier
   alias Kazi.Harness.Profile
 
   # The standard edit/shell tools every reconcile dispatch needs to fix
@@ -78,14 +79,24 @@ defmodule Kazi.Harness.DispatchSurface do
       them today, so a non-Claude harness (or a test double with no `:profile`)
       is unaffected and stays back-compatible.
 
-  When both hold, returns `build/1` over the workspace's `injected_servers/1`.
+  When both hold, returns `build/1` over the workspace's `injected_servers/1`,
+  **tier-filtered**: the live code-review-graph MCP server is a TIER-2 feature
+  (ADR-0047 §2), so the active `Kazi.Context.Tier` (`adapter_opts[:context_tier]`,
+  default 1) DROPS it below tier 2. At the default tier 1 the agent gets the
+  cached orientation TEXT (assembled separately by `Kazi.Context`) but no live
+  graph MCP; tier ≥ 2 exposes it. The standard edit/shell tool floor is always
+  present — the surface is never empty (the agent can always read/edit/run).
+
   The caller merges this UNDER its explicit adapter opts, so an operator/goal
   that set `:tools` (etc.) still wins.
   """
   @spec minimal_default(term(), keyword()) :: keyword()
   def minimal_default(workspace, adapter_opts) when is_list(adapter_opts) do
     if is_binary(workspace) and surface_supported?(adapter_opts) do
-      build(injected_servers(workspace))
+      workspace
+      |> injected_servers()
+      |> tier_filter(Tier.resolve(adapter_opts))
+      |> build()
     else
       []
     end
@@ -135,6 +146,17 @@ defmodule Kazi.Harness.DispatchSurface do
   @doc "The standard edit/shell tool floor — the never-empty surface."
   @spec standard_tools() :: [String.t()]
   def standard_tools, do: @standard_tools
+
+  # T36.3 (ADR-0047 §2): drop the live code-review-graph MCP server below tier 2 —
+  # it is the tier-2 "+ graph" feature. Other injected servers (e.g. the E35
+  # search-only context store) are NOT graph and stay regardless of tier. Tier ≥ 2
+  # keeps the full injected set.
+  @spec tier_filter([injected_server()], Tier.t()) :: [injected_server()]
+  defp tier_filter(servers, tier) do
+    if Tier.graph?(tier),
+      do: servers,
+      else: Enum.reject(servers, &(&1.name == @graph_server))
+  end
 
   # The per-profile opt-in: the surface is applied only when the resolved profile
   # in `adapter_opts[:profile]` advertises the economy opts (ADR-0047 "opt-in per

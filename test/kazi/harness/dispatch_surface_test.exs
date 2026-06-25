@@ -63,16 +63,38 @@ defmodule Kazi.Harness.DispatchSurfaceTest do
   end
 
   describe "minimal_default/2 — the per-dispatch policy gate" do
-    test "applies the surface for a Claude-profile dispatch with a workspace" do
+    test "the DEFAULT tier (1) restricts the surface but EXCLUDES the graph MCP (T36.3)" do
       {:ok, profile} = Registry.fetch(:claude)
 
+      # No :context_tier ⇒ tier 1 ⇒ the live graph MCP is a tier-2 feature, so it
+      # is dropped: strict-config + the standard edit/shell floor, no graph server.
       opts = DispatchSurface.minimal_default(@workspace, profile: profile)
+
+      assert Keyword.get(opts, :strict_mcp_config) == true
+      assert Keyword.get(opts, :mcp_config) == []
+      assert Keyword.get(opts, :tools) == DispatchSurface.standard_tools()
+      refute "mcp__code-review-graph" in Keyword.get(opts, :tools)
+    end
+
+    test "tier 2 ADDS the graph MCP server back into the surface (ADR-0047 §2)" do
+      {:ok, profile} = Registry.fetch(:claude)
+
+      opts = DispatchSurface.minimal_default(@workspace, profile: profile, context_tier: 2)
 
       assert Keyword.get(opts, :strict_mcp_config) == true
       assert Keyword.get(opts, :mcp_config) == [@injected_config]
 
       assert Keyword.get(opts, :tools) ==
                DispatchSurface.standard_tools() ++ ["mcp__code-review-graph"]
+    end
+
+    test "tier 0 also excludes the graph MCP (evidence-only surface)" do
+      {:ok, profile} = Registry.fetch(:claude)
+
+      opts = DispatchSurface.minimal_default(@workspace, profile: profile, context_tier: 0)
+
+      assert Keyword.get(opts, :mcp_config) == []
+      assert Keyword.get(opts, :tools) == DispatchSurface.standard_tools()
     end
 
     test "is a no-op when no resolved profile is present (test doubles, pre-resolve)" do
@@ -98,9 +120,10 @@ defmodule Kazi.Harness.DispatchSurfaceTest do
   end
 
   describe "end-to-end: the surface restricts the Claude argv (the acc)" do
-    test "a dispatch carries ONLY the injected server + needed edit/shell tools" do
+    test "a tier-2 dispatch carries ONLY the injected server + needed edit/shell tools" do
       {:ok, profile} = Registry.fetch(:claude)
-      surface = DispatchSurface.minimal_default(@workspace, profile: profile)
+      # Tier 2 exposes the live graph MCP; tier 1 (default) would exclude it (T36.3).
+      surface = DispatchSurface.minimal_default(@workspace, profile: profile, context_tier: 2)
 
       args = Claude.build_args("fix predicates", surface)
 
