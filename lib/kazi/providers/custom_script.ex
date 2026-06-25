@@ -109,8 +109,6 @@ defmodule Kazi.Providers.CustomScript do
 
   # A pass_when comparison: an operator and a numeric operand.
   @pass_when_re ~r/^\s*(==|!=|<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)\s*$/
-  # One JSONPath segment: a `.key` or a `[index]`.
-  @path_token_re ~r/\.([^.\[\]]+)|\[(\d+)\]/
 
   @doc "The verdict strings this provider accepts."
   @spec verdicts() :: [String.t()]
@@ -270,8 +268,8 @@ defmodule Kazi.Providers.CustomScript do
          {:ok, expr} <- require_string(config, :pass_when),
          {:ok, {op, operand}} <- parse_pass_when(expr),
          {:ok, data} <- decode_json(output),
-         {:ok, raw} <- json_get(data, path),
-         {:ok, number} <- to_number(raw) do
+         {:ok, raw} <- Kazi.JSONPath.get(data, path),
+         {:ok, number} <- Kazi.JSONPath.to_number(raw) do
       evidence =
         evidence
         |> Map.merge(%{path: path, pass_when: expr, observed: number})
@@ -349,59 +347,8 @@ defmodule Kazi.Providers.CustomScript do
   defp compare(value, ">", operand), do: value > operand
   defp compare(value, ">=", operand), do: value >= operand
 
-  # A number is used verbatim; a list uses its length (so a path pointing at a
-  # findings array compares its COUNT). Anything else cannot be compared.
-  defp to_number(n) when is_number(n), do: {:ok, n}
-  defp to_number(list) when is_list(list), do: {:ok, length(list)}
-  defp to_number(other), do: {:error, {:not_a_number, other}}
-
-  # =============================================================================
-  # JSONPath subset ($, .key, [index])
-  # =============================================================================
-
-  defp json_get(data, path) do
-    with {:ok, tokens} <- parse_path(path) do
-      fetch_path(data, tokens, path)
-    end
-  end
-
-  defp parse_path("$" <> rest), do: tokenize(rest)
-  defp parse_path(path), do: {:error, {:invalid_path, path}}
-
-  defp tokenize(rest) do
-    matches = Regex.scan(@path_token_re, rest)
-    consumed = matches |> Enum.map(&hd/1) |> Enum.join()
-
-    if consumed == rest do
-      {:ok, Enum.map(matches, &token/1)}
-    else
-      {:error, {:invalid_path, "$" <> rest}}
-    end
-  end
-
-  # Regex.scan yields the full match plus the two alternation groups; the one that
-  # did not participate is the empty string.
-  defp token([_full, key, ""]), do: {:key, key}
-  defp token([_full, "", index]), do: {:index, String.to_integer(index)}
-  defp token([_full, key]), do: {:key, key}
-
-  defp fetch_path(value, [], _path), do: {:ok, value}
-
-  defp fetch_path(map, [{:key, key} | rest], path) when is_map(map) do
-    case Map.fetch(map, key) do
-      {:ok, value} -> fetch_path(value, rest, path)
-      :error -> {:error, {:path_missing, key, path}}
-    end
-  end
-
-  defp fetch_path(list, [{:index, index} | rest], path) when is_list(list) do
-    case Enum.fetch(list, index) do
-      {:ok, value} -> fetch_path(value, rest, path)
-      :error -> {:error, {:path_index_out_of_range, index, path}}
-    end
-  end
-
-  defp fetch_path(_value, [token | _rest], path), do: {:error, {:path_type_mismatch, token, path}}
+  # JSONPath extraction + numeric coercion are shared with the `:ratchet` metric
+  # via `Kazi.JSONPath` (one implementation of the `$`/`.key`/`[index]` subset).
 
   # =============================================================================
   # Evidence extraction (SARIF / JUnit), best-effort
