@@ -482,6 +482,28 @@ defmodule Kazi.Goal.LoaderTest do
       assert goal.budget == %Budget{}
       assert goal.scope == %Scope{}
     end
+
+    test "an omitted budget.cached_read_weight uses the struct default (T34.4)" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"max_tokens" => 1_000},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert goal.budget.cached_read_weight == Budget.default_cached_read_weight()
+    end
+
+    test "budget.cached_read_weight maps onto the budget (T34.4)" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"max_tokens" => 1_000, "cached_read_weight" => 0.25},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert goal.budget.cached_read_weight == 0.25
+    end
   end
 
   describe "load/1 / from_map/1 — validation errors" do
@@ -536,6 +558,17 @@ defmodule Kazi.Goal.LoaderTest do
 
       assert {:error, reason} = Loader.from_map(data)
       assert reason =~ "budget.max_iterations must be a positive integer"
+    end
+
+    test "an out-of-range budget.cached_read_weight is rejected (T34.4)" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"cached_read_weight" => 1.5},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "budget.cached_read_weight must be a number between 0.0 and 1.0"
     end
 
     test "a non-string scope.workspace is rejected" do
