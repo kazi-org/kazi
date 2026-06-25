@@ -31,12 +31,35 @@ defmodule Kazi.Harness.ConformanceTest do
             tokens: 5350,
             cost: %{tokens: 5350},
             cost_usd: 0.0123,
-            touched: ["lib/app/widget.ex", "test/app/widget_test.exs"]
+            touched: ["lib/app/widget.ex", "test/app/widget_test.exs"],
+            # T34.2: the four Anthropic fields mapped onto the economy envelope —
+            # cache_creation -> cache_write, cache_read -> cached_input — with the
+            # raw object kept and a full-fidelity marker (all four reported).
+            usage: %{
+              input_tokens: 100,
+              output_tokens: 250,
+              cache_write_tokens: 0,
+              cached_input_tokens: 5000
+            },
+            usage_raw: %{
+              "input_tokens" => 100,
+              "output_tokens" => 250,
+              "cache_creation_input_tokens" => 0,
+              "cache_read_input_tokens" => 5000
+            },
+            usage_fidelity: :full
           }
         )
 
       # The helper returns the parsed map for any extra bespoke assertions.
       assert parsed.tokens == 100 + 250 + 5000 + 0
+
+      assert parsed.usage == %{
+               input_tokens: 100,
+               output_tokens: 250,
+               cache_write_tokens: 0,
+               cached_input_tokens: 5000
+             }
     end
 
     test "argv renders the claw-code hygiene flags when their opts are supplied" do
@@ -62,7 +85,20 @@ defmodule Kazi.Harness.ConformanceTest do
           tokens: 5350,
           cost: %{tokens: 5350},
           cost_usd: 0.0123,
-          touched: ["lib/app/widget.ex", "test/app/widget_test.exs"]
+          touched: ["lib/app/widget.ex", "test/app/widget_test.exs"],
+          usage: %{
+            input_tokens: 100,
+            output_tokens: 250,
+            cache_write_tokens: 0,
+            cached_input_tokens: 5000
+          },
+          usage_raw: %{
+            "input_tokens" => 100,
+            "output_tokens" => 250,
+            "cache_creation_input_tokens" => 0,
+            "cache_read_input_tokens" => 5000
+          },
+          usage_fidelity: :full
         }
       )
     end
@@ -88,7 +124,20 @@ defmodule Kazi.Harness.ConformanceTest do
           tokens: 5350,
           cost: %{tokens: 5350},
           cost_usd: 0.0123,
-          touched: ["lib/app/widget.ex", "test/app/widget_test.exs"]
+          touched: ["lib/app/widget.ex", "test/app/widget_test.exs"],
+          usage: %{
+            input_tokens: 100,
+            output_tokens: 250,
+            cache_write_tokens: 0,
+            cached_input_tokens: 5000
+          },
+          usage_raw: %{
+            "input_tokens" => 100,
+            "output_tokens" => 250,
+            "cache_creation_input_tokens" => 0,
+            "cache_read_input_tokens" => 5000
+          },
+          usage_fidelity: :full
         }
       )
     end
@@ -163,7 +212,16 @@ defmodule Kazi.Harness.ConformanceTest do
           result: "Made the failing unit test pass.",
           # turn.completed usage: input 1200 + cached_input 900 + output 300.
           tokens: 2400,
-          cost: %{tokens: 2400}
+          cost: %{tokens: 2400},
+          # T34.2: Codex's native cached/fresh split mapped onto the envelope (all
+          # three reported -> :full), with the raw usage object retained.
+          usage: %{input_tokens: 1200, cached_input_tokens: 900, output_tokens: 300},
+          usage_raw: %{
+            "input_tokens" => 1200,
+            "cached_input_tokens" => 900,
+            "output_tokens" => 300
+          },
+          usage_fidelity: :full
         }
       )
     end
@@ -177,7 +235,14 @@ defmodule Kazi.Harness.ConformanceTest do
         expected_parse: %{
           result: "Made the failing unit test pass.",
           tokens: 2400,
-          cost: %{tokens: 2400}
+          cost: %{tokens: 2400},
+          usage: %{input_tokens: 1200, cached_input_tokens: 900, output_tokens: 300},
+          usage_raw: %{
+            "input_tokens" => 1200,
+            "cached_input_tokens" => 900,
+            "output_tokens" => 300
+          },
+          usage_fidelity: :full
         }
       )
     end

@@ -136,6 +136,22 @@ defmodule Kazi.CLIRunJsonTest do
       usage = payload["usage"]
       assert is_map(usage)
       assert usage["cost_usd"] > 0
+
+      # T34.2: …and the cached-vs-fresh TOKEN split is now mapped from the Claude
+      # usage object — fresh input, generated output, and the cache-read class the
+      # economy program centers on are all present and positive.
+      assert usage["input_tokens"] > 0
+      assert usage["output_tokens"] > 0
+      assert usage["cached_input_tokens"] > 0
+      # cache_creation was reported as 0 — a reported 0 is kept (it WAS measured),
+      # distinct from an unreported field.
+      assert usage["cache_write_tokens"] == 0
+
+      # The split is consistent with the back-compat rollup: the four token fields
+      # sum to budget_spent.tokens (same per-dispatch source, un-summed here).
+      assert usage["input_tokens"] + usage["output_tokens"] + usage["cache_write_tokens"] +
+               usage["cached_input_tokens"] == payload["budget_spent"]["tokens"]
+
       # …while components the harness did not report as a distinct envelope field
       # are OMITTED (absent ≠ zero), not zero-filled.
       refute Map.has_key?(usage, "reasoning_tokens")
