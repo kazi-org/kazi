@@ -483,8 +483,15 @@ defmodule Kazi.Authoring do
 
   # A JSON string decodes to its object; an already-decoded map passes through;
   # anything else (a number, a list, a decode error, nil) is an invalid proposal.
+  #
+  # A drafting harness (a coding agent / LLM) routinely wraps the JSON it returns
+  # in a Markdown code fence (```json ... ```) or surrounds it with prose ("Here
+  # are the predicates: { ... }"). Feeding that raw to Jason.decode/1 fails, which
+  # is why `kazi plan "<idea>"` reported "proposal is not valid JSON" even though
+  # the harness ran fine (the on-ramp's step-1 bug). So extract the JSON object
+  # first; a bare object passes through unchanged.
   defp decode_proposal(proposal) when is_binary(proposal) do
-    case Jason.decode(proposal) do
+    case Jason.decode(extract_json_object(proposal)) do
       {:ok, %{} = map} -> {:ok, map}
       {:ok, _other} -> {:error, {:invalid_proposal, "proposal JSON is not an object"}}
       {:error, _} -> {:error, {:invalid_proposal, "proposal is not valid JSON"}}
@@ -494,6 +501,28 @@ defmodule Kazi.Authoring do
   defp decode_proposal(%{} = map), do: {:ok, map}
   defp decode_proposal(nil), do: {:error, {:invalid_proposal, "harness returned no proposal"}}
   defp decode_proposal(_other), do: {:error, {:invalid_proposal, "proposal is not an object"}}
+
+  # Pull the JSON object out of possibly fenced / prose-wrapped harness output:
+  # prefer the contents of a ```json (or bare ```) code fence, then narrow to the
+  # span from the first "{" to the last "}". Returns the input unchanged when it
+  # is already a bare object or carries no braces (so a genuinely malformed result
+  # still surfaces as an "invalid JSON" error rather than being masked).
+  defp extract_json_object(text) do
+    unfenced =
+      case Regex.run(~r/```(?:json)?\s*(.*?)```/s, text, capture: :all_but_first) do
+        [body] -> body
+        _ -> text
+      end
+
+    with {start, _} <- :binary.match(unfenced, "{"),
+         [_ | _] = closes <- :binary.matches(unfenced, "}"),
+         {stop, _} <- List.last(closes),
+         true <- stop >= start do
+      binary_part(unfenced, start, stop - start + 1)
+    else
+      _ -> String.trim(unfenced)
+    end
+  end
 
   # Build the acceptance predicate list. At least one usable predicate is
   # required (a goal with no predicate is vacuously "done" — ADR-0002); an empty
