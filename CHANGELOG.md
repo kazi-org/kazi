@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.11.0](https://github.com/kazi-org/kazi/compare/v1.10.0...v1.11.0) (2026-06-25)
+
+
+### Features
+
+* **json:** add usage envelope renderer + schema descriptor (T34.1) ([5294c88](https://github.com/kazi-org/kazi/commit/5294c88b5cb321fdcb840a2983844157283004ea))
+* **json:** render additive usage envelope + budget_spent.tokens (T34.1) ([85bcb3c](https://github.com/kazi-org/kazi/commit/85bcb3c2837a1c7f31f8040d667c85e1155a2fd7))
+* **loop:** accumulate the run-aggregate usage envelope (T34.1) ([bcac448](https://github.com/kazi-org/kazi/commit/bcac448b31f5e512b238832f170e87d472bab282))
+* **mcp:** mirror the usage envelope in the MCP run result (T34.1) ([e28250b](https://github.com/kazi-org/kazi/commit/e28250b2f794e13788133b7b6cf9ec97f04dd2d8))
+
 ## [1.10.0](https://github.com/kazi-org/kazi/compare/v1.9.0...v1.10.0) (2026-06-25)
 
 
