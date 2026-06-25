@@ -585,6 +585,21 @@ Pass `--enrich` (off by default) to have your coding agent propose live
 predicates from discovered endpoints; the deterministic detection always stands.
 Review the goal-file, fill in the live TODO, then `kazi apply` it.
 
+Pass `--with-gist` to opt **this repo** into the Gist context store
+([ADR-0045](docs/adr/0045-context-store-layer-gist-provider.md)) — a budget-fitted
+text-artifact memory that keeps each agent prompt small. It verifies `gist doctor`,
+writes the project-local `.kazi/context.toml` naming the provider, registers the
+`gist serve` MCP server in the repo's `.mcp.json`, and recommends setting
+`KAZI_GIST_DSN` to a PostgreSQL DSN for cross-iteration persistence. It is
+**project-local only** — it never mutates a global agent config — and requires the
+[`gist`](https://github.com/sirerun/gist) binary on `PATH` (absent it, the command
+reports the missing dep and the goal-file is still written):
+
+```sh
+kazi init ./my-service --with-gist
+export KAZI_GIST_DSN="postgres://USER:PASS@HOST:5432/gist"   # cross-call persistence
+```
+
 ### Worked example
 
 Run it against the Go fixture that ships with this repo:
@@ -630,7 +645,7 @@ pins this output, so the example never drifts from what the tool produces.
 ## CLI reference
 
 ```
-kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp]  # adopt a repo -> a goal-file (+ .mcp.json)
+kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]  # adopt a repo -> a goal-file (+ .mcp.json / context store)
 kazi plan "<idea>" [--workspace <path>]   # draft predicates from plain English
 kazi list-proposed [--status <state>]        # review drafts (proposed/approved/rejected)
 kazi approve <proposal-ref>                  # bless a drafted goal
