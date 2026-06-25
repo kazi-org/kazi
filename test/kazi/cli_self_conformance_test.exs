@@ -369,6 +369,49 @@ defmodule Kazi.CLISelfConformanceTest do
   end
 
   # ===========================================================================
+  # Every ADVERTISED verb is dispatchable (T33.2, ADR-0044).
+  #
+  # ADR-0022/0023: an orchestrator drives kazi as a subprocess and learns the
+  # surface from `kazi help --json`. That contract only holds if EVERY verb the
+  # surface advertises actually dispatches on the same binary — an advertised but
+  # undispatchable verb is drift an onboarding agent cannot recover from (it reads
+  # the verb from `help --json`, runs it, and hits an unknown-command error). The
+  # `mcp` verb (T33.1) is the verb this task adds to that surface; this guard pins
+  # it, and every other advertised verb, against that drift on the REAL CLI — the
+  # advertised list comes from the actual `help --json` output, not a hand-copy.
+  # ===========================================================================
+
+  describe "every advertised verb is dispatchable (ADR-0022/0023, T33.2)" do
+    test "`help --json` advertises `mcp` and the binary dispatches it" do
+      assert "mcp" in advertised_verbs(),
+             "help --json must advertise the mcp verb (T33.2, ADR-0044)"
+
+      refute match?({:error, _}, dispatch_probe("mcp")),
+             "mcp is advertised by help --json but the binary does not dispatch it"
+    end
+
+    test "EVERY verb help --json advertises dispatches (no advertised-but-undispatchable verb)" do
+      undispatchable =
+        for verb <- advertised_verbs(),
+            match?({:error, _}, dispatch_probe(verb)),
+            do: verb
+
+      assert undispatchable == [],
+             "advertised verbs the binary does not dispatch: #{inspect(undispatchable)}"
+    end
+
+    test "the dispatchability check is load-bearing — a non-advertised verb IS undispatchable" do
+      # Negative control (ZERO-STUB): the SAME probe the green assertions use
+      # returns the unknown-command error for a verb the surface never advertises.
+      # This proves those assertions are not vacuous — if `mcp` (or any verb)
+      # stopped dispatching, `dispatch_probe/1` would return `{:error, _}` and the
+      # guard above would FAIL. The check tests dispatch, not `assert true`.
+      refute "totally-bogus-verb" in advertised_verbs()
+      assert match?({:error, _}, dispatch_probe("totally-bogus-verb"))
+    end
+  end
+
+  # ===========================================================================
   # Regression guards — the contract's NEGATIVE space. These prove the
   # `assert_conformant/2` checks actually FAIL on a violation (prose leak, a
   # stdin block), so the self-conformance suite is not vacuously green.
@@ -405,6 +448,34 @@ defmodule Kazi.CLISelfConformanceTest do
         drive(fn -> Process.sleep(:infinity) end)
       end
     end
+  end
+
+  # ===========================================================================
+  # helpers — advertised-verb dispatchability (T33.2)
+  # ===========================================================================
+
+  # The verbs `kazi help --json` advertises, read from the REAL generated surface
+  # (the `@commands` table help --json renders). An orchestrator learns the verb
+  # set from exactly this output, so the dispatchability guard checks exactly it.
+  defp advertised_verbs do
+    out = capture_io(fn -> Kazi.CLI.run(["help", "--json"]) end)
+    {:ok, payload} = Jason.decode(String.trim(out))
+    Enum.map(payload["commands"], & &1["name"])
+  end
+
+  # Probe the parser for one verb, supplying a dummy positional where the verb
+  # requires one so we observe DISPATCH (a command tuple) versus the
+  # unknown-command error — never a "missing argument" false negative. Mirrors the
+  # help-schema drift guard's probe (T16.1, CLIHelpSchemaTest).
+  defp dispatch_probe(name) do
+    argv =
+      case name do
+        n when n in ~w(apply init status approve reject plan export lint) -> [n, "dummy"]
+        "schema" -> [name, "apply"]
+        _ -> [name]
+      end
+
+    Kazi.CLI.parse(argv)
   end
 
   # ===========================================================================
