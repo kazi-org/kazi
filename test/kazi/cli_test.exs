@@ -461,6 +461,100 @@ defmodule Kazi.CLITest do
   end
 
   # ===========================================================================
+  # Tier 2 — context store: --context-store enables it + additive JSON stats (T35.5)
+  # ===========================================================================
+
+  describe "run/2 — apply --context-store" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    @fake_gist Path.expand("../support/fake_gist.sh", __DIR__)
+
+    # A goal that fails with oversized evidence and a 1-iteration budget: one
+    # dispatch indexes the >5KB evidence into the (injected fake) store, then the
+    # run stops :over_budget — enough to assert the additive context_store object.
+    defp big_evidence_goal(tmp_dir, work) do
+      goal_file = Path.join(tmp_dir, "ctx-store.toml")
+
+      File.write!(goal_file, """
+      id = "ctx-store-e2e"
+      name = "oversized evidence"
+
+      [budget]
+      max_iterations = 1
+
+      [scope]
+      workspace = "#{work}"
+
+      [[predicate]]
+      id = "code"
+      provider = "test_runner"
+      cmd = "sh"
+      args = ["-c", "yes 'verbose failing log line with detail' | head -800; exit 1"]
+
+      [[predicate]]
+      id = "code2"
+      provider = "test_runner"
+      cmd = "sh"
+      args = ["-c", "yes 'another verbose failing detail line' | head -800; exit 1"]
+      """)
+
+      goal_file
+    end
+
+    defp noop_harness(tmp_dir) do
+      h = Path.join(tmp_dir, "noop_harness.sh")
+      File.write!(h, "#!/bin/sh\nexit 0\n")
+      File.chmod!(h, 0o755)
+      h
+    end
+
+    test "the store is enabled and --json carries the additive context_store object",
+         %{tmp_dir: tmp_dir} do
+      %{work: work} = setup_repo(tmp_dir)
+      goal_file = big_evidence_goal(tmp_dir, work)
+      store = Path.join(tmp_dir, "gist-store")
+      File.mkdir_p!(store)
+
+      opts = [
+        adapter_opts: [
+          command: noop_harness(tmp_dir),
+          context_store:
+            {Kazi.ContextStore.GistCLI, [gist_bin: @fake_gist, env: [{"FAKE_GIST_STORE", store}]]},
+          context_budget: 400
+        ],
+        reobserve_interval_ms: 5
+      ]
+
+      {_code, out} =
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], opts)
+        end)
+
+      assert {:ok, decoded} = Jason.decode(out)
+      assert %{"provider" => "gist", "budget" => 400} = decoded["context_store"]
+      assert decoded["context_store"]["indexed_bytes"] > 0
+      assert is_integer(decoded["context_store"]["saved_bytes"])
+    end
+
+    test "absent --context-store the result has NO context_store key (byte-identical)",
+         %{tmp_dir: tmp_dir} do
+      %{work: work} = setup_repo(tmp_dir)
+      goal_file = big_evidence_goal(tmp_dir, work)
+
+      opts = [adapter_opts: [command: noop_harness(tmp_dir)], reobserve_interval_ms: 5]
+
+      {_code, out} =
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], opts)
+        end)
+
+      assert {:ok, decoded} = Jason.decode(out)
+      refute Map.has_key?(decoded, "context_store")
+    end
+  end
+
+  # ===========================================================================
   # Tier 2 — vacuous goal rejected through the CLI (T2.3, R3)
   # ===========================================================================
 
