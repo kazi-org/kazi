@@ -52,7 +52,11 @@ defmodule Kazi.CLI.Schema do
           type: "array<object>",
           description:
             "The predicate vector: one {id, verdict} per predicate, sorted by id. " <>
-              "verdict is pass / fail / error / unknown."
+              "verdict is pass / fail / error / unknown. ADR-0041 adds four OPTIONAL, " <>
+              "additive fields per predicate, present only on a graded result: score " <>
+              "(float), prior_score (float), direction (higher_better/lower_better), and " <>
+              "evidence (array of LSP-Diagnostic-shaped items: {file,line,col,rule,level," <>
+              "message,expected,got}). A boolean predicate carries none of them."
         },
         %{name: "iterations", type: "integer", description: "The loop's observation count."},
         %{
@@ -192,7 +196,10 @@ defmodule Kazi.CLI.Schema do
         %{
           name: "predicates",
           type: "array<object>",
-          description: "run only: the predicate vector ({id, verdict}, sorted by id)."
+          description:
+            "run only: the predicate vector ({id, verdict}, sorted by id). ADR-0041 adds " <>
+              "optional, additive per-predicate fields on a graded result: score, " <>
+              "prior_score, direction, and evidence (LSP-Diagnostic-shaped items)."
         },
         %{
           name: "release_ref",
