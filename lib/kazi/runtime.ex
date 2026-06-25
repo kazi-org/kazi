@@ -40,7 +40,7 @@ defmodule Kazi.Runtime do
   provider fails loudly here, not silently at dispatch).
   """
 
-  alias Kazi.{Goal, Loop, Predicate, PredicateResult, PredicateVector, ReadModel}
+  alias Kazi.{Enforcement, Goal, Loop, Predicate, PredicateResult, PredicateVector, ReadModel}
 
   require Logger
 
@@ -148,6 +148,12 @@ defmodule Kazi.Runtime do
       `:infinity`).
     * `:providers` — override the predicate-kind → provider-module map (advanced;
       defaults to the built-in Slice-0 map).
+    * `:enforcement` — a `Kazi.Enforcement` profile to apply (T32.4, ADR-0042),
+      overriding the goal's authored/derived profile. Omitted, the policy is
+      resolved from the goal: default-on for creation-mode goals, opt-in for repair.
+      Its declared ratchet guards are synthesized into the goal's guards before the
+      loop observes; the profile is threaded to `Kazi.Loop` to compose clean-tree
+      isolation, read-only-write flagging, and the skip→fail mapping onto the tick.
     * `:standing` — run as a standing (continuous/maintenance) reconciler (T3.4a,
       UC-016): the loop does not terminate at convergence but keeps re-observing
       on the bounded interval to hold the goal's predicates true. Forwarded to
@@ -179,6 +185,14 @@ defmodule Kazi.Runtime do
     workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
     await_timeout = Keyword.get(opts, :await_timeout, :infinity)
 
+    # T32.4 anti-gaming enforcement (ADR-0042): resolve the profile (default-on for
+    # creation mode, opt-in for repair — `Kazi.Enforcement.resolve/1`) and SYNTHESIZE
+    # its declared ratchet guards (test-count / coverage, §4) into the goal's guards
+    # BEFORE the loop observes, so they gate convergence exactly like authored
+    # guards. An `:enforcement` opt overrides the goal's authored/derived profile.
+    enforcement = Keyword.get(opts, :enforcement) || Enforcement.resolve(goal)
+    goal = %Goal{goal | guards: goal.guards ++ Enforcement.guard_predicates(enforcement)}
+
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
          :ok <- guard_not_vacuous(goal, providers, workspace) do
@@ -206,7 +220,10 @@ defmodule Kazi.Runtime do
           # T3.4d standing wiring: dropped here and re-set in the merge below so
           # the loop's standing mode defaults to the goal-file's declared
           # `standing`, overridable by an explicit `:standing` opt (CLI flag).
-          :standing
+          :standing,
+          # T32.4: resolved above and re-set in the merge below as the loop's
+          # `:enforcement` profile.
+          :enforcement
         ])
         |> Keyword.merge(
           goal: goal,
@@ -228,7 +245,11 @@ defmodule Kazi.Runtime do
           # `:standing` opt) wins; otherwise fall back to the goal-file's own
           # declared `standing` field. So a goal authored standing runs standing
           # with no flag, and the flag can still force it on for any goal.
-          standing: Keyword.get(opts, :standing, goal.standing)
+          standing: Keyword.get(opts, :standing, goal.standing),
+          # T32.4 anti-gaming enforcement (ADR-0042): thread the resolved profile so
+          # the loop composes clean-tree isolation + read-only flagging + the
+          # skip→fail mapping onto the reconcile tick.
+          enforcement: enforcement
         )
 
       with {:ok, loop} <- Loop.start_link(loop_opts) do
