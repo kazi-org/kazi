@@ -174,4 +174,52 @@ on the E19/E34 benchmark for ESCALATION — no tier ladder is shipped as proven:
   and the stop rule, with thresholds loaded from config (E19/E34-derived), NOT
   hardcoded — that is where a tier ladder could be claimed "proven", and only from
   data.
+
+  The policy is the pure `Kazi.Context.Escalation` state machine (`init/2` +
+  `step/3`), so the ladder is tunable, not baked into the loop. `Kazi.Loop` owns the
+  signal and applies the resulting tier: each observation it computes a
+  **non-progress** verdict — the SAME `Kazi.Loop.StuckDetector` rule (identical
+  non-empty failing set, no graded-score improvement, ADR-0041) over a 2-window —
+  and a per-iteration **cost** delta from the ADR-0046 usage envelope (dollars when
+  reported, else the token total), folds them through `Escalation.step/3`, and reads
+  the resulting `escalation_state.tier` as the active tier for the next dispatch
+  (gating the orientation prefix, the tier-2 graph MCP surface, and the recorded
+  `context.tier`). With no non-progress the active tier never leaves the base, so
+  the dispatch path is byte-identical to T36.3.
+
+  **Escalation trigger.** On `threshold` consecutive non-progress observations at a
+  tier, the active tier steps up one rung (1 → 2 → 3 → 4), bounded by `max_tier`.
+  Progress (a shrinking/changing failing set, an improving score, or convergence)
+  resets the streak and holds the tier — escalation only ever climbs, it never
+  de-escalates a paying tier.
+
+  **Stop rule (decision 4).** Each escalation captures the rung-below's
+  per-iteration cost as a baseline; if the escalated rung's first iteration still
+  does not progress AND cost MORE than the baseline, the bump was net-negative — the
+  loop reverts to the lower tier and stops climbing for the run (cost-per-converged-
+  predicate is the KPI, not minimal tokens nor maximal context). A cost-neutral
+  escalation is kept and the climb may continue.
+
+  **Config (thresholds from config, not magic numbers).** The knobs resolve from the
+  `:context_escalation` `Kazi.Loop` opt, then `config :kazi, :context_escalation`,
+  then the provisional defaults (`Kazi.Context.Escalation.Config`):
+
+  | Knob | Default | Meaning |
+  |---|---|---|
+  | `:enabled` | `true` | Master switch; `false` pins the active tier at the base. |
+  | `:threshold` | `2` | Consecutive non-progress observations at a tier before stepping up. |
+  | `:min_tier` / `:max_tier` | `0` / `4` | The tier window the ladder clamps to. |
+  | `:stop_rule` | `true` | Revert a net-negative (cost-up, no-progress) bump. |
+
+  The default `:threshold` is **provisional**: `2` is one below the stuck window
+  (`StuckDetector.default_iterations/0` is `3`) so a stall gets a richer-context
+  attempt BEFORE the run is abandoned as stuck. It is explicitly NOT shipped as
+  proven — the E19 benchmark (T19.5/T19.7) and the T36.5 arms set it from data; this
+  ADR forbids shipping a guessed ladder. The active tier and the ordered tier-change
+  log (escalations + reverts) are surfaced in `Kazi.Loop.snapshot/1`
+  (`:context_tier` / `:context_tier_escalations`) so a run's ladder is observable.
+
+  Distinct from ADR-0035's model-tiering (`docs/tiering-signals.md`): that is a
+  CROSS-invocation `--model` ladder owned by the skill; this is a WITHIN-run CONTEXT
+  ladder owned by kazi core. Different axis, different owner.
 </content>
