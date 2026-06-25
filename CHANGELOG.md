@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.30.0](https://github.com/kazi-org/kazi/compare/v1.29.0...v1.30.0) (2026-06-25)
+
+
+### Features
+
+* **context-store:** redact content before indexing (T35.3) ([7030db0](https://github.com/kazi-org/kazi/commit/7030db0df7b0868d08d7c36bca7d6b104d3e6fe5))
+* **prompt:** redact secrets in evidence before the harness (T35.3) ([7df95a2](https://github.com/kazi-org/kazi/commit/7df95a2ede8a0fe3126ef6ca25e668f043b35b9b))
+* **redaction:** shared secret redactor for evidence egress (T35.3) ([88adeb0](https://github.com/kazi-org/kazi/commit/88adeb0e4925456f5e0732a776c95728cb24bf23))
+
+
+### Bug Fixes
+
+* **context-store:** unique gist staging filename (T35.3) ([b5eea80](https://github.com/kazi-org/kazi/commit/b5eea8050a75c404e0337777fcee815fdb953a86))
+
 ## [1.29.0](https://github.com/kazi-org/kazi/compare/v1.28.0...v1.29.0) (2026-06-25)
 
 

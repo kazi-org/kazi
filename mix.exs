@@ -7,7 +7,7 @@ defmodule Kazi.MixProject do
 
       # x-release-please-start-version
 
-      version: "1.29.0",
+      version: "1.30.0",
 
       # x-release-please-end-version
       elixir: "~> 1.20",
