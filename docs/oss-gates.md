@@ -1,11 +1,12 @@
 # OSS contribution gates
 
-kazi is a public, Apache-2.0 repository. Two CI gates keep the public surface
-honest and free of internal-only detail. Both are defined in ADR-0034 and built
-in epic E29.
+kazi is a public, Apache-2.0 repository. Three CI gates keep the public surface
+honest and free of internal-only detail. Gates 1-2 are defined in ADR-0034 (E29);
+Gate 3 is defined in ADR-0036 (E31).
 
 - Gate 1 -- docs land with the code (T29.1)
 - Gate 2 -- no internal-info leak (T29.2)
+- Gate 3 -- docs are fresh (T31.5)
 
 Each gate is a small, self-contained shell script under `.github/scripts/` that
 runs in CI (the `OSS gates` workflow, `.github/workflows/oss-gates.yml`) on every
@@ -138,6 +139,41 @@ just new diff additions):
 - In CI: set `SCAN_TREE: "1"` on the `no-internal-leak` job in
   `.github/workflows/oss-gates.yml`.
 - Locally: run with `SCAN_TREE=1 ...`.
+
+## Gate 3 -- docs are fresh (T31.5)
+
+Runner: `.github/scripts/doc_freshness/doc_freshness.sh`
+
+The self-maintaining doc-freshness predicate set (T31.4, ADR-0036) wired into CI
+as the `doc-freshness` job. It asserts the docs have not drifted from the code:
+every shipped CLI command is in the README (a), no live doc names a removed or
+unknown command (b), every ADR a doc cites exists (c), and no done+released task
+lingers in the plan (d). Full predicate detail and local-run instructions are in
+`docs/doc-freshness.md`.
+
+### Phase 1: strict-but-warn
+
+Like Gate 1, this gate runs in WARN mode. The runner exits 1 while known
+offenders stand (README command coverage, the `kazi mcp` / `kazi adopt` drift,
+and the untrimmed plan); the job converts that nonzero into a `::warning` and
+exits 0 via a `FRESHNESS_BLOCKING` env defaulting to `"0"`. The report and the
+offender list are printed, but the build stays green so the gate does not red
+every PR while the backlog is worked down. Those fixes belong to T22.x / T28.3
+(README + drift) and T31.2 (plan trim), not to this gate.
+
+The job runs with `SKIP_SUBSUMED=1` so the subsumed coherence checks (T9.9/T16.4)
+are referenced, not invoked -- it does not install the node / mix toolchains they
+need, and a missing toolchain must not register a false FAIL. Those keep their
+own coverage in `ci.yml` / `site-smoke.yml`.
+
+### Ratchet to blocking
+
+Flip a single toggle once the offenders are cleared and the runner exits 0:
+
+- In CI: set `FRESHNESS_BLOCKING: "1"` on the `doc-freshness` job in
+  `.github/workflows/oss-gates.yml`.
+
+In blocking mode a failing predicate set fails the job.
 
 ## Where this is enforced
 
