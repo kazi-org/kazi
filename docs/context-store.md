@@ -145,9 +145,27 @@ machine-parseable contract every kazi `--json` command honors); a provider error
 non-zero exit. Without a DSN, only a single index-then-search *within one process*
 is meaningful (see [Persistence requires `KAZI_GIST_DSN`](#persistence-requires-kazi_gist_dsn)).
 
-## Status
+## Enabling it on a run
 
-The provider integration (`Kazi.ContextStore.GistCLI`) and the `kazi context`
-wrapper CLI (T35.7) have landed. The opt-in `kazi apply --context-store gist
---context-budget N` loop wiring and the additive `context_store` JSON stats on the
-run result land in a later step.
+The store is opt-in per run:
+
+```
+kazi apply <goal> --context-store gist --context-budget 6000 --json
+```
+
+- `--context-store gist` wires the Gist provider into the dispatch loop (the
+  evidence compression above). Off by default.
+- `--context-budget N` sets the per-iteration retrieval budget in bytes (default
+  6000). Ignored without `--context-store`.
+
+When enabled, the `--json` result gains an **additive** `context_store` object:
+
+```json
+{ "context_store": { "provider": "gist", "indexed_bytes": 754257,
+  "returned_bytes": 7500, "saved_bytes": 746757, "budget": 6000 } }
+```
+
+Absent the flag, the result is byte-identical to today (no `context_store` key).
+Note the cross-process caveat: the stats reflect what the run indexed only when the
+store has a shared backend (`KAZI_GIST_DSN`); with the per-process in-memory store
+the counters read zero.
