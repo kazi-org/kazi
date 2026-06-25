@@ -118,4 +118,32 @@ a guessed tier ladder into the loop.
 - **Rely on `--allowed-tools` alone for surface control.** It governs approval, not
   context inclusion; the irrelevant tool schemas can still be in the prompt. Use the
   strict-config / exclude flags to actually remove them.
+
+## Implementation
+
+Decision 1 (per-run tool-surface restriction) ships in two steps:
+
+- **T36.1** extends the `:claude` profile's `supported_opts`/`build_args` with the
+  economy opts → flags (`:tools`/`:disallowed_tools`/`:strict_mcp_config`/
+  `:mcp_config`/`:max_turns`/`:exclude_dynamic_system_prompt_sections`/
+  `:no_session_persistence`), each appended only when supplied, version-gated where
+  the flag's behavior is version-sensitive. Absent the opts, argv is byte-identical.
+- **T36.2** consumes those opts: `Kazi.Harness.DispatchSurface` computes the
+  **minimal default surface** — `--strict-mcp-config` plus a `--mcp-config` scoped to
+  the MCP servers kazi injected (the orientation/graph server in the workspace
+  `.mcp.json`) and a `--tools` allow-list of the standard edit/shell tools (the
+  never-empty floor) plus an `mcp__<server>` ref per injected server. `Kazi.Loop`
+  merges this surface UNDER the dispatch's adapter opts (an explicit operator/goal opt
+  still wins), gated on the resolved profile advertising the economy opts and on a
+  workspace being present — so non-Claude harnesses and workspaceless loops are
+  unchanged.
+
+  The injected-server set is the single seam `DispatchSurface.injected_servers/1`
+  exposes: the **E35** `Kazi.ContextStore` (search-only, ADR-0045) plugs in by
+  appending its `{name, config}` entry there once T35.1 lands — no change to the
+  rendering logic. Until then the minimal surface is computed from the servers kazi
+  currently injects (orientation/graph only).
+
+Decision 2 (context-budget tiers) is deferred to T36.3+ and stays gated on the E19/E34
+benchmark — no tier ladder is shipped as proven.
 </content>
