@@ -65,7 +65,10 @@ defmodule Kazi.Runtime do
     # T32.7 (ADR-0043): the first-class static-analysis provider — Dialyzer-led,
     # generalized to the polyglot SARIF tools, gated on parsed findings (not the
     # exit code) with a baseline ratchet on NEW findings.
-    static: Kazi.Providers.Static
+    static: Kazi.Providers.Static,
+    # T32.8 (ADR-0043): `:coverage` is a ratchet instance — patch coverage meets a
+    # target AND project coverage does not regress (two Kazi.Ratchet comparisons).
+    coverage: Kazi.Providers.Coverage
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The

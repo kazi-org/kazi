@@ -486,13 +486,78 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @coverage %{
+    kind: "coverage",
+    title: "coverage predicate config",
+    description:
+      "Patch coverage meets a target AND project coverage does not regress (ADR-0043): two " <>
+        "Kazi.Ratchet comparisons. New code must be covered (patch vs a fixed target); the " <>
+        "whole codebase's coverage may only improve (project vs a baseline). Reports score = " <>
+        "patch coverage.",
+    keys: [
+      %{
+        name: "patch",
+        type: "table",
+        required: true,
+        description:
+          "A metric table emitting the PATCH coverage % (cmd required, args, env, path, " <>
+            "timeout_ms — same shape as ratchet's metric)."
+      },
+      %{
+        name: "target",
+        type: "number",
+        required: true,
+        description: "The patch-coverage floor (e.g. 80.0). Patch coverage below it fails."
+      },
+      %{
+        name: "project",
+        type: "table",
+        required: false,
+        description:
+          "An optional metric table emitting TOTAL project coverage %. Present -> the project " <>
+            "no-regression dimension gates too."
+      },
+      %{
+        name: "project_baseline",
+        type: "number | string",
+        required: false,
+        description:
+          "The project bar: \"stored\"/\"prior\" (default — tightened on a pass), a git ref, " <>
+            "or a number."
+      },
+      %{
+        name: "project_allowed_regression",
+        type: "number",
+        required: false,
+        description: "The tolerated project-coverage drop. Default 0 — \"may only improve\"."
+      }
+    ],
+    example: %{
+      "id" => "coverage",
+      "provider" => "coverage",
+      "target" => 80.0,
+      "patch" => %{
+        "cmd" => "scripts/patch-coverage",
+        "args" => ["--json"],
+        "path" => "$.patch.percent"
+      },
+      "project" => %{
+        "cmd" => "scripts/coverage",
+        "args" => ["--json"],
+        "path" => "$.totals.percent"
+      },
+      "project_baseline" => "stored"
+    }
+  }
+
   @schemas %{
     "custom_script" => @custom_script,
     "ratchet" => @ratchet,
     "static" => @static,
     "http_probe" => @http_probe,
     "browser" => @browser,
-    "metrics" => @metrics
+    "metrics" => @metrics,
+    "coverage" => @coverage
   }
 
   @doc "The provider kinds with a documented config schema, sorted."

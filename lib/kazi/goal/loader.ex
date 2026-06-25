@@ -217,7 +217,10 @@ defmodule Kazi.Goal.Loader do
     # T32.7 (ADR-0043): the first-class static-analysis provider. Its
     # cmd/format/baseline keys are validated below so an unknown format or a
     # missing command fails at load time, not silently at dispatch.
-    "static" => :static
+    "static" => :static,
+    # T32.8 (ADR-0043): `:coverage` validates its patch metric + target below so a
+    # mis-declared coverage gate fails at load, not at dispatch.
+    "coverage" => :coverage
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -910,6 +913,16 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T32.8 (ADR-0043): a coverage predicate requires a `patch` metric table with a
+  # non-empty `cmd` and a numeric `target` (the patch-coverage floor), so a
+  # mis-declared coverage gate fails at load, not at dispatch.
+  defp validate_provider_config(:coverage, config, id) do
+    with :ok <- validate_coverage_patch(config, id),
+         :ok <- validate_coverage_target(config, id) do
+      validate_coverage_project(config, id)
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
 
   # --- static (T32.7, ADR-0043) ----------------------------------------------
@@ -994,6 +1007,55 @@ defmodule Kazi.Goal.Loader do
            "(got #{inspect(other)})"}
     end
   end
+  # --- coverage (T32.8, ADR-0043) --------------------------------------------
+
+  defp validate_coverage_patch(config, id) do
+    if metric_with_cmd?(Map.get(config, :patch)) do
+      :ok
+    else
+      {:error,
+       "coverage predicate #{inspect(id)} requires a \"patch\" metric table with a " <>
+         "non-empty string \"cmd\""}
+    end
+  end
+
+  defp validate_coverage_target(config, id) do
+    case Map.get(config, :target) do
+      n when is_number(n) ->
+        :ok
+
+      _ ->
+        {:error, "coverage predicate #{inspect(id)} requires a numeric \"target\""}
+    end
+  end
+
+  # The project dimension is optional, but when present it must be a metric table
+  # with a cmd (the same shape the patch metric uses).
+  defp validate_coverage_project(config, id) do
+    case Map.get(config, :project) do
+      nil ->
+        :ok
+
+      project ->
+        if metric_with_cmd?(project) do
+          :ok
+        else
+          {:error,
+           "coverage predicate #{inspect(id)} \"project\" must be a metric table with a " <>
+             "non-empty string \"cmd\""}
+        end
+    end
+  end
+
+  # A metric inline table (string- or atom-keyed) declaring a non-empty `cmd`.
+  defp metric_with_cmd?(metric) when is_map(metric) do
+    case fetch_either(metric, "cmd") do
+      cmd when is_binary(cmd) and cmd != "" -> true
+      _ -> false
+    end
+  end
+
+  defp metric_with_cmd?(_), do: false
 
   # --- ratchet (T32.3, ADR-0041) ---------------------------------------------
 
