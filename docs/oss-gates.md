@@ -154,7 +154,7 @@ lingers in the plan (d). Full predicate detail and local-run instructions are in
 ### Phase 1: strict-but-warn
 
 Like Gate 1, this gate runs in WARN mode. The runner exits 1 while known
-offenders stand (README command coverage, the `kazi mcp` / `kazi adopt` drift,
+offenders stand (README command coverage, the mcp/adopt command-name drift,
 and the untrimmed plan); the job converts that nonzero into a `::warning` and
 exits 0 via a `FRESHNESS_BLOCKING` env defaulting to `"0"`. The report and the
 offender list are printed, but the build stays green so the gate does not red

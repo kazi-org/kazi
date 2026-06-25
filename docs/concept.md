@@ -325,8 +325,9 @@ activates, is served by a future generic webhook, not a bespoke bridge.
 **kazi is self-teaching, so the agent already knows how to drive it** (ADR-0024).
 kazi describes itself in machine-readable form (`kazi help --json`,
 `kazi schema`) and ships the integration glue for the dominant harness: an opt-in
-Claude Code skill (`kazi install-skill`), a harness-neutral `AGENTS.md`, and a
-`kazi mcp` tool surface. The on-ramp is "install kazi -> the agent can drive it,"
+Claude Code skill (`kazi install-skill`), a harness-neutral `AGENTS.md`, and an
+MCP server (`mix kazi.mcp`) exposing the same commands as self-describing tools.
+The on-ramp is "install kazi -> the agent can drive it,"
 not "read the docs first."
 
 **One front door: the router skill** (ADR-0031). The Claude Code skill is a
@@ -343,7 +344,7 @@ command:
   predicate vector being objectively satisfied (including a live prod probe), not
   a heuristic verdict.
 - `kazi status` / `watch` -- convergence state and the LiveView dashboard.
-- `kazi adopt <repo>` (CLI `kazi init`) -- reverse-engineer a starter goal-set
+- `kazi init <repo>` (the router's `adopt` verb) -- reverse-engineer a starter goal-set
   from an existing repo.
 
 Verb consistency end to end (ADR-0032): the skill verb, the thing the human types
