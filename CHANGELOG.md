@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.9.0](https://github.com/kazi-org/kazi/compare/v1.8.1...v1.9.0) (2026-06-25)
+
+
+### Features
+
+* **predicate:** first-class ratchet provider, wiring + schema (T32.3) ([44830a6](https://github.com/kazi-org/kazi/commit/44830a6ce34a83d34dc50901df20a3d469ae1453))
+* **predicate:** ratchet baseline-comparison machinery + store (T32.3) ([e1483e8](https://github.com/kazi-org/kazi/commit/e1483e835774ebb97f444dce7779683c0e5537f0))
+* **predicate:** shared JSONPath + metric signal extraction (T32.3) ([ff848fa](https://github.com/kazi-org/kazi/commit/ff848fa6b60c8ff3eb283a917e8f29248dccccc9))
+
 ## [1.8.1](https://github.com/kazi-org/kazi/compare/v1.8.0...v1.8.1) (2026-06-25)
 
 
