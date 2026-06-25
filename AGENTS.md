@@ -21,6 +21,10 @@ intent); kazi turns that intent into objective predicates and executes them.
 `/tidy` stays orthogonal hygiene (git/worktree/scratch sweeping), not part of the
 converge loop.
 
+When the user says "have kazi drive this until done" (the canonical invocation
+phrase), that is the request to drive kazi: author the predicates with `kazi
+plan`, then converge them with `kazi apply` until they are objectively true.
+
 ## Two-tier economics (why)
 
 Spend expensive reasoning ONCE on what "done" means -- the acceptance predicates.
