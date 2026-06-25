@@ -221,9 +221,11 @@ defmodule Kazi.Goal.Loader do
     # T32.8 (ADR-0043): `:coverage` validates its patch metric + target below so a
     # mis-declared coverage gate fails at load, not at dispatch. `:property` runs
     # PropCheck under `mix test`; its `num_tests` (the score denominator) is
-    # validated below.
+    # validated below. `:mutation` gates a 0-1 score on a threshold that is
+    # validated `< 1.0` below (NEVER 100%).
     "coverage" => :coverage,
-    "property" => :property
+    "property" => :property,
+    "mutation" => :mutation
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -943,6 +945,16 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T32.8 (ADR-0043): a mutation predicate's `threshold` must be a number in
+  # [0, 1.0) — NEVER 100% (an unreachable, gameable target; equivalent mutants make
+  # a perfect score impossible). It also needs a way to read the score: either a
+  # `score_path` or BOTH `killed_path` and `survived_path`. Validated at load.
+  defp validate_provider_config(:mutation, config, id) do
+    with :ok <- validate_mutation_threshold(config, id) do
+      validate_mutation_score_config(config, id)
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
 
   # --- static (T32.7, ADR-0043) ----------------------------------------------
@@ -1027,6 +1039,41 @@ defmodule Kazi.Goal.Loader do
            "(got #{inspect(other)})"}
     end
   end
+
+  # --- mutation (T32.8, ADR-0043) --------------------------------------------
+
+  defp validate_mutation_threshold(config, id) do
+    case Map.get(config, :threshold) do
+      n when is_number(n) and n >= 0 and n < 1.0 ->
+        :ok
+
+      n when is_number(n) and n >= 1.0 ->
+        {:error,
+         "mutation predicate #{inspect(id)} \"threshold\" must be < 1.0 — a mutation gate is " <>
+           "NEVER 100% (equivalent mutants make a perfect score unreachable; got #{inspect(n)})"}
+
+      other ->
+        {:error,
+         "mutation predicate #{inspect(id)} requires a numeric \"threshold\" in [0, 1.0) " <>
+           "(got #{inspect(other)})"}
+    end
+  end
+
+  defp validate_mutation_score_config(config, id) do
+    cond do
+      is_binary(Map.get(config, :score_path)) ->
+        :ok
+
+      is_binary(Map.get(config, :killed_path)) and is_binary(Map.get(config, :survived_path)) ->
+        :ok
+
+      true ->
+        {:error,
+         "mutation predicate #{inspect(id)} needs a \"score_path\" OR both \"killed_path\" " <>
+           "and \"survived_path\" to read the score"}
+    end
+  end
+
   # --- coverage (T32.8, ADR-0043) --------------------------------------------
 
   defp validate_coverage_patch(config, id) do

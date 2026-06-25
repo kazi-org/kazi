@@ -56,6 +56,8 @@ its config at runtime via `kazi schema <kind>`.
   project coverage does not regress (ADR-0043).
 - **[`property`](property-predicate.md)** — property-based testing (PropCheck
   under `mix test`); the shrunk counterexample as evidence (ADR-0043).
+- **[`mutation`](mutation-predicate.md)** — mutation testing: a 0-1 score gated on
+  a threshold (never 100%), surviving mutants as evidence (ADR-0043).
 
 ## Reference
 

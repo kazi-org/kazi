@@ -72,7 +72,10 @@ defmodule Kazi.Runtime do
     # T32.8 (ADR-0043): `:property` runs property-based tests (PropCheck under
     # `mix test`), scoring cases-passed/N with the shrunk counterexample as
     # evidence.
-    property: Kazi.Providers.Property
+    property: Kazi.Providers.Property,
+    # T32.8 (ADR-0043): `:mutation` is the test-quality signal — a 0-1 score gated
+    # on a threshold (never 100%), with surviving mutants as evidence.
+    mutation: Kazi.Providers.Mutation
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
