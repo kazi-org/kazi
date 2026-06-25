@@ -7,6 +7,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.2.0](https://github.com/kazi-org/kazi/compare/v1.1.0...v1.2.0) (2026-06-25)
+
+
+### Features
+
+* **cli:** kazi schema custom_script provider-key schema (T32.1) ([bf2bb48](https://github.com/kazi-org/kazi/commit/bf2bb48839e57f3cf0740cf9592f76cd0aa176f4))
+* **predicate:** custom_script generic command-runner provider (T32.1) ([371b1a7](https://github.com/kazi-org/kazi/commit/371b1a79a358456bd2d241b4d1e3b10f49c69a01))
+* **predicate:** validate custom_script config keys in the loader (T32.1) ([af92813](https://github.com/kazi-org/kazi/commit/af92813ce6ee56755f01165acb9a669beda76f78))
+* **site:** render decided tagline, invocation phrase + agent testimonial (T25.1/T25.5/T25.6) ([bdb3124](https://github.com/kazi-org/kazi/commit/bdb3124044aecc21bc6aa13db4e0fcd0c0b43579))
+* **site:** wire decided tagline + invocation phrase into canonical strings (T25.1/T25.6) ([0a4e140](https://github.com/kazi-org/kazi/commit/0a4e14033ea6ab4d027d48a83df3cab706dfb2d8))
+* **skill:** recognize + document the invocation phrase (T25.6) ([12f0f5a](https://github.com/kazi-org/kazi/commit/12f0f5aae7bf151c894f5a4f7186c39f38fd962e))
+
 ## [1.1.0](https://github.com/kazi-org/kazi/compare/v1.0.1...v1.1.0) (2026-06-25)
 
 
