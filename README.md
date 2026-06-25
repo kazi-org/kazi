@@ -630,7 +630,7 @@ pins this output, so the example never drifts from what the tool produces.
 ## CLI reference
 
 ```
-kazi init <repo-dir> [--out <file>] [--enrich]    # adopt a repo -> a goal-file
+kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp]  # adopt a repo -> a goal-file (+ .mcp.json)
 kazi plan "<idea>" [--workspace <path>]   # draft predicates from plain English
 kazi list-proposed [--status <state>]        # review drafts (proposed/approved/rejected)
 kazi approve <proposal-ref>                  # bless a drafted goal
@@ -643,6 +643,15 @@ kazi --help
 ```
 
 `kazi apply` exits `0` on convergence, non-zero otherwise — so it composes in CI/scripts.
+
+> **Drive kazi over MCP (preferred).** An MCP-speaking harness wires kazi as an MCP
+> server and drives its self-describing `kazi_plan` / `kazi_approve` / `kazi_apply` /
+> `kazi_status` tools — no JSON-CLI shell-out. The canonical client config references
+> the installed binary verb (`kazi init --with-mcp` writes exactly this `.mcp.json`):
+>
+> ```json
+> { "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }
+> ```
 
 > **Read-model note.** The Mix task (`mix kazi.apply`) creates and migrates the SQLite
 > read-model on startup, so every iteration is persisted. The standalone escript
