@@ -472,6 +472,9 @@ defmodule Kazi.CLISelfConformanceTest do
       case name do
         n when n in ~w(apply init status approve reject plan export lint) -> [n, "dummy"]
         "schema" -> [name, "apply"]
+        # `context` requires a <subcommand>; probe with a real one so we observe
+        # dispatch (a command tuple), not the missing-subcommand usage error.
+        "context" -> ["context", "stats"]
         _ -> [name]
       end
 
