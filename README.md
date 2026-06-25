@@ -36,13 +36,19 @@ brew install kazi-org/tap/kazi
 kazi install-skill        # teaches Claude Code the kazi skill (writes ~/.claude/skills/kazi)
 ```
 
-Then open Claude Code and say:
+Then drive it from Claude Code with the kazi skill — author the checks, then converge:
 
-> **have kazi drive this until done**
+```text
+/kazi plan "add a /healthz endpoint that returns 200 ok, with a test, deployed"
+# Claude drafts the acceptance predicates; glance at them, then:
+/kazi apply
+```
 
-Claude authors the acceptance checks, runs them, fixes whatever is failing, and loops —
-reporting back only when every check is *objectively* true (or it is genuinely `stuck`).
-You never leave your chat with Claude. That's it.
+Claude loops — editing, testing, deploying — and reports back only when every predicate
+is *objectively* true (or it is genuinely `stuck`). You never leave your chat with Claude.
+
+Prefer plain English? Just say **have kazi drive this until done** — the skill runs the
+same `/kazi plan` → `/kazi apply` for you.
 
 ## How it works
 
