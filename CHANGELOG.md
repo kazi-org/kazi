@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.41.0](https://github.com/kazi-org/kazi/compare/v1.40.1...v1.41.0) (2026-06-25)
+
+
+### Features
+
+* **app:** supervise the DAG-snapshot cache in the web tree (T23.7) ([d48846a](https://github.com/kazi-org/kazi/commit/d48846ad3c14ebc99ee2f9e990408f9dc3201c9b))
+* **scheduler:** publish render-ready DAG snapshots on each transition (T23.7) ([1606130](https://github.com/kazi-org/kazi/commit/16061302ec335dd39ead39fb51c27cf13b64bb24))
+* **web:** live dependency-DAG dashboard at /dag (T23.7, UC-038) ([7d12fdc](https://github.com/kazi-org/kazi/commit/7d12fdc643b52a3550b3d571b9acdaf87b7ed358))
+
 ## [1.40.1](https://github.com/kazi-org/kazi/compare/v1.40.0...v1.40.1) (2026-06-25)
 
 
