@@ -146,6 +146,37 @@ landed. The findings:
   never the shared working dir (lore L-0014: a sibling session can reset the shared
   tree).
 
+## Diff-inspection guard (T32.5, §5 realized — ADVISORY)
+
+The §5 diff-inspection guard shipped as `Kazi.Enforcement.DiffGuard` (a pure scanner)
+wired into `Kazi.Loop`'s post-dispatch path. The realization, faithful to "start
+advisory — surface, don't block":
+
+- **Input.** `git diff HEAD` of the workspace — the agent's uncommitted iteration
+  changes — fetched via an injectable `diff_fn` (a test feeds a canned diff; a
+  non-git/missing workspace or a crashing diff source degrades to "" → no events, so
+  the advisory guard can never break the tick). New untracked files are not in
+  `git diff HEAD`; the guard inspects edits to existing files, which is where the
+  skip/special-case/grader signatures land.
+
+- **Signatures.** `skip_marker` (newly-added skip/xfail/ignore/disabled markers
+  across pytest/unittest/JS/Go/Rust/JUnit/ExUnit), `test_special_casing`
+  (`if <input-ish ident> == <literal>`, anchored to a small input-ish identifier
+  allowlist so a routine `if mode == "create"` branch is not flagged), and
+  `grader_edit` (an add/delete touching a `read_only_paths` grader path or an
+  obviously-named predicate file). Only ADDED lines carry the first two; `grader_edit`
+  also fires on a deletion.
+
+- **The downgrade.** A hit (a) appends a `diff_gaming` event to the loop's
+  `gaming_events` (surfaced in `--json` alongside the §2 read-only-write flags), and
+  (b) records the upcoming observation index so `Kazi.Loop.code_history/1` discounts
+  that observation's graded SCORE before the stuck classifier reads it. A GAMED
+  apparent score improvement therefore no longer rescues the loop from a stuck
+  verdict (ADR-0041's graded gradient). The boolean failing-set/`:converged` logic is
+  untouched and the stored vector keeps its real score, so a genuine convergence is
+  never blocked — only the *progress view* is downgraded, exactly the ADVISORY
+  contract the "Consequences" false-positive risk demands.
+
 ## Alternatives rejected
 
 - **Keep guards declarative (today).** A capable model defeats convention; the METR
