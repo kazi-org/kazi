@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.40.0](https://github.com/kazi-org/kazi/compare/v1.39.0...v1.40.0) (2026-06-25)
+
+
+### Features
+
+* **bench:** tier x surface arms + `mix kazi.bench --tier-surface` (T36.5) ([52dbb90](https://github.com/kazi-org/kazi/commit/52dbb90eb411096b837a944d32bc64eab04ceb40))
+* **harness:** add :ambient dispatch-surface OFF switch (T36.5) ([f43005d](https://github.com/kazi-org/kazi/commit/f43005d9228f45e359e368b9fbd8fe86c067a492))
+
 ## [1.39.0](https://github.com/kazi-org/kazi/compare/v1.38.2...v1.39.0) (2026-06-25)
 
 
