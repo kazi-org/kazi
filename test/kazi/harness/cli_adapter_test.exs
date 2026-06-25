@@ -375,6 +375,74 @@ defmodule Kazi.Harness.CliAdapterTest do
     end
   end
 
+  describe "cost_usd from the dated price map (T34.5)" do
+    @no_cost_stub Path.expand("../../support/stub_claude_no_cost_json.sh", __DIR__)
+
+    test "derives cost_usd from the token split when the harness reports no dollars + a known model",
+         %{workspace: workspace} do
+      # The no-cost stub reports a usage split but no `total_cost_usd`; with a
+      # known model the adapter prices the accounted tokens via Kazi.Economy.PriceMap.
+      env = [
+        {"STUB_INPUT_TOKENS", "100"},
+        {"STUB_OUTPUT_TOKENS", "250"},
+        {"STUB_CACHE_READ_TOKENS", "5000"},
+        {"STUB_CACHE_CREATION_TOKENS", "0"}
+      ]
+
+      assert {:ok, result} =
+               CliAdapter.run("fix it", workspace,
+                 harness: :claude,
+                 command: @no_cost_stub,
+                 model: "claude-opus-4-8",
+                 env: env
+               )
+
+      # opus-4-8 on this split (input 100, output 250, cache_write 0, cached 5000):
+      # (100*5 + 250*25 + 0*6.25 + 5000*0.5) / 1e6 = 0.00925.
+      assert result.cost_usd == 0.00925
+      # The token split survives alongside the derived cost.
+      assert result.usage.input_tokens == 100
+      assert result.usage.cached_input_tokens == 5000
+    end
+
+    test "OMITS cost_usd for an unknown model — never a guess", %{workspace: workspace} do
+      assert {:ok, result} =
+               CliAdapter.run("fix it", workspace,
+                 harness: :claude,
+                 command: @no_cost_stub,
+                 model: "some-unpriced-model-v9"
+               )
+
+      refute Map.has_key?(result, :cost_usd)
+      # Tokens are still reported — only the dollar figure is withheld.
+      assert result.usage.input_tokens == 100
+    end
+
+    test "OMITS cost_usd when no model is supplied (nothing to price against)", %{
+      workspace: workspace
+    } do
+      assert {:ok, result} =
+               CliAdapter.run("fix it", workspace, harness: :claude, command: @no_cost_stub)
+
+      refute Map.has_key?(result, :cost_usd)
+    end
+
+    test "a harness-reported cost_usd is authoritative and not overwritten by the price map", %{
+      workspace: workspace
+    } do
+      # The cost-reporting stub emits total_cost_usd=0.0123; even with a known
+      # model the harness's own figure wins (the price map is a fallback only).
+      assert {:ok, result} =
+               CliAdapter.run("fix it", workspace,
+                 harness: :claude,
+                 command: @json_stub,
+                 model: "claude-opus-4-8"
+               )
+
+      assert result.cost_usd == 0.0123
+    end
+  end
+
   describe "error paths" do
     test "empty prompt returns {:error, :empty_prompt}", %{workspace: workspace} do
       assert CliAdapter.run("", workspace, harness: :claude) == {:error, :empty_prompt}
