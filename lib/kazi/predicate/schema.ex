@@ -608,6 +608,92 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @mutation %{
+    kind: "mutation",
+    title: "mutation predicate config",
+    description:
+      "Mutation testing — the test-QUALITY signal (ADR-0043). A 0-1 score (killed / total) " <>
+        "gated on a threshold that is NEVER 100% (rejected at load). Surviving mutants are " <>
+        "the evidence. Gated on the parsed score, not the exit code. Scope to changed lines " <>
+        "via the tool's own flags in args.",
+    keys: [
+      %{
+        name: "cmd",
+        type: "string",
+        required: true,
+        description: "The executable (ONE executable, not a command line; use args)."
+      },
+      %{
+        name: "args",
+        type: "array<string>",
+        required: false,
+        description:
+          "Argument list. Default []. Put the diff-scoping flag (e.g. --diff/--since) here."
+      },
+      %{
+        name: "env",
+        type: "table | array<pair>",
+        required: false,
+        description: "Extra environment as a {name = value} table or {name, value} pairs."
+      },
+      %{
+        name: "threshold",
+        type: "number",
+        required: true,
+        description: "The 0-1 score floor the run must meet. Must be >= 0 AND < 1.0 (never 100%)."
+      },
+      %{
+        name: "score_path",
+        type: "string",
+        required: false,
+        description:
+          "A JSONPath over stdout to a PRECOMPUTED 0-1 score. Use when the tool reports a ratio."
+      },
+      %{
+        name: "killed_path",
+        type: "string",
+        required: false,
+        description:
+          "A JSONPath to the killed COUNT. With survived_path the score is " <>
+            "killed / (killed + survived). Use instead of score_path."
+      },
+      %{
+        name: "survived_path",
+        type: "string",
+        required: false,
+        description: "A JSONPath to the survived COUNT (pairs with killed_path)."
+      },
+      %{
+        name: "survivors_path",
+        type: "string",
+        required: false,
+        description: "A JSONPath to the surviving-mutant list, surfaced (bounded) as evidence."
+      },
+      %{
+        name: "merge_stderr",
+        type: "boolean",
+        required: false,
+        description: "Fold stderr into stdout for the parsed output. Default false."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description: "Kill the command after this many ms and map it to :error. Default: none."
+      }
+    ],
+    example: %{
+      "id" => "mutation-score",
+      "provider" => "mutation",
+      "cmd" => "mix",
+      "args" => ["muzak", "--diff", "--format", "json"],
+      "threshold" => 0.8,
+      "killed_path" => "$.summary.killed",
+      "survived_path" => "$.summary.survived",
+      "survivors_path" => "$.survivors"
+    }
+  }
+
   @schemas %{
     "custom_script" => @custom_script,
     "ratchet" => @ratchet,
@@ -616,7 +702,8 @@ defmodule Kazi.Predicate.Schema do
     "browser" => @browser,
     "metrics" => @metrics,
     "coverage" => @coverage,
-    "property" => @property
+    "property" => @property,
+    "mutation" => @mutation
   }
 
   @doc "The provider kinds with a documented config schema, sorted."
