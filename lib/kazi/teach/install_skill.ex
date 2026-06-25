@@ -102,8 +102,28 @@ defmodule Kazi.Teach.InstallSkill do
     kazi is a reconciliation controller: you declare a goal as machine-checkable
     acceptance predicates, and kazi drives a coding harness in a loop until those
     predicates are objectively true, the loop is stuck, or it is over budget. kazi
-    is NOT a harness -- it drives one. You drive kazi by shelling out and parsing
-    its `--json` output (never its prose).
+    is NOT a harness -- it drives one.
+
+    ## How to drive kazi: MCP first, JSON-CLI fallback
+
+    PREFER the MCP server. If you speak MCP (Claude Code, Codex, Cursor), wire kazi
+    as an MCP server and drive its self-describing tools -- `kazi_plan`,
+    `kazi_approve`, `kazi_apply`, `kazi_status`, `kazi_list_proposed` -- whose
+    input/output schemas teach you the surface at ZERO prose cost. The installed
+    binary serves it over stdio via the `kazi mcp` verb (ADR-0044). The canonical
+    client config is the binary verb:
+
+    ```json
+    #{Kazi.MCP.ClientConfig.inline()}
+    ```
+
+    `kazi init --with-mcp` writes exactly this `.mcp.json` into a repo for you, and
+    `mix kazi.mcp` is the development entry point that starts the SAME server.
+
+    FALLBACK -- the JSON-CLI shell-out. When MCP is unavailable, drive kazi by
+    shelling out and parsing its `--json` output (never its prose). The same
+    plan -> approve -> apply recipe applies; the rest of this skill teaches it as
+    CLI invocations, which map one-to-one onto the MCP tools above.
 
     ## The invocation phrase
 
