@@ -155,12 +155,16 @@ const personas = [
           {HERO_TAGLINE}
         </h1>
         <p class="ui-body mx-auto mt-6 max-w-2xl text-pretty text-lg">
-          <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>. Install it
-          as a skill and <strong class="ui-strong">Claude Code</strong> can finally
-          <em>finish</em> the job: you keep working in Claude the way you already do, and
-          kazi makes &ldquo;done&rdquo; <strong class="ui-strong">objective</strong> &mdash;
-          looping your agent until every check passes (tests green, the endpoint live, the
-          change deployed), or stopping to tell you why.
+          Give <strong class="ui-strong">Claude Code</strong> the power to actually
+          <em>finish</em>. You chat with Claude the way you already do; kazi works in the
+          background to make &ldquo;done&rdquo; <strong class="ui-strong">objective</strong>
+          &mdash; looping your agent until every check passes (tests green, the endpoint
+          live, the change deployed), or stopping to tell you why
+          (<code class="ui-body">stuck</code>, or out of budget) instead of pretending it's
+          finished.
+        </p>
+        <p class="ui-strong mx-auto mt-5 max-w-2xl text-pretty text-lg font-semibold">
+          You never run kazi yourself &mdash; Claude does.
         </p>
       </div>
     </section>
@@ -265,10 +269,12 @@ const personas = [
         How it works
       </h2>
       <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
-        Under the hood, kazi <em>drives</em> the coding agent you already use (Claude
-        Code, Codex, &hellip;) in a reconcile loop. It is <strong class="ui-strong">not</strong>
-        another coding agent, terminal, or IDE &mdash; as that agent gets better, kazi
-        gets better for free.
+        Under the hood, <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>
+        &mdash; your agent runs it, not you. It <em>drives</em> the coding agent you already
+        use (Claude Code, Codex, &hellip;) in a reconcile loop: observe every failing check,
+        dispatch a fix, integrate, re-check. It is <strong class="ui-strong">not</strong>
+        another coding agent, terminal, or IDE &mdash; as that agent gets better, kazi gets
+        better for free.
       </p>
       <p class="ui-muted mx-auto mt-4 max-w-2xl text-center text-sm">
         Think of it like <strong class="ui-body">{KUBERNETES_LINE}</strong>: you declare
