@@ -27,7 +27,7 @@ permissions:
 
 env:
   ELIXIR_VERSION: "1.20.1"
-  OTP_VERSION: "28.0"
+  OTP_VERSION: "28.3"
   # Burrito 1.5 pins Zig 0.15.2; newer Zig is API-incompatible with its build.zig.
   ZIG_VERSION: "0.15.2"
 
@@ -157,7 +157,7 @@ jobs:
     name: Build linux_aarch64
     needs: build
     runs-on: ubuntu-24.04-arm
-    container: hexpm/elixir:1.20.1-erlang-28.0-debian-trixie-20260610-slim
+    container: hexpm/elixir:1.20.1-erlang-28.3.3-debian-trixie-20260610-slim
     env:
       MIX_ENV: prod
       BURRITO_TARGET: linux_aarch64
