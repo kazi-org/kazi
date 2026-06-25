@@ -19,10 +19,12 @@ defmodule Kazi.Teach.InstallSkill do
   only verbs, and the router teaches them.
 
   The body still teaches the underlying recipe -- caller-drafts `kazi plan --json`
-  -> review -> `kazi approve --json` -> `kazi apply --harness <cheap> --json
-  [--stream]` -> parse the result -> branch on `next_action` -- plus the two-tier
-  economics (a strong model authors the predicates, a cheap/local model runs the
-  loop, kazi keeps it honest via objective termination).
+  -> review -> `kazi approve --json` -> `kazi apply --harness claude --model
+  <cheap-claude-id> --json [--stream]` -> parse the result -> branch on `next_action`
+  -- plus the two-tier economics (a FRONTIER model authors the predicates, a CHEAP
+  Claude model runs the loop via in-family tiering, kazi keeps it honest via objective
+  termination). In-family Claude tiering is the DEFAULT (ADR-0033/0035); local/BYOM
+  via opencode is the secondary privacy add-on.
 
   A NON-KAZI repo degrades cleanly: the router tells the agent to fall back to the
   generic `/plan` + `/apply` skills when `kazi` is not on PATH, so the global skill
@@ -92,7 +94,7 @@ defmodule Kazi.Teach.InstallSkill do
     """
     ---
     name: #{@skill_name}
-    description: Drive kazi -- a reconciliation controller that converges a software goal to machine-checkable acceptance predicates -- as a tool from an orchestrating agent. A ROUTER over four verbs: plan (author the predicates), apply (converge the goal -- the reconcile loop), status (read convergence state), adopt (reverse-engineer a starter goal-file from a repo). Use when the user wants to author predicates for a goal, then have a cheap/local model grind until they objectively pass (and not declare victory early). Triggers include "converge this goal with kazi", "drive kazi", "have kazi run the loop", "plan/apply with kazi", "author acceptance predicates and reconcile", or any task where you (a strong model) set the bar and a cheaper model should reach it under objective termination.
+    description: Drive kazi -- a reconciliation controller that converges a software goal to machine-checkable acceptance predicates -- as a tool from an orchestrating agent. A ROUTER over four verbs: plan (author the predicates), apply (converge the goal -- the reconcile loop), status (read convergence state), adopt (reverse-engineer a starter goal-file from a repo). Use when the user wants to author predicates for a goal, then have a cheap Claude model (in-family tiering, the default; local/BYOM via opencode is the secondary privacy option) grind until they objectively pass (and not declare victory early). Triggers include "converge this goal with kazi", "drive kazi", "have kazi run the loop", "plan/apply with kazi", "author acceptance predicates and reconcile", or any task where you (a strong model) set the bar and a cheaper model should reach it under objective termination.
     ---
 
     # Drive kazi from an orchestrating agent (router)
@@ -158,23 +160,38 @@ defmodule Kazi.Teach.InstallSkill do
     kazi sits in the MIDDLE of a three-layer stack:
 
     ```
-      you, the orchestrator   (strong model -- plan/design, AUTHOR the predicates)
+      you, the orchestrator   (FRONTIER model -- plan/design, AUTHOR the predicates)
             |  drive kazi as a tool  (this recipe)
             v
           kazi                (the controller -- objective predicates + convergence loop)
             |  drives the inner harness
             v
-      cheap implementer       (a cheap/local model -- opencode/codex/... -- the keystrokes)
+      cheap implementer       (a CHEAP Claude model -- the keystrokes)
     ```
 
     Spend expensive reasoning ONCE on the part that needs judgment: what "done"
-    means -- the acceptance predicates. Spend cheap, local compute on the iterative
-    grind of editing until those predicates pass. kazi's objective termination makes
-    the split safe: the cheap implementer cannot declare victory on
-    plausible-but-wrong work, because truth lives in the controller (the predicate
-    vector), not in the model doing the keystrokes. You set the bar; the cheap model
-    reaches for it; kazi holds the bar still. You own the per-phase model policy --
-    kazi bakes in none of it; it just exposes `--harness` / `--model` per call.
+    means -- the acceptance predicates. Spend cheap compute on the iterative grind of
+    editing until those predicates pass. kazi's objective termination makes the split
+    safe: the cheap implementer cannot declare victory on plausible-but-wrong work,
+    because truth lives in the controller (the predicate vector), not in the model
+    doing the keystrokes. You set the bar; the cheap model reaches for it; kazi holds
+    the bar still. You own the per-phase model policy -- kazi bakes in none of it; it
+    just exposes `--harness` / `--model` per call.
+
+    **The DEFAULT recipe is in-family Claude tiering (ADR-0033/0035).** You are a
+    FRONTIER Claude model (e.g. `claude-opus-4-8`) and you already AUTHOR the
+    predicates in this very session; run the grind on a CHEAP Claude model via
+    `kazi apply --harness claude --model <cheap-claude-id>`. The cheap tier is
+    `claude-haiku-4-5` (step up to `claude-sonnet-4-6` for harder slices). This needs
+    only a Claude API key -- no local model, no special hardware -- so the economics
+    apply to anyone running Claude Code. The cost win is still BEING MEASURED; treat
+    it as the intended economics, not a measured figure.
+
+    **Local / BYOM is the SECONDARY privacy add-on.** If your code must never leave
+    your hardware, run the grind on a local model instead --
+    `kazi apply --harness opencode --model <local-model>` (e.g. a local Qwen/Llama via
+    opencode). Same two-tier shape, no cloud; explicitly secondary to the in-family
+    default above.
 
     ## The loop the verbs sit inside: plan -> approve -> apply
 
@@ -257,14 +274,15 @@ defmodule Kazi.Teach.InstallSkill do
     declines a proposal, kept for audit.) Browse the queue with
     `kazi list-proposed --json` (optionally `--status proposed|approved|rejected`).
 
-    ### Step 3 -- converge (`apply` verb -> `kazi apply --harness <cheap> --json [--stream]`)
+    ### Step 3 -- converge (`apply` verb -> `kazi apply --harness claude --model <cheap-claude-id> --json [--stream]`)
 
-    Apply the approved goal with the CHEAP harness (the two-tier split). This is the
+    Apply the approved goal with the CHEAP tier (the two-tier split). This is the
     `apply` verb -- the reconcile loop. `kazi apply` drives the goal to a TERMINAL
-    VERDICT on the current release and takes a GOAL-FILE path:
+    VERDICT on the current release and takes a GOAL-FILE path. The DEFAULT is in-family
+    Claude tiering: you authored on a frontier model, so grind on a cheap Claude model:
 
     ```sh
-    kazi apply <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
+    kazi apply <goal-file> --workspace <path> --harness claude --model claude-haiku-4-5 --json
     ```
 
     `apply --json` emits ONE terminal result object on termination. The exit code
@@ -275,7 +293,14 @@ defmodule Kazi.Teach.InstallSkill do
     the object without an `event`; that is the terminal result you branch on:
 
     ```sh
-    kazi apply <goal-file> --workspace <path> --harness opencode --json --stream
+    kazi apply <goal-file> --workspace <path> --harness claude --model claude-haiku-4-5 --json --stream
+    ```
+
+    SECONDARY (privacy / no-cloud): to keep the grind on local hardware, swap the
+    harness/model for a local model via opencode -- same loop, no cloud:
+
+    ```sh
+    kazi apply <goal-file> --workspace <path> --harness opencode --model <local-model> --json
     ```
 
     **Parallel + standing (the native scheduler, ADR-0027).** For a goal-set that
@@ -288,8 +313,8 @@ defmodule Kazi.Teach.InstallSkill do
     and re-converges on drift, instead of converging once and stopping:
 
     ```sh
-    kazi apply <goal-file> --workspace <path> --parallel --harness opencode --json
-    kazi apply <goal-file> --workspace <path> --standing --harness opencode --json
+    kazi apply <goal-file> --workspace <path> --parallel --harness claude --model claude-haiku-4-5 --json
+    kazi apply <goal-file> --workspace <path> --standing --harness claude --model claude-haiku-4-5 --json
     ```
 
     **The `--explain` read-only gate.** `kazi apply --explain` (alias `--dry-run`)
@@ -368,7 +393,7 @@ defmodule Kazi.Teach.InstallSkill do
     refuse (or branch) if it is not the version you were written against:
 
     ```sh
-    result=$(kazi apply "$GOAL" --workspace "$WS" --harness opencode --json)
+    result=$(kazi apply "$GOAL" --workspace "$WS" --harness claude --model claude-haiku-4-5 --json)
     ver=$(printf '%s' "$result" | jq -r .schema_version)
     [ "$ver" = "2" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
     next=$(printf '%s' "$result" | jq -r .next_action)
