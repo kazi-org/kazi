@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.36.0](https://github.com/kazi-org/kazi/compare/v1.35.0...v1.36.0) (2026-06-25)
+
+
+### Features
+
+* **context-store:** inner-prompt contract + inner-search-only gist (T35.9) ([1db6f35](https://github.com/kazi-org/kazi/commit/1db6f355207e85adaba218580f4e57bfcb432e46))
+
 ## [1.35.0](https://github.com/kazi-org/kazi/compare/v1.34.0...v1.35.0) (2026-06-25)
 
 
