@@ -7,6 +7,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.5.0](https://github.com/kazi-org/kazi/compare/v1.4.0...v1.5.0) (2026-06-25)
+
+
+### Features
+
+* **site:** add command-accuracy scanner for removed kazi verbs ([3eaf0cf](https://github.com/kazi-org/kazi/commit/3eaf0cf07703bf346ce18f74a7a164349134578d))
+
 ## [1.4.0](https://github.com/kazi-org/kazi/compare/v1.3.0...v1.4.0) (2026-06-25)
 
 
