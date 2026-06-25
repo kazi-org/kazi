@@ -3069,15 +3069,28 @@ defmodule Kazi.CLI do
         _ = Ecto.Migrator.run(repo, :up, all: true)
         :ok
       else
-        # Escript / bare path: no supervised repo. Create the SQLite file if absent
-        # (no-op if it exists), then start the repo only for the migration. With no
-        # competing pool there is no lock contention.
+        # Standalone binary path (the Burrito release): no supervised repo, because
+        # `Kazi.Application.start/2` hands straight to the CLI before standing up the
+        # supervision tree. Create the SQLite file if absent (no-op if it exists),
+        # then START the repo and LEAVE IT RUNNING for the rest of this process.
+        #
+        # We must NOT use `Ecto.Migrator.with_repo/2` here: it starts a transient
+        # repo, runs the fun, and STOPS the repo when the fun returns -- leaving the
+        # read-model migrated but with no live connection. Every read-model command
+        # that runs AFTER this (the CLI `status`/`list-proposed`/`approve`, and the
+        # long-lived `kazi mcp` server's `kazi_status` tool) then crashes the binary
+        # with "could not lookup Ecto repo Kazi.Repo because it was not started". The
+        # caller is short-lived (a CLI command halts; the MCP server runs until EOF),
+        # so a process-linked repo that lives until exit is exactly right and races
+        # nothing (no supervised pool exists in this path).
         _ = repo.__adapter__().storage_up(repo.config())
 
-        {:ok, _, _} =
-          Ecto.Migrator.with_repo(repo, fn r ->
-            Ecto.Migrator.run(r, :up, all: true)
-          end)
+        case repo.start_link() do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+        end
+
+        _ = Ecto.Migrator.run(repo, :up, all: true)
 
         :ok
       end
