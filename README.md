@@ -144,11 +144,11 @@ the same checks keep failing (`stuck` → escalate to you), or the budget runs o
 
 ## How the skill routes
 
-`install-skill` adds a trigger to the kazi skill — the same way `use context7` pulls
-Context7 into a session — so **have kazi drive this until done** only routes to kazi once
-you have installed it. From there Claude authors the acceptance predicates with `kazi
-plan` and runs `kazi apply` until they are *objectively* true. You do not operate kazi
-directly; your agent does.
+`install-skill` adds a trigger to the kazi skill, so `/kazi plan` / `/kazi apply` — and the
+plain-English phrase **have kazi drive this until done** — only route to kazi once you have
+installed it. From there Claude authors the acceptance predicates with `kazi plan` and runs
+`kazi apply` until they are *objectively* true. You do not operate kazi directly; your
+agent does.
 
 ---
 
