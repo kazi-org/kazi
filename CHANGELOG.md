@@ -7,6 +7,17 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.3.0](https://github.com/kazi-org/kazi/compare/v1.2.0...v1.3.0) (2026-06-25)
+
+
+### Features
+
+* **cli:** emit additive envelope-v2 predicate fields under --json (T32.2) ([4a0dd63](https://github.com/kazi-org/kazi/commit/4a0dd63cdad0515df1c7f4854a2abe1c772f65b1))
+* **evidence:** SARIF/JUnit parser + LSP-Diagnostic evidence item (T32.2) ([533dcbd](https://github.com/kazi-org/kazi/commit/533dcbd426ccbd0b553b12c14911d61e2c581375))
+* **loop:** thread prior_score; stuck-detector reads the graded delta (T32.2) ([4b41f7a](https://github.com/kazi-org/kazi/commit/4b41f7ae6d9afd2dd1331a984d965220c78d7d90))
+* **predicate:** envelope v2 — score/direction/prior_score/diagnostics (T32.2) ([9d9ad89](https://github.com/kazi-org/kazi/commit/9d9ad894654c723703e43b3a62001b67015fa47b))
+* **read-model:** persist + round-trip envelope-v2 fields (T32.2) ([5b87e34](https://github.com/kazi-org/kazi/commit/5b87e3428c0c43daf3a7f8a831aec5ef78572011))
+
 ## [1.2.0](https://github.com/kazi-org/kazi/compare/v1.1.0...v1.2.0) (2026-06-25)
 
 
