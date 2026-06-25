@@ -61,7 +61,11 @@ defmodule Kazi.Runtime do
     custom_script: Kazi.Providers.CustomScript,
     # T32.3 (ADR-0041): the first-class ratchet mode — signal-vs-baseline within
     # an allowed regression. Coverage/perf/size are configs of this one provider.
-    ratchet: Kazi.Providers.Ratchet
+    ratchet: Kazi.Providers.Ratchet,
+    # T32.7 (ADR-0043): the first-class static-analysis provider — Dialyzer-led,
+    # generalized to the polyglot SARIF tools, gated on parsed findings (not the
+    # exit code) with a baseline ratchet on NEW findings.
+    static: Kazi.Providers.Static
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
