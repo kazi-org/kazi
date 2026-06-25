@@ -60,6 +60,23 @@ test.describe("kazi website smoke", () => {
     await expect(page.getByText(/Agent-authored/)).toBeVisible();
   });
 
+  test("shows the in-family token-economy section", async ({ page }) => {
+    await page.goto("/");
+    // T25.11 (ADR-0033/0035): the token-economy section leads with in-family
+    // Claude tiering — a cheap-model grind, no local model required.
+    await expect(
+      page.getByRole("heading", { name: "Token economy without local models" }),
+    ).toBeVisible();
+    // The worked example shows `kazi apply --harness claude --model <cheap-id>`.
+    await expect(
+      page.locator("pre", { hasText: "--harness claude --model claude-haiku-4-5" }),
+    ).toBeVisible();
+    // And the escalate-on-stuck ladder is documented.
+    await expect(
+      page.locator("pre", { hasText: "claude-opus-4-8" }),
+    ).toBeVisible();
+  });
+
   test("shows the real brew install command", async ({ page }) => {
     await page.goto("/");
     expect(INSTALL_CMD).toBe("brew install kazi-org/tap/kazi");
