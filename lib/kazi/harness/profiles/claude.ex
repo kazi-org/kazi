@@ -24,10 +24,10 @@ defmodule Kazi.Harness.Profiles.Claude do
   Renders the args AFTER the `claude` command for `prompt`/`opts`.
 
   `-p <prompt> --output-format json` is the always-present non-interactive +
-  structured-envelope shape (ADR-0008, T4.1). The claw-code hygiene flags (T4.8)
-  and the in-family model selector (T19.6, ADR-0033) are appended ONLY when their
-  opt is supplied, so with no such opts the argv is byte-for-byte the pre-T4.8
-  shape:
+  structured-envelope shape (ADR-0008, T4.1). The claw-code hygiene flags (T4.8),
+  the in-family model selector (T19.6, ADR-0033), and the inner-harness economy
+  flags (T36.1, ADR-0047) are appended ONLY when their opt is supplied, so with no
+  such opts the argv is byte-for-byte the pre-T4.8 shape:
 
     * `:max_budget_usd` -> `--max-budget-usd <amount>`  (per-dispatch ceiling)
     * `:allowed_tools`  -> `--allowed-tools <t> <t> …`  (least-privilege tool set)
@@ -39,10 +39,17 @@ defmodule Kazi.Harness.Profiles.Claude do
   drives the grind on a cheap Claude model — NO local model required. It is
   appended ONLY when `opts[:model]` is a non-empty string; when absent, the argv
   is byte-for-byte what it was before this flag existed.
+
+  The economy flags (ADR-0047) shrink what the inner harness sees per dispatch —
+  fewer tool schemas in context, a narrower MCP surface, a turn ceiling. Each is
+  appended ONLY when its opt is supplied, AFTER the hygiene + model args, so with
+  none of them the argv is byte-for-byte unchanged. See `economy_args/1` for the
+  opt → flag map and the version-gated capability check.
   """
   @spec build_args(String.t(), keyword()) :: [String.t()]
   def build_args(prompt, opts) when is_binary(prompt) and is_list(opts) do
-    ["-p", prompt, "--output-format", "json"] ++ hygiene_args(opts) ++ model_args(opts)
+    ["-p", prompt, "--output-format", "json"] ++
+      hygiene_args(opts) ++ model_args(opts) ++ economy_args(opts)
   end
 
   defp hygiene_args(opts) do
@@ -55,6 +62,101 @@ defmodule Kazi.Harness.Profiles.Claude do
       _ -> []
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # economy flags (T36.1, ADR-0047): the inner-harness minimalism surface.
+  # ---------------------------------------------------------------------------
+
+  # The opt -> `claude` flag map, in stable emission order. `kind` decides how the
+  # value renders:
+  #
+  #   * `:list`    -> `<flag> <v> <v> …`  (tool/config lists; accepts a list or a
+  #                   comma/space-delimited string, normalized the same way the
+  #                   T4.8 `--allowed-tools` set is)
+  #   * `:value`   -> `<flag> <v>`        (a single scalar, e.g. the turn ceiling)
+  #   * `:boolean` -> `<flag>`            (a bare switch, emitted only when truthy)
+  #
+  # `min_version` is the Claude Code version a flag's behavior depends on; nil means
+  # no gate. `--strict-mcp-config` and `--exclude-dynamic-system-prompt-sections`
+  # are version-sensitive (ADR-0047 risk note), so they carry a conservative floor:
+  # on a CLI older than that, the flag is DROPPED rather than emitted to a binary
+  # that would error on it. When `opts[:cli_version]` is absent (kazi could not
+  # probe the binary) the check is permissive — it emits the flag, matching the
+  # pre-T36.1 behavior of never second-guessing the installed CLI.
+  @economy_flags [
+    %{opt: :tools, flag: "--tools", kind: :list, min_version: nil},
+    %{opt: :disallowed_tools, flag: "--disallowedTools", kind: :list, min_version: nil},
+    %{opt: :mcp_config, flag: "--mcp-config", kind: :list, min_version: nil},
+    %{opt: :strict_mcp_config, flag: "--strict-mcp-config", kind: :boolean, min_version: "1.0.0"},
+    %{opt: :max_turns, flag: "--max-turns", kind: :value, min_version: nil},
+    %{
+      opt: :exclude_dynamic_system_prompt_sections,
+      flag: "--exclude-dynamic-system-prompt-sections",
+      kind: :boolean,
+      min_version: "1.0.0"
+    },
+    %{
+      opt: :no_session_persistence,
+      flag: "--no-session-persistence",
+      kind: :boolean,
+      min_version: nil
+    }
+  ]
+
+  @spec economy_args(keyword()) :: [String.t()]
+  defp economy_args(opts) do
+    cli_version = Keyword.get(opts, :cli_version)
+    Enum.flat_map(@economy_flags, &flag_args(&1, opts, cli_version))
+  end
+
+  # One flag's contribution: nothing when the opt is absent/empty or the running
+  # CLI is too old to understand it; otherwise the rendered flag + value(s).
+  @spec flag_args(map(), keyword(), term()) :: [String.t()]
+  defp flag_args(%{min_version: min} = spec, opts, cli_version) do
+    if cli_supports?(min, cli_version) do
+      render_flag(spec, Keyword.get(opts, spec.opt))
+    else
+      []
+    end
+  end
+
+  defp render_flag(%{kind: :boolean, flag: flag}, true), do: [flag]
+  defp render_flag(%{kind: :boolean}, _value), do: []
+
+  defp render_flag(%{kind: :value, flag: flag}, value)
+       when is_integer(value) and value > 0,
+       do: [flag, Integer.to_string(value)]
+
+  defp render_flag(%{kind: :value, flag: flag}, value)
+       when is_binary(value) and value != "",
+       do: [flag, value]
+
+  defp render_flag(%{kind: :value}, _value), do: []
+
+  defp render_flag(%{kind: :list, flag: flag}, value) do
+    case normalize_tools(value) do
+      [] -> []
+      items -> [flag | items]
+    end
+  end
+
+  # The version-gated capability check. No floor, or no detected version, means
+  # "emit" (permissive). An unparseable version on either side also degrades to
+  # permissive — kazi never withholds a flag because it failed to read a version.
+  @spec cli_supports?(String.t() | nil, term()) :: boolean()
+  defp cli_supports?(nil, _cli_version), do: true
+  defp cli_supports?(_min_version, nil), do: true
+
+  defp cli_supports?(min_version, cli_version) when is_binary(cli_version) do
+    with {:ok, have} <- Version.parse(cli_version),
+         {:ok, need} <- Version.parse(min_version) do
+      Version.compare(have, need) != :lt
+    else
+      _ -> true
+    end
+  end
+
+  defp cli_supports?(_min_version, _cli_version), do: true
 
   defp budget_args(opts) do
     case Keyword.get(opts, :max_budget_usd) do
