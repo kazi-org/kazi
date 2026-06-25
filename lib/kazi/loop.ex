@@ -2108,8 +2108,22 @@ defmodule Kazi.Loop do
     Budget.check(budget, %{
       iterations: data.iterations,
       elapsed_ms: elapsed_ms(data),
-      tokens: data.tokens_used
+      tokens: budgeted_tokens(data)
     })
+  end
+
+  # T34.4 (ADR-0046 #4): the token total fed to the gate, with cached reads
+  # discounted. `tokens_used` is the full rolled-up total (cached reads counted
+  # at full weight; surfaced unchanged as `budget_spent.tokens` for back-compat);
+  # here we rebate the discounted fraction of the cached reads the usage envelope
+  # accumulated, so a cache-hit-heavy run is not falsely flagged `over_budget`.
+  # When no cached reads were reported the value equals `tokens_used`, so the gate
+  # behaves byte-identically to the pre-T34.4 arithmetic. The GATE decision lives
+  # in `Kazi.Loop.Budget.check/2` and is unchanged — only this input is reweighted.
+  @spec budgeted_tokens(Data.t()) :: non_neg_integer()
+  defp budgeted_tokens(%Data{budget: budget, tokens_used: raw, usage: usage}) do
+    cached = Map.get(usage, :cached_input_tokens, 0)
+    Budget.budgeted_tokens(raw, cached, budget.cached_read_weight)
   end
 
   # Wall-clock elapsed since the loop started, in ms, via the injectable clock.

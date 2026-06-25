@@ -113,7 +113,10 @@ defmodule Kazi.Scheduler.Budget do
       %Budget{
         max_iterations: Enum.at(shares_by_dim.max_iterations, i),
         max_wall_clock_ms: Enum.at(shares_by_dim.max_wall_clock_ms, i),
-        max_tokens: Enum.at(shares_by_dim.max_tokens, i)
+        max_tokens: Enum.at(shares_by_dim.max_tokens, i),
+        # The cached-read weight is a cost-accounting policy, not a ceiling to
+        # divide (T34.4): every share keeps the parent's weight verbatim.
+        cached_read_weight: budget.cached_read_weight
       }
     end
   end
