@@ -8,6 +8,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "check:coherence": "node scripts/check-coherence.mjs",
+    "check:commands": "node scripts/check-commands.mjs",
     "test": "playwright test"
   },
   "dependencies": {
