@@ -154,6 +154,11 @@ defmodule Kazi.Loop do
   # prefix (tier 0 drops it) and records the active tier per iteration; the graph
   # MCP surface gate lives in `Kazi.Harness.DispatchSurface`.
   alias Kazi.Context.Tier
+  # T36.4 (ADR-0047 §2/§4): escalate the active tier on non-progress (1→2→3→4),
+  # with a stop rule that reverts a net-negative (cost-up, no-progress) bump. Pure
+  # policy + thresholds-from-config; the loop owns the signal (progress/cost) and
+  # applies the resulting tier. See `observe_tick/1` and `active_tier/1`.
+  alias Kazi.Context.Escalation
 
   require Logger
 
@@ -449,7 +454,24 @@ defmodule Kazi.Loop do
               last_context: nil,
               last_tools: %{},
               last_orientation_prefix: nil,
-              last_retrieval_section: nil
+              last_retrieval_section: nil,
+              # --- T36.4 (ADR-0047 §2/§4): context-tier escalation --------------
+              # The resolved escalation `Config` (thresholds + stop-rule flag) and
+              # the running escalation `State` (the active tier, the non-progress
+              # streak, the stop-rule bookkeeping). `escalation_state.tier` is the
+              # tier the NEXT dispatch assembles its context at — it starts at the
+              # operator/goal base tier (`Tier.resolve/1`, default 1) and steps up
+              # on sustained non-progress. `escalation_prev_cost` is the cumulative
+              # run cost snapshot from which the per-iteration cost DELTA (the
+              # stop-rule signal) is computed each observation. `escalation_events`
+              # is an append-only log of the {kind, from, to, iteration} tier
+              # changes, surfaced in `snapshot/1`. All appended last so the existing
+              # field order is untouched; with no non-progress the active tier never
+              # moves and the loop is byte-identical to before.
+              escalation_config: nil,
+              escalation_state: nil,
+              escalation_prev_cost: 0,
+              escalation_events: []
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -555,6 +577,16 @@ defmodule Kazi.Loop do
       enforcement OFF — every seam is a no-op and the loop is byte-for-byte
       unchanged. `Kazi.Runtime.run/2` resolves the default-on-for-creation policy
       and threads the profile here.
+    * `:context_escalation` — tune the context-budget tier escalation ladder
+      (T36.4, ADR-0047 §2/§4): a `Kazi.Context.Escalation.Config`, a keyword/map of
+      overrides (`:enabled`, `:threshold`, `:min_tier`, `:max_tier`, `:stop_rule`),
+      or `nil` to resolve `config :kazi, :context_escalation` then the provisional
+      defaults. On `:threshold` consecutive non-progress observations against the
+      same failing set (the ADR-0041 score gradient), the active tier steps up
+      (1 → 2 → 3 → 4) so the next dispatch assembles richer context; the stop rule
+      reverts a bump that raised cost without progress. The default `:threshold` is
+      `Kazi.Context.Escalation.default_threshold/0` (provisional, pending the
+      E19/T36.5 benchmark). Set `enabled: false` to pin the active tier at the base.
     * `:name` — register the process under a name.
   """
   @spec start_link(keyword()) :: :gen_statem.start_ret()
@@ -691,7 +723,9 @@ defmodule Kazi.Loop do
             active: boolean(),
             guarantees: [atom()],
             gaming_events: [map()]
-          }
+          },
+          context_tier: Tier.t(),
+          context_tier_escalations: [map()]
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
@@ -724,6 +758,11 @@ defmodule Kazi.Loop do
     # is deterministically testable; capture the start instant once at init.
     now_fn = Keyword.get(opts, :now_fn, fn -> System.monotonic_time(:millisecond) end)
 
+    # T36.4 (ADR-0047 §2/§4): bind the adapter opts (the base-tier source) and the
+    # resolved escalation config once, so the struct can seed the escalation state.
+    adapter_opts = Keyword.get(opts, :adapter_opts, [])
+    escalation_config = Escalation.config(Keyword.get(opts, :context_escalation))
+
     data = %Data{
       goal: goal,
       providers: fetch!(opts, :providers),
@@ -731,7 +770,7 @@ defmodule Kazi.Loop do
       integrate: fetch!(opts, :integrate),
       deploy: fetch!(opts, :deploy),
       workspace: Keyword.get(opts, :workspace),
-      adapter_opts: Keyword.get(opts, :adapter_opts, []),
+      adapter_opts: adapter_opts,
       workspace_opts: Keyword.get(opts, :workspace_opts, []),
       live_kinds: MapSet.new(Keyword.get(opts, :live_kinds, @default_live_kinds)),
       reobserve_interval_ms: Keyword.get(opts, :reobserve_interval_ms, @default_reobserve_ms),
@@ -770,7 +809,14 @@ defmodule Kazi.Loop do
       # T32.5 diff-inspection guard (ADR-0042 §5): the diff source the guard scans,
       # defaulting to a `git diff HEAD` of the workspace. Injectable so a test can
       # feed a canned diff; only invoked when enforcement is active.
-      diff_fn: Keyword.get(opts, :diff_fn, &default_diff_fn/1)
+      diff_fn: Keyword.get(opts, :diff_fn, &default_diff_fn/1),
+      # T36.4 (ADR-0047 §2/§4): resolve the escalation config (the `:context_escalation`
+      # opt > `config :kazi, :context_escalation` > provisional defaults) and seed the
+      # escalation state from the operator/goal base tier. With escalation enabled but
+      # no non-progress the active tier stays at the base, so the dispatch path is
+      # byte-identical to before until a stall is detected.
+      escalation_config: escalation_config,
+      escalation_state: Escalation.init(Tier.resolve(adapter_opts), escalation_config)
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -934,7 +980,14 @@ defmodule Kazi.Loop do
       # T32.4 enforcement: the active anti-gaming guarantees + any flagged gaming
       # event, so `kazi status` / `run --json` can show the bar was held
       # (ADR-0042 §7). A disabled shape (`active: false`) when enforcement is off.
-      enforcement: enforcement_status(data)
+      enforcement: enforcement_status(data),
+      # T36.4 (ADR-0047 §2/§4): the live context-budget tier the loop is currently
+      # assembling dispatches at (escalated from the base on non-progress), and the
+      # ordered log of tier changes (escalations + stop-rule reverts) this run made,
+      # so a test / `kazi status` can confirm a stalled run escalated and a
+      # net-negative bump was reverted.
+      context_tier: active_tier(data),
+      context_tier_escalations: Enum.reverse(data.escalation_events)
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -1000,6 +1053,14 @@ defmodule Kazi.Loop do
     # below is unchanged. The flags are surfaced via snapshot/1 and the read-model.
     data = %Data{data | regressions: detect_regressions(data)}
 
+    # T36.4 (ADR-0047 §2/§4): fold this observation's progress/cost signal into the
+    # escalation state BEFORE deciding, so a stalled run's NEXT dispatch (chosen by
+    # `decide/2` below) assembles its context at the escalated tier. On sustained
+    # non-progress against the same failing set the active tier steps up; the stop
+    # rule reverts a bump that raised cost without progress. A no-op for a
+    # progressing run (the tier holds at the base).
+    data = escalate_context(data)
+
     log_diff(data)
     notify_iteration(data)
 
@@ -1055,6 +1116,74 @@ defmodule Kazi.Loop do
 
   defp discount_if_flagged(results, true) do
     Map.new(results, fn {id, %PredicateResult{} = result} -> {id, %{result | score: nil}} end)
+  end
+
+  # =============================================================================
+  # T36.4 context-tier escalation (ADR-0047 §2/§4)
+  # =============================================================================
+
+  # Fold this observation's progress/cost signal into the escalation state and
+  # apply the decision. The active tier (`escalation_state.tier`) is what every
+  # tier consumer (`active_tier/1`) reads, so a step up here makes the NEXT
+  # dispatch assemble richer context. Records each tier change in
+  # `escalation_events` for `snapshot/1`.
+  @spec escalate_context(Data.t()) :: Data.t()
+  defp escalate_context(%Data{escalation_state: nil} = data), do: data
+
+  defp escalate_context(%Data{escalation_config: config, escalation_state: state} = data) do
+    cost_now = run_cost(data)
+    signal = %{progressing?: code_progressing?(data), cost: cost_now - data.escalation_prev_cost}
+
+    {state, decision} = Escalation.step(state, config, signal)
+
+    %Data{
+      data
+      | escalation_state: state,
+        escalation_prev_cost: cost_now,
+        escalation_events: record_escalation_event(data, decision)
+    }
+  end
+
+  # The active context tier the loop assembles a dispatch at — the escalation
+  # state's current tier (T36.4), which starts at the operator/goal base tier
+  # (`Tier.resolve/1`, default 1) and steps up on non-progress. Falls back to the
+  # base-tier resolution if escalation was never seeded (defensive; always seeded
+  # in `init/1`).
+  @spec active_tier(Data.t()) :: Tier.t()
+  defp active_tier(%Data{escalation_state: %Escalation.State{} = state}),
+    do: Escalation.tier(state)
+
+  defp active_tier(%Data{adapter_opts: adapter_opts}), do: Tier.resolve(adapter_opts)
+
+  # The non-progress signal escalation reads (ADR-0047 §2): the loop is NOT
+  # progressing when the last two CODE observations carry the same non-empty
+  # failing set with no graded-score improvement — exactly the
+  # `Kazi.Loop.StuckDetector` verdict over a 2-window (the minimal delta that can
+  # show "no change"). So escalation and the stuck stop read the SAME signal; the
+  # CONFIG threshold (not this window) decides how many such steps trigger a step
+  # up. Fewer than two observations, an empty/changed failing set, or an improving
+  # score all read as progressing.
+  @spec code_progressing?(Data.t()) :: boolean()
+  defp code_progressing?(%Data{} = data) do
+    StuckDetector.stuck?(code_history(data), 2) == :not_stuck
+  end
+
+  # The cumulative run cost the stop rule's per-iteration delta is computed from
+  # (ADR-0046/0047 §4): the harness-reported dollars when present, else the rolled-
+  # up token total as the cost proxy. Both accumulate across dispatches, so the
+  # per-observation delta is the cost of the dispatch that observation measures.
+  @spec run_cost(Data.t()) :: number()
+  defp run_cost(%Data{usage: %{cost_usd: cost}}) when is_number(cost), do: cost
+  defp run_cost(%Data{tokens_used: tokens}), do: tokens
+
+  # Append a tier-change event (an escalation or a stop-rule revert) to the log,
+  # keyed by the observation index that triggered it; a `:hold` records nothing.
+  @spec record_escalation_event(Data.t(), Escalation.decision()) :: [map()]
+  defp record_escalation_event(%Data{escalation_events: events}, :hold), do: events
+
+  defp record_escalation_event(%Data{escalation_events: events, iterations: iterations}, decision) do
+    {kind, from, to} = decision
+    [%{kind: kind, from: from, to: to, iteration: iterations - 1} | events]
   end
 
   # T32.2 / ADR-0041: copy each predicate's score from the previous observation's
@@ -1503,10 +1632,17 @@ defmodule Kazi.Loop do
   # there is a workspace to scope the MCP config to — so non-Claude harnesses and
   # workspaceless loops are unchanged.
   @spec dispatch_adapter_opts(Data.t()) :: keyword()
-  defp dispatch_adapter_opts(%Data{adapter_opts: adapter_opts, workspace: workspace}) do
-    case DispatchSurface.minimal_default(workspace, adapter_opts) do
-      [] -> adapter_opts
-      surface -> Keyword.merge(surface, adapter_opts)
+  defp dispatch_adapter_opts(%Data{adapter_opts: adapter_opts, workspace: workspace} = data) do
+    # T36.4: overlay the ESCALATED active `:context_tier` so the tier-2 graph MCP
+    # gate in `DispatchSurface` sees the live tier — a run that escalated to tier ≥ 2
+    # gets the graph server exposed even though the operator opt was the default 1.
+    # The overlaid opts are also what the harness receives, so the dispatched
+    # `:context_tier` reflects the tier the context was assembled at.
+    eff = Keyword.put(adapter_opts, Tier.opt_key(), active_tier(data))
+
+    case DispatchSurface.minimal_default(workspace, eff) do
+      [] -> eff
+      surface -> Keyword.merge(surface, eff)
     end
   end
 
@@ -1649,7 +1785,7 @@ defmodule Kazi.Loop do
   # T36.3 (ADR-0047 §3): the active context tier is recorded alongside the section
   # counters, so each iteration's `context` envelope reports which tier it ran at.
   @spec record_counters(Data.t(), map(), Kazi.HarnessAdapter.result()) :: Data.t()
-  defp record_counters(%Data{adapter_opts: adapter_opts} = data, parts, result) do
+  defp record_counters(%Data{} = data, parts, result) do
     context =
       Counters.context(
         parts.orientation,
@@ -1657,7 +1793,11 @@ defmodule Kazi.Loop do
         parts.retrieval,
         data.last_orientation_prefix,
         data.last_retrieval_section,
-        Tier.resolve(adapter_opts)
+        # T36.4: record the ESCALATED active tier this dispatch actually ran at, so
+        # the per-iteration `context` envelope attributes outcomes to the live tier
+        # (which may have stepped up from the base on non-progress), not the static
+        # base opt.
+        active_tier(data)
       )
 
     %Data{
@@ -1701,7 +1841,11 @@ defmodule Kazi.Loop do
   defp orientation_prefix(%Data{workspace: workspace}) when not is_binary(workspace), do: nil
 
   defp orientation_prefix(%Data{adapter_opts: adapter_opts} = data) do
-    if Tier.orientation?(Tier.resolve(adapter_opts)) and orientation_prefix?(adapter_opts),
+    # T36.4: the ESCALATED active tier gates the prefix, not the static base tier —
+    # tier 0 drops the cached orientation; tier ≥ 1 keeps it (still subject to the
+    # T19.4 toggle). Absent any escalation the active tier IS the base, so the path
+    # is unchanged.
+    if Tier.orientation?(active_tier(data)) and orientation_prefix?(adapter_opts),
       do: build_orientation_prefix(data),
       else: nil
   end
