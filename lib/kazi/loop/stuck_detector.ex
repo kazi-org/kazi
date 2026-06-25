@@ -30,22 +30,36 @@ defmodule Kazi.Loop.StuckDetector do
     * Fewer than `n` observations recorded → **not stuck** (not enough evidence;
       a loop must run at least `n` times before it can be declared stuck).
     * The most recent `n` observations have the SAME failing-predicate-id set AND
-      that set is **non-empty** → **stuck** on that set. "Same set" is set
-      equality on the failing ids, so reordering within a vector does not matter,
-      and only genuine `:fail`s count (matching `Kazi.PredicateVector.failing/1`:
-      `:error`/`:unknown` are not actionable failing work, so they neither create
-      nor sustain a stuck verdict).
-    * Otherwise (the set changed across the window, or the window is all-green) →
-      **not stuck**. A converging or merely *progressing* loop — one whose failing
-      set shrinks, grows, or swaps members between iterations — is making headway
-      and must be left to run.
+      that set is **non-empty** AND no failing predicate's graded score improved
+      across the window → **stuck** on that set. "Same set" is set equality on the
+      failing ids, so reordering within a vector does not matter, and only genuine
+      `:fail`s count (matching `Kazi.PredicateVector.failing/1`: `:error`/`:unknown`
+      are not actionable failing work, so they neither create nor sustain a stuck
+      verdict).
+    * Otherwise (the set changed across the window, the window is all-green, or a
+      still-failing predicate's score is *moving the improving way* — ADR-0041's
+      graded gradient) → **not stuck**. A converging or merely *progressing* loop —
+      one whose failing set shrinks, grows, swaps members, OR whose score climbs
+      toward its threshold without yet crossing it — is making headway and must be
+      left to run.
 
   The empty-set guard is deliberate: a goal that is fully passing for `n`
   iterations is converged, not stuck, and a goal with no failing predicates has
   no work to escalate. Only a persistent, *non-empty* failing set is stuck.
+
+  ## The graded-score escape (ADR-0041 / T32.2)
+
+  Boolean is a sparse signal: a predicate stuck on the same fail/fail/fail set
+  LOOKS identical whether the agent is flailing or steadily shrinking a 200-error
+  lint count toward zero. The envelope-v2 score is the dense gradient that tells
+  them apart. When the failing set is identical and non-empty, the detector reads
+  each failing predicate's `score` across the window (interpreted through its
+  `direction`); if ANY has net-improved from the window's first to last
+  observation, the loop is *progressing*, not stuck. A boolean predicate carries
+  no score, so this escape never fires for it — the boolean verdict is unchanged.
   """
 
-  alias Kazi.PredicateVector
+  alias Kazi.{PredicateResult, PredicateVector}
 
   @typedoc "A failing-predicate-id set for one observation."
   @type failing_set :: MapSet.t(Kazi.Predicate.id())
@@ -104,11 +118,12 @@ defmodule Kazi.Loop.StuckDetector do
   def stuck?(_history, n) when not is_integer(n) or n < 1, do: :not_stuck
 
   def stuck?(history, n) when is_list(history) do
+    # The most recent `n` observations (oldest-first within the window). We keep
+    # the full vectors — not just the failing sets — so the graded-score escape
+    # (ADR-0041) can read each failing predicate's score across the window.
     window =
       history
-      |> Enum.map(fn {_index, %PredicateVector{} = vector} ->
-        MapSet.new(PredicateVector.failing(vector))
-      end)
+      |> Enum.map(fn {_index, %PredicateVector{} = vector} -> vector end)
       |> Enum.take(-n)
 
     decide_window(window, n)
@@ -117,12 +132,53 @@ defmodule Kazi.Loop.StuckDetector do
   # Not enough observations recorded yet to fill the window → not stuck.
   defp decide_window(window, n) when length(window) < n, do: :not_stuck
 
-  # The window is full: stuck iff every failing set is identical AND non-empty.
-  defp decide_window([first | rest] = _window, _n) do
+  # The window is full. Stuck iff every failing set is identical AND non-empty AND
+  # no failing predicate's graded score improved across the window.
+  defp decide_window(window, _n) do
+    failing_sets = Enum.map(window, fn vector -> MapSet.new(PredicateVector.failing(vector)) end)
+    [first | rest] = failing_sets
+
     cond do
       MapSet.size(first) == 0 -> :not_stuck
-      Enum.all?(rest, &MapSet.equal?(&1, first)) -> {:stuck, first}
-      true -> :not_stuck
+      not Enum.all?(rest, &MapSet.equal?(&1, first)) -> :not_stuck
+      progressing?(window, first) -> :not_stuck
+      true -> {:stuck, first}
     end
   end
+
+  # ADR-0041 graded-score escape: true when ANY predicate in the persistent
+  # failing set net-improved its score from the window's first to last observation
+  # (interpreted through `direction`). Boolean predicates carry no score, so this
+  # is always false for them — the boolean stuck verdict is unchanged.
+  @spec progressing?([PredicateVector.t()], failing_set()) :: boolean()
+  defp progressing?(window, failing_set) do
+    Enum.any?(failing_set, fn id -> id_improved?(window, id) end)
+  end
+
+  # A single predicate's net score movement across the window: collect its scored
+  # observations oldest-first and ask whether the last beats the first the
+  # improving way. Needs at least two scored observations to have a delta.
+  defp id_improved?(window, id) do
+    scored =
+      window
+      |> Enum.map(&PredicateVector.get(&1, id))
+      |> Enum.filter(fn
+        %PredicateResult{} = result -> PredicateResult.scored?(result)
+        _ -> false
+      end)
+
+    case scored do
+      [first | _] = list when length(list) >= 2 ->
+        last = List.last(list)
+        direction = last.direction || first.direction
+        improved?(direction, first.score, last.score)
+
+      _ ->
+        false
+    end
+  end
+
+  defp improved?(:higher_better, first, last), do: last > first
+  defp improved?(:lower_better, first, last), do: last < first
+  defp improved?(_no_direction, _first, _last), do: false
 end

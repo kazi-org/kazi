@@ -829,6 +829,14 @@ defmodule Kazi.Loop do
     # predicate is re-run via the real provider path and may be classified flaky).
     {vector, quarantine} = observe(data)
 
+    # T32.2 / ADR-0041: thread each scored predicate's PREVIOUS-iteration score
+    # into `prior_score`, so the progress classifier and stuck-detector read the
+    # direction-interpreted delta. The provider supplies `score`/`direction`; the
+    # LOOP supplies `prior_score` — it is the only component that knows the prior
+    # iteration. A boolean predicate (no score) is untouched: prior stays nil, so
+    # the vector is byte-identical to the pre-v2 shape.
+    vector = thread_prior_scores(vector, data.vector)
+
     # 0-based per-goal iteration index for this observation (matches the
     # read-model's iteration_index and the on_iteration payload's :iteration).
     index = data.iterations
@@ -895,6 +903,32 @@ defmodule Kazi.Loop do
     for {index, %PredicateVector{results: results}} <- ordered_history(data) do
       {index, results |> Map.drop(MapSet.to_list(drop_ids)) |> PredicateVector.new()}
     end
+  end
+
+  # T32.2 / ADR-0041: copy each predicate's score from the previous observation's
+  # same-id result into this observation's `prior_score`. The first observation
+  # (no prior vector) leaves every prior_score nil. Boolean predicates (prior
+  # score nil) are untouched — the result struct is unchanged, so the stored and
+  # in-memory shapes stay byte-identical to the pre-v2 loop.
+  @spec thread_prior_scores(PredicateVector.t(), PredicateVector.t() | nil) :: PredicateVector.t()
+  defp thread_prior_scores(vector, nil), do: vector
+
+  defp thread_prior_scores(
+         %PredicateVector{results: results} = vector,
+         %PredicateVector{results: prev}
+       ) do
+    threaded =
+      Map.new(results, fn {id, %PredicateResult{} = result} ->
+        prior =
+          case Map.get(prev, id) do
+            %PredicateResult{score: score} -> score
+            _ -> nil
+          end
+
+        {id, PredicateResult.with_prior_score(result, prior)}
+      end)
+
+    %{vector | results: threaded}
   end
 
   # Evaluate every predicate the goal carries (predicates ++ guards) via its
