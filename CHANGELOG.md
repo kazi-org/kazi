@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.27.0](https://github.com/kazi-org/kazi/compare/v1.26.0...v1.27.0) (2026-06-25)
+
+
+### Features
+
+* **context:** add context-budget tier ladder (T36.3) ([3e8552c](https://github.com/kazi-org/kazi/commit/3e8552c38b1b7883c57ea54738e6adeea1485553))
+* **harness:** gate the graph MCP behind tier 2 in the dispatch surface (T36.3) ([57af522](https://github.com/kazi-org/kazi/commit/57af522cec0ab384c949f52d053eb7ec9102a294))
+* **loop:** gate orientation prefix and record tier by context tier (T36.3) ([aeaed37](https://github.com/kazi-org/kazi/commit/aeaed37d4e59fd0ca4ad46eeead581a80596fc24))
+* **loop:** record active context tier in the per-iteration envelope (T36.3) ([78f6ed9](https://github.com/kazi-org/kazi/commit/78f6ed9399f14fb71caaa4af947a395f3b5e2a16))
+
 ## [1.26.0](https://github.com/kazi-org/kazi/compare/v1.25.0...v1.26.0) (2026-06-25)
 
 
