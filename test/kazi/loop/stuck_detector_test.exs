@@ -119,4 +119,82 @@ defmodule Kazi.Loop.StuckDetectorTest do
   test "default_iterations/0 is a sensible positive default" do
     assert StuckDetector.default_iterations() == 3
   end
+
+  # ===========================================================================
+  # Graded-score escape (ADR-0041 / T32.2) — the stuck-detector sees the delta
+  # ===========================================================================
+
+  describe "stuck?/2 — same failing set, but the graded score is moving" do
+    # A vector with a single failing, SCORED predicate :a (the others pass).
+    defp scored_vector(score, direction) do
+      PredicateVector.new(%{
+        a: PredicateResult.new(:fail, %{}, score: score, direction: direction)
+      })
+    end
+
+    test "a :lower_better count shrinking across the window is progress, not stuck" do
+      # Same failing set {:a} for 3 iterations — boolean-equivalent would be STUCK —
+      # but the score falls 30 → 20 → 12, which for lower_better is real progress.
+      h =
+        history([
+          scored_vector(30.0, :lower_better),
+          scored_vector(20.0, :lower_better),
+          scored_vector(12.0, :lower_better)
+        ])
+
+      assert StuckDetector.stuck?(h, 3) == :not_stuck
+    end
+
+    test "a :higher_better score climbing across the window is progress, not stuck" do
+      h =
+        history([
+          scored_vector(0.40, :higher_better),
+          scored_vector(0.55, :higher_better),
+          scored_vector(0.70, :higher_better)
+        ])
+
+      assert StuckDetector.stuck?(h, 3) == :not_stuck
+    end
+
+    test "a FLAT score (no movement) with the same failing set is still stuck" do
+      h =
+        history([
+          scored_vector(12.0, :lower_better),
+          scored_vector(12.0, :lower_better),
+          scored_vector(12.0, :lower_better)
+        ])
+
+      assert StuckDetector.stuck?(h, 3) == {:stuck, MapSet.new([:a])}
+    end
+
+    test "a score moving the WRONG way (regressing) does not rescue from stuck" do
+      # lower_better but the count is RISING 12 → 20 → 30: not progress → stuck.
+      h =
+        history([
+          scored_vector(12.0, :lower_better),
+          scored_vector(20.0, :lower_better),
+          scored_vector(30.0, :lower_better)
+        ])
+
+      assert StuckDetector.stuck?(h, 3) == {:stuck, MapSet.new([:a])}
+    end
+
+    test "net improvement across the window counts even if it dips mid-window" do
+      # 30 → 31 → 12: first-to-last net improvement (lower_better) → not stuck.
+      h =
+        history([
+          scored_vector(30.0, :lower_better),
+          scored_vector(31.0, :lower_better),
+          scored_vector(12.0, :lower_better)
+        ])
+
+      assert StuckDetector.stuck?(h, 3) == :not_stuck
+    end
+
+    test "a boolean predicate (no score) is unaffected — still stuck (back-compat)" do
+      # Identical to the legacy stuck case: no score means no escape.
+      h = history([vector([:a]), vector([:a]), vector([:a])])
+      assert StuckDetector.stuck?(h, 3) == {:stuck, MapSet.new([:a])}
+    end
+  end
 end
