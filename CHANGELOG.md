@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.33.0](https://github.com/kazi-org/kazi/compare/v1.32.0...v1.33.0) (2026-06-25)
+
+
+### Features
+
+* **cli:** kazi apply --context-store/--context-budget + additive stats (T35.5) ([19bb14d](https://github.com/kazi-org/kazi/commit/19bb14d0f5e8190288d24dfc191fa64c11a540ac))
+
 ## [1.32.0](https://github.com/kazi-org/kazi/compare/v1.31.0...v1.32.0) (2026-06-25)
 
 
