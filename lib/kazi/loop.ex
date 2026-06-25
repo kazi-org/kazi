@@ -1163,14 +1163,22 @@ defmodule Kazi.Loop do
 
   # Build the :dispatch_agent action, carrying the failing code predicates and
   # their evidence as params (this is what seeds the harness prompt, concept §5).
+  #
+  # T32.6 (ADR-0042 §6): `held_out` predicates are filtered out here too, so
+  # neither their ids (the work-item line) nor their evidence reach the agent's
+  # dispatch context. They are still evaluated and still gate convergence — only
+  # the agent's VIEW is narrowed (hidden-for-acceptance). The visible failing
+  # predicates still seed the fix context.
   @spec dispatch_action(PredicateVector.t(), Data.t()) :: Action.t()
   defp dispatch_action(vector, %Data{goal: goal, live_kinds: live_kinds} = _data) do
     kinds = predicate_kinds(goal)
+    held_out = held_out_ids(goal)
 
     failing =
       vector
       |> PredicateVector.failing()
       |> Enum.reject(fn id -> MapSet.member?(live_kinds, Map.get(kinds, id)) end)
+      |> Enum.reject(fn id -> MapSet.member?(held_out, id) end)
 
     evidence =
       Map.new(failing, fn id -> {id, PredicateVector.get(vector, id).evidence} end)
@@ -1436,11 +1444,21 @@ defmodule Kazi.Loop do
   # The failing slice the orientation builder ranks against: `{id, result}` pairs
   # for every `:fail` predicate in the current vector (the shape
   # `Kazi.Context.orientation_pack/3` expects). Empty when there is no vector yet.
+  #
+  # T32.6 (ADR-0042 §6): `held_out` predicates are excluded so the
+  # orientation prefix, retrieval section, and `.kazi/context.md` orientation
+  # file built from this slice never leak a held-out predicate's id or evidence
+  # into the agent's context — the same hidden-for-acceptance split
+  # `dispatch_action/2` enforces on the prompt body.
   @spec failing_slice(Data.t()) :: [{Predicate.id(), PredicateResult.t()}]
   defp failing_slice(%Data{vector: nil}), do: []
 
-  defp failing_slice(%Data{vector: %PredicateVector{results: results}}) do
-    for {id, %PredicateResult{status: :fail} = result} <- results, do: {id, result}
+  defp failing_slice(%Data{vector: %PredicateVector{results: results}, goal: goal}) do
+    held_out = held_out_ids(goal)
+
+    for {id, %PredicateResult{status: :fail} = result} <- results,
+        not MapSet.member?(held_out, id),
+        do: {id, result}
   end
 
   # Context threaded to an action's execute/2 (Kazi.Action.context). A plain map
@@ -1814,6 +1832,22 @@ defmodule Kazi.Loop do
     goal
     |> Goal.all_predicates()
     |> Map.new(fn %Predicate{id: id, kind: kind} -> {id, kind} end)
+  end
+
+  # T32.6 (ADR-0042 §6): the set of predicate ids the goal marks `held_out`. The
+  # controller evaluates them and they still gate convergence, but they are
+  # filtered OUT of everything that reaches the agent — the dispatch prompt's
+  # failing-id list + evidence (`dispatch_action/2`) and the
+  # orientation/retrieval/workspace context built from the failing slice
+  # (`failing_slice/1`). This is the visible-for-iteration vs
+  # hidden-for-acceptance split.
+  @spec held_out_ids(Goal.t()) :: MapSet.t()
+  defp held_out_ids(%Goal{} = goal) do
+    goal
+    |> Goal.all_predicates()
+    |> Enum.filter(&Predicate.held_out?/1)
+    |> Enum.map(& &1.id)
+    |> MapSet.new()
   end
 
   # An Action.result/0 counts as success when it is :ok or {:ok, _}.
