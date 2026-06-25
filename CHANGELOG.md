@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.34.0](https://github.com/kazi-org/kazi/compare/v1.33.0...v1.34.0) (2026-06-25)
+
+
+### Features
+
+* **stuck-bundle:** compact escalation bundle on stuck (T35.6) ([998129e](https://github.com/kazi-org/kazi/commit/998129e8f12323f4d437bd1464076d9c9303b874))
+
 ## [1.33.0](https://github.com/kazi-org/kazi/compare/v1.32.0...v1.33.0) (2026-06-25)
 
 
