@@ -2499,6 +2499,17 @@ defmodule Kazi.CLI do
   #   * `release_ref`    — WHAT was shipped (the T3.3c release tag), or nil.
   #   * `schema_version` — the contract version (`@run_schema_version`); a breaking
   #                        change bumps it.
+  #   * `usage`          — the ADR-0046 economy envelope: an ADDITIVE, optional
+  #                        object of the run's token/cost components
+  #                        (`input_tokens`, `cached_input_tokens`,
+  #                        `cache_write_tokens`, `output_tokens`,
+  #                        `reasoning_tokens`, `cost_usd`). Present only when the
+  #                        harness reported at least one component; each field is
+  #                        omitted when unreported (absent ≠ zero). Strictly
+  #                        additive, so `schema_version` stays 2 — the same rule
+  #                        ADR-0041's predicate envelope followed; the single
+  #                        rolled-up total stays in `budget_spent.tokens` for
+  #                        back-compat. See `Kazi.CLI.Usage`.
   @spec run_result_json(Goal.t(), :converged | :stopped | :over_budget, map()) :: map()
   defp run_result_json(%Goal{id: id}, outcome, result) do
     status = run_status(outcome, result)
@@ -2514,6 +2525,19 @@ defmodule Kazi.CLI do
       reason: reason_string(Map.get(result, :reason)),
       release_ref: Map.get(result, :release_ref)
     }
+    |> put_usage(result)
+  end
+
+  # ADR-0046 economy envelope: attach the additive `usage` object ONLY when the
+  # harness reported at least one component, omitting the key entirely otherwise
+  # (honest-unknown — an absent envelope means "unreported", never zeros). The
+  # renderer drops absent fields; here we drop the whole object when nothing was
+  # reported, so the pre-envelope contract is byte-identical on a no-usage run.
+  defp put_usage(map, result) do
+    case Kazi.CLI.Usage.render(Map.get(result, :usage, %{})) do
+      usage when map_size(usage) == 0 -> map
+      usage -> Map.put(map, :usage, usage)
+    end
   end
 
   # A pre-loop run error (vacuous goal, unknown provider/harness, await timeout):
@@ -2581,11 +2605,16 @@ defmodule Kazi.CLI do
 
   # What the run consumed. `iterations` always; `exceeded` names the budget
   # dimension only when the stop was over-budget, else nil (a clean converge or a
-  # stuck stop did not exceed a budget dimension).
+  # stuck stop did not exceed a budget dimension). `tokens` is the single
+  # rolled-up token total (ADR-0046 back-compat): an orchestrator pinning the
+  # pre-envelope contract keeps reading `budget_spent.tokens` even as the richer,
+  # cached-vs-fresh split moves into the additive `usage` envelope. A run with no
+  # reported tokens renders 0 (the legacy field was always an integer).
   defp budget_spent_json(result) do
     %{
       iterations: result.iterations,
-      exceeded: budget_exceeded(result)
+      exceeded: budget_exceeded(result),
+      tokens: Map.get(result, :tokens_used, 0)
     }
   end
 
