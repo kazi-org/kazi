@@ -1,19 +1,20 @@
 # OSS contribution gates
 
-kazi is a public, Apache-2.0 repository. Five CI gates keep the public surface
+kazi is a public, Apache-2.0 repository. Six CI gates keep the public surface
 honest and free of internal-only detail. Gates 1-2 are defined in ADR-0034 (E29);
 Gate 3 is defined in ADR-0036 (E31); Gates 4-5 are defined in ADR-0034 (E29; T29.4
-and T28.4).
+and T28.4); Gate 6 is defined in ADR-0035 (T30.5).
 
 - Gate 1 -- docs land with the code (T29.1)
 - Gate 2 -- no internal-info leak (T29.2)
 - Gate 3 -- docs are fresh (T31.5)
 - Gate 4 -- site command accuracy (T29.4)
 - Gate 5 -- doc command accuracy (T28.4)
+- Gate 6 -- tiering accuracy + coherence (T30.5)
 
 Each gate runs in CI (the `OSS gates` workflow, `.github/workflows/oss-gates.yml`)
 on every pull request. Gates 1-3 are small shell scripts under `.github/scripts/`;
-Gates 4-5 are Node scanners (Gate 4 under `site/scripts/`, Gate 5 under
+Gates 4-6 are Node scanners (Gate 4 under `site/scripts/`, Gates 5-6 under
 `.github/scripts/`). The same scripts run locally so you can check a change before
 you push.
 
@@ -331,6 +332,62 @@ or `lib/kazi/cli.ex` and skips (exits 0) otherwise -- a CLI change is included
 because it can orphan a doc reference even when no doc file changed. Tests can
 point the real scanner at a fixture tree via `KAZI_DOC_FILES` (a space-separated
 file list) and `KAZI_CLI_FILE` without duplicating the matching logic.
+
+## Gate 6 -- tiering accuracy + coherence (T30.5)
+
+Script: `.github/scripts/check-tiering-coherence.mjs` (run locally with
+`node .github/scripts/check-tiering-coherence.mjs`).
+
+The in-family Claude tiering surfaces -- the install skill
+(`lib/kazi/teach/install_skill.ex`), `AGENTS.md`, `README.md`, and the marketing
+site (`site/src/`) -- carry two claims a stale edit can silently break. This gate
+guards both, and **composes** the existing command / coherence gates for the rest
+(it does not re-implement them).
+
+### What it checks itself (the two new invariants)
+
+1. **Model ids are current.** The tiering ladder names concrete Claude model ids
+   (`claude-haiku-4-5` -> `claude-sonnet-4-6` -> `claude-opus-4-8`). A model
+   retires or a release renames an id, and a doc left behind hands the reader an
+   id that errors on the first `kazi apply --model ...`. The gate scans the four
+   surfaces for any `claude-<...>` model id and fails on one that is NOT in the
+   current-generation allow-list (sourced from the claude-api reference: Fable 5,
+   Opus 4.8/4.7/4.6, Sonnet 4.6, Haiku 4.5). This catches an invented id AND a
+   once-real-now-stale one (`claude-3-5-sonnet`, `claude-sonnet-4-5`,
+   `claude-opus-4-1`). A legacy-but-still-served id is intentionally rejected --
+   a tiering doc should steer a new reader to a current model. The id regex is
+   case-sensitive and shape-specific, so the prose word "Claude" and non-id
+   tokens (`claude` the harness, the `claude-api` skill) never trip it.
+
+2. **The cost claim stays hedged.** ADR-0033's cost win is DESIGNED-FOR, NOT YET
+   MEASURED -- the headline figure is being measured by the multi-iteration
+   benchmark (T19.7). The gate fails if a surface states a cost NUMBER (`$0.0X`,
+   `N% cheaper`, `Nx cheaper`) as a measured fact -- i.e. on a line lacking a
+   "being measured" / "not yet measured" / "designed-for" hedge. The currency
+   pattern requires a decimal, so a shell variable (`$1`, `$GOAL`) in an example
+   block is never a false hit.
+
+### What it composes (commands + coherence, reused not rebuilt)
+
+- **Command accuracy** (no unshipped/stale `kazi <verb>`): README + `docs/` are
+  covered by Gate 5 (T28.4); the rendered SKILL.md + `AGENTS.md` by the T16.4
+  ExUnit coherence test (`test/kazi/teach_coherence_test.exs`); the site by Gate 4
+  (T29.4).
+- **README <-> site** canonical-string coherence (T9.9,
+  `site/scripts/check-coherence.mjs`) and **SKILL/AGENTS <-> CLI** coherence
+  (T16.4) run in `ci.yml` / `site-smoke.yml`.
+
+### Blocking, and how it is proven load-bearing
+
+The gate ships BLOCKING: the tiering surfaces are clean at ship (T25.11 / T30.1 /
+T30.2 use current ids and keep the cost claim hedged), so a new stale id or
+un-hedged cost number reds the PR. The `tiering-coherence` job scans the full set
+of surfaces when a PR touches any of them (or `cli.ex`), and **always** runs the
+load-bearing tests (`node --test .github/scripts/check-tiering-coherence.test.mjs`)
+-- proving the gate FAILS on a planted bad/stale id, an un-hedged cost number, and
+(via the composed Gate 5) an unshipped `kazi frobnicate`, and PASSES on the clean
+current surfaces. Tests point the scanner at a fixture tree via `TIERING_FILES`
+(a space-separated file list); `BLOCKING=0` softens to warn-only.
 
 ## Release-stage gate -- MCP-parity smoke (T33.4, ADR-0044)
 
