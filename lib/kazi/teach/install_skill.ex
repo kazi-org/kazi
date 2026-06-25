@@ -94,7 +94,7 @@ defmodule Kazi.Teach.InstallSkill do
     """
     ---
     name: #{@skill_name}
-    description: Drive kazi -- a reconciliation controller that converges a software goal to machine-checkable acceptance predicates -- as a tool from an orchestrating agent. A ROUTER over four verbs: plan (author the predicates), apply (converge the goal -- the reconcile loop), status (read convergence state), adopt (reverse-engineer a starter goal-file from a repo). Use when the user wants to author predicates for a goal, then have a cheap Claude model (in-family tiering, the default; local/BYOM via opencode is the secondary privacy option) grind until they objectively pass (and not declare victory early). Triggers include "converge this goal with kazi", "drive kazi", "have kazi run the loop", "plan/apply with kazi", "author acceptance predicates and reconcile", or any task where you (a strong model) set the bar and a cheaper model should reach it under objective termination.
+    description: Drive kazi -- a reconciliation controller that converges a software goal to machine-checkable acceptance predicates -- as a tool from an orchestrating agent. A ROUTER over four verbs: plan (author the predicates), apply (converge the goal -- the reconcile loop), status (read convergence state), adopt (reverse-engineer a starter goal-file from a repo). Use when the user wants to author predicates for a goal, then have a cheap Claude model (in-family tiering, the default; local/BYOM via opencode is the secondary privacy option) grind until they objectively pass (and not declare victory early). Triggers include "have kazi drive this until done" (the canonical invocation phrase), "converge this goal with kazi", "drive kazi", "have kazi run the loop", "plan/apply with kazi", "author acceptance predicates and reconcile", or any task where you (a strong model) set the bar and a cheaper model should reach it under objective termination.
     ---
 
     # Drive kazi from an orchestrating agent (router)
@@ -104,6 +104,15 @@ defmodule Kazi.Teach.InstallSkill do
     predicates are objectively true, the loop is stuck, or it is over budget. kazi
     is NOT a harness -- it drives one. You drive kazi by shelling out and parsing
     its `--json` output (never its prose).
+
+    ## The invocation phrase
+
+    When the user says "have kazi drive this until done" (the canonical
+    invocation phrase, the Context7 "use context7" pattern), that IS the request
+    to drive kazi: author the acceptance predicates for the task with the `plan`
+    verb, then converge them with the `apply` verb until they are objectively
+    true. This phrase is one of the skill's triggers, so it routes here whenever
+    the kazi skill is installed; treat it as "set the bar, then reconcile to it".
 
     This skill is a ROUTER. The user (or you) names a sub-skill verb; you route it
     to the matching real `kazi` CLI command and drive it over `--json`:
