@@ -7,15 +7,15 @@ interface Props {
 }
 
 const {
-  title = "kazi — the missing outer loop for coding agents",
-  description = "Describe what “done” looks like. kazi drives a coding agent in a loop until the outcome is objectively real — tests pass, the endpoint is live, the change is deployed — or it stops and tells you why.",
+  title = "kazi — the outer/reconciliation loop for coding agents",
+  description = "Your coding agent says \"done.\" kazi proves it. kazi drives a coding agent in a loop until the outcome is objectively real — tests pass, the endpoint is live, the change is deployed — or it stops and tells you why.",
 } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
 // A real raster OG image (1200x630 PNG). SVG OG images are not rendered by
 // Twitter / Slack / LinkedIn / Facebook, so the social card points at a PNG.
 const ogImage = new URL("/og-image.png", Astro.site).href;
-const ogImageAlt = "kazi - the missing outer loop for coding agents";
+const ogImageAlt = "kazi - the outer/reconciliation loop for coding agents";
 ---
 
 <!doctype html>
