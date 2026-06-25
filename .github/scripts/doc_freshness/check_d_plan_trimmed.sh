@@ -51,17 +51,22 @@ fi
 offenders=0
 undated=0
 
-# Walk every `- [x]` task line in the plan with its line number.
-while IFS=: read -r lineno text; do
+# Walk every `- [x]` task line in the LIVE plan with its file + line number. The
+# live plan is the master `docs/plan.md` PLUS, in the split layout (T31.1), each
+# `docs/plans/<epic>.md` epic file (where the task lines move). `grep -H` forces a
+# file prefix; the `docs/plans/*.md` glob is empty on a monolithic plan, so this is
+# backward-compatible (it then walks `docs/plan.md` exactly as before).
+while IFS=: read -r file lineno text; do
   # Extract the task id (e.g. T9.5) for a readable report.
   tid="$(df_extract "$text" 'T[0-9]+\.[0-9]+[a-z]?')"
   [ -n "$tid" ] || tid='(no-id)'
+  rel="${file#"$DF_ROOT/"}"
 
   done_date="$(df_extract "$text" 'Done: [0-9]{4}-[0-9]{2}-[0-9]{2}')"
   done_date="${done_date#Done: }"
 
   if [ -z "$done_date" ]; then
-    df_fail "(d) [x] ${tid} has no Done: date -> docs/plan.md:${lineno} (cannot prove it post-dates ${RELEASE_REF})"
+    df_fail "(d) [x] ${tid} has no Done: date -> ${rel}:${lineno} (cannot prove it post-dates ${RELEASE_REF})"
     undated=$((undated + 1))
     offenders=$((offenders + 1))
     continue
@@ -69,10 +74,10 @@ while IFS=: read -r lineno text; do
 
   # String comparison is valid for ISO-8601 YYYY-MM-DD dates.
   if [[ "$done_date" < "$RELEASE_DATE" || "$done_date" == "$RELEASE_DATE" ]]; then
-    df_fail "(d) [x] ${tid} done ${done_date} <= release ${RELEASE_REF} (${RELEASE_DATE}); should be trimmed -> docs/plan.md:${lineno}"
+    df_fail "(d) [x] ${tid} done ${done_date} <= release ${RELEASE_REF} (${RELEASE_DATE}); should be trimmed -> ${rel}:${lineno}"
     offenders=$((offenders + 1))
   fi
-done < <(grep -nE '^- \[x\]' "$PLAN" || true)
+done < <(grep -HnE '^- \[x\]' "$PLAN" "$DF_ROOT"/docs/plans/*.md 2>/dev/null || true)
 
 if [ "$offenders" -eq 0 ]; then
   df_pass "(d) no done+released task lingers in the live plan (cutoff ${RELEASE_REF} ${RELEASE_DATE})"
