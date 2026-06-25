@@ -7,7 +7,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { INSTALL_CMD, POSITIONING, KUBERNETES_LINE } from "../src/canonical.mjs";
+import {
+  INSTALL_CMD,
+  POSITIONING,
+  KUBERNETES_LINE,
+  HERO_TAGLINE,
+  INVOCATION_PHRASE,
+} from "../src/canonical.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const readmePath = join(here, "..", "..", "README.md");
@@ -18,6 +24,8 @@ const checks = [
   ["install command", INSTALL_CMD],
   ["positioning one-liner", POSITIONING],
   ["Kubernetes framing", KUBERNETES_LINE],
+  ["hero tagline", HERO_TAGLINE],
+  ["invocation phrase", INVOCATION_PHRASE],
 ];
 
 const missing = checks.filter(([, value]) => !readme.includes(value));
