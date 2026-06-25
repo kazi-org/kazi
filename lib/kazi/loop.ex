@@ -95,6 +95,15 @@ defmodule Kazi.Loop do
   @behaviour :gen_statem
 
   alias Kazi.{Action, Goal, Predicate, PredicateResult, PredicateVector, Retrieval}
+  # T32.4 anti-gaming enforcement (ADR-0042): the loop composes the enforcement
+  # profile onto the ordinary reconcile tick — clean-tree + separate-process checker
+  # isolation for the tamper-prone graders (guard + held-out predicates) at the
+  # `run_provider/3` seam, the skipped/errored/xfail → :fail mapping, and the
+  # read-only-lease write flagging around the agent dispatch. The pure profile +
+  # detection logic lives in `Kazi.Enforcement`; the loop only wires the seams and
+  # records the active guarantees + any flagged gaming event for the snapshot/result.
+  alias Kazi.Enforcement
+  alias Kazi.Enforcement.Isolation
   # T4.9c retrieval opt-in (ADR-0012): the loop appends the goal-declared
   # retriever's snippets to the dispatch prompt, reusing the adapter's render so
   # the section is byte-identical to `build_prompt/3`'s (see `dispatch_prompt/2`).
@@ -196,7 +205,14 @@ defmodule Kazi.Loop do
           # components the harness reported, summed across iterations. Only
           # reported components are present (absent ≠ zero); empty when no harness
           # run reported any.
-          usage: map()
+          usage: map(),
+          # T32.4 enforcement: the active anti-gaming guarantees + flagged gaming
+          # events for the run (ADR-0042 §7). `active: false` when enforcement off.
+          enforcement: %{
+            active: boolean(),
+            guarantees: [atom()],
+            gaming_events: [map()]
+          }
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -374,7 +390,29 @@ defmodule Kazi.Loop do
               # the additive `usage` envelope; the single rolled-up total stays in
               # `tokens_used` for back-compat. Appended last so the existing field
               # order is untouched.
-              usage: %{}
+              usage: %{},
+              # --- T32.4 anti-gaming enforcement (ADR-0042) -------------------
+              # The resolved enforcement profile (`Kazi.Enforcement`), or nil =
+              # enforcement off (the default — the loop is byte-for-byte unchanged).
+              # When active, the loop runs the tamper-prone graders (guard +
+              # held-out predicates) from a clean detached worktree
+              # (`enforcement.clean_ref`) at the `run_provider/3` seam, maps
+              # skipped/errored/xfail sub-results to :fail, and flags writes to the
+              # read-only-leased paths around each dispatch. All appended last so
+              # the existing field order is untouched.
+              enforcement: nil,
+              # Whether clean-tree isolation was actually established on the last
+              # observation (false if it degraded — not a git repo / ref
+              # unresolvable). The REPORTED guarantees drop `:clean_tree` when this
+              # is false, so a partial guarantee is visible (ADR-0042 §7).
+              clean_tree_active?: false,
+              # The content-hash snapshot of the read-only-leased paths taken just
+              # before the last agent dispatch (`Kazi.Enforcement.digest_paths/2`);
+              # compared after the dispatch to flag a write.
+              read_only_before: %{},
+              # Append-only list of flagged gaming events (a read-only-path write,
+              # ADR-0042 §2), surfaced in snapshot/1 + the terminal result.
+              gaming_events: []
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -472,6 +510,14 @@ defmodule Kazi.Loop do
       `scope.repo` when set). Injectable so a test can make two goals derive the
       SAME key (to assert serialization) or DISTINCT keys (to assert parallelism).
       Ignored unless `:lease` is set.
+    * `:enforcement` — a resolved `Kazi.Enforcement` profile (T32.4, ADR-0042) to
+      compose onto the reconcile tick: clean-tree + separate-process isolation for
+      the goal's GUARD + HELD-OUT predicates (the tamper-prone graders) at the
+      `run_provider/3` seam, the skipped/errored/xfail → `:fail` mapping, and
+      read-only-lease write flagging around each dispatch. Default `nil` =
+      enforcement OFF — every seam is a no-op and the loop is byte-for-byte
+      unchanged. `Kazi.Runtime.run/2` resolves the default-on-for-creation policy
+      and threads the profile here.
     * `:name` — register the process under a name.
   """
   @spec start_link(keyword()) :: :gen_statem.start_ret()
@@ -603,7 +649,12 @@ defmodule Kazi.Loop do
           tokens_used: non_neg_integer(),
           budget_reason: Budget.reason() | nil,
           stuck_failing: [Kazi.Predicate.id()] | nil,
-          regressions: [RegressionDetector.flag()]
+          regressions: [RegressionDetector.flag()],
+          enforcement: %{
+            active: boolean(),
+            guarantees: [atom()],
+            gaming_events: [map()]
+          }
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
@@ -673,7 +724,12 @@ defmodule Kazi.Loop do
       lease_opts: Keyword.get(opts, :lease_opts, []),
       lease_holder: Keyword.get(opts, :lease_holder, goal.id),
       lease_ttl_ms: Keyword.get(opts, :lease_ttl_ms, @default_lease_ttl_ms),
-      resource_key: derive_resource_key(opts, goal)
+      resource_key: derive_resource_key(opts, goal),
+      # T32.4 anti-gaming enforcement (ADR-0042): the resolved profile is threaded
+      # IN by `Kazi.Runtime` (which applies the default-on-for-creation policy);
+      # absent it, enforcement is off and every enforcement seam is a no-op, so the
+      # default loop is unchanged.
+      enforcement: Keyword.get(opts, :enforcement)
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -833,7 +889,11 @@ defmodule Kazi.Loop do
       stuck_failing: stuck_failing_list(data.stuck_failing),
       # T1.2 regression: the green→red flags detected over the history so far,
       # each with its attributed dispatch (see Kazi.Loop.RegressionDetector).
-      regressions: data.regressions
+      regressions: data.regressions,
+      # T32.4 enforcement: the active anti-gaming guarantees + any flagged gaming
+      # event, so `kazi status` / `run --json` can show the bar was held
+      # (ADR-0042 §7). A disabled shape (`active: false`) when enforcement is off.
+      enforcement: enforcement_status(data)
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -852,7 +912,13 @@ defmodule Kazi.Loop do
   defp observe_tick(%Data{} = data) do
     # T1.3 flake: observe now also evolves the quarantine set (a failing
     # predicate is re-run via the real provider path and may be classified flaky).
-    {vector, quarantine} = observe(data)
+    # T32.4 enforcement: observe runs the tamper-prone graders (guard + held-out
+    # predicates) against a clean detached worktree when enforcement isolation is
+    # active; `clean_tree_active?` records whether that actually held (it degrades
+    # to the working copy if the workspace is not a git repo), so the reported
+    # guarantees reflect the ACTUAL level (ADR-0042 §7).
+    {vector, quarantine, clean_tree_active?} = observe_with_isolation(data)
+    data = %Data{data | clean_tree_active?: clean_tree_active?}
 
     # T32.2 / ADR-0041: thread each scored predicate's PREVIOUS-iteration score
     # into `prior_score`, so the progress classifier and stuck-detector read the
@@ -956,22 +1022,83 @@ defmodule Kazi.Loop do
     %{vector | results: threaded}
   end
 
+  # T32.4 enforcement: wrap the observation in clean-tree isolation when the
+  # enforcement profile is active AND the goal carries a tamper-prone grader (a
+  # guard or held-out predicate). The clean tree is a throwaway detached worktree
+  # at `enforcement.clean_ref`, prepared ONCE for the tick and removed after
+  # (`Kazi.Enforcement.Isolation`); the isolated graders are evaluated against it so
+  # an in-iteration edit to a checker file in the working copy cannot change their
+  # verdict (the in-iteration edit lives in the working copy, the worktree is the
+  # committed state at the ref). The ordinary visible predicates still evaluate
+  # against the working copy so the agent's in-flight work is seen and the loop
+  # converges normally. Returns `{vector, quarantine, clean_tree_active?}`;
+  # `clean_tree_active?` is false when isolation degraded (the workspace is not a
+  # git repo / the ref is unresolvable) — the checker still ran, in the working
+  # copy, and the reported guarantees drop `:clean_tree` (honest reporting,
+  # ADR-0042 §7). With enforcement off the worktree is never created and this is
+  # exactly the pre-T32.4 single-workspace observe.
+  @spec observe_with_isolation(Data.t()) :: {PredicateVector.t(), MapSet.t(), boolean()}
+  defp observe_with_isolation(%Data{enforcement: enf, workspace: ws} = data) do
+    if Enforcement.isolate?(enf) and is_binary(ws) and any_isolated?(data) do
+      result =
+        Isolation.with_clean_tree(ws, enf.clean_ref, fn clean_ws ->
+          observe(data, fn predicate -> if isolated?(predicate), do: clean_ws, else: ws end)
+        end)
+
+      case result do
+        {:ok, {vector, quarantine}} -> {vector, quarantine, true}
+        {:degraded, _reason, {vector, quarantine}} -> {vector, quarantine, false}
+      end
+    else
+      {vector, quarantine} = observe(data, fn _predicate -> ws end)
+      {vector, quarantine, false}
+    end
+  end
+
+  # Whether the goal carries any tamper-prone grader that clean-tree isolation
+  # applies to — a guard or held-out predicate. When none exist, the clean worktree
+  # is never created (no cost on the common path).
+  @spec any_isolated?(Data.t()) :: boolean()
+  defp any_isolated?(%Data{goal: goal}) do
+    goal |> Goal.all_predicates() |> Enum.any?(&isolated?/1)
+  end
+
+  # The predicates clean-tree isolation guards: the tamper-prone graders — guard
+  # predicates (test-count / coverage ratchets, ADR-0042 §4) and held-out
+  # acceptance predicates (ADR-0042 §6). The ordinary visible iterating predicates
+  # are NOT isolated, so the agent's working-copy work is seen and the loop can
+  # converge (running them from a clean ref would never see uncommitted work).
+  @spec isolated?(Predicate.t()) :: boolean()
+  defp isolated?(%Predicate{} = predicate) do
+    Predicate.guard?(predicate) or Predicate.held_out?(predicate)
+  end
+
   # Evaluate every predicate the goal carries (predicates ++ guards) via its
   # registered provider, building the PredicateVector for this observation.
+  #
+  # `checker_workspace_fn` resolves the cwd each predicate's checker runs in (T32.4
+  # clean-tree isolation): an isolated grader gets the clean worktree, everything
+  # else the working copy. With enforcement off it is `fn _ -> data.workspace end`,
+  # so the context is byte-identical to the pre-T32.4 path.
   #
   # T1.3 flake: returns `{vector, quarantine}` — observation also evolves the
   # (sticky) quarantine set, because a failing predicate is re-run through the
   # real provider path and may be classified flaky. The fold threads the set so
   # one observation can quarantine several predicates.
-  @spec observe(Data.t()) :: {PredicateVector.t(), MapSet.t()}
-  defp observe(%Data{goal: goal} = data) do
-    context = provider_context(data)
-
+  #
+  # T32.4 enforcement: each result passes through `Kazi.Enforcement.enforce_result/2`
+  # so a checker that "passed" only by skipping/erroring/xfailing work is downgraded
+  # to :fail (a no-op when enforcement is off, ADR-0042 §3).
+  @spec observe(Data.t(), (Predicate.t() -> String.t() | nil)) ::
+          {PredicateVector.t(), MapSet.t()}
+  defp observe(%Data{goal: goal} = data, checker_workspace_fn) do
     {pairs, quarantine} =
       goal
       |> Goal.all_predicates()
       |> Enum.map_reduce(data.quarantine, fn %Predicate{} = predicate, quarantine ->
+        context = provider_context(data, checker_workspace_fn.(predicate))
         {result, quarantine} = evaluate(predicate, context, data, quarantine)
+        result = Enforcement.enforce_result(data.enforcement, result)
         {{predicate.id, result}, quarantine}
       end)
 
@@ -1240,6 +1367,12 @@ defmodule Kazi.Loop do
     # MCP/graph is an orientation optimisation, not a precondition).
     prepare_workspace(data)
 
+    # T32.4 read-only lease (ADR-0042 §2): hash the read-only-leased paths just
+    # before handing the workspace to the agent, so a post-dispatch change to one is
+    # a flagged gaming event. A no-op (empty snapshot) when enforcement is off or no
+    # paths are leased.
+    before = read_only_snapshot(data)
+
     # T36.2 (ADR-0047 §1): drive the imminent dispatch with the MINIMAL default
     # tool/MCP surface — `--strict-mcp-config` exposing ONLY the MCP servers kazi
     # injected (the orientation/graph server written by `prepare_workspace/1`
@@ -1247,6 +1380,10 @@ defmodule Kazi.Loop do
     # tools the agent needs to fix predicates, NOT the ambient set. See
     # `dispatch_adapter_opts/1`.
     result = data.harness.run(prompt, data.workspace, dispatch_adapter_opts(data))
+
+    # T32.4 read-only lease: re-hash the leased paths and flag any write to one —
+    # "a write attempt is a flagged event, not a silent edit" (ADR-0042 §2).
+    data = flag_read_only_writes(data, before)
 
     # T1.4 budget: accumulate this run's token estimate (if the harness reported
     # one) into the running total the budget guard checks next tick.
@@ -1531,12 +1668,17 @@ defmodule Kazi.Loop do
   end
 
   # Context threaded to a provider's evaluate/2 (Kazi.PredicateProvider.context).
-  @spec provider_context(Data.t()) :: map()
-  defp provider_context(%Data{} = data) do
+  #
+  # T32.4 enforcement: `checker_workspace` is the cwd the checker runs in — the
+  # clean detached worktree for an isolated grader, the working copy otherwise. It
+  # defaults to `data.workspace`, so a caller that does not thread enforcement gets
+  # the pre-T32.4 context unchanged.
+  @spec provider_context(Data.t(), String.t() | nil) :: map()
+  defp provider_context(%Data{} = data, checker_workspace) do
     %{
       goal: data.goal,
       scope: data.goal.scope,
-      workspace: data.workspace,
+      workspace: checker_workspace || data.workspace,
       landed?: data.landed?,
       deployed?: data.deployed?,
       iteration: data.iterations
@@ -1707,7 +1849,10 @@ defmodule Kazi.Loop do
       # T1.4 budget: the rolled-up token total → `budget_spent.tokens` (ADR-0046).
       tokens_used: data.tokens_used,
       # T34.1 (ADR-0046): the run-aggregate usage envelope (token/cost split).
-      usage: data.usage
+      usage: data.usage,
+      # T32.4 enforcement: the active anti-gaming guarantees + flagged gaming
+      # events, so the CLI's `run --json` can report the bar was held (ADR-0042 §7).
+      enforcement: enforcement_status(data)
     }
   end
 
@@ -1918,6 +2063,73 @@ defmodule Kazi.Loop do
       %Digest{} = digest -> %Data{data | working_set_digest: digest}
     end
   end
+
+  # =============================================================================
+  # T32.4 anti-gaming enforcement: read-only lease + reported guarantees
+  # =============================================================================
+
+  # The content-hash snapshot of the read-only-leased paths, taken before a
+  # dispatch. Empty (a no-op) when enforcement is off or no paths are leased.
+  @spec read_only_snapshot(Data.t()) :: %{optional(String.t()) => term()}
+  defp read_only_snapshot(%Data{enforcement: %Enforcement{enabled: true} = enf, workspace: ws}) do
+    Enforcement.digest_paths(ws, enf.read_only_paths)
+  end
+
+  defp read_only_snapshot(%Data{}), do: %{}
+
+  # Compare the leased paths against the pre-dispatch snapshot and append a flagged
+  # gaming event for each one the agent wrote to (ADR-0042 §2). A no-op when
+  # enforcement is off / nothing was leased / nothing changed.
+  @spec flag_read_only_writes(Data.t(), %{optional(String.t()) => term()}) :: Data.t()
+  defp flag_read_only_writes(
+         %Data{enforcement: %Enforcement{enabled: true} = enf, workspace: ws} = data,
+         before
+       ) do
+    case Enforcement.detect_writes(ws, enf.read_only_paths, before) do
+      [] ->
+        data
+
+      events ->
+        stamped = Enum.map(events, &Map.put(&1, :iteration, max(data.iterations - 1, 0)))
+
+        Enum.each(stamped, fn event ->
+          Logger.warning(fn ->
+            "kazi.loop goal=#{data.goal.id} ENFORCEMENT flagged read-only write to " <>
+              "#{event.path} (iteration #{event.iteration})"
+          end)
+        end)
+
+        %Data{data | gaming_events: data.gaming_events ++ stamped}
+    end
+  end
+
+  defp flag_read_only_writes(%Data{} = data, _before), do: data
+
+  # The enforcement status surfaced in snapshot/1 + the terminal result: whether
+  # enforcement is active, the ACTUAL active guarantees (the configured set with
+  # `:clean_tree` dropped if isolation degraded on the last observation), and the
+  # flagged gaming events so far. Returns a `nil`-equivalent disabled shape when
+  # enforcement is off, so the field is always present and machine-parseable.
+  @spec enforcement_status(Data.t()) :: %{
+          active: boolean(),
+          guarantees: [atom()],
+          gaming_events: [map()]
+        }
+  defp enforcement_status(%Data{enforcement: %Enforcement{enabled: true} = enf} = data) do
+    guarantees =
+      enf
+      |> Enforcement.guarantee_atoms()
+      |> drop_clean_tree_if_degraded(data.clean_tree_active?)
+
+    %{active: true, guarantees: guarantees, gaming_events: data.gaming_events}
+  end
+
+  defp enforcement_status(%Data{}), do: %{active: false, guarantees: [], gaming_events: []}
+
+  # Honest reporting (ADR-0042 §7): `:clean_tree` only appears among the active
+  # guarantees when isolation was actually established on the last observation.
+  defp drop_clean_tree_if_degraded(guarantees, true), do: guarantees
+  defp drop_clean_tree_if_degraded(guarantees, _false), do: guarantees -- [:clean_tree]
 
   # =============================================================================
   # Misc helpers
