@@ -1,18 +1,21 @@
 # OSS contribution gates
 
-kazi is a public, Apache-2.0 repository. Four CI gates keep the public surface
+kazi is a public, Apache-2.0 repository. Five CI gates keep the public surface
 honest and free of internal-only detail. Gates 1-2 are defined in ADR-0034 (E29);
-Gate 3 is defined in ADR-0036 (E31); Gate 4 is defined in ADR-0034 (E29, T29.4).
+Gate 3 is defined in ADR-0036 (E31); Gates 4-5 are defined in ADR-0034 (E29; T29.4
+and T28.4).
 
 - Gate 1 -- docs land with the code (T29.1)
 - Gate 2 -- no internal-info leak (T29.2)
 - Gate 3 -- docs are fresh (T31.5)
 - Gate 4 -- site command accuracy (T29.4)
+- Gate 5 -- doc command accuracy (T28.4)
 
 Each gate runs in CI (the `OSS gates` workflow, `.github/workflows/oss-gates.yml`)
 on every pull request. Gates 1-3 are small shell scripts under `.github/scripts/`;
-Gate 4 is a Node scanner under `site/scripts/`. The same scripts run locally so you
-can check a change before you push.
+Gates 4-5 are Node scanners (Gate 4 under `site/scripts/`, Gate 5 under
+`.github/scripts/`). The same scripts run locally so you can check a change before
+you push.
 
 ## Running the guards locally
 
@@ -248,6 +251,86 @@ In blocking mode a hit exits 1 and fails the job.
 (exits 0) when it does not -- the scanner only inspects `site/` source. Tests can
 point the real scanner at a fixture tree via the `SITE_ROOT` env var without
 duplicating the matching logic.
+
+## Gate 5 -- doc command accuracy (T28.4)
+
+Script: `.github/scripts/check-doc-commands.mjs` (run locally with
+`node .github/scripts/check-doc-commands.mjs`).
+
+The docs-tree sibling of Gate 4. Where Gate 4 guards the marketing site against a
+removed verb, Gate 5 guards the README + `docs/` against ANY kazi command or flag
+that does not ship: a doc that hands the reader `kazi frobnicate` or
+`kazi apply --frobnicate` sends them a command that errors on their first try.
+
+### How it learns the real CLI surface (no hardcoded list)
+
+The truth source is the `@commands` / `@switches` table in `lib/kazi/cli.ex`.
+`kazi help --json` is GENERATED from that table, and an ExUnit test
+(`test/kazi/cli_help_schema_test.exs`) pins that the two stay in sync. So the
+scanner parses that table -- which is, transitively, the shipped
+`kazi help --json` surface -- with no Elixir runtime or built binary needed in
+the gate (the same runtime-free choice the doc-freshness predicates document in
+`.github/scripts/doc_freshness/lib.sh`). A maintainer with a built binary can
+cross-check: `kazi help --json | jq -r '.commands[].name'`.
+
+### What it scans
+
+`README.md` plus every top-level `docs/*.md` (which includes `docs/concept.md`),
+EXCEPT the history / archival tiers that legitimately name removed verbs:
+`deprecations.md`, `devlog.md`, `plan.md`, `lore.md`, `doc-freshness.md`, and this
+gate's own `oss-gates.md`. `docs/adr/**`, `docs/research/**`, and `docs/schemas/**`
+are skipped (frozen records and machine schemas, not live command guides).
+
+### Command-context discipline (why prose is safe)
+
+The gate does NOT flag every `kazi <word>`. Prose like "kazi is a reconciler" or
+"kazi owns parallelism" is not a command. A `kazi <verb>` is checked only in
+COMMAND CONTEXT: the start of a line inside a fenced code block (optionally after
+a `$`/`>` prompt), or the start of an inline backtick code span (`` `kazi apply` ``).
+A `#`-comment line in a code block has the verb off the command position, so it is
+not flagged. Flags are likewise read only off a kazi invocation, at a token
+boundary, so a hyphen inside a placeholder (`<goal-file>`) or word ("opt-in") is
+never mistaken for a flag.
+
+### Marker list (a hit fails the build)
+
+1. A removed verb used as a primary command: `kazi run`, `kazi propose`,
+   `mix kazi.run` (removed at v1.0.0, ADR-0032).
+2. A `kazi <verb>` whose verb is NOT in the shipped command table.
+3. A `--flag` on a kazi invocation whose flag is NOT in `@switches`.
+
+Each finding is reported with `file:line` and the offending token.
+
+### Allow-list (these pass)
+
+A line that DOCUMENTS a removal or a forward-reference is exempt, so a single
+honest mention passes while a code block that hands the reader a dead token is
+flagged. A line is allow-listed if it contains either:
+
+- the case-insensitive phrase `deprecated alias`, or
+- an explicit inline `verb-drift:allow` marker (an HTML comment
+  `<!-- verb-drift:allow: ... -->` works and renders invisibly in Markdown).
+
+The scanner's own file and `oss-gates.md` are excluded from the scan so their
+example tokens do not self-trip.
+
+### Blocking (not warn)
+
+Unlike Gates 1, 3, and 4, Gate 5 ships BLOCKING. The docs tree was already clean
+when the gate landed (T27.6 + T28.3 cleared the stale verbs; the one remaining
+forward-reference -- `kazi plan --from-acc` in `acc-predicates-bridge.md` -- is
+allow-listed), so there is no dirty backlog to soften for: a new fake command or
+flag should red the PR immediately. The scanner scans the FULL docs tree (not just
+the diff). To soften to warn-only locally, set `BLOCKING=0`.
+
+### Scoped to docs/README/cli.ex PRs
+
+`oss-gates.yml` triggers on every PR (no workflow-level path filter), so the
+`doc-commands` job first checks whether the PR diff touches `README.md`, `docs/`,
+or `lib/kazi/cli.ex` and skips (exits 0) otherwise -- a CLI change is included
+because it can orphan a doc reference even when no doc file changed. Tests can
+point the real scanner at a fixture tree via `KAZI_DOC_FILES` (a space-separated
+file list) and `KAZI_CLI_FILE` without duplicating the matching logic.
 
 ## Where this is enforced
 
