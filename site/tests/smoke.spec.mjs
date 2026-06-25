@@ -49,8 +49,51 @@ test.describe("kazi website smoke", () => {
 
   test("documents the invocation phrase", async ({ page }) => {
     await page.goto("/");
-    // T25.6: the decided invocation phrase renders verbatim on the site.
-    await expect(page.getByText(INVOCATION_PHRASE)).toBeVisible();
+    // T25.6: the decided invocation phrase renders verbatim on the site. It now
+    // appears in both the hero on-ramp (step 3) and the "you chat with Claude
+    // Code" spine section, so assert it is present at least once.
+    await expect(page.getByText(INVOCATION_PHRASE).first()).toBeVisible();
+  });
+
+  test("hero leads with the 10-second on-ramp (T25.4)", async ({ page }) => {
+    await page.goto("/");
+    // The FIRST screen is the agent on-ramp: a "Try it in 10 seconds" block that
+    // walks install -> install-skill -> the invocation phrase. install-skill is
+    // the human's primary path (the raw CLI is demoted to a Reference section).
+    await expect(
+      page.getByRole("heading", { name: "Try it in 10 seconds" }),
+    ).toBeVisible();
+    await expect(page.getByText("kazi install-skill").first()).toBeVisible();
+    // The on-ramp sits ABOVE the "How it works" reconcile-loop mechanic.
+    const tryY = await page
+      .locator("#try")
+      .evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    const howY = await page
+      .locator("#how")
+      .evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    expect(tryY).toBeLessThan(howY);
+  });
+
+  test("has the 'you chat with Claude Code, it drives kazi' spine", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    // T25.4 / T25.9 spine: the primary section frames the human -> Claude -> kazi
+    // -> Claude flow; kazi is the loop the agent drives, never called "a skill".
+    await expect(
+      page.getByRole("heading", {
+        name: "You chat with Claude Code, it drives kazi",
+      }),
+    ).toBeVisible();
+  });
+
+  test("demotes the raw CLI to a Reference section", async ({ page }) => {
+    await page.goto("/");
+    // The raw `kazi` verbs are the agent/advanced path, not the human's primary
+    // one — they live under a Reference heading below the on-ramp.
+    await expect(
+      page.getByRole("heading", { name: "Reference: drive kazi directly" }),
+    ).toBeVisible();
   });
 
   test("shows the agent-voiced testimonial", async ({ page }) => {
