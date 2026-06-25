@@ -95,6 +95,18 @@ defmodule Kazi.CLIRunJsonTest do
       # The predicate VECTOR: a {id, verdict} per predicate, every one passing.
       vector = Map.new(payload["predicates"], &{&1["id"], &1["verdict"]})
       assert vector == %{"code" => "pass", "live" => "pass"}
+
+      # T34.6 (ADR-0046 §5): the additive `economy` object is present on a recorded
+      # run. status/stuck/iterations are always present; the converged-predicate
+      # count is the KPI denominator. This stub harness reports NO cost, so the
+      # cost-per-converged-predicate KPI is OMITTED (unavailable ≠ 0).
+      economy = payload["economy"]
+      assert is_map(economy)
+      assert economy["status"] == "converged"
+      assert economy["stuck"] == false
+      assert economy["converged_predicates"] == 2
+      assert is_integer(economy["iterations"]) and economy["iterations"] > 0
+      refute Map.has_key?(economy, "cost_per_converged_predicate")
     end
 
     test "a harness reporting usage emits the additive usage envelope, omitting unreported fields",
@@ -155,6 +167,15 @@ defmodule Kazi.CLIRunJsonTest do
       # …while components the harness did not report as a distinct envelope field
       # are OMITTED (absent ≠ zero), not zero-filled.
       refute Map.has_key?(usage, "reasoning_tokens")
+
+      # T34.6 (ADR-0046 §5): with a reported cost the `economy` object now carries
+      # the cost-per-converged-predicate KPI, derived from the run-aggregate cost
+      # and the 2 converged predicates.
+      economy = payload["economy"]
+      assert economy["status"] == "converged"
+      assert economy["converged_predicates"] == 2
+      assert economy["cost_usd"] > 0
+      assert economy["cost_per_converged_predicate"] == economy["cost_usd"] / 2
     end
   end
 

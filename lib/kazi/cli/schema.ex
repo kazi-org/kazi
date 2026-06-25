@@ -79,6 +79,18 @@ defmodule Kazi.CLI.Schema do
               "schema_version stays 2 (same rule as the ADR-0041 predicate envelope)."
         },
         %{
+          name: "economy",
+          type: "object",
+          description:
+            "T34.6/ADR-0046 run-end economy KPIs, DERIVED from the per-iteration envelopes. " <>
+              "Always carries status, stuck (boolean), iterations; every DERIVED KPI is " <>
+              "OMITTED when unavailable (absent is NOT zero): converged_predicates, " <>
+              "iterations_to_convergence, cost_usd, wall_clock_s, cost_per_converged_predicate, " <>
+              "wall_clock_per_converged_predicate, fresh_input_tokens_avoided, " <>
+              "rediscovery_tool_calls_avoided, plus the optional harness/model/context_tier " <>
+              "breakdown labels. Additive, so schema_version stays 2."
+        },
+        %{
           name: "next_action",
           type: "string",
           description: "Orchestration hint: done / investigate / raise_budget. Not a kazi action."
@@ -127,6 +139,19 @@ defmodule Kazi.CLI.Schema do
           "cache_write_tokens" => 0,
           "output_tokens" => 2400,
           "cost_usd" => 0.0123
+        },
+        "economy" => %{
+          "status" => "converged",
+          "stuck" => false,
+          "iterations" => 4,
+          "converged_predicates" => 2,
+          "iterations_to_convergence" => 4,
+          "cost_usd" => 0.0123,
+          "cost_per_converged_predicate" => 0.00615,
+          "wall_clock_s" => 88.0,
+          "wall_clock_per_converged_predicate" => 44.0,
+          "fresh_input_tokens_avoided" => 18_000,
+          "rediscovery_tool_calls_avoided" => 12
         },
         "next_action" => "done",
         "reason" => nil,
