@@ -68,6 +68,17 @@ defmodule Mix.Tasks.Kazi.Bench do
       converged-predicate, iterations-to-convergence, fresh-input-avoided,
       rediscovery-avoided, and stuck-rate, tabled by arm. The benchmark CONSUMES
       the `economy` object each run emits; an unavailable KPI prints `n/a`.
+    * `--tiering <dir>`    — aggregate the recorded in-family TIERING arms (T19.7,
+      ADR-0033/0035) into the per-arm $/tokens/iterations + convergence/correctness
+      table: vanilla-frontier (a frontier model grinds the whole goal) vs
+      static-cheap (a cheap Claude model grinds predicates a frontier model
+      authored once) vs escalating (start cheap, climb Haiku→Sonnet→Opus only on a
+      kazi-reported non-progress signal). Each arm contributes `<arm>.result.json`
+      (its terminal `kazi apply --json`) + its captured per-dispatch
+      `claude --output-format json` envelopes (`<arm>.NNN.json`). The real `$`/tokens
+      come from the captured envelopes' `total_cost_usd`/`usage`; convergence +
+      correctness from the result (a cheaper-but-WRONG arm is VISIBLE, never a
+      false done).
     * `--help`             — print this usage (the 3 arms + how to run) and exit.
   """
 
@@ -88,6 +99,7 @@ defmodule Mix.Tasks.Kazi.Bench do
           arms: :string,
           captures: :string,
           kpis: :string,
+          tiering: :string,
           help: :boolean
         ],
         aliases: [h: :help]
@@ -96,6 +108,9 @@ defmodule Mix.Tasks.Kazi.Bench do
     cond do
       opts[:help] ->
         Mix.shell().info(usage())
+
+      opts[:tiering] ->
+        tiering_from_runs(opts[:tiering])
 
       opts[:kpis] ->
         kpis_from_runs(opts[:kpis], arms(opts))
@@ -168,6 +183,55 @@ defmodule Mix.Tasks.Kazi.Bench do
     Mix.shell().info(table)
   end
 
+  # T19.7 (ADR-0033/0035): aggregate the recorded TIERING arms from `dir` into the
+  # per-arm $/tokens/iterations + convergence/correctness table — the in-family
+  # cost proof. Each arm contributes `<arm>.result.json` (its terminal
+  # `kazi apply --json` object) and its captured per-dispatch
+  # `claude --output-format json` envelopes (`<arm>.NNN.json`). The canonical
+  # vanilla-frontier → static-cheap → escalating arms table first; any extra arm
+  # (e.g. a constructed escalating worst-case) follows, alpha-sorted. This is the
+  # deterministic offline path the bench-shaped acceptance exercises.
+  defp tiering_from_runs(dir) do
+    report =
+      dir
+      |> tiering_arm_labels()
+      |> Enum.map(fn arm ->
+        result =
+          case File.read(Path.join(dir, "#{arm}.result.json")) do
+            {:ok, body} -> Jason.decode!(body)
+            _ -> %{}
+          end
+
+        envelopes =
+          dir
+          |> Path.join("#{arm}.[0-9]*.json")
+          |> Path.wildcard()
+          |> Enum.sort()
+          |> Enum.map(&File.read!/1)
+
+        {arm, result, envelopes}
+      end)
+
+    table = report |> Bench.tiering_report() |> Bench.render_tiering_table()
+    Mix.shell().info("kazi.bench — per-arm tiering cost table (T19.7, ADR-0033/0035)\n")
+    Mix.shell().info(table)
+  end
+
+  # Discover the arm labels in `dir` from the `<arm>.result.json` files, ordering
+  # the canonical tiering arms first (in ladder order) and any extras alpha-sorted.
+  @tiering_canonical ["vanilla-frontier", "static-cheap", "escalating"]
+  defp tiering_arm_labels(dir) do
+    present =
+      dir
+      |> Path.join("*.result.json")
+      |> Path.wildcard()
+      |> Enum.map(&(Path.basename(&1) |> String.replace_suffix(".result.json", "")))
+
+    canonical = Enum.filter(@tiering_canonical, &(&1 in present))
+    extras = present |> Enum.reject(&(&1 in @tiering_canonical)) |> Enum.sort()
+    canonical ++ extras
+  end
+
   defp arms(opts) do
     case opts[:arms] do
       nil ->
@@ -217,6 +281,12 @@ defmodule Mix.Tasks.Kazi.Bench do
       --captures <dir>    aggregate recorded token envelopes offline (per-dispatch)
       --kpis <dir>        fold recorded `apply --json` results into the per-arm
                           economy-KPI breakdown (T34.6, ADR-0046)
+      --tiering <dir>     aggregate the recorded in-family TIERING arms (T19.7,
+                          ADR-0033/0035) into the per-arm $/tokens/iterations +
+                          convergence/correctness table (vanilla-frontier vs
+                          static-cheap vs escalating). Each arm: <arm>.result.json
+                          (terminal `apply --json`) + captured <arm>.NNN.json
+                          `claude --output-format json` envelopes.
       --help, -h          print this usage and exit
     """
   end

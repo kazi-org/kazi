@@ -177,4 +177,100 @@ defmodule Kazi.BenchTest do
       assert Bench.render_table(report) == table
     end
   end
+
+  describe "tiering arms (T19.7, ADR-0033/0035)" do
+    @tiering Path.expand("../fixtures/bench/tiering", __DIR__)
+
+    defp tiering_result(arm),
+      do: Path.join(@tiering, "#{arm}.result.json") |> File.read!() |> Jason.decode!()
+
+    defp tiering_envelopes(arm) do
+      @tiering
+      |> Path.join("#{arm}.[0-9]*.json")
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.map(&File.read!/1)
+    end
+
+    test "tiering_arm/3 folds one static arm: model, dispatch, tokens, cost, converged, correct" do
+      arm =
+        Bench.tiering_arm(
+          "static-cheap",
+          tiering_result("static-cheap"),
+          tiering_envelopes("static-cheap")
+        )
+
+      assert arm.arm == "static-cheap"
+      assert arm.models == ["claude-haiku-4-5"]
+      assert arm.dispatches == 1
+      assert arm.tokens == 100 + 1000 + 20_000 + 70_000
+      assert arm.cost_usd == 0.05
+      assert arm.converged
+      assert arm.correct
+    end
+
+    test "an escalating arm carries the climbed ladder, summed dispatches/tokens/cost" do
+      arm =
+        Bench.tiering_arm(
+          "escalating",
+          tiering_result("escalating"),
+          tiering_envelopes("escalating")
+        )
+
+      # The model column shows the climb in dispatch order (Haiku → Sonnet → Opus).
+      assert arm.models == ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"]
+      assert arm.dispatches == 3
+      assert arm.tokens == 91_100 + 89_100 + 81_100
+      assert_in_delta arm.cost_usd, 0.35, 1.0e-9
+      assert arm.converged
+      assert arm.correct
+    end
+
+    test "a cheaper-but-FAILS arm is visible: converged=false, correct=false (no false done)" do
+      arm =
+        Bench.tiering_arm(
+          "static-fails",
+          tiering_result("static-fails"),
+          tiering_envelopes("static-fails")
+        )
+
+      refute arm.converged
+      refute arm.correct
+      # the $ it spent failing is still counted (a failed cheap grind is not free).
+      assert arm.cost_usd == 0.05
+    end
+
+    test "a converged run with a FAILING predicate is not 'correct' (predicate is the oracle)" do
+      result = %{"status" => "converged", "predicates" => [%{"id" => "p1", "verdict" => "fail"}]}
+      arm = Bench.tiering_arm("x", result, tiering_envelopes("static-cheap"))
+
+      assert arm.converged
+      refute arm.correct
+    end
+
+    test "tiering_report/1 preserves order and render_tiering_table/1 is deterministic" do
+      report =
+        Bench.tiering_report([
+          {"vanilla-frontier", tiering_result("vanilla-frontier"),
+           tiering_envelopes("vanilla-frontier")},
+          {"static-cheap", tiering_result("static-cheap"), tiering_envelopes("static-cheap")},
+          {"escalating", tiering_result("escalating"), tiering_envelopes("escalating")}
+        ])
+
+      assert Enum.map(report, & &1.arm) == ["vanilla-frontier", "static-cheap", "escalating"]
+
+      table = Bench.render_tiering_table(report)
+
+      assert table ==
+               """
+               | Arm | Model(s) | Dispatches | Tokens | Cost (USD) | Converged | Correct |
+               |---|---|---|---|---|---|---|
+               | vanilla-frontier | claude-opus-4-8 | 1 | 81100 | 0.1600 | yes | yes |
+               | static-cheap | claude-haiku-4-5 | 1 | 91100 | 0.0500 | yes | yes |
+               | escalating | claude-haiku-4-5 → claude-sonnet-4-6 → claude-opus-4-8 | 3 | 261300 | 0.3500 | yes | yes |
+               """
+
+      assert Bench.render_tiering_table(report) == table
+    end
+  end
 end

@@ -77,6 +77,41 @@ defmodule Kazi.Bench do
 
   @token_fields [:input, :output, :cache_creation, :cache_read, :total]
 
+  @typedoc """
+  One TIERING arm's roll-up (T19.7, ADR-0033/0035 — the in-family cost proof).
+
+  Where the A/B/C arms above isolate the orientation PREFIX over one model, the
+  tiering arms isolate the MODEL choice over one fixture: vanilla-frontier (a
+  frontier model does the whole grind) vs static-cheap (a cheap Claude model
+  grinds predicates a frontier model authored once) vs escalating (start cheap,
+  climb the Haiku→Sonnet→Opus ladder only on a kazi-reported non-progress signal,
+  ADR-0035). Each arm folds its captured per-dispatch `claude --output-format
+  json` envelopes (the real `$`/tokens) and its terminal `kazi apply --json`
+  result (convergence + correctness):
+
+    * `:arm`        — the arm label (`"vanilla-frontier"` / `"static-cheap"` /
+      `"escalating"`).
+    * `:models`     — the distinct model ids the arm dispatched, in first-seen
+      order (one for the static arms; the climbed ladder for an escalating arm).
+    * `:dispatches` — the number of captured envelopes (inner-harness calls).
+    * `:tokens`     — summed token total across the arm's dispatches.
+    * `:cost_usd`   — summed `total_cost_usd` across the arm's dispatches (the real
+      provider figure, not a re-priced estimate).
+    * `:converged`  — whether the terminal run reached `converged`.
+    * `:correct`    — whether the run converged AND every predicate verdict is
+      `pass` (the predicate IS the machine-checkable correctness oracle, so a
+      cheaper-but-WRONG result is visible, never hidden as a false done).
+  """
+  @type tiering_arm :: %{
+          arm: String.t(),
+          models: [String.t()],
+          dispatches: non_neg_integer(),
+          tokens: non_neg_integer(),
+          cost_usd: float(),
+          converged: boolean(),
+          correct: boolean()
+        }
+
   @doc """
   Parses a single `claude --output-format json` envelope (a decoded map OR the
   raw JSON string) into a per-dispatch `t:capture/0`.
@@ -174,7 +209,97 @@ defmodule Kazi.Bench do
     Enum.join([header, divider | rows], "\n") <> "\n"
   end
 
+  @doc """
+  Fold one TIERING arm (T19.7) from its terminal `kazi apply --json` result and
+  its captured per-dispatch `claude --output-format json` envelopes.
+
+  `result` is the decoded `apply --json` object (read for `status` +
+  `predicates[].verdict`); `envelopes` is the ordered list of captured envelopes
+  (decoded maps or raw JSON strings) — the `$`/tokens/models the arm spent. A
+  missing/blank input degrades to a zeroed, non-converged arm rather than
+  crashing, exactly as `parse_capture/1` does (a surprising recording never
+  breaks the table).
+  """
+  @spec tiering_arm(String.t(), map(), [map() | String.t()]) :: tiering_arm()
+  def tiering_arm(arm, result, envelopes)
+      when is_binary(arm) and is_map(result) and is_list(envelopes) do
+    captures = Enum.map(envelopes, &parse_capture/1)
+    converged = Map.get(result, "status") == "converged"
+
+    %{
+      arm: arm,
+      models: envelopes |> Enum.map(&parse_model/1) |> Enum.reject(&(&1 == nil)) |> Enum.uniq(),
+      dispatches: length(envelopes),
+      tokens: Enum.reduce(captures, 0, &(&1.total + &2)),
+      cost_usd: Enum.reduce(captures, 0.0, &(&1.cost_usd + &2)),
+      converged: converged,
+      correct: converged and all_predicates_pass?(result)
+    }
+  end
+
+  @doc """
+  Build the tiering report from an ordered list of `{arm_label, result, envelopes}`
+  triples (order preserved, so vanilla/static/escalating stay in submission order).
+  """
+  @spec tiering_report([{String.t(), map(), [map() | String.t()]}]) :: [tiering_arm()]
+  def tiering_report(arms) when is_list(arms) do
+    Enum.map(arms, fn {arm, result, envelopes} -> tiering_arm(arm, result, envelopes) end)
+  end
+
+  @doc """
+  Render a list of `t:tiering_arm/0` as a deterministic markdown table: the
+  per-arm $/tokens/iterations + convergence/correctness comparison T19.7 emits.
+
+  Columns: Arm | Model(s) | Dispatches | Tokens | Cost (USD) | Converged |
+  Correct. Byte-stable for a given arm list, so a test can assert on it.
+  """
+  @spec render_tiering_table([tiering_arm()]) :: String.t()
+  def render_tiering_table(arms) when is_list(arms) do
+    header = "| Arm | Model(s) | Dispatches | Tokens | Cost (USD) | Converged | Correct |"
+    divider = "|---|---|---|---|---|---|---|"
+
+    rows =
+      Enum.map(arms, fn a ->
+        "| #{a.arm} | #{models_label(a.models)} | #{a.dispatches} | #{a.tokens} | " <>
+          "#{format_cost(a.cost_usd)} | #{yes_no(a.converged)} | #{yes_no(a.correct)} |"
+      end)
+
+    Enum.join([header, divider | rows], "\n") <> "\n"
+  end
+
   # --- helpers ---------------------------------------------------------------
+
+  # Whether every recorded predicate verdict is `pass` (the correctness oracle).
+  # An absent/empty predicate list is NOT correct (nothing proven passed).
+  defp all_predicates_pass?(result) do
+    case Map.get(result, "predicates") do
+      [_ | _] = preds -> Enum.all?(preds, &(Map.get(&1, "verdict") == "pass"))
+      _ -> false
+    end
+  end
+
+  # Extract the dispatch's model id from a captured `claude --output-format json`
+  # envelope: the `modelUsage` object is keyed by model id; fall back to `nil`
+  # (unknown) when the envelope carried none.
+  @spec parse_model(map() | String.t()) :: String.t() | nil
+  defp parse_model(envelope) when is_binary(envelope) do
+    case Jason.decode(envelope) do
+      {:ok, %{} = decoded} -> parse_model(decoded)
+      _ -> nil
+    end
+  end
+
+  defp parse_model(%{"modelUsage" => usage}) when is_map(usage) do
+    usage |> Map.keys() |> List.first()
+  end
+
+  defp parse_model(_envelope), do: nil
+
+  defp models_label([]), do: "—"
+  defp models_label(models), do: Enum.join(models, " → ")
+
+  defp yes_no(true), do: "yes"
+  defp yes_no(false), do: "no"
 
   defp zero_capture do
     %{
