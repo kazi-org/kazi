@@ -1,5 +1,14 @@
 # Changelog
 
+> **Deprecated (removal in v2.0.0):** the command-runner provider names
+> `test_runner` and `prod_log` are **deprecated** -- folded onto the unified
+> `custom_script` engine as presets (ADR-0040). Both names still resolve, so this
+> is NON-BREAKING; a goal still using either name loads and evaluates identically
+> and the loader prints a one-line migration hint to STDERR (never into `--json`
+> stdout). Migrate `test_runner` -> `custom_script` with `verdict = "exit_zero"`,
+> and `prod_log` -> `custom_script` with `verdict = "match_count"`. The names are
+> removed in v2.0.0. See [docs/deprecations.md](docs/deprecations.md).
+
 > **Breaking (v1.0.0):** the deprecated CLI aliases `kazi run`, `kazi propose`,
 > and `mix kazi.run` were **removed** (verb unification under ADR-0032). They no
 > longer parse: `kazi run` / `kazi propose` now error as unknown commands, and the
