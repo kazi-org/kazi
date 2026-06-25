@@ -64,6 +64,20 @@ The bundle is bounded (default 12 KB) and redacted on egress like every prompt
 path. kazi only *produces* it; it wires no model switch (that is the orchestrator's
 job). Absent a stuck stop, there is no `stuck_bundle` key.
 
+## Inner-harness contract (outer indexes, inner searches)
+
+kazi (the outer controller) indexes authoritative artifacts; an **inner harness
+searches, it does not index** — by default (ADR-0045 §7). Two mechanisms enforce it:
+
+- **Prompt rule.** The injected context-store section carries the contract: *"Use
+  the provided snippets as evidence; if you need more, request a targeted
+  source/query — do not ask for whole logs or whole docs."*
+- **Tool surface.** When the workspace `.mcp.json` declares the Gist MCP server
+  (`kazi init --with-gist`), kazi exposes it to the inner harness **search-only** —
+  the `--tools` allow-list carries `mcp__gist__gist_search`, not the bare
+  `mcp__gist`, so `gist_index` is not callable. A goal/operator can widen this
+  (allow inner indexing) with the `inner_index` opt.
+
 ## Redaction before indexing (non-negotiable)
 
 Content is passed through `Kazi.Redaction.redact/1` at the `Kazi.ContextStore.index/3`
