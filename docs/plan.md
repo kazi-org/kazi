@@ -133,6 +133,25 @@ Open work:
   knowledge into the tier docs, and holds documentation FRESH via machine-checkable
   predicates in CI -- so the plan stays small/cheap and the docs never go stale; the
   flagship self-dogfood, ADR-0036) -- E31.
+- **UC-047** (anyone declares a NEW kind of objective check without a kazi release: a
+  generic `custom_script` predicate runs any CLI tool -- mutation/fuzz/security/contract
+  -- with an explicitly-declared verdict + structured-evidence parse, defusing the
+  exit-code gotchas; it is the SINGLE command-runner -- `test_runner`/`prod_log` fold in
+  as deprecated presets, removed in v2.0.0, ADR-0040) -- E32.
+- **UC-048** (every predicate reports a GRADED score + structured, localized evidence
+  -- `{pass, score, prior_score, direction, evidence[]}`, SARIF/JUnit/LSP-shaped -- so
+  the stuck-detector gets a real gradient and fixer agents get one-iteration fix
+  context; coverage/perf/size collapse onto one first-class `ratchet` mode, ADR-0041)
+  -- E32.
+- **UC-049** (kazi's "truth lives in the controller" becomes ENFORCED, not declarative:
+  read-only predicate/test leasing, skipped-as-failed, test-count + coverage ratchets,
+  a diff-inspection guard, and an optional held-out acceptance subset make objective
+  done resistant to a capable grind model, ADR-0042) -- E32.
+- **UC-050** (the catalog expands to a real verification workhorse: first-class
+  `:static` (Dialyzer-led + polyglot SARIF), `:coverage`, `:property` (PropCheck),
+  `:mutation`, `:cve` (govulncheck reachability) providers + documented
+  contract/perf/security-tail recipes, plus live upgrades -- sustained-health,
+  `:metrics` (PromQL/RED), SLO burn-rate, synthetic journey, ADR-0043) -- E32.
 
 ## Checkable Work Breakdown
 
@@ -624,6 +643,46 @@ doc-specific logic in kazi core (ADR-0036 reject).
 - [ ] T31.7 LIVE dogfood -- run the standing goal on THIS repo: drive the E31 standing goal against kazi itself -- trim the already-done+released epics (e.g. E12/E13/E14/E18/E24/E29), extract their knowledge to the tier docs, and bring the freshness predicates green. Report honestly (what trimmed, what extracted, did freshness pass). Uses the released binary per the feature-complete dogfood policy.  Owner: TBD  Est: 2h  verifies: [UC-046, UC-033]  deps: [T31.6]  acc: a recorded run where the live plan shrinks (done epics archived losslessly), knowledge lands in the tier docs, and the freshness gate is green; honest result incl. anything skipped; evidence persisted.
 - [ ] T31.8 Docs + positioning (self-maintaining docs as a kazi capability): document the doc-lifecycle in `concept.md` + README (kazi keeps its own plan/docs healthy -- the dogfood), and cross-link the tier map (ADR-0036). Coherence (T9.9/T16.4) green.  Owner: TBD  Est: 1h  verifies: [UC-046, UC-035]  deps: [T31.7]  acc: `concept.md`/README describe the trim+freshness lifecycle and the tier map; only real commands; coherence green; deployed live if the site changes.
 
+### E32 -- Predicate catalog & evidence v2: the verification workhorse (P1, ADR-0040/0041/0042/0043)
+
+Turn kazi's four-provider checker set into a real software-development verification
+layer. Grounded in `docs/research/predicate-verification-landscape.md` (three deep
+research streams: verification beyond unit tests, live/prod verification, agentic
+anti-gaming). The headline insight: BREADTH is the smaller half -- four FRAMEWORK
+changes improve every checker (existing, new, user-written) more than a longer list.
+Build the framework first (the generic protocol + the score/evidence/ratchet envelope
++ anti-gaming enforcement), THEN the concrete providers that prove it. The convergence
+gate is unchanged: `:converged` still requires the whole predicate vector `:pass`
+(ADR-0002).
+
+Acceptance for the epic: a `custom_script` provider lets a NEW check ship as config
+with a safe-by-default verdict, AND it is the single command-runner -- `test_runner`/
+`prod_log` fold in as deprecated presets (non-breaking now; removed in v2.0.0)
+(ADR-0040); every predicate carries `{pass, score, prior_score, direction, evidence[]}`
+with SARIF/JUnit/LSP-shaped evidence and a first-class `ratchet` mode, on an additive
+non-breaking schema bump (ADR-0041); the anti-gaming guarantees are enforced (default-on
+for creation mode) at the clean-tree + separate-process isolation level + reported
+(ADR-0042); the first-class providers `:static`/`:coverage`/`:property`/`:mutation`/
+`:cve` land with docs, plus the live upgrades (sustained-health -> `:metrics` ->
+burn-rate -> journey) and documented contract/perf/security-tail recipes (ADR-0043).
+Each surface lands with its docs (ADR-0034) and is verified against `kazi help --json`.
+NOTE (precondition): before T32.4 the clean-tree + separate-process "checker outside the
+agent's reach" seam must be verified against `lib/kazi/loop.ex` + the worktree wiring
+(flagged in ADR-0042, not assumed).
+
+- [ ] T32.1 `custom_script` generic predicate provider -- the UNIFIED command-runner (ADR-0040, the keystone): add `Kazi.Providers.CustomScript` (kind `:custom_script`) registered in `lib/kazi/runtime.ex`; runs a declared `cmd`/`args` in the workspace and maps the result via a DECLARED `verdict` (`exit_zero` default | `exit_code` map | `json` JSONPath+comparison over stdout), so a SARIF-emitting tool that exits 0 with findings is gated on its parsed findings, not its exit code. Distinguish `:error` (checker could not run -- declared `error_codes`/parse failure) from `:fail`. Loader validates the new keys; `kazi schema custom_script` documents them; ship `priv/examples` recipes (SARIF via Semgrep, JUnit via a test runner, JSON via a mutation tester).  Owner: TBD  Est: 3h  verifies: [UC-047, infrastructure]  deps: []  acc: ExUnit -- a tool exiting 0 WITH findings (json verdict) yields `:fail`; a missing-binary exit yields `:error` not `:fail`; exit_zero/exit_code/json verdicts each covered; the three example recipes parse + evaluate; `kazi schema custom_script` lists every key; documented in `docs/`.
+- [ ] T32.1b Fold `test_runner`/`prod_log` onto the unified core + DEPRECATE the names (ADR-0040 decision 1+7, operator decision 2026-06-24): reimplement `test_runner` as a `custom_script` preset (`verdict = "exit_zero"` + JUnit evidence) and `prod_log` as a preset (regex-match-count verdict over output); the loader rewrites both names to the unified provider and emits a one-line STDERR deprecation hint (never into `--json` stdout). Record the aliases + the near-mechanical goal-file migration + the v2.0.0 removal target in `docs/deprecations.md` + the CHANGELOG. SHIPS NON-BREAKING (a minor bump -- both names still resolve); actual REMOVAL is a separate future v2.0.0 task (the 0.x->1.x landmine: next breaking commit auto-bumps the major). `http_probe`/`browser` are out of scope (not command-runners).  Owner: TBD  Est: 2h  verifies: [UC-047, infrastructure]  deps: [T32.1]  acc: ExUnit -- an existing `provider = "test_runner"`/`"prod_log"` goal file still loads + evaluates identically (byte-compatible result) via the preset, with a stderr deprecation hint and pure `--json` stdout; `docs/deprecations.md` names the aliases + the migration + the v2.0.0 removal; no goal file is broken by this change.
+- [ ] T32.2 Predicate envelope v2 -- score + direction + structured evidence (ADR-0041): extend `Kazi.PredicateResult` to carry `score` (optional float), `direction` (`:higher_better | :lower_better`, so the controller reads progress without per-provider knowledge), `prior_score` (threaded by the loop from the previous iteration's same-id result), and `evidence[]` as LSP-Diagnostic-shaped items (`{file, line, col, rule, level, message, expected, got}`); add a shared SARIF/JUnit-XML parser the providers map onto, raw stdout kept only as a truncated fallback. Boolean predicates set `score = nil` and behave byte-identically to today (back-compat). The loop threads `prior_score` and exposes the direction-interpreted delta to the progress classifier + stuck-detector (T1.5) WITHOUT changing the `:converged` gate. The `--json`/`schema_version` change is ADDITIVE -- a NON-BREAKING minor bump, not a v2.0.0 trigger.  Owner: TBD  Est: 3h  verifies: [UC-048, infrastructure]  deps: []  acc: ExUnit -- a result with `score`/`direction`/`prior_score`/structured `evidence` round-trips through the read-model; a `:lower_better` count improving (going down) registers as progress; a boolean (score=nil) predicate's stored shape is unchanged; the stuck-detector sees the delta; `:converged` still requires the whole vector `:pass`; SARIF + JUnit fixtures parse into evidence items; the schema bump is additive/non-breaking.
+- [ ] T32.3 First-class `ratchet` predicate mode (ADR-0041): add `mode = "ratchet"` with `metric`, `baseline` (git ref or stored prior value), `allowed_regression`; passes iff `signal - baseline <= allowed_regression`, reports `score = signal`. Build the baseline-comparison machinery ONCE (resolve baseline, diff-scope, store the new value) so coverage/perf/size are configs of one mode. Doubles as the ADR-0042 guard substrate (a metric that may only improve).  Owner: TBD  Est: 2.5h  verifies: [UC-048, UC-050]  deps: [T32.2]  acc: ExUnit -- a ratchet predicate passes when signal improves, fails on a regression beyond `allowed_regression`, and stores the new baseline; an absolute-threshold predicate is unaffected; the same mode services a coverage AND a size example.
+- [ ] T32.4 Anti-gaming enforcement profile (ADR-0042, the thesis hardening): add an `enforcement` goal profile -- DEFAULT-ON for kazi-authored creation-mode goals, opt-in for repair goals (operator decision) -- that (a) runs the checker at the CLEAN-TREE + SEPARATE-PROCESS isolation level: evidence-bearing checker definitions/inputs resolved from a CLEAN tree (not the agent's working copy) AND the checker executed in a separate OS process the agent cannot introspect/monkey-patch (closes the operator-overloading / in-process-grader-edit class; full container isolation DEFERRED); (b) leases the goal's predicate + executed-test paths READ-ONLY to fixer agents (a write attempt is a flagged event); (c) maps skipped/errored/xfail sub-results to `:fail`; (d) enforces test-count + coverage RATCHETS as guards (via T32.3); (e) surfaces the active guarantees + any flagged gaming event in `kazi status`/`--json`. PRECONDITION: verify the clean-tree + separate-process seam against `loop.ex` + worktree wiring first.  Owner: TBD  Est: 4.5h  verifies: [UC-049, infrastructure]  deps: [T32.2, T32.3]  acc: ExUnit -- a skipped test counts as `:fail` not `:pass`; deleting a test trips the count ratchet (guard regression, not progress); a write to a read-only-leased predicate file is flagged; the checker runs in a separate process resolved from a clean tree (an in-iteration edit to the checker file does not affect the verdict); the active enforcement guarantees appear in `--json`; the isolation seam is documented with a `loop.ex` reference.
+- [ ] T32.5 Diff-inspection gaming guard (ADR-0042, advisory): before crediting an iteration as progress, run a cheap structural check on the agent's diff for gaming signatures -- edits to predicate/grader files, `if input == <test_case>` special-casing, newly-added `skip`/`xfail` markers -- and downgrade the iteration + surface evidence on a hit rather than crediting a false pass. Advisory (surface, don't hard-block) at first; the T32.4 ratchets are the hard guard.  Owner: TBD  Est: 2h  verifies: [UC-049]  deps: [T32.4]  acc: ExUnit -- a diff that adds `@pytest.mark.skip` or special-cases a test input is flagged with evidence; a legitimate refactor diff is not flagged (low false-positive on the fixture set); the flag downgrades progress, it does not crash the loop.
+- [ ] T32.6 Optional held-out acceptance subset (ADR-0042): let a goal mark acceptance predicates `held_out = true` -- evaluated by the controller but their definitions/inputs are NOT placed in the agent's dispatch context (visible-for-iteration vs hidden-for-acceptance). Convergence requires the held-out set to pass too.  Owner: TBD  Est: 2h  verifies: [UC-049]  deps: [T32.2]  acc: ExUnit -- a `held_out` predicate is absent from the dispatch prompt/context but present in the observe vector; `:converged` requires it `:pass`; the visible predicates still seed fix context.
+- [ ] T32.7 `:static` provider -- analysis/type-check/lint, Dialyzer-led (ADR-0043): add `Kazi.Providers.Static` (kind `:static`); lead with Dialyzer (kazi-native, zero false positives), generalize to tsc/mypy/golangci-lint/Semgrep via SARIF; baseline-ratchet on NEW findings (T32.3). SARIF evidence (`ruleId`/`level`/`file:line:col`).  Owner: TBD  Est: 2.5h  verifies: [UC-050, infrastructure]  deps: [T32.2, T32.3]  acc: ExUnit -- a Dialyzer run with a fresh warning yields `:fail` with a localized evidence item; a clean run yields `:pass`; the baseline ratchet ignores pre-existing findings and fails only on new ones; `kazi schema static` + a `docs/` how-to ship.
+- [ ] T32.8 `:coverage` + `:property` + `:mutation` + `:cve` first-class providers (ADR-0043): `:coverage` = patch coverage >= target AND no project regression (a T32.3 ratchet instance, already named in the behaviour docstring); `:property` = PropCheck under `mix test`, score = cases-passed/N, shrunk counterexample as evidence; `:mutation` = score 0-1 gated on a threshold (NEVER 100%), scope to changed lines, surviving-mutant evidence; `:cve` = dependency vulnerability scan led by `govulncheck` REACHABILITY (fail only on a transitively-called vuln, call stack as proof -- a demonstration; trivy/grype/npm-audit manifest-only as tier-2 CLAIMS ratcheted vs a baseline), encoding the exit-0-under-json gotcha (promoted from a recipe to first-class, operator decision). Each with `kazi schema <kind>` + a `docs/` how-to.  Owner: TBD  Est: 5h  verifies: [UC-050, infrastructure]  deps: [T32.3]  acc: ExUnit -- coverage fails on a patch-coverage drop, passes the walking skeleton; a PropCheck counterexample surfaces SHRUNK input + score; a mutation run reports a 0-1 score + surviving mutants and is gated on a threshold not 100%; a `:cve` run fails on a reachable known-vuln dep with the call stack as evidence and is gated on parsed output not the exit code; all four documented.
+- [ ] T32.9 Documented `custom_script` recipes -- contract/perf/security-tail (ADR-0043, config not code): ship + document `priv/examples` recipes over T32.1 for contract/schema compat (`buf breaking`, `oasdiff`, `pact can-i-deploy`), perf/size ratchets (Criterion/bencher.dev, size-limit/bloaty), secret scanning (trufflehog `Verified:true`), a11y + Lighthouse CI, IaC/container scan, and visual-regression. (Dependency CVE is NOT here -- it was promoted to the first-class `:cve` provider, T32.8.) Encode the two evidence tiers: verified findings fail directly; presence-based findings ratchet against a baseline. Bake in the exit-code gotchas (trivy/semgrep need `--exit-code`; grype exits 2; nuclei/ZAP have no findings exit code).  Owner: TBD  Est: 2.5h  verifies: [UC-047, UC-050]  deps: [T32.1, T32.3]  acc: each recipe runs the real tool and yields the correct verdict on a fixture (a breaking proto change fails `buf breaking`; a size regression trips the ratchet; a planted verified secret fails); the exit-code-gotcha tools are gated on parsed output not exit code; `docs/` lists the recipes + the two evidence tiers.
+- [ ] T32.10 Live provider upgrades -- sustained-health + `:metrics` + burn-rate + journey (ADR-0043): upgrade `http_probe` to "N consecutive healthy samples over window W" (the K8s `failureThreshold` model, not a single 200); add `:metrics` (PromQL/RED: error-rate + p95/p99 over W via `histogram_quantile` over `rate(..._bucket[W])` by `(le)`); add an SLO multiwindow multi-burn-rate gate over `:metrics`; re-use the `browser` provider as a post-deploy synthetic journey requiring X consecutive passes. `prod_log` stays as a coarse safety net. Each degrades to "not applicable" when no metrics endpoint is configured; document the bake-window discipline (never converge on a single sample).  Owner: TBD  Est: 4h  verifies: [UC-050, infrastructure]  deps: [T32.2]  acc: ExUnit/fixtures -- a single transient 200 does NOT pass sustained-health (requires N consecutive); a `:metrics` predicate computes a windowed quantile and gates on it; a burn-rate gate fires only when both long+short windows breach; a journey requiring X consecutive passes rejects a one-off success; absent a metrics endpoint the live metric predicates report not-applicable, not a false pass; the bake-window rule is documented.
+- [ ] T32.11 LIVE dogfood -- the expanded catalog converges a real fixture (gated on feature-complete): drive a self-contained fixture goal that exercises the new framework end-to-end -- a `:static` (Dialyzer) + `:coverage` ratchet + a `:mutation` score gate + the `:cve` provider + a sustained-health live predicate -- starting RED and converging to objective-true on the released binary, with the anti-gaming guarantees active (creation-mode default-on). Report honestly (did each predicate gate correctly? did enforcement flag anything? did it converge?). Gated by the feature-complete dogfood policy.  Owner: TBD  Est: 2.5h  verifies: [UC-047, UC-048, UC-049, UC-050]  deps: [T32.4, T32.7, T32.8, T32.9, T32.10]  acc: a recorded run where the fixture starts with failing new-kind predicates, the fixer converges them to objective-true under active enforcement, and the score gradient is visible in the iteration log; honest result (including any predicate that did NOT gate as intended); evidence persisted to `docs/devlog.md`; uses the released binary.
+
 ### Waves
 
 Recommended order. The two independent tracks (E12->E13 and E14) can run alongside
@@ -676,6 +735,10 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E29 (OSS gates, autonomous):** T29.1 (docs-with-code CI guard), T29.2 (no-leak CI guard) in PARALLEL -> T29.3 (scrub existing leaks, after T29.2). Independent of feature epics; safe to land early.
 - **Wave E30 (adaptive tiering, skill-driven, ADR-0035):** T30.1 (skill+AGENTS.md default to in-family tiering) + T30.3 (verify `--json` signal sufficiency) in PARALLEL -> T30.2 (escalate-on-stuck recipe) -> T19.7 (3-arm benchmark incl. escalating) -> T30.4 (live escalation dogfood) ; T30.5 (accuracy+coherence gate) + T25.11 (content) after T30.1/T30.2. Skill-layer only; no kazi-core policy. T30.1/T30.3 unblocked now.
 - **Wave E31 (self-maintaining docs, ADR-0036):** T31.1 (split-plan migration) -> T31.2 (deterministic trim tool) -> T31.3 (gated extraction) ; T31.4 (freshness predicates, parallel/unblocked) -> T31.5 (freshness CI gate) ; T31.6 (standing goal) after T31.2+T31.4 -> T31.7 (live dogfood on this repo) -> T31.8 (docs/positioning). Logic in skill+CI; kazi drives. T31.1/T31.4 unblocked now.
+- **Wave E32-1 (framework first -- the keystones):** T32.1 (`custom_script` generic protocol) + T32.2 (envelope v2: score + direction + structured evidence) in PARALLEL (independent: a new provider vs the result shape) -> T32.1b (fold `test_runner`/`prod_log` onto the unified core + deprecate, after T32.1) + T32.3 (first-class `ratchet` mode, after T32.2). These unlock everything else; build before any concrete provider. T32.1b ships non-breaking (presets + deprecation hint); the v2.0.0 removal of the names is a separate future task.
+- **Wave E32-2 (anti-gaming enforcement -- the thesis):** T32.4 (enforcement profile: clean-tree checker + read-only leasing + skipped-as-failed + ratchet guards) after T32.2/T32.3 -> T32.5 (diff-inspection guard) + T32.6 (held-out acceptance subset) in PARALLEL after T32.4. PRECONDITION for T32.4: verify the "checker outside the agent's reach" seam against `loop.ex` (ADR-0042).
+- **Wave E32-3 (concrete providers -- prove the framework):** T32.7 (`:static`, Dialyzer-led) + T32.8 (`:coverage`/`:property`/`:mutation`) in PARALLEL after T32.3 ; T32.9 (security/contract/perf `custom_script` recipes) after T32.1/T32.3 ; T32.10 (live upgrades: sustained-health/`:metrics`/burn-rate/journey) after T32.2. All independent of each other.
+- **Wave E32-4 (prove):** T32.11 (live dogfood: the expanded catalog converges a real fixture under enforcement) after T32.4/T32.7/T32.8/T32.9/T32.10. Gated by the feature-complete dogfood policy (released binary).
 
 ## Risk Register
 
@@ -726,6 +789,13 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 | R-E27-1 | The verb rename breaks the shipped agent-drivable JSON contract / skill / MCP for existing callers. | High | Low | `run`/`propose` (+ `mix kazi.run`) stay as DEPRECATED ALIASES dispatching identically (T27.1/T27.2); the `schema_version` bump (T27.3) makes the contract change explicit; a deprecation-window note (T27.7); alias tests pin back-compat. |
 | R-E27-2 | A broad rename misses a reference, leaving an inconsistent surface. | Med | Med | Coherence guards cover it: skill<->CLI (T16.4), README<->site (T9.9), self-conformance (T15.7); `kazi help --json` is generated from the real command table; T27.8 live-verifies both verbs. |
 | R-E27-3 | The `schema_version` bump breaks orchestrators pinning the old version. | Med | Low | Documented as a breaking contract change (ADR-0032/T27.3), not silent; the old command names remain valid aliases so only the pinned version (not the call) must update. |
+| R-E32-1 | The `custom_script` generic provider becomes a footgun: a mis-declared verdict (e.g. `exit_zero` on a tool that exits 0 WITH findings) silently passes a real failure. | High | Med | Verdict is EXPLICITLY declared, not assumed (T32.1); safe defaults + the `:error`-vs-`:fail` distinction; the exit-code gotchas (govulncheck/trivy/semgrep/grype) are encoded as recipe config (T32.9), and shipped examples model the json-verdict pattern. ADR-0040. |
+| R-E32-2 | A graded `score` (ADR-0041) re-introduces reward hacking through the gradient -- the agent inflates a proxy (assertion-free tests lifting line coverage) without improving the true goal. | Med | Med | The THRESHOLD (the gate), not the gradient, is authoritative and measures the true goal; prefer gaming-resistant scores (mutation over raw line coverage); the score only feeds progress/stuck classification, never the `:converged` gate. ADR-0041 + ADR-0042. |
+| R-E32-3 | Anti-gaming enforcement (T32.4) over-restricts and breaks legitimate work -- the agent SHOULD author new tests in creation mode, but read-only test leasing blocks it. | Med | Med | The read-only class is scoped to the goal's PREDICATE/acceptance files, not all tests; the diff-inspection guard (T32.5) is advisory (surface, not hard-block) at first; held-out (T32.6) is opt-in for the acceptance subset only; the working predicates stay visible so the gradient + fix context survive. ADR-0042. |
+| R-E32-4 | "Run the checker outside the agent's reach" (T32.4) collides with how dispatch + worktrees are actually wired, so the clean-tree guarantee is wrong/partial. | High | Med | T32.4 carries an explicit PRECONDITION: verify the seam against `lib/kazi/loop.ex` + the worktree wiring BEFORE implementing, and document the reference; the guarantee is reported in `--json` (T32.4) so a partial guarantee is visible, never silently assumed. ADR-0042. |
+| R-E32-5 | Live metric/burn-rate predicates (T32.10) assume an observability stack (Prometheus) kazi cannot provision, so they mislead when absent. | Med | Med | They degrade to "not applicable" (never a false pass) when no metrics endpoint is configured; sustained-health needs only an HTTP endpoint and is the universal baseline; the bake-window discipline is documented. ADR-0043. |
+| R-E32-6 | Provider sprawl: too many first-class kinds to maintain. | Low | Med | The earns-first-class test (ADR-0043 §context): only five code-side providers (`:static`/`:coverage`/`:property`/`:mutation`/`:cve`) + the live upgrades are first-class; the long tail (contract/perf/a11y/visual/secret/IaC) stays `custom_script` config (T32.9), growing the catalog without growing the release surface. |
+| R-E32-7 | Unifying + deprecating `test_runner`/`prod_log` (T32.1b) breaks existing goal files, or the eventual removal force-bumps a premature v2.0.0. | Med | Low | T32.1b ships NON-BREAKING -- both names keep resolving as presets with a stderr deprecation hint and a near-mechanical migration documented in `docs/deprecations.md`; the actual REMOVAL is a SEPARATE future v2.0.0 task (not in E31), mirroring the run/propose -> v1.0.0 window; an existing-goal-file load test pins back-compat. ADR-0040 decision 7. |
 
 ## Operating Procedure
 
@@ -766,6 +836,46 @@ never swept into your commit.
   tool, T31.3 gated extraction, T31.4 freshness predicates, T31.5 freshness CI gate,
   T31.6 standing goal, T31.7 live dogfood on this repo, T31.8 docs/positioning.
   Wave E31; UC-046; risks R-E31-1..4. T31.1/T31.4 unblocked now.
+### 2026-06-24 -- Change Summary (E32: predicate catalog & evidence v2 -- the verification workhorse; ADR-0040/0041/0042/0043)
+- Operator directive: review the state of the predicate checkers (unit tests, browser
+  check, endpoint returns) and brainstorm how to expand them so kazi becomes a real
+  software-development workhorse; deep-research the subject.
+- Mapped the current state (4 providers: `test_runner`/`http_probe`/`prod_log`/`browser`;
+  `surface-coverage` meta-predicate; `:coverage`/`:custom_script` named-but-unbuilt) and
+  ran 3 deep-research streams (verification beyond unit tests, live/prod verification,
+  agentic anti-gaming). FINDING: the framework is excellent; the catalog is thin, the
+  evidence is raw, and the anti-gaming story (kazi's whole thesis) is declarative, not
+  enforced. The biggest wins are FRAMEWORK changes that improve every checker, not a
+  longer list.
+- **Added `docs/research/predicate-verification-landscape.md`** -- the cited synthesis
+  (primary sources flagged; secondary/vendor claims marked) as ADR input.
+- **Added ADR-0040** (generic `custom_script` protocol -- the extensibility keystone;
+  explicit verdict defuses the exit-code gotchas), **ADR-0041** (predicate envelope v2:
+  graded `{pass, score, prior_score, evidence[]}` + SARIF/JUnit/LSP evidence + a
+  first-class `ratchet` mode; `:converged` gate unchanged), **ADR-0042** (anti-gaming
+  ENFORCEMENT: clean-tree checker, read-only predicate/test leasing, skipped-as-failed,
+  count/coverage ratchets, diff-inspection guard, optional held-out acceptance subset;
+  grounded in METR's 43x "sees the scoring function" result), **ADR-0043** (catalog
+  expansion: which checkers ship first-class -- `:static`/`:coverage`/`:property`/
+  `:mutation` + live upgrades -- vs `custom_script` config). All four are **Proposed**
+  (awaiting operator ratification), not Accepted.
+- **Added E32** (P1): T32.1-T32.3 (framework: generic protocol, envelope v2, ratchet),
+  T32.4-T32.6 (anti-gaming enforcement + diff guard + held-out), T32.7-T32.10 (concrete
+  providers + recipes + live upgrades), T32.11 (live dogfood). Waves E32-1..4; UC-047..
+  UC-050; risks R-E32-1..6. Build the framework first, then the providers that prove it.
+- Written in a worktree (`plan/e31-predicate-catalog`) per the shared-tree reset hazard
+  (lore L-0014). Precondition flagged in T32.4/R-E32-4: the "checker outside the agent's
+  reach" seam must be verified against `loop.ex` before implementing, not assumed.
+- **RATIFIED (operator, 2026-06-24): ADR-0040/0041/0042/0043 -> Accepted.** Four
+  decisions folded in: (1) `custom_script` is the SINGLE command-runner -- `test_runner`/
+  `prod_log` fold in as deprecated presets (non-breaking now, removed in v2.0.0; added
+  T32.1b + R-E32-7); (2) anti-gaming enforcement is DEFAULT-ON for creation-mode goals,
+  opt-in for repair; (3) the "checker outside the agent's reach" isolation level is
+  CLEAN-TREE + SEPARATE-PROCESS (full container deferred); (4) the CVE/security provider
+  is promoted to a FIRST-CLASS `:cve` (govulncheck reachability) -- five first-class
+  code-side providers now. Defaulted (no objection): a `direction` field on the score
+  (ADR-0041), the schema bump is additive/non-breaking, and `:static` ships the polyglot
+  SARIF path alongside Dialyzer in one provider.
 
 ### 2026-06-24 -- Change Summary (T25.12: close all-stars.md growth-playbook gap #10)
 - Audited the `tmp/all-stars.md` growth research (docs/site playbook vs fast-growing
