@@ -18,11 +18,19 @@ adoption spine is:
 
 > **you → Claude Code → kazi → Claude Code.**
 
-You describe the outcome in plain language — *"**have kazi drive this until
-done**"* — and Claude Code authors the acceptance predicates with `kazi plan`,
-hands them to kazi, and kazi loops the agent until every predicate is
-objectively true (or reports `stuck` / `over_budget`). Claude Code reports the
-result back to you. You never leave your chat with Claude.
+Concretely, in Claude Code you drive the skill's two verbs:
+
+```text
+/kazi plan "add a /healthz endpoint that returns 200 ok, with a test, deployed"
+/kazi apply
+```
+
+`/kazi plan` has Claude author the acceptance predicates (glance at them, then
+converge); `/kazi apply` runs the reconcile loop until every predicate is
+objectively true (or reports `stuck` / `over_budget`). Plain language works too —
+just say *"**have kazi drive this until done**"* and the skill runs the same
+`/kazi plan` → `/kazi apply` for you. Claude Code reports the result back; you
+never leave your chat with Claude.
 
 Under the hood — the part you don't operate directly — kazi is the
 **outer/reconciliation loop** the agent drives (Section 1). It is **not** itself
