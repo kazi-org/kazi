@@ -15,7 +15,7 @@ jobs:
     env:
       MIX_ENV: test
       ELIXIR_VERSION: "1.20.1"
-      OTP_VERSION: "28.0"
+      OTP_VERSION: "28.3"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
