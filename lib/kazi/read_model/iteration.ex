@@ -22,8 +22,10 @@ defmodule Kazi.ReadModel.Iteration do
       iteration (T3.3c, UC-015); `nil` for non-deploy iterations.
     * `context` — the per-iteration context counters (T34.3, ADR-0046 §2):
       `%{"orientation_cache", "retrieval_cache", "orientation_tokens",
-      "evidence_tokens", "retrieval_tokens"}` (string-keyed on disk). Empty `%{}`
-      for a pre-T34.3 / no-dispatch iteration.
+      "evidence_tokens", "retrieval_tokens", "tier"}` (string-keyed on disk). The
+      `"tier"` is the active context-budget tier the dispatch ran at (T36.3,
+      ADR-0047 §3; default 1, `nil` for a no-dispatch iteration). Empty `%{}` for a
+      pre-T34.3 / no-dispatch iteration.
     * `tools` — the per-iteration tool counters (T34.3, ADR-0046 §2):
       `%{"tool_calls", "file_reads", "search_calls", "graph_calls"}` (string-keyed
       on disk). Empty `%{}` when the harness exposed no tool-use stream (absent ≠
