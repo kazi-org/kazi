@@ -3206,6 +3206,7 @@ defmodule Kazi.CLI do
     |> put_usage(result)
     |> put_economy(economy)
     |> put_context_store(result)
+    |> put_stuck_bundle(result)
   end
 
   # T35.5 (ADR-0045 §6): the additive `context_store` byte-accounting object, present
@@ -3214,6 +3215,14 @@ defmodule Kazi.CLI do
     do: Map.put(map, :context_store, cs)
 
   defp put_context_store(map, _result), do: map
+
+  # T35.6 (ADR-0045 §5): the additive `stuck_bundle` object, present only on a stuck
+  # stop, so an escalating orchestrator hands the higher model rung the compact
+  # bundle instead of the full transcript. Absent ⇒ byte-identical.
+  defp put_stuck_bundle(map, %{stuck_bundle: bundle}) when is_map(bundle),
+    do: Map.put(map, :stuck_bundle, bundle)
+
+  defp put_stuck_bundle(map, _result), do: map
 
   # T34.6 (ADR-0046 §5): attach the additive `economy` object — the run-end KPIs
   # derived from the per-iteration envelopes (cost / converged-predicate, wall-clock
