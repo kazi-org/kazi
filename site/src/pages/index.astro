@@ -21,6 +21,28 @@ const harnessList =
     ? HARNESSES.join("")
     : `${HARNESSES.slice(0, -1).join(", ")} and ${HARNESSES[HARNESSES.length - 1]}`;
 
+// The 10-second on-ramp — the FIRST thing a visitor sees (T25.4, ADR-0030). The
+// human's primary path is the kazi *skill* driven from inside Claude Code, not
+// the raw CLI. The raw `kazi` verbs live under "Drive kazi directly" (advanced).
+const onramp = [
+  {
+    label: "Install kazi",
+    code: INSTALL_CMD,
+    note: "One self-contained binary via Homebrew — no Erlang prerequisite.",
+    copy: true,
+  },
+  {
+    label: "Teach Claude Code the kazi skill",
+    code: "kazi install-skill",
+    note: "Writes the kazi skill to ~/.claude/skills/kazi — a one-time, opt-in step.",
+  },
+  {
+    label: "In Claude Code, hand it work in plain language",
+    phrase: INVOCATION_PHRASE,
+    note: "Claude authors the acceptance checks, runs them, fixes what's failing, and loops — reporting back only when every check is objectively true (or it is genuinely stuck). You never leave your chat with Claude.",
+  },
+];
+
 const features = [
   {
     title: "Objective termination",
@@ -99,8 +121,8 @@ const personas = [
       <span class="ui-strong text-xl font-bold tracking-tight">kazi</span>
     </a>
     <nav class="flex items-center gap-6 text-sm" aria-label="Primary">
+      <a href="#try" class="ui-body ui-link">Try it</a>
       <a href="#how" class="ui-body ui-link">How it works</a>
-      <a href="#install" class="ui-body ui-link">Install</a>
       <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-body ui-link">Docs</a>
       <a
         href={REPO}
@@ -110,7 +132,7 @@ const personas = [
     </nav>
   </header>
 
-  <!-- Hero -->
+  <!-- Hero — leads with the 10-second on-ramp (the agent paradigm), not the CLI -->
   <main>
     <section class="relative overflow-hidden" aria-labelledby="hero-heading">
       <div
@@ -118,7 +140,7 @@ const personas = [
         aria-hidden="true"
       >
       </div>
-      <div class="mx-auto max-w-4xl px-6 pb-16 pt-16 text-center sm:pt-24">
+      <div class="mx-auto max-w-4xl px-6 pb-12 pt-16 text-center sm:pt-24">
         <a
           href={REPO}
           class="ui-chip inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
@@ -133,18 +155,34 @@ const personas = [
           {HERO_TAGLINE}
         </h1>
         <p class="ui-body mx-auto mt-6 max-w-2xl text-pretty text-lg">
-          <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>. Tell it the
-          outcome you want &mdash; in plain English or a short goal-file &mdash; and it
-          drives a coding agent in a loop until that outcome is <em>objectively</em> real:
-          tests pass, the endpoint is live, the change is deployed.
+          <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>. Install it
+          as a skill and <strong class="ui-strong">Claude Code</strong> can finally
+          <em>finish</em> the job: you keep working in Claude the way you already do, and
+          kazi makes &ldquo;done&rdquo; <strong class="ui-strong">objective</strong> &mdash;
+          looping your agent until every check passes (tests green, the endpoint live, the
+          change deployed), or stopping to tell you why.
         </p>
+      </div>
+    </section>
 
-        <!-- Install CTA -->
-        <div class="mx-auto mt-8 flex max-w-xl flex-col items-center gap-3">
+    <!-- Try it in 10 seconds — the primary on-ramp (install → install-skill → invoke) -->
+    <section id="try" class="mx-auto max-w-3xl px-6 pb-8" aria-labelledby="try-heading">
+      <h2
+        id="try-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        Try it in 10 seconds
+      </h2>
+      <ol class="mt-8 space-y-4">
+        <li class="ui-card rounded-2xl border p-5">
+          <div class="flex items-baseline gap-3">
+            <span class="kazi-text text-xl font-extrabold">1</span>
+            <span class="ui-strong font-semibold">{onramp[0].label}</span>
+          </div>
           <button
             id="copy-install"
             type="button"
-            class="ui-code group flex w-full items-center justify-between gap-4 rounded-xl border px-5 py-4 text-left font-mono text-sm"
+            class="ui-code group mt-3 flex w-full items-center justify-between gap-4 rounded-xl border px-5 py-4 text-left font-mono text-sm"
             data-cmd={INSTALL_CMD}
             title="Copy the install command"
           >
@@ -154,67 +192,88 @@ const personas = [
               id="copy-label">copy</span
             >
           </button>
-          <div class="flex flex-wrap items-center justify-center gap-3">
-            <a
-              href="#install"
-              class="kazi-gradient rounded-xl px-5 py-3 font-semibold text-[#06101f] shadow-lg shadow-blue-500/20 hover:opacity-95"
-              >Get started</a
-            >
-            <a
-              href={REPO}
-              class="ui-outline rounded-xl border px-5 py-3 font-semibold"
-              >Star on GitHub</a
-            >
+          <p class="ui-muted mt-2 text-xs">{onramp[0].note}</p>
+        </li>
+        <li class="ui-card rounded-2xl border p-5">
+          <div class="flex items-baseline gap-3">
+            <span class="kazi-text text-xl font-extrabold">2</span>
+            <span class="ui-strong font-semibold">{onramp[1].label}</span>
           </div>
-        </div>
-
-        <p class="ui-muted mt-8 text-sm">
-          Think of it like <strong class="ui-body">{KUBERNETES_LINE}</strong>: you
-          declare desired state, kazi watches actual state, and it closes the gap until the
-          two match.
-        </p>
-
-        <!-- Proof artifact: the loop converging on a real goal -->
-        <figure class="mx-auto mt-12 max-w-3xl">
-          <img
-            src="/proof-loop.svg"
-            alt="kazi reconcile loop converging: across four iterations the failing predicate set shrinks from [tests, livez] to empty, then go test passes and the deployed GET /livez returns 200 ok — converged."
-            class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
-            width="820"
-            height="372"
-            loading="lazy"
-          />
-          <figcaption class="ui-muted mt-3 text-xs">
-            A real goal &mdash; <em>tests pass and the deployed <code>/livez</code> returns
-            ok</em> &mdash; driven to convergence. Done is observed, not asserted.
-          </figcaption>
-        </figure>
-      </div>
+          <pre class="ui-code mt-3 overflow-x-auto rounded-xl border px-5 py-4 font-mono text-sm"><code><span class="ui-muted">$ </span>{onramp[1].code}</code></pre>
+          <p class="ui-muted mt-2 text-xs">{onramp[1].note}</p>
+        </li>
+        <li class="ui-card rounded-2xl border p-5">
+          <div class="flex items-baseline gap-3">
+            <span class="kazi-text text-xl font-extrabold">3</span>
+            <span class="ui-strong font-semibold">{onramp[2].label}</span>
+          </div>
+          <p
+            class="kazi-text mt-3 text-balance text-center text-2xl font-extrabold tracking-tight"
+          >
+            &ldquo;{INVOCATION_PHRASE}&rdquo;
+          </p>
+          <p class="ui-muted mt-3 text-sm">{onramp[2].note}</p>
+        </li>
+      </ol>
+      <p class="ui-muted mx-auto mt-6 max-w-2xl text-center text-sm">
+        That's it. You stay in your chat with Claude Code &mdash; kazi runs underneath.
+      </p>
     </section>
 
-    <!-- Features -->
-    <section class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="features-heading">
-      <h2 id="features-heading" class="sr-only">Why kazi</h2>
-      <div class="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-        {
-          features.map((f) => (
-            <div class="ui-card rounded-2xl border p-6">
-              <h3 class="ui-strong text-lg font-semibold">{f.title}</h3>
-              <p class="ui-body mt-2 text-sm leading-relaxed">{f.body}</p>
-            </div>
-          ))
-        }
-      </div>
-    </section>
-
-    <!-- 60-second mental model -->
-    <section id="how" class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="how-heading">
-      <h2 id="how-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
-        The 60-second mental model
+    <!-- Chat with Claude Code, it drives kazi (the primary spine) -->
+    <section
+      class="mx-auto max-w-4xl px-6 py-12"
+      aria-labelledby="spine-heading"
+    >
+      <h2
+        id="spine-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        You chat with Claude Code, it drives kazi
       </h2>
       <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
-        A reconciliation loop for software goals. It runs until the predicates are
-        objectively true, stuck, or over budget.
+        You don't operate kazi directly &mdash; your coding agent does. After
+        <code class="ui-body">kazi install-skill</code>, the phrase
+        <strong class="ui-strong">&ldquo;{INVOCATION_PHRASE}&rdquo;</strong>
+        routes to kazi the same way <code class="ui-body">use context7</code> pulls
+        Context7 into a session &mdash; it's a trigger on the kazi skill, so it routes to
+        kazi only once the skill is installed.
+      </p>
+      <ol class="mx-auto mt-10 grid max-w-3xl gap-3 sm:grid-cols-4">
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">You</div>
+          <div class="ui-muted mt-1 text-xs">describe the outcome you want, in plain language</div>
+        </li>
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">Claude Code</div>
+          <div class="ui-muted mt-1 text-xs">authors the acceptance predicates with <code class="ui-body">kazi&nbsp;plan</code></div>
+        </li>
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">kazi</div>
+          <div class="ui-muted mt-1 text-xs">runs <code class="ui-body">kazi&nbsp;apply</code>, looping the agent until the predicates are objectively true</div>
+        </li>
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">Claude Code</div>
+          <div class="ui-muted mt-1 text-xs">reports back &mdash; converged, or honestly <code class="ui-body">stuck</code></div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- How it works — the reconcile-loop mechanic, demoted below the on-ramp -->
+    <section id="how" class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="how-heading">
+      <h2 id="how-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
+        How it works
+      </h2>
+      <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
+        Under the hood, kazi <em>drives</em> the coding agent you already use (Claude
+        Code, Codex, &hellip;) in a reconcile loop. It is <strong class="ui-strong">not</strong>
+        another coding agent, terminal, or IDE &mdash; as that agent gets better, kazi
+        gets better for free.
+      </p>
+      <p class="ui-muted mx-auto mt-4 max-w-2xl text-center text-sm">
+        Think of it like <strong class="ui-body">{KUBERNETES_LINE}</strong>: you declare
+        desired state, kazi watches actual state, and it closes the gap until the two
+        match.
       </p>
       <ol class="mx-auto mt-10 grid max-w-4xl gap-3 sm:grid-cols-5">
         {
@@ -227,6 +286,39 @@ const personas = [
           ))
         }
       </ol>
+
+      <!-- Proof artifact: the loop converging on a real goal -->
+      <figure class="mx-auto mt-12 max-w-3xl">
+        <img
+          src="/proof-loop.svg"
+          alt="kazi reconcile loop converging: across four iterations the failing predicate set shrinks from [tests, livez] to empty, then go test passes and the deployed GET /livez returns 200 ok — converged."
+          class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
+          width="820"
+          height="372"
+          loading="lazy"
+        />
+        <figcaption class="ui-muted mt-3 text-center text-xs">
+          A real goal &mdash; <em>tests pass and the deployed <code>/livez</code> returns
+          ok</em> &mdash; driven to convergence. Done is observed, not asserted.
+        </figcaption>
+      </figure>
+    </section>
+
+    <!-- Features -->
+    <section class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="features-heading">
+      <h2 id="features-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
+        Why kazi
+      </h2>
+      <div class="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+        {
+          features.map((f) => (
+            <div class="ui-card rounded-2xl border p-6">
+              <h3 class="ui-strong text-lg font-semibold">{f.title}</h3>
+              <p class="ui-body mt-2 text-sm leading-relaxed">{f.body}</p>
+            </div>
+          ))
+        }
+      </div>
     </section>
 
     <!-- With vs. without kazi -->
@@ -262,36 +354,6 @@ const personas = [
           ))
         }
       </div>
-    </section>
-
-    <!-- Drive kazi from your coding agent (the invocation phrase) -->
-    <section
-      class="mx-auto max-w-3xl px-6 py-12 text-center"
-      aria-labelledby="drive-heading"
-    >
-      <h2 id="drive-heading" class="ui-strong text-3xl font-bold tracking-tight">
-        Drive kazi from your coding agent
-      </h2>
-      <p class="ui-body mx-auto mt-3 max-w-2xl">
-        You don't operate kazi directly &mdash; your coding agent does. Teach
-        Claude Code the kazi skill once with
-        <code class="ui-body">kazi install-skill</code>, then hand it work in plain
-        language:
-      </p>
-      <p
-        class="kazi-text mx-auto mt-6 text-balance text-2xl font-extrabold tracking-tight"
-      >
-        &ldquo;{INVOCATION_PHRASE}&rdquo;
-      </p>
-      <p class="ui-muted mx-auto mt-4 max-w-2xl text-sm">
-        The agent recognizes the phrase, authors the acceptance predicates with
-        <code class="ui-body">kazi plan</code>, and runs
-        <code class="ui-body">kazi apply</code> until they are
-        <em>objectively</em> true &mdash; the same way
-        <code class="ui-body">use context7</code> pulls Context7 into a session.
-        It's a trigger on the kazi skill, so the phrase routes to kazi only once
-        the skill is installed.
-      </p>
     </section>
 
     <!-- Token economy without local models (in-family Claude tiering) -->
@@ -441,9 +503,15 @@ kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-
       </p>
     </section>
 
-    <!-- Install + first goal -->
-    <section id="install" class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="install-heading">
-      <h2 id="install-heading" class="ui-strong text-3xl font-bold tracking-tight">Install and run a goal</h2>
+    <!-- Reference / Advanced: drive kazi directly (the raw CLI — NOT the primary path) -->
+    <section id="advanced" class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="advanced-heading">
+      <h2 id="advanced-heading" class="ui-strong text-3xl font-bold tracking-tight">
+        Reference: drive kazi directly
+      </h2>
+      <p class="ui-body mt-3 max-w-2xl text-sm">
+        Most people never touch these &mdash; Claude Code runs them for you (above).
+        They're here for agents and for anyone who wants to drive the loop by hand.
+      </p>
       <div class="mt-6 space-y-6">
         <div>
           <p class="ui-body text-sm font-semibold">1. Install</p>
