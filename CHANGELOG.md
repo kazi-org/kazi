@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.6.0](https://github.com/kazi-org/kazi/compare/v1.5.0...v1.6.0) (2026-06-25)
+
+
+### Features
+
+* **loader:** deprecate test_runner/prod_log provider names with a STDERR hint (T32.1b) ([f98ec15](https://github.com/kazi-org/kazi/commit/f98ec15145137a240214d6d2b50b0316bc526333))
+* **schema:** document match_count verdict + match_regex/merge_stderr keys (T32.1b) ([7620dc6](https://github.com/kazi-org/kazi/commit/7620dc63b6fff4be593adbdb5a03f5a1d934fa1d))
+
 ## [1.5.0](https://github.com/kazi-org/kazi/compare/v1.4.0...v1.5.0) (2026-06-25)
 
 
