@@ -626,6 +626,7 @@ kazi reject  <proposal-ref>                  # discard a draft
 kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
         [--env <name>]                       #   target a deploy environment (staging/prod)
         [--standing]                         #   run continuously (re-converge on drift)
+kazi mcp                                      # start the MCP server over stdio (ADR-0044)
 kazi --help
 ```
 
