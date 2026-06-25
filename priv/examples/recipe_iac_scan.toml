@@ -1,0 +1,34 @@
+# Recipe (T32.9, ADR-0043): IaC / container scan ratchet — findings may only shrink.
+#
+# Trivy scans infrastructure-as-code (and container images) for misconfigurations
+# and known vulnerabilities. Its findings are PRESENCE/CLAIM signals (a pattern
+# matched, not a live exploit), so blocking on the absolute count would wedge a
+# loop on pre-existing debt. Instead this gates with the T32.3 `ratchet` mode:
+# the misconfiguration COUNT is `lower_better` with `allowed_regression = 0`, so
+# security debt can only shrink — a new finding fails, a pre-existing one does not.
+#
+# EXIT-CODE GOTCHA: Trivy exits 0 even WITH findings unless you pass `--exit-code 1`
+# (likewise Semgrep). This recipe deliberately does NOT set `--exit-code`: the
+# ratchet metric reads the finding COUNT from the parsed JSON (a list `path`
+# yields its length), so the verdict never depends on the exit code. Trivy exiting
+# 0 is in fact required — the metric treats any non-zero exit as `:error`.
+#
+# Evidence tier: PRESENCE / CLAIM (ratchet against a baseline).
+#
+#     kazi apply priv/examples/recipe_iac_scan.toml --workspace .
+#
+# Swap `config .` for `image <ref>` to ratchet a container image, and adapt the
+# `path` to the array your scanner emits. See docs/custom-script-recipes.md,
+# docs/ratchet-predicate.md, and `kazi schema ratchet`.
+
+id = "recipe-iac-scan"
+name = "IaC scan: misconfigurations may only shrink"
+
+[[predicate]]
+id = "iac-misconfig-ratchet"
+provider = "ratchet"
+description = "Trivy misconfiguration count stays at or below its stored baseline (parsed, not exit code)"
+baseline = "stored"
+direction = "lower_better"
+allowed_regression = 0.0
+metric = { cmd = "trivy", args = ["config", ".", "--format", "json"], path = "$.Results[0].Misconfigurations" }
