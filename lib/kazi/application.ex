@@ -47,7 +47,14 @@ defmodule Kazi.Application do
     children =
       scheduler_children ++
         if sqlite_nif_available?() do
-          [Kazi.Repo, {Phoenix.PubSub, name: Kazi.PubSub}, KaziWeb.Endpoint]
+          # PubSub before the DAG-snapshot cache (it subscribes on init, T23.7)
+          # before the endpoint that serves the dashboard reading from it.
+          [
+            Kazi.Repo,
+            {Phoenix.PubSub, name: Kazi.PubSub},
+            KaziWeb.DagSource.Cache,
+            KaziWeb.Endpoint
+          ]
         else
           []
         end
