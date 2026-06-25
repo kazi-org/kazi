@@ -50,7 +50,10 @@ while IFS= read -r hit; do
       offenders=$((offenders + 1))
     fi
   done < <(printf '%s\n' "$text" | grep -oE "$adr_re" | grep -oE '[0-9]{4}')
-done < <(grep -rnE "$adr_re" "$README" "$DF_ROOT/docs" 2>/dev/null || true)
+  # This predicate's own doc cites ADR-9999 as a dangling EXAMPLE; exclude it so
+  # the example does not self-trip (mirrors the leak guard excluding its own doc).
+done < <(grep -rnE "$adr_re" "$README" "$DF_ROOT/docs" 2>/dev/null \
+  | grep -v '/docs/doc-freshness.md:' || true)
 
 if [ "$offenders" -eq 0 ]; then
   df_pass "(c) every ADR referenced by a doc exists in docs/adr/"
