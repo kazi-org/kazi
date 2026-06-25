@@ -38,6 +38,29 @@ defmodule Kazi.LoopBudgetTest do
     end
   end
 
+  # A harness double that reports BOTH the rolled-up token estimate
+  # (`cost.tokens`, what `budget_spent.tokens` accumulates) AND the per-field
+  # economy envelope split (`usage`, T34.2), so the T34.4 cached-read discount
+  # is driveable. `:tokens_per_run` is the full total (cached reads counted at
+  # full weight, as a provider sums them); `:cached_per_run` is how many of those
+  # were cached reads.
+  defmodule CachedUsageHarness do
+    @behaviour Kazi.HarnessAdapter
+
+    @impl true
+    def run(_prompt, _workspace, opts) do
+      total = Keyword.get(opts, :tokens_per_run, 0)
+      cached = Keyword.get(opts, :cached_per_run, 0)
+
+      {:ok,
+       %{
+         output: "ok",
+         cost: %{tokens: total},
+         usage: %{input_tokens: total - cached, cached_input_tokens: cached}
+       }}
+    end
+  end
+
   defmodule NoopIntegrate do
     @behaviour Kazi.Action
     @impl true
@@ -62,10 +85,12 @@ defmodule Kazi.LoopBudgetTest do
   end
 
   defp start_loop(goal, opts) do
+    {harness, opts} = Keyword.pop(opts, :harness, TokenHarness)
+
     base = [
       goal: goal,
       providers: %{tests: NeverConvergingProvider},
-      harness: TokenHarness,
+      harness: harness,
       integrate: NoopIntegrate,
       deploy: NoopDeploy,
       # Poll fast so the budget trips quickly rather than waiting on the prod
@@ -201,5 +226,67 @@ defmodule Kazi.LoopBudgetTest do
     assert result.outcome == :over_budget
     assert result.reason == :max_iterations
     assert result.iterations == 2
+  end
+
+  # ===========================================================================
+  # T34.4 (ADR-0046 #4): the budget guard discounts cached reads, so a fresh-
+  # cheap but cache-hit-heavy run is NOT falsely flagged over_budget. The
+  # terminal gate logic is unchanged — only the token COST arithmetic.
+  # ===========================================================================
+
+  describe "cached-read discount on the token dimension" do
+    # 60 tokens/run, 58 of them cached reads (fresh-cheap, cache-heavy). The same
+    # spend trips the token ceiling under the old all-equal arithmetic but not
+    # under the default discount — proven below by flipping ONLY the weight.
+    @cache_heavy adapter_opts: [tokens_per_run: 60, cached_per_run: 58]
+
+    test "a cache-heavy run stays under the token budget with the default discount" do
+      # max_tokens: 100 would trip on the raw 60+60=120 total by iteration 2, but
+      # discounted (cached at 0.1) the token spend stays far under 100, so the run
+      # instead reaches the iteration ceiling. The TOKEN gate never fires.
+      goal = never_converging_goal(Kazi.Budget.new(max_tokens: 100, max_iterations: 10))
+
+      {:ok, loop} = start_loop(goal, [harness: CachedUsageHarness] ++ @cache_heavy)
+
+      assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+      assert result.outcome == :over_budget
+      # NOT :token_budget — the discount kept the cache-heavy spend under the ceiling.
+      assert result.reason == :max_iterations
+      assert result.iterations == 10
+
+      # The rolled-up total still accumulated at full weight (back-compat):
+      # `budget_spent.tokens` reports raw tokens, the discount is gate-only.
+      assert Kazi.Loop.snapshot(loop).tokens_used == 600
+    end
+
+    test "the SAME run trips :token_budget when cached reads are weighted as fresh" do
+      # cached_read_weight: 1.0 is the pre-T34.4 all-equal arithmetic. Same
+      # harness, same ceiling — only the weight differs — and now the cached
+      # reads count full, so the token gate fires. This isolates the discount as
+      # the sole cause of the different outcome; the gate logic is identical.
+      goal =
+        never_converging_goal(
+          Kazi.Budget.new(max_tokens: 100, max_iterations: 10, cached_read_weight: 1.0)
+        )
+
+      {:ok, loop} = start_loop(goal, [harness: CachedUsageHarness] ++ @cache_heavy)
+
+      assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+      assert result.outcome == :over_budget
+      assert result.reason == :token_budget
+    end
+
+    test "a run with NO cached reads trips :token_budget identically (discount is a no-op)" do
+      # Fresh-only spend: the discount has nothing to rebate, so behaviour is
+      # byte-identical to the pre-T34.4 token dimension regardless of the weight.
+      goal = never_converging_goal(Kazi.Budget.new(max_tokens: 100, max_iterations: 10))
+
+      {:ok, loop} =
+        start_loop(goal, harness: CachedUsageHarness, adapter_opts: [tokens_per_run: 60])
+
+      assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+      assert result.outcome == :over_budget
+      assert result.reason == :token_budget
+    end
   end
 end
