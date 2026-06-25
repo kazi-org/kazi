@@ -480,6 +480,7 @@ OUTCOME: :converged   (tests pass · live /livez = "ok")
 | `browser`      | a real browser flow (Playwright) | per-flow config |
 | `prod_log`     | a production-log condition (e.g. 5xx rate) | per-check config |
 | `custom_script`| ANY CLI checker (scanner, mutation tester, contract check) | `cmd`, `args`, `verdict`, `path`, `pass_when` |
+| `ratchet`      | a metric may not regress vs a baseline (coverage, perf, size) | `metric`, `baseline`, `direction`, `allowed_regression` |
 
 `custom_script` is the **escape hatch**: it turns any command-line tool into a
 predicate without a kazi release. Crucially the **verdict is declared, not
@@ -489,6 +490,17 @@ designed out). See [`docs/custom-script-provider.md`](docs/custom-script-provide
 `kazi schema custom_script`, and the recipes in
 [`priv/examples/`](priv/examples/) (`custom_script_sarif.toml`,
 `custom_script_junit.toml`, `custom_script_mutation.toml`).
+
+`ratchet` is the **no-regression** mode: a metric passes only while it stays
+within `allowed_regression` of a `baseline`, read through `direction`
+(`higher_better` for coverage/mutation score, `lower_better` for size/latency).
+The baseline is a fixed number, the metric's own stored prior value (`"stored"` —
+seeded on the first run, tightened on every pass), or a **git ref** (`"main"` —
+the metric recomputed at that ref). Coverage, perf, and size are configs of this
+one mode. With `allowed_regression = 0` a metric "may only improve." See
+[`docs/ratchet-predicate.md`](docs/ratchet-predicate.md), `kazi schema ratchet`,
+and the recipes in [`priv/examples/`](priv/examples/) (`ratchet_coverage.toml`,
+`ratchet_size.toml`).
 
 Add `guard = true` to a predicate to make it an **invariant** (e.g. "coverage must
 not drop") — kazi blocks the "delete the failing test" shortcut.

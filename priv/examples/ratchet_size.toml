@@ -1,0 +1,26 @@
+# Example kazi goal-file: binary/bundle size may not grow vs a git ref (ADR-0041).
+#
+# The SAME ratchet mode that gates coverage gates size — only the config differs.
+# Size is `lower_better` (up is worse). Here the baseline is a GIT REF (`main`):
+# the metric is recomputed against that ref in a throwaway worktree, so the gate
+# is "no larger than it is on main", with a small `allowed_regression` budget
+# (1024 bytes) for unavoidable growth.
+#
+# The metric prints a single number to stdout (the byte size), so no `path` is
+# needed — stdout IS the number.
+#
+#     kazi apply priv/examples/ratchet_size.toml --workspace .
+#
+# See Kazi.Providers.Ratchet and `kazi schema ratchet`.
+
+id = "ratchet-size"
+name = "Binary size may not grow vs main"
+
+[[predicate]]
+id = "size-no-regression"
+provider = "ratchet"
+description = "the built artifact is no larger than on main (within 1 KiB)"
+baseline = "main"
+direction = "lower_better"
+allowed_regression = 1024
+metric = { cmd = "scripts/artifact-size" }
