@@ -112,11 +112,15 @@ distinct hygiene offender (it cannot prove it post-dates the release).
 
 The cutoff is the newest `v*` tag's commit date (override with `RELEASE_REF`).
 
-**This predicate is EXPECTED to FAIL today.** The trim tool (T31.2) has not run,
-so done+released work still sits in the live plan. That is the point: the check
-enumerates exactly the offenders a future trim will clear. It is not a regression.
+**This predicate is EXPECTED to FAIL today.** The trim tool
+(`.github/scripts/trim_plan.py`, T31.2) now EXISTS but has not been run against
+this repo's plan (that live trim is T31.7), so done+released work still sits in
+the live plan. That is the point: the check enumerates exactly the offenders the
+trim will clear (archiving each fully-done, released epic to `docs/plans/archive/`,
+which the non-recursive `docs/plans/*.md` glob then excludes). It is not a
+regression.
 
-Asserts: once T31.2 runs, the live plan holds only open/unreleased work.
+Asserts: once the trim runs, the live plan holds only open/unreleased work.
 
 ## Subsumed coherence checks (referenced, not reimplemented)
 
