@@ -29,6 +29,18 @@ byte-identical to the pre-store path. This page documents the first provider, th
 - `stats/1` — report the byte accounting (`indexed_bytes` / `returned_bytes` /
   `saved_bytes`).
 
+## Redaction before indexing (non-negotiable)
+
+Content is passed through `Kazi.Redaction.redact/1` at the `Kazi.ContextStore.index/3`
+dispatch seam — **before any provider sees it** — so a credential that leaked into
+captured evidence (a `DATABASE_URL` in a failing migration log, an `Authorization`
+header) never lands in the store. "An un-redacted store is a credential store"
+(ADR-0045). This is the **same** redactor the harness-prompt path applies to
+evidence (ADR-0009 amendment), so the two egress paths redact identically. Index
+through `Kazi.ContextStore.index/3`, not a provider's `index/3` directly, to get
+redaction. It is a mitigation, not a guarantee — keep credentials out of the
+workspace.
+
 ## The Gist provider
 
 `Kazi.ContextStore.GistCLI` shells to the [`sirerun/gist`](https://github.com/sirerun/gist)

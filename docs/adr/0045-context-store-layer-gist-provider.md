@@ -132,8 +132,13 @@ without naming the layers. The layering this ADR fixes:
 - **Risk — stale context.** Indexed source goes stale after edits. Mitigation: git
   SHA + mtime + content hash in the label; invalidate changed files each iteration.
 - **Risk — secret leakage.** Logs/configs can hold credentials. Mitigation: kazi
-  applies the **same** redaction it applies to harness prompts (ADR-0009) *before*
-  indexing — non-negotiable; an un-redacted store is a credential store.
+  applies the **same** redaction it applies to harness prompts *before* indexing —
+  non-negotiable; an un-redacted store is a credential store. The shared redactor
+  is `Kazi.Redaction.redact/1` (T35.3), applied at the `Kazi.ContextStore.index/3`
+  dispatch seam (every provider covered) and at the prompt's evidence projection
+  (ADR-0009 amendment), so both egress paths redact identically. (Note: ADR-0009
+  as originally written did not specify redaction; the 2026-06-25 amendment adds
+  it and `Kazi.Redaction` is the single implementation both paths share.)
 - **Risk — double retrieval stack / MCP tool sprawl.** Mitigation: the named-layer
   table is the contract; inner harnesses get search-only; `context_store.provider`
   and `retrieval.provider` are distinct config keys that never alias.
