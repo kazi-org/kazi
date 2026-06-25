@@ -95,6 +95,19 @@ defmodule Kazi.Loop do
   @behaviour :gen_statem
 
   alias Kazi.{Action, Goal, Predicate, PredicateResult, PredicateVector, Retrieval}
+  alias Kazi.ContextStore
+  alias Kazi.ContextStore.Labels, as: StoreLabels
+
+  # T35.4 (ADR-0045 §3): evidence compression via the context store. An artifact
+  # whose rendered size exceeds this threshold is INDEXED under a SHA-scoped label
+  # and replaced in the dispatch prompt by a compact reference plus budget-fitted
+  # snippets retrieved from the store — instead of inlining the whole thing every
+  # iteration. Sub-threshold artifacts inline as before. Default 5 KB (ADR-0045 §3).
+  @context_store_threshold 5_120
+
+  # Default per-iteration retrieval budget (bytes) when the goal/run did not set
+  # `:context_budget` (ADR-0045 §9: apply-iteration snippets ≈ 6 000).
+  @context_store_default_budget 6_000
   # T32.4 anti-gaming enforcement (ADR-0042): the loop composes the enforcement
   # profile onto the ordinary reconcile tick — clean-tree + separate-process checker
   # isolation for the tamper-prone graders (guard + held-out predicates) at the
@@ -1575,6 +1588,7 @@ defmodule Kazi.Loop do
           work_item: String.t(),
           digest: String.t(),
           evidence: String.t(),
+          context_store: String.t() | nil,
           retrieval: String.t() | nil
         }
   defp dispatch_prompt_parts(%Action{params: params}, %Data{goal: goal} = data) do
@@ -1585,26 +1599,118 @@ defmodule Kazi.Loop do
     work_item =
       "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}"
 
-    # VOLATILE: the failing evidence, capped (T19.3/T4.8) so a runaway log/diff is
-    # bounded at the seam by a head+tail window. `inspect/1`'s default `limit`
-    # would itself truncate large evidence — but head-ONLY, losing the tail signal
-    # and at an opaque element count, not a byte budget. Render in FULL
-    # (`limit: :infinity`) so the T4.8 cap is the single governing bound and keeps
-    # both the failure head and its resolution tail. Small evidence is under the cap
-    # and returned verbatim, so the small-evidence path is unchanged.
-    evidence =
-      "evidence: " <>
-        Prompt.truncate_evidence(
-          inspect(Map.get(params, :evidence, %{}), limit: :infinity, printable_limit: :infinity)
-        )
+    # VOLATILE: the failing evidence, rendered in FULL (the T4.8 cap is the single
+    # governing bound) — `evidence_part/3` then either inlines it (capped) as before,
+    # or, when a context store is configured AND the artifact is oversized (T35.4),
+    # indexes it and returns a compact reference plus a budget-fitted snippet section.
+    raw_evidence =
+      inspect(Map.get(params, :evidence, %{}), limit: :infinity, printable_limit: :infinity)
+
+    {evidence, context_store} = evidence_part(raw_evidence, failing, data)
 
     %{
       orientation: orientation_prefix(data),
       work_item: work_item,
       digest: Digest.render(data.working_set_digest),
       evidence: evidence,
+      context_store: context_store,
       retrieval: retrieval_section(data)
     }
+  end
+
+  # T35.4 (ADR-0045 §3): evidence compression. Returns `{evidence_slot,
+  # context_store_section}`.
+  #
+  # DEFAULT (no `:context_store` in adapter_opts) and sub-threshold artifacts:
+  # `{"evidence: " <> truncate_evidence(raw), nil}` — BYTE-IDENTICAL to the
+  # pre-T35.4 path. Only when a store is configured AND the rendered artifact
+  # exceeds `@context_store_threshold` does it compress: index the full artifact
+  # under a SHA-scoped label (redacted inside `ContextStore.index/3`, T35.3), put a
+  # compact reference in the evidence slot (the label + byte count + a one-line
+  # summary, NOT the bytes), and retrieve budget-fitted snippets for the failing
+  # predicates as a separate section. Indexing/search failures degrade silently —
+  # the store is an optimisation, never a precondition (graceful degradation).
+  @spec evidence_part(String.t(), [Predicate.id()], Data.t()) ::
+          {String.t(), String.t() | nil}
+  defp evidence_part(raw_evidence, failing, %Data{adapter_opts: adapter_opts} = data) do
+    case Keyword.get(adapter_opts, :context_store) do
+      nil ->
+        {inline_evidence(raw_evidence), nil}
+
+      store ->
+        if byte_size(raw_evidence) > @context_store_threshold do
+          compress_evidence(raw_evidence, store, failing, data)
+        else
+          {inline_evidence(raw_evidence), nil}
+        end
+    end
+  end
+
+  # Redact BEFORE truncating/inlining: the loop's dispatch prompt is a separate
+  # path from `Kazi.Harness.Prompt.build_prompt` (T34.3 split it into cacheable
+  # sections), so it does not inherit that path's redaction — redact here too so a
+  # secret in captured evidence never reaches the harness (T35.3 parity, ADR-0009
+  # amendment). Redaction is a no-op on ordinary output, so the non-secret path is
+  # byte-identical to before.
+  defp inline_evidence(raw_evidence),
+    do: "evidence: " <> Prompt.truncate_evidence(Kazi.Redaction.redact(raw_evidence))
+
+  @spec compress_evidence(String.t(), ContextStore.t(), [Predicate.id()], Data.t()) ::
+          {String.t(), String.t() | nil}
+  defp compress_evidence(raw_evidence, store, failing, %Data{adapter_opts: adapter_opts} = data) do
+    label = StoreLabels.run_test_log(data.goal.id, data.iterations)
+    budget = Keyword.get(adapter_opts, :context_budget, @context_store_default_budget)
+
+    # Best-effort index; a failure (missing gist, etc.) just means no compression.
+    _ = ContextStore.index(label, raw_evidence, context_store: store)
+
+    reference =
+      "evidence: [indexed #{label}: #{byte_size(raw_evidence)} bytes] " <>
+        evidence_summary(raw_evidence)
+
+    {reference, context_store_section(store, budget, failing, data)}
+  end
+
+  # A one-line summary kept in the prompt alongside the reference, so the agent sees
+  # WHAT was indexed without the bytes. The store section carries the ranked detail.
+  # Redacted (like every other path that egresses evidence to the harness).
+  @spec evidence_summary(String.t()) :: String.t()
+  defp evidence_summary(raw_evidence) do
+    raw_evidence
+    |> Kazi.Redaction.redact()
+    |> String.split("\n", parts: 2)
+    |> hd()
+    |> Prompt.truncate_evidence(max_bytes: 200)
+  end
+
+  # T35.4: retrieve budget-fitted snippets for the current failing predicates and
+  # render them as a clearly-delimited section. Query = the failing-predicate ids
+  # (the error signature). An empty result, a disabled store, or any error renders
+  # NO section (the reference in the evidence slot still names the indexed artifact).
+  @spec context_store_section(ContextStore.t(), non_neg_integer(), [Predicate.id()], Data.t()) ::
+          String.t() | nil
+  defp context_store_section(store, budget, failing, _data) do
+    # `failing` is the list of failing-predicate IDS (as carried in the dispatch
+    # action params), not {id, result} pairs — the ids ARE the error-signature query.
+    query = Enum.map_join(failing, " ", &to_string/1)
+
+    case ContextStore.search(query, budget, context_store: store) do
+      {:ok, [_ | _] = snippets} -> render_context_store_section(snippets)
+      _ -> nil
+    end
+  end
+
+  @spec render_context_store_section([Kazi.ContextStore.Snippet.t()]) :: String.t()
+  defp render_context_store_section(snippets) do
+    "## Indexed evidence (context store)\n\n" <>
+      "Budget-fitted snippets retrieved from the indexed artifacts above. " <>
+      "Use them as evidence; request a targeted source/query if you need more.\n\n" <>
+      Enum.map_join(snippets, "\n\n", fn %Kazi.ContextStore.Snippet{text: text, source: source} ->
+        case source do
+          nil -> "```\n" <> text <> "\n```"
+          src -> "### " <> src <> "\n```\n" <> text <> "\n```"
+        end
+      end)
   end
 
   # T34.3: join the prompt sections — byte-identical to the pre-T34.3
@@ -1618,6 +1724,7 @@ defmodule Kazi.Loop do
          work_item: work_item,
          digest: digest,
          evidence: evidence,
+         context_store: context_store,
          retrieval: retrieval
        }) do
     body =
@@ -1632,11 +1739,16 @@ defmodule Kazi.Loop do
         prefix -> prefix <> "\n\n" <> body
       end
 
-    case retrieval do
-      nil -> prompt
-      section -> prompt <> "\n\n" <> section
-    end
+    # T35.4: the indexed-evidence section sits AFTER the (now-compact) evidence slot
+    # and BEFORE retrieval; nil when no artifact was compressed this iteration, so
+    # the default path is unchanged.
+    prompt = append_section(prompt, context_store)
+    append_section(prompt, retrieval)
   end
+
+  @spec append_section(String.t(), String.t() | nil) :: String.t()
+  defp append_section(prompt, nil), do: prompt
+  defp append_section(prompt, section), do: prompt <> "\n\n" <> section
 
   # T34.3 (ADR-0046 §2): fold this dispatch's per-iteration `context` + `tools`
   # counters into the loop state (attached to the NEXT iteration event). The
