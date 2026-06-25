@@ -37,6 +37,47 @@ defmodule Kazi.Predicate.SchemaTest do
     assert Schema.fetch("not_a_provider") == :error
   end
 
+  describe "live provider schemas (T32.10, ADR-0043)" do
+    for kind <- ~w(http_probe browser metrics) do
+      test "#{kind} has a fully-documented config schema" do
+        {:ok, schema} = Schema.fetch(unquote(kind))
+        assert schema.kind == unquote(kind)
+        assert schema.description != ""
+
+        for key <- schema.keys do
+          assert key.name != ""
+          assert key.type != ""
+          assert is_boolean(key.required)
+          assert key.description != ""
+        end
+      end
+    end
+
+    test "kinds/0 lists every provider schema, sorted" do
+      kinds = Schema.kinds()
+      assert kinds == Enum.sort(kinds)
+      assert MapSet.subset?(MapSet.new(~w(http_probe browser metrics)), MapSet.new(kinds))
+    end
+
+    test "the http_probe schema documents sustained-health samples" do
+      {:ok, schema} = Schema.fetch("http_probe")
+      names = schema.keys |> Enum.map(& &1.name) |> MapSet.new()
+      assert MapSet.subset?(MapSet.new(~w(samples interval_ms)), names)
+    end
+
+    test "the metrics schema documents the three modes' keys" do
+      {:ok, schema} = Schema.fetch("metrics")
+      names = schema.keys |> Enum.map(& &1.name) |> MapSet.new()
+      assert MapSet.subset?(MapSet.new(~w(query_url query pass_when quantile burn_rate)), names)
+    end
+
+    test "kazi schema metrics emits the key schema as JSON and exits 0" do
+      out = capture_io(fn -> assert Kazi.CLI.run(["schema", "metrics"]) == 0 end)
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["kind"] == "metrics"
+    end
+  end
+
   describe "kazi schema custom_script (CLI)" do
     test "emits the custom_script key schema as JSON and exits 0" do
       out = capture_io(fn -> assert Kazi.CLI.run(["schema", "custom_script"]) == 0 end)

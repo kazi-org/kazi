@@ -141,7 +141,10 @@ defmodule Kazi.Loop do
   # the loop would dispatch a fixer agent to "fix" before the change is even
   # deployed (T1.6/T1.7, UC-021). A prior plural `:prod_logs` here silently
   # mis-classified prod-log predicates as code.
-  @default_live_kinds [:http_probe, :prod_log, :browser]
+  # T32.10 (ADR-0043): `:metrics` is a live RED/SLO predicate — it only passes
+  # against a deployed system, so it MUST be deploy-gated like the other live kinds
+  # rather than dispatched to a fixer agent before the change is even deployed.
+  @default_live_kinds [:http_probe, :prod_log, :browser, :metrics]
 
   # When code is green and the change is landed + deployed but the whole vector is
   # still not satisfied (a live predicate has not yet flipped to :pass), the loop

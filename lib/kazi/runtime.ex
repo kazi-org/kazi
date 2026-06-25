@@ -52,6 +52,9 @@ defmodule Kazi.Runtime do
     http_probe: Kazi.Providers.HttpProbe,
     prod_log: Kazi.Providers.ProdLog,
     browser: Kazi.Providers.Browser,
+    # T32.10 (ADR-0043): the live RED/SLO metrics provider (PromQL windowed
+    # quantile + burn-rate gate). Degrades to :unknown when no endpoint is set.
+    metrics: Kazi.Providers.Metrics,
     # T32.1 (ADR-0040): the generic command-runner — the sanctioned extension
     # point. A new verification kind is CONFIG (a goal-file verdict), not a kazi
     # release.

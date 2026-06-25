@@ -152,6 +152,7 @@ defmodule Kazi.Goal.Loader do
   | `"http_probe"`    | `:http_probe`    | live probe (T0.5b) |
   | `"prod_log"`      | `:prod_log`      | prod-log query (T1.6) |
   | `"browser"`       | `:browser`       | Playwright UI check (T2.2) |
+  | `"metrics"`       | `:metrics`       | live RED/SLO metrics (T32.10, ADR-0043) |
   | `"custom_script"` | `:custom_script` | generic command-runner (T32.1, ADR-0040) |
   | `"ratchet"`       | `:ratchet`       | signal-vs-baseline ratchet (T32.3, ADR-0041) |
 
@@ -194,6 +195,10 @@ defmodule Kazi.Goal.Loader do
     "http_probe" => :http_probe,
     "prod_log" => :prod_log,
     "browser" => :browser,
+    # T32.10 (ADR-0043): live RED/SLO metrics. Its pass_when/quantile/burn_rate
+    # keys are validated below (validate_provider_config/3) so a mis-declared gate
+    # fails loudly at load time, not silently at dispatch.
+    "metrics" => :metrics,
     # T32.1 (ADR-0040): the generic command-runner. Its verdict/evidence keys are
     # validated below (validate_custom_script/2) so a mis-declared verdict fails
     # loudly at load time, not silently at dispatch.
@@ -869,6 +874,18 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T32.10 (ADR-0043): metrics config validation. The mode is implicit (burn_rate
+  # > quantile > scalar); each mode's required keys are checked so a mis-declared
+  # gate (a bad pass_when, an out-of-range quantile, a burn_rate missing a window)
+  # fails loudly at load time. A predicate with NO endpoint is intentionally
+  # allowed (it degrades to :unknown / not-applicable at evaluation).
+  defp validate_provider_config(:metrics, config, id) do
+    with :ok <- validate_metrics_direction(config, id),
+         :ok <- validate_metrics_pass_when(config, id) do
+      validate_metrics_mode(config, id)
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
 
   # --- ratchet (T32.3, ADR-0041) ---------------------------------------------
@@ -944,6 +961,117 @@ defmodule Kazi.Goal.Loader do
   rescue
     ArgumentError -> Map.get(map, key)
   end
+
+  # --- metrics (T32.10, ADR-0043) --------------------------------------------
+
+  @metrics_pass_when_re ~r/^\s*(==|!=|<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)\s*$/
+
+  defp validate_metrics_direction(config, id) do
+    case Map.get(config, :direction) do
+      nil ->
+        :ok
+
+      dir when dir in ["higher_better", "lower_better"] ->
+        :ok
+
+      other ->
+        {:error,
+         metrics_error(
+           id,
+           "has unknown direction #{inspect(other)} " <>
+             "(known: \"higher_better\", \"lower_better\")"
+         )}
+    end
+  end
+
+  # A pass_when, when present, must be a well-formed "<op> <number>" comparison.
+  # It is required for the scalar/quantile modes (checked in validate_metrics_mode)
+  # but irrelevant to burn_rate; here we only reject a malformed one.
+  defp validate_metrics_pass_when(config, id) do
+    case Map.get(config, :pass_when) do
+      nil ->
+        :ok
+
+      expr when is_binary(expr) ->
+        if Regex.match?(@metrics_pass_when_re, expr),
+          do: :ok,
+          else:
+            {:error,
+             metrics_error(
+               id,
+               "has malformed pass_when #{inspect(expr)} " <>
+                 "(expected \"<op> <number>\", op one of == != < <= > >=)"
+             )}
+
+      other ->
+        {:error, metrics_error(id, "\"pass_when\" must be a string, got #{inspect(other)}")}
+    end
+  end
+
+  defp validate_metrics_mode(config, id) do
+    cond do
+      Map.has_key?(config, :burn_rate) -> validate_metrics_burn_rate(config, id)
+      Map.has_key?(config, :quantile) -> validate_metrics_quantile(config, id)
+      true -> validate_metrics_scalar(config, id)
+    end
+  end
+
+  defp validate_metrics_scalar(config, id) do
+    with :ok <- require_metrics_query(config, id) do
+      require_metrics_pass_when(config, id)
+    end
+  end
+
+  defp validate_metrics_quantile(config, id) do
+    case Map.get(config, :quantile) do
+      q when is_number(q) and q >= 0 and q <= 1 ->
+        with :ok <- require_metrics_query(config, id) do
+          require_metrics_pass_when(config, id)
+        end
+
+      other ->
+        {:error,
+         metrics_error(id, "\"quantile\" must be a number in 0..1, got #{inspect(other)}")}
+    end
+  end
+
+  defp validate_metrics_burn_rate(config, id) do
+    case Map.get(config, :burn_rate) do
+      %{} = spec ->
+        cond do
+          not (is_binary(spec["long"]) and spec["long"] != "") ->
+            {:error, metrics_error(id, "burn_rate requires a non-empty string \"long\" query")}
+
+          not (is_binary(spec["short"]) and spec["short"] != "") ->
+            {:error, metrics_error(id, "burn_rate requires a non-empty string \"short\" query")}
+
+          not is_number(spec["threshold"]) ->
+            {:error, metrics_error(id, "burn_rate requires a numeric \"threshold\"")}
+
+          true ->
+            :ok
+        end
+
+      other ->
+        {:error, metrics_error(id, "\"burn_rate\" must be a table, got #{inspect(other)}")}
+    end
+  end
+
+  defp require_metrics_query(config, id) do
+    case Map.get(config, :query) do
+      q when is_binary(q) and q != "" -> :ok
+      _ -> {:error, metrics_error(id, "requires a non-empty string \"query\"")}
+    end
+  end
+
+  defp require_metrics_pass_when(config, id) do
+    case Map.get(config, :pass_when) do
+      expr when is_binary(expr) and expr != "" -> :ok
+      _ -> {:error, metrics_error(id, "requires a \"pass_when\" comparison (e.g. \"<= 0.5\")")}
+    end
+  end
+
+  defp metrics_error(id, detail), do: "metrics predicate #{inspect(id)} #{detail}"
 
   defp validate_custom_script_cmd(config, id) do
     case Map.get(config, :cmd) do
