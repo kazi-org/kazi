@@ -2547,6 +2547,12 @@ defmodule Kazi.CLI do
 
   # The predicate vector as a list of `{id, verdict}` objects, sorted by id for a
   # stable, diffable order. An absent/empty vector renders as `[]`.
+  #
+  # ADR-0041 envelope v2: the graded `score` / `prior_score` / `direction` and the
+  # structured `evidence` (LSP-Diagnostic-shaped items) are ADDITIVE, optional
+  # per-predicate fields — emitted ONLY when present, so a boolean predicate stays
+  # exactly `{id, verdict}` and `schema_version` does not bump (an additive field
+  # leaves the contract compatible; docs/schemas/run-result.md §Compatibility).
   @spec predicate_vector_json(Kazi.PredicateVector.t() | nil) :: [map()]
   defp predicate_vector_json(nil), do: []
 
@@ -2555,7 +2561,22 @@ defmodule Kazi.CLI do
     |> Enum.sort_by(fn {id, _} -> to_string(id) end)
     |> Enum.map(fn {id, result} ->
       %{id: to_string(id), verdict: to_string(result.status)}
+      |> put_present("score", result.score)
+      |> put_present("prior_score", result.prior_score)
+      |> put_present("direction", result.direction && to_string(result.direction))
+      |> put_evidence(result.diagnostics)
     end)
+  end
+
+  # Additive field helpers for the envelope-v2 predicate object: a key is written
+  # only when its value is non-default, so a boolean predicate is byte-identical.
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  defp put_evidence(map, []), do: map
+
+  defp put_evidence(map, diagnostics) when is_list(diagnostics) do
+    Map.put(map, "evidence", Enum.map(diagnostics, &Kazi.Evidence.to_map/1))
   end
 
   # What the run consumed. `iterations` always; `exceeded` names the budget
