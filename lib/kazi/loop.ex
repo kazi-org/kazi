@@ -180,7 +180,16 @@ defmodule Kazi.Loop do
           iterations: non_neg_integer(),
           # T3.3d deploy wiring: the release ref recorded on the most recent
           # successful deploy (T3.3c), or nil if nothing was deployed this run.
-          release_ref: String.t() | nil
+          release_ref: String.t() | nil,
+          # T1.4 budget: the single rolled-up token total the budget guard checks,
+          # surfaced so the CLI can render `budget_spent.tokens` (ADR-0046
+          # back-compat).
+          tokens_used: non_neg_integer(),
+          # T34.1 (ADR-0046): the run-aggregate usage envelope — the token/cost
+          # components the harness reported, summed across iterations. Only
+          # reported components are present (absent ≠ zero); empty when no harness
+          # run reported any.
+          usage: map()
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -349,7 +358,16 @@ defmodule Kazi.Loop do
               lease_holder: nil,
               lease_ttl_ms: nil,
               resource_key: nil,
-              held_lease: nil
+              held_lease: nil,
+              # --- T34.1 (ADR-0046): run-aggregate usage envelope --------------
+              # The token/cost components the harness reported, summed across
+              # iterations (the cached-vs-fresh split + dollars). Only reported
+              # components are accumulated (absent ≠ zero), so an empty map means
+              # no harness run reported usage. Surfaced in the terminal result as
+              # the additive `usage` envelope; the single rolled-up total stays in
+              # `tokens_used` for back-compat. Appended last so the existing field
+              # order is untouched.
+              usage: %{}
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -1221,6 +1239,11 @@ defmodule Kazi.Loop do
     # one) into the running total the budget guard checks next tick.
     data = accumulate_tokens(data, result)
 
+    # T34.1 (ADR-0046): accumulate the run-aggregate usage envelope — the
+    # cached-vs-fresh token/cost components the harness reported — surfaced in the
+    # terminal `--json` result. Only reported components are summed (absent ≠ zero).
+    data = accumulate_usage(data, result)
+
     # T4.7 working-set digest: distill a BOUNDED, transcript-free note of the
     # files this iteration touched (map memory ONLY — `Digest.from_result/2`
     # reads the result's `:touched` set and nothing else, never the agent's
@@ -1651,7 +1674,11 @@ defmodule Kazi.Loop do
       iterations: data.iterations,
       # T3.3d deploy wiring: the release ref of the artifact deployed this run
       # (T3.3c), surfaced so the runtime/CLI can report WHAT was shipped.
-      release_ref: data.release_ref
+      release_ref: data.release_ref,
+      # T1.4 budget: the rolled-up token total → `budget_spent.tokens` (ADR-0046).
+      tokens_used: data.tokens_used,
+      # T34.1 (ADR-0046): the run-aggregate usage envelope (token/cost split).
+      usage: data.usage
     }
   end
 
@@ -1799,6 +1826,30 @@ defmodule Kazi.Loop do
     do: tokens
 
   defp token_estimate(_), do: 0
+
+  # T34.1 (ADR-0046): fold a harness run's reported usage components into the
+  # run-aggregate envelope. Only components the harness actually reported are
+  # summed — an unreported field stays absent (absent ≠ zero, honest-unknown).
+  # T34.1 surfaces `cost_usd` (already parsed by the profile, `%{cost_usd: c}`);
+  # T34.2 adds the per-profile cached/fresh TOKEN split onto the same envelope.
+  @spec accumulate_usage(Data.t(), Kazi.HarnessAdapter.result()) :: Data.t()
+  defp accumulate_usage(%Data{} = data, result) do
+    %Data{data | usage: merge_usage(data.usage, usage_components(result))}
+  end
+
+  # The envelope-shaped usage components a harness result carries, keyed by the
+  # `Kazi.CLI.Usage` field names. A result without usage contributes nothing.
+  @spec usage_components(Kazi.HarnessAdapter.result()) :: map()
+  defp usage_components({:ok, %{cost_usd: cost}}) when is_number(cost), do: %{cost_usd: cost}
+  defp usage_components(_), do: %{}
+
+  # Sum two usage maps component-wise; a component present in only one side is
+  # carried through, so the aggregate reports exactly the union of what was
+  # reported (never zero-filling an unreported field).
+  @spec merge_usage(map(), map()) :: map()
+  defp merge_usage(acc, components) do
+    Map.merge(acc, components, fn _key, a, b -> a + b end)
+  end
 
   # =============================================================================
   # T4.7 working-set digest: map memory across iterations
