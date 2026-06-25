@@ -24,7 +24,8 @@
 #      word boundary so prose like "kazi runs it" does NOT trip.
 #   2. A backtick-quoted `` `kazi <cmd>` `` whose <cmd> is NOT in the shipped
 #      command table (lib/kazi/cli.ex @commands). Catches future drift, e.g.
-#      `kazi mcp` / `kazi adopt` (conceptual names, not shipped commands).
+#      `kazi adopt` (a conceptual name, not a shipped command). `kazi mcp` IS a
+#      shipped verb as of T33.1/ADR-0044, so it now passes this check.
 #
 # Usage:
 #   .github/scripts/doc_freshness/check_b_no_dead_command_refs.sh
