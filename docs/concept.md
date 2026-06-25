@@ -350,8 +350,8 @@ command:
 Verb consistency end to end (ADR-0032): the skill verb, the thing the human types
 at the agent, and the CLI command read the same. `kazi plan` authors intent;
 `kazi apply` converges it -- mirroring `/plan` and `/apply`. (`run`/`propose`
-survive only as deprecated aliases for back-compat; they are not the primary
-verbs.) This keeps kazi an outer-loop tool the agent calls (ADR-0001), not a
+were removed at v1.0.0; use `kazi apply`/`kazi plan` -- see docs/deprecations.md.)
+This keeps kazi an outer-loop tool the agent calls (ADR-0001), not a
 harness the human types into directly.
 
 ---
