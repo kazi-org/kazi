@@ -1292,17 +1292,33 @@ defmodule Kazi.CLI do
   # the release ref so far — so an orchestrator follows convergence live. Side
   # effect only; the runtime contains a raising observer.
   defp emit_stream_event(payload) do
-    event = %{
-      schema_version: @run_schema_version,
-      event: "iteration",
-      iteration: Map.get(payload, :iteration),
-      predicates: predicate_vector_json(Map.get(payload, :vector)),
-      converged: Map.get(payload, :converged?) == true,
-      release_ref: Map.get(payload, :release_ref)
-    }
+    event =
+      %{
+        schema_version: @run_schema_version,
+        event: "iteration",
+        iteration: Map.get(payload, :iteration),
+        predicates: predicate_vector_json(Map.get(payload, :vector)),
+        converged: Map.get(payload, :converged?) == true,
+        release_ref: Map.get(payload, :release_ref),
+        # T34.3 (ADR-0046 §2): the per-iteration context counters — the
+        # orientation/retrieval cache state + section token estimates kazi spent on
+        # this dispatch's context. Always present (kazi owns the prompt).
+        context: Map.get(payload, :context) || %{}
+      }
+      # T34.3: the tool counters, present ONLY when the harness exposed a tool-use
+      # stream — an empty `tools` is omitted so absent ≠ zero (ADR-0046 §6).
+      |> put_stream_tools(Map.get(payload, :tools))
 
     IO.puts(Jason.encode!(event))
   end
+
+  # T34.3: include the `tools` counters only when non-empty (the harness reported
+  # tool data); an empty map is omitted so a reader never mistakes "unreported" for
+  # "zero tool calls".
+  defp put_stream_tools(event, tools) when is_map(tools) and map_size(tools) > 0,
+    do: Map.put(event, :tools, tools)
+
+  defp put_stream_tools(event, _tools), do: event
 
   defp format_run_error({:unknown_provider_kinds, kinds}) do
     "goal names provider kind(s) this build can't evaluate: " <>
