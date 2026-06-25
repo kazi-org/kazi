@@ -116,8 +116,9 @@ defmodule Kazi.Teach.InstallSkillTest do
     # subset; it must NEVER reference a `kazi <word>` that is not one of these.
     # `apply`/`plan` are the primary verbs; `run`/`propose` remain as deprecated
     # aliases (ADR-0032) so the router may name them when flagging the deprecation.
+    # `mcp` is the installed MCP-server verb (T33.1, ADR-0044).
     real = MapSet.new(~w(apply run plan propose status init install-skill list-proposed approve
-                         reject export lint help schema version))
+                         reject export lint help schema version mcp))
 
     referenced =
       Regex.scan(~r/`kazi ([a-z][a-z-]*)/, content)
