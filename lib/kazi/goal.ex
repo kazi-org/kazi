@@ -92,6 +92,7 @@ defmodule Kazi.Goal do
           standing: boolean(),
           harness: harness() | nil,
           groups: [Group.t()],
+          enforcement: Kazi.Enforcement.t() | nil,
           metadata: map()
         }
 
@@ -117,13 +118,23 @@ defmodule Kazi.Goal do
             # no taxonomy (ungrouped goal, fully backward-compatible). Appended
             # additively so the existing field order is untouched.
             groups: [],
+            # T32.4 anti-gaming enforcement (ADR-0042): the goal's authored
+            # enforcement profile (`Kazi.Enforcement`) from the goal-file's
+            # `[enforcement]` table, or nil = unspecified (the default-on for
+            # creation / opt-in for repair policy is then resolved by
+            # `Kazi.Enforcement.resolve/1`). Appended additively so the existing
+            # field order is untouched.
+            enforcement: nil,
             metadata: %{}
 
   @doc """
   Builds a goal.
 
   `id` is required. Optional opts: `:name`, `:mode`, `:predicates`, `:guards`,
-  `:budget`, `:scope`, `:standing`, `:harness`, `:groups`, `:metadata`. `:mode`
+  `:budget`, `:scope`, `:standing`, `:harness`, `:groups`, `:enforcement`,
+  `:metadata`. `:enforcement` (default `nil`) is the goal's authored
+  `Kazi.Enforcement` anti-gaming profile (T32.4, ADR-0042); when unset the
+  default-on-for-creation policy is resolved at run time. `:mode`
   is `:repair` (default) or `:create` (creation mode — predicates are acceptance
   criteria, T2.1). `:standing` (default `false`) declares a standing/maintenance
   goal (T3.4d, UC-016). `:harness` (default `nil`) is the goal's harness
@@ -162,6 +173,8 @@ defmodule Kazi.Goal do
       harness: Keyword.get(opts, :harness),
       # T12.1 group taxonomy (ADR-0020): the declared `[[group]]` set.
       groups: Keyword.get(opts, :groups, []),
+      # T32.4 anti-gaming enforcement (ADR-0042): the authored enforcement profile.
+      enforcement: Keyword.get(opts, :enforcement),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
