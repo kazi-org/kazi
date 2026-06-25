@@ -222,10 +222,12 @@ defmodule Kazi.Goal.Loader do
     # mis-declared coverage gate fails at load, not at dispatch. `:property` runs
     # PropCheck under `mix test`; its `num_tests` (the score denominator) is
     # validated below. `:mutation` gates a 0-1 score on a threshold that is
-    # validated `< 1.0` below (NEVER 100%).
+    # validated `< 1.0` below (NEVER 100%). `:cve` scans dependencies; its tool +
+    # (for the manifest tier) count_path are validated below.
     "coverage" => :coverage,
     "property" => :property,
-    "mutation" => :mutation
+    "mutation" => :mutation,
+    "cve" => :cve
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -955,6 +957,16 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T32.8 (ADR-0043): a cve predicate's `tool` (when declared) must be a known
+  # scanner, and a manifest-tier tool (trivy/grype/npm_audit) requires a
+  # `count_path` to read the vuln count it ratchets. govulncheck (tier 1, the
+  # default) needs neither — it parses its reachability finding stream.
+  defp validate_provider_config(:cve, config, id) do
+    with {:ok, tool} <- validate_cve_tool(config, id) do
+      validate_cve_count_path(tool, config, id)
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
 
   # --- static (T32.7, ADR-0043) ----------------------------------------------
@@ -1039,6 +1051,37 @@ defmodule Kazi.Goal.Loader do
            "(got #{inspect(other)})"}
     end
   end
+
+  # --- cve (T32.8, ADR-0043) -------------------------------------------------
+
+  @cve_tools ~w(govulncheck trivy grype npm_audit)
+  @cve_manifest_tools ~w(trivy grype npm_audit)
+
+  defp validate_cve_tool(config, id) do
+    case Map.get(config, :tool, "govulncheck") do
+      tool when tool in @cve_tools ->
+        {:ok, tool}
+
+      other ->
+        {:error,
+         "cve predicate #{inspect(id)} has unknown tool #{inspect(other)} " <>
+           "(known: #{known_list(@cve_tools)})"}
+    end
+  end
+
+  defp validate_cve_count_path(tool, config, id) when tool in @cve_manifest_tools do
+    case Map.get(config, :count_path) do
+      path when is_binary(path) and path != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "cve predicate #{inspect(id)} tool #{inspect(tool)} (manifest tier) requires a " <>
+           "\"count_path\" to the vulnerability count it ratchets"}
+    end
+  end
+
+  defp validate_cve_count_path(_tool, _config, _id), do: :ok
 
   # --- mutation (T32.8, ADR-0043) --------------------------------------------
 

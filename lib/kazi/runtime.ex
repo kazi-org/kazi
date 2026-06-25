@@ -75,7 +75,11 @@ defmodule Kazi.Runtime do
     property: Kazi.Providers.Property,
     # T32.8 (ADR-0043): `:mutation` is the test-quality signal — a 0-1 score gated
     # on a threshold (never 100%), with surviving mutants as evidence.
-    mutation: Kazi.Providers.Mutation
+    mutation: Kazi.Providers.Mutation,
+    # T32.8 (ADR-0043): `:cve` is dependency vuln scanning led by govulncheck
+    # reachability (fail on a transitively-called vuln, call stack as proof);
+    # trivy/grype/npm-audit are manifest-only, ratcheted vs a baseline.
+    cve: Kazi.Providers.Cve
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The

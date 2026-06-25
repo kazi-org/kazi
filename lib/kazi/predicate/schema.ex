@@ -694,6 +694,78 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @cve %{
+    kind: "cve",
+    title: "cve predicate config",
+    description:
+      "Dependency vulnerability scanning (ADR-0043), led by govulncheck REACHABILITY: fail on " <>
+        "a transitively-called vuln with the call stack as proof (tier 1). trivy/grype/npm_audit " <>
+        "are manifest-only (tier 2), ratcheted vs a baseline. Gated on the PARSED output, NEVER " <>
+        "the exit code (govulncheck -json exits 0 even with vulns).",
+    keys: [
+      %{
+        name: "tool",
+        type: "string",
+        required: false,
+        description:
+          "\"govulncheck\" (default, tier-1 reachability), \"trivy\", \"grype\", or " <>
+            "\"npm_audit\" (tier-2 manifest, ratcheted)."
+      },
+      %{
+        name: "cmd",
+        type: "string",
+        required: false,
+        description: "The executable. Default: the tool's binary (npm for npm_audit)."
+      },
+      %{
+        name: "args",
+        type: "array<string>",
+        required: false,
+        description: "Argument list. Default: the tool's JSON-output invocation."
+      },
+      %{
+        name: "env",
+        type: "table | array<pair>",
+        required: false,
+        description: "Extra environment as a {name = value} table or {name, value} pairs."
+      },
+      %{
+        name: "count_path",
+        type: "string",
+        required: false,
+        description:
+          "tier 2 (trivy/grype/npm_audit): a JSONPath to the vulnerability COUNT to ratchet. " <>
+            "Required for the manifest tools."
+      },
+      %{
+        name: "baseline",
+        type: "number | string",
+        required: false,
+        description:
+          "tier 2: the bar — a number (allowed max count) or \"stored\"/\"prior\" (the last " <>
+            "passing count, tightened on a pass; first run seeds it). Default 0."
+      },
+      %{
+        name: "allowed_regression",
+        type: "number",
+        required: false,
+        description: "tier 2: the tolerated increase over baseline. Default 0."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description: "Kill the command after this many ms and map it to :error. Default: none."
+      }
+    ],
+    example: %{
+      "id" => "no-reachable-cves",
+      "provider" => "cve",
+      "tool" => "govulncheck",
+      "args" => ["-json", "./..."]
+    }
+  }
+
   @schemas %{
     "custom_script" => @custom_script,
     "ratchet" => @ratchet,
@@ -703,7 +775,8 @@ defmodule Kazi.Predicate.Schema do
     "metrics" => @metrics,
     "coverage" => @coverage,
     "property" => @property,
-    "mutation" => @mutation
+    "mutation" => @mutation,
+    "cve" => @cve
   }
 
   @doc "The provider kinds with a documented config schema, sorted."
