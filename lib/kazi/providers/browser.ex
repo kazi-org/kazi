@@ -54,6 +54,13 @@ defmodule Kazi.Providers.Browser do
       probe only proves the page renders). Handed verbatim to the runner.
     * `:timeout_ms`  — optional. Per-operation timeout passed to the runner
       (default `30_000`).
+    * `:samples`     — optional. Number of CONSECUTIVE passing runs required
+      (default `1`). With `> 1` the provider re-runs the journey N times as a
+      post-deploy synthetic monitor and passes only when ALL N runs pass — a
+      one-off success among failures never passes (T32.10, ADR-0043). The first
+      non-passing run breaks the streak (a `:fail` run is real failing work; an
+      `:error` run is infra). Sustained runs carry envelope-v2 grading: `score` is
+      the count of passing runs, `direction` `:higher_better`.
     * `:screenshot`  — optional. Where the runner should write a screenshot
       (string path); recorded in evidence when the runner returns one.
     * `:cmd`         — optional. The runner executable (string). Defaults to the
@@ -92,6 +99,7 @@ defmodule Kazi.Providers.Browser do
   @default_cmd "node"
   @default_runner "priv/browser/playwright_runner.js"
   @default_timeout_ms 30_000
+  @default_samples 1
 
   @impl true
   def evaluate(%Predicate{kind: :browser, config: config}, context) do
@@ -100,7 +108,12 @@ defmodule Kazi.Providers.Browser do
     with {:ok, url} <- fetch_url(config),
          {:ok, cmd, args} <- fetch_cmd(config),
          {:ok, payload} <- encode_payload(url, config) do
-      drive(cmd, args, payload, url, workspace, config)
+      # A single-run journey is byte-identical to the pre-T32.10 provider; only
+      # `:samples > 1` enters the consecutive-pass synthetic-monitor path (T32.10).
+      case samples(config) do
+        n when n <= 1 -> drive(cmd, args, payload, url, workspace, config)
+        n -> journey(cmd, args, payload, url, workspace, config, n)
+      end
     else
       {:error, reason} ->
         PredicateResult.error(%{reason: reason, workspace: workspace})
@@ -109,6 +122,71 @@ defmodule Kazi.Providers.Browser do
 
   def evaluate(%Predicate{kind: kind}, _context) do
     PredicateResult.error(%{reason: {:unsupported_kind, kind}})
+  end
+
+  # ===========================================================================
+  # Synthetic journey — N consecutive passing runs (T32.10, ADR-0043)
+  # ===========================================================================
+
+  # Re-run the journey up to N times; the run stops at the first non-:pass result
+  # (a broken streak can never reach N consecutive passes, an :error run is infra),
+  # then summarizes the runs actually taken.
+  defp journey(cmd, args, payload, url, workspace, config, samples) do
+    runs = collect_runs(cmd, args, payload, url, workspace, config, samples, [])
+    summarize_journey(url, workspace, samples, runs)
+  end
+
+  defp collect_runs(cmd, args, payload, url, workspace, config, remaining, acc) do
+    result = drive(cmd, args, payload, url, workspace, config)
+    acc = [result | acc]
+
+    cond do
+      result.status != :pass -> Enum.reverse(acc)
+      remaining <= 1 -> Enum.reverse(acc)
+      true -> collect_runs(cmd, args, payload, url, workspace, config, remaining - 1, acc)
+    end
+  end
+
+  # Any :error run is infra (:error); all-N passing is :pass; otherwise :fail.
+  # The score is the passing-run count (higher-better), the gradient the
+  # controller reads as progress (ADR-0041).
+  defp summarize_journey(url, workspace, samples, runs) do
+    passing = Enum.count(runs, &(&1.status == :pass))
+
+    evidence = %{
+      url: url,
+      workspace: workspace,
+      samples_required: samples,
+      passing_count: passing,
+      runs: Enum.map(runs, &run_summary/1)
+    }
+
+    cond do
+      errored = Enum.find(runs, &(&1.status == :error)) ->
+        PredicateResult.error(Map.merge(errored.evidence, evidence))
+
+      passing == samples ->
+        PredicateResult.new(:pass, evidence, score: passing * 1.0, direction: :higher_better)
+
+      true ->
+        failed = Enum.find(runs, &(&1.status == :fail))
+
+        evidence
+        |> Map.put(:assertions, Map.get(failed.evidence, :assertions, []))
+        |> then(&PredicateResult.new(:fail, &1, score: passing * 1.0, direction: :higher_better))
+    end
+  end
+
+  # A seed-sized per-run record: the run's status and its assertion results.
+  defp run_summary(%PredicateResult{status: status, evidence: evidence}) do
+    %{status: status, assertions: Map.get(evidence, :assertions, [])}
+  end
+
+  defp samples(config) do
+    case Map.get(config, :samples, @default_samples) do
+      n when is_integer(n) and n >= 1 -> n
+      _ -> @default_samples
+    end
   end
 
   # A browser predicate without a URL has nothing to drive: a config (:error)
