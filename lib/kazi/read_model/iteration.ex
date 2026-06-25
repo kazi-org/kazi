@@ -20,6 +20,14 @@ defmodule Kazi.ReadModel.Iteration do
       (T1.2), each with its attributed dispatch; empty list when none.
     * `release_ref` — the release ref recorded on a successful deploy this
       iteration (T3.3c, UC-015); `nil` for non-deploy iterations.
+    * `context` — the per-iteration context counters (T34.3, ADR-0046 §2):
+      `%{"orientation_cache", "retrieval_cache", "orientation_tokens",
+      "evidence_tokens", "retrieval_tokens"}` (string-keyed on disk). Empty `%{}`
+      for a pre-T34.3 / no-dispatch iteration.
+    * `tools` — the per-iteration tool counters (T34.3, ADR-0046 §2):
+      `%{"tool_calls", "file_reads", "search_calls", "graph_calls"}` (string-keyed
+      on disk). Empty `%{}` when the harness exposed no tool-use stream (absent ≠
+      zero).
     * `observed_at` — when the predicates were evaluated.
   """
 
@@ -43,13 +51,26 @@ defmodule Kazi.ReadModel.Iteration do
     # T3.3c release tagging: the release ref recorded on a successful deploy this
     # iteration (a git tag by default); nil for non-deploy iterations.
     field(:release_ref, :string)
+    # T34.3 (ADR-0046 §2): per-iteration context + tool counters (string-keyed
+    # JSON maps). `context` carries the orientation/retrieval cache state + section
+    # token estimates; `tools` the tool-call breakdown. Default `%{}` (no counters).
+    field(:context, :map, default: %{})
+    field(:tools, :map, default: %{})
     field(:observed_at, :utc_datetime_usec)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:goal_ref, :iteration_index, :predicate_vector, :observed_at]
-  @optional [:converged, :action_kind, :action_params, :regressions, :release_ref]
+  @optional [
+    :converged,
+    :action_kind,
+    :action_params,
+    :regressions,
+    :release_ref,
+    :context,
+    :tools
+  ]
 
   @doc """
   Builds a changeset for inserting an iteration row.
