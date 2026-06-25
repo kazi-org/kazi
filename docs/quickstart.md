@@ -120,6 +120,29 @@ The goal's acceptance is the **conjunction** of all predicates — there is no
 contract and the [`[budget]`](../lib/kazi/goal/loader.ex) keys
 (`max_iterations`, `max_wall_clock_ms`, `max_tokens`).
 
+#### Held-out acceptance predicates (anti-gaming)
+
+A `[[predicate]]` may set `held_out = true`:
+
+```toml
+# the acceptance test the agent must satisfy but never sees
+[[predicate]]
+id = "gold-acceptance"
+provider = "test_runner"
+held_out = true        # evaluated + required for convergence, but hidden from the agent
+cmd = "mix"
+args = ["test", "test/gold_acceptance_test.exs"]
+```
+
+A held-out predicate is still evaluated by the controller and still required to
+pass before kazi reports `:converged` — but its id, definition, and evidence are
+**withheld from the agent's dispatch context**. This is the
+*visible-for-iteration vs hidden-for-acceptance* split (Codeforces pretests vs
+system tests; SWE-bench withholds the gold tests): a capable agent can game only
+what it can see, so withholding the acceptance subset keeps the bar honest. The
+visible predicates still seed the agent's fix context. See
+[ADR-0042 §6](adr/0042-anti-gaming-enforcement.md) for the rationale.
+
 ### Converge it
 
 ```sh
