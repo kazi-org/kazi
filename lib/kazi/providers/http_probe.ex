@@ -17,6 +17,21 @@ defmodule Kazi.Providers.HttpProbe do
   It is the live predicate used to verify a deployed service — e.g. asserting the
   Wave-2 fixture's `GET /healthz` returns `200` with body `ok`.
 
+  ## Sustained health (T32.10, ADR-0043)
+
+  A single `200` is a weak signal — a service can answer one probe and then fall
+  over. With `:samples > 1` the provider takes N **consecutive** samples and only
+  passes when ALL of them are healthy (the Kubernetes `failureThreshold` model,
+  not a single 200). The first sample that does not hold breaks the run, so a lone
+  transient `200` among failures never passes. This is the bake-window discipline
+  in code: never converge on a single sample (see `docs/live-providers.md`).
+
+  Sustained results carry envelope-v2 grading (ADR-0041): `score` is the count of
+  healthy samples observed and `direction` is `:higher_better`, so the controller
+  reads "3 of 5 healthy → 4 of 5 healthy" as progress without probe-specific
+  knowledge. A single-sample probe (`:samples` unset or `1`) is byte-identical to
+  the pre-T32.10 provider: no score, the same one-request evidence shape.
+
   ## Config
 
   Read from `Kazi.Predicate.config`:
@@ -29,6 +44,10 @@ defmodule Kazi.Providers.HttpProbe do
     * `:body_match`    — optional. `:contains` (default) or `:exact`.
     * `:headers`       — optional. List of `{name, value}` request headers.
     * `:timeout_ms`    — optional. Request timeout in milliseconds (default 5000).
+    * `:samples`       — optional. Number of CONSECUTIVE healthy samples required
+      (default `1`). With `> 1` the probe passes only when all N samples hold.
+    * `:interval_ms`   — optional. Delay between samples in milliseconds (default
+      `0`). Only meaningful with `:samples > 1`.
 
   At least one of `:expect_status` / `:expect_body` should be given; with neither,
   any completed request passes (the probe only proves reachability).
@@ -50,12 +69,14 @@ defmodule Kazi.Providers.HttpProbe do
   # Bodies can be large; evidence must stay seed-sized, not a full page dump.
   @body_limit 2_000
   @default_timeout_ms 5_000
+  @default_samples 1
+  @default_interval_ms 0
 
   @impl true
   def evaluate(%Predicate{kind: :http_probe, config: config}, _context) do
     case fetch_url(config) do
       {:ok, url} ->
-        request(url, config)
+        probe(url, config)
 
       :error ->
         PredicateResult.error(%{reason: :missing_url})
@@ -64,6 +85,15 @@ defmodule Kazi.Providers.HttpProbe do
 
   def evaluate(%Predicate{kind: kind}, _context) do
     PredicateResult.error(%{reason: :unsupported_kind, kind: kind})
+  end
+
+  # A single-sample probe is byte-identical to the pre-T32.10 provider; only when
+  # `:samples > 1` do we enter the sustained-health path (T32.10).
+  defp probe(url, config) do
+    case samples(config) do
+      n when n <= 1 -> request(url, config)
+      n -> sustained(url, config, n)
+    end
   end
 
   defp fetch_url(config) do
@@ -114,6 +144,87 @@ defmodule Kazi.Providers.HttpProbe do
       PredicateResult.pass(evidence)
     else
       PredicateResult.fail(Map.put(evidence, :assertion_failures, Enum.reverse(failures)))
+    end
+  end
+
+  # ===========================================================================
+  # Sustained health — N consecutive healthy samples (T32.10, ADR-0043)
+  # ===========================================================================
+
+  # Take up to N samples sequentially; the run stops at the first sample that is
+  # not :pass (a broken streak can never reach N consecutive, and an :error sample
+  # is infra). The verdict is then summarized over the samples actually taken.
+  defp sustained(url, config, samples) do
+    interval = interval_ms(config)
+
+    results = collect_samples(url, config, samples, interval, [])
+    summarize(url, samples, results)
+  end
+
+  defp collect_samples(url, config, remaining, interval, acc) do
+    result = request(url, config)
+    acc = [result | acc]
+
+    cond do
+      # A non-pass (a failing assertion or an infra :error) breaks the consecutive
+      # run — no point taking the rest.
+      result.status != :pass -> Enum.reverse(acc)
+      remaining <= 1 -> Enum.reverse(acc)
+      true -> wait_then_sample(url, config, remaining, interval, acc)
+    end
+  end
+
+  defp wait_then_sample(url, config, remaining, interval, acc) do
+    if interval > 0, do: Process.sleep(interval)
+    collect_samples(url, config, remaining - 1, interval, acc)
+  end
+
+  # Map the taken samples to one verdict: any :error sample is infra (:error);
+  # all-N healthy is :pass; otherwise a real :fail. The score is the healthy count
+  # (higher-better), the dense gradient the controller reads as progress (ADR-0041).
+  defp summarize(url, samples, results) do
+    healthy = Enum.count(results, &(&1.status == :pass))
+
+    evidence = %{
+      url: url,
+      samples_required: samples,
+      healthy_count: healthy,
+      samples: Enum.map(results, &sample_summary/1)
+    }
+
+    cond do
+      errored = Enum.find(results, &(&1.status == :error)) ->
+        PredicateResult.error(Map.put(evidence, :reason, errored.evidence[:reason]))
+
+      healthy == samples ->
+        PredicateResult.new(:pass, evidence, score: healthy * 1.0, direction: :higher_better)
+
+      true ->
+        failed = Enum.find(results, &(&1.status == :fail))
+
+        evidence
+        |> Map.put(:assertion_failures, failed.evidence[:assertion_failures])
+        |> then(&PredicateResult.new(:fail, &1, score: healthy * 1.0, direction: :higher_better))
+    end
+  end
+
+  # A seed-sized per-sample record: the status and (when the request completed)
+  # the HTTP status. Enough to see WHICH sample broke the streak.
+  defp sample_summary(%PredicateResult{status: status, evidence: evidence}) do
+    %{status: status, http_status: Map.get(evidence, :http_status)}
+  end
+
+  defp samples(config) do
+    case Map.get(config, :samples, @default_samples) do
+      n when is_integer(n) and n >= 1 -> n
+      _ -> @default_samples
+    end
+  end
+
+  defp interval_ms(config) do
+    case Map.get(config, :interval_ms, @default_interval_ms) do
+      ms when is_integer(ms) and ms >= 0 -> ms
+      _ -> @default_interval_ms
     end
   end
 
