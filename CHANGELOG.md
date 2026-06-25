@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.24.0](https://github.com/kazi-org/kazi/compare/v1.23.0...v1.24.0) (2026-06-25)
+
+
+### Features
+
+* **budget:** discount cached reads in the token budget guard (T34.4) ([281f38c](https://github.com/kazi-org/kazi/commit/281f38c34bfd27485e5c550be8133f8986caa0c5))
+* **goal:** accept budget.cached_read_weight config (T34.4) ([8bed21b](https://github.com/kazi-org/kazi/commit/8bed21ba3284d57b945d99c0c45c2ba0ffbf6b89))
+
 ## [1.23.0](https://github.com/kazi-org/kazi/compare/v1.22.0...v1.23.0) (2026-06-25)
 
 
