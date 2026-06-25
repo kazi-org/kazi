@@ -16,6 +16,17 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.23.0](https://github.com/kazi-org/kazi/compare/v1.22.0...v1.23.0) (2026-06-25)
+
+
+### Features
+
+* **harness:** surface claude tool-use names for per-iteration tool counters ([0447f36](https://github.com/kazi-org/kazi/commit/0447f36cdb6369183dcc9d9bc4cdc81acabc2dbc))
+* **loop:** add Kazi.Loop.Counters for per-iteration context + tool counters ([619f19d](https://github.com/kazi-org/kazi/commit/619f19df369e274df96ec7761eb74425e89f8890))
+* **loop:** record context + tool counters in the iteration event (T34.3) ([5089b58](https://github.com/kazi-org/kazi/commit/5089b580d65b824f443dd1296f6efa916d4fa3af))
+* **read-model:** persist + round-trip per-iteration context + tool counters ([22a51f6](https://github.com/kazi-org/kazi/commit/22a51f68e534d8eac80ee32c2793768a98a4b49c))
+* **runtime,cli:** project context + tool counters to read-model and stream ([129dace](https://github.com/kazi-org/kazi/commit/129dacef31c6af0248248bfef2c2f868a6b885a5))
+
 ## [1.22.0](https://github.com/kazi-org/kazi/compare/v1.21.0...v1.22.0) (2026-06-25)
 
 
