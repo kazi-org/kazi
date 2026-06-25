@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.18.0](https://github.com/kazi-org/kazi/compare/v1.17.0...v1.18.0) (2026-06-25)
+
+
+### Features
+
+* **ci:** add doc command-accuracy gate vs kazi CLI surface ([535f938](https://github.com/kazi-org/kazi/commit/535f938ce37c3e7e263b6d064ee273fac58dfbbc))
+
 ## [1.17.0](https://github.com/kazi-org/kazi/compare/v1.16.0...v1.17.0) (2026-06-25)
 
 
