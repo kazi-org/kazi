@@ -294,6 +294,103 @@ const personas = [
       </p>
     </section>
 
+    <!-- Token economy without local models (in-family Claude tiering) -->
+    <section class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="economy-heading">
+      <h2
+        id="economy-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        Token economy without local models
+      </h2>
+      <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
+        The cheapest agent loop isn't a local GPU &mdash; it's spending frontier
+        reasoning <em>once</em>, then grinding on a cheap model the predicates keep
+        honest. kazi makes that an <strong class="ui-strong">in-family Claude</strong>
+        move, so any Claude Code user gets it with
+        <strong class="ui-strong">no local model and no local GPU host</strong>.
+      </p>
+      <ul class="mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-2">
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">Easy iterations &rarr; cheap model</div>
+          <div class="ui-muted mt-1 text-sm">
+            The N-iteration grind runs on a cheap Claude model
+            (e.g. Haiku 4.5, <code class="ui-body">claude-haiku-4-5</code>).
+          </div>
+        </li>
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">Hard reasoning &rarr; frontier model</div>
+          <div class="ui-muted mt-1 text-sm">
+            Authoring the predicates runs once on a frontier model
+            (e.g. Opus 4.8, <code class="ui-body">claude-opus-4-8</code>).
+          </div>
+        </li>
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">Predicates keep it honest</div>
+          <div class="ui-muted mt-1 text-sm">
+            The cheap model can't declare a false &ldquo;done&rdquo; &mdash;
+            convergence is gated on objective checks, not its say-so.
+          </div>
+        </li>
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">Pay frontier rates only for judgment</div>
+          <div class="ui-muted mt-1 text-sm">
+            Frontier pricing for authoring the predicates, cheap rates for the bulk
+            of the work.
+          </div>
+        </li>
+      </ul>
+
+      <div class="mt-8">
+        <p class="ui-body text-sm font-semibold">
+          Author on a frontier model, grind on a cheap one
+        </p>
+        <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code># Author the predicates once (a frontier model drafts them), then approve:
+kazi plan "add a /healthz endpoint that returns 200 ok" --workspace ./svc
+kazi approve &lt;proposal-ref&gt;
+
+# Drive the grind on a cheap Claude model &mdash; no local model needed:
+kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-4-5</code></pre>
+        <p class="ui-muted mt-2 text-xs">
+          <code class="ui-body">--harness claude --model &lt;id&gt;</code> selects which
+          Claude model runs that call; <code class="ui-body">claude</code> is already the
+          default harness, so the only new thing is naming a cheaper model for the grind.
+        </p>
+      </div>
+
+      <div class="mt-8">
+        <p class="ui-body text-sm font-semibold">
+          Start cheap, escalate on stuck (the smart default)
+        </p>
+        <p class="ui-muted mt-1 text-sm">
+          The adaptive default starts on the cheapest model and steps up only when kazi
+          reports the same slice is stuck &mdash; so you pay frontier rates only for the
+          slices that need them:
+        </p>
+        <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>claude-haiku-4-5  &rarr;  claude-sonnet-4-6  &rarr;  claude-opus-4-8   (cap &mdash; don't escalate past Opus)</code></pre>
+        <p class="ui-muted mt-2 text-xs">
+          The ladder lives in the orchestrating skill, never in kazi: kazi reports
+          per-iteration state (<code class="ui-body">converged</code> /
+          <code class="ui-body">stuck</code> / <code class="ui-body">over_budget</code>)
+          via <code class="ui-body">kazi apply --json</code>, and the skill owns the rungs.
+        </p>
+      </div>
+
+      <p class="ui-muted mx-auto mt-8 max-w-2xl text-center text-sm">
+        <strong class="ui-body">Designed-for, not yet measured.</strong> The cost win is
+        the <em>intended</em> economics &mdash; frontier judgment once, cheap iterations
+        gated by predicates. The headline dollar figure is being measured by the
+        multi-iteration benchmark; until it lands we state the <em>shape</em> of the
+        saving, not an unproven number.
+      </p>
+      <p class="ui-muted mx-auto mt-4 max-w-2xl text-center text-sm">
+        <strong class="ui-body">Want full privacy instead?</strong> Local /
+        bring-your-own-model is the <strong class="ui-body">secondary</strong> option:
+        point kazi at a local model via <code class="ui-body">opencode</code> so your code
+        and context never leave your hardware. It trades the in-family convenience for
+        on-prem privacy.
+      </p>
+    </section>
+
     <!-- What a coding agent says (agent-voiced testimonial) -->
     <section
       class="mx-auto max-w-3xl px-6 py-12"
