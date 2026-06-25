@@ -2576,7 +2576,31 @@ defmodule Kazi.CLI do
       budget_spent: budget_spent_json(result),
       next_action: next_action(status),
       reason: reason_string(Map.get(result, :reason)),
-      release_ref: Map.get(result, :release_ref)
+      release_ref: Map.get(result, :release_ref),
+      enforcement: enforcement_json(Map.get(result, :enforcement))
+    }
+  end
+
+  # T32.4 (ADR-0042 §7): surface the anti-gaming guarantees that were ACTIVE for the
+  # run and any flagged gaming event, so an orchestrator (and a human) can see the
+  # bar was held — honesty per the global definition of done. `active: false` when
+  # enforcement was off, so the field is always present and machine-parseable. The
+  # guarantee atoms render as strings for a stable JSON contract.
+  defp enforcement_json(%{active: active, guarantees: guarantees, gaming_events: events}) do
+    %{
+      active: active,
+      guarantees: Enum.map(guarantees, &to_string/1),
+      gaming_events: Enum.map(events, &gaming_event_json/1)
+    }
+  end
+
+  defp enforcement_json(_), do: %{active: false, guarantees: [], gaming_events: []}
+
+  defp gaming_event_json(%{type: type} = event) do
+    %{
+      type: to_string(type),
+      path: Map.get(event, :path),
+      iteration: Map.get(event, :iteration)
     }
     |> put_usage(result)
   end
