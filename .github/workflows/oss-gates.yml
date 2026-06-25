@@ -1,6 +1,6 @@
 name: OSS gates
 
-# Contribution gates for this public repo (ADR-0034 / E29):
+# Contribution gates for this public repo (ADR-0034 / E29, ADR-0036 / E31):
 #   1. docs-with-code  (T29.1) -- a user-facing surface change must ship docs.
 #                                  Phase 1: strict-but-warn (non-blocking).
 #   2. no-internal-leak (T29.2) -- the PR diff must not introduce private IPs,
@@ -8,6 +8,12 @@ name: OSS gates
 #                                  Blocking on a real hit; diff-scoped so the
 #                                  pre-existing leaks (scrubbed by T29.3) do not
 #                                  red every PR.
+#   3. doc-freshness   (T31.5) -- the self-maintaining doc-freshness predicate
+#                                  set (T31.4) run as a gate. Phase 1: WARN only
+#                                  (exits 0) so the known offenders -- README
+#                                  command coverage (T22.x/T28.3), the kazi
+#                                  mcp/adopt drift (T28.3), and the untrimmed
+#                                  plan (T31.2) -- do not red every PR.
 #
 # Kept separate from ci.yml on purpose: the gates evolve (warn -> block, diff ->
 # full-tree) independently of the build/test pipeline.
@@ -58,3 +64,48 @@ jobs:
           # leaks, to also scan the full working tree.
           SCAN_TREE: "0"
         run: .github/scripts/no_internal_leak_guard.sh
+
+  doc-freshness:
+    name: docs are fresh (T31.5, warn)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags: predicate (d) compares plan task Done: dates
+          # against the newest v* release tag's commit date.
+          fetch-depth: 0
+
+      - name: Run doc-freshness predicates (T31.4)
+        env:
+          # Phase 1: WARN only. The T31.4 runner exits 1 while the known
+          # offenders stand -- README command coverage (T22.x/T28.3), the
+          # `kazi mcp` / `kazi adopt` drift (T28.3), and the untrimmed plan
+          # (T31.2). In WARN mode this step prints the report + offenders and
+          # exits 0 regardless, so it never reds a PR. Flip FRESHNESS_BLOCKING
+          # to "1" (one toggle) once those tasks land and the set is green.
+          FRESHNESS_BLOCKING: "0"
+          # The (E)/(F) coherence checks (T9.9/T16.4) need node site deps and
+          # fetched mix deps that this lightweight gate does not install. Tell
+          # the runner to print their reference instead of invoking them, so a
+          # missing toolchain cannot register a false FAIL. They keep their own
+          # coverage in ci.yml / site-smoke.yml.
+          SKIP_SUBSUMED: "1"
+        run: |
+          set -uo pipefail
+          echo "== doc-freshness gate (T31.5, ADR-0036) =="
+          .github/scripts/doc_freshness/doc_freshness.sh
+          status=$?
+          echo "doc_freshness.sh exit status: ${status}"
+          if [ "${status}" -eq 0 ]; then
+            echo "doc-freshness: PASS."
+            exit 0
+          fi
+          if [ "${FRESHNESS_BLOCKING}" = "1" ]; then
+            echo "doc-freshness gate is in BLOCKING mode -> failing the job."
+            exit "${status}"
+          fi
+          echo "::warning title=doc-freshness::predicates failed; phase-1 WARN, not blocking. See the report above and docs/doc-freshness.md."
+          echo "doc-freshness gate is in phase-1 WARN mode -> reporting only, exiting 0."
+          echo "(Set FRESHNESS_BLOCKING=1 on this job to ratchet it to blocking once green.)"
+          exit 0
