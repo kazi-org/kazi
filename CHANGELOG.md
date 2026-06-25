@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.20.0](https://github.com/kazi-org/kazi/compare/v1.19.0...v1.20.0) (2026-06-25)
+
+
+### Features
+
+* **context-store:** add GistCLI provider (T35.2) ([2acd9a9](https://github.com/kazi-org/kazi/commit/2acd9a99ae53c559b530adac0b4211ee92f6244d))
+
 ## [1.19.0](https://github.com/kazi-org/kazi/compare/v1.18.0...v1.19.0) (2026-06-25)
 
 
