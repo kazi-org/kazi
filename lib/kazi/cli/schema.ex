@@ -87,7 +87,8 @@ defmodule Kazi.CLI.Schema do
             "T34.6/ADR-0046 run-end economy KPIs, DERIVED from the per-iteration envelopes. " <>
               "Always carries status, stuck (boolean), iterations; every DERIVED KPI is " <>
               "OMITTED when unavailable (absent is NOT zero): converged_predicates, " <>
-              "iterations_to_convergence, cost_usd, wall_clock_s, cost_per_converged_predicate, " <>
+              "iterations_to_convergence, tokens (the run-aggregate token total, T34.8), " <>
+              "cost_usd, wall_clock_s, cost_per_converged_predicate, " <>
               "wall_clock_per_converged_predicate, fresh_input_tokens_avoided, " <>
               "rediscovery_tool_calls_avoided, plus the optional harness/model/context_tier " <>
               "breakdown labels. Additive, so schema_version stays 2."
@@ -148,6 +149,7 @@ defmodule Kazi.CLI.Schema do
           "iterations" => 4,
           "converged_predicates" => 2,
           "iterations_to_convergence" => 4,
+          "tokens" => 21_900,
           "cost_usd" => 0.0123,
           "cost_per_converged_predicate" => 0.00615,
           "wall_clock_s" => 88.0,
