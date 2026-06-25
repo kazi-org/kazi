@@ -97,6 +97,18 @@ defmodule Kazi.CLI.Schema do
           name: "error",
           type: "string",
           description: "Present only when status is error: a pre-loop failure message."
+        },
+        %{
+          name: "enforcement",
+          type: "object",
+          description:
+            "T32.4/ADR-0042 anti-gaming guarantees that were ACTIVE for the run: " <>
+              "{active: boolean, guarantees: array<string>, gaming_events: array<object>}. " <>
+              "guarantees is the ACTUAL active set (e.g. clean_tree, separate_process, " <>
+              "read_only_lease, fail_on_skip, ratchet_guards) — clean_tree is omitted when " <>
+              "isolation degraded, so a partial guarantee is visible, never assumed. Each " <>
+              "gaming_event is {type, path, iteration} (e.g. a flagged read_only_write). " <>
+              "active is false when enforcement was off."
         }
       ],
       example: %{
@@ -118,7 +130,12 @@ defmodule Kazi.CLI.Schema do
         },
         "next_action" => "done",
         "reason" => nil,
-        "release_ref" => "v2026.06.23-abc1234"
+        "release_ref" => "v2026.06.23-abc1234",
+        "enforcement" => %{
+          "active" => true,
+          "guarantees" => ["clean_tree", "fail_on_skip", "ratchet_guards", "separate_process"],
+          "gaming_events" => []
+        }
       }
     },
     "plan" => %{
