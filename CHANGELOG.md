@@ -7,6 +7,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.4.0](https://github.com/kazi-org/kazi/compare/v1.3.0...v1.4.0) (2026-06-25)
+
+
+### Features
+
+* **site:** add Docs nav + community footer links (T25.12) ([3cfc635](https://github.com/kazi-org/kazi/commit/3cfc635bd09a5c7850a16a9ed18284fcfbfe7376))
+
 ## [1.3.0](https://github.com/kazi-org/kazi/compare/v1.2.0...v1.3.0) (2026-06-25)
 
 
