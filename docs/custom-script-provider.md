@@ -165,12 +165,19 @@ migration and the removal schedule.
 
 ## Shipped recipes
 
-Three worked examples live under [`priv/examples/`](../priv/examples/):
+Three core worked examples live under [`priv/examples/`](../priv/examples/):
 
 - `custom_script_sarif.toml` — gate on a SARIF scanner's parsed findings count.
 - `custom_script_junit.toml` — a test runner gated on its exit code, with JUnit
   evidence.
 - `custom_script_mutation.toml` — gate on a mutation tester's JSON score.
+
+A fuller catalog of off-the-shelf recipes — contract/schema compat (`buf
+breaking`, `oasdiff`, `pact can-i-deploy`), perf/size ratchets, secret scanning
+(TruffleHog), a11y (Lighthouse), IaC/container scan (Trivy), and visual
+regression — lives in [`docs/custom-script-recipes.md`](custom-script-recipes.md),
+which also documents the two evidence tiers (demonstration vs presence/claim) and
+the per-tool exit-code gotchas.
 
 ## See also
 

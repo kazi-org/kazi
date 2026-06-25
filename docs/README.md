@@ -52,6 +52,14 @@ need them.
     multi-goal result.
 - **[`--json` signals → skill-side escalation](tiering-signals.md)** — how the
   structured output triggers adaptive model tiering.
+- **[The `custom_script` provider](custom-script-provider.md)** — the generic
+  command-runner: turn any CLI checker into a predicate (verdict declared, not
+  assumed).
+- **[The `ratchet` predicate](ratchet-predicate.md)** — signal-vs-baseline within
+  an allowed regression (coverage, perf, size).
+- **[`custom_script` recipe catalog](custom-script-recipes.md)** — off-the-shelf
+  recipes (contract/perf/secret/a11y/IaC/visual), the two evidence tiers, and the
+  per-tool exit-code gotchas.
 - **[Deprecations & removal schedule](deprecations.md)** — removed verbs and the
   versions that removed them.
 - **[OSS contribution gates](oss-gates.md)** — the docs-with-code and no-leak
