@@ -42,9 +42,28 @@ test.describe("kazi website smoke", () => {
     // The hero H1 renders the canonical tagline byte-identically (T25.1), so
     // assert the exact decided string rather than fragments.
     await expect(h1).toContainText(HERO_TAGLINE);
-    // The positioning one-liner from canonical.mjs (the precise category) is the
-    // hero's second beat.
-    await expect(page.getByText(POSITIONING)).toBeVisible();
+    // The hero now LEADS with the Claude Code benefit, not the loop category
+    // (operator refinement): an explicit "you don't run kazi, Claude does" line.
+    await expect(
+      page.getByText("You never run kazi yourself — Claude does."),
+    ).toBeVisible();
+  });
+
+  test("demotes the loop framing into 'How it works'", async ({ page }) => {
+    await page.goto("/");
+    // The positioning one-liner is the under-the-hood category/mechanic, NOT the
+    // opening identity — it lives in the "How it works" section, below the fold,
+    // and still appears verbatim (the coherence gate needs it).
+    const positioning = page.getByText(POSITIONING);
+    await expect(positioning).toBeVisible();
+    const posY = await positioning.evaluate(
+      (el) => el.getBoundingClientRect().top + window.scrollY,
+    );
+    const tryY = await page
+      .locator("#try")
+      .evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    // It appears AFTER the on-ramp, never as the hero lead.
+    expect(posY).toBeGreaterThan(tryY);
   });
 
   test("documents the invocation phrase", async ({ page }) => {
