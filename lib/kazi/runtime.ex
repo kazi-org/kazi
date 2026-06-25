@@ -68,7 +68,11 @@ defmodule Kazi.Runtime do
     static: Kazi.Providers.Static,
     # T32.8 (ADR-0043): `:coverage` is a ratchet instance — patch coverage meets a
     # target AND project coverage does not regress (two Kazi.Ratchet comparisons).
-    coverage: Kazi.Providers.Coverage
+    coverage: Kazi.Providers.Coverage,
+    # T32.8 (ADR-0043): `:property` runs property-based tests (PropCheck under
+    # `mix test`), scoring cases-passed/N with the shrunk counterexample as
+    # evidence.
+    property: Kazi.Providers.Property
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
