@@ -94,8 +94,11 @@ jobs:
         run: |
           set -uo pipefail
           echo "== doc-freshness gate (T31.5, ADR-0036) =="
-          .github/scripts/doc_freshness/doc_freshness.sh
-          status=$?
+          # GitHub runs this step under `bash -e`; capture the runner's exit with
+          # `|| status=$?` so a nonzero does NOT abort the step before the phase-1
+          # WARN swallow below (a bare call + `status=$?` would errexit out here).
+          status=0
+          .github/scripts/doc_freshness/doc_freshness.sh || status=$?
           echo "doc_freshness.sh exit status: ${status}"
           if [ "${status}" -eq 0 ]; then
             echo "doc-freshness: PASS."
