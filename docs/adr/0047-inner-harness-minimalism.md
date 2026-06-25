@@ -1,7 +1,7 @@
 # ADR 0047: Inner-harness minimalism — context-budget tiers + per-run tool-surface restriction
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-06-24

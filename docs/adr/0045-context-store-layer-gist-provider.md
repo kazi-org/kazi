@@ -1,7 +1,7 @@
 # ADR 0045: A context-store layer (text-artifact memory), with Gist as the first provider
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-06-24

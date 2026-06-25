@@ -1,7 +1,7 @@
 # ADR 0044: `kazi mcp` as a first-class installed subcommand
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-06-24

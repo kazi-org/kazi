@@ -1,7 +1,7 @@
 # ADR 0046: Economy accounting envelope — cached-vs-fresh tokens, cost, and cost-per-converged-predicate
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-06-24
@@ -34,10 +34,14 @@ tokens went up" is the *expected* effect of injecting a stable prefix, and the w
 fresh tokens are counted separately. The right KPI is not tokens-per-run; it is
 **cost per converged predicate**.
 
-The providers already expose the fields. Claude Code and Codex report cached-token
-usage in their structured output; the kazi profiles parse usage "to some extent"
-today but discard the breakdown. This ADR is mostly about *not throwing the data
-away* and giving it a stable schema home.
+The providers already expose the fields, and kazi already parses them — then throws
+them away. The `claude` profile's `total_tokens/1` (`lib/kazi/harness/profiles/claude.ex`)
+reads `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, and
+`cache_read_input_tokens` from the Claude envelope and **sums all four into one
+`:tokens` integer**. The cache split is right there in the data and is discarded at
+the moment of folding. This ADR is mostly about *not throwing that data away* and
+giving it a stable schema home — the cheap-vs-fresh distinction the whole
+token-economy program rests on is one un-summed map away.
 
 ## Decision
 
