@@ -199,8 +199,15 @@ Rules:
   pre-envelope contract keeps reading the single rolled-up total there; `usage`
   carries the un-summed split. The two are consistent but serve different readers.
 
-T34.1 defines this envelope and its additive wiring; the per-profile mapping of
-each provider's raw usage onto these fields (with a fidelity marker) lands in T34.2.
+T34.1 defines this envelope and its additive wiring; T34.2 maps each provider's
+raw usage onto these fields. The Anthropic (`:claude`) usage object maps as
+`input_tokens`/`output_tokens` verbatim, `cache_creation_input_tokens →
+cache_write_tokens`, and `cache_read_input_tokens → cached_input_tokens`; the
+`:codex` profile reports the cached/fresh split natively. Each profile also
+records a `usage_fidelity` marker (`:full` / `:partial` / `:none`) on its own
+parse — an INTERNAL parse-confidence signal that is **not** surfaced in the
+`--json` result (the `usage` object carries only the reported token/cost fields).
+A field the provider did not report is omitted from `usage`, never zero-filled.
 
 ## Error object
 
