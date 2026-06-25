@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.26.0](https://github.com/kazi-org/kazi/compare/v1.25.0...v1.26.0) (2026-06-25)
+
+
+### Features
+
+* **bench:** consume the economy KPIs in a per-arm breakdown table (T34.6) ([b55a5bb](https://github.com/kazi-org/kazi/commit/b55a5bba0b8b3d3bdca4ac71c6ca9543b3b43988))
+* **cli:** surface the economy KPIs in the apply --json run result (T34.6) ([9125961](https://github.com/kazi-org/kazi/commit/9125961c03eed8b209469df29d167245998f5426))
+* **economy:** pure run-end economy-KPI fold from iteration envelopes (T34.6) ([f4a4cb3](https://github.com/kazi-org/kazi/commit/f4a4cb30532281837e87ca3651a61fba688f9ff3))
+* **mcp:** mirror the economy KPIs in the kazi_apply run result (T34.6) ([94fe9ff](https://github.com/kazi-org/kazi/commit/94fe9ff920e3e43ceb6b3e8582021dcd92f1eb19))
+
 ## [1.25.0](https://github.com/kazi-org/kazi/compare/v1.24.0...v1.25.0) (2026-06-25)
 
 
