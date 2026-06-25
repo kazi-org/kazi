@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.8.1](https://github.com/kazi-org/kazi/compare/v1.8.0...v1.8.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **site:** use kazi apply/plan verbs in Install + proof asset (T27.6) ([eb9db10](https://github.com/kazi-org/kazi/commit/eb9db1096d17988da8ee8e658fc9c37397bc7171))
+
 ## [1.8.0](https://github.com/kazi-org/kazi/compare/v1.7.0...v1.8.0) (2026-06-25)
 
 
