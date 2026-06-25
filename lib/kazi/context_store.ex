@@ -127,12 +127,19 @@ defmodule Kazi.ContextStore do
   @doc """
   Resolves a store (via `resolve/1`) and invokes its `index/3`. With no
   `:context_store` opt and no config this resolves to the no-op (stores nothing).
+
+  Content is passed through `Kazi.Redaction.redact/1` BEFORE it reaches any
+  provider (T35.3, ADR-0045: "an un-redacted store is a credential store") — the
+  SAME redactor the harness-prompt path applies (`Kazi.Harness.Prompt`), so a
+  secret in captured evidence never lands in the store. Redaction happens at this
+  dispatch seam so every provider is covered uniformly; index through here, not a
+  provider's `index/3` directly.
   """
   @spec index(Labels.label(), String.t(), keyword()) :: {:ok, index_result()} | {:error, term()}
   def index(label, content, opts \\ [])
       when is_binary(label) and is_binary(content) and is_list(opts) do
     {module, init_opts} = resolve(opts)
-    module.index(label, content, init_opts)
+    module.index(label, Kazi.Redaction.redact(content), init_opts)
   end
 
   @doc """
