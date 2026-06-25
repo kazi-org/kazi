@@ -6,7 +6,8 @@ defmodule Kazi.Predicate.Schema do
   `kazi schema <provider-kind>` emits one of these so any agent can introspect the
   config keys a predicate of that kind accepts — no external docs. Today this
   covers `custom_script` (the generic command-runner whose verdict/evidence keys
-  are config, not code); other kinds can be added the same way.
+  are config, not code) and the live providers `http_probe`, `browser`, and
+  `metrics` (T32.10, ADR-0043); other kinds can be added the same way.
 
   The descriptor is intentionally flat — a `keys` list of
   `{name, type, required, description}` rows plus an `example` config object — the
@@ -188,7 +189,231 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
-  @schemas %{"custom_script" => @custom_script, "ratchet" => @ratchet}
+  @http_probe %{
+    kind: "http_probe",
+    title: "http_probe predicate config",
+    description:
+      "The live HTTP probe (T0.5b, sustained-health T32.10/ADR-0043): request a URL and " <>
+        "assert on the response. With samples > 1 it requires N CONSECUTIVE healthy samples " <>
+        "(the K8s failureThreshold model) — never converge on a single 200.",
+    keys: [
+      %{name: "url", type: "string", required: true, description: "The URL to request."},
+      %{
+        name: "method",
+        type: "string",
+        required: false,
+        description: "HTTP method (default \"get\")."
+      },
+      %{
+        name: "expect_status",
+        type: "integer",
+        required: false,
+        description: "The status the response must equal."
+      },
+      %{
+        name: "expect_body",
+        type: "string",
+        required: false,
+        description: "Substring (default) or exact value the body must match."
+      },
+      %{
+        name: "body_match",
+        type: "string",
+        required: false,
+        description: "\"contains\" (default) or \"exact\"."
+      },
+      %{
+        name: "headers",
+        type: "array<pair>",
+        required: false,
+        description: "Request headers as {name, value} pairs."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description: "Per-request timeout in ms (default 5000)."
+      },
+      %{
+        name: "samples",
+        type: "integer",
+        required: false,
+        description:
+          "Number of CONSECUTIVE healthy samples required (default 1). With > 1, a lone " <>
+            "transient 200 among failures never passes (sustained health)."
+      },
+      %{
+        name: "interval_ms",
+        type: "integer",
+        required: false,
+        description: "Delay between samples in ms (default 0). Only meaningful with samples > 1."
+      }
+    ],
+    example: %{
+      "id" => "healthz-sustained",
+      "provider" => "http_probe",
+      "url" => "https://service.example.com/healthz",
+      "expect_status" => 200,
+      "expect_body" => "ok",
+      "samples" => 5,
+      "interval_ms" => 2000
+    }
+  }
+
+  @browser %{
+    kind: "browser",
+    title: "browser predicate config",
+    description:
+      "The live browser/Playwright UI check (T2.2). With samples > 1 it re-runs the journey " <>
+        "as a post-deploy synthetic monitor requiring X CONSECUTIVE passes (T32.10/ADR-0043) — " <>
+        "a one-off success among failures never passes.",
+    keys: [
+      %{name: "url", type: "string", required: true, description: "The page to open."},
+      %{
+        name: "steps",
+        type: "array<table>",
+        required: false,
+        description: "Interaction steps replayed before asserting (runner vocabulary)."
+      },
+      %{
+        name: "assertions",
+        type: "array<table>",
+        required: false,
+        description: "Checks the runner evaluates (e.g. visible/text)."
+      },
+      %{
+        name: "samples",
+        type: "integer",
+        required: false,
+        description:
+          "Number of CONSECUTIVE passing runs required (default 1). With > 1, a synthetic " <>
+            "journey monitor — a one-off success never passes."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description: "Per-operation timeout passed to the runner (default 30000)."
+      },
+      %{
+        name: "screenshot",
+        type: "string",
+        required: false,
+        description: "Path the runner writes a screenshot to."
+      },
+      %{
+        name: "cmd",
+        type: "string",
+        required: false,
+        description: "The runner executable (default the shipped node runner)."
+      },
+      %{
+        name: "args",
+        type: "array<string>",
+        required: false,
+        description: "Argument list for cmd."
+      },
+      %{
+        name: "env",
+        type: "table | array<pair>",
+        required: false,
+        description: "Extra environment for the runner."
+      }
+    ],
+    example: %{
+      "id" => "checkout-journey",
+      "provider" => "browser",
+      "url" => "https://app.example.com",
+      "assertions" => [%{"type" => "visible", "selector" => "h1"}],
+      "samples" => 3
+    }
+  }
+
+  @metrics %{
+    kind: "metrics",
+    title: "metrics predicate config",
+    description:
+      "The live RED/SLO metrics provider (T32.10, ADR-0043): query a Prometheus-compatible " <>
+        "endpoint and gate on a windowed signal. Modes: scalar (Prometheus computes the " <>
+        "number), quantile (kazi computes histogram_quantile over the bucket vector), and " <>
+        "burn_rate (a multiwindow multi-burn-rate SLO gate that fires only when BOTH windows " <>
+        "breach). Absent an endpoint it degrades to :unknown (not applicable), never a pass.",
+    keys: [
+      %{
+        name: "query_url",
+        type: "string",
+        required: false,
+        description:
+          "Prometheus HTTP API base (e.g. \"https://metrics.example.com\"). Absent -> :unknown " <>
+            "(not applicable)."
+      },
+      %{
+        name: "query",
+        type: "string",
+        required: false,
+        description: "The PromQL expression. Required for the scalar and quantile modes."
+      },
+      %{
+        name: "pass_when",
+        type: "string",
+        required: false,
+        description:
+          "The comparison the observed number must satisfy, \"<op> <number>\" with op one of " <>
+            "== != < <= > >=. Required for the scalar and quantile modes."
+      },
+      %{
+        name: "quantile",
+        type: "float",
+        required: false,
+        description:
+          "A float in 0..1 selecting quantile mode; kazi computes histogram_quantile over the " <>
+            "query's bucket vector."
+      },
+      %{
+        name: "burn_rate",
+        type: "table",
+        required: false,
+        description:
+          "{long = promql, short = promql, threshold = number} selecting the SLO burn-rate " <>
+            "gate (fails only when both windows breach)."
+      },
+      %{
+        name: "direction",
+        type: "string",
+        required: false,
+        description: "\"higher_better\" or \"lower_better\" (default lower_better)."
+      },
+      %{
+        name: "window",
+        type: "string",
+        required: false,
+        description: "Informational: the span the query speaks for (kazi does not rewrite [W])."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description: "HTTP request timeout in ms (default 5000)."
+      }
+    ],
+    example: %{
+      "id" => "p95-latency-under-slo",
+      "provider" => "metrics",
+      "query_url" => "https://metrics.example.com",
+      "query" => "sum(rate(http_request_duration_seconds_bucket[5m])) by (le)",
+      "quantile" => 0.95,
+      "pass_when" => "<= 0.5",
+      "window" => "5m"
+    }
+  }
+
+  @schemas %{
+    "custom_script" => @custom_script,
+    "ratchet" => @ratchet,
+    "http_probe" => @http_probe,
+    "browser" => @browser,
+    "metrics" => @metrics
+  }
 
   @doc "The provider kinds with a documented config schema, sorted."
   @spec kinds() :: [String.t()]
