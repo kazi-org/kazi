@@ -16,6 +16,10 @@
 #     the provider must map to :error.
 #   * STUB_NOISE — if set, printed as a leading non-JSON line before the verdict,
 #     proving the provider tolerates diagnostic noise before the JSON object.
+#   * STUB_SEQ_FILE — a file with one JSON verdict per line. Each invocation prints
+#     the NEXT line (tracked in <STUB_SEQ_FILE>.counter), so a synthetic-journey
+#     monitor that re-runs the runner N times sees a controlled SEQUENCE of
+#     verdicts (T32.10). Takes priority over STUB_JSON when set.
 #
 # It also echoes the received payload to stderr (folded into stdout is avoided so
 # it does not pollute the JSON parse) is intentionally NOT done — keeping stdout
@@ -24,6 +28,16 @@ set -euo pipefail
 
 if [ -n "${STUB_NOISE:-}" ]; then
   echo "${STUB_NOISE}"
+fi
+
+if [ -n "${STUB_SEQ_FILE:-}" ]; then
+  counter_file="${STUB_SEQ_FILE}.counter"
+  n=0
+  if [ -f "$counter_file" ]; then n=$(cat "$counter_file"); fi
+  # sed is 1-indexed; print the (n+1)th verdict line, then advance the counter.
+  sed -n "$((n + 1))p" "$STUB_SEQ_FILE"
+  echo "$((n + 1))" > "$counter_file"
+  exit "${STUB_EXIT:-0}"
 fi
 
 if [ -n "${STUB_JSON:-}" ]; then

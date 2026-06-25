@@ -21,7 +21,7 @@ defmodule Kazi.Providers.BrowserTest do
 
   # Build a :browser predicate whose runner command is the stub, with the stub's
   # canned verdict supplied through the provider's real `:env` seam.
-  defp predicate(stub_json, extra_config \\ %{}, stub_env \\ []) do
+  defp predicate(stub_json, extra_config, stub_env) do
     env = [{"STUB_JSON", stub_json} | stub_env]
 
     config =
@@ -235,5 +235,61 @@ defmodule Kazi.Providers.BrowserTest do
 
     assert result.status == :pass
     assert result.evidence.workspace == File.cwd!()
+  end
+
+  # --- synthetic journey (samples > 1, T32.10) -------------------------------
+
+  describe "synthetic journey (samples > 1)" do
+    test "X consecutive passing runs -> :pass with score = passing count", %{workspace: ws} do
+      pass = Jason.encode!(%{status: "pass", assertions: [], screenshot: nil, error: nil})
+      seq_file = write_sequence(ws, [pass, pass, pass])
+
+      result =
+        Browser.evaluate(
+          predicate(nil, %{samples: 3}, [{"STUB_SEQ_FILE", seq_file}]),
+          %{workspace: ws}
+        )
+
+      assert %PredicateResult{status: :pass, evidence: evidence} = result
+      assert evidence.samples_required == 3
+      assert evidence.passing_count == 3
+      assert length(evidence.runs) == 3
+      assert result.score == 3.0
+      assert result.direction == :higher_better
+    end
+
+    test "a one-off success among failures is rejected -> :fail", %{workspace: ws} do
+      pass = Jason.encode!(%{status: "pass", assertions: [], screenshot: nil, error: nil})
+      fail = Jason.encode!(%{status: "fail", assertions: [], screenshot: nil, error: nil})
+      seq_file = write_sequence(ws, [pass, fail])
+
+      result =
+        Browser.evaluate(
+          predicate(nil, %{samples: 3}, [{"STUB_SEQ_FILE", seq_file}]),
+          %{workspace: ws}
+        )
+
+      assert %PredicateResult{status: :fail, evidence: evidence} = result
+      assert evidence.samples_required == 3
+      # Only the first run passed before the streak broke.
+      assert evidence.passing_count == 1
+      assert result.score == 1.0
+      assert result.direction == :higher_better
+    end
+
+    test "samples: 1 is byte-identical to the single-run path (no score)", %{workspace: ws} do
+      verdict = Jason.encode!(%{status: "pass", assertions: [], screenshot: nil, error: nil})
+      result = evaluate(ws, verdict, %{samples: 1})
+
+      assert %PredicateResult{status: :pass, score: nil, evidence: evidence} = result
+      refute Map.has_key?(evidence, :samples_required)
+    end
+  end
+
+  # Write a one-verdict-per-line sequence file the stub consumes across runs.
+  defp write_sequence(workspace, verdicts) do
+    path = Path.join(workspace, "journey_seq_#{System.unique_integer([:positive])}.jsonl")
+    File.write!(path, Enum.join(verdicts, "\n") <> "\n")
+    path
   end
 end
