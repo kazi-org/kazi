@@ -429,12 +429,32 @@ defmodule Kazi.MCP.Server do
       "iterations" => Map.get(result, :iterations, 0),
       "budget_spent" => %{
         "iterations" => Map.get(result, :iterations, 0),
-        "exceeded" => budget_exceeded(result)
+        "exceeded" => budget_exceeded(result),
+        # ADR-0046: the single rolled-up token total stays for back-compat; the
+        # cached-vs-fresh split moves into the additive `usage` envelope.
+        "tokens" => Map.get(result, :tokens_used, 0)
       },
       "next_action" => next_action(status),
       "reason" => reason_string(Map.get(result, :reason)),
       "release_ref" => Map.get(result, :release_ref)
     }
+    |> put_usage(result)
+  end
+
+  # ADR-0046 economy envelope: attach the additive `usage` object only when the
+  # harness reported at least one component, mirroring the CLI's `run_result_json`
+  # so the MCP tool result and the CLI `--json` result stay the SAME shape.
+  defp put_usage(map, result) do
+    case Kazi.CLI.Usage.render(Map.get(result, :usage, %{})) do
+      usage when map_size(usage) == 0 -> map
+      usage -> Map.put(map, "usage", stringify_keys(usage))
+    end
+  end
+
+  # The `usage` envelope keys are the `Kazi.CLI.Usage` field atoms; render them as
+  # strings so the MCP result object is uniformly string-keyed.
+  defp stringify_keys(map) do
+    Map.new(map, fn {key, value} -> {Atom.to_string(key), value} end)
   end
 
   # A pre-loop run failure (vacuous goal, unknown provider/harness, await
