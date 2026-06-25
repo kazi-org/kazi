@@ -13,6 +13,10 @@
 #   - docs/devlog.md       append-only session history
 #   - docs/plan.md         the WBS, records past task wording
 #   - docs/lore.md         append-only invariants/landmines
+#   - docs/doc-freshness.md THIS predicate set's own doc -- it quotes removed
+#                          verbs and unknown commands as examples, so it is
+#                          excluded so its examples do not self-trip (the same
+#                          self-exclusion the leak guard applies to its own doc).
 #
 # Two failure classes are reported, each with file:line:
 #   1. A KNOWN-REMOVED verb token: `kazi run`, `kazi propose`, `mix kazi.run`
@@ -43,7 +47,8 @@ done < <(
       ! -name 'deprecations.md' \
       ! -name 'devlog.md' \
       ! -name 'plan.md' \
-      ! -name 'lore.md'
+      ! -name 'lore.md' \
+      ! -name 'doc-freshness.md'
   } | sort -u
 )
 
