@@ -239,12 +239,12 @@ const personas = [
         You chat with Claude Code, it drives kazi
       </h2>
       <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
-        You don't operate kazi directly &mdash; your coding agent does. After
-        <code class="ui-body">kazi install-skill</code>, the phrase
-        <strong class="ui-strong">&ldquo;{INVOCATION_PHRASE}&rdquo;</strong>
-        routes to kazi the same way <code class="ui-body">use context7</code> pulls
-        Context7 into a session &mdash; it's a trigger on the kazi skill, so it routes to
-        kazi only once the skill is installed.
+        You don't operate kazi directly &mdash; your coding agent does. Once you've run{" "}
+        <code class="ui-body">kazi install-skill</code>, the skill verbs{" "}
+        <code class="ui-body">/kazi plan</code> and <code class="ui-body">/kazi apply</code>{" "}
+        &mdash; or the plain-English phrase{" "}
+        <strong class="ui-strong">&ldquo;{INVOCATION_PHRASE}&rdquo;</strong> &mdash; route to
+        kazi. They're triggers on the kazi skill, so they only work once it's installed.
       </p>
       <ol class="mx-auto mt-10 grid max-w-3xl gap-3 sm:grid-cols-4">
         <li class="ui-card rounded-xl border p-4 text-center">
