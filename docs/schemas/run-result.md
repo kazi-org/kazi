@@ -85,6 +85,12 @@ the branch from the predicate vector:
 | `stuck`        | `investigate`   |
 | `error`        | `investigate`   |
 
+For how an orchestrator reads these fields to drive a skill-side adaptive-model
+escalation ladder (start cheap, step the model up on a stuck/non-converged slice),
+see [`docs/tiering-signals.md`](../tiering-signals.md) (ADR-0035). That mapping is
+a pure interpretation of the fields above -- kazi adds no escalation field or
+policy.
+
 ### `predicates[].verdict`
 
 The predicate's status string at the terminal observation: `pass`, `fail`,
