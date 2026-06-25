@@ -45,6 +45,14 @@ orchestrator pinning the pre-envelope contract keeps reading `budget_spent.token
 (the single rolled-up total) and ignores the richer cached-vs-fresh split. See
 [`usage` — economy envelope](#usage--economy-envelope-adr-0046) below.
 
+ADR-0046 also adds the OPTIONAL `economy` object (T34.6): the run-end KPIs
+**derived** from the per-iteration envelopes (cost / converged-predicate,
+wall-clock / converged-predicate, iterations-to-convergence, fresh-input-avoided,
+rediscovery-tool-calls-avoided, and the run's stuck flag). It is **additive** —
+`status`, `stuck`, and `iterations` are always present and every derived KPI is
+**omitted when unavailable** (absent ≠ zero) — so `schema_version` stays **2**. See
+[`economy` — run-end KPIs](#economy--run-end-kpis-adr-0046) below.
+
 ## Shape
 
 ```json
@@ -64,6 +72,19 @@ orchestrator pinning the pre-envelope contract keeps reading `budget_spent.token
     "cache_write_tokens": 0,
     "output_tokens": 2400,
     "cost_usd": 0.0123
+  },
+  "economy": {
+    "status": "converged",
+    "stuck": false,
+    "iterations": 4,
+    "converged_predicates": 2,
+    "iterations_to_convergence": 4,
+    "cost_usd": 0.0123,
+    "cost_per_converged_predicate": 0.00615,
+    "wall_clock_s": 88.0,
+    "wall_clock_per_converged_predicate": 44.0,
+    "fresh_input_tokens_avoided": 18000,
+    "rediscovery_tool_calls_avoided": 12
   },
   "next_action": "done",
   "reason": null,
@@ -86,6 +107,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `iterations`     | integer             | The loop's observation count. |
 | `budget_spent`   | object              | What the run consumed: `{ "iterations": integer, "exceeded": string\|null, "tokens": integer }`. `exceeded` names the budget dimension only when `status` is `over_budget`, else `null`. `tokens` is the single rolled-up token total (ADR-0046 back-compat); the cached-vs-fresh split lives in `usage`. |
 | `usage`          | object (optional)   | ADR-0046 economy envelope. **Additive, optional** — present only when the harness reported usage. See [`usage` — economy envelope](#usage--economy-envelope-adr-0046). |
+| `economy`        | object              | ADR-0046 run-end KPIs derived from the per-iteration envelopes. **Additive** — `status`/`stuck`/`iterations` always present; each derived KPI omitted when unavailable (absent ≠ zero). See [`economy` — run-end KPIs](#economy--run-end-kpis-adr-0046). |
 | `next_action`    | string (enum)       | An orchestration **hint** — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`) or `stuck`. `null` on a clean converge. |
 | `release_ref`    | string \| null      | The release tag of the artifact deployed this run (T3.3c), or `null` if nothing was deployed. |
@@ -208,6 +230,64 @@ records a `usage_fidelity` marker (`:full` / `:partial` / `:none`) on its own
 parse — an INTERNAL parse-confidence signal that is **not** surfaced in the
 `--json` result (the `usage` object carries only the reported token/cost fields).
 A field the provider did not report is omitted from `usage`, never zero-filled.
+
+## `economy` — run-end KPIs (ADR-0046)
+
+The `economy` object reports the run-end economy KPIs **derived** from the
+per-iteration accounting envelopes (the `usage` split + the per-iteration
+`context` / `tools` counters T34.3 records). It turns raw token totals into the
+metric the operator optimizes — **cost per converged predicate**, not tokens per
+run (ADR-0046 §5).
+
+```json
+"economy": {
+  "status": "converged",
+  "stuck": false,
+  "iterations": 4,
+  "converged_predicates": 2,
+  "iterations_to_convergence": 4,
+  "cost_usd": 0.0123,
+  "cost_per_converged_predicate": 0.00615,
+  "wall_clock_s": 88.0,
+  "wall_clock_per_converged_predicate": 44.0,
+  "fresh_input_tokens_avoided": 18000,
+  "rediscovery_tool_calls_avoided": 12
+}
+```
+
+| Field                                | Type             | Meaning |
+|--------------------------------------|------------------|---------|
+| `status`                             | string           | The terminal status (mirrors the top-level `status`). Always present. |
+| `stuck`                              | boolean          | Whether this run ended stuck. Always present. (The benchmark aggregates these into a `stuck_rate` per harness/model/context-tier.) |
+| `iterations`                         | integer          | The loop's observation count. Always present. |
+| `converged_predicates`               | integer (opt.)   | How many predicates reached `pass` at run end — the KPI denominator. |
+| `iterations_to_convergence`          | integer (opt.)   | The observation at which the run converged. **Omitted** on a non-converged run (never the total). |
+| `cost_usd`                           | float (opt.)     | The run's reported dollar cost (from `usage.cost_usd`). |
+| `wall_clock_s`                       | float (opt.)     | Wall-clock seconds spanned by the recorded observations. |
+| `cost_per_converged_predicate`       | float (opt.)     | `cost_usd / converged_predicates`. |
+| `wall_clock_per_converged_predicate` | float (opt.)     | `wall_clock_s / converged_predicates`. |
+| `fresh_input_tokens_avoided`         | integer (opt.)   | Orientation/retrieval tokens served from the prompt cache (a stable-prefix `hit`) instead of re-sent as fresh input — the saving the caching work buys. |
+| `rediscovery_tool_calls_avoided`     | integer (opt.)   | The decline in file/search/graph re-discovery calls below the cold first dispatch — the rediscovery a stable prefix lets later dispatches skip. |
+| `harness` / `model` / `context_tier` | string (opt.)    | The breakdown labels, present only when set (a benchmark arm). |
+
+Rules:
+
+- **Additive.** `status`, `stuck`, and `iterations` are always present, so the
+  object is never empty; `schema_version` stays **2**.
+- **Absent ≠ zero (honest-unknown, ADR-0046 §6).** A KPI whose inputs were not
+  reported is **omitted**, never `0`. A run whose harness reported no `cost_usd`
+  has no `cost_per_converged_predicate` (not a free run); a run with no
+  per-iteration `tools` stream has no `rediscovery_tool_calls_avoided` (not zero
+  re-discovery). The per-iteration cache/re-discovery KPIs need the recorded
+  iteration log (the default persisted run); without it only the run-aggregate
+  KPIs are derivable and the rest are omitted.
+- **Derived, never re-run.** Every KPI is folded from already-recorded signals
+  (`Kazi.Economy.KPIs`); kazi runs nothing extra to produce them.
+
+The E19/E36 benchmark (`mix kazi.bench --kpis <dir>`) folds a directory of
+recorded `apply --json` results into a per-arm breakdown table
+(cost/converged-predicate, stuck-rate, and the avoided-token deltas by
+harness/model/context-tier), consuming **this** object — re-deriving nothing.
 
 ## Error object
 
