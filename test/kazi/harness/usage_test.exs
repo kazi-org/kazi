@@ -117,4 +117,33 @@ defmodule Kazi.Harness.UsageTest do
       assert Claude.parse("not json at all") == %{}
     end
   end
+
+  describe "Claude.parse/1 — tool-use names (T34.3, ADR-0046 §2)" do
+    test "the default --output-format json envelope carries no per-tool data → :tool_uses absent" do
+      parsed = Claude.parse(~s({"result":"done","num_turns":3}))
+      refute Map.has_key?(parsed, :tool_uses)
+    end
+
+    test "a richer envelope with messages[].content[] tool_use blocks surfaces the names in order" do
+      envelope =
+        ~s({"result":"done","messages":[) <>
+          ~s({"role":"assistant","content":[) <>
+          ~s({"type":"text","text":"thinking"},) <>
+          ~s({"type":"tool_use","name":"Read"},) <>
+          ~s({"type":"tool_use","name":"Grep"}]},) <>
+          ~s({"role":"assistant","content":[) <>
+          ~s({"type":"tool_use","name":"Read"}]}]})
+
+      parsed = Claude.parse(envelope)
+      assert parsed.tool_uses == ["Read", "Grep", "Read"]
+    end
+
+    test "messages without tool_use content yield no :tool_uses key" do
+      envelope =
+        ~s({"result":"done","messages":[{"role":"assistant","content":[) <>
+          ~s({"type":"text","text":"just text"}]}]})
+
+      refute Map.has_key?(Claude.parse(envelope), :tool_uses)
+    end
+  end
 end
