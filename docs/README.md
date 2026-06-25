@@ -43,6 +43,18 @@ need them.
 - **[Claim ↔ kazi-lease compose boundary](pool-claim-lease-deadlock-safety.md)** —
   deadlock safety where `/claim` meets a kazi lease.
 
+## Predicate providers
+
+How to declare each kind of acceptance predicate. Every kind also self-describes
+its config at runtime via `kazi schema <kind>`.
+
+- **[`custom_script`](custom-script-provider.md)** — the generic command-runner:
+  turn any CLI checker into a predicate via a declared verdict (ADR-0040).
+- **[`ratchet`](ratchet-predicate.md)** — the no-regression mode: a metric stays
+  within an allowed regression of a baseline (ADR-0041).
+- **[`coverage`](coverage-predicate.md)** — patch coverage meets a target AND
+  project coverage does not regress (ADR-0043).
+
 ## Reference
 
 - **[`--json` result schemas](schemas/run-result.md)** — the versioned terminal
