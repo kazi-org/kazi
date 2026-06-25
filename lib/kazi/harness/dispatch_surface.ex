@@ -45,7 +45,12 @@ defmodule Kazi.Harness.DispatchSurface do
   """
 
   alias Kazi.Context.Tier
+  alias Kazi.ContextStore.GistInit
   alias Kazi.Harness.Profile
+
+  # The context-store MCP tool inner harnesses MAY call (ADR-0045 §7): search, not
+  # index. Inner harnesses search; only the outer controller indexes (T35.9).
+  @gist_search_tool "gist_search"
 
   # The standard edit/shell tools every reconcile dispatch needs to fix
   # predicates: read/inspect, edit/write, run, and find. This is the NEVER-EMPTY
@@ -61,8 +66,18 @@ defmodule Kazi.Harness.DispatchSurface do
   @graph_server "code-review-graph"
   @mcp_filename ".mcp.json"
 
-  @typedoc "One kazi-injected MCP server: its name + the config file declaring it."
-  @type injected_server :: %{name: String.t(), config: String.t()}
+  @typedoc """
+  An injected MCP server. `:tools`, when present, is the explicit allow-list of
+  `mcp__<server>__<tool>` refs for that server (a SCOPED subset); absent, the bare
+  `mcp__<server>` ref allows all of the server's tools. The context-store server
+  uses `:tools` to expose `gist_search` only — inner harnesses search, they do not
+  index, by default (T35.9, ADR-0045 §7).
+  """
+  @type injected_server :: %{
+          required(:name) => String.t(),
+          required(:config) => String.t(),
+          optional(:tools) => [String.t()]
+        }
 
   @doc """
   The minimal-surface opts to merge into a reconcile dispatch's adapter opts, or
@@ -96,6 +111,7 @@ defmodule Kazi.Harness.DispatchSurface do
       workspace
       |> injected_servers()
       |> tier_filter(Tier.resolve(adapter_opts))
+      |> apply_inner_index_policy(adapter_opts)
       |> build()
     else
       []
@@ -117,7 +133,7 @@ defmodule Kazi.Harness.DispatchSurface do
   @spec build([injected_server()]) :: keyword()
   def build(injected) when is_list(injected) do
     mcp_configs = injected |> Enum.map(& &1.config) |> Enum.uniq()
-    mcp_tools = Enum.map(injected, &"mcp__#{&1.name}")
+    mcp_tools = Enum.flat_map(injected, &server_tool_refs/1)
 
     [
       strict_mcp_config: true,
@@ -125,6 +141,13 @@ defmodule Kazi.Harness.DispatchSurface do
       tools: @standard_tools ++ mcp_tools
     ]
   end
+
+  # A server's allow-list refs: its SCOPED `:tools` when present (e.g. the
+  # context-store server's `gist_search`-only ref), else the bare `mcp__<name>`
+  # (all of that server's tools).
+  @spec server_tool_refs(injected_server()) :: [String.t()]
+  defp server_tool_refs(%{tools: tools}) when is_list(tools) and tools != [], do: tools
+  defp server_tool_refs(%{name: name}), do: ["mcp__#{name}"]
 
   @doc """
   The MCP servers kazi injects into `workspace`, as `{name, config}` entries.
@@ -137,10 +160,48 @@ defmodule Kazi.Harness.DispatchSurface do
   """
   @spec injected_servers(String.t()) :: [injected_server()]
   def injected_servers(workspace) when is_binary(workspace) do
-    [
-      %{name: @graph_server, config: Path.join(workspace, @mcp_filename)}
-      # E35: append the Kazi.ContextStore search-only server here (T35.1).
-    ]
+    mcp_path = Path.join(workspace, @mcp_filename)
+    [%{name: @graph_server, config: mcp_path}] ++ context_store_server(mcp_path)
+  end
+
+  # E35 (T35.9, ADR-0045 §7): when the workspace `.mcp.json` declares the Gist
+  # context-store server (written by `kazi init --with-gist`), expose it to the
+  # inner harness SEARCH-ONLY — its allow-list ref is scoped to `gist_search`, so
+  # `gist_index` is NOT allowed: inner harnesses search, only the outer controller
+  # indexes. A goal/operator can widen this (allow indexing) via the
+  # `:inner_index` opt — see `apply_inner_index_policy/2`. Absent the gist server
+  # from `.mcp.json`, nothing is injected (back-compat).
+  @spec context_store_server(String.t()) :: [injected_server()]
+  defp context_store_server(mcp_path) do
+    name = GistInit.gist_server_name()
+
+    if mcp_declares_server?(mcp_path, name) do
+      [%{name: name, config: mcp_path, tools: ["mcp__#{name}__#{@gist_search_tool}"]}]
+    else
+      []
+    end
+  end
+
+  @spec mcp_declares_server?(String.t(), String.t()) :: boolean()
+  defp mcp_declares_server?(mcp_path, name) do
+    with {:ok, body} <- File.read(mcp_path),
+         {:ok, %{"mcpServers" => servers}} when is_map(servers) <- Jason.decode(body) do
+      Map.has_key?(servers, name)
+    else
+      _ -> false
+    end
+  end
+
+  # T35.9: widen the search-only context-store server to its full tool set (allow
+  # `gist_index`) when the goal/operator opted in via `:inner_index`. Dropping a
+  # server's scoped `:tools` makes `build/1` emit the bare `mcp__<name>` ref.
+  @spec apply_inner_index_policy([injected_server()], keyword()) :: [injected_server()]
+  defp apply_inner_index_policy(servers, adapter_opts) do
+    if Keyword.get(adapter_opts, :inner_index) == true do
+      Enum.map(servers, &Map.delete(&1, :tools))
+    else
+      servers
+    end
   end
 
   @doc "The standard edit/shell tool floor — the never-empty surface."
