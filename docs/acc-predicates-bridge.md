@@ -100,6 +100,6 @@ plan task it claimed.
 - It is L1 only — the verification gate. The objective-done loop (L2),
   blast-radius leasing (L3), and shared observability (L4) are later ADR-0026
   layers.
-- It does not add a `kazi` CLI subcommand. A `kazi plan --from-acc` flag (or a
+- It does not add a `kazi` CLI subcommand. A `kazi plan --from-acc` flag (or a <!-- verb-drift:allow: forward-reference to an unbuilt flag, T20.2+ -->
   `/apply --verify-with-kazi` gate in the global skill) is a deliberate follow-up
   (T20.2+).
