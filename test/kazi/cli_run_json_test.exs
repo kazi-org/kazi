@@ -176,6 +176,15 @@ defmodule Kazi.CLIRunJsonTest do
       assert economy["converged_predicates"] == 2
       assert economy["cost_usd"] > 0
       assert economy["cost_per_converged_predicate"] == economy["cost_usd"] / 2
+
+      # T34.8: the economy object also carries a NON-ZERO run-aggregate token total
+      # (no longer "tokens: 0") and the harness-reported cost — so a benchmark reads
+      # real $/tokens straight from kazi's economy, no capture shim needed. The
+      # token total matches the back-compat rollup; the cost matches the `usage`
+      # figure (Claude's authoritative total_cost_usd).
+      assert economy["tokens"] == payload["budget_spent"]["tokens"]
+      assert economy["tokens"] > 0
+      assert economy["cost_usd"] == usage["cost_usd"]
     end
   end
 
