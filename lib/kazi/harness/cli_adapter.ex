@@ -84,6 +84,7 @@ defmodule Kazi.Harness.CliAdapter do
 
   @behaviour Kazi.HarnessAdapter
 
+  alias Kazi.Economy.PriceMap
   alias Kazi.Harness.Profile
   alias Kazi.Harness.Registry
 
@@ -134,7 +135,14 @@ defmodule Kazi.Harness.CliAdapter do
       # Best-effort, additive: merge the parsed structured fields over the
       # always-present base. A non-structured / field-light stdout contributes
       # nothing, so the result degrades to exactly the base map.
-      {:ok, Map.merge(base, Profile.parse(profile, output))}
+      result = Map.merge(base, Profile.parse(profile, output))
+
+      # T34.5 (ADR-0046): if the harness did NOT report a dollar figure but DID
+      # report a token split for a model the dated price map (`Kazi.Economy.PriceMap`)
+      # prices, derive `cost_usd` from the accounted tokens. A harness-reported
+      # `cost_usd` always wins (kept untouched); an unknown model omits cost
+      # entirely — never a guessed figure (honest-unknown).
+      {:ok, put_priced_cost(result, build_opts)}
     rescue
       error in ErlangError ->
         # :enoent surfaces here when the configured binary is not on PATH —
@@ -143,6 +151,23 @@ defmodule Kazi.Harness.CliAdapter do
           :enoent -> {:error, {:command_not_found, command}}
           other -> {:error, other}
         end
+    end
+  end
+
+  # T34.5 (ADR-0046): derive `cost_usd` from the dated price map ONLY when the
+  # harness reported a token split but no dollar figure, and the run's model is
+  # one the map prices. A harness-reported `:cost_usd` (Claude's `total_cost_usd`)
+  # is authoritative and left untouched; a missing token split, a missing model,
+  # or a model the map does not name leaves `cost_usd` ABSENT — never guessed.
+  @spec put_priced_cost(map(), keyword()) :: map()
+  defp put_priced_cost(result, build_opts) do
+    with false <- Map.has_key?(result, :cost_usd),
+         %{} = usage <- Map.get(result, :usage),
+         model when is_binary(model) <- Keyword.get(build_opts, :model),
+         {:ok, cost} <- PriceMap.cost_usd(model, usage) do
+      Map.put(result, :cost_usd, cost)
+    else
+      _ -> result
     end
   end
 
