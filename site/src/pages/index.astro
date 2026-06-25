@@ -37,9 +37,10 @@ const onramp = [
     note: "Writes the kazi skill to ~/.claude/skills/kazi — a one-time, opt-in step.",
   },
   {
-    label: "In Claude Code, hand it work in plain language",
+    label: "In Claude Code, drive it with the kazi skill",
+    code: '/kazi plan "add a /healthz endpoint that returns 200 ok, with a test, deployed"\n/kazi apply',
     phrase: INVOCATION_PHRASE,
-    note: "Claude authors the acceptance checks, runs them, fixes what's failing, and loops — reporting back only when every check is objectively true (or it is genuinely stuck). You never leave your chat with Claude.",
+    note: "Claude drafts the acceptance predicates, then loops — editing, testing, deploying — reporting back only when every predicate is objectively true (or it is genuinely stuck). You never leave your chat with Claude.",
   },
 ];
 
@@ -211,12 +212,14 @@ const personas = [
             <span class="kazi-text text-xl font-extrabold">3</span>
             <span class="ui-strong font-semibold">{onramp[2].label}</span>
           </div>
-          <p
-            class="kazi-text mt-3 text-balance text-center text-2xl font-extrabold tracking-tight"
-          >
-            &ldquo;{INVOCATION_PHRASE}&rdquo;
+          <pre class="ui-code mt-3 overflow-x-auto rounded-xl border px-5 py-4 font-mono text-sm"><code>{onramp[2].code}</code></pre>
+          <p class="ui-muted mt-2 text-xs">{onramp[2].note}</p>
+          <p class="ui-body mt-3 text-sm">
+            Prefer plain English? Just say
+            <strong class="ui-strong">&ldquo;{INVOCATION_PHRASE}&rdquo;</strong>
+            &mdash; the skill runs the same <code class="ui-body">/kazi plan</code> &rarr;
+            <code class="ui-body">/kazi apply</code> for you.
           </p>
-          <p class="ui-muted mt-3 text-sm">{onramp[2].note}</p>
         </li>
       </ol>
       <p class="ui-muted mx-auto mt-6 max-w-2xl text-center text-sm">
