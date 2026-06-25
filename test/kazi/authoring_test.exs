@@ -173,6 +173,31 @@ defmodule Kazi.AuthoringTest do
       assert [%{id: "code"}] = goal.predicates
     end
 
+    # A drafting harness routinely wraps its JSON in a Markdown code fence; the raw
+    # string is not valid JSON, which broke `kazi plan "<idea>"` (the on-ramp step-1
+    # bug). A caller-drafts string travels the SAME decode path as harness output,
+    # so a fenced / prose-wrapped string pins the JSON-extraction fix.
+    test "a JSON proposal wrapped in a code fence is parsed" do
+      proposal =
+        "Here are the acceptance predicates:\n\n" <>
+          "```json\n{\"predicates\":[{\"id\":\"code\",\"provider\":\"test_runner\"}]}\n```\n\nThat is the draft."
+
+      assert {:ok, %Draft{goal: goal}} =
+               Authoring.propose("fenced idea", harness: ExplodingHarness, proposal: proposal)
+
+      assert [%{id: "code"}] = goal.predicates
+    end
+
+    test "a JSON proposal surrounded by prose (no fence) is parsed" do
+      proposal =
+        ~s(Sure, here is the goal: {"predicates":[{"id":"code","provider":"test_runner"}]} -- done.)
+
+      assert {:ok, %Draft{goal: goal}} =
+               Authoring.propose("prose idea", harness: ExplodingHarness, proposal: proposal)
+
+      assert [%{id: "code"}] = goal.predicates
+    end
+
     test "forwards adapter_opts and workspace to the injected harness" do
       defmodule EchoHarness do
         @behaviour Kazi.HarnessAdapter
