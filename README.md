@@ -173,8 +173,10 @@ rates for the bulk of the work.
 
 ```sh
 # 1. Author the acceptance predicates ONCE — let your session's frontier model
-#    (e.g. Opus 4.8) draft them with `kazi plan`, then approve:
+#    (e.g. Opus 4.8) draft them with `kazi plan`. It PRINTS a proposal-ref:
 kazi plan "add a /healthz endpoint that returns 200 ok" --workspace ./svc
+# review the draft (or run `kazi list-proposed` to see pending refs), then approve
+# it by passing the ref `kazi plan` printed:
 kazi approve <proposal-ref>
 
 # 2. Drive the N-iteration grind on a CHEAP Claude model — no local model needed:
