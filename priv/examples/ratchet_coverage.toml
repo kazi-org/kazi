@@ -1,0 +1,27 @@
+# Example kazi goal-file: coverage may not regress (the ratchet mode, ADR-0041).
+#
+# A ratchet predicate asserts a metric stays within `allowed_regression` of a
+# baseline, interpreted through `direction`. Coverage is `higher_better` (down is
+# worse). With `baseline = "stored"` the bar is the metric's own last passing
+# value (persisted between runs and tightened on a pass; the first run seeds it),
+# and `allowed_regression = 0` means coverage may only improve.
+#
+# The `metric` table declares how to read the number: run `cmd`/`args` in the
+# workspace and read `path` off its JSON stdout (omit `path` to parse stdout as a
+# bare number). Adapt `cmd`/`path` to your coverage tool.
+#
+#     kazi apply priv/examples/ratchet_coverage.toml --workspace .
+#
+# See Kazi.Providers.Ratchet and `kazi schema ratchet`.
+
+id = "ratchet-coverage"
+name = "Coverage may not regress"
+
+[[predicate]]
+id = "coverage-no-regression"
+provider = "ratchet"
+description = "line coverage stays at or above its stored baseline"
+baseline = "stored"
+direction = "higher_better"
+allowed_regression = 0.0
+metric = { cmd = "scripts/coverage", args = ["--json"], path = "$.totals.percent" }
