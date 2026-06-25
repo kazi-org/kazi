@@ -258,14 +258,22 @@ kazi schema run    | jq '.schema_version, .fields[].name'
 ```
 
 
-## 5. The richer alternative: the MCP server (`mix kazi.mcp`)
+## 5. The richer alternative: the MCP server (`kazi mcp`)
 
 Shelling out and parsing JSON is universal and works with any agent. For an
-MCP-speaking harness there is a richer path: the kazi **MCP server**
-(`mix kazi.mcp`, E16, ADR-0024) that wraps these same commands -- plan / approve /
-apply / status -- as self-describing MCP tools (tool descriptions + input/output
-schemas ARE the teaching). An MCP client lists kazi's tools and drives the
-plan -> approve -> apply loop natively, with no shelling or JSON parsing.
+MCP-speaking harness there is a richer path: the kazi **MCP server** that wraps
+these same commands -- plan / approve / apply / status -- as self-describing MCP
+tools (tool descriptions + input/output schemas ARE the teaching). An MCP client
+lists kazi's tools and drives the plan -> approve -> apply loop natively, with no
+shelling or JSON parsing.
+
+On an installed binary the server is the `kazi mcp` verb (T33.1, ADR-0044); a
+source checkout can also start it with `mix kazi.mcp` (E16, ADR-0024). Both start
+the SAME server, so an MCP client config is just:
+
+```json
+{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }
+```
 
 It consumes the same proven JSON contract this recipe documents. For any non-MCP
 agent, this recipe plus the two schemas is the complete, universal way to drive
@@ -278,5 +286,7 @@ kazi.
 - `docs/adr/0023-harness-friendly-agent-drivable-cli.md` -- the agent-drivable
   CLI decision (the recipe shape, the two drive modes, the result contract).
 - `docs/adr/0024-kazi-self-teaching-to-harnesses.md` -- self-teaching: the skill,
-  `help --json` / `schema`, `AGENTS.md`, and the `mix kazi.mcp` server.
+  `help --json` / `schema`, `AGENTS.md`, and the `kazi mcp` / `mix kazi.mcp` server.
+- `docs/adr/0044-kazi-mcp-installed-subcommand.md` -- `kazi mcp` as a first-class
+  installed subcommand (the installed leg of the MCP surface).
 - `docs/schemas/run-result.md`, `docs/schemas/status.md` -- the committed schemas.

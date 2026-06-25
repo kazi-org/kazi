@@ -47,8 +47,11 @@ That writes a skill describing the kazi recipe (the same recipe in
 [orchestrator-recipe.md](orchestrator-recipe.md)) so Claude Code knows how to
 author predicates, approve them, and run the convergence loop on your behalf.
 
-> An MCP server for kazi is not a shipped command today — the skill is the
-> supported way to wire kazi into Claude Code. Use `kazi install-skill`.
+> kazi also ships an MCP server: `kazi mcp` starts it over stdio (ADR-0044), the
+> same server `mix kazi.mcp` runs in a source checkout. Point an MCP client at it
+> with `{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }` to
+> drive the plan → approve → apply loop through self-describing tools. The skill
+> (`kazi install-skill`) remains the prose-free on-ramp for Claude Code.
 
 ---
 

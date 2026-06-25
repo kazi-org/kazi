@@ -234,6 +234,11 @@ kazi schema [apply|status]    # the versioned --json result schema(s) as data
 (the `run`/`propose` aliases were removed in v0.6.0, T27.9). `kazi schema` emits the
 versioned result schemas; both are JSON.
 
+An MCP-speaking harness can skip the JSON-CLI shell-out entirely: `kazi mcp` starts
+the MCP server over stdio (ADR-0044) -- the same server `mix kazi.mcp` runs -- and
+the plan / approve / apply / status tools self-describe through their schemas. Wire
+it with `{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }`.
+
 ## Verifying a pooled task with kazi
 
 In an /apply --pool session, gate your task's MERGE on objective convergence
