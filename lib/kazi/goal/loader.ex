@@ -145,9 +145,17 @@ defmodule Kazi.Goal.Loader do
   | `"http_probe"`    | `:http_probe`    | live probe (T0.5b) |
   | `"prod_log"`      | `:prod_log`      | prod-log query (T1.6) |
   | `"browser"`       | `:browser`       | Playwright UI check (T2.2) |
+  | `"custom_script"` | `:custom_script` | generic command-runner (T32.1, ADR-0040) |
 
   An unknown `provider` is a validation error rather than a silently-accepted
   atom, so a typo fails loudly at load time instead of at dispatch time.
+
+  A `custom_script` predicate carries extra keys (`verdict`, `path`, `pass_when`,
+  `pass_codes`/`fail_codes`, `error_codes`, `evidence_format`, `timeout_ms`) that
+  are VALIDATED at load time (an unknown verdict, a `json` verdict missing
+  `path`/`pass_when`, a malformed `pass_when`, or an `exit_code` verdict without
+  `pass_codes` is a load error). See `Kazi.Providers.CustomScript` and
+  `kazi schema custom_script` for the full key reference.
 
   ## Example
 
@@ -170,7 +178,11 @@ defmodule Kazi.Goal.Loader do
     "test_runner" => :tests,
     "http_probe" => :http_probe,
     "prod_log" => :prod_log,
-    "browser" => :browser
+    "browser" => :browser,
+    # T32.1 (ADR-0040): the generic command-runner. Its verdict/evidence keys are
+    # validated below (validate_custom_script/2) so a mis-declared verdict fails
+    # loudly at load time, not silently at dispatch.
+    "custom_script" => :custom_script
   }
 
   # Reserved keys on a [[predicate]] table; everything else falls through to
@@ -681,14 +693,20 @@ defmodule Kazi.Goal.Loader do
          {:ok, guard?} <- fetch_guard(raw, id),
          {:ok, acceptance?} <- fetch_acceptance(raw, id),
          :ok <- reject_guard_acceptance(guard?, acceptance?, id),
-         {:ok, group} <- fetch_predicate_group(raw, id) do
+         {:ok, group} <- fetch_predicate_group(raw, id),
+         config = predicate_config(raw),
+         # T32.1 (ADR-0040): provider-specific config validation. Generic for
+         # every other kind (config is handed verbatim to the provider); for
+         # custom_script the verdict/evidence keys are checked so a mis-declared
+         # gate fails loudly at load time, not silently at dispatch.
+         :ok <- validate_provider_config(kind, config, id) do
       {:ok,
        Predicate.new(id, kind,
          description: Map.get(raw, "description"),
          guard?: guard?,
          acceptance?: acceptance?,
          group: group,
-         config: predicate_config(raw)
+         config: config
        )}
     end
   end
@@ -768,6 +786,171 @@ defmodule Kazi.Goal.Loader do
     |> Map.drop(@predicate_reserved_keys)
     |> Map.new(fn {key, value} -> {String.to_atom(key), value} end)
   end
+
+  # The verdict strings + evidence-format envelopes a custom_script predicate may
+  # declare. Kept in lockstep with Kazi.Providers.CustomScript (the engine that
+  # consumes them); validated here so a typo is a load error.
+  @custom_script_verdicts ~w(exit_zero exit_code json)
+  @custom_script_evidence_formats ~w(sarif junit json raw)
+
+  # T32.1 (ADR-0040): per-provider config validation. Every kind other than
+  # custom_script hands its config verbatim to the provider (no extra schema), so
+  # the default is a no-op. custom_script's verdict/evidence keys are checked so a
+  # mis-declared gate (an unknown verdict, a json verdict missing `path`, a bad
+  # `pass_when`) fails loudly at load time instead of silently at dispatch.
+  defp validate_provider_config(:custom_script, config, id) do
+    with :ok <- validate_custom_script_cmd(config, id),
+         {:ok, verdict} <- validate_custom_script_verdict(config, id),
+         :ok <- validate_custom_script_args(config, id),
+         :ok <- validate_custom_script_error_codes(config, id),
+         :ok <- validate_custom_script_timeout(config, id),
+         :ok <- validate_custom_script_evidence_format(config, id) do
+      validate_custom_script_for_verdict(verdict, config, id)
+    end
+  end
+
+  defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  defp validate_custom_script_cmd(config, id) do
+    case Map.get(config, :cmd) do
+      cmd when is_binary(cmd) and cmd != "" -> :ok
+      _ -> {:error, "custom_script predicate #{inspect(id)} requires a non-empty string \"cmd\""}
+    end
+  end
+
+  defp validate_custom_script_verdict(config, id) do
+    case Map.get(config, :verdict, "exit_zero") do
+      verdict when verdict in @custom_script_verdicts ->
+        {:ok, verdict}
+
+      other ->
+        {:error,
+         "custom_script predicate #{inspect(id)} has unknown verdict #{inspect(other)} " <>
+           "(known: #{known_list(@custom_script_verdicts)})"}
+    end
+  end
+
+  defp validate_custom_script_args(config, id) do
+    case Map.get(config, :args) do
+      nil -> :ok
+      args when is_list(args) -> if Enum.all?(args, &is_binary/1), do: :ok, else: bad_args(id)
+      _ -> bad_args(id)
+    end
+  end
+
+  defp bad_args(id),
+    do: {:error, "custom_script predicate #{inspect(id)} \"args\" must be an array of strings"}
+
+  defp validate_custom_script_error_codes(config, id) do
+    case Map.get(config, :error_codes) do
+      nil ->
+        :ok
+
+      codes when is_list(codes) ->
+        if Enum.all?(codes, &is_integer/1), do: :ok, else: bad_codes(:error_codes, id)
+
+      _ ->
+        bad_codes(:error_codes, id)
+    end
+  end
+
+  defp validate_custom_script_timeout(config, id) do
+    case Map.get(config, :timeout_ms) do
+      nil ->
+        :ok
+
+      ms when is_integer(ms) and ms > 0 ->
+        :ok
+
+      _ ->
+        {:error,
+         "custom_script predicate #{inspect(id)} \"timeout_ms\" must be a positive integer"}
+    end
+  end
+
+  defp validate_custom_script_evidence_format(config, id) do
+    case Map.get(config, :evidence_format) do
+      nil ->
+        :ok
+
+      format when format in @custom_script_evidence_formats ->
+        :ok
+
+      other ->
+        {:error,
+         "custom_script predicate #{inspect(id)} has unknown evidence_format #{inspect(other)} " <>
+           "(known: #{known_list(@custom_script_evidence_formats)})"}
+    end
+  end
+
+  # The "json" verdict gates on parsed stdout, so it REQUIRES a `path` and a
+  # well-formed `pass_when`; the "exit_code" verdict REQUIRES a non-empty
+  # `pass_codes` list (which exit codes count as a pass). "exit_zero" needs no
+  # extra keys.
+  defp validate_custom_script_for_verdict("json", config, id) do
+    with :ok <- require_string_key(config, :path, id),
+         :ok <- require_string_key(config, :pass_when, id) do
+      validate_pass_when(Map.get(config, :pass_when), id)
+    end
+  end
+
+  defp validate_custom_script_for_verdict("exit_code", config, id) do
+    with :ok <- validate_code_list(config, :pass_codes, id, required: true) do
+      validate_code_list(config, :fail_codes, id, required: false)
+    end
+  end
+
+  defp validate_custom_script_for_verdict(_verdict, _config, _id), do: :ok
+
+  defp require_string_key(config, key, id) do
+    case Map.get(config, key) do
+      value when is_binary(value) and value != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "custom_script predicate #{inspect(id)} with verdict \"json\" requires a non-empty " <>
+           "string #{inspect(Atom.to_string(key))}"}
+    end
+  end
+
+  defp validate_pass_when(expr, id) do
+    if Regex.match?(~r/^\s*(==|!=|<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)\s*$/, expr) do
+      :ok
+    else
+      {:error,
+       "custom_script predicate #{inspect(id)} \"pass_when\" must be \"<op> <number>\" " <>
+         "(op one of == != < <= > >=), got #{inspect(expr)}"}
+    end
+  end
+
+  defp validate_code_list(config, key, id, required: required?) do
+    case Map.get(config, key) do
+      nil ->
+        if required? do
+          {:error,
+           "custom_script predicate #{inspect(id)} with verdict \"exit_code\" requires a " <>
+             "non-empty integer array #{inspect(Atom.to_string(key))}"}
+        else
+          :ok
+        end
+
+      [] when required? ->
+        {:error,
+         "custom_script predicate #{inspect(id)} \"#{key}\" must be a non-empty integer array"}
+
+      codes when is_list(codes) ->
+        if Enum.all?(codes, &is_integer/1), do: :ok, else: bad_codes(key, id)
+
+      _ ->
+        bad_codes(key, id)
+    end
+  end
+
+  defp bad_codes(key, id),
+    do: {:error, "custom_script predicate #{inspect(id)} \"#{key}\" must be an array of integers"}
+
+  defp known_list(values), do: Enum.map_join(values, ", ", &inspect/1)
 
   defp optional_string(map, key, table) do
     case Map.get(map, key) do
