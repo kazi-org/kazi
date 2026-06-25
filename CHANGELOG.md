@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.37.0](https://github.com/kazi-org/kazi/compare/v1.36.0...v1.37.0) (2026-06-25)
+
+
+### Features
+
+* **site:** benefit-first &lt;title&gt;/OG + meta description (T25.4 follow-up) ([84e403f](https://github.com/kazi-org/kazi/commit/84e403f36dd1f8ddf2d1c91a360d035df0056412))
+* **site:** lead the hero with the Claude Code benefit (T25.4) ([a50e170](https://github.com/kazi-org/kazi/commit/a50e170264d1c6601467909ba6168a1afa690db6))
+
 ## [1.36.0](https://github.com/kazi-org/kazi/compare/v1.35.0...v1.36.0) (2026-06-25)
 
 
