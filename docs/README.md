@@ -50,8 +50,13 @@ its config at runtime via `kazi schema <kind>`.
 
 - **[`custom_script`](custom-script-provider.md)** — the generic command-runner:
   turn any CLI checker into a predicate via a declared verdict (ADR-0040).
+  - **[`custom_script` recipe catalog](custom-script-recipes.md)** — off-the-shelf
+    recipes (contract/perf/secret/a11y/IaC/visual), the two evidence tiers, and
+    the per-tool exit-code gotchas.
 - **[`ratchet`](ratchet-predicate.md)** — the no-regression mode: a metric stays
   within an allowed regression of a baseline (ADR-0041).
+- **[`static`](static-predicate.md)** — analysis / type-check / lint, Dialyzer-led
+  + polyglot SARIF; a baseline ratchet on new findings (ADR-0043).
 - **[`coverage`](coverage-predicate.md)** — patch coverage meets a target AND
   project coverage does not regress (ADR-0043).
 - **[`property`](property-predicate.md)** — property-based testing (PropCheck
@@ -60,6 +65,8 @@ its config at runtime via `kazi schema <kind>`.
   a threshold (never 100%), surviving mutants as evidence (ADR-0043).
 - **[`cve`](cve-predicate.md)** — dependency vulnerability scanning: `govulncheck`
   reachability (call stack as proof) + manifest scanners ratcheted (ADR-0043).
+- **[Live providers](live-providers.md)** — `http_probe` sustained health,
+  `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
 
 ## Reference
 
@@ -70,14 +77,6 @@ its config at runtime via `kazi schema <kind>`.
     multi-goal result.
 - **[`--json` signals → skill-side escalation](tiering-signals.md)** — how the
   structured output triggers adaptive model tiering.
-- **[The `custom_script` provider](custom-script-provider.md)** — the generic
-  command-runner: turn any CLI checker into a predicate (verdict declared, not
-  assumed).
-- **[The `ratchet` predicate](ratchet-predicate.md)** — signal-vs-baseline within
-  an allowed regression (coverage, perf, size).
-- **[`custom_script` recipe catalog](custom-script-recipes.md)** — off-the-shelf
-  recipes (contract/perf/secret/a11y/IaC/visual), the two evidence tiers, and the
-  per-tool exit-code gotchas.
 - **[Deprecations & removal schedule](deprecations.md)** — removed verbs and the
   versions that removed them.
 - **[OSS contribution gates](oss-gates.md)** — the docs-with-code and no-leak
