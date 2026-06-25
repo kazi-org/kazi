@@ -1,6 +1,6 @@
 # Changelog
 
-> **Breaking (v0.6.0):** the deprecated CLI aliases `kazi run`, `kazi propose`,
+> **Breaking (v1.0.0):** the deprecated CLI aliases `kazi run`, `kazi propose`,
 > and `mix kazi.run` were **removed** (verb unification under ADR-0032). They no
 > longer parse: `kazi run` / `kazi propose` now error as unknown commands, and the
 > MCP server no longer advertises `kazi_run` / `kazi_propose`. Use `kazi apply`,
@@ -14,7 +14,7 @@
 
 * repoint run/propose to apply/plan in user-facing docs (T27.9)
 * repoint run/propose to apply/plan; assert aliases now error (T27.9)
-* mark run/propose aliases REMOVED in v0.6.0 (T27.9)
+* mark run/propose aliases REMOVED in v1.0.0 (T27.9)
 * **teach:** scrub run/propose from SKILL.md template and AGENTS.md (T27.9)
 * **mcp:** MCP tools kazi_run/kazi_propose are removed; use kazi_apply/kazi_plan.
 * **cli:** kazi schema run/propose no longer resolve.
@@ -37,7 +37,7 @@
 
 ### Documentation
 
-* mark run/propose aliases REMOVED in v0.6.0 (T27.9) ([0e2d537](https://github.com/kazi-org/kazi/commit/0e2d537209bea641f85b72d7e2d288aa6fe33231))
+* mark run/propose aliases REMOVED in v1.0.0 (T27.9) ([0e2d537](https://github.com/kazi-org/kazi/commit/0e2d537209bea641f85b72d7e2d288aa6fe33231))
 * repoint run/propose to apply/plan in user-facing docs (T27.9) ([f270548](https://github.com/kazi-org/kazi/commit/f2705485174bde495991110dceb4e945bb36d468))
 
 
@@ -66,7 +66,7 @@
 
 ### Bug Fixes
 
-* **cli:** deprecation hint names v0.6.0 as the removal version ([fa9c147](https://github.com/kazi-org/kazi/commit/fa9c147e14e34e5796fc17bfa09e7f1a37e76e18))
+* **cli:** deprecation hint names v1.0.0 as the removal version ([fa9c147](https://github.com/kazi-org/kazi/commit/fa9c147e14e34e5796fc17bfa09e7f1a37e76e18))
 
 ## [0.4.0](https://github.com/kazi-org/kazi/compare/v0.3.0...v0.4.0) (2026-06-24)
 

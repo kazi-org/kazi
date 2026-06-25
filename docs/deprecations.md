@@ -7,8 +7,9 @@ it is recorded here as REMOVED with the version that removed it.
 
 ## REMOVED CLI verbs: `run`, `propose`, and `mix kazi.run`
 
-Status: **REMOVED in v0.6.0** (ADR-0032). These aliases were deprecated when the
-rename shipped in v0.5.0 and removed one minor later, in v0.6.0. They no longer
+Status: **REMOVED in v1.0.0** (ADR-0032). These aliases were deprecated when the
+rename shipped in v0.5.0 and removed in the next release, v1.0.0 -- the removal
+is a breaking change, so it landed as a major version bump. They no longer
 parse: `kazi run` / `kazi propose` now produce an "unknown command" error, `mix
 kazi.run` no longer exists, and the MCP server no longer advertises or dispatches
 `kazi_run` / `kazi_propose`.
@@ -39,9 +40,9 @@ aliases gave those callers a window to migrate; that window (v0.5.0) has elapsed
 
 ### Removal version
 
-The aliases were removed in **v0.6.0** (operator decision, 2026-06-24). The verb
-rename shipped in v0.5.0 with the aliases still present, so callers got a full
-minor-release window to migrate before v0.6.0 removed them. As of v0.6.0:
+The aliases were removed in **v1.0.0** (operator decision, 2026-06-24). The verb
+rename shipped in v0.5.0 with the aliases still present, so callers got a
+release window to migrate before v1.0.0 removed them. As of v1.0.0:
 
 - `kazi run` and `kazi propose` no longer parse; use `kazi apply` / `kazi plan`.
 - `mix kazi.run` no longer exists; use `mix kazi.apply`.
