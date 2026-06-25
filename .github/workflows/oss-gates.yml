@@ -27,6 +27,15 @@ name: OSS gates
 #                                  --json). BLOCKING: the docs tree is clean, so a
 #                                  new fake command/flag reds the PR. Runs when a
 #                                  PR touches docs/README/concept or cli.ex.
+#   6. tiering-coherence (T30.5) -- the in-family Claude tiering surfaces (skill /
+#                                  AGENTS.md / README / site) must name only
+#                                  CURRENT model ids (claude-api current
+#                                  generation) and must NOT state an unproven cost
+#                                  NUMBER as measured (the cost win is being
+#                                  measured by T19.7). Composes the command (T28.4
+#                                  / T16.4 / T29.4) and README<->site / SKILL<->CLI
+#                                  (T9.9 / T16.4) gates for those surfaces.
+#                                  BLOCKING: the surfaces are clean at ship.
 #
 # Kept separate from ci.yml on purpose: the gates evolve (warn -> block, diff ->
 # full-tree) independently of the build/test pipeline.
@@ -193,3 +202,45 @@ jobs:
           else
             echo "no docs/README/cli.ex changes in this PR -> skipping (exit 0)."
           fi
+
+  tiering-coherence:
+    name: tiering accuracy + coherence (T30.5, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run tiering accuracy + coherence guard (when a tiering surface or cli.ex changed)
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # BLOCKING by default: the tiering surfaces are clean at ship (T25.11 /
+          # T30.1 / T30.2 use current ids and keep the cost claim hedged), so a
+          # stale model id or un-hedged cost number reds the PR.
+          BLOCKING: "1"
+        run: |
+          set -uo pipefail
+          # oss-gates.yml triggers on every PR (no path filter). The gate scans
+          # the skill source, AGENTS.md, README, and site/ -- and cli.ex can change
+          # what counts as a real command -- so gate the run on a change to any of
+          # those. The load-bearing tests always run (cheap, no toolchain).
+          if git diff --name-only "${BASE_REF}"...HEAD \
+              | grep -qE '^(README\.md|AGENTS\.md|lib/kazi/teach/|lib/kazi/cli\.ex|site/|\.github/scripts/check-tiering-coherence)'; then
+            echo "a tiering surface (or cli.ex) changed -> running the tiering gate."
+            node .github/scripts/check-tiering-coherence.mjs
+          else
+            echo "no tiering-surface changes in this PR -> skipping the full-tree scan (exit 0)."
+          fi
+          # Always run the load-bearing proof: the gate must FAIL on a planted bad
+          # id / un-hedged cost number / unshipped command, and PASS on the clean
+          # current surfaces (T30.5 zero-stub requirement).
+          echo "running the tiering-gate load-bearing tests."
+          node --test .github/scripts/check-tiering-coherence.test.mjs
