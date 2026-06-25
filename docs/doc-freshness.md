@@ -157,8 +157,54 @@ report a false FAIL when `mix` errors on missing deps rather than on coherence).
 | (E) | README <-> website canonical strings (T9.9) | `site/scripts/check-coherence.mjs` (subsumed) |
 | (F) | skill / AGENTS.md <-> CLI (T16.4) | `test/kazi/teach_coherence_test.exs` (subsumed) |
 
-## CI enforcement is T31.5
+## CI enforcement (T31.5): phase-1 WARN
 
-This file and these scripts are the DEFINITION. The CI gate -- a freshness job
-that runs the set on every PR, warn-first then ratcheted to blocking like the E29
-OSS gates (`docs/oss-gates.md`) -- is T31.5. Until then, run the set locally.
+This file and these scripts are the DEFINITION. The CI gate is the `doc-freshness`
+job in the OSS-gates workflow (`.github/workflows/oss-gates.yml`), alongside the
+E29 docs-with-code and no-internal-leak gates. It runs on every pull request.
+
+The job checks out the full history and tags (predicate (d) needs the newest
+`v*` tag's date) and runs the runner:
+
+```sh
+.github/scripts/doc_freshness/doc_freshness.sh
+```
+
+It runs with `SKIP_SUBSUMED=1`, so the (E)/(F) coherence checks (T9.9/T16.4) are
+referenced, not invoked: this lightweight gate does not fetch the node site deps
+or the mix deps those checks need, and the runner must not report a false FAIL
+from a missing toolchain. Those two checks keep their own coverage in `ci.yml` /
+`site-smoke.yml`.
+
+### Phase 1: WARN only (current)
+
+Like the E29 gates, the freshness gate starts warn-first. The runner exits 1
+while the known offenders stand, so a raw run would red every PR. The job wraps
+it: a `FRESHNESS_BLOCKING` env (default `"0"`) converts the runner's nonzero exit
+into a GitHub `::warning` plus an `exit 0`. The report and the offender list are
+printed in full, but the build stays green.
+
+The offenders the gate reports on `main` today, and who fixes them (NOT T31.5):
+
+- **(a) commands missing from README** -- e.g. `kazi export`, `kazi status`,
+  `kazi schema`, `kazi version`, `kazi help`, `kazi lint`, `kazi install-skill`.
+  Fixed by the README command-coverage work (**T22.x / T28.3**).
+- **(b) dead/unknown command references** -- `kazi mcp` and `kazi adopt` named in
+  `docs/concept.md` and `docs/orchestrator-recipe.md` (conceptual names, not
+  shipped commands). Fixed by the docs drift cleanup (**T28.3**).
+- **(d) untrimmed plan** -- done+released `- [x]` tasks still sitting in
+  `docs/plan.md`. Cleared by the ADR-0036 Layer-1 plan trim (**T31.2**).
+
+Predicate (c) passes today.
+
+### Ratchet to blocking
+
+Once T22.x / T28.3 fix the README + drift offenders and T31.2 trims the plan, the
+runner will exit 0 and the gate can become blocking. Flip a single toggle:
+
+- In CI: set `FRESHNESS_BLOCKING: "1"` on the `doc-freshness` job in
+  `.github/workflows/oss-gates.yml`. A failing predicate set then fails the job.
+- Locally, the runner already exits nonzero on any failure, so no toggle is
+  needed to see the blocking signal -- just run it.
+
+This is the same warn -> block ratchet the E29 gates use (`docs/oss-gates.md`).
