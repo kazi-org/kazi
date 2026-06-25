@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Kazi.BenchTest do
   use ExUnit.Case, async: false
 
   @captures Path.expand("../../fixtures/bench/captures", __DIR__)
+  @kpi_runs Path.expand("../../fixtures/bench/kpi_runs", __DIR__)
 
   setup do
     prev = Mix.shell()
@@ -64,6 +65,33 @@ defmodule Mix.Tasks.Kazi.BenchTest do
     assert out =~ "| C | 3 |"
     refute out =~ "| A | 1 |"
     refute out =~ "| B | 3 |"
+  end
+
+  test "--kpis folds recorded apply --json results into the per-arm economy-KPI breakdown (T34.6)" do
+    Mix.Tasks.Kazi.Bench.run(["--kpis", @kpi_runs])
+    out = shell_output()
+
+    # The benchmark CONSUMES the per-run `economy` objects and tables them by arm.
+    assert out =~ "per-arm economy-KPI breakdown"
+
+    assert out =~
+             "| Harness | Model | Tier | Runs | Stuck-rate | Converged-rate | " <>
+               "Cost/conv-pred | Wall/conv-pred (s) | Iters-to-conv | " <>
+               "Fresh-input-avoided | Rediscovery-avoided |"
+
+    # Arm B: one converged run; arm C: one converged + one stuck ⇒ stuck-rate 0.50.
+    assert out =~ "| B |"
+    assert out =~ "| C |"
+    # C's stuck run reported no cost_usd, so the mean folds over the one run that did.
+    assert out =~ "0.50"
+  end
+
+  test "--kpis honours an --arms subset" do
+    Mix.Tasks.Kazi.Bench.run(["--kpis", @kpi_runs, "--arms", "B"])
+    out = shell_output()
+
+    assert out =~ "| B |"
+    refute out =~ "| C |"
   end
 
   test "no --captures and no --help points at the maintainer live run (T19.5), runs nothing live" do

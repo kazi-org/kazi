@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "goal_id": "bench-fixture",
+  "status": "converged",
+  "predicates": [
+    { "id": "code", "verdict": "pass" },
+    { "id": "live", "verdict": "pass" }
+  ],
+  "iterations": 3,
+  "budget_spent": { "iterations": 3, "exceeded": null, "tokens": 39000 },
+  "usage": { "input_tokens": 6000, "cached_input_tokens": 30000, "output_tokens": 3000, "cost_usd": 0.07 },
+  "economy": {
+    "status": "converged",
+    "stuck": false,
+    "iterations": 3,
+    "converged_predicates": 2,
+    "iterations_to_convergence": 3,
+    "cost_usd": 0.07,
+    "wall_clock_s": 60.0,
+    "cost_per_converged_predicate": 0.035,
+    "wall_clock_per_converged_predicate": 30.0,
+    "fresh_input_tokens_avoided": 30000,
+    "rediscovery_tool_calls_avoided": 14
+  },
+  "next_action": "done",
+  "reason": null,
+  "release_ref": null
+}

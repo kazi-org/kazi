@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "goal_id": "bench-fixture-2",
+  "status": "stuck",
+  "predicates": [
+    { "id": "code", "verdict": "pass" },
+    { "id": "live", "verdict": "fail" }
+  ],
+  "iterations": 5,
+  "budget_spent": { "iterations": 5, "exceeded": null, "tokens": 52000 },
+  "usage": { "input_tokens": 9000, "cached_input_tokens": 40000, "output_tokens": 3000 },
+  "economy": {
+    "status": "stuck",
+    "stuck": true,
+    "iterations": 5,
+    "converged_predicates": 1,
+    "fresh_input_tokens_avoided": 40000,
+    "rediscovery_tool_calls_avoided": 18
+  },
+  "next_action": "investigate",
+  "reason": "stuck",
+  "release_ref": null
+}
