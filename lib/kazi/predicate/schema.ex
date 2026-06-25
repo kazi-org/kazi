@@ -46,7 +46,8 @@ defmodule Kazi.Predicate.Schema do
         required: false,
         description:
           "How the result maps to a status: \"exit_zero\" (default; exit 0 -> pass), " <>
-            "\"exit_code\" (map specific codes), or \"json\" (gate on parsed stdout)."
+            "\"exit_code\" (map specific codes), \"json\" (gate on parsed stdout), or " <>
+            "\"match_count\" (gate on a count of output lines matching a regex)."
       },
       %{
         name: "pass_codes",
@@ -71,12 +72,29 @@ defmodule Kazi.Predicate.Schema do
             "compare. A list value compares its length. Required for that verdict."
       },
       %{
+        name: "match_regex",
+        type: "string",
+        required: false,
+        description:
+          "verdict=match_count: a regex marking an output line to count. Required for that " <>
+            "verdict."
+      },
+      %{
         name: "pass_when",
         type: "string",
         required: false,
         description:
-          "verdict=json: the comparison the extracted number must satisfy to pass, " <>
-            "\"<op> <number>\" with op one of == != < <= > >=. Required for that verdict."
+          "verdict=json or match_count: the comparison the extracted/observed number must " <>
+            "satisfy to pass, \"<op> <number>\" with op one of == != < <= > >=. Required for " <>
+            "those verdicts."
+      },
+      %{
+        name: "merge_stderr",
+        type: "boolean",
+        required: false,
+        description:
+          "Fold the command's stderr into stdout so the retained output is the combined " <>
+            "stream. Default false. (The test_runner/prod_log presets set it true.)"
       },
       %{
         name: "error_codes",
