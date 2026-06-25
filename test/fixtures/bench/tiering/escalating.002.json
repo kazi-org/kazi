@@ -1,0 +1,1 @@
+{"type":"result","result":"ok","total_cost_usd":0.14,"usage":{"input_tokens":100,"output_tokens":1000,"cache_creation_input_tokens":18000,"cache_read_input_tokens":70000},"modelUsage":{"claude-sonnet-4-6":{"costUSD":0.14}}}
