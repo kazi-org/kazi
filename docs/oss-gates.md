@@ -1,17 +1,18 @@
 # OSS contribution gates
 
-kazi is a public, Apache-2.0 repository. Three CI gates keep the public surface
+kazi is a public, Apache-2.0 repository. Four CI gates keep the public surface
 honest and free of internal-only detail. Gates 1-2 are defined in ADR-0034 (E29);
-Gate 3 is defined in ADR-0036 (E31).
+Gate 3 is defined in ADR-0036 (E31); Gate 4 is defined in ADR-0034 (E29, T29.4).
 
 - Gate 1 -- docs land with the code (T29.1)
 - Gate 2 -- no internal-info leak (T29.2)
 - Gate 3 -- docs are fresh (T31.5)
+- Gate 4 -- site command accuracy (T29.4)
 
-Each gate is a small, self-contained shell script under `.github/scripts/` that
-runs in CI (the `OSS gates` workflow, `.github/workflows/oss-gates.yml`) on every
-pull request. The same scripts run locally so you can check a change before you
-push.
+Each gate runs in CI (the `OSS gates` workflow, `.github/workflows/oss-gates.yml`)
+on every pull request. Gates 1-3 are small shell scripts under `.github/scripts/`;
+Gate 4 is a Node scanner under `site/scripts/`. The same scripts run locally so you
+can check a change before you push.
 
 ## Running the guards locally
 
@@ -174,6 +175,79 @@ Flip a single toggle once the offenders are cleared and the runner exits 0:
   `.github/workflows/oss-gates.yml`.
 
 In blocking mode a failing predicate set fails the job.
+
+## Gate 4 -- site command accuracy (T29.4)
+
+Script: `site/scripts/check-commands.mjs` (run locally with
+`npm --prefix site run check:commands`).
+
+The marketing site must never present a REMOVED kazi verb as a live command. A
+stale verb on the site hands a new user a command that errors on their very first
+try. The guard scans the site source and reports any removed verb used as a
+PRIMARY command.
+
+### What it scans
+
+Every `.astro`, `.mjs`, `.md`, and `.svg` file under `site/`, recursively
+(skipping `node_modules`, `dist`, `.astro`). `.svg` is included on purpose: the
+`proof-loop.svg` asset is XML text and a removed verb can hide inside a `<tspan>`,
+which is exactly where one shipped live (the original gap this gate closes).
+
+### Marker list (a hit is a removed verb used as a primary command)
+
+The verb list is deliberately narrow -- only verbs the current CLI no longer
+accepts:
+
+- `kazi run` -- removed at v1.0.0 (T27.9); use `kazi apply`.
+- `kazi propose` -- removed at v1.0.0 (T27.9); use `kazi plan`.
+
+A match is `kazi <verb>` for any removed verb (word-boundary anchored).
+
+`kazi approve`, `kazi reject`, and `kazi list-proposed` are STILL live commands
+(`lib/kazi/cli.ex`) and are NOT flagged -- flagging them would red every
+legitimate doc once this gate ratchets to blocking. The old `propose` -> `approve`
+proposal flow is caught at its `kazi propose` entry point, which is the part that
+actually no longer exists.
+
+### Allow-list (these pass)
+
+A line that DOCUMENTS the removal is exempt, so a single honest mention passes
+while a code block that hands the user the dead verb is flagged. A line is
+allow-listed if it contains either:
+
+- the case-insensitive phrase `deprecated alias`, e.g.
+  ``` `kazi run` is a deprecated alias, removed in v1.0.0 -- use `kazi apply`. ```
+- an explicit inline `verb-drift:allow` marker.
+
+The scanner's own file is excluded from the scan (it names the removed verbs in
+its comments) so it cannot self-trip.
+
+### Phase 1: strict-but-warn
+
+The site is CURRENTLY DIRTY: `proof-loop.svg` shows `kazi run` and
+`site/src/pages/index.astro` step 2 shows `kazi propose`. So the guard runs in
+WARN mode -- it prints every offending `file:line` and a fix hint, but exits 0
+(non-blocking). This surfaces the signal without reddening every PR while the site
+copy is still being corrected (that cleanup is T27.6 + T25.2, not this gate).
+
+### Ratchet to blocking
+
+Flip a single toggle once the site no longer ships any removed verb:
+
+- In CI: set `BLOCKING: "1"` on the `site-commands` job in
+  `.github/workflows/oss-gates.yml`.
+- Locally / for the script default: set `DEFAULT_BLOCKING = true` at the top of
+  `check-commands.mjs`, or run with `BLOCKING=1 ...`.
+
+In blocking mode a hit exits 1 and fails the job.
+
+### Scoped to site/ PRs
+
+`oss-gates.yml` triggers on every PR (no workflow-level path filter), so the
+`site-commands` job first checks whether the PR diff touches `site/` and skips
+(exits 0) when it does not -- the scanner only inspects `site/` source. Tests can
+point the real scanner at a fixture tree via the `SITE_ROOT` env var without
+duplicating the matching logic.
 
 ## Where this is enforced
 
