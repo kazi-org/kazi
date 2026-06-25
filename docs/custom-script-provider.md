@@ -25,11 +25,13 @@ kazi schema custom_script
 | `cmd` | string | yes | The executable. ONE executable, not a command line — use `args` for the rest. |
 | `args` | array of strings | no | Arguments passed to `cmd`. Default `[]`. |
 | `env` | table / pairs | no | Extra environment as `{NAME = "value"}` or `{name, value}` pairs. |
-| `verdict` | string | no | `"exit_zero"` (default), `"exit_code"`, or `"json"`. See below. |
+| `verdict` | string | no | `"exit_zero"` (default), `"exit_code"`, `"json"`, or `"match_count"`. See below. |
 | `pass_codes` | array of integers | for `exit_code` | Exit codes that count as **pass**. |
 | `fail_codes` | array of integers | no | Exit codes that count as **fail** (a code in neither list is a fail). |
 | `path` | string | for `json` | A JSONPath subset over stdout to the value to compare. |
-| `pass_when` | string | for `json` | The comparison the extracted number must satisfy, `"<op> <number>"`. |
+| `match_regex` | string | for `match_count` | A regex marking an output line to count. |
+| `pass_when` | string | for `json`, `match_count` | The comparison the extracted/observed number must satisfy, `"<op> <number>"`. |
+| `merge_stderr` | boolean | no | Fold stderr into stdout so the retained `output` is the combined stream. Default `false`. |
 | `error_codes` | array of integers | no | Exit codes that mean **the checker could not run** → `:error` (not `:fail`). |
 | `evidence_format` | string | no | `"sarif"`, `"junit"`, `"json"`, or `"raw"` (default). Shapes evidence only. |
 | `timeout_ms` | integer | no | Kill the command after this many ms → `:error`. |
@@ -99,6 +101,28 @@ pass_when = "== 0"
 
 A JSON parse failure or a missing path is an `:error`, never a silent pass.
 
+### `match_count`
+
+Count the lines of the command's output that match `match_regex` and compare that
+**count** via `pass_when`. This gates a tool on the **textual signal** in its
+output rather than its exit code — e.g. "no `panic` lines", "at most two
+deprecation warnings". `pass_when` is `"<op> <number>"` (same operators as
+`json`). Set `merge_stderr = true` when the signal you count is on stderr.
+
+```toml
+[[predicate]]
+id = "no-5xx-in-window"
+provider = "custom_script"
+cmd = "fetch-logs"
+args = ["--service", "api", "--minutes", "15"]
+verdict = "match_count"
+match_regex = " 5\\d\\d "
+pass_when = "== 0"
+```
+
+An invalid or missing `match_regex`/`pass_when` is an `:error`, never a silent
+pass.
+
 ## `:error` vs `:fail`
 
 kazi distinguishes a genuine `:fail` (the predicate does not hold — real work for
@@ -109,6 +133,7 @@ NOT something a fixer agent should be dispatched against). `custom_script` maps 
 - the binary is missing or the workspace path is invalid (`:cmd_unrunnable`);
 - the exit code is one you declared in `error_codes`;
 - a `json` verdict's stdout is not valid JSON, or `path` does not resolve;
+- a `match_count` verdict's `match_regex` or `pass_when` is missing or malformed;
 - the command exceeds `timeout_ms`.
 
 This is the same lesson Argo Rollouts encodes by separating `failureLimit` from
@@ -118,10 +143,25 @@ This is the same lesson Argo Rollouts encodes by separating `failureLimit` from
 
 Every result carries the proof a fixer agent needs: `cmd`, `args`, `workspace`,
 `verdict`, the `exit` code, and a truncated `output`. A `json` verdict adds
-`path`, `pass_when`, and the `observed` number. Setting `evidence_format` to
-`"sarif"` or `"junit"` adds a structured `findings` list (file/line/rule/message
-for SARIF; failing case names for JUnit). Evidence extraction never changes the
-verdict.
+`path`, `pass_when`, and the `observed` number. A `match_count` verdict adds
+`match_regex`, `pass_when`, the `observed` count, and a bounded `matched_lines`
+sample. Setting `evidence_format` to `"sarif"` or `"junit"` adds a structured
+`findings` list (file/line/rule/message for SARIF; failing case names for JUnit).
+Evidence extraction never changes the verdict.
+
+## Folds the bespoke command-runners (test_runner, prod_log)
+
+`custom_script` is **the** command-runner. The two older command-runner
+providers are now thin presets over this one engine and their names are
+**deprecated** (removed in v2.0.0):
+
+- `test_runner` == `custom_script` with `verdict = "exit_zero"`;
+- `prod_log` == `custom_script` with a `match_count` verdict over the query output.
+
+Both names still resolve, so existing goals keep working; the loader prints a
+one-line migration hint to STDERR. See
+[`docs/deprecations.md`](deprecations.md) for the near-mechanical goal-file
+migration and the removal schedule.
 
 ## Shipped recipes
 

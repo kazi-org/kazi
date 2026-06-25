@@ -5,6 +5,108 @@ which each is removed. A deprecated surface is kept through a written deprecatio
 window so existing callers are not broken mid-flight; once a surface is removed,
 it is recorded here as REMOVED with the version that removed it.
 
+## DEPRECATED provider names: `test_runner` and `prod_log`
+
+Status: **DEPRECATED (folded onto `custom_script`); removal scheduled for
+v2.0.0** (ADR-0040 decisions 1 + 7). The two bespoke command-runner providers are
+now thin presets over the unified `custom_script` engine. Both names still
+RESOLVE -- an existing goal-file loads and evaluates byte-identically -- so this
+ships NON-BREAKING (a minor bump). When a goal still declares either name, the
+loader emits a one-line migration hint to STDERR (never into `--json` stdout).
+
+### What is deprecated (and what to use)
+
+| Deprecated provider | Use instead                                    |
+|---------------------|------------------------------------------------|
+| `test_runner`       | `custom_script` with `verdict = "exit_zero"`   |
+| `prod_log`          | `custom_script` with `verdict = "match_count"` |
+
+`http_probe` and `browser` are NOT command-runners -- they keep their own
+contracts and are unaffected.
+
+### Why (rationale)
+
+ADR-0040 makes `custom_script` THE command-runner: the sanctioned extension point
+where a new verification kind is config, not a kazi release. Keeping
+`test_runner` and `prod_log` as separate first-class providers would leave several
+ways to "run a command" with duplicated verdict/evidence logic. They are folded
+onto one engine (`Kazi.Providers.CommandRunner`) and their names deprecated so
+there is a single command-runner surface. The presets exist only for the
+migration window.
+
+### Removal version
+
+The names are removed in **v2.0.0**. Removing a public surface is a breaking
+change, so it lands on the next major -- mirroring the `run`/`propose` ->
+v1.0.0 pattern. Until then both names keep working as presets and the loader
+prints the migration hint.
+
+### Migration (near-mechanical goal-file edit)
+
+`test_runner` -- rename the provider and declare the (already-default) verdict;
+`cmd`/`args`/`env` are unchanged:
+
+```toml
+# before
+[[predicate]]
+id = "code"
+provider = "test_runner"
+cmd = "go"
+args = ["test", "./..."]
+
+# after
+[[predicate]]
+id = "code"
+provider = "custom_script"
+verdict = "exit_zero"
+cmd = "go"
+args = ["test", "./..."]
+```
+
+`prod_log` -- rename the provider and express the threshold as a `match_count`
+verdict over the query output (`match_regex` selects the lines to count,
+`pass_when` is the gate). `cmd`/`args`/`env` are unchanged:
+
+```toml
+# before
+[[predicate]]
+id = "logs"
+provider = "prod_log"
+cmd = "fetch-logs"
+args = ["--service", "api", "--minutes", "15"]
+max_5xx = 0
+
+# after
+[[predicate]]
+id = "logs"
+provider = "custom_script"
+verdict = "match_count"
+cmd = "fetch-logs"
+args = ["--service", "api", "--minutes", "15"]
+match_regex = " 5\\d\\d "
+pass_when = "== 0"
+```
+
+Note: the `custom_script` `match_count` evidence reports the matched-line
+`observed` count and a bounded `matched_lines` sample; `prod_log`'s
+production-log-shaped evidence (`server_error_count`, `panic_count`,
+`window_minutes`) is specific to that preset. Migrate to the generic count when
+you are ready to read the generic evidence; until v2.0.0 the `prod_log` preset
+keeps its richer evidence.
+
+### Hint, not error
+
+While deprecated, a goal using either name loads and runs unchanged; the loader
+prints one advisory line per distinct deprecated provider to STDERR -- e.g.
+`kazi: provider "test_runner" is deprecated (ADR-0040) and will be removed in
+v2.0.0 — migrate to custom_script (verdict = "exit_zero"). See
+docs/deprecations.md.` -- and never touches stdout, so a `--json` caller's
+stdout stays pure JSON. At v2.0.0 the names will stop resolving and become a
+load error.
+
+See ADR-0040 (`docs/adr/0040-generic-predicate-protocol-custom-script.md`) for
+the full decision and its consequences.
+
 ## REMOVED CLI verbs: `run`, `propose`, and `mix kazi.run`
 
 Status: **REMOVED in v1.0.0** (ADR-0032). These aliases were deprecated when the
