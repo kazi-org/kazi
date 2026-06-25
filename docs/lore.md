@@ -164,6 +164,21 @@ shipped `priv/examples/deploy_target.toml` had the wrong single-string form; E18
 fixes it + adds a runnability guard over all shipped examples. (README quickstart 2
 already uses the correct split form.) (2026-06-24.)
 
+### L-0015 #provider #cve #govulncheck #landmine -- `govulncheck -json` exits 0 EVEN WITH vulns; gate on parsed output
+`govulncheck` returns a non-zero exit (3) when it finds vulns ONLY in its default
+text mode. Under `-json` / `-format json` it ALWAYS exits 0 regardless of findings
+(the structured-output mode suppresses the failure code). So a `:cve` (or any
+`custom_script`) check that trusts the exit code under JSON output reads "exit 0" as
+"no vulns" and FALSE-PASSES. The `:cve` provider (T32.8, ADR-0043) gates on the
+PARSED finding stream, never the exit code: a non-zero exit with NO parseable JSON is
+the only `:error` path; a parsed stream decides pass/fail. The same gotcha bites
+manifest-tier tools the other way -- `npm audit`/`grype` exit NON-zero WITH findings
+(`grype` exits 2, `npm audit` exits 1), so tier-2 also parses the count exit-code-
+agnostically. Reachability matters too: govulncheck emits a finding per OSV at
+increasing trace depth; a vuln is REACHABLE (safe to fail on) iff a finding's
+`trace` leaf frame carries a `function` (the vulnerable symbol is actually called),
+not merely imported. (2026-06-24.)
+
 ## Benchmarking
 
 ### L-0013 #benchmark #tokens #harness #method -- measure kazi tokens with a harness shim, in a REAL git repo
