@@ -439,6 +439,7 @@ defmodule Kazi.MCP.Server do
       "release_ref" => Map.get(result, :release_ref)
     }
     |> put_usage(result)
+    |> put_economy(id, status, result)
   end
 
   # ADR-0046 economy envelope: attach the additive `usage` object only when the
@@ -450,6 +451,39 @@ defmodule Kazi.MCP.Server do
       usage -> Map.put(map, "usage", stringify_keys(usage))
     end
   end
+
+  # T34.6 (ADR-0046 §5): attach the additive `economy` KPIs, mirroring the CLI's
+  # `run_result_json` so the MCP and `--json` results stay the SAME shape. The
+  # cache + re-discovery KPIs fold over the RECORDED per-iteration counters
+  # (best-effort: an unavailable read-model yields the run-aggregate KPIs only).
+  # Unavailable KPIs are OMITTED by `Kazi.Economy.KPIs.to_json/1` (absent ≠ zero).
+  defp put_economy(map, goal_id, status, result) do
+    iterations =
+      try do
+        ReadModel.list_iterations(goal_id)
+      rescue
+        _ -> []
+      end
+
+    meta = %{
+      status: status,
+      converged_predicates: converged_predicate_count(Map.get(result, :vector)),
+      iteration_count: Map.get(result, :iterations, 0),
+      usage: Map.get(result, :usage, %{})
+    }
+
+    Map.put(
+      map,
+      "economy",
+      Kazi.Economy.KPIs.from_iterations(iterations, meta) |> Kazi.Economy.KPIs.to_json()
+    )
+  end
+
+  defp converged_predicate_count(%Kazi.PredicateVector{results: results}) do
+    Enum.count(results, fn {_id, result} -> Kazi.PredicateResult.passed?(result) end)
+  end
+
+  defp converged_predicate_count(_), do: nil
 
   # The `usage` envelope keys are the `Kazi.CLI.Usage` field atoms; render them as
   # strings so the MCP result object is uniformly string-keyed.
