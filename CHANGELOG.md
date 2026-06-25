@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.14.0](https://github.com/kazi-org/kazi/compare/v1.13.0...v1.14.0) (2026-06-25)
+
+
+### Features
+
+* **loader:** register + validate :static, add `kazi schema static` (T32.7) ([db6ba50](https://github.com/kazi-org/kazi/commit/db6ba502ee484418217bbc2909c95a090973261e))
+* **predicate:** :static provider — Dialyzer-led analysis (T32.7) ([3456080](https://github.com/kazi-org/kazi/commit/3456080cf26d71c2a677dab5d62d37c42cabe005))
+
 ## [1.13.0](https://github.com/kazi-org/kazi/compare/v1.12.0...v1.13.0) (2026-06-25)
 
 
