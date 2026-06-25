@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.8.0](https://github.com/kazi-org/kazi/compare/v1.7.0...v1.8.0) (2026-06-25)
+
+
+### Features
+
+* **harness:** advertise Claude economy opts in supported_opts (T36.1) ([dcc0569](https://github.com/kazi-org/kazi/commit/dcc056922782898cbeed2a714ff4d00d24db9138))
+* **harness:** map Claude economy flags in build_args (T36.1) ([1006aa4](https://github.com/kazi-org/kazi/commit/1006aa4d10280e4dbaa576ba1ead009a3301d4a6))
+
 ## [1.7.0](https://github.com/kazi-org/kazi/compare/v1.6.0...v1.7.0) (2026-06-25)
 
 
