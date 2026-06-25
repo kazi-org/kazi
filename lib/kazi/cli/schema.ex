@@ -63,8 +63,20 @@ defmodule Kazi.CLI.Schema do
           name: "budget_spent",
           type: "object",
           description:
-            "{iterations: integer, exceeded: string|null}. exceeded names the budget " <>
-              "dimension only when status is over_budget."
+            "{iterations: integer, exceeded: string|null, tokens: integer}. exceeded names " <>
+              "the budget dimension only when status is over_budget. tokens is the single " <>
+              "rolled-up token total (ADR-0046 back-compat); the cached-vs-fresh split lives " <>
+              "in the additive usage envelope below."
+        },
+        %{
+          name: "usage",
+          type: "object",
+          description:
+            "ADR-0046 economy envelope: OPTIONAL, ADDITIVE. Present only when the harness " <>
+              "reported usage. Fields (each optional, omitted when unreported — absent is " <>
+              "NOT zero): input_tokens, cached_input_tokens, cache_write_tokens, " <>
+              "output_tokens, reasoning_tokens (integers), cost_usd (float). Additive, so " <>
+              "schema_version stays 2 (same rule as the ADR-0041 predicate envelope)."
         },
         %{
           name: "next_action",
@@ -96,7 +108,14 @@ defmodule Kazi.CLI.Schema do
           %{"id" => "live", "verdict" => "pass"}
         ],
         "iterations" => 4,
-        "budget_spent" => %{"iterations" => 4, "exceeded" => nil},
+        "budget_spent" => %{"iterations" => 4, "exceeded" => nil, "tokens" => 21_900},
+        "usage" => %{
+          "input_tokens" => 1500,
+          "cached_input_tokens" => 18_000,
+          "cache_write_tokens" => 0,
+          "output_tokens" => 2400,
+          "cost_usd" => 0.0123
+        },
         "next_action" => "done",
         "reason" => nil,
         "release_ref" => "v2026.06.23-abc1234"
