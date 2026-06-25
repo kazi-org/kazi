@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.25.0](https://github.com/kazi-org/kazi/compare/v1.24.0...v1.25.0) (2026-06-25)
+
+
+### Features
+
+* **economy:** dated price map for cost_usd (T34.5) ([19d4254](https://github.com/kazi-org/kazi/commit/19d42548c2ededdb04616c96e11417ba4882e65e))
+* **harness:** derive cost_usd from the price map when the harness omits it (T34.5) ([310b7e6](https://github.com/kazi-org/kazi/commit/310b7e6a3638e4479e302bda9d518029ad21a7ca))
+
 ## [1.24.0](https://github.com/kazi-org/kazi/compare/v1.23.0...v1.24.0) (2026-06-25)
 
 
