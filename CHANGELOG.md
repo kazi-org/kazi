@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.29.0](https://github.com/kazi-org/kazi/compare/v1.28.0...v1.29.0) (2026-06-25)
+
+
+### Features
+
+* **cli:** add `kazi context index|search|stats` wrapper (T35.7) ([3e38338](https://github.com/kazi-org/kazi/commit/3e38338e30f8d79dbcf0fc5ebca4a56b85c12451))
+
 ## [1.28.0](https://github.com/kazi-org/kazi/compare/v1.27.0...v1.28.0) (2026-06-25)
 
 
