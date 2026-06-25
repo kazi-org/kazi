@@ -218,6 +218,12 @@ defmodule Kazi.CLI do
       flags: [:dir]
     },
     %{
+      name: "mcp",
+      summary: "Start the kazi MCP server over stdio (the same server `mix kazi.mcp` starts).",
+      args: [],
+      flags: []
+    },
+    %{
       name: "plan",
       summary:
         "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates).",
@@ -288,6 +294,7 @@ defmodule Kazi.CLI do
       kazi status <ref> [--json]
       kazi init <repo-dir> [--out <file>] [--enrich]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
+      kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
       kazi plan --json [--predicates <json>]      # caller-drafts (predicates supplied)
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
@@ -407,6 +414,7 @@ defmodule Kazi.CLI do
       kazi apply my.goal.toml --workspace ./svc --harness opencode --model local/qwen3.6
       kazi init ./my-service --out my-service.goal.toml
       kazi install-skill
+      kazi mcp                                     # an MCP client runs this as its server command
       kazi apply my.goal.toml --workspace ./svc --json --stream
       kazi status cli-e2e --json
       kazi plan "a /healthz endpoint that returns 200"
@@ -485,6 +493,9 @@ defmodule Kazi.CLI do
       {:install_skill, opts} ->
         execute_install_skill(opts, inject_opts)
 
+      {:mcp, _opts} ->
+        execute_mcp(inject_opts)
+
       {:propose, idea, opts} ->
         execute_propose(idea, opts, inject_opts)
 
@@ -523,6 +534,7 @@ defmodule Kazi.CLI do
           | {:status, String.t(), keyword()}
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
+          | {:mcp, keyword()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
@@ -688,6 +700,18 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T33.1 (ADR-0044): `kazi mcp` starts the MCP server over stdio — the SAME
+  # `Kazi.MCP.Server` that `mix kazi.mcp` starts, shared via `Kazi.MCP.Stdio`.
+  # It is a long-running stdio server, NOT a `--json` command: it takes no flags
+  # and reads line-delimited JSON-RPC from stdin, so any extra argument is a usage
+  # error.
+  defp parse_command(["mcp" | rest], _flags) do
+    case rest do
+      [] -> {:mcp, []}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
   # T3.5c authoring: `plan "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
   # carried through (where the harness drafts the goal).
@@ -757,7 +781,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
@@ -1526,6 +1550,35 @@ defmodule Kazi.CLI do
 
   defp format_skill_error(reason) when is_atom(reason), do: :file.format_error(reason)
   defp format_skill_error(reason), do: inspect(reason)
+
+  # =============================================================================
+  # mcp command (T33.1, ADR-0044): start the MCP server over stdio
+  # =============================================================================
+  #
+  # `kazi mcp` starts the SAME `Kazi.MCP.Server` that `mix kazi.mcp` starts — the
+  # one server module both entry points share through `Kazi.MCP.Stdio`, so the
+  # installed binary and the development task cannot drift (ADR-0044 decision 4).
+  # No new tools are introduced here: this is a distribution/packaging surface, the
+  # missing leg ADR-0024 named but the installed CLI never grew.
+  #
+  # We bring up the read-model the same way every other command does
+  # (`ensure_read_model`: burrito-safe, degrades quietly under the escript) so the
+  # server's status/list-proposed tools read real persisted state — matching the
+  # Mix task's `app.start`. The serve loop then reads line-delimited JSON-RPC from
+  # stdin and BLOCKS until EOF; the process exit code is 0 on a clean EOF.
+  #
+  # `inject_opts` is forwarded to `Kazi.MCP.Stdio.serve/1`: a hermetic caller (the
+  # Tier-2 boundary test) passes `boot: false` (the app is already running) and
+  # `redirect_logging: false` (do not mutate the global logger) to drive the real
+  # dispatch over a captured stdio without touching the read-model bootstrap or
+  # the logger handlers.
+  defp execute_mcp(inject_opts) do
+    inject_opts
+    |> Keyword.put_new(:boot, &ensure_read_model/0)
+    |> Kazi.MCP.Stdio.serve()
+
+    0
+  end
 
   # =============================================================================
   # export command (T12.6, ADR-0020 decision 5): an Obsidian vault of the group tree
