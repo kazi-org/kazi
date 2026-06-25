@@ -352,6 +352,100 @@ defmodule Kazi.Teach.InstallSkill do
 
     `next_action` is an orchestration HINT, not a kazi action -- you own the policy.
 
+    ### Escalate-on-stuck: the bounded model ladder (the DEFAULT adaptive recipe)
+
+    Static cheap-tiering (above) always grinds on one cheap model. The ADAPTIVE
+    refinement (ADR-0035) starts on the cheapest model and steps UP only when kazi
+    reports the SAME slice is not progressing -- so you pay frontier rates only for
+    the slices that actually need them. The escalation policy lives ENTIRELY here in
+    the skill: kazi reports per-invocation state, YOU (the skill) own the ladder and
+    the counter. kazi-core has NO model-selection logic (ADR-0035 decision 1).
+
+    **The ladder (capped at the frontier).** Three rungs, cheapest first; it STOPS at
+    the top -- it never escalates past the frontier:
+
+    ```
+    claude-haiku-4-5  ->  claude-sonnet-4-6  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
+    ```
+
+    **The trigger (which `--json` fields).** After each `kazi apply --harness claude
+    --model <rung> --json` on a slice, read the terminal result object and branch on
+    these fields (the T30.3 mapping, `docs/tiering-signals.md`):
+
+    - `goal_id` -- the SLICE id, stable across the successive invocations you make on
+      one slice. KEY your rung counter by `goal_id` (this counter is the SKILL's own
+      state -- never a kazi field; ADR-0035).
+    - `status` -- `converged` -> slice done (reset). `stuck` or `over_budget` -> this
+      rung did NOT converge -> escalate. `error` -> a misconfig (vacuous goal,
+      unknown harness); read `error` and FIX the goal, do NOT escalate the model.
+    - `next_action` -- the derived hint: `done` (stop), `investigate` (stuck ->
+      escalate), `raise_budget` (over_budget -> raise budget AND/OR step up).
+    - `predicates[]` -- confirm it is the SAME slice still failing (the same
+      unmet-predicate set), so you escalate against the same bar, not a new slice.
+    - `reason` / `budget_spent.exceeded` -- on `over_budget`, name the budget
+      dimension so you can choose "raise budget on the same model" vs "step up".
+
+    **The trigger, in one line:** on a result for the slice's `goal_id` whose
+    `status` is `stuck` or `over_budget` (equivalently `next_action` is `investigate`
+    or `raise_budget`) -- i.e. NOT `converged` and NOT `error` -- with the same
+    failing `predicates[]` still unmet, increment the per-`goal_id` rung counter and
+    re-dispatch the SAME slice with the next `--model` UP the ladder.
+
+    **Reset on a fresh slice.** A NEW slice means a NEW `goal_id`. Start it fresh on
+    the cheapest rung (`claude-haiku-4-5`); the rung counter is per-`goal_id`, so a
+    fresh slice has no carried-over rung.
+
+    **Bounded by kazi.** Escalation rides ON TOP of kazi's own budget/stuck
+    termination -- it never overrides a terminal verdict. Each rung is one
+    `kazi apply`, which kazi itself bounds (it returns `stuck`/`over_budget` rather
+    than looping forever), and the ladder is capped at `claude-opus-4-8`. So the
+    escalation loop cannot run unboundedly: at worst it makes three bounded rungs and
+    stops at the frontier.
+
+    **Disable -> degenerates to static tiering.** Turn escalation OFF by pinning the
+    `--model` to one rung and never stepping it up; the recipe collapses to the
+    static cheap-tiering above (always `claude-haiku-4-5`, or always whatever single
+    rung you pin). The ladder is the ADD-ON, not a requirement.
+
+    Copy-paste recipe (the ladder, the trigger, the reset, the cap -- POSIX sh):
+
+    ```sh
+    # The capped ladder (cheapest -> frontier). Escalation STOPS at the last entry.
+    ladder="claude-haiku-4-5 claude-sonnet-4-6 claude-opus-4-8"
+
+    goal_file="$1"   # the approved slice's goal-file (a fresh slice starts at rung 1)
+    rung=1           # SKILL state: the per-goal_id rung index (1-based), reset per slice
+
+    while :; do
+      model=$(printf '%s\\n' $ladder | sed -n "${rung}p")
+      result=$(kazi apply "$goal_file" --workspace "$WS" \\
+                 --harness claude --model "$model" --json)
+
+      ver=$(printf '%s' "$result" | jq -r .schema_version)
+      [ "$ver" = "2" ] || { echo "unexpected schema_version: $ver" >&2; exit 1; }
+
+      status=$(printf '%s' "$result" | jq -r .status)
+      case "$status" in
+        converged)
+          echo "slice converged on $model"; break ;;          # RESET happens for the NEXT slice (fresh goal_id, rung=1)
+        error)
+          printf '%s' "$result" | jq -r .error >&2; exit 1 ;;  # misconfig: FIX the goal, do NOT escalate
+        stuck|over_budget)
+          # same slice did not converge -> step UP the ladder, CAPPED at the frontier
+          last=$(printf '%s\\n' $ladder | wc -w)
+          if [ "$rung" -ge "$last" ]; then
+            echo "exhausted the ladder at the frontier ($model); not converged" >&2; exit 1
+          fi
+          rung=$((rung + 1)) ;;                                # SKILL-side counter; never a kazi field
+      esac
+    done
+    ```
+
+    Add `--stream` to react WITHIN a rung (escalate before a rung fully terminates):
+    watch the streamed per-iteration `predicates[]` -- the same failing set across
+    every observation is no-progress this rung. This is strictly additive; the
+    terminal `status` already suffices for the ladder (see `docs/tiering-signals.md`).
+
     ### The `status` verb -- report convergence (`kazi status <ref> --json`)
 
     `status` REPORTS a goal's convergence state from the read-model -- it never runs
