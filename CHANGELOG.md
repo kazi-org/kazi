@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.15.0](https://github.com/kazi-org/kazi/compare/v1.14.0...v1.15.0) (2026-06-25)
+
+
+### Features
+
+* **harness:** minimal default dispatch surface (T36.2) ([c42b0d9](https://github.com/kazi-org/kazi/commit/c42b0d9a940532c1186c5932ab21719526cdba5b))
+
 ## [1.14.0](https://github.com/kazi-org/kazi/compare/v1.13.0...v1.14.0) (2026-06-25)
 
 
