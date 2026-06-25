@@ -399,10 +399,34 @@ defmodule Kazi.ReadModel do
   def to_predicate_vector(%Iteration{predicate_vector: serialized}) do
     serialized
     |> Enum.map(fn {id, %{"status" => status} = entry} ->
-      {id, PredicateResult.new(deserialize_status(status), Map.get(entry, "evidence", %{}))}
+      {id, deserialize_result(status, entry)}
     end)
     |> PredicateVector.new()
   end
+
+  # Rehydrate one stored result. The envelope-v2 fields (ADR-0041) are read back
+  # additively: absent keys yield the boolean defaults, so a pre-v2 row (no score
+  # / direction / diagnostics) round-trips to exactly the boolean struct.
+  defp deserialize_result(status, entry) do
+    PredicateResult.new(
+      deserialize_status(status),
+      Map.get(entry, "evidence", %{}),
+      score: entry["score"],
+      prior_score: entry["prior_score"],
+      direction: deserialize_direction(entry["direction"]),
+      diagnostics: deserialize_diagnostics(entry["diagnostics"])
+    )
+  end
+
+  defp deserialize_direction(nil), do: nil
+  defp deserialize_direction("higher_better"), do: :higher_better
+  defp deserialize_direction("lower_better"), do: :lower_better
+  defp deserialize_direction(_), do: nil
+
+  defp deserialize_diagnostics(nil), do: []
+
+  defp deserialize_diagnostics(items) when is_list(items),
+    do: Enum.map(items, &Kazi.Evidence.from_map/1)
 
   # --- orientation-pack cache (T4.6, ADR-0010 §4) ----------------------------
 
@@ -576,10 +600,35 @@ defmodule Kazi.ReadModel do
 
   # id => %{"status" => "<status>", "evidence" => <evidence>}. Ids are stored as
   # strings (atoms don't survive a JSON round-trip).
+  #
+  # ADR-0041 envelope v2: `score` / `prior_score` / `direction` / `diagnostics`
+  # are serialized ADDITIVELY — a key is written ONLY when the field is non-default
+  # (a non-nil score/direction, a non-empty diagnostics list). A boolean predicate
+  # (the default shape) therefore serializes to EXACTLY `%{"status", "evidence"}`,
+  # byte-identical to the pre-v2 store. Diagnostics are mapped to JSON-safe
+  # string-keyed maps by construction (`Kazi.Evidence.to_map/1`), so they need no
+  # deep-sanitize (cf. lore L-0010, which is about raw provider evidence terms).
   defp serialize_vector(%PredicateVector{results: results}) do
-    Map.new(results, fn {id, %PredicateResult{status: status, evidence: evidence}} ->
-      {to_string(id), %{"status" => to_string(status), "evidence" => sanitize_evidence(evidence)}}
+    Map.new(results, fn {id, %PredicateResult{} = result} ->
+      {to_string(id), serialize_result(result)}
     end)
+  end
+
+  defp serialize_result(%PredicateResult{status: status, evidence: evidence} = result) do
+    %{"status" => to_string(status), "evidence" => sanitize_evidence(evidence)}
+    |> put_when("score", result.score)
+    |> put_when("prior_score", result.prior_score)
+    |> put_when("direction", result.direction && to_string(result.direction))
+    |> put_diagnostics(result.diagnostics)
+  end
+
+  defp put_when(map, _key, nil), do: map
+  defp put_when(map, key, value), do: Map.put(map, key, value)
+
+  defp put_diagnostics(map, []), do: map
+
+  defp put_diagnostics(map, diagnostics) when is_list(diagnostics) do
+    Map.put(map, "diagnostics", Enum.map(diagnostics, &Kazi.Evidence.to_map/1))
   end
 
   # T18.2: make evidence JSON-safe before it hits the Ecto `:map` column. A
