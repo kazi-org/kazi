@@ -16,6 +16,23 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.19.0](https://github.com/kazi-org/kazi/compare/v1.18.0...v1.19.0) (2026-06-25)
+
+
+### Features
+
+* **cli:** surface enforcement guarantees in `apply --json` (T32.4) ([4c197e6](https://github.com/kazi-org/kazi/commit/4c197e686fa91aa6be0b283f6e8440fb3436c17a))
+* **enforcement:** Kazi.Enforcement profile + clean-tree isolation (T32.4) ([8ff7345](https://github.com/kazi-org/kazi/commit/8ff7345fa460a9b047f2f705e3104d0f303501fa))
+* **goal:** carry the authored enforcement profile (T32.4) ([b1d3577](https://github.com/kazi-org/kazi/commit/b1d357758167be6904e2f85448d4eff8d928267f))
+* **loader:** parse the [enforcement] goal-file table (T32.4) ([1686f15](https://github.com/kazi-org/kazi/commit/1686f152e3a4a4b36e4d85c8d18afbd6949fbbd8))
+* **loop:** compose anti-gaming enforcement onto the reconcile tick (T32.4) ([88d901a](https://github.com/kazi-org/kazi/commit/88d901a34c3445851ad338ac94135a7c05e896bb))
+* **runtime:** resolve enforcement + synthesize ratchet guards (T32.4) ([0e69a7a](https://github.com/kazi-org/kazi/commit/0e69a7aa7b876838088941123fbb8072fdfa519e))
+
+
+### Bug Fixes
+
+* **cli:** keep the usage envelope alongside enforcement in `apply --json` ([6be0c85](https://github.com/kazi-org/kazi/commit/6be0c850221844f4b6f65c7eb157b32826210aba))
+
 ## [1.18.0](https://github.com/kazi-org/kazi/compare/v1.17.0...v1.18.0) (2026-06-25)
 
 
