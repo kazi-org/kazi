@@ -36,6 +36,15 @@ on a graded result, absent on a boolean one — so `schema_version` stays **2** 
 an orchestrator pinning v2 keeps parsing unchanged. See
 [`predicates[]` — graded fields](#predicates--graded-fields-adr-0041) below.
 
+ADR-0046 (economy accounting) adds the OPTIONAL `usage` envelope and the
+`budget_spent.tokens` rollup. Both are **additive** — `usage` is present only when
+the harness reported usage, and `budget_spent.tokens` is a new key on an existing
+object — so `schema_version` stays **2** (the same rule as ADR-0041; bumping the
+integer would break an orchestrator that pins `schema_version == 2`). An
+orchestrator pinning the pre-envelope contract keeps reading `budget_spent.tokens`
+(the single rolled-up total) and ignores the richer cached-vs-fresh split. See
+[`usage` — economy envelope](#usage--economy-envelope-adr-0046) below.
+
 ## Shape
 
 ```json
@@ -48,12 +57,23 @@ an orchestrator pinning v2 keeps parsing unchanged. See
     { "id": "live", "verdict": "pass" }
   ],
   "iterations": 4,
-  "budget_spent": { "iterations": 4, "exceeded": null },
+  "budget_spent": { "iterations": 4, "exceeded": null, "tokens": 21900 },
+  "usage": {
+    "input_tokens": 1500,
+    "cached_input_tokens": 18000,
+    "cache_write_tokens": 0,
+    "output_tokens": 2400,
+    "cost_usd": 0.0123
+  },
   "next_action": "done",
   "reason": null,
   "release_ref": "v2026.06.23-abc1234"
 }
 ```
+
+(`usage` is present only when the harness reported usage, and each of its fields is
+omitted when unreported — the example above shows a Claude run that reported no
+`reasoning_tokens`.)
 
 ## Fields
 
@@ -64,7 +84,8 @@ an orchestrator pinning v2 keeps parsing unchanged. See
 | `status`         | string (enum)       | The terminal status — one of `converged`, `stuck`, `over_budget`, `error`. The orchestrator's primary branch. |
 | `predicates`     | array of objects    | The **predicate vector**: one `{ "id", "verdict" }` per predicate at the terminal observation, sorted by `id` for a stable diff. |
 | `iterations`     | integer             | The loop's observation count. |
-| `budget_spent`   | object              | What the run consumed: `{ "iterations": integer, "exceeded": string\|null }`. `exceeded` names the budget dimension only when `status` is `over_budget`, else `null`. |
+| `budget_spent`   | object              | What the run consumed: `{ "iterations": integer, "exceeded": string\|null, "tokens": integer }`. `exceeded` names the budget dimension only when `status` is `over_budget`, else `null`. `tokens` is the single rolled-up token total (ADR-0046 back-compat); the cached-vs-fresh split lives in `usage`. |
+| `usage`          | object (optional)   | ADR-0046 economy envelope. **Additive, optional** — present only when the harness reported usage. See [`usage` — economy envelope](#usage--economy-envelope-adr-0046). |
 | `next_action`    | string (enum)       | An orchestration **hint** — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`) or `stuck`. `null` on a clean converge. |
 | `release_ref`    | string \| null      | The release tag of the artifact deployed this run (T3.3c), or `null` if nothing was deployed. |
@@ -137,6 +158,49 @@ A graded predicate object:
   ]
 }
 ```
+
+## `usage` — economy envelope (ADR-0046)
+
+The optional `usage` object reports the run's token and cost accounting, split so
+the cheap (cached-read) and expensive (fresh) token classes are visible — the
+distinction the token-economy program rests on. It mirrors the Anthropic usage
+envelope plus the harness's own dollar figure.
+
+```json
+"usage": {
+  "input_tokens": 1500,
+  "cached_input_tokens": 18000,
+  "cache_write_tokens": 0,
+  "output_tokens": 2400,
+  "reasoning_tokens": 0,
+  "cost_usd": 0.0123
+}
+```
+
+| Field                 | Type    | Meaning |
+|-----------------------|---------|---------|
+| `input_tokens`        | integer | Fresh (uncached) prompt input tokens. |
+| `cached_input_tokens` | integer | Prompt input served from the provider cache (priced far below fresh input). |
+| `cache_write_tokens`  | integer | Tokens written to the provider cache this run. |
+| `output_tokens`       | integer | Generated output tokens. |
+| `reasoning_tokens`    | integer | Reasoning/thinking tokens, when the harness reports them separately. |
+| `cost_usd`            | float   | The harness's own reported dollar cost for the run. |
+
+Rules:
+
+- **Additive and optional.** `usage` is present **only** when the harness reported
+  at least one component; a run with no usage omits the key entirely, and the
+  object is byte-identical to the pre-envelope contract. `schema_version` stays
+  **2**.
+- **Absent ≠ zero (honest-unknown).** A component the harness could not report is
+  **omitted**, never set to `0` — absent means *unreported*. Do not read a missing
+  field as zero spend.
+- **`budget_spent.tokens` is the back-compat rollup.** An orchestrator pinning the
+  pre-envelope contract keeps reading the single rolled-up total there; `usage`
+  carries the un-summed split. The two are consistent but serve different readers.
+
+T34.1 defines this envelope and its additive wiring; the per-profile mapping of
+each provider's raw usage onto these fields (with a fidelity marker) lands in T34.2.
 
 ## Error object
 
