@@ -24,16 +24,28 @@ converge loop.
 ## Two-tier economics (why)
 
 Spend expensive reasoning ONCE on what "done" means -- the acceptance predicates.
-Spend cheap, local compute on the grind of editing until they pass. kazi's
-objective termination makes the split safe: the cheap implementer cannot declare
-victory on plausible-but-wrong work, because truth lives in the predicates, not
-in the model doing the keystrokes. You (strong model) AUTHOR predicates; a cheap
-harness (`--harness <cheap> --model <m>`) RUNS the loop; kazi holds the bar still.
+Spend cheap compute on the grind of editing until they pass. kazi's objective
+termination makes the split safe: the cheap implementer cannot declare victory on
+plausible-but-wrong work, because truth lives in the predicates, not in the model
+doing the keystrokes. You (FRONTIER model) AUTHOR predicates; a cheap harness
+(`--harness claude --model <cheap-claude-id>`) RUNS the loop; kazi holds the bar
+still.
+
+The DEFAULT recipe is in-family Claude tiering (ADR-0033/0035): you are a frontier
+Claude model (e.g. `claude-opus-4-8`) authoring predicates in this session, and you
+grind on a CHEAP Claude model -- `claude-haiku-4-5` (step up to `claude-sonnet-4-6`
+for harder slices) -- via `--harness claude --model <id>`. It needs only a Claude API
+key: no local model, no special hardware. The cost win is BEING MEASURED -- treat it
+as the intended economics, not a measured figure.
+
+Local / BYOM is the SECONDARY privacy add-on: if code must never leave your hardware,
+grind on a local model instead -- `--harness opencode --model <local-model>` (a local
+Qwen/Llama via opencode). Same two-tier shape, no cloud; explicitly secondary.
 
 ## The loop: plan -> approve -> apply -> branch
 
 ```
-plan --json -> (review) -> approve --json -> apply --harness <cheap> --json [--stream]
+plan --json -> (review) -> approve --json -> apply --harness claude --model <cheap-claude-id> --json [--stream]
                                                     |
                                        parse result, branch on next_action
 ```
@@ -103,12 +115,20 @@ Emits `{schema_version, proposal_ref, status: "approved", goal_id}`. `kazi rejec
 > plan/approve persist the approved goal into a loadable goal-file; apply that
 > file's path in step 3.
 
-### 3. converge -- `kazi apply --harness <cheap> --json [--stream]`
+### 3. converge -- `kazi apply --harness claude --model <cheap-claude-id> --json [--stream]`
 
-Apply the approved goal with the cheap harness:
+Apply the approved goal with the cheap tier. The DEFAULT is in-family Claude
+tiering: you authored on a frontier model, so grind on a cheap Claude model:
 
 ```sh
-kazi apply <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
+kazi apply <goal-file> --workspace <path> --harness claude --model claude-haiku-4-5 --json
+```
+
+SECONDARY (privacy / no-cloud): keep the grind on local hardware via opencode --
+same loop, no cloud:
+
+```sh
+kazi apply <goal-file> --workspace <path> --harness opencode --model <local-model> --json
 ```
 
 Emits ONE terminal result object. Exit code mirrors convergence: `0` only on
@@ -149,7 +169,7 @@ it off the first object you parse and refuse (or branch) if it is not the versio
 you were written against:
 
 ```sh
-result=$(kazi apply "$GOAL" --workspace "$WS" --harness opencode --json)
+result=$(kazi apply "$GOAL" --workspace "$WS" --harness claude --model claude-haiku-4-5 --json)
 ver=$(printf '%s' "$result" | jq -r .schema_version)
 [ "$ver" = "2" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
 next=$(printf '%s' "$result" | jq -r .next_action)
