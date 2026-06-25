@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.13.0](https://github.com/kazi-org/kazi/compare/v1.12.0...v1.13.0) (2026-06-25)
+
+
+### Features
+
+* **examples:** ship custom_script/ratchet recipes — contract/perf/secret/a11y/IaC/visual (T32.9) ([a7e5850](https://github.com/kazi-org/kazi/commit/a7e58504979d5d2fe027d5af20846dc5caafffeb))
+
 ## [1.12.0](https://github.com/kazi-org/kazi/compare/v1.11.0...v1.12.0) (2026-06-25)
 
 
