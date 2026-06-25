@@ -1,0 +1,31 @@
+# Example kazi goal-file: no NEW static-analysis findings (the static provider,
+# ADR-0043), for a polyglot SARIF tool that carries pre-existing debt.
+#
+# `format = "sarif"` reads a SARIF log (the lingua franca of tsc/mypy/
+# golangci-lint/Semgrep) via the shared parser, so each finding is localized to
+# `file:line:col` with its rule id and level. The verdict is gated on those parsed
+# findings even when the tool exits 0 WITH findings.
+#
+# `baseline = "stored"` turns this into a ratchet on NEW findings: the finding
+# count is compared (lower_better) against its own last passing value, so the
+# predicate IGNORES pre-existing debt and fails only when a new finding appears.
+# The first run seeds the baseline; a pass tightens the floor downward. Set a
+# number for a fixed budget, or a git ref ("main") to compare against a commit.
+#
+#     kazi apply priv/examples/static_sarif.toml --workspace .
+#
+# Adapt `cmd`/`args` to your SARIF-emitting analyzer. See Kazi.Providers.Static,
+# `kazi schema static`, and docs/static-predicate.md.
+
+id = "static-sarif"
+name = "No new static-analysis findings"
+
+[[predicate]]
+id = "no-new-findings"
+provider = "static"
+description = "no new SARIF findings vs the stored baseline"
+cmd = "semgrep"
+args = ["--sarif", "--config", "auto", "."]
+format = "sarif"
+baseline = "stored"
+allowed_regression = 0

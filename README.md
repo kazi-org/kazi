@@ -482,6 +482,7 @@ OUTCOME: :converged   (tests pass · live /livez = "ok")
 | `metrics`      | a live **RED/SLO** signal (PromQL): windowed quantile, error-rate, or **burn-rate** gate | `query_url`, `query`, `pass_when`, `quantile`, `burn_rate` |
 | `custom_script`| ANY CLI checker (scanner, mutation tester, contract check) | `cmd`, `args`, `verdict`, `path`, `pass_when` |
 | `ratchet`      | a metric may not regress vs a baseline (coverage, perf, size) | `metric`, `baseline`, `direction`, `allowed_regression` |
+| `static`       | static analysis / type-check / lint (Dialyzer-led, SARIF-general) | `cmd`, `args`, `format`, `baseline`, `allowed_regression` |
 
 `custom_script` is the **escape hatch**: it turns any command-line tool into a
 predicate without a kazi release. Crucially the **verdict is declared, not
@@ -506,6 +507,17 @@ one mode. With `allowed_regression = 0` a metric "may only improve." See
 [`docs/ratchet-predicate.md`](docs/ratchet-predicate.md), `kazi schema ratchet`,
 and the recipes in [`priv/examples/`](priv/examples/) (`ratchet_coverage.toml`,
 `ratchet_size.toml`).
+
+`static` is the **analysis / type-check / lint** mode: the cheapest, most
+deterministic check, run every iteration to catch defects on paths the tests
+never execute. It **leads with Dialyzer** (kazi-native, zero false positives) and
+generalizes to the polyglot SARIF tools (`tsc`, `mypy`, `golangci-lint`, Semgrep)
+via `format`. The verdict is gated on the **parsed findings, not the exit code**,
+and a `baseline` turns it into a ratchet that **fails only on NEW findings** (so
+pre-existing debt can only shrink, never block). Findings surface as localized
+`file:line:col` evidence. See [`docs/static-predicate.md`](docs/static-predicate.md),
+`kazi schema static`, and the recipes in [`priv/examples/`](priv/examples/)
+(`static_dialyzer.toml`, `static_sarif.toml`).
 
 The **live providers** (`http_probe` sustained-health, `browser` journeys,
 `metrics`, `prod_log`) verify a *deployed* service. The discipline they enforce:
