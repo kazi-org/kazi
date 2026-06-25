@@ -14,6 +14,12 @@ name: OSS gates
 #                                  command coverage (T22.x/T28.3), the kazi
 #                                  mcp/adopt drift (T28.3), and the untrimmed
 #                                  plan (T31.2) -- do not red every PR.
+#   4. site-commands   (T29.4) -- the site source must not present a REMOVED kazi
+#                                  verb (`kazi run`, `kazi propose`) as a live
+#                                  command. Scans site/ incl. .svg assets. Phase
+#                                  1: WARN only (the proof SVG + index.astro step
+#                                  2 are still dirty; T27.6 + T25.2 clean them).
+#                                  Only scans on PRs that touch site/.
 #
 # Kept separate from ci.yml on purpose: the gates evolve (warn -> block, diff ->
 # full-tree) independently of the build/test pipeline.
@@ -112,3 +118,36 @@ jobs:
           echo "doc-freshness gate is in phase-1 WARN mode -> reporting only, exiting 0."
           echo "(Set FRESHNESS_BLOCKING=1 on this job to ratchet it to blocking once green.)"
           exit 0
+
+  site-commands:
+    name: site command accuracy (T29.4, warn)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run site command-accuracy guard (only when site/ changed)
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # Phase 1: warn only. The scanner defaults to non-blocking; flip this to
+          # "1" (and clear the dirty site, T27.6 + T25.2) to ratchet to blocking.
+          BLOCKING: "0"
+        run: |
+          set -uo pipefail
+          # oss-gates.yml triggers on every PR (no path filter), so gate the scan
+          # on a real site/ change -- the scanner only inspects site/ source.
+          if git diff --name-only "${BASE_REF}"...HEAD | grep -qE '^site/'; then
+            echo "site/ changed -> running command-accuracy guard."
+            node site/scripts/check-commands.mjs
+          else
+            echo "no site/ changes in this PR -> skipping (exit 0)."
+          fi
