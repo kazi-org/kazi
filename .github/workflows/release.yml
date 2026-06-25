@@ -21,6 +21,16 @@ on:
         description: The release tag to attach the built assets to.
         required: true
         type: string
+  # Manual escape hatch + recovery: build and attach the binaries for an EXISTING
+  # tag on demand. Used when a release-please release was cut without its assets
+  # (e.g. the chained build skipped), so `brew install` can be refreshed without
+  # cutting a new release. Same `tag` input shape as workflow_call.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to build + attach assets to (e.g. v1.41.0).
+        required: true
+        type: string
 
 permissions:
   contents: write # create the Release and upload assets
@@ -60,6 +70,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Build the tag's code when invoked via workflow_call/workflow_dispatch;
+          # on a direct tag push, github.ref is already the tag.
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Erlang/OTP and Elixir
         uses: erlef/setup-beam@v1
