@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.22.0](https://github.com/kazi-org/kazi/compare/v1.21.0...v1.22.0) (2026-06-25)
+
+
+### Features
+
+* **enforcement:** add DiffGuard advisory diff-inspection scanner (T32.5) ([a0c9610](https://github.com/kazi-org/kazi/commit/a0c961097de3c586b69943a5660f7d2b07401901))
+* **loop:** wire advisory diff-gaming guard with progress downgrade (T32.5) ([dc7c4d4](https://github.com/kazi-org/kazi/commit/dc7c4d43e5f5bfb29702fc5de6f24ccddda60c8f))
+
 ## [1.21.0](https://github.com/kazi-org/kazi/compare/v1.20.0...v1.21.0) (2026-06-25)
 
 
