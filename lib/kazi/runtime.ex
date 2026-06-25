@@ -51,7 +51,11 @@ defmodule Kazi.Runtime do
     tests: Kazi.Providers.TestRunner,
     http_probe: Kazi.Providers.HttpProbe,
     prod_log: Kazi.Providers.ProdLog,
-    browser: Kazi.Providers.Browser
+    browser: Kazi.Providers.Browser,
+    # T32.1 (ADR-0040): the generic command-runner — the sanctioned extension
+    # point. A new verification kind is CONFIG (a goal-file verdict), not a kazi
+    # release.
+    custom_script: Kazi.Providers.CustomScript
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
