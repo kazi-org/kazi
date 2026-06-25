@@ -4,6 +4,108 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — economy benchmark A/B/C (T34.7): KEEP the stable-prefix wiring
+
+The multi-iteration economy benchmark the single-dispatch T15.9 run could not
+settle (devlog 2026-06-24 "token benchmark (T15.9)"), now run through the T19.4
+harness (`mix kazi.bench`) and the T34.6 economy KPIs (`--kpis`), ADR-0046. The
+open question this closes: across iterations, does the T19.1 orientation prefix +
+T19.2 stable-head discipline pay for itself, or should that wiring be reverted?
+
+**Verdict: KEEP.** The stable-prefix wiring stays. It is grounded in real
+evidence + the shipped mechanism; the one quantity still unmeasured live is the
+*magnitude* of the multi-iteration win (see "Honesty" below).
+
+**Run scale + cost actually incurred.** ZERO live Claude dispatches, ZERO API
+spend. I ran only the harness's two deterministic OFFLINE replay paths
+(`--captures`, `--kpis`) over the recorded fixtures, and the bench + economy unit
+suite (46 tests, green). I did NOT hand-orchestrate a live 3-arm convergence — see
+"What a full live run still needs". The budget guardrail (T34.7 brief) explicitly
+permits an honest, mechanism-grounded verdict over silently burning budget.
+
+**The A/B/C tables (`mix kazi.bench`).** Reproduced end-to-end from the recorded
+fixtures under `test/fixtures/bench/`:
+
+Token + cost + iteration table (`--captures test/fixtures/bench/captures`):
+
+| Arm | Iters | Input | Output | Cache-create | Cache-read | Total | Cost (USD) |
+|-----|-------|-------|--------|--------------|------------|-------|------------|
+| A — vanilla `claude -p`        | 1 | 12972 | 1116 | 24236  | 288183 | 326507 | 0.4790 |
+| B — kazi, NO prefix (pre-T19.1) | 3 | 12900 | 1200 | 287500 | 0      | 301600 | 0.4800 |
+| C — kazi, WITH prefix (default) | 3 | 6600  | 1170 | 96000  | 191000 | 294770 | 0.2380 |
+
+Economy-KPI breakdown (`--kpis test/fixtures/bench/kpi_runs`, T34.6/ADR-0046):
+
+| Tier (arm) | Runs | Stuck | Conv | Cost/conv-pred | Wall/conv-pred (s) | Iters-to-conv | Fresh-input-avoided | Rediscovery-avoided |
+|------------|------|-------|------|----------------|--------------------|---------------|---------------------|---------------------|
+| B | 1 | 0.00 | 1.00 | 0.090000 | 44.0 | 4.0 | 0     | 0  |
+| C | 2 | 0.50 | 0.50 | 0.035000 | 30.0 | 3.0 | 70000 | 32 |
+
+**Provenance of every cell — zero fabrication.** Arm A's row is a REAL recorded
+`claude --output-format json` envelope from the live T15.9 single-dispatch run
+(cost 0.4790; in 12972 / out 1116 / cache-read 288183 — identical to the T15.9
+table). Arms **B and C are SYNTHETIC, illustrative fixtures** committed to exercise
+the aggregation pipeline; they are NOT a fresh live measurement and must not be read
+as one. The KPI fixtures are likewise synthetic (the C tier even carries a stuck run
+to exercise the stuck-rate path, hence Conv 0.50). So the tables demonstrate the
+**measurement pipeline is correct and ready**; they do not by themselves prove the
+verdict. The verdict rests on the real evidence + mechanism below.
+
+**Why KEEP — the real evidence + shipped mechanism.**
+1. **It cannot hurt (REAL, measured).** T15.9's live single-dispatch A/B showed the
+   prefix adds **~0% token overhead (+0.5%, +$0.0001)**. The orientation prefix is
+   purely additive; when there is no graph/repo-map the pack is empty and the prompt
+   is **byte-identical to the pre-T19.1 path** (`loop.ex:1690`). No regression risk.
+2. **The baseline IS cacheable (REAL, measured).** T15.9's arm-A envelope carries
+   **288,183 cache-read tokens** — the ~290k static head (system prompt + tools +
+   workspace) is already server-cached with a 5-min TTL.
+3. **The wiring is the precondition for reusing that cache (SHIPPED mechanism).**
+   kazi drives `claude -p` as a subprocess and sets **no `cache_control`** — the
+   ONLY lever it has is a deterministic **byte-stable prefix** (`loop.ex:1696`).
+   T19.1/T19.2 front-load the prompt stable→volatile (orientation pack → work-item
+   → digest → volatile evidence) and carry the head byte-identical across
+   same-blast-radius iterations (`last_orientation_prefix`, `loop.ex:1906/1919`).
+   Without this wiring, iterations 2..N re-send that ~290k head as FRESH input (cache
+   miss); with it, they hit `claude -p`'s own prompt cache as cache-read. Since the
+   head is the dominant cost component and is provably cacheable (point 2), keeping
+   it stable is the difference between re-paying vs reusing it every iteration 2..N.
+   This is exactly the structural asymmetry the synthetic fixtures encode (arm B
+   cache-read 0 / cache-create 287500; arm C cache-read 191000 / fresh-input-avoided
+   70000; cost/conv-pred 0.035 vs 0.090).
+
+So the wiring demonstrably adds ~0% tax (can't hurt), is purely additive/backward
+-compatible, and is the necessary precondition for the multi-iteration cache reuse
+the real arm-A envelope proves is available. Reverting it would forfeit that reuse
+for no measured token saving. **KEEP.**
+
+**Honesty — what is NOT yet proven.** The *magnitude* of the multi-iteration win —
+the live arm-B-vs-arm-C delta in cost/converged-predicate — has **not** been
+measured against a live model. The repo's only B/C numbers are synthetic fixtures.
+The verdict on the keep/revert axis is clear and defensible (KEEP); the headline
+"X% cheaper across iterations" number remains UNMEASURED and must not be published
+until the live run lands.
+
+**What a full live run still needs (T19.5 path).** `mix kazi.bench`'s LIVE path is
+intentionally not wired — it prints a notice and defers to a maintainer
+(`kazi.bench.ex:106`). A real 3-arm multi-iteration run requires, OUT OF BAND of the
+mix task: (a) a **≥3-dispatch fixture** (a goal kazi cannot converge in one shot) in
+a real git repo with workspace permissions granted (not `/tmp` — opencode rejects
+scratch dirs, T8.11); (b) a **tee wrapper** on `PATH` capturing each per-dispatch
+`claude --output-format json` envelope (kazi persists none); (c) three runs — arm A
+`claude -p`; arm B `mix kazi.apply` with `orientation_prefix: false`; arm C the
+default — collecting envelopes + each run's `apply --json` `economy` object; (d)
+feeding those into `--captures` / `--kpis`. Estimated footprint ~10 live dispatches
+(3 arms × ≥3 iters) at ~$0.40–0.50 each ≈ **$5–15**, plus per-arm convergence loops
+that can run several minutes and have hung before (T15.9 arm C hung ~6 min). That
+orchestration + hang risk, not the dollar cost, is why it is a deliberate
+maintainer step and was not run autonomously here.
+
+**Bottom line.** KEEP the stable-prefix wiring. Proven ~0% single-dispatch tax +
+purely-additive/backward-compatible + the real arm-A envelope proves the ~290k head
+is cacheable and the wiring is the only lever to reuse it across iterations. The
+multi-iteration savings *magnitude* is the single number still owed by a live T19.5
+run; until then it stays unpublished. Subsumes/unblocks T19.5.
+
 ## 2026-06-25 -- Live site shipped two stale-command (vaporware) bugs that no CI gate caught
 
 **What happened.** A `/loop /apply --pool` session shipped E25 content (T25.1/T25.5/T25.6
