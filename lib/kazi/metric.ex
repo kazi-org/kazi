@@ -99,36 +99,13 @@ defmodule Kazi.Metric do
     end
   end
 
-  # Run the command in the workspace, capturing exit + stdout. A raise (missing
-  # binary / bad cwd) is captured and tagged rather than crashing the caller; an
-  # optional timeout brutally kills an overrun and reports it.
+  # Run the command in the workspace via the shared command-execution core (the
+  # same `:error` vs ran-exit boundary the custom_script/test_runner/prod_log
+  # providers fold onto, T32.1b/ADR-0040). A raise (missing binary / bad cwd) or a
+  # timeout overrun comes back tagged for `signal/2` to map to `:error`.
   defp run(cmd, args, workspace, config) do
     opts = [cd: workspace, stderr_to_stdout: false] ++ env_opt(config)
-    run_cmd(cmd, args, opts, Map.get(config, :timeout_ms))
-  end
-
-  defp run_cmd(cmd, args, opts, nil) do
-    {output, exit_code} = System.cmd(cmd, args, opts)
-    {:ran, output, exit_code}
-  rescue
-    error in [ErlangError, File.Error] -> {:raised, Exception.message(error)}
-  end
-
-  defp run_cmd(cmd, args, opts, timeout_ms) when is_integer(timeout_ms) and timeout_ms > 0 do
-    task =
-      Task.async(fn ->
-        try do
-          {:ok, System.cmd(cmd, args, opts)}
-        rescue
-          error in [ErlangError, File.Error] -> {:raised, Exception.message(error)}
-        end
-      end)
-
-    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, {output, exit_code}}} -> {:ran, output, exit_code}
-      {:ok, {:raised, message}} -> {:raised, message}
-      _ -> {:timeout, timeout_ms}
-    end
+    Kazi.Providers.CommandRunner.run(cmd, args, opts, Map.get(config, :timeout_ms))
   end
 
   defp decode_json(output) do
