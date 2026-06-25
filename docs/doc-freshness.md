@@ -102,12 +102,13 @@ Asserts: no doc points at an ADR number that does not exist.
 
 ### (d) No done+released task lingers in the live plan
 
-`check_d_plan_trimmed.sh`. For every `- [x]` task in `docs/plan.md`, if its
-`Done: YYYY-MM-DD` date is on or before the last release tag's date, it is stale
-residue that the ADR-0036 Layer-1 trim (T31.2) should have archived. Such tasks
-are reported with `docs/plan.md:<line>` and the task id. A `[x]` task with NO
-`Done:` date is reported as a distinct hygiene offender (it cannot prove it
-post-dates the release).
+`check_d_plan_trimmed.sh`. For every `- [x]` task in the live plan — the master
+`docs/plan.md` PLUS each `docs/plans/*.md` epic file under the split layout (T31.1),
+where task lines move — if its `Done: YYYY-MM-DD` date is on or before the last
+release tag's date, it is stale residue that the ADR-0036 Layer-1 trim (T31.2)
+should have archived. Such tasks are reported with `<file>:<line>` and the task id
+(e.g. `docs/plans/E12.md:14`). A `[x]` task with NO `Done:` date is reported as a
+distinct hygiene offender (it cannot prove it post-dates the release).
 
 The cutoff is the newest `v*` tag's commit date (override with `RELEASE_REF`).
 
