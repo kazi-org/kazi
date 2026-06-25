@@ -101,7 +101,9 @@ defmodule Kazi.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :inets, :ssl],
+      # :xmerl backs the JUnit-XML evidence parser (Kazi.Evidence, ADR-0041); it is
+      # a standard OTP app but must be listed so it ships in the release/escript.
+      extra_applications: [:logger, :inets, :ssl, :xmerl],
       mod: {Kazi.Application, []}
     ]
   end

@@ -576,10 +576,36 @@ defmodule Kazi.ReadModel do
 
   # id => %{"status" => "<status>", "evidence" => <evidence>}. Ids are stored as
   # strings (atoms don't survive a JSON round-trip).
+  #
+  # ADR-0041 envelope v2: a SCORED result additionally carries
+  # `score`/`direction`/`prior_score`/`evidence_items`. These keys are added ONLY
+  # when set (the boolean shape leaves them all at their defaults), so a boolean
+  # predicate serializes byte-identically to the pre-v2 `%{"status", "evidence"}`
+  # form — the back-compat invariant.
   defp serialize_vector(%PredicateVector{results: results}) do
-    Map.new(results, fn {id, %PredicateResult{status: status, evidence: evidence}} ->
-      {to_string(id), %{"status" => to_string(status), "evidence" => sanitize_evidence(evidence)}}
+    Map.new(results, fn {id, %PredicateResult{} = result} ->
+      {to_string(id), serialize_result(result)}
     end)
+  end
+
+  defp serialize_result(%PredicateResult{status: status, evidence: evidence} = result) do
+    %{"status" => to_string(status), "evidence" => sanitize_evidence(evidence)}
+    |> put_when_set("score", result.score)
+    |> put_when_set("direction", result.direction && to_string(result.direction))
+    |> put_when_set("prior_score", result.prior_score)
+    |> put_evidence_items(result.evidence_items)
+  end
+
+  # Add a key only for a non-nil value, so the boolean shape (all-nil) is unchanged.
+  defp put_when_set(map, _key, nil), do: map
+  defp put_when_set(map, key, value), do: Map.put(map, key, value)
+
+  # Evidence items serialize as a list of JSON-safe, string-keyed maps; an empty
+  # list (the boolean default) is omitted entirely so the stored shape is unchanged.
+  defp put_evidence_items(map, []), do: map
+
+  defp put_evidence_items(map, items) when is_list(items) do
+    Map.put(map, "evidence_items", Enum.map(items, &sanitize_evidence/1))
   end
 
   # T18.2: make evidence JSON-safe before it hits the Ecto `:map` column. A
