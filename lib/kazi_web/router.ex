@@ -37,6 +37,10 @@ defmodule KaziWeb.Router do
     # live-updating from Kazi.ReadModel (ADR-0011 read projection).
     live("/goals", GoalBoardLive, :index)
     live("/leases", LeaseMapLive, :index)
+    # T23.7: the live dependency-DAG dashboard — groups by running/ready/blocked/
+    # converged state, the `needs` edges, and per-group convergence (ADR-0011
+    # read projection of the dependency-graph scheduler, ADR-0028).
+    live("/dag", DagLive, :index)
     live("/goals/:id/history", HistoryLive, :index)
   end
 

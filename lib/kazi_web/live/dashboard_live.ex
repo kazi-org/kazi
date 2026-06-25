@@ -25,6 +25,7 @@ defmodule KaziWeb.DashboardLive do
       <nav>
         <.link navigate={~p"/goals"} id="nav-goal-board">Goal board</.link>
         <.link navigate={~p"/leases"} id="nav-lease-map">Lease map</.link>
+        <.link navigate={~p"/dag"} id="nav-dag">Dependency DAG</.link>
       </nav>
     </main>
     """
