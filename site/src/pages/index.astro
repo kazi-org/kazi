@@ -359,12 +359,12 @@ const personas = [
         </div>
         <div>
           <p class="ui-body text-sm font-semibold">2. Describe what you want</p>
-          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi propose "a /healthz endpoint that returns 200"
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi plan "a /healthz endpoint that returns 200"
 kazi approve &lt;proposal-ref&gt;</code></pre>
         </div>
         <div>
           <p class="ui-body text-sm font-semibold">3. Drive it to convergence</p>
-          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi run my-goal.toml --workspace ./my-project</code></pre>
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi apply my-goal.toml --workspace ./my-project</code></pre>
           <p class="ui-muted mt-2 text-xs">
             kazi loops &mdash; observe, dispatch, re-observe &mdash; and exits 0 only when
             every predicate is objectively true.
