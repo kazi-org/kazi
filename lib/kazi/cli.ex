@@ -1124,15 +1124,36 @@ defmodule Kazi.CLI do
     # otherwise. The exit code is the same on both surfaces: 0 only on convergence.
     case Runtime.run(goal, run_opts) do
       {:ok, %{outcome: :converged} = result} ->
-        report_outcome(goal, :converged, result, json?)
+        report_outcome(
+          goal,
+          :converged,
+          result,
+          run_economy(goal, :converged, result, opts, persist?),
+          json?
+        )
+
         0
 
       {:ok, %{outcome: :over_budget} = result} ->
-        report_outcome(goal, :over_budget, result, json?)
+        report_outcome(
+          goal,
+          :over_budget,
+          result,
+          run_economy(goal, :over_budget, result, opts, persist?),
+          json?
+        )
+
         1
 
       {:ok, %{outcome: :stopped} = result} ->
-        report_outcome(goal, :stopped, result, json?)
+        report_outcome(
+          goal,
+          :stopped,
+          result,
+          run_economy(goal, :stopped, result, opts, persist?),
+          json?
+        )
+
         1
 
       {:error, reason} ->
@@ -1140,6 +1161,46 @@ defmodule Kazi.CLI do
         1
     end
   end
+
+  # T34.6 (ADR-0046 §5): fold the run's per-iteration accounting envelopes into the
+  # run-end economy KPIs. The cost split comes from the run-aggregate `usage`
+  # envelope (T34.1) and the terminal vector's converged-predicate count; the
+  # cache + re-discovery KPIs come from the RECORDED per-iteration `context` /
+  # `tools` counters (T34.3), read back from the read-model when the run persisted.
+  # Without persistence (no read-model) only the run-aggregate KPIs are derivable
+  # and the per-iteration ones report unavailable (`nil`) — honest, never zero.
+  defp run_economy(%Goal{} = goal, outcome, result, opts, persist?) do
+    iterations = if persist?, do: recorded_iterations(goal.id), else: []
+
+    meta = %{
+      status: run_status(outcome, result),
+      converged_predicates: converged_predicate_count(Map.get(result, :vector)),
+      iteration_count: Map.get(result, :iterations, 0),
+      usage: Map.get(result, :usage, %{}),
+      harness: opts[:harness] && to_string(opts[:harness]),
+      model: opts[:model] && to_string(opts[:model])
+    }
+
+    Kazi.Economy.KPIs.from_iterations(iterations, meta)
+  end
+
+  # Read back the goal's recorded iterations for the economy fold, best-effort: a
+  # read-model that is not started/available yields no iterations (the
+  # per-iteration KPIs then report unavailable) rather than crashing the run's
+  # terminal report.
+  defp recorded_iterations(goal_id) do
+    ReadModel.list_iterations(goal_id)
+  rescue
+    _ -> []
+  end
+
+  # The number of predicates that reached `pass` at the terminal observation — the
+  # KPI denominator (cost / converged predicate). `nil` for an absent vector.
+  defp converged_predicate_count(%Kazi.PredicateVector{results: results}) do
+    Enum.count(results, fn {_id, result} -> Kazi.PredicateResult.passed?(result) end)
+  end
+
+  defp converged_predicate_count(_), do: nil
 
   # =============================================================================
   # run --parallel (T21.8, ADR-0027): drive the native parallel scheduler
@@ -1215,8 +1276,8 @@ defmodule Kazi.CLI do
   # Render the loop's terminal result on the requested surface (T15.3): the
   # versioned JSON result object under --json, the existing human report
   # otherwise. Both share the SAME loop result; only the OUTPUT shape differs.
-  defp report_outcome(%Goal{} = goal, outcome, result, json?) do
-    emit(json?, run_result_json(goal, outcome, result), fn ->
+  defp report_outcome(%Goal{} = goal, outcome, result, economy, json?) do
+    emit(json?, run_result_json(goal, outcome, result, economy), fn ->
       report(goal, human_outcome(outcome), result)
     end)
   end
@@ -2627,8 +2688,8 @@ defmodule Kazi.CLI do
   #                        ADR-0041's predicate envelope followed; the single
   #                        rolled-up total stays in `budget_spent.tokens` for
   #                        back-compat. See `Kazi.CLI.Usage`.
-  @spec run_result_json(Goal.t(), :converged | :stopped | :over_budget, map()) :: map()
-  defp run_result_json(%Goal{id: id}, outcome, result) do
+  @spec run_result_json(Goal.t(), :converged | :stopped | :over_budget, map(), map()) :: map()
+  defp run_result_json(%Goal{id: id}, outcome, result, economy) do
     status = run_status(outcome, result)
 
     %{
@@ -2644,7 +2705,21 @@ defmodule Kazi.CLI do
       enforcement: enforcement_json(Map.get(result, :enforcement))
     }
     |> put_usage(result)
+    |> put_economy(economy)
   end
+
+  # T34.6 (ADR-0046 §5): attach the additive `economy` object — the run-end KPIs
+  # derived from the per-iteration envelopes (cost / converged-predicate, wall-clock
+  # / converged-predicate, iterations-to-convergence, fresh-input-avoided,
+  # rediscovery-tool-calls-avoided, and this run's stuck flag). `Kazi.Economy.KPIs`
+  # OMITS every unavailable KPI (absent ≠ zero), and `status`/`stuck`/`iterations`
+  # are always present, so the object is never empty. Strictly additive —
+  # `schema_version` stays 2 (the ADR-0041/0046 additive rule).
+  defp put_economy(map, economy) when is_map(economy) do
+    Map.put(map, :economy, Kazi.Economy.KPIs.to_json(economy))
+  end
+
+  defp put_economy(map, _economy), do: map
 
   # T32.4 (ADR-0042 §7): surface the anti-gaming guarantees that were ACTIVE for the
   # run and any flagged gaming event, so an orchestrator (and a human) can see the
