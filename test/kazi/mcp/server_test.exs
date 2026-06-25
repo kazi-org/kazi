@@ -355,6 +355,15 @@ defmodule Kazi.MCP.ServerTest do
 
       vector = Map.new(payload["predicates"], &{&1["id"], &1["verdict"]})
       assert vector["code"] == "fail"
+
+      # T34.6 (ADR-0046 §5): the MCP run result mirrors the CLI's additive
+      # `economy` object so both surfaces stay the SAME shape. An over-budget run
+      # never converged ⇒ iterations-to-convergence is OMITTED (unavailable).
+      economy = payload["economy"]
+      assert is_map(economy)
+      assert economy["status"] == "over_budget"
+      assert economy["stuck"] == false
+      refute Map.has_key?(economy, "iterations_to_convergence")
     end
 
     test "the removed `kazi_run` alias is now an unknown tool (T27.9, ADR-0032)" do
