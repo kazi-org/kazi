@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.17.0](https://github.com/kazi-org/kazi/compare/v1.16.0...v1.17.0) (2026-06-25)
+
+
+### Features
+
+* **predicate:** :coverage first-class provider (T32.8) ([e5f3eab](https://github.com/kazi-org/kazi/commit/e5f3eabb6fef80aed211023d9acfd95812481137))
+* **predicate:** :cve first-class provider (T32.8) ([daf85df](https://github.com/kazi-org/kazi/commit/daf85dfe9b468ba3c3e73ae79071fcdfdfc0dd68))
+* **predicate:** :mutation first-class provider (T32.8) ([d776f9f](https://github.com/kazi-org/kazi/commit/d776f9fcdad8f486971ce624e62a5926467bac5d))
+* **predicate:** :property first-class provider (T32.8) ([00b159a](https://github.com/kazi-org/kazi/commit/00b159a1573ce72ea9835cdedff8766963319728))
+
 ## [1.16.0](https://github.com/kazi-org/kazi/compare/v1.15.0...v1.16.0) (2026-06-25)
 
 
