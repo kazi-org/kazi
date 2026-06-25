@@ -1,0 +1,27 @@
+# Recipe (T32.9, ADR-0043): API contract compat — no breaking proto change.
+#
+# `buf breaking` compares the working Protobuf schema against a baseline (a git
+# ref, an image, or a directory) and exits NON-ZERO when it finds a wire- or
+# source-incompatible change. Its exit code IS the verdict, so `exit_zero` is
+# exactly right — no parsing needed.
+#
+# Evidence tier: DEMONSTRATION (fail directly). A `buf breaking` hit is a concrete,
+# located incompatibility (rule id + file:line), not a probabilistic claim — safe
+# to fail a loop on directly. `evidence_format` is left at the default; buf prints
+# the offending rules to stdout, which the truncated `output` already carries.
+#
+#     kazi apply priv/examples/recipe_contract_buf.toml --workspace .
+#
+# Adapt `--against` to your baseline (here the previous commit). See
+# docs/custom-script-recipes.md and `kazi schema custom_script`.
+
+id = "recipe-contract-buf"
+name = "API contract: no breaking proto change"
+
+[[predicate]]
+id = "no-breaking-proto"
+provider = "custom_script"
+description = "buf breaking finds no wire/source-incompatible change vs the baseline"
+cmd = "buf"
+args = ["breaking", "--against", ".git#ref=HEAD~1"]
+verdict = "exit_zero"

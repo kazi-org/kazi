@@ -1,0 +1,34 @@
+# Recipe (T32.9, ADR-0043): accessibility ratchet — a11y score may not regress.
+#
+# Lighthouse (or Lighthouse CI) scores a page and emits a JSON report; the
+# accessibility category score is a 0–1 float at
+# `categories.accessibility.score`. Accessibility is a PRESENCE/CLAIM signal — a
+# rolled-up score that should only climb — so it is gated with the T32.3 `ratchet`
+# mode (`higher_better`) against its stored baseline, with `allowed_regression = 0`
+# so the score may only improve.
+#
+# Evidence tier: PRESENCE / CLAIM (ratchet against a baseline) — the gate fires on
+# a regression below the baseline, not on the absolute level, so a partial score
+# does not block while it is climbing.
+#
+# Lighthouse exits 0 on a successful run regardless of the score, which is exactly
+# what the ratchet wants — the verdict comes from the parsed `score`, not the exit
+# code. Point `cmd`/`url` at your page; for Lighthouse CI read the score out of
+# its assertion JSON instead.
+#
+#     kazi apply priv/examples/recipe_a11y_lighthouse.toml --workspace .
+#
+# See docs/custom-script-recipes.md, docs/ratchet-predicate.md, and
+# `kazi schema ratchet`.
+
+id = "recipe-a11y-lighthouse"
+name = "Accessibility: Lighthouse a11y score may not regress"
+
+[[predicate]]
+id = "a11y-score-no-regression"
+provider = "ratchet"
+description = "the Lighthouse accessibility score stays at or above its stored baseline"
+baseline = "stored"
+direction = "higher_better"
+allowed_regression = 0.0
+metric = { cmd = "lighthouse", args = ["https://app.example.com", "--only-categories=accessibility", "--output=json", "--output-path=stdout", "--quiet", "--chrome-flags=--headless"], path = "$.categories.accessibility.score" }
