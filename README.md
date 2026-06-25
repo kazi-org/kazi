@@ -23,11 +23,11 @@
 
 **Your coding agent says "done." kazi proves it.**
 
-*kazi* (Swahili: *work / a job*) is **the outer/reconciliation loop for coding agents**.
-Install it as a skill and **Claude Code** can finally *finish* the job: you keep working
-in Claude the way you already do, and kazi makes "done" **objective** — looping your agent
+Give **Claude Code** the power to actually *finish*. You chat with Claude the way you
+already do; kazi works in the background to make "done" **objective** — looping your agent
 until every check passes (tests green, the endpoint live, the change deployed), or stopping
 to tell you why (`stuck`, or out of budget) instead of pretending it's finished.
+**You never run kazi yourself — Claude does.**
 
 ## Try it in 10 seconds
 
@@ -46,8 +46,10 @@ You never leave your chat with Claude. That's it.
 
 ## How it works
 
-Under the hood, kazi *drives* the coding agent you already use (Claude Code, Codex, …)
-in a reconcile loop.
+Under the hood, *kazi* is **the outer/reconciliation loop for coding agents** — your agent
+runs it, not you. (*kazi* is Swahili for *work / a job*.) It *drives* the coding agent you
+already use (Claude Code, Codex, …) in a reconcile loop: observe every failing check,
+dispatch a fix, integrate, re-check.
 
 Think of it like **Kubernetes for coding goals**: you declare desired state, kazi
 watches actual state, and it keeps closing the gap until the two match.
