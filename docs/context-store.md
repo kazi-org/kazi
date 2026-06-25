@@ -29,6 +29,26 @@ byte-identical to the pre-store path. This page documents the first provider, th
 - `stats/1` — report the byte accounting (`indexed_bytes` / `returned_bytes` /
   `saved_bytes`).
 
+## Loop integration (evidence compression)
+
+When a goal/run configures a store (via `adapter_opts[:context_store]`, with an
+optional `adapter_opts[:context_budget]`), the reconcile loop compresses oversized
+failing evidence instead of inlining it every iteration (ADR-0045 §3):
+
+- An artifact whose rendered size exceeds the threshold (**5 KB** default) is
+  **indexed** under a SHA-scoped label (`kazi:run:<goal>:iter:<n>:test-log`).
+- The dispatch prompt's evidence slot then carries a **compact reference** — the
+  label, the byte count, and a one-line summary — **not the bytes**.
+- A separate **`## Indexed evidence (context store)`** section is injected with the
+  budget-fitted snippets retrieved for the current failing predicates.
+- **Sub-threshold artifacts inline as before**, and with **no store configured the
+  dispatch prompt is byte-identical** to the pre-integration path.
+
+If the store is unavailable (e.g. `gist` missing) the index/search degrade
+silently — the run is unaffected. The loop's dispatch evidence is also redacted
+on the way out (see below), closing the gap that this path is distinct from
+`Kazi.Harness.Prompt.build_prompt`.
+
 ## Redaction before indexing (non-negotiable)
 
 Content is passed through `Kazi.Redaction.redact/1` at the `Kazi.ContextStore.index/3`
