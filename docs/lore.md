@@ -232,3 +232,22 @@ DEGRADES to the working copy, and `:clean_tree` is dropped from the reported
 guarantees (`enforcement_status/1`) -- report the ACTUAL level, never a fabricated
 one. The clean worktree is a temp dir, always removed in an `after` (L-0014: a
 sibling can reset the shared tree). (2026-06-25, T32.4.)
+
+### L-0016 #enforcement #loop #gaming #diff #invariant -- the diff guard is ADVISORY: downgrade progress, never block convergence
+T32.5's `Kazi.Enforcement.DiffGuard` (ADR-0042 §5) scans the agent's `git diff HEAD`
+for gaming signatures (skip/xfail markers, `if <input> == <literal>` special-casing,
+grader-path edits) and is wired into `Kazi.Loop.flag_diff_gaming/1` AFTER the
+dispatch, next to the §2 read-only-lease flagging. LANDMINE: it is ADVISORY -- a hit
+must NOT fail the goal or touch the `:converged` gate. The "downgrade" is narrow: the
+flagged observation's index is recorded in `gaming_flagged_iterations`, and ONLY
+`code_history/1` (the history fed to the stuck detector) strips that observation's
+graded SCORE, so a GAMED apparent score improvement can't fire the ADR-0041
+graded-progress escape and rescue the loop from a stuck verdict. The STORED vector
+keeps its real score and the boolean failing-set logic is untouched -- if predicates
+genuinely pass, the loop still converges. Do NOT "harden" this into a hard block: the
+ratchets (§4) + read-only lease (§2) are the hard guard; this is the cheap
+early-warning layer with a low-false-positive bar (an `if mode == "create"` branch or
+a whitespace refactor must NOT flag). The diff source is an injectable `diff_fn`
+(default `git diff HEAD`); a crashing/non-git source degrades to "" -> no events, so
+the guard can never break the tick. New untracked files don't appear in
+`git diff HEAD` -- the guard sees edits to existing files only. (2026-06-25, T32.5.)
