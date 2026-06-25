@@ -17,20 +17,26 @@
 #   stats  -> "Bytes indexed:  N B" / "Bytes returned: N B" / "Bytes saved: N B"
 set -euo pipefail
 
-STORE="${FAKE_GIST_STORE:?FAKE_GIST_STORE must be set}"
-mkdir -p "$STORE"
-CONTENT="$STORE/content.dat"
-IDX="$STORE/indexed_bytes"
-RET="$STORE/returned_bytes"
-touch "$CONTENT"
-[ -f "$IDX" ] || echo 0 >"$IDX"
-[ -f "$RET" ] || echo 0 >"$RET"
-
 sub="${1:-}"
 shift || true
 
+# The file-backed store is only needed by the subcommands that read/write the
+# index (index/search/stats). `doctor` (T35.8 verify step) inspects the runtime
+# only, so it must work WITHOUT $FAKE_GIST_STORE — init the store lazily.
+init_store() {
+  STORE="${FAKE_GIST_STORE:?FAKE_GIST_STORE must be set}"
+  mkdir -p "$STORE"
+  CONTENT="$STORE/content.dat"
+  IDX="$STORE/indexed_bytes"
+  RET="$STORE/returned_bytes"
+  touch "$CONTENT"
+  [ -f "$IDX" ] || echo 0 >"$IDX"
+  [ -f "$RET" ] || echo 0 >"$RET"
+}
+
 case "$sub" in
   index)
+    init_store
     files=()
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -51,6 +57,7 @@ case "$sub" in
     ;;
 
   search)
+    init_store
     query="${1:-}"
     shift || true
     budget=0
@@ -86,7 +93,19 @@ case "$sub" in
     echo $(( $(cat "$RET") + rb )) >"$RET"
     ;;
 
+  doctor)
+    # `kazi init --with-gist` shells `gist doctor` to verify the install before
+    # writing project-local config (T35.8). The real binary prints a checklist and
+    # exits 0 when the runtime is healthy (a missing DSN is informational, not a
+    # failure); the fake mirrors that contract.
+    echo "Gist Doctor"
+    echo "==========="
+    echo "[OK] gist runtime: fake"
+    exit 0
+    ;;
+
   stats)
+    init_store
     ib=$(cat "$IDX")
     rb=$(cat "$RET")
     saved=$((ib - rb))
