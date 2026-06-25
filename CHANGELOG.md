@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.31.0](https://github.com/kazi-org/kazi/compare/v1.30.0...v1.31.0) (2026-06-25)
+
+
+### Features
+
+* **context:** pure tier-escalation policy with stop rule (T36.4) ([fbec61e](https://github.com/kazi-org/kazi/commit/fbec61e06aac04253a76fa3cc5a9fa69538a7921))
+* **loop:** escalate the active context tier on non-progress (T36.4) ([c3fa1b8](https://github.com/kazi-org/kazi/commit/c3fa1b8b8d0255dfae3e4ee9d0efe7bebd09f66e))
+
 ## [1.30.0](https://github.com/kazi-org/kazi/compare/v1.29.0...v1.30.0) (2026-06-25)
 
 
