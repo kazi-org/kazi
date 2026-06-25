@@ -57,6 +57,8 @@ defmodule Kazi.CLI do
 
   alias Kazi.{Adopt, Authoring, Goal, ReadModel, Runtime}
   alias Kazi.Authoring.Clarify
+  alias Kazi.ContextStore
+  alias Kazi.ContextStore.{GistCLI, Snippet}
   alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
   alias Kazi.Export.Obsidian
@@ -124,6 +126,8 @@ defmodule Kazi.CLI do
     parallelism: :integer,
     explain: :boolean,
     dry_run: :boolean,
+    provider: :string,
+    budget: :integer,
     help: :boolean,
     version: :boolean
   ]
@@ -170,6 +174,10 @@ defmodule Kazi.CLI do
       "`apply` only: PRINT the computed wave schedule (the topological `needs`-DAG frontiers + the blast-radius parallelism within each) and EXIT 0 WITHOUT EXECUTING — dispatches nothing, so over-constraint is visible before a run. Under --json emits the schedule as JSON. Alias of --dry-run.",
     dry_run:
       "`apply` only: alias of --explain — print the computed schedule and exit 0 without dispatching anything.",
+    provider:
+      "`context` only: the context-store provider to proxy to (currently `gist`, the default). The provider stays independently usable; this is a thin wrapper so users learn one CLI (ADR-0045).",
+    budget:
+      "`context search` only: cap the search result at N bytes (the byte budget the provider fits ranked snippets into). Default: the provider's own default.",
     help: "Show this help and exit.",
     version: "Print the kazi version and exit."
   }
@@ -266,6 +274,16 @@ defmodule Kazi.CLI do
       flags: [:json]
     },
     %{
+      name: "context",
+      summary:
+        "Thin wrapper over the context-store provider: `context index|search|stats` (ADR-0045).",
+      args: [
+        %{name: "subcommand", required: true},
+        %{name: "args", required: false}
+      ],
+      flags: [:provider, :budget, :json]
+    },
+    %{
       name: "help",
       summary: "Show usage. With --json, emit the command/flag surface as a single JSON object.",
       args: [],
@@ -305,6 +323,9 @@ defmodule Kazi.CLI do
       kazi reject <proposal-ref> [--json]
       kazi export <goal-file> --obsidian <dir> [--json]   # write an Obsidian vault
       kazi lint <goal-file> [--json]              # advisory near-duplicate group-name warnings
+      kazi context index <label> <file> [--provider gist] [--json]   # index an artifact
+      kazi context search "<query>" [--budget N] [--provider gist] [--json]
+      kazi context stats [--provider gist] [--json]                  # byte accounting
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
 
@@ -412,6 +433,14 @@ defmodule Kazi.CLI do
                              Model the harness should use, e.g.
                              `local/qwen3.6` for opencode. Overrides the goal-file's
                              [harness] model.
+      --provider <name>      `context` only (T35.7, ADR-0045): the context-store
+                             provider the `context` subcommands proxy to. Currently
+                             `gist` (the default), the CLI adapter to the `gist`
+                             binary. A thin wrapper so users learn one CLI; the
+                             provider stays independently usable.
+      --budget <N>           `context search` only: cap the search result at N bytes
+                             (the byte budget the provider fits ranked snippets
+                             into). Default: the provider's own default.
       --help, -h             Show this help and exit.
       --version, -v          Print the kazi version and exit.
 
@@ -431,6 +460,9 @@ defmodule Kazi.CLI do
       kazi approve prop-a-healthz-endpoint-3f9c1a2b4d5e
       kazi export priv/examples/grouped_taxonomy.toml --obsidian ./vault
       kazi lint priv/examples/grouped_taxonomy.toml
+      kazi context index workspace-docs ./docs/concept.md --provider gist
+      kazi context search "session cookie" --budget 4000 --json
+      kazi context stats --json
   """
 
   @doc """
@@ -523,6 +555,9 @@ defmodule Kazi.CLI do
       {:lint, goal_file, opts} ->
         execute_lint(goal_file, opts)
 
+      {:context, subcommand, args, opts} ->
+        execute_context(subcommand, args, opts, inject_opts)
+
       {:error, message} ->
         IO.puts(:stderr, "error: #{message}\n")
         IO.puts(:stderr, @usage)
@@ -550,6 +585,7 @@ defmodule Kazi.CLI do
           | {:reject, String.t(), keyword()}
           | {:export, Path.t(), keyword()}
           | {:lint, Path.t(), keyword()}
+          | {:context, String.t(), [String.t()], keyword()}
           | {:error, String.t()}
 
   @doc """
@@ -792,13 +828,49 @@ defmodule Kazi.CLI do
   defp parse_command(["lint"], _flags),
     do: {:error, "the `lint` command requires a <goal-file> argument"}
 
+  # T35.7 (ADR-0045): `context index|search|stats` — a THIN wrapper over the
+  # `Kazi.ContextStore` provider so users learn one CLI (the provider stays
+  # independently usable). The subcommand is a required positional; the remaining
+  # positionals are the subcommand's own args (a label + file for index, a query
+  # for search, none for stats). `--provider`/`--budget`/`--json` are carried
+  # through to `execute_context/4`, which proxies to the resolved provider.
+  defp parse_command(["context" | rest], flags), do: parse_context(rest, flags)
+
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
+
+  # The `context` parse body. The subcommand (index / search / stats) is required;
+  # an unknown one is a clear usage error (NOT an "unknown command", which would
+  # mis-hint at the top-level verbs). The remaining positionals stay as the
+  # subcommand's own args — validated in `execute_context/4`, where the surface
+  # (a JSON error envelope under --json) is consistent with the other commands.
+  @context_subcommands ~w(index search stats)
+
+  defp parse_context([sub | rest], flags) when sub in @context_subcommands,
+    do: {:context, sub, rest, context_flags(flags)}
+
+  defp parse_context([sub | _], _flags),
+    do:
+      {:error,
+       "unknown context subcommand #{inspect(sub)} (expected `index`, `search`, or `stats`)"}
+
+  defp parse_context([], _flags),
+    do: {:error, "the `context` command requires a <subcommand> (`index`, `search`, or `stats`)"}
+
+  # The flag bundle the `context` subcommands share: the provider selector
+  # (default `gist`), the search byte budget, and the machine-surface toggle.
+  defp context_flags(flags) do
+    [
+      provider: flags[:provider] || "gist",
+      budget: flags[:budget],
+      json: flags[:json] || false
+    ]
+  end
 
   defp approval_command(command, proposal_ref, [], flags),
     do: {command, proposal_ref, json: flags[:json] || false}
@@ -1887,6 +1959,235 @@ defmodule Kazi.CLI do
   defp lint_load_error(goal_file, reason, opts) do
     message = "could not load goal-file #{goal_file}: #{reason}"
 
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  # =============================================================================
+  # context — the context-store wrapper (T35.7, ADR-0045)
+  # =============================================================================
+  #
+  # A THIN wrapper over the `Kazi.ContextStore` provider behaviour so users learn
+  # ONE CLI (`kazi context index|search|stats`) instead of a separate provider
+  # tool — the provider (the `gist` binary, via `Kazi.ContextStore.GistCLI`) stays
+  # independently usable. These subcommands re-derive NO provider logic: each
+  # resolves a store and proxies straight through `Kazi.ContextStore.{index,
+  # search,stats}`, the same seam the loop wiring uses. `--json` emits a single,
+  # parseable JSON object on stdout (no human prose interleaved); the default is
+  # human prose. `inject_opts[:context_store_opts]` is the test seam that points
+  # the provider at a fake binary; production passes none (the real `gist` + env
+  # DSN are used).
+  defp execute_context(subcommand, args, opts, inject_opts) do
+    case context_store(opts, inject_opts) do
+      {:ok, store} -> run_context(subcommand, args, store, opts)
+      {:error, message} -> context_error(message, opts)
+    end
+  end
+
+  # Resolve the `--provider` name (default `gist`) to a `{module, init_opts}`
+  # store. Unknown providers are a clear error, not a crash. The init opts come
+  # from the test seam (a fake `gist`); production gets `[]` so the GistCLI uses
+  # the real binary and the `KAZI_GIST_DSN` / `GIST_DSN` env it reads itself.
+  defp context_store(opts, inject_opts) do
+    provider_opts = Keyword.get(inject_opts, :context_store_opts, [])
+
+    case Keyword.get(opts, :provider, "gist") do
+      "gist" ->
+        {:ok, {GistCLI, provider_opts}}
+
+      other ->
+        {:error,
+         "unknown context provider #{inspect(other)} (currently only `gist` is supported)"}
+    end
+  end
+
+  # `context stats` — proxy to `stats/1` and report the byte accounting.
+  defp run_context("stats", [], store, opts) do
+    case ContextStore.stats(context_store: store) do
+      {:ok, stats} ->
+        emit(json?(opts), context_stats_json(stats), fn -> print_context_stats(stats) end)
+        0
+
+      {:error, reason} ->
+        context_error(context_error_message(reason), opts)
+    end
+  end
+
+  defp run_context("stats", extra, _store, opts),
+    do:
+      context_error(
+        "`context stats` takes no positional arguments (got: #{Enum.join(extra, " ")})",
+        opts
+      )
+
+  # `context search "<query>" [--budget N]` — proxy to `search/3` and report the
+  # budget-fitting snippets. A missing budget means "the provider's own default"
+  # (the store treats budget 0 as no explicit cap).
+  defp run_context("search", [query], store, opts) do
+    case context_budget(opts) do
+      {:ok, budget} ->
+        case ContextStore.search(query, budget, context_store: store) do
+          {:ok, snippets} ->
+            emit(json?(opts), context_search_json(query, budget, snippets), fn ->
+              print_context_search(query, snippets)
+            end)
+
+            0
+
+          {:error, reason} ->
+            context_error(context_error_message(reason), opts)
+        end
+
+      {:error, message} ->
+        context_error(message, opts)
+    end
+  end
+
+  defp run_context("search", [], _store, opts),
+    do: context_error("`context search` requires a <query> argument (quote it)", opts)
+
+  defp run_context("search", [_query | extra], _store, opts),
+    do:
+      context_error(
+        "unexpected argument(s) after the search query: #{Enum.join(extra, " ")}",
+        opts
+      )
+
+  # `context index <label> <file>` — read the artifact at <file> and proxy to
+  # `index/3` under the stable source <label>.
+  defp run_context("index", [label, file], store, opts) do
+    case File.read(file) do
+      {:ok, content} ->
+        case ContextStore.index(label, content, context_store: store) do
+          {:ok, result} ->
+            emit(json?(opts), context_index_json(label, result), fn ->
+              print_context_index(label, result)
+            end)
+
+            0
+
+          {:error, reason} ->
+            context_error(context_error_message(reason), opts)
+        end
+
+      {:error, posix} ->
+        context_error(
+          "could not read <file> #{file}: #{:file.format_error(posix)}",
+          opts
+        )
+    end
+  end
+
+  defp run_context("index", args, _store, opts) when length(args) < 2,
+    do: context_error("`context index` requires a <label> and a <file> argument", opts)
+
+  defp run_context("index", [_label, _file | extra], _store, opts),
+    do: context_error("unexpected argument(s) after <file>: #{Enum.join(extra, " ")}", opts)
+
+  # The search byte budget: absent ⇒ 0 (the provider's own default); a negative
+  # budget is a usage error (the store requires a non-negative cap).
+  defp context_budget(opts) do
+    case Keyword.get(opts, :budget) do
+      nil -> {:ok, 0}
+      n when is_integer(n) and n >= 0 -> {:ok, n}
+      n -> {:error, "--budget must be a non-negative integer (got: #{inspect(n)})"}
+    end
+  end
+
+  # The `context <sub> --json` envelopes: a single parseable object per subcommand,
+  # carrying `command`/`subcommand` (so an orchestrator routes the result) and the
+  # `schema_version` pin shared with the other --json surfaces.
+  defp context_stats_json(stats) do
+    %{
+      schema_version: @run_schema_version,
+      command: "context",
+      subcommand: "stats",
+      provider: to_string(stats.provider),
+      indexed_bytes: stats.indexed_bytes,
+      returned_bytes: stats.returned_bytes,
+      saved_bytes: stats.saved_bytes
+    }
+  end
+
+  defp context_search_json(query, budget, snippets) do
+    %{
+      schema_version: @run_schema_version,
+      command: "context",
+      subcommand: "search",
+      query: query,
+      budget: budget,
+      count: length(snippets),
+      snippets: Enum.map(snippets, &Snippet.to_serializable/1)
+    }
+  end
+
+  defp context_index_json(label, result) do
+    %{
+      schema_version: @run_schema_version,
+      command: "context",
+      subcommand: "index",
+      label: Map.get(result, :label, label),
+      bytes: Map.get(result, :bytes, 0),
+      chunks: Map.get(result, :chunks)
+    }
+  end
+
+  defp print_context_stats(stats) do
+    IO.puts(
+      "CONTEXT  provider=#{stats.provider}  indexed=#{stats.indexed_bytes} B" <>
+        "  returned=#{stats.returned_bytes} B  saved=#{stats.saved_bytes} B"
+    )
+  end
+
+  defp print_context_search(query, []) do
+    IO.puts("CONTEXT  no snippets for #{inspect(query)}.")
+  end
+
+  defp print_context_search(query, snippets) do
+    IO.puts("CONTEXT  #{length(snippets)} snippet(s) for #{inspect(query)}:")
+
+    Enum.each(snippets, fn %Snippet{} = s ->
+      source = s.source || "(unattributed)"
+      IO.puts("  [#{source}] #{s.bytes} B")
+      IO.puts(s.text)
+    end)
+  end
+
+  defp print_context_index(label, result) do
+    chunks = Map.get(result, :chunks)
+    chunk_note = if is_integer(chunks), do: " (#{chunks} chunk(s))", else: ""
+    IO.puts("CONTEXT  indexed #{label}: #{Map.get(result, :bytes, 0)} B#{chunk_note}")
+  end
+
+  # Translate the provider's error shapes (Kazi.ContextStore.GistCLI) into a clear
+  # operator-facing line. The "binary not available" case is the common one — a
+  # machine without `gist` — and gets a fix hint, never a stack trace.
+  defp context_error_message(:gist_not_available),
+    do:
+      "the context-store provider is unavailable: the `gist` binary is not on PATH " <>
+        "(install gist, or run without the `context` command — the store is off by default)"
+
+  defp context_error_message({:gist_timeout, ms}),
+    do: "the context-store provider timed out after #{ms} ms"
+
+  defp context_error_message({kind, code, output})
+       when kind in [:gist_index_failed, :gist_search_failed, :gist_stats_failed],
+       do: "the context-store provider failed (#{kind}, exit #{code}): #{output}"
+
+  defp context_error_message({:gist_raised, message}),
+    do: "the context-store provider raised: #{message}"
+
+  defp context_error_message(reason), do: "the context-store provider errored: #{inspect(reason)}"
+
+  # The error surface shared by the `context` subcommands: a JSON error envelope on
+  # stdout under --json (the NON-INTERACTIVE contract), a human stderr line
+  # otherwise; a stable non-zero exit either way.
+  defp context_error(message, opts) do
     if json?(opts) do
       emit_json_error(message)
     else
