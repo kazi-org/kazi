@@ -1841,10 +1841,27 @@ defmodule Kazi.Loop do
   end
 
   # The envelope-shaped usage components a harness result carries, keyed by the
-  # `Kazi.CLI.Usage` field names. A result without usage contributes nothing.
+  # `Kazi.CLI.Usage` field names. T34.1 folded the harness's `:cost_usd`; T34.2
+  # adds the per-field cached/fresh token split the profile mapped onto `:usage`
+  # (`%{input_tokens: …, cached_input_tokens: …, …}`). Only the components the
+  # harness actually reported are returned — an unreported field stays absent.
+  # A result without either contributes nothing.
   @spec usage_components(Kazi.HarnessAdapter.result()) :: map()
-  defp usage_components({:ok, %{cost_usd: cost}}) when is_number(cost), do: %{cost_usd: cost}
+  defp usage_components({:ok, %{} = result}) do
+    %{}
+    |> put_cost_usd(result)
+    |> put_token_split(result)
+  end
+
   defp usage_components(_), do: %{}
+
+  defp put_cost_usd(components, %{cost_usd: cost}) when is_number(cost),
+    do: Map.put(components, :cost_usd, cost)
+
+  defp put_cost_usd(components, _result), do: components
+
+  defp put_token_split(components, %{usage: %{} = usage}), do: Map.merge(components, usage)
+  defp put_token_split(components, _result), do: components
 
   # Sum two usage maps component-wise; a component present in only one side is
   # carried through, so the aggregate reports exactly the union of what was
