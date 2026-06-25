@@ -30,6 +30,21 @@ defmodule Kazi.Predicate do
   evaluates the predicate. A guard predicate is never an acceptance predicate
   (guards are invariants, not goals to reach); the two flags are independent but
   the loader rejects a predicate marked both.
+
+  ## Held-out predicates (anti-gaming, T32.6, ADR-0042 §6)
+
+  A predicate may be marked `held_out = true`: the controller still evaluates it
+  and it still counts toward convergence (`:converged` requires the WHOLE vector
+  `:pass`, ADR-0002), but its id/definition/evidence are **not** placed in the
+  agent's dispatch context. This is the *visible-for-iteration vs
+  hidden-for-acceptance* split (Codeforces pretests vs system tests; SWE-bench
+  withholds gold tests): a capable agent can game only what it can see (METR's
+  43x reward-hacking finding, ADR-0042 context), so withholding the acceptance
+  subset from the agent's view keeps the bar honest. The visible predicates still
+  seed the fix context (the climbable gradient); the held-out set is the system
+  test the agent never sees but must still satisfy. `held_out?` is orthogonal to
+  `guard?`/`acceptance?` — it changes only what reaches the agent, never how the
+  controller evaluates or gates.
   """
 
   @typedoc """
@@ -57,6 +72,7 @@ defmodule Kazi.Predicate do
           config: config(),
           guard?: boolean(),
           acceptance?: boolean(),
+          held_out?: boolean(),
           group: String.t() | nil
         }
 
@@ -67,6 +83,14 @@ defmodule Kazi.Predicate do
             config: %{},
             guard?: false,
             acceptance?: false,
+            # T32.6 held-out acceptance subset (ADR-0042 §6): when true, the
+            # controller still evaluates this predicate and still requires it to
+            # pass for `:converged`, but its id/definition/evidence are withheld
+            # from the agent's dispatch context (visible-for-iteration vs
+            # hidden-for-acceptance). Default false = fully visible, current
+            # behavior. Appended additively so the existing field order is
+            # untouched.
+            held_out?: false,
             # T12.2 group taxonomy (ADR-0020): an optional declared group id this
             # predicate belongs to — a normalized slug referencing the goal's
             # `[[group]]` taxonomy, NOT a free-text path. Default `nil` (ungrouped;
@@ -79,12 +103,14 @@ defmodule Kazi.Predicate do
   Builds a predicate.
 
   `id` and `kind` are required; `:config`, `:description`, `:guard?`,
-  `:acceptance?`, and `:group` are optional opts. `:acceptance?` marks the
-  predicate as an acceptance criterion expected to fail at t0 (creation mode,
-  T2.1); it is a declarative marker only and does not change evaluation.
-  `:group` (default `nil`) is the declared group id this predicate belongs to
-  (T12.2, ADR-0020); the loader validates that a non-nil group references a
-  declared `[[group]]` id.
+  `:acceptance?`, `:held_out?`, and `:group` are optional opts. `:acceptance?`
+  marks the predicate as an acceptance criterion expected to fail at t0 (creation
+  mode, T2.1); it is a declarative marker only and does not change evaluation.
+  `:held_out?` (default `false`) withholds the predicate's id/definition/evidence
+  from the agent's dispatch context while still evaluating it and requiring it to
+  pass for `:converged` (T32.6, ADR-0042 §6). `:group` (default `nil`) is the
+  declared group id this predicate belongs to (T12.2, ADR-0020); the loader
+  validates that a non-nil group references a declared `[[group]]` id.
 
   ## Examples
 
@@ -110,6 +136,7 @@ defmodule Kazi.Predicate do
       config: Keyword.get(opts, :config, %{}),
       guard?: Keyword.get(opts, :guard?, false),
       acceptance?: Keyword.get(opts, :acceptance?, false),
+      held_out?: Keyword.get(opts, :held_out?, false),
       group: Keyword.get(opts, :group)
     }
   end
@@ -141,4 +168,20 @@ defmodule Kazi.Predicate do
   """
   @spec acceptance?(t()) :: boolean()
   def acceptance?(%__MODULE__{acceptance?: acceptance?}), do: acceptance?
+
+  @doc """
+  Returns true if the predicate is held out — evaluated by the controller and
+  required for convergence, but withheld from the agent's dispatch context
+  (visible-for-iteration vs hidden-for-acceptance, T32.6, ADR-0042 §6).
+
+  ## Examples
+
+      iex> Kazi.Predicate.held_out?(Kazi.Predicate.new(:gold, :tests, held_out?: true))
+      true
+
+      iex> Kazi.Predicate.held_out?(Kazi.Predicate.new(:unit, :tests))
+      false
+  """
+  @spec held_out?(t()) :: boolean()
+  def held_out?(%__MODULE__{held_out?: held_out?}), do: held_out?
 end

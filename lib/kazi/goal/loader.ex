@@ -122,17 +122,24 @@ defmodule Kazi.Goal.Loader do
   | `description` | string    | no       | `Predicate.description` |
   | `guard`       | boolean   | no       | `Predicate.guard?` (default `false`) |
   | `acceptance`  | boolean   | no       | `Predicate.acceptance?` (default `false`) |
+  | `held_out`    | boolean   | no       | `Predicate.held_out?` (default `false`) |
   | `group`       | string    | no       | `Predicate.group` — a declared `[[group]]` id (normalized); an unknown id is a load error (T12.2) |
   | *(any other)* | any       | no       | `Predicate.config` (atom-keyed, verbatim) |
 
-  Every key on a `[[predicate]]` table other than the six reserved keys above is
-  collected, verbatim, into the predicate's `config` map (with atom keys). That
-  config is handed untouched to the provider that evaluates the predicate.
+  Every key on a `[[predicate]]` table other than the seven reserved keys above
+  is collected, verbatim, into the predicate's `config` map (with atom keys).
+  That config is handed untouched to the provider that evaluates the predicate.
 
   `acceptance = true` marks a predicate as an acceptance criterion (creation
   mode, T2.1) — desired NEW behavior expected to fail at t0. It is a declarative
   marker only; evaluation is unchanged. A predicate may not be both a `guard` and
   an `acceptance` predicate (a guard is an invariant, not a goal to reach).
+
+  `held_out = true` withholds the predicate's id/definition/evidence from the
+  agent's dispatch context while the controller still evaluates it and still
+  requires it to pass for `:converged` (T32.6, ADR-0042 §6 — the
+  visible-for-iteration vs hidden-for-acceptance split). It is orthogonal to
+  `guard`/`acceptance`.
 
   #### Provider kinds
 
@@ -199,7 +206,7 @@ defmodule Kazi.Goal.Loader do
   # Reserved keys on a [[predicate]] table; everything else falls through to
   # the predicate's `config`. `group` (T12.2) is reserved so a declared group
   # reference does not leak into the provider config.
-  @predicate_reserved_keys ~w(id provider description guard acceptance group)
+  @predicate_reserved_keys ~w(id provider description guard acceptance held_out group)
 
   # goal-file `mode` string -> Goal.mode atom (T2.1 creation mode).
   @goal_modes %{"repair" => :repair, "create" => :create}
@@ -710,6 +717,7 @@ defmodule Kazi.Goal.Loader do
          {:ok, guard?} <- fetch_guard(raw, id),
          {:ok, acceptance?} <- fetch_acceptance(raw, id),
          :ok <- reject_guard_acceptance(guard?, acceptance?, id),
+         {:ok, held_out?} <- fetch_held_out(raw, id),
          {:ok, group} <- fetch_predicate_group(raw, id),
          config = predicate_config(raw),
          # T32.1 (ADR-0040): provider-specific config validation. Generic for
@@ -722,6 +730,7 @@ defmodule Kazi.Goal.Loader do
          description: Map.get(raw, "description"),
          guard?: guard?,
          acceptance?: acceptance?,
+         held_out?: held_out?,
          group: group,
          config: config
        )}
@@ -772,6 +781,16 @@ defmodule Kazi.Goal.Loader do
     case Map.get(raw, "acceptance", false) do
       acceptance? when is_boolean(acceptance?) -> {:ok, acceptance?}
       _ -> {:error, "predicate #{inspect(id)} \"acceptance\" must be a boolean"}
+    end
+  end
+
+  # T32.6 (ADR-0042 §6): optional `held_out` boolean. When true the controller
+  # still evaluates the predicate and still requires it to pass for `:converged`,
+  # but its id/definition/evidence are withheld from the agent's dispatch context.
+  defp fetch_held_out(raw, id) do
+    case Map.get(raw, "held_out", false) do
+      held_out? when is_boolean(held_out?) -> {:ok, held_out?}
+      _ -> {:error, "predicate #{inspect(id)} \"held_out\" must be a boolean"}
     end
   end
 
