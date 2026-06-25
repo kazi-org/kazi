@@ -243,7 +243,7 @@ object.
 Each progress line is a `Kazi.Loop` observation rendered as:
 
 ```json
-{ "schema_version": 2, "event": "iteration", "iteration": 0, "predicates": [ { "id": "code", "verdict": "fail" }, { "id": "live", "verdict": "fail" } ], "converged": false, "release_ref": null }
+{ "schema_version": 2, "event": "iteration", "iteration": 1, "predicates": [ { "id": "code", "verdict": "fail" }, { "id": "live", "verdict": "fail" } ], "converged": false, "release_ref": null, "context": { "orientation_cache": "hit", "retrieval_cache": "disabled", "orientation_tokens": 412, "evidence_tokens": 38, "retrieval_tokens": 0 }, "tools": { "tool_calls": 6, "file_reads": 2, "search_calls": 1, "graph_calls": 1 } }
 ```
 
 | Field            | Type             | Meaning |
@@ -253,7 +253,47 @@ Each progress line is a `Kazi.Loop` observation rendered as:
 | `predicates`     | array of objects | The predicate **vector** at this observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as the terminal result. |
 | `converged`      | boolean          | Whether the whole vector was satisfied at this observation. |
 | `release_ref`    | string \| null   | The release ref recorded so far this run (T3.3c), or `null`. |
+| `context`        | object           | ADR-0046 §2 per-iteration **context** counters from the dispatch that fed this observation. See [`context` + `tools` counters](#context--tools--per-iteration-counters-adr-0046) below. |
+| `tools`          | object (optional)| ADR-0046 §2 per-iteration **tool** counters. **Present only when the harness exposed a tool-use stream** — an empty/absent `tools` means the harness reported none (absent ≠ zero). |
 | `schema_version` | integer          | The contract version, same as the result object. |
+
+### `context` + `tools` — per-iteration counters (ADR-0046)
+
+These (T34.3, ADR-0046 §2) make the stable-prefix caching claim (ADR-0010/0045)
+**falsifiable**: a working orientation prefix shows the `context.orientation_cache`
+flip `miss → hit` across iterations with an unchanged blast radius, while the
+agent's `tools.file_reads` / `tools.search_calls` fall. They are **additive**, so
+`schema_version` stays **2**. The same maps are persisted on each read-model
+iteration row (the `context` / `tools` columns).
+
+`context` is **always present** — kazi builds the prompt, so a `0` here is a real,
+measured zero (e.g. orientation off ⇒ `orientation_tokens: 0`,
+`orientation_cache: "disabled"`), never "unknown":
+
+| Field                | Type    | Meaning |
+|----------------------|---------|---------|
+| `orientation_cache`  | string  | `"hit"` when kazi re-sent a **byte-identical** orientation prefix the inner harness's prompt cache can reuse (same blast radius, T19.2), `"miss"` on the first or a changed prefix, `"disabled"` when no orientation pack was sent (no graph/repo-map, or the prefix is off). |
+| `retrieval_cache`    | string  | Same `hit`/`miss`/`disabled` verdict for the optional retrieval section. |
+| `orientation_tokens` | integer | Estimated tokens (`ceil(chars / 4)`, ADR-0010) of the orientation prefix; `0` when absent. |
+| `evidence_tokens`    | integer | Estimated tokens of the failing-evidence section. |
+| `retrieval_tokens`   | integer | Estimated tokens of the retrieval section; `0` when absent. |
+
+The **first** observation has no preceding dispatch, so it reports the
+all-`disabled` / all-`0` context.
+
+`tools` is parsed from the harness result's tool-use stream and is present **only
+when the harness exposes one** (honest-unknown, ADR-0046 §6). When present, every
+bucket is reported (an unused category is a real `0`); when absent, the agent's
+tool usage is **unreported**, not zero. Claude's default `--output-format json`
+envelope carries no per-tool breakdown, so `tools` is typically absent for the
+`:claude` harness; a richer envelope (assistant `tool_use` blocks) populates it.
+
+| Field          | Type    | Meaning |
+|----------------|---------|---------|
+| `tool_calls`   | integer | Total tool invocations the agent made this dispatch. |
+| `file_reads`   | integer | File-read tool calls (e.g. `Read`). |
+| `search_calls` | integer | Search/grep tool calls (e.g. `Grep`/`Glob`) — the "rediscovery" calls a stable prefix should reduce. |
+| `graph_calls`  | integer | Code-graph / semantic-navigation tool calls (the code-review-graph MCP surface). |
 
 ### Stream shape
 
