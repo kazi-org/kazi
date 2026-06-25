@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.41.1](https://github.com/kazi-org/kazi/compare/v1.41.0...v1.41.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **cli:** keep the read-model repo running in the standalone binary ([077db2f](https://github.com/kazi-org/kazi/commit/077db2fa5ad705ee459a4cd1830b414aadbaec09))
+
 ## [1.41.0](https://github.com/kazi-org/kazi/compare/v1.40.1...v1.41.0) (2026-06-25)
 
 
