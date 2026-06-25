@@ -78,3 +78,25 @@ automatically) — not hard-coded into kazi.
   §8, ADR-0008).
 - **Treating headless `-p` as a reason to reimplement agent capabilities in
   kazi.** That is rebuilding a harness — the explicit non-goal of ADR-0001.
+
+## Amendment (2026-06-25): secret redaction before egress (T35.3)
+
+The original decision said the prompt is a thin projection of *raw* failing
+evidence. It did **not** address a security concern: captured evidence (test
+logs, HTTP bodies, harness stderr) can contain credentials — a `DATABASE_URL`
+in a failing migration log, an `Authorization` header in a flaky HTTP test —
+which would then flow verbatim into a third-party harness prompt.
+
+**Decision (amendment):** evidence rendered into the prompt is passed through a
+single shared redactor, `Kazi.Redaction.redact/1`, before it reaches the harness.
+The redactor replaces high-confidence secret shapes (provider token formats, PEM
+private keys, JWTs, connection-string passwords, `Bearer`/`Basic` headers, and
+named `password=`/`api_key=`-style values) with `[REDACTED]`, while leaving
+ordinary failure output untouched so the repair signal stays legible. It is a
+mitigation, not a guarantee; the durable rule remains keeping credentials out of
+the workspace.
+
+This is the **same** redactor the context store applies before indexing
+(ADR-0045) — one pattern set, two egress paths (prompt + store), redacting
+identically. The thin-projection decision above is otherwise unchanged: redaction
+is a transform on the evidence values, not a new prompt-engineering layer.
