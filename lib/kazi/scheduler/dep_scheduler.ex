@@ -103,6 +103,7 @@ defmodule Kazi.Scheduler.DepScheduler do
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
   alias Kazi.Scheduler
+  alias Kazi.Scheduler.DagSnapshot
   alias Kazi.Scheduler.PartitionSupervisor
 
   @typedoc """
@@ -351,9 +352,35 @@ defmodule Kazi.Scheduler.DepScheduler do
         put_state(acc, id, :blocked)
       end)
 
-    Enum.reduce(ready, state, fn group_id, acc ->
-      start_group(acc, group_id)
-    end)
+    state =
+      Enum.reduce(ready, state, fn group_id, acc ->
+        start_group(acc, group_id)
+      end)
+
+    # Publish the post-transition DAG snapshot so the live dependency-DAG
+    # dashboard (T23.7, ADR-0011) reflects the run as it progresses. This is the
+    # one chokepoint every state change flows through (init + each terminal +
+    # each regress), so a single broadcast here keeps the dashboard live. The
+    # scheduler is the PRODUCER; the dashboard is a pure read-only consumer — it
+    # never calls back in (ADR-0011 §2).
+    broadcast_dag(state)
+    state
+  end
+
+  # Best-effort publish of the render-ready DAG snapshot. The dashboard's PubSub
+  # server is supervised only when the web tree boots (`Kazi.Application`); when
+  # it isn't running (hermetic scheduler tests, the escript), this is a no-op
+  # rather than a crash — mirrors `Kazi.ReadModel`'s broadcast guard.
+  defp broadcast_dag(state) do
+    if Process.whereis(Kazi.PubSub) do
+      Phoenix.PubSub.broadcast(
+        Kazi.PubSub,
+        DagSnapshot.topic(),
+        {:dag_updated, DagSnapshot.from(state.goal, state.states)}
+      )
+    end
+
+    :ok
   end
 
   # Mark a group :running and start its supervised reconciler task. The task body
