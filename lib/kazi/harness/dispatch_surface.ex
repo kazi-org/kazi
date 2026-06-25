@@ -84,7 +84,15 @@ defmodule Kazi.Harness.DispatchSurface do
   `[]` when the dispatch should be left untouched.
 
   Returns `[]` (no surface restriction, byte-identical to the pre-T36.2 dispatch)
-  unless BOTH hold:
+  when EITHER:
+
+    * `adapter_opts[:dispatch_surface]` is `:ambient` — the explicit OFF switch:
+      the operator/benchmark asked for the pre-T36.2 ambient surface (every
+      configured MCP server + the harness's default tool set), so the minimal
+      surface is suppressed. This is the `tool-surface off` arm the T36.5
+      benchmark measures against the `:minimal` default (ADR-0047). Any value
+      other than `:ambient` (including the absent default) keeps the minimal
+      surface, and
 
     * `workspace` is a real path (a workspaceless loop has nowhere to scope the
       MCP config), AND
@@ -107,7 +115,7 @@ defmodule Kazi.Harness.DispatchSurface do
   """
   @spec minimal_default(term(), keyword()) :: keyword()
   def minimal_default(workspace, adapter_opts) when is_list(adapter_opts) do
-    if is_binary(workspace) and surface_supported?(adapter_opts) do
+    if not ambient?(adapter_opts) and is_binary(workspace) and surface_supported?(adapter_opts) do
       workspace
       |> injected_servers()
       |> tier_filter(Tier.resolve(adapter_opts))
@@ -207,6 +215,32 @@ defmodule Kazi.Harness.DispatchSurface do
   @doc "The standard edit/shell tool floor — the never-empty surface."
   @spec standard_tools() :: [String.t()]
   def standard_tools, do: @standard_tools
+
+  @doc """
+  The tool-surface mode the adapter opts select: `:ambient` when
+  `:dispatch_surface` is explicitly `:ambient` (the OFF switch — pre-T36.2 full
+  surface), else `:minimal` (the default). The label the T36.5 benchmark records
+  per arm.
+
+  ## Examples
+
+      iex> Kazi.Harness.DispatchSurface.surface_mode([])
+      :minimal
+      iex> Kazi.Harness.DispatchSurface.surface_mode(dispatch_surface: :ambient)
+      :ambient
+  """
+  @spec surface_mode(keyword()) :: :minimal | :ambient
+  def surface_mode(adapter_opts) when is_list(adapter_opts) do
+    if ambient?(adapter_opts), do: :ambient, else: :minimal
+  end
+
+  def surface_mode(_), do: :minimal
+
+  # The explicit OFF switch: `:dispatch_surface, :ambient` suppresses the minimal
+  # surface so the dispatch carries the pre-T36.2 ambient set. Any other value
+  # (or absence) keeps the minimal default.
+  @spec ambient?(keyword()) :: boolean()
+  defp ambient?(adapter_opts), do: Keyword.get(adapter_opts, :dispatch_surface) == :ambient
 
   # T36.3 (ADR-0047 §2): drop the live code-review-graph MCP server below tier 2 —
   # it is the tier-2 "+ graph" feature. Other injected servers (e.g. the E35
