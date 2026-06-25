@@ -9,9 +9,12 @@ changes (and write/super­sede the ADR).
 
 ## 0. How you actually use it (the spine)
 
-In practice you never operate kazi by hand. You keep working in **Claude Code**
-the way you already do; `kazi install-skill` teaches Claude Code a skill that
-*drives* kazi for you. The adoption spine is:
+Give **Claude Code** the power to actually *finish*. You chat with Claude the way
+you already do; kazi works in the background to make "done" **objective** —
+looping your agent until every check passes, or stopping to tell you why.
+**You never run kazi yourself — Claude does.** A one-time `kazi install-skill`
+teaches Claude Code a skill that *drives* kazi for you, and from then on the
+adoption spine is:
 
 > **you → Claude Code → kazi → Claude Code.**
 
@@ -21,10 +24,11 @@ hands them to kazi, and kazi loops the agent until every predicate is
 objectively true (or reports `stuck` / `over_budget`). Claude Code reports the
 result back to you. You never leave your chat with Claude.
 
-A note on what kazi *is*: kazi is the **outer/reconciliation loop** the agent
-drives (Section 1). It is **not** itself a skill, a harness, or another agent —
-`install-skill` only writes a Claude Code *skill* whose job is to drive kazi.
-The rest of this document is the architecture beneath that spine.
+Under the hood — the part you don't operate directly — kazi is the
+**outer/reconciliation loop** the agent drives (Section 1). It is **not** itself
+a skill, a harness, or another agent; `install-skill` only writes a Claude Code
+*skill* whose job is to drive kazi. The rest of this document is the architecture
+beneath that spine.
 
 ---
 
