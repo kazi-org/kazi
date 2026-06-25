@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.12.0](https://github.com/kazi-org/kazi/compare/v1.11.0...v1.12.0) (2026-06-25)
+
+
+### Features
+
+* **predicate:** :metrics provider — windowed quantile + SLO burn-rate (T32.10) ([1551677](https://github.com/kazi-org/kazi/commit/155167786cd70a6c0447bc5a6d3cf2c3c07a384b))
+* **predicate:** browser synthetic journey — X consecutive passes (T32.10) ([ea7445d](https://github.com/kazi-org/kazi/commit/ea7445d8ed8c46ef12118d79f617118a5c6abfad))
+* **predicate:** http_probe sustained-health — N consecutive samples (T32.10) ([c98728b](https://github.com/kazi-org/kazi/commit/c98728bd30d86d0734ac1214fad951c4ed71aee5))
+
 ## [1.11.0](https://github.com/kazi-org/kazi/compare/v1.10.0...v1.11.0) (2026-06-25)
 
 
