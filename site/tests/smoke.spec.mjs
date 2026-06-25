@@ -11,7 +11,12 @@
 // Run after `npm run build`: `npx playwright test`.
 import { test, expect } from "@playwright/test";
 
-import { INSTALL_CMD, POSITIONING } from "../src/canonical.mjs";
+import {
+  INSTALL_CMD,
+  POSITIONING,
+  HERO_TAGLINE,
+  INVOCATION_PHRASE,
+} from "../src/canonical.mjs";
 
 const REPO = "https://github.com/kazi-org/kazi";
 
@@ -34,13 +39,25 @@ test.describe("kazi website smoke", () => {
     await page.goto("/");
     const h1 = page.locator("h1");
     await expect(h1).toBeVisible();
-    // The headline is split across spans/<br>, so assert on the visible text
-    // fragments rather than one exact string.
-    await expect(h1).toContainText("Describe what");
-    await expect(h1).toContainText("looks like");
-    await expect(h1).toContainText("kazi makes it true");
-    // The positioning one-liner from canonical.mjs is in the hero copy.
+    // The hero H1 renders the canonical tagline byte-identically (T25.1), so
+    // assert the exact decided string rather than fragments.
+    await expect(h1).toContainText(HERO_TAGLINE);
+    // The positioning one-liner from canonical.mjs (the precise category) is the
+    // hero's second beat.
     await expect(page.getByText(POSITIONING)).toBeVisible();
+  });
+
+  test("documents the invocation phrase", async ({ page }) => {
+    await page.goto("/");
+    // T25.6: the decided invocation phrase renders verbatim on the site.
+    await expect(page.getByText(INVOCATION_PHRASE)).toBeVisible();
+  });
+
+  test("shows the agent-voiced testimonial", async ({ page }) => {
+    await page.goto("/");
+    // T25.5: the testimonial is present and labelled as agent-authored.
+    await expect(page.getByText("What a coding agent says")).toBeVisible();
+    await expect(page.getByText(/Agent-authored/)).toBeVisible();
   });
 
   test("shows the real brew install command", async ({ page }) => {
