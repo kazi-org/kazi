@@ -497,7 +497,13 @@ defmodule Kazi.Runtime do
         converged: converged?,
         # T1.2 regression: project the observation's green→red flags so they are
         # queryable from the read-model (Kazi.ReadModel.regressions/1).
-        regressions: Map.get(payload, :regressions, [])
+        regressions: Map.get(payload, :regressions, []),
+        # T34.3 (ADR-0046 §2): project the per-iteration context + tool counters so
+        # the cached-vs-fresh and tool-call signals are queryable from the
+        # read-model (and the E19 arms can attribute outcomes to them). Absent on a
+        # pre-T34.3 payload — defaults to the empty map, which records as no-counters.
+        context: Map.get(payload, :context, %{}),
+        tools: Map.get(payload, :tools, %{})
       }
       # T3.3d deploy wiring: project the release ref recorded on a successful
       # deploy (T3.3c) into the read-model's `release_ref` column so the shipped
