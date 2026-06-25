@@ -24,11 +24,30 @@
 **Your coding agent says "done." kazi proves it.**
 
 *kazi* (Swahili: *work / a job*) is **the outer/reconciliation loop for coding agents**.
-You tell it the outcome you want — in plain English or as a short goal-file — and
-kazi drives a coding agent (Claude Code, Codex, …) in a loop until that outcome is
-*objectively* real: tests pass, the endpoint is live, the change is deployed. If it
-can't get there, it stops and tells you why (stuck, or out of budget) instead of
-pretending it's finished.
+Install it as a skill and **Claude Code** can finally *finish* the job: you keep working
+in Claude the way you already do, and kazi makes "done" **objective** — looping your agent
+until every check passes (tests green, the endpoint live, the change deployed), or stopping
+to tell you why (`stuck`, or out of budget) instead of pretending it's finished.
+
+## Try it in 10 seconds
+
+```sh
+brew install kazi-org/tap/kazi
+kazi install-skill        # teaches Claude Code the kazi skill (writes ~/.claude/skills/kazi)
+```
+
+Then open Claude Code and say:
+
+> **have kazi drive this until done**
+
+Claude authors the acceptance checks, runs them, fixes whatever is failing, and loops —
+reporting back only when every check is *objectively* true (or it is genuinely `stuck`).
+You never leave your chat with Claude. That's it.
+
+## How it works
+
+Under the hood, kazi *drives* the coding agent you already use (Claude Code, Codex, …)
+in a reconcile loop.
 
 Think of it like **Kubernetes for coding goals**: you declare desired state, kazi
 watches actual state, and it keeps closing the gap until the two match.
@@ -115,23 +134,13 @@ the same checks keep failing (`stuck` → escalate to you), or the budget runs o
 
 ---
 
-## Drive kazi from your coding agent
+## How the skill routes
 
-You don't operate kazi directly — your coding agent does. Teach Claude Code the
-kazi skill once, then hand it work in plain language:
-
-```sh
-kazi install-skill   # writes the kazi skill to ~/.claude/skills/kazi (opt-in)
-```
-
-Then, in your normal Claude Code session, just say:
-
-> **have kazi drive this until done**
-
-The agent recognizes the phrase, authors the acceptance predicates with `kazi
-plan`, and runs `kazi apply` until they are *objectively* true — the same way
-`use context7` pulls Context7 into a session. (It's a trigger on the kazi skill,
-so the phrase only routes to kazi once the skill is installed.)
+`install-skill` adds a trigger to the kazi skill — the same way `use context7` pulls
+Context7 into a session — so **have kazi drive this until done** only routes to kazi once
+you have installed it. From there Claude authors the acceptance predicates with `kazi
+plan` and runs `kazi apply` until they are *objectively* true. You do not operate kazi
+directly; your agent does.
 
 ---
 
