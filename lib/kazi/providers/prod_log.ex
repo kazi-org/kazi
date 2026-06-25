@@ -14,6 +14,21 @@ defmodule Kazi.Providers.ProdLog do
   dispatch a fixer agent against an infra problem (`Kazi.PredicateResult`,
   ADR-0002).
 
+  This provider is now a **preset** over the unified command-runner core (T32.1b,
+  ADR-0040 decision 1): `prod_log` == `custom_script` with a regex-match-count
+  verdict over the command's output, sharing the execution engine
+  (`Kazi.Providers.CommandRunner`) with `custom_script` / `test_runner` while
+  keeping its production-log-shaped evidence (5xx / panic counts).
+
+  > #### Deprecated alias {: .warning}
+  >
+  > The `prod_log` provider name is **deprecated** (ADR-0040 decision 7) and
+  > scheduled for removal in **v2.0.0**. It keeps working through the migration
+  > window as this preset; new goals can express the same check as
+  > `provider = "custom_script"` with `verdict = "match_count"`. See
+  > `docs/deprecations.md`. The loader emits a one-line migration hint to STDERR
+  > when a goal still uses the alias.
+
   ## Config
 
   The predicate's `config` map carries the log query (run via `System.cmd/3`,
@@ -54,6 +69,7 @@ defmodule Kazi.Providers.ProdLog do
   @behaviour Kazi.PredicateProvider
 
   alias Kazi.{Predicate, PredicateResult}
+  alias Kazi.Providers.CommandRunner
 
   # Keep the sample seed-sized: enough matched lines to orient a fixer, not a
   # full log dump.
@@ -121,19 +137,20 @@ defmodule Kazi.Providers.ProdLog do
     end
   end
 
-  # Run the log query in the workspace, capturing stdout+stderr together so the
-  # evidence is the same stream an operator would read. System.cmd/3 raises only
-  # when the executable cannot be found or the cwd is invalid — both are infra
-  # problems, so we map them to :error rather than letting the provider crash.
+  # Run the log query in the workspace via the shared command-runner core (T32.1b,
+  # ADR-0040 decision 1) — the one engine custom_script/test_runner also use —
+  # capturing stdout+stderr together so the evidence is the same stream an operator
+  # would read. A command that could not be started (binary missing, bad cwd) is an
+  # infra `:error`, never a `:fail` about production logs.
   defp query(cmd, args, workspace, config, server_re, panic_re) do
     opts = [cd: workspace, stderr_to_stdout: true]
     opts = if env = config[:env], do: Keyword.put(opts, :env, env), else: opts
 
-    case System.cmd(cmd, args, opts) do
-      {output, 0} ->
+    case CommandRunner.run(cmd, args, opts) do
+      {:ran, output, 0} ->
         classify(output, cmd, args, workspace, config, server_re, panic_re)
 
-      {output, exit_code} ->
+      {:ran, output, exit_code} ->
         # The query command itself failed (auth, bad flags): an infra/config
         # problem, not a claim about production logs.
         PredicateResult.error(%{
@@ -143,15 +160,15 @@ defmodule Kazi.Providers.ProdLog do
           workspace: workspace,
           output: output
         })
+
+      {:raised, message} ->
+        PredicateResult.error(%{
+          reason: {:cmd_unrunnable, message},
+          cmd: cmd,
+          args: args,
+          workspace: workspace
+        })
     end
-  rescue
-    error in [ErlangError, File.Error] ->
-      PredicateResult.error(%{
-        reason: {:cmd_unrunnable, Exception.message(error)},
-        cmd: cmd,
-        args: args,
-        workspace: workspace
-      })
   end
 
   # Scan the fetched log output: a panic anywhere fails; a 5xx count over the
