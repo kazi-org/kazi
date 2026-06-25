@@ -153,6 +153,43 @@ you never re-derive the branch from the predicate vector:
 
 `next_action` is a HINT -- you own the policy.
 
+### Escalate-on-stuck: the bounded model ladder (ADR-0035)
+
+Static cheap-tiering always grinds on one cheap model. The ADAPTIVE refinement
+starts cheapest and steps UP only when kazi reports the SAME slice not progressing,
+so you pay frontier rates only for the slices that need them. The policy lives
+ENTIRELY in the skill -- kazi reports per-invocation state, YOU own the ladder and
+the rung counter. kazi-core has NO model-selection logic (ADR-0035 decision 1).
+
+The ladder is capped at the frontier and STOPS there:
+
+```
+claude-haiku-4-5  ->  claude-sonnet-4-6  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
+```
+
+Trigger (the `--json` fields, T30.3 -- `docs/tiering-signals.md`): after each
+`kazi apply --harness claude --model <rung> --json`, read the terminal result and
+branch by `goal_id` (the slice id; KEY your rung counter by it -- the counter is
+SKILL state, never a kazi field), `status` (`converged` -> reset; `stuck` /
+`over_budget` -> step up; `error` -> fix the goal, do NOT escalate), `next_action`,
+and `predicates[]` (confirm the same failing set -- same slice, same bar);
+`reason` / `budget_spent.exceeded` name the budget dimension on `over_budget`.
+
+In one line: on a result for the slice's `goal_id` whose `status` is `stuck` or
+`over_budget` (NOT `converged`, NOT `error`) with the same failing `predicates[]`,
+increment the per-`goal_id` rung counter and re-dispatch the SAME slice with the
+next `--model` UP the ladder.
+
+- RESET on a fresh slice: a new `goal_id` starts at rung 1 (`claude-haiku-4-5`).
+- BOUNDED by kazi: escalation rides on kazi's own budget/stuck termination (each
+  rung is one bounded `kazi apply`) and the ladder caps at `claude-opus-4-8`, so it
+  cannot loop unboundedly -- at worst three rungs, then stop.
+- DISABLE -> static tiering: pin `--model` to one rung and never step up; the recipe
+  degenerates to static cheap-tiering (always `claude-haiku-4-5`).
+
+The full copy-paste sh recipe (ladder + trigger + reset + cap) is in the installed
+kazi SKILL.md ("Escalate-on-stuck") -- kept in lockstep with this section.
+
 ### Polling -- `kazi status <ref> --json`
 
 `kazi status <ref> --json` is a PURE read of the read-model (no loop runs). The
