@@ -11,8 +11,8 @@ defmodule Kazi.Predicate.SchemaTest do
   alias Kazi.Predicate.Schema
 
   # Every key the custom_script provider accepts must appear in its schema.
-  @expected_keys ~w(cmd args env verdict pass_codes fail_codes path pass_when error_codes
-                    evidence_format timeout_ms)
+  @expected_keys ~w(cmd args env verdict pass_codes fail_codes path match_regex pass_when
+                    merge_stderr error_codes evidence_format timeout_ms)
 
   test "the custom_script schema lists EVERY config key" do
     {:ok, schema} = Schema.fetch("custom_script")

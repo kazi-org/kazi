@@ -610,7 +610,8 @@ defmodule Kazi.CLITest do
 
     [[predicate]]
     id = "code"
-    provider = "test_runner"
+    provider = "custom_script"
+    verdict = "exit_zero"
     cmd = "sh"
     args = ["-c", "test -f fixed.txt"]
 
