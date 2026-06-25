@@ -67,13 +67,14 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
-      - name: Install xz (Burrito payload compression + Zig tarball extraction)
+      - name: Install xz (Burrito payload compression + Zig tarball extraction) and jq (MCP smoke)
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y xz-utils
+            sudo apt-get update && sudo apt-get install -y xz-utils jq
           else
             brew list xz >/dev/null 2>&1 || brew install xz
+            command -v jq >/dev/null 2>&1 || brew install jq
           fi
 
       - name: Set up Zig ${{ env.ZIG_VERSION }} (Burrito cross-compiler)
@@ -127,6 +128,14 @@ jobs:
           out="$("$bin" --help 2>&1)"
           echo "$out" | head -5
           echo "$out" | grep -q "kazi" || { echo "smoke-test failed: --help did not run"; exit 1; }
+
+      - name: MCP-parity smoke (the INSTALLED binary must serve `kazi mcp`)
+        # T33.4 (ADR-0044): the installed binary -- not `mix` -- starts `kazi mcp`,
+        # lists its tools, and answers a kazi_status call over stdio. A failure here
+        # BLOCKS the release (this runs before the asset upload), so a binary that
+        # cannot serve the MCP server path never ships.
+        shell: bash
+        run: .github/scripts/mcp_release_smoke.sh "burrito_out/kazi_${BURRITO_TARGET}"
 
       - name: Generate checksums
         shell: bash
@@ -190,6 +199,12 @@ jobs:
           chmod +x burrito_out/kazi_linux_aarch64
           burrito_out/kazi_linux_aarch64 --help 2>&1 | head -5 | grep -q "kazi" \
             || { echo "smoke-test failed: arm64 --help did not run"; exit 1; }
+
+          # MCP-parity smoke (T33.4, ADR-0044): the installed arm64 binary -- not
+          # `mix` -- must serve `kazi mcp` (list tools + answer kazi_status) over
+          # stdio. A failure here exits non-zero and BLOCKS the release before the
+          # asset upload. jq was installed above.
+          .github/scripts/mcp_release_smoke.sh burrito_out/kazi_linux_aarch64
 
           cd burrito_out
           sha256sum kazi_linux_aarch64 | tee kazi_linux_aarch64.sha256
