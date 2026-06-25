@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.7.0](https://github.com/kazi-org/kazi/compare/v1.6.0...v1.7.0) (2026-06-25)
+
+
+### Features
+
+* **loop:** held-out acceptance subset hidden from agent (T32.6) ([f8abf5c](https://github.com/kazi-org/kazi/commit/f8abf5cc1549f42b8f87d28472e22bad323d640b))
+
 ## [1.6.0](https://github.com/kazi-org/kazi/compare/v1.5.0...v1.6.0) (2026-06-25)
 
 
