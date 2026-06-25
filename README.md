@@ -479,6 +479,16 @@ OUTCOME: :converged   (tests pass · live /livez = "ok")
 | `http_probe`   | a live URL's status + body | `url`, `expect_status`, `expect_body`, `body_match` |
 | `browser`      | a real browser flow (Playwright) | per-flow config |
 | `prod_log`     | a production-log condition (e.g. 5xx rate) | per-check config |
+| `custom_script`| ANY CLI checker (scanner, mutation tester, contract check) | `cmd`, `args`, `verdict`, `path`, `pass_when` |
+
+`custom_script` is the **escape hatch**: it turns any command-line tool into a
+predicate without a kazi release. Crucially the **verdict is declared, not
+assumed** — a SARIF/JSON scanner that exits `0` *with* findings is gated on its
+parsed output, not its exit code (the class of "the gate silently passed" bug,
+designed out). See [`docs/custom-script-provider.md`](docs/custom-script-provider.md),
+`kazi schema custom_script`, and the recipes in
+[`priv/examples/`](priv/examples/) (`custom_script_sarif.toml`,
+`custom_script_junit.toml`, `custom_script_mutation.toml`).
 
 Add `guard = true` to a predicate to make it an **invariant** (e.g. "coverage must
 not drop") — kazi blocks the "delete the failing test" shortcut.
