@@ -73,8 +73,49 @@ Passed through the store config (`{Kazi.ContextStore.GistCLI, opts}`):
 | `:source` | `gist search --source` filter, and the returned snippet's `:source` |
 | `:timeout_ms` | kill an overrunning `gist` call (default: no timeout) |
 
+## The `kazi context` command
+
+`kazi context` is a **thin wrapper** over the provider so you learn ONE CLI — the
+provider (the `gist` binary) stays independently usable; the wrapper re-derives no
+provider logic, it proxies straight through the `Kazi.ContextStore` behaviour
+(T35.7, ADR-0045).
+
+```sh
+kazi context index <label> <file>                 # index a heavy artifact under a label
+kazi context search "<query>" [--budget N]         # budget-fitted, ranked recall
+kazi context stats                                 # byte accounting (indexed/returned/saved)
+```
+
+Shared flags:
+
+| Flag | Meaning |
+|---|---|
+| `--provider <name>` | the context-store provider to proxy to. Currently `gist` (the default). |
+| `--budget <N>` | `context search` only: cap the result at N bytes. Default: the provider's own default. |
+| `--json` | emit a single parseable JSON object on stdout instead of human prose. |
+
+Examples:
+
+```sh
+# index a doc, then recall the budget-fitting snippets for a query
+kazi context index workspace-docs ./docs/concept.md
+kazi context search "session cookie" --budget 4000
+
+# the byte accounting an orchestrator can parse
+kazi context stats --json
+# => {"command":"context","subcommand":"stats","provider":"gist",
+#     "indexed_bytes":1234,"returned_bytes":210,"saved_bytes":1024,...}
+```
+
+Under `--json`, the WHOLE of stdout is one object (the same NON-INTERACTIVE,
+machine-parseable contract every kazi `--json` command honors); a provider error
+(e.g. `gist` not on `PATH`) is a clear JSON error envelope on stdout with a stable
+non-zero exit. Without a DSN, only a single index-then-search *within one process*
+is meaningful (see [Persistence requires `KAZI_GIST_DSN`](#persistence-requires-kazi_gist_dsn)).
+
 ## Status
 
-This is the provider integration (ADR-0045 phase). The opt-in `kazi apply
---context-store gist --context-budget N` flag and the additive `context_store` JSON
-stats land in a later step; until then the store is wired only behind the behaviour.
+The provider integration (`Kazi.ContextStore.GistCLI`) and the `kazi context`
+wrapper CLI (T35.7) have landed. The opt-in `kazi apply --context-store gist
+--context-budget N` loop wiring and the additive `context_store` JSON stats on the
+run result land in a later step.
