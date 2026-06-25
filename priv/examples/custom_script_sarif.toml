@@ -1,0 +1,26 @@
+# Example kazi goal-file: gate on a SARIF scanner's PARSED findings (ADR-0040).
+#
+# A static-analysis scanner like Semgrep exits 0 even WHEN it finds issues under
+# `--sarif` output — so "exit 0 == pass" would silently pass real findings. The
+# `json` verdict gates on the parsed findings COUNT instead of the exit code:
+# `path` points at the SARIF results array, and a LIST value compares its length,
+# so `pass_when = "== 0"` means "zero findings". `evidence_format = "sarif"`
+# extracts the findings into structured evidence for the fixer agent.
+#
+#     kazi apply priv/examples/custom_script_sarif.toml --workspace .
+#
+# See Kazi.Providers.CustomScript and `kazi schema custom_script`.
+
+id = "custom-script-sarif"
+name = "Static analysis: zero SARIF findings"
+
+[[predicate]]
+id = "no-sarif-findings"
+provider = "custom_script"
+description = "Semgrep reports zero findings (gated on parsed SARIF, not exit code)"
+cmd = "semgrep"
+args = ["--sarif", "--config", "auto", "."]
+verdict = "json"
+evidence_format = "sarif"
+path = "$.runs[0].results"
+pass_when = "== 0"

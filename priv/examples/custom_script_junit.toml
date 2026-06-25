@@ -1,0 +1,25 @@
+# Example kazi goal-file: a test runner whose verdict IS its exit code, with
+# JUnit evidence (ADR-0040).
+#
+# A test runner already exits non-zero when tests fail, so the `exit_zero` verdict
+# is exactly right — no need to parse anything to decide pass/fail. Declaring
+# `evidence_format = "junit"` additionally parses the JUnit XML the runner prints
+# to stdout into structured `findings` (the failing cases), so a fixer agent gets
+# the failures, not a raw dump. (Point the runner at stdout — here
+# `--junit-xml=/dev/stdout`.)
+#
+#     kazi apply priv/examples/custom_script_junit.toml --workspace .
+#
+# See Kazi.Providers.CustomScript and `kazi schema custom_script`.
+
+id = "custom-script-junit"
+name = "Unit tests: green, with JUnit evidence"
+
+[[predicate]]
+id = "junit-tests-green"
+provider = "custom_script"
+description = "the test suite passes (exit code), failing cases parsed from JUnit XML"
+cmd = "pytest"
+args = ["-q", "--junit-xml=/dev/stdout"]
+verdict = "exit_zero"
+evidence_format = "junit"

@@ -1,0 +1,25 @@
+# Example kazi goal-file: gate on a mutation tester's score (ADR-0040).
+#
+# A mutation tester emits a scalar score (the percentage of injected mutants the
+# test suite caught). The `json` verdict extracts that number from the tool's JSON
+# summary on stdout and compares it: `pass_when = ">= 80"` holds the suite to an
+# 80% mutation score. Adapt `cmd`/`path` to your tool — the tool must print a JSON
+# object to stdout and `path` must point at the score field.
+#
+#     kazi apply priv/examples/custom_script_mutation.toml --workspace .
+#
+# See Kazi.Providers.CustomScript and `kazi schema custom_script`.
+
+id = "custom-script-mutation"
+name = "Mutation score at or above 80%"
+
+[[predicate]]
+id = "mutation-score"
+provider = "custom_script"
+description = "the mutation score is >= 80% (parsed from the tool's JSON summary)"
+cmd = "cargo"
+args = ["mutants", "--json"]
+verdict = "json"
+evidence_format = "json"
+path = "$.mutation_score"
+pass_when = ">= 80"
