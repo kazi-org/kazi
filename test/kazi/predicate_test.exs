@@ -40,6 +40,15 @@ defmodule Kazi.PredicateTest do
       p = Predicate.new(:signup, :browser, group: "identity-access")
       assert p.group == "identity-access"
     end
+
+    test "held_out? defaults to false (fully visible, backward-compatible)" do
+      assert Predicate.new(:unit, :tests).held_out? == false
+    end
+
+    test "accepts an optional held_out? flag (T32.6)" do
+      p = Predicate.new(:gold, :tests, held_out?: true)
+      assert p.held_out? == true
+    end
   end
 
   test "enforces id and kind keys on direct struct construction" do
@@ -51,5 +60,10 @@ defmodule Kazi.PredicateTest do
   test "guard?/1 reflects the flag" do
     refute Predicate.guard?(Predicate.new(:unit, :tests))
     assert Predicate.guard?(Predicate.new(:unit, :tests, guard?: true))
+  end
+
+  test "held_out?/1 reflects the flag (T32.6)" do
+    refute Predicate.held_out?(Predicate.new(:unit, :tests))
+    assert Predicate.held_out?(Predicate.new(:gold, :tests, held_out?: true))
   end
 end

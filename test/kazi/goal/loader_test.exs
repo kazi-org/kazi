@@ -158,6 +158,35 @@ defmodule Kazi.Goal.LoaderTest do
       assert reason =~ "acceptance"
     end
 
+    test "held_out = true marks a predicate as held out (T32.6, ADR-0042 §6)" do
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "p", "provider" => "test_runner", "held_out" => true, "acceptance" => true}
+        ]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{id: "p", held_out?: true, acceptance?: true}] = goal.predicates
+    end
+
+    test "held_out defaults to false and is not collected into config" do
+      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "http_probe"}]}
+      assert {:ok, goal} = Loader.from_map(data)
+      assert [%Predicate{held_out?: false, config: config}] = goal.predicates
+      refute Map.has_key?(config, :held_out)
+    end
+
+    test "a non-boolean held_out is rejected" do
+      data = %{
+        "id" => "g",
+        "predicate" => [%{"id" => "p", "provider" => "http_probe", "held_out" => "yes"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "held_out"
+    end
+
     test "a predicate may not be both a guard and an acceptance predicate" do
       data = %{
         "id" => "g",
