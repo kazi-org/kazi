@@ -476,9 +476,10 @@ OUTCOME: :converged   (tests pass · live /livez = "ok")
 | `provider`     | checks… | key config |
 |----------------|---------|------------|
 | `test_runner`  | a command's exit code (unit/integration tests) | `cmd`, `args` |
-| `http_probe`   | a live URL's status + body | `url`, `expect_status`, `expect_body`, `body_match` |
-| `browser`      | a real browser flow (Playwright) | per-flow config |
-| `prod_log`     | a production-log condition (e.g. 5xx rate) | per-check config |
+| `http_probe`   | a live URL's status + body, optionally **sustained** over N samples | `url`, `expect_status`, `expect_body`, `body_match`, `samples`, `interval_ms` |
+| `browser`      | a real browser flow (Playwright), optionally a **journey** over N runs | per-flow config, `samples` |
+| `prod_log`     | a production-log condition (e.g. 5xx rate) — a coarse safety net | per-check config |
+| `metrics`      | a live **RED/SLO** signal (PromQL): windowed quantile, error-rate, or **burn-rate** gate | `query_url`, `query`, `pass_when`, `quantile`, `burn_rate` |
 | `custom_script`| ANY CLI checker (scanner, mutation tester, contract check) | `cmd`, `args`, `verdict`, `path`, `pass_when` |
 | `ratchet`      | a metric may not regress vs a baseline (coverage, perf, size) | `metric`, `baseline`, `direction`, `allowed_regression` |
 
@@ -501,6 +502,15 @@ one mode. With `allowed_regression = 0` a metric "may only improve." See
 [`docs/ratchet-predicate.md`](docs/ratchet-predicate.md), `kazi schema ratchet`,
 and the recipes in [`priv/examples/`](priv/examples/) (`ratchet_coverage.toml`,
 `ratchet_size.toml`).
+
+The **live providers** (`http_probe` sustained-health, `browser` journeys,
+`metrics`, `prod_log`) verify a *deployed* service. The discipline they enforce:
+**never converge on a single sample** — `http_probe` and `browser` require N
+*consecutive* healthy samples (the Kubernetes `failureThreshold` model), and a
+`metrics` burn-rate gate fires only when both a long and a short window breach.
+Absent a metrics endpoint, `metrics` degrades to *not applicable* (never a false
+pass). See [`docs/live-providers.md`](docs/live-providers.md) and
+`kazi schema http_probe` / `kazi schema browser` / `kazi schema metrics`.
 
 Add `guard = true` to a predicate to make it an **invariant** (e.g. "coverage must
 not drop") — kazi blocks the "delete the failing test" shortcut.
