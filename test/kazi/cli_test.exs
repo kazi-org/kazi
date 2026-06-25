@@ -124,6 +124,13 @@ defmodule Kazi.CLITest do
       assert opts[:with_mcp] == true
     end
 
+    # T35.8 (ADR-0045): `--with-gist` opts the repo into the Gist context store.
+    test "parses `init <repo-dir> --with-gist`" do
+      assert {:init, "./repo", opts} = Kazi.CLI.parse(["init", "./repo", "--with-gist"])
+      assert opts[:with_gist] == true
+      assert opts[:with_mcp] == nil
+    end
+
     test "`init` with no repo-dir is an error" do
       assert {:error, message} = Kazi.CLI.parse(["init"])
       assert message =~ "requires a <repo-dir>"
@@ -567,6 +574,91 @@ defmodule Kazi.CLITest do
 
       assert code == 0
       refute File.exists?(Path.join(repo, ".mcp.json"))
+    end
+
+    # T35.8 (ADR-0045 §8): `--with-gist` opts THIS repo into the Gist context store
+    # — verify `gist doctor`, write project-local `.kazi/context.toml`, register the
+    # `gist serve` MCP server in `.mcp.json`, recommend KAZI_GIST_DSN. The doctor
+    # probe runs against the file-backed fake binary (test seam) so the path is
+    # hermetic. The acceptance bar: project files are written and the GLOBAL agent
+    # config is left untouched.
+    @fake_gist Path.expand("../support/fake_gist.sh", __DIR__)
+
+    test "`--with-gist` writes project-local context.toml + gist MCP server, untouched global",
+         %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "go-repo-gist")
+      File.mkdir_p!(repo)
+      File.write!(Path.join(repo, "go.mod"), "module example.com/app\n")
+      out = Path.join(tmp_dir, "go.goal.toml")
+
+      {code, output} =
+        with_io(fn ->
+          Kazi.CLI.run(["init", repo, "--out", out, "--with-gist"], gist_bin: @fake_gist)
+        end)
+
+      assert code == 0
+
+      # Project-local context-store config names the gist provider.
+      ctx_path = Path.join([repo, ".kazi", "context.toml"])
+      assert File.exists?(ctx_path)
+      assert {:ok, ctx} = Toml.decode(File.read!(ctx_path))
+      assert ctx["context_store"]["provider"] == "gist"
+
+      # Project-local MCP config registers the gist serve server.
+      mcp_path = Path.join(repo, ".mcp.json")
+      assert {:ok, config} = Jason.decode(File.read!(mcp_path))
+      assert config["mcpServers"]["gist"] == %{"command" => "gist", "args" => ["serve"]}
+
+      # The on-ramp recommends the DSN env var (never writes a credential).
+      assert output =~ "KAZI_GIST_DSN"
+      assert output =~ ctx_path
+      assert output =~ mcp_path
+
+      # GLOBAL config untouched: every write is confined to the repo. Nothing is
+      # written outside it (tmp_dir stands in for "outside the project"); only the
+      # goal-file the operator asked for lives there.
+      refute File.exists?(Path.join(tmp_dir, ".kazi"))
+      refute File.exists?(Path.join(tmp_dir, ".mcp.json"))
+    end
+
+    # Absent `gist`, the command reports the missing dep and exits non-zero — it
+    # never crashes, and it writes no context-store config (nothing to configure).
+    # The goal-file is still written (that step ran before the gist step).
+    test "`--with-gist` without the gist binary reports the missing dep, no crash",
+         %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "go-repo-no-gist")
+      File.mkdir_p!(repo)
+      File.write!(Path.join(repo, "go.mod"), "module example.com/app\n")
+      out = Path.join(tmp_dir, "go.goal.toml")
+
+      {code, stderr} =
+        with_io(:stderr, fn ->
+          Kazi.CLI.run(["init", repo, "--out", out, "--with-gist"],
+            gist_bin: "kazi-no-such-gist-binary-xyz"
+          )
+        end)
+
+      assert code == 1
+      assert stderr =~ "gist"
+      assert stderr =~ "not installed"
+
+      # No context-store config was written; the goal-file still landed.
+      refute File.exists?(Path.join([repo, ".kazi", "context.toml"]))
+      refute File.exists?(Path.join(repo, ".mcp.json"))
+      assert File.exists?(out)
+    end
+
+    # Without the flag, init never touches the context store (opt-in).
+    test "init without `--with-gist` does not write .kazi/context.toml", %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "go-repo-no-ctx")
+      File.mkdir_p!(repo)
+      File.write!(Path.join(repo, "go.mod"), "module example.com/app\n")
+      out = Path.join(tmp_dir, "go.goal.toml")
+
+      {code, _output} = with_io(fn -> Kazi.CLI.run(["init", repo, "--out", out]) end)
+
+      assert code == 0
+      refute File.exists?(Path.join([repo, ".kazi", "context.toml"]))
     end
   end
 
