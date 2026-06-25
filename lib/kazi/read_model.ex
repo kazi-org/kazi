@@ -54,6 +54,8 @@ defmodule Kazi.ReadModel do
           optional(:converged) => boolean(),
           optional(:regressions) => [map()],
           optional(:release_ref) => String.t() | nil,
+          optional(:context) => map(),
+          optional(:tools) => map(),
           optional(:observed_at) => DateTime.t()
         }
 
@@ -87,6 +89,10 @@ defmodule Kazi.ReadModel do
       regressions: serialize_regressions(Map.get(attrs, :regressions, [])),
       # T3.3c release tagging: the release ref recorded on a successful deploy.
       release_ref: Map.get(attrs, :release_ref),
+      # T34.3 (ADR-0046 §2): the per-iteration context + tool counters, serialized
+      # JSON-safe (string keys; values are already strings/integers). Absent ⇒ %{}.
+      context: serialize_counters(Map.get(attrs, :context, %{})),
+      tools: serialize_counters(Map.get(attrs, :tools, %{})),
       observed_at: observed_at
     }
 
@@ -123,6 +129,10 @@ defmodule Kazi.ReadModel do
     :action_params,
     :regressions,
     :release_ref,
+    # T34.3 (ADR-0046 §2): a terminal upsert (stuck/budget stop) replaces the
+    # context + tool counters with the final dispatch's, keeping the row current.
+    :context,
+    :tools,
     :observed_at,
     :updated_at
   ]
@@ -651,6 +661,18 @@ defmodule Kazi.ReadModel do
 
   defp serialize_action_params(nil), do: %{}
   defp serialize_action_params(%Action{params: params}), do: params
+
+  # T34.3 (ADR-0046 §2): serialize a per-iteration counter map (`context`/`tools`)
+  # JSON-safe — stringify the keys (atoms don't survive JSON); the values are
+  # already strings/integers. A non-map (or absent) counter is the empty object,
+  # so a no-counters iteration records `{}`. Already-string-keyed maps (read back
+  # and re-recorded) pass through unchanged, keeping re-recording idempotent.
+  @spec serialize_counters(term()) :: map()
+  defp serialize_counters(counters) when is_map(counters) do
+    Map.new(counters, fn {key, value} -> {to_string(key), value} end)
+  end
+
+  defp serialize_counters(_), do: %{}
 
   # T1.2 regression: serialize the detector's flags into JSON-safe maps. Each
   # flag's :attributed_dispatch is a %Kazi.Action{} (or nil); it is flattened to
