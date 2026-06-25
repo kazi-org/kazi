@@ -20,6 +20,13 @@ name: OSS gates
 #                                  1: WARN only (the proof SVG + index.astro step
 #                                  2 are still dirty; T27.6 + T25.2 clean them).
 #                                  Only scans on PRs that touch site/.
+#   5. doc-commands    (T28.4) -- every kazi command/flag a LIVE doc (README +
+#                                  docs/concept.md + docs/) presents as runnable
+#                                  must exist in the REAL CLI surface (parsed from
+#                                  lib/kazi/cli.ex @commands/@switches == kazi help
+#                                  --json). BLOCKING: the docs tree is clean, so a
+#                                  new fake command/flag reds the PR. Runs when a
+#                                  PR touches docs/README/concept or cli.ex.
 #
 # Kept separate from ci.yml on purpose: the gates evolve (warn -> block, diff ->
 # full-tree) independently of the build/test pipeline.
@@ -150,4 +157,39 @@ jobs:
             node site/scripts/check-commands.mjs
           else
             echo "no site/ changes in this PR -> skipping (exit 0)."
+          fi
+
+  doc-commands:
+    name: doc command accuracy (T28.4, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run doc command-accuracy guard (when docs/README/concept or cli.ex changed)
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # BLOCKING by default (the scanner ships blocking; the docs tree is
+          # clean). The gate scans the FULL docs tree, so a stale ref reds the PR.
+          BLOCKING: "1"
+        run: |
+          set -uo pipefail
+          # oss-gates.yml triggers on every PR (no path filter). The scan only
+          # depends on the docs and the CLI surface, so gate it on a change to
+          # README, docs/, or lib/kazi/cli.ex -- a cli.ex change can orphan a doc
+          # reference even when no doc file changed.
+          if git diff --name-only "${BASE_REF}"...HEAD | grep -qE '^(README\.md|docs/|lib/kazi/cli\.ex)'; then
+            echo "docs/README/concept or cli.ex changed -> running doc command-accuracy guard."
+            node .github/scripts/check-doc-commands.mjs
+          else
+            echo "no docs/README/cli.ex changes in this PR -> skipping (exit 0)."
           fi
