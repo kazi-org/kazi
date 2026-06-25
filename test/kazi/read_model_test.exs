@@ -64,6 +64,58 @@ defmodule Kazi.ReadModelTest do
     assert fetched.action_params == %{"failing" => ["probe"]}
   end
 
+  test "round-trips the per-iteration context + tool counters (T34.3)" do
+    assert {:ok, _inserted} =
+             ReadModel.record_iteration(%{
+               goal_ref: "counters-goal",
+               iteration_index: 0,
+               predicate_vector: sample_vector(),
+               observed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond),
+               context: %{
+                 orientation_cache: "hit",
+                 retrieval_cache: "disabled",
+                 orientation_tokens: 120,
+                 evidence_tokens: 30,
+                 retrieval_tokens: 0
+               },
+               tools: %{tool_calls: 4, file_reads: 2, search_calls: 1, graph_calls: 1}
+             })
+
+    fetched = ReadModel.get_iteration("counters-goal", 0)
+
+    # Stored JSON-safe with stringified keys; values (strings/integers) survive.
+    assert fetched.context == %{
+             "orientation_cache" => "hit",
+             "retrieval_cache" => "disabled",
+             "orientation_tokens" => 120,
+             "evidence_tokens" => 30,
+             "retrieval_tokens" => 0
+           }
+
+    assert fetched.tools == %{
+             "tool_calls" => 4,
+             "file_reads" => 2,
+             "search_calls" => 1,
+             "graph_calls" => 1
+           }
+  end
+
+  test "an iteration recorded without counters deserializes to empty maps (back-compat, T34.3)" do
+    # The pre-T34.3 shape: no :context / :tools attrs. The additive columns default
+    # to %{}, so old-shape records still read back cleanly.
+    assert {:ok, _inserted} =
+             ReadModel.record_iteration(%{
+               goal_ref: "no-counters-goal",
+               iteration_index: 0,
+               predicate_vector: sample_vector(),
+               observed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+             })
+
+    fetched = ReadModel.get_iteration("no-counters-goal", 0)
+    assert fetched.context == %{}
+    assert fetched.tools == %{}
+  end
+
   test "persists an errored predicate whose evidence holds tuples + atom keys (T18.2)" do
     # The exact crash from the token benchmark: a test_runner that cannot exec its
     # cmd yields an :error result whose evidence carries a tuple reason and atom
