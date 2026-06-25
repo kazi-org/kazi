@@ -62,12 +62,19 @@ defmodule Mix.Tasks.Kazi.Bench do
     * `--captures <dir>`   — directory of recorded `claude --output-format json`
       envelopes to aggregate INSTEAD of running live (offline replay; the path
       the hermetic acceptance exercises). One `<arm>.NNN.json` file per dispatch.
+    * `--kpis <dir>`       — directory of recorded `kazi apply --json` RESULT
+      objects (one `<arm>.NNN.json` per run) to fold into the per-arm economy-KPI
+      breakdown (T34.6, ADR-0046): cost / converged-predicate, wall-clock /
+      converged-predicate, iterations-to-convergence, fresh-input-avoided,
+      rediscovery-avoided, and stuck-rate, tabled by arm. The benchmark CONSUMES
+      the `economy` object each run emits; an unavailable KPI prints `n/a`.
     * `--help`             — print this usage (the 3 arms + how to run) and exit.
   """
 
   use Mix.Task
 
   alias Kazi.Bench
+  alias Kazi.Economy.KPIs
 
   @arms ["A", "B", "C"]
 
@@ -80,6 +87,7 @@ defmodule Mix.Tasks.Kazi.Bench do
           workspace: :string,
           arms: :string,
           captures: :string,
+          kpis: :string,
           help: :boolean
         ],
         aliases: [h: :help]
@@ -88,6 +96,9 @@ defmodule Mix.Tasks.Kazi.Bench do
     cond do
       opts[:help] ->
         Mix.shell().info(usage())
+
+      opts[:kpis] ->
+        kpis_from_runs(opts[:kpis], arms(opts))
 
       opts[:captures] ->
         replay_from_captures(opts[:captures], arms(opts))
@@ -125,6 +136,36 @@ defmodule Mix.Tasks.Kazi.Bench do
     |> Path.wildcard()
     |> Enum.sort()
     |> Enum.map(fn path -> path |> File.read!() |> Bench.parse_capture() end)
+  end
+
+  # T34.6/T34.7: aggregate recorded `kazi apply --json` RESULT objects from
+  # `<dir>/<arm>.*.json` (one recorded run per file) into the per-arm economy-KPI
+  # breakdown table (cost / converged-predicate, wall-clock / converged-predicate,
+  # iterations-to-convergence, fresh-input-avoided, rediscovery-avoided, stuck-rate
+  # by arm). Each run's `economy` object (the per-run KPIs the run already
+  # computed) is read back via `Kazi.Economy.KPIs.from_run_result/2` — the
+  # benchmark RE-DERIVES nothing and CONSUMES the contract the run emits. The arm
+  # label is carried as the `context_tier` so arms table separately; an unavailable
+  # KPI prints `n/a` (absent ≠ zero). This is the deterministic offline path the
+  # bench-shaped acceptance exercises.
+  defp kpis_from_runs(dir, arms) do
+    kpis =
+      Enum.flat_map(arms, fn arm ->
+        dir
+        |> Path.join("#{arm}.*.json")
+        |> Path.wildcard()
+        |> Enum.sort()
+        |> Enum.map(fn path ->
+          path
+          |> File.read!()
+          |> Jason.decode!()
+          |> KPIs.from_run_result(%{context_tier: arm})
+        end)
+      end)
+
+    table = kpis |> KPIs.aggregate() |> KPIs.render_table()
+    Mix.shell().info("kazi.bench — per-arm economy-KPI breakdown (T34.6, ADR-0046)\n")
+    Mix.shell().info(table)
   end
 
   defp arms(opts) do
@@ -173,7 +214,9 @@ defmodule Mix.Tasks.Kazi.Bench do
       --goal <file>       goal/fixture file the arms converge (required to run live)
       --workspace <path>  target workspace for arms B/C (and arm A's cwd)
       --arms <list>       subset of A,B,C to run (default A,B,C)
-      --captures <dir>    aggregate recorded envelopes offline instead of running live
+      --captures <dir>    aggregate recorded token envelopes offline (per-dispatch)
+      --kpis <dir>        fold recorded `apply --json` results into the per-arm
+                          economy-KPI breakdown (T34.6, ADR-0046)
       --help, -h          print this usage and exit
     """
   end
