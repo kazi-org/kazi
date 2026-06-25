@@ -142,7 +142,7 @@ defmodule Kazi.CLIHelpSchemaTest do
 
       for flag <- apply_cmd["flags"] do
         assert is_binary(flag["name"]) and String.starts_with?(flag["name"], "--")
-        assert flag["type"] in ["string", "boolean"]
+        assert flag["type"] in ["string", "boolean", "integer"]
         assert is_binary(flag["description"]) and flag["description"] != ""
         assert is_list(flag["aliases"])
       end
