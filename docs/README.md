@@ -67,6 +67,9 @@ its config at runtime via `kazi schema <kind>`.
   reachability (call stack as proof) + manifest scanners ratcheted (ADR-0043).
 - **[Live providers](live-providers.md)** — `http_probe` sustained health,
   `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
+- **[The context store (Gist provider)](context-store.md)** — budget-fitted
+  retrieval over heavy text artifacts; the `gist` CLI adapter, `KAZI_GIST_DSN`
+  persistence, and graceful degradation when `gist` is absent.
 
 ## Reference
 
