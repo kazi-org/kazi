@@ -168,4 +168,77 @@ defmodule Kazi.Harness.DispatchSurfaceTest do
       assert Enum.at(args, tools_idx + 1) == "Read"
     end
   end
+
+  describe "context store: inner searches, does NOT index by default (T35.9, ADR-0045 §7)" do
+    @describetag :tmp_dir
+
+    defp write_mcp_with_gist(dir) do
+      path = Path.join(dir, ".mcp.json")
+
+      File.write!(
+        path,
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "code-review-graph" => %{"command" => "code-review-graph", "args" => ["serve"]},
+            "gist" => %{"command" => "gist", "args" => ["serve"]}
+          }
+        })
+      )
+
+      path
+    end
+
+    test "build/1 honours a server's scoped :tools (search-only ref, not the bare ref)" do
+      injected = [
+        %{name: "gist", config: "/w/.mcp.json", tools: ["mcp__gist__gist_search"]}
+      ]
+
+      tools = Keyword.get(DispatchSurface.build(injected), :tools)
+      assert "mcp__gist__gist_search" in tools
+      refute "mcp__gist" in tools
+      refute "mcp__gist__gist_index" in tools
+    end
+
+    test "minimal_default exposes gist_search but DENIES gist_index by default", %{
+      tmp_dir: tmp_dir
+    } do
+      write_mcp_with_gist(tmp_dir)
+      {:ok, profile} = Registry.fetch(:claude)
+
+      tools = Keyword.get(DispatchSurface.minimal_default(tmp_dir, profile: profile), :tools)
+
+      assert "mcp__gist__gist_search" in tools
+      # the bare ref (all tools) and an index ref are NOT in the allow-list.
+      refute "mcp__gist" in tools
+      refute "mcp__gist__gist_index" in tools
+    end
+
+    test "the :inner_index opt widens to the full gist server (index allowed)", %{
+      tmp_dir: tmp_dir
+    } do
+      write_mcp_with_gist(tmp_dir)
+      {:ok, profile} = Registry.fetch(:claude)
+
+      tools =
+        Keyword.get(
+          DispatchSurface.minimal_default(tmp_dir, profile: profile, inner_index: true),
+          :tools
+        )
+
+      assert "mcp__gist" in tools
+      refute "mcp__gist__gist_search" in tools
+    end
+
+    test "no gist server in .mcp.json ⇒ nothing injected for it", %{tmp_dir: tmp_dir} do
+      File.write!(
+        Path.join(tmp_dir, ".mcp.json"),
+        Jason.encode!(%{"mcpServers" => %{"code-review-graph" => %{"command" => "x"}}})
+      )
+
+      {:ok, profile} = Registry.fetch(:claude)
+      tools = Keyword.get(DispatchSurface.minimal_default(tmp_dir, profile: profile), :tools)
+
+      refute Enum.any?(tools, &String.starts_with?(&1, "mcp__gist"))
+    end
+  end
 end
