@@ -26,8 +26,18 @@ or read the epic files directly. **Do not** raw-grep `docs/plan.md` alone for ta
 lines — it holds only pointers. Tooling that walks tasks must cover
 `docs/plan.md` AND `docs/plans/*.md` (the doc-freshness checks and `/apply --pool`
 task-discovery do). The split is transparent to `parse_plan.py` (same epic/task
-counts as the pre-split monolith) and is the precondition for per-epic archival
-(T31.2).
+counts as the pre-split monolith).
+
+**Archival (T31.2/ADR-0036 L1).** `.github/scripts/trim_plan.py` is the
+deterministic, lossless trim: it archives an epic ONLY when it is fully closed
+(no open/blocked task) AND release-covered (every `[x]` task's `Done:` date is on
+or before the newest release tag). It moves the epic file verbatim to
+`docs/plans/archive/`, drops its WBS pointer, and records a one-line entry in the
+master's `## Archived epics` section. `trim_plan.py` dry-runs by default; `--apply`
+performs it; `test_trim_plan.py` pins the lossless round-trip. Archived epics leave
+the live WBS (parse_plan.py no longer expands them), and the `docs/plans/*.md` glob
+the doc-freshness checks use is non-recursive, so `archive/` is out of the
+live-plan checks. (The live trim of this repo's done epics is T31.7.)
 
 ## Execution model
 
