@@ -144,6 +144,34 @@ Decision 1 (per-run tool-surface restriction) ships in two steps:
   rendering logic. Until then the minimal surface is computed from the servers kazi
   currently injects (orientation/graph only).
 
-Decision 2 (context-budget tiers) is deferred to T36.3+ and stays gated on the E19/E34
-benchmark — no tier ladder is shipped as proven.
+Decision 2 (context-budget tiers) lands its **scaffolding** in T36.3 and stays gated
+on the E19/E34 benchmark for ESCALATION — no tier ladder is shipped as proven:
+
+- **T36.3** defines the ladder as `Kazi.Context.Tier`: tiers `0`–`4` with a
+  cumulative feature set (`orientation`/`graph`/`retrieval`/`snapshot`), the default
+  (`default/0` = tier 1), and resolution of the `:context_tier` adapter opt
+  (`resolve/1`, normalizing a malformed value to the default — a bad opt never
+  crashes a dispatch). The active tier drives assembly:
+
+  - the orientation prefix is gated on `Tier.orientation?/1` in `Kazi.Loop`, so tier
+    0 DROPS the cached orientation and tier ≥ 1 keeps it (still subject to the T19.4
+    `:orientation_prefix` toggle); the default tier 1 is byte-identical to the
+    pre-T36.3 prompt;
+  - the live code-review-graph MCP server is gated on `Tier.graph?/1` in
+    `Kazi.Harness.DispatchSurface`, so it is the tier-2 "+ graph" feature — the
+    default tier 1 surface now EXCLUDES it (the agent has the cached orientation TEXT
+    but no live graph MCP), and tier ≥ 2 exposes it. (This refines T36.2's minimal
+    surface, which previously always injected the graph server: under the tier ladder
+    the graph MCP belongs to tier 2, matching the table above.)
+  - tiers 3 (retrieval snippets) and 4 (compact snapshot) are named, selectable, and
+    recorded; their richer content sources are wired in later — the scaffolding is
+    real, not a stub that errors.
+
+  The active tier is RECORDED per iteration in the ADR-0046 `context` envelope
+  (`context.tier`), satisfying decision 3.
+
+- **T36.4** adds the escalation trigger (non-progress against the same failing set)
+  and the stop rule, with thresholds loaded from config (E19/E34-derived), NOT
+  hardcoded — that is where a tier ladder could be claimed "proven", and only from
+  data.
 </content>

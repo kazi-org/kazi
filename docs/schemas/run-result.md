@@ -336,7 +336,7 @@ object.
 Each progress line is a `Kazi.Loop` observation rendered as:
 
 ```json
-{ "schema_version": 2, "event": "iteration", "iteration": 1, "predicates": [ { "id": "code", "verdict": "fail" }, { "id": "live", "verdict": "fail" } ], "converged": false, "release_ref": null, "context": { "orientation_cache": "hit", "retrieval_cache": "disabled", "orientation_tokens": 412, "evidence_tokens": 38, "retrieval_tokens": 0 }, "tools": { "tool_calls": 6, "file_reads": 2, "search_calls": 1, "graph_calls": 1 } }
+{ "schema_version": 2, "event": "iteration", "iteration": 1, "predicates": [ { "id": "code", "verdict": "fail" }, { "id": "live", "verdict": "fail" } ], "converged": false, "release_ref": null, "context": { "orientation_cache": "hit", "retrieval_cache": "disabled", "orientation_tokens": 412, "evidence_tokens": 38, "retrieval_tokens": 0, "tier": 1 }, "tools": { "tool_calls": 6, "file_reads": 2, "search_calls": 1, "graph_calls": 1 } }
 ```
 
 | Field            | Type             | Meaning |
@@ -370,9 +370,18 @@ measured zero (e.g. orientation off ⇒ `orientation_tokens: 0`,
 | `orientation_tokens` | integer | Estimated tokens (`ceil(chars / 4)`, ADR-0010) of the orientation prefix; `0` when absent. |
 | `evidence_tokens`    | integer | Estimated tokens of the failing-evidence section. |
 | `retrieval_tokens`   | integer | Estimated tokens of the retrieval section; `0` when absent. |
+| `tier`               | integer \| null | The active context-budget tier the dispatch assembled its context at (T36.3, ADR-0047 §3): `0` evidence-only, `1` + cached orientation (**default**), `2` + code-review-graph MCP, `3` + retrieval snippets, `4` + compact snapshot. `null` for the no-dispatch baseline. Selected per dispatch via the `:context_tier` adapter opt. |
 
 The **first** observation has no preceding dispatch, so it reports the
-all-`disabled` / all-`0` context.
+all-`disabled` / all-`0` context with `tier: null`.
+
+The tier is a dial on how much context kazi sends the inner harness: tier 0 drops
+the cached orientation prefix entirely, tier 1 (the default) keeps it, and tier 2
+additionally exposes the live code-review-graph MCP server in the dispatch's
+tool/MCP surface. The ladder is **defined** here but its escalation policy is
+benchmark-gated (ADR-0047 forbids shipping a guessed ladder as proven); recording
+the active tier per iteration is what lets the E19/E34 benchmark attribute
+convergence/stuck outcomes to it.
 
 `tools` is parsed from the harness result's tool-use stream and is present **only
 when the harness exposes one** (honest-unknown, ADR-0046 §6). When present, every
