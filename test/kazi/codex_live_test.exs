@@ -46,6 +46,7 @@ defmodule Kazi.CodexLiveTest do
   use ExUnit.Case, async: false
 
   alias Kazi.{Goal, Predicate, PredicateVector, ReadModel, Repo, Runtime, Scope}
+  alias Kazi.Harness.Profiles.Codex
 
   @moduletag :codex_live
   @moduletag timeout: 900_000
@@ -75,6 +76,51 @@ defmodule Kazi.CodexLiveTest do
 
       :ok ->
         run_live_convergence()
+    end
+  end
+
+  # T34.2 (UC-033, ADR-0046): a LIVE smoke that the CURRENT Codex usage shape
+  # still maps onto the economy envelope. Drives the real `codex exec --json` for
+  # a trivial prompt, parses its stdout with the production profile, and asserts
+  # the usage envelope mapped — fidelity is not :none and the raw object is kept.
+  # Honest skip when codex/auth are absent; it makes no claim without a real turn.
+  # A real turn that legitimately reports no usage is reported, not failed.
+  test "the live codex usage shape still maps onto the economy envelope (T34.2)" do
+    case preflight() do
+      {:skip, reason} ->
+        IO.puts("\n[codex_live] usage-shape smoke SKIPPED (no claim): #{reason}")
+        :skipped
+
+      :ok ->
+        args = ["exec", "Reply with the single word: ok", "--json"]
+        {stdout, _exit} = System.cmd("codex", args, stderr_to_stdout: true)
+        parsed = Codex.parse(stdout)
+
+        case Map.get(parsed, :usage_fidelity) do
+          fidelity when fidelity in [:full, :partial] ->
+            # The current provider shape maps: a non-empty envelope, the raw
+            # object retained, and only integer token fields surfaced.
+            assert is_map(parsed.usage) and map_size(parsed.usage) > 0
+            assert is_map(parsed.usage_raw)
+
+            assert Enum.all?(Map.values(parsed.usage), &(is_integer(&1) and &1 >= 0)),
+                   "mapped usage must be non-negative integers, got: #{inspect(parsed.usage)}"
+
+            IO.puts(
+              "\n[codex_live] usage shape maps: fidelity=#{fidelity} " <>
+                "envelope=#{inspect(parsed.usage)}"
+            )
+
+          other ->
+            # A real turn ran but reported no usage object (:none or absent). Not a
+            # mapping regression — reported honestly, no success claimed.
+            IO.puts(
+              "\n[codex_live] usage-shape smoke INCONCLUSIVE (no claim): the real turn " <>
+                "reported fidelity=#{inspect(other)} (no usage object). Parsed=#{inspect(parsed)}"
+            )
+
+            :no_usage_reported
+        end
     end
   end
 

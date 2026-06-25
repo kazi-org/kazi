@@ -84,6 +84,42 @@ defmodule Kazi.Harness.CodexProfileTest do
       # input 1200 + cached_input 900 + output 300.
       assert parsed.tokens == 1200 + 900 + 300
       assert parsed.cost == %{tokens: 2400}
+
+      # T34.2 (ADR-0046): the SAME usage object maps onto the economy envelope
+      # (Codex reports the cached/fresh split natively), the raw object is kept,
+      # and all three fields reported -> :full fidelity.
+      assert parsed.usage == %{input_tokens: 1200, cached_input_tokens: 900, output_tokens: 300}
+
+      assert parsed.usage_raw == %{
+               "input_tokens" => 1200,
+               "cached_input_tokens" => 900,
+               "output_tokens" => 300
+             }
+
+      assert parsed.usage_fidelity == :full
+    end
+
+    test "T34.2: a usage object reporting only SOME fields maps to :partial (absent ≠ zero)" do
+      profile = Registry.fetch!(:codex)
+
+      # Only cached_input_tokens reported — the cached-read class the economy
+      # program centers on. The other two fields are OMITTED, not zero-filled.
+      stream =
+        Enum.join(
+          [
+            ~s({"type":"item.completed","item":{"type":"agent_message","text":"done"}}),
+            ~s({"type":"turn.completed","usage":{"cached_input_tokens":900}})
+          ],
+          "\n"
+        )
+
+      parsed = Profile.parse(profile, stream)
+
+      assert parsed.usage == %{cached_input_tokens: 900}
+      refute Map.has_key?(parsed.usage, :input_tokens)
+      refute Map.has_key?(parsed.usage, :output_tokens)
+      assert parsed.usage_raw == %{"cached_input_tokens" => 900}
+      assert parsed.usage_fidelity == :partial
     end
 
     test "accepts the assistant_message alias for the agent text item" do
@@ -157,6 +193,11 @@ defmodule Kazi.Harness.CodexProfileTest do
       assert parsed.result == "done, no usage"
       refute Map.has_key?(parsed, :tokens)
       refute Map.has_key?(parsed, :cost)
+      # T34.2: a parsed turn with NO usage reports :none — not zero-filled fields,
+      # and no :usage/:usage_raw at all (absent ≠ zero, ADR-0046 honest-unknown).
+      assert parsed.usage_fidelity == :none
+      refute Map.has_key?(parsed, :usage)
+      refute Map.has_key?(parsed, :usage_raw)
     end
 
     test "malformed/empty output degrades to %{} (additive, never crashes)" do
