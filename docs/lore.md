@@ -208,3 +208,27 @@ PR. Within the worktree your tree is private to that path. If you must edit in t
 shared dir, commit immediately after each file (smallest possible uncommitted
 window); never hold uncommitted work across tool calls. This is the textual companion
 to the PreToolUse worktree hook + the CLAUDE.md Worktree Guardrail.
+
+## Enforcement / anti-gaming
+
+### L-0015 #enforcement #loop #worktree #invariant -- the checker-isolation seam is `run_provider/3`; scope clean-tree to graders only
+The ONLY place `Kazi.Loop` invokes a predicate provider is `run_provider/3`
+(`lib/kazi/loop.ex`), reached from `observe/2` -> `evaluate/4`; the checker cwd is
+`context.workspace` built by `provider_context/2` from `data.workspace` (the agent's
+working copy). That single seam is where T32.4 anti-gaming isolation sits. Two rungs
+(ADR-0042 §1; container isolation deferred): SEPARATE-PROCESS is ALREADY held -- the
+command-runner providers (`CustomScript`/`TestRunner`/`Ratchet` via `CommandRunner`)
+use `System.cmd`, a fresh OS subprocess distinct from the agent's `claude -p`
+dispatch -- so no change was needed for it. CLEAN-TREE is added by
+`observe_with_isolation/1` wrapping the tick in a throwaway detached worktree at
+`clean_ref` (`Kazi.Enforcement.Isolation.with_clean_tree/3`, the same
+`git worktree add --detach` pattern as `Kazi.Ratchet.resolve_git_ref/3`).
+LANDMINE: clean-tree MUST be scoped to the tamper-prone GRADERS (guard + held-out
+predicates), NOT all checkers -- running a visible iterating predicate from a clean
+ref would never see the agent's UNCOMMITTED work, so the loop could never converge
+(a deadlock). The visible predicates run against the working copy; only the graders
+are isolated. When the workspace is not a git repo the worktree-add fails, isolation
+DEGRADES to the working copy, and `:clean_tree` is dropped from the reported
+guarantees (`enforcement_status/1`) -- report the ACTUAL level, never a fabricated
+one. The clean worktree is a temp dir, always removed in an `after` (L-0014: a
+sibling can reset the shared tree). (2026-06-25, T32.4.)

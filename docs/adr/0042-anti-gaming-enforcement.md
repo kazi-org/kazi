@@ -105,6 +105,47 @@ creation mode** (the highest gaming-risk surface — the agent writes tests/feat
   are wired; the exact seam needs verification against `loop.ex` before implementation
   (flagged as a task precondition, not assumed).
 
+## Verified seam (T32.4, the precondition discharged)
+
+The precondition flagged in "Consequences" — verify "run the checker outside the
+agent's reach" against `loop.ex` before implementation — was discharged when T32.4
+landed. The findings:
+
+- **Where a provider is invoked.** `Kazi.Loop` invokes a checker in exactly ONE
+  place: `run_provider/3` (`lib/kazi/loop.ex`), reached from `observe/2` →
+  `evaluate/4`. The cwd a checker runs in is `context.workspace`, built by
+  `provider_context/2` from `data.workspace` (the agent's working copy). That is
+  the single seam; there is no other path a predicate is evaluated through.
+
+- **Separate-process rung — already held.** The command-runner providers
+  (`Kazi.Providers.CustomScript` / `TestRunner` / `Ratchet`, all via
+  `Kazi.Providers.CommandRunner`) shell out with `System.cmd`, which spawns a fresh
+  OS subprocess. That subprocess is distinct from the agent's own `claude -p`
+  dispatch (`data.harness.run/3` in `dispatch_agent/2`); the agent cannot introspect
+  or monkey-patch a BEAM-spawned port. No change was needed for this rung — it is
+  reported as `separate_process` and is always active under enforcement.
+
+- **Clean-tree rung — added at the seam.** When enforcement is active,
+  `observe_with_isolation/1` wraps the observation: it prepares a throwaway detached
+  worktree at `clean_ref` (`Kazi.Enforcement.Isolation.with_clean_tree/3`, the same
+  `git worktree add --detach` pattern `Kazi.Ratchet.resolve_git_ref/3` uses) and
+  evaluates the **guard + held-out** predicates (the tamper-prone graders) against
+  it, removing it after. The ordinary visible predicates still evaluate against the
+  working copy — running them from a clean ref would never see the agent's
+  uncommitted work and the loop could not converge. So the seam ADR-0042 §1 assumed
+  exists and is clean; the realization is SCOPED to the graders, not all checkers,
+  which is the honest reading of §1(a) ("checker definitions and their inputs").
+
+- **The reported guarantee is the actual one.** Clean-tree needs a git workspace.
+  When that is absent the worktree add fails, isolation **degrades** to the working
+  copy, and `:clean_tree` is dropped from the reported guarantees
+  (`Kazi.Loop.enforcement_status/1`). `kazi apply --json` therefore shows a partial
+  guarantee, never a fabricated one — the precondition's honesty bar.
+
+- **Landmine.** The clean tree is a temp-dir worktree, always removed in an `after`,
+  never the shared working dir (lore L-0014: a sibling session can reset the shared
+  tree).
+
 ## Alternatives rejected
 
 - **Keep guards declarative (today).** A capable model defeats convention; the METR
