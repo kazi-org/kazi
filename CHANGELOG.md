@@ -7,6 +7,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.0.1](https://github.com/kazi-org/kazi/compare/v1.0.0...v1.0.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **release:** build on OTP 28.3 so `kazi version` prints no warning ([b68cc3f](https://github.com/kazi-org/kazi/commit/b68cc3f388d6e3d48c5e13f53bac6d6ad5f3eb73))
+
 ## [1.0.0](https://github.com/kazi-org/kazi/compare/v0.5.0...v1.0.0) (2026-06-24)
 
 
