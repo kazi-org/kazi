@@ -256,8 +256,13 @@ defmodule Kazi.Harness.Prompt do
     |> Enum.map_join("\n", fn {key, value} -> "- #{key}: #{stringify(value)}" end)
   end
 
-  defp stringify(value) when is_binary(value), do: value
-  defp stringify(value), do: inspect(value)
+  # Captured evidence (test logs, HTTP bodies, stderr) is projected OUT of the
+  # workspace into a third-party harness prompt, so a secret that leaked into the
+  # output must not ride along (T35.3, ADR-0009 amendment). Redact every rendered
+  # value through the SAME `Kazi.Redaction` the context store uses, so the two
+  # egress paths redact identically.
+  defp stringify(value) when is_binary(value), do: Kazi.Redaction.redact(value)
+  defp stringify(value), do: Kazi.Redaction.redact(inspect(value))
 
   # =============================================================================
   # claw-code hygiene: evidence truncation (T4.8, UC-009/UC-022)
