@@ -135,6 +135,69 @@ so the phrase only routes to kazi once the skill is installed.)
 
 ---
 
+## Token economy without local models
+
+The cheapest way to run an agent loop isn't a local GPU — it's spending frontier
+reasoning **once**, then grinding on a cheap model that the predicates keep honest.
+kazi makes that an **in-family Claude** move, so any Claude Code user gets it with
+**no local model and no local GPU host**
+([ADR-0033](docs/adr/0033-cheaper-via-in-family-claude-tiering.md)):
+
+- You **chat with Claude Code**; it drives kazi.
+- **Easy iterations** run on a **cheap Claude model** (e.g. **Haiku 4.5**, `claude-haiku-4-5`).
+- **Hard reasoning** runs on a **frontier model** (e.g. **Opus 4.8**, `claude-opus-4-8`).
+- The **predicates keep the cheap model honest** — it cannot declare a false "done,"
+  because convergence is gated on objective checks, not the model's say-so.
+
+You pay frontier rates only for the judgment (authoring the predicates) and cheap
+rates for the bulk of the work.
+
+### Worked example — author on a frontier model, grind on a cheap one
+
+```sh
+# 1. Author the acceptance predicates ONCE — let your session's frontier model
+#    (e.g. Opus 4.8) draft them with `kazi plan`, then approve:
+kazi plan "add a /healthz endpoint that returns 200 ok" --workspace ./svc
+kazi approve <proposal-ref>
+
+# 2. Drive the N-iteration grind on a CHEAP Claude model — no local model needed:
+kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-4-5
+```
+
+`--harness claude --model <id>` selects which Claude model runs that call
+([ADR-0033](docs/adr/0033-cheaper-via-in-family-claude-tiering.md)); `claude` is
+already the default harness, so the only new thing is naming a cheaper model for
+the grind.
+
+### Start cheap, escalate on stuck (the smart default)
+
+Static tiering always grinds on one cheap model. The adaptive default — **start
+cheapest, step UP only when kazi reports the same slice is stuck** — pays frontier
+rates only for the slices that actually need them
+([ADR-0035](docs/adr/0035-skill-driven-adaptive-model-tiering.md)):
+
+```
+claude-haiku-4-5  ->  claude-sonnet-4-6  ->  claude-opus-4-8   (cap — do not escalate past Opus)
+```
+
+The policy lives in the orchestrating skill, **never in kazi**: kazi reports
+per-iteration state (`converged` / `stuck` / `over_budget`) via `kazi apply --json`,
+and the skill owns the ladder and the per-slice rung counter. The full
+copy-paste recipe is in [`AGENTS.md`](AGENTS.md) ("Escalate-on-stuck") and the
+installed `kazi` skill.
+
+> **Designed-for, not yet measured.** The cost win is the *intended* economics —
+> frontier judgment once, cheap iterations gated by predicates. The headline dollar
+> figure is being measured by the multi-iteration benchmark; until it lands, we state
+> the *shape* of the saving, not an unproven number.
+
+> **Want full privacy instead?** Local / bring-your-own-model is the **secondary**
+> option: point kazi at a local model via `opencode` so your code and context never
+> leave your hardware (see [Use a different coding harness](#use-a-different-coding-harness)).
+> It trades the in-family convenience for on-prem privacy.
+
+---
+
 ## What a coding agent says
 
 > *"Left to myself, I'll tell you a task is done the moment the code looks
