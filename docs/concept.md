@@ -7,6 +7,27 @@ changes (and write/super­sede the ADR).
 
 ---
 
+## 0. How you actually use it (the spine)
+
+In practice you never operate kazi by hand. You keep working in **Claude Code**
+the way you already do; `kazi install-skill` teaches Claude Code a skill that
+*drives* kazi for you. The adoption spine is:
+
+> **you → Claude Code → kazi → Claude Code.**
+
+You describe the outcome in plain language — *"**have kazi drive this until
+done**"* — and Claude Code authors the acceptance predicates with `kazi plan`,
+hands them to kazi, and kazi loops the agent until every predicate is
+objectively true (or reports `stuck` / `over_budget`). Claude Code reports the
+result back to you. You never leave your chat with Claude.
+
+A note on what kazi *is*: kazi is the **outer/reconciliation loop** the agent
+drives (Section 1). It is **not** itself a skill, a harness, or another agent —
+`install-skill` only writes a Claude Code *skill* whose job is to drive kazi.
+The rest of this document is the architecture beneath that spine.
+
+---
+
 ## 1. The one-sentence definition
 
 **kazi is a reconciliation controller for software goals: you declare desired
