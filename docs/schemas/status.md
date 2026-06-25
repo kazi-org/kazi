@@ -53,7 +53,7 @@ An unknown ref is the error object below with a non-zero exit.
 | `status`         | string (enum)    | The derived lifecycle: `converged` (the latest iteration converged) or `in_progress`. |
 | `converged`      | boolean          | Whether the latest recorded iteration was judged converged (T0.8). |
 | `iteration`      | integer          | The latest recorded 0-based iteration index. |
-| `predicates`     | array of objects | The predicate **vector** at the latest observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as `apply --json`. |
+| `predicates`     | array of objects | The predicate **vector** at the latest observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as `apply --json`, including the optional ADR-0041 graded fields (`score`, `prior_score`, `direction`, `evidence`) when present. See [`run-result.md`](run-result.md#predicates--graded-fields-adr-0041). |
 | `release_ref`    | string \| null   | The release ref recorded on the latest iteration (T3.3c), or `null`. |
 | `observed_at`    | string (ISO 8601)| When the latest iteration's predicates were evaluated. |
 | `schema_version` | integer          | The contract version. |
