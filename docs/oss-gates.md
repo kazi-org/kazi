@@ -332,6 +332,39 @@ because it can orphan a doc reference even when no doc file changed. Tests can
 point the real scanner at a fixture tree via `KAZI_DOC_FILES` (a space-separated
 file list) and `KAZI_CLI_FILE` without duplicating the matching logic.
 
+## Release-stage gate -- MCP-parity smoke (T33.4, ADR-0044)
+
+The gates above run on every PR. One more gate runs at RELEASE time, not on PRs:
+a smoke that proves the shipped binary can serve the MCP server path.
+
+Script: `.github/scripts/mcp_release_smoke.sh <path-to-kazi-binary>`
+
+ADR-0044 made `kazi mcp` a real verb on the installed binary, and named a
+launch-parity smoke (start via `kazi mcp`, list tools, call `kazi_status`)
+sufficient to verify the release ships a working MCP server path. T33.4 wires
+that smoke into `.github/workflows/release.yml`: after each Burrito target is
+built, the workflow runs the freshly-built INSTALLED binary (NOT `mix`) as an MCP
+stdio server, performs the JSON-RPC handshake, asserts `tools/list` advertises
+`kazi_status`, and asserts a `kazi_status` tool call answers with a structured
+status payload (`isError: false`, a `kind` + `schema_version` result). The binary
+boots its bundled SQLite read-model first (the prod path migrates
+`<home>/.kazi/kazi.db`), so the smoke also proves the read-model the MCP tools
+read is genuinely up in the shipped artifact.
+
+The step runs BEFORE the release assets are uploaded, in both the native-arch
+matrix jobs and the arm64 container job, so a non-zero exit BLOCKS the release: a
+binary that cannot serve `kazi mcp` never becomes a GitHub Release asset.
+
+Run it locally against a `mix`-run server with the shim pattern (the dev `mix
+kazi.mcp` path boots `app.start` WITHOUT migrating, so create + migrate the
+read-model first):
+
+```sh
+mix ecto.create && mix ecto.migrate
+printf '#!/usr/bin/env bash\nexec mix kazi.mcp\n' > /tmp/kazi-shim && chmod +x /tmp/kazi-shim
+.github/scripts/mcp_release_smoke.sh /tmp/kazi-shim
+```
+
 ## Where this is enforced
 
 ADR-0034 enforces both rules at three layers:
