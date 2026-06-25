@@ -39,13 +39,18 @@ defmodule Kazi.Goal.Loader do
 
   ### `[budget]` table (optional, → `Kazi.Budget`)
 
-  | Key                 | TOML type        | Maps to                  |
-  |---------------------|------------------|--------------------------|
-  | `max_iterations`    | positive integer | `Budget.max_iterations`  |
-  | `max_wall_clock_ms` | positive integer | `Budget.max_wall_clock_ms` |
-  | `max_tokens`        | positive integer | `Budget.max_tokens`      |
+  | Key                  | TOML type        | Maps to                  |
+  |----------------------|------------------|--------------------------|
+  | `max_iterations`     | positive integer | `Budget.max_iterations`  |
+  | `max_wall_clock_ms`  | positive integer | `Budget.max_wall_clock_ms` |
+  | `max_tokens`         | positive integer | `Budget.max_tokens`      |
+  | `cached_read_weight` | float `0.0..1.0` | `Budget.cached_read_weight` |
 
-  Omitted dimensions are unbounded (`nil`).
+  Omitted ceiling dimensions are unbounded (`nil`). `cached_read_weight` is not a
+  ceiling: it is the fraction of a fresh token each cached-read input token counts
+  as in the token budget (T34.4, ADR-0046) — cached reads are far cheaper than
+  fresh input, so a cache-hit-heavy run is not falsely flagged `over_budget`. When
+  omitted it defaults to `Budget.default_cached_read_weight/0`.
 
   ### `[scope]` table (optional, → `Kazi.Scope`)
 
@@ -416,12 +421,30 @@ defmodule Kazi.Goal.Loader do
       end
     end)
     |> case do
-      {:ok, opts} -> {:ok, Budget.new(opts)}
+      {:ok, opts} -> add_cached_read_weight(opts, budget)
       {:error, _} = err -> err
     end
   end
 
   defp build_budget(_), do: {:error, "[budget] must be a table"}
+
+  # T34.4 (ADR-0046): the optional cached-read weight — the fraction of a fresh
+  # token each cached-read input token counts as in the token budget. Absent →
+  # the struct default; present → a number in `0.0..1.0` (an integer `0` or `1`
+  # is accepted and coerced to a float). Out of range or non-numeric fails loudly
+  # rather than being silently clamped, so a typo is caught at load time.
+  defp add_cached_read_weight(opts, budget) do
+    case Map.get(budget, "cached_read_weight") do
+      nil ->
+        {:ok, Budget.new(opts)}
+
+      value when is_number(value) and value >= 0 and value <= 1 ->
+        {:ok, Budget.new([{:cached_read_weight, value / 1} | opts])}
+
+      _ ->
+        {:error, "budget.cached_read_weight must be a number between 0.0 and 1.0"}
+    end
+  end
 
   defp build_scope(scope) when is_map(scope) do
     with {:ok, workspace} <- optional_string(scope, "workspace", "scope"),
