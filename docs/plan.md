@@ -492,6 +492,7 @@ features -- agent-driving (skill/mcp/`--json`) is REAL now; promised work labell
 - [ ] T25.9 Launch kit + OG card (HN-first): an OG/Twitter card showing the agent paradigm (wire into `site/src/layouts/Layout.astro`); a Show HN title (`kazi - drive your coding agent in a loop until the goal is objectively true`) + post draft + an X thread, framed against "agents claim done but aren't"; honest, no unshipped command as working.  Owner: TBD  Est: 1.5h  verifies: [UC-039, UC-035]  delivers: [an OG card + a Show HN/X launch kit draft]  deps: [T25.3, T25.7]  acc: a link-preview check renders the card; the launch kit leads with the agent paradigm + a reproducible hook; Lighthouse SEO stays >= 90; ready for the operator to post.
 - [ ] T25.10 Accuracy gate + live publish: every command across README/docs/site verified against `kazi help --json`; README<->site coherence (T9.9) + skill/`AGENTS.md` coherence (T16.4) green; version current; no dead links; deploy + verify live at https://kazi.sire.run and README renders on GitHub. Record the publish honestly.  Owner: TBD  Est: 1.5h  verifies: [UC-039, infrastructure]  deps: [T25.3, T25.4, T25.7, T25.8, T25.9]  acc: zero unshipped-command references; coherence green; live site shows the agent paradigm; README renders on GitHub; any skipped item flagged, not hidden.
 - [ ] T25.11 "Token economy without local models" content (ADR-0033, the broad-appeal cost story): a README/site section + a worked example showing the in-family Claude tiering -- you chat with Claude Code, it drives kazi, EASY iterations run on a cheap Claude model (e.g. Haiku 4.5), HARD reasoning on a frontier model (e.g. Opus 4.8), and predicates keep the cheap model honest -- so any Claude Code user gets better token economy with NO local model / local GPU host. Frame local/BYOM (opencode) as the secondary PRIVACY option, and reference the ADAPTIVE escalation recipe (ADR-0035/E30: start cheap, escalate on stuck) as the smart default. HONEST: the cost number is "designed for / being measured" until T19.7 runs (no unproven figure); model ids checked against the claude-api reference.  Owner: TBD  Est: 1.5h  verifies: [UC-043, UC-045, UC-039]  delivers: [a "token economy without local models" section + a worked frontier->cheap-Claude example + a pointer to the escalation recipe]  deps: [T19.6, T30.1]  acc: README + site show the in-family tiering example (`kazi plan` with a frontier model -> `kazi apply --harness claude --model <cheap>`) and mention the escalate-on-stuck behavior; local/BYOM is the secondary privacy note; no unproven cost number stated; commands verified against `kazi help --json`; coherence (T9.9) green.
+- [ ] T25.12 Community + getting-help links (closes the all-stars.md growth-playbook gap #10, the last unaddressed item): the only fast-growing-OSS pattern still missing from kazi's surfaces. (a) Enable GitHub Discussions on `kazi-org/kazi` (a repo setting); if Discussions stays off, fall back to Issues. (b) README: add a one-line footer pointer -- "Questions? Start a [GitHub Discussion](.../discussions) | Read [concept.md](docs/concept.md) for the architecture". (c) Site: add a "Docs" (or "Community") nav link in `site/src/pages/index.astro` -- point it at `docs/concept.md` on GitHub until a rendered `/docs` exists (the T22.6 decision), plus a help link in the footer. Keep README<->site coherence (T9.9) green; update the Playwright smoke (T9.5) to assert the new nav link.  Owner: TBD  Est: 1h  verifies: [UC-039, UC-035]  delivers: [a Discussions/help link in the README footer + a Docs/Community nav + footer link on the site]  deps: []  acc: Discussions enabled (or an Issues fallback documented); README footer links to Discussions (or Issues) + concept.md; the site nav shows a Docs/Community link and the footer a help link, all resolving (HTTP 200); the Playwright smoke (T9.5) covers the new nav link; coherence (T9.9) green; deployed + verified live at https://kazi.sire.run.
 
 ### E26 -- The kazi skill becomes a router: plan/apply/status/adopt (P1, ADR-0031)
 
@@ -634,6 +635,7 @@ the adoption spine (E15->E16->E17). E9 leftovers are tiny and independent.
 - **Wave E25-2 (surfaces):** T25.3 (README) -> T25.4 (website) ; T25.8 (docs quickstart) alongside.
 - **Wave E25-3 (launch):** T25.9 (OG + Show HN/X kit) -> T25.10 (accuracy gate + live publish). Supersedes the messaging of the open E17 + E22 README/site tasks (execute those per ADR-0030 here).
 - **Wave E25-4 (token economy, ADR-0033):** T25.11 ("token economy without local models" content) after T19.6 (the `claude --model` enabler); the cost number stays "designed for / being measured" until T19.7.
+- **Wave E25-5 (community links, quick win):** T25.12 (Discussions + Docs/Community links on README + site; closes all-stars.md gap #10). Unblocked now (deps []); independent of the E25 content rewrite.
 - **Wave E26-1 (router):** T26.1 (router SKILL.md + dispatch) -> T26.2 (`kazi plan`), T26.3 (`kazi apply`), T26.4 (`status`/`adopt`) in parallel -> T26.5 (coherence + retire loop/qualify from the code on-ramp).
 - **Wave E26-2 (prove):** T26.6 (live router dogfood; subsumption claim gated on T21.12/T23.9).
 - **Wave E27-1 (CLI rename, autonomous -- start now):** T27.1 (verbs + aliases) -> T27.3 (schema bump) -> T27.4 (help/schema); T27.2 (mix task) in parallel after T27.1.
@@ -713,6 +715,21 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-24 -- Change Summary (T25.12: close all-stars.md growth-playbook gap #10)
+- Audited the `tmp/all-stars.md` growth research (docs/site playbook vs fast-growing
+  OSS AI tools) against current surfaces. FINDING: 6 of 10 gaps already SHIPPED
+  (version badge, social-proof badges, who-it's-for, why-now, before/after, OG image),
+  2 PARTIAL (screencast/site-hero -> E25 T25.2/T25.4), 1 PLANNED (README restructure ->
+  T25.3). The research was NOT formally ingested (it is an untracked tmp scratch file)
+  but was clearly USED -- its specific suggestions match shipped surfaces (the README
+  "Why now?" text is near-verbatim). The companion deep research IS ingested
+  (devlog 2026-06-24 -> ADR-0030/E25).
+- **Added T25.12** (the only unaddressed gap, #10): Community + getting-help links --
+  enable GitHub Discussions (Issues fallback), add a README footer Discussions/concept
+  pointer + a site Docs/Community nav + footer help link; coherence (T9.9) green;
+  Playwright smoke (T9.5) covers the new nav; deployed + verified live. Wave E25-5;
+  verifies UC-039/UC-035; unblocked now.
 
 ### 2026-06-24 -- Change Summary (E30: adaptive in-family model tiering, skill-driven; ADR-0035)
 - Operator directive: "use kazi to optimize token economy (Opus for plan, Haiku/Sonnet
