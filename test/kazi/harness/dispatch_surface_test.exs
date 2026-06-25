@@ -127,7 +127,7 @@ defmodule Kazi.Harness.DispatchSurfaceTest do
       # and `--strict-mcp-config` makes the inner harness ignore it entirely — so
       # its config path never reaches the argv and its schemas never reach the
       # prompt.
-      ambient_config = "/home/operator/.config/ambient/.mcp.json"
+      ambient_config = "ambient/.mcp.json"
       refute ambient_config in args
       refute "mcp__some-ambient-server" in args
       # The exclusion is enforced by --strict-mcp-config, not by listing ambient.
