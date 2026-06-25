@@ -550,6 +550,64 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @property %{
+    kind: "property",
+    title: "property predicate config",
+    description:
+      "Property-based testing, PropCheck under `mix test` (ADR-0043). Score = cases-passed / " <>
+        "N (higher_better); the SHRUNK counterexample is the evidence on a failure. The " <>
+        "verdict is read from the parsed PropEr summary, not the exit code alone.",
+    keys: [
+      %{
+        name: "cmd",
+        type: "string",
+        required: false,
+        description: "The executable. Default \"mix\"."
+      },
+      %{
+        name: "args",
+        type: "array<string>",
+        required: false,
+        description: "Argument list. Default [\"test\"]."
+      },
+      %{
+        name: "env",
+        type: "table | array<pair>",
+        required: false,
+        description: "Extra environment as a {name = value} table or {name, value} pairs."
+      },
+      %{
+        name: "num_tests",
+        type: "integer",
+        required: false,
+        description:
+          "N — the generated cases per property, the score DENOMINATOR. Default 100 " <>
+            "(PropCheck's own default). Must be a positive integer."
+      },
+      %{
+        name: "merge_stderr",
+        type: "boolean",
+        required: false,
+        description:
+          "Fold stderr into stdout for the parsed output. Default true (the combined stream " <>
+            "is what a developer reads)."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description: "Kill the run after this many ms and map it to :error. Default: no timeout."
+      }
+    ],
+    example: %{
+      "id" => "encode-decode-roundtrips",
+      "provider" => "property",
+      "cmd" => "mix",
+      "args" => ["test", "--only", "property"],
+      "num_tests" => 100
+    }
+  }
+
   @schemas %{
     "custom_script" => @custom_script,
     "ratchet" => @ratchet,
@@ -557,7 +615,8 @@ defmodule Kazi.Predicate.Schema do
     "http_probe" => @http_probe,
     "browser" => @browser,
     "metrics" => @metrics,
-    "coverage" => @coverage
+    "coverage" => @coverage,
+    "property" => @property
   }
 
   @doc "The provider kinds with a documented config schema, sorted."

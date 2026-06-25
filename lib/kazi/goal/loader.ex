@@ -219,8 +219,11 @@ defmodule Kazi.Goal.Loader do
     # missing command fails at load time, not silently at dispatch.
     "static" => :static,
     # T32.8 (ADR-0043): `:coverage` validates its patch metric + target below so a
-    # mis-declared coverage gate fails at load, not at dispatch.
-    "coverage" => :coverage
+    # mis-declared coverage gate fails at load, not at dispatch. `:property` runs
+    # PropCheck under `mix test`; its `num_tests` (the score denominator) is
+    # validated below.
+    "coverage" => :coverage,
+    "property" => :property
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -920,6 +923,23 @@ defmodule Kazi.Goal.Loader do
     with :ok <- validate_coverage_patch(config, id),
          :ok <- validate_coverage_target(config, id) do
       validate_coverage_project(config, id)
+    end
+  end
+
+  # T32.8 (ADR-0043): a property predicate's `num_tests` (the score denominator)
+  # must be a positive integer when declared; cmd/args default to `mix test`.
+  defp validate_provider_config(:property, config, id) do
+    case Map.get(config, :num_tests) do
+      nil ->
+        :ok
+
+      n when is_integer(n) and n > 0 ->
+        :ok
+
+      other ->
+        {:error,
+         "property predicate #{inspect(id)} \"num_tests\" must be a positive integer " <>
+           "(got #{inspect(other)})"}
     end
   end
 

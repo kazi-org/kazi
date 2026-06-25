@@ -54,6 +54,8 @@ its config at runtime via `kazi schema <kind>`.
   within an allowed regression of a baseline (ADR-0041).
 - **[`coverage`](coverage-predicate.md)** — patch coverage meets a target AND
   project coverage does not regress (ADR-0043).
+- **[`property`](property-predicate.md)** — property-based testing (PropCheck
+  under `mix test`); the shrunk counterexample as evidence (ADR-0043).
 
 ## Reference
 
