@@ -1841,7 +1841,8 @@ defmodule Kazi.Loop do
   defp render_context_store_section(snippets) do
     "## Indexed evidence (context store)\n\n" <>
       "Budget-fitted snippets retrieved from the indexed artifacts above. " <>
-      "Use them as evidence; request a targeted source/query if you need more.\n\n" <>
+      "Use the provided snippets as evidence; if you need more, request a targeted " <>
+      "source/query — do not ask for whole logs or whole docs.\n\n" <>
       Enum.map_join(snippets, "\n\n", fn %Kazi.ContextStore.Snippet{text: text, source: source} ->
         case source do
           nil -> "```\n" <> text <> "\n```"
