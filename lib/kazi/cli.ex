@@ -59,6 +59,7 @@ defmodule Kazi.CLI do
   alias Kazi.Authoring.Clarify
   alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
+  alias Kazi.ContextStore.GistInit
   alias Kazi.Export.Obsidian
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
@@ -109,6 +110,7 @@ defmodule Kazi.CLI do
     status: :string,
     enrich: :boolean,
     with_mcp: :boolean,
+    with_gist: :boolean,
     out: :string,
     dir: :string,
     harness: :string,
@@ -146,6 +148,8 @@ defmodule Kazi.CLI do
       "`init` only: opt into harness enrichment (off by default) to propose live predicates.",
     with_mcp:
       "`init` only: also write the canonical kazi MCP client config to the repo's .mcp.json ({command:\"kazi\",args:[\"mcp\"]}), so an MCP harness drives kazi natively (ADR-0044).",
+    with_gist:
+      "`init` only: opt THIS repo into the Gist context store — verify `gist doctor`, write .kazi/context.toml, register the `gist serve` MCP server in .mcp.json, and recommend KAZI_GIST_DSN. Project-local only; never touches global config (ADR-0045).",
     out: "`init` output goal-file (default <repo>/kazi.goal.toml).",
     dir:
       "`install-skill` only: target skill directory (default ~/.claude/skills/kazi). Injected to a tmp dir in tests.",
@@ -211,7 +215,7 @@ defmodule Kazi.CLI do
       name: "init",
       summary: "Adopt a repo by stack detection and write a starter goal-file.",
       args: [%{name: "repo-dir", required: true}],
-      flags: [:out, :enrich, :with_mcp, :workspace]
+      flags: [:out, :enrich, :with_mcp, :with_gist, :workspace]
     },
     %{
       name: "install-skill",
@@ -295,7 +299,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --parallel [N] [--json] # parallel scheduler
       kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
       kazi status <ref> [--json]
-      kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp]
+      kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
@@ -337,6 +341,15 @@ defmodule Kazi.CLI do
                              ({command:"kazi",args:["mcp"]}) so an MCP-speaking
                              harness drives kazi natively (ADR-0044). Additive —
                              preserves any servers already declared.
+      --with-gist            `init` only: opt THIS repo into the Gist context
+                             store (ADR-0045). Verifies `gist doctor`, writes the
+                             project-local .kazi/context.toml naming the provider,
+                             additively registers the `gist serve` MCP server in
+                             .mcp.json, and recommends setting KAZI_GIST_DSN for
+                             cross-iteration persistence. PROJECT-LOCAL ONLY — it
+                             never mutates a global agent config (~/.claude). When
+                             `gist` is not installed it reports the missing dep and
+                             exits non-zero (the goal-file is still written).
       --env <name>           Deploy environment to target, e.g. staging / prod
                              (T3.3d). Selects the goal/deploy's per-env target;
                              requires the goal-file's deploy config to define an
@@ -422,6 +435,7 @@ defmodule Kazi.CLI do
       kazi apply my.goal.toml --workspace ./svc --harness opencode --model local/qwen3.6
       kazi init ./my-service --out my-service.goal.toml
       kazi init ./my-service --with-mcp            # also write .mcp.json (canonical kazi MCP config)
+      kazi init ./my-service --with-gist           # opt this repo into the Gist context store (ADR-0045)
       kazi install-skill
       kazi mcp                                     # an MCP client runs this as its server command
       kazi apply my.goal.toml --workspace ./svc --json --stream
@@ -684,7 +698,8 @@ defmodule Kazi.CLI do
   # T5.5 adopt: `kazi init <repo-dir>` reverse-engineers a starter goal-file by
   # deterministic stack detection (ADR-0013). --out is the output file; --enrich
   # opts into harness enrichment (off by default); --with-mcp also writes the
-  # canonical kazi MCP client config to the repo's .mcp.json (T33.3, ADR-0044).
+  # canonical kazi MCP client config to the repo's .mcp.json (T33.3, ADR-0044);
+  # --with-gist opts the repo into the Gist context store (T35.8, ADR-0045).
   defp parse_command(["init", repo_dir | rest], flags) do
     case rest do
       [] ->
@@ -692,6 +707,7 @@ defmodule Kazi.CLI do
          out: flags[:out],
          enrich: flags[:enrich],
          with_mcp: flags[:with_mcp],
+         with_gist: flags[:with_gist],
          workspace: flags[:workspace]}
 
       extra ->
@@ -1552,8 +1568,15 @@ defmodule Kazi.CLI do
         out = opts[:out] || Path.join(repo_dir, @default_stack_out)
 
         case write_goal_file(out, Adopt.to_toml(goal_map)) do
-          0 -> maybe_write_mcp_config(repo_dir, opts)
-          nonzero -> nonzero
+          0 ->
+            # Both opt-in setups are additive and independent; run each and fail
+            # the command if either step fails (max of the exit codes).
+            mcp_code = maybe_write_mcp_config(repo_dir, opts)
+            gist_code = maybe_write_gist_config(repo_dir, opts, inject_opts)
+            max(mcp_code, gist_code)
+
+          nonzero ->
+            nonzero
         end
 
       {:error, :no_stack_detected} ->
@@ -1614,6 +1637,92 @@ defmodule Kazi.CLI do
       0
     end
   end
+
+  # `--with-gist` (T35.8, ADR-0045 §8): opt THIS repo into the Gist context store.
+  # Verify `gist doctor`, write the project-local `.kazi/context.toml`, additively
+  # register the `gist serve` MCP server in `.mcp.json`, and recommend KAZI_GIST_DSN
+  # for cross-iteration persistence. PROJECT-LOCAL ONLY — no global agent config is
+  # touched. Absent the `gist` binary, report the missing dep and exit non-zero (the
+  # goal-file is already written); never crash. Without the flag this is a no-op.
+  #
+  # `inject_opts` threads the `:gist_bin`/`:gist_env`/`:gist_timeout_ms` test seam
+  # into the doctor probe so the healthy and missing-dep paths are hermetic.
+  defp maybe_write_gist_config(repo_dir, opts, inject_opts) do
+    if opts[:with_gist] do
+      case GistInit.doctor(gist_doctor_opts(inject_opts)) do
+        {:ok, _doctor_out} ->
+          write_gist_project_config(repo_dir)
+
+        {:error, :gist_not_available} ->
+          IO.puts(
+            :stderr,
+            "error: `gist` is not installed (not on PATH). Install it " <>
+              "(https://github.com/sirerun/gist), then re-run `kazi init --with-gist`. " <>
+              "The goal-file was written; no context-store config was changed."
+          )
+
+          1
+
+        {:error, reason} ->
+          IO.puts(:stderr, "error: `gist doctor` reported a problem: #{inspect(reason)}")
+          1
+      end
+    else
+      0
+    end
+  end
+
+  # The doctor probe's subprocess seam: tests inject a fake `gist` binary (and its
+  # env) so the verify step runs hermetically against test/support/fake_gist.sh.
+  defp gist_doctor_opts(inject_opts) do
+    [:gist_bin, :gist_timeout_ms]
+    |> Enum.reduce([], fn key, acc ->
+      case inject_opts[key] do
+        nil -> acc
+        val -> Keyword.put(acc, strip_gist_prefix(key), val)
+      end
+    end)
+    |> then(fn acc ->
+      case inject_opts[:gist_env] do
+        nil -> acc
+        env -> Keyword.put(acc, :env, env)
+      end
+    end)
+  end
+
+  defp strip_gist_prefix(:gist_bin), do: :gist_bin
+  defp strip_gist_prefix(:gist_timeout_ms), do: :timeout_ms
+
+  # Write both project-local artifacts (context.toml + the gist MCP server entry)
+  # and print the on-ramp, including the KAZI_GIST_DSN recommendation. Either write
+  # failing is reported and exits non-zero.
+  defp write_gist_project_config(repo_dir) do
+    with {:ok, ctx_outcome, ctx_path} <- GistInit.write_context_toml(repo_dir),
+         {:ok, mcp_outcome, mcp_path} <- GistInit.ensure_mcp(repo_dir) do
+      IO.puts("#{outcome_verb(ctx_outcome)} #{ctx_path}  (context-store provider -> gist)")
+      IO.puts("#{outcome_verb(mcp_outcome)} #{mcp_path}  (gist MCP server -> `gist serve`)")
+
+      IO.puts("\nThis repo is now opted into the Gist context store (project-local).")
+
+      IO.puts("For cross-iteration persistence, set #{GistInit.dsn_env()} to a PostgreSQL DSN:")
+
+      IO.puts("  export #{GistInit.dsn_env()}=\"postgres://USER:PASS@HOST:5432/gist\"")
+      0
+    else
+      {:error, reason} ->
+        IO.puts(
+          :stderr,
+          "error: could not write the Gist context-store config: #{inspect(reason)}"
+        )
+
+        1
+    end
+  end
+
+  defp outcome_verb(:created), do: "WROTE "
+  defp outcome_verb(:updated), do: "UPDATE"
+  defp outcome_verb(:merged), do: "MERGED"
+  defp outcome_verb(:present), do: "OK    "
 
   # Write a single goal-file (stack mode) and print the path + review hint.
   defp write_goal_file(out, toml) do
