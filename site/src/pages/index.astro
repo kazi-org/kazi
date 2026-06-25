@@ -156,7 +156,7 @@ const personas = [
           {HERO_TAGLINE}
         </h1>
         <p class="ui-body mx-auto mt-6 max-w-2xl text-pretty text-lg">
-          Give <strong class="ui-strong">Claude Code</strong> the power to actually
+          Give <strong class="ui-strong">Claude Code</strong> the power to actually{" "}
           <em>finish</em>. You chat with Claude the way you already do; kazi works in the
           background to make &ldquo;done&rdquo; <strong class="ui-strong">objective</strong>
           &mdash; looping your agent until every check passes (tests green, the endpoint
@@ -215,9 +215,9 @@ const personas = [
           <pre class="ui-code mt-3 overflow-x-auto rounded-xl border px-5 py-4 font-mono text-sm"><code>{onramp[2].code}</code></pre>
           <p class="ui-muted mt-2 text-xs">{onramp[2].note}</p>
           <p class="ui-body mt-3 text-sm">
-            Prefer plain English? Just say
+            Prefer plain English? Just say{" "}
             <strong class="ui-strong">&ldquo;{INVOCATION_PHRASE}&rdquo;</strong>
-            &mdash; the skill runs the same <code class="ui-body">/kazi plan</code> &rarr;
+            &mdash; the skill runs the same <code class="ui-body">/kazi plan</code> &rarr;{" "}
             <code class="ui-body">/kazi apply</code> for you.
           </p>
         </li>
@@ -275,7 +275,7 @@ const personas = [
         Under the hood, <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>
         &mdash; your agent runs it, not you. It <em>drives</em> the coding agent you already
         use (Claude Code, Codex, &hellip;) in a reconcile loop: observe every failing check,
-        dispatch a fix, integrate, re-check. It is <strong class="ui-strong">not</strong>
+        dispatch a fix, integrate, re-check. It is <strong class="ui-strong">not</strong>{" "}
         another coding agent, terminal, or IDE &mdash; as that agent gets better, kazi gets
         better for free.
       </p>
@@ -376,8 +376,8 @@ const personas = [
       <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
         The cheapest agent loop isn't a local GPU &mdash; it's spending frontier
         reasoning <em>once</em>, then grinding on a cheap model the predicates keep
-        honest. kazi makes that an <strong class="ui-strong">in-family Claude</strong>
-        move, so any Claude Code user gets it with
+        honest. kazi makes that an <strong class="ui-strong">in-family Claude</strong>{" "}
+        move, so any Claude Code user gets it with{" "}
         <strong class="ui-strong">no local model and no local GPU host</strong>.
       </p>
       <ul class="mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-2">
@@ -482,7 +482,7 @@ kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-
           the thing I hoped was finished.&rdquo;
         </blockquote>
         <figcaption class="ui-muted mt-5 text-sm">
-          &mdash; Claude (Anthropic), describing kazi in its own words.
+          &mdash; Claude (Anthropic), describing kazi in its own words.{" "}
           <span class="ui-body">Agent-authored</span>, kept verbatim and labelled
           as such &mdash; not a human testimonial.
         </figcaption>
@@ -506,7 +506,7 @@ kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-
         <strong class="ui-body">Not for you (yet)</strong> if you want an agent to
         decide <em>what</em> to build &mdash; that's your call; kazi only drives toward an
         outcome you declare. It also needs a coding harness
-        (<code class="ui-body">claude</code>,
+        (<code class="ui-body">claude</code>,{" "}
         <code class="ui-body">opencode</code>, &hellip;) on your PATH &mdash; kazi
         drives one, it isn't one.
       </p>
@@ -526,7 +526,7 @@ kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-
           <p class="ui-body text-sm font-semibold">1. Install</p>
           <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>{INSTALL_CMD}</code></pre>
           <p class="ui-muted mt-2 text-xs">
-            A coding agent (<code class="ui-body">claude</code> or
+            A coding agent (<code class="ui-body">claude</code> or{" "}
             <code class="ui-body">opencode</code>) must be on your PATH &mdash; kazi
             drives one, it does not bundle one.
           </p>
