@@ -91,7 +91,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       # aliases were removed in v0.6.0, so the table (and help --json) omits them.
       expected =
         MapSet.new(
-          ~w(apply status init install-skill mcp plan list-proposed approve reject export lint help schema version)
+          ~w(apply status init install-skill mcp plan list-proposed approve reject export lint context help schema version)
         )
 
       assert reported == expected,
@@ -278,6 +278,11 @@ defmodule Kazi.CLIHelpSchemaTest do
 
         n when n in ~w(schema) ->
           [n, "apply"]
+
+        # `context` requires a <subcommand> positional; probe with a real one
+        # (`stats`) so we observe dispatch, not the missing-subcommand error.
+        "context" ->
+          ["context", "stats"]
 
         n ->
           [n]
