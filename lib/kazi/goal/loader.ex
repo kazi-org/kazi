@@ -185,6 +185,17 @@ defmodule Kazi.Goal.Loader do
     "custom_script" => :custom_script
   }
 
+  # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
+  # DEPRECATED — folded onto `custom_script` and kept only for the migration
+  # window (removed in v2.0.0). Each maps to the custom_script form a goal should
+  # migrate to, named in the STDERR deprecation hint. The names still RESOLVE
+  # (their kinds are unchanged above) so no existing goal-file is broken; the hint
+  # is advisory and goes to STDERR only (never `--json` stdout).
+  @deprecated_providers %{
+    "test_runner" => "custom_script (verdict = \"exit_zero\")",
+    "prod_log" => "custom_script (verdict = \"match_count\")"
+  }
+
   # Reserved keys on a [[predicate]] table; everything else falls through to
   # the predicate's `config`. `group` (T12.2) is reserved so a declared group
   # reference does not leak into the provider config.
@@ -231,6 +242,12 @@ defmodule Kazi.Goal.Loader do
          # and every group `parent` must reference a DECLARED id, and the parent
          # chain must be acyclic.
          :ok <- validate_group_references(groups, all) do
+      # T32.1b (ADR-0040 decision 7): the command-runner aliases `test_runner` /
+      # `prod_log` are deprecated (folded onto `custom_script`). They keep
+      # resolving through the migration window; emit a one-line migration hint to
+      # STDERR — NEVER stdout — so a `--json` caller's stdout stays pure JSON.
+      warn_deprecated_providers(Map.get(data, "predicate", []))
+
       {predicates, guards} = Enum.split_with(all, &(not &1.guard?))
 
       {:ok,
@@ -790,7 +807,7 @@ defmodule Kazi.Goal.Loader do
   # The verdict strings + evidence-format envelopes a custom_script predicate may
   # declare. Kept in lockstep with Kazi.Providers.CustomScript (the engine that
   # consumes them); validated here so a typo is a load error.
-  @custom_script_verdicts ~w(exit_zero exit_code json)
+  @custom_script_verdicts ~w(exit_zero exit_code json match_count)
   @custom_script_evidence_formats ~w(sarif junit json raw)
 
   # T32.1 (ADR-0040): per-provider config validation. Every kind other than
@@ -804,6 +821,7 @@ defmodule Kazi.Goal.Loader do
          :ok <- validate_custom_script_args(config, id),
          :ok <- validate_custom_script_error_codes(config, id),
          :ok <- validate_custom_script_timeout(config, id),
+         :ok <- validate_custom_script_merge_stderr(config, id),
          :ok <- validate_custom_script_evidence_format(config, id) do
       validate_custom_script_for_verdict(verdict, config, id)
     end
@@ -868,6 +886,19 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  defp validate_custom_script_merge_stderr(config, id) do
+    case Map.get(config, :merge_stderr) do
+      nil ->
+        :ok
+
+      value when is_boolean(value) ->
+        :ok
+
+      _ ->
+        {:error, "custom_script predicate #{inspect(id)} \"merge_stderr\" must be a boolean"}
+    end
+  end
+
   defp validate_custom_script_evidence_format(config, id) do
     case Map.get(config, :evidence_format) do
       nil ->
@@ -900,7 +931,30 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # The "match_count" verdict gates on a COUNT of output lines matching a regex, so
+  # it REQUIRES a non-empty `match_regex` and a well-formed `pass_when`. (Regex
+  # validity is checked at evaluation time — a bad pattern is an :error there, the
+  # same as prod_log's `:invalid_regex`.)
+  defp validate_custom_script_for_verdict("match_count", config, id) do
+    with :ok <- require_match_count_key(config, :match_regex, id),
+         :ok <- require_match_count_key(config, :pass_when, id) do
+      validate_pass_when(Map.get(config, :pass_when), id)
+    end
+  end
+
   defp validate_custom_script_for_verdict(_verdict, _config, _id), do: :ok
+
+  defp require_match_count_key(config, key, id) do
+    case Map.get(config, key) do
+      value when is_binary(value) and value != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "custom_script predicate #{inspect(id)} with verdict \"match_count\" requires a " <>
+           "non-empty string #{inspect(Atom.to_string(key))}"}
+    end
+  end
 
   defp require_string_key(config, key, id) do
     case Map.get(config, key) do
@@ -980,6 +1034,33 @@ defmodule Kazi.Goal.Loader do
   defp known_providers do
     @provider_kinds |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
   end
+
+  # T32.1b (ADR-0040 decision 7): emit a one-line deprecation hint to STDERR for
+  # each DISTINCT deprecated command-runner provider the goal uses. Deduped so a
+  # goal with many `test_runner` predicates warns once. Goes to `:stderr` only —
+  # a `--json` caller reads JSON on stdout, which this never touches (the hard
+  # requirement). Best-effort and side-effect-only: it never alters the load.
+  defp warn_deprecated_providers(predicates) when is_list(predicates) do
+    predicates
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(&Map.get(&1, "provider"))
+    |> Enum.uniq()
+    |> Enum.each(fn provider ->
+      case Map.fetch(@deprecated_providers, provider) do
+        {:ok, replacement} ->
+          IO.puts(
+            :stderr,
+            "kazi: provider #{inspect(provider)} is deprecated (ADR-0040) and will be removed " <>
+              "in v2.0.0 — migrate to #{replacement}. See docs/deprecations.md."
+          )
+
+        :error ->
+          :ok
+      end
+    end)
+  end
+
+  defp warn_deprecated_providers(_predicates), do: :ok
 
   # The declared group ids, sorted, for an unknown-reference error message. Empty
   # when no `[[group]]` was declared (so a stray `group =` on a predicate names
