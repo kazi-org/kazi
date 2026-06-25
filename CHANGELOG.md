@@ -7,6 +7,27 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.1.0](https://github.com/kazi-org/kazi/compare/v1.0.1...v1.1.0) (2026-06-25)
+
+
+### Features
+
+* **docs-freshness:** predicate (a) -- every CLI command in README (T31.4) ([9c11fbf](https://github.com/kazi-org/kazi/commit/9c11fbf22eaea3d5d1cd2cce78abc883471722f5))
+* **docs-freshness:** predicate (b) -- no dead command refs in live docs (T31.4) ([66638dc](https://github.com/kazi-org/kazi/commit/66638dc3215063b130a40b7bd557f23478340dfb))
+* **docs-freshness:** predicate (c) -- referenced ADRs exist (T31.4) ([bd925e1](https://github.com/kazi-org/kazi/commit/bd925e1c6857120004e15baf9205e0cbcfcd8990))
+* **docs-freshness:** predicate (d) -- plan trimmed of released tasks (T31.4) ([73d12f8](https://github.com/kazi-org/kazi/commit/73d12f87ff003320b0c4a0eff0bd7cd3adc11211))
+* **docs-freshness:** runner for the predicate set (T31.4) ([4f03bbd](https://github.com/kazi-org/kazi/commit/4f03bbd4105b887292015bce96beaf329211e862))
+* **docs-freshness:** shared lib for doc-freshness predicates (T31.4) ([a458463](https://github.com/kazi-org/kazi/commit/a4584639bd4c722d9e62e90e7a6a55463be10c1c))
+* **teach:** AGENTS.md defaults to in-family Claude tiering (T30.1) ([08d3af7](https://github.com/kazi-org/kazi/commit/08d3af7b76e6c38a6d90b17360d64c7339979310))
+* **teach:** bounded escalate-on-stuck model ladder in the SKILL.md (T30.2) ([ac82f7b](https://github.com/kazi-org/kazi/commit/ac82f7bd258796716f5809a89abfee54ddb73af8))
+* **teach:** SKILL.md template defaults to in-family Claude tiering (T30.1) ([37dac7f](https://github.com/kazi-org/kazi/commit/37dac7f9d8e8d8d32c36dfe12f5147e5e73e4dc6))
+
+
+### Bug Fixes
+
+* **ci:** doc-freshness WARN step must not errexit on a failing run ([9dc9d6d](https://github.com/kazi-org/kazi/commit/9dc9d6de0bdeeb62f3fb7e67d1bc153fb15bef0c))
+* **docs-freshness:** exclude the freshness doc from (b)/(c) self-scan (T31.4) ([094df2f](https://github.com/kazi-org/kazi/commit/094df2f77c1c66a3c677cacd170508b64a2d07d9))
+
 ## [1.0.1](https://github.com/kazi-org/kazi/compare/v1.0.0...v1.0.1) (2026-06-25)
 
 
