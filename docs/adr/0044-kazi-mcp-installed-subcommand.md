@@ -63,7 +63,11 @@ prose cost; the CLI path teaches nothing until the agent reads docs.
   on-ramp tells people to `brew install`.
 - Burrito packaging must include the MCP server path in the installed release — a
   build concern to verify, not a code change (the module already ships in the OTP
-  release).
+  release). T33.4 verifies this in CI: a release-stage smoke
+  (`.github/scripts/mcp_release_smoke.sh`) drives the freshly-built INSTALLED binary
+  (not `mix`) as an MCP stdio server — start `kazi mcp`, list tools, call
+  `kazi_status` — and a non-zero exit BLOCKS the release before any asset is
+  published (see `docs/oss-gates.md`, "Release-stage gate").
 - Risk: stdio framing / non-TTY behavior must match what MCP clients expect. Bounded
   — the server already runs this way under `mix kazi.mcp`; this ADR only changes how
   it is launched, so a launch-parity smoke test (start via `kazi mcp`, list tools,
