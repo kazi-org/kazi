@@ -70,6 +70,38 @@ defmodule Kazi.Goal.Loader do
   `id` is required when a `[harness]` table is present. The loaded `id` threads
   into `Kazi.Harness.resolve/1` as `:goal_harness` (the wiring itself is T8.7).
 
+  ### `[enforcement]` table (optional, → `Goal.enforcement`, T32.4/ADR-0042)
+
+  Declares the goal's anti-gaming ENFORCEMENT profile — the guarantees that keep a
+  capable agent from gaming a visible check (concept §2, Gap 1). Absent → the goal
+  carries NO authored profile (`nil`) and the default policy is resolved at run
+  time: **default-on for creation-mode goals, opt-in for repair**. Declaring the
+  table is itself opting in (it defaults `enabled = true`); set `enabled = false`
+  to opt a creation goal out.
+
+  | Key               | TOML type        | Default  | Maps to / effect |
+  |-------------------|------------------|----------|------------------|
+  | `enabled`         | boolean          | `true`   | whether enforcement is active for the goal |
+  | `clean_tree`      | boolean          | `true`   | run the GUARD + HELD-OUT graders from a clean detached worktree (so an in-iteration checker edit can't change their verdict); degrades gracefully + drops `clean_tree` from the reported guarantees when the workspace is not a git repo |
+  | `clean_ref`       | string           | `"HEAD"` | the git ref the clean tree is checked out from |
+  | `fail_on_skip`    | boolean          | `true`   | map skipped / errored / xfail sub-results to `:fail` |
+  | `read_only_paths` | array of strings | `[]`     | repo-relative paths leased read-only to fixer agents; a post-iteration write to one is a FLAGGED gaming event (surfaced in `--json`) |
+
+  A `[[enforcement.guard]]` array of tables declares test-count / coverage RATCHET
+  guards (ADR-0042 §4) synthesized into the goal's `guards` as `:ratchet`
+  predicates (the T32.3 machinery). Each guard:
+
+  | Key                  | TOML type | Required | Maps to (the `:ratchet` config) |
+  |----------------------|-----------|----------|---------------------------------|
+  | `id`                 | string    | yes      | the guard predicate id |
+  | `metric`             | table     | yes      | the metric (`cmd`/`args`/`env`/`path`/`timeout_ms`) producing the signal |
+  | `direction`          | string    | no (`"higher_better"`) | `"higher_better"` (test count, coverage — down is worse) or `"lower_better"` |
+  | `baseline`           | number/string | no (`"stored"`) | a literal, `"stored"`/`"prior"`, or a git ref |
+  | `allowed_regression` | number    | no (`0`) | tolerated worsening; `0` = "may only improve" |
+
+  See ADR-0042 and `docs/how-to/enforcement.md`; `kazi schema apply` documents the
+  `enforcement` object surfaced in the `--json` run result.
+
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
   Declares the goal's *group taxonomy* — the vocabulary by which a large goal
@@ -281,6 +313,8 @@ defmodule Kazi.Goal.Loader do
          {:ok, harness} <- build_harness(Map.get(data, "harness")),
          # T12.1 group taxonomy (ADR-0020): optional `[[group]]` array.
          {:ok, groups} <- build_groups(Map.get(data, "group", [])),
+         # T32.4 anti-gaming enforcement (ADR-0042): optional `[enforcement]` table.
+         {:ok, enforcement} <- build_enforcement(Map.get(data, "enforcement")),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
@@ -306,6 +340,7 @@ defmodule Kazi.Goal.Loader do
          standing: standing,
          harness: harness,
          groups: groups,
+         enforcement: enforcement,
          metadata: Map.get(data, "metadata", %{})
        )}
     end
@@ -415,6 +450,99 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_harness(_), do: {:error, "[harness] must be a table"}
+
+  # T32.4 anti-gaming enforcement (ADR-0042): the optional `[enforcement]` table.
+  # Absent (nil) → the goal carries no authored profile (`nil`); the default-on-for-
+  # creation policy is then resolved at run time (`Kazi.Enforcement.resolve/1`). A
+  # present table is the author's intent: it defaults `enabled` to `true` (declaring
+  # the table means opting in, including a creation OR repair goal), `clean_tree`
+  # to `true`, `clean_ref` to `"HEAD"`, and `fail_on_skip` to `true`; an explicit
+  # `enabled = false` opts a creation goal OUT. Each ratchet guard
+  # (`[[enforcement.guard]]`) carries `id` + an inline `metric` table (passed
+  # through to the `:ratchet` provider's own normalization) + optional
+  # `direction`/`baseline`/`allowed_regression`. Wrong types fail loudly at load.
+  defp build_enforcement(nil), do: {:ok, nil}
+
+  defp build_enforcement(enf) when is_map(enf) do
+    with {:ok, enabled} <- enforcement_bool(enf, "enabled", true),
+         {:ok, clean_tree} <- enforcement_bool(enf, "clean_tree", true),
+         {:ok, clean_ref} <- enforcement_clean_ref(enf),
+         {:ok, fail_on_skip} <- enforcement_bool(enf, "fail_on_skip", true),
+         {:ok, read_only_paths} <- enforcement_paths(enf),
+         {:ok, guards} <- enforcement_guards(Map.get(enf, "guard", [])) do
+      {:ok,
+       Kazi.Enforcement.new(
+         enabled: enabled,
+         clean_tree: clean_tree,
+         clean_ref: clean_ref,
+         fail_on_skip: fail_on_skip,
+         read_only_paths: read_only_paths,
+         guards: guards
+       )}
+    end
+  end
+
+  defp build_enforcement(_), do: {:error, "[enforcement] must be a table"}
+
+  defp enforcement_bool(enf, key, default) do
+    case Map.get(enf, key, default) do
+      value when is_boolean(value) -> {:ok, value}
+      _ -> {:error, "enforcement \"#{key}\" must be a boolean"}
+    end
+  end
+
+  defp enforcement_clean_ref(enf) do
+    case Map.get(enf, "clean_ref", "HEAD") do
+      ref when is_binary(ref) and ref != "" -> {:ok, ref}
+      _ -> {:error, "enforcement \"clean_ref\" must be a non-empty string"}
+    end
+  end
+
+  defp enforcement_paths(enf) do
+    case Map.get(enf, "read_only_paths", []) do
+      paths when is_list(paths) ->
+        if Enum.all?(paths, &is_binary/1),
+          do: {:ok, paths},
+          else: {:error, "enforcement \"read_only_paths\" must be a list of strings"}
+
+      _ ->
+        {:error, "enforcement \"read_only_paths\" must be a list of strings"}
+    end
+  end
+
+  defp enforcement_guards(guards) when is_list(guards) do
+    Enum.reduce_while(guards, {:ok, []}, fn guard, {:ok, acc} ->
+      case enforcement_guard(guard) do
+        {:ok, parsed} -> {:cont, {:ok, [parsed | acc]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, parsed} -> {:ok, Enum.reverse(parsed)}
+      error -> error
+    end
+  end
+
+  defp enforcement_guards(_), do: {:error, "[[enforcement.guard]] must be an array of tables"}
+
+  defp enforcement_guard(guard) when is_map(guard) do
+    case Map.get(guard, "id") do
+      id when is_binary(id) and id != "" ->
+        {:ok,
+         %{
+           id: id,
+           metric: Map.get(guard, "metric", %{}),
+           direction: Map.get(guard, "direction", "higher_better"),
+           baseline: Map.get(guard, "baseline", "stored"),
+           allowed_regression: Map.get(guard, "allowed_regression", 0)
+         }}
+
+      _ ->
+        {:error, "enforcement guard is missing a non-empty string \"id\""}
+    end
+  end
+
+  defp enforcement_guard(_), do: {:error, "[[enforcement.guard]] must be a table"}
 
   defp fetch_harness_id(harness) do
     case Map.get(harness, "id") do
