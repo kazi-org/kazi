@@ -135,6 +135,9 @@ jobs:
           echo "(Set FRESHNESS_BLOCKING=1 on this job to ratchet it to blocking once green.)"
           exit 0
 
+      - name: Test the plan-trim tool (T31.2 fixtures)
+        run: python3 .github/scripts/test_trim_plan.py
+
   site-commands:
     name: site command accuracy (T29.4, warn)
     runs-on: ubuntu-latest
