@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.38.1](https://github.com/kazi-org/kazi/compare/v1.38.0...v1.38.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **site:** repair "Afterkazi" spacing + drop the Context7 jargon ([722f055](https://github.com/kazi-org/kazi/commit/722f055012036ae32c9028b628b3587c580d3173))
+
 ## [1.38.0](https://github.com/kazi-org/kazi/compare/v1.37.0...v1.38.0) (2026-06-25)
 
 
