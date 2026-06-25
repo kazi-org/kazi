@@ -649,6 +649,10 @@ works today:
 build (that's your judgment); or put a vector DB in the core loop (the retrieval
 adapter is an optional augmentation, never the foundation).
 
+## Community & help
+
+Questions? Start a [GitHub Discussion](https://github.com/kazi-org/kazi/discussions) | Read [`concept.md`](docs/concept.md) for the architecture.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE). See the [NOTICE](NOTICE)
