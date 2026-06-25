@@ -108,6 +108,7 @@ defmodule Kazi.CLI do
     standing: :boolean,
     status: :string,
     enrich: :boolean,
+    with_mcp: :boolean,
     out: :string,
     dir: :string,
     harness: :string,
@@ -143,6 +144,8 @@ defmodule Kazi.CLI do
       "Filter `list-proposed` to one lifecycle state (proposed / approved / rejected). Default: all.",
     enrich:
       "`init` only: opt into harness enrichment (off by default) to propose live predicates.",
+    with_mcp:
+      "`init` only: also write the canonical kazi MCP client config to the repo's .mcp.json ({command:\"kazi\",args:[\"mcp\"]}), so an MCP harness drives kazi natively (ADR-0044).",
     out: "`init` output goal-file (default <repo>/kazi.goal.toml).",
     dir:
       "`install-skill` only: target skill directory (default ~/.claude/skills/kazi). Injected to a tmp dir in tests.",
@@ -208,7 +211,7 @@ defmodule Kazi.CLI do
       name: "init",
       summary: "Adopt a repo by stack detection and write a starter goal-file.",
       args: [%{name: "repo-dir", required: true}],
-      flags: [:out, :enrich, :workspace]
+      flags: [:out, :enrich, :with_mcp, :workspace]
     },
     %{
       name: "install-skill",
@@ -292,7 +295,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --parallel [N] [--json] # parallel scheduler
       kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
       kazi status <ref> [--json]
-      kazi init <repo-dir> [--out <file>] [--enrich]
+      kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
@@ -329,6 +332,11 @@ defmodule Kazi.CLI do
       --enrich               `init` only: opt into harness enrichment (OFF by
                              default) to propose live predicates from discovered
                              endpoints. The deterministic detection always stands.
+      --with-mcp             `init` only: also write the canonical kazi MCP client
+                             config to the repo's .mcp.json
+                             ({command:"kazi",args:["mcp"]}) so an MCP-speaking
+                             harness drives kazi natively (ADR-0044). Additive —
+                             preserves any servers already declared.
       --env <name>           Deploy environment to target, e.g. staging / prod
                              (T3.3d). Selects the goal/deploy's per-env target;
                              requires the goal-file's deploy config to define an
@@ -413,6 +421,7 @@ defmodule Kazi.CLI do
       kazi apply priv/examples/standing_maintenance.toml --workspace ./svc --standing
       kazi apply my.goal.toml --workspace ./svc --harness opencode --model local/qwen3.6
       kazi init ./my-service --out my-service.goal.toml
+      kazi init ./my-service --with-mcp            # also write .mcp.json (canonical kazi MCP config)
       kazi install-skill
       kazi mcp                                     # an MCP client runs this as its server command
       kazi apply my.goal.toml --workspace ./svc --json --stream
@@ -674,11 +683,16 @@ defmodule Kazi.CLI do
 
   # T5.5 adopt: `kazi init <repo-dir>` reverse-engineers a starter goal-file by
   # deterministic stack detection (ADR-0013). --out is the output file; --enrich
-  # opts into harness enrichment (off by default).
+  # opts into harness enrichment (off by default); --with-mcp also writes the
+  # canonical kazi MCP client config to the repo's .mcp.json (T33.3, ADR-0044).
   defp parse_command(["init", repo_dir | rest], flags) do
     case rest do
       [] ->
-        {:init, repo_dir, out: flags[:out], enrich: flags[:enrich], workspace: flags[:workspace]}
+        {:init, repo_dir,
+         out: flags[:out],
+         enrich: flags[:enrich],
+         with_mcp: flags[:with_mcp],
+         workspace: flags[:workspace]}
 
       extra ->
         {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
@@ -1459,7 +1473,11 @@ defmodule Kazi.CLI do
       {:ok, adoption} ->
         goal_map = stack_goal_map(repo_dir, adoption, opts)
         out = opts[:out] || Path.join(repo_dir, @default_stack_out)
-        write_goal_file(out, Adopt.to_toml(goal_map))
+
+        case write_goal_file(out, Adopt.to_toml(goal_map)) do
+          0 -> maybe_write_mcp_config(repo_dir, opts)
+          nonzero -> nonzero
+        end
 
       {:error, :no_stack_detected} ->
         IO.puts(
@@ -1488,6 +1506,36 @@ defmodule Kazi.CLI do
       "scope" => %{"workspace" => opts[:workspace] || repo_dir},
       "predicate" => [adoption.predicate | guards] ++ proposed
     }
+  end
+
+  # `--with-mcp` (T33.3, ADR-0044): after the goal-file lands, additively write the
+  # canonical kazi MCP client config to the repo's `.mcp.json` so an MCP-speaking
+  # harness drives kazi NATIVELY via the installed `kazi mcp` verb — no JSON-CLI
+  # shell-out. Without the flag this is a no-op (exit 0). The merge preserves any
+  # servers already declared.
+  defp maybe_write_mcp_config(repo_dir, opts) do
+    if opts[:with_mcp] do
+      case Kazi.MCP.ClientConfig.ensure_in_dir(repo_dir) do
+        {:ok, outcome, path} ->
+          verb =
+            case outcome do
+              :created -> "WROTE "
+              :merged -> "MERGED"
+              :present -> "OK    "
+            end
+
+          IO.puts("#{verb} #{path}  (kazi MCP server -> `kazi mcp`)")
+          IO.puts("\nWire an MCP-speaking harness with:")
+          IO.puts("  " <> Kazi.MCP.ClientConfig.inline())
+          0
+
+        {:error, reason} ->
+          IO.puts(:stderr, "error: could not write the MCP client config: #{inspect(reason)}")
+          1
+      end
+    else
+      0
+    end
   end
 
   # Write a single goal-file (stack mode) and print the path + review hint.
