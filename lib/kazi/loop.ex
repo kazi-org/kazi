@@ -150,6 +150,10 @@ defmodule Kazi.Loop do
   # prefix is byte-identical across iterations whose blast radius is unchanged.
   alias Kazi.Context
   alias Kazi.Context.Pack
+  # T36.3 (ADR-0047 §2): the context-budget tier ladder. Gates the orientation
+  # prefix (tier 0 drops it) and records the active tier per iteration; the graph
+  # MCP surface gate lives in `Kazi.Harness.DispatchSurface`.
+  alias Kazi.Context.Tier
 
   require Logger
 
@@ -1641,15 +1645,19 @@ defmodule Kazi.Loop do
   # `last_retrieval_section`) — a byte-identical prefix is a "hit" the inner
   # harness's prompt cache can reuse (T19.2). The prior prefixes are then advanced
   # to this dispatch's for the next comparison.
+  #
+  # T36.3 (ADR-0047 §3): the active context tier is recorded alongside the section
+  # counters, so each iteration's `context` envelope reports which tier it ran at.
   @spec record_counters(Data.t(), map(), Kazi.HarnessAdapter.result()) :: Data.t()
-  defp record_counters(%Data{} = data, parts, result) do
+  defp record_counters(%Data{adapter_opts: adapter_opts} = data, parts, result) do
     context =
       Counters.context(
         parts.orientation,
         parts.evidence,
         parts.retrieval,
         data.last_orientation_prefix,
-        data.last_retrieval_section
+        data.last_retrieval_section,
+        Tier.resolve(adapter_opts)
       )
 
     %Data{
@@ -1683,11 +1691,19 @@ defmodule Kazi.Loop do
   # benchmark (T19.4/T19.5) measures arm C (prefix on) against. The flag is the
   # ONLY behaviour change: with it absent or `true` the path is byte-identical to
   # before, so every existing T19.1/T19.2/T19.3 contract is unchanged.
+  #
+  # T36.3 (ADR-0047 §2): the active context TIER also gates the prefix. Tier 0
+  # (evidence-only) DROPS the cached orientation; tier ≥ 1 keeps it (still subject
+  # to the T19.4 toggle above). The default tier is 1, so absent a `:context_tier`
+  # opt the path is byte-identical to before — tier 1 IS "evidence + cached
+  # orientation".
   @spec orientation_prefix(Data.t()) :: String.t() | nil
   defp orientation_prefix(%Data{workspace: workspace}) when not is_binary(workspace), do: nil
 
   defp orientation_prefix(%Data{adapter_opts: adapter_opts} = data) do
-    if orientation_prefix?(adapter_opts), do: build_orientation_prefix(data), else: nil
+    if Tier.orientation?(Tier.resolve(adapter_opts)) and orientation_prefix?(adapter_opts),
+      do: build_orientation_prefix(data),
+      else: nil
   end
 
   @spec build_orientation_prefix(Data.t()) :: String.t() | nil
