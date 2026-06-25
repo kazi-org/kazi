@@ -100,6 +100,87 @@ defmodule Kazi.ReadModelTest do
     assert result.evidence["args"] == []
   end
 
+  # ===========================================================================
+  # Envelope v2 — score / direction / prior_score / diagnostics (ADR-0041, T32.2)
+  # ===========================================================================
+
+  test "a graded result round-trips score, direction, prior_score, and evidence" do
+    diag = Kazi.Evidence.new(file: "lib/a.ex", line: 14, rule: "no-unused", level: :warning)
+
+    vector =
+      PredicateVector.new(%{
+        lint:
+          PredicateResult.new(:fail, %{output: "30 warnings"},
+            score: 12.0,
+            direction: :lower_better,
+            prior_score: 30.0,
+            diagnostics: [diag]
+          )
+      })
+
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "graded-goal",
+               iteration_index: 0,
+               predicate_vector: vector,
+               observed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+             })
+
+    fetched = ReadModel.get_iteration("graded-goal", 0)
+
+    # Raw stored shape carries the additive keys (an orchestrator reads these).
+    # The raw provider map stays under "evidence" (legacy field); the structured
+    # LSP-Diagnostic items are stored under "diagnostics" (the struct field name).
+    stored = fetched.predicate_vector["lint"]
+    assert stored["status"] == "fail"
+    assert stored["score"] == 12.0
+    assert stored["prior_score"] == 30.0
+    assert stored["direction"] == "lower_better"
+    assert stored["evidence"] == %{"output" => "30 warnings"}
+
+    assert stored["diagnostics"] == [
+             %{"file" => "lib/a.ex", "line" => 14, "rule" => "no-unused", "level" => "warning"}
+           ]
+
+    # Rehydrated back into the domain struct.
+    result = PredicateVector.get(ReadModel.to_predicate_vector(fetched), "lint")
+    assert result.score == 12.0
+    assert result.direction == :lower_better
+    assert result.prior_score == 30.0
+    assert result.diagnostics == [diag]
+    # The interpreted gradient survives: 30 → 12 lower_better is progress.
+    assert PredicateResult.progress(result) == :progressed
+  end
+
+  test "a boolean predicate's stored shape is UNCHANGED — exactly status + evidence (back-compat)" do
+    vector =
+      PredicateVector.new(%{
+        unit: PredicateResult.pass(%{exit: 0, output: "ok"}),
+        probe: PredicateResult.fail(%{http_status: 503})
+      })
+
+    assert {:ok, _} =
+             ReadModel.record_iteration(%{
+               goal_ref: "boolean-goal",
+               iteration_index: 0,
+               predicate_vector: vector,
+               observed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+             })
+
+    fetched = ReadModel.get_iteration("boolean-goal", 0)
+
+    # The serialized map for a boolean result has EXACTLY two keys — no score,
+    # prior_score, direction, or evidence/diagnostics leaked in. This is the
+    # byte-identical guarantee the envelope-v2 additive design rests on.
+    assert Map.keys(fetched.predicate_vector["unit"]) |> Enum.sort() == ["evidence", "status"]
+    assert Map.keys(fetched.predicate_vector["probe"]) |> Enum.sort() == ["evidence", "status"]
+
+    assert fetched.predicate_vector["unit"] == %{
+             "status" => "pass",
+             "evidence" => %{"exit" => 0, "output" => "ok"}
+           }
+  end
+
   test "defaults converged to whether the full vector is satisfied" do
     all_pass =
       PredicateVector.new(%{
