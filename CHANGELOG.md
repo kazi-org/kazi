@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.32.0](https://github.com/kazi-org/kazi/compare/v1.31.0...v1.32.0) (2026-06-25)
+
+
+### Features
+
+* **loop:** wire context store for evidence compression (T35.4) ([82427d1](https://github.com/kazi-org/kazi/commit/82427d1c582b79a8f67d4502138e0b8465f77501))
+
 ## [1.31.0](https://github.com/kazi-org/kazi/compare/v1.30.0...v1.31.0) (2026-06-25)
 
 
