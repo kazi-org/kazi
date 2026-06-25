@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.35.0](https://github.com/kazi-org/kazi/compare/v1.34.0...v1.35.0) (2026-06-25)
+
+
+### Features
+
+* **site:** lead with the 10-second on-ramp (T25.4) ([5b5ce70](https://github.com/kazi-org/kazi/commit/5b5ce709962900c4c31481e0c09371acc11e5a4b))
+
 ## [1.34.0](https://github.com/kazi-org/kazi/compare/v1.33.0...v1.34.0) (2026-06-25)
 
 
