@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.42.1](https://github.com/kazi-org/kazi/compare/v1.42.0...v1.42.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **authoring:** extract JSON from fenced/prose harness output before decoding ([2be1c70](https://github.com/kazi-org/kazi/commit/2be1c709886ab26ad98ac84bd6322c9af3b9a70f))
+
 ## [1.42.0](https://github.com/kazi-org/kazi/compare/v1.41.1...v1.42.0) (2026-06-25)
 
 
