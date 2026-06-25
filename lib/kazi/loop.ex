@@ -99,6 +99,10 @@ defmodule Kazi.Loop do
   # retriever's snippets to the dispatch prompt, reusing the adapter's render so
   # the section is byte-identical to `build_prompt/3`'s (see `dispatch_prompt/2`).
   alias Kazi.Harness.Prompt
+  # T36.2 (ADR-0047 §1): the minimal default tool/MCP surface for a reconcile
+  # dispatch — injected MCP servers + standard edit/shell tools, not the ambient
+  # set. Consumed in `dispatch_agent/2`.
+  alias Kazi.Harness.DispatchSurface
   # T3.1d resource lease: the per-key lease substrate (acquire/renew/release via
   # CAS + TTL on an injected clock, ADR-0006). The loop leases the goal's resource
   # key before dispatch so contending instances serialize (see the dispatch-prep
@@ -1236,7 +1240,13 @@ defmodule Kazi.Loop do
     # MCP/graph is an orientation optimisation, not a precondition).
     prepare_workspace(data)
 
-    result = data.harness.run(prompt, data.workspace, data.adapter_opts)
+    # T36.2 (ADR-0047 §1): drive the imminent dispatch with the MINIMAL default
+    # tool/MCP surface — `--strict-mcp-config` exposing ONLY the MCP servers kazi
+    # injected (the orientation/graph server written by `prepare_workspace/1`
+    # above, plus the E35 context store once it lands) and the standard edit/shell
+    # tools the agent needs to fix predicates, NOT the ambient set. See
+    # `dispatch_adapter_opts/1`.
+    result = data.harness.run(prompt, data.workspace, dispatch_adapter_opts(data))
 
     # T1.4 budget: accumulate this run's token estimate (if the harness reported
     # one) into the running total the budget guard checks next tick.
@@ -1265,6 +1275,22 @@ defmodule Kazi.Loop do
     # detector can attribute a later green→red edge to it.
     data = log_dispatch(data, action)
     reobserve(data, data.reobserve_interval_ms)
+  end
+
+  # T36.2 (ADR-0047 §1): the adapter opts for THIS dispatch — the loop's standing
+  # `adapter_opts` overlaid on the minimal default tool/MCP surface
+  # (`Kazi.Harness.DispatchSurface`). The surface is merged UNDER the loop opts so
+  # an explicit operator/goal `:tools` / `:mcp_config` / `:strict_mcp_config`
+  # still wins. It is a no-op (byte-identical to the pre-T36.2 dispatch) unless
+  # the resolved harness profile advertises the T36.1 economy opts (Claude) AND
+  # there is a workspace to scope the MCP config to — so non-Claude harnesses and
+  # workspaceless loops are unchanged.
+  @spec dispatch_adapter_opts(Data.t()) :: keyword()
+  defp dispatch_adapter_opts(%Data{adapter_opts: adapter_opts, workspace: workspace}) do
+    case DispatchSurface.minimal_default(workspace, adapter_opts) do
+      [] -> adapter_opts
+      surface -> Keyword.merge(surface, adapter_opts)
+    end
   end
 
   # The prompt seeding the harness with the failing-predicate evidence
