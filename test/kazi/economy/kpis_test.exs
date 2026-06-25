@@ -67,6 +67,10 @@ defmodule Kazi.Economy.KPIsTest do
       # 0.02 / 2 converged predicates.
       assert kpis.cost_per_converged_predicate == 0.01
 
+      # T34.8: the run-aggregate token total surfaces on the economy object (here
+      # only cached_input was reported ⇒ that IS the total) — never "tokens: 0".
+      assert kpis.tokens == 18_000
+
       # 20s span between the two observation timestamps.
       assert kpis.wall_clock_s == 20.0
       assert kpis.wall_clock_per_converged_predicate == 10.0
@@ -99,6 +103,8 @@ defmodule Kazi.Economy.KPIsTest do
 
       assert kpis.cost_usd == nil
       assert kpis.cost_per_converged_predicate == nil
+      # T34.8: an empty usage envelope reports NO token total either (absent ≠ 0).
+      assert kpis.tokens == nil
       # The token/tool-derived KPIs are still present (their inputs were reported).
       assert kpis.fresh_input_tokens_avoided == 400
     end
@@ -169,6 +175,7 @@ defmodule Kazi.Economy.KPIsTest do
       assert json["iterations"] == 2
       # Unavailable KPIs are OMITTED (absent ≠ zero).
       refute Map.has_key?(json, "cost_usd")
+      refute Map.has_key?(json, "tokens")
       refute Map.has_key?(json, "cost_per_converged_predicate")
       refute Map.has_key?(json, "fresh_input_tokens_avoided")
       refute Map.has_key?(json, "wall_clock_s")
@@ -181,9 +188,70 @@ defmodule Kazi.Economy.KPIsTest do
       assert json["model"] == "haiku"
       assert json["context_tier"] == "C"
       assert json["cost_per_converged_predicate"] == 0.01
+      assert json["tokens"] == 18_000
       assert json["fresh_input_tokens_avoided"] == 400
       assert json["rediscovery_tool_calls_avoided"] == 8
       assert json["iterations_to_convergence"] == 2
+    end
+  end
+
+  describe "tokens — the run-aggregate token total (T34.8)" do
+    test "sums every reported token component of the run-aggregate usage envelope" do
+      # A live-shaped run-aggregate usage envelope: the four Anthropic token
+      # classes the loop accumulates from each dispatch's parsed usage, plus the
+      # harness's own dollar figure (Claude's total_cost_usd).
+      run =
+        converged_run(%{
+          usage: %{
+            input_tokens: 1_200,
+            output_tokens: 800,
+            cache_write_tokens: 5_000,
+            cached_input_tokens: 18_000,
+            cost_usd: 0.0731
+          }
+        })
+
+      kpis = KPIs.compute(run)
+
+      # NON-ZERO total = 1_200 + 800 + 5_000 + 18_000 (reasoning unreported, omitted).
+      assert kpis.tokens == 25_000
+      # The harness-reported cost is surfaced verbatim (authoritative for the model).
+      assert kpis.cost_usd == 0.0731
+
+      json = KPIs.to_json(kpis)
+      assert json["tokens"] == 25_000
+      assert json["cost_usd"] == 0.0731
+    end
+
+    test "a run reporting only cost (no token split) still omits tokens" do
+      kpis = KPIs.compute(converged_run(%{usage: %{cost_usd: 0.05}}))
+
+      assert kpis.tokens == nil
+      assert kpis.cost_usd == 0.05
+      refute Map.has_key?(KPIs.to_json(kpis), "tokens")
+    end
+
+    test "from_run_result round-trips the recorded economy tokens" do
+      result = %{
+        "status" => "converged",
+        "economy" => %{"status" => "converged", "tokens" => 25_000, "cost_usd" => 0.0731},
+        "usage" => %{"cost_usd" => 0.0731}
+      }
+
+      kpis = KPIs.from_run_result(result)
+      assert kpis.tokens == 25_000
+    end
+
+    test "from_run_result derives tokens from the recorded usage split when economy omits it" do
+      # A recorded result whose economy predates the tokens field but whose usage
+      # envelope carries the split — the benchmark consumer still recovers the total.
+      result = %{
+        "status" => "converged",
+        "usage" => %{"input_tokens" => 1_200, "output_tokens" => 800, "cost_usd" => 0.03}
+      }
+
+      kpis = KPIs.from_run_result(result)
+      assert kpis.tokens == 2_000
     end
   end
 
