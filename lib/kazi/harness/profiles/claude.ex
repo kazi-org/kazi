@@ -214,7 +214,11 @@ defmodule Kazi.Harness.Profiles.Claude do
   Recognised fields: `result` (final text), `usage` (summed to a token total,
   surfaced as `:tokens` and `:cost => %{tokens: n}`, AND mapped onto the
   per-field economy envelope — `:usage`/`:usage_raw`/`:usage_fidelity`, T34.2),
-  `total_cost_usd` (`:cost_usd`), and a touched working set (`:touched`).
+  `total_cost_usd` (`:cost_usd`), a touched working set (`:touched`), and — when a
+  richer envelope carries assistant `messages[].content[]` `tool_use` blocks —
+  the agent's tool-use names (`:tool_uses`, T34.3). The default
+  `--output-format json` envelope carries no per-tool breakdown, so `:tool_uses`
+  is absent there.
   """
   @spec parse(String.t()) :: map()
   def parse(output) when is_binary(output) do
@@ -231,6 +235,7 @@ defmodule Kazi.Harness.Profiles.Claude do
     |> put_usage(envelope)
     |> put_cost(envelope)
     |> put_touched(envelope)
+    |> put_tool_uses(envelope)
   end
 
   defp put_result(acc, %{"result" => result}) when is_binary(result),
@@ -294,6 +299,40 @@ defmodule Kazi.Harness.Profiles.Claude do
       files -> Map.put(acc, :touched, files)
     end
   end
+
+  # T34.3 (ADR-0046 §2): surface the agent's tool-use names so the loop can derive
+  # the per-iteration `tools` counters (tool_calls / file_reads / search_calls /
+  # graph_calls). The default `--output-format json` envelope is a single result
+  # object that carries NO per-tool breakdown, so this is ABSENT there (honest:
+  # the loop records the tool counters as unreported, never zero). It activates
+  # only for a richer envelope that carries assistant `messages[].content[]`
+  # `tool_use` blocks (e.g. `--output-format stream-json --verbose`): each block's
+  # `name` is collected, in order. Nothing found ⇒ the key is omitted.
+  defp put_tool_uses(acc, envelope) do
+    case tool_use_names(envelope) do
+      [] -> acc
+      names -> Map.put(acc, :tool_uses, names)
+    end
+  end
+
+  # Collect `tool_use` block names from the envelope's `messages[].content[]`
+  # arrays. Best-effort and tolerant: a missing/odd shape yields `[]`.
+  @spec tool_use_names(map()) :: [String.t()]
+  defp tool_use_names(envelope) do
+    envelope
+    |> Map.get("messages", [])
+    |> List.wrap()
+    |> Enum.flat_map(&message_tool_uses/1)
+  end
+
+  defp message_tool_uses(%{"content" => content}) when is_list(content) do
+    content
+    |> Enum.filter(&match?(%{"type" => "tool_use"}, &1))
+    |> Enum.map(fn block -> Map.get(block, "name") end)
+    |> Enum.filter(&is_binary/1)
+  end
+
+  defp message_tool_uses(_message), do: []
 
   @spec total_tokens(map()) :: non_neg_integer()
   defp total_tokens(usage) do
