@@ -62,14 +62,35 @@ defmodule Kazi.Loop.CountersTest do
       assert ctx.retrieval_tokens == 0
     end
 
-    test "empty_context/0 is all-disabled / all-zero (the no-dispatch baseline)" do
+    test "empty_context/0 is all-disabled / all-zero / no-tier (the no-dispatch baseline)" do
       assert Counters.empty_context() == %{
                orientation_cache: "disabled",
                retrieval_cache: "disabled",
                orientation_tokens: 0,
                evidence_tokens: 0,
-               retrieval_tokens: 0
+               retrieval_tokens: 0,
+               tier: nil
              }
+    end
+  end
+
+  describe "context/6 — active context tier (T36.3, ADR-0047 §3)" do
+    test "the tier defaults to nil so the pure section-counting contract is unchanged" do
+      ctx = Counters.context("# Orientation", "ev", nil, nil, nil)
+      assert ctx.tier == nil
+    end
+
+    test "records the active tier passed by the loop" do
+      ctx = Counters.context("# Orientation", "ev", nil, nil, nil, 2)
+      assert ctx.tier == 2
+      # The section counters are unaffected by the tier.
+      assert ctx.orientation_cache == "miss"
+      assert ctx.evidence_tokens > 0
+    end
+
+    test "tier 0 is recorded as the integer 0 (not treated as absent)" do
+      ctx = Counters.context(nil, "ev", nil, nil, nil, 0)
+      assert ctx.tier == 0
     end
   end
 
