@@ -97,6 +97,7 @@ defmodule Kazi.Loop do
   alias Kazi.{Action, Goal, Predicate, PredicateResult, PredicateVector, Retrieval}
   alias Kazi.ContextStore
   alias Kazi.ContextStore.Labels, as: StoreLabels
+  alias Kazi.Context.StuckBundle
 
   # T35.4 (ADR-0045 §3): evidence compression via the context store. An artifact
   # whose rendered size exceeds this threshold is INDEXED under a SHA-scoped label
@@ -2262,6 +2263,67 @@ defmodule Kazi.Loop do
       # events, so the CLI's `run --json` can report the bar was held (ADR-0042 §7).
       enforcement: enforcement_status(data)
     }
+    |> maybe_attach_stuck_bundle(data)
+  end
+
+  # T35.6 (ADR-0045 §5): on a stuck stop, attach a compact, bounded bundle so the
+  # ADR-0035 model-ladder escalation (skill-side) hands the higher rung the bundle
+  # instead of the lower rung's full transcript. Only on `:stuck` — every other
+  # outcome's result is byte-identical to before.
+  @spec maybe_attach_stuck_bundle(result(), Data.t()) :: result()
+  defp maybe_attach_stuck_bundle(result, %Data{} = data) do
+    case stop_reason(data) do
+      :stuck -> Map.put(result, :stuck_bundle, build_stuck_bundle(data))
+      _ -> result
+    end
+  end
+
+  @spec build_stuck_bundle(Data.t()) :: StuckBundle.t()
+  defp build_stuck_bundle(%Data{} = data) do
+    failing_ids = stuck_failing_list(data.stuck_failing) || []
+
+    failing =
+      for id <- failing_ids do
+        {id, evidence_for(data.vector, id)}
+      end
+
+    budget = Keyword.get(data.adapter_opts, :context_budget, 12_000)
+
+    StuckBundle.assemble(
+      %{
+        failing: failing,
+        changed_files: data.working_set_digest.files,
+        snippets: stuck_snippets(data, failing_ids, budget)
+      },
+      budget: budget
+    )
+  end
+
+  defp evidence_for(%PredicateVector{} = vector, id) do
+    case PredicateVector.get(vector, id) do
+      %PredicateResult{evidence: evidence} -> evidence
+      _ -> %{}
+    end
+  end
+
+  defp evidence_for(_vector, _id), do: %{}
+
+  # Top store snippets for the error signature (the failing-predicate ids), when a
+  # context store is configured; else none. Best-effort — a disabled/erroring store
+  # just yields no snippets.
+  defp stuck_snippets(%Data{adapter_opts: adapter_opts}, failing_ids, budget) do
+    case Keyword.get(adapter_opts, :context_store) do
+      nil ->
+        []
+
+      store ->
+        query = Enum.map_join(failing_ids, " ", &to_string/1)
+
+        case ContextStore.search(query, budget, context_store: store) do
+          {:ok, snippets} when is_list(snippets) -> snippets
+          _ -> []
+        end
+    end
   end
 
   # The terminal result's `:reason`: the budget dimension on an :over_budget stop
