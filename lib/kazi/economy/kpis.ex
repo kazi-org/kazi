@@ -12,6 +12,8 @@ defmodule Kazi.Economy.KPIs do
       cost_usd per converged predicate
       wall-clock per converged predicate
       iterations to convergence
+      tokens  (the run-aggregate token total, threaded from each dispatch's
+               parsed harness usage — non-zero on a real run, T34.8)
       fresh input tokens avoided  (the cached reads a stable prefix served)
       rediscovery tool-calls avoided  (the falling file/search re-discovery)
       stuck rate  (by harness / model / context tier)
@@ -102,6 +104,7 @@ defmodule Kazi.Economy.KPIs do
           converged_predicates: non_neg_integer() | nil,
           iterations: non_neg_integer(),
           iterations_to_convergence: non_neg_integer() | nil,
+          tokens: non_neg_integer() | nil,
           cost_usd: float() | nil,
           wall_clock_s: float() | nil,
           cost_per_converged_predicate: float() | nil,
@@ -126,6 +129,7 @@ defmodule Kazi.Economy.KPIs do
     iterations = list_iterations(run)
     iteration_count = iteration_count(run, iterations)
     converged_predicates = converged_predicates(run)
+    tokens = tokens(run)
     cost_usd = cost_usd(run)
     wall_clock_s = wall_clock_s(iterations)
 
@@ -138,6 +142,7 @@ defmodule Kazi.Economy.KPIs do
       converged_predicates: converged_predicates,
       iterations: iteration_count,
       iterations_to_convergence: iterations_to_convergence(status, iterations, iteration_count),
+      tokens: tokens,
       cost_usd: cost_usd,
       wall_clock_s: wall_clock_s,
       cost_per_converged_predicate: ratio(cost_usd, converged_predicates),
@@ -196,6 +201,7 @@ defmodule Kazi.Economy.KPIs do
         get(economy, :converged_predicates) || count_passing(get(result, :predicates)),
       iterations: get(economy, :iterations) || get(result, :iterations) || 0,
       iterations_to_convergence: get(economy, :iterations_to_convergence),
+      tokens: get(economy, :tokens) || token_total(get(result, :usage) || %{}),
       cost_usd: get(economy, :cost_usd) || get(get(result, :usage) || %{}, :cost_usd),
       wall_clock_s: get(economy, :wall_clock_s),
       cost_per_converged_predicate: get(economy, :cost_per_converged_predicate),
@@ -290,6 +296,7 @@ defmodule Kazi.Economy.KPIs do
       {"context_tier", kpis.context_tier},
       {"converged_predicates", kpis.converged_predicates},
       {"iterations_to_convergence", kpis.iterations_to_convergence},
+      {"tokens", kpis.tokens},
       {"cost_usd", kpis.cost_usd},
       {"wall_clock_s", kpis.wall_clock_s},
       {"cost_per_converged_predicate", kpis.cost_per_converged_predicate},
@@ -349,6 +356,38 @@ defmodule Kazi.Economy.KPIs do
       _ -> nil
     end
   end
+
+  # The run-aggregate token total surfaced in the economy object (T34.8): the sum
+  # of the run's reported token components (the T34.1/T34.2 `usage` envelope the
+  # loop accumulated from each dispatch's parsed Anthropic usage). `nil` when the
+  # harness reported NO token component at all (absent ≠ zero — honest-unknown),
+  # so a consumer never reads kazi's economy as "tokens: 0" on a run whose harness
+  # simply did not report usage; a run that DID report usage carries the real,
+  # non-zero total here without a capture shim.
+  defp tokens(run), do: token_total(Map.get(run, :usage, %{}) || %{})
+
+  # The token fields of the ADR-0046 `usage` envelope (the same five
+  # `Kazi.CLI.Usage` renders, minus `cost_usd`). Summed for the economy `tokens`
+  # total; an envelope reporting none of them yields `nil`, never `0`.
+  @usage_token_fields [
+    :input_tokens,
+    :cached_input_tokens,
+    :cache_write_tokens,
+    :output_tokens,
+    :reasoning_tokens
+  ]
+
+  @spec token_total(map()) :: non_neg_integer() | nil
+  defp token_total(usage) when is_map(usage) do
+    Enum.reduce(@usage_token_fields, nil, fn field, acc ->
+      case fetch(usage, field) do
+        {:ok, n} when is_integer(n) and n >= 0 -> (acc || 0) + n
+        _ -> acc
+      end
+    end)
+  end
+
+  defp token_total(_usage), do: nil
 
   # Iterations to convergence: the 1-based position of the FIRST converged
   # observation in the per-iteration list. With no per-iteration list (no
