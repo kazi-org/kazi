@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.40.1](https://github.com/kazi-org/kazi/compare/v1.40.0...v1.40.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **economy:** surface run-aggregate tokens in the --json economy object (T34.8) ([5501b1d](https://github.com/kazi-org/kazi/commit/5501b1dd254576a27e7c75d265fc5544f91770a2))
+
 ## [1.40.0](https://github.com/kazi-org/kazi/compare/v1.39.0...v1.40.0) (2026-06-25)
 
 
