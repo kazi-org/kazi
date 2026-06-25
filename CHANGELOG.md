@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.16.0](https://github.com/kazi-org/kazi/compare/v1.15.0...v1.16.0) (2026-06-25)
+
+
+### Features
+
+* **usage:** fold the per-field token split into the run-aggregate envelope (T34.2) ([53100c5](https://github.com/kazi-org/kazi/commit/53100c5e5c29e9be0bd7613e722a82090ff1026e))
+* **usage:** map per-profile raw usage onto the economy envelope + fidelity (T34.2) ([d192ac5](https://github.com/kazi-org/kazi/commit/d192ac51c827f0e59b5498f0b24f891b3f131ce2))
+
 ## [1.15.0](https://github.com/kazi-org/kazi/compare/v1.14.0...v1.15.0) (2026-06-25)
 
 
