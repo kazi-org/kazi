@@ -4,6 +4,31 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 -- Live site shipped two stale-command (vaporware) bugs that no CI gate caught
+
+**What happened.** A `/loop /apply --pool` session shipped E25 content (T25.1/T25.5/T25.6
+-> PR #454; T25.8 -> PR #459), deployed to GitHub Pages, and verified live at
+https://kazi.sire.run. During live verification it found two deprecated/removed `kazi`
+verbs still rendered in production:
+1. The Install section of `site/src/pages/index.astro` (step 2) shows the REMOVED
+   `kazi propose` -> `kazi approve` proposal flow (the current verbs are `kazi plan` /
+   `kazi apply`; `propose` is a deprecated alias).
+2. `proof-loop.svg` (the hero proof asset) shows `kazi run my-goal.toml` -- the removed
+   `run` verb. An `.svg` is XML text, so a text grep over `site/` reaches it.
+
+**Root cause (why it shipped unguarded).** The repo has two coherence gates, and NEITHER
+covers the site's command accuracy: T9.9 (`site/scripts/check-coherence.mjs`) only diffs
+a small set of canonical STRINGS between README and site; T16.4 only scans
+`SKILL.md`/`AGENTS.md` against the CLI. So a stale `kazi <verb>` anywhere in `site/`
+passes CI. Remediation existed in the plan only as dep-gated rewrites (T25.4/T25.10/T22.7)
+and the verb-rename sweep T27.6; none had run, so the drift went live.
+
+**Action.** Added T29.4 (a standing site command-accuracy CI guard, warn-then-block) to
+close the gap, and annotated T27.6 (the ready, direct fix for bug #1) and T25.2 (owns bug
+#2 via asset replacement) as confirmed-live. Lesson: a canonical-STRING coherence check is
+not a command-ACCURACY check; the no-vaporware guarantee needs a verb-level scan over every
+published surface (README + docs + site + rendered assets), not just the strings under test.
+
 ## 2026-06-24 -- Content-marketing research: how fast-growing OSS AI tools won stars (motivates ADR-0030 / E25)
 
 Two sourced deep-research passes (~15 tools + the agent-native/MCP tier + HN launch
