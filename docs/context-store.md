@@ -49,6 +49,21 @@ silently — the run is unaffected. The loop's dispatch evidence is also redacte
 on the way out (see below), closing the gap that this path is distinct from
 `Kazi.Harness.Prompt.build_prompt`.
 
+## Stuck-bundle replay for escalation
+
+When a run stops `:stuck` (the same failing set persisted across the stuck window),
+the `--json` result gains an **additive** `stuck_bundle` object: a compact, bounded
+projection of what a higher model rung needs to make progress — the failing
+predicates + their normalized failure, the last changed files, and budget-fitted
+store snippets for the error signatures (empty when no store is configured). The
+ADR-0035 model-ladder escalation (skill-side) hands the higher rung **that bundle**
+instead of the lower rung's full transcript — "this is where the dollars are"
+(ADR-0045 §5).
+
+The bundle is bounded (default 12 KB) and redacted on egress like every prompt
+path. kazi only *produces* it; it wires no model switch (that is the orchestrator's
+job). Absent a stuck stop, there is no `stuck_bundle` key.
+
 ## Redaction before indexing (non-negotiable)
 
 Content is passed through `Kazi.Redaction.redact/1` at the `Kazi.ContextStore.index/3`
