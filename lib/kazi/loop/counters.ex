@@ -11,12 +11,18 @@ defmodule Kazi.Loop.Counters do
     * **`context`** — what kazi spent on context for the dispatch that fed this
       iteration. kazi BUILDS the prompt, so it knows these exactly (no harness
       cooperation needed): the orientation/retrieval cache state (whether kazi
-      re-sent a byte-identical prefix the inner harness's own cache can hit) and
-      the per-section token estimates.
+      re-sent a byte-identical prefix the inner harness's own cache can hit), the
+      per-section token estimates, and the active context TIER (T36.3, ADR-0047)
+      the dispatch ran at.
 
           %{ orientation_cache: "hit"|"miss"|"disabled",
              retrieval_cache:   "hit"|"miss"|"disabled",
-             orientation_tokens: 0, evidence_tokens: 0, retrieval_tokens: 0 }
+             orientation_tokens: 0, evidence_tokens: 0, retrieval_tokens: 0,
+             tier: 0..4 | nil }
+
+      `tier` is the resolved `Kazi.Context.Tier` (default 1) the dispatch assembled
+      its context at (ADR-0047 §3: "each iteration's context envelope records the
+      active tier"); `nil` for the no-dispatch baseline (`empty_context/0`).
 
     * **`tools`** — what the agent DID, parsed from the harness result's tool-use
       stream where the harness exposes one:
@@ -55,7 +61,8 @@ defmodule Kazi.Loop.Counters do
           retrieval_cache: cache_state(),
           orientation_tokens: non_neg_integer(),
           evidence_tokens: non_neg_integer(),
-          retrieval_tokens: non_neg_integer()
+          retrieval_tokens: non_neg_integer(),
+          tier: Kazi.Context.Tier.t() | nil
         }
 
   @typedoc "The per-iteration tool counters (empty when the harness reported none)."
@@ -72,31 +79,39 @@ defmodule Kazi.Loop.Counters do
   reuse (same blast radius ⇒ stable prefix, T19.2), and `"miss"` otherwise (the
   first dispatch, or a changed section). Token counts are `ceil(chars / 4)`; an
   absent section is a real `0`.
+
+  `tier` (T36.3, ADR-0047 §3) is the resolved `Kazi.Context.Tier` the dispatch
+  assembled its context at; it defaults to `nil` so the pure section-counting
+  contract is unchanged for callers that do not track a tier. `Kazi.Loop` passes
+  the live tier so each iteration records the one it ran at.
   """
   @spec context(
           String.t() | nil,
           String.t() | nil,
           String.t() | nil,
           String.t() | nil,
-          String.t() | nil
+          String.t() | nil,
+          Kazi.Context.Tier.t() | nil
         ) ::
           context()
-  def context(orientation, evidence, retrieval, prev_orientation, prev_retrieval) do
+  def context(orientation, evidence, retrieval, prev_orientation, prev_retrieval, tier \\ nil) do
     %{
       orientation_cache: cache_state(orientation, prev_orientation),
       retrieval_cache: cache_state(retrieval, prev_retrieval),
       orientation_tokens: estimate_tokens(orientation),
       evidence_tokens: estimate_tokens(evidence),
-      retrieval_tokens: estimate_tokens(retrieval)
+      retrieval_tokens: estimate_tokens(retrieval),
+      tier: tier
     }
   end
 
   @doc """
   The all-zero / all-disabled context map for an iteration with NO preceding
-  dispatch (the first observation): no context was spent, every cache is off.
+  dispatch (the first observation): no context was spent, every cache is off, and
+  the active `tier` is `nil` (no dispatch ran).
   """
   @spec empty_context() :: context()
-  def empty_context, do: context(nil, nil, nil, nil, nil)
+  def empty_context, do: context(nil, nil, nil, nil, nil, nil)
 
   @doc """
   The tool counters parsed from a harness `result`, classified into
