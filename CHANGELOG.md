@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.42.0](https://github.com/kazi-org/kazi/compare/v1.41.1...v1.42.0) (2026-06-25)
+
+
+### Features
+
+* **plan:** deterministic, lossless plan-trim tool (T31.2) ([38cb252](https://github.com/kazi-org/kazi/commit/38cb25285fe04469a459d48e5ca85c72d175c8b6))
+
 ## [1.41.1](https://github.com/kazi-org/kazi/compare/v1.41.0...v1.41.1) (2026-06-25)
 
 
