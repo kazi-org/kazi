@@ -12,11 +12,29 @@ predicates are objectively true, stuck, or over budget. It drives harnesses
   To change a decision, write a superseding ADR.
 - `docs/plan.md` -- the live build plan and the unit of execution.
 
+## Plan layout (split, T31.1)
+
+`docs/plan.md` is a **master index**: each epic heading is a pointer
+(`### ENN -- Title -> plans/ENN.md`) and the epic body (its `- [ ] TNN ...` task
+lines) lives in `docs/plans/ENN.md`. To read the FULL WBS, expand the includes:
+
+```
+python3 ~/.claude/skills/plan/scripts/parse_plan.py   # -> .claude/scratch/parsed-plan.json
+```
+
+or read the epic files directly. **Do not** raw-grep `docs/plan.md` alone for task
+lines — it holds only pointers. Tooling that walks tasks must cover
+`docs/plan.md` AND `docs/plans/*.md` (the doc-freshness checks and `/apply --pool`
+task-discovery do). The split is transparent to `parse_plan.py` (same epic/task
+counts as the pre-split monolith) and is the precondition for per-epic archival
+(T31.2).
+
 ## Execution model
 
 - Work the plan with `/apply --pool` (the operator runs several sessions via
   `/loop /apply --pool`). The plan's Waves section prescribes parallelism; the
-  WBS is the single checkable source of truth.
+  WBS (master `plan.md` + `docs/plans/*.md`) is the single checkable source of
+  truth.
 - Pool coordination uses `/claim` (atomic git-ref locks at `refs/claims/*`). The
   repo has no local `.claude/scripts/claim.sh`; the global fallback
   `~/.claude/skills/claim/scripts/claim.sh` is used automatically.
