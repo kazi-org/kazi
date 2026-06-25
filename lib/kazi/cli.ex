@@ -130,6 +130,8 @@ defmodule Kazi.CLI do
     dry_run: :boolean,
     provider: :string,
     budget: :integer,
+    context_store: :string,
+    context_budget: :integer,
     help: :boolean,
     version: :boolean
   ]
@@ -182,6 +184,10 @@ defmodule Kazi.CLI do
       "`context` only: the context-store provider to proxy to (currently `gist`, the default). The provider stays independently usable; this is a thin wrapper so users learn one CLI (ADR-0045).",
     budget:
       "`context search` only: cap the search result at N bytes (the byte budget the provider fits ranked snippets into). Default: the provider's own default.",
+    context_store:
+      "`apply` only: opt into the context store for the run — index oversized failing evidence and inject budget-fitted snippets instead of inlining it each iteration (currently `gist`). Off by default; absent, the dispatch + result are byte-identical (ADR-0045).",
+    context_budget:
+      "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
     help: "Show this help and exit.",
     version: "Print the kazi version and exit."
   }
@@ -210,7 +216,9 @@ defmodule Kazi.CLI do
         :stream,
         :parallel,
         :explain,
-        :dry_run
+        :dry_run,
+        :context_store,
+        :context_budget
       ]
     },
     %{
@@ -1202,6 +1210,11 @@ defmodule Kazi.CLI do
       # one JSONL progress event per observation to stdout; the final run-result
       # object below TERMINATES the stream. Off (no `:stream`) unless both flags.
       |> maybe_put_stream(opts)
+      # T35.5 (ADR-0045 §8): --context-store/--context-budget wire the store into
+      # the dispatch loop (T35.4). Off by default → adapter_opts unchanged → the
+      # dispatch + result are byte-identical. A caller/test that already set
+      # :context_store in adapter_opts wins (the flag does not override it).
+      |> maybe_put_context_store(opts)
 
     json? = opts[:json] == true
 
@@ -1210,7 +1223,7 @@ defmodule Kazi.CLI do
     # and `:stopped` (which carries `reason: :stuck` for a stuck stop, T1.5) — and
     # rendered as the versioned JSON contract under --json or the human report
     # otherwise. The exit code is the same on both surfaces: 0 only on convergence.
-    case Runtime.run(goal, run_opts) do
+    case attach_run_context_store(Runtime.run(goal, run_opts), run_opts) do
       {:ok, %{outcome: :converged} = result} ->
         report_outcome(
           goal,
@@ -1289,6 +1302,82 @@ defmodule Kazi.CLI do
   end
 
   defp converged_predicate_count(_), do: nil
+
+  # =============================================================================
+  # context store wiring (T35.5, ADR-0045 §8)
+  # =============================================================================
+
+  @context_default_budget 6_000
+
+  # Map a --context-store provider name to its ContextStore provider module.
+  defp context_store_provider("gist"), do: {:ok, Kazi.ContextStore.GistCLI}
+  defp context_store_provider(other), do: {:error, {:unknown_context_store, other}}
+
+  # Fold --context-store/--context-budget into run_opts[:adapter_opts]. A
+  # caller/test that already set :context_store in adapter_opts WINS (the flag does
+  # not override an injected store). With no flag, run_opts is returned unchanged so
+  # the dispatch is byte-identical (the loop, T35.4, only compresses when a store is
+  # present). An unknown provider name leaves the store off.
+  defp maybe_put_context_store(run_opts, opts) do
+    adapter = Keyword.get(run_opts, :adapter_opts, [])
+
+    cond do
+      Keyword.has_key?(adapter, :context_store) ->
+        run_opts
+
+      is_nil(opts[:context_store]) ->
+        run_opts
+
+      true ->
+        case context_store_provider(opts[:context_store]) do
+          {:ok, module} ->
+            budget = opts[:context_budget] || @context_default_budget
+
+            Keyword.put(
+              run_opts,
+              :adapter_opts,
+              Keyword.merge(adapter, context_store: module, context_budget: budget)
+            )
+
+          {:error, _} ->
+            run_opts
+        end
+    end
+  end
+
+  # Attach the additive `context_store` stats object to a successful run result when
+  # a store was configured. Absent ⇒ result unchanged ⇒ byte-identical.
+  defp attach_run_context_store({:ok, result}, run_opts),
+    do: {:ok, attach_context_store_stats(result, run_opts)}
+
+  defp attach_run_context_store(other, _run_opts), do: other
+
+  defp attach_context_store_stats(result, run_opts) do
+    adapter = Keyword.get(run_opts, :adapter_opts, [])
+
+    case Keyword.get(adapter, :context_store) do
+      nil ->
+        result
+
+      store ->
+        budget = Keyword.get(adapter, :context_budget, @context_default_budget)
+
+        case ContextStore.stats(context_store: store) do
+          {:ok, stats} -> Map.put(result, :context_store, context_store_json(stats, budget))
+          {:error, _} -> result
+        end
+    end
+  end
+
+  defp context_store_json(stats, budget) do
+    %{
+      provider: to_string(Map.get(stats, :provider, "gist")),
+      indexed_bytes: Map.get(stats, :indexed_bytes, 0),
+      returned_bytes: Map.get(stats, :returned_bytes, 0),
+      saved_bytes: Map.get(stats, :saved_bytes, 0),
+      budget: budget
+    }
+  end
 
   # =============================================================================
   # run --parallel (T21.8, ADR-0027): drive the native parallel scheduler
@@ -3116,7 +3205,15 @@ defmodule Kazi.CLI do
     }
     |> put_usage(result)
     |> put_economy(economy)
+    |> put_context_store(result)
   end
+
+  # T35.5 (ADR-0045 §6): the additive `context_store` byte-accounting object, present
+  # only when the run used a store. Absent ⇒ the result is byte-identical to today.
+  defp put_context_store(map, %{context_store: cs}) when is_map(cs),
+    do: Map.put(map, :context_store, cs)
+
+  defp put_context_store(map, _result), do: map
 
   # T34.6 (ADR-0046 §5): attach the additive `economy` object — the run-end KPIs
   # derived from the per-iteration envelopes (cost / converged-predicate, wall-clock
