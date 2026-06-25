@@ -48,12 +48,15 @@ defmodule Kazi.Harness.Registry do
   # Claude-specific boundary logic (`Kazi.Harness.Profiles.Claude`), pinned
   # byte-for-byte against the real `Kazi.Harness.ClaudeAdapter` by a golden test.
   # supported_opts are the claw-code hygiene flags (T4.8) Claude understands, the
-  # per-run `:command` override (the test-stub seam), and `:model` — the in-family
+  # per-run `:command` override (the test-stub seam), `:model` — the in-family
   # tiering selector (T19.6, ADR-0033) that points Claude at a cheaper in-family
-  # model via `--model`. A Claude-only flag is never forwarded to a different
-  # harness. (`:model` is also an always-kept adapter opt in `Kazi.Harness`, so
-  # the model still reaches `build_args`; declaring it here keeps the profile's
-  # advertised opt surface honest and satisfies the ADR-0022 conformance contract.)
+  # model via `--model` — and the inner-harness economy flags (T36.1, ADR-0047)
+  # that shrink the per-dispatch tool/MCP surface, plus the `:cli_version` the
+  # economy flags' version-gated capability check reads. A Claude-only flag is
+  # never forwarded to a different harness. (`:model` is also an always-kept
+  # adapter opt in `Kazi.Harness`, so the model still reaches `build_args`;
+  # declaring it here keeps the profile's advertised opt surface honest and
+  # satisfies the ADR-0022 conformance contract.)
   @spec claude() :: Profile.t()
   defp claude do
     %Profile{
@@ -61,7 +64,18 @@ defmodule Kazi.Harness.Registry do
       command: "claude",
       build_args: &Profiles.Claude.build_args/2,
       parse: &Profiles.Claude.parse/1,
-      supported_opts: [:command, :max_budget_usd, :allowed_tools, :permission_mode, :model]
+      supported_opts:
+        [:command, :max_budget_usd, :allowed_tools, :permission_mode, :model] ++
+          [
+            :tools,
+            :disallowed_tools,
+            :mcp_config,
+            :strict_mcp_config,
+            :max_turns,
+            :exclude_dynamic_system_prompt_sections,
+            :no_session_persistence,
+            :cli_version
+          ]
     }
   end
 
