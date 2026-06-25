@@ -232,13 +232,24 @@ supervision, each converging an objective partition. It is not a "swarm of fake
 agents" (section 10): every concurrent unit is a real supervised reconciler over
 a leased blast radius.
 
-### 8a. Dependency-aware waves (ADR-0028)
+### 8a. Predicate-graph waves: dependency-aware ordering (ADR-0028)
 
 Blast-radius partitioning gives SPATIAL parallelism (disjoint edits run free). It
 says nothing about SEMANTIC order: when group B logically depends on group A's
 output (the streaming predicates need the result-contract predicates true first),
 two spatially-disjoint groups may still need to run in order. ADR-0028 adds that
-missing axis.
+missing axis -- **predicate-graph waves**.
+
+This is kazi's codification of the wave pattern an external orchestrator authors
+by hand: a planning step declares each task's `deps:`, and an apply step executes
+the result as ordered *waves* (parallel within a wave, a barrier between waves).
+kazi keeps the authored dependencies but replaces the hand-grouped, statically
+barriered waves with a schedule it COMPUTES: the predicate group taxonomy
+(`[[group]]`, ADR-0020) plus `needs` edges form a dependency graph over the
+goal's predicates, and kazi derives the wave order from that graph -- hence
+*predicate-graph waves*. The grouping foundation is ADR-0020; the scheduler that
+runs the frontier is ADR-0027 (section 8); this section is the ordering layer
+ADR-0028 adds on top.
 
 - **Declare `needs` edges.** A predicate group (the `[[group]]` taxonomy,
   ADR-0020) carries an optional `needs = ["group-id", ...]` -- a
@@ -262,10 +273,46 @@ missing axis.
   and NAMES the blocking dep in the collective status, rather than hanging
   silently.
 
+**Express the deps in the goal-file.** You author `needs` on the `[[group]]`
+taxonomy; a predicate joins a group with `group = "<id>"`. Edges name the groups
+that must converge BEFORE this one:
+
+```toml
+[[group]]
+id   = "result-contract"
+name = "Result Contract"
+
+[[group]]
+id    = "streaming"
+name  = "Streaming"
+needs = ["result-contract"]   # don't start streaming until the contract converges
+
+[[predicate]]
+id       = "contract-shape"
+provider = "test_runner"
+group    = "result-contract"
+
+[[predicate]]
+id       = "stream-emits-tokens"
+provider = "test_runner"
+group    = "streaming"
+```
+
+**Run it the same way as any goal** -- `kazi apply <goal-file> --parallel`. When
+the goal's groups declare `needs`, the scheduler routes the run through the
+dependency-aware path automatically; with NO `needs`, it stays the fully-parallel
+scheduler of section 8 (back-compatible). Under `--json`, the collective result
+names any blocked sub-DAG and its blocking dep, so a stuck dependency is reported,
+not silently hung.
+
 The irreducible input is the dependency edges: kazi computes everything
 downstream of them, but it cannot DERIVE logical precedence from code (only
-spatial disjointness). A human (or the planning agent) authors `needs` once; kazi
-derives and re-derives the wave schedule from there.
+spatial disjointness, from the blast-radius graph). Authoring the `needs` edges is
+human/LLM judgment and a real burden -- a human (or the planning agent) writes
+them once, and an over-declared edge needlessly re-serializes work. What kazi
+guarantees is everything AFTER that declaration: it computes the ready set, runs
+each frontier with spatial parallelism, re-gates on objective convergence, and
+escalates blocked sub-DAGs -- it does not infer the order itself.
 
 ---
 
