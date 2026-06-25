@@ -273,4 +273,81 @@ defmodule Kazi.BenchTest do
       assert Bench.render_tiering_table(report) == table
     end
   end
+
+  describe "tier × surface arms (T36.5, ADR-0047)" do
+    @tier_surface Path.expand("../fixtures/bench/tier_surface", __DIR__)
+
+    defp ts_result(arm),
+      do: Path.join(@tier_surface, "#{arm}.result.json") |> File.read!() |> Jason.decode!()
+
+    defp ts_envelopes(arm) do
+      @tier_surface
+      |> Path.join("#{arm}.[0-9]*.json")
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.map(&File.read!/1)
+    end
+
+    test "tier_surface_arm/3 parses tier+surface from the label and folds the real $/tokens" do
+      arm = Bench.tier_surface_arm("t1-on", ts_result("t1-on"), ts_envelopes("t1-on"))
+
+      assert arm.arm == "t1-on"
+      assert arm.tier == 1
+      assert arm.surface == :minimal
+      assert arm.dispatches == 1
+      assert arm.tokens == 34_640
+      assert arm.cost_usd == 0.05
+      assert arm.converged
+      assert arm.correct
+      assert arm.converged_predicates == 1
+      assert arm.cost_per_converged_predicate == 0.05
+      refute arm.stuck
+      # the tiering-only :models key is dropped for the tier-surface shape
+      refute Map.has_key?(arm, :models)
+    end
+
+    test "a '-off' label parses to the :ambient (surface OFF) arm" do
+      arm = Bench.tier_surface_arm("t1-off", ts_result("t1-off"), ts_envelopes("t1-off"))
+      assert arm.surface == :ambient
+      assert arm.tier == 1
+    end
+
+    test "a STUCK arm with no passing predicate: cost/conv-pred is nil (no cost-per-zero), stuck true" do
+      arm = Bench.tier_surface_arm("t3-on", ts_result("t3-on"), ts_envelopes("t3-on"))
+
+      assert arm.stuck
+      refute arm.converged
+      refute arm.correct
+      assert arm.converged_predicates == 0
+      assert arm.cost_per_converged_predicate == nil
+    end
+
+    test "tier_surface_report/1 preserves order and render_tier_surface_table/1 is deterministic" do
+      report =
+        Bench.tier_surface_report([
+          {"t0-on", ts_result("t0-on"), ts_envelopes("t0-on")},
+          {"t1-on", ts_result("t1-on"), ts_envelopes("t1-on")},
+          {"t1-off", ts_result("t1-off"), ts_envelopes("t1-off")},
+          {"t2-on", ts_result("t2-on"), ts_envelopes("t2-on")},
+          {"t3-on", ts_result("t3-on"), ts_envelopes("t3-on")}
+        ])
+
+      assert Enum.map(report, & &1.arm) == ["t0-on", "t1-on", "t1-off", "t2-on", "t3-on"]
+
+      table = Bench.render_tier_surface_table(report)
+
+      assert table ==
+               """
+               | Arm | Tier | Surface | Dispatches | Tokens | Cost (USD) | Cost/conv-pred | Converged | Correct | Stuck |
+               |---|---|---|---|---|---|---|---|---|---|
+               | t0-on | 0 | on | 1 | 30600 | 0.0400 | 0.0400 | yes | yes | no |
+               | t1-on | 1 | on | 1 | 34640 | 0.0500 | 0.0500 | yes | yes | no |
+               | t1-off | 1 | off | 1 | 36660 | 0.0550 | 0.0550 | yes | yes | no |
+               | t2-on | 2 | on | 1 | 38680 | 0.0600 | 0.0600 | yes | yes | no |
+               | t3-on | 3 | on | 1 | 40900 | 0.0900 | n/a | no | no | yes |
+               """
+
+      assert Bench.render_tier_surface_table(report) == table
+    end
+  end
 end

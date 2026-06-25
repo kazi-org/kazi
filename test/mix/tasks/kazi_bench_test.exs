@@ -15,6 +15,7 @@ defmodule Mix.Tasks.Kazi.BenchTest do
   @captures Path.expand("../../fixtures/bench/captures", __DIR__)
   @kpi_runs Path.expand("../../fixtures/bench/kpi_runs", __DIR__)
   @tiering Path.expand("../../fixtures/bench/tiering", __DIR__)
+  @tier_surface Path.expand("../../fixtures/bench/tier_surface", __DIR__)
 
   setup do
     prev = Mix.shell()
@@ -111,6 +112,24 @@ defmodule Mix.Tasks.Kazi.BenchTest do
     assert out =~ "| escalating | claude-haiku-4-5 → claude-sonnet-4-6 → claude-opus-4-8 | 3 |"
     # The cheaper-but-FAILS arm is visible: not converged, not correct.
     assert out =~ "| static-fails | claude-haiku-4-5 | 1 | 91100 | 0.0500 | no | no |"
+  end
+
+  test "--tier-surface tables the tier × surface arms on $/tokens + cost/conv-pred + stuck (T36.5)" do
+    Mix.Tasks.Kazi.Bench.run(["--tier-surface", @tier_surface])
+    out = shell_output()
+
+    assert out =~ "per-arm tier × surface table (T36.5, ADR-0047)"
+
+    assert out =~
+             "| Arm | Tier | Surface | Dispatches | Tokens | Cost (USD) | Cost/conv-pred | Converged | Correct | Stuck |"
+
+    # Arms sorted by (tier, surface): t0-on → t1-on → t1-off → t2-on → t3-on.
+    assert out =~ "| t0-on | 0 | on | 1 | 30600 | 0.0400 | 0.0400 | yes | yes | no |"
+    assert out =~ "| t1-on | 1 | on | 1 | 34640 | 0.0500 | 0.0500 | yes | yes | no |"
+    assert out =~ "| t1-off | 1 | off | 1 | 36660 | 0.0550 | 0.0550 | yes | yes | no |"
+    assert out =~ "| t2-on | 2 | on | 1 | 38680 | 0.0600 | 0.0600 | yes | yes | no |"
+    # A stuck arm with no passing predicate: cost/conv-pred is n/a, stuck visible.
+    assert out =~ "| t3-on | 3 | on | 1 | 40900 | 0.0900 | n/a | no | no | yes |"
   end
 
   test "no --captures and no --help points at the maintainer live run (T19.5), runs nothing live" do
