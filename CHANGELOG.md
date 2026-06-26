@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.59.0](https://github.com/kazi-org/kazi/compare/v1.58.0...v1.59.0) (2026-06-26)
+
+
+### Features
+
+* **blog:** T38.12 Post 7 -- plan the work, then work the plan ([27135da](https://github.com/kazi-org/kazi/commit/27135daa58a32d12896010e24c04e9d92c3715db))
+
 ## [1.58.0](https://github.com/kazi-org/kazi/compare/v1.57.0...v1.58.0) (2026-06-26)
 
 
