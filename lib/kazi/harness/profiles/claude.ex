@@ -222,9 +222,31 @@ defmodule Kazi.Harness.Profiles.Claude do
   """
   @spec parse(String.t()) :: map()
   def parse(output) when is_binary(output) do
-    case Jason.decode(output) do
+    case Jason.decode(extract_envelope(output)) do
       {:ok, %{} = envelope} -> extract_fields(envelope)
       _ -> %{}
+    end
+  end
+
+  # The `claude` CLI prints diagnostics to stderr (e.g. "Warning: no stdin data
+  # received in 3s, proceeding without it."), which the adapter merges into stdout
+  # via `stderr_to_stdout: true`. That noise PREFIXES the JSON envelope, so a naive
+  # `Jason.decode(output)` fails and silently drops EVERY structured field
+  # (`:result`, `:tokens`, `:cost_usd`, `:usage`) — the authoring on-ramp (T26.8)
+  # then saw no `:result` and fell back to the raw envelope, which has no
+  # top-level predicates. Narrow to the JSON object span (first "{" .. last "}")
+  # before decoding so a noise-prefixed envelope still parses. A clean envelope is
+  # unchanged (the span IS the whole object, so the golden parse stays byte-stable),
+  # and output with no braces or genuinely malformed JSON still degrades to `%{}`.
+  @spec extract_envelope(String.t()) :: String.t()
+  defp extract_envelope(output) do
+    with {start, _} <- :binary.match(output, "{"),
+         [_ | _] = closes <- :binary.matches(output, "}"),
+         {stop, _} <- List.last(closes),
+         true <- stop >= start do
+      binary_part(output, start, stop - start + 1)
+    else
+      _ -> output
     end
   end
 
