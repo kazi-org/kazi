@@ -1,0 +1,149 @@
+---
+// The kazi blog index (T38.2, epic E38). Lists PUBLISHED posts newest-first.
+//
+// Empty-safe by design: until Post 1 ships (T38.6) the published set is honestly
+// EMPTY (the only entry in the collection is a `draft: true` placeholder), so the
+// page renders a tasteful "Posts coming soon" empty state rather than an error or
+// a faked post. Drafts are excluded by the `!data.draft` filter — never publish a
+// post or flip the placeholder to satisfy a test.
+import { getCollection } from "astro:content";
+import Layout from "../../layouts/Layout.astro";
+
+const REPO = "https://github.com/kazi-org/kazi";
+
+// Published posts only, newest first.
+const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
+);
+
+const dateFmt = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+// The flagship series landing page (T38.2). Linked whether or not posts exist yet.
+const SERIES_SLUG = "from-vibe-coding-to-reconciliation";
+const SERIES_TITLE = "From Vibe Coding to Reconciliation";
+---
+
+<Layout
+  title="Blog — kazi"
+  description="Writing from the kazi team: a hands-on ladder from vibe coding to a reconciliation workflow, plus notes on driving coding agents to an objective definition of done."
+>
+  <!-- Nav (mirrors the home page chrome) -->
+  <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+    <a href="/" class="flex items-center gap-2" aria-label="kazi home">
+      <img src="/logo/kazi-mark.svg" alt="" width="34" height="34" />
+      <span class="ui-strong text-xl font-bold tracking-tight">kazi</span>
+    </a>
+    <nav class="flex items-center gap-6 text-sm" aria-label="Primary">
+      <a href="/#try" class="ui-body ui-link">Try it</a>
+      <a href="/#how" class="ui-body ui-link">How it works</a>
+      <a href="/blog" class="ui-strong ui-link" aria-current="page">Blog</a>
+      <a
+        href={REPO}
+        class="ui-outline rounded-lg border px-3 py-1.5 font-medium">GitHub</a
+      >
+    </nav>
+  </header>
+
+  <main>
+    <section class="mx-auto max-w-3xl px-6 pb-8 pt-12 sm:pt-16">
+      <h1
+        class="ui-strong text-balance text-4xl font-extrabold tracking-tight sm:text-5xl"
+      >
+        The kazi blog
+      </h1>
+      <p class="ui-body mt-5 max-w-2xl text-pretty text-lg">
+        Hands-on writing about driving coding agents to an objective definition
+        of done. The flagship series,{" "}
+        <a href={`/blog/${SERIES_SLUG}`} class="kazi-text font-semibold hover:underline"
+          >{SERIES_TITLE}</a
+        >, walks the same ladder we climbed — from prompting by feel to a
+        reconciliation workflow.
+      </p>
+    </section>
+
+    <section class="mx-auto max-w-3xl px-6 pb-20">
+      {
+        posts.length === 0 ? (
+          <div class="ui-card rounded-2xl border p-8 text-center" id="blog-empty-state">
+            <h2 class="ui-strong text-xl font-semibold">Posts coming soon</h2>
+            <p class="ui-body mx-auto mt-3 max-w-md text-pretty text-sm leading-relaxed">
+              The first post is being written. In the meantime, you can preview
+              the full arc of the{" "}
+              <a
+                href={`/blog/${SERIES_SLUG}`}
+                class="kazi-text font-semibold hover:underline"
+              >
+                {SERIES_TITLE}
+              </a>{" "}
+              series.
+            </p>
+            <a
+              href={`/blog/${SERIES_SLUG}`}
+              class="ui-outline mt-6 inline-flex rounded-lg border px-4 py-2 text-sm font-medium"
+            >
+              See the series &rarr;
+            </a>
+          </div>
+        ) : (
+          <ul class="space-y-6" id="blog-post-list">
+            {posts.map((post) => (
+              <li class="ui-card rounded-2xl border p-6">
+                <a href={`/blog/${post.id}`} class="group block">
+                  <div class="ui-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <time datetime={post.data.date.toISOString()}>
+                      {dateFmt.format(post.data.date)}
+                    </time>
+                    {post.data.series && (
+                      <>
+                        <span aria-hidden="true">&middot;</span>
+                        <span>
+                          {post.data.series} &middot; Part {post.data.part}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <h2 class="ui-strong mt-2 text-xl font-semibold group-hover:underline">
+                    {post.data.title}
+                  </h2>
+                  <p class="ui-body mt-2 text-sm leading-relaxed">
+                    {post.data.description}
+                  </p>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </main>
+
+  <!-- Footer (mirrors the home page chrome) -->
+  <footer class="ui-hairline border-t">
+    <div
+      class="ui-muted mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm sm:flex-row"
+    >
+      <div class="flex flex-col items-center gap-1 sm:items-start">
+        <div class="flex items-center gap-2">
+          <img src="/logo/kazi-mark.svg" alt="" width="22" height="22" />
+          <span>kazi &middot; Apache-2.0 &middot; &copy; Sire Run, Inc.</span>
+        </div>
+        <span
+          >Built by the team behind <a href="https://sire.run" class="ui-link"
+            >Sire</a
+          >.</span
+        >
+      </div>
+      <nav class="flex items-center gap-5" aria-label="Footer">
+        <a href="/blog" class="ui-link">Blog</a>
+        <a href={REPO} class="ui-link">GitHub</a>
+        <a href={`${REPO}/releases`} class="ui-link">Releases</a>
+        <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
+      </nav>
+    </div>
+  </footer>
+</Layout>
