@@ -58,6 +58,15 @@ jobs:
 
       - name: Build
         run: npm run build
+        # T38.21: privacy-respecting, cookieless analytics is config-gated. The
+        # include (site/src/components/Analytics.astro) emits a tracker only when
+        # PUBLIC_ANALYTICS_DOMAIN is set at build time. Sourced from the
+        # `ANALYTICS_DOMAIN` repo variable so analytics can be turned on by setting
+        # one variable — no code change. When the variable is unset GitHub passes an
+        # empty string and the site ships analytics-free (an HTML comment says so).
+        # See docs/site-analytics.md.
+        env:
+          PUBLIC_ANALYTICS_DOMAIN: ${{ vars.ANALYTICS_DOMAIN }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
