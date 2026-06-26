@@ -161,19 +161,13 @@ E9 core T9.1-T9.4/T9.7-T9.9) are removed from this WBS -- they are done on `main
 their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E9 (leftovers) -- Website polish (P2, ADR-0018) -> plans/E9.md
-### E12 -- Hierarchical predicate grouping + Obsidian export (P3, ADR-0020) -> plans/E12.md
-### E13 -- Intended-vs-actual reconciliation: import intent + detect dead code (P3, ADR-0021) -> plans/E13.md
-### E14 -- Onboard more coding harnesses: Codex, Antigravity, claw-code, + any CLI harness (P3, ADR-0016 + ADR-0022) -> plans/E14.md
 ### E15 -- Harness-friendly, agent-drivable kazi: JSON CLI + result contract (P3, ADR-0023) -> plans/E15.md
 ### E16 -- kazi self-teaching to harnesses: skill + MCP + machine-readable help (P3, ADR-0024) -> plans/E16.md
-### E17 -- Adoption: lead EVERY surface with the agent-driven on-ramp (P1, ADR-0025) -> plans/E17.md
-### E18 -- Bug fixes from the T15.9 token-benchmark dogfood (P2, no ADR) -> plans/E18.md
 ### E19 -- Realize the unwired token-efficiency levers + measure (P2, ADR-0010) -> plans/E19.md
 ### E20 -- kazi UNDER /apply --pool: objective-done + coordination + observability beneath pooled sessions (P1, ADR-0026) -> plans/E20.md
 ### E21 -- kazi owns parallelization: a native scheduler over a partitioned goal-set (P1, ADR-0027) -> plans/E21.md
 ### E22 -- Pre-publish documentation refresh -- RETIRED / CONSOLIDATED into E25 (2026-06-25) -> plans/E22.md
 ### E23 -- Dependency-aware partitioning: predicate-graph waves (P2, ADR-0028) -> plans/E23.md
-### E24 -- Remove the Telegram bridge (P2, ADR-0029; cleanup) -> plans/E24.md
 ### E25 -- Content-marketing refocus: lead with the agent-drives-kazi paradigm (P1, ADR-0030) -> plans/E25.md
 ### E26 -- The kazi skill becomes a router: plan/apply/status/adopt (P1, ADR-0031) -> plans/E26.md
 ### E27 -- Rename the CLI verbs: run -> apply, propose -> plan (P1, ADR-0032) -> plans/E27.md
@@ -805,3 +799,15 @@ never swept into your commit.
   `cli_adapter.ex`, `profiles/`); authoring (for E13/E15): `lib/kazi/authoring.ex`
   + `lib/kazi/authoring/clarify.ex`; goal loader (for E12): `lib/kazi/goal/loader.ex`;
   CLI (for E15/E16): `lib/kazi/cli.ex`.
+
+## Archived epics
+
+Fully-done, released epics, trimmed from the live WBS (T31.2/ADR-0036 L1).
+Their bodies live verbatim under `docs/plans/archive/`.
+
+- E12 -- Hierarchical predicate grouping + Obsidian export (P3, ADR-0020) (archived 2026-06-25) -> plans/archive/E12.md
+- E13 -- Intended-vs-actual reconciliation: import intent + detect dead code (P3, ADR-0021) (archived 2026-06-25) -> plans/archive/E13.md
+- E14 -- Onboard more coding harnesses: Codex, Antigravity, claw-code, + any CLI harness (P3, ADR-0016 + ADR-0022) (archived 2026-06-25) -> plans/archive/E14.md
+- E17 -- Adoption: lead EVERY surface with the agent-driven on-ramp (P1, ADR-0025) (archived 2026-06-25) -> plans/archive/E17.md
+- E18 -- Bug fixes from the T15.9 token-benchmark dogfood (P2, no ADR) (archived 2026-06-25) -> plans/archive/E18.md
+- E24 -- Remove the Telegram bridge (P2, ADR-0029; cleanup) (archived 2026-06-25) -> plans/archive/E24.md
