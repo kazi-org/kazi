@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.52.0](https://github.com/kazi-org/kazi/compare/v1.51.0...v1.52.0) (2026-06-26)
+
+
+### Features
+
+* **site:** T38.20 core series diagrams (loop, ladder, before/after) ([d2c771c](https://github.com/kazi-org/kazi/commit/d2c771c356b26ad5114a14df91175f01130916a3))
+* **site:** T38.20 per-post header art + generator ([5b84b18](https://github.com/kazi-org/kazi/commit/5b84b186fae4e313aef0354b8dc2b9838b88c03c))
+* **site:** T38.20 render series diagrams + per-post art with alt text ([c408383](https://github.com/kazi-org/kazi/commit/c40838348414bec0f4bc3c5c222c9613adb44139))
+
 ## [1.51.0](https://github.com/kazi-org/kazi/compare/v1.50.0...v1.51.0) (2026-06-26)
 
 
