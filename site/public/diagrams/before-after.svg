@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 430" width="960" height="430" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" role="img" aria-label="Without kazi versus with kazi. Without: the agent says it is done and you trust it on faith; parallel agents collide on the same files; green on a laptop, broken in production; it stops when it feels finished. With kazi: every predicate is verified true with stored evidence; agents lease their blast radius so overlapping work serializes; a live predicate probes the deployed endpoint; it stops only on converged, stuck, or over budget.">
+  <defs>
+    <linearGradient id="ba-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="1" y="1" width="958" height="428" rx="14" fill="#0b1220" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- column headers -->
+  <text x="28" y="52" font-size="16" font-weight="700" fill="#94a3b8">Without kazi</text>
+  <text x="520" y="52" font-size="16" font-weight="700" fill="url(#ba-grad)">With kazi</text>
+  <line x1="28" y1="66" x2="452" y2="66" stroke="#1e293b" stroke-width="1.5"/>
+  <line x1="508" y1="66" x2="932" y2="66" stroke="#1e293b" stroke-width="1.5"/>
+  <line x1="480" y1="40" x2="480" y2="404" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- rows -->
+  <g font-size="13.5">
+    <!-- row 1 -->
+    <circle cx="44" cy="112" r="9" fill="#3b1418" stroke="#7f1d1d"/><text x="44" y="116" text-anchor="middle" font-size="11" fill="#f87171">&#10005;</text>
+    <text x="66" y="106" fill="#94a3b8">&#8220;The agent says it&#8217;s done.&#8221;<tspan x="66" dy="18">You trust it on faith.</tspan></text>
+    <circle cx="524" cy="112" r="9" fill="#0f2a1f" stroke="#14532d"/><text x="524" y="116" text-anchor="middle" font-size="11" fill="#34d399">&#10003;</text>
+    <text x="546" y="106" fill="#cbd5e1">Every predicate verified true,<tspan x="546" dy="18">with stored evidence.</tspan></text>
+
+    <!-- row 2 -->
+    <circle cx="44" cy="190" r="9" fill="#3b1418" stroke="#7f1d1d"/><text x="44" y="194" text-anchor="middle" font-size="11" fill="#f87171">&#10005;</text>
+    <text x="66" y="184" fill="#94a3b8">Two agents edit the same files<tspan x="66" dy="18">&#8594; merge conflicts.</tspan></text>
+    <circle cx="524" cy="190" r="9" fill="#0f2a1f" stroke="#14532d"/><text x="524" y="194" text-anchor="middle" font-size="11" fill="#34d399">&#10003;</text>
+    <text x="546" y="184" fill="#cbd5e1">Agents lease their blast radius &#8212;<tspan x="546" dy="18">overlapping work serializes.</tspan></text>
+
+    <!-- row 3 -->
+    <circle cx="44" cy="268" r="9" fill="#3b1418" stroke="#7f1d1d"/><text x="44" y="272" text-anchor="middle" font-size="11" fill="#f87171">&#10005;</text>
+    <text x="66" y="262" fill="#94a3b8">Green on a laptop,<tspan x="66" dy="18">broken in production.</tspan></text>
+    <circle cx="524" cy="268" r="9" fill="#0f2a1f" stroke="#14532d"/><text x="524" y="272" text-anchor="middle" font-size="11" fill="#34d399">&#10003;</text>
+    <text x="546" y="262" fill="#cbd5e1">A live predicate probes<tspan x="546" dy="18">the deployed endpoint.</tspan></text>
+
+    <!-- row 4 -->
+    <circle cx="44" cy="346" r="9" fill="#3b1418" stroke="#7f1d1d"/><text x="44" y="350" text-anchor="middle" font-size="11" fill="#f87171">&#10005;</text>
+    <text x="66" y="340" fill="#94a3b8">It stops when it<tspan x="66" dy="18">feels finished.</tspan></text>
+    <circle cx="524" cy="346" r="9" fill="#0f2a1f" stroke="#14532d"/><text x="524" y="350" text-anchor="middle" font-size="11" fill="#34d399">&#10003;</text>
+    <text x="546" y="340" fill="#cbd5e1">It stops only on converged,<tspan x="546" dy="18">stuck, or over budget.</tspan></text>
+  </g>
+
+  <text x="480" y="416" text-anchor="middle" font-size="12" fill="#64748b">Truth lives in the controller, not the agent.</text>
+</svg>
