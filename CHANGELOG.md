@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.44.0](https://github.com/kazi-org/kazi/compare/v1.43.0...v1.44.0) (2026-06-26)
+
+
+### Features
+
+* **loader:** expose provider_kinds/0 as the single source of truth ([87a3c54](https://github.com/kazi-org/kazi/commit/87a3c543653a7778e0ac2958a6eb8b0236d9f31c))
+
+
+### Bug Fixes
+
+* **authoring:** accept nested/goal-file proposal shapes; map E32 providers ([0f9778a](https://github.com/kazi-org/kazi/commit/0f9778a5e2f7cbfbe24ca24492ef98811984c934))
+
 ## [1.43.0](https://github.com/kazi-org/kazi/compare/v1.42.1...v1.43.0) (2026-06-26)
 
 
