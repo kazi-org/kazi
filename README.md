@@ -303,7 +303,7 @@ kazi apply <goal-file> --workspace <path> \
 ```
 
 `--harness <id>` selects the harness (`claude`, `opencode`, `codex`,
-`antigravity`, or `claw` today — see the [tier table](#tiered-harness-support-adr-0022)
+`antigravity`, `claw`, or `gemini_cli` today — see the [tier table](#tiered-harness-support-adr-0022)
 below); `--model <provider/model>` selects the model that harness should use.
 
 **Point opencode at a local model (e.g. a locally-hosted Qwen3.6).** If you run
@@ -375,6 +375,7 @@ added with a documented workaround, and one is **best-effort only**:
 | `codex` | First-class | `codex exec … --json` JSONL stream; auth `OPENAI_API_KEY` / `codex login`. |
 | `antigravity` | Conformant **with a workaround** | non-TTY stdout bug (`antigravity-cli#76`) handled via `--prompt-file --output json`; auth `GEMINI_API_KEY` / `ANTIGRAVITY_API_KEY`. |
 | `claw` | **Best-effort / demo-grade** | claw-code emits **no** structured output and has no model flag — kazi surfaces its raw stdout as the result with **no cost/token extraction**. It runs, but fidelity is degraded; treat it as a demo ("an agent-managed museum exhibit, not a production tool"), not a budgeted production run. Auth is via env API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). |
+| `gemini_cli` | First-class | `gemini -p … -o json` single JSON envelope; `--approval-mode yolo` runs non-interactively; full result + best-effort token parse; auth `GEMINI_API_KEY` (or Google OAuth / Vertex `GOOGLE_API_KEY`). |
 
 ### Build a self-contained release (full read-model)
 
