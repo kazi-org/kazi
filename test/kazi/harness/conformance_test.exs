@@ -313,6 +313,50 @@ defmodule Kazi.Harness.ConformanceTest do
     end
   end
 
+  describe ":gemini_cli golden-transcript conformance (T37.1, ADR-0022)" do
+    # Gemini is a fully-conformant addition (native `-o json`); argv carries the
+    # prompt directly and `--approval-mode yolo` auto-approves so the run is
+    # non-interactive. The recorded envelope reports token counts nested under
+    # stats.models.<model>.tokens, which sum to the surfaced :tokens/:cost.
+    test "argv + JSON-envelope parse against the recorded transcript" do
+      assert_profile_conformance(:gemini_cli,
+        prompt: "fix the failing test",
+        opts: [model: "gemini-2.5-pro"],
+        expected_argv: [
+          "-p",
+          "fix the failing test",
+          "-o",
+          "json",
+          "--approval-mode",
+          "yolo",
+          "-m",
+          "gemini-2.5-pro"
+        ],
+        transcript: "harness/gemini_cli_run.json",
+        expected_parse: %{
+          # stats.models.gemini-2.5-pro.tokens.totalTokenCount.
+          result: "Made the failing unit test pass.",
+          tokens: 1900,
+          cost: %{tokens: 1900}
+        }
+      )
+    end
+
+    test "argv without a model omits the -m flag (same recorded parse)" do
+      assert_profile_conformance(:gemini_cli,
+        prompt: "fix the failing test",
+        opts: [],
+        expected_argv: ["-p", "fix the failing test", "-o", "json", "--approval-mode", "yolo"],
+        transcript: "harness/gemini_cli_run.json",
+        expected_parse: %{
+          result: "Made the failing unit test pass.",
+          tokens: 1900,
+          cost: %{tokens: 1900}
+        }
+      )
+    end
+  end
+
   describe ":claw golden-transcript conformance (T14.4, ADR-0022) — BEST-EFFORT" do
     # claw-code is DEMO-GRADE: it emits NO JSON, so its "golden transcript" is just
     # the RAW stdout text the tool printed, and `parse` surfaces it verbatim as
