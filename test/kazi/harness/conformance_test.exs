@@ -62,6 +62,32 @@ defmodule Kazi.Harness.ConformanceTest do
              }
     end
 
+    # T26.8: the REAL `claude -p --output-format json` stdout captured while drafting
+    # an authoring proposal. The `claude` CLI prints "Warning: no stdin data
+    # received in 3s, ..." to stderr, which the adapter merges into stdout
+    # (`stderr_to_stdout: true`), so the JSON envelope is PREFIXED with that warning
+    # line. Before the fix, `parse/1`'s naive `Jason.decode(output)` failed on the
+    # prefix and dropped EVERY structured field (`:result`/`:tokens`/`:cost_usd`) —
+    # the on-ramp step-1 blocker, since authoring then saw no `:result`. The parse
+    # now narrows to the JSON object span first, so the noise-prefixed real envelope
+    # still yields the structured fields.
+    test "parses a real envelope PREFIXED by claude's stderr warning (T26.8)" do
+      transcript = Conformance.read_transcript("harness/claude_authoring_draft_stdout.txt")
+      assert String.starts_with?(transcript, "Warning: no stdin data received")
+
+      parsed = Profile.parse(Registry.fetch!(:claude), transcript)
+
+      # The structured fields the naive decode used to drop are all present again.
+      assert is_binary(parsed.result)
+      assert is_integer(parsed.tokens) and parsed.tokens > 0
+      assert is_number(parsed.cost_usd)
+
+      # The recovered `:result` is the drafted proposal JSON — it carries a
+      # top-level predicates array (what authoring needs to build the goal).
+      assert {:ok, %{"predicates" => predicates}} = Jason.decode(parsed.result)
+      assert is_list(predicates) and predicates != []
+    end
+
     test "argv renders the claw-code hygiene flags when their opts are supplied" do
       assert_profile_conformance(:claude,
         prompt: "Make the suite green",
