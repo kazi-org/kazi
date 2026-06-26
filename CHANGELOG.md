@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.45.0](https://github.com/kazi-org/kazi/compare/v1.44.0...v1.45.0) (2026-06-26)
+
+
+### Features
+
+* **doc-freshness:** add doc-coverage + stale-task ratchet metrics (T31.6) ([cdfed44](https://github.com/kazi-org/kazi/commit/cdfed4438bf6ea51f6fe2ed749799632d851717d))
+* **examples:** add doc-lifecycle standing goal (T31.6) ([d815a0c](https://github.com/kazi-org/kazi/commit/d815a0ce8026c8dd8d97486c451cfa57a3b7c1aa))
+
 ## [1.44.0](https://github.com/kazi-org/kazi/compare/v1.43.0...v1.44.0) (2026-06-26)
 
 
