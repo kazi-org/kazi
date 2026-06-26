@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.46.1](https://github.com/kazi-org/kazi/compare/v1.46.0...v1.46.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **harness:** tolerate stderr noise before the claude JSON envelope (T26.8) ([d6e1b9a](https://github.com/kazi-org/kazi/commit/d6e1b9aafdd87d401583a41e7e131218022c28f8))
+
 ## [1.46.0](https://github.com/kazi-org/kazi/compare/v1.45.0...v1.46.0) (2026-06-26)
 
 
