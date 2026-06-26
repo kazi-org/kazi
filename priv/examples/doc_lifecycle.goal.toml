@@ -1,0 +1,176 @@
+# kazi STANDING goal: the self-maintaining documentation lifecycle (T31.6,
+# ADR-0036), built on the E32 predicate paradigm (ADR-0040/0041/0042).
+#
+# This is the flagship self-dogfood: kazi reconciling its OWN docs. `docs/plan.md`
+# is kazi's `goal.toml`; as the project grows the plan bloats and the stable docs
+# drift. ADR-0036 makes "the docs stay fresh and the plan stays trimmed" a kazi
+# STANDING goal in three layers, with ALL the logic in the CI + script layer and
+# kazi only DRIVING it (no doc engine in core -- ADR-0036 reject). This file is
+# that goal, expressed entirely as `custom_script` + `ratchet` predicates pointing
+# at the T31.4 checker scripts and the T31.2/T31.3 lifecycle tools.
+#
+# ## How a human runs it
+#
+#     # standing because the goal-file declares it (holds the docs fresh forever):
+#     kazi apply priv/examples/doc_lifecycle.goal.toml --workspace .
+#
+# When a predicate drifts red, kazi re-dispatches the harness to bring it green,
+# then returns to steady observing. There is NO doc-specific code in kazi core:
+# every predicate below is the GENERIC custom_script / ratchet provider wrapping a
+# script that already lives under .github/scripts/.
+#
+# ## The three layers (ADR-0036) and what DRIVES each
+#
+#   Layer 1 (auto)          plan trim          .github/scripts/trim_plan.py --apply
+#                           Deterministic, lossless: archives a fully-done +
+#                           release-covered epic verbatim. Drives the "plan
+#                           trimmed" custom_script predicate (d) and the
+#                           stale-task ratchet toward 0.
+#   Layer 2 (human-confirm) knowledge lift     .github/scripts/extract_knowledge.py
+#                           Propose-then-confirm (the /ingest pattern): lifts
+#                           durable nuggets to the tier docs. NOTHING is removed
+#                           from the archive; routing is reviewed before write, so
+#                           this layer KEEPS its confirm gate -- kazi proposes, a
+#                           human approves.
+#   Layer 3 (auto)          freshness checks   .github/scripts/doc_freshness/*.sh
+#                           The machine-checkable predicates below. They run in CI
+#                           OUTSIDE the agent's reach (ADR-0042), so an agent
+#                           cannot edit a checker to fake a green.
+#
+# See docs/doc-freshness.md and docs/adr/0036-self-maintaining-docs-via-kazi-standing-goal.md.
+
+id = "doc-lifecycle"
+name = "Self-maintaining docs: keep the plan trimmed and the docs fresh forever"
+
+# T3.4d: STANDING/maintenance reconciler (UC-016/UC-046). It does not stop at
+# convergence -- once green it keeps re-observing and re-converges on drift.
+standing = true
+
+[metadata]
+use_case = "UC-046"
+kind = "standing"
+adr = "0036"
+
+[budget]
+# A standing goal runs indefinitely, so leave max_iterations / wall-clock unset; a
+# per-fix-arc token ceiling still bounds runaway drift remediation.
+max_tokens = 500000
+
+[scope]
+# kazi maintains ITS OWN repo. The checker scripts self-locate via BASH_SOURCE, so
+# they evaluate the live plan + docs regardless of where the metric is invoked.
+workspace = "."
+paths = ["docs/plan.md", "docs/plans", "README.md", "docs"]
+
+# T32.4 anti-gaming enforcement (ADR-0042): the freshness checkers and the
+# lifecycle tools are READ-ONLY to the agent during a fix arc -- the agent fixes
+# the DOCS and the PLAN, never the graders. Combined with the checkers running in
+# CI (T31.5), this is "truth lives in the controller, not the agent" (concept §2).
+[enforcement]
+enabled = true
+clean_tree = true
+clean_ref = "HEAD"
+fail_on_skip = true
+read_only_paths = [
+  ".github/scripts/doc_freshness",
+  ".github/scripts/trim_plan.py",
+  ".github/scripts/extract_knowledge.py",
+]
+
+# =============================================================================
+# Layer 3 -- doc-freshness predicates (custom_script, ADR-0040), each WRAPPING a
+# T31.4 checker script. The script's exit code already means pass/fail, so the
+# `exit_zero` verdict is exactly right (a 0 is :pass, any other exit is :fail).
+#
+# Each checker is invoked as `bash <script>`: the `cmd` is ONE executable on PATH
+# (`bash`) and the script is a workspace-relative `args` entry, which bash resolves
+# against the run cwd (`--workspace`). A bare relative `cmd` is NOT runnable --
+# System.cmd resolves an executable against PATH, not the workspace (docs/lore.md
+# L-0012's sibling: cmd is the executable, args carry the rest).
+# =============================================================================
+
+# (d) Layer 1 trigger: no done+released task lingers in the live plan. RED until
+# trim_plan.py --apply has archived the done+released epics (the Layer-1 action).
+[[predicate]]
+id = "plan-trimmed"
+provider = "custom_script"
+description = "no done+released [x] task lingers in the live plan (Layer-1 trim target)"
+cmd = "bash"
+args = [".github/scripts/doc_freshness/check_d_plan_trimmed.sh"]
+verdict = "exit_zero"
+
+# (a) every shipped CLI command appears in README.md.
+[[predicate]]
+id = "commands-in-readme"
+provider = "custom_script"
+description = "every shipped CLI command is documented in README.md"
+cmd = "bash"
+args = [".github/scripts/doc_freshness/check_a_commands_in_readme.sh"]
+verdict = "exit_zero"
+
+# (b) no live doc references a command absent from the code.
+[[predicate]]
+id = "no-dead-command-refs"
+provider = "custom_script"
+description = "no live doc names a removed or unknown CLI command"
+cmd = "bash"
+args = [".github/scripts/doc_freshness/check_b_no_dead_command_refs.sh"]
+verdict = "exit_zero"
+
+# (c) every ADR referenced by a doc exists.
+[[predicate]]
+id = "adr-refs-exist"
+provider = "custom_script"
+description = "every ADR a doc cites exists in docs/adr/"
+cmd = "bash"
+args = [".github/scripts/doc_freshness/check_c_adr_refs_exist.sh"]
+verdict = "exit_zero"
+
+# (E) subsumed: README <-> website canonical-string coherence (T9.9, ADR-0018).
+[[predicate]]
+id = "readme-site-coherence"
+provider = "custom_script"
+description = "README and the website render the same canonical strings (T9.9)"
+cmd = "node"
+args = ["site/scripts/check-coherence.mjs"]
+verdict = "exit_zero"
+
+# (F) subsumed: skill / AGENTS.md <-> CLI command-flag coherence (T16.4, ADR-0024).
+[[predicate]]
+id = "skill-cli-coherence"
+provider = "custom_script"
+description = "the rendered skill / AGENTS.md reference only real commands+flags (T16.4)"
+cmd = "mix"
+args = ["test", "test/kazi/teach_coherence_test.exs"]
+verdict = "exit_zero"
+
+# =============================================================================
+# Envelope-v2 RATCHET predicates (ADR-0041, T32.3). The doc-coverage check is a
+# GRADIENT, not a boolean: the standing goal ratchets it up over time. Each metric
+# script prints ONE bare number to stdout, so no `path` is needed.
+# =============================================================================
+
+# Doc-coverage ratchet: % of shipped commands documented in README. higher_better,
+# baseline "stored" (the metric's own last passing value, tightened on each pass),
+# allowed_regression 0 -> coverage may only improve, never regress.
+[[predicate]]
+id = "doc-coverage-ratchet"
+provider = "ratchet"
+description = "the % of shipped CLI commands documented in README may only improve"
+baseline = "stored"
+direction = "higher_better"
+allowed_regression = 0.0
+metric = { cmd = "bash", args = [".github/scripts/doc_freshness/metric_doc_coverage.sh"] }
+
+# Stale-task ratchet: count of done+released [x] tasks still in the live plan.
+# lower_better with baseline 0 -> passes only when the count reaches 0, and the
+# reported score is the gradient (how many remain) so the loop reads progress as
+# the Layer-1 trim archives done epics.
+[[predicate]]
+id = "stale-tasks-ratchet"
+provider = "ratchet"
+description = "the count of stale done+released [x] tasks in the live plan ratchets to 0"
+baseline = 0
+direction = "lower_better"
+allowed_regression = 0.0
+metric = { cmd = "bash", args = [".github/scripts/doc_freshness/metric_stale_tasks.sh"] }
