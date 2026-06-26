@@ -12,10 +12,12 @@
 // `propose` -> `approve` proposal flow is caught at its `kazi propose` entry
 // point, which is the part that actually no longer exists.
 //
-// Phase: strict-but-WARN. The site is currently DIRTY (the proof SVG shows
-// `kazi run`, index.astro step 2 shows `kazi propose`), so this guard prints
-// every hit but exits 0. Ratchet to BLOCKING (set DEFAULT_BLOCKING = true below,
-// or run with BLOCKING=1) only AFTER T27.6 + T25.2 clean the site.
+// Phase: BLOCKING in CI (ratcheted at T38.4). T27.6 + T25.2 cleaned the site, so
+// the whole site/ tree -- including the E38 blog content under
+// site/src/content/blog/** (now scanned for .md + .mdx) -- passes clean, and the
+// oss-gates `site-commands` job runs with BLOCKING=1 (a removed verb reds the PR).
+// The local default below stays WARN (exit 0) so an editor can run the scanner
+// for a report without it aborting; pass BLOCKING=1 to mirror CI.
 //
 // Run: `npm --prefix site run check:commands` (or `node site/scripts/check-commands.mjs`).
 import { readFileSync, readdirSync } from "node:fs";
@@ -32,8 +34,13 @@ const REMOVED_VERBS = ["run", "propose"];
 const VERB_RE = new RegExp(`\\bkazi\\s+(${REMOVED_VERBS.join("|")})\\b`);
 
 // Source extensions to scan. .svg is included on purpose: the proof asset is XML
-// text and a removed verb can hide in a <tspan>.
-const SCAN_EXTS = new Set([".astro", ".mjs", ".md", ".svg"]);
+// text and a removed verb can hide in a <tspan>. .md AND .mdx are both scanned so
+// the E38 adoption blog content under `site/src/content/blog/**` is covered: the
+// walk below is rooted at the site/ tree and recurses every non-skipped dir, so
+// every blog post (the collection glob is `**/*.{md,mdx}`, T38.1) is scanned and a
+// post can never ship a removed kazi verb (`kazi run` / `kazi propose`) as a live
+// command. (T38.4 extended the set from `.md` to also include `.mdx`.)
+const SCAN_EXTS = new Set([".astro", ".mjs", ".md", ".mdx", ".svg"]);
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Default to the site/ root; SITE_ROOT lets a test point the real scanner at a

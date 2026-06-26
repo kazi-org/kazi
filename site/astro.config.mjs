@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { defineConfig } from "astro/config";
+import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
 
 // Single source of truth for the displayed version: release-please's manifest at
@@ -15,6 +16,12 @@ const KAZI_VERSION = JSON.parse(readFileSync(manifestUrl, "utf8"))["."];
 export default defineConfig({
   site: "https://kazi.sire.run",
   base: "/",
+  // @astrojs/sitemap (T38.4) emits sitemap-index.xml + sitemap-0.xml at build,
+  // enumerating every static route — including the blog index, the series
+  // landing page, and each published post route — so search engines discover the
+  // blog. It walks the generated route set, so a new published post is picked up
+  // automatically; draft posts emit no route and are therefore absent.
+  integrations: [sitemap()],
   vite: {
     plugins: [tailwindcss()],
     define: { __KAZI_VERSION__: JSON.stringify(KAZI_VERSION) },
