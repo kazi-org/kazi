@@ -1396,6 +1396,15 @@ defmodule Kazi.CLI do
   # harness, lease, or worktree is touched. Production injects nothing and the
   # default per-goal loop runs.
   defp run_goal_parallel(%Goal{} = goal, opts, persist?, runtime_opts) do
+    # T21.12 fix: the parallel scheduler dispatches partition/group reconcilers
+    # under the NAMED `Kazi.Scheduler.PartitionSupervisor`. The app supervision
+    # tree starts it, but the Burrito standalone binary hands straight to the CLI
+    # before that tree is stood up (the same path that left `Kazi.Repo` unstarted),
+    # so under the released binary the supervisor is absent and the scheduler's
+    # `start_child/2` crashes with `:noproc`. Ensure it is running for this process
+    # before dispatching — idempotent under mix/test where the app tree started it.
+    {:ok, _supervisor} = Kazi.Scheduler.PartitionSupervisor.ensure_started()
+
     workspace = opts[:workspace] || goal.scope.workspace
     json? = opts[:json] == true
 
