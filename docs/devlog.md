@@ -1580,3 +1580,88 @@ project's success bar (CLAUDE.md): idea → production, with objective convergen
 relaxed (project-scoped allValues=ALLOW) to permit `allUsers` public invoker so the
 live probe can reach `/livez`. Restore it (delete the project-level override) if the
 fixture no longer needs to be public.
+
+## 2026-06-26 — T32.11 expanded-catalog dogfood CONVERGED (the E32 framework drives a real fixture)
+
+The expanded predicate catalog (E32) converged a self-contained fixture on the
+**released binary** (`kazi 1.64.1`, downloaded from the v1.64.1 release, sha256
+verified): four new-kind predicates started RED and a real `claude` agent drove
+them to objective-true under active anti-gaming enforcement. Honest result — every
+predicate gated as intended, enforcement held, no gaming. The fifth new-kind
+predicate (sustained-health) was demonstrated separately (no service in a
+self-contained agent loop). Fixture committed at
+`priv/examples/expanded_catalog_dogfood/`.
+
+**The fixture.** A creation-mode goal (`mode = "create"`, enforcement default-on)
+over a tiny `stats` module. The grader scripts under `checks/` are deterministic
+stand-ins for the real tools (Dialyzer/coverage/mutation-tester/trivy) so the run
+is reproducible offline, but they observe REAL workspace state, so the agent
+converges them with real edits — the framework (provider gating, the envelope-v2
+score gradient, the ratchets, enforcement) is what T32.11 tests, and the providers
+are generic command-runners by design (ADR-0040).
+
+**Run (`kazi apply … --harness claude --json --stream`, workspace = a git checkout
+of the fixture):**
+- iter 0 (observe): all four new-kind predicates FAIL with their t0 scores —
+  `coverage` f/`20.0`, `mutation-score` f/`0.2`, `no-unsafe-eval` (`:static` SARIF)
+  f/`1.0` finding, `no-vulnerable-deps` (`:cve`) f/`1.0` vuln; the `test-count`
+  enforcement guard passes. → `:dispatch_agent`.
+- iter 1 (observe): all five PASS → **`:converged`**. The terminal `predicates`
+  vector carries `prior_score` (`20.0 / 0.2 / 1.0 / 1.0`) so the RED→GREEN gradient
+  is auditable in one object.
+- `iterations: 2`, `iterations_to_convergence: 2`, `cost_usd ≈ 0.363`,
+  `tokens 146819`, `wall_clock_s ≈ 62`, `next_action: done`.
+
+**Per-predicate gating — all correct (observed, not expected):**
+- `:static` (SARIF): t0 1 finding → `:fail`; agent removed `eval(` from
+  `src/stats.py` → 0 findings → `:pass`. (Gated on parsed SARIF findings, not the
+  exit code — the grader exits 0 either way.)
+- `:coverage` ratchet: t0 20% (1/5 functions tested) < target 80 → `:fail`; agent
+  added a `test_<fn>` for every function → 100% → `:pass`. Project no-regression
+  dimension (`project_baseline = "stored"`) held.
+- `:mutation`: t0 score 0.2 (1 assertion) < threshold 0.8 → `:fail`; agent added
+  assertions → score 1.0 → `:pass`. Threshold is **0.8, not 100%** (the loader
+  rejects a 1.0 threshold by design).
+- `:cve` (manifest tier, `count_path`/`baseline 0`): t0 1 vuln (`requests==2.19.0`)
+  → `:fail`; agent bumped to `requests==2.32.3` → 0 vulns → `:pass`.
+
+**Enforcement — active and held (`enforcement` in `--json`):**
+`active: true`, `guarantees: [clean_tree, fail_on_skip, ratchet_guards,
+read_only_lease, separate_process]` (all five), `gaming_events: []`. The agent
+edited only `src/`, `tests/`, and `requirements.txt`; `checks/` was UNCHANGED, so
+the read-only lease held and nothing was flagged — the agent did the real work
+rather than editing a grader. (No gaming was attempted, so the flag path was not
+exercised in the positive; the lease + clean-tree guarantees were merely reported
+active.)
+
+**Sustained-health (`http_probe`, T32.10) — demonstrated separately, both gates:**
+Against a local server (`/stable` always 200, `/flapping` alternates 200/503), an
+`http_probe` with `samples = 3, interval_ms = 200`:
+- `/stable` → the predicate PASSES at t0, so kazi rejected the goal as
+  `vacuous_goal` ("every predicate already passes at t0") — direct proof the
+  sustained-health probe was satisfied by 3 consecutive 200s.
+- `/flapping` → `:fail` at t0 with evidence `healthy_count: 1` and an
+  `assertion_failures` entry `{expected: 200, actual: 503}` — a lone transient 200
+  among failures never reaches N consecutive, exactly the K8s `failureThreshold`
+  model. A single 200 does not pass.
+
+**Two real findings surfaced building the fixture (worth recording):**
+- A relative grader `cmd` (e.g. `cmd = "checks/lint.sh"`) is resolved against the
+  LAUNCHER's cwd, not `--workspace`, and fails `:enoent` (Erlang `spawn_executable`
+  semantics). A PATH-resolvable `cmd` with the script in `args`
+  (`cmd = "bash", args = ["checks/lint.sh"]`) runs in the workspace correctly. The
+  example goal-files use a relative `cmd` (`scripts/coverage`) — that pattern only
+  works if the script is on the launcher's path or absolute. Fixture uses the
+  `bash <script>` form.
+- The `:static` `format = "dialyzer"` parser only recognizes findings on
+  `.ex/.exs/.erl/.hrl` files (`@dialyzer_re` in `lib/kazi/providers/static.ex`); a
+  `.py` finding line silently parses to ZERO findings → a false `:pass`. For a
+  polyglot fixture, `format = "sarif"` is the language-neutral path and gates
+  correctly. (Expected for a Dialyzer-led provider, but a quiet false-pass for a
+  non-BEAM file is a sharp edge — SARIF or a BEAM-extension source avoids it.)
+
+**Verdict: T32.11 DONE (positive).** The expanded catalog converged a real fixture
+on the released binary; all four agent-driven new-kind predicates gated correctly
+RED→GREEN with a visible score gradient; the sustained-health probe gated correctly
+in both directions; enforcement was active with no gaming. Reusable fixture at
+`priv/examples/expanded_catalog_dogfood/`.
