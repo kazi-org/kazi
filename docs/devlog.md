@@ -89,6 +89,95 @@ T19.7's worst-case row + the `Kazi.Context.Escalation` unit tests; a live
 capability-driven climb needs a slice genuinely beyond the cheap tier's reach,
 which a self-verifying harness rarely yields and which was not gamed here.
 
+## 2026-06-26 — T35.10 context-store dogfood → VERDICT: KEEP OPT-IN (do NOT promote to default)
+
+LIVE dogfood of the `--context-store gist` store (ADR-0045 / E35) on the released
+**v1.64.1** binary, driving the **claude** harness on real multi-iteration goals
+in scratch git workspaces, with a real PostgreSQL-backed `gist` provider
+(`gist v1.0.1`, `pg_trgm` available, a local Postgres in a container). Every
+number below is OBSERVED from `apply --json` or `context --json`, not asserted.
+
+**Headline: the integrated store path did not engage on any real `apply` run, so
+the run-result `indexed→returned` ratio is unobservable on the shipped binary.**
+The promote bar (a measured ratio from the released binary) is therefore not met.
+
+### What was run (4 real `apply` runs, claude harness, scratch workspaces)
+
+Two goals, each run WITH and WITHOUT `--context-store gist --context-budget 6000`.
+The checkers are `custom_script` predicates that print an ~11.4 KB failure log
+until a marker file is created; the harness creates the marker and converges.
+
+| run | store | status | iters | converged preds | cost_usd | cost/conv-pred | tokens | `context_store` object |
+|---|---|---|---|---|---|---|---|---|
+| 1-pred converge | off | converged | 2 | 1 | 0.1554 | 0.1554 | 61705 | **absent** |
+| 1-pred converge | gist | converged | 2 | 1 | 0.0728 | 0.0728 | 64066 | **absent** |
+| 2-pred converge | off | converged | 2 | 2 | 0.1398 | 0.0699 | 78692 | **absent** |
+| 2-pred converge | gist | converged | 2 | 2 | 0.2309 | 0.1155 | 76825 | **absent** |
+
+- **No `context_store` object** appears in `apply --json` on ANY store run.
+- **Zero rows** were written to the gist Postgres DB during these runs (sources
+  count stayed 0 after a `TRUNCATE`), even though the 2-predicate run's combined
+  failing evidence inspects to **8411 bytes** — above the `@context_store_threshold`
+  of 5120 that should trigger `compress_evidence/4` (`lib/kazi/loop.ex`). The store
+  branch never executed.
+- The with/without cost spread (0.0728↔0.2309) is **claude prompt-cache
+  nondeterminism** (cached-read tokens varied run-to-run), NOT a store effect — the
+  store did not run, so there is no real cost delta to attribute to it.
+
+### The one signal that IS real: the provider budget-fits when called directly
+
+Exercising the same provider through `kazi context index|search` (the T35.7 wrapper)
+DOES persist and retrieve. Indexed the 11444-byte log (3 chunks), then searched:
+
+| query | budget | returned bytes | ratio | reduction |
+|---|---|---|---|---|
+| "assertion failed marker" | 2000 / 6000 | 691 | 16.6:1 | 94.0% |
+| "BUILD FAILURE LOG assertion" | 2000 / 6000 | 229 | 50.0:1 | 98.0% |
+| "stack frame module" | 2000 / 6000 | 0 | n/a | lexical miss (0 results) |
+
+So the gist provider's budget-fitting is real (94–98% reduction on a matching
+query) but **query-sensitive** — the returned bytes are the matching chunk(s), well
+under budget, and some queries return nothing. This is provider behavior, not the
+integrated-loop measurement the task requires.
+
+### Two structural gaps found (root causes, observed)
+
+1. **`gist stats` reports zeros regardless of DB contents.** The installed gist
+   build's `stats` (CLI) returns per-process/in-memory counters — `Bytes indexed: 0`,
+   `Sources: 0` even immediately after a successful `index` that demonstrably wrote
+   rows. kazi's `context_store` accounting object parses `gist stats`
+   (`Kazi.ContextStore.GistCLI.stats/1` → `attach_context_store_stats/2` in
+   `lib/kazi/cli.ex`), so even on a run where the loop DID index, the run-result
+   `indexed_bytes/returned_bytes/saved_bytes` would read 0/0/0. The accounting
+   surface is blind on this gist build.
+2. **Evidence cap (4000) < store threshold (5120).** Every evidence provider caps
+   its `:output` at `@output_limit = 4_000` (`custom_script`, `static`, `mutation`,
+   `property`, `cve`), below the loop's `@context_store_threshold = 5_120`. A single
+   failing predicate can therefore never cross the threshold; only a multi-predicate
+   failing set can — and even the 8411-byte 2-predicate case did not engage the
+   store on v1.64.1 (see headline). v1.64.1 DOES contain the T35.5 wiring
+   (`19bb14d`, confirmed `git merge-base --is-ancestor`), so this is a real
+   behavioral gap, not a missing release.
+
+### Verdict — KEEP OPT-IN; do NOT promote to default
+
+The ADR-0046 bar is "every number observed, not asserted." On the released binary
+the integrated store produces **no observable `indexed→returned` ratio** (no
+`context_store` object; nothing indexed during real `apply` runs), and the
+accounting that would surface it (`gist stats`) reports zeros. There is no measured
+ratio to "hold," so promotion to default is unjustified — a default-on store that
+silently never engages is strictly worse than an honest opt-in. The store also
+requires external Postgres + gist setup, which on its own argues against default-on.
+The only positive evidence is provider-level budget-fitting (94–98% on one
+artifact), which is real but not the loop measurement.
+
+Recommended follow-ups (not done here; this task is measure + verdict only):
+diagnose why `apply --context-store gist` does not engage the store on a
+threshold-crossing run (no `context_store` object emitted, zero rows indexed);
+lower `@context_store_threshold` below the 4000 provider cap (or raise the cap) so a
+single oversized predicate can engage; and replace the per-process `gist stats`
+read with DB-backed accounting so the run-result ratio is observable.
+
 ## 2026-06-25 — T16.6 LIVE: the installed kazi skill drives a goal end to end (plan → approve → apply) on released v1.46.2
 
 The closing live proof for T16.6 (UC-034): a Claude Code user who runs
