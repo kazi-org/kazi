@@ -345,6 +345,56 @@ defmodule Kazi.AuthoringTest do
       assert {:error, {:invalid_proposal, _}} =
                Authoring.parse_proposal(~s({"predicates":[]}), "g")
     end
+
+    # T26.8: real claude routinely nests the goal under a wrapper key instead of
+    # returning predicates at the top level. After T26.7 that JSON PARSED but
+    # `build_predicates` saw no top-level list and reported "proposal has no
+    # predicates" — the on-ramp step-1 blocker. The parser now descends into the
+    # wrapper so each plausible shape yields ≥1 usable predicate.
+    test "accepts predicates nested under a \"goal\" wrapper" do
+      json = ~s({"goal":{"name":"Wrapped","predicates":[{"id":"p","provider":"http_probe"}]}})
+      assert {:ok, %Goal{mode: :create} = goal} = Authoring.parse_proposal(json, "g")
+      assert [%Kazi.Predicate{id: "p", kind: :http_probe, acceptance?: true}] = goal.predicates
+    end
+
+    test "accepts predicates nested under a \"proposal\" wrapper" do
+      json = ~s({"proposal":{"predicates":[{"id":"p","provider":"http_probe"}]}})
+      assert {:ok, goal} = Authoring.parse_proposal(json, "g")
+      assert [%{id: "p"}] = goal.predicates
+    end
+
+    test "accepts a goal-file-shaped object with the singular \"predicate\" array" do
+      json =
+        ~s({"name":"GF","predicate":[{"id":"p","provider":"http_probe","url":"https://x/healthz"}]})
+
+      assert {:ok, goal} = Authoring.parse_proposal(json, "g")
+      assert [%Kazi.Predicate{id: "p", kind: :http_probe} = predicate] = goal.predicates
+      # sibling config keys (the goal-file convention) survive as predicate config.
+      assert predicate.config[:url] == "https://x/healthz"
+    end
+
+    # T26.8 (the E32 provider gap): authoring used to carry its own 4-entry
+    # provider map that omitted custom_script (and the rest of the E32 catalog), so
+    # a drafted/caller predicate naming a modern provider was silently dropped. It
+    # now defers to the loader's catalog, so a custom_script predicate survives.
+    test "a predicate naming custom_script survives into the built goal" do
+      json =
+        ~s({"predicates":[{"id":"lint","provider":"custom_script","verdict":"exit_zero","cmd":"mix credo"}]})
+
+      assert {:ok, goal} = Authoring.parse_proposal(json, "g")
+      assert [%Kazi.Predicate{id: "lint", kind: :custom_script}] = goal.predicates
+    end
+
+    test "wrapped + custom_script together (a realistic drafted shape)" do
+      json =
+        ~s({"goal":{"name":"Harden","predicate":[) <>
+          ~s({"id":"tests","provider":"test_runner"},) <>
+          ~s({"id":"static","provider":"static","cmd":"mix dialyzer"}]}})
+
+      assert {:ok, goal} = Authoring.parse_proposal(json, "g")
+      kinds = goal.predicates |> Enum.map(& &1.kind) |> Enum.sort()
+      assert kinds == [:static, :tests]
+    end
   end
 
   describe "serialize_goal/1 — round-trips through the loader" do
