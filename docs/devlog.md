@@ -4,6 +4,37 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — LIVE dogfood frontier is headless-unblockable; T26.8 prose-drafting still broken live
+
+A headless `/apply --pool` session checked whether the remaining LIVE dogfood tasks
+are operator-only or actually drivable from a non-interactive session, using the
+`claude` CLI harness (v2.1.193) + the RELEASED binary `kazi v1.45.0` (downloaded
+from the GH release, sha-verified) + agent-browser.
+
+**Core enabler PROVEN (real reconcile).** Authored a minimal create-mode goal — one
+`custom_script` predicate, `bash -c 'test -f hello.txt && [ "$(cat hello.txt)" = ok ]'`,
+`verdict = exit_zero`, failing at t0 (no file). `kazi apply <goal> --workspace <ws>
+--harness claude --json` converged in **2 iterations / 15.3s**: iter1 vector `fail`
+(exit 1) → claude harness created `hello.txt` → iter2 `pass` (exit 0) →
+`{"status":"converged","iterations":2,...}`, `enforcement.active=true`,
+`gaming_events=[]`. `hello.txt` verified = `6f6b` (`ok`, 2 bytes, no newline). So the
+goal-file → claude → objective-true loop runs fully headless on the released binary.
+That unblocks the goal-file dogfoods (T20.11, T21.12, T23.9, T30.4, T31.7, T32.11,
+T35.10) and — with the LiveView feature built + agent-browser — the dashboard tasks
+(T20.8, T21.9) and the live-site leg of T25.10.
+
+**T26.8 LIVE FINDING — the prose on-ramp is still broken.** Drove `kazi plan "<idea>"`
+on v1.45.0 (which contains PR #623). `--json` returns a STRUCTURED clarification
+request (`missing: live-target, scope` — progress over the old raw parse error), but
+`--yes` best-effort STILL returns `{"error":"... proposal has no predicates"}`. So
+PR #623's robust-to-multiple-shapes parser does NOT match what real claude actually
+emits — exactly the risk the fixer flagged (it had no live capture and guessed). The
+real fix per the original T26.8 recipe: source build + a temporary `IO.inspect` in
+`Kazi.Authoring.drive_harness` (authoring.ex:405) to capture ONE raw claude draft,
+then parse THAT shape (or pin it via the drafting prompt). T26.8 stays `[ ]`; it also
+blocks T16.6/T26.6. Plan updated (master Progress Log + E26.md T26.8 note) so other
+sessions claim the now-unblocked dogfoods and avoid re-deferring them as "operator-only".
+
 ## 2026-06-25 — Doc-lifecycle encoded as a kazi standing goal (T31.6 / ADR-0036)
 
 Shipped `priv/examples/doc_lifecycle.goal.toml`: the ADR-0036 documentation
