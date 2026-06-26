@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.46.2](https://github.com/kazi-org/kazi/compare/v1.46.1...v1.46.2) (2026-06-26)
+
+
+### Bug Fixes
+
+* **authoring:** pin custom_script config schema in drafting prompt ([4ac3a71](https://github.com/kazi-org/kazi/commit/4ac3a7114688896ef03525cf1c93a8c26265e375))
+
 ## [1.46.1](https://github.com/kazi-org/kazi/compare/v1.46.0...v1.46.1) (2026-06-26)
 
 
