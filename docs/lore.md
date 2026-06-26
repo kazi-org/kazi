@@ -69,6 +69,23 @@ because it has no cache step. Landmine: ALSO mind that deleting a GitHub Release
 before its replacement has built leaves the Homebrew formula pointing at missing
 assets -- build the new release FIRST, then swap. (E6 / T6.3, 2026-06-22.)
 
+### L-0019 #release #homebrew #tap #onramp -- the Homebrew tap lags the latest release, so `brew install` ships a STALE binary
+`brew install kazi-org/tap/kazi` does NOT track the newest GitHub release
+automatically -- the tap formula is bumped separately, and it drifts behind. As
+of the T16.6 dogfood (2026-06-25) the tap still served **1.41.1** while the
+latest release was **v1.46.2+**. That matters because behavioral fixes ride the
+binary: 1.41.1 carries the BROKEN prose on-ramp (the `kazi plan` "proposal is not
+valid JSON" / "proposal has no predicates" bug fixed in T26.8 and shipped in
+v1.46.x). Consequence: a user who `brew install`s kazi, runs `kazi install-skill`
+(the skill content is correct and version-agnostic), and follows the skill's
+`plan -> approve -> apply` flow FAILS at the very first step (`plan`) on the stale
+binary -- even though the released binary converges the same goal end to end. The
+skill is not the gate; the packaged binary is. Fix: auto-bump the tap on every
+release so `brew install` is never more than one version behind. Until then,
+verify on-ramp behavior against the DOWNLOADED release binary
+(`gh release download <tag> -R kazi-org/kazi`), never the `brew`-installed one,
+and tell brew users to upgrade. (E16 / T16.6, 2026-06-25.)
+
 ## Reconcile / surface scanner
 
 ### L-0006 #reconcile #surface #scanner #deadcode -- the surface scan is APPROXIMATE: reflection and string-dispatch are invisible

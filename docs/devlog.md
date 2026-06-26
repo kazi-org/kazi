@@ -4,6 +4,75 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — T16.6 LIVE: the installed kazi skill drives a goal end to end (plan → approve → apply) on released v1.46.2
+
+The closing live proof for T16.6 (UC-034): a Claude Code user who runs
+`kazi install-skill` gets a skill that drives kazi to convergence with **no
+further instruction**. Exercised against the **released v1.46.2 macOS binary**
+driving the **real claude harness** — no source build, no stubs.
+
+**Step 1 — install the skill (non-invasive).** `kazi install-skill --dir
+<scratch>` writes exactly ONE file, `SKILL.md`, into the target dir (the `--dir`
+flag is the documented test/scratch injection point; default is the global
+skills dir, left untouched here).
+
+**Step 2 — verify the installed skill teaches the CURRENT surface.** Read the
+generated `SKILL.md` and cross-checked every `kazi <cmd>` it names against `kazi
+help --json`:
+- It routes the four current verbs — `plan` (author predicates), `apply`
+  (the reconcile loop), `status` (read state), `adopt` → `kazi init` — plus
+  `approve` / `reject` / `list-proposed`, all REAL commands.
+- It explicitly states the legacy verbs `run`/`propose` were REMOVED and to use
+  `apply`/`plan`; it does NOT instruct the agent to run a removed verb as a live
+  command.
+- It carries the full `plan → approve → apply` recipe, the two-tier economics,
+  the escalation ladder, and a "confirm the live surface with `kazi help --json`"
+  instruction — enough for an agent to drive a goal with no other guidance.
+  VERDICT: the skill content is correct and current.
+- One drift FINDING (not in the skill file): the `install-skill` **stdout
+  banner** the binary prints after writing still reads "propose --json → approve
+  --json → run --harness <cheap>" — the removed verbs. Cosmetic (an agent reads
+  `SKILL.md`, not the banner), but it should be updated to `plan → approve →
+  apply` for honesty. Logged for a follow-up.
+
+**Step 3 — drive a fixture goal following ONLY the skill's flow.**
+1. `kazi plan "create a file named hello.txt … exact contents … Hello, kazi!"
+   --workspace <ws> --yes --json` → drafted a proposal
+   (`prop-create-a-file-named-hello-txt-…`) with **1 usable `custom_script`
+   predicate**: `cmd="sh"`, `args=["-c","printf 'Hello, kazi!\n' | diff -
+   hello.txt"]`, `verdict=exit_zero`. The prose on-ramp parsed cleanly — NO
+   "proposal is not valid JSON" error (the T26.8 fix is live on v1.46.2).
+2. `kazi approve <ref> --json` → `{"status":"approved"}`.
+3. Transcribed the approved predicate verbatim into a create-mode goal-file
+   (`mode="create"`, the predicate byte-for-byte), then `kazi apply <goal-file>
+   --workspace <ws> --harness claude --json` → **`status: converged`** in **2
+   iterations / 16.2s**, predicate `verdict: pass`. Workspace artifact
+   `hello.txt` == bytes `Hello, kazi!\n` (13 bytes), exactly the predicate.
+   `economy`: 1 converged predicate, $0.17, 39,079 tokens.
+4. `kazi status create-a-file-named-hello-txt --json` → `kind:run,
+   converged:true` — the read-model reflects the run. All four skill verbs
+   exercised green.
+
+**Verdict: the dogfood PASSES for a user on the released binary.** T16.6 → `[x]`.
+
+**Two honest caveats.**
+1. A freshly-installed skill registers for a NEW Claude Code session; this
+   verification followed the skill's documented flow with the released v1.46.2
+   binary by hand, which is the faithful equivalent of an agent reading that
+   skill and driving the same commands — not a screenshot of a separate session.
+2. **The stale Homebrew tap is the residual gate for `brew install` users.**
+   `brew install kazi-org/tap/kazi` currently ships **1.41.1**, which has the
+   BROKEN prose on-ramp (the `kazi plan` JSON-parse bug fixed in T26.8 and
+   shipped in v1.46.x). So a brew-install user who runs `install-skill` and
+   follows the skill TODAY fails at the very first step (`plan`) until the tap
+   is bumped to ≥1.46.2. The skill itself is correct and version-agnostic; the
+   gate is the packaged binary, not the skill. Bumping the tap on release is the
+   outstanding fix (see `docs/lore.md` L-0019).
+
+Note: T16.6's plan-line acceptance text predates the verb rename and reads
+"propose → approve → run"; the real, current flow is **plan → approve → apply**
+(`kazi help --json`), which is what was driven here.
+
 ## 2026-06-26 — T26.8 LIVE VERIFIED: the full `plan → approve → apply` on-ramp converges on released v1.46.2
 
 The closing live proof for T26.8. Both code fixes (L2 harness-parse PR #634/v1.46.1,
