@@ -287,6 +287,18 @@ defmodule Kazi.Goal.Loader do
   @goal_modes %{"repair" => :repair, "create" => :create}
 
   @doc """
+  The canonical `provider` string → `Kazi.Predicate.kind` atom mapping the loader
+  validates against (ADR-0002).
+
+  Exposed as the single source of truth so other write paths (notably
+  `Kazi.Authoring`, which drafts goals from a prose idea) map providers to the
+  exact same kinds the loader accepts — a provider added here flows to every
+  caller, so the catalogs cannot drift (T26.8).
+  """
+  @spec provider_kinds() :: %{optional(String.t()) => atom()}
+  def provider_kinds, do: @provider_kinds
+
+  @doc """
   Reads the TOML goal-file at `path` and parses it into a `Kazi.Goal`.
 
   Returns `{:ok, goal}` on success, or `{:error, reason}` with a human-readable
