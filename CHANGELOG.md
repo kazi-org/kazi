@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.43.0](https://github.com/kazi-org/kazi/compare/v1.42.1...v1.43.0) (2026-06-26)
+
+
+### Features
+
+* **scripts:** add gated knowledge-extraction tool (T31.3) ([2d91b14](https://github.com/kazi-org/kazi/commit/2d91b144edc91bd1265705d0f312d783560193f8))
+
 ## [1.42.1](https://github.com/kazi-org/kazi/compare/v1.42.0...v1.42.1) (2026-06-25)
 
 
