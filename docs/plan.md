@@ -180,6 +180,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E34 -- Economy accounting envelope: cached-vs-fresh tokens + cost-per-converged-predicate (P1, ADR-0046) -> plans/E34.md
 ### E35 -- Context-store layer + Gist provider: evidence compression + stuck-bundle replay (P2, ADR-0045) -> plans/E35.md
 ### E36 -- Inner-harness minimalism: tool-surface restriction now, context tiers measured (P2, ADR-0047) -> plans/E36.md
+### E37 -- Wire the Gemini CLI harness profile (P2, ADR-0016/0022) -> plans/E37.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
