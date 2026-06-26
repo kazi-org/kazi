@@ -213,3 +213,80 @@ runner will exit 0 and the gate can become blocking. Flip a single toggle:
   needed to see the blocking signal -- just run it.
 
 This is the same warn -> block ratchet the E29 gates use (`docs/oss-gates.md`).
+
+## The standing goal (T31.6): kazi reconciles its own docs
+
+The CI gate above is the ENFORCEMENT view -- a job that reds a PR on drift. The
+SAME predicate set is also expressed as a committed kazi STANDING goal-file,
+`priv/examples/doc_lifecycle.goal.toml`, so kazi can DRIVE the lifecycle (not just
+flag it): when a predicate drifts red, kazi re-dispatches the harness to bring it
+green, then returns to steady observing. This is the flagship self-dogfood --
+kazi reconciling its own documentation -- and it is the E32 predicate paradigm
+applied verbatim, with NO doc-specific code in kazi core (ADR-0036 reject).
+
+```sh
+# standing because the goal-file declares it -- holds the docs fresh forever:
+kazi apply priv/examples/doc_lifecycle.goal.toml --workspace .
+```
+
+### Predicate composition (all generic providers, zero bespoke engine)
+
+| Predicate id | Provider | Wraps | Verdict / mode |
+|--------------|----------|-------|----------------|
+| `plan-trimmed` | `custom_script` (ADR-0040) | `check_d_plan_trimmed.sh` | `exit_zero` |
+| `commands-in-readme` | `custom_script` | `check_a_commands_in_readme.sh` | `exit_zero` |
+| `no-dead-command-refs` | `custom_script` | `check_b_no_dead_command_refs.sh` | `exit_zero` |
+| `adr-refs-exist` | `custom_script` | `check_c_adr_refs_exist.sh` | `exit_zero` |
+| `readme-site-coherence` | `custom_script` | `site/scripts/check-coherence.mjs` (E) | `exit_zero` |
+| `skill-cli-coherence` | `custom_script` | `test/kazi/teach_coherence_test.exs` (F) | `exit_zero` |
+| `doc-coverage-ratchet` | `ratchet` (ADR-0041) | `metric_doc_coverage.sh` | `higher_better`, baseline `stored` |
+| `stale-tasks-ratchet` | `ratchet` | `metric_stale_tasks.sh` | `lower_better`, baseline `0` |
+
+The six freshness checks are `custom_script` predicates: the checker's exit code
+already means pass/fail, so the `exit_zero` verdict (ADR-0040) is exactly right.
+Each is invoked as `bash <script>` -- the `cmd` is one executable on PATH and the
+checker rides in `args`, which bash resolves against `--workspace` (a bare
+relative `cmd` is not runnable; `System.cmd` searches PATH, not the workspace).
+
+Two checks that are GRADIENTS, not booleans, are `ratchet` predicates (envelope-v2,
+ADR-0041): `doc-coverage-ratchet` reads the % of shipped commands documented in
+the README (`metric_doc_coverage.sh`, the same command surface predicate (a) uses)
+and may only improve; `stale-tasks-ratchet` reads the count of stale done+released
+`[x]` tasks (`metric_stale_tasks.sh`, the same offenders predicate (d) enumerates)
+and ratchets to `0`. Each metric script prints ONE bare number to stdout, so the
+ratchet reads stdout directly (no `path`).
+
+### The three layers and what DRIVES each
+
+The goal-file maps onto ADR-0036's three layers -- Layer 1 and 3 auto, Layer 2
+keeps its human-confirm gate:
+
+- **Layer 1 (auto) -- plan trim.** When `plan-trimmed` / `stale-tasks-ratchet` are
+  red, the fix is `.github/scripts/trim_plan.py --apply` (T31.2): deterministic,
+  lossless archival of done+released epics.
+- **Layer 2 (human-confirm) -- knowledge lift.** After an epic is archived,
+  `.github/scripts/extract_knowledge.py` (T31.3) PROPOSES tier-routed edits; a
+  human approves them (`--apply`). The goal does not auto-apply Layer 2.
+- **Layer 3 (auto) -- freshness checks.** The six predicates above, run in CI
+  OUTSIDE the agent's reach.
+
+### Anti-gaming (ADR-0042)
+
+The goal-file's `[enforcement]` block marks the checker scripts and the lifecycle
+tools (`.github/scripts/doc_freshness`, `trim_plan.py`, `extract_knowledge.py`)
+`read_only_paths`, so an agent fixing the docs cannot edit a grader to fake a
+green; combined with the checkers running in CI (T31.5), "truth lives in the
+controller, not the agent" (concept §2). `clean_tree` and `fail_on_skip` are on.
+
+### Validation
+
+`test/kazi/goal/doc_lifecycle_goal_test.exs` pins that the goal-file loads as a
+standing goal with exactly this composition (6 `custom_script` + 2 `ratchet`, no
+other kinds), that every wrapper points at a real script on disk (zero-stub), and
+that a freshness wrapper EVALUATES to a genuine `:pass`/`:fail` verdict (never
+`:error`). The shipped-examples guard (`examples_runnable_test.exs`) additionally
+loads it with every other recipe. Today the goal evaluates to a real mixed vector
+-- `adr-refs-exist`, the two coherence checks, and `doc-coverage-ratchet` pass;
+`plan-trimmed`, `commands-in-readme`, `no-dead-command-refs`, and
+`stale-tasks-ratchet` are red, i.e. exactly the drift the live dogfood (T31.7)
+drives to green.

@@ -54,6 +54,17 @@ heuristic; each written edit carries a `kx:<sig>` provenance marker so re-runnin
 idempotent. `test_extract_knowledge.py` pins the tier map, the never-touch-archive
 invariant, the no-knowledge-lost backstop, and idempotency.
 
+**Standing goal (T31.6/ADR-0036).** The whole lifecycle is encoded as a committed
+kazi STANDING goal-file, `priv/examples/doc_lifecycle.goal.toml`, so kazi DRIVES it
+(`kazi apply priv/examples/doc_lifecycle.goal.toml --workspace .`): the six
+doc-freshness checks are `custom_script` predicates (ADR-0040) wrapping the T31.4
+scripts via `bash <script>`, plus a doc-coverage `ratchet` (% commands documented,
+higher_better) and a stale-task-count `ratchet` (to 0, lower_better) per
+envelope-v2 (ADR-0041). An `[enforcement]` block marks the checkers + lifecycle
+tools `read_only_paths` (ADR-0042) so an agent cannot edit a grader. NO doc logic
+lives in kazi core. See `docs/doc-freshness.md` ("The standing goal") and
+`test/kazi/goal/doc_lifecycle_goal_test.exs`. The live dogfood run is T31.7.
+
 ## Execution model
 
 - Work the plan with `/apply --pool` (the operator runs several sessions via
