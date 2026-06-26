@@ -84,6 +84,59 @@ test.describe("series landing page", () => {
   });
 });
 
+// T38.21: series instrumentation. Asserted against the PUBLISHED series landing
+// page (a real, shipped blog page) rather than a faked post — the per-post
+// canonical/UTM behaviour is identical (both render through Layout.astro + the
+// shared withUtm helper), so this exercises the true contract without minting a
+// fake published post (which the honesty discipline above forbids).
+test.describe("series instrumentation (T38.21)", () => {
+  const SERIES_URL = `/blog/${SERIES_SLUG}`;
+
+  test("emits a canonical URL pointing back to the live permalink", async ({
+    page,
+  }) => {
+    await page.goto(SERIES_URL);
+    const canonical = page.locator('link[rel="canonical"]');
+    await expect(canonical).toHaveCount(1);
+    // The canonical is the live-site permalink (Astro.site = https://kazi.sire.run),
+    // not the local preview origin — that is what cross-posts must point back to.
+    const href = await canonical.getAttribute("href");
+    // Live-site permalink (Astro emits a trailing slash for directory routes).
+    expect(href.replace(/\/$/, "")).toBe(`https://kazi.sire.run${SERIES_URL}`);
+  });
+
+  test("outbound repo link carries the full UTM scheme", async ({ page }) => {
+    await page.goto(SERIES_URL);
+    const repoLink = page
+      .locator('nav[aria-label="Primary"] a', { hasText: "GitHub" })
+      .first();
+    const href = await repoLink.getAttribute("href");
+    const url = new URL(href);
+    expect(url.origin + url.pathname).toBe("https://github.com/kazi-org/kazi");
+    expect(url.searchParams.get("utm_source")).toBe("blog");
+    expect(url.searchParams.get("utm_medium")).toBe("post");
+    expect(url.searchParams.get("utm_campaign")).toBe("vibe-to-reconciliation");
+    expect(url.searchParams.get("utm_content")).toBe(SERIES_SLUG);
+  });
+
+  test("ships the cookieless analytics include (inactive without a domain)", async ({
+    page,
+  }) => {
+    const res = await page.goto(SERIES_URL);
+    const html = (await res?.text()) ?? "";
+    // The include is config-gated: with no PUBLIC_ANALYTICS_DOMAIN at build time it
+    // emits NO tracker script, only an honest marker comment. (When a domain is
+    // set, this flips to a <script data-domain> Plausible include.)
+    const hasMarker = html.includes("kazi analytics:");
+    const hasTracker =
+      html.includes("data-domain") && html.includes("plausible.io");
+    expect(
+      hasMarker || hasTracker,
+      "expected the analytics include (marker comment or tracker script) in the page HTML",
+    ).toBe(true);
+  });
+});
+
 // T38.3: the per-post route ([...slug].astro). The published set is honestly
 // empty today (only a draft placeholder exists), so the production build emits
 // NO post page — and the route's getStaticPaths excludes drafts. We assert the

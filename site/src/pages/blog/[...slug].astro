@@ -12,6 +12,7 @@ import type { GetStaticPaths } from "astro";
 import { getCollection, render } from "astro:content";
 import type { CollectionEntry } from "astro:content";
 import Layout from "../../layouts/Layout.astro";
+import { withUtm } from "../../utm.mjs";
 
 const REPO = "https://github.com/kazi-org/kazi";
 
@@ -79,6 +80,10 @@ const dateFmt = new Intl.DateTimeFormat("en-US", {
 // The series landing page slug (T38.2) — link the post's series back to it.
 const seriesSlug = "from-vibe-coding-to-reconciliation";
 const isFlagshipSeries = series === "From Vibe Coding to Reconciliation";
+
+// Outbound repo/install link, UTM-tagged so the click is attributed to THIS post
+// (the series' one adoption signal — see utm.mjs / docs/blog-style.md).
+const repoHref = withUtm(REPO, post.id);
 ---
 
 <Layout
@@ -105,7 +110,7 @@ const isFlagshipSeries = series === "From Vibe Coding to Reconciliation";
       <a href="/#try" class="ui-body ui-link">Try it</a>
       <a href="/#how" class="ui-body ui-link">How it works</a>
       <a href="/blog" class="ui-body ui-link">Blog</a>
-      <a href={REPO} class="ui-outline rounded-lg border px-3 py-1.5 font-medium"
+      <a href={repoHref} class="ui-outline rounded-lg border px-3 py-1.5 font-medium"
         >GitHub</a
       >
     </nav>
@@ -241,7 +246,7 @@ const isFlagshipSeries = series === "From Vibe Coding to Reconciliation";
       </div>
       <nav class="flex items-center gap-5" aria-label="Footer">
         <a href="/blog" class="ui-link">Blog</a>
-        <a href={REPO} class="ui-link">GitHub</a>
+        <a href={repoHref} class="ui-link">GitHub</a>
         <a href={`${REPO}/releases`} class="ui-link">Releases</a>
         <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
       </nav>

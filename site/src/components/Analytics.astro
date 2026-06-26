@@ -1,0 +1,42 @@
+---
+// Privacy-respecting, cookieless analytics include (T38.21, ADR-0048 dec. 8).
+//
+// The site is static (GitHub Pages, no backend), so analytics must be a
+// client-only, cookieless include — no consent banner, no PII, no cross-site
+// cookies. This wires a Plausible-style include (Plausible is cookieless and
+// GDPR/CCPA/PECR-compliant by design) using its outbound-link variant, which
+// auto-records clicks on links leaving the site. That outbound-link event is how
+// the series' ONE adoption signal — blog-attributed install intents (clicks from
+// a blog page to the kazi repo/install, see docs/blog-style.md + utm.mjs) — is
+// measured, WITHOUT tracking individuals.
+//
+// CONFIG-GATED, not faked. The include ships WIRED but inactive until a domain is
+// supplied at build time via the PUBLIC_ANALYTICS_DOMAIN env var (the Pages deploy
+// passes it from the `ANALYTICS_DOMAIN` repo variable — see .github/workflows/
+// pages.yml and docs/site-analytics.md). When the var is empty NO tracker script
+// is emitted — the page stays script-free and a visible HTML comment says so, so
+// the build never pretends to be measuring when it is not. This is deliberate: we
+// do not hardcode a placeholder endpoint that silently drops events.
+const domain = import.meta.env.PUBLIC_ANALYTICS_DOMAIN?.trim();
+// The script source. Defaults to Plausible Cloud's outbound-link variant; a
+// self-hosted Plausible (or a compatible cookieless provider) can override it via
+// PUBLIC_ANALYTICS_SRC without touching this file.
+const src =
+  import.meta.env.PUBLIC_ANALYTICS_SRC?.trim() ||
+  "https://plausible.io/js/script.outbound-links.js";
+const enabled = Boolean(domain);
+---
+
+{
+  enabled ? (
+    <script is:inline defer data-domain={domain} src={src} />
+  ) : (
+    <Fragment
+      set:html={
+        "<!-- kazi analytics: cookieless Plausible include is WIRED but inactive " +
+        "(PUBLIC_ANALYTICS_DOMAIN unset). Set the ANALYTICS_DOMAIN repo variable to " +
+        "activate on the next Pages deploy. See docs/site-analytics.md. -->"
+      }
+    />
+  )
+}

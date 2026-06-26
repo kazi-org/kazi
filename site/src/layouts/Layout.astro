@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import Analytics from "../components/Analytics.astro";
 
 interface Props {
   title?: string;
@@ -68,6 +69,11 @@ const ogImageAlt =
     <!-- Per-page <head> extras (e.g. a blog post's article:published_time /
          article:author / article:tag). Empty on every page that omits it. -->
     <slot name="head" />
+
+    <!-- Cookieless, privacy-respecting analytics (T38.21). Config-gated: emits a
+         tracker only when PUBLIC_ANALYTICS_DOMAIN is set at build time, else an
+         HTML comment marker. See docs/site-analytics.md. -->
+    <Analytics />
   </head>
   <body class="page-shell min-h-screen antialiased selection:bg-violet-500/30">
     <slot />
