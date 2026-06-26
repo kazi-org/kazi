@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.60.0](https://github.com/kazi-org/kazi/compare/v1.59.0...v1.60.0) (2026-06-26)
+
+
+### Features
+
+* **blog:** T38.13 Post 8 — a definition of "done" that can't lie ([e178360](https://github.com/kazi-org/kazi/commit/e1783600a19979e8f371bda918a4406b55aaf9c2))
+
 ## [1.59.0](https://github.com/kazi-org/kazi/compare/v1.58.0...v1.59.0) (2026-06-26)
 
 
