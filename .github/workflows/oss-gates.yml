@@ -14,12 +14,14 @@ name: OSS gates
 #                                  command coverage (T22.x/T28.3), the kazi
 #                                  mcp/adopt drift (T28.3), and the untrimmed
 #                                  plan (T31.2) -- do not red every PR.
-#   4. site-commands   (T29.4) -- the site source must not present a REMOVED kazi
-#                                  verb (`kazi run`, `kazi propose`) as a live
-#                                  command. Scans site/ incl. .svg assets. Phase
-#                                  1: WARN only (the proof SVG + index.astro step
-#                                  2 are still dirty; T27.6 + T25.2 clean them).
-#                                  Only scans on PRs that touch site/.
+#   4. site-commands   (T29.4, blog glob T38.4) -- the site source must not
+#                                  present a REMOVED kazi verb (`kazi run`,
+#                                  `kazi propose`) as a live command. Scans site/
+#                                  incl. .svg assets AND the E38 blog content
+#                                  (site/src/content/blog/**, .md + .mdx).
+#                                  BLOCKING (ratcheted at T38.4 once T27.6 + T25.2
+#                                  cleaned the site). Only scans on PRs that touch
+#                                  site/.
 #   5. doc-commands    (T28.4) -- every kazi command/flag a LIVE doc (README +
 #                                  docs/concept.md + docs/) presents as runnable
 #                                  must exist in the REAL CLI surface (parsed from
@@ -160,9 +162,13 @@ jobs:
       - name: Run site command-accuracy guard (only when site/ changed)
         env:
           BASE_REF: origin/${{ github.base_ref }}
-          # Phase 1: warn only. The scanner defaults to non-blocking; flip this to
-          # "1" (and clear the dirty site, T27.6 + T25.2) to ratchet to blocking.
-          BLOCKING: "0"
+          # BLOCKING (ratcheted at T38.4). T27.6 + T25.2 cleaned the site (the
+          # proof SVG + index.astro no longer ship a removed verb), so the whole
+          # site/ tree -- now including the E38 blog content under
+          # site/src/content/blog/** (scanned for .md + .mdx) -- passes clean. A
+          # removed kazi verb (`kazi run` / `kazi propose`) on any site surface,
+          # blog posts included, now reds the PR.
+          BLOCKING: "1"
         run: |
           set -uo pipefail
           # oss-gates.yml triggers on every PR (no path filter), so gate the scan
