@@ -5,10 +5,10 @@ defmodule Kazi.Harness.Registry do
 
   `:claude` is the default harness (and the one whose behaviour every other path
   is pinned against). Further built-in harnesses (`:opencode` in T8.4, then
-  `:codex`/`:gemini_cli`/…) are added here as profile DATA — a `command`, an argv
-  renderer, and a parser — not as new adapter modules. A fully custom harness is
-  declared in config and resolved by the resolution seam (T8.5) without touching
-  this module.
+  `:codex`/`:antigravity`/`:claw`/`:gemini_cli`) are added here as profile DATA —
+  a `command`, an argv renderer, and a parser — not as new adapter modules. A
+  fully custom harness is declared in config and resolved by the resolution seam
+  (T8.5) without touching this module.
 
   Lookup is total: an unknown id returns a tagged `{:error, {:unknown_harness, id}}`
   so the resolution seam can report a clear message instead of crashing.
@@ -26,6 +26,7 @@ defmodule Kazi.Harness.Registry do
   def fetch(:codex), do: {:ok, codex()}
   def fetch(:antigravity), do: {:ok, antigravity()}
   def fetch(:claw), do: {:ok, claw()}
+  def fetch(:gemini_cli), do: {:ok, gemini_cli()}
   def fetch(id) when is_atom(id), do: {:error, {:unknown_harness, id}}
 
   @doc """
@@ -42,7 +43,7 @@ defmodule Kazi.Harness.Registry do
 
   @doc "The ids of all built-in harnesses."
   @spec ids() :: [atom()]
-  def ids, do: [:claude, :opencode, :codex, :antigravity, :claw]
+  def ids, do: [:claude, :opencode, :codex, :antigravity, :claw, :gemini_cli]
 
   # The :claude profile — the default. Its argv + parser are the canonical
   # Claude-specific boundary logic (`Kazi.Harness.Profiles.Claude`), pinned
@@ -156,6 +157,28 @@ defmodule Kazi.Harness.Registry do
       build_args: &Profiles.Claw.build_args/2,
       parse: &Profiles.Claw.parse/1,
       supported_opts: [:command]
+    }
+  end
+
+  # The :gemini_cli profile (T37.1, ADR-0022) — Google's Gemini CLI (`gemini`), a
+  # FULLY-CONFORMANT addition like Codex (native `-o json`, no #76-style non-TTY
+  # workaround). argv is `-p <prompt> -o json --approval-mode yolo` plus an
+  # optional `-m <m>`; `--approval-mode yolo` auto-approves tool actions so the run
+  # is non-interactive (the analogue of Antigravity's `--yes`). The parser consumes
+  # gemini's `-o json` envelope (`Kazi.Harness.Profiles.GeminiCli`), mirroring the
+  # Antigravity single-envelope path. supported_opts are the per-run `:command`
+  # override (the test-stub seam) and `:model` — gemini does NOT understand Claude's
+  # hygiene flags, so resolution (T8.5) drops them. Auth is `GEMINI_API_KEY` (or
+  # Google OAuth / Vertex `GOOGLE_API_KEY`), supplied by the operator's environment
+  # (forwarded via opts[:env], not a profile concern).
+  @spec gemini_cli() :: Profile.t()
+  defp gemini_cli do
+    %Profile{
+      id: :gemini_cli,
+      command: "gemini",
+      build_args: &Profiles.GeminiCli.build_args/2,
+      parse: &Profiles.GeminiCli.parse/1,
+      supported_opts: [:command, :model]
     }
   end
 end
