@@ -25,6 +25,52 @@ so re-running is idempotent. Wired the fixture test into `oss-gates.yml` alongsi
 lossless, mechanical) + T31.3 (extract, gated, lossless backstop) are Layers 1+2 of
 the ADR-0036 doc lifecycle; T31.6 will drive both as a kazi standing goal.
 
+## 2026-06-25 — T26.8: `kazi plan` drafted-proposal SHAPE made robust + E32 providers mapped (PR #623, live-verify deferred)
+
+Worked T26.8 under `/apply --pool` (headless). The on-ramp step-1 blocker after
+T26.7: a drafted proposal PARSES, but `build_predicates` reported "proposal has no
+predicates" because the predicate array wasn't at the documented top level.
+
+**Diagnosis (two distinct gaps).**
+  1. *Shape.* `parse_proposal/2` read only the top-level plural `"predicates"` key.
+     Real claude routinely returns the goal nested under a wrapper
+     (`{"goal": {…}}` / `"proposal"` / `"spec"`) or as a goal-file-shaped object
+     using the singular `"predicate"` array — so `Map.get(map, "predicates")` was
+     `nil` and `build_predicates(nil)` → "proposal has no predicates".
+  2. *Provider catalog.* Authoring kept its OWN 4-entry `@provider_kinds`
+     (`test_runner`/`http_probe`/`prod_log`/`browser`) that omitted the entire E32
+     catalog, so a drafted/caller predicate naming `custom_script` (or `static`,
+     `ratchet`, `metrics`, `coverage`, `property`, `mutation`, `cve`) was dropped by
+     `provider_kind/1` → "no usable predicate in proposal".
+
+**Approach: robust-to-multiple-shapes (NOT a live-captured shape).** Headless, so a
+multi-minute live `claude` capture wasn't reliable; per the task's sanctioned
+fallback the parser was made robust to the plausible shapes (a durable fix
+regardless of which exact shape claude emits):
+  - `unwrap_proposal/1` descends into a single `goal`/`proposal`/`spec` wrapper when
+    the top level carries no predicate array;
+  - `extract_predicates/1` accepts both the plural `"predicates"` and the goal-file
+    singular `"predicate"` array;
+  - `predicate_config_source/1` takes config from a nested `"config"` map, else
+    collects the non-reserved sibling keys (the goal-file convention) so that
+    shape's config survives;
+  - provider mapping now defers to `Kazi.Goal.Loader.provider_kinds/0` — newly
+    exposed as the single source of truth — so the loader's full catalog is
+    recognised and the two catalogs cannot drift again. Malformed input still
+    errors cleanly.
+
+**Validation.** `mix compile --warnings-as-errors` + `mix format --check-formatted`
+clean; `authoring_test.exs` 38 passed (6 new fixtures: wrapper-nested,
+goal-file-singular with sibling config, custom_script survival, wrapped+modern
+combo); full suite 2240 passed (the lone foreground failure was the known
+timing-flaky `Scheduler.SupervisionTest`, greens on re-run).
+
+**REMAINING GATE (why T26.8 stays `[ ]`).** The acceptance still requires LIVE
+verification on the released binary — `kazi plan "<idea>"` → `kazi approve <ref>` →
+`kazi apply` converges (the full chain, which also unblocks T27.8). A headless agent
+cannot cut a release or drive a live multi-minute claude session, so that leg is
+DEFERRED to a live session. The code/tests/docs landed; the live verify did not.
+
 ## 2026-06-25 — Session handover: release/tap pipeline fixed live; `kazi plan` drafting half-fixed (T26.7 done, T26.8 next)
 
 Long `/apply --pool` + operator-directed session. Shipped + verified live this session:
