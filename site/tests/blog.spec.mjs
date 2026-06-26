@@ -153,6 +153,43 @@ test.describe("blog index", () => {
     ).toHaveCount(1);
   });
 
+  test("/blog lists the series in reading order, Part 1 → Part 12", async ({
+    page,
+  }) => {
+    // Every adoption-series post shares one publish date, so a date-only sort is
+    // unstable and scrambles the series. The index sorts by date then part, so
+    // the rendered order must be ascending by part (Part 1 first).
+    await page.goto("/blog");
+    const expected = [
+      POST1_SLUG,
+      POST2_SLUG,
+      POST3_SLUG,
+      POST4_SLUG,
+      POST5_SLUG,
+      POST6_SLUG,
+      POST7_SLUG,
+      POST8_SLUG,
+      POST9_SLUG,
+      POST10_SLUG,
+      POST11_SLUG,
+      POST12_SLUG,
+    ];
+    const hrefs = await page
+      .locator("#blog-post-list > li a[href^='/blog/']")
+      .evaluateAll((els) =>
+        els
+          .map((el) => el.getAttribute("href"))
+          .filter((h) => h && !h.endsWith("/blog")),
+      );
+    const order = hrefs.map((h) => h.replace(/^\/blog\//, "").replace(/\/$/, ""));
+    // Keep only the per-post links (one per post), preserving DOM order.
+    const seen = [];
+    for (const slug of order) {
+      if (expected.includes(slug) && !seen.includes(slug)) seen.push(slug);
+    }
+    expect(seen).toEqual(expected);
+  });
+
   test("/blog loads with no console errors", async ({ page }) => {
     const errors = watchConsole(page);
     await page.goto("/blog", { waitUntil: "networkidle" });
