@@ -1,15 +1,16 @@
 // T38.2: smoke test for the blog index + the series landing page (served from
 // dist/). Asserts ONLY what is genuinely true today.
 //
-// HONEST about the empty published set: until Post 1 ships (T38.6) the published
-// blog set is EMPTY (the collection holds only a draft placeholder). So this test
-// asserts the index renders its empty state — it does NOT assert "≥1 published
-// post". That "lists at least one post" assertion (from the plan acc) is
-// deliberately DEFERRED to Post 1 (T38.6); faking a published post to satisfy it
-// would be dishonest.
+// T38.6 shipped Post 1, so the published blog set is no longer empty: the index
+// now lists at least one post (the "≥1 published post" assertion the plan acc
+// deferred from T38.2 is fulfilled here), and the series landing page flips
+// Part 1's row from "coming" to a live link.
 import { test, expect } from "@playwright/test";
 
 const SERIES_SLUG = "from-vibe-coding-to-reconciliation";
+// Post 1 (T38.6). Its filename is the slug; the per-post route is /blog/<slug>.
+const POST1_SLUG = "the-ceiling-of-looks-good-to-me";
+const POST1_TITLE = 'The ceiling of "looks good to me"';
 
 function watchConsole(page) {
   const errors = [];
@@ -27,16 +28,19 @@ test.describe("blog index", () => {
     await expect(page.getByRole("heading", { name: "The kazi blog" })).toBeVisible();
   });
 
-  test("/blog is empty-safe (shows the empty state, no faked post)", async ({
+  test("/blog lists the published post(s), no empty state (T38.6)", async ({
     page,
   }) => {
     await page.goto("/blog");
-    // Published set is honestly empty until T38.6 → the empty state renders, and
-    // there is no post list. (When Post 1 ships, this flips to a post list; the
-    // "≥1 post" assertion is deferred to that task.)
-    await expect(page.locator("#blog-empty-state")).toBeVisible();
-    await expect(page.getByText("Posts coming soon")).toBeVisible();
-    await expect(page.locator("#blog-post-list")).toHaveCount(0);
+    // Post 1 is published → the post list renders and the empty state is gone.
+    await expect(page.locator("#blog-empty-state")).toHaveCount(0);
+    await expect(page.locator("#blog-post-list")).toBeVisible();
+    const items = page.locator("#blog-post-list > li");
+    await expect(items.first()).toBeVisible();
+    // Post 1 is listed and links to its per-post route.
+    await expect(
+      page.locator(`#blog-post-list a[href="/blog/${POST1_SLUG}"]`),
+    ).toHaveCount(1);
   });
 
   test("/blog loads with no console errors", async ({ page }) => {
@@ -66,13 +70,22 @@ test.describe("series landing page", () => {
     expect(parts).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
 
-  test("marks unpublished parts as coming", async ({ page }) => {
+  test("marks the published part(s) and the rest as coming (T38.6)", async ({
+    page,
+  }) => {
     await page.goto(`/blog/${SERIES_SLUG}`);
-    // No post is published yet, so every part carries the "coming" badge. Scope
+    // Post 1 is published; the remaining 11 still carry the "coming" badge. Scope
     // to the badges inside the parts list (the intro prose also uses the word).
     await expect(
       page.locator("#series-parts .ui-chip", { hasText: "coming" }),
-    ).toHaveCount(12);
+    ).toHaveCount(11);
+    await expect(
+      page.locator("#series-parts .ui-chip", { hasText: "published" }),
+    ).toHaveCount(1);
+    // Part 1's row links to the live post.
+    await expect(
+      page.locator(`#series-parts a[href="/blog/${POST1_SLUG}"]`),
+    ).toHaveCount(1);
   });
 
   test("loads with no console errors", async ({ page }) => {
@@ -187,20 +200,39 @@ test.describe("series visual assets (T38.20)", () => {
   });
 });
 
-// T38.3: the per-post route ([...slug].astro). The published set is honestly
-// empty today (only a draft placeholder exists), so the production build emits
-// NO post page — and the route's getStaticPaths excludes drafts. We assert the
-// honest, true-today contract: a draft post is NOT reachable in the shipped
-// site (404). The "a published post renders at /blog/<slug> with correct meta +
-// working prev/next" assertion is exercised LOCALLY in dev (where drafts are
-// previewable) and was verified during T38.3; it is deferred here to Post 1
-// (T38.6), exactly as the index's "≥1 post" assertion is — faking a published
-// post to green this would be dishonest.
+// T38.3 / T38.6: the per-post route ([...slug].astro). Post 1 is now a real
+// published post, so we assert it renders at its permalink with the correct
+// header (title) and a header image carrying non-empty alt text. Drafts remain
+// excluded from the production build (the welcome placeholder 404s).
 test.describe("blog post route", () => {
   test("draft posts are excluded from the production build (404)", async ({
     page,
   }) => {
     const res = await page.goto("/blog/welcome");
     expect(res?.status()).toBe(404);
+  });
+
+  test("Post 1 renders at its permalink with title + header image (T38.6)", async ({
+    page,
+  }) => {
+    const res = await page.goto(`/blog/${POST1_SLUG}`);
+    expect(res?.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", { level: 1, name: POST1_TITLE }),
+    ).toBeVisible();
+    // Header image is the per-post art, with non-empty alt text.
+    const hero = page.locator('main article img[src="/blog/art/part-01.svg"]');
+    await expect(hero).toHaveCount(1);
+    const alt = (await hero.getAttribute("alt"))?.trim() ?? "";
+    expect(alt.length, "empty alt on the post header image").toBeGreaterThan(0);
+  });
+
+  test("Post 1 loads with no console errors (T38.6)", async ({ page }) => {
+    const errors = watchConsole(page);
+    await page.goto(`/blog/${POST1_SLUG}`, { waitUntil: "networkidle" });
+    expect(
+      errors,
+      `console errors on the post:\n${errors.join("\n")}`,
+    ).toEqual([]);
   });
 });
