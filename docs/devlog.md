@@ -4,6 +4,78 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T21.12 + T23.9 RE-VERIFIED on the FIXED released binary v1.64.2 (`--parallel` now runs end-to-end; both DONE)
+
+Re-verification of the two parallel-scheduler dogfoods on the **released v1.64.2
+macOS binary** (the bundled fix from PR #740 — see release notes: `scheduler: start
+PartitionSupervisor on CLI apply --parallel path` + `partition: term-scope the
+repo-map blast radius`). release-please rolled the fix INTO v1.64.2 (the release
+commit `9ae2c9a` sits atop the two fix commits; tag `v1.64.2` contains
+`1708f3b`/`5b21475`) rather than cutting a new patch above it, so v1.64.2 IS the
+fixed binary — no separate tag was needed. Binary checksum `kazi_macos_aarch64.sha256`
+verified OK; `kazi version` → `1.64.2`. Inner harness: real `claude` (Claude Code
+2.1.193) via a one-line permission wrapper SCRIPT set as the goal-file `[harness]
+command` (`#!/bin/bash; exec claude --dangerously-skip-permissions "$@"`). Note the
+`[harness] command` override is a bare binary path passed to `System.cmd` (the
+profile supplies the args), so a shell string with flags does NOT execute — it must
+be an executable wrapper file. A `hello.txt` smoke converged first (2 iters,
+$0.11) to confirm the wrapper grants edits. Fixture:
+`priv/examples/predicate_graph_waves.toml`, run against a throwaway Go workspace
+(`git init`, `go mod init`, one `main.go`), all predicates failing at t0.
+
+**Step 1 — `--explain --json` (un-collapse, was the partitioner defect).** On the
+FIXED binary frontier 0 now prints **TWO** partitions, not one:
+```
+frontier 0:  partition <hashA> goal_ids:["health"]
+             partition <hashB> goal_ids:["result-contract"]
+frontier 1:  partition <hashC> goal_ids:["streaming"]
+```
+The disjoint groups `result-contract` and `health` are separate blast-radius
+partitions; `streaming` is gated in its own frontier behind its `needs`. This is the
+exact authored needs-DAG. (On v1.64.1 this collapsed `health`+`result-contract` into
+one partition.)
+
+**Step 2 — `--parallel --json` real EXECUTION (was the `:noproc` crash).** The run
+**converged, exit 0**, no `:noproc`. Group-iteration timeline from the loop log:
+```
+07:38:58.847  result-contract  iter=1   failing=[contract-type-defined]
+07:38:58.847  health           iter=1   failing=[health-route-present]      <- SAME ms: 2 disjoint partitions CONCURRENT
+07:39:19.730  result-contract  iter=2   failing=[]   (CONVERGED)
+07:39:19.952  streaming        iter=1   failing=[streaming-*]               <- 0.222s AFTER result-contract converged (NOT t0)
+07:39:24.103  health           iter=2   failing=[]   (CONVERGED independently)
+07:39:52.626  streaming        iter=2   failing=[]   (CONVERGED)
+```
+Final JSON: `{"collective":"converged","blocked":[],"next_action":"done",
+"schedule":[{"frontier":0,"groups":[{"group":"result-contract","state":"converged"},
+{"group":"health","state":"converged"}]},{"frontier":1,"groups":[{"group":
+"streaming","state":"converged"}]}]}`.
+
+**What the timeline proves (observed, not asserted):**
+- **Spatial parallelism (T21.12/ADR-0027):** `result-contract` and `health` dispatch
+  in the **same millisecond** (`07:38:58.847`) — ≥2 disjoint blast-radius partitions
+  converging CONCURRENTLY under ONE `kazi apply --parallel`, single-node, NATS-free,
+  no external orchestrator.
+- **Semantic sequencing (T23.9/ADR-0028):** `streaming` dispatches at `07:39:19.952`,
+  **0.222 s after `result-contract` converged** (`07:39:19.730`) and **before
+  `health` converged** (`07:39:24.103`) — so it waited SPECIFICALLY for its
+  `needs=["result-contract"]` dep, pipelined per-group readiness, NOT a global wave
+  barrier and NOT triggered by the unrelated `health`. Objective gate: `custom_script`
+  `go test`/`grep` (ADR-0040), evidence-backed.
+- **Merge:** all three real Go files landed back in the single workspace — `widget.go`
+  (`type Widget struct`), `health.go` (`/healthz`), `stream.go` (a `/widgets/stream`
+  handler that genuinely consumes the `Widget` type → real logical dep). The
+  per-partition isolated worktrees were merged and torn down (`git worktree list` →
+  only `main`).
+
+**Verdict.** **T21.12 acc MET** — ≥2 partitions converging concurrently under one
+`kazi run`, no external orchestrator, no NATS, then merged; every claim observed on
+the FIXED released binary. **T23.9 acc MET** — kazi sequenced the dependent group
+correctly AND parallelized the disjoint ones, gated objectively, executing the
+computed needs-DAG to collective convergence ON THE RELEASED BINARY (the prior
+`:noproc` blocker is gone; the earlier in-tree-only caveat no longer applies). Both
+tasks DONE. Fix PR #740; released in v1.64.2. (The blocked-dep escalation contract
+for T23.9 was already captured live in the prior entry's Run B.)
+
 ## 2026-06-26 — T21.12 FIX: `--parallel` PartitionSupervisor `:noproc` + partitioner collapse, both fixed
 
 Fixes the two ship-blocking defects the T21.12 dogfood (entry below) found on the
