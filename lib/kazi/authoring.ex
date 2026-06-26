@@ -48,6 +48,23 @@ defmodule Kazi.Authoring do
   so a malformed or empty draft fails loudly rather than persisting a vacuous
   goal.
 
+  ### Shape robustness (T26.8)
+
+  A real drafting harness does not always return the predicates at the top level.
+  `parse_proposal/2` therefore accepts, in addition to the canonical shape above:
+
+    * the goal nested under a single wrapper key — `{"goal": {…}}`,
+      `{"proposal": {…}}`, or `{"spec": {…}}`;
+    * the goal-file singular `"predicate"` array (`{"predicate": [ … ]}`) instead
+      of the plural `"predicates"`, with each predicate's config either nested
+      under `"config"` or spread as sibling keys (the goal-file convention).
+
+  The `provider` strings recognised are the loader's full catalog
+  (`Kazi.Goal.Loader.provider_kinds/0`) — including the E32 providers
+  (`custom_script`, `static`, `ratchet`, `metrics`, `coverage`, `property`,
+  `mutation`, `cve`) — so a drafted or caller-supplied predicate naming a modern
+  provider survives instead of being silently dropped.
+
   ## Persisted shape
 
   The draft goal is stored in the canonical goal-file map shape
@@ -457,8 +474,9 @@ defmodule Kazi.Authoring do
   """
   @spec parse_proposal(term(), Goal.id()) :: {:ok, Goal.t()} | {:error, term()}
   def parse_proposal(proposal, goal_id) do
-    with {:ok, map} <- decode_proposal(proposal),
-         {:ok, predicates} <- build_predicates(Map.get(map, "predicates")) do
+    with {:ok, decoded} <- decode_proposal(proposal),
+         map = unwrap_proposal(decoded),
+         {:ok, predicates} <- build_predicates(extract_predicates(map)) do
       {:ok,
        Goal.new(goal_id,
          name: optional_string(Map.get(map, "name")),
@@ -466,6 +484,44 @@ defmodule Kazi.Authoring do
          predicates: predicates,
          metadata: draft_metadata(Map.get(map, "rationale"))
        )}
+    end
+  end
+
+  # The wrapper keys a drafting harness routinely nests the goal under instead of
+  # returning it at the top level ("goal"/"proposal"/"spec"). T26.8: after T26.7
+  # the harness output PARSES, but real claude frequently returns
+  # `{"goal": {"predicates": [...]}}` (or the goal-file singular `"predicate"`
+  # array), so the old top-level `Map.get(map, "predicates")` saw no list and
+  # `build_predicates` reported "proposal has no predicates" — the on-ramp step-1
+  # blocker. Descend into a single wrapper object so any of these shapes yields a
+  # usable predicate list.
+  @wrapper_keys ~w(goal proposal spec)
+
+  # When the top level already carries a predicate array, use it as-is; otherwise
+  # descend into the first wrapper object that does. A map with neither stays as-is
+  # so `build_predicates` still reports the "no predicates" error cleanly.
+  defp unwrap_proposal(%{} = map) do
+    if extract_predicates(map) do
+      map
+    else
+      Enum.find_value(@wrapper_keys, map, fn key ->
+        case Map.get(map, key) do
+          %{} = nested -> if extract_predicates(nested), do: nested
+          _ -> nil
+        end
+      end)
+    end
+  end
+
+  # The predicate array out of a proposal object, accepting both the documented
+  # plural `"predicates"` key and the goal-file singular `"predicate"` array (the
+  # shape a harness emits when it drafts a goal-file directly). `nil` when neither
+  # is a list, so `build_predicates/1` surfaces the "no predicates" error.
+  defp extract_predicates(%{} = map) do
+    cond do
+      is_list(Map.get(map, "predicates")) -> Map.get(map, "predicates")
+      is_list(Map.get(map, "predicate")) -> Map.get(map, "predicate")
+      true -> nil
     end
   end
 
@@ -552,12 +608,21 @@ defmodule Kazi.Authoring do
         Predicate.new(id, kind,
           description: optional_string(Map.get(raw, "description")),
           acceptance?: true,
-          config: predicate_config(Map.get(raw, "config"))
+          config: predicate_config(predicate_config_source(raw))
         )
     end
   end
 
   defp build_predicate(_raw), do: nil
+
+  # The provider config for a proposal entry. The documented authoring shape nests
+  # it under a `"config"` key; a goal-file-shaped predicate (T26.8) instead spreads
+  # config as sibling keys, so when there is no nested `"config"` map, collect the
+  # non-reserved siblings — the same convention the loader uses — so that shape's
+  # config survives.
+  @predicate_reserved_keys ~w(id provider description guard acceptance held_out group config)
+  defp predicate_config_source(%{"config" => config}) when is_map(config), do: config
+  defp predicate_config_source(raw) when is_map(raw), do: Map.drop(raw, @predicate_reserved_keys)
 
   # --- persistence -----------------------------------------------------------
 
@@ -687,27 +752,28 @@ defmodule Kazi.Authoring do
 
   # --- provider mapping ------------------------------------------------------
   #
-  # Mirror the loader's provider string ↔ kind mapping so a serialized goal
-  # round-trips through `Kazi.Goal.Loader.from_map/1` and a proposal naming a
-  # provider maps to the same kind the loader would.
+  # Defer to the loader's provider string ↔ kind mapping (its `provider_kinds/0`,
+  # the single source of truth — ADR-0002) so a proposal naming a provider maps to
+  # the SAME kind the loader would, and a serialized goal round-trips through
+  # `Kazi.Goal.Loader.from_map/1`. Before T26.8 authoring kept its own 4-entry copy
+  # that omitted the E32 providers (`custom_script`, `static`, `ratchet`,
+  # `metrics`, `coverage`, `property`, `mutation`, `cve`), so a drafted/caller
+  # predicate naming one was silently dropped; delegating closes that gap and keeps
+  # the catalogs from drifting again.
 
-  @provider_kinds %{
-    "test_runner" => :tests,
-    "http_probe" => :http_probe,
-    "prod_log" => :prod_log,
-    "browser" => :browser
-  }
-
-  @kind_providers Map.new(@provider_kinds, fn {string, kind} -> {kind, string} end)
-
-  defp provider_kind(provider), do: Map.get(@provider_kinds, provider)
+  defp provider_kind(provider), do: Map.get(Loader.provider_kinds(), provider)
 
   # Map a kind atom back to the loader's provider string. `:tests` serialises as
-  # "test_runner" (the loader's name for it).
-  defp provider_string(kind), do: Map.get(@kind_providers, kind, Atom.to_string(kind))
+  # "test_runner" (the loader's name for it); an unmapped kind falls back to its
+  # own atom name.
+  defp provider_string(kind) do
+    Enum.find_value(Loader.provider_kinds(), Atom.to_string(kind), fn {string, k} ->
+      if k == kind, do: string
+    end)
+  end
 
   defp known_providers do
-    @provider_kinds |> Map.keys() |> Enum.sort() |> Enum.join(", ")
+    Loader.provider_kinds() |> Map.keys() |> Enum.sort() |> Enum.join(", ")
   end
 
   # --- small helpers ---------------------------------------------------------
