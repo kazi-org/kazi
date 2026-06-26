@@ -4,6 +4,40 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T26.8 LIVE VERIFIED: the full `plan → approve → apply` on-ramp converges on released v1.46.2
+
+The closing live proof for T26.8. Both code fixes (L2 harness-parse PR #634/v1.46.1,
+L3 drafting-prompt schema PR #638/v1.46.2) were exercised end to end against the
+**released v1.46.2 macOS binary** driving the **real claude harness** — no source
+build, no stubs.
+
+**The chain.**
+1. `kazi plan "Create a file named status.txt in the workspace whose contents are
+   exactly the text: ready" --yes --json` → drafted a proposal
+   (`prop-create-a-file-named-status-txt-…`) with **1 usable `custom_script`
+   predicate** whose config keys are the canonical `cmd` / `args` / `verdict` /
+   `pass_codes` — `cmd="sh"`, `args=["-c","test -f status.txt && printf '%s' ready |
+   cmp -s - status.txt"]`. No invented `script`/`interpreter`. (Pre-fix this returned
+   "proposal has no predicates".)
+2. `kazi approve <ref>` → `{"status":"approved"}` — the goal LOADS through the same
+   loader `approve` uses. (Pre-L3-fix this failed: `requires a non-empty string "cmd"`.)
+3. `kazi apply <goal-file> --harness claude` → **`status: converged`** in **2
+   iterations / 14.9s**, predicate `verdict: pass`, and `status.txt` == bytes `ready`
+   (5 bytes, no trailing newline). `economy`: 1 converged predicate, $0.159, 39,947
+   tokens.
+
+**One honest gap noted (not a T26.8 blocker).** `approve` does NOT auto-materialize a
+goal-file; the operator captures the approved predicates "as a file you can version
+and re-run" (README's documented step — `approve`'s own output says "The goal is now
+runnable: kazi apply <goal-file>"). For this verify the goal-file was the approved
+predicate transcribed verbatim (byte-for-byte the drafted `cmd` config), so the
+chain proven is faithful. A future ergonomics task could let `kazi apply` consume an
+approved proposal-ref directly (or have `approve --out goal.toml` write the file),
+removing the manual transcription. Filed as an observation, not part of T26.8.
+
+T26.8 is now `[x]`. This unblocks T16.6 (Claude Code drives kazi via the skill) and
+T26.6 (live subsumption gate), both of which depended on a working prose on-ramp.
+
 ## 2026-06-25 — T26.8 layer 2: the drafted custom_script config SHAPE blocks `approve` (invented `script`, not `cmd`)
 
 PR #634 fixed the harness PARSE layer (claude's stderr warning broke the envelope —
