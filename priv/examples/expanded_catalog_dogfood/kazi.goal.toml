@@ -1,0 +1,86 @@
+# Expanded-catalog dogfood goal (T32.11, ADR-0040/0041/0042/0043).
+#
+# A self-contained creation-mode goal that exercises the E32 framework end-to-end:
+# a :static (lint) finding-count gate, a :coverage ratchet, a :mutation score gate,
+# and a :cve manifest-tier ratchet — all starting RED at t0, converging to
+# objective-true under active anti-gaming enforcement (creation-mode default-on).
+#
+# The grader scripts under checks/ are deterministic stand-ins for the real tools
+# (Dialyzer/coverage/mutation-tester/trivy) so the run is reproducible offline;
+# they observe REAL workspace state, so a coding agent converges them by editing
+# src/, tests/ and requirements.txt. See README.md.
+#
+#     kazi apply priv/examples/expanded_catalog_dogfood/kazi.goal.toml \
+#       --workspace <a git checkout of this dir> --harness claude
+
+id = "expanded-catalog-dogfood"
+name = "Expanded predicate catalog converges a self-contained fixture"
+mode = "create"
+
+[budget]
+max_iterations = 10
+max_tokens = 1500000
+
+[scope]
+paths = ["src/", "tests/", "requirements.txt"]
+
+# --- anti-gaming enforcement (ADR-0042) -------------------------------------
+[enforcement]
+enabled = true
+clean_tree = true
+clean_ref = "HEAD"
+fail_on_skip = true
+# The graders may not be edited by the fixer — a write is a flagged event.
+read_only_paths = ["checks"]
+
+# A test-count ratchet guard: the suite may only grow (deleting a test is a
+# regression, not progress). The metric counts test_ functions.
+[[enforcement.guard]]
+id = "test-count-no-drop"
+direction = "higher_better"
+baseline = "stored"
+allowed_regression = 0
+metric = { cmd = "sh", args = ["-c", "grep -cE 'def test_' tests/test_stats.py"] }
+
+# --- :static — analysis/lint, finding-count gate (ADR-0043) ------------------
+[[predicate]]
+id = "no-unsafe-eval"
+provider = "static"
+description = "the static analyzer reports no findings (remove eval() from src/stats.py)"
+cmd = "bash"
+args = ["checks/lint.sh"]
+format = "sarif"
+
+# --- :coverage — patch coverage >= target, project may not regress ----------
+[[predicate]]
+id = "coverage"
+provider = "coverage"
+description = "every function in src/stats.py has a matching test_<name> (>= 80% patch coverage)"
+target = 80.0
+patch = { cmd = "bash", args = ["checks/patch_cov.sh"], path = "$.percent" }
+project = { cmd = "bash", args = ["checks/project_cov.sh"], path = "$.percent" }
+project_baseline = "stored"
+project_allowed_regression = 0.0
+
+# --- :mutation — test-quality score gate (NEVER 100%) -----------------------
+[[predicate]]
+id = "mutation-score"
+provider = "mutation"
+description = "the test suite kills >= 80% of injected mutants (add assertions to tests/test_stats.py)"
+cmd = "bash"
+args = ["checks/mutation.sh"]
+threshold = 0.8
+killed_path = "$.killed"
+survived_path = "$.survived"
+survivors_path = "$.survivors"
+
+# --- :cve — dependency vulnerability ratchet (manifest tier) ----------------
+[[predicate]]
+id = "no-vulnerable-deps"
+provider = "cve"
+description = "no known-vulnerable pinned deps in requirements.txt (bump requests off 2.19.x)"
+tool = "trivy"
+cmd = "bash"
+args = ["checks/cve.sh"]
+count_path = "$.vulns"
+baseline = 0
