@@ -205,8 +205,9 @@ Do **not** add posts for these — they were considered and left out on purpose:
 - A hierarchical "agent organization" post (CEO/C-suite/VPs/Leads delegation) — a
   different product philosophy, not a rung toward kazi's thesis.
 - Email drip funnels / gated lead capture / welcome sequences — the site is static and
-  gated capture cuts against the developer-respecting stance. RSS is the subscription
-  channel; the one adoption signal (T38.21) is the conversion measure.
+  gated capture cuts against the developer-respecting stance. RSS (the feed at
+  `/blog/rss.xml`, T38.4 — published posts only) is the subscription channel; the one
+  adoption signal (T38.21) is the conversion measure.
 - A separate team/role charter for producing the series — the work runs under the
   existing `/apply --pool`; this style sheet carries the voice/quality bar.
 
