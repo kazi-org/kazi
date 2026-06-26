@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="https://kazi.sire.run"><b>Website</b></a> &nbsp;&middot;&nbsp;
+  <a href="https://kazi.sire.run/blog">Blog</a> &nbsp;&middot;&nbsp;
   <a href="docs/concept.md">Concept</a> &nbsp;&middot;&nbsp;
   <a href="https://github.com/kazi-org/kazi/releases">Releases</a> &nbsp;&middot;&nbsp;
   <a href="https://github.com/kazi-org/homebrew-tap">Homebrew tap</a>
@@ -804,6 +805,16 @@ works today:
 **By design, kazi will never**: become a coding agent/harness; decide *what* to
 build (that's your judgment); or put a vector DB in the core loop (the retrieval
 adapter is an optional augmentation, never the foundation).
+
+## Learn more
+
+New to driving coding agents to an objective "done"? The blog walks the same
+ladder we climbed, one rung per post — from prompting by feel up to a
+reconciliation workflow. Each post is independently useful, even if you never
+adopt kazi.
+
+- **[From Vibe Coding to Reconciliation](https://kazi.sire.run/blog/from-vibe-coding-to-reconciliation)** — the twelve-part series.
+- **[All posts](https://kazi.sire.run/blog)** — the kazi blog index.
 
 ## Community & help
 
