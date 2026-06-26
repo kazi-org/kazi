@@ -1,0 +1,170 @@
+# Example kazi goal-file: PREDICATE-GRAPH WAVES (E23/ADR-0028) over the NATIVE
+# PARALLEL SCHEDULER (E21/ADR-0027).
+#
+# This goal demonstrates kazi computing a pipelined, dependency-aware wave
+# schedule from authored `needs` edges -- the codification of a hand-authored
+# "task deps + waves" workflow:
+#
+#   * SPATIAL parallelism (ADR-0027): two groups that touch DISJOINT files
+#     (`result-contract` vs `health`) are partitioned by blast radius and
+#     converge CONCURRENTLY, under one `kazi apply`, single-node, NATS-free.
+#
+#   * SEMANTIC ordering (ADR-0028): a group runs only after ITS `needs` deps
+#     OBJECTIVELY converge, pipelined (no global wave barrier). `streaming`
+#     declares `needs = ["result-contract"]` and genuinely consumes the contract
+#     (the stream handler references the `Widget` type), so it is a real LOGICAL
+#     successor -- not merely spatially separate. It must not dispatch until
+#     `result-contract` is converged; `health` is unrelated and finishes whenever.
+#
+# Computed schedule (verify first with `kazi apply <file> --explain`):
+#
+#     Frontier 1 (concurrent):  result-contract  ||  health
+#     Frontier 2 (after rc):    streaming
+#
+#   +-----------------+      +-----------+
+#   | result-contract |----->| streaming |
+#   +-----------------+      +-----------+
+#   +-----------------+
+#   |     health      |   (independent -- no needs, no dependents)
+#   +-----------------+
+#
+# This file is also the dogfood fixture for plan tasks T23.9 (predicate-graph
+# waves) and T21.12 (native parallelism); see docs/how-to/predicate-graph-waves.md
+# for the runbook and the evidence to capture.
+#
+# CREATE mode: every predicate FAILS at t0 (the files do not exist yet), so the
+# failing predicates ARE the work-list and the vacuous-goal guard (T2.3) is
+# satisfied. Run against a SCRATCH service workspace -- NOT the kazi repo itself --
+# so the run is self-contained and safe:
+#
+#     kazi apply priv/examples/predicate_graph_waves.toml --workspace <scratch-repo> --parallel
+#
+# Schema: Kazi.Goal.Loader. Group `needs` = T23.1/ADR-0028. custom_script
+# verdict="exit_zero" = T32.1/ADR-0040 (pass iff the command exits 0).
+
+id = "predicate-graph-waves-example"
+name = "Predicate-graph waves: result-contract -> streaming, parallel with health"
+mode = "create"
+
+[metadata]
+adr = "0027,0028"
+demonstrates = "needs-edge topological gating + concurrent disjoint partitions, NATS-free"
+dogfood = "T23.9 + T21.12"
+
+[budget]
+max_iterations = 20
+max_tokens = 1500000
+
+[scope]
+# The scratch service the agent BUILDS the three capabilities in (passed at run
+# time as `--workspace <scratch-repo>`). Disjoint files per capability are what
+# let the blast-radius partitioner run result-contract and health in parallel.
+paths = ["widget.go", "health.go", "stream.go", "*_test.go"]
+
+# ---------------------------------------------------------------------------
+# Group taxonomy + the needs-DAG (the ONE authored input kazi cannot derive).
+# ---------------------------------------------------------------------------
+
+# Frontier-1 group, no deps: the typed response contract every other capability
+# is written against. Disjoint from `health` -> runs concurrently with it.
+[[group]]
+id = "result-contract"
+name = "Result contract"
+
+# Frontier-1 group, no deps: an independent /healthz endpoint in its own file.
+# No `needs`, no dependents -> proves the fully-parallel default (ADR-0027) runs
+# it alongside result-contract from t0.
+[[group]]
+id = "health"
+name = "Health endpoint"
+
+# Frontier-2 group: the streaming endpoint CONSUMES the contract type, so it is a
+# genuine logical successor. `needs = ["result-contract"]` is the precedence kazi
+# computes the wave schedule from; it must not dispatch until result-contract
+# objectively converges.
+[[group]]
+id = "streaming"
+name = "Streaming endpoint"
+needs = ["result-contract"]
+
+# ---------------------------------------------------------------------------
+# result-contract predicates (acceptance; fail at t0; converge -> unblocks streaming)
+# ---------------------------------------------------------------------------
+
+[[predicate]]
+id = "contract-type-defined"
+provider = "custom_script"
+description = "widget.go defines `type Widget struct` (the response contract) -- fails at t0, no file"
+group = "result-contract"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "grep -q 'type Widget struct' widget.go"]
+
+[[predicate]]
+id = "contract-test-green"
+provider = "custom_script"
+description = "the contract unit test passes -- fails at t0, no test/impl yet"
+group = "result-contract"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "go test ./... -run TestWidgetContract"]
+
+# ---------------------------------------------------------------------------
+# health predicates (independent frontier-1 group -- disjoint file -> parallel partition)
+# ---------------------------------------------------------------------------
+
+[[predicate]]
+id = "health-route-present"
+provider = "custom_script"
+description = "health.go registers a /healthz route -- fails at t0, no file"
+group = "health"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "grep -q '/healthz' health.go"]
+
+[[predicate]]
+id = "health-test-green"
+provider = "custom_script"
+description = "the health endpoint test passes -- fails at t0"
+group = "health"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "go test ./... -run TestHealthz"]
+
+# ---------------------------------------------------------------------------
+# streaming predicates (frontier-2; gated behind result-contract converging)
+# ---------------------------------------------------------------------------
+
+[[predicate]]
+id = "streaming-route-present"
+provider = "custom_script"
+description = "stream.go registers a /widgets/stream SSE route -- fails at t0"
+group = "streaming"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "grep -q '/widgets/stream' stream.go"]
+
+[[predicate]]
+id = "streaming-consumes-contract"
+provider = "custom_script"
+description = "the stream handler references the Widget contract type (real logical dep on result-contract)"
+group = "streaming"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "grep -q 'Widget' stream.go"]
+
+[[predicate]]
+id = "streaming-test-green"
+provider = "custom_script"
+description = "the streaming endpoint test passes -- fails at t0"
+group = "streaming"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "go test ./... -run TestWidgetStream"]
