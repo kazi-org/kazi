@@ -8,8 +8,12 @@
 // post or flip the placeholder to satisfy a test.
 import { getCollection } from "astro:content";
 import Layout from "../../layouts/Layout.astro";
+import { withUtm } from "../../utm.mjs";
 
 const REPO = "https://github.com/kazi-org/kazi";
+// Outbound repo/install link, UTM-tagged to the blog index (the one adoption
+// signal — see utm.mjs / docs/blog-style.md).
+const repoHref = withUtm(REPO, "blog-index");
 
 // Published posts only, newest first.
 const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
@@ -43,7 +47,7 @@ const SERIES_TITLE = "From Vibe Coding to Reconciliation";
       <a href="/#how" class="ui-body ui-link">How it works</a>
       <a href="/blog" class="ui-strong ui-link" aria-current="page">Blog</a>
       <a
-        href={REPO}
+        href={repoHref}
         class="ui-outline rounded-lg border px-3 py-1.5 font-medium">GitHub</a
       >
     </nav>
@@ -140,7 +144,7 @@ const SERIES_TITLE = "From Vibe Coding to Reconciliation";
       </div>
       <nav class="flex items-center gap-5" aria-label="Footer">
         <a href="/blog" class="ui-link">Blog</a>
-        <a href={REPO} class="ui-link">GitHub</a>
+        <a href={repoHref} class="ui-link">GitHub</a>
         <a href={`${REPO}/releases`} class="ui-link">Releases</a>
         <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
       </nav>
