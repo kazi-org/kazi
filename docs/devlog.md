@@ -4,6 +4,94 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T26.6 LIVE: the kazi skill ROUTER drives a goal end to end (plan → approve → apply) with NO legacy skills; subsumption ASSERTED
+
+The E26/ADR-0031 closing proof: in a real session, drive a fixture goal to
+**objective convergence** through the kazi skill ROUTER's verbs only —
+`kazi plan` → `kazi approve` → `kazi apply` — using NO `/loop`, NO `/apply`, NO
+`/qualify` (no legacy skills). Run on the **released v1.64.2 macOS binary** (checksum
+`kazi_macos_aarch64.sha256` OK; `kazi version` → `1.64.2`) driving the **real claude
+harness** (Claude Code 2.1.193). Workspace: a throwaway `git init` dir, the goal
+file absent at t0 (CREATE mode, predicate fails at t0).
+
+**The router flow (every step a real `kazi` verb; full JSON captured):**
+
+1. `kazi plan "Create a file named VERSION.txt in the workspace whose contents are
+   exactly the text: 1.0.0" --workspace <ws> --yes --json`
+   → `{"status":"proposed","proposal_ref":"prop-create-a-file-named-version-txt-8d50dc3bd447",
+   "predicates":[{"id":"version_file_exists_with_exact_content","provider":"custom_script",
+   "config":{"cmd":"sh","args":["-c","test -f VERSION.txt && [ \"$(cat VERSION.txt)\" = \"1.0.0\" ]"]},
+   "acceptance":true}], ...}`. **1 usable `custom_script` predicate**, canonical
+   `cmd`/`args` shape — no invented `script`/`interpreter` (the T26.8 L3 prompt-schema
+   fix holds live). Drafting drove a ~12 s claude session; the proposal persisted to
+   the read-model.
+2. `kazi list-proposed --status proposed --json` → the proposal is queued
+   (`"status":"proposed"`).
+3. `kazi approve prop-create-a-file-named-version-txt-8d50dc3bd447 --json` →
+   `{"status":"approved", ...}` — the stored goal LOADS through approve's loader (the
+   T26.8 L2/L3 fixes hold).
+4. `kazi status prop-…-8d50dc3bd447 --json` →
+   `{"status":"approved","kind":"proposal","goal_id":"create-a-file-named-version-txt"}`
+   (the router's `status` verb reads persisted state).
+5. `kazi apply version.goal.toml --workspace <ws> --harness claude --json` →
+   **`{"status":"converged","predicates":[{"id":"version_file_exists_with_exact_content",
+   "verdict":"pass"}],"next_action":"done"}`** in **2 iterations / 18.5 s**, economy
+   `converged_predicates:1`, `cost_usd:0.116`, `tokens:39712`, enforcement active
+   (`fail_on_skip`, `separate_process`), `gaming_events:[]`. Independent re-check:
+   `VERSION.txt` == bytes `1.0.0\n` and `[ "$(cat VERSION.txt)" = "1.0.0" ]` exits 0
+   (the drafter's rationale called this — `$( )` strips the single trailing newline,
+   so exact-content holds).
+
+**No legacy skills used.** Every action above is a first-class `kazi` CLI verb
+(`plan` / `list-proposed` / `approve` / `status` / `apply`), the exact map the router
+SKILL.md exposes (plan/apply/status/adopt → real CLI). `/loop`, `/apply`, `/qualify`
+were not invoked at any step. The launch gate was the OBJECTIVE predicate verdict
+(`pass`), not a qualify inference — the founding no-false-done thesis applied to the
+operator's own on-ramp.
+
+**SUBSUMPTION GATE (ADR-0031 decision 6) — ASSERTED.** The "`kazi apply` replaces
+`/apply --pool`" claim is now made, gated as required on the E21/E23 dogfoods, which
+PASSED and are re-verified live on this same v1.64.2 binary (see the entry directly
+below): T21.12 (spatial parallelism — `result-contract` ∥ `health` dispatched in the
+SAME millisecond, ≥2 disjoint blast-radius partitions concurrent under one
+`kazi apply --parallel`, single-node, NATS-free) and T23.9 (semantic sequencing —
+`streaming` waited specifically for its `needs=["result-contract"]` dep, pipelined,
+objectively gated). Corroborated here on the released binary:
+`kazi apply priv/examples/predicate_graph_waves.toml --explain --json` computes the
+authored needs-DAG schedule — frontier 0 = two partitions `{result-contract}`,
+`{health}` (concurrent); frontier 1 = `{streaming}` (gated) — `dispatched:false`,
+pure planning. So for code goals the router's `kazi apply` subsumes the
+loop+apply+qualify pipeline: the serial path converges a single goal to objective
+done (this run), and `--parallel` runs the partitioned needs-DAG to collective
+convergence (the entry below). The PR #740 release-packaging fix that made released
+`--parallel` execute is bundled in v1.64.2, so the subsumption holds on the released
+binary, not just in-tree.
+
+**Honest findings (observed this session).**
+- **The `[harness] command` shell-string wrapper does NOT work on the released
+  binary and is not needed here.** `cli_adapter.ex` calls `System.cmd(command, args)`
+  — `command` must be a single executable; a shell string like
+  `bash -lc 'exec claude --dangerously-skip-permissions "$@"'` is not found
+  (`:enoent`), so the harness never launches → an instant 0-token `stuck` (reproduced:
+  first smoke went `stuck` in 2 s with `tokens:0`). The neighboring entry's working
+  form is an executable wrapper SCRIPT file, not a flag-bearing shell string.
+- **Plain `--harness claude` made real edits in this environment.** Both the
+  `hello.txt` smoke (converged 2 iters / 80.6 s / $0.106, `hello.txt`==`ok`) and the
+  real `VERSION.txt` apply converged with NO permission wrapper at all; kazi sets no
+  `permission_mode` by default (none in `lib/`), so this is Claude Code 2.1.193's
+  headless `-p` behavior in this nested session. Reported as observed; the earlier
+  T30.4 "vanilla makes no edits" finding did not reproduce here for the serial
+  create-mode path. The shell-string wrapper, by contrast, is strictly broken.
+- **`approve` does not auto-materialize a goal-file** (unchanged from T26.8). The
+  approved predicate was transcribed verbatim into `version.goal.toml` (byte-for-byte
+  the drafted `cmd`/`args`) for the `apply` leg; `kazi lint` confirmed it loads. A
+  future ergonomics task could let `apply` consume an approved proposal-ref directly.
+
+**Verdict: T26.6 DONE.** The kazi skill router drove a goal end to end to objective
+convergence (`VERSION.txt`==`1.0.0`, predicate `pass`) using only kazi verbs, no
+legacy skills, on the released v1.64.2 binary; the subsumption claim is asserted on
+the now-passing-and-live E21/E23 dogfoods (T21.12/T23.9).
+
 ## 2026-06-26 — T21.12 + T23.9 RE-VERIFIED on the FIXED released binary v1.64.2 (`--parallel` now runs end-to-end; both DONE)
 
 Re-verification of the two parallel-scheduler dogfoods on the **released v1.64.2
