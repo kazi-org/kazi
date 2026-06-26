@@ -22,8 +22,11 @@ need them.
 ## Guides — drive kazi
 
 - **[Orchestrator recipe](orchestrator-recipe.md)** — the full `--json`
-  propose → approve → converge flow an orchestrating agent drives kazi through
+  plan → approve → converge flow an orchestrating agent drives kazi through
   (the source of truth the installed skill teaches).
+- **[`AGENTS.md`](../AGENTS.md)** — the harness-neutral one-page brief any coding
+  agent reads to drive kazi (`kazi plan` → `kazi apply`), independent of the Claude
+  Code skill.
 - **[Add a harness](add-a-harness.md)** — point kazi at `opencode`, `codex`, or
   your own CLI coding agent; the harness tier table.
 - **[Self-hosting: kazi builds kazi](self-hosting.md)** — kazi dogfooding itself.
