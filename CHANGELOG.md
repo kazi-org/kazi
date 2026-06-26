@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.47.0](https://github.com/kazi-org/kazi/compare/v1.46.2...v1.47.0) (2026-06-26)
+
+
+### Features
+
+* **site:** add blog content collection + frontmatter schema (T38.1) ([f7f1860](https://github.com/kazi-org/kazi/commit/f7f18600ae37ab8075b62e5a33f0b26a88a3eb4f))
+
 ## [1.46.2](https://github.com/kazi-org/kazi/compare/v1.46.1...v1.46.2) (2026-06-26)
 
 
