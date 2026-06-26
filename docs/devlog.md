@@ -4,6 +4,42 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — Doc-lifecycle encoded as a kazi standing goal (T31.6 / ADR-0036)
+
+Shipped `priv/examples/doc_lifecycle.goal.toml`: the ADR-0036 documentation
+lifecycle expressed as a committed kazi STANDING goal-file kazi can reconcile,
+built ENTIRELY on the E32 generic providers — no bespoke predicate engine and no
+doc-specific code in kazi core (the ADR-0036 reject held).
+
+Predicate composition: six doc-freshness checks are `custom_script` predicates
+(ADR-0040) WRAPPING the T31.4 scripts — `check_a/b/c/d` plus the subsumed (E)
+README↔site and (F) skill↔CLI coherence checks — each with `verdict = "exit_zero"`
+since the checker's exit code already means pass/fail. Two GRADIENTS are `ratchet`
+predicates (ADR-0041 envelope-v2): a doc-coverage ratchet (% commands documented,
+`higher_better`, baseline `stored`) and a stale-`[x]`-task count ratchet (to `0`,
+`lower_better`). The two ratchet metrics are thin new wrapper scripts
+(`metric_doc_coverage.sh`, `metric_stale_tasks.sh`) reading the SAME command
+surface / offender set as predicates (a)/(d), each printing one bare number to
+stdout. An `[enforcement]` block (ADR-0042) marks the checkers + lifecycle tools
+`read_only_paths` so an agent can't edit a grader to fake a green.
+
+Landmine re-confirmed (L-0012 sibling): a bare relative `cmd` like
+`.github/scripts/...sh` is NOT runnable — `System.cmd` resolves the executable
+against PATH, not the workspace, so it fails `:enoent`. Fix: `cmd = "bash"`,
+checker in `args` (bash resolves the script arg against `--workspace`). Verified
+empirically before settling the format.
+
+Validation (headless bar = load + predicate-eval, no live multi-minute reconcile):
+`test/kazi/goal/doc_lifecycle_goal_test.exs` pins load-as-standing, the 6+2 kind
+composition (no other kinds), zero-stub (every wrapper points at a real script),
+and a real `:pass`/`:fail` (never `:error`) eval. Manual full-vector eval today:
+`adr-refs-exist`, `readme-site-coherence`, `skill-cli-coherence`, and
+`doc-coverage-ratchet` (score 66.7) PASS; `plan-trimmed`, `commands-in-readme`,
+`no-dead-command-refs`, and `stale-tasks-ratchet` (score 121) FAIL — exactly the
+drift on main today that the live dogfood (T31.7) drives to green. Layers wired:
+1 (trim, auto) + 3 (freshness, auto) auto, 2 (extract, human-confirm) keeps its
+gate.
+
 ## 2026-06-25 — Gated knowledge extraction shipped (T31.3 / ADR-0036 Layer 2)
 
 Shipped `.github/scripts/extract_knowledge.py` + `test_extract_knowledge.py`, the
