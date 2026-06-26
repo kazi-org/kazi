@@ -45,6 +45,42 @@ defmodule Kazi.Scheduler.PartitionSupervisor do
     end
   end
 
+  @doc """
+  Ensures the named partition-reconciler supervisor is running, returning its pid.
+
+  The application supervision tree starts the named instance (`Kazi.Application`),
+  but the **Burrito standalone binary** hands straight to the CLI before that tree
+  is stood up — the same path that leaves `Kazi.Repo` unstarted (see the CLI
+  read-model boot, `Kazi.CLI`). Under the release binary the named supervisor is
+  therefore absent, and the scheduler's `start_child/2` crashes with `:noproc`
+  the instant a `kazi apply --parallel` run dispatches a partition/group. The CLI
+  parallel-apply path calls this FIRST so a `--parallel` run reliably has a running
+  supervisor in BOTH paths:
+
+    * mix / release-app: the app tree already started it — this is idempotent and
+      returns the already-running pid;
+    * standalone binary: no supervised tree exists, so this starts the named
+      instance, process-linked to the caller. The caller is a short-lived CLI
+      command (it halts when done), so a process-linked supervisor that lives
+      until exit is exactly right and races no supervised pool.
+
+  Accepts the registered `name` (defaults to `#{inspect(__MODULE__)}`) so it is
+  testable against a fresh, not-yet-started name without disturbing the app tree.
+  """
+  @spec ensure_started(atom()) :: {:ok, pid()}
+  def ensure_started(name \\ __MODULE__) when is_atom(name) do
+    case Process.whereis(name) do
+      pid when is_pid(pid) ->
+        {:ok, pid}
+
+      nil ->
+        case start_link(name: name) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+        end
+    end
+  end
+
   @impl true
   def init(_opts) do
     DynamicSupervisor.init(strategy: :one_for_one)
