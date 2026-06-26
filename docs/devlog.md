@@ -4,6 +4,91 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T30.4 LIVE escalation dogfood: cheap tier converged, ladder did not climb (honest negative) + a `max_iterations=1` landmine
+
+The live dogfood for the ADR-0035 escalate-on-stuck ladder (UC-045, UC-033),
+run against the **released v1.64.1 macOS binary** driving the **real claude
+harness** (Claude Code 2.1.193) — no source build, no stubs.
+
+**Fixture (self-contained, opaque, non-gameable).** A `custom_script` goal whose
+predicate runs a candidate `solution.py` and compares the **sha256** of its
+printed integer to a stored digest. The hash is one-way, so the oracle yields
+only pass/fail and leaks nothing — the model cannot game it by reading the
+checker; it must compute the value. The problem (chosen non-memorizable, not the
+famous Project-Euler bound): the sum of every `n` with `1 ≤ n < 1_000_000` that is
+a palindrome simultaneously in base 10, base 2, AND base 8 (no leading zeros) —
+answer `610`. Multi-step base conversion is an honest correctness trap.
+
+**Ladder (per AGENTS.md / ADR-0035):** `claude-haiku-4-5 → claude-sonnet-4-6 →
+claude-opus-4-8`, each rung one `kazi apply --harness claude --model <rung> --json`
+on the same slice; escalate when `status` is `stuck`/`over_budget`.
+
+**Released-CLI gap found before the run.** `kazi apply` exposes no
+`--permission-mode`/`--allowed-tools` flag, and the goal-file `[harness]` table
+accepts only `id`/`model`/`command`. With the default permission mode the inner
+`claude` runs non-interactively and **applies zero edits** — a first probe ran
+two Haiku iterations, spent $0.112, and wrote no file (terminal
+`status: over_budget`, predicate still `fail`). To grant the inner agent the
+file-edit permission the recipe assumes (the T19.7 repro used
+`permission_mode: :bypassPermissions`), the run set `[harness] command` to a
+one-line wrapper (`exec claude --dangerously-skip-permissions "$@"`). With that,
+a trivial `hello.txt` smoke converged ($0.049). **Follow-up:** surface
+`permission_mode` on the released CLI (or default it for the claude harness),
+else a vanilla `kazi apply --harness claude` makes no edits and every code goal
+terminates `over_budget`.
+
+**Run A — the real escalation attempt (`max_iterations = 2` per rung).**
+
+```
+kazi apply ./goal.toml --workspace ./ws --harness claude --model claude-haiku-4-5 --json
+```
+
+Rung 1 (Haiku) terminal result: `status: converged`, predicate `pass`,
+`iterations: 2`, `cost_usd: 0.0768584`, `wall_clock_s: 39.3`. The iteration
+trace is `iter=1 failing=[…] → iter=2 failing=[]`: Haiku got the first dispatch
+wrong, self-corrected on the second, and converged. The written `solution.py`
+was independently verified to print `610` (oracle exit 0). **The ladder never
+advanced past rung 1 — escalation did NOT fire, and was not needed.**
+
+This reproduces the T19.7 / T36.5 finding on a fresh, harder, opaque-oracle
+fixture via the released binary: a self-verifying inner harness (bash + the
+predicate oracle across iterations) converges a within-reach slice on the
+cheapest tier, so the model-escalation ladder rarely climbs in practice. A
+genuine capability-driven climb was **not observed and not manufactured** — the
+opaque sha256 oracle plus the honesty bar preclude staging a fake stall.
+
+**Run B — a `max_iterations = 1` probe surfaced a loop-accounting landmine.**
+Rerun with a one-dispatch budget, rung 1 (Haiku) reported `status: over_budget`,
+`next_action: raise_budget`, `budget_spent.exceeded: "max_iterations"`, predicate
+`fail` — i.e. exactly the ladder's escalation trigger. **But the `solution.py`
+Haiku wrote in that single dispatch already printed `610` (correct).** Haiku
+*solved* it; the `over_budget` is an artifact: kazi's observe→act loop needs a
+**final re-observation after the last action** to record the pass, and
+`max_iterations = 1` spends its only iteration on the act, terminating with the
+*pre-dispatch* failing vector. **Landmine:** `max_iterations = 1` can never
+converge any goal, and a one-dispatch budget over-reports "stuck". An
+`over_budget`/`stuck` result must be read **together with the predicate vector /
+real state**, never as standalone proof the model failed — and an escalation
+recipe must give each rung at least 2 iterations (act + confirm). Escalating the
+model here would have been escalating against a budget artifact, not a capability
+limit, so it was not done.
+
+**Cost (every figure from a captured `cost_usd` envelope).** Auth/permission
+probes ≈ $0.21 (incl. the $0.112 no-edit probe and the $0.049 smoke); Run A
+$0.0769; Run B rung 1 $0.0788. **Total observed ≈ $0.37**, far under any ceiling
+(the fixture is deliberately tiny).
+
+**Verdict (honest).** The escalation **trigger signal** is live-verified
+sufficient on the released binary: a non-converged rung emits
+`status`/`next_action`/`budget_spent.exceeded` + the failing `predicates[]`
+exactly as ADR-0035 / T30.3 specify, and rung dispatch on the released binary
+works. The **model-escalation ladder did not climb**, because the cheap tier
+(Haiku) converged unaided — a truthfully-reported negative, which the T30.4
+acceptance explicitly permits. The ladder's climb logic remains pinned by
+T19.7's worst-case row + the `Kazi.Context.Escalation` unit tests; a live
+capability-driven climb needs a slice genuinely beyond the cheap tier's reach,
+which a self-verifying harness rarely yields and which was not gamed here.
+
 ## 2026-06-25 — T16.6 LIVE: the installed kazi skill drives a goal end to end (plan → approve → apply) on released v1.46.2
 
 The closing live proof for T16.6 (UC-034): a Claude Code user who runs
