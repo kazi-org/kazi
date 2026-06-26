@@ -4,6 +4,62 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — T26.8 ROOT CAUSE found by live capture: claude's stderr warning broke the envelope parse, not the proposal shape
+
+Built kazi from source and drove ONE real `claude -p --output-format json` authoring
+draft (idea: "a CLI tool that prints the current git branch name") to capture the
+exact bytes, instead of guessing the shape. The capture overturns the prior
+hypothesis (PR #623 assumed a proposal-SHAPE problem and added `goal`/`proposal`/
+`spec` wrapper-key parsing). The real bug is one layer DOWN, in the harness adapter.
+
+**What real claude returns.** The adapter result map was
+`%{exit: 0, command: "claude", output: <stdout>, workspace: "."}` — NO `:result`,
+NO `:tokens`, NO `:cost_usd`. The `output` was:
+
+1. a leading line on STDERR — `Warning: no stdin data received in 3s, proceeding
+   without it. ...` (claude waits 3s for stdin under `System.cmd`, then warns), which
+   the adapter merges into stdout via `cmd_opts`'s `stderr_to_stdout: true`; then
+2. the normal `{"type":"result", ..., "result":"<the proposal JSON as a string>", ...,
+   "usage":{...}, "total_cost_usd":...}` envelope.
+
+**Why authoring failed.** `Kazi.Harness.Profiles.Claude.parse/1` did
+`Jason.decode(output)` on the WHOLE stdout. The warning prefix made that decode fail,
+so `parse/1` returned `%{}` and the adapter merged NOTHING — dropping `:result`,
+`:tokens`, `:cost_usd`, `:usage` on every run that hit the warning. With no `:result`,
+authoring's `proposal_payload/1` fell back to the raw `:output`, whose first-`{`..last-`}`
+span is the OUTER envelope object (`type`/`result`/`usage` keys) — no top-level
+`predicates` — so `build_predicates` reported "proposal has no predicates". PR #623's
+wrapper keys never matched because the real wrapper key is `result` and its value is a
+JSON STRING, not a nested map. This also explains why `kazi apply` "works" while
+`kazi plan` doesn't: apply re-runs predicates to judge done and lets the budget fall
+back to a token ESTIMATE (ADR-0008), so the dropped `:result`/token fields are
+invisible there; authoring is the only path that needs the structured `:result`.
+
+**The fix (one line of behavior).** `Claude.parse/1` now narrows to the JSON object
+span (first `{` .. last `}`) BEFORE `Jason.decode`, so a stderr-noise-prefixed
+envelope still parses. A clean envelope is byte-identical (the span IS the whole
+object — golden conformance unchanged); output with no braces or genuinely malformed
+JSON still degrades to `%{}`. This restores `:result` (→ authoring builds the goal)
+AND `:tokens`/`:cost_usd` (→ token/cost accounting, silently broken before whenever the
+warning appeared). No change to the authoring parser or the drafting prompt was needed;
+PR #623's speculative wrapper-key code is left in place as harmless defense-in-depth.
+
+**Verified against real bytes (source build).** The captured stdout is checked in as
+`test/fixtures/harness/claude_authoring_draft_stdout.txt`. Re-running the fixed
+`Profile.parse(:claude, <real bytes>)` yields `:result` + `:tokens` + `:cost_usd`, and
+`Kazi.Authoring.parse_proposal/2` on the recovered `:result` builds **6 acceptance
+predicates** (`custom_script`×3, `test_runner`, `coverage`, `static`) — the
+`custom_script` predicates survive (the E32 provider map, already fixed in PR #623 by
+delegating to `Loader.provider_kinds/0`, is confirmed correct). Tests:
+`conformance_test.exs` pins the noise-prefixed real-envelope parse;
+`authoring_test.exs` drives `propose/2` through a stub returning the real adapter
+result and asserts ≥1 predicate incl. `custom_script`.
+
+**Remaining gate.** Live verify on the RELEASED binary — the full `kazi plan "<idea>"`
+→ `kazi approve <ref>` → `kazi apply` chain — is a POST-RELEASE step (this fix must
+merge + release first). Pre-merge verification was done against the source build on
+real claude bytes as above.
+
 ## 2026-06-25 — LIVE dogfood frontier is headless-unblockable; T26.8 prose-drafting still broken live
 
 A headless `/apply --pool` session checked whether the remaining LIVE dogfood tasks
