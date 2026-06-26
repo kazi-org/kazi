@@ -83,3 +83,21 @@ test.describe("series landing page", () => {
     );
   });
 });
+
+// T38.3: the per-post route ([...slug].astro). The published set is honestly
+// empty today (only a draft placeholder exists), so the production build emits
+// NO post page — and the route's getStaticPaths excludes drafts. We assert the
+// honest, true-today contract: a draft post is NOT reachable in the shipped
+// site (404). The "a published post renders at /blog/<slug> with correct meta +
+// working prev/next" assertion is exercised LOCALLY in dev (where drafts are
+// previewable) and was verified during T38.3; it is deferred here to Post 1
+// (T38.6), exactly as the index's "≥1 post" assertion is — faking a published
+// post to green this would be dishonest.
+test.describe("blog post route", () => {
+  test("draft posts are excluded from the production build (404)", async ({
+    page,
+  }) => {
+    const res = await page.goto("/blog/welcome");
+    expect(res?.status()).toBe(404);
+  });
+});
