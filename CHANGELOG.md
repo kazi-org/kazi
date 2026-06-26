@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.53.0](https://github.com/kazi-org/kazi/compare/v1.52.0...v1.53.0) (2026-06-26)
+
+
+### Features
+
+* **blog:** T38.6 Post 1 — the ceiling of "looks good to me" ([e7271b7](https://github.com/kazi-org/kazi/commit/e7271b7fc2949dfc7e1797a67d5c78d0994b93a3))
+
 ## [1.52.0](https://github.com/kazi-org/kazi/compare/v1.51.0...v1.52.0) (2026-06-26)
 
 
