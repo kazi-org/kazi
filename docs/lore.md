@@ -306,3 +306,25 @@ in `cmd:"sh", args:["-c","<line>"]`, never a `script` key). INVARIANT: when you 
 a harness to emit a kazi goal-file, embed the AUTHORITATIVE config schema, do not let
 it guess — and source that schema from `Kazi.Predicate.Schema`, the same place the CLI
 reads. (2026-06-25, T26.8.)
+
+### L-0019 #scheduler #cli #burrito #release #parallel #landmine -- the released binary's `--parallel` crashes `:noproc`; `PartitionSupervisor` is never started in the standalone path
+`kazi apply <goal> --parallel` on a RELEASED (Burrito standalone) binary crashes
+immediately and deterministically with `{:noproc, {GenServer, :call,
+[Kazi.Scheduler.PartitionSupervisor, {:start_child, ...DepScheduler.start_group...}]}}`.
+Cause: `Kazi.Application.start/2` detects a Burrito standalone run and hands straight
+to `Kazi.Release.burrito_main()`, so the supervision tree below it -- including
+`{Kazi.Scheduler.PartitionSupervisor, name: ...}` (application.ex) -- is NEVER stood
+up. The CLI then manually `start_link`s ONLY `Kazi.Repo` (in `migrate_read_model/0`,
+the same retrofit the homebrew read-model crash needed, [[homebrew-tap-stale-readmodel-crash]]);
+nothing starts `PartitionSupervisor`. So `run_goal_parallel/4` -> `Kazi.Scheduler.run_goals/2`
+-> `DepScheduler` -> `PartitionSupervisor.start_child(PartitionSupervisor, …)` targets
+a named process that does not exist -> `:noproc`. This breaks the ENTIRE E21/E23
+parallel-execution surface on every released binary. LANDMINE: `--explain`
+(pure planning, no supervisor) and serial `--apply` BOTH work, so the break is
+invisible unless you actually run `--parallel` live -- exactly the gap the T23.9
+dogfood hit. INVARIANT: any process the supervision tree starts that a CLI command
+needs must ALSO be started in the Burrito standalone path (mirror `ensure_read_model`
+/ `migrate_read_model`); declaring it in `Kazi.Application` children is NOT enough,
+because that tree never boots under a standalone binary. FIX: start
+`PartitionSupervisor` in the CLI parallel path before `run_goals/2`. (2026-06-26,
+T23.9; found on v1.64.1.)
