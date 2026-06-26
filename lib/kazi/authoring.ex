@@ -373,6 +373,18 @@ defmodule Kazi.Authoring do
   drafted predicates reflect them; `rationale` is the inline "why these predicates
   / what is out of scope" the draft surfaces at review (T11.5).
 
+  ## Pinning the provider config shape (T26.8)
+
+  A real drafting harness, told only the provider NAMES, guesses each predicate's
+  `config` shape — and guesses wrong. Live on v1.46.1 the claude harness drafted a
+  `custom_script` predicate with an invented `{"script", "interpreter",
+  "working_dir", "expected_exit_code"}` shape, so the proposal PARSED but the goal
+  then failed to load (`custom_script … requires a non-empty string "cmd"`),
+  killing the on-ramp at `approve`. So the prompt now EMBEDS the authoritative
+  per-provider config contract, rendered straight from `Kazi.Predicate.Schema`
+  (the SAME source `kazi schema <provider>` prints — no hand-duplicated field list
+  to drift), and explicitly pins `custom_script` to `cmd` (NOT `script`).
+
   ## Examples
 
       iex> prompt = Kazi.Authoring.build_prompt("a health endpoint that returns 200")
@@ -402,9 +414,52 @@ defmodule Kazi.Authoring do
         "rationale": "<one or two sentences: why these predicates, and what is deliberately out of scope>"
       }
 
+    Each predicate's `config` object MUST use the EXACT keys kazi's provider
+    expects — kazi rejects an unknown config shape at load, so do NOT invent
+    config keys. The config contract per provider (required keys marked
+    *required*):
+
+    #{provider_config_contract()}
+
+    A `custom_script` config MUST use `cmd` (ONE executable, e.g. "sh" or
+    "test") plus optional `args` (an array of strings), `verdict`, and `env`; it
+    MUST NOT use `script`, `interpreter`, `working_dir`, or `expected_exit_code`
+    — those are not kazi config keys and the goal will fail to load. Put a shell
+    line in `cmd: "sh"`, `args: ["-c", "<line>"]`, never in a `script` key.
+
     Author at least one predicate. These are acceptance criteria for NEW
     behavior: they are expected to fail now and pass once the idea is built.
     """
+  end
+
+  # The authoritative per-provider config contract embedded into the drafting
+  # prompt (T26.8), rendered from `Kazi.Predicate.Schema` — the SAME single source
+  # of truth `kazi schema <provider>` prints — so the harness drafts a `config`
+  # kazi's loader actually accepts instead of guessing (and guessing wrong, e.g.
+  # the invented `custom_script` `script` shape that loaded-failed live on v1.46.1).
+  # Sourcing it here means the field list never drifts from the providers.
+  defp provider_config_contract do
+    Kazi.Predicate.Schema.kinds()
+    |> Enum.map_join("\n", &render_provider_contract/1)
+  end
+
+  # One provider's contract line: its config keys (required ones marked) plus a
+  # concrete example config object (the schema's own example, minus the
+  # predicate-envelope keys), so the harness sees the exact shape to emit.
+  defp render_provider_contract(kind) do
+    {:ok, schema} = Kazi.Predicate.Schema.fetch(kind)
+
+    keys =
+      Enum.map_join(schema.keys, ", ", fn key ->
+        "#{key.name} (#{key.type})#{if key.required, do: " *required*", else: ""}"
+      end)
+
+    example_config =
+      schema.example
+      |> Map.drop(["id", "provider", "description"])
+      |> Jason.encode!()
+
+    "  - #{kind}: #{keys}\n    example config: #{example_config}"
   end
 
   # The clarifications block (the author's clarify-phase answers) inserted between
