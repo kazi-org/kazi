@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.55.0](https://github.com/kazi-org/kazi/compare/v1.54.0...v1.55.0) (2026-06-26)
+
+
+### Features
+
+* **blog:** T38.8 Post 3 — decisions need a home ([e782322](https://github.com/kazi-org/kazi/commit/e7823222732d9ab7a3c51ba996efd62cbe54b783))
+
 ## [1.54.0](https://github.com/kazi-org/kazi/compare/v1.53.0...v1.54.0) (2026-06-26)
 
 
