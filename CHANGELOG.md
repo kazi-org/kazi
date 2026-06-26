@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.63.0](https://github.com/kazi-org/kazi/compare/v1.62.0...v1.63.0) (2026-06-26)
+
+
+### Features
+
+* **blog:** T38.16 Post 11 — meet kazi: "done," proven ([541baaf](https://github.com/kazi-org/kazi/commit/541baaf71c7112526c3a93785420d544b39ecbc1))
+
 ## [1.62.0](https://github.com/kazi-org/kazi/compare/v1.61.0...v1.62.0) (2026-06-26)
 
 
