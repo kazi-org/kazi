@@ -14,4 +14,4 @@ export const HERO_TAGLINE = 'Your coding agent says "done." kazi proves it.';
 export const INVOCATION_PHRASE = "have kazi drive this until done";
 // Harnesses kazi can drive today (must match the README's "Use a different coding harness"
 // tier table). Order mirrors Kazi.Harness.Registry.ids/0 (ADR-0022).
-export const HARNESSES = ["claude", "opencode", "codex", "antigravity", "claw"];
+export const HARNESSES = ["claude", "opencode", "codex", "antigravity", "claw", "gemini_cli"];
