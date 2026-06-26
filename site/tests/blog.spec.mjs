@@ -29,6 +29,10 @@
 // T38.12 shipped Post 7, so the published set is now seven: the index lists all
 // seven, and the series landing page flips Part 7's row to a live link too (seven
 // "published" badges, five "coming").
+//
+// T38.13 shipped Post 8, so the published set is now eight: the index lists all
+// eight, and the series landing page flips Part 8's row to a live link too (eight
+// "published" badges, four "coming").
 import { test, expect } from "@playwright/test";
 
 const SERIES_SLUG = "from-vibe-coding-to-reconciliation";
@@ -53,6 +57,9 @@ const POST6_TITLE = "From prompts to skills";
 // Post 7 (T38.12).
 const POST7_SLUG = "plan-the-work-then-work-the-plan";
 const POST7_TITLE = "Plan the work, then work the plan";
+// Post 8 (T38.13).
+const POST8_SLUG = "a-definition-of-done-that-cant-lie";
+const POST8_TITLE = 'A definition of "done" that can\'t lie';
 
 function watchConsole(page) {
   const errors = [];
@@ -101,6 +108,9 @@ test.describe("blog index", () => {
     await expect(
       page.locator(`#blog-post-list a[href="/blog/${POST7_SLUG}"]`),
     ).toHaveCount(1);
+    await expect(
+      page.locator(`#blog-post-list a[href="/blog/${POST8_SLUG}"]`),
+    ).toHaveCount(1);
   });
 
   test("/blog loads with no console errors", async ({ page }) => {
@@ -130,18 +140,18 @@ test.describe("series landing page", () => {
     expect(parts).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
 
-  test("marks the published part(s) and the rest as coming (T38.12)", async ({
+  test("marks the published part(s) and the rest as coming (T38.13)", async ({
     page,
   }) => {
     await page.goto(`/blog/${SERIES_SLUG}`);
-    // Posts 1–7 are published; the remaining 5 still carry the "coming" badge.
+    // Posts 1–8 are published; the remaining 4 still carry the "coming" badge.
     // Scope to the badges inside the parts list (the intro prose also uses the word).
     await expect(
       page.locator("#series-parts .ui-chip", { hasText: "coming" }),
-    ).toHaveCount(5);
+    ).toHaveCount(4);
     await expect(
       page.locator("#series-parts .ui-chip", { hasText: "published" }),
-    ).toHaveCount(7);
+    ).toHaveCount(8);
     // Parts 1–5 rows link to the live posts.
     await expect(
       page.locator(`#series-parts a[href="/blog/${POST1_SLUG}"]`),
@@ -163,6 +173,9 @@ test.describe("series landing page", () => {
     ).toHaveCount(1);
     await expect(
       page.locator(`#series-parts a[href="/blog/${POST7_SLUG}"]`),
+    ).toHaveCount(1);
+    await expect(
+      page.locator(`#series-parts a[href="/blog/${POST8_SLUG}"]`),
     ).toHaveCount(1);
   });
 
@@ -452,6 +465,30 @@ test.describe("blog post route", () => {
   test("Post 7 loads with no console errors (T38.12)", async ({ page }) => {
     const errors = watchConsole(page);
     await page.goto(`/blog/${POST7_SLUG}`, { waitUntil: "networkidle" });
+    expect(
+      errors,
+      `console errors on the post:\n${errors.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  test("Post 8 renders at its permalink with title + header image (T38.13)", async ({
+    page,
+  }) => {
+    const res = await page.goto(`/blog/${POST8_SLUG}`);
+    expect(res?.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", { level: 1, name: POST8_TITLE }),
+    ).toBeVisible();
+    // Header image is the per-post art, with non-empty alt text.
+    const hero = page.locator('main article img[src="/blog/art/part-08.svg"]');
+    await expect(hero).toHaveCount(1);
+    const alt = (await hero.getAttribute("alt"))?.trim() ?? "";
+    expect(alt.length, "empty alt on the post header image").toBeGreaterThan(0);
+  });
+
+  test("Post 8 loads with no console errors (T38.13)", async ({ page }) => {
+    const errors = watchConsole(page);
+    await page.goto(`/blog/${POST8_SLUG}`, { waitUntil: "networkidle" });
     expect(
       errors,
       `console errors on the post:\n${errors.join("\n")}`,
