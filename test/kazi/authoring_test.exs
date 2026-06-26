@@ -91,6 +91,29 @@ defmodule Kazi.AuthoringTest do
     end
   end
 
+  # T26.8 (layer 2): a stub returning a `custom_script` draft in the CORRECT,
+  # loader-valid shape (`cmd` + `args`) — what the harness emits once the drafting
+  # prompt pins the provider config contract. The prior live failure was claude
+  # inventing a `{"script", "interpreter", "expect_exit"}` config that PARSED but
+  # then failed to load (`custom_script … requires a non-empty string "cmd"`),
+  # killing the on-ramp at `approve`. This stub proves the fixed shape loads.
+  defmodule ValidCustomScriptHarness do
+    @behaviour Kazi.HarnessAdapter
+
+    @impl true
+    def run(_prompt, _workspace, _opts) do
+      {:ok,
+       %{
+         result:
+           ~s({"name":"greeting","predicates":[) <>
+             ~s({"id":"greeting_file_exists_with_exact_contents",) <>
+             ~s("provider":"custom_script",) <>
+             ~s("description":"greeting.txt contains exactly hello world",) <>
+             ~s("config":{"cmd":"grep","args":["-Fxq","hello world","greeting.txt"]}}]})
+       }}
+    end
+  end
+
   # A stub whose harness simply could not run.
   defmodule FailingHarness do
     @behaviour Kazi.HarnessAdapter
@@ -418,6 +441,25 @@ defmodule Kazi.AuthoringTest do
       kinds = goal.predicates |> Enum.map(& &1.kind) |> Enum.sort()
       assert kinds == [:static, :tests]
     end
+
+    # T26.8 (layer 2): a drafted `custom_script` predicate carrying the REAL `cmd`
+    # config (what the pinned prompt elicits) survives end to end AND the
+    # serialized goal-file rehydrates through the SAME loader `approve` uses — so
+    # the loader's custom_script validation passes instead of erroring on a missing
+    # `cmd`. This is the pure-tier guard for the `approve` blocker.
+    test "a cmd-shaped custom_script predicate loads through the loader" do
+      json =
+        ~s({"predicates":[{"id":"file_exists","provider":"custom_script",) <>
+          ~s("config":{"cmd":"test","args":["-f","greeting.txt"]}}]})
+
+      assert {:ok, goal} = Authoring.parse_proposal(json, "g")
+      serialized = Authoring.serialize_goal(goal)
+
+      assert {:ok, %Goal{} = loaded} = Kazi.Goal.Loader.from_map(serialized)
+      cs = Enum.find(loaded.predicates, &(&1.kind == :custom_script))
+      assert cs.config[:cmd] == "test"
+      assert cs.config[:args] == ["-f", "greeting.txt"]
+    end
   end
 
   # T26.8: the end-to-end on-ramp against REAL captured `claude` output. The prior
@@ -447,6 +489,27 @@ defmodule Kazi.AuthoringTest do
 
       kinds = Enum.map(draft.goal.predicates, & &1.kind)
       assert :custom_script in kinds
+    end
+
+    # T26.8 (layer 2, the `approve` blocker): the NEXT layer of the same bug. After
+    # the parse fix the proposal PARSED, but a drafted `custom_script` config used
+    # an invented `{"script", …}` shape with no `cmd`, so the persisted goal then
+    # FAILED to load (`requires a non-empty string "cmd"`) — the on-ramp died at
+    # `approve`. With the drafting prompt pinned to the real `cmd` contract, a
+    # drafted `custom_script` goal now LOADS end to end: decode → build → persist →
+    # the loader's custom_script validation passes (so `approve` would succeed).
+    test "a drafted custom_script goal LOADS through the loader (no missing-cmd)" do
+      assert {:ok, draft} =
+               Authoring.propose("create greeting.txt with contents hello world",
+                 harness: ValidCustomScriptHarness
+               )
+
+      row = Repo.get_by(ProposedGoal, proposal_ref: draft.proposal_ref)
+      assert {:ok, %Goal{} = goal} = Kazi.Goal.Loader.from_map(row.goal)
+
+      cs = Enum.find(goal.predicates, &(&1.kind == :custom_script))
+      assert cs, "expected a custom_script predicate to survive into the loaded goal"
+      assert cs.config[:cmd] == "grep"
     end
   end
 
@@ -478,6 +541,27 @@ defmodule Kazi.AuthoringTest do
       assert prompt =~ "ship a /healthz route"
       assert prompt =~ "acceptance"
       assert prompt =~ "JSON"
+    end
+
+    # T26.8 (layer 2): the prompt must PIN the provider config contract so the
+    # harness drafts a loader-valid `config` instead of an invented one. It must
+    # teach that `custom_script` requires `cmd` and must NOT use the invented
+    # `script` shape that load-failed live, and the contract must be sourced from
+    # `Kazi.Predicate.Schema` so it never drifts from the providers.
+    test "pins the custom_script config contract (cmd required, not script)" do
+      prompt = Authoring.build_prompt("create greeting.txt")
+
+      # The custom_script contract is present, with cmd marked required.
+      assert prompt =~ "custom_script: cmd (string) *required*"
+      # The invented shape is explicitly forbidden.
+      assert prompt =~ "MUST NOT use `script`"
+      assert prompt =~ "interpreter"
+      # Sourced from the schema's own example (the cmd-based shape), not invented.
+      assert prompt =~ ~s("cmd":"semgrep")
+      # Every documented provider's contract is rendered from the single source.
+      for kind <- Kazi.Predicate.Schema.kinds() do
+        assert prompt =~ "- #{kind}:"
+      end
     end
   end
 
