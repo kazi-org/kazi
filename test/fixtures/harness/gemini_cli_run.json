@@ -1,0 +1,1 @@
+{"session_id":"sess_golden","response":"Made the failing unit test pass.","stats":{"models":{"gemini-2.5-pro":{"api":{"totalRequests":1,"totalErrors":0,"totalLatencyMs":4200},"tokens":{"promptTokenCount":1500,"candidatesTokenCount":400,"cachedContentTokenCount":900,"totalTokenCount":1900}}}}}

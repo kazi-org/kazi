@@ -74,10 +74,25 @@ antigravity_live_excluded = [:antigravity_live]
 # fails, never fake-passes) when either is unavailable.
 claw_live_excluded = [:claw_live]
 
+# The live Gemini CLI smoke test (tagged `:gemini_cli_live`, T37.1/T37.2,
+# ADR-0022) drives the operator's REAL `gemini` CLI (`gemini -p "<prompt>" -o
+# json --approval-mode yolo`) wired to Google via `GEMINI_API_KEY` (or Google
+# OAuth / Vertex `GOOGLE_API_KEY`). Like `:codex_live`/`:antigravity_live` it is
+# NON-hermetic and EXCLUDED by default so the standard `mix test` and CI stay
+# hermetic (no network, no creds). The live body itself is T37.2; T37.1 only
+# registers the tag (and a placeholder). Opt in explicitly:
+#
+#     mix test --only gemini_cli_live test/kazi/gemini_cli_live_test.exs
+#
+# The (T37.2) test will probe the `gemini` binary + auth first and SKIP HONESTLY
+# (never fail, never fake-pass) when either is unavailable.
+gemini_cli_live_excluded = [:gemini_cli_live]
+
 ExUnit.start(
   exclude:
     nats_excluded ++
       graphify_excluded ++
       opencode_live_excluded ++
-      codex_live_excluded ++ antigravity_live_excluded ++ claw_live_excluded
+      codex_live_excluded ++
+      antigravity_live_excluded ++ claw_live_excluded ++ gemini_cli_live_excluded
 )
