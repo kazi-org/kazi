@@ -152,6 +152,13 @@ Open work:
   `:mutation`, `:cve` (govulncheck reachability) providers + documented
   contract/perf/security-tail recipes, plus live upgrades -- sustained-health,
   `:metrics` (PromQL/RED), SLO burn-rate, synthetic journey, ADR-0043) -- E32.
+- **UC-051** (a developer evaluating kazi reads a twelve-part credibility-building blog
+  series on https://kazi.sire.run/blog that walks them from a vanilla coding-agent
+  workflow up the same ladder the author climbed -- persistent context, knowledge tiers,
+  real-world verification, structural code understanding, reusable skills, a written
+  plan, an honest definition of done, safe parallelism -- to a reconciliation workflow,
+  and adopts kazi as the natural conclusion; each post is independently useful and the
+  series describes only shipped behavior, ADR-0048) -- E38.
 
 ## Checkable Work Breakdown
 
@@ -181,6 +188,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E35 -- Context-store layer + Gist provider: evidence compression + stuck-bundle replay (P2, ADR-0045) -> plans/E35.md
 ### E36 -- Inner-harness minimalism: tool-surface restriction now, context tiers measured (P2, ADR-0047) -> plans/E36.md
 ### E37 -- Wire the Gemini CLI harness profile (P2, ADR-0016/0022) -> plans/E37.md
+### E38 -- Adoption blog series: "From Vibe Coding to Reconciliation" (12 parts) (P1, ADR-0048) -> plans/E38.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -237,6 +245,11 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 | R-E32-5 | Live metric/burn-rate predicates (T32.10) assume an observability stack (Prometheus) kazi cannot provision, so they mislead when absent. | Med | Med | They degrade to "not applicable" (never a false pass) when no metrics endpoint is configured; sustained-health needs only an HTTP endpoint and is the universal baseline; the bake-window discipline is documented. ADR-0043. |
 | R-E32-6 | Provider sprawl: too many first-class kinds to maintain. | Low | Med | The earns-first-class test (ADR-0043 §context): only five code-side providers (`:static`/`:coverage`/`:property`/`:mutation`/`:cve`) + the live upgrades are first-class; the long tail (contract/perf/a11y/visual/secret/IaC) stays `custom_script` config (T32.9), growing the catalog without growing the release surface. |
 | R-E32-7 | Unifying + deprecating `test_runner`/`prod_log` (T32.1b) breaks existing goal files, or the eventual removal force-bumps a premature v2.0.0. | Med | Low | T32.1b ships NON-BREAKING -- both names keep resolving as presets with a stderr deprecation hint and a near-mechanical migration documented in `docs/deprecations.md`; the actual REMOVAL is a SEPARATE future v2.0.0 task (not in E31), mirroring the run/propose -> v1.0.0 window; an existing-goal-file load test pins back-compat. ADR-0040 decision 7. |
+| R-E38-1 | The series reads as condescending toward "vibe coders" or as influencer hype, repelling the working engineers it must win. | High | Med | ADR-0048 freezes a fellow-traveler stance; the committed style sheet (T38.5) encodes voice + a no-hype checklist; a human voice/continuity review is a REQUIRED gate step (T38.18d) because a coherence check cannot catch tone. |
+| R-E38-2 | A post advertises a kazi capability that is not shipped (vaporware), breaking the credibility the series is built to create. | High | Med | No-vaporware is an ADR-0048 non-negotiable: every command verified vs `kazi help --json`/`concept.md`; the E29 removed-verb guard is extended over `site/src/content/blog/**` (T38.4) and the E31 freshness checks + the T38.18 gate block publish until green; "coming" only where honestly labelled. |
+| R-E38-3 | Twelve quality posts are a large sustained writing effort; the series stalls half-published and reads as abandoned. | Med | Med | Posts are independently useful (ADR-0048) so a partial series still delivers value; the plan publishes incrementally (Wave E38-2) and each post ships live on its own; the gate (T38.18) runs over whatever is published, not all-or-nothing for value (only for the launch announcement T38.19). |
+| R-E38-4 | The series duplicates or contradicts the E25 README/site launch messaging (two generations of the same pitch). | Low | Med | E38 is the LONG-FORM companion to ADR-0030/E25, not a rewrite: it REUSES E25's hero transcript (T25.2), without/with frame, and dogfood gallery (T25.7) and links the same launch; T38.19 explicitly coordinates with (does not duplicate) the E25 T25.10 launch gate. |
+| R-E38-5 | Naming the product late depresses near-term conversion / lead-gen from the early posts. | Low | Med | Deliberate trade per ADR-0048 (credibility over a conversion spike); every post still links forward and the final third (posts 10-12) converts; distribution widens because marketing-allergic communities will share product-light, useful posts. |
 
 ## Operating Procedure
 
@@ -262,6 +275,37 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-25 -- Change Summary (E38: adoption blog series "From Vibe Coding to Reconciliation"; ADR-0048)
+- Operator directive (/plan): plan a TWELVE-part blog series for the kazi website that
+  walks a reader from a vanilla coding-agent user ("vibe coder") to a super-user who
+  reaches for kazi, to drive ADOPTION by building CREDIBILITY for kazi's ideas. Explicit
+  caution: the plan + ADR are PUBLIC docs shipped with kazi -- wrong framing would turn
+  off engineers.
+- Discovery: reconstructed the author's actual ladder from the global skills directory
+  (memory -> knowledge tiers -> browser verification -> code graph/context economy ->
+  skills -> plan -> definition-of-done -> pool/claim parallelism -> reconciliation/kazi);
+  mapped the Astro site (`site/`, GitHub Pages, kazi.sire.run, no blog section yet,
+  canonical strings in `site/src/canonical.mjs`); grounded the framing against ADR-0030
+  (agent-native positioning) + `docs/concept.md` (the two gaps).
+- **Created ADR-0048** (adoption blog series -- editorial stance): fellow-traveler tone
+  (never talk down to "vibe coders"); every post independently useful; credibility over
+  hype; NO vaporware (coherence/freshness-gated); the product EMERGES (kazi named late);
+  one story / reused E25 assets / two surfaces. Builds on ADR-0025/0030.
+- **Added E38** (P1, ADR-0048, UC-051): T38.1-T38.4 blog infrastructure on the Astro
+  site (content collection + schema, index/series/post routes, RSS/nav + a verb-drift
+  guard extending E29 over `site/src/content/blog/**`); T38.5 committed editorial style
+  sheet; T38.6-T38.17 the twelve posts (one per rung, each ending on the limitation that
+  motivates the next); T38.18 the single no-vaporware accuracy+coherence+quality gate;
+  T38.19 announcement/cross-post kit coordinated with the E25 launch. Waves E38-1..3;
+  risks R-E38-1..5.
+- Non-overlap recorded: E38 is the LONG-FORM companion to E25's one-screen surfaces
+  (README/site) -- it reuses the hero transcript (T25.2) + without/with frame + dogfood
+  gallery (T25.7), does not re-create them, and T38.19 coordinates with (not duplicates)
+  the E25 T25.10 launch gate.
+- Authored in an isolated git worktree off origin/main (`plan/e38-blog-series`) per the
+  shared-tree reset hazard (lore L-0014); local main was 30 commits behind, so numbers
+  (E38/ADR-0048/UC-051) were taken from origin/main, not the stale local checkout.
 
 ### 2026-06-25 -- Change Summary (LIVE dogfood frontier UNBLOCKED for the headless pool -- enablers proven)
 - The remaining open frontier is the LIVE dogfood / launch chain. A headless pool
