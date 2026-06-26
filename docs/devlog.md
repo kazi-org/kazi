@@ -4,6 +4,83 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T21.12 native-parallel dogfood: `--parallel` is BROKEN on the released binary (honest negative, BLOCKED)
+
+The live dogfood for the E21/ADR-0027 native parallel scheduler (UC-037) — proving
+≥2 disjoint blast-radius partitions converge **concurrently** under one `kazi apply`,
+single-node and NATS-free — run against the **released v1.64.1 macOS binary** driving
+the **real claude harness** (Claude Code 2.1.193). No source build, no stubs. The
+proof was **not obtained**: `kazi apply --parallel` is non-functional on the released
+binary, and even if it ran the partitioner collapses to one partition. Two
+independent defects, both observed.
+
+**Setup.** A scratch Go service in a throwaway `<scratch-repo>` (`git init`, `go mod
+init`, one `main.go`), all predicates failing at t0. Ran the canonical fixture
+`priv/examples/predicate_graph_waves.toml` (3 groups: `result-contract` ∥ `health`
+disjoint, `streaming needs result-contract`) and a minimal 2-group `repair` fixture
+(disjoint `alpha.go`/`beta.go`, one one-line fix each).
+
+**Step 1 — `--explain` (compute the schedule, no dispatch): partitions COLLAPSE.**
+`kazi apply <fixture> --workspace <scratch> --parallel --explain --json` printed the
+two frontier-0 groups (`result-contract`, `health`) as **one** partition (a single
+`partition_id`, `goal_ids: ["health","result-contract"]`), not two. Tried three
+configurations — (a) the canonical fixture with no graph, (b) the same after
+`code-review-graph build`, (c) a hand-built 2-file repository whose group ids match
+the symbols (`alpha`/`beta`) with a graph present — **all three collapsed to one
+partition**. So no spatial concurrency is even scheduled.
+
+**Step 2 — the real run: deterministic `:noproc` crash.** `kazi apply <fixture>
+--workspace <scratch> --parallel --json --harness claude` exits 1 **immediately**
+(elapsed ~0s, nothing dispatched) with:
+
+```
+{"status":"error","next_action":"investigate","error":"{:noproc, {GenServer, :call,
+[Kazi.Scheduler.PartitionSupervisor, {:start_child, ...}, :infinity]}}"}
+```
+
+Reproduced on **both** fixtures, every run. The `Kazi.Scheduler.PartitionSupervisor`
+process is **not started** in the released burrito binary's runtime, so the
+coordinator's first `start_child` fails before any partition reconciler runs. (Same
+class of defect as the historical "`Kazi.Repo` not started in the burrito path" —
+a process the CLI path needs is absent from the packaged supervision tree.)
+
+**Control — the SERIAL path works.** The same 2-group `repair` fixture run WITHOUT
+`--parallel` (`kazi apply ... --json --harness claude`) **converged in 2 iterations**
+— both `alpha-done` and `beta-done` flipped to `pass`, cost ~$0.17. So the harness,
+the read-model, and the per-goal reconciler are healthy on the released binary; the
+defect is isolated to the parallel scheduler path.
+
+**Root causes (code-confirmed against the worktree source).**
+1. **`--parallel` crashes (hard blocker):** `Kazi.Scheduler.PartitionSupervisor` is
+   not in the released binary's started supervision tree → `:noproc` on `start_child`.
+   Nothing parallel can run until it is supervised in the CLI/burrito boot path.
+2. **Partitions collapse even when run (latent):** the partitioner derives a group's
+   blast-radius terms from `Kazi.Predicate.metadata.partition_terms`, but the
+   `Kazi.Predicate` struct has **no `:metadata` field** (the loader routes unknown
+   keys to `:config`), so `predicate_terms/1` never matches and every group falls
+   back to its group-id as its only term. Those group-id terms are then surveyed
+   through `Kazi.Context.RepoMapSource`, which (a) shells out to `code-review-graph
+   query-graph` — a subcommand that **does not exist** in code-review-graph 2.3.1
+   (only `build/update/serve/...`), so the graph path always errors and falls back to
+   (b) the **file-scan repo map**, whose `files`/`symbols` lists are **term-blind**
+   (they return the entire source tree regardless of the evidence terms). Identical
+   radius for every group ⇒ one partition by transitive-overlap. The runbook's
+   "graph stale/absent ⇒ collapse" caveat is, in practice, the only outcome
+   reachable from the CLI today.
+
+**Verdict: T21.12 BLOCKED (honest negative).** ≥2 partitions converging concurrently
+was **not** observed and is **not reachable** on the released binary v1.64.1: the
+`--parallel` entrypoint crashes with `:noproc` (PartitionSupervisor unstarted), and
+the partitioner collapses any multi-group goal to a single partition (unauthorable
+`partition_terms` + a graph shell-out to a removed subcommand + a term-blind
+file-scan fallback). The parallel scheduler is well-covered by ExUnit (T21.1–T21.10
+with injected stubs) but has never been exercised end-to-end through the packaged
+binary — that gap is exactly what this dogfood found. Follow-ups for the operator:
+(i) start `Kazi.Scheduler.PartitionSupervisor` in the CLI boot path + add a
+released-binary smoke test for `--parallel`; (ii) make the graph survey term-aware
+(fix the `query-graph` shell-out to match the current CLI, or filter the file-scan
+fallback by terms) so disjoint groups produce disjoint radii. Task left unchecked.
+
 ## 2026-06-26 — T30.4 LIVE escalation dogfood: cheap tier converged, ladder did not climb (honest negative) + a `max_iterations=1` landmine
 
 The live dogfood for the ADR-0035 escalate-on-stuck ladder (UC-045, UC-033),
