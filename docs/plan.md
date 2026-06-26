@@ -262,6 +262,37 @@ never swept into your commit.
 
 ## Progress Log
 
+### 2026-06-25 -- Change Summary (LIVE dogfood frontier UNBLOCKED for the headless pool -- enablers proven)
+- The remaining open frontier is the LIVE dogfood / launch chain. A headless pool
+  session VERIFIED the enablers are now present and proven, so most of these are no
+  longer operator-only -- other sessions should claim them.
+- **Enablers (verified 2026-06-25):** the `claude` CLI harness is installed and
+  drives the loop; the RELEASED binary `kazi v1.45.0` (sha-verified) runs every
+  read-model + `apply` command; `agent-browser` is available for the LiveView
+  dashboards and the LiveView feature itself is built (`lib/kazi_web/live/*`,
+  deps T20.6/T21.1 done). The build frontier is drained, so the feature-complete
+  dogfood-policy gate is SATISFIED.
+- **PROOF (a real reconcile, not a mock):** a minimal create-mode goal (a
+  `custom_script` predicate asserting `hello.txt` contents == `ok`, failing at t0)
+  driven by `kazi apply --harness claude --json` on v1.45.0 converged in 2
+  iterations / 15.3s -- iter1 FAIL -> claude created the file -> iter2 PASS ->
+  `status: converged`, enforcement active, zero gaming events.
+- **Now headless-poolable** (goal-file-driven reconcile + browser): T20.11, T21.12,
+  T23.9, T30.4, T31.7, T32.11, T35.10 (drive kazi on a goal-file, record evidence in
+  `docs/devlog.md`); T20.8, T21.9 (LiveView dashboards via agent-browser); the
+  live-site leg of T25.10. T15.9 too, modulo the secondary cheap-harness it names.
+- **STILL blocked (with reason):** **T26.8** -- `kazi plan "<idea>"` prose drafting
+  STILL fails live on v1.45.0 (`--json` asks for clarification; `--yes` returns
+  "proposal has no predicates"). PR #623's robust-to-multiple-shapes parse did NOT
+  match what real claude emits; the real fix needs a captured raw claude draft (see
+  the T26.8 LIVE FINDING note in plans/E26.md). This also blocks **T16.6** / **T26.6**
+  (both drive the prose plan->approve->apply path). **T25.2** (asciinema hero cast)
+  needs a terminal recorder not installed here.
+- Net: the operator-only assumption on the dogfoods was too conservative. The
+  goal-file dogfoods + dashboard tasks are claimable headlessly TODAY; the prose
+  on-ramp (`kazi plan`) is the one genuinely-still-broken surface -- fix T26.8
+  against a captured real-claude draft before claiming T16.6/T26.6.
+
 ### 2026-06-25 -- Change Summary (docs/website consolidation + human->Claude->kazi->Claude reframe)
 - Operator directive: collapse the sprawling, multi-generation doc/website tasks into
   fewer canonical tasks (stop drafting successive generations of the same document), and
