@@ -347,6 +347,40 @@ guarantees is everything AFTER that declaration: it computes the ready set, runs
 each frontier with spatial parallelism, re-gates on objective convergence, and
 escalates blocked sub-DAGs -- it does not infer the order itself.
 
+### 8b. Interop: kazi under an external pool orchestrator (ADR-0026)
+
+Section 8 is kazi OWNING parallelism (the native scheduler). The mirror case is
+kazi as a good citizen UNDERNEATH a parallel orchestrator someone already runs --
+the operator's `/loop /apply --pool` (many Claude Code sessions, each `/claim`-ing
+a plan task and rebase-merging a PR), a CI matrix, any swarm. That hand-rolled
+workflow is a re-implementation of kazi's own problem statement, and it carries
+three documented failure modes: **session-asserted done** (each session decides
+its own task is finished -- the Gap-1 failure, which has produced false "merged"
+reports), **wave stalls** (a session dies on an auth/push/test failure with no
+self-recovery), and **coarse coordination** (`/claim` locks a task *id*, not the
+code it touches, so two tasks editing the same function both merge clean and break
+behaviour -- a silent logical conflict). kazi already ships the primitive for each.
+
+So ADR-0026 slots kazi UNDER each pool session rather than replacing the pool:
+
+- **Two-tier coordination, composed not replaced.** `/claim` stays the OUTER lock
+  (which session takes which task); kazi's blast-radius lease (section 7) becomes
+  the INNER lock (what code the run may touch). Claim = task selection, lease =
+  blast radius -- the same `/claim` ↔ lease boundary the pool guides spell out.
+- **The authoring bridge is `kazi plan` caller-drafts (ADR-0023).** A session turns
+  its task's `acc:` line into predicates through the single sanctioned authoring
+  path -- no parallel mechanism -- and `kazi apply` is then the objective-done gate
+  that can BLOCK a merge the session would otherwise have asserted done.
+
+This does NOT contradict section 8 or ADR-0001. ADR-0027's native scheduler is the
+PRIMARY parallel story (kazi owns the swarm); ADR-0026 is RETAINED only as the
+interop story for when an external orchestrator owns scheduling and kazi supplies
+objective-done + finer coordination beneath it. Both are the same kazi -- the
+controller that owns convergence and truth -- exposed at different layers. The
+operator-facing recipes for this live in the pool guides (the `acc:`→predicates
+bridge, the per-task drive recipe, the verification gate, the blast-radius lease,
+and the claim↔lease deadlock-safety boundary).
+
 ---
 
 ## 9. Architecture & data layers (ADR-0003, ADR-0004, ADR-0005)
@@ -423,7 +457,8 @@ command:
   internal, `--standing` re-converges on drift, and "launch-ready" is just the
   predicate vector being objectively satisfied (including a live prod probe), not
   a heuristic verdict.
-- `kazi status` / `watch` -- convergence state and the LiveView dashboard.
+- `kazi status` -- convergence state (the `--json` read); the LiveView console is
+  the live dashboard for inspection (goal board, presence, lease map).
 - `kazi init <repo>` (the router's `adopt` verb) -- reverse-engineer a starter goal-set
   from an existing repo.
 
@@ -433,6 +468,54 @@ at the agent, and the CLI command read the same. `kazi plan` authors intent;
 were removed at v1.0.0; use `kazi apply`/`kazi plan` -- see docs/deprecations.md.)
 This keeps kazi an outer-loop tool the agent calls (ADR-0001), not a
 harness the human types into directly.
+
+### 10a. The docs are themselves a kazi goal (ADR-0036)
+
+The plan (`docs/plan.md`) IS kazi's `goal.toml` -- the executable spec the apply
+loop reconciles against -- and the stable docs (`concept.md`, `lore.md`, ADRs) are
+the orientation every dispatch carries. Both rot: completed epics accumulate in the
+live plan (inflating per-dispatch context, a direct token cost) and the prose
+drifts from a moving codebase (the stale-context failure objective predicates exist
+to prevent). The flagship dogfood (ADR-0036) is to apply kazi's own thesis to its
+docs -- make trim and freshness a kazi-reconciled STANDING goal rather than another
+LLM-driven, manually-triggered, unenforced cleanup. The logic lives in the
+skill + CI predicate layer; kazi only DRIVES it, so the core stays an
+unopinionated controller (the ADR-0023/0033/0035 line):
+
+- **Layer 1 -- deterministic structural trim (lossless).** A script (not an LLM)
+  archives an epic out of the live plan ONLY when it is 100% `[x]` AND release-tag
+  covered, moving the block verbatim to a git-tracked archive and leaving a
+  one-line pointer. Idempotent and reversible.
+- **Layer 2 -- gated knowledge extraction (LLM, propose-then-confirm).** AFTER
+  Layer 1 has preserved the raw block, the LLM lifts only durable nuggets to the
+  right tier (invariant→`lore.md`, finding→`devlog.md`, decision→`adr/`,
+  architecture→`concept.md`). Because the archive already holds everything, a
+  routing mistake never LOSES knowledge.
+- **Layer 3 -- freshness as predicates (the enforcement).** A machine-checkable
+  doc-freshness set runs in CI and fails the build on drift: every shipped command
+  appears in README + `help --json`, no doc names a symbol absent from the code,
+  every referenced ADR exists, and no `[x]` task older than the last release
+  remains in the live plan. These are the same predicate kinds (a `ratchet` on the
+  documented-command %, a count that ratchets to 0) kazi gates any goal with.
+
+This is the reconciler property turned on kazi itself: the docs are the desired
+state, the freshness checks are the predicates, and kazi keeps actual state
+matching. The runnable set is documented in `docs/doc-freshness.md`; the trim tool
+is `.github/scripts/trim_plan.py`.
+
+### 10b. Where these docs live (presentation decision)
+
+**Decided: the repository is the single source of truth for documentation; the
+website does NOT host a rendered `/docs` tree (no docs-site generator, no second
+copy to keep in sync).** The canonical docs are the Markdown under `docs/` in this
+repo, read on GitHub. The website (kazi.sire.run) is a marketing + on-ramp surface
+-- the hero spine, the quickstart pointer, and links INTO the repo docs -- not a
+documentation mirror. Rationale: a rendered docs site is a second copy that drifts
+from the code it documents (the exact Layer-3 failure above), and the audience for
+deep docs is an agent or a contributor already in the repo, not a web visitor.
+README↔site coherence is enforced as a freshness predicate (T9.9); full guides stay
+single-sourced in `docs/`. If a rendered docs site is ever added, it must render
+FROM `docs/` (one source), never duplicate it.
 
 ---
 
