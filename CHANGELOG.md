@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.46.0](https://github.com/kazi-org/kazi/compare/v1.45.0...v1.46.0) (2026-06-26)
+
+
+### Features
+
+* **harness:** add :gemini_cli profile ([8e59072](https://github.com/kazi-org/kazi/commit/8e59072d08eda519840157858344e56f71b5e686))
+
 ## [1.45.0](https://github.com/kazi-org/kazi/compare/v1.44.0...v1.45.0) (2026-06-26)
 
 
