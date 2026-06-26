@@ -337,4 +337,9 @@ proves `start_child/2` works after `ensure_started/1` on a fresh (absent) name.
 GENERAL RULE for the future: when adding any new CLI command that reaches a
 supervised process (a `start_child`/`GenServer.call` to a named child of
 `Kazi.Application`), ensure-start it on the CLI path or it will `:noproc` only on
-the released binary. (Found on v1.64.1, T23.9; fixed T21.12.)
+the released binary. (Found on v1.64.1, T23.9; fixed T21.12, PR #740.) VERIFIED LIVE
+on the FIXED released binary v1.64.2: `kazi apply
+priv/examples/predicate_graph_waves.toml --parallel --json` ran end-to-end (no
+`:noproc`), dispatched two disjoint partitions concurrently, gated the dependent
+group, and converged collectively (exit 0) -- see docs/devlog.md (2026-06-26
+re-verify entry).
