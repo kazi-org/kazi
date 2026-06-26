@@ -128,7 +128,7 @@ defmodule Kazi.Partition do
       |> Enum.map(&normalize_goal/1)
       |> Enum.map(fn {id, terms} ->
         survey = source_mod.survey(workspace, terms, source_opts)
-        {id, blast_radius(survey)}
+        {id, blast_radius(survey, terms)}
       end)
       |> Enum.sort_by(fn {id, _radius} -> to_string(id) end)
 
@@ -143,15 +143,58 @@ defmodule Kazi.Partition do
   # The set of file paths a survey touches: impacted files, the files defining the
   # impacted symbols, and the failing test sources. Sorted + de-duplicated so the
   # radius (and any key derived from it) is byte-stable.
-  defp blast_radius(survey) do
+  #
+  # A `:repo_map` survey is BROAD by design: the repo-map fallback (T4.2) returns
+  # the WHOLE workspace tree as orientation material — it is ranked by relevance
+  # downstream by `Kazi.Context`, NOT filtered. As a blast radius that is wrong:
+  # every goal would get the whole repo as its radius, so genuinely DISJOINT goals
+  # overlap on everything and collapse into ONE partition (no spatial concurrency).
+  # So a repo-map survey is SCOPED here to the paths actually relevant to THIS
+  # goal's evidence terms before the radius is taken. A `:graph` survey is already
+  # term-scoped at the source (the graph's `--impacted <terms>` query) and a test
+  # double's survey is built per-goal, so both pass through UNSCOPED — scoping them
+  # would wrongly drop graph-impacted callers whose path/name need not contain the
+  # literal term.
+  defp blast_radius(%{origin: :repo_map} = survey, terms) do
+    files = Enum.filter(survey.files, &term_match?(&1.path, terms))
+    symbols = Enum.filter(survey.symbols, &symbol_relevant?(&1, terms))
+    tests = Enum.filter(survey.test_sources, &term_match?(&1.path, terms))
+
+    survey_paths(files, symbols, tests)
+  end
+
+  defp blast_radius(survey, _terms) do
+    survey_paths(survey.files, survey.symbols, survey.test_sources)
+  end
+
+  defp survey_paths(files, symbols, tests) do
     [
-      Enum.map(survey.files, & &1.path),
-      Enum.map(survey.symbols, & &1.path),
-      Enum.map(survey.test_sources, & &1.path)
+      Enum.map(files, & &1.path),
+      Enum.map(symbols, & &1.path),
+      Enum.map(tests, & &1.path)
     ]
     |> Enum.concat()
     |> Enum.uniq()
     |> Enum.sort()
+  end
+
+  # A repo-map symbol is relevant when its defining file's path OR its own name
+  # mentions a term (a term like `Widget` matches the symbol in `widget.go` even
+  # though the path does not contain the cased name).
+  defp symbol_relevant?(%{name: name, path: path}, terms),
+    do: term_match?(path, terms) or term_match?(name, terms)
+
+  # Mirrors `Kazi.Context.mentions?/2`: a value is relevant to a term when either
+  # contains the other (so `lib/calc.ex` matches term `calc`, and a `foo.ex:3`
+  # term still matches the `foo.ex` path). Empty terms match nothing — a goal with
+  # no terms gets an empty radius and stays its own singleton partition.
+  defp term_match?(value, terms) when is_binary(value) do
+    Enum.any?(terms, fn term ->
+      term = to_string(term)
+
+      term != "" and
+        (value == term or String.contains?(value, term) or String.contains?(term, value))
+    end)
   end
 
   # --- transitive-closure grouping (union-find by shared path) ----------------
