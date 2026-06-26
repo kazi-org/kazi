@@ -83,22 +83,79 @@ editorial stance. The series is tracked as epic E38.
    it (the final third of the series). Early posts name the specific tools the author
    used (a memory tool, a browser-automation tool, a code graph, and so on) as
    illustrations of a technique -- "what I reached for" -- never as "what you must
-   install." The techniques generalize beyond any one tool or harness.
+   install." The techniques generalize beyond any one tool OR harness: the story is
+   told through one coding agent for concreteness, but each rung is framed so a reader
+   on Codex/opencode/any harness sees their own path.
+
+   **Separate the technique from the author's private stack.** Much of the author's
+   ladder runs on tools that are personal, internal, or not publicly installable. A
+   credibility series cannot ask a reader to reproduce a path half of which they
+   cannot obtain, and the public repo's no-internal-leak rule (ADR-0034) forbids
+   surfacing internal infrastructure. Therefore each post leads with the GENERIC,
+   reproducible technique (e.g. "give decisions a home," "verify against a real
+   browser") that a reader can do with commodity tools, and names a specific tool only
+   as "what I happened to use," clearly marked, with a commodity alternative noted.
+   No post requires a private or internal tool to follow along, and none leaks
+   internal hosts, paths, or codenames.
 
 6. **One story, reused assets, two surfaces.** The series is the long-form
    companion to ADR-0030's short surfaces, not a competing rewrite. It reuses the
    loop-transcript hero, the without/with frame, and the dogfood "done" gallery
    rather than minting parallel versions, and it links into the same launch. The
    README/site remain the one-screen pitch; the blog is the credibility and
-   education layer beneath them.
+   education layer beneath them. The positioning source of truth is the existing
+   canonical strings (`site/src/canonical.mjs`) and ADR-0030; the series does not
+   introduce a parallel positioning doc.
+
+7. **Show the loop; don't only describe it.** A series whose climax is "the
+   reconciliation pattern" cannot be text-only -- the reader must SEE the loop, the
+   ladder, and the without/with contrast. The series ships a small set of explanatory
+   DIAGRAMS (the reconcile loop, the rung ladder, before/after) and per-post header
+   art, in the site's visual language -- technical diagrams, NOT glossy ad creative,
+   consistent with credibility over hype. Existing site/README assets are reused
+   before any are generated, and every image carries descriptive alt text.
+
+8. **Instrument for one honest adoption signal, not vanity.** Per ADR-0030
+   ("instrument downloads/retention, not stars"), the series declares ONE measurable
+   success signal tied to adoption (e.g. blog-attributed installs/skill-wires or a
+   doc-to-install progression), with privacy-respecting analytics appropriate to a
+   static site, UTM tagging on outbound links, and a canonical-URL strategy for any
+   syndication (so cross-posts do not incur a duplicate-content penalty or bleed the
+   canonical's authority). The series is judged by that signal, not by post count or
+   star spikes. Heavyweight lifecycle marketing (email drip funnels, gated capture) is
+   out of scope (see "Considered and deliberately excluded").
 
 The twelve posts and their per-post theses are specified in `docs/plans/E38.md`. The
 arc is: (1) the ceiling of agent-decided "done"; (2) persistent context; (3)
-knowledge tiers; (4) real-world verification; (5) structural code understanding and
-context economy; (6) prompts becoming skills; (7) intent as a written plan; (8) an
-honest definition of done; (9) safe parallelism across many agents; (10) the
-reconciliation pattern underneath all of it; (11) kazi as the packaging of rungs
-7-10; (12) the reader's on-ramp.
+knowledge tiers (and keeping them honest); (4) real-world verification (and code ->
+prod); (5) structural code understanding, context economy, and safe refactoring; (6)
+prompts becoming skills; (7) intent as a written plan; (8) an honest definition of
+done (including adversarial/security review); (9) safe parallelism across many agents
+(and resilience/recovery); (10) the reconciliation pattern underneath all of it; (11)
+kazi as the packaging of rungs 7-10; (12) the reader's on-ramp (and hardening the
+harness before unsupervised runs). The added themes ride as sub-beats on existing
+posts so the count stays twelve; the per-post detail and the two supporting tasks
+(visual assets, instrumentation) are in `docs/plans/E38.md`.
+
+## Considered and deliberately excluded
+
+To keep the series credible and on-message -- and to stop a well-meaning execution
+pass from bolting marketing machinery onto it -- the following were considered and
+deliberately left out:
+
+- **A hierarchical "agent organization" post (CEO/C-suite/VPs/Leads delegation).**
+  Out of scope: that is a different product philosophy (role-based delegation), not a
+  rung toward kazi's thesis (objective done + resource-level coordination). Including
+  it would dilute the arc. Post 9 covers the parallelism rung that matters for kazi
+  (coordinate on blast radius, not identity).
+- **Email drip funnels / gated lead capture / welcome sequences.** Out of scope: the
+  site is static (GitHub Pages) with no backend, and gated capture cuts against the
+  developer-respecting, anti-hype stance. RSS (already planned) is the
+  developer-appropriate subscription channel; the one adoption signal (decision 8) is
+  the conversion measure, not an email list.
+- **A separate team/role charter for producing the series.** Out of scope: the work
+  is executed by the existing `/apply --pool`; the editorial style sheet (E38 T38.5)
+  carries the voice/quality bar that a charter would otherwise hold.
 
 ## Consequences
 
@@ -129,3 +186,7 @@ reconciliation pattern underneath all of it; (11) kazi as the packaging of rungs
 - Tone is hard to enforce mechanically; a written editorial style sheet (E38 T38.5)
   and a human review pass per post are required, because a coherence check cannot
   catch condescension or hype.
+- The visual-assets and instrumentation decisions (7, 8) add production surface
+  beyond writing -- diagrams to make and an analytics/canonical-URL setup to wire --
+  which is why they are scoped as two bounded tasks (E38 T38.20/T38.21), held to
+  "diagrams not ad creative" and "one signal not a funnel," not open-ended.
