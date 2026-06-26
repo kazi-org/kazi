@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.64.2](https://github.com/kazi-org/kazi/compare/v1.64.1...v1.64.2) (2026-06-26)
+
+
+### Bug Fixes
+
+* **partition:** term-scope the repo-map blast radius so disjoint groups split ([5b21475](https://github.com/kazi-org/kazi/commit/5b214756fb55d7517489b8d342065cf8f8377cad))
+* **scheduler:** start PartitionSupervisor on CLI apply --parallel path ([1708f3b](https://github.com/kazi-org/kazi/commit/1708f3bda36b67eae3bbbb9b6cc4c66801a67ebe))
+
 ## [1.64.1](https://github.com/kazi-org/kazi/compare/v1.64.0...v1.64.1) (2026-06-26)
 
 
