@@ -251,3 +251,21 @@ a whitespace refactor must NOT flag). The diff source is an injectable `diff_fn`
 (default `git diff HEAD`); a crashing/non-git source degrades to "" -> no events, so
 the guard can never break the tick. New untracked files don't appear in
 `git diff HEAD` -- the guard sees edits to existing files only. (2026-06-25, T32.5.)
+
+### L-0017 #harness #claude #stderr #parse #landmine -- claude's stderr warnings get merged into stdout and break the JSON-envelope parse
+`Kazi.Harness.CliAdapter` runs the harness with `cmd_opts`'s `stderr_to_stdout: true`,
+so ANYTHING the CLI prints to stderr is prepended/interleaved into the `output` the
+profile parser reads. The `claude` CLI prints `Warning: no stdin data received in 3s,
+proceeding without it. ...` to stderr (it waits for stdin under `System.cmd`, which
+provides none), so on essentially EVERY dispatch the stdout the parser sees is
+`"<warning line>\n{<envelope>}"`. LANDMINE: a naive `Jason.decode(output)` then FAILS
+on the prefix and SILENTLY drops every structured field (`:result`, `:tokens`,
+`:cost_usd`, `:usage`) -- it does not crash, it just returns `%{}`, so token/cost
+accounting degrades to an estimate and the authoring on-ramp (which needs `:result`)
+reports "proposal has no predicates". `Kazi.Harness.Profiles.Claude.parse/1` therefore
+NARROWS to the JSON object span (first `{` .. last `}`) before decoding. INVARIANT: any
+profile parsing a `--output-format json` style envelope must tolerate leading/trailing
+stderr noise the same way -- never feed raw merged stdout straight to `Jason.decode`.
+`kazi apply` masked this for a long time because it re-runs predicates to judge done
+and the budget falls back to a token estimate (ADR-0008), so the dropped fields are
+invisible there; only authoring surfaced it. (2026-06-25, T26.8.)
