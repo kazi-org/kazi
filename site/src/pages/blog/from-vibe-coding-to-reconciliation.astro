@@ -160,15 +160,85 @@ const rows = PARTS.map((p) => ({ ...p, post: published[p.part] ?? null }));
       </p>
     </section>
 
+    <!--
+      Explanatory diagrams (T38.20, ADR-0048 dec. 7): the series cannot be
+      text-only — the reader should SEE the loop, the ladder, and the without/with
+      contrast. These are hand-authored SVGs in the site's visual language (the
+      ADR-0018 cyan→blue→violet gradient on the ink surface), not ad creative, each
+      with descriptive alt text.
+    -->
+    <section
+      class="mx-auto max-w-3xl px-6 pb-10"
+      aria-labelledby="series-diagrams-heading"
+    >
+      <h2
+        id="series-diagrams-heading"
+        class="ui-strong text-xl font-semibold tracking-tight"
+      >
+        See the loop, the ladder, and the contrast
+      </h2>
+      <div class="mt-6 space-y-10">
+        <figure>
+          <img
+            src="/diagrams/reconcile-loop.svg"
+            alt="Diagram of the kazi reconcile loop: observe, diff, dispatch, re-observe, decide — repeating while predicates still fail, and exiting only on converged, stuck, or over budget."
+            class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
+            width="960"
+            height="360"
+            loading="lazy"
+          />
+          <figcaption class="ui-muted mt-3 text-center text-xs">
+            The loop the whole series climbs toward: declare the goal as
+            predicates, drive an agent, check against reality, repeat.
+          </figcaption>
+        </figure>
+        <figure>
+          <img
+            src="/diagrams/ladder.svg"
+            alt="Diagram of the twelve-rung ladder from vibe coding at the bottom to a reconciliation workflow at the top; each rung is independently useful and you can start at any rung."
+            class="ui-hairline mx-auto w-full max-w-md rounded-xl border shadow-2xl shadow-black/40"
+            width="760"
+            height="620"
+            loading="lazy"
+          />
+          <figcaption class="ui-muted mt-3 text-center text-xs">
+            The rungs, bottom to top. Each post is one rung; you can start
+            wherever you are today.
+          </figcaption>
+        </figure>
+        <figure>
+          <img
+            src="/diagrams/before-after.svg"
+            alt="Before-and-after diagram contrasting working without kazi (trusting the agent's word, parallel agents colliding, green-on-a-laptop, stopping when it feels finished) against with kazi (every predicate verified with evidence, leased blast radius, a live deployed probe, and stopping only on converged, stuck, or over budget)."
+            class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
+            width="960"
+            height="430"
+            loading="lazy"
+          />
+          <figcaption class="ui-muted mt-3 text-center text-xs">
+            The without/with contrast the series argues for, rung by rung.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
     <section class="mx-auto max-w-3xl px-6 pb-20">
       <ol class="space-y-3" id="series-parts">
         {
           rows.map(({ part, title, description, post }) => (
             <li class="ui-card rounded-2xl border p-5" data-part={part}>
-              <div class="flex items-baseline gap-4">
-                <span class="kazi-text shrink-0 text-xl font-extrabold tabular-nums">
-                  {String(part).padStart(2, "0")}
-                </span>
+              <div class="flex items-start gap-4">
+                {/* Per-post header art (T38.20): the same SVG each post wires as
+                    its `ogImage`/`heroAlt` header when it ships (T38.6+); shown
+                    here as a thumbnail so the art renders before the posts do. */}
+                <img
+                  src={`/blog/art/part-${String(part).padStart(2, "0")}.svg`}
+                  alt={`Header art for Part ${part} of ${SERIES_TITLE}: ${title}. Rung ${part} of 12 on the kazi gradient.`}
+                  width="160"
+                  height="90"
+                  class="ui-hairline aspect-video w-20 shrink-0 rounded-lg border sm:w-40"
+                  loading="lazy"
+                />
                 <div class="min-w-0 flex-1">
                   <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                     {post ? (

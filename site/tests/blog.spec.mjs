@@ -137,6 +137,56 @@ test.describe("series instrumentation (T38.21)", () => {
   });
 });
 
+// T38.20: visual assets — the three core explanatory diagrams (reconcile loop,
+// rung ladder, without/with before-after) and per-post header art render on the
+// series page with descriptive alt text, and the SVG assets are served.
+test.describe("series visual assets (T38.20)", () => {
+  const CORE_DIAGRAMS = [
+    "/diagrams/reconcile-loop.svg",
+    "/diagrams/ladder.svg",
+    "/diagrams/before-after.svg",
+  ];
+
+  test("renders the three core diagrams with non-empty alt text", async ({
+    page,
+  }) => {
+    await page.goto(`/blog/${SERIES_SLUG}`);
+    for (const src of CORE_DIAGRAMS) {
+      const img = page.locator(`img[src="${src}"]`);
+      await expect(img).toHaveCount(1);
+      const alt = (await img.getAttribute("alt"))?.trim() ?? "";
+      expect(alt.length, `empty alt on ${src}`).toBeGreaterThan(0);
+    }
+  });
+
+  test("renders per-post header art for all 12 parts with alt text", async ({
+    page,
+  }) => {
+    await page.goto(`/blog/${SERIES_SLUG}`);
+    const arts = page.locator('#series-parts img[src^="/blog/art/part-"]');
+    await expect(arts).toHaveCount(12);
+    const alts = await arts.evaluateAll((els) =>
+      els.map((el) => (el.getAttribute("alt") ?? "").trim()),
+    );
+    expect(alts.every((a) => a.length > 0), `some art has empty alt`).toBe(true);
+  });
+
+  test("diagram + per-post art SVGs are served (200, image/svg+xml)", async ({
+    page,
+  }) => {
+    const assets = [
+      ...CORE_DIAGRAMS,
+      "/blog/art/part-01.svg",
+      "/blog/art/part-12.svg",
+    ];
+    for (const src of assets) {
+      const res = await page.request.get(src);
+      expect(res.status(), `status for ${src}`).toBe(200);
+      expect(res.headers()["content-type"], `mime for ${src}`).toContain("svg");
+    }
+  });
+});
+
 // T38.3: the per-post route ([...slug].astro). The published set is honestly
 // empty today (only a draft placeholder exists), so the production build emits
 // NO post page — and the route's getStaticPaths excludes drafts. We assert the
