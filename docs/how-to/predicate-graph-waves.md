@@ -74,9 +74,16 @@ Frontier 1 (concurrent):  result-contract  ||  health
 Frontier 2 (after rc):    streaming
 ```
 
-If `--explain` shows two groups you expect to be disjoint collapsed into **one**
-partition, the blast-radius graph for the workspace is stale or absent -- partition
-quality depends on graph freshness. Refresh it before claiming concurrency.
+Partition quality follows the blast radius each group's terms resolve to. With a
+code-review-graph present, the radius is the graph's `--impacted` set; without one,
+kazi falls back to a file-scan repo map scoped to the paths your group's terms
+mention. Groups whose terms (a group's `partition_terms`, else its group id) map to
+**disjoint** paths land in separate partitions and run concurrently; groups whose
+terms hit the **same** file merge into one partition and serialize. If `--explain`
+shows two groups you expect to be disjoint collapsed into one partition, their terms
+are resolving to overlapping paths -- name the groups (or set `partition_terms`)
+after the distinct files each touches, or refresh a stale graph, before claiming
+concurrency.
 
 ## Run it (parallel, NATS-free) and read the result
 
