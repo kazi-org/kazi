@@ -57,6 +57,26 @@ query-graph` shell-out also targets a subcommand absent from current
 code-review-graph, but it degrades to the (now term-scoped) repo-map fallback, so
 partitioning is correct regardless.
 
+**LIVE RE-VERIFY on the RELEASED binary v1.64.2 (T21.12 now PROVEN).** After PR #738
+merged and release-please published v1.64.2, downloaded + checksum-verified the
+macOS aarch64 binary and re-ran the dogfood — no source build, no stubs. Fixture: a
+3-group `needs`-DAG in a scratch `git init` workspace (alpha, beta no-deps; gamma
+`needs = ["alpha"]`), each group one `custom_script` predicate gated on a distinct
+file containing `DONE`; inner harness `claude` via the proven permission wrapper
+(`command` -> a `exec claude --dangerously-skip-permissions "$@"` script; confirmed
+with a hello.txt smoke that converged in 2 iters). Results:
+- `--explain --json`: frontier 0 = TWO disjoint partitions (`["alpha"]`, `["beta"]`),
+  frontier 1 = `["gamma"]`. (On v1.64.1 the same shape collapsed to one partition.)
+- `--parallel --json`: exit 0, `{"collective":"converged","next_action":"done"}`,
+  schedule frontier 0 = alpha(converged) + beta(converged), frontier 1 =
+  gamma(converged), `blocked: []`. **No `:noproc`.** The interleaved loop logs show
+  `::alpha` and `::beta` reconciling in the SAME wall-clock window (frontier-0
+  spatial concurrency) and `::gamma` dispatching only AFTER alpha converged
+  (`needs` pipelining), all under ONE `kazi apply`, single-node, NATS-free, no
+  external orchestrator. All three edits landed (`alpha/beta/gamma.txt` = `DONE`) —
+  partitions converged and merged. The T21.12 acceptance (>=2 partitions converging
+  concurrently, every claim observed) is met; T21.12 marked done.
+
 ## 2026-06-26 — T21.12 native-parallel dogfood: `--parallel` is BROKEN on the released binary (honest negative, BLOCKED)
 
 The live dogfood for the E21/ADR-0027 native parallel scheduler (UC-037) — proving
