@@ -144,7 +144,7 @@ jobs:
         run: python3 .github/scripts/test_extract_knowledge.py
 
   site-commands:
-    name: site command accuracy (T29.4, warn)
+    name: site command accuracy (T29.4, blocking)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history)
