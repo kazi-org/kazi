@@ -4,6 +4,51 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — T26.8 layer 2: the drafted custom_script config SHAPE blocks `approve` (invented `script`, not `cmd`)
+
+PR #634 fixed the harness PARSE layer (claude's stderr warning broke the envelope —
+see the entry below). A LIVE run on the RELEASED v1.46.1 binary then exposed the
+NEXT layer of the same "drafted-proposal SHAPE" bug — one step past parsing.
+
+**The live symptom.** On v1.46.1, `kazi plan "Create a file named greeting.txt …
+contents exactly: hello world" --yes --json` now SUCCEEDS at drafting and returns a
+proposal with a predicate (the parse fix works). But `kazi approve <ref>` then FAILS:
+
+    could not approve …: the stored goal no longer loads: "custom_script predicate
+    \"greeting_file_exists_with_exact_contents\" requires a non-empty string \"cmd\""
+
+**Root cause.** The drafting harness (claude), told only the provider NAMES, GUESSES
+each predicate's `config` shape — and guesses wrong. It drafted a `custom_script`
+config with an INVENTED shell-script shape:
+`{"script": "<bash>", "interpreter": "bash", "working_dir": ".", "expected_exit_code": 0}`.
+But kazi's REAL `custom_script` schema (what `kazi schema custom_script` prints,
+sourced from `Kazi.Predicate.Schema`) requires `cmd` (ONE executable) plus optional
+`args`/`verdict`/`env`/… — there is NO `script`/`interpreter`/`working_dir`/
+`expected_exit_code`. So every drafted `custom_script` predicate is structurally
+invalid and the on-ramp dies at `approve` (the loader validates `cmd` at load).
+The captured fixture `test/fixtures/harness/claude_authoring_draft_stdout.txt` shows
+this exact invented shape across all three of its `custom_script` predicates.
+
+**The fix (option (a): pin the prompt).** `Kazi.Authoring.build_prompt/2` now EMBEDS
+the authoritative per-provider config contract, rendered straight from
+`Kazi.Predicate.Schema` (the SAME single source `kazi schema <provider>` prints — no
+hand-duplicated field list to drift). Each documented provider gets its required/
+optional keys (required marked `*required*`) plus the schema's own example config,
+and `custom_script` gets an explicit pin: MUST use `cmd` (put a shell line in
+`cmd:"sh", args:["-c","<line>"]`), MUST NOT use `script`/`interpreter`/`working_dir`/
+`expected_exit_code`. Prompt-first (not decoder-aliasing) so the harness emits VALID
+configs at the source. Confirmed: a drafted `custom_script` predicate using `cmd` now
+LOADS through the same loader `approve` uses (no "requires a non-empty string cmd").
+
+**Tests.** `authoring_test.exs`: a `cmd`-shaped `custom_script` parse → serialize →
+`Loader.from_map` LOADS (Tier-0); a stub draft in the fixed shape `propose`s and the
+persisted goal LOADS end-to-end (Tier-2); `build_prompt/2` output contains the
+`custom_script` contract (`cmd … *required*`) and forbids `script`. Full suite green.
+
+**Remaining gate.** Live re-verify on the RELEASED binary — `kazi plan "<idea>"` →
+`kazi approve <ref>` → `kazi apply` converges — is a POST-RELEASE step (this fix must
+merge + release first). T26.8 stays `[ ]` until that live chain is observed.
+
 ## 2026-06-25 — T26.8 ROOT CAUSE found by live capture: claude's stderr warning broke the envelope parse, not the proposal shape
 
 Built kazi from source and drove ONE real `claude -p --output-format json` authoring

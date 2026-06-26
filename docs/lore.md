@@ -269,3 +269,23 @@ stderr noise the same way -- never feed raw merged stdout straight to `Jason.dec
 `kazi apply` masked this for a long time because it re-runs predicates to judge done
 and the budget falls back to a token estimate (ADR-0008), so the dropped fields are
 invisible there; only authoring surfaced it. (2026-06-25, T26.8.)
+
+### L-0018 #authoring #harness #custom_script #schema #landmine -- a drafting harness GUESSES predicate config; `custom_script` is `cmd`, NOT `script`
+A drafting harness (claude) told only the provider NAMES will INVENT each predicate's
+`config` shape, and the guess does not match kazi's loader. Live on v1.46.1: claude
+drafted a `custom_script` predicate with `{"script": "<bash>", "interpreter": "bash",
+"working_dir": ".", "expected_exit_code": 0}`. The REAL `custom_script` schema (what
+`kazi schema custom_script` prints, sourced from `Kazi.Predicate.Schema`) requires
+`cmd` (ONE executable, not a command line) plus optional `args`/`verdict`/`env`/… and
+has NO `script`/`interpreter`/`working_dir`/`expected_exit_code`. LANDMINE: the bad
+config PARSES fine (authoring carries config through verbatim) and only EXPLODES one
+layer later, at `approve` → `Kazi.Goal.Loader.from_map/1`, with `custom_script
+predicate "…" requires a non-empty string "cmd"` — so the on-ramp dies at approve,
+not at draft, making it look like an approval bug rather than a drafting one. FIX:
+`Kazi.Authoring.build_prompt/2` EMBEDS the per-provider config contract rendered from
+`Kazi.Predicate.Schema` (the single source of truth — never hand-duplicate the field
+list, it WILL drift) and explicitly pins `custom_script` to `cmd` (a shell line goes
+in `cmd:"sh", args:["-c","<line>"]`, never a `script` key). INVARIANT: when you teach
+a harness to emit a kazi goal-file, embed the AUTHORITATIVE config schema, do not let
+it guess — and source that schema from `Kazi.Predicate.Schema`, the same place the CLI
+reads. (2026-06-25, T26.8.)
