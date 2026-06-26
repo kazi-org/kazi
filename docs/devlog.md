@@ -4,6 +4,24 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — Session handover: release/tap pipeline fixed live; `kazi plan` drafting half-fixed (T26.7 done, T26.8 next)
+
+Long `/apply --pool` + operator-directed session. Shipped + verified live this session:
+
+- **E32 wave** (predicate catalog / evidence-v2): T32.1b through T32.10 shipped + released; plan marked.
+- **Docs/site reframed to the human -> Claude -> kazi -> Claude on-ramp**: README, website (live), `concept.md` Section 0, the GitHub repo description, and the page `<title>`/OG meta -- all lead with the benefit ("you never run kazi yourself; Claude does"); "the outer/reconciliation loop for coding agents" demoted to an under-the-hood note (kept for SEO/coherence). Fixed 9 Astro newline-stripping spacing bugs (the `Afterkazi` class -- text on one line + an inline `<code>`/`<strong>` on the next loses the space; fix with an explicit `{" "}`). Removed the unexplained Context7 analogy from user-facing copy. All verified on https://kazi.sire.run.
+- **RELEASE/TAP PIPELINE fixed end to end (the headline).** Root cause: the Burrito binary boots the CLI before supervising `Kazi.Repo`, and `migrate_read_model` (standalone branch) used `Ecto.Migrator.with_repo` -- migrate-then-STOP -- so the read-model was never left running. Every read-model command crashed the binary ("could not lookup Ecto repo Kazi.Repo because it was not started"): `kazi status`/`list-proposed`/`approve` AND the `kazi mcp` `kazi_status` tool. The T33.4 MCP release-smoke calls `kazi_status` BEFORE asset upload, so it failed on EVERY release since the smoke landed -> 0 binaries since v1.20.0 -> `brew install` frozen at the broken 1.20.0. Fix: PR #613 (start + KEEP the repo running in the standalone branch), released v1.41.1; the chain self-healed (build smoke passed, `tap-bump` auto-pushed the formula -- `HOMEBREW_TAP_TOKEN` was configured all along; the chain had been FAILING on the smoke, not skipping). Also added PR #611 (a `workflow_dispatch` manual build trigger as a recovery hatch). `brew upgrade` -> 1.41.x VERIFIED: `status`/`list-proposed`/`mcp` no longer crash.
+- **`kazi plan` drafting -- JSON layer (T26.7, PR #617):** `decode_proposal/1` now extracts the JSON object from fenced/prose harness output before `Jason.decode`. Merged + 2 Tier-2 tests.
+
+**OPEN THREAD -> T26.8 (epic E26).** `kazi plan "<idea>"` still fails end to end: after T26.7 the harness output PARSES but has no usable top-level `predicates` array ("proposal has no predicates"). `kazi apply <goal-file>` works; only prose-idea DRAFTING is broken. Next-step recipe:
+  1. Capture ONE raw `claude` draft. It drives a MULTI-MINUTE claude session, so do NOT cap at 3 min (the diagnostic timed out) -- use a >=10-min timeout or a background run. Tee the harness result with a temporary `IO.inspect` in `Kazi.Authoring.drive_harness` (lib/kazi/authoring.ex:405; REVERT after).
+  2. Compare claude's actual shape against the expected `{name, predicates:[{id, provider, description, config}], rationale}` (`build_prompt/2`, authoring.ex:366).
+  3. Fix the smaller of: tighten the drafting PROMPT to pin the shape, or make `build_predicates`/`decode_proposal` accept what claude emits.
+  4. Also map the E32 providers (`custom_script`/`:static`/...) into authoring `provider_kind` (currently omitted -> a drafted predicate naming one is silently dropped).
+  5. Verify LIVE on the released binary: `kazi plan "<idea>"` -> `kazi approve <ref>` -> `kazi apply` converges (this also unblocks T27.8's blocked plan->approve leg).
+
+Durable details are in memory: `kazi-plan-drafting-broken`, `homebrew-tap-stale-readmodel-crash`, `adoption-docs-consolidated-e25`.
+
 ## 2026-06-25 — context-tier + tool-surface benchmark (T36.5): surface ON is a real ~2× token win; the tier knob is net-neutral on a within-reach fixture
 
 The two inner-harness knobs ADR-0047 gave kazi — the context TIER
