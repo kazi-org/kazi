@@ -250,6 +250,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 | R-E38-3 | Twelve quality posts are a large sustained writing effort; the series stalls half-published and reads as abandoned. | Med | Med | Posts are independently useful (ADR-0048) so a partial series still delivers value; the plan publishes incrementally (Wave E38-2) and each post ships live on its own; the gate (T38.18) runs over whatever is published, not all-or-nothing for value (only for the launch announcement T38.19). |
 | R-E38-4 | The series duplicates or contradicts the E25 README/site launch messaging (two generations of the same pitch). | Low | Med | E38 is the LONG-FORM companion to ADR-0030/E25, not a rewrite: it REUSES E25's hero transcript (T25.2), without/with frame, and dogfood gallery (T25.7) and links the same launch; T38.19 explicitly coordinates with (does not duplicate) the E25 T25.10 launch gate. |
 | R-E38-5 | Naming the product late depresses near-term conversion / lead-gen from the early posts. | Low | Med | Deliberate trade per ADR-0048 (credibility over a conversion spike); every post still links forward and the final third (posts 10-12) converts; distribution widens because marketing-allergic communities will share product-light, useful posts. |
+| R-E38-6 | The journey runs on the author's PRIVATE/internal stack (personal memory/browser/graph tooling); readers cannot reproduce it and a public post could leak internal infra. | High | Med | ADR-0048 dec. 5 (added in the skills-coverage second pass): every post LEADS with the commodity, reproducible technique and names a personal/internal tool only as "what I used" with a commodity alternative; no post requires a private tool; the T38.18 gate runs the E29 no-leak scan over `site/src/content/blog/**` and asserts no required-private-tool. |
+| R-E38-7 | Scope creep -- a well-meaning execution pass bolts marketing machinery (a 30-agent-org post, email drip funnels, a team charter) onto the series, diluting the anti-hype stance. | Med | Med | ADR-0048 "Considered and deliberately excluded" names each and why; the two sanctioned supporting tasks are bounded (T38.20 "diagrams not ad creative", T38.21 "one signal not a funnel"); reviewers cite the exclusion list. |
 
 ## Operating Procedure
 
@@ -275,6 +277,38 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-25 -- Change Summary (E38 second pass: skills-coverage review -> folded sub-beats + 2 tasks; ADR-0048 revised)
+- Operator directive (/plan, second pass): review ALL of the operator's global skills to
+  find gaps the E38 plan/ADR missed. Read 39 SKILL.md files via two parallel reviewers
+  (engineering-workflow + creative/marketing/meta), built a skill->post coverage matrix,
+  triaged with judgment (did NOT absorb every suggestion).
+- **Folded the genuinely-missing RUNGS in as SUB-BEATS (count stays twelve):** knowledge
+  maintenance (lint/tidy/audit-docs -> post 3, reinforces kazi's own E31 self-maintaining
+  docs); safe refactoring + research-as-graph (refactor/ingest/graphify -> post 5);
+  adversarial/security review (deep-review/red-team -> post 8); resilience/recovery
+  (preflight/resume) + crew-vs-pool (-> post 9); reconciliation-applies-to-work-progress
+  (-> post 10); code->prod + deploy triage (-> post 4); harden-your-harness (audit-setup
+  -> post 12).
+- **Added two bounded SUPPORTING tasks:** T38.20 visual assets (the reconcile-loop /
+  ladder / before-after diagrams + per-post header art -- diagrams in the site palette,
+  NOT ad creative; reuse existing assets first) and T38.21 instrumentation (ONE named
+  adoption signal + privacy-respecting static-site analytics + a UTM scheme + the
+  canonical-syndication rule, per ADR-0030's "measure adoption not stars"). Strengthened
+  T38.18 (code examples must RUN; model-ids checked; the no-leak/no-required-private-tool
+  assertion) and T38.5 (the private-stack + harness-agnostic framing rules) and T38.19
+  (canonical syndication to avoid duplicate-content).
+- **Two gaps the reviewers under-stated, now in ADR-0048:** (dec. 5) SEPARATE the
+  technique from the author's PRIVATE stack -- lead with the commodity technique, name a
+  personal/internal tool only as "what I used" with an alternative, never require it or
+  leak internal infra (ADR-0034); (dec. 7/8) show the loop with diagrams + instrument one
+  honest signal.
+- **Deliberately EXCLUDED, recorded in ADR-0048** so a pool session cannot re-add them: a
+  hierarchical agent-org post, email/lifecycle drip funnels, a separate team charter
+  (each off-thesis or anti-hype or backend-requiring on a static site).
+- Risks R-E38-6 (private-stack reproducibility/leak) + R-E38-7 (scope creep) added. E38
+  is now 21 tasks (4 infra + 1 style sheet + 12 posts + gate + announcement + visuals +
+  instrumentation). Authored in an isolated worktree off origin/main (lore L-0014).
 
 ### 2026-06-25 -- Change Summary (E38: adoption blog series "From Vibe Coding to Reconciliation"; ADR-0048)
 - Operator directive (/plan): plan a TWELVE-part blog series for the kazi website that
