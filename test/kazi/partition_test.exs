@@ -184,6 +184,60 @@ defmodule Kazi.PartitionTest do
     end
   end
 
+  # T21.12 regression: a `:repo_map` survey is BROAD by design — the repo-map
+  # fallback returns the WHOLE workspace tree regardless of the evidence terms
+  # (it is ranked downstream by Kazi.Context, not filtered). Before the fix the
+  # partitioner took that whole-tree survey as each goal's blast radius, so two
+  # GENUINELY DISJOINT goals overlapped on the entire repo and COLLAPSED into ONE
+  # partition — no spatial concurrency. The fix SCOPES a repo-map survey to the
+  # paths relevant to each goal's terms; graph/static surveys (already term-scoped)
+  # are untouched (covered by the cases above).
+  defmodule WholeTreeRepoMap do
+    @moduledoc false
+    @behaviour Kazi.Context.GraphSource
+
+    # Returns the SAME whole-tree survey for ANY terms, with `origin: :repo_map`,
+    # exactly like the real repo-map fallback over a populated workspace.
+    @impl true
+    def survey(_workspace, _terms, opts) do
+      paths = Keyword.fetch!(opts, :paths)
+      Survey.new(:repo_map, files: Enum.map(paths, &FileRef.new/1))
+    end
+
+    def new(paths), do: {__MODULE__, paths: paths}
+  end
+
+  describe "partition/2 — repo-map survey is term-scoped (T21.12)" do
+    test "disjoint terms over a whole-tree repo-map survey yield SEPARATE partitions" do
+      # The survey returns the whole tree for every goal; scoping by terms makes
+      # `health` match `health.go` and `result-contract` match nothing here, so the
+      # two land in distinct partitions instead of collapsing into one.
+      source = WholeTreeRepoMap.new(["health.go", "widget.go", "stream.go"])
+
+      goals = [{"health", ["health"]}, {"result-contract", ["result-contract"]}]
+
+      assert [p1, p2] = Partition.partition(goals, "/ws", graph_source: source)
+      assert p1.goal_ids == ["health"]
+      assert p1.blast_radius == ["health.go"]
+      assert p2.goal_ids == ["result-contract"]
+      # No tree path mentions "result-contract" -> empty radius -> own singleton.
+      assert p2.blast_radius == []
+      assert p1.key != p2.key
+    end
+
+    test "terms that match the SAME repo-map paths still MERGE into one partition" do
+      # Both goals' terms hit `widget.go`, so the scoped radii overlap and they
+      # correctly serialize on one partition (the overlap case is preserved).
+      source = WholeTreeRepoMap.new(["widget.go", "health.go"])
+
+      goals = [{"g1", ["widget"]}, {"g2", ["widget"]}]
+
+      assert [partition] = Partition.partition(goals, "/ws", graph_source: source)
+      assert partition.goal_ids == ["g1", "g2"]
+      assert partition.blast_radius == ["widget.go"]
+    end
+  end
+
   describe "partition/2 — input shapes" do
     test "accepts a %{id:, terms:} map" do
       source = TermSource.new(%{"a" => ["lib/a.ex"]})

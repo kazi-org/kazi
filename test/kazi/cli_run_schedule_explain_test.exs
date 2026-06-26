@@ -346,6 +346,51 @@ defmodule Kazi.CLIRunScheduleExplainTest do
   end
 
   # ===========================================================================
+  # Tier 2 — run --explain --json over the REAL repo-map: disjoint groups are
+  # SEPARATE partitions (T21.12 regression — was collapsing into one)
+  # ===========================================================================
+
+  describe "run --explain --json — repo-map partitions disjoint groups (T21.12)" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    test "two no-needs groups over disjoint files yield TWO partitions in frontier 0",
+         %{tmp_dir: tmp_dir} do
+      # The dogfood shape (priv/examples/predicate_graph_waves.toml): two frontier-0
+      # groups whose work lives in DISJOINT files. With NO injected graph source the
+      # explain path uses the REAL repo-map fallback over the workspace. Before the
+      # fix the repo-map returned the WHOLE tree for both groups, collapsing them
+      # into ONE partition; now the radius is term-scoped, so they partition apart.
+      File.write!(Path.join(tmp_dir, "health.go"), "package main\n// healthz route\n")
+      File.write!(Path.join(tmp_dir, "result-contract.go"), "package main\n// Widget\n")
+
+      goal_file = write_disjoint_groups_goal_file(tmp_dir)
+
+      out =
+        capture_io(fn ->
+          # No graph_source injected -> real RepoMapSource over tmp_dir.
+          assert Kazi.CLI.run(
+                   ["apply", goal_file, "--workspace", tmp_dir, "--explain", "--json"],
+                   []
+                 ) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+
+      # No `needs` -> a single frontier holding both groups.
+      assert [f0] = payload["frontiers"]
+      assert Enum.sort(f0["groups"]) == ["health", "result-contract"]
+
+      # The fix: two DISJOINT partitions, not one collapsed partition.
+      assert length(f0["partitions"]) == 2
+
+      goal_id_sets = Enum.map(f0["partitions"], & &1["goal_ids"])
+      assert ["health"] in goal_id_sets
+      assert ["result-contract"] in goal_id_sets
+    end
+  end
+
+  # ===========================================================================
   # helpers
   # ===========================================================================
 
@@ -486,6 +531,35 @@ defmodule Kazi.CLIRunScheduleExplainTest do
     cmd = "sh"
     args = ["-c", "test -f never_b.txt"]
     group = "b"
+    """)
+  end
+
+  # Two frontier-0 groups with NO `needs` and NO partition_terms, so each group's
+  # blast-radius terms fall back to its group id (`health`, `result-contract`) —
+  # the exact dogfood shape that drives the repo-map term-scoping.
+  defp write_disjoint_groups_goal_file(tmp_dir) do
+    write_goal_file(tmp_dir, "disjoint", """
+    [[group]]
+    id = "result-contract"
+    name = "Result contract"
+
+    [[group]]
+    id = "health"
+    name = "Health endpoint"
+
+    [[predicate]]
+    id = "contract-defined"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "grep -q Widget result-contract.go"]
+    group = "result-contract"
+
+    [[predicate]]
+    id = "health-route"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "grep -q healthz health.go"]
+    group = "health"
     """)
   end
 
