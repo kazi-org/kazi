@@ -167,6 +167,38 @@ links into the same launch. The README/site remain the one-screen pitch; the blo
 the credibility and education layer beneath them. A post that needs an E25 asset that
 has not landed yet uses an honest placeholder/label until it does.
 
+## The one adoption signal (ADR-0048 dec. 8)
+
+The series is judged by **ONE** measurable signal, not by post count, page views,
+or GitHub stars (ADR-0030: "instrument downloads/retention, not stars"):
+
+> **Blog-attributed install intents** — outbound clicks from a blog page to the
+> kazi repo/install that carry `utm_source=blog`. A doc → install progression
+> measure, captured privacy-respectingly.
+
+This is the conversion measure for the whole series. When you write or review a
+post, the question that matters is "does this honestly move a reader toward
+trying kazi?" — not "will this rack up views."
+
+The wiring that makes the signal measurable (cookieless analytics, the UTM scheme
+on outbound links, and the canonical-URL syndication rule) lives in
+[`docs/site-analytics.md`](site-analytics.md). Two rules bind authors:
+
+- **Outbound repo/install links use the UTM helper.** Build any outbound link to
+  the repo/install with `withUtm()` (`site/src/utm.mjs`) so it carries
+  `utm_source=blog`, `utm_medium=post`, `utm_campaign=vibe-to-reconciliation`,
+  `utm_content=<slug>`. Never hand-append a query string — the scheme must not
+  drift.
+- **Syndicated copies set the canonical URL.** Every post already emits
+  `<link rel="canonical">` to its `https://kazi.sire.run/blog/<slug>` permalink
+  (automatic, via `Layout.astro`). Any cross-post (dev.to/Medium/Hashnode/etc.)
+  MUST set its `rel=canonical` back to that permalink so authority stays on the
+  kazi site and there is no duplicate-content penalty. T38.19 consumes this rule.
+
+**Out of scope (ADR-0048):** no email capture, drip funnels, or gated lead
+capture. RSS (`/blog/rss.xml`) is the subscription channel; this one signal is the
+conversion measure.
+
 ---
 
 ## The series
@@ -219,7 +251,9 @@ Do **not** add posts for these — they were considered and left out on purpose:
   assets first. Every image carries descriptive alt text.
 - **T38.21 — instrumentation:** ONE measurable adoption signal (not vanity metrics),
   privacy-respecting analytics appropriate to a static site, a UTM scheme on outbound
-  links, and a canonical-URL syndication rule. The named signal is recorded by T38.21.
+  links, and a canonical-URL syndication rule. The named signal is **blog-attributed
+  install intents** (see [The one adoption signal](#the-one-adoption-signal-adr-0048-dec-8)
+  above); the wiring is documented in [`docs/site-analytics.md`](site-analytics.md).
 
 ## References
 
