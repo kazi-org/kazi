@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.49.0](https://github.com/kazi-org/kazi/compare/v1.48.0...v1.49.0) (2026-06-26)
+
+
+### Features
+
+* **site:** add blog post route + layout (T38.3) ([c1dd7fe](https://github.com/kazi-org/kazi/commit/c1dd7fe69d8981236813c30dbcfa929c941fad41))
+
 ## [1.48.0](https://github.com/kazi-org/kazi/compare/v1.47.0...v1.48.0) (2026-06-26)
 
 
