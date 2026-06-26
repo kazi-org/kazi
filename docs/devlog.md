@@ -4,6 +4,74 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T21.9 LIVE dashboard dogfood: reconcilers + per-partition convergence shown live; leases NOT shown (PARTIAL)
+
+**Task.** T21.9 acc: the operator dashboard shows ≥2 concurrent partition
+reconcilers + their leases + per-partition convergence, LIVE, exercised in a real
+browser (agent-browser); read-only, decoupled from the loop (ADR-0011).
+
+**Setup.** Source build (`mix deps.get && mix compile`), `mix phx.server` on
+`localhost:4000` (dev endpoint, `config/dev.exs`). A native-parallel run was driven
+IN THE SAME BEAM NODE so the dashboard saw it: `Kazi.Scheduler.DepScheduler.run/2`
+over `priv/examples/predicate_graph_waves.toml` (3 groups: `result-contract` and
+`health` at frontier 1, `streaming` `needs = ["result-contract"]` at frontier 2),
+with an injected stub group-reconciler that sleeps then returns `:converged` (no
+inner harness needed — the goal is to keep ≥2 reconcilers ALIVE concurrently so
+leases + convergence RENDER). Under the hood each DAG group is reconciled via the
+flat E21 partition path (`run_goals_flat → Kazi.Scheduler.run/2`, one reconciler
+per partition).
+
+**What the `/dag` view showed LIVE (golden path, no console errors):**
+- **Frontier 1:** `Result contract` RUNNING **and** `Health endpoint` RUNNING
+  simultaneously — **≥2 concurrent reconcilers** — with `Streaming endpoint`
+  PENDING (`deps 0/1 converged`) and the `result-contract → streaming` `needs`
+  edge rendered.
+- **Pipeline:** `Health endpoint` (independent) converged while `Result contract`
+  was still RUNNING and `Streaming` still PENDING — per-group convergence is
+  independent.
+- **Frontier 2:** once `Result contract` converged, `Streaming` flipped to RUNNING
+  with `deps 1/1 converged` — the `needs` gate released on the dep's objective
+  convergence.
+- **Terminal:** all three CONVERGED.
+
+Each transition was captured in a real browser (agent-browser, screenshots in the
+PR description). **≥2 concurrent reconcilers + per-partition (per-group)
+convergence: OBSERVED LIVE.**
+
+**Gap 1 — leases NOT shown (the material miss).** The lease map (`/leases`,
+`KaziWeb.LeaseMapLive`) defaults to `KaziWeb.CoordinationSource.Transport`, which
+aggregates presence/intents/leases over the coordination TRANSPORT. In a
+single-node NATS-free dev run it **500s on mount**: `(ArgumentError)
+Kazi.Coordination.Transport.Memory requires a :bus handle in opts` (no bus is
+configured in dev). Even with a bus, the native-parallel scheduler acquires
+`Kazi.Coordination.Lease.Memory` leases in an isolated per-run store and announces
+NO presence/intent on the transport, so the Transport source would surface nothing
+for native-parallel partitions. **The dashboard cannot show native-parallel
+partition leases today.** This is the NATS-free/single-node gap the task flagged.
+
+**Gap 2 — the flat E21 scheduler has no dashboard surface.** `Kazi.Scheduler`
+(the E21/ADR-0027 flat parallel coordinator) does **not** broadcast anything to the
+dashboard — only `Kazi.Scheduler.DepScheduler` (E23/ADR-0028) broadcasts
+`DagSnapshot` frames (`scheduler:dag` topic). So a pure FLAT native-parallel run
+(no `needs` edges) is invisible to the dashboard; the `/dag` view is the only live
+surface for concurrent reconcilers + convergence, and it requires a `needs`-DAG
+goal.
+
+**Gap 3 (caveat, not necessarily a product bug).** In headless agent-browser the
+LiveView did not push diffs over websocket to an already-open page; live state was
+observed via page **reload** (static mount reads `KaziWeb.DagSource.Cache.current/0`,
+which holds the latest broadcast frame). The scheduler IS broadcasting on every
+transition — proven by reloads showing the correct progressive state at each
+frontier — but the no-reload websocket diff push was not confirmed in this headless
+setup.
+
+**Verdict: T21.9 PARTIAL — left `[ ]`.** Reconcilers + per-partition convergence
+shown live in a real browser (2 of 3 acc clauses); **leases NOT shown** (wired to
+NATS only; `/leases` 500s NATS-free). Closing T21.9 needs either a single-node
+coordination source for the lease map (so in-memory partition leases render
+NATS-free) or an explicit acc carve-out that the lease panel is NATS-only. Fixture
+reused: `priv/examples/predicate_graph_waves.toml`.
+
 ## 2026-06-26 — T26.6 LIVE: the kazi skill ROUTER drives a goal end to end (plan → approve → apply) with NO legacy skills; subsumption ASSERTED
 
 The E26/ADR-0031 closing proof: in a real session, drive a fixture goal to
