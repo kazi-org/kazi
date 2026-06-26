@@ -68,6 +68,29 @@ defmodule Kazi.AuthoringTest do
       do: {:ok, %{result: ~s({"name": "nope", "predicates": []})}}
   end
 
+  # T26.8: a stub that returns EXACTLY what the real `claude` adapter produces when
+  # drafting a proposal — the captured stderr-warning-prefixed `--output-format
+  # json` stdout, run through the REAL `:claude` profile parser. This proves the
+  # on-ramp end to end against real bytes: the prior PR #623 parser was authored
+  # with no live capture and STILL returned "proposal has no predicates" because the
+  # warning line broke the envelope parse so `:result` never reached authoring. The
+  # stub reads the checked-in fixture and merges the parsed subset over the base
+  # result map exactly as `Kazi.Harness.CliAdapter` does.
+  defmodule RealClaudeDraftHarness do
+    @behaviour Kazi.HarnessAdapter
+
+    @fixture Path.expand("../fixtures/harness/claude_authoring_draft_stdout.txt", __DIR__)
+
+    @impl true
+    def run(_prompt, workspace, _opts) do
+      output = File.read!(@fixture)
+      base = %{output: output, exit: 0, command: "claude", workspace: workspace}
+
+      {:ok,
+       Map.merge(base, Kazi.Harness.Profile.parse(Kazi.Harness.Registry.fetch!(:claude), output))}
+    end
+  end
+
   # A stub whose harness simply could not run.
   defmodule FailingHarness do
     @behaviour Kazi.HarnessAdapter
@@ -394,6 +417,36 @@ defmodule Kazi.AuthoringTest do
       assert {:ok, goal} = Authoring.parse_proposal(json, "g")
       kinds = goal.predicates |> Enum.map(& &1.kind) |> Enum.sort()
       assert kinds == [:static, :tests]
+    end
+  end
+
+  # T26.8: the end-to-end on-ramp against REAL captured `claude` output. The prior
+  # speculative parser (PR #623) was authored with no live capture and STILL failed
+  # live with "proposal has no predicates"; the real cause was the harness layer
+  # dropping `:result` when claude's stderr warning prefixed the JSON envelope. This
+  # block drives `propose/2` through a stub that reproduces the real adapter result
+  # (the captured stdout run through the real `:claude` profile parser), proving a
+  # drafted proposal that matches what real claude returns yields a usable goal.
+  describe "propose/2 — real claude draft shape (T26.8, the on-ramp step-1 fix)" do
+    test "a real claude draft yields ≥1 usable predicate (no 'no predicates')" do
+      assert {:ok, draft} =
+               Authoring.propose("a CLI tool that prints the current git branch name",
+                 harness: RealClaudeDraftHarness
+               )
+
+      assert draft.status == :proposed
+      assert draft.goal.mode == :create
+      assert length(draft.goal.predicates) >= 1
+    end
+
+    test "a drafted predicate naming custom_script survives into the goal" do
+      assert {:ok, draft} =
+               Authoring.propose("a CLI tool that prints the current git branch name",
+                 harness: RealClaudeDraftHarness
+               )
+
+      kinds = Enum.map(draft.goal.predicates, & &1.kind)
+      assert :custom_script in kinds
     end
   end
 
