@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.50.0](https://github.com/kazi-org/kazi/compare/v1.49.0...v1.50.0) (2026-06-26)
+
+
+### Features
+
+* **site:** add blog RSS feed, sitemap, Blog nav + extend verb guard to .mdx ([b9cbfed](https://github.com/kazi-org/kazi/commit/b9cbfedf9017ff92aaaddf7280e6f656b0a523e0))
+
 ## [1.49.0](https://github.com/kazi-org/kazi/compare/v1.48.0...v1.49.0) (2026-06-26)
 
 
