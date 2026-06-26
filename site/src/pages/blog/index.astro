@@ -15,9 +15,13 @@ const REPO = "https://github.com/kazi-org/kazi";
 // signal — see utm.mjs / docs/blog-style.md).
 const repoHref = withUtm(REPO, "blog-index");
 
-// Published posts only, newest first.
+// Published posts only. Newest first by date, then by series part ascending so a
+// same-day series (every adoption-series post shares one publish date) renders in
+// reading order — Part 1, Part 2, … — instead of an unstable date-only sort.
 const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
-  (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
+  (a, b) =>
+    b.data.date.valueOf() - a.data.date.valueOf() ||
+    a.data.part - b.data.part,
 );
 
 const dateFmt = new Intl.DateTimeFormat("en-US", {
