@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.48.0](https://github.com/kazi-org/kazi/compare/v1.47.0...v1.48.0) (2026-06-26)
+
+
+### Features
+
+* **site:** add /blog index + series landing pages (T38.2) ([a0d6a87](https://github.com/kazi-org/kazi/commit/a0d6a8781e621e656a61f9daf765f8b5c46bf4c2))
+
 ## [1.47.0](https://github.com/kazi-org/kazi/compare/v1.46.2...v1.47.0) (2026-06-26)
 
 
