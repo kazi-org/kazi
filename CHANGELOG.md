@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.51.0](https://github.com/kazi-org/kazi/compare/v1.50.0...v1.51.0) (2026-06-26)
+
+
+### Features
+
+* **site:** T38.21 cookieless analytics, UTM, canonical instrumentation ([9f22a0f](https://github.com/kazi-org/kazi/commit/9f22a0f68ad66bdfa0fa3c9361211e3cc6756ee1))
+
 ## [1.50.0](https://github.com/kazi-org/kazi/compare/v1.49.0...v1.50.0) (2026-06-26)
 
 
