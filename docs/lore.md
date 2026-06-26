@@ -325,6 +325,16 @@ invisible unless you actually run `--parallel` live -- exactly the gap the T23.9
 dogfood hit. INVARIANT: any process the supervision tree starts that a CLI command
 needs must ALSO be started in the Burrito standalone path (mirror `ensure_read_model`
 / `migrate_read_model`); declaring it in `Kazi.Application` children is NOT enough,
-because that tree never boots under a standalone binary. FIX: start
-`PartitionSupervisor` in the CLI parallel path before `run_goals/2`. (2026-06-26,
-T23.9; found on v1.64.1.)
+because that tree never boots under a standalone binary. FIXED (2026-06-26, T21.12):
+`Kazi.Scheduler.PartitionSupervisor.ensure_started/1` (idempotent under the app
+tree, process-linked-start under the standalone binary) is called by
+`run_goal_parallel/4` BEFORE `Kazi.Scheduler.run_goals/2`, so BOTH start_child
+sites (`scheduler.ex` flat path + `dep_scheduler.ex` DAG path, both targeting the
+named `PartitionSupervisor`) have a running supervisor. The two coordinator
+`GenServer.start_link`s (scheduler/dep_scheduler) do NOT need a supervisor, so they
+were never affected. Regression: `test/kazi/scheduler/partition_supervisor_test.exs`
+proves `start_child/2` works after `ensure_started/1` on a fresh (absent) name.
+GENERAL RULE for the future: when adding any new CLI command that reaches a
+supervised process (a `start_child`/`GenServer.call` to a named child of
+`Kazi.Application`), ensure-start it on the CLI path or it will `:noproc` only on
+the released binary. (Found on v1.64.1, T23.9; fixed T21.12.)

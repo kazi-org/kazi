@@ -4,6 +4,59 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T21.12 FIX: `--parallel` PartitionSupervisor `:noproc` + partitioner collapse, both fixed
+
+Fixes the two ship-blocking defects the T21.12 dogfood (entry below) found on the
+released v1.64.1 binary. Both are repaired with small, contained changes + regression
+tests; the full suite is green (2279 tests) and `mix format` is clean.
+
+**Defect 1 — `--parallel` exits 1 with `:noproc` on the released binary (FIXED).**
+Root cause: `Kazi.Application.start/2` hands straight to the CLI in the Burrito
+standalone binary (`burrito_standalone?/0`) *before* the supervision tree — which
+holds the named `Kazi.Scheduler.PartitionSupervisor` — is stood up. So in the
+released binary that supervisor is absent and the scheduler's
+`PartitionSupervisor.start_child/2` crashes with `{:noproc, {GenServer, :call,
+[Kazi.Scheduler.PartitionSupervisor, ...]}}` the instant a `--parallel` run
+dispatches. This is the same class as the historical "`Kazi.Repo` not started in the
+burrito path" fix (`with_read_model` / `migrate_read_model`'s standalone branch).
+Fix: a new `Kazi.Scheduler.PartitionSupervisor.ensure_started/1` (mirrors that
+precedent) that returns the running named instance under mix/release-app
+(idempotent) and starts it, process-linked to the short-lived CLI process, under the
+standalone binary. The CLI parallel-apply path (`run_goal_parallel/4`) calls it
+*before* dispatching. Files: `lib/kazi/scheduler/partition_supervisor.ex`,
+`lib/kazi/cli.ex`. Test: `test/kazi/scheduler/partition_supervisor_test.exs`
+exercises `ensure_started/1` against a fresh, not-yet-started name (simulating the
+standalone path the running app tree masks) and proves `start_child/2` then works
+rather than `:noproc`-ing.
+
+**Defect 2 — disjoint groups collapse into ONE partition (FIXED).** Root cause: in a
+scratch workspace there is no code-review-graph, so the blast-radius survey falls
+back to `Kazi.Context.RepoMapSource`'s file-scan repo map — which is **term-blind**:
+it returns the WHOLE workspace tree regardless of the evidence terms (it is meant to
+be *ranked* downstream by `Kazi.Context`, not filtered). The partitioner took that
+whole-tree survey as every group's blast radius, so genuinely disjoint groups
+overlapped on the entire repo and merged into one partition (no spatial concurrency).
+Fix: `Kazi.Partition` now SCOPES a `:repo_map`-origin survey to the paths actually
+relevant to each goal's terms before taking the radius; `:graph`/`:static` surveys
+are already term-scoped at the source and pass through unchanged (scoping them would
+wrongly drop graph-impacted callers whose path/name need not contain the literal
+term). File: `lib/kazi/partition.ex`. Tests: `test/kazi/partition_test.exs` (a
+whole-tree `:repo_map` double — disjoint terms → 2 partitions, overlapping terms →
+1) and `test/kazi/cli_run_schedule_explain_test.exs` (an integration `--explain
+--json` over the REAL repo-map and a populated workspace, the dogfood shape: two
+no-`needs` groups over disjoint files now yield TWO frontier-0 partitions). Both new
+tests were confirmed to FAIL with the fix reverted.
+
+Note (latent, not blocking T21.12): authoring explicit per-predicate
+`partition_terms` is still inert — the loader routes unknown goal-file keys to
+`Kazi.Predicate.config`, not a `:metadata` field, so `predicate_terms/1` never
+matches and every group falls back to its group-id as its term. The dogfood relies
+on that group-id fallback and now partitions correctly; making `partition_terms`
+authorable is a separate enhancement. The graph path's `code-review-graph
+query-graph` shell-out also targets a subcommand absent from current
+code-review-graph, but it degrades to the (now term-scoped) repo-map fallback, so
+partitioning is correct regardless.
+
 ## 2026-06-26 — T21.12 native-parallel dogfood: `--parallel` is BROKEN on the released binary (honest negative, BLOCKED)
 
 The live dogfood for the E21/ADR-0027 native parallel scheduler (UC-037) — proving
