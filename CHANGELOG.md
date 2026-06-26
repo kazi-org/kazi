@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.56.0](https://github.com/kazi-org/kazi/compare/v1.55.0...v1.56.0) (2026-06-26)
+
+
+### Features
+
+* **blog:** T38.9 Post 4 — give your agent eyes (all the way to prod) ([50e2626](https://github.com/kazi-org/kazi/commit/50e2626fb92610a91eedc6f37d2e2b79cd2bd0aa))
+
 ## [1.55.0](https://github.com/kazi-org/kazi/compare/v1.54.0...v1.55.0) (2026-06-26)
 
 
