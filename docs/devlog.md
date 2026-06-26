@@ -1750,3 +1750,104 @@ on the released binary; all four agent-driven new-kind predicates gated correctl
 RED→GREEN with a visible score gradient; the sustained-health probe gated correctly
 in both directions; enforcement was active with no gaming. Reusable fixture at
 `priv/examples/expanded_catalog_dogfood/`.
+
+## 2026-06-26 — T23.9 predicate-graph waves dogfood: kazi computes + executes a pipelined needs-DAG (live), plus a released-binary `--parallel` bug
+
+The E23/ADR-0028 proof: encode a real multi-group goal with `needs` edges and
+observe kazi (1) COMPUTE the topological wave schedule and (2) EXECUTE it
+pipelined — disjoint groups in parallel, dependent groups sequenced behind their
+deps' objective convergence, a stuck dep escalated (not hung). Fixture:
+`priv/examples/predicate_graph_waves.toml` (`result-contract` and `health` in
+frontier 0, `streaming` needs `result-contract` in frontier 1). Inner harness:
+`claude`, with a one-line permission wrapper (`exec claude
+--dangerously-skip-permissions "$@"`) set as the goal-file `[harness] command`, the
+same workaround the T30.4 dogfood found — vanilla `kazi apply --harness claude` has
+no `--permission-mode` flag, so the inner agent otherwise makes zero edits. A
+`hello.txt` smoke confirmed the wrapper grants edits (converged in 2 iters) before
+the real run.
+
+**Computed schedule (`kazi apply <fixture> --workspace <scratch> --explain --json`,
+verified on the RELEASED binary v1.64.1):**
+```
+frontier 0:  result-contract  ||  health   (two blast-radius partitions, concurrent)
+frontier 1:  streaming                      (gated behind result-contract)
+```
+`--explain` dispatches nothing and exits 0 — it is pure planning and works on the
+released binary. The schedule is exactly the authored `needs`-DAG: `streaming` in
+its own frontier after `result-contract`; `health` parallel with `result-contract`.
+
+**RELEASED-BINARY BUG (the headline operational finding).** `kazi apply
+<goal> --workspace <ws> --parallel` on the released v1.64.1 binary crashes
+immediately, deterministically (reproduced twice), with:
+```
+{"error":"{:noproc, {GenServer, :call, [Kazi.Scheduler.PartitionSupervisor,
+  {:start_child, {{Task, :start_link, [...DepScheduler.start_group/2]}, ...}}}}",
+ "status":"error","next_action":"investigate"}
+```
+Root cause: `Kazi.Application.start/2` hands straight to `Kazi.Release.burrito_main()`
+under a Burrito standalone binary, so the supervision tree — including
+`{Kazi.Scheduler.PartitionSupervisor, ...}` (application.ex) — is NEVER stood up.
+The CLI's `migrate_read_model/0` manually `start_link`s only `Kazi.Repo` in the
+standalone path (the same retrofit the homebrew read-model crash needed); it never
+starts `PartitionSupervisor`. So `run_goal_parallel/4` → `Kazi.Scheduler.run_goals/2`
+→ `DepScheduler` → `PartitionSupervisor.start_child(PartitionSupervisor, …)` calls a
+named process that doesn't exist → `:noproc`. **Every released binary's `--parallel`
+is broken** (the entire E23/E21 parallel-execution surface). `--explain` is
+unaffected (pure planning, no supervisor). This is a release-packaging bug, not a
+goal-file error; see lore (predicate-graph-waves entry). Fix: start
+`PartitionSupervisor` in the CLI parallel path, mirroring `ensure_read_model`.
+
+**How the LIVE EXECUTION evidence below was captured.** Because the released binary
+cannot execute `--parallel`, the live run was driven from an in-tree source build
+(`mix kazi.apply`, full supervision tree → `PartitionSupervisor` running) at commit
+`d88a771`. The COMPUTED schedule is from the released binary; the EXECUTION is
+in-tree. Stated plainly so the two artifacts are not conflated.
+
+**Run A — convergence (`--parallel`, in-tree), observed timeline (from the loop
+log):**
+- `01:55:59.487` `result-contract` iter=1 starts; `01:55:59.489` `health` iter=1
+  starts — **2 ms apart → DISJOINT GROUPS PARALLELIZED** (frontier 0, blast-radius
+  partitions running concurrently).
+- `01:57:57` `health` converges; `01:58:09.963` `result-contract` converges.
+- `01:58:10.454` `streaming` iter=1 starts — **0.5 s after `result-contract`
+  converged**, ~2 m 11 s after t0. `streaming` did NOT start at t0 alongside
+  `health`, and `health` converging at `01:57:57` did NOT trigger it: it waited
+  specifically for its `needs = ["result-contract"]` dep → **DEPENDENT GROUP
+  SEQUENCED, pipelined per-group readiness (no global wave barrier), objectively
+  gated** (the gate is `result-contract`'s evidence-backed convergence, not "an
+  agent said done").
+- `01:58:40` `streaming` converges. Collective `converged`, `blocked: []`, exit 0.
+  The agent wrote all five Go files (`widget.go`/`widget_test.go`,
+  `health.go`/`health_test.go`, `stream.go`) and `go test` gated each group.
+
+**Run B — blocked-dependency escalation (`--parallel`, in-tree).** Same shape, but
+`result-contract`'s sole predicate is impossible (`[ "$(date +%Y)" = "1999" ]`, the
+agent cannot fix the clock) with `max_iterations = 2`:
+- `01:59:53.152` `result-contract` iter=1 and `health` iter=1 start in the **same
+  millisecond** (parallel again).
+- `02:00:20` `health` converges — **a sibling OUTSIDE the blocked sub-DAG still
+  finishes**.
+- `02:00:31` `result-contract` iter=2 still failing → **`over_budget`** (budget=2).
+- `streaming` is **never dispatched** (no loop line) — it is **escalated as blocked**
+  rather than hung. Final JSON:
+  `blocked: [{"reason":"over_budget","group":"streaming","blocked_by":"result-contract"}]`,
+  `collective: "over_budget"`, `next_action: "raise_budget"`, exit 1. The schedule
+  reports `result-contract: over_budget`, `health: converged`, `streaming: blocked`.
+  **The blocking dep is NAMED, the dependent never ran against an unconverged dep,
+  and the scheduler did not hang** — exactly the T23.5 escalation contract,
+  observed live.
+
+**Honesty notes.** (1) The COMPUTED schedule is from the released binary; the
+EXECUTION evidence is from an in-tree `mix` build because the released `--parallel`
+is broken (bug above). (2) The permission wrapper is required for the inner claude
+agent to edit at all (T30.4 finding), so this is not a vanilla out-of-the-box run.
+(3) Run A and Run B both used `custom_script` (`go test` / `grep` / `date`)
+predicates — objective, evidence-backed gates.
+
+**Verdict: T23.9 acc MET (predicate-graph-waves behavior observed live —
+parallelism of disjoint groups, sequencing of dependent groups, pipelined objective
+gating, and blocked-dep escalation with the dep named) — with one material caveat:
+the released binary cannot execute `--parallel` (PartitionSupervisor `:noproc`); the
+live evidence is in-tree. The feature is proven; the release path needs the
+supervisor-startup fix before a released binary can run it.** Fixture reused:
+`priv/examples/predicate_graph_waves.toml`.
