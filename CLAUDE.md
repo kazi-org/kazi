@@ -39,6 +39,21 @@ the live WBS (parse_plan.py no longer expands them), and the `docs/plans/*.md` g
 the doc-freshness checks use is non-recursive, so `archive/` is out of the
 live-plan checks. (The live trim of this repo's done epics is T31.7.)
 
+**Knowledge extraction (T31.3/ADR-0036 L2).** `.github/scripts/extract_knowledge.py`
+is the gated propose-then-confirm pass that runs AFTER an epic is archived: it lifts
+the durable nuggets out of an archived block and routes each to its tier per the
+ADR-0036 map — invariant/landmine -> `docs/lore.md`, finding/benchmark ->
+`docs/devlog.md`, decision -> a new proposed `docs/adr/` file, architecture ->
+`docs/concept.md` (NOT design.md). It NEVER writes to or removes from the archive,
+so the archive is the lossless backstop and a mis-route loses no knowledge. It
+dry-runs by default (printing the routing for human review); `--apply` is the
+human-confirm gate that writes the edits. Source: `--epic docs/plans/archive/ENN.md`
+or `--latest` (the most-recently-archived epic). Nuggets are found by explicit
+`Nugget(<class>): ...` annotations, class hashtags (`#invariant` etc.), or a keyword
+heuristic; each written edit carries a `kx:<sig>` provenance marker so re-running is
+idempotent. `test_extract_knowledge.py` pins the tier map, the never-touch-archive
+invariant, the no-knowledge-lost backstop, and idempotency.
+
 ## Execution model
 
 - Work the plan with `/apply --pool` (the operator runs several sessions via

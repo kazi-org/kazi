@@ -4,6 +4,27 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-25 — Gated knowledge extraction shipped (T31.3 / ADR-0036 Layer 2)
+
+Shipped `.github/scripts/extract_knowledge.py` + `test_extract_knowledge.py`, the
+Layer-2 propose-then-confirm pass that composes AFTER T31.2's `trim_plan.py`.
+Once `trim_plan.py --apply` archives a fully-done, released epic verbatim under
+`docs/plans/archive/`, `extract_knowledge.py --latest` (or `--epic <file>`) reads
+that archived block, finds the durable nuggets, and routes each to its tier per the
+ADR-0036 map: invariant/landmine -> `lore.md` (next `L-NNNN`), finding/benchmark ->
+`devlog.md` (dated, newest-first), decision -> a NEW `docs/adr/NNNN-*.md` with
+`Status: Proposed`, architecture -> `concept.md` (NOT design.md). Nuggets are found
+by explicit `Nugget(<class>):` annotations, class hashtags, or a keyword heuristic.
+
+Two invariants make it the safe LLM-shaped step: it NEVER writes to or removes from
+the archive (so the archive is the lossless backstop — a mis-route loses no
+knowledge), and it dry-runs by default, printing the routing for review; `--apply`
+is the human-confirm gate. Each written edit carries a `kx:<sig>` provenance marker,
+so re-running is idempotent. Wired the fixture test into `oss-gates.yml` alongside
+`test_trim_plan.py` (report-only; CI never auto-writes docs). Together T31.2 (trim,
+lossless, mechanical) + T31.3 (extract, gated, lossless backstop) are Layers 1+2 of
+the ADR-0036 doc lifecycle; T31.6 will drive both as a kazi standing goal.
+
 ## 2026-06-25 — Session handover: release/tap pipeline fixed live; `kazi plan` drafting half-fixed (T26.7 done, T26.8 next)
 
 Long `/apply --pool` + operator-directed session. Shipped + verified live this session:
