@@ -680,3 +680,69 @@ test.describe("blog post route", () => {
     ).toEqual([]);
   });
 });
+
+// T38.18: in-series prev/next navigation. The per-post layout renders rel="prev"
+// and rel="next" links (bounded: Part 1 has no prev, Part 12 has no next). The
+// series-accuracy gate requires that these resolve and walk the ladder in order,
+// so a reader can page Part 1 → Part 12 (and back) without hitting a 404.
+test.describe("blog post prev/next navigation (T38.18)", () => {
+  test("Part 1 has next but no prev, and 'next' goes to Part 2", async ({
+    page,
+  }) => {
+    await page.goto(`/blog/${POST1_SLUG}`);
+    await expect(page.locator('a[rel="prev"]')).toHaveCount(0);
+    const next = page.locator('a[rel="next"]');
+    await expect(next).toHaveCount(1);
+    await expect(next).toHaveAttribute("href", `/blog/${POST2_SLUG}`);
+    await next.click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: POST2_TITLE }),
+    ).toBeVisible();
+  });
+
+  test("Part 12 has prev but no next, and 'prev' goes to Part 11", async ({
+    page,
+  }) => {
+    await page.goto(`/blog/${POST12_SLUG}`);
+    await expect(page.locator('a[rel="next"]')).toHaveCount(0);
+    const prev = page.locator('a[rel="prev"]');
+    await expect(prev).toHaveCount(1);
+    await expect(prev).toHaveAttribute("href", `/blog/${POST11_SLUG}`);
+    await prev.click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: POST11_TITLE }),
+    ).toBeVisible();
+  });
+
+  test("the prev/next chain links every part in order, Part 1 → Part 12", async ({
+    page,
+  }) => {
+    // Walk forward from Part 1 following only the rel="next" link, asserting the
+    // chain visits all twelve slugs in sequence and terminates at Part 12.
+    const order = [
+      POST1_SLUG,
+      POST2_SLUG,
+      POST3_SLUG,
+      POST4_SLUG,
+      POST5_SLUG,
+      POST6_SLUG,
+      POST7_SLUG,
+      POST8_SLUG,
+      POST9_SLUG,
+      POST10_SLUG,
+      POST11_SLUG,
+      POST12_SLUG,
+    ];
+    let slug = POST1_SLUG;
+    const visited = [];
+    for (let i = 0; i < order.length + 1 && slug; i++) {
+      visited.push(slug);
+      await page.goto(`/blog/${slug}`);
+      const next = page.locator('a[rel="next"]');
+      if ((await next.count()) === 0) break;
+      const href = await next.getAttribute("href");
+      slug = href.replace(/^\/blog\//, "").replace(/\/$/, "");
+    }
+    expect(visited).toEqual(order);
+  });
+});
