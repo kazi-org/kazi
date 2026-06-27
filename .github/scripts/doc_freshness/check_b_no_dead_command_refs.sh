@@ -17,6 +17,12 @@
 #                          verbs and unknown commands as examples, so it is
 #                          excluded so its examples do not self-trip (the same
 #                          self-exclusion the leak guard applies to its own doc).
+#   - docs/oss-gates.md    the doc for the sibling site/doc command guards
+#                          (Gate 4/5, T28.4) -- it names `kazi run`/`kazi propose`/
+#                          `kazi frobnicate` as EXAMPLES of what those guards
+#                          catch, exactly like doc-freshness.md. Gate 5's own
+#                          scanner already self-excludes this file; this guard
+#                          must match, or the example list self-trips (T31.7).
 #
 # Two failure classes are reported, each with file:line:
 #   1. A KNOWN-REMOVED verb token: `kazi run`, `kazi propose`, `mix kazi.run`
@@ -49,7 +55,8 @@ done < <(
       ! -name 'devlog.md' \
       ! -name 'plan.md' \
       ! -name 'lore.md' \
-      ! -name 'doc-freshness.md'
+      ! -name 'doc-freshness.md' \
+      ! -name 'oss-gates.md'
   } | sort -u
 )
 
