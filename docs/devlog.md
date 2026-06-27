@@ -2393,3 +2393,51 @@ the released binary cannot execute `--parallel` (PartitionSupervisor `:noproc`);
 live evidence is in-tree. The feature is proven; the release path needs the
 supervisor-startup fix before a released binary can run it.** Fixture reused:
 `priv/examples/predicate_graph_waves.toml`.
+
+## 2026-06-26 — native-parallel runtime bugfixes: group-collapse + `/leases` 500 (from the T21.12/T23.9 dogfood)
+
+Three related native-parallel bugs surfaced by the parallel-run dogfooding. #1 (the
+released-binary `--parallel` `:noproc`) was already fixed and released in v1.64.2
+(commit `1708f3b`, `ensure_started/1` on the CLI path; see lore L-0019) — left as-is,
+verified present in the tag. This entry covers the two remaining fixes.
+
+**Bug #2 — disjoint GROUPS collapse into one serial partition (no parallelism
+without `needs`).** The CLI `--parallel` path always hands `Kazi.Scheduler.run_goals/2`
+a SINGLE goal, and the flat partition unit is the whole goal, so a single bare goal
+always yields exactly one partition (reproduced: a 2-group, no-`needs` goal →
+`Partitioner.partition([goal])` = 1 partition). The group axis only engaged when a
+group declared a `needs` edge (`DepScheduler.dag?/1`), so a goal with 2+ INDEPENDENT
+groups ran as ONE serial loop — even though `--explain` showed N parallel partitions
+within the single frontier (explain and execution disagreed). Fix: `run_goals/2` now
+routes a single goal through the group scheduler when `dag?` OR `group_parallel?/1`
+(2+ groups AND every acceptance predicate carries a declared group). With no `needs`,
+`DepScheduler` dispatches every group in one frontier — fully parallel, matching
+explain. Guard: a goal with any UNGROUPED acceptance predicate stays flat so the
+per-group sub-goal split never drops a predicate (guards, which may be ungrouped, are
+replicated into every sub-goal). Verified via
+`test/kazi/scheduler/run_goals_group_parallel_test.exs` (two gated group reconcilers
+both dispatch before either is released → concurrent; ungrouped-predicate goal stays
+flat with all predicates intact). See lore L-0020.
+
+**Bug #3 — `/leases` 500s on a NATS-free (native) run.** The dashboard defaulted to
+`KaziWeb.CoordinationSource.Transport`, whose `snapshot/0` → `Transport.Memory.fetch`
+→ `bus_pid` RAISES `ArgumentError "requires a :bus handle"` when no `:coordination_opts`
+is configured (the native default). And native parallel uses per-run in-memory lease
+stores with no readable singleton, so there was nothing for the dashboard to project.
+Fix: added `Kazi.Coordination.LeaseTable` (a globally-readable, best-effort `Agent`
+registry of held native leases — every write a no-op when absent, so it never couples
+the scheduler to the web tree), started in the web subtree; `LeasedReconciler` records
+on acquire / forgets on terminal. Added `KaziWeb.CoordinationSource.Native` (projects
+the table, no NATS) and made it the DEFAULT source; Transport is now opt-in via
+`:lease_map_source` for when NATS is wired. `/leases` renders the live native lease map
+(empty state when nothing is held) instead of 500-ing. Verified via
+`test/kazi_web/live/lease_map_live_native_test.exs` (the view renders empty + populated
+through the default native path), `test/kazi_web/coordination_source/native_test.exs`,
+`test/kazi/coordination/lease_table_test.exs`. Honesty note: the CLI `--parallel` path
+does not yet inject `:lease`, so a CLI run shows the EMPTY lease map until CLI-level
+leasing is wired — but it RENDERS (no 500), which was the blocker. See lore L-0021.
+
+**Quality gates:** `mix format` clean, `mix compile --warnings-as-errors` clean, full
+suite green (2290 passed, 24 excluded). All three fixes verified VIA TEST (ExUnit);
+released-binary `--parallel` for #1 was independently verified live on v1.64.2 (lore
+L-0019). #2/#3 not yet exercised on a released binary (post-release coordinator step).

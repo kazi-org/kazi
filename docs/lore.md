@@ -343,3 +343,49 @@ priv/examples/predicate_graph_waves.toml --parallel --json` ran end-to-end (no
 `:noproc`), dispatched two disjoint partitions concurrently, gated the dependent
 group, and converged collectively (exit 0) -- see docs/devlog.md (2026-06-26
 re-verify entry).
+
+### L-0020 #scheduler #partition #groups #parallel #landmine -- a single goal's disjoint GROUPS collapse into ONE serial partition unless they declare `needs`
+The CLI `--parallel` path ALWAYS hands `Kazi.Scheduler.run_goals/2` exactly ONE goal
+(the loaded goal-file). The flat partition unit is the WHOLE goal, so a single bare
+goal always partitions to exactly ONE partition (`Kazi.Partition.partition([goal])`
+=> 1 entry; proven by the long-standing "single goal degenerates to one partition"
+test). The GROUP axis (parallelising a goal's predicate groups) only kicked in when
+`Kazi.Scheduler.DepScheduler.dag?/1` was true -- i.e. some group declared a `needs`
+edge. So a goal with 2+ INDEPENDENT groups and NO `needs` (the "fully parallel,
+ADR-0027 default" case the `Group.needs` doc promises) silently ran as ONE serial
+loop over all predicates -- disjoint groups did NOT parallelise. LANDMINE: `--explain`
+computed the frontiers and partitioned the groups WITHIN a frontier, so the dry-run
+schedule SHOWED N parallel partitions while the real run collapsed to 1 -- explain
+and execution disagreed. FIXED (2026-06-26): `run_goals/2` now routes a single goal
+through the group scheduler when `dag?` OR `group_parallel?/1` (2+ groups AND every
+acceptance predicate carries a declared group). With no `needs`, `DepScheduler`
+dispatches every group in ONE frontier (concurrent), matching explain. GUARD: a goal
+with any UNGROUPED acceptance predicate stays FLAT -- the per-group sub-goal split
+keeps only each group's predicates, so an ungrouped predicate would be DROPPED;
+guards (which may be ungrouped) are replicated into every sub-goal, so they are safe.
+Regression: `test/kazi/scheduler/run_goals_group_parallel_test.exs`.
+
+### L-0021 #dashboard #leases #coordination #nats #native #landmine -- `/leases` 500s on a NATS-free run; the default Transport source RAISES with no `:bus`
+The operator lease-map dashboard (`/leases`, `KaziWeb.LeaseMapLive`) defaulted to
+`KaziWeb.CoordinationSource.Transport`, whose `snapshot/0` calls
+`Kazi.Coordination.Presence.snapshot/1` -> `Kazi.Coordination.Transport.Memory.fetch/2`
+-> `bus_pid/1`, which RAISES `ArgumentError "requires a :bus handle"` when no
+`:coordination_opts` (`:bus`) is configured -- the native, NATS-free default. So
+opening `/leases` on a single-node run 500'd. Root cause beyond the raise: native
+parallel coordinates on PER-RUN `Kazi.Coordination.Lease.Memory` stores passed by
+handle, deliberately NOT global, so there was NO readable singleton the dashboard
+could project. FIXED (2026-06-26): added `Kazi.Coordination.LeaseTable` -- a
+globally-readable, best-effort `Agent` registry of held native leases (every write a
+no-op when it is not running, so it never couples the scheduler to the web tree or
+crashes a headless run) -- started in the web subtree; `Kazi.Scheduler.LeasedReconciler`
+records on acquire / forgets on terminal. A new non-NATS source
+`KaziWeb.CoordinationSource.Native` projects that table and is now the DEFAULT, so
+`/leases` renders the live native lease map (empty state when nothing is held)
+without touching NATS. INVARIANT: a web read seam over coordination MUST NOT require
+the NATS transport on a single-node run; default to the native source and opt into
+Transport only when NATS is wired. NOTE: the CLI `--parallel` path does not yet
+inject `:lease`, so the dashboard shows the EMPTY lease map on a CLI run until
+CLI-level leasing is wired -- but it RENDERS (no 500). Regression:
+`test/kazi_web/live/lease_map_live_native_test.exs`,
+`test/kazi_web/coordination_source/native_test.exs`,
+`test/kazi/coordination/lease_table_test.exs`.
