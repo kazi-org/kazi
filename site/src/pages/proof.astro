@@ -36,7 +36,6 @@ const cases = [
       ["status", "converged"],
       ["iterations", "2"],
       ["wall clock", "18.5 s"],
-      ["cost", "$0.116"],
       ["tokens", "39,712"],
     ],
     source: "docs/devlog.md — 2026-06-26 · T26.6",
@@ -59,7 +58,6 @@ const cases = [
       ["status", "converged"],
       ["iterations", "2"],
       ["wall clock", "39.3 s"],
-      ["cost", "$0.0769"],
       ["model", "claude-haiku-4-5"],
     ],
     source: "docs/devlog.md — 2026-06-26 · T30.4 (Run A)",
@@ -134,7 +132,8 @@ const cases = [
         count, cost, and wall-clock figure is copied verbatim from a real run
         recorded in the{" "}
         <a href={DEVLOG} class="kazi-text font-semibold hover:underline">devlog</a>
-        ; the full reproduction steps live in the{" "}
+; the full reproduction steps &mdash; and the metered{" "}
+        <code class="ui-body">cost_usd</code> per run &mdash; live in the{" "}
         <a href={METHODOLOGY} class="kazi-text font-semibold hover:underline"
           >methodology doc</a
         >. If a number can&rsquo;t be traced to a captured run, it isn&rsquo;t on
