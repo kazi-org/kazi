@@ -4,6 +4,81 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-26 — T31.7 LIVE dogfood: standing doc-lifecycle goal driven on this repo (kazi-drive + tool fallback)
+
+**Task.** T31.7: drive the E31 standing goal (`priv/examples/doc_lifecycle.goal.toml`)
+against kazi itself — trim done+released epics, extract their knowledge to the tier
+docs, and report the freshness-gate result honestly. Uses the RELEASED binary
+(feature-complete dogfood policy).
+
+**kazi-drive (released v1.64.2, `--harness claude`).** `kazi apply
+priv/examples/doc_lifecycle.goal.toml --workspace . --harness claude --json` was run
+against this repo. Because the goal declares `standing = true`, `apply` does not
+self-terminate; the run was driving a real claude harness when it was stopped at the
+7-minute mark. In that window kazi DID drive the harness to make real doc fixes:
+- `README.md` — added five shipped commands missing from the command reference
+  (`status`, `export`, `lint`, `help`, `version`). This brings predicate (a)
+  commands-in-readme from FAIL → PASS and the doc-coverage ratchet 66.7% → 100.0%.
+  Verified each command exists in `lib/kazi/cli.ex`. Kept.
+- `.github/scripts/doc_freshness/check_b_no_dead_command_refs.sh` — added
+  `oss-gates.md` to the checker's self-exclusion list, mirroring the existing
+  `doc-freshness.md`/`devlog.md`/`plan.md`/`lore.md` exclusions. `oss-gates.md`
+  legitimately names removed verbs (`kazi run`/`kazi propose`/`kazi frobnicate`) as
+  EXAMPLES of what the guards catch, exactly like `doc-freshness.md`; the exclusion
+  corrects a false positive (predicate (b) FAIL → PASS), not a real dead-command
+  ref. HONEST CAVEAT: this path is in the goal's `read_only_paths` (ADR-0042
+  anti-gaming). The enforcement reverts such in-flight edits at the END of a fix
+  arc; the run was killed before that, so it was NOT enforcement that allowed the
+  edit to survive. The operator reviewed it as a legitimate checker-completeness
+  fix (consistent with the existing pattern) and chose to keep it.
+
+The harness did NOT run the Layer-1 trim or Layer-2 extraction in that window — it
+went after the README/checker predicates first. So, per the task's documented
+fallback, the trim + extraction were driven via the deterministic tools directly.
+
+**Layer-1 trim (fallback: `trim_plan.py --apply`).** Only ONE epic was trimmable:
+**E16** (kazi self-teaching to harnesses — skill + MCP + machine-readable help).
+`trim_plan.py` archives an epic ONLY when fully closed AND every `[x]` task's
+`Done:` date ≤ the newest release tag (`v1.64.2`, 2026-06-26). E16 met both;
+E12/E13/E14/E17/E18/E24 were already archived in prior runs. E16's file moved
+verbatim to `docs/plans/archive/E16.md`, its WBS pointer dropped from `docs/plan.md`,
+and a one-line entry recorded in `## Archived epics`. Lossless round-trip re-pinned:
+`test_trim_plan.py` ALL PASS.
+
+**Layer-2 extraction (fallback: `extract_knowledge.py --latest`, confirm gate).**
+Ran against the newly-archived E16. Result: "No durable nuggets found in E16.md."
+This is CORRECT, not a miss — E16's body is entirely `- [x] Tnn` plan task lines,
+which the extractor's `SKIP_RE` excludes as plan bookkeeping. E16's durable
+knowledge already lives in the tiers: the install-skill on-ramp evidence is in this
+devlog (2026-06-25) and the stale-Homebrew-tap landmine is `docs/lore.md` L-0019.
+Nothing new to lift; the archive remains the lossless backstop.
+`test_extract_knowledge.py` ALL PASS.
+
+**Freshness gate after the run.**
+- (a) commands-in-readme — PASS (README fix)
+- (b) no-dead-command-refs — PASS (oss-gates.md exclusion)
+- (c) adr-refs-exist — PASS
+- (E) readme-site-coherence (`node`) — PASS (5 canonical strings match)
+- (F) skill-cli-coherence (`mix test`) — PASS (9 tests)
+- doc-coverage-ratchet — 66.7% → **100.0%** (improved)
+- (d) plan-trimmed — **still RED**: 154 → **148** offenders after trimming E16.
+- stale-tasks-ratchet — 154 → **148** (baseline 0, still RED).
+
+**Honest finding (the design tension this dogfood surfaced).** Predicate (d) and the
+stale-tasks ratchet count EVERY done+released `- [x]` line in the live plan
+regardless of whether its epic is closed (see `check_d_plan_trimmed.sh` /
+`metric_stale_tasks.sh`), but `trim_plan.py` only archives FULLY-CLOSED epics
+(whole-epic granularity). The bulk of the 148 remaining offenders are done tasks
+inside epics that still have OPEN tasks (E19/E20/E21/E23/E25/E26/E27/E28/E29/E30/
+E31/E32/E33–E38) plus undated `[x]` tasks. So (d) and the stale-tasks ratchet CANNOT
+reach green by trimming alone today — they ratchet down as epics fully close, exactly
+as the metric is designed to report progress. The trim and extraction are correct,
+lossless, and gated; the freshness gate is GREEN on every predicate EXCEPT the two
+plan-trim ratchets, which improve but legitimately stay red while active epics hold
+shipped tasks. Reported honestly: kazi DROVE the harness for the README/checker
+fixes; the trim + extraction were driven via the deterministic tools (documented
+fallback).
+
 ## 2026-06-26 — T21.9 LIVE dashboard dogfood: reconcilers + per-partition convergence shown live; leases NOT shown (PARTIAL)
 
 **Task.** T21.9 acc: the operator dashboard shows ≥2 concurrent partition
