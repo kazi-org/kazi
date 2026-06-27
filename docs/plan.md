@@ -169,7 +169,6 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E9 (leftovers) -- Website polish (P2, ADR-0018) -> plans/E9.md
 ### E15 -- Harness-friendly, agent-drivable kazi: JSON CLI + result contract (P3, ADR-0023) -> plans/E15.md
-### E16 -- kazi self-teaching to harnesses: skill + MCP + machine-readable help (P3, ADR-0024) -> plans/E16.md
 ### E19 -- Realize the unwired token-efficiency levers + measure (P2, ADR-0010) -> plans/E19.md
 ### E20 -- kazi UNDER /apply --pool: objective-done + coordination + observability beneath pooled sessions (P1, ADR-0026) -> plans/E20.md
 ### E21 -- kazi owns parallelization: a native scheduler over a partitioned goal-set (P1, ADR-0027) -> plans/E21.md
@@ -921,3 +920,4 @@ Their bodies live verbatim under `docs/plans/archive/`.
 - E17 -- Adoption: lead EVERY surface with the agent-driven on-ramp (P1, ADR-0025) (archived 2026-06-25) -> plans/archive/E17.md
 - E18 -- Bug fixes from the T15.9 token-benchmark dogfood (P2, no ADR) (archived 2026-06-25) -> plans/archive/E18.md
 - E24 -- Remove the Telegram bridge (P2, ADR-0029; cleanup) (archived 2026-06-25) -> plans/archive/E24.md
+- E16 -- kazi self-teaching to harnesses: skill + MCP + machine-readable help (P3, ADR-0024) (archived 2026-06-26) -> plans/archive/E16.md
