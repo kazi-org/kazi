@@ -16,6 +16,19 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.66.0](https://github.com/kazi-org/kazi/compare/v1.65.1...v1.66.0) (2026-06-27)
+
+
+### Features
+
+* **coordination:** readable native-lease registry (LeaseTable) ([d85632a](https://github.com/kazi-org/kazi/commit/d85632ac39cea134975547d58bd5f02d0cd92b1c))
+
+
+### Bug Fixes
+
+* **scheduler:** parallelize disjoint groups of a no-needs goal ([153b114](https://github.com/kazi-org/kazi/commit/153b1143220bb7e0a9327e851e9f8ea50f14809a))
+* **web:** default /leases to a NATS-free coordination source ([162cdc8](https://github.com/kazi-org/kazi/commit/162cdc8e877819c6c5cf1159ae783955cf56c605))
+
 ## [1.65.1](https://github.com/kazi-org/kazi/compare/v1.65.0...v1.65.1) (2026-06-27)
 
 
