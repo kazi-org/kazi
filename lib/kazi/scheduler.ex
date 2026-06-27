@@ -296,16 +296,41 @@ defmodule Kazi.Scheduler do
     end
   end
 
-  # Route to the pipelined `DepScheduler` only when the goal-set is EXACTLY one
-  # goal whose groups form a non-trivial `needs`-DAG (some group declares an
-  # edge). Anything else — many goals, a goal with no groups, or groups with no
-  # `needs` — is `:flat`, the fully-parallel ADR-0027 default. This keeps
-  # `run_goals/2` byte-for-byte backward-compatible for every existing caller.
+  # Route to the GROUP scheduler (`DepScheduler`) when the goal-set is EXACTLY one
+  # goal whose predicates are organized into groups — either a non-trivial
+  # `needs`-DAG (some group declares an edge) OR 2+ independent groups with no
+  # edges. The latter is still GROUP-PARALLEL: with no `needs`, `DepScheduler`
+  # dispatches every group in ONE frontier (fully parallel, the ADR-0027 default),
+  # so disjoint groups run concurrently instead of collapsing into one serial
+  # partition (the partition unit for a single bare goal is the whole goal, so the
+  # flat path would otherwise yield exactly one partition — the group-collapse bug).
+  #
+  # Anything else — many goals, or a goal with no/one group — is `:flat`. The
+  # 2+-group route is GUARDED so nothing is dropped: it triggers only when every
+  # acceptance predicate carries a declared group (`group_parallel?/1`), since the
+  # per-group sub-goal split keeps only each group's predicates (guards, which may
+  # be ungrouped, are replicated to every group's sub-goal). A goal with ungrouped
+  # acceptance predicates stays flat so those predicates are never lost.
   defp dag_goal([%Kazi.Goal{} = goal]) do
-    if Kazi.Scheduler.DepScheduler.dag?(goal), do: {:ok, goal}, else: :flat
+    cond do
+      Kazi.Scheduler.DepScheduler.dag?(goal) -> {:ok, goal}
+      group_parallel?(goal) -> {:ok, goal}
+      true -> :flat
+    end
   end
 
   defp dag_goal(_goals), do: :flat
+
+  # True when a single goal's acceptance predicates are fully organized into 2+
+  # groups (no edges required): its disjoint groups should run in parallel, so it
+  # routes through the group scheduler. Requires every acceptance predicate to
+  # carry a declared group so the per-group sub-goal split (which keeps only that
+  # group's predicates) loses nothing; an ungrouped acceptance predicate forces the
+  # flat path. Guards may be ungrouped — they are replicated into every sub-goal.
+  defp group_parallel?(%Kazi.Goal{groups: groups, predicates: predicates}) do
+    length(groups) >= 2 and predicates != [] and
+      Enum.all?(predicates, fn %Kazi.Predicate{group: group} -> group != nil end)
+  end
 
   # Drive a single goal's `needs`-DAG topologically + pipelined (ADR-0028). Each
   # READY group is reconciled by a GROUP reconciler; the default reconciles the
