@@ -149,18 +149,19 @@ the same checks keep failing (`stuck` → escalate to you), or the budget runs o
 Goals a naive pipeline leaves *subtly broken* — the file looks created, the answer looks
 right, the parallel split looks done — that kazi drove to **objective convergence**. Every
 number below is copied verbatim from a real `kazi apply --json` run recorded in
-[`docs/devlog.md`](docs/devlog.md); the full reproduction steps (goal-file, command, version)
-are in [`docs/dogfood-methodology.md`](docs/dogfood-methodology.md). No unverifiable claims —
+[`docs/devlog.md`](docs/devlog.md); the full reproduction steps (goal-file, command, version,
+and the metered `cost_usd` per run) are in
+[`docs/dogfood-methodology.md`](docs/dogfood-methodology.md). No unverifiable claims —
 if a number can't be traced to a captured run, it isn't here.
 
 | Goal | The subtle break | Result | Source |
 |---|---|---|---|
-| **Exact-content file** — `VERSION.txt` must be exactly `1.0.0` | "The file exists" looks done, but the bytes must be exact | `converged`, 2 iters / 18.5 s / $0.116 (v1.64.2) | T26.6 |
-| **Self-correcting on an opaque oracle** — `solution.py` graded by a one-way sha256 | The first plausible attempt is *wrong*; nothing grades it | `converged`, 2 iters / 39.3 s / $0.0769, Haiku self-corrected on iter 2 (v1.64.1) | T30.4 |
+| **Exact-content file** — `VERSION.txt` must be exactly `1.0.0` | "The file exists" looks done, but the bytes must be exact | `converged`, 2 iters / 18.5 s / 39,712 tokens (v1.64.2) | T26.6 |
+| **Self-correcting on an opaque oracle** — `solution.py` graded by a one-way sha256 | The first plausible attempt is *wrong*; nothing grades it | `converged`, 2 iters / 39.3 s, Haiku self-corrected on iter 2 (v1.64.1) | T30.4 |
 | **A real cross-group dependency, parallelized** — streaming consumes a contract type | A naive parallel split compiles against a type that doesn't exist yet | `collective: converged`, 2 disjoint groups concurrent + 1 gated, single-node, NATS-free (v1.64.2) | T21.12 / T23.9 |
 
-Full gallery + before/after evidence + reproducible method: **<https://kazi.sire.run/proof>**
-(see also the [methodology doc](docs/dogfood-methodology.md)).
+Full gallery + before/after evidence + reproducible method (incl. per-run cost):
+**<https://kazi.sire.run/proof>** (see also the [methodology doc](docs/dogfood-methodology.md)).
 
 ---
 
