@@ -761,11 +761,15 @@ kazi reject  <proposal-ref>                  # discard a draft
 kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
         [--env <name>]                       #   target a deploy environment (staging/prod)
         [--standing]                         #   run continuously (re-converge on drift)
+kazi status <ref>                            # report a run's (or proposal's) current state
 kazi context index <label> <file>            # context store: index a heavy artifact
 kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provider gist)
 kazi context stats                           #   byte accounting (indexed/returned/saved)
+kazi export <goal-file> --obsidian <dir>     # write an Obsidian vault of the goal tree
+kazi lint <goal-file>                        # advisory near-duplicate group-name warnings
 kazi mcp                                      # start the MCP server over stdio (ADR-0044)
-kazi --help
+kazi help [--json]                           # the command/flag surface (--json for machines)
+kazi version                                 # print the kazi version and exit
 ```
 
 `kazi apply` exits `0` on convergence, non-zero otherwise — so it composes in CI/scripts.
