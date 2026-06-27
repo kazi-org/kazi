@@ -52,6 +52,13 @@ defmodule Kazi.Application do
           [
             Kazi.Repo,
             {Phoenix.PubSub, name: Kazi.PubSub},
+            # The readable native-lease registry (the dashboard-lease-map fix): the
+            # NATS-free lease map source (`KaziWeb.CoordinationSource.Native`) reads
+            # the active per-run leases the scheduler records here, so `/leases`
+            # renders on a native run instead of 500-ing on the NATS transport. It
+            # is read by the web tree, so it boots alongside it; absent it, lease
+            # recording is a no-op and the dashboard renders the empty state.
+            Kazi.Coordination.LeaseTable,
             KaziWeb.DagSource.Cache,
             KaziWeb.Endpoint
           ]

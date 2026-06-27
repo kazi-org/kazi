@@ -13,6 +13,7 @@ defmodule Kazi.Scheduler.LeasedReconcilerTest do
 
   alias Kazi.Coordination.Lease
   alias Kazi.Coordination.Lease.Memory
+  alias Kazi.Coordination.LeaseTable
   alias Kazi.Scheduler.LeasedReconciler
 
   setup do
@@ -53,6 +54,36 @@ defmodule Kazi.Scheduler.LeasedReconcilerTest do
 
       assert reconciler.(partition(key)) == {:error, :boom}
       assert Memory.peek(key, ctx.lease_opts) == :free
+    end
+
+    test "the held lease is published to the readable LeaseTable and forgotten on terminal",
+         ctx do
+      # The dashboard-lease-map fix: the NATS-free `/leases` source reads the held
+      # native leases from the LeaseTable, so the lifecycle records on acquire and
+      # forgets on terminal. Inject an isolated table instance to observe it.
+      table = :"leased_table_#{System.unique_integer([:positive])}"
+      start_supervised!(%{id: table, start: {LeaseTable, :start_link, [[name: table]]}})
+
+      key = "radius:lib/published.ex"
+      test_pid = self()
+
+      inner = fn _partition ->
+        # Mid-run: the held lease is visible in the readable table.
+        send(test_pid, {:table_mid, LeaseTable.list(table)})
+        :converged
+      end
+
+      reconciler =
+        LeasedReconciler.wrap(inner,
+          backend: ctx.backend,
+          lease_opts: ctx.lease_opts,
+          lease_table: table
+        )
+
+      assert reconciler.(partition(key)) == :converged
+      assert_received {:table_mid, [%Lease{key: ^key}]}
+      # After terminal: forgotten alongside the release.
+      assert LeaseTable.list(table) == []
     end
   end
 
