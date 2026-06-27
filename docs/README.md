@@ -18,6 +18,9 @@ need them.
 - **[Concept & architecture](concept.md)** — the canonical source of truth: what
   kazi is, the goal contract, the convergence loop, the coordination model, and
   the build order.
+- **[Dogfood "done" methodology](dogfood-methodology.md)** — how every number in
+  the [Proof gallery](https://kazi.sire.run/proof) was produced (goal, command,
+  version, captured result), so each converged case is reproducible.
 
 ## Guides — drive kazi
 
