@@ -164,6 +164,37 @@ test.describe("kazi website smoke", () => {
     );
   });
 
+  test("nav shows a Proof link to the dogfood gallery", async ({ page }) => {
+    await page.goto("/");
+    // T25.7: the primary nav exposes a Proof entry routing to /proof, the dogfood
+    // "done" gallery.
+    const proofLink = page
+      .getByRole("navigation", { name: "Primary" })
+      .getByRole("link", { name: "Proof", exact: true });
+    await expect(proofLink).toBeVisible();
+    await expect(proofLink).toHaveAttribute("href", "/proof");
+  });
+
+  test("the Proof gallery renders >=2 converged cases with reproduce commands", async ({
+    page,
+  }) => {
+    // T25.7: the dogfood gallery must show real converged cases (acceptance
+    // requires >=2) with a reproducible method — no placeholders.
+    const errors = watchConsole(page);
+    await page.goto("/proof");
+    await expect(
+      page.getByRole("heading", { name: "Proof, not vibes" }),
+    ).toBeVisible();
+    // At least two cases each render a converged verdict and a reproduce command.
+    const reproduceBlocks = page.locator("pre", { hasText: "kazi apply" });
+    expect(await reproduceBlocks.count()).toBeGreaterThanOrEqual(2);
+    // The methodology doc is linked (the reproducibility contract).
+    await expect(
+      page.getByRole("link", { name: /Read the full methodology/ }),
+    ).toBeVisible();
+    expect(errors, `console errors on /proof:\n${errors.join("\n")}`).toEqual([]);
+  });
+
   test("footer links to community help (Discussions)", async ({ page }) => {
     await page.goto("/");
     // T25.12: the footer carries a getting-help link to GitHub Discussions.
