@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.65.0](https://github.com/kazi-org/kazi/compare/v1.64.2...v1.65.0) (2026-06-27)
+
+
+### Features
+
+* **site:** add the dogfood "done" proof gallery (T25.7) ([25d7f9d](https://github.com/kazi-org/kazi/commit/25d7f9d090c05389321444a557127896e6ec9dc0))
+
+
+### Bug Fixes
+
+* **site:** keep per-run cost in the methodology doc, not the proof surface ([8f35d9e](https://github.com/kazi-org/kazi/commit/8f35d9e4dfa3cdf81dc0c4f925eb6c2d8d143b1a))
+
 ## [1.64.2](https://github.com/kazi-org/kazi/compare/v1.64.1...v1.64.2) (2026-06-26)
 
 
