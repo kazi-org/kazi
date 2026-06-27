@@ -11,11 +11,13 @@ defmodule KaziWeb.LeaseMapLive do
   `Kazi.Harness.*`, and it never touches NATS directly (ADR-0011 §2).
 
   The source is injectable (ADR-0011 §3): it defaults to
-  `KaziWeb.CoordinationSource.Transport` (aggregates over the coordination
-  transport) but can be overridden via the `:lease_map_source` application env so a
-  LiveView/Playwright test drives the map from a fixture source with no NATS. A
-  fresh snapshot pushed on the source topic — e.g. one with a released lease
-  dropped — re-renders the map live.
+  `KaziWeb.CoordinationSource.Native` (the NATS-free source that reads the live
+  per-run leases from `Kazi.Coordination.LeaseTable`), so `/leases` renders out of
+  the box on a single-node native run. When NATS is wired (multi-node, Slice 3+),
+  set `:lease_map_source` to `KaziWeb.CoordinationSource.Transport` to aggregate
+  over the transport; a LiveView/Playwright test points it at a fixture source with
+  no NATS. A fresh snapshot pushed on the source topic — e.g. one with a released
+  lease dropped — re-renders the map live.
 
   When nothing is present and no leases are held the view renders a clear empty
   state.
@@ -48,9 +50,11 @@ defmodule KaziWeb.LeaseMapLive do
   end
 
   # The injectable coordination seam (ADR-0011 §3): override in test config to feed
-  # the map a fixture source; defaults to the transport aggregator.
+  # the map a fixture source; defaults to the NATS-free native source so the
+  # dashboard renders on a single-node run (set :lease_map_source to the Transport
+  # source when NATS is wired).
   defp source do
-    Application.get_env(:kazi, :lease_map_source, KaziWeb.CoordinationSource.Transport)
+    Application.get_env(:kazi, :lease_map_source, KaziWeb.CoordinationSource.Native)
   end
 
   @impl true
