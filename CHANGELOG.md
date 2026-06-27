@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.65.1](https://github.com/kazi-org/kazi/compare/v1.65.0...v1.65.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **doc-freshness:** exclude oss-gates.md from dead-command-ref check (T31.7) ([2c5553a](https://github.com/kazi-org/kazi/commit/2c5553a6136d16e22f10372c0b4d0f92b5d24dff))
+
 ## [1.65.0](https://github.com/kazi-org/kazi/compare/v1.64.2...v1.65.0) (2026-06-27)
 
 
