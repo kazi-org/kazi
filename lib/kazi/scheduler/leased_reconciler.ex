@@ -44,6 +44,7 @@ defmodule Kazi.Scheduler.LeasedReconciler do
   """
 
   alias Kazi.Coordination.Lease
+  alias Kazi.Coordination.LeaseTable
 
   @default_ttl_ms 60_000
   @default_acquire_timeout_ms 30_000
@@ -84,6 +85,11 @@ defmodule Kazi.Scheduler.LeasedReconciler do
       that cannot acquire in time reconciles to `:stuck` (it never converged).
     * `:retry_interval_ms` — poll interval while a lease is contended (default
       `#{@default_retry_interval_ms}`).
+    * `:lease_table` — the readable native-lease registry to publish the held lease
+      into for the duration of the run (default `Kazi.Coordination.LeaseTable`), so
+      the NATS-free dashboard (`/leases`) can render the live lease map. Best-effort:
+      a no-op when the table is not running (a hermetic test, the escript), so this
+      never couples the scheduler to the web tree.
   """
   @spec wrap(Kazi.Scheduler.reconciler(), keyword()) :: Kazi.Scheduler.reconciler()
   def wrap(inner, opts) when is_function(inner, 1) and is_list(opts) do
@@ -93,6 +99,7 @@ defmodule Kazi.Scheduler.LeasedReconciler do
     ttl_ms = Keyword.get(opts, :ttl_ms, @default_ttl_ms)
     acquire_timeout = Keyword.get(opts, :acquire_timeout_ms, @default_acquire_timeout_ms)
     retry_interval = Keyword.get(opts, :retry_interval_ms, @default_retry_interval_ms)
+    lease_table = Keyword.get(opts, :lease_table, LeaseTable)
 
     fn partition ->
       key = key_fun.(partition)
@@ -100,6 +107,10 @@ defmodule Kazi.Scheduler.LeasedReconciler do
 
       case acquire(backend, key, holder, ttl_ms, lease_opts, acquire_timeout, retry_interval) do
         {:ok, lease} ->
+          # Publish the held lease so the NATS-free dashboard can read it; forgotten
+          # on terminal alongside the release. Best-effort (no-op when absent).
+          LeaseTable.record(lease, lease_table)
+
           try do
             inner.(partition)
           after
@@ -107,6 +118,7 @@ defmodule Kazi.Scheduler.LeasedReconciler do
             # `after` runs as the process unwinds, so a raising reconciler still
             # frees its lease rather than holding it for the whole TTL.
             backend.release(lease, lease_opts)
+            LeaseTable.forget(key, lease_table)
           end
 
         :timeout ->
