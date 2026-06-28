@@ -47,6 +47,31 @@ defmodule Kazi.Coordination.LeaseTable do
   end
 
   @doc """
+  Ensures the named singleton is running, starting it if absent. Idempotent.
+
+  The full app tree (`Kazi.Application`) starts the singleton, but the Burrito
+  standalone binary hands straight to the CLI before that tree is stood up (the
+  same path that left `Kazi.Repo`/`Kazi.Scheduler.PartitionSupervisor` unstarted),
+  so a released `kazi apply --parallel` would have no readable lease table to
+  publish into. The CLI parallel path calls this so native partition leases are
+  recordable; under mix/test where the app tree already started it, this is a
+  no-op returning the running pid.
+  """
+  @spec ensure_started(atom()) :: {:ok, pid()}
+  def ensure_started(name \\ __MODULE__) when is_atom(name) do
+    case Process.whereis(name) do
+      pid when is_pid(pid) ->
+        {:ok, pid}
+
+      nil ->
+        case start_link(name: name) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+        end
+    end
+  end
+
+  @doc """
   Records a held lease, keyed by its `:key`. Best-effort: a no-op when the table is
   not running, so the lease lifecycle never depends on it.
   """
