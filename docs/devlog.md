@@ -4,6 +4,48 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-28 — T21.9 wiring: `kazi apply --parallel` now publishes partition leases to the dashboard (Gap 1 closed)
+
+**Type:** finding
+**Tags:** scheduler, leases, dashboard, native-parallel, cli, T21.9
+
+**Problem.** The T21.9 dashboard dogfood (devlog 2026-06-26) closed 2 of 3 acc
+clauses (≥2 concurrent reconcilers + per-partition convergence shown live) but
+left **leases NOT shown** — the material miss. Root cause beyond the NATS-free
+`/leases` 500 (since fixed by `CoordinationSource.Native` + `LeaseTable`, L-0021):
+the CLI `--parallel` path never injected a `:lease`, so
+`Kazi.Scheduler.run_goals/2` skipped `LeasedReconciler.wrap/2` and nothing was
+ever recorded into the globally-readable `Kazi.Coordination.LeaseTable`. The lease
+map rendered, but EMPTY, on every native run.
+
+**Root cause.** `Kazi.CLI.run_goal_parallel/4` composed `scheduler_opts` with only
+`:workspace` + `:run_opts`. With no `:lease` key, `lib/kazi/scheduler.ex` (line
+~572) takes the `nil` branch and returns the bare worktree reconciler — the whole
+publish seam (`LeasedReconciler` → `LeaseTable` → `CoordinationSource.Native` →
+`/leases`) existed and was tested but was never engaged from the CLI.
+
+**Fix.** `run_goal_parallel/4` now calls `maybe_put_default_lease/1`: it starts a
+per-run `Kazi.Coordination.Lease.Memory` store, calls
+`Kazi.Coordination.LeaseTable.ensure_started/0` (new — the Burrito standalone CLI
+bypasses the app supervision tree, the same class as the existing
+`PartitionSupervisor.ensure_started`/`Repo` fixes), and injects
+`lease: [backend: Memory, lease_opts: [store: store], lease_table: LeaseTable]`.
+Best-effort + hermetic: skipped when the caller injected its own `:reconciler`
+(boundary tests drive their own seam) or `:lease`, so the parallel boundary tests
+stay free of real lease/clock side effects.
+
+**Impact.** A SAME-NODE dashboard (the dev `mix phx.server` driving an in-node
+native-parallel run — exactly the T21.9/T20.8 scenario) now renders the live
+partition lease map. Honest scope boundary (recorded in L-0021): a one-shot
+released CLI and a separately-deployed dashboard are different BEAM nodes and share
+no in-memory table, so cross-node lease visibility still needs the NATS Transport
+source (Slice 3). Tests: `test/kazi/cli_run_parallel_lease_test.exs` (a real
+`apply --parallel` run, no injected reconciler/lease, with a capturing provider
+that observes the held lease in `LeaseTable` during reconcile) +
+`ensure_started/1` cases in `test/kazi/coordination/lease_table_test.exs`.
+Remaining for T21.9 closure: the browser leg — `mix phx.server` + an in-node
+native-parallel run + agent-browser confirming ≥2 leases render live.
+
 ## 2026-06-28 — T25.2 hero asset: REAL recorded cast replaces the hand-drawn mockup
 
 **Task.** T25.2: the home/README proof-of-convergence visual had to become a
