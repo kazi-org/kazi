@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.67.0](https://github.com/kazi-org/kazi/compare/v1.66.0...v1.67.0) (2026-06-28)
+
+
+### Features
+
+* **assets:** replace proof-loop mockup with a real recorded cast (T25.2) ([e6ea9d2](https://github.com/kazi-org/kazi/commit/e6ea9d25a87aeb842fd021cc3ea93890efac75f1))
+* **examples:** add hero-cast demo fixture (T25.2) ([36f5a62](https://github.com/kazi-org/kazi/commit/36f5a6278efe4498434ba08578bcf1c08c86e836))
+* **site:** use the real recorded cast as the home proof asset (T25.2) ([5ac6613](https://github.com/kazi-org/kazi/commit/5ac66138d1f4ab836797edde934c50b944875f3a))
+
 ## [1.66.0](https://github.com/kazi-org/kazi/compare/v1.65.1...v1.66.0) (2026-06-27)
 
 
