@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.68.0](https://github.com/kazi-org/kazi/compare/v1.67.0...v1.68.0) (2026-06-28)
+
+
+### Features
+
+* **scheduler:** inject default lease on the CLI --parallel path (T21.9) ([3fcc7ce](https://github.com/kazi-org/kazi/commit/3fcc7ce4c40a5f8ce00d9b3bf1990006113df1fb))
+
 ## [1.67.0](https://github.com/kazi-org/kazi/compare/v1.66.0...v1.67.0) (2026-06-28)
 
 
