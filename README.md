@@ -282,9 +282,9 @@ brew install kazi-org/tap/kazi
 kazi --help
 ```
 
-Prebuilt binaries are published for **Apple Silicon macOS** and **x86_64 Linux**
-on each [GitHub Release](https://github.com/kazi-org/kazi/releases) (Intel macOS
-and ARM Linux are not yet built — build from source, below). The binary is a
+Prebuilt binaries are published for **Apple Silicon macOS**, **x86_64 Linux**, and
+**ARM Linux** (`aarch64`) on each [GitHub Release](https://github.com/kazi-org/kazi/releases)
+(Intel macOS is not yet built — build from source, below). The binary is a
 Burrito wrap of a `mix release` ([ADR-0014](docs/adr/0014-binary-distribution-burrito-homebrew.md)),
 so unlike the escript it carries the native `exqlite` NIF and persists every
 iteration.
