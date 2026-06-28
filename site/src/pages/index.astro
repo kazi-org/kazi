@@ -298,19 +298,20 @@ const personas = [
         }
       </ol>
 
-      <!-- Proof artifact: the loop converging on a real goal -->
+      <!-- Proof artifact: a REAL recorded kazi apply run converging (T25.2) -->
       <figure class="mx-auto mt-12 max-w-3xl">
         <img
-          src="/proof-loop.svg"
-          alt="kazi reconcile loop converging: across four iterations the failing predicate set shrinks from [tests, livez] to empty, then go test passes and the deployed GET /livez returns 200 ok — converged."
+          src="/proof-loop.gif"
+          alt="A real kazi apply run: kazi.loop reports iter=1 failing=[tests-pass], then iter=2 failing=[], then CONVERGED — every predicate is satisfied (predicate vector: [pass] tests-pass)."
           class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
-          width="820"
-          height="372"
+          width="905"
+          height="291"
           loading="lazy"
         />
         <figcaption class="ui-muted mt-3 text-center text-xs">
-          A real goal &mdash; <em>tests pass and the deployed <code>/livez</code> returns
-          ok</em> &mdash; driven to convergence. Done is observed, not asserted.
+          A <strong class="ui-body">real</strong> <code>kazi apply</code> run &mdash; one
+          acceptance predicate, <em><code>go test</code> passes</em>, false at t0 and driven
+          to convergence by the <code>claude</code> harness. Done is observed, not asserted.
         </figcaption>
       </figure>
     </section>
