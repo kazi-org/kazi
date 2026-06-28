@@ -1,0 +1,36 @@
+# Hero-cast demo goal (T25.2): the smallest honest reconcile run.
+#
+# At t0 the workspace has a bug — Greet returns the wrong word, so `go test`
+# fails and the single acceptance predicate is :fail. kazi drives the coding
+# harness in a loop, re-checking the predicate each iteration, until `go test`
+# objectively passes — then the goal is converged.
+#
+# Reproduce the asciinema cast in README / the site hero:
+#
+#     cp -r priv/examples/hero_cast_demo/workspace /tmp/hero-demo
+#     kazi apply priv/examples/hero_cast_demo/goal.toml \
+#       --workspace /tmp/hero-demo --harness claude
+#
+# The committed `workspace/` is the BROKEN starting state; the cast records kazi
+# converging a fresh copy of it.
+
+id = "hero-greet-converge"
+name = "Greet returns the correct greeting — go test passes"
+
+[budget]
+max_iterations = 5
+max_tokens = 200000
+
+[scope]
+paths = ["."]
+
+# ACCEPTANCE predicate: the test suite passes (its exit code IS the verdict).
+# FAILS at t0 (Greet returns "Goodbye, …", the test wants "Hello, …"); PASSES
+# once the harness fixes the greeting.
+[[predicate]]
+id = "tests-pass"
+provider = "custom_script"
+description = "go test ./... passes — fails at t0 (Greet returns the wrong word)"
+cmd = "go"
+args = ["test", "./..."]
+verdict = "exit_zero"
