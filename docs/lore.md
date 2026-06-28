@@ -383,9 +383,19 @@ records on acquire / forgets on terminal. A new non-NATS source
 `/leases` renders the live native lease map (empty state when nothing is held)
 without touching NATS. INVARIANT: a web read seam over coordination MUST NOT require
 the NATS transport on a single-node run; default to the native source and opt into
-Transport only when NATS is wired. NOTE: the CLI `--parallel` path does not yet
-inject `:lease`, so the dashboard shows the EMPTY lease map on a CLI run until
-CLI-level leasing is wired -- but it RENDERS (no 500). Regression:
+Transport only when NATS is wired. UPDATE (2026-06-28, T21.9): the CLI
+`--parallel` path now INJECTS a default `:lease` -- `Kazi.CLI.run_goal_parallel/4`
+starts a per-run `Kazi.Coordination.Lease.Memory` store, calls
+`Kazi.Coordination.LeaseTable.ensure_started/0` (the Burrito CLI bypasses the app
+tree, same class as the `PartitionSupervisor`/`Repo` ensure-started fixes), and
+points the lease layer at the global `LeaseTable`, so native partition leases
+publish and a SAME-NODE dashboard renders the live lease map. Skipped when a
+caller injects its own `:reconciler` or `:lease` (hermetic boundary tests).
+LANDMINE that remains: the published table is per-BEAM-node -- a one-shot released
+CLI and a separately-deployed dashboard are different nodes and share no in-memory
+table, so cross-node lease visibility still needs the NATS Transport source
+(Slice 3). Regression:
 `test/kazi_web/live/lease_map_live_native_test.exs`,
 `test/kazi_web/coordination_source/native_test.exs`,
-`test/kazi/coordination/lease_table_test.exs`.
+`test/kazi/coordination/lease_table_test.exs`,
+`test/kazi/cli_run_parallel_lease_test.exs`.
