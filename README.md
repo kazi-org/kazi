@@ -83,11 +83,15 @@ flowchart TD
     style Dep fill:#334155,stroke:#475569,color:#f8fafc
 ```
 
-That loop on a real goal — *"tests pass **and** the deployed `/livez` returns ok"* —
-drives the failing predicates to zero and only then reports done:
+That loop drives the failing predicates to zero and only then reports done. The
+recording below is a **real** `kazi apply` run (not a mockup): a goal whose one
+acceptance predicate — *"`go test` passes"* — is false at t0, driven by the
+`claude` harness until it is objectively true. Reproduce it with
+[`priv/examples/hero_cast_demo`](priv/examples/hero_cast_demo) (the committed
+asciicast is [`assets/proof-loop.cast`](assets/proof-loop.cast)):
 
 <p align="center">
-  <img src="assets/proof-loop.svg" alt="kazi reconcile loop converging: across four iterations the failing predicate set shrinks from [tests, livez] to [], then go test passes and the deployed GET /livez returns 200 ok — converged." width="760">
+  <img src="assets/proof-loop.gif" alt="A real kazi apply run: kazi.loop reports iter=1 failing=[&quot;tests-pass&quot;], then iter=2 failing=[], then CONVERGED — every predicate is satisfied (predicate vector: [pass] tests-pass)." width="760">
 </p>
 
 It is **not** another coding agent, terminal, or IDE. kazi *drives* the agent you
