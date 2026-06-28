@@ -51,4 +51,34 @@ defmodule Kazi.Coordination.LeaseTableTest do
     assert LeaseTable.forget("k", absent) == :ok
     assert LeaseTable.list(absent) == []
   end
+
+  describe "ensure_started/1 (the CLI parallel path's best-effort start)" do
+    test "starts the named table when absent so leases become recordable" do
+      name = :"lease_table_ensure_#{System.unique_integer([:positive])}"
+      refute Process.whereis(name)
+
+      assert {:ok, pid} = LeaseTable.ensure_started(name)
+      on_exit(fn -> if Process.alive?(pid), do: Agent.stop(pid) end)
+
+      assert is_pid(pid)
+      assert Process.whereis(name) == pid
+
+      # Once started, records land and are readable (the dashboard's read seam).
+      :ok = LeaseTable.record(lease("blast:lib/a.ex", "kazi-part-1"), name)
+      assert [%Lease{key: "blast:lib/a.ex"}] = LeaseTable.list(name)
+    end
+
+    test "is idempotent — a second call returns the already-running pid, no restart" do
+      name = :"lease_table_ensure_idem_#{System.unique_integer([:positive])}"
+
+      assert {:ok, pid} = LeaseTable.ensure_started(name)
+      on_exit(fn -> if Process.alive?(pid), do: Agent.stop(pid) end)
+
+      # A record made between calls must survive — ensure_started must not restart.
+      :ok = LeaseTable.record(lease("blast:lib/keep.ex", "kazi-part-1"), name)
+
+      assert {:ok, ^pid} = LeaseTable.ensure_started(name)
+      assert [%Lease{key: "blast:lib/keep.ex"}] = LeaseTable.list(name)
+    end
+  end
 end
