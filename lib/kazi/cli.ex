@@ -1422,6 +1422,7 @@ defmodule Kazi.CLI do
         default_parallel_run_opts(opts, persist?),
         &merge_parallel_run_opts(&1, opts, persist?)
       )
+      |> maybe_put_default_lease()
 
     case Kazi.Scheduler.run_goals([goal], scheduler_opts) do
       {:ok, result} ->
@@ -1431,6 +1432,38 @@ defmodule Kazi.CLI do
       {:error, reason} ->
         report_run_error(goal, reason, json?)
         1
+    end
+  end
+
+  # Engage the partition LEASE layer on the production CLI path so the operator
+  # dashboard's lease map (`/leases`, `KaziWeb.CoordinationSource.Native`) renders
+  # the live native-parallel leases. Without `:lease` opts the scheduler skips
+  # `Kazi.Scheduler.LeasedReconciler.wrap/2` entirely (lib/kazi/scheduler.ex), so
+  # nothing publishes into `Kazi.Coordination.LeaseTable` and the map stays empty.
+  #
+  # We start a per-run in-memory lease store (the single-node, NATS-free backend;
+  # ADR-0027) and point the lease layer at the globally-readable `LeaseTable` so a
+  # SAME-NODE dashboard (the dev `mix phx.server` driving an in-node run) sees the
+  # partitions' leases live. A separately-deployed dashboard reading a one-shot
+  # CLI's leases still needs the NATS transport source (Slice 3) — different BEAM
+  # nodes share no in-memory table.
+  #
+  # Best-effort and hermetic: skipped when the caller already injected `:lease`
+  # (keep its handle) or injected a `:reconciler` (a boundary test drives its own
+  # seam and must not be wrapped in a real lease), so the parallel boundary tests
+  # stay free of real lease/clock side effects.
+  defp maybe_put_default_lease(opts) do
+    if Keyword.has_key?(opts, :lease) or Keyword.has_key?(opts, :reconciler) do
+      opts
+    else
+      {:ok, _table} = Kazi.Coordination.LeaseTable.ensure_started()
+      {:ok, store} = Kazi.Coordination.Lease.Memory.start_link()
+
+      Keyword.put(opts, :lease,
+        backend: Kazi.Coordination.Lease.Memory,
+        lease_opts: [store: store],
+        lease_table: Kazi.Coordination.LeaseTable
+      )
     end
   end
 
