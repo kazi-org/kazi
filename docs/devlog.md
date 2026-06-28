@@ -4,6 +4,44 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-28 — T25.2 hero asset: REAL recorded cast replaces the hand-drawn mockup
+
+**Task.** T25.2: the home/README proof-of-convergence visual had to become a
+genuine recording of a real reconcile run (not a mockup), and doing so also
+remedies the live stale-verb bug (the old `assets/proof-loop.svg` showed the
+removed `kazi run my-goal.toml`).
+
+**What was recorded.** A minimal honest fixture, `priv/examples/hero_cast_demo/`:
+a tiny Go module whose `Greet` returns the wrong word, so `go test` fails at t0,
+and a goal with one `custom_script` acceptance predicate (`go test ./...`,
+`verdict = exit_zero`). `kazi apply … --harness claude` (released binary v1.66.0,
+macOS arm64) drove the `claude` harness to fix the greeting and converged in **2
+iterations** — `iter=1 failing=["tests-pass"]` → `iter=2 failing=[]` → `CONVERGED`.
+The asciicast captured genuine live timing (iter 2 lands ~27 s after iter 1 — real
+harness work); `idle_time_limit: 2.0` caps the pause on playback.
+
+**Artifacts.** Source cast `assets/proof-loop.cast` (committed, reproducible);
+render `assets/proof-loop.gif` + `site/public/proof-loop.gif` (18 KB, via `agg`).
+The hand-drawn `proof-loop.svg` mockups were removed. README + `index.astro` prose
+and alt text were rewritten to describe what the cast actually shows (one
+`tests-pass` predicate), not the old aspirational "tests + /livez over four
+iterations" narrative.
+
+**Findings / friction.**
+- The released binary logs at `:debug`, so a raw `kazi apply` run buries the
+  `kazi.loop` progress + `CONVERGED` summary in Ecto/SQLite SQL noise. There is no
+  `--quiet`/log-level flag or env override. The committed `record.sh` de-noises
+  transparently (drops the SQL/`:debug` lines, strips the timestamp prefix); every
+  rendered line is verbatim kazi output.
+- `svg-term-cli` crashes on Node 25 and `termtosvg`/`pipx` were unavailable, so the
+  asset is a GIF (explicitly allowed by the task's "SVG/GIF"); the `.cast` is the
+  text source of truth. The T29.4 verb guard scans the remaining hand-authored
+  `.svg` diagrams; the binary GIF can't hide a verb because it's a real recording.
+
+**Status.** Site builds clean and references only `proof-loop.gif`; the T29.4
+`check-commands` guard passes in BLOCKING mode; Gate 5 doc-command accuracy passes.
+PR/merge/release/live-verify tracked on the task.
+
 ## 2026-06-26 — T31.7 LIVE dogfood: standing doc-lifecycle goal driven on this repo (kazi-drive + tool fallback)
 
 **Task.** T31.7: drive the E31 standing goal (`priv/examples/doc_lifecycle.goal.toml`)

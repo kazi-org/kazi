@@ -193,9 +193,12 @@ PRIMARY command.
 ### What it scans
 
 Every `.astro`, `.mjs`, `.md`, and `.svg` file under `site/`, recursively
-(skipping `node_modules`, `dist`, `.astro`). `.svg` is included on purpose: the
-`proof-loop.svg` asset is XML text and a removed verb can hide inside a `<tspan>`,
-which is exactly where one shipped live (the original gap this gate closes).
+(skipping `node_modules`, `dist`, `.astro`). `.svg` is included on purpose: an
+SVG asset is XML text and a removed verb can hide inside a `<tspan>`, which is
+exactly where one shipped live in the original hand-drawn `proof-loop.svg` mockup
+(the gap this gate closes). That hero asset is now a **real recorded cast**
+rendered to `proof-loop.gif` (T25.2); other hand-authored SVG diagrams remain, so
+`.svg` scanning still earns its keep.
 
 ### Marker list (a hit is a removed verb used as a primary command)
 
@@ -226,13 +229,15 @@ allow-listed if it contains either:
 The scanner's own file is excluded from the scan (it names the removed verbs in
 its comments) so it cannot self-trip.
 
-### Phase 1: strict-but-warn
+### Phase 2: blocking (current)
 
-The site is CURRENTLY DIRTY: `proof-loop.svg` shows `kazi run` and
-`site/src/pages/index.astro` step 2 shows `kazi propose`. So the guard runs in
-WARN mode -- it prints every offending `file:line` and a fix hint, but exits 0
-(non-blocking). This surfaces the signal without reddening every PR while the site
-copy is still being corrected (that cleanup is T27.6 + T25.2, not this gate).
+The site is now CLEAN: the `kazi propose` in `index.astro` step 2 was corrected
+(T27.6) and the `proof-loop.svg` mockup that showed `kazi run` was replaced by a
+real recorded cast (`proof-loop.gif`, T25.2). With both gone, the gate ratcheted
+to BLOCKING (T38.4): the `site-commands` job runs with `BLOCKING: "1"`, so a
+removed verb used as a primary command in any scanned `site/` file exits 1 and
+reds the PR. It still skips PRs that do not touch `site/`. (It began as
+strict-but-warn while the site copy was still being corrected.)
 
 ### Ratchet to blocking
 

@@ -251,13 +251,14 @@ Do **not** add posts for these — they were considered and left out on purpose:
 
   **Visual language.** Diagrams are hand-authored, optimised **SVG** (vector, so they
   stay crisp at any size and theme-neutral as self-contained dark panels, matching the
-  existing `proof-loop.svg`). No raster/stock imagery, and no removed CLI verbs — the
-  `check:commands` guard scans `.svg` too, so name only commands the CLI ships today
-  (e.g. `kazi apply`).
+  diagrams under `site/public/diagrams/`). No raster/stock imagery, and no removed CLI
+  verbs — the `check:commands` guard scans `.svg` too, so name only commands the CLI
+  ships today (e.g. `kazi apply`).
 
   **What exists (reuse before adding):**
-  - `site/public/proof-loop.svg` — the loop **convergence transcript** (home hero +
-    README). Reused, not duplicated.
+  - `site/public/proof-loop.gif` — the loop **convergence transcript**, a real
+    recorded `kazi apply` cast (home + README; source cast at `assets/proof-loop.cast`,
+    T25.2). Reused, not duplicated.
   - `site/public/diagrams/reconcile-loop.svg` — the reconcile **cycle** (observe →
     diff → dispatch → re-observe → decide, with the "still failing → dispatch again"
     feedback arc and the converged / stuck / over-budget exits). Distinct from the
