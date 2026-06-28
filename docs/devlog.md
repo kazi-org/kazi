@@ -4,6 +4,37 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-28 — T21.9 CLOSED: leases shown LIVE in a browser (the missing clause), on released v1.68.0
+
+**Type:** dogfood
+**Tags:** dashboard, leases, native-parallel, T21.9, live-verification
+
+**Task.** Close the last open T21.9 clause — the operator dashboard showing the
+parallel run's **leases** live — after the wiring fix (PR #756, v1.68.0) made the
+CLI `--parallel` path publish into `Kazi.Coordination.LeaseTable`.
+
+**What was driven.** With the dev endpoint (`config/dev.exs`, `server: true`,
+`localhost:4000`) booted IN THE SAME BEAM NODE (so the served dashboard reads the
+same `LeaseTable`), a flat leased native-parallel run held two disjoint partitions
+concurrently: `Kazi.Scheduler.run_goals/2` over two disjoint goals with an injected
+graph source + sleeping reconcilers + the SAME lease-opts shape the CLI now injects
+(`backend: Lease.Memory`, a per-run store, `lease_table: LeaseTable`). The script
+confirmed `LeaseTable.list/0` held 2 leases.
+
+**Observed LIVE (agent-browser, golden path, no console errors).** `/leases` (the
+`kazi lease map`, `KaziWeb.LeaseMapLive` via the default `CoordinationSource.Native`
+source) rendered the **`Active leases`** table with **two rows** — two concurrent
+partition holders (`kazi.partition:09bee…:2` and `kazi.partition:7b7d…:1`), each
+with its Resource (blast-radius key) + Holder. Screenshot captured. Before v1.68.0
+this table was EMPTY on every native run (the CLI never injected `:lease`).
+
+**Verdict: T21.9 DONE.** All three acc clauses now verified live: **leases** (this
+run, 2026-06-28) + **>=2 concurrent reconcilers** and **per-partition convergence**
+(the 2026-06-26 `/dag` dogfood, screenshots in that PR). Honest scope (L-0021): the
+lease table is per-BEAM-node, so a one-shot released CLI and a separately-deployed
+dashboard (different nodes) still need the NATS Transport source (Slice 3); the
+same-node operator-dashboard scenario the acc describes works on v1.68.0.
+
 ## 2026-06-28 — T21.9 wiring: `kazi apply --parallel` now publishes partition leases to the dashboard (Gap 1 closed)
 
 **Type:** finding
