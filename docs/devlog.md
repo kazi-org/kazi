@@ -4,6 +4,65 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-06-28 — T15.9 nested-loop dogfood: WIRING PROVEN over `--json`; local model SUCCEEDED but its edit escaped the `--workspace` (opencode `--dir` not threaded)
+
+**Type:** dogfood
+**Tags:** orchestrator, opencode, local-model, json-cli, plan-approve-apply, workspace-isolation, T15.9
+
+**Task.** Drive the FULL `plan -> approve -> apply` spine entirely over `--json`,
+as an outer orchestrator, with a cheap locally-hosted model running kazi's inner
+reconcile loop (orchestrator -> kazi -> opencode -> local model). Tiny broken
+fixture: a `custom_script` predicate `sh -c "test -f hello.txt && grep -q hello
+hello.txt"` (fails at t0; the inner model must create the file). Driven on a
+current source build (`kazi 1.68.0`; the brew binary is stale at 1.41.1).
+
+**Local-model arm (confirmed live).** opencode `run "<prompt>" --format json
+--model <local-ollama-provider>/qwen3.6:35b-a3b-q8_0` returned proper NDJSON with
+`{"type":"text","text":"OK"}` + a `step_finish` carrying token counts and
+`cost: 0` (a free, locally-served model). Reachable and responsive.
+
+**The loop, step by step (all over `--json`):**
+1. **plan (caller-drafts):** `kazi plan --json --predicates '<json>'` -> a
+   `proposed` proposal object, `proposal_ref prop-…2b66f3dbd894`. PASS.
+2. **approve:** `kazi approve <ref> --json` -> `{"status":"approved",…}`. PASS.
+3. **apply:** `kazi apply <goal-file> --workspace <ws> --harness opencode --model
+   <local>/qwen3.6:35b-a3b-q8_0 --json` -> the inner loop ran: observed t0
+   (predicate `code` = fail), recorded iteration 0, wired opencode (wrote
+   `.kazi/context.md` orientation + `.mcp.json` into `<ws>`), and dispatched the
+   local model.
+
+**The real finding (corrected — NOT "too slow").** The local model SUCCEEDED at the
+task: it created `hello.txt` containing `hello` at 17:16 (mid-run). But the file
+landed in **opencode's resolved directory (the git-repo / server root = the
+worktree), NOT kazi's `--workspace`** (a non-git tmp dir). kazi evaluates the
+predicate IN `--workspace`, so it never saw the file, never converged, and the loop
+kept re-dispatching (which looked like a stall). Root cause: kazi's opencode
+profile argv is `run <prompt> --format json [--model …]` and **omits `--dir
+<workspace>`** (the installed `opencode run` HAS a `--dir` flag: "directory to run
+in"). `CliAdapter` does `System.cmd(... cd: workspace)`, but opencode does not honor
+the launch cwd — it resolves its own project root (and `opencode` runs as a
+persistent `bun server.ts` daemon the `run` attaches to), so the inner agent's
+edits escape the goal's workspace. **opencode runs do NOT isolate to kazi's
+`--workspace` today.**
+
+**Verdict: WIRING PROOF — PASS** (full orchestrator -> kazi -> opencode ->
+local-model spine driven over `--json`; the acc explicitly accepts a wiring proof).
+**Convergence — NOT observed by kazi**, because the inner agent's correct edit
+landed outside the workspace, not because the model was slow. This is a real,
+fixable kazi<->opencode integration bug, captured as **T39.7** (thread `--dir
+<workspace>` into the opencode profile).
+
+**Friction logged (every point kazi was awkward to drive as a tool) -> E39
+(ADR-0049, merged this session):**
+1. `plan --json --predicates` IGNORED the supplied `goal_id`/`idea` (T39.1).
+2. The **approve -> apply handoff is broken**: `approve` never writes a goal-file,
+   `apply` requires one; the orchestrator supplied it (T39.2/T39.3).
+3. `--json` via dev `mix run` CO-MINGLES Phoenix/Ecto logs into stdout (T39.4).
+4. The operator **escript cannot author** (`plan`/`approve` need the SQLite NIF an
+   escript can't bundle); used the Mix path (T39.5).
+5. **opencode edits escape `--workspace`** (no `--dir`) — the convergence-blocker
+   above (T39.7).
+
 ## 2026-06-28 — T21.9 CLOSED: leases shown LIVE in a browser (the missing clause), on released v1.68.0
 
 **Type:** dogfood
