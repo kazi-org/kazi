@@ -50,6 +50,18 @@ defmodule Kazi.Harness.ClaudeEconomyFlagsTest do
       assert args == @base ++ ["--no-session-persistence"]
     end
 
+    test ":effort renders --effort with the reasoning-effort level (T36.6)" do
+      args = Claude.build_args("do work", effort: "high")
+      assert args == @base ++ ["--effort", "high"]
+    end
+
+    test ":effort sits AFTER the model arg, in order (T36.6)" do
+      # The reasoning-effort lever is an economy flag, so it appends after the
+      # hygiene + model prefix — never before --model.
+      args = Claude.build_args("do work", model: "claude-haiku-4-5", effort: "low")
+      assert args == @base ++ ["--model", "claude-haiku-4-5", "--effort", "low"]
+    end
+
     test "all economy flags together render in a stable order, after the base head" do
       args =
         Claude.build_args("do work",
@@ -133,10 +145,16 @@ defmodule Kazi.Harness.ClaudeEconomyFlagsTest do
           strict_mcp_config: false,
           max_turns: 0,
           exclude_dynamic_system_prompt_sections: false,
-          no_session_persistence: nil
+          no_session_persistence: nil,
+          effort: ""
         )
 
       assert args == @base
+    end
+
+    test "a blank / nil :effort emits nothing (byte-identical to absent, T36.6)" do
+      assert Claude.build_args("do work", effort: "") == @base
+      assert Claude.build_args("do work", effort: nil) == @base
     end
 
     test "a cli_version alone (no economy opts) changes nothing" do
@@ -200,10 +218,22 @@ defmodule Kazi.Harness.ClaudeEconomyFlagsTest do
             :max_turns,
             :exclude_dynamic_system_prompt_sections,
             :no_session_persistence,
+            :effort,
             :cli_version
           ] do
         assert opt in profile.supported_opts, "expected #{inspect(opt)} in supported_opts"
       end
+    end
+
+    test ":effort is Claude-only — advertised by :claude, NOT by :opencode (T36.6)" do
+      # Parity-by-design: the reasoning-effort lever is a Claude flag, so only the
+      # claude profile keeps it through `Kazi.Harness`'s supported_opts take; a
+      # non-Claude harness never receives it.
+      {:ok, claude} = Registry.fetch(:claude)
+      {:ok, opencode} = Registry.fetch(:opencode)
+
+      assert :effort in claude.supported_opts
+      refute :effort in opencode.supported_opts
     end
   end
 end

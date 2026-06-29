@@ -58,6 +58,27 @@ defmodule Kazi.CLITest do
       assert opts[:workspace] == nil
     end
 
+    test "parses `apply ... --effort <level>` into the :run opts (T36.6)" do
+      assert {:run, "goal.toml", opts} =
+               Kazi.CLI.parse([
+                 "apply",
+                 "goal.toml",
+                 "--workspace",
+                 "/tmp/ws",
+                 "--effort",
+                 "high"
+               ])
+
+      assert opts[:effort] == "high"
+    end
+
+    test "--effort is nil when absent (mirrors --model, T36.6)" do
+      assert {:run, "goal.toml", opts} =
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
+
+      assert opts[:effort] == nil
+    end
+
     test "--help (and -h) is recognized" do
       assert {:help, _} = Kazi.CLI.parse(["--help"])
       assert {:help, _} = Kazi.CLI.parse(["-h"])
