@@ -48,7 +48,12 @@ a guessed tier ladder into the loop.
 1. **Per-run inner tool-surface restriction (commit now).** Extend the `claude`
    profile's `supported_opts` to pass through the economy flags — `:tools`,
    `:disallowed_tools`, `:strict_mcp_config`, `:mcp_config`, `:max_turns`,
-   `:exclude_dynamic_system_prompt_sections`, `:no_session_persistence`. kazi
+   `:exclude_dynamic_system_prompt_sections`, `:no_session_persistence`, and the
+   reasoning-effort lever `:effort` (`--effort <level>`, T36.6). The economy levers
+   are **Claude-only by design** (parity-by-design, ADR-0016 item 3): only the
+   `:claude` profile advertises them in `supported_opts`, so they are never
+   forwarded to opencode/codex/antigravity/claw/gemini_cli, and `--effort` requires
+   a Claude CLI new enough to accept it. kazi
    defaults a reconcile dispatch to the **minimal** surface the task needs:
    `--strict-mcp-config` with only the MCP servers kazi actually injected (the
    orientation/graph server, and the context store from ADR-0045 in search-only
@@ -128,6 +133,16 @@ Decision 1 (per-run tool-surface restriction) ships in two steps:
   `:mcp_config`/`:max_turns`/`:exclude_dynamic_system_prompt_sections`/
   `:no_session_persistence`), each appended only when supplied, version-gated where
   the flag's behavior is version-sensitive. Absent the opts, argv is byte-identical.
+- **T36.6** adds the reasoning-effort lever to that same surface: a `:value`
+  economy flag `:effort -> --effort <level>` on the `:claude` profile, threaded by
+  a `kazi apply ... --effort <level>` CLI flag and a goal-file `[harness] effort`
+  table key. Precedence is **CLI `--effort` > goal-file `[harness] effort`**;
+  absent both, argv is byte-for-byte unchanged. `Kazi.Runtime.build_adapter_opts/3`
+  folds the resolved effort into `adapter_opts` for the claude profile, and because
+  only the `:claude` profile lists `:effort` in `supported_opts`, a non-Claude
+  harness drops it at `Kazi.Harness`'s `Keyword.take` (Claude-only,
+  parity-by-design). It forwards to `claude --effort` and so requires a Claude CLI
+  recent enough to support that flag.
 - **T36.2** consumes those opts: `Kazi.Harness.DispatchSurface` computes the
   **minimal default surface** — `--strict-mcp-config` plus a `--mcp-config` scoped to
   the MCP servers kazi injected (the orientation/graph server in the workspace
