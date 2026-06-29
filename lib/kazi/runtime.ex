@@ -217,6 +217,9 @@ defmodule Kazi.Runtime do
           # T8.7 harness selection: consumed by resolve_harness/2 below, not a Loop opt.
           :harness,
           :model,
+          # T36.6 harness selection: consumed by build_adapter_opts/3 below (folded
+          # into adapter_opts as the claude profile's `--effort` lever), not a Loop opt.
+          :effort,
           # T3.4d standing wiring: dropped here and re-set in the merge below so
           # the loop's standing mode defaults to the goal-file's declared
           # `standing`, overridable by an explicit `:standing` opt (CLI flag).
@@ -374,7 +377,27 @@ defmodule Kazi.Runtime do
     base
     |> Keyword.merge(harness_opts)
     |> maybe_put_goal_command(goal)
+    |> maybe_put_effort(goal, opts)
   end
+
+  # T36.6 (ADR-0047): the Claude-only reasoning-effort lever. Fold `:effort` into
+  # adapter_opts so the claude profile renders `--effort <level>`. Precedence is the
+  # CLI `--effort` opt > the goal-file `[harness] effort`; absent both, NOTHING is
+  # added so argv is byte-for-byte unchanged. Set AFTER the harness_opts merge so it
+  # is not dropped; it survives `Kazi.Harness.build_adapter_opts`'s `Keyword.take`
+  # because the claude profile advertises `:effort` in supported_opts. A non-Claude
+  # harness drops it at that take (it is not in that profile's supported_opts).
+  defp maybe_put_effort(adapter_opts, %Goal{} = goal, opts) do
+    case Keyword.get(opts, :effort) || goal_harness_effort(goal) do
+      effort when is_binary(effort) and effort != "" -> Keyword.put(adapter_opts, :effort, effort)
+      _ -> adapter_opts
+    end
+  end
+
+  defp goal_harness_effort(%Goal{harness: harness}) when is_map(harness),
+    do: Map.get(harness, :effort)
+
+  defp goal_harness_effort(%Goal{}), do: nil
 
   defp maybe_put_goal_command(adapter_opts, %Goal{harness: %{command: cmd}})
        when is_binary(cmd) and cmd != "",

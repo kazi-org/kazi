@@ -117,6 +117,7 @@ defmodule Kazi.CLI do
     dir: :string,
     harness: :string,
     model: :string,
+    effort: :string,
     yes: :boolean,
     strict: :boolean,
     adr: :boolean,
@@ -163,6 +164,8 @@ defmodule Kazi.CLI do
       "Coding harness to drive: claude (default) or opencode. Overrides the goal-file/app config.",
     model:
       "Model the harness should use, e.g. local/qwen3.6. Overrides the goal-file's [harness] model.",
+    effort:
+      "Reasoning effort level the claude harness should use, e.g. low / medium / high (forwards claude --effort). Claude-only; overrides the goal-file's [harness] effort.",
     yes: "`plan` only: skip the interactive clarify questions and draft best-effort.",
     strict: "`plan` only: refuse an underspecified idea non-interactively instead of guessing.",
     adr:
@@ -212,6 +215,7 @@ defmodule Kazi.CLI do
         :standing,
         :harness,
         :model,
+        :effort,
         :json,
         :stream,
         :parallel,
@@ -922,11 +926,15 @@ defmodule Kazi.CLI do
           # T23.6 (ADR-0028): --explain / --dry-run is the PURE PLANNING surface —
           # print the computed wave schedule and dispatch NOTHING. The two spellings
           # are aliases; either sets :explain so the surface is one branch.
+          # T36.6 (ADR-0047): the Claude-only reasoning-effort lever, threaded the
+          # same way --model is. Forwarded to Kazi.Runtime, which folds it into
+          # adapter_opts (CLI > goal-file [harness] effort) for the claude profile.
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
           harness: flags[:harness],
           model: flags[:model],
+          effort: flags[:effort],
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1204,6 +1212,10 @@ defmodule Kazi.CLI do
       # default path (no flags) stays byte-identical to the pre-T8.7 claude path.
       |> maybe_put(:harness, opts[:harness])
       |> maybe_put(:model, opts[:model])
+      # T36.6 (ADR-0047): forward the Claude-only --effort lever to Kazi.Runtime,
+      # which folds it into adapter_opts for the claude profile. Only set when
+      # given, so the default path stays byte-identical.
+      |> maybe_put(:effort, opts[:effort])
       # T15.4 (ADR-0023 decision 3): under --json --stream, thread a per-iteration
       # streaming observer into the runtime's `:stream` seam, which composes it
       # OVER the read-model projection (one `on_iteration` fires both). It emits
@@ -1474,6 +1486,7 @@ defmodule Kazi.CLI do
     [persist?: persist?]
     |> maybe_put(:harness, opts[:harness])
     |> maybe_put(:model, opts[:model])
+    |> maybe_put(:effort, opts[:effort])
   end
 
   # Merge the CLI-owned per-goal opts OVER any caller-supplied `:run_opts` (tests),
@@ -1484,6 +1497,7 @@ defmodule Kazi.CLI do
     |> Keyword.put_new(:persist?, persist?)
     |> maybe_put(:harness, opts[:harness])
     |> maybe_put(:model, opts[:model])
+    |> maybe_put(:effort, opts[:effort])
   end
 
   # The collective run's exit code: 0 only when the whole goal-set collectively
