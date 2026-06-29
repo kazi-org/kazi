@@ -38,8 +38,12 @@ doing the keystrokes. The strong brain sets the bar; the cheap brain reaches for
 it; kazi holds the bar still.
 
 The orchestrator owns the per-phase model policy. kazi bakes NONE of that tiering
-in -- it just exposes the levers (`--harness` / `--model` per call, structured
-output, the propose -> approve -> run state machine) and stays a pure tool.
+in -- it just exposes the levers (`--harness` / `--model` / `--effort` per call,
+structured output, the propose -> approve -> run state machine) and stays a pure
+tool. `--effort <level>` (e.g. low / medium / high) forwards `claude --effort` --
+a Claude-only token-economy lever (ADR-0047, parity-by-design: it is not forwarded
+to other harnesses) -- and a goal-file can carry it as `[harness] effort = "..."`,
+overridden by the CLI flag.
 
 
 ## 2. The agent-driven loop
