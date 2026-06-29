@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.69.0](https://github.com/kazi-org/kazi/compare/v1.68.0...v1.69.0) (2026-06-29)
+
+
+### Features
+
+* **harness:** forward claude --effort reasoning lever (T36.6) ([e2bfcba](https://github.com/kazi-org/kazi/commit/e2bfcba16f02592c0dc153114a7b39e01ab6cc80))
+
 ## [1.68.0](https://github.com/kazi-org/kazi/compare/v1.67.0...v1.68.0) (2026-06-28)
 
 
