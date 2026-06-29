@@ -106,6 +106,111 @@ defmodule Kazi.CLIHarnessTest do
     refute "--format" in argv
   end
 
+  # The goal-file variant: a `[harness]` table that authors an `effort` level.
+  defp write_goal_with_effort(work, effort) do
+    path = Path.join(work, "goal.toml")
+
+    File.write!(path, """
+    id = "cli-harness"
+    name = "CLI harness selection"
+
+    [scope]
+    workspace = "#{work}"
+
+    [harness]
+    id = "claude"
+    effort = "#{effort}"
+
+    [[predicate]]
+    id = "code"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+    """)
+
+    path
+  end
+
+  test "`apply --effort high` reaches the claude harness argv (T36.6)", %{work: work} do
+    goal = write_goal(work)
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work, "--effort", "high"],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    # The claude profile renders `--effort <level>` as a contiguous pair.
+    argv = argv_lines(work)
+    assert "-p" in argv
+    assert "--effort" in argv
+    assert effort_value(argv) == "high"
+  end
+
+  test "a goal-file `[harness] effort` reaches the argv with no CLI flag (T36.6)", %{work: work} do
+    goal = write_goal_with_effort(work, "medium")
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    argv = argv_lines(work)
+    assert "--effort" in argv
+    assert effort_value(argv) == "medium"
+  end
+
+  test "the CLI `--effort` flag OVERRIDES the goal-file `[harness] effort` (T36.6)", %{work: work} do
+    goal = write_goal_with_effort(work, "medium")
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work, "--effort", "high"],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    # CLI > goal-file precedence: the rendered level is the flag's, not the file's.
+    argv = argv_lines(work)
+    assert effort_value(argv) == "high"
+    refute "medium" in argv
+  end
+
+  test "no --effort and no goal-file effort leaves the argv with no --effort (T36.6)", %{
+    work: work
+  } do
+    goal = write_goal(work)
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+    refute "--effort" in argv_lines(work)
+  end
+
+  # The token immediately after `--effort` in the recorded argv.
+  defp effort_value(argv) do
+    idx = Enum.find_index(argv, &(&1 == "--effort"))
+    if idx, do: Enum.at(argv, idx + 1)
+  end
+
   test "an unknown --harness id fails with a clear message", %{work: work} do
     goal = write_goal(work)
 

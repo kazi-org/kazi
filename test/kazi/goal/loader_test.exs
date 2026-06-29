@@ -271,7 +271,7 @@ defmodule Kazi.Goal.LoaderTest do
       }
 
       assert {:ok, %Goal{harness: harness}} = Loader.from_map(data)
-      assert harness == %{id: :opencode, model: "local/qwen3.6", command: nil}
+      assert harness == %{id: :opencode, model: "local/qwen3.6", command: nil, effort: nil}
     end
 
     test "a [harness] id-only table parses with nil model/command" do
@@ -281,8 +281,28 @@ defmodule Kazi.Goal.LoaderTest do
         "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
       }
 
-      assert {:ok, %Goal{harness: %{id: :claude, model: nil, command: nil}}} =
+      assert {:ok, %Goal{harness: %{id: :claude, model: nil, command: nil, effort: nil}}} =
                Loader.from_map(data)
+    end
+
+    test "a [harness] effort parses into harness.effort (T36.6)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude", "effort" => "medium"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{id: :claude, effort: "medium"}}} = Loader.from_map(data)
+    end
+
+    test "an absent [harness] effort defaults to nil (T36.6)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude", "model" => "claude-haiku-4-5"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{effort: nil}}} = Loader.from_map(data)
     end
 
     test "the loaded harness id threads into Kazi.Harness.resolve/1 as :goal_harness" do
@@ -376,7 +396,8 @@ defmodule Kazi.Goal.LoaderTest do
       assert harness == %{
                id: :opencode,
                model: "local/qwen3.6",
-               command: "/usr/local/bin/opencode"
+               command: "/usr/local/bin/opencode",
+               effort: nil
              }
     end
   end
