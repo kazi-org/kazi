@@ -188,6 +188,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E36 -- Inner-harness minimalism: tool-surface restriction now, context tiers measured (P2, ADR-0047) -> plans/E36.md
 ### E37 -- Wire the Gemini CLI harness profile (P2, ADR-0016/0022) -> plans/E37.md
 ### E38 -- Adoption blog series: "From Vibe Coding to Reconciliation" (12 parts) (P1, ADR-0048) -> plans/E38.md
+### E39 -- Orchestrator-driving ergonomics: close the plan -> approve -> apply loop over `--json` (P1, ADR-0049) -> plans/E39.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -198,6 +199,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 | R-E14-1 | Antigravity `agy -p` SILENTLY drops stdout under a non-TTY subprocess (issue #76) -- exactly kazi's mode. | High | High (observed in research) | T14.3 uses the `--prompt-file` + `--output json` (read a file) workaround, NOT bare `-p`; pin a version; record the landmine in `docs/lore.md`. ADR-0022. |
 | R-E14-2 | claw-code emits no structured output ("museum exhibit"), so cost/parse fidelity is degraded. | Low | High (inherent) | T14.4 is BEST-EFFORT only (raw-stdout parse, no invented cost), explicitly labelled demo-grade. ADR-0022. |
 | R-E15-1 | The `--json` result schema is a compatibility surface an orchestrator pins against; a breaking change silently breaks callers. | Med | Med | Version it (`schema_version`, T15.3); the orchestrator recipe documents pinning; a self-conformance test (T15.7) guards regressions. ADR-0023. |
+| R-E39-1 | `apply <proposal-ref>` adds a second argument mode (ref vs goal-file); a wrong disambiguation could run the wrong goal or break the existing path. | Med | Low | The `prop-` prefix is the discriminator; a non-approved/unknown ref errors clearly; a path argument stays byte-for-byte the old behavior; ExUnit pins all three (T39.2). ADR-0049. |
 | R-E15/16-1 | End-to-end value needs a capable, FAST-ENOUGH inner harness; claw->local Qwen is best-effort/slow (T8.11). | Med | High (known) | The JSON contract makes kazi drivable regardless; convergence speed is the inner harness's problem. T15.9/T16.6 report honestly (wiring proof vs fast convergence). |
 | R-E16-1 | The shipped skill/`AGENTS.md` drift from the real CLI. | Med | Med | `help --json` is GENERATED from the command table (T16.1); a coherence test (T16.4) fails CI when the skill names a command `help --json` does not report. ADR-0024. |
 | R-E17-1 | Website/README copy drifts from what kazi actually does. | Med | Med | Copy DERIVES from README/concept; the README<->site canonical-string drift-check (T9.9) fails CI on divergence; T17.1/T17.2 update both in lockstep. |
@@ -276,6 +278,29 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-06-28 -- Change Summary (E39 added: resolve the T15.9 orchestrator-driving friction; ADR-0049)
+- Operator directive (/plan "to resolve the friction"): the T15.9 nested-loop dogfood
+  (orchestrator -> kazi -> a local model via opencode) drove the full `plan -> approve
+  -> apply` spine over `--json` and the inner loop worked, but surfaced four points
+  where kazi is awkward to drive as a tool. Captured them as a new epic instead of
+  letting the findings die in the devlog.
+- **New epic E39 (P1, ADR-0049):** close the spine over `--json` end to end.
+  - T39.1 `plan --json --predicates` honors caller `goal_id`/`idea` (today it mints a
+    generic id).
+  - T39.2 `apply <proposal-ref>` runs an APPROVED proposal directly -- the key fix for
+    the broken approve -> apply handoff (approve never wrote a goal-file, apply required
+    one, forcing orchestrator-side reconstruction).
+  - T39.3 `approve <ref> --write <path>` materializes the goal-file for file-based flows.
+  - T39.4 `--json` stdout is the single JSON object on every entrypoint (dev `mix run`
+    co-mingles logs into stdout; the released binary is already clean).
+  - T39.5 authoring on the escript: degrade (ephemeral store) or guide clearly (it
+    hard-fails today because an escript cannot bundle the SQLite NIF).
+  - T39.6 LIVE regression dogfood: re-drive the loop over CLEAN `--json` with the fixes.
+- **ADR created:** docs/adr/0049-approve-to-apply-handoff.md -- accept `apply
+  <proposal-ref>` + `approve --write` to close the handoff; honor caller goal_id/idea;
+  guarantee `--json` stdout purity; guide/degrade escript authoring.
+- Friction source recorded in docs/devlog.md (2026-06-28, T15.9). New risk row R-E39-1.
 
 ### 2026-06-25 -- Change Summary (E38 second pass: skills-coverage review -> folded sub-beats + 2 tasks; ADR-0048 revised)
 - Operator directive (/plan, second pass): review ALL of the operator's global skills to
