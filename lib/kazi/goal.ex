@@ -38,10 +38,11 @@ defmodule Kazi.Goal do
     * `harness` — the goal's harness selection (T8.6, ADR-0016): which coding
       harness this goal prefers to be driven by, declared in the goal-file's
       `[harness]` table. A plain map `%{id: atom|nil, model: String.t()|nil,
-      command: String.t()|nil}` — `id` is the harness id (e.g. `:opencode`),
-      `model` an optional provider/model override, `command` an optional binary
-      override. Default `nil` (no goal-level preference; resolution falls through
-      to config/default, ADR-0016). Like `mode`/`standing`, this is authoring
+      command: String.t()|nil, effort: String.t()|nil}` — `id` is the harness id
+      (e.g. `:opencode`), `model` an optional provider/model override, `command` an
+      optional binary override, `effort` an optional Claude-only reasoning-effort
+      level (`--effort`, T36.6). Default `nil` (no goal-level preference; resolution
+      falls through to config/default, ADR-0016). Like `mode`/`standing`, this is authoring
       intent recorded on the goal; threading the loaded `id` into
       `Kazi.Harness.resolve/1` as `:goal_harness` is T8.7.
     * `groups` — the goal's declared **group taxonomy** (T12.1, ADR-0020): a list
@@ -78,7 +79,8 @@ defmodule Kazi.Goal do
   @type harness :: %{
           id: atom() | nil,
           model: String.t() | nil,
-          command: String.t() | nil
+          command: String.t() | nil,
+          effort: String.t() | nil
         }
 
   @type t :: %__MODULE__{

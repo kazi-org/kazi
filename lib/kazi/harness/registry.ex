@@ -75,6 +75,9 @@ defmodule Kazi.Harness.Registry do
             :max_turns,
             :exclude_dynamic_system_prompt_sections,
             :no_session_persistence,
+            # T36.6 (ADR-0047): the Claude-only reasoning-effort lever (`--effort
+            # <level>`). Declared ONLY here so a non-Claude harness never receives it.
+            :effort,
             :cli_version
           ]
     }

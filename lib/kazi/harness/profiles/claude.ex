@@ -41,10 +41,20 @@ defmodule Kazi.Harness.Profiles.Claude do
   is byte-for-byte what it was before this flag existed.
 
   The economy flags (ADR-0047) shrink what the inner harness sees per dispatch —
-  fewer tool schemas in context, a narrower MCP surface, a turn ceiling. Each is
-  appended ONLY when its opt is supplied, AFTER the hygiene + model args, so with
-  none of them the argv is byte-for-byte unchanged. See `economy_args/1` for the
-  opt → flag map and the version-gated capability check.
+  fewer tool schemas in context, a narrower MCP surface, a turn ceiling, and a
+  reasoning-effort lever. Each is appended ONLY when its opt is supplied, AFTER the
+  hygiene + model args, so with none of them the argv is byte-for-byte unchanged.
+  The economy opt → flag map (see `economy_args/1`) and the version-gated
+  capability check cover:
+
+    * `:tools`        -> `--tools <t> …`            (the tool allow-list)
+    * `:disallowed_tools` -> `--disallowedTools <t> …`
+    * `:mcp_config`   -> `--mcp-config <c> …`       (scoped MCP config)
+    * `:strict_mcp_config` -> `--strict-mcp-config`  (version-gated)
+    * `:max_turns`    -> `--max-turns <n>`           (the per-dispatch turn ceiling)
+    * `:exclude_dynamic_system_prompt_sections` -> the bare switch (version-gated)
+    * `:no_session_persistence` -> the bare switch
+    * `:effort`       -> `--effort <level>`          (reasoning effort, T36.6)
   """
   @spec build_args(String.t(), keyword()) :: [String.t()]
   def build_args(prompt, opts) when is_binary(prompt) and is_list(opts) do
@@ -100,7 +110,13 @@ defmodule Kazi.Harness.Profiles.Claude do
       flag: "--no-session-persistence",
       kind: :boolean,
       min_version: nil
-    }
+    },
+    # T36.6 (ADR-0047): the reasoning-effort lever — forwards `claude --effort
+    # <level>` (e.g. low / medium / high). A `:value` scalar like `:max_turns`; a
+    # nil floor (no version gate). Claude-only (parity-by-design): only the
+    # `:claude` profile advertises `:effort` in supported_opts, so a non-Claude
+    # harness never sees it. Appended only when set, so absent it argv is unchanged.
+    %{opt: :effort, flag: "--effort", kind: :value, min_version: nil}
   ]
 
   @spec economy_args(keyword()) :: [String.t()]

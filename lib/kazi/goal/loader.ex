@@ -71,6 +71,7 @@ defmodule Kazi.Goal.Loader do
   | `id`      | string    | `harness.id` — a KNOWN harness id atom (`"claude"`, `"opencode"`, …); an unknown id is a validation error (never `String.to_atom/1`, so a typo cannot leak an atom) |
   | `model`   | string    | `harness.model` — optional provider/model override |
   | `command` | string    | `harness.command` — optional binary override |
+  | `effort`  | string    | `harness.effort` — optional Claude-only reasoning-effort level (`--effort <level>`, T36.6); overridden by the CLI `--effort` flag |
 
   `id` is required when a `[harness]` table is present. The loaded `id` threads
   into `Kazi.Harness.resolve/1` as `:goal_harness` (the wiring itself is T8.7).
@@ -479,8 +480,11 @@ defmodule Kazi.Goal.Loader do
   defp build_harness(harness) when is_map(harness) do
     with {:ok, id} <- fetch_harness_id(harness),
          {:ok, model} <- optional_string(harness, "model", "harness"),
-         {:ok, command} <- optional_string(harness, "command", "harness") do
-      {:ok, %{id: id, model: model, command: command}}
+         {:ok, command} <- optional_string(harness, "command", "harness"),
+         # T36.6 (ADR-0047): optional Claude-only reasoning-effort lever (`--effort
+         # <level>`), parsed exactly like `model`. Absent → nil (no goal-level effort).
+         {:ok, effort} <- optional_string(harness, "effort", "harness") do
+      {:ok, %{id: id, model: model, command: command, effort: effort}}
     end
   end
 
