@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.70.1](https://github.com/kazi-org/kazi/compare/v1.70.0...v1.70.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **providers:** scrub host release/ERTS env from spawned children (L-0022) ([5f884d7](https://github.com/kazi-org/kazi/commit/5f884d7395fafed6bf1b1019e781f57ae171298a))
+
 ## [1.70.0](https://github.com/kazi-org/kazi/compare/v1.69.0...v1.70.0) (2026-06-30)
 
 
