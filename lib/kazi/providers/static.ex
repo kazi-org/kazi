@@ -383,10 +383,11 @@ defmodule Kazi.Providers.Static do
   end
 
   defp git(workspace, args) do
-    {output, exit_code} = System.cmd("git", ["-C", workspace | args], stderr_to_stdout: true)
-    if exit_code == 0, do: {:ok, output}, else: {:error, output}
-  rescue
-    error in [ErlangError, File.Error] -> {:error, Exception.message(error)}
+    case CommandRunner.run("git", ["-C", workspace | args], stderr_to_stdout: true) do
+      {:ran, output, 0} -> {:ok, output}
+      {:ran, output, _exit_code} -> {:error, output}
+      {:raised, message} -> {:error, message}
+    end
   end
 
   # =============================================================================
