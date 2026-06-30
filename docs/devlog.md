@@ -2611,3 +2611,39 @@ leasing is wired — but it RENDERS (no 500), which was the blocker. See lore L-
 suite green (2290 passed, 24 excluded). All three fixes verified VIA TEST (ExUnit);
 released-binary `--parallel` for #1 was independently verified live on v1.64.2 (lore
 L-0019). #2/#3 not yet exercised on a released binary (post-release coordinator step).
+
+## 2026-06-30 — fix: scrub the burrito release/ERTS env from custom_script children (L-0022)
+
+**Symptom (L-0022):** a `custom_script` predicate of `cmd = "mix", args = ["test", …]`
+died with an opaque **exit 2 / empty output** when kazi ran from the released
+(burrito-packaged) binary, so a goal whose grader is `mix test` could never SEE the
+green and looped to `max_iterations`. `mix format` survived, which made it look
+model-specific. Same "kazi can't see the green" class as the opencode `--workspace`
+landmine.
+
+**Root cause (diagnosed by dumping the child env via a passing probe predicate):**
+the burrito binary exports its own release/ERTS locators — `BINDIR`, `ROOTDIR`,
+`RELEASE_ROOT`, `RELEASE_SYS_CONFIG`, `__BURRITO`, `__BURRITO_BIN_PATH` — into its OS
+environment, and every spawned child inherits them. A nested `erl` (invoked by the
+child `mix`/`elixir`) **honours `BINDIR`/`ROOTDIR` and execs the burrito `erlexec`**,
+booting the kazi release instead of the child's own BEAM — which is why the child
+printed kazi's CLI usage (`unknown command "/opt/homebrew/bin/mix"`). Isolation
+proved `BINDIR`/`ROOTDIR` are the killers: unsetting just them (even with the
+polluted PATH intact) makes the nested `mix test` pass, so no PATH surgery is needed.
+
+**Fix:** `Kazi.Providers.CommandRunner.run/4` — the single `System.cmd/3` choke
+point all command-runner providers (custom_script, test_runner, prod_log) fold onto
+— now clears that footprint via the `:env` option (`{var, nil}`) before every spawn,
+on both the no-timeout and timeout paths. It COMPOSES with the caller's own `:env`
+(caller entries last, so they still win) and leaves the rest of the inherited
+environment intact; from a dev shell none of those vars are set, so the scrub is a
+no-op. Authored test-first (the read-only bar in
+`test/kazi/providers/command_runner_test.exs`) and converged by **kazi driving
+`claude-sonnet-5`** (3 iterations, $2.49, zero gaming events).
+
+**Verified:** the bar (5/5) and full suite (2310 passed, 24 excluded) green; `mix
+format` clean. End-to-end proof under a *real* simulated-burrito env (the actual
+`BINDIR`/`ROOTDIR`/`RELEASE_*` values + burrito-first PATH): the fixed `CommandRunner`
+spawned a nested `elixir` that returned `{:ran, "CHILD_BEAM_OK\n", 0}` — the BEAM
+booted correctly instead of re-entering the host release. Released-binary
+confirmation follows the next release build. Resolves lore **L-0022**.
