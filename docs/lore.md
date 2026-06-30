@@ -399,3 +399,24 @@ table, so cross-node lease visibility still needs the NATS Transport source
 `test/kazi_web/coordination_source/native_test.exs`,
 `test/kazi/coordination/lease_table_test.exs`,
 `test/kazi/cli_run_parallel_lease_test.exs`.
+
+### L-0022 #burrito #release #custom_script #mix #env #landmine -- the released binary leaks its OWN release env into `custom_script` subprocesses, crashing a nested `mix test`
+The Burrito-packaged `kazi` binary leaks its release environment (`RELEASE_*`,
+`ELIXIR_ERL_OPTIONS`, etc.) into the subprocesses spawned by a `custom_script`
+predicate. A `custom_script` of `cmd = "mix", args = ["test", ...]` then boots the
+target app under the leaked release env and dies with **exit 2 and EMPTY output** --
+the same "kazi can't SEE the green" failure class as the opencode `--workspace`
+landmine: the inner harness makes the correct edit, but the grader can never read it
+as passing, so the goal never converges (it loops to `max_iterations`). `mix format
+--check-formatted` SURVIVES the leak (it does not boot the app), which makes the
+failure look model-specific rather than env-specific. Sibling of L-0019's "Burrito
+bypasses the app tree" class -- here the leak is OUTWARD into children, not a missing
+supervisor inward. Workaround for a goal-file author: wrap the predicate so it starts
+from a clean environment, e.g. `env -i HOME="$HOME" PATH="$PATH" LANG="$LANG"
+MIX_ENV=test mix test ...` (keep only PATH/HOME/LANG so mix still resolves its
+toolchain). Found 2026-06-30 dogfooding the `support-claude-sonnet-5` goal (driving
+claude-sonnet-5): the price-map/suite predicates read `exit 2` until the clean-env
+wrapper was added, after which the goal converged in 2 iterations. Real fix lives in
+kazi core: scrub `RELEASE_*` / `ELIXIR_ERL_OPTIONS` from the `custom_script`
+provider's spawn env so `mix test` (and any app-booting child) is hermetic without an
+author workaround.
