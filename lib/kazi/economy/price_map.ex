@@ -61,7 +61,7 @@ defmodule Kazi.Economy.PriceMap do
 
   # The date this table was compiled against the providers' published pricing.
   # Bump it in lockstep with any `@prices` edit so a stale table is self-evident.
-  @as_of "2026-06-24"
+  @as_of "2026-06-30"
 
   # Prices in USD per 1,000,000 tokens. Anthropic list pricing as of `@as_of`:
   # input/output from the published sheet; `cached` = input × 0.1 (cache-read
@@ -77,6 +77,15 @@ defmodule Kazi.Economy.PriceMap do
       reasoning: 25.00
     },
     "claude-sonnet-4-6" => %{
+      input: 3.00,
+      cached: 0.30,
+      cache_write: 3.75,
+      output: 15.00,
+      reasoning: 15.00
+    },
+    # List pricing (the introductory $2/$10 rate runs through 2026-08-31; this
+    # table tracks list, not the promo, per the moduledoc's dated-table policy).
+    "claude-sonnet-5" => %{
       input: 3.00,
       cached: 0.30,
       cache_write: 3.75,
