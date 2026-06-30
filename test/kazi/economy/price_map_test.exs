@@ -26,6 +26,22 @@ defmodule Kazi.Economy.PriceMapTest do
       assert PriceMap.cost_usd("claude-opus-4-8", usage) == {:ok, 61.75}
     end
 
+    test "prices claude-sonnet-5 at list rates ($3 input / $15 output)" do
+      # claude-sonnet-5 (per 1M, Anthropic list pricing): input 3.00, cached 0.30,
+      # cache_write 3.75, output 15.00, reasoning 15.00. (Introductory $2/$10 runs
+      # through 2026-08-31; the table tracks list price — see PriceMap moduledoc.)
+      usage = %{
+        input_tokens: 1_000_000,
+        cached_input_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        reasoning_tokens: 1_000_000
+      }
+
+      # 3.00 + 0.30 + 3.75 + 15.00 + 15.00 = 37.05
+      assert PriceMap.cost_usd("claude-sonnet-5", usage) == {:ok, 37.05}
+    end
+
     test "a realistic split computes a fractional cost (cheap cached reads)" do
       # A cache-hit-heavy run: mostly cached reads, little fresh input.
       usage = %{
