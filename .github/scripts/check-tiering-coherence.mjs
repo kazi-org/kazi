@@ -3,7 +3,7 @@
 // marketing site -- ship two claims a stale edit can silently break:
 //
 //   1. MODEL IDS. The tiering ladder names concrete Claude model ids
-//      (`claude-haiku-4-5` -> `claude-sonnet-4-6` -> `claude-opus-4-8`). A model
+//      (`claude-haiku-4-5` -> `claude-sonnet-5` -> `claude-opus-4-8`). A model
 //      retires or a release renames an id, and a doc left behind hands the reader
 //      an id that 404s on their first `kazi apply --model ...`. The current,
 //      real ids live in the claude-api reference (Opus 4.8 / Sonnet 4.6 / Haiku
@@ -204,8 +204,8 @@ function main() {
     console.error(`  ${rel(v.file)}:${v.lineno}: ${v.kind}: ${v.token}  ->  ${v.text}`);
   }
   console.error(
-    "\nFix: replace a stale model id with a current one (e.g. `claude-sonnet-4-5` -> " +
-      "`claude-sonnet-4-6`), or hedge a cost figure (state the SHAPE of the saving, not an " +
+    "\nFix: replace a stale model id with a current one (e.g. `claude-sonnet-4-6` -> " +
+      "`claude-sonnet-5`), or hedge a cost figure (state the SHAPE of the saving, not an " +
       'unproven number) until the multi-iteration benchmark (T19.7) lands. A hedged line ' +
       'carries "being measured" / "not yet measured" / "designed-for".',
   );

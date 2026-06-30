@@ -211,7 +211,7 @@ defmodule Kazi.Teach.InstallSkill do
     FRONTIER Claude model (e.g. `claude-opus-4-8`) and you already AUTHOR the
     predicates in this very session; run the grind on a CHEAP Claude model via
     `kazi apply --harness claude --model <cheap-claude-id>`. The cheap tier is
-    `claude-haiku-4-5` (step up to `claude-sonnet-4-6` for harder slices). This needs
+    `claude-haiku-4-5` (step up to `claude-sonnet-5` for harder slices). This needs
     only a Claude API key -- no local model, no special hardware -- so the economics
     apply to anyone running Claude Code. The cost win is still BEING MEASURED; treat
     it as the intended economics, not a measured figure.
@@ -394,7 +394,7 @@ defmodule Kazi.Teach.InstallSkill do
     the top -- it never escalates past the frontier:
 
     ```
-    claude-haiku-4-5  ->  claude-sonnet-4-6  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
+    claude-haiku-4-5  ->  claude-sonnet-5  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
     ```
 
     **The trigger (which `--json` fields).** After each `kazi apply --harness claude
@@ -440,7 +440,7 @@ defmodule Kazi.Teach.InstallSkill do
 
     ```sh
     # The capped ladder (cheapest -> frontier). Escalation STOPS at the last entry.
-    ladder="claude-haiku-4-5 claude-sonnet-4-6 claude-opus-4-8"
+    ladder="claude-haiku-4-5 claude-sonnet-5 claude-opus-4-8"
 
     goal_file="$1"   # the approved slice's goal-file (a fresh slice starts at rung 1)
     rung=1           # SKILL state: the per-goal_id rung index (1-based), reset per slice

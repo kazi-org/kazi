@@ -223,7 +223,7 @@ rates only for the slices that actually need them
 ([ADR-0035](docs/adr/0035-skill-driven-adaptive-model-tiering.md)):
 
 ```
-claude-haiku-4-5  ->  claude-sonnet-4-6  ->  claude-opus-4-8   (cap — do not escalate past Opus)
+claude-haiku-4-5  ->  claude-sonnet-5  ->  claude-opus-4-8   (cap — do not escalate past Opus)
 ```
 
 The policy lives in the orchestrating skill, **never in kazi**: kazi reports
