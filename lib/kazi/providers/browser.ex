@@ -93,6 +93,7 @@ defmodule Kazi.Providers.Browser do
   @behaviour Kazi.PredicateProvider
 
   alias Kazi.{Predicate, PredicateResult}
+  alias Kazi.Providers.CommandRunner
 
   # The Node runner the provider ships and drives in production. Resolved against
   # the app's priv dir so it works from an escript / release as well as in-repo.
@@ -242,10 +243,10 @@ defmodule Kazi.Providers.Browser do
     end
   end
 
-  # Run the Node runner in the workspace, feeding the JSON payload on stdin and
-  # capturing stdout (the JSON result) + stderr together. System.cmd/3 raises
-  # only when the executable cannot be found or the cwd is invalid — both are
-  # infra problems, so we map them to :error rather than letting the provider
+  # Run the Node runner in the workspace via the shared command-execution core,
+  # feeding the JSON payload on stdin and capturing stdout (the JSON result) +
+  # stderr together. A command that cannot even start (missing executable, bad
+  # cwd) is infra, so we map it to :error rather than letting the provider
   # crash (mirrors TestRunner/ProdLog).
   defp drive(cmd, args, payload, url, workspace, config) do
     opts = [cd: workspace, stderr_to_stdout: true]
@@ -253,11 +254,11 @@ defmodule Kazi.Providers.Browser do
 
     # The runner reads the JSON payload as the last positional argument so the
     # seam is identical for a real `node` and a one-line stub (no stdin plumbing).
-    case System.cmd(cmd, args ++ [payload], opts) do
-      {output, 0} ->
+    case CommandRunner.run(cmd, args ++ [payload], opts) do
+      {:ran, output, 0} ->
         interpret(output, cmd, args, url, workspace)
 
-      {output, exit_code} ->
+      {:ran, output, exit_code} ->
         # A non-zero runner exit is the browser failing to even produce a verdict
         # (launch failure, crash): infra, not a claim about the UI.
         PredicateResult.error(%{
@@ -268,16 +269,16 @@ defmodule Kazi.Providers.Browser do
           workspace: workspace,
           output: output
         })
+
+      {:raised, message} ->
+        PredicateResult.error(%{
+          reason: {:cmd_unrunnable, message},
+          cmd: cmd,
+          args: args,
+          url: url,
+          workspace: workspace
+        })
     end
-  rescue
-    error in [ErlangError, File.Error] ->
-      PredicateResult.error(%{
-        reason: {:cmd_unrunnable, Exception.message(error)},
-        cmd: cmd,
-        args: args,
-        url: url,
-        workspace: workspace
-      })
   end
 
   # Parse the runner's JSON verdict and map it to the contract. A runner that
