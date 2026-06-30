@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.70.0](https://github.com/kazi-org/kazi/compare/v1.69.0...v1.70.0) (2026-06-30)
+
+
+### Features
+
+* **economy:** price claude-sonnet-5 in the cost table ([cf8937e](https://github.com/kazi-org/kazi/commit/cf8937ebe9581654ac9e806099179edff3815b01))
+
 ## [1.69.0](https://github.com/kazi-org/kazi/compare/v1.68.0...v1.69.0) (2026-06-29)
 
 
