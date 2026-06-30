@@ -352,7 +352,7 @@ guards both, and **composes** the existing command / coherence gates for the res
 ### What it checks itself (the two new invariants)
 
 1. **Model ids are current.** The tiering ladder names concrete Claude model ids
-   (`claude-haiku-4-5` -> `claude-sonnet-4-6` -> `claude-opus-4-8`). A model
+   (`claude-haiku-4-5` -> `claude-sonnet-5` -> `claude-opus-4-8`). A model
    retires or a release renames an id, and a doc left behind hands the reader an
    id that errors on the first `kazi apply --model ...`. The gate scans the four
    surfaces for any `claude-<...>` model id and fails on one that is NOT in the

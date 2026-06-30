@@ -53,7 +53,7 @@ still.
 
 The DEFAULT recipe is in-family Claude tiering (ADR-0033/0035): you are a frontier
 Claude model (e.g. `claude-opus-4-8`) authoring predicates in this session, and you
-grind on a CHEAP Claude model -- `claude-haiku-4-5` (step up to `claude-sonnet-4-6`
+grind on a CHEAP Claude model -- `claude-haiku-4-5` (step up to `claude-sonnet-5`
 for harder slices) -- via `--harness claude --model <id>`. It needs only a Claude API
 key: no local model, no special hardware. The cost win is BEING MEASURED -- treat it
 as the intended economics, not a measured figure.
@@ -184,7 +184,7 @@ the rung counter. kazi-core has NO model-selection logic (ADR-0035 decision 1).
 The ladder is capped at the frontier and STOPS there:
 
 ```
-claude-haiku-4-5  ->  claude-sonnet-4-6  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
+claude-haiku-4-5  ->  claude-sonnet-5  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
 ```
 
 Trigger (the `--json` fields, T30.3 -- `docs/tiering-signals.md`): after each
