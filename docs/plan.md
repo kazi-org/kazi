@@ -177,6 +177,22 @@ Open work:
   a coherence guard catches any recurrence, and the non-functional
   `Kazi.Retrieval.Graphify` backend -- which shelled out to a `graphify` CLI that
   does not exist -- is retired, ADR-0052) -- E42.
+- **UC-055** (a goal can assert that the SHIPPED CLI binary actually runs: a first-class
+  `:cli` predicate drives the built binary as a user invokes it -- argv -> exit code +
+  stdout/stderr matchers (`equals`/`contains`/`regex`/`json_path`), an ordered
+  sub-invocation script, and a `--help` golden-snapshot -- so the artifact-serves gap
+  that `:tests` is blind to (the `:noproc` CLI crash, the OTP stderr warning, the
+  L-0022 `RELEASE_*` env leak, the brew `Kazi.Repo`-not-started crash, all GREEN in
+  `mix test`) becomes a pre-merge predicate; dogfooded on kazi's own release binary,
+  ADR-0053) -- E43.
+- **UC-056** (a goal can assert real UI behavior objectively: the `:browser` runner's
+  assertion vocabulary gains a higher-level pack -- `console_clean`, `a11y` (axe-core),
+  `visual` (baseline diff), `form_validation`, richer DOM assertions
+  (`attr`/`count`/`enabled`/`field_value`), and a `viewport` matrix -- so "no console
+  errors / accessible / renders on mobile / the form validates / this component still
+  looks right" are declarative predicates on what a real browser observes, not a
+  hand-authored click/type sequence; runner + schema only, zero kazi-core change,
+  ADR-0053) -- E43.
 
 ## Checkable Work Breakdown
 
@@ -210,6 +226,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E40 -- Behavior specs: wire the dormant Gherkin importer into a first-class `docs/specs/` tier (P2, ADR-0050) -> plans/E40.md
 ### E41 -- Crystallize discovered truth: a use-case/wiring-gap importer + prod-log predicate correlation (P2, ADR-0051) -> plans/E41.md
 ### E42 -- Fix kazi's self-teaching artifacts: no personal-skill assumptions, retire dead Graphify retrieval (P1, ADR-0052) -> plans/E42.md
+### E43 -- Higher-level interactive-surface predicates: a `:browser` assertion pack + a first-class `:cli` provider (P1, ADR-0053) -> plans/E43.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -274,6 +291,9 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 | R-E38-5 | Naming the product late depresses near-term conversion / lead-gen from the early posts. | Low | Med | Deliberate trade per ADR-0048 (credibility over a conversion spike); every post still links forward and the final third (posts 10-12) converts; distribution widens because marketing-allergic communities will share product-light, useful posts. |
 | R-E38-6 | The journey runs on the author's PRIVATE/internal stack (personal memory/browser/graph tooling); readers cannot reproduce it and a public post could leak internal infra. | High | Med | ADR-0048 dec. 5 (added in the skills-coverage second pass): every post LEADS with the commodity, reproducible technique and names a personal/internal tool only as "what I used" with a commodity alternative; no post requires a private tool; the T38.18 gate runs the E29 no-leak scan over `site/src/content/blog/**` and asserts no required-private-tool. |
 | R-E38-7 | Scope creep -- a well-meaning execution pass bolts marketing machinery (a 30-agent-org post, email drip funnels, a team charter) onto the series, diluting the anti-hype stance. | Med | Med | ADR-0048 "Considered and deliberately excluded" names each and why; the two sanctioned supporting tasks are bounded (T38.20 "diagrams not ad creative", T38.21 "one signal not a funnel"); reviewers cite the exclusion list. |
+| R-E43-1 | The UI-pack assertions (T43.2/T43.3/T43.10) drag runner-side deps (axe-core, a screenshot-diff lib, Maestro) into the browser runner, inflating its footprint or breaking `mix test`. | Med | Med | Deps stay runner-side and OPTIONAL: an assertion whose dep is absent returns `:error` "unavailable", never `:fail` (exactly how Playwright is handled today); `mix test` drives the STUB runner and never installs a browser dep; ADR-0053 §1/§4. |
+| R-E43-2 | `:cli` overlaps `:tests`/`:custom_script`, confusing authors about which to reach for. | Low | Med | ADR-0053 delineates them: `:tests`=the suite (compile+unit truth), `:custom_script`=an arbitrary tool with a declared parse, `:cli`=turnkey golden-invocation of a SHIPPED binary (exit/stdout/stderr matrix + `--help` golden). `kazi schema cli` + the docs how-to state the boundary (T43.7). |
+| R-E43-3 | `:cli`/UI live dogfoods (T43.6/T43.9) need a real browser or a real built binary that a headless pool session may lack, so the wave stalls or reports a false "verified". | Med | Med | Both tasks are `kind: any` and REPORT HONESTLY which path ran (stub vs live; mix/escript/burrito) per the global Definition-of-Done; the stub-path ExUnit in T43.1-T43.5/T43.7-T43.8 is the machine-checkable backbone, the live run is the confirmation, never the gate. |
 
 ## Operating Procedure
 
