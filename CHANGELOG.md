@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.71.0](https://github.com/kazi-org/kazi/compare/v1.70.1...v1.71.0) (2026-07-01)
+
+
+### Features
+
+* **cli:** thread --permission-mode/--allowed-tools through apply; fix stale propose/run verbs ([4496100](https://github.com/kazi-org/kazi/commit/449610065de777a43dc0d4ca7413df3d29c56301))
+
 ## [1.70.1](https://github.com/kazi-org/kazi/compare/v1.70.0...v1.70.1) (2026-06-30)
 
 
