@@ -45,6 +45,19 @@ a Claude-only token-economy lever (ADR-0047, parity-by-design: it is not forward
 to other harnesses) -- and a goal-file can carry it as `[harness] effort = "..."`,
 overridden by the CLI flag.
 
+**The permission surface (issue #769).** A headless `claude -p` dispatch against
+a workspace that has never been through Claude Code's interactive trust dialog
+gets EVERY tool call silently denied -- the run burns real tokens/cost each
+iteration while making zero file changes, eventually going `stuck`. Pass
+`--permission-mode <mode>` (e.g. `acceptEdits`, `bypassPermissions`, `plan`) and/or
+`--allowed-tools <t> ...` (a comma/space-separated tool list) to pre-authorize the
+dispatch, forwarding `claude --permission-mode`/`--allowed-tools`; a goal-file can
+carry the same as `[harness] permission_mode = "..."` / `allowed_tools = [...]`,
+overridden by the CLI flags (same precedence as `effort`). Claude-only,
+parity-by-design. If a run goes `stuck` with zero `changed_files` and non-zero
+`usage.cost_usd`, check the harness result's `permission_denials` field first --
+it names exactly which tool calls were refused.
+
 
 ## 2. The agent-driven loop
 

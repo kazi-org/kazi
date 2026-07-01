@@ -399,3 +399,31 @@ table, so cross-node lease visibility still needs the NATS Transport source
 `test/kazi_web/coordination_source/native_test.exs`,
 `test/kazi/coordination/lease_table_test.exs`,
 `test/kazi/cli_run_parallel_lease_test.exs`.
+
+### L-0023 #claude #harness #permission #trust-dialog #stuck #landmine -- a headless `claude -p` dispatch against an untrusted workspace silently denies EVERY tool call, burning cost with zero progress
+`kazi apply --harness claude` against a workspace that has never been through
+Claude Code's interactive trust dialog (the common case for CI, fresh clones, or any
+automated first-run) gets **every tool call (Write, Bash, ...) silently denied** --
+`-p`/headless mode has no human to accept the dialog. The model tries, is refused,
+and nothing changes on disk; the goal burns real tokens/`usage.cost_usd` each
+iteration and eventually reports `stuck` with `stuck_bundle.changed_files == []`.
+This is the same "kazi can't SEE the green" failure SHAPE as L-0021 (opencode
+`--workspace`) but a DIFFERENT cause: here the inner harness never even makes the
+edit, because Claude Code itself refused the write. The raw
+`claude --output-format json` envelope's `permission_denials` array names exactly
+which tool calls were refused (`tool_name`/`tool_input`); before this fix nothing in
+kazi's own output surfaced it, so diagnosing it required manually re-deriving kazi's
+argv from source and replaying `claude -p ...` by hand outside kazi (github.com/
+kazi-org/kazi/issues/769). Fixed: `--permission-mode <mode>` / `--allowed-tools
+<t> ...` are now real `kazi apply` CLI flags and goal-file `[harness]
+permission_mode`/`allowed_tools` fields (CLI wins, mirroring `effort`'s precedence,
+ADR-0047), wired to the `Kazi.Harness.Profiles.Claude.build_args/2` opts that
+already knew how to render them but were never set anywhere in kazi. The parsed
+envelope also now surfaces `:permission_denials` (`Kazi.Harness.Profiles.Claude.
+parse/1`) so a `stuck` run with zero changed files and non-zero cost is diagnosable
+from kazi's OWN result, not a manual argv replay. Regression:
+`test/kazi/cli_harness_test.exs`, `test/kazi/harness/usage_test.exs`,
+`test/kazi/goal/loader_test.exs`. NOT YET DONE: the denial isn't threaded into
+`stuck_bundle`/the `--stream` per-iteration event (would need a new `Data` field +
+carry-forward, mirroring `working_set_digest`) -- today it is on the raw harness
+dispatch result, not yet distilled into the loop's terminal/streamed output.

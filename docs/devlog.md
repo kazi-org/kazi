@@ -2611,3 +2611,53 @@ leasing is wired — but it RENDERS (no 500), which was the blocker. See lore L-
 suite green (2290 passed, 24 excluded). All three fixes verified VIA TEST (ExUnit);
 released-binary `--parallel` for #1 was independently verified live on v1.64.2 (lore
 L-0019). #2/#3 not yet exercised on a released binary (post-release coordinator step).
+
+## 2026-07-01 — fix: expose the claude permission surface + surface `permission_denials` (issue #769)
+
+**Symptom:** `kazi apply --harness claude` against a workspace with no accepted
+Claude Code trust dialog got every tool call silently denied — real tokens/cost
+spent each iteration, zero file changes, eventual `stuck` with
+`stuck_bundle.changed_files == []` and nothing in `--json`/`--stream` output
+pointing at why. Filed as github.com/kazi-org/kazi/issues/769 with a full repro
+and root cause already diagnosed (hand-replaying kazi's argv reproduced it
+directly against the real `claude` CLI, whose stderr and JSON envelope both name
+the denial).
+
+**Root cause:** `Kazi.Harness.Profiles.Claude.build_args/2` already knew how to
+render `--permission-mode <mode>` / `--allowed-tools <t> ...` (`Kazi.Harness.
+Registry`'s `:claude` profile already advertised both in `supported_opts`), but
+nothing anywhere in kazi ever SET those opts — no CLI flag, no goal-file field.
+The capability existed; the wiring to reach it did not.
+
+**Fix:** mirrored the existing `--effort` (T36.6/ADR-0047) wiring exactly —
+`--permission-mode`/`--allowed-tools` are now real `kazi apply` CLI flags
+(`lib/kazi/cli.ex`) and goal-file `[harness] permission_mode`/`allowed_tools`
+fields (`lib/kazi/goal/loader.ex`, `lib/kazi/goal.ex`'s `harness()` type), folded
+into `adapter_opts` by `Kazi.Runtime.maybe_put_permission_mode/3` and
+`maybe_put_allowed_tools/3` (CLI wins over the goal-file, same precedence as
+`effort`; absent both, argv is byte-for-byte unchanged). Separately,
+`Kazi.Harness.Profiles.Claude.parse/1` now surfaces the raw envelope's
+`permission_denials` array as `:permission_denials` (tool_name/tool_input/
+tool_use_id), additive like `:touched`/`:tool_uses`, so a denial is diagnosable
+from kazi's own harness result instead of a manual argv replay outside kazi.
+
+**Scope note (honest, not fully closed):** the issue offered three independent
+fixes ("any of these would resolve it"). This lands #1 (the permission surface)
+completely and the PARSING half of #2 (`permission_denials` is now on the raw
+`Kazi.HarnessAdapter.run/3` result map). It does NOT thread that field into
+`stuck_bundle`/the `--stream` per-iteration event yet — that needs a new `Data`
+struct field + carry-forward function mirroring `record_working_set/2`, which is
+real additional plumbing beyond this fix's scope. Recorded as lore **L-0023**
+with that gap named explicitly. Fix #3 (pre-flight untrusted-workspace detection
+via `~/.claude.json`) was not attempted — introspecting another tool's private,
+undocumented config format was judged too fragile for this pass.
+
+**Verified:** full suite green (2329 passed, 24 excluded), `mix format`/
+`mix compile --warnings-as-errors` clean. New coverage: `test/kazi/cli_harness_test.exs`
+(CLI flag -> argv, goal-file precedence, CLI-over-goal-file override, byte-identical
+absent-both — mirroring the existing `--effort` test shape exactly),
+`test/kazi/harness/usage_test.exs` (`permission_denials` parsing: absent, empty,
+single, multiple, malformed-entry-filtered), `test/kazi/goal/loader_test.exs` +
+`test/kazi/adopt_writer_test.exs` (goal-file field parsing + the harness map's now
+six keys). No released-binary confirmation yet — this is a code-level fix pending
+the next release.
