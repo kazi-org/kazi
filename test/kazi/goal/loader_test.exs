@@ -271,7 +271,15 @@ defmodule Kazi.Goal.LoaderTest do
       }
 
       assert {:ok, %Goal{harness: harness}} = Loader.from_map(data)
-      assert harness == %{id: :opencode, model: "local/qwen3.6", command: nil, effort: nil}
+
+      assert harness == %{
+               id: :opencode,
+               model: "local/qwen3.6",
+               command: nil,
+               effort: nil,
+               permission_mode: nil,
+               allowed_tools: nil
+             }
     end
 
     test "a [harness] id-only table parses with nil model/command" do
@@ -303,6 +311,58 @@ defmodule Kazi.Goal.LoaderTest do
       }
 
       assert {:ok, %Goal{harness: %{effort: nil}}} = Loader.from_map(data)
+    end
+
+    test "a [harness] permission_mode parses into harness.permission_mode (issue #769)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude", "permission_mode" => "acceptEdits"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{permission_mode: "acceptEdits"}}} = Loader.from_map(data)
+    end
+
+    test "a [harness] allowed_tools parses into harness.allowed_tools (issue #769)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude", "allowed_tools" => ["Write", "Bash"]},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{allowed_tools: ["Write", "Bash"]}}} = Loader.from_map(data)
+    end
+
+    test "an absent [harness] permission_mode/allowed_tools default to nil (issue #769)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude", "model" => "claude-haiku-4-5"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{permission_mode: nil, allowed_tools: nil}}} =
+               Loader.from_map(data)
+    end
+
+    test "an empty [harness] allowed_tools reads as nil, not [] (issue #769)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude", "allowed_tools" => []},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Goal{harness: %{allowed_tools: nil}}} = Loader.from_map(data)
+    end
+
+    test "a [harness] allowed_tools that is not an array of strings is a validation error (issue #769)" do
+      data = %{
+        "id" => "g",
+        "harness" => %{"id" => "claude", "allowed_tools" => "Write"},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "harness.allowed_tools must be an array of strings"
     end
 
     test "the loaded harness id threads into Kazi.Harness.resolve/1 as :goal_harness" do
@@ -397,7 +457,35 @@ defmodule Kazi.Goal.LoaderTest do
                id: :opencode,
                model: "local/qwen3.6",
                command: "/usr/local/bin/opencode",
-               effort: nil
+               effort: nil,
+               permission_mode: nil,
+               allowed_tools: nil
+             }
+    end
+
+    test "a [harness] table with permission_mode + allowed_tools parses from TOML text (issue #769)" do
+      toml = """
+      id = "g"
+
+      [harness]
+      id = "claude"
+      permission_mode = "acceptEdits"
+      allowed_tools = ["Write", "Bash", "Edit"]
+
+      [[predicate]]
+      id = "p"
+      provider = "test_runner"
+      """
+
+      assert {:ok, %Goal{harness: harness}} = Loader.from_map(Toml.decode!(toml))
+
+      assert harness == %{
+               id: :claude,
+               model: nil,
+               command: nil,
+               effort: nil,
+               permission_mode: "acceptEdits",
+               allowed_tools: ["Write", "Bash", "Edit"]
              }
     end
   end

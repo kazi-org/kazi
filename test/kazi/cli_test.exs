@@ -79,6 +79,42 @@ defmodule Kazi.CLITest do
       assert opts[:effort] == nil
     end
 
+    test "parses `apply ... --permission-mode <mode>` into the :run opts (issue #769)" do
+      assert {:run, "goal.toml", opts} =
+               Kazi.CLI.parse([
+                 "apply",
+                 "goal.toml",
+                 "--workspace",
+                 "/tmp/ws",
+                 "--permission-mode",
+                 "acceptEdits"
+               ])
+
+      assert opts[:permission_mode] == "acceptEdits"
+    end
+
+    test "parses `apply ... --allowed-tools <list>` into the :run opts (issue #769)" do
+      assert {:run, "goal.toml", opts} =
+               Kazi.CLI.parse([
+                 "apply",
+                 "goal.toml",
+                 "--workspace",
+                 "/tmp/ws",
+                 "--allowed-tools",
+                 "Write,Bash,Edit"
+               ])
+
+      assert opts[:allowed_tools] == "Write,Bash,Edit"
+    end
+
+    test "--permission-mode/--allowed-tools are nil when absent (issue #769)" do
+      assert {:run, "goal.toml", opts} =
+               Kazi.CLI.parse(["apply", "goal.toml", "--workspace", "/tmp/ws"])
+
+      assert opts[:permission_mode] == nil
+      assert opts[:allowed_tools] == nil
+    end
+
     test "--help (and -h) is recognized" do
       assert {:help, _} = Kazi.CLI.parse(["--help"])
       assert {:help, _} = Kazi.CLI.parse(["-h"])

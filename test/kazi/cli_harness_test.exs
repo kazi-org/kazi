@@ -211,6 +211,129 @@ defmodule Kazi.CLIHarnessTest do
     if idx, do: Enum.at(argv, idx + 1)
   end
 
+  # The goal-file variant: a `[harness]` table authoring permission_mode/allowed_tools.
+  defp write_goal_with_permission_surface(work, permission_mode, allowed_tools) do
+    path = Path.join(work, "goal.toml")
+    tools = allowed_tools |> Enum.map(&"\"#{&1}\"") |> Enum.join(", ")
+
+    File.write!(path, """
+    id = "cli-harness"
+    name = "CLI harness selection"
+
+    [scope]
+    workspace = "#{work}"
+
+    [harness]
+    id = "claude"
+    permission_mode = "#{permission_mode}"
+    allowed_tools = [#{tools}]
+
+    [[predicate]]
+    id = "code"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+    """)
+
+    path
+  end
+
+  test "`apply --permission-mode <mode> --allowed-tools <list>` reaches the claude harness argv (issue #769)",
+       %{work: work} do
+    goal = write_goal(work)
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(
+          [
+            "apply",
+            goal,
+            "--workspace",
+            work,
+            "--permission-mode",
+            "acceptEdits",
+            "--allowed-tools",
+            "Write,Bash"
+          ],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0, "expected convergence (exit 0) once the harness is authorized to write"
+
+    argv = argv_lines(work)
+    assert "--permission-mode" in argv
+    assert "acceptEdits" in argv
+    assert "--allowed-tools" in argv
+    assert "Write" in argv
+    assert "Bash" in argv
+  end
+
+  test "a goal-file `[harness] permission_mode`/`allowed_tools` reaches the argv with no CLI flag (issue #769)",
+       %{work: work} do
+    goal = write_goal_with_permission_surface(work, "bypassPermissions", ["Edit"])
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    argv = argv_lines(work)
+    assert "--permission-mode" in argv
+    assert "bypassPermissions" in argv
+    assert "--allowed-tools" in argv
+    assert "Edit" in argv
+  end
+
+  test "the CLI `--permission-mode` flag OVERRIDES the goal-file `[harness] permission_mode` (issue #769)",
+       %{work: work} do
+    goal = write_goal_with_permission_surface(work, "plan", ["Edit"])
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work, "--permission-mode", "acceptEdits"],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    argv = argv_lines(work)
+    assert permission_mode_value(argv) == "acceptEdits"
+    refute "plan" in argv
+  end
+
+  test "no --permission-mode/--allowed-tools and no goal-file equivalent leaves the argv with neither (issue #769)",
+       %{work: work} do
+    goal = write_goal(work)
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+    argv = argv_lines(work)
+    refute "--permission-mode" in argv
+    refute "--allowed-tools" in argv
+  end
+
+  # The token immediately after `--permission-mode` in the recorded argv.
+  defp permission_mode_value(argv) do
+    idx = Enum.find_index(argv, &(&1 == "--permission-mode"))
+    if idx, do: Enum.at(argv, idx + 1)
+  end
+
   test "an unknown --harness id fails with a clear message", %{work: work} do
     goal = write_goal(work)
 
