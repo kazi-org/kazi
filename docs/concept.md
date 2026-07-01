@@ -168,6 +168,54 @@ A **goal** is a declarative document:
 The goal's *acceptance* is the conjunction of all predicates. There is no
 "the agent thinks it's done." Done is `∀ p ∈ predicates: eval(p) = true`.
 
+### 5a. Importing intent, and detecting dead code (ADR-0021)
+
+A goal's predicates do not have to be hand-typed. Correctness is framed as a
+two-way containment between the **intended set I** (what should be true) and
+the **actual surface A** (what the code exposes): `I \ A` is what the
+convergence loop drives to done; `A \ I` is dead or undocumented code. `I` can
+be imported, never invented by kazi itself:
+
+- **Machine specs, deterministically** — `Kazi.Reconcile.OpenApiImporter` (one
+  `http_probe` predicate per path/operation) and `Kazi.Reconcile.GherkinImporter`
+  (one `test_runner` predicate per `.feature` Scenario, §10c/ADR-0050). Pure,
+  hermetic — the same input always yields the same goal, and re-import upserts.
+- **Prose, via the harness** — `Kazi.Reconcile.ProseImporter` drives the
+  existing authoring/clarify path (§10, ADR-0011/0019) over an ADR or
+  requirements doc to draft CANDIDATE predicates, always human-reviewed before
+  acceptance. Fuzzy by nature; the deterministic paths above are the
+  trustworthy backbone.
+
+`A \ I` (dead code) is caught by a **surface-coverage meta-predicate**: a
+scanner inventories a project's public surface (HTTP routes, exported symbols,
+CLI commands) and asserts every element is owned by ≥1 intended predicate; an
+unowned element FAILS, held true continuously by standing mode (§0), not a
+one-shot report. `kazi init`/`adopt` (ADR-0013) stays the small CODE-side
+bootstrap — it mirrors `A`, so it can express a regression guard but can never
+state intent.
+
+### 5b. Crystallizing empirically-discovered truth (ADR-0051)
+
+§5a's three `I`-sources all require intent to be DECLARED — written down before
+or alongside the code. A fourth source is empirical: exploring a *running*
+system to discover `I` and `A \ I` — a use-case manifest with live PASS/FAIL
+verdicts, and a wiring-gap table (MISSING/STUB/ORPHAN). kazi does not perform
+this exploration inside its own deterministic core (that would reverse ADR-0001/
+ADR-0009); instead `kazi spec discover` drives the user's own configured coding
+harness — the SAME opt-in, off-by-default seam `Kazi.Adopt.enrich/2` already
+uses (§ADR-0013 §4) — with a kazi-authored prompt that catalogs use cases,
+tests them live, and classifies wiring gaps into an OPEN schema
+(`kazi schema usecase-manifest`) any tool can emit. This makes the capability
+available to every kazi user, not dependent on any one operator's personal
+skill library. `Kazi.Reconcile.UseCaseManifestImporter` then CRYSTALLIZES that
+manifest (self-discovered or externally produced) the same way §5a's importers
+crystallize a document: proven-working use cases become held-true predicates,
+wiring gaps feed the existing surface-coverage meta-predicate, via
+`kazi spec import --from-usecase-manifest`. An opt-in prod-log correlation on
+`browser`/`http_probe`/`custom_script` predicates additionally flags a `:pass`
+verdict whose route is erroring live in production — a discovered fact no
+importer alone would catch.
+
 ---
 
 ## 6. The convergence loop
@@ -516,6 +564,29 @@ deep docs is an agent or a contributor already in the repo, not a web visitor.
 README↔site coherence is enforced as a freshness predicate (T9.9); full guides stay
 single-sourced in `docs/`. If a rendered docs site is ever added, it must render
 FROM `docs/` (one source), never duplicate it.
+
+### 10c. Behavior specs: the Gherkin tier (ADR-0050)
+
+The five tiers above answer WHY (`docs/adr/`), WHAT THE SYSTEM IS (`concept.md`),
+WHAT'S LEFT (`docs/plan.md`), WHAT HAPPENED (`devlog.md`), and WHAT MUST NEVER
+HAPPEN (`lore.md`) -- but nothing answered WHAT BEHAVIOR IS BEING BUILT, reviewably,
+before code. A WBS one-liner plus a hand-authored predicate was the entire "spec"
+for a task.
+
+**`docs/specs/`** closes this: one `<slug>.feature` file per non-trivial task,
+written in the Gherkin subset `Kazi.Reconcile.GherkinImporter` already parses
+(Feature/Scenario/Given/When/Then, ADR-0021/T13.2), optionally paired with a short
+`<slug>.md` proposal note. A plan task may point at its spec via an optional
+`spec:` WBS field. A CLI verb (ADR-0050) upserts the spec's Scenarios as
+`[[predicate]]` entries in the goal -- **predicates are DERIVED from a reviewed
+spec, not hand-typed** -- and when the epic archives (10a, Layer 1), its
+referenced specs move to `docs/specs/archive/` with it.
+
+Call this tier "behavior specs" in prose: kazi already overloads bare "spec" three
+other ways (Elixir `@spec`, "goal spec" as a synonym for `goal.toml` in this very
+section, and ADR-0021's external-machine-spec import sense). `docs/specs/` is
+optional per task, not mandatory -- it exists for behavior worth reviewing before
+code, not every WBS line.
 
 ---
 
