@@ -201,7 +201,7 @@ or alongside the code. A fourth source is empirical: exploring a *running*
 system to discover `I` and `A \ I` — a use-case manifest with live PASS/FAIL
 verdicts, and a wiring-gap table (MISSING/STUB/ORPHAN). kazi does not perform
 this exploration inside its own deterministic core (that would reverse ADR-0001/
-ADR-0009); instead `kazi spec discover` drives the user's own configured coding
+ADR-0009); instead `kazi spec discover` drives the user's own configured coding <!-- verb-drift:allow: `kazi spec` is planned (E41/ADR-0051), not yet shipped -->
 harness — the SAME opt-in, off-by-default seam `Kazi.Adopt.enrich/2` already
 uses (§ADR-0013 §4) — with a kazi-authored prompt that catalogs use cases,
 tests them live, and classifies wiring gaps into an OPEN schema
@@ -211,7 +211,7 @@ skill library. `Kazi.Reconcile.UseCaseManifestImporter` then CRYSTALLIZES that
 manifest (self-discovered or externally produced) the same way §5a's importers
 crystallize a document: proven-working use cases become held-true predicates,
 wiring gaps feed the existing surface-coverage meta-predicate, via
-`kazi spec import --from-usecase-manifest`. An opt-in prod-log correlation on
+`kazi spec import --from-usecase-manifest`. An opt-in prod-log correlation on <!-- verb-drift:allow: `kazi spec` is planned (E41/ADR-0051), not yet shipped -->
 `browser`/`http_probe`/`custom_script` predicates additionally flags a `:pass`
 verdict whose route is erroring live in production — a discovered fact no
 importer alone would catch.
