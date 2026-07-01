@@ -118,6 +118,8 @@ defmodule Kazi.CLI do
     harness: :string,
     model: :string,
     effort: :string,
+    permission_mode: :string,
+    allowed_tools: :string,
     yes: :boolean,
     strict: :boolean,
     adr: :boolean,
@@ -166,6 +168,10 @@ defmodule Kazi.CLI do
       "Model the harness should use, e.g. local/qwen3.6. Overrides the goal-file's [harness] model.",
     effort:
       "Reasoning effort level the claude harness should use, e.g. low / medium / high (forwards claude --effort). Claude-only; overrides the goal-file's [harness] effort.",
+    permission_mode:
+      "`apply` only: permission mode the claude harness should run with, e.g. acceptEdits / bypassPermissions / plan (forwards claude --permission-mode). Needed for a headless dispatch against a workspace that has not been through Claude Code's interactive trust dialog, or every tool call is silently denied. Claude-only; overrides the goal-file's [harness] permission_mode.",
+    allowed_tools:
+      "`apply` only: comma/space-separated tool allow-list the claude harness may use, e.g. \"Write,Bash,Edit\" (forwards claude --allowed-tools). Claude-only; overrides the goal-file's [harness] allowed_tools.",
     yes: "`plan` only: skip the interactive clarify questions and draft best-effort.",
     strict: "`plan` only: refuse an underspecified idea non-interactively instead of guessing.",
     adr:
@@ -216,6 +222,8 @@ defmodule Kazi.CLI do
         :harness,
         :model,
         :effort,
+        :permission_mode,
+        :allowed_tools,
         :json,
         :stream,
         :parallel,
@@ -767,7 +775,7 @@ defmodule Kazi.CLI do
     do: {:error, "the `init` command requires a <repo-dir> argument"}
 
   # T16.2 (ADR-0024 decision 1): `kazi install-skill` writes the kazi Claude Code
-  # skill so an orchestrating agent already knows the propose → approve → run
+  # skill so an orchestrating agent already knows the plan → approve → apply
   # recipe. OPT-IN/consent-first — only this explicit command writes, and only
   # under `--dir` (a tmp dir in tests) or the default ~/.claude/skills/kazi. A
   # normal `kazi` run never touches ~/.claude.
@@ -929,12 +937,17 @@ defmodule Kazi.CLI do
           # T36.6 (ADR-0047): the Claude-only reasoning-effort lever, threaded the
           # same way --model is. Forwarded to Kazi.Runtime, which folds it into
           # adapter_opts (CLI > goal-file [harness] effort) for the claude profile.
+          # (issue #769): --permission-mode / --allowed-tools, threaded the same
+          # way, so a headless claude dispatch against an untrusted workspace can
+          # be pre-authorized instead of getting every tool call silently denied.
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
           harness: flags[:harness],
           model: flags[:model],
           effort: flags[:effort],
+          permission_mode: flags[:permission_mode],
+          allowed_tools: flags[:allowed_tools],
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1216,6 +1229,11 @@ defmodule Kazi.CLI do
       # which folds it into adapter_opts for the claude profile. Only set when
       # given, so the default path stays byte-identical.
       |> maybe_put(:effort, opts[:effort])
+      # (issue #769): forward --permission-mode/--allowed-tools the same way, so
+      # a headless claude dispatch can be pre-authorized against an untrusted
+      # workspace instead of silently denying every tool call.
+      |> maybe_put(:permission_mode, opts[:permission_mode])
+      |> maybe_put(:allowed_tools, opts[:allowed_tools])
       # T15.4 (ADR-0023 decision 3): under --json --stream, thread a per-iteration
       # streaming observer into the runtime's `:stream` seam, which composes it
       # OVER the read-model projection (one `on_iteration` fires both). It emits
@@ -1487,6 +1505,8 @@ defmodule Kazi.CLI do
     |> maybe_put(:harness, opts[:harness])
     |> maybe_put(:model, opts[:model])
     |> maybe_put(:effort, opts[:effort])
+    |> maybe_put(:permission_mode, opts[:permission_mode])
+    |> maybe_put(:allowed_tools, opts[:allowed_tools])
   end
 
   # Merge the CLI-owned per-goal opts OVER any caller-supplied `:run_opts` (tests),
@@ -1498,6 +1518,8 @@ defmodule Kazi.CLI do
     |> maybe_put(:harness, opts[:harness])
     |> maybe_put(:model, opts[:model])
     |> maybe_put(:effort, opts[:effort])
+    |> maybe_put(:permission_mode, opts[:permission_mode])
+    |> maybe_put(:allowed_tools, opts[:allowed_tools])
   end
 
   # The collective run's exit code: 0 only when the whole goal-set collectively
@@ -1963,7 +1985,7 @@ defmodule Kazi.CLI do
   # =============================================================================
   #
   # `kazi install-skill` writes the kazi Claude Code SKILL.md so an orchestrating
-  # agent already knows the propose → approve → run recipe (the two-tier
+  # agent already knows the plan → approve → apply recipe (the two-tier
   # economics + branching on `next_action`). It is OPT-IN/consent-first: only this
   # explicit command writes, and a normal `kazi` run never touches ~/.claude
   # (`brew install` only PRINTS a hint to run it — the tap formula's `caveats`).
@@ -1978,7 +2000,7 @@ defmodule Kazi.CLI do
       {:ok, path} ->
         IO.puts("WROTE  #{path}")
         IO.puts("\nThe kazi skill is installed. In Claude Code, it teaches the recipe:")
-        IO.puts("  propose --json → approve --json → run --harness <cheap> --json [--stream]")
+        IO.puts("  plan --json → approve --json → apply --harness <cheap> --json [--stream]")
         IO.puts("then branch on the result's next_action.")
         0
 
@@ -2814,7 +2836,7 @@ defmodule Kazi.CLI do
 
   # `list-proposed [--status <state>] [--json]`: print the proposal queue, newest
   # first. T15.6 (ADR-0023 decision 2): under --json emit a single JSON object —
-  # the queue as a list an orchestrator drives propose → approve → run on — the
+  # the queue as a list an orchestrator drives plan → approve → apply on — the
   # human table otherwise.
   defp execute_list_proposed(opts) do
     with_read_model(fn ->
@@ -3005,7 +3027,7 @@ defmodule Kazi.CLI do
   # authoring --json result schemas (T15.6, ADR-0023 decision 2)
   # =============================================================================
   #
-  # The structured JSON an orchestrator drives the propose → approve → run state
+  # The structured JSON an orchestrator drives the plan → approve → apply state
   # machine on. `list-proposed --json` emits the queue (each row's ref, state,
   # goal id, idea) under the optional status filter; `approve`/`reject --json`
   # emit a machine-readable transition result. All carry `schema_version`.

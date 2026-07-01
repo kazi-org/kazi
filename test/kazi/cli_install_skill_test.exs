@@ -61,6 +61,9 @@ defmodule Kazi.CLIInstallSkillTest do
       assert out =~ path
       # It teaches the recipe in the report.
       assert out =~ "next_action"
+      # The recipe uses the current verbs (plan/approve/apply), never the
+      # removed propose/run aliases (ADR-0032, T27.9).
+      assert out =~ "plan --json → approve --json → apply"
     end
 
     test "honors the :skill_dir inject seam (no flag)", %{dir: dir} do
