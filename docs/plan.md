@@ -171,6 +171,12 @@ Open work:
   manifest of the same shape) into held-true standing predicates + the existing
   surface-coverage meta-predicate, and an opt-in prod-log correlation flags a passing
   predicate whose route is erroring live, ADR-0051) -- E41.
+- **UC-054** (`AGENTS.md` and the `kazi install-skill`-generated `SKILL.md` describe
+  kazi's upstream-planning/downstream-hygiene contract generically instead of naming
+  the operator's personal skills (`/plan`/`/tidy`/`/loop`/`/qualify`) as if universal,
+  a coherence guard catches any recurrence, and the non-functional
+  `Kazi.Retrieval.Graphify` backend -- which shelled out to a `graphify` CLI that
+  does not exist -- is retired, ADR-0052) -- E42.
 
 ## Checkable Work Breakdown
 
@@ -203,6 +209,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E39 -- Orchestrator-driving ergonomics: close the plan -> approve -> apply loop over `--json` (P1, ADR-0049) -> plans/E39.md
 ### E40 -- Behavior specs: wire the dormant Gherkin importer into a first-class `docs/specs/` tier (P2, ADR-0050) -> plans/E40.md
 ### E41 -- Crystallize discovered truth: a use-case/wiring-gap importer + prod-log predicate correlation (P2, ADR-0051) -> plans/E41.md
+### E42 -- Fix kazi's self-teaching artifacts: no personal-skill assumptions, retire dead Graphify retrieval (P1, ADR-0052) -> plans/E42.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
