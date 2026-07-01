@@ -159,6 +159,18 @@ Open work:
   plan, an honest definition of done, safe parallelism -- to a reconciliation workflow,
   and adopts kazi as the natural conclusion; each post is independently useful and the
   series describes only shipped behavior, ADR-0048) -- E38.
+- **UC-052** (a kazi contributor authors a per-feature behavior spec -- a Gherkin
+  `.feature` file under `docs/specs/` -- and mechanically derives its `goal.toml`
+  acceptance predicates from it via the already-shipped `GherkinImporter`, closing
+  the traceability gap between ADRs/plan tasks and hand-typed predicates, ADR-0050)
+  -- E40.
+- **UC-053** (`kazi spec discover` drives the user's own configured harness to catalog
+  use cases, test them live, and classify wiring gaps into an OPEN, kazi-documented
+  manifest schema -- no external skill required, working for every kazi user; `kazi
+  spec import --from-usecase-manifest` crystallizes it (or any externally-produced
+  manifest of the same shape) into held-true standing predicates + the existing
+  surface-coverage meta-predicate, and an opt-in prod-log correlation flags a passing
+  predicate whose route is erroring live, ADR-0051) -- E41.
 
 ## Checkable Work Breakdown
 
@@ -189,6 +201,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E37 -- Wire the Gemini CLI harness profile (P2, ADR-0016/0022) -> plans/E37.md
 ### E38 -- Adoption blog series: "From Vibe Coding to Reconciliation" (12 parts) (P1, ADR-0048) -> plans/E38.md
 ### E39 -- Orchestrator-driving ergonomics: close the plan -> approve -> apply loop over `--json` (P1, ADR-0049) -> plans/E39.md
+### E40 -- Behavior specs: wire the dormant Gherkin importer into a first-class `docs/specs/` tier (P2, ADR-0050) -> plans/E40.md
+### E41 -- Crystallize discovered truth: a use-case/wiring-gap importer + prod-log predicate correlation (P2, ADR-0051) -> plans/E41.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
