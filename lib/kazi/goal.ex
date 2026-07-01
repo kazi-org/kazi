@@ -80,7 +80,9 @@ defmodule Kazi.Goal do
           id: atom() | nil,
           model: String.t() | nil,
           command: String.t() | nil,
-          effort: String.t() | nil
+          effort: String.t() | nil,
+          permission_mode: String.t() | nil,
+          allowed_tools: [String.t()] | nil
         }
 
   @type t :: %__MODULE__{

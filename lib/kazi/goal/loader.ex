@@ -483,8 +483,24 @@ defmodule Kazi.Goal.Loader do
          {:ok, command} <- optional_string(harness, "command", "harness"),
          # T36.6 (ADR-0047): optional Claude-only reasoning-effort lever (`--effort
          # <level>`), parsed exactly like `model`. Absent → nil (no goal-level effort).
-         {:ok, effort} <- optional_string(harness, "effort", "harness") do
-      {:ok, %{id: id, model: model, command: command, effort: effort}}
+         {:ok, effort} <- optional_string(harness, "effort", "harness"),
+         # (issue #769) optional Claude-only permission surface: `permission_mode`
+         # (`--permission-mode <mode>`) and `allowed_tools` (`--allowed-tools <t>
+         # ...`), so a goal-file can pre-authorize a headless `claude -p` dispatch
+         # against an untrusted workspace instead of getting every tool call
+         # silently denied. Absent → nil/[] (no goal-level override), parsed the
+         # same way `model`/`effort` and `[scope] paths` are.
+         {:ok, permission_mode} <- optional_string(harness, "permission_mode", "harness"),
+         {:ok, allowed_tools} <- optional_string_list(harness, "allowed_tools", "harness") do
+      {:ok,
+       %{
+         id: id,
+         model: model,
+         command: command,
+         effort: effort,
+         permission_mode: permission_mode,
+         allowed_tools: presence_list(allowed_tools)
+       }}
     end
   end
 
@@ -1703,6 +1719,12 @@ defmodule Kazi.Goal.Loader do
       _ -> {:error, "#{table}.#{key} must be a string"}
     end
   end
+
+  # An empty list reads as "not set" (nil), matching the model/command/effort
+  # harness fields above, so a goal-file with no `allowed_tools` carries `nil`
+  # rather than `[]` and the runtime's `maybe_put`-style checks stay uniform.
+  defp presence_list([]), do: nil
+  defp presence_list(list) when is_list(list), do: list
 
   defp optional_string_list(map, key, table) do
     case Map.get(map, key) do

@@ -378,6 +378,8 @@ defmodule Kazi.Runtime do
     |> Keyword.merge(harness_opts)
     |> maybe_put_goal_command(goal)
     |> maybe_put_effort(goal, opts)
+    |> maybe_put_permission_mode(goal, opts)
+    |> maybe_put_allowed_tools(goal, opts)
   end
 
   # T36.6 (ADR-0047): the Claude-only reasoning-effort lever. Fold `:effort` into
@@ -394,10 +396,47 @@ defmodule Kazi.Runtime do
     end
   end
 
+  # (issue #769) The Claude-only permission surface. A headless `claude -p`
+  # dispatch against a workspace with no accepted trust dialog gets EVERY tool
+  # call silently denied — the profile already renders `--permission-mode
+  # <mode>` / `--allowed-tools <t> ...` (Kazi.Harness.Profiles.Claude), but
+  # nothing ever set the opts that trigger it. Fold them in exactly like
+  # `:effort`: CLI `--permission-mode`/`--allowed-tools` > the goal-file
+  # `[harness] permission_mode`/`allowed_tools`; absent both, argv is
+  # byte-for-byte unchanged. A non-Claude harness drops both at the
+  # `supported_opts` take (T8.5) since neither is declared there.
+  defp maybe_put_permission_mode(adapter_opts, %Goal{} = goal, opts) do
+    case Keyword.get(opts, :permission_mode) || goal_harness_permission_mode(goal) do
+      mode when is_binary(mode) and mode != "" ->
+        Keyword.put(adapter_opts, :permission_mode, mode)
+
+      _ ->
+        adapter_opts
+    end
+  end
+
+  defp maybe_put_allowed_tools(adapter_opts, %Goal{} = goal, opts) do
+    case Keyword.get(opts, :allowed_tools) || goal_harness_allowed_tools(goal) do
+      nil -> adapter_opts
+      "" -> adapter_opts
+      tools -> Keyword.put(adapter_opts, :allowed_tools, tools)
+    end
+  end
+
   defp goal_harness_effort(%Goal{harness: harness}) when is_map(harness),
     do: Map.get(harness, :effort)
 
   defp goal_harness_effort(%Goal{}), do: nil
+
+  defp goal_harness_permission_mode(%Goal{harness: harness}) when is_map(harness),
+    do: Map.get(harness, :permission_mode)
+
+  defp goal_harness_permission_mode(%Goal{}), do: nil
+
+  defp goal_harness_allowed_tools(%Goal{harness: harness}) when is_map(harness),
+    do: Map.get(harness, :allowed_tools)
+
+  defp goal_harness_allowed_tools(%Goal{}), do: nil
 
   defp maybe_put_goal_command(adapter_opts, %Goal{harness: %{command: cmd}})
        when is_binary(cmd) and cmd != "",
