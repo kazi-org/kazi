@@ -210,7 +210,15 @@ defmodule Kazi.AdoptWriterTest do
       toml = Writer.to_toml(map)
       assert {:ok, decoded} = Toml.decode(toml)
       assert {:ok, %Goal{harness: harness}} = Loader.from_map(decoded)
-      assert harness == %{id: :opencode, model: "local/qwen3.6", command: nil, effort: nil}
+
+      assert harness == %{
+               id: :opencode,
+               model: "local/qwen3.6",
+               command: nil,
+               effort: nil,
+               permission_mode: nil,
+               allowed_tools: nil
+             }
     end
   end
 
