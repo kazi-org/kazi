@@ -11,10 +11,13 @@ predicates are objectively true, stuck, or over budget. It drives harnesses
 - `docs/adr/0001`..`0007` -- frozen decisions. Do NOT relitigate them in passing.
   To change a decision, write a superseding ADR.
 - `docs/plan.md` -- the live build plan and the unit of execution.
-- `docs/specs/` -- per-task **behavior specs** (Gherkin `.feature`, ADR-0050):
-  the reviewable "what behavior is being built" tier, upstream of `goal.toml`
-  predicates. Optional per task; a plan task references its spec via `spec:`.
-  Not the same as a "goal spec" (`goal.toml`, ADR-0036) or an Elixir `@spec`.
+- `docs/specs/` -- **behavior specs** (Gherkin `.feature`, ADR-0050): the
+  reviewable "what behavior is being built" tier, upstream of `goal.toml`
+  predicates. Per-task (a plan task references its spec via `spec:`), optional;
+  ADR-0054 also uses this SAME tier at the product/capability scope (tagged
+  Scenarios, `@role:`/`@priority:`/`@interface:`) as the use-case catalog --
+  no separate schema. Not the same as a "goal spec" (`goal.toml`, ADR-0036) or
+  an Elixir `@spec`.
 
 ## Plan layout (split, T31.1)
 

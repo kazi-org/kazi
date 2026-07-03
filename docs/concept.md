@@ -194,27 +194,35 @@ one-shot report. `kazi init`/`adopt` (ADR-0013) stays the small CODE-side
 bootstrap — it mirrors `A`, so it can express a regression guard but can never
 state intent.
 
-### 5b. Crystallizing empirically-discovered truth (ADR-0051)
+### 5b. Crystallizing empirically-discovered truth (ADR-0054, ADR-0051 decision 4)
 
 §5a's three `I`-sources all require intent to be DECLARED — written down before
 or alongside the code. A fourth source is empirical: exploring a *running*
-system to discover `I` and `A \ I` — a use-case manifest with live PASS/FAIL
-verdicts, and a wiring-gap table (MISSING/STUB/ORPHAN). kazi does not perform
-this exploration inside its own deterministic core (that would reverse ADR-0001/
-ADR-0009); instead `kazi spec discover` drives the user's own configured coding <!-- verb-drift:allow: `kazi spec` is planned (E41/ADR-0051), not yet shipped -->
-harness — the SAME opt-in, off-by-default seam `Kazi.Adopt.enrich/2` already
-uses (§ADR-0013 §4) — with a kazi-authored prompt that catalogs use cases,
-tests them live, and classifies wiring gaps into an OPEN schema
-(`kazi schema usecase-manifest`) any tool can emit. This makes the capability
-available to every kazi user, not dependent on any one operator's personal
-skill library. `Kazi.Reconcile.UseCaseManifestImporter` then CRYSTALLIZES that
-manifest (self-discovered or externally produced) the same way §5a's importers
-crystallize a document: proven-working use cases become held-true predicates,
-wiring gaps feed the existing surface-coverage meta-predicate, via
-`kazi spec import --from-usecase-manifest`. An opt-in prod-log correlation on <!-- verb-drift:allow: `kazi spec` is planned (E41/ADR-0051), not yet shipped -->
-`browser`/`http_probe`/`custom_script` predicates additionally flags a `:pass`
-verdict whose route is erroring live in production — a discovered fact no
-importer alone would catch.
+system to discover `I` and `A \ I`. An earlier design (ADR-0051 decisions 1-3)
+tried to close this with a bespoke, kazi-only "use-case manifest" JSON schema
+and a one-shot harness prompt meant to replicate exhaustive live testing in a
+single dispatch — corrected by ADR-0054: that repeated the exact mistake §5a's
+own Gherkin choice had just avoided (inventing a format instead of adopting a
+real one), and a single prompt cannot honestly promise the exhaustiveness a
+dedicated audit tool provides.
+
+The corrected design stays inside the SAME two mechanisms this doc already
+describes. A product-level use case IS a Gherkin Scenario — a directory of
+tagged `.feature` files (`@role:`/`@priority:`/`@interface:`, real Cucumber tag
+syntax) at the product/capability scope, imported through the SAME
+`GherkinImporter` §10c already uses (extended to read tags), via the SAME CLI
+verb §10c describes — no new schema, no new importer module. Discovering those
+Scenarios for an existing, undocumented codebase is not a one-shot prompt kazi
+trusts blindly; it is a new `--discover` flag on `kazi init` (ADR-0013) writing <!-- verb-drift:allow: `--discover` is planned (E41/ADR-0054), not yet shipped -->
+a starter goal whose predicate is a manifest-coverage check (every
+surface-scanner-found element, T13.4, is referenced by ≥1 Scenario) — FALSE
+until documented, driven to TRUE by ordinary `kazi apply`, converging over
+iterations the same way any other goal does, with the harness receiving only
+the grounded gap each iteration (ADR-0009). Wiring gaps stay on §5a's existing
+surface-coverage meta-predicate, untouched. An opt-in prod-log correlation on
+`browser`/`http_probe`/`custom_script` predicates (ADR-0051 decision 4,
+retained) additionally flags a `:pass` verdict whose route is erroring live in
+production — a discovered fact no importer alone would catch.
 
 ---
 
