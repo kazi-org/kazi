@@ -220,6 +220,11 @@ defmodule Kazi.Runtime do
           # T36.6 harness selection: consumed by build_adapter_opts/3 below (folded
           # into adapter_opts as the claude profile's `--effort` lever), not a Loop opt.
           :effort,
+          # (issue #769) harness selection: consumed by build_adapter_opts/3 below
+          # (folded into adapter_opts as the claude profile's `--permission-mode`/
+          # `--allowed-tools` levers), not a Loop opt.
+          :permission_mode,
+          :allowed_tools,
           # T3.4d standing wiring: dropped here and re-set in the merge below so
           # the loop's standing mode defaults to the goal-file's declared
           # `standing`, overridable by an explicit `:standing` opt (CLI flag).
@@ -378,6 +383,8 @@ defmodule Kazi.Runtime do
     |> Keyword.merge(harness_opts)
     |> maybe_put_goal_command(goal)
     |> maybe_put_effort(goal, opts)
+    |> maybe_put_permission_mode(goal, opts)
+    |> maybe_put_allowed_tools(goal, opts)
   end
 
   # T36.6 (ADR-0047): the Claude-only reasoning-effort lever. Fold `:effort` into
@@ -398,6 +405,51 @@ defmodule Kazi.Runtime do
     do: Map.get(harness, :effort)
 
   defp goal_harness_effort(%Goal{}), do: nil
+
+  # (issue #769): the Claude-only `--permission-mode` lever, parsed/folded exactly
+  # like `:effort` above (T36.6) — CLI `--permission-mode` opt > the goal-file
+  # `[harness] permission_mode`; absent both, nothing is added so argv is
+  # byte-for-byte unchanged. A headless dispatch against a workspace that has not
+  # been through Claude Code's interactive trust dialog needs this or every tool
+  # call is silently denied.
+  defp maybe_put_permission_mode(adapter_opts, %Goal{} = goal, opts) do
+    case Keyword.get(opts, :permission_mode) || goal_harness_permission_mode(goal) do
+      mode when is_binary(mode) and mode != "" ->
+        Keyword.put(adapter_opts, :permission_mode, mode)
+
+      _ ->
+        adapter_opts
+    end
+  end
+
+  defp goal_harness_permission_mode(%Goal{harness: harness}) when is_map(harness),
+    do: Map.get(harness, :permission_mode)
+
+  defp goal_harness_permission_mode(%Goal{}), do: nil
+
+  # (issue #769): the Claude-only `--allowed-tools` lever, parsed/folded exactly
+  # like `:effort` above (T36.6) — CLI `--allowed-tools` opt > the goal-file
+  # `[harness] allowed_tools`; absent both, nothing is added so argv is
+  # byte-for-byte unchanged. The CLI flag is a comma/space-separated string; the
+  # goal-file field is a TOML array; the claude profile's `normalize_tools/1`
+  # accepts either shape.
+  defp maybe_put_allowed_tools(adapter_opts, %Goal{} = goal, opts) do
+    case Keyword.get(opts, :allowed_tools) || goal_harness_allowed_tools(goal) do
+      tools when is_binary(tools) and tools != "" ->
+        Keyword.put(adapter_opts, :allowed_tools, tools)
+
+      tools when is_list(tools) and tools != [] ->
+        Keyword.put(adapter_opts, :allowed_tools, tools)
+
+      _ ->
+        adapter_opts
+    end
+  end
+
+  defp goal_harness_allowed_tools(%Goal{harness: harness}) when is_map(harness),
+    do: Map.get(harness, :allowed_tools)
+
+  defp goal_harness_allowed_tools(%Goal{}), do: nil
 
   defp maybe_put_goal_command(adapter_opts, %Goal{harness: %{command: cmd}})
        when is_binary(cmd) and cmd != "",
