@@ -1,7 +1,12 @@
 # ADR 0051: Crystallize discovered truth -- an open use-case-manifest schema, a harness-driven discovery step, and prod-log predicate correlation
 
 ## Status
-Accepted
+Accepted -- decisions 1-3 (the open `usecase-manifest.json` schema, `kazi spec
+discover` as a one-shot harness command, and `UseCaseManifestImporter`)
+SUPERSEDED by ADR-0054 (product-level use cases are Gherkin + tags via the
+existing `GherkinImporter`, discovered by an iterative `kazi init --discover`
+convergence instead). Decision 4 (prod-log predicate correlation) is RETAINED
+-- see ADR-0054 decision 6.
 
 ## Date
 2026-07-01
