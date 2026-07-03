@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.72.0](https://github.com/kazi-org/kazi/compare/v1.71.0...v1.72.0) (2026-07-03)
+
+
+### Features
+
+* **goal:** parse permission_mode/allowed_tools in the [harness] table ([9ea9334](https://github.com/kazi-org/kazi/commit/9ea93343d9df5beb190de214e7d2affbde4ada81))
+
+
+### Bug Fixes
+
+* **runtime:** fold permission_mode/allowed_tools into adapter_opts ([#769](https://github.com/kazi-org/kazi/issues/769)) ([1599ff1](https://github.com/kazi-org/kazi/commit/1599ff1ae891cf5752107f27c6548b468517f64f))
+
 ## [1.71.0](https://github.com/kazi-org/kazi/compare/v1.70.1...v1.71.0) (2026-07-01)
 
 
