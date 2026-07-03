@@ -101,6 +101,20 @@ rebase-merged with CI green, and -- for any production surface -- deployed and
 verified live (a live predicate passes), reported honestly. Many small commits;
 do not commit files from different directories in one commit.
 
+For kazi specifically, "deployed" means a tagged GitHub release AND the local
+`kazi` binary on `$PATH` upgraded to that release (`which kazi` to see which
+install it resolves to; `kazi version` to check the tag). A merged PR that
+only lives on `main` is not done -- dogfooding (`/apply`, this project's own
+`kazi apply` invocations, the goal files under `priv/examples/`) runs against
+whatever binary `kazi` resolves to locally, so a fix that has been released
+but not pulled down locally is invisible to every subsequent dogfood run and
+will silently appear "not fixed" even though the code merged. Landmine: the
+Homebrew tap (`kazi-org/tap/kazi`) has lagged behind the newest release before
+(`brew info kazi` showing an old installed version against a newer stable) --
+`brew upgrade kazi` alone is not sufficient confirmation; always verify
+`kazi version` actually matches the new tag afterward, and if it doesn't,
+install the release binary directly rather than assuming the tap caught up.
+
 ## Docs land with the code (ADR-0034)
 
 A user-facing or behavioral change is not done until its docs are done in the SAME
