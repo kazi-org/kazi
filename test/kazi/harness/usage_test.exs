@@ -146,4 +146,57 @@ defmodule Kazi.Harness.UsageTest do
       refute Map.has_key?(Claude.parse(envelope), :tool_uses)
     end
   end
+
+  describe "Claude.parse/1 — permission_denials (issue #769)" do
+    test "an envelope with no permission_denials omits the key" do
+      parsed = Claude.parse(~s({"result":"done","num_turns":3}))
+      refute Map.has_key?(parsed, :permission_denials)
+    end
+
+    test "an empty permission_denials array omits the key" do
+      parsed = Claude.parse(~s({"result":"done","permission_denials":[]}))
+      refute Map.has_key?(parsed, :permission_denials)
+    end
+
+    test "a denied tool call surfaces tool_name/tool_input/tool_use_id" do
+      envelope =
+        ~s({"result":"I need permission to write the file","permission_denials":[) <>
+          ~s({"tool_name":"Write","tool_use_id":"toolu_01abc",) <>
+          ~s("tool_input":{"file_path":"/tmp/kazi-repro/PROOF.txt","content":"converged"}}]})
+
+      parsed = Claude.parse(envelope)
+
+      assert parsed.permission_denials == [
+               %{
+                 tool_name: "Write",
+                 tool_use_id: "toolu_01abc",
+                 tool_input: %{
+                   "file_path" => "/tmp/kazi-repro/PROOF.txt",
+                   "content" => "converged"
+                 }
+               }
+             ]
+    end
+
+    test "multiple denials are carried in order, each independently normalized" do
+      envelope =
+        ~s({"result":"denied","permission_denials":[) <>
+          ~s({"tool_name":"Write"},{"tool_name":"Bash","tool_input":{"command":"ls"}}]})
+
+      parsed = Claude.parse(envelope)
+
+      assert parsed.permission_denials == [
+               %{tool_name: "Write"},
+               %{tool_name: "Bash", tool_input: %{"command" => "ls"}}
+             ]
+    end
+
+    test "a malformed denial (no tool_name) is filtered out rather than crashing" do
+      envelope =
+        ~s({"result":"denied","permission_denials":[{"tool_input":{}},{"tool_name":"Edit"}]})
+
+      parsed = Claude.parse(envelope)
+      assert parsed.permission_denials == [%{tool_name: "Edit"}]
+    end
+  end
 end
