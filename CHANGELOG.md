@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.72.1](https://github.com/kazi-org/kazi/compare/v1.72.0...v1.72.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **harness:** surface claude permission_denials in parse/1 ([#769](https://github.com/kazi-org/kazi/issues/769)) ([0262ed4](https://github.com/kazi-org/kazi/commit/0262ed4d4e6733cdacfbce478fb753ee339dd689))
+
 ## [1.72.0](https://github.com/kazi-org/kazi/compare/v1.71.0...v1.72.0) (2026-07-03)
 
 
