@@ -211,6 +211,160 @@ defmodule Kazi.CLIHarnessTest do
     if idx, do: Enum.at(argv, idx + 1)
   end
 
+  # The goal-file variant: a `[harness]` table that authors permission_mode/
+  # allowed_tools (issue #769).
+  defp write_goal_with_permission(work, permission_mode, allowed_tools) do
+    path = Path.join(work, "goal.toml")
+
+    File.write!(path, """
+    id = "cli-harness"
+    name = "CLI harness selection"
+
+    [scope]
+    workspace = "#{work}"
+
+    [harness]
+    id = "claude"
+    permission_mode = "#{permission_mode}"
+    allowed_tools = #{inspect(allowed_tools)}
+
+    [[predicate]]
+    id = "code"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+    """)
+
+    path
+  end
+
+  test "`apply --permission-mode acceptEdits --allowed-tools Write,Bash` reaches the claude harness argv (issue #769)",
+       %{work: work} do
+    goal = write_goal(work)
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(
+          [
+            "apply",
+            goal,
+            "--workspace",
+            work,
+            "--permission-mode",
+            "acceptEdits",
+            "--allowed-tools",
+            "Write,Bash"
+          ],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    argv = argv_lines(work)
+    assert "--permission-mode" in argv
+    assert permission_mode_value(argv) == "acceptEdits"
+    assert "--allowed-tools" in argv
+    assert "Write" in argv
+    assert "Bash" in argv
+  end
+
+  test "a goal-file `[harness] permission_mode`/`allowed_tools` reaches the argv with no CLI flags (issue #769)",
+       %{work: work} do
+    goal = write_goal_with_permission(work, "plan", ["Edit", "Read"])
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    argv = argv_lines(work)
+    assert permission_mode_value(argv) == "plan"
+    assert "Edit" in argv
+    assert "Read" in argv
+  end
+
+  test "the CLI `--permission-mode`/`--allowed-tools` flags OVERRIDE the goal-file `[harness]` fields (issue #769)",
+       %{work: work} do
+    goal = write_goal_with_permission(work, "plan", ["Edit", "Read"])
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(
+          [
+            "apply",
+            goal,
+            "--workspace",
+            work,
+            "--permission-mode",
+            "bypassPermissions",
+            "--allowed-tools",
+            "Write"
+          ],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    # CLI > goal-file precedence: the rendered values are the flags', not the
+    # file's. Read off the `--allowed-tools` values specifically (not blanket
+    # argv membership) — Edit/Read/Write/Bash are ALSO always present in the
+    # separate, unrelated `--tools` standard-tools flag (dispatch_surface.ex),
+    # so a bare `"Edit" in argv` check would false-positive on that flag.
+    argv = argv_lines(work)
+    assert permission_mode_value(argv) == "bypassPermissions"
+    refute "plan" in argv
+    assert allowed_tools_values(argv) == ["Write"]
+  end
+
+  test "no --permission-mode/--allowed-tools and no goal-file fields leave the argv with neither flag (issue #769)",
+       %{work: work} do
+    goal = write_goal(work)
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    argv = argv_lines(work)
+    refute "--permission-mode" in argv
+    refute "--allowed-tools" in argv
+  end
+
+  # The token immediately after `--permission-mode` in the recorded argv.
+  defp permission_mode_value(argv) do
+    idx = Enum.find_index(argv, &(&1 == "--permission-mode"))
+    if idx, do: Enum.at(argv, idx + 1)
+  end
+
+  # The tokens between `--allowed-tools` and the next flag in the recorded argv
+  # (the claude profile renders it as a variadic `--allowed-tools <t> <t> …`).
+  # Deliberately scoped to just that flag's values, not blanket argv membership
+  # — Read/Edit/Write/Bash/Glob/Grep are ALSO always present in the separate,
+  # unrelated `--tools` standard-tools flag (dispatch_surface.ex).
+  defp allowed_tools_values(argv) do
+    idx = Enum.find_index(argv, &(&1 == "--allowed-tools"))
+
+    if idx do
+      argv |> Enum.drop(idx + 1) |> Enum.take_while(&(not String.starts_with?(&1, "--")))
+    else
+      []
+    end
+  end
+
   test "an unknown --harness id fails with a clear message", %{work: work} do
     goal = write_goal(work)
 

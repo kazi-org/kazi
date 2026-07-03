@@ -271,7 +271,15 @@ defmodule Kazi.Goal.LoaderTest do
       }
 
       assert {:ok, %Goal{harness: harness}} = Loader.from_map(data)
-      assert harness == %{id: :opencode, model: "local/qwen3.6", command: nil, effort: nil}
+
+      assert harness == %{
+               id: :opencode,
+               model: "local/qwen3.6",
+               command: nil,
+               effort: nil,
+               permission_mode: nil,
+               allowed_tools: nil
+             }
     end
 
     test "a [harness] id-only table parses with nil model/command" do
@@ -397,7 +405,9 @@ defmodule Kazi.Goal.LoaderTest do
                id: :opencode,
                model: "local/qwen3.6",
                command: "/usr/local/bin/opencode",
-               effort: nil
+               effort: nil,
+               permission_mode: nil,
+               allowed_tools: nil
              }
     end
   end
