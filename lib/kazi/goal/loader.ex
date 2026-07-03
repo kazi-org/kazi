@@ -66,12 +66,14 @@ defmodule Kazi.Goal.Loader do
   goal's `harness` stays `nil` (no goal-level preference; resolution falls
   through to config/default). Loaded as a `%{id:, model:, command:}` map.
 
-  | Key       | TOML type | Maps to              |
-  |-----------|-----------|----------------------|
-  | `id`      | string    | `harness.id` — a KNOWN harness id atom (`"claude"`, `"opencode"`, …); an unknown id is a validation error (never `String.to_atom/1`, so a typo cannot leak an atom) |
-  | `model`   | string    | `harness.model` — optional provider/model override |
-  | `command` | string    | `harness.command` — optional binary override |
-  | `effort`  | string    | `harness.effort` — optional Claude-only reasoning-effort level (`--effort <level>`, T36.6); overridden by the CLI `--effort` flag |
+  | Key              | TOML type        | Maps to              |
+  |------------------|------------------|----------------------|
+  | `id`             | string           | `harness.id` — a KNOWN harness id atom (`"claude"`, `"opencode"`, …); an unknown id is a validation error (never `String.to_atom/1`, so a typo cannot leak an atom) |
+  | `model`          | string           | `harness.model` — optional provider/model override |
+  | `command`        | string           | `harness.command` — optional binary override |
+  | `effort`         | string           | `harness.effort` — optional Claude-only reasoning-effort level (`--effort <level>`, T36.6); overridden by the CLI `--effort` flag |
+  | `permission_mode`| string           | `harness.permission_mode` — optional Claude-only permission mode (`--permission-mode <mode>`, issue #769); overridden by the CLI `--permission-mode` flag |
+  | `allowed_tools`  | array of strings | `harness.allowed_tools` — optional Claude-only tool allow-list (`--allowed-tools <t> …`, issue #769); overridden by the CLI `--allowed-tools` flag |
 
   `id` is required when a `[harness]` table is present. The loaded `id` threads
   into `Kazi.Harness.resolve/1` as `:goal_harness` (the wiring itself is T8.7).
@@ -483,8 +485,24 @@ defmodule Kazi.Goal.Loader do
          {:ok, command} <- optional_string(harness, "command", "harness"),
          # T36.6 (ADR-0047): optional Claude-only reasoning-effort lever (`--effort
          # <level>`), parsed exactly like `model`. Absent → nil (no goal-level effort).
-         {:ok, effort} <- optional_string(harness, "effort", "harness") do
-      {:ok, %{id: id, model: model, command: command, effort: effort}}
+         {:ok, effort} <- optional_string(harness, "effort", "harness"),
+         # (issue #769): optional Claude-only permission mode (`--permission-mode
+         # <mode>`), parsed exactly like `effort`. Absent → nil.
+         {:ok, permission_mode} <- optional_string(harness, "permission_mode", "harness"),
+         # (issue #769): optional Claude-only tool allow-list (`--allowed-tools
+         # <t> …`). An empty/absent array means no goal-level override (nil, not
+         # `[]`), mirroring the nil-means-unset convention every other harness
+         # field here uses.
+         {:ok, allowed_tools} <- optional_string_list(harness, "allowed_tools", "harness") do
+      {:ok,
+       %{
+         id: id,
+         model: model,
+         command: command,
+         effort: effort,
+         permission_mode: permission_mode,
+         allowed_tools: if(allowed_tools == [], do: nil, else: allowed_tools)
+       }}
     end
   end
 
