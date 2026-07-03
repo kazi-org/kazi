@@ -38,11 +38,15 @@ defmodule Kazi.Goal do
     * `harness` — the goal's harness selection (T8.6, ADR-0016): which coding
       harness this goal prefers to be driven by, declared in the goal-file's
       `[harness]` table. A plain map `%{id: atom|nil, model: String.t()|nil,
-      command: String.t()|nil, effort: String.t()|nil}` — `id` is the harness id
+      command: String.t()|nil, effort: String.t()|nil, permission_mode:
+      String.t()|nil, allowed_tools: [String.t()]|nil}` — `id` is the harness id
       (e.g. `:opencode`), `model` an optional provider/model override, `command` an
       optional binary override, `effort` an optional Claude-only reasoning-effort
-      level (`--effort`, T36.6). Default `nil` (no goal-level preference; resolution
-      falls through to config/default, ADR-0016). Like `mode`/`standing`, this is authoring
+      level (`--effort`, T36.6), `permission_mode` an optional Claude-only
+      permission mode (`--permission-mode`, issue #769), `allowed_tools` an
+      optional Claude-only tool allow-list (`--allowed-tools`, issue #769).
+      Default `nil` (no goal-level preference; resolution falls through to
+      config/default, ADR-0016). Like `mode`/`standing`, this is authoring
       intent recorded on the goal; threading the loaded `id` into
       `Kazi.Harness.resolve/1` as `:goal_harness` is T8.7.
     * `groups` — the goal's declared **group taxonomy** (T12.1, ADR-0020): a list
@@ -74,13 +78,16 @@ defmodule Kazi.Goal do
 
   @typedoc """
   A goal's harness selection (T8.6, ADR-0016): the harness `id` it prefers,
-  plus optional `model`/`command` overrides. Any field may be `nil`.
+  plus optional `model`/`command`/`effort`/`permission_mode`/`allowed_tools`
+  overrides. Any field may be `nil`.
   """
   @type harness :: %{
           id: atom() | nil,
           model: String.t() | nil,
           command: String.t() | nil,
-          effort: String.t() | nil
+          effort: String.t() | nil,
+          permission_mode: String.t() | nil,
+          allowed_tools: [String.t()] | nil
         }
 
   @type t :: %__MODULE__{
