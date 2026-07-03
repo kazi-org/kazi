@@ -230,11 +230,22 @@ defmodule Kazi.Harness.Profiles.Claude do
   Recognised fields: `result` (final text), `usage` (summed to a token total,
   surfaced as `:tokens` and `:cost => %{tokens: n}`, AND mapped onto the
   per-field economy envelope — `:usage`/`:usage_raw`/`:usage_fidelity`, T34.2),
-  `total_cost_usd` (`:cost_usd`), a touched working set (`:touched`), and — when a
+  `total_cost_usd` (`:cost_usd`), a touched working set (`:touched`), — when a
   richer envelope carries assistant `messages[].content[]` `tool_use` blocks —
-  the agent's tool-use names (`:tool_uses`, T34.3). The default
-  `--output-format json` envelope carries no per-tool breakdown, so `:tool_uses`
-  is absent there.
+  the agent's tool-use names (`:tool_uses`, T34.3), and `permission_denials`
+  (`:permission_denials`, issue #769). The default `--output-format json`
+  envelope carries no per-tool breakdown, so `:tool_uses` is absent there.
+
+  ## `permission_denials` (issue #769)
+
+  A headless `claude -p` dispatch against a workspace that has not been through
+  Claude Code's interactive trust dialog gets every tool call silently DENIED —
+  the model tries, the call is refused, and nothing changes on disk. The
+  envelope's `permission_denials` array names exactly which tool calls were
+  refused (`tool_name`/`tool_input`, plus `tool_use_id` when present); parsing
+  it into `:permission_denials` makes that diagnosable from kazi's OWN `--json`/
+  `--stream` output instead of requiring a manual argv replay outside kazi. An
+  absent or empty array omits the key entirely (additive, like `:touched`).
   """
   @spec parse(String.t()) :: map()
   def parse(output) when is_binary(output) do
@@ -274,6 +285,7 @@ defmodule Kazi.Harness.Profiles.Claude do
     |> put_cost(envelope)
     |> put_touched(envelope)
     |> put_tool_uses(envelope)
+    |> put_permission_denials(envelope)
   end
 
   defp put_result(acc, %{"result" => result}) when is_binary(result),
@@ -371,6 +383,34 @@ defmodule Kazi.Harness.Profiles.Claude do
   end
 
   defp message_tool_uses(_message), do: []
+
+  # (issue #769) Surface which tool calls were denied — typically because the
+  # workspace has no accepted trust dialog and a headless dispatch has no human
+  # to accept one. Each entry keeps `tool_name`/`tool_input` (and `tool_use_id`
+  # when present) so the denial is localized, mirroring how `:touched` carries
+  # the working set rather than a bare count. Best-effort and tolerant: a
+  # missing/odd shape or an empty array omits the key (additive).
+  @spec put_permission_denials(map(), map()) :: map()
+  defp put_permission_denials(acc, %{"permission_denials" => denials}) when is_list(denials) do
+    case Enum.filter(denials, &valid_denial?/1) |> Enum.map(&normalize_denial/1) do
+      [] -> acc
+      denials -> Map.put(acc, :permission_denials, denials)
+    end
+  end
+
+  defp put_permission_denials(acc, _envelope), do: acc
+
+  defp valid_denial?(%{"tool_name" => name}) when is_binary(name), do: true
+  defp valid_denial?(_denial), do: false
+
+  defp normalize_denial(denial) do
+    %{tool_name: Map.get(denial, "tool_name")}
+    |> maybe_put_denial(:tool_use_id, Map.get(denial, "tool_use_id"))
+    |> maybe_put_denial(:tool_input, Map.get(denial, "tool_input"))
+  end
+
+  defp maybe_put_denial(map, _key, nil), do: map
+  defp maybe_put_denial(map, key, value), do: Map.put(map, key, value)
 
   @spec total_tokens(map()) :: non_neg_integer()
   defp total_tokens(usage) do
