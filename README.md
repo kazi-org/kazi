@@ -353,7 +353,18 @@ its own preferred harness in an optional `[harness]` table:
 id = "opencode"                            # a KNOWN harness id (claude / opencode / codex / antigravity / claw)
 model = "local-ollama/qwen3.6:35b-a3b"       # optional provider/model override
 command = "opencode"                       # optional binary override
+effort = "high"                            # optional Claude-only reasoning-effort level
+permission_mode = "acceptEdits"            # optional Claude-only permission mode
+allowed_tools = ["Write", "Bash", "Edit"]  # optional Claude-only tool allow-list
 ```
+
+`permission_mode` / `allowed_tools` are Claude-only (silently dropped by every
+other harness) and forward `claude --permission-mode <mode>` /
+`claude --allowed-tools <t> …`. They're also settable per run as CLI flags —
+`--permission-mode` / `--allowed-tools` (each overrides the matching
+`[harness]` field) — which matters for a **headless dispatch against a
+workspace that has not been through Claude Code's interactive trust dialog**,
+where every tool call would otherwise be silently denied.
 
 Or set a machine-wide default in app config:
 
