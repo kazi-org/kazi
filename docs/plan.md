@@ -209,6 +209,20 @@ Open work:
   (`no_stubs`/`oss_hygiene`/`docs_updated`) replacing prose wave gates, an apply
   preflight, and a clarify floor that flags a code goal with no landing mode,
   ADR-0055) -- E44.
+- **UC-059** (a PROJECT is plannable and drivable as one kazi artifact: `kazi plan
+  --project` authors a roadmap as a goal DAG (`needs` edges between goals), rolling-wave
+  is native (an outline phase is a goal whose `plan_expanded` predicate converges when
+  the phase's goal-set exists, floor-passed, approved -- a standing roadmap apply
+  triggers the next planning pass when the frontier lands), `kazi apply <roadmap>` runs
+  goals in topological frontiers to a collective verdict, `kazi plan render` emits the
+  human-readable plan as a GENERATED view of the read-model, and `kazi plan --discover`
+  unifies the authoring on-ramp, ADR-0056) -- E45.
+- **UC-060** (kazi is the ONE system for engineering work -- no external plan/apply
+  orchestration skills required: the escalation ladder is `[escalation]` goal-file data
+  (core still holds no selection policy), the self-teaching artifacts carry the full
+  surface from the binary alone, kazi's own WBS migrates to a roadmap goal-DAG with
+  `docs/plan.md` generated, and retirement of the external skills is gated on a
+  zero-skill idea->landed-PR->live-verify dogfood, ADR-0056) -- E45.
 
 ## Checkable Work Breakdown
 
@@ -244,6 +258,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E42 -- Fix kazi's self-teaching artifacts: no personal-skill assumptions, retire dead Graphify retrieval (P1, ADR-0052) -> plans/E42.md
 ### E43 -- Higher-level interactive-surface predicates: a `:browser` assertion pack + a first-class `:cli` provider (P1, ADR-0053) -> plans/E43.md
 ### E44 -- Landing is part of convergence: `[integration]` + implicit `landed` predicate + controller-owned process contract (P1, ADR-0055) -> plans/E44.md
+### E45 -- One system: roadmap-scope planning, plan-as-generated-view, escalation-as-data, skill retirement (P1, ADR-0056) -> plans/E45.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -336,6 +351,29 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-03 -- Change Summary (E45: one system -- kazi subsumes the plan/apply orchestration skills; ADR-0056)
+- Operator directive: before kazi there was one plan/apply orchestration-skill pair;
+  now there are TWO parallel systems maintaining copies of the same facts (`acc:`
+  lines vs predicates, hand-authored Waves vs the `needs`-DAG schedule, checkpoint
+  files vs the read-model, the pool vs the native scheduler). Requirement: ONE way of
+  doing things, one set of tools to maintain.
+- ADR-0056 written (Accepted): `kazi plan --project` authors a roadmap as a goal DAG
+  (ADR-0028 lifted one level); rolling-wave is native -- an outline phase is a goal
+  whose `plan_expanded` predicate converges when the phase's goal-set exists, floor-
+  passed, approved, so planning itself converges and a standing roadmap apply
+  schedules the next planning pass; `kazi plan render` makes the plan document a
+  generated VIEW (output, never input); `kazi plan --discover` unifies the on-ramp;
+  the ADR-0035 escalation ladder becomes `[escalation]` goal-file DATA (supersedes
+  decision 1's ladder location; no-policy-in-core retained -- README row amended);
+  non-engineering explicitly OUT; retirement gated on a zero-skill
+  idea->landed->live dogfood (extends ADR-0031; ADR-0026 historical on proof).
+- E45 added (10 tasks, plans/E45.md; UC-059/UC-060): Wave A roadmap core
+  (T45.1-T45.5), Wave B discovery + escalation (T45.6-T45.7, independent), Wave C
+  retirement (T45.8-T45.10) deliberately coarse per the rolling-wave discipline and
+  gated on Wave A + the E44 landing dogfood (T44.14); T45.9 migrates kazi's OWN WBS
+  to a roadmap (pre-migration plan archived verbatim as the escape hatch); T45.10 is
+  the exit proof that flips ADR-0026/0031 status notes ONLY on a passing run.
 
 ### 2026-07-03 -- Change Summary (E44: landing is part of convergence; ADR-0055)
 - Operator-reported regression vs the external plan->apply orchestration: parallel
