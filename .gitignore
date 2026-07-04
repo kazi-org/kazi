@@ -42,3 +42,10 @@ package-lock.json
 .claude/scratch/
 .claude/worktrees/
 .claude-checkpoint.*.md
+
+# Per-dispatch, per-workspace kazi artifacts (T4.4, ADR-0010): the orientation
+# pack (`.kazi/context.md`) is regenerated fresh each dispatch, and `.mcp.json`
+# is machine-local MCP client wiring written into the target workspace ahead of
+# a dispatch (docs/devlog.md) — neither is a repo source file.
+/.kazi/
+/.mcp.json
