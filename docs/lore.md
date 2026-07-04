@@ -238,8 +238,10 @@ command-runner providers (`CustomScript`/`TestRunner`/`Ratchet` via `CommandRunn
 use `System.cmd`, a fresh OS subprocess distinct from the agent's `claude -p`
 dispatch -- so no change was needed for it. CLEAN-TREE is added by
 `observe_with_isolation/1` wrapping the tick in a throwaway detached worktree at
-`clean_ref` (`Kazi.Enforcement.Isolation.with_clean_tree/3`, the same
-`git worktree add --detach` pattern as `Kazi.Ratchet.resolve_git_ref/3`).
+`clean_ref` (`Kazi.Enforcement.Isolation.with_clean_tree/4` as of L-0024 -- see
+that entry, candidate-overlaid + `read_only_paths`-pinned, arity was `/3` at
+T32.4 -- the same `git worktree add --detach` pattern as
+`Kazi.Ratchet.resolve_git_ref/3`).
 LANDMINE: clean-tree MUST be scoped to the tamper-prone GRADERS (guard + held-out
 predicates), NOT all checkers -- running a visible iterating predicate from a clean
 ref would never see the agent's UNCOMMITTED work, so the loop could never converge
@@ -448,3 +450,30 @@ from kazi's OWN result, not a manual argv replay. Regression:
 `stuck_bundle`/the `--stream` per-iteration event (would need a new `Data` field +
 carry-forward, mirroring `working_set_digest`) -- today it is on the raw harness
 dispatch result, not yet distilled into the loop's terminal/streamed output.
+
+### L-0024 #enforcement #isolation #held-out #worktree #landmine -- clean-tree isolation grading the WHOLE cwd from frozen `ref` makes a held-out predicate structurally unable to converge
+Deep-review 001 H1: L-0015 scoped clean-tree isolation to the tamper-prone graders
+(guard + held-out predicates) correctly, but the ORIGINAL realization then swapped
+the checker's ENTIRE cwd to a worktree at frozen `clean_ref` -- so a held-out
+`:custom_script`/`:tests` acceptance predicate graded committed `HEAD`, never the
+agent's uncommitted working-copy fix. Because `dispatch_action/2` also filters
+held-out ids out of the agent's work-list (T32.6, ADR-0042 §6 -- the agent must not
+see what it's graded on), and `integrate` (the only commit path) never runs while
+`decide/2` clause 2 (code still "failing") keeps firing, a goal with a held-out
+acceptance predicate under default enforcement could loop FOREVER without ever
+reaching either `:converged` or `integrate` -- a documented, default-on integrity
+feature silently defeating itself. Fixed: `Kazi.Enforcement.Isolation.prepare/3`
+(now arity 3, `with_clean_tree/4`) OVERLAYS the agent's candidate working-tree state
+(tracked edits via a `git diff ref` patch + untracked new files copied
+individually, respecting `.gitignore`) onto the clean worktree BEFORE the checker
+runs, then re-checks-out ONLY the configured `read_only_paths` from `ref` -- so the
+grader's OWN definition stays pinned (an in-iteration edit to IT still cannot flip
+the verdict) while the candidate fix under test is graded live. LANDMINE for
+operators: a grader/checker file is protected from overlay ONLY if it is listed in
+`read_only_paths` -- before this fix EVERY file was implicitly pinned (too strong,
+the root cause); a held-out `:custom_script` predicate's own script/config path
+must now be added to `read_only_paths` to keep it tamper-proof. Regression:
+`test/kazi/enforcement/isolation_working_tree_test.exs` (candidate overlay, deletion
+overlay, grader-path pinning, absent-at-ref pinning, graceful degradation, and an
+end-to-end `Kazi.Loop` convergence proof). (2026-07-03, deep-review 001
+remediation.)

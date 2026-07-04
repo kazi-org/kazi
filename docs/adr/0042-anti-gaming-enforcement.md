@@ -127,14 +127,14 @@ landed. The findings:
 
 - **Clean-tree rung — added at the seam.** When enforcement is active,
   `observe_with_isolation/1` wraps the observation: it prepares a throwaway detached
-  worktree at `clean_ref` (`Kazi.Enforcement.Isolation.with_clean_tree/3`, the same
-  `git worktree add --detach` pattern `Kazi.Ratchet.resolve_git_ref/3` uses) and
-  evaluates the **guard + held-out** predicates (the tamper-prone graders) against
-  it, removing it after. The ordinary visible predicates still evaluate against the
-  working copy — running them from a clean ref would never see the agent's
-  uncommitted work and the loop could not converge. So the seam ADR-0042 §1 assumed
-  exists and is clean; the realization is SCOPED to the graders, not all checkers,
-  which is the honest reading of §1(a) ("checker definitions and their inputs").
+  worktree at `clean_ref` (`Kazi.Enforcement.Isolation.with_clean_tree/4`, the same
+  `git worktree add --detach` pattern `Kazi.Ratchet.resolve_git_ref/3` uses,
+  candidate-overlaid per the H1 fix below) and evaluates the **guard + held-out**
+  predicates (the tamper-prone graders) against it, removing it after. The ordinary
+  visible predicates still evaluate against the working copy. So the seam ADR-0042
+  §1 assumed exists and is clean; the realization is SCOPED to the graders, not all
+  checkers, which is the honest reading of §1(a) ("checker definitions and their
+  inputs").
 
 - **The reported guarantee is the actual one.** Clean-tree needs a git workspace.
   When that is absent the worktree add fails, isolation **degrades** to the working
@@ -145,6 +145,37 @@ landed. The findings:
 - **Landmine.** The clean tree is a temp-dir worktree, always removed in an `after`,
   never the shared working dir (lore L-0014: a sibling session can reset the shared
   tree).
+
+## H1 fix (deep-review 001, 2026-07-03): candidate-graded clean tree
+
+`docs/deep-reviews/001-full-codebase.md` H1 found that grading the ENTIRE clean-tree
+cwd wholesale — the original T32.4 realization above — made a held-out/guard
+predicate structurally unable to converge: the fix under test lives in the agent's
+working copy, but the isolated checker read frozen `clean_ref`, and the only commit
+path (`integrate`) is itself gated on the same held-out check passing. A valid
+configuration could loop forever, dispatching an agent whose fix the checker would
+never see.
+
+The fix: `Kazi.Enforcement.Isolation.prepare/3` now OVERLAYS the agent's candidate
+working-tree state (tracked edits + untracked new files) onto the clean worktree
+before the checker runs, then re-pins ONLY the configured `read_only_paths` — the
+grader's OWN definition files — back to `clean_ref`. This keeps both properties §1
+actually needs: a working-copy edit to the *candidate* fix IS seen (so a held-out
+predicate can converge once satisfied, without waiting for a commit), while a
+working-copy edit to a *grader* file still cannot change the verdict (it stays
+pinned to the committed state). See `Kazi.Enforcement.Isolation`'s moduledoc for the
+overlay/pin mechanics and `test/kazi/enforcement/isolation_working_tree_test.exs`
+for the regression coverage (both properties, plus the graceful-degradation path,
+unchanged).
+
+One behavior change operators should know: a grader/checker file is now protected
+from clean-tree overlay ONLY if it is listed in `read_only_paths` — a file NOT
+listed is overlaid with its working-copy state like any other candidate file. Before
+this fix, EVERY file was implicitly pinned (too strong, and the root cause of H1).
+An operator who wants a checker script protected from both the read-only-write flag
+(guarantee 2) and clean-tree overlay (guarantee 1) lists it once, in
+`read_only_paths` — one coherent "this is the grader" declaration instead of two
+different implicit ones.
 
 ## Diff-inspection guard (T32.5, §5 realized — ADVISORY)
 
