@@ -33,25 +33,36 @@ the held-out acceptance subset, is the `held_out` predicate flag, T32.6.)
 The **GUARD** and **held-out** predicates — the tamper-prone graders — are resolved
 and run from a **clean detached git worktree** at `clean_ref` (default `HEAD`), in a
 **separate OS process** (kazi's command-runner providers already shell out via a
-fresh subprocess). So an in-iteration edit to a checker file in the agent's working
-copy **cannot change the verdict**: the worktree is the committed state, not the
-working copy.
+fresh subprocess). Before the checker runs, the worktree is **overlaid** with the
+agent's candidate working-tree state (tracked edits + untracked new files), then the
+declared `read_only_paths` — the grader's OWN definition files — are **re-pinned**
+to `clean_ref`. So an in-iteration edit to a *grader* file in the agent's working
+copy still **cannot change the verdict** (that path is always resolved from the
+committed state), while an in-iteration edit to the *candidate fix under test* IS
+seen — a held-out predicate can converge as soon as the working copy satisfies it,
+without waiting for `integrate` to commit it first (deep-review 001 H1).
 
 The ordinary *visible* predicates the agent iterates on still run against the
 working copy, so the agent's in-flight work is seen and the loop converges normally.
 
+> **Only `read_only_paths` is pinned.** A grader/checker/test file is protected from
+> clean-tree overlay if and only if it is listed in `read_only_paths`. A file NOT
+> listed there is overlaid like any other candidate file — so a `[[enforcement]]`
+> block that declares a held-out `:custom_script` checker should list that checker's
+> own script/config path in `read_only_paths` if it must stay tamper-proof.
+
 > **The verified seam.** The only place `Kazi.Loop` invokes a provider is
 > `run_provider/3`, with a context carrying `workspace: data.workspace`. Enforcement
 > swaps that workspace for the clean worktree for the duration of an observation
-> (`Kazi.Loop.observe_with_isolation/1` → `Kazi.Enforcement.Isolation.with_clean_tree/3`,
+> (`Kazi.Loop.observe_with_isolation/1` → `Kazi.Enforcement.Isolation.with_clean_tree/4`,
 > the same `git worktree add --detach` pattern `Kazi.Ratchet` uses) and removes it
 > after. Full container isolation is **deferred** (ADR-0042 §1). See the verified
-> seam note in `docs/adr/0042-anti-gaming-enforcement.md`.
+> seam note + the H1 fix section in `docs/adr/0042-anti-gaming-enforcement.md`.
 
 **Honest reporting.** When the workspace is not a git repo (or `clean_ref` cannot be
-checked out) isolation **degrades gracefully** — the checker still runs, against the
-working copy — and `clean_tree` **drops out of the reported guarantees**. A partial
-guarantee is visible, never assumed.
+checked out, or the overlay/pin steps fail) isolation **degrades gracefully** — the
+checker still runs, against the working copy — and `clean_tree` **drops out of the
+reported guarantees**. A partial guarantee is visible, never assumed.
 
 ### 2. Read-only lease
 
