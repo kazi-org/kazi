@@ -195,6 +195,20 @@ Open work:
   looks right" are declarative predicates on what a real browser observes, not a
   hand-authored click/type sequence; runner + schema only, zero kazi-core change,
   ADR-0053) -- E43.
+- **UC-057** (converged work always LANDS: an `[integration]` goal-file block
+  (commit/branch/pr/merge/none) is enforced as an implicit `landed` predicate, so a
+  code-green-but-dirty workspace is an UNSATISFIED vector -- the inner agent commits in
+  small scoped conventional commits, Integrate verifies-then-ships (push -> PR with the
+  predicate vector as body -> rebase-merge; no more `git add -A` monolith), and
+  `--parallel` groups land as per-group branches/PRs merged in `needs` order with
+  `git cherry` silent-revert verification, ADR-0055) -- E44.
+- **UC-058** (the working discipline an external orchestrator gave for free is
+  controller-owned: a versioned, cacheable process-contract section in every dispatch
+  prompt (small one-directory commits, zero-stub, lore-grep, migration-number safety;
+  `[conventions]` to extend/disable), deterministic gate providers
+  (`no_stubs`/`oss_hygiene`/`docs_updated`) replacing prose wave gates, an apply
+  preflight, and a clarify floor that flags a code goal with no landing mode,
+  ADR-0055) -- E44.
 
 ## Checkable Work Breakdown
 
@@ -229,6 +243,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E41 -- Crystallize discovered truth: Gherkin + tags for product-level use cases, iterative discovery via `kazi init --discover`, and prod-log predicate correlation (P2, ADR-0054/ADR-0051) -> plans/E41.md
 ### E42 -- Fix kazi's self-teaching artifacts: no personal-skill assumptions, retire dead Graphify retrieval (P1, ADR-0052) -> plans/E42.md
 ### E43 -- Higher-level interactive-surface predicates: a `:browser` assertion pack + a first-class `:cli` provider (P1, ADR-0053) -> plans/E43.md
+### E44 -- Landing is part of convergence: `[integration]` + implicit `landed` predicate + controller-owned process contract (P1, ADR-0055) -> plans/E44.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -321,6 +336,32 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-03 -- Change Summary (E44: landing is part of convergence; ADR-0055)
+- Operator-reported regression vs the external plan->apply orchestration: parallel
+  `kazi apply` runs finish and NOTHING commits -- N dirty worktrees to reconcile by
+  hand. Root-caused structurally: `Kazi.Loop.decide/2` reaches `:converged` (clause 1)
+  before `:integrate` (clause 3) whenever the goal is all code predicates, so the
+  existing branch->commit->push->PR->rebase-merge action only fires when a LIVE
+  predicate keeps the vector unsatisfied. Compounding: Integrate bulk-commits
+  (`git add -A` + one monolith) and the dispatch prompt carries zero process
+  discipline.
+- ADR-0055 written (Accepted): `[integration]` block enforced as an implicit `landed`
+  predicate (T0.8 guard untouched -- landing joins the objective bar); Integrate
+  verifies-then-ships; a versioned controller-owned process-contract prompt section
+  (the explicit decision: goal-files stay declarative -- kazi plan does NOT embed the
+  orchestrator's ~15 prose discipline blocks; each routes to predicate / prompt
+  contract / controller behavior); per-group branch-PR landing in `needs` order under
+  `--parallel` with `git cherry` verification; first-class `no_stubs`/`oss_hygiene`/
+  `docs_updated` gate providers; an apply preflight. Also the missing half of
+  ADR-0031's subsumption claim.
+- E44 added (14 tasks, plans/E44.md; UC-057/UC-058): Wave A core chain T44.1->T44.3 +
+  process contract T44.4 + permission alignment T44.5 (builds on #776/#769); Wave B
+  gate providers + preflight (independent); Wave C parallel landing; Wave D authoring
+  floor + self-teaching docs (incl. the Tier-0 explicit `landed` custom_script pattern
+  for older binaries) + a live dogfood. Interim mitigation usable today: an explicit
+  `landed` predicate in any goal-set drives the inner agent to commit via failing-
+  predicate evidence.
 
 ### 2026-06-28 -- Change Summary (E39 added: resolve the T15.9 orchestrator-driving friction; ADR-0049)
 - Operator directive (/plan "to resolve the friction"): the T15.9 nested-loop dogfood
