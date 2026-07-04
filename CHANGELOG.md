@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.0](https://github.com/kazi-org/kazi/compare/v1.72.2...v1.73.0) (2026-07-04)
+
+
+### Features
+
+* **dashboard:** fleet run registry, starmap LiveView, kazi dashboard verb (E46 slice) ([090da6b](https://github.com/kazi-org/kazi/commit/090da6b26b6f852725ac22d7a66eecdff073c9ed))
+
 ## [1.72.2](https://github.com/kazi-org/kazi/compare/v1.72.1...v1.72.2) (2026-07-04)
 
 
