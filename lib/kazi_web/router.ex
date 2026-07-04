@@ -33,6 +33,9 @@ defmodule KaziWeb.Router do
     pipe_through(:browser)
 
     live("/", DashboardLive, :index)
+    # T46.5: the fleet starmap — every registered `kazi apply` run at a glance
+    # (ADR-0011 read projection of `Kazi.ReadModel.RunRegistry`, ADR-0057).
+    live("/starmap", StarmapLive, :index)
     # T3.6b: the goal board — goals + status + predicate vector + iteration count,
     # live-updating from Kazi.ReadModel (ADR-0011 read projection).
     live("/goals", GoalBoardLive, :index)
