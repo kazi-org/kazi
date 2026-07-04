@@ -2647,3 +2647,47 @@ format` clean. End-to-end proof under a *real* simulated-burrito env (the actual
 spawned a nested `elixir` that returned `{:ran, "CHILD_BEAM_OK\n", 0}` — the BEAM
 booted correctly instead of re-entering the host release. Released-binary
 confirmation follows the next release build. Resolves lore **L-0022**.
+
+## 2026-07-04 — E46 starmap slice: first kazi-driven feature lands; live verification catches a seam-level-only proof
+
+The first E46 slice (run registry T46.1, `kazi dashboard` verb T46.4, starmap
+LiveView skeleton T46.5) was driven end to end BY kazi (`kazi apply --harness
+claude --model claude-sonnet-5`, goal-set from the approved proposal): 7/7
+predicates converged, PR #789 rebase-merged, v1.73.0 released, local binary
+upgraded. Findings, in the order the DoD walk surfaced them:
+
+- **Budget accounting is cache-inclusive and BIG.** One sonnet-5 dispatch on
+  this slice measured ~15.1M counted tokens (ADR-0046 accounting). A 600k
+  `max_tokens` cap — generous-sounding — is ~4% of one dispatch. Calibrate caps
+  in dispatch-units, not API-token intuition.
+- **`over_budget` reports a STALE vector** (kazi#790): the budget gate fired
+  after a dispatch that had actually finished ALL the work, and the terminal
+  result showed the pre-dispatch 2/7 — re-running with a raised budget
+  converged at iteration 0 with zero dispatches. Until fixed, treat an
+  over_budget vector as "unknown", not "no progress": re-evaluate before
+  escalating (an escalation ladder would have pointlessly re-dispatched a
+  frontier model onto green work).
+- **`kazi plan` accepts what `approve` cannot load** (kazi#788): caller-drafts
+  custom_script predicates without `cmd` persist fine, then approve fails with
+  "the stored goal no longer loads". Workaround: re-plan with config.cmd; the
+  upsert on the same proposal_ref replaces the stored goal.
+- **File-scoped `mix test` predicates are gameable-by-honesty.** The
+  `starmap_view` predicate ran "this test file passes"; the agent (openly —
+  the moduledoc says so) built a walking skeleton and wrote tests for what it
+  built. The description demanded wave bands + 6 node states; the cmd could
+  not see the difference. Predicates must pin the SPEC (assert the behavior),
+  not delegate to a test file the implementer authors.
+- **Live verification caught a seam-level-only proof.** T46.1's registry
+  passed 9 ExUnit tests and its migration applies — but a REAL converged
+  `kazi apply` on the released v1.73.0 binary left the `runs` table EMPTY:
+  the live apply path never calls RunRegistry. Same shape as the
+  context-store non-engagement (2026-07-01): module-green, production-inert.
+  T46.1 reopened with an integration-predicate requirement. The starmap
+  LiveView also renders unstyled (semantic HTML, no design language) — the
+  design reference exists for the restyle pass.
+- The main-CI red after the merge was the known ProviderDeprecationTest
+  stderr-capture flake; re-run greened it.
+
+Net: kazi drove a real 946-line feature to converged/merged/released in two
+iterations, and the definition-of-done's live-verify step earned its place
+twice in one slice.
