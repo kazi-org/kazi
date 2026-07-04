@@ -135,6 +135,8 @@ defmodule Kazi.CLI do
     budget: :integer,
     context_store: :string,
     context_budget: :integer,
+    port: :integer,
+    bind: :string,
     help: :boolean,
     version: :boolean
   ]
@@ -197,6 +199,10 @@ defmodule Kazi.CLI do
       "`apply` only: opt into the context store for the run — index oversized failing evidence and inject budget-fitted snippets instead of inlining it each iteration (currently `gist`). Off by default; absent, the dispatch + result are byte-identical (ADR-0045).",
     context_budget:
       "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
+    port:
+      "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
+    bind:
+      "`dashboard` only: interface to bind (default 127.0.0.1 -- loopback only). Set explicitly to bind a non-loopback address; overriding is loud (printed at boot), never silent.",
     help: "Show this help and exit.",
     version: "Print the kazi version and exit."
   }
@@ -257,6 +263,13 @@ defmodule Kazi.CLI do
       summary: "Start the kazi MCP server over stdio (the same server `mix kazi.mcp` starts).",
       args: [],
       flags: []
+    },
+    %{
+      name: "dashboard",
+      summary:
+        "Boot the standalone fleet-mode web endpoint (the starmap: every registered run, read-only, no goal loop) against the shared read-model.",
+      args: [],
+      flags: [:port, :bind]
     },
     %{
       name: "plan",
@@ -571,6 +584,9 @@ defmodule Kazi.CLI do
       {:mcp, _opts} ->
         execute_mcp(inject_opts)
 
+      {:dashboard, opts} ->
+        execute_dashboard(opts, inject_opts)
+
       {:propose, idea, opts} ->
         execute_propose(idea, opts, inject_opts)
 
@@ -613,6 +629,7 @@ defmodule Kazi.CLI do
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
           | {:mcp, keyword()}
+          | {:dashboard, keyword()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
@@ -798,6 +815,18 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T46.4 (ADR-0057): `kazi dashboard` boots the standalone fleet-mode web
+  # endpoint (the starmap) with NO goal loop in the process — a read-only
+  # projection over the shared read-model + run registry. `--port`/`--bind`
+  # only take effect on a FRESH boot of the endpoint (a dev/test process that
+  # already supervises it keeps its existing bind; see `execute_dashboard/2`).
+  defp parse_command(["dashboard" | rest], flags) do
+    case rest do
+      [] -> {:dashboard, port: flags[:port], bind: flags[:bind]}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
   # T3.5c authoring: `plan "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
   # carried through (where the harness drafts the goal).
@@ -875,7 +904,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
@@ -2072,6 +2101,102 @@ defmodule Kazi.CLI do
 
     0
   end
+
+  # =============================================================================
+  # dashboard command (T46.4, ADR-0057): the standalone fleet-mode web endpoint
+  # =============================================================================
+  #
+  # `kazi dashboard` boots the operator web endpoint against the shared
+  # read-model + run registry with NO goal loop in the process — a pure
+  # read-only projection (ADR-0011 reaffirmed at fleet scope). Home view: the
+  # starmap (`KaziWeb.StarmapLive`).
+  #
+  # In every entry point this process ALREADY supervises (dev, `mix test`,
+  # `mix kazi.apply`), `KaziWeb.Endpoint` is already running as part of the app's
+  # normal supervision tree (`Kazi.Application`) — in that case `--port`/`--bind`
+  # are advisory only (the endpoint is already bound) and we just report where
+  # it's serving. Only a FRESH boot (a standalone burrito/escript process with no
+  # endpoint yet) actually applies the flags and starts one.
+  #
+  # `inject_opts[:serve_forever]` is the injectable seam (matching `execute_mcp`'s
+  # `inject_opts`): production leaves the default (block forever so the process
+  # keeps serving until Ctrl-C); the CLI boundary test overrides it with a no-op
+  # so `run/2` returns instead of hanging.
+  defp execute_dashboard(opts, inject_opts) do
+    ensure_read_model()
+
+    {mode, bind, port} =
+      case Process.whereis(KaziWeb.Endpoint) do
+        pid when is_pid(pid) ->
+          http = KaziWeb.Endpoint.config(:http) || []
+          {:already_running, format_bind(http[:ip]), http[:port]}
+
+        nil ->
+          bind = opts[:bind] || "127.0.0.1"
+          port = opts[:port] || 4050
+          start_standalone_endpoint(bind, port)
+          {:booted, bind, port}
+      end
+
+    case mode do
+      :already_running ->
+        IO.puts(
+          "kazi dashboard: this process already serves the starmap at http://#{bind}:#{port}/ " <>
+            "(--port/--bind ignored -- they only apply to a fresh standalone boot)"
+        )
+
+      :booted ->
+        IO.puts(
+          "kazi dashboard: starmap (fleet view, read-only) at http://#{bind}:#{port}/ -- Ctrl-C to stop"
+        )
+    end
+
+    serve_forever = Keyword.get(inject_opts, :serve_forever, fn -> Process.sleep(:infinity) end)
+    serve_forever.()
+
+    0
+  end
+
+  # Boots a standalone endpoint (no scheduler/loop children, ADR-0057 decision 4)
+  # under its own supervisor: Phoenix.PubSub (unless already running under this
+  # process) then KaziWeb.Endpoint, configured to the requested bind/port.
+  defp start_standalone_endpoint(bind, port) do
+    base_config = Application.get_env(:kazi, KaziWeb.Endpoint, [])
+
+    secret_key_base =
+      base_config[:secret_key_base] || Base.encode64(:crypto.strong_rand_bytes(48))
+
+    Application.put_env(
+      :kazi,
+      KaziWeb.Endpoint,
+      Keyword.merge(base_config,
+        http: [ip: parse_bind_ip(bind), port: port],
+        server: true,
+        secret_key_base: secret_key_base
+      )
+    )
+
+    pubsub_children =
+      if Process.whereis(Kazi.PubSub), do: [], else: [{Phoenix.PubSub, name: Kazi.PubSub}]
+
+    {:ok, _pid} =
+      Supervisor.start_link(pubsub_children ++ [KaziWeb.Endpoint],
+        strategy: :one_for_one,
+        name: Kazi.Dashboard.Supervisor
+      )
+
+    :ok
+  end
+
+  defp parse_bind_ip(bind) do
+    bind
+    |> String.split(".")
+    |> Enum.map(&String.to_integer/1)
+    |> List.to_tuple()
+  end
+
+  defp format_bind({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
+  defp format_bind(_), do: "127.0.0.1"
 
   # =============================================================================
   # export command (T12.6, ADR-0020 decision 5): an Obsidian vault of the group tree

@@ -762,6 +762,12 @@ pins this output, so the example never drifts from what the tool produces.
   converged, the `needs` edges, per-group convergence), and per-goal convergence
   history. Read-only inspection, decoupled from the loop
   ([ADR-0011](docs/adr/0011-slice3-operator-surfaces.md)).
+- **`kazi dashboard` — the fleet starmap** — several concurrent `kazi apply`
+  runs on one machine are a black box by default; `kazi dashboard` boots a
+  standalone, read-only web endpoint over the shared run registry (`/starmap`:
+  every registered run at a glance, state landed / converging / stale / stuck,
+  run tags, fleet counts). See [docs/dashboard.md](docs/dashboard.md)
+  ([ADR-0057](docs/adr/0057-fleet-observability-dashboard.md)).
 
 ---
 
@@ -783,6 +789,7 @@ kazi context stats                           #   byte accounting (indexed/return
 kazi export <goal-file> --obsidian <dir>     # write an Obsidian vault of the goal tree
 kazi lint <goal-file>                        # advisory near-duplicate group-name warnings
 kazi mcp                                      # start the MCP server over stdio (ADR-0044)
+kazi dashboard [--port <n>] [--bind <ip>]    # the fleet starmap: every registered run, read-only (ADR-0057)
 kazi help [--json]                           # the command/flag surface (--json for machines)
 kazi version                                 # print the kazi version and exit
 ```
