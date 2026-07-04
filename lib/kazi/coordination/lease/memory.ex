@@ -5,16 +5,16 @@ defmodule Kazi.Coordination.Lease.Memory do
   ADR-0006; UC-013).
 
   This is not a stub. Within one BEAM node it is a correct, concurrency-safe lease
-  store: a `GenServer` holds the `key => %Lease{}` map, and every mutation
-  (acquire/renew/release) runs inside one server call, so the compare-and-set is
-  **atomic** — two processes racing to acquire the same free key serialize
-  through the server and exactly one wins. The NATS JetStream KV backend (T3.1b)
-  replaces this only when work must coordinate *across* nodes; on a single node
-  this backend is the production path, not a placeholder.
+  store: an `Agent` holds the `key => %Lease{}` map, and every mutation
+  (acquire/renew/release) runs inside `Agent.get_and_update/2`, so the
+  compare-and-set is **atomic** — two processes racing to acquire the same free
+  key serialize through the Agent and exactly one wins. The NATS JetStream KV
+  backend (T3.1b) replaces this only when work must coordinate *across* nodes; on
+  a single node this backend is the production path, not a placeholder.
 
   ## Instance, not global
 
-  A backend is a running server referenced by a `{__MODULE__, pid}` tuple, passed
+  A backend is a running `Agent` referenced by a `{__MODULE__, pid}` tuple, passed
   per call as the `:store` option. Nothing is global: each store is independent,
   so tests (and concurrent goals) are isolated without naming collisions, and the
   conformance suite spins up a fresh store per test.
@@ -39,40 +39,26 @@ defmodule Kazi.Coordination.Lease.Memory do
     * **renew / release** — act only when the presented lease is the *current*
       revision and not expired; a stale lease (the key moved on) ⇒
       `{:error, :not_held}` for renew, a silent no-op (`:ok`) for release.
-
-  ## Holder-process monitoring (M8, deep-review-001)
-
-  `acquire/4` is called from the process that will hold the lease, and this
-  server MONITORS that process (`self()` at the call site) for the life of the
-  lease. If the holder process dies WITHOUT releasing — including via an
-  untrappable `Process.exit(pid, :kill)`, which skips a `try/after`'s release
-  entirely (`Kazi.Scheduler.LeasedReconciler`'s brutal-kill / self-kill cases) —
-  the server auto-releases the key on the `:DOWN`, so a sibling partition
-  contending on the same blast-radius key is never blocked until the TTL simply
-  because the holder was killed rather than exiting cleanly. A normal
-  `release/2` demonitors, so a clean exit never leaves a stray monitor. `renew/3`
-  never changes who is being watched — it is always called by the SAME process
-  that acquired the lease, so the existing monitor is left untouched.
   """
 
   @behaviour Kazi.Coordination.Lease
 
-  use GenServer
+  use Agent
 
   alias Kazi.Coordination.Lease
 
-  @typedoc "An opaque handle to a running store: the module-tagged server pid."
+  @typedoc "An opaque handle to a running store: the module-tagged Agent pid."
   @type store :: {__MODULE__, pid()}
 
   @doc """
   Starts a fresh, empty lease store and returns `{:ok, store_handle}`.
 
   The handle is the `{__MODULE__, pid}` tuple passed back per call as `:store`.
-  Accepts standard `GenServer.start_link/3` options (e.g. `:name`) under `opts`.
+  Accepts standard `Agent.start_link/2` options (e.g. `:name`) under `opts`.
   """
   @spec start_link(keyword()) :: {:ok, store()} | {:error, term()}
   def start_link(opts \\ []) do
-    case GenServer.start_link(__MODULE__, :ok, opts) do
+    case Agent.start_link(fn -> %{} end, opts) do
       {:ok, pid} -> {:ok, {__MODULE__, pid}}
       {:error, _reason} = error -> error
     end
@@ -83,142 +69,83 @@ defmodule Kazi.Coordination.Lease.Memory do
       when is_binary(key) and is_binary(holder) and is_integer(ttl_ms) and ttl_ms > 0 do
     pid = store_pid(opts)
     now = Lease.now_ms(opts)
-    # M8: the CALLING process is the holder, monitored for auto-release on death.
-    GenServer.call(pid, {:acquire, key, holder, ttl_ms, now, self()})
+    expires_at = now + ttl_ms
+
+    # The whole acquire — free/held check, mint, store — runs inside one
+    # get_and_update so two racing acquirers on the same key cannot both win.
+    Agent.get_and_update(pid, fn leases ->
+      case live_lease(leases, key, now) do
+        # Free at `now` (unheld or expired) — or held by us: mint/refresh.
+        nil ->
+          mint(leases, key, holder, expires_at)
+
+        %Lease{holder: ^holder} ->
+          mint(leases, key, holder, expires_at)
+
+        # A different, unexpired holder owns it.
+        %Lease{} ->
+          {{:error, :held}, leases}
+      end
+    end)
   end
 
   @impl Lease
-  def renew(%Lease{} = lease, ttl_ms, opts) when is_integer(ttl_ms) and ttl_ms > 0 do
+  def renew(%Lease{key: key, holder: holder, revision: revision}, ttl_ms, opts)
+      when is_integer(ttl_ms) and ttl_ms > 0 do
     pid = store_pid(opts)
     now = Lease.now_ms(opts)
-    GenServer.call(pid, {:renew, lease, ttl_ms, now})
+    expires_at = now + ttl_ms
+
+    Agent.get_and_update(pid, fn leases ->
+      case live_lease(leases, key, now) do
+        # Still the current, unexpired lease we hold — extend + bump revision.
+        %Lease{holder: ^holder, revision: ^revision} ->
+          mint(leases, key, holder, expires_at)
+
+        # Superseded (revision moved on / re-acquired / expired / released).
+        _other ->
+          {{:error, :not_held}, leases}
+      end
+    end)
   end
 
   @impl Lease
-  def release(%Lease{} = lease, opts) do
+  def release(%Lease{key: key, holder: holder, revision: revision}, opts) do
     pid = store_pid(opts)
     now = Lease.now_ms(opts)
-    GenServer.call(pid, {:release, lease, now})
+
+    Agent.get_and_update(pid, fn leases ->
+      case live_lease(leases, key, now) do
+        # We are the current holder — free the key.
+        %Lease{holder: ^holder, revision: ^revision} ->
+          {:ok, Map.delete(leases, key)}
+
+        # Already free, expired, or superseded — releasing is a no-op.
+        _other ->
+          {:ok, leases}
+      end
+    end)
   end
 
   @impl Lease
   def peek(key, opts) when is_binary(key) do
     pid = store_pid(opts)
     now = Lease.now_ms(opts)
-    GenServer.call(pid, {:peek, key, now})
-  end
 
-  # =============================================================================
-  # Server
-  # =============================================================================
-
-  # State: the live `key => %Lease{}` map, plus the bookkeeping M8 needs to
-  # auto-release on a dead holder — `monitors: %{ref => key}` (resolve a :DOWN
-  # to the key it guards) and `holder_refs: %{key => ref}` (demonitor the RIGHT
-  # ref on a normal release/re-acquire, never a stale one).
-  @impl GenServer
-  def init(:ok) do
-    {:ok, %{leases: %{}, monitors: %{}, holder_refs: %{}}}
-  end
-
-  @impl GenServer
-  def handle_call({:acquire, key, holder, ttl_ms, now, holder_pid}, _from, state) do
-    expires_at = now + ttl_ms
-
-    case live_lease(state.leases, key, now) do
-      # Free at `now` (unheld or expired) — or held by us: mint/refresh, watching
-      # the CALLING process (a re-acquire may be a different process presenting
-      # the same holder string; the newest caller is who now truly holds it).
-      nil ->
-        {lease, state} = mint_and_monitor(state, key, holder, expires_at, holder_pid)
-        {:reply, {:ok, lease}, state}
-
-      %Lease{holder: ^holder} ->
-        {lease, state} = mint_and_monitor(state, key, holder, expires_at, holder_pid)
-        {:reply, {:ok, lease}, state}
-
-      # A different, unexpired holder owns it.
-      %Lease{} ->
-        {:reply, {:error, :held}, state}
-    end
-  end
-
-  def handle_call(
-        {:renew, %Lease{key: key, holder: holder, revision: revision}, ttl_ms, now},
-        _from,
-        state
-      ) do
-    expires_at = now + ttl_ms
-
-    case live_lease(state.leases, key, now) do
-      # Still the current, unexpired lease we hold — extend + bump revision.
-      # renew/3 is always called by the SAME process that acquired, so the
-      # existing monitor on this key is still watching the right pid; leave it.
-      %Lease{holder: ^holder, revision: ^revision} ->
-        renewed = %Lease{
-          key: key,
-          holder: holder,
-          revision: revision + 1,
-          expires_at_ms: expires_at
-        }
-
-        {:reply, {:ok, renewed}, %{state | leases: Map.put(state.leases, key, renewed)}}
-
-      # Superseded (revision moved on / re-acquired / expired / released).
-      _other ->
-        {:reply, {:error, :not_held}, state}
-    end
-  end
-
-  def handle_call(
-        {:release, %Lease{key: key, holder: holder, revision: revision}, now},
-        _from,
-        state
-      ) do
-    case live_lease(state.leases, key, now) do
-      # We are the current holder — free the key and stop watching it.
-      %Lease{holder: ^holder, revision: ^revision} ->
-        {:reply, :ok, forget_key(state, key)}
-
-      # Already free, expired, or superseded — releasing is a no-op.
-      _other ->
-        {:reply, :ok, state}
-    end
-  end
-
-  def handle_call({:peek, key, now}, _from, state) do
-    result =
-      case live_lease(state.leases, key, now) do
+    Agent.get(pid, fn leases ->
+      case live_lease(leases, key, now) do
         %Lease{} = lease -> {:ok, lease}
         nil -> :free
       end
-
-    {:reply, result, state}
+    end)
   end
 
-  # M8 (deep-review-001): the holder process died — auto-release its lease so a
-  # sibling contending on the same key does not wait out the whole TTL just
-  # because the holder was killed (brutal-kill, self-kill) rather than exiting
-  # cleanly through `release/2`. A ref no longer in `monitors` (the key already
-  # moved on through a normal release/re-acquire, which always demonitors first)
-  # resolves to nothing here.
-  @impl GenServer
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    case Map.fetch(state.monitors, ref) do
-      {:ok, key} -> {:noreply, forget_key(state, key)}
-      :error -> {:noreply, state}
-    end
-  end
-
-  def handle_info(_msg, state), do: {:noreply, state}
-
-  # Mint the next revision of a lease for `key` and (re)monitor `holder_pid` —
-  # demonitoring any stale prior watch on this key first, so a re-acquire by a
-  # NEW process (presenting the same holder string) transfers the watch rather
-  # than accumulating monitors, and so `:DOWN` for the OLD holder can never race
-  # against the new one's fresh lease.
-  defp mint_and_monitor(state, key, holder, expires_at, holder_pid) do
-    revision = next_revision(state.leases, key)
+  # Mint the next revision of a lease (acquire or renew share this), returning the
+  # new lease both as the call result and stored under `key`.
+  @spec mint(map(), Lease.key(), Lease.holder(), non_neg_integer()) ::
+          {{:ok, Lease.t()}, map()}
+  defp mint(leases, key, holder, expires_at) do
+    revision = next_revision(leases, key)
 
     lease = %Lease{
       key: key,
@@ -227,41 +154,7 @@ defmodule Kazi.Coordination.Lease.Memory do
       expires_at_ms: expires_at
     }
 
-    state = demonitor_key(state, key)
-    ref = Process.monitor(holder_pid)
-
-    state = %{
-      state
-      | leases: Map.put(state.leases, key, lease),
-        monitors: Map.put(state.monitors, ref, key),
-        holder_refs: Map.put(state.holder_refs, key, ref)
-    }
-
-    {lease, state}
-  end
-
-  # Free `key` and stop watching it (release, or the holder-process auto-release
-  # on :DOWN) — always removes the lease AND both monitor-bookkeeping entries
-  # together so they can never drift out of sync.
-  defp forget_key(state, key) do
-    state = demonitor_key(state, key)
-    %{state | leases: Map.delete(state.leases, key)}
-  end
-
-  defp demonitor_key(state, key) do
-    case Map.fetch(state.holder_refs, key) do
-      {:ok, ref} ->
-        Process.demonitor(ref, [:flush])
-
-        %{
-          state
-          | monitors: Map.delete(state.monitors, ref),
-            holder_refs: Map.delete(state.holder_refs, key)
-        }
-
-      :error ->
-        state
-    end
+    {{:ok, lease}, Map.put(leases, key, lease)}
   end
 
   # The lease holding `key` at `now`, or `nil` when the key is free (unheld or its
