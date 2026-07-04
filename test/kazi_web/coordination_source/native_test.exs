@@ -49,7 +49,7 @@ defmodule KaziWeb.CoordinationSource.NativeTest do
     assert Enum.map(leases, & &1.holder) == ["agent-1", "agent-2"]
 
     # A released lease drops out of the next snapshot.
-    :ok = LeaseTable.forget("blast:lib/a.ex", name)
+    :ok = LeaseTable.forget(lease("blast:lib/a.ex", "agent-1"), name)
     assert %Snapshot{leases: [%{key: "blast:lib/b.ex"}]} = Native.snapshot()
   end
 end

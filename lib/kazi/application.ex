@@ -41,7 +41,13 @@ defmodule Kazi.Application do
     # in one BEAM, NATS-free. It sits empty until a `Kazi.Scheduler` run starts
     # children under it.
     scheduler_children = [
-      {Kazi.Scheduler.PartitionSupervisor, name: Kazi.Scheduler.PartitionSupervisor}
+      {Kazi.Scheduler.PartitionSupervisor, name: Kazi.Scheduler.PartitionSupervisor},
+      # M8 (deep-review-001): the survivor-side worktree-cleanup registry. Started
+      # unconditionally (no NIF/web dependency, like the supervisor above) so a
+      # brutal-killed or self-killed partition's worktree can always be reaped by
+      # the surviving coordinator/`invoke_reconciler` process, on any entry point
+      # (escript, `mix kazi.run`, a release) that can run a parallel scheduler.
+      Kazi.Scheduler.WorktreeTable
     ]
 
     children =

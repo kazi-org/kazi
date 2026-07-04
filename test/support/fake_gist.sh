@@ -52,6 +52,13 @@ case "$sub" in
       printf '\n' >>"$CONTENT"
       total=$((total + bytes))
       echo "Indexed $f: 1 chunks (0 code)"
+      # Record the staged artifact's + its parent dir's permission bits BEFORE
+      # the adapter removes the file, so a perms test can assert on them
+      # (deep review L4: staged content must not be world-readable).
+      dir=$(dirname "$f")
+      file_mode=$(stat -f "%OLp" "$f" 2>/dev/null || stat -c "%a" "$f")
+      dir_mode=$(stat -f "%OLp" "$dir" 2>/dev/null || stat -c "%a" "$dir")
+      echo "$file_mode $dir_mode" >"$STORE/last_artifact_perms"
     done
     echo $(( $(cat "$IDX") + total )) >"$IDX"
     ;;

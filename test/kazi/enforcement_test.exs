@@ -311,8 +311,11 @@ defmodule Kazi.EnforcementTest do
   #     change the verdict — the core anti-gaming guarantee.
   # ===========================================================================
 
-  test "an in-iteration edit to a checker file does NOT change an isolated guard's verdict" do
-    # A committed checker that PASSES (exit 0). The guard runs it.
+  test "an edit to a GRADER-declared checker file does NOT change an isolated guard's verdict" do
+    # A committed checker that PASSES (exit 0). The guard runs it. `check.sh` is
+    # declared as a `read_only_paths` grader-definition file (H1 fix, deep-review
+    # 001: clean-tree isolation pins ONLY the declared grader paths to `ref`, not
+    # the whole cwd — see isolation.ex moduledoc), so it stays protected.
     dir = git_repo_with(%{"check.sh" => "exit 0\n", "feature.txt" => ""})
 
     # The agent (between observations) TAMPERS the checker in the working copy to
@@ -325,9 +328,16 @@ defmodule Kazi.EnforcementTest do
         config: %{cmd: "sh", args: ["check.sh"], verdict: "exit_zero"}
       )
 
-    # WITH enforcement clean-tree: the guard is resolved from the CLEAN tree (HEAD),
-    # so the working-copy tamper is invisible — it still PASSES.
-    isolated = observe_guard_verdict(dir, guard, Enforcement.new(enabled: true, clean_tree: true))
+    # WITH enforcement clean-tree + check.sh declared read-only: the guard is
+    # resolved from the CLEAN tree (HEAD) for its OWN grader path, so the
+    # working-copy tamper is invisible — it still PASSES.
+    isolated =
+      observe_guard_verdict(
+        dir,
+        guard,
+        Enforcement.new(enabled: true, clean_tree: true, read_only_paths: ["check.sh"])
+      )
+
     assert isolated == :pass
 
     # WITHOUT clean-tree isolation: the guard runs the TAMPERED working copy → fail.

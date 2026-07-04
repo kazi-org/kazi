@@ -308,9 +308,13 @@ defmodule Kazi.Loop do
               # ordered per-iteration vector history (T1.1): a list of
               # `{iteration_index, PredicateVector.t()}` kept newest-first while
               # in `data` (prepend is O(1)); read APIs reverse it to oldest-first.
-              # Full (unbounded) at Slice 0/1 scale — every iteration's whole
-              # vector is retained so the regression (T1.2) and stuck (T1.5)
-              # detectors can analyse the complete trajectory in-state.
+              # Full (unbounded) for a DEFAULT (non-standing) loop — it terminates,
+              # so the trajectory never grows past a modest run. M6
+              # (deep-review-001): a STANDING loop (UC-016) re-observes forever, so
+              # ITS history is bounded to a sliding window (`bound_history/2`)
+              # covering both the stuck and regression detection windows — a
+              # DEFAULT loop is unaffected (`bound_history/2` is a no-op when
+              # `standing: false`).
               history: [],
               actions: [],
               iterations: 0,
@@ -1055,8 +1059,9 @@ defmodule Kazi.Loop do
           # the default loop, which never reads it.
           steady?: false,
           # Prepend this observation's full vector to the in-state history
-          # (newest-first; read APIs reverse to oldest-first). T1.1.
-          history: [{index, vector} | data.history],
+          # (newest-first; read APIs reverse to oldest-first). T1.1. M6
+          # (deep-review-001): bounded for a standing loop (see `bound_history/2`).
+          history: bound_history([{index, vector} | data.history], data),
           iterations: data.iterations + 1
       }
 
@@ -1091,8 +1096,21 @@ defmodule Kazi.Loop do
     # quarantined ones (T1.3, no convergence claim) are excluded — so a loop
     # merely WAITING on a live probe is not mistaken for a stalled agent.
     case StuckDetector.stuck?(code_history(data), data.stuck_iterations) do
-      {:stuck, failing} -> terminate_stuck(failing, data)
-      :not_stuck -> decide(vector, data)
+      {:stuck, failing} ->
+        terminate_stuck(failing, data)
+
+      :not_stuck ->
+        # M5 (deep-review-001): a predicate persistently in :error is a terminal,
+        # checker-unrunnable condition -- it never converges, never dispatches
+        # (`code_failing?`/`PredicateVector.failing` match only :fail), and never
+        # trips the ABOVE :fail-based stuck check, so left unchecked the loop
+        # would re-observe forever with no budget (when no [budget] table is
+        # declared). Reuse the same terminal :stuck stop rather than a new
+        # terminal state, on the SAME window the ordinary stuck check uses.
+        case StuckDetector.error_stuck?(code_history(data), data.stuck_iterations) do
+          {:error_stuck, erroring} -> terminate_stuck(erroring, data)
+          :not_error_stuck -> decide(vector, data)
+        end
     end
   end
 
@@ -1226,14 +1244,17 @@ defmodule Kazi.Loop do
     %{vector | results: threaded}
   end
 
-  # T32.4 enforcement: wrap the observation in clean-tree isolation when the
-  # enforcement profile is active AND the goal carries a tamper-prone grader (a
-  # guard or held-out predicate). The clean tree is a throwaway detached worktree
-  # at `enforcement.clean_ref`, prepared ONCE for the tick and removed after
+  # T32.4 enforcement (H1 fix, deep-review 001): wrap the observation in clean-tree
+  # isolation when the enforcement profile is active AND the goal carries a
+  # tamper-prone grader (a guard or held-out predicate). The clean tree is a
+  # throwaway detached worktree at `enforcement.clean_ref`, overlaid with the
+  # agent's candidate working-tree state and with `enforcement.read_only_paths`
+  # (the grader's OWN definition files) re-pinned to `clean_ref`
   # (`Kazi.Enforcement.Isolation`); the isolated graders are evaluated against it so
-  # an in-iteration edit to a checker file in the working copy cannot change their
-  # verdict (the in-iteration edit lives in the working copy, the worktree is the
-  # committed state at the ref). The ordinary visible predicates still evaluate
+  # a working-copy edit to a GRADER file cannot change their verdict, while a
+  # working-copy edit to the CANDIDATE fix under test IS seen — held-out/guard
+  # predicates can converge once the fix satisfies them, without waiting for
+  # `integrate` to commit it first. The ordinary visible predicates still evaluate
   # against the working copy so the agent's in-flight work is seen and the loop
   # converges normally. Returns `{vector, quarantine, clean_tree_active?}`;
   # `clean_tree_active?` is false when isolation degraded (the workspace is not a
@@ -1245,7 +1266,7 @@ defmodule Kazi.Loop do
   defp observe_with_isolation(%Data{enforcement: enf, workspace: ws} = data) do
     if Enforcement.isolate?(enf) and is_binary(ws) and any_isolated?(data) do
       result =
-        Isolation.with_clean_tree(ws, enf.clean_ref, fn clean_ws ->
+        Isolation.with_clean_tree(ws, enf.clean_ref, enf.read_only_paths, fn clean_ws ->
           observe(data, fn predicate -> if isolated?(predicate), do: clean_ws, else: ws end)
         end)
 
@@ -2095,6 +2116,25 @@ defmodule Kazi.Loop do
     }
   end
 
+  # M6 (deep-review-001): the sliding-window floor a STANDING loop's history is
+  # trimmed to — comfortably larger than any realistic stuck/regression window
+  # so trimming only ever drops entries far older than either detector reads.
+  @standing_history_floor 100
+
+  # Bound `history` (newest-first) for a standing loop only; a no-op for the
+  # default loop, which terminates and never accrues unbounded history. The
+  # window is the larger of the configured stuck window and the floor above —
+  # trimming never removes the two newest entries a fresh green->red transition
+  # needs, so a NEW regression is always still caught the tick it occurs; only
+  # already-stale trajectory (older than every detector's window) is dropped.
+  @spec bound_history(history(), Data.t()) :: history()
+  defp bound_history(history, %Data{standing: true, stuck_iterations: stuck_iterations}) do
+    window = max(@standing_history_floor, stuck_iterations || 0)
+    Enum.take(history, window)
+  end
+
+  defp bound_history(history, %Data{standing: _not_standing}), do: history
+
   # The in-state history (T1.1) is kept newest-first in `data` for O(1) prepend;
   # readers (snapshot/1, history/1) want it oldest-first (ascending iteration
   # index), so reverse it on the way out.
@@ -2749,7 +2789,11 @@ defmodule Kazi.Loop do
       # 0-based per-goal index matching the read-model's iteration_index column.
       iteration: data.iterations - 1,
       vector: data.vector,
-      converged?: PredicateVector.satisfied?(data.vector),
+      # Reuse the SAME test `decide/2` uses (`all_satisfied?`, which drops
+      # quarantined predicates) rather than the raw full-vector `satisfied?/1` —
+      # otherwise the converging iteration's read-model row can read
+      # `converged?: false` even though the run just converged (deep review L10).
+      converged?: all_satisfied?(data.vector, data.quarantine),
       # T1.2 regression: the green→red flags for this observation, so the runtime
       # projects them into the read-model (making the regression queryable).
       regressions: data.regressions,

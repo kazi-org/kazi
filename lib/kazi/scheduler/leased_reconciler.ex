@@ -118,7 +118,7 @@ defmodule Kazi.Scheduler.LeasedReconciler do
             # `after` runs as the process unwinds, so a raising reconciler still
             # frees its lease rather than holding it for the whole TTL.
             backend.release(lease, lease_opts)
-            LeaseTable.forget(key, lease_table)
+            LeaseTable.forget(lease, lease_table)
           end
 
         :timeout ->

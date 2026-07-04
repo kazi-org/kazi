@@ -254,14 +254,23 @@ defmodule Kazi.ContextStore.GistCLI do
   # concurrent indexes of the SAME label from colliding on one staging path (one
   # call's post-index `File.rm` would otherwise pull the file out from under
   # another's `gist index`).
+  #
+  # Indexed content can carry repo-sensitive evidence, and the default umask
+  # leaves both the dir and the file world-readable in a shared /tmp — a
+  # co-tenant on the host could read it before the post-index `File.rm` (deep
+  # review L4). Lock the dir to 0700 and the file to 0600 before any content is
+  # written to it.
   defp write_artifact(label, content) do
     dir = Path.join(System.tmp_dir!(), "kazi-context-store")
     File.mkdir_p!(dir)
+    File.chmod!(dir, 0o700)
 
     name =
       sanitize(label) <> "-" <> Integer.to_string(System.unique_integer([:positive])) <> ".md"
 
     path = Path.join(dir, name)
+    File.touch!(path)
+    File.chmod!(path, 0o600)
     File.write!(path, content)
     path
   end

@@ -68,7 +68,7 @@ defmodule Kazi.Scheduler do
 
   use GenServer
 
-  alias Kazi.Scheduler.PartitionSupervisor
+  alias Kazi.Scheduler.{PartitionSupervisor, Worktree}
 
   @typedoc """
   The terminal status of one partition's reconciler (the unit the collective
@@ -176,11 +176,14 @@ defmodule Kazi.Scheduler do
     * `:max_restarts` — per-partition RESTART budget (T21.10, ADR-0027): how many
       times a CRASHED reconciler is re-spawned before the partition escalates to
       `:crashed`. Default `0` (a crash escalates immediately — the pre-T21.10
-      behavior). A restart re-runs the same reconciler on the same partition; the
-      crashed child's `try/after` lease + worktree cleanup already ran as it
-      unwound, so a restart never inherits dangling lease/worktree state. The
-      coordinator survives every child crash regardless of this budget
-      (`:one_for_one`).
+      behavior). A restart re-runs the same reconciler on the same partition. An
+      ORDINARY raise's `try/after` lease + worktree cleanup already ran as it
+      unwound; an untrappable `Process.exit(pid, :kill)` does NOT (M8,
+      deep-review-001) — the lease backend auto-releases on the holder process's
+      `:DOWN` regardless, and the coordinator finishes any leftover worktree
+      cleanup itself, so a restart never inherits dangling lease/worktree state
+      either way. The coordinator survives every child crash regardless of this
+      budget (`:one_for_one`).
 
   Returns `{:ok, result}` (see `t:result/0`) once every partition is terminal, or
   `{:error, reason}` if the coordinator could not be started.
@@ -202,13 +205,32 @@ defmodule Kazi.Scheduler do
 
     case GenServer.start_link(__MODULE__, init_arg) do
       {:ok, coordinator} ->
-        result = GenServer.call(coordinator, :await, await_call_timeout(timeout))
-        GenServer.stop(coordinator)
-        {:ok, result}
+        await_coordinator(coordinator, await_call_timeout(timeout, max_restarts))
 
       {:error, _reason} = error ->
         error
     end
+  end
+
+  # M7 (deep-review-001): a wedged/restarting partition's worst-case wall time is
+  # `(max_restarts + 1) * reconcile_timeout` (the per-attempt timeout applies to
+  # EACH restart attempt), so the coordinator's own `:await` must outlive that,
+  # not just one attempt's timeout. Wrapped in try/catch :exit so a genuinely
+  # unreachable coordinator (or a bound that still proves too tight) reports a
+  # structured `{:error, :await_timeout}` verdict instead of crashing the whole
+  # `run/2` caller with an uncaught `exit(:timeout)`.
+  defp await_coordinator(coordinator, await_timeout) do
+    result = GenServer.call(coordinator, :await, await_timeout)
+    GenServer.stop(coordinator)
+    {:ok, result}
+  catch
+    :exit, reason ->
+      # The coordinator may still be alive (a call timeout is not a coordinator
+      # crash) — kill it defensively so it never leaks past this run. `:kill` is
+      # untrappable and never blocks, unlike `GenServer.stop/1` which could itself
+      # hang against a genuinely wedged coordinator.
+      if Process.alive?(coordinator), do: Process.exit(coordinator, :kill)
+      {:error, {:await_timeout, reason}}
   end
 
   @doc """
@@ -420,12 +442,24 @@ defmodule Kazi.Scheduler do
       |> Keyword.take([:supervisor, :reconcile_timeout, :max_restarts])
       |> Keyword.put(:reconciler, reconciler)
 
-    with {:ok, result} <- run(partitions, run_opts) do
-      result
-      |> maybe_rollup_budget(budget_ctx)
-      |> maybe_integrate(opts)
+    case run(partitions, run_opts) do
+      {:ok, result} ->
+        result
+        |> maybe_rollup_budget(budget_ctx)
+        |> maybe_integrate(opts)
+
+      {:error, _} = error ->
+        # `maybe_rollup_budget/2` is the only path that stops the per-run spend
+        # Agent; on this error path `run/2` never returns a result to route
+        # through it, so stop it here too rather than leaking it until the
+        # (short-lived CLI) caller dies (deep review L9).
+        stop_budget_agent(budget_ctx)
+        error
     end
   end
+
+  defp stop_budget_agent(nil), do: :ok
+  defp stop_budget_agent(%{spent: spent}), do: Agent.stop(spent)
 
   # T21.7: split a goal `:budget` across the partitions (derived shares) and wrap
   # the inner reconciler so each partition runs under its share and records its
@@ -735,11 +769,14 @@ defmodule Kazi.Scheduler do
   #
   #   * if the slot already has a collected status (a normal exit after it reported
   #     via {:partition_done, ...}), nothing to do;
-  #   * else an abnormal exit with no recorded status is a CRASH. If the slot has
-  #     RESTART budget left (T21.10), re-spawn the SAME reconciler on the SAME
-  #     partition (the crashed child's try/after lease+worktree cleanup already
-  #     ran), decrementing the budget; otherwise escalate to :crashed so the
-  #     collective fold accounts for it.
+  #   * else an abnormal exit with no recorded status is a CRASH. An ORDINARY raise
+  #     runs its try/after during unwind (lease + worktree cleanup already ran); an
+  #     untrappable Process.exit(pid, :kill) does NOT (M8, deep-review-001) — that
+  #     signal kills the whole linked reconcile chain together, so THIS is the only
+  #     surviving process that can finish that cleanup (`reap_leftover_worktree/2`).
+  #     If the slot has RESTART budget left (T21.10), re-spawn the SAME reconciler
+  #     on the SAME partition, decrementing the budget; otherwise escalate to
+  #     :crashed so the collective fold accounts for it.
   #
   # The coordinator survives every child crash (it traps nothing — the child runs
   # under the DynamicSupervisor :one_for_one and we only hold a monitor).
@@ -768,10 +805,23 @@ defmodule Kazi.Scheduler do
         state
 
       crashed?(reason) and restarts_left?(state, slot) ->
+        reap_leftover_worktree(state, slot)
         restart_slot(state, slot)
 
       true ->
+        reap_leftover_worktree(state, slot)
         collect(state, slot, down_status(reason))
+    end
+  end
+
+  # M8 (deep-review-001): finish a brutal-killed partition's worktree cleanup.
+  # A no-op unless `Kazi.Scheduler.Worktree.wrap/2` actually left an entry behind
+  # (an ordinary raise already cleaned up via its own `after`, so this only ever
+  # does real work after an untrappable :kill).
+  defp reap_leftover_worktree(state, slot) do
+    case Map.fetch(state.tasks, slot) do
+      {:ok, %{partition: partition}} -> Worktree.reap(partition)
+      :error -> :ok
     end
   end
 
@@ -847,8 +897,15 @@ defmodule Kazi.Scheduler do
   # IMPORTANT for T21.10: if the reconciler RAISES (a real crash), no
   # {:partition_done, ...} is sent and this child exits abnormally — the
   # coordinator sees the {:DOWN, ...} and applies the restart/escalate policy. The
-  # nested-Task timeout path returns :stuck/:crashed as a normal status (a wedged
-  # or self-killed reconciler is contained, not a child crash to restart).
+  # nested-Task TIMEOUT path (`Task.shutdown/2` unlinks before brutal-killing) is
+  # contained here, returning :stuck as a normal status without crashing this
+  # process. A SELF-KILLED reconciler (`Process.exit(self(), :kill)`) is
+  # DIFFERENT: `:kill` is untrappable and propagates through the link
+  # regardless, killing this process too — that case is NOT contained here; it
+  # surfaces at the coordinator's {:DOWN, ...} handler like any other crash (M8,
+  # deep-review-001: this is also why a self-kill's lease/worktree cleanup
+  # cannot run in a `try/after` here and needs the coordinator/lease-backend
+  # survivor-side cleanup instead).
   defp run_reconciler(reconciler, partition, timeout) do
     receive do
       {:coordinator, coordinator, slot} ->
@@ -862,9 +919,20 @@ defmodule Kazi.Scheduler do
     task = Task.async(fn -> reconciler.(partition) end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, status} -> normalize_status(status)
-      nil -> :stuck
-      {:exit, _reason} -> :crashed
+      {:ok, status} ->
+        normalize_status(status)
+
+      nil ->
+        # M8 (deep-review-001): `Task.shutdown/2` unlinks THEN brutal-kills the
+        # wedged task, so THIS process (invoke_reconciler's caller) survives —
+        # but the killed task's own `try/after` (lease release, worktree
+        # removal) never ran. This is the surviving process finishing that
+        # cleanup: a no-op unless `Worktree.wrap/2` actually left an entry.
+        Worktree.reap(partition)
+        :stuck
+
+      {:exit, _reason} ->
+        :crashed
     end
   end
 
@@ -919,11 +987,18 @@ defmodule Kazi.Scheduler do
     end
   end
 
-  # The :await call timeout: generous beyond the per-partition timeout so the
-  # coordinator's own await never fires before a partition's. Infinity stays
-  # infinity.
-  defp await_call_timeout(:infinity), do: :infinity
-  defp await_call_timeout(ms) when is_integer(ms), do: ms * 4 + 5_000
+  # The :await call timeout: generous beyond the per-partition WORST-CASE wall
+  # time so the coordinator's own await never fires before a partition's. A
+  # slot's worst case is `(max_restarts + 1) * reconcile_timeout` -- the
+  # per-attempt timeout applies to EACH restart attempt, not just the first
+  # (M7, deep-review-001) -- plus slack for coordinator overhead. Infinity
+  # stays infinity regardless of the restart budget.
+  defp await_call_timeout(:infinity, _max_restarts), do: :infinity
+
+  defp await_call_timeout(ms, max_restarts)
+       when is_integer(ms) and is_integer(max_restarts) and max_restarts >= 0 do
+    ms * (max_restarts + 1) + 5_000
+  end
 
   # =============================================================================
   # Default reconciler (production wiring: the real per-goal serial loop)
