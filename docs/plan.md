@@ -223,6 +223,19 @@ Open work:
   surface from the binary alone, kazi's own WBS migrates to a roadmap goal-DAG with
   `docs/plan.md` generated, and retirement of the external skills is gated on a
   zero-skill idea->landed-PR->live-verify dogfood, ADR-0056) -- E45.
+- **UC-061** (the FLEET is observable in one pane: every `kazi apply` on the machine
+  registers itself (run registry + heartbeats in the shared read-model, stale =
+  crashed, never silently absent) and `kazi dashboard` renders the starmap home view
+  -- the goal DAG in topological wave bands with node states landed/converging/
+  claimed/pending/stuck, per-node run tags, fleet counts, and a ranked attention
+  queue fed by the existing stuck/flake/regression/budget signals; read-only
+  projection, no control plane, ADR-0057) -- E46.
+- **UC-062** (no run is a black box: every run leaves a replayable trail -- an
+  `events.jsonl` sink (loop events + per-iteration predicate vectors) and a
+  REDACTED `transcript.jsonl` tee of the inner-harness stream -- so the operator can
+  peek into any goal live or post-mortem: the convergence heatmap (predicates x
+  iterations) with an iteration scrubber, and transcript peek with tool-call
+  folding; peeking equals tailing a file, ADR-0057) -- E46.
 
 ## Checkable Work Breakdown
 
@@ -259,6 +272,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E43 -- Higher-level interactive-surface predicates: a `:browser` assertion pack + a first-class `:cli` provider (P1, ADR-0053) -> plans/E43.md
 ### E44 -- Landing is part of convergence: `[integration]` + implicit `landed` predicate + controller-owned process contract (P1, ADR-0055) -> plans/E44.md
 ### E45 -- One system: roadmap-scope planning, plan-as-generated-view, escalation-as-data, skill retirement (P1, ADR-0056) -> plans/E45.md
+### E46 -- Fleet observability: run registry, per-run sinks, `kazi dashboard` starmap (P1, ADR-0057) -> plans/E46.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -351,6 +365,33 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-03 -- Change Summary (E46: fleet observability -- run registry, per-run sinks, `kazi dashboard`; ADR-0057)
+- Operator problem: several concurrent sessions each drive a `kazi apply` and the
+  fleet is a black box -- the LiveView surface is per-BEAM-node, one-shot CLI runs
+  have no surface, the inner-harness transcript is discarded, and a dead run is
+  indistinguishable from a converged one. Grounding: the shared read-model already
+  holds per-iteration predicate vectors + ADR-0046 counters machine-wide; the
+  stuck/flake/regression detectors already compute the attention signals; the
+  LiveView assets exist. The missing pieces are a run REGISTRY, persisted
+  TRANSCRIPTS, and a fleet-mode surface -- not new instrumentation.
+- ADR-0057 written (Accepted): read-only fleet projection (ADR-0011 reaffirmed);
+  a `runs` registry with heartbeats in the shared read-model (liveness =
+  staleness, no IPC); per-run append-only JSONL sinks -- `events.jsonl` +
+  `transcript.jsonl` teed through redaction, retention-capped (the sink kills the
+  black box; the dashboard is one consumer); a `kazi dashboard` verb in standalone
+  fleet mode, localhost-bound; home view is the operator-chosen STARMAP (goal DAG
+  in `--explain` wave bands, ADR-0055 landed as a node state, attention queue),
+  drill-in is the convergence heatmap (predicates x iterations) + iteration
+  scrubber + transcript peek with tool-call folding. NATS fan-in stays Slice 3
+  (this dashboard is its first real consumer); external OTel/Grafana rejected as
+  the primary surface (domain-specific viz; sinks stay open JSONL).
+- E46 added (10 tasks, plans/E46.md; UC-061/UC-062): Wave A data spine
+  (T46.1 registry -> T46.2 event sink / T46.3 transcript sink), Wave B surface
+  (T46.4 verb -> T46.5 starmap / T46.7 heatmap / T46.8 peek; T46.6 attention
+  queue), Wave C docs overview + a >=3-concurrent-runs live browser dogfood
+  (T46.10). T20.8 marked SUPERSEDED in plans/E20.md (its shared-instance
+  assumption is obsolete; the live proof folds into T46.10).
 
 ### 2026-07-03 -- Change Summary (E45: one system -- kazi subsumes the plan/apply orchestration skills; ADR-0056)
 - Operator directive: before kazi there was one plan/apply orchestration-skill pair;
