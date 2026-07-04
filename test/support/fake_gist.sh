@@ -56,8 +56,12 @@ case "$sub" in
       # the adapter removes the file, so a perms test can assert on them
       # (deep review L4: staged content must not be world-readable).
       dir=$(dirname "$f")
-      file_mode=$(stat -f "%OLp" "$f" 2>/dev/null || stat -c "%a" "$f")
-      dir_mode=$(stat -f "%OLp" "$dir" 2>/dev/null || stat -c "%a" "$dir")
+      # GNU stat (`-c`, Linux CI) FIRST, BSD stat (`-f`, macOS) as the fallback:
+      # GNU `stat -f` means --file-system (exits 0 with garbage, not perms), so a
+      # BSD-first `|| gnu` never falls through on Linux. GNU `-c` genuinely errors
+      # on macOS, so `gnu || bsd` picks the right one on both.
+      file_mode=$(stat -c "%a" "$f" 2>/dev/null || stat -f "%OLp" "$f")
+      dir_mode=$(stat -c "%a" "$dir" 2>/dev/null || stat -f "%OLp" "$dir")
       echo "$file_mode $dir_mode" >"$STORE/last_artifact_perms"
     done
     echo $(( $(cat "$IDX") + total )) >"$IDX"
