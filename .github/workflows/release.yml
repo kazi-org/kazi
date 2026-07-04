@@ -40,6 +40,13 @@ env:
   OTP_VERSION: "28.3"
   # Burrito 1.5 pins Zig 0.15.2; newer Zig is API-incompatible with its build.zig.
   ZIG_VERSION: "0.15.2"
+  # M1 (deep-review-001): expected SHA256 of each Zig 0.15.2 tarball, published at
+  # https://ziglang.org/download/0.15.2/ -- verified against the curl'd tarball
+  # before extraction so a compromised/MITM'd download aborts the job instead of
+  # silently feeding a trojaned toolchain into `mix release`.
+  ZIG_SHA256_aarch64_macos: "3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b"
+  ZIG_SHA256_x86_64_linux: "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+  ZIG_SHA256_aarch64_linux: "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f"
 
 jobs:
   build:
@@ -69,14 +76,14 @@ jobs:
       BURRITO_TARGET: ${{ matrix.target }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Build the tag's code when invoked via workflow_call/workflow_dispatch;
           # on a direct tag push, github.ref is already the tag.
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Erlang/OTP and Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
@@ -112,13 +119,23 @@ jobs:
           url="https://ziglang.org/download/${ZIG_VERSION}/zig-${arch}-${os}-${ZIG_VERSION}.tar.xz"
           echo "Downloading $url"
           curl -fsSL --retry 5 --retry-all-errors "$url" -o /tmp/zig.tar.xz
+          # M1 (deep-review-001): verify against the pinned SHA256 before extracting.
+          # `shasum -a 256` (not GNU sha256sum, absent on macOS runners) matches the
+          # tool already used for release-asset checksums below.
+          sha_var="ZIG_SHA256_${arch}_${os}"
+          expected="${!sha_var}"
+          actual="$(shasum -a 256 /tmp/zig.tar.xz | awk '{print $1}')"
+          if [ "$actual" != "$expected" ]; then
+            echo "Zig tarball SHA256 mismatch: expected $expected, got $actual" >&2
+            exit 1
+          fi
           mkdir -p "$HOME/zig"
           tar -xJf /tmp/zig.tar.xz -C "$HOME/zig" --strip-components=1
           echo "$HOME/zig" >> "$GITHUB_PATH"
           "$HOME/zig/zig" version
 
       - name: Cache deps and _build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             deps
@@ -162,7 +179,7 @@ jobs:
           ls -la
 
       - name: Upload Release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           # On a direct tag push, github.ref_name is the tag; when called by
           # release-please, take the tag from the input.
@@ -197,6 +214,8 @@ jobs:
           # Zig (arm64 Linux) for the Burrito wrap.
           curl -fsSL --retry 5 --retry-all-errors \
             "https://ziglang.org/download/${ZIG_VERSION}/zig-aarch64-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
+          # M1 (deep-review-001): verify against the pinned SHA256 before extracting.
+          echo "${ZIG_SHA256_aarch64_linux}  /tmp/zig.tar.xz" | sha256sum -c -
           mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
           export PATH="/opt/zig:${PATH}"
           zig version
