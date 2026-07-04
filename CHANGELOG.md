@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.72.2](https://github.com/kazi-org/kazi/compare/v1.72.1...v1.72.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* remediate deep-review 001 code findings (H1,M2-M9,L4,lows) ([59cc094](https://github.com/kazi-org/kazi/commit/59cc0948bacb8c07f4edfbc1205c80ce382890ba))
+
+
+### Reverts
+
+* back out M8 lease-holder-monitor (broke lease CAS atomicity) ([f15f4cf](https://github.com/kazi-org/kazi/commit/f15f4cf175104d2af1de9e76377dc9592568f565))
+
 ## [1.72.1](https://github.com/kazi-org/kazi/compare/v1.72.0...v1.72.1) (2026-07-03)
 
 
