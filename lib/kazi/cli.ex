@@ -948,6 +948,11 @@ defmodule Kazi.CLI do
           effort: flags[:effort],
           permission_mode: flags[:permission_mode],
           allowed_tools: flags[:allowed_tools],
+          # T35.5 (ADR-0045 §8): --context-store/--context-budget must survive the
+          # parse layer or maybe_put_context_store/2 never sees them — the store
+          # silently stayed off (and an unknown name never warned, deep review L11).
+          context_store: flags[:context_store],
+          context_budget: flags[:context_budget],
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1172,7 +1177,18 @@ defmodule Kazi.CLI do
         run_goal(goal, opts, persist?, runtime_opts)
 
       {:error, reason} ->
-        IO.puts(:stderr, "error: could not load goal-file #{goal_file}: #{reason}")
+        message = "could not load goal-file #{goal_file}: #{reason}"
+
+        # M9 (deep-review-001): under --json this must still emit a JSON error
+        # object on stdout (not just a human line to stderr), matching every
+        # other --json command's `emit_json_error` convention -- an
+        # orchestrator parsing stdout must never see an empty stream here.
+        if json?(opts) do
+          emit_json_error(message)
+        else
+          IO.puts(:stderr, "error: #{message}")
+        end
+
         1
     end
   end
@@ -1369,7 +1385,11 @@ defmodule Kazi.CLI do
               Keyword.merge(adapter, context_store: module, context_budget: budget)
             )
 
-          {:error, _} ->
+          {:error, {:unknown_context_store, name}} ->
+            # An unknown --context-store name silently left the store off, so the
+            # operator believed compression was active when it was not (deep
+            # review L11) — warn on stderr rather than swallowing it.
+            IO.puts(:stderr, "warning: unknown --context-store #{inspect(name)}; store left off")
             run_opts
         end
     end
@@ -1677,7 +1697,7 @@ defmodule Kazi.CLI do
   # stderr line otherwise) with a NON-ZERO exit, so an orchestrator branches on
   # the exit code, never on prose.
   defp execute_status(ref, opts) do
-    with_read_model(fn ->
+    with_read_model(opts, fn ->
       cond do
         (iteration = ReadModel.latest_iteration(ref)) != nil ->
           report_run_status(ref, iteration, opts)
@@ -2499,7 +2519,7 @@ defmodule Kazi.CLI do
   # spawns the harness to draft. Either mode emits a single JSON object under
   # --json; human prose otherwise.
   defp execute_propose(idea, opts, inject_opts) do
-    with_read_model(fn ->
+    with_read_model(opts, fn ->
       case caller_proposal(opts, inject_opts) do
         {:ok, payload} -> caller_drafts(idea, payload, opts, inject_opts)
         :none -> kazi_drafts(idea, opts, inject_opts)
@@ -2839,7 +2859,7 @@ defmodule Kazi.CLI do
   # the queue as a list an orchestrator drives plan → approve → apply on — the
   # human table otherwise.
   defp execute_list_proposed(opts) do
-    with_read_model(fn ->
+    with_read_model(opts, fn ->
       rows = ReadModel.list_proposed_goals(list_filter(opts[:status]))
 
       emit(json?(opts), list_proposed_json(rows, opts[:status]), fn ->
@@ -2858,7 +2878,7 @@ defmodule Kazi.CLI do
   # reports a machine-readable success object (or a JSON error on the same stdout
   # surface), the human lines otherwise.
   defp execute_approve(proposal_ref, opts) do
-    with_read_model(fn ->
+    with_read_model(opts, fn ->
       case Authoring.approve(proposal_ref) do
         {:ok, %Goal{} = goal} ->
           emit(json?(opts), approval_json("approved", proposal_ref, goal.id), fn ->
@@ -2877,7 +2897,7 @@ defmodule Kazi.CLI do
   # `reject <proposal-ref> [--json]`: transition proposed → rejected (declined,
   # audited). T15.6: same JSON/human split as approve.
   defp execute_reject(proposal_ref, opts) do
-    with_read_model(fn ->
+    with_read_model(opts, fn ->
       case Authoring.reject(proposal_ref) do
         {:ok, draft} ->
           emit(json?(opts), approval_json("rejected", proposal_ref, draft.goal.id), fn ->
@@ -2910,11 +2930,23 @@ defmodule Kazi.CLI do
   # The authoring commands all require a live read-model (they persist/query
   # proposals); unlike `run` they cannot degrade to no-persistence. Ensure it, run
   # the command, or refuse cleanly with exit 1 if the DB is unavailable.
-  defp with_read_model(fun) do
+  #
+  # `opts` is threaded through so the read-model-unavailable error follows the
+  # same --json contract every other load/availability error does (deep review
+  # L2): a JSON error envelope on stdout under --json (escript builds without the
+  # NIF hit this path), the human stderr line otherwise.
+  defp with_read_model(opts \\ [], fun) do
     if ensure_read_model() do
       fun.()
     else
-      IO.puts(:stderr, "error: the read-model is unavailable; authoring requires persistence")
+      message = "the read-model is unavailable; authoring requires persistence"
+
+      if json?(opts) do
+        emit_json_error(message)
+      else
+        IO.puts(:stderr, "error: #{message}")
+      end
+
       1
     end
   end

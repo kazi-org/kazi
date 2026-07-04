@@ -44,6 +44,8 @@ defmodule Kazi.Scheduler.Worktree do
 
   require Logger
 
+  alias Kazi.Scheduler.WorktreeTable
+
   @typedoc """
   The inner reconciler the worktree seam wraps: it receives the partition AND the
   path to the partition's freshly-created worktree, and returns a partition
@@ -71,6 +73,12 @@ defmodule Kazi.Scheduler.Worktree do
       test can pin it.
     * `:branch_prefix` — prefix for the per-worktree branch name (default
       `"kazi-partition"`). Each worktree gets a unique branch off the repo HEAD.
+    * `:worktree_table` — the readable registry (M8, deep-review-001) this
+      records the in-flight worktree into for the duration of the run (default
+      `Kazi.Scheduler.WorktreeTable`), so a SURVIVING process can finish the
+      cleanup a brutal-killed partition's `after` never reached. Best-effort: a
+      no-op when the table is not running, so this never couples the scheduler
+      to anything else.
   """
   @spec wrap(worktree_reconciler(), keyword()) :: Kazi.Scheduler.reconciler()
   def wrap(inner, opts) when is_function(inner, 2) and is_list(opts) do
@@ -78,6 +86,7 @@ defmodule Kazi.Scheduler.Worktree do
     base_dir = Keyword.get(opts, :base_dir, default_base_dir())
     git_cmd = Keyword.get(opts, :git_cmd, "git")
     branch_prefix = Keyword.get(opts, :branch_prefix, "kazi-partition")
+    worktree_table = Keyword.get(opts, :worktree_table, WorktreeTable)
 
     fn partition ->
       slug = slug_for(partition)
@@ -85,6 +94,12 @@ defmodule Kazi.Scheduler.Worktree do
 
       case create(git_cmd, repo, path, branch) do
         :ok ->
+          # M8 (deep-review-001): record BEFORE running the risky work, so a
+          # process that gets brutal-killed mid-run (never reaching `after`)
+          # still leaves a trace a surviving process can reap.
+          entry = %{git_cmd: git_cmd, repo: repo, path: path}
+          WorktreeTable.record(partition, entry, worktree_table)
+
           try do
             inner.(partition, path)
           after
@@ -93,6 +108,7 @@ defmodule Kazi.Scheduler.Worktree do
             # process never cd'd into `path`, and `path` is under the managed
             # base dir, never the repo cwd.
             safe_cleanup(git_cmd, repo, path)
+            WorktreeTable.forget(partition, worktree_table)
           end
 
         {:error, reason} ->
@@ -114,6 +130,26 @@ defmodule Kazi.Scheduler.Worktree do
   @spec default_base_dir() :: Path.t()
   def default_base_dir do
     Path.join(System.tmp_dir!(), "kazi-worktrees")
+  end
+
+  @doc """
+  The survivor's half of the M8 (deep-review-001) fix: reaps whatever worktree
+  is still recorded for `partition` in `worktree_table` (default
+  `Kazi.Scheduler.WorktreeTable`) and finishes its cleanup via `safe_cleanup/3`.
+
+  A no-op when nothing is recorded — which is the common case, since a normal
+  exit (including an ordinary crash where `after` runs during unwind) already
+  forgot its own entry. Only a process that was brutal-killed (a
+  `:reconcile_timeout` firing, or an untrappable `Process.exit(pid, :kill)`)
+  leaves an entry behind for this to find, so this is safe to call
+  UNCONDITIONALLY from any process that just observed one of those two exits.
+  """
+  @spec reap(term(), atom() | pid()) :: :ok
+  def reap(partition, worktree_table \\ WorktreeTable) do
+    case WorktreeTable.reap(partition, worktree_table) do
+      %{git_cmd: git_cmd, repo: repo, path: path} -> safe_cleanup(git_cmd, repo, path)
+      nil -> :ok
+    end
   end
 
   # --- worktree lifecycle -----------------------------------------------------
@@ -202,10 +238,19 @@ defmodule Kazi.Scheduler.Worktree do
     {Path.join(base_dir, name), branch}
   end
 
-  # A filesystem-safe slug for a partition. Prefers the partition's stable key
-  # (truncated), falling back to a generic label so any partition shape works.
+  # A filesystem- AND git-ref-safe slug for a partition. Prefers the partition's
+  # stable key (truncated), falling back to a generic label so any partition
+  # shape works. Real blast-radius keys carry characters git refuses in a branch
+  # name (`radius:lib/a.ex` — `:` is forbidden in refs), so anything outside
+  # [A-Za-z0-9_-] is folded to `-`; without this the `-b <branch>` in create/4
+  # fails and the partition never runs.
   defp slug_for(%{key: key}) when is_binary(key) and key != "" do
-    "p-" <> String.slice(key, 0, 16)
+    sanitized =
+      key
+      |> String.slice(0, 16)
+      |> String.replace(~r/[^A-Za-z0-9_-]/, "-")
+
+    "p-" <> sanitized
   end
 
   defp slug_for(_partition), do: "p"

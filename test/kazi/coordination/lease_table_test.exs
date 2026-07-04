@@ -28,8 +28,22 @@ defmodule Kazi.Coordination.LeaseTableTest do
     keys = name |> LeaseTable.list() |> Enum.map(& &1.key) |> Enum.sort()
     assert keys == ["blast:lib/a.ex", "blast:lib/b.ex"]
 
-    :ok = LeaseTable.forget("blast:lib/a.ex", name)
+    :ok = LeaseTable.forget(lease("blast:lib/a.ex", "agent-1"), name)
     assert name |> LeaseTable.list() |> Enum.map(& &1.key) == ["blast:lib/b.ex"]
+  end
+
+  test "forget is a no-op when the recorded holder does not match (L8)" do
+    name = :"lease_table_#{System.unique_integer([:positive])}"
+    start_supervised!(%{id: name, start: {LeaseTable, :start_link, [[name: name]]}})
+
+    # Simulate the race: the incoming holder has already recorded its own entry
+    # under the same key by the time the outgoing holder's release runs.
+    :ok = LeaseTable.record(lease("blast:lib/a.ex", "agent-1"), name)
+    :ok = LeaseTable.record(lease("blast:lib/a.ex", "agent-2"), name)
+
+    :ok = LeaseTable.forget(lease("blast:lib/a.ex", "agent-1"), name)
+
+    assert [%Lease{key: "blast:lib/a.ex", holder: "agent-2"}] = LeaseTable.list(name)
   end
 
   test "re-recording the same key replaces the holder (one entry per resource)" do
@@ -48,7 +62,7 @@ defmodule Kazi.Coordination.LeaseTableTest do
     # No process registered under `absent` — every op is safe and inert.
     assert LeaseTable.list(absent) == []
     assert LeaseTable.record(lease("k", "h"), absent) == :ok
-    assert LeaseTable.forget("k", absent) == :ok
+    assert LeaseTable.forget(lease("k", "h"), absent) == :ok
     assert LeaseTable.list(absent) == []
   end
 

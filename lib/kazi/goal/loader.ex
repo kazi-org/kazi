@@ -582,17 +582,23 @@ defmodule Kazi.Goal.Loader do
 
   defp enforcement_guards(_), do: {:error, "[[enforcement.guard]] must be an array of tables"}
 
+  @known_guard_directions ["higher_better", "lower_better"]
+
   defp enforcement_guard(guard) when is_map(guard) do
     case Map.get(guard, "id") do
       id when is_binary(id) and id != "" ->
-        {:ok,
-         %{
-           id: id,
-           metric: Map.get(guard, "metric", %{}),
-           direction: Map.get(guard, "direction", "higher_better"),
-           baseline: Map.get(guard, "baseline", "stored"),
-           allowed_regression: Map.get(guard, "allowed_regression", 0)
-         }}
+        with {:ok, direction} <-
+               validate_guard_direction(Map.get(guard, "direction", "higher_better")),
+             {:ok, baseline} <- validate_guard_baseline(Map.get(guard, "baseline", "stored")) do
+          {:ok,
+           %{
+             id: id,
+             metric: Map.get(guard, "metric", %{}),
+             direction: direction,
+             baseline: baseline,
+             allowed_regression: Map.get(guard, "allowed_regression", 0)
+           }}
+        end
 
       _ ->
         {:error, "enforcement guard is missing a non-empty string \"id\""}
@@ -600,6 +606,31 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp enforcement_guard(_), do: {:error, "[[enforcement.guard]] must be a table"}
+
+  # `metric`/`direction`/`baseline` were previously stored verbatim with no
+  # validation, so a typo'd guard config was silently accepted (deep review
+  # L12). `direction` has exactly two known values (`Kazi.Ratchet.regression/3`
+  # only implements these two); `baseline` must be either a literal number or a
+  # non-empty string (a "stored" keyword or a git ref —
+  # `Kazi.Ratchet.resolve_baseline/5` accepts nothing else).
+  defp validate_guard_direction(direction) when direction in @known_guard_directions,
+    do: {:ok, direction}
+
+  defp validate_guard_direction(other) do
+    {:error,
+     "enforcement guard \"direction\" must be \"higher_better\" or \"lower_better\", " <>
+       "got #{inspect(other)}"}
+  end
+
+  defp validate_guard_baseline(baseline) when is_number(baseline), do: {:ok, baseline}
+
+  defp validate_guard_baseline(baseline) when is_binary(baseline) and baseline != "",
+    do: {:ok, baseline}
+
+  defp validate_guard_baseline(other) do
+    {:error,
+     "enforcement guard \"baseline\" must be a number or a non-empty string, got #{inspect(other)}"}
+  end
 
   defp fetch_harness_id(harness) do
     case Map.get(harness, "id") do
@@ -885,19 +916,36 @@ defmodule Kazi.Goal.Loader do
   # edges, so this is a depth-first cycle detection over the full edge set: a
   # node revisited on the current DFS stack closes a cycle. Edge targets are
   # guaranteed to be declared by validate_group_needs/2, which runs first.
+  #
+  # `walk_needs/4` threads a `finished` memo (a node whose subtree is already
+  # PROVEN acyclic) across BOTH the recursive descent and the outer per-group
+  # loop, in addition to the per-walk `stack` (deep review L1): without it, a
+  # wide diamond lattice of `needs` edges re-walks each shared descendant once
+  # per path to it — O(2^n) over a DAG with n diamond levels, hanging
+  # `kazi apply`/`--explain` at load. Memoizing "already finished" turns every
+  # node into a single expansion, O(V+E) total.
   defp validate_no_needs_cycle(groups) do
     needs_by_id = Map.new(groups, &{&1.id, &1.needs})
 
-    Enum.reduce_while(groups, :ok, fn group, :ok ->
-      case walk_needs(group.id, needs_by_id, MapSet.new()) do
-        :ok -> {:cont, :ok}
-        {:cycle, id} -> {:halt, {:error, "group #{inspect(id)} has a cyclic needs chain"}}
-      end
-    end)
+    {result, _finished} =
+      Enum.reduce_while(groups, {:ok, MapSet.new()}, fn group, {:ok, finished} ->
+        case walk_needs(group.id, needs_by_id, MapSet.new(), finished) do
+          {:ok, finished} ->
+            {:cont, {:ok, finished}}
+
+          {:cycle, id} ->
+            {:halt, {{:error, "group #{inspect(id)} has a cyclic needs chain"}, finished}}
+        end
+      end)
+
+    result
   end
 
-  defp walk_needs(id, needs_by_id, stack) do
+  defp walk_needs(id, needs_by_id, stack, finished) do
     cond do
+      MapSet.member?(finished, id) ->
+        {:ok, finished}
+
       MapSet.member?(stack, id) ->
         {:cycle, id}
 
@@ -906,12 +954,16 @@ defmodule Kazi.Goal.Loader do
 
         needs_by_id
         |> Map.get(id, [])
-        |> Enum.reduce_while(:ok, fn dep, :ok ->
-          case walk_needs(dep, needs_by_id, stack) do
-            :ok -> {:cont, :ok}
+        |> Enum.reduce_while({:ok, finished}, fn dep, {:ok, finished} ->
+          case walk_needs(dep, needs_by_id, stack, finished) do
+            {:ok, finished} -> {:cont, {:ok, finished}}
             {:cycle, _} = cycle -> {:halt, cycle}
           end
         end)
+        |> case do
+          {:ok, finished} -> {:ok, MapSet.put(finished, id)}
+          {:cycle, _} = cycle -> cycle
+        end
     end
   end
 
@@ -942,7 +994,7 @@ defmodule Kazi.Goal.Loader do
          :ok <- reject_guard_acceptance(guard?, acceptance?, id),
          {:ok, held_out?} <- fetch_held_out(raw, id),
          {:ok, group} <- fetch_predicate_group(raw, id),
-         config = predicate_config(raw),
+         {:ok, config} <- predicate_config(raw, id),
          # T32.1 (ADR-0040): provider-specific config validation. Generic for
          # every other kind (config is handed verbatim to the provider); for
          # custom_script the verdict/evidence keys are checked so a mis-declared
@@ -1040,10 +1092,34 @@ defmodule Kazi.Goal.Loader do
 
   # Every non-reserved key on the predicate table becomes config, atom-keyed,
   # handed verbatim to the provider.
-  defp predicate_config(raw) do
+  #
+  # M3 (deep-review-001): `String.to_atom/1` on an UNBOUNDED set of untrusted
+  # keys (a hallucinating inner agent via `kazi adopt --enrich`, or an inline-goal
+  # MCP `kazi_apply` call) grows the BEAM atom table without limit — atoms are
+  # never garbage collected, so enough distinct junk keys crash the VM. Every
+  # LEGITIMATE provider config key is already a compile-time atom literal
+  # somewhere in the provider modules (already interned), so
+  # `String.to_existing_atom/1` succeeds for all real configs and only rejects
+  # keys no provider has ever declared — turning an atom-exhaustion DoS into an
+  # ordinary load error.
+  defp predicate_config(raw, id) do
     raw
     |> Map.drop(@predicate_reserved_keys)
-    |> Map.new(fn {key, value} -> {String.to_atom(key), value} end)
+    |> Enum.reduce_while({:ok, %{}}, fn {key, value}, {:ok, acc} ->
+      case safe_config_key(key) do
+        {:ok, atom_key} ->
+          {:cont, {:ok, Map.put(acc, atom_key, value)}}
+
+        :unknown ->
+          {:halt, {:error, "predicate #{inspect(id)} has unknown config key #{inspect(key)}"}}
+      end
+    end)
+  end
+
+  defp safe_config_key(key) when is_binary(key) do
+    {:ok, String.to_existing_atom(key)}
+  rescue
+    ArgumentError -> :unknown
   end
 
   # The verdict strings + evidence-format envelopes a custom_script predicate may

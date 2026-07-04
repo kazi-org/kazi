@@ -251,6 +251,10 @@ defmodule Kazi.Ratchet do
     case Store.read(store_dir(config, context, workspace), config[:id]) do
       {:ok, value} -> {:ok, :stored, value}
       :none -> {:seed, nil}
+      # M2 (deep-review-001): a corrupt store is NOT a missing one -- surface it
+      # as a predicate error rather than silently reseeding the ratchet at the
+      # current (possibly regressed) signal and reporting :pass.
+      {:error, :corrupt} -> {:error, {:ratchet_store_corrupt, config[:id]}}
     end
   end
 

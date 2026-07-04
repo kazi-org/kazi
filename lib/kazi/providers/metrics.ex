@@ -331,16 +331,28 @@ defmodule Kazi.Providers.Metrics do
   defp bucket_vector(_), do: {:error, :not_a_bucket_vector}
 
   defp bucket_entry(%{"metric" => %{"le" => le}, "value" => [_ts, value]}) do
-    with {:ok, count} <- parse_number(value) do
-      {:ok, {parse_le(le), count}}
+    with {:ok, count} <- parse_number(value),
+         {:ok, bound} <- parse_le(le) do
+      {:ok, {bound, count}}
     end
   end
 
   defp bucket_entry(_), do: {:error, :missing_le_or_value}
 
-  defp parse_le(le) when le in ["+Inf", "Inf", "inf", "+inf"], do: :inf
-  defp parse_le(le) when is_binary(le), do: parse_number!(le)
-  defp parse_le(le) when is_number(le), do: le * 1.0
+  # M4 (deep-review-001): a non-numeric `le` label (a malformed/untrusted
+  # Prometheus scrape) maps to `{:error, {:unparseable_le, le}}` -- never a
+  # raised `MatchError` -- via the SAFE `parse_number/1`, mirroring the bucket
+  # count's own handling above and every other provider's config-error discipline.
+  defp parse_le(le) when le in ["+Inf", "Inf", "inf", "+inf"], do: {:ok, :inf}
+
+  defp parse_le(le) when is_binary(le) do
+    case parse_number(le) do
+      {:ok, number} -> {:ok, number}
+      {:error, _} -> {:error, {:unparseable_le, le}}
+    end
+  end
+
+  defp parse_le(le) when is_number(le), do: {:ok, le * 1.0}
 
   defp bucket_evidence(buckets) do
     buckets

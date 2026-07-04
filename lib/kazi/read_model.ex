@@ -371,25 +371,35 @@ defmodule Kazi.ReadModel do
 
     aggregates
     |> Enum.map(&build_goal_summary/1)
+    |> Enum.reject(&is_nil/1)
     |> Enum.sort_by(& &1.last_observed_at, {:desc, DateTime})
   end
 
+  # A concurrent invalidate/reset between the aggregate scan (above) and this
+  # per-goal fetch can delete the iteration `get_iteration/2` expects, yielding
+  # `nil` — guard it and skip the summary rather than crashing the whole board
+  # render on a race (deep review L7).
   defp build_goal_summary(%{
          goal_ref: goal_ref,
          iteration_count: iteration_count,
          latest_index: latest_index,
          last_observed_at: last_observed_at
        }) do
-    latest = get_iteration(goal_ref, latest_index)
-    vector = to_predicate_vector(latest)
+    case get_iteration(goal_ref, latest_index) do
+      nil ->
+        nil
 
-    %GoalSummary{
-      goal_ref: goal_ref,
-      status: derive_status(latest, vector),
-      latest_vector: vector,
-      iteration_count: iteration_count,
-      last_observed_at: last_observed_at
-    }
+      latest ->
+        vector = to_predicate_vector(latest)
+
+        %GoalSummary{
+          goal_ref: goal_ref,
+          status: derive_status(latest, vector),
+          latest_vector: vector,
+          iteration_count: iteration_count,
+          last_observed_at: last_observed_at
+        }
+    end
   end
 
   # The board's lifecycle status is derived from the latest iteration, not stored:
@@ -660,7 +670,13 @@ defmodule Kazi.ReadModel do
   defp sanitize_evidence(v), do: inspect(v)
 
   defp serialize_action_params(nil), do: %{}
-  defp serialize_action_params(%Action{params: params}), do: params
+
+  # Same class as the sanitized `evidence` above: `action.params` is stored
+  # verbatim, so a non-JSON-safe param (a tuple, an atom key) would fail the
+  # `:map` cast and lose the iteration (deep review L13). Route it through the
+  # same deep-sanitizer defensively, even though today's dispatch evidence only
+  # carries `:fail` (already JSON-safe) results.
+  defp serialize_action_params(%Action{params: params}), do: sanitize_evidence(params)
 
   # T34.3 (ADR-0046 §2): serialize a per-iteration counter map (`context`/`tools`)
   # JSON-safe — stringify the keys (atoms don't survive JSON); the values are

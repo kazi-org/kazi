@@ -82,12 +82,29 @@ defmodule Kazi.Coordination.LeaseTable do
   end
 
   @doc """
-  Forgets the lease held under `key` (it was released). Best-effort: a no-op when
-  the table is not running.
+  Forgets `lease` (it was released) — but ONLY if the entry currently recorded
+  under its `:key` is still held by the SAME `:holder`. `record/2` and
+  `forget/2` are two separate `Agent.update` calls, so two partitions
+  serializing on the same key can interleave: the outgoing holder's release
+  runs its `forget` after the incoming holder has already `record`ed its own
+  entry, and an unconditional delete-by-key would erase that fresh entry
+  (deep review L8) — the dashboard would then read a held key as free, even
+  though the underlying lease backend's CAS keeps coordination itself correct.
+  Keying the forget by holder identity makes this a safe no-op instead.
+
+  Best-effort: a no-op when the table is not running.
   """
-  @spec forget(Lease.key(), atom() | pid()) :: :ok
-  def forget(key, name \\ __MODULE__) when is_binary(key) do
-    if alive?(name), do: Agent.update(name, &Map.delete(&1, key))
+  @spec forget(Lease.t(), atom() | pid()) :: :ok
+  def forget(%Lease{key: key, holder: holder}, name \\ __MODULE__) do
+    if alive?(name) do
+      Agent.update(name, fn table ->
+        case Map.fetch(table, key) do
+          {:ok, %Lease{holder: ^holder}} -> Map.delete(table, key)
+          _ -> table
+        end
+      end)
+    end
+
     :ok
   end
 

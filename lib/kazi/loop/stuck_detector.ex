@@ -181,4 +181,67 @@ defmodule Kazi.Loop.StuckDetector do
   defp improved?(:higher_better, first, last), do: last > first
   defp improved?(:lower_better, first, last), do: last < first
   defp improved?(_no_direction, _first, _last), do: false
+
+  # ===========================================================================
+  # Persistent-:error detection (M5, deep-review-001)
+  # ===========================================================================
+
+  @doc """
+  Decides whether the loop is stuck on a PERSISTENT `:error` over `history` with
+  window `n` — the same non-empty set of predicates reporting `:error` (a
+  `:no_provider` predicate, a `custom_script` emitting non-JSON under the `json`
+  verdict, a checker that times out every run) across the last `n` consecutive
+  observations. A persistent `:error` is a terminal, checker-unrunnable
+  condition: it never converges (`all_satisfied?` requires `:pass`), never
+  dispatches (`PredicateVector.failing/1` matches only `:fail`), and never
+  escalates via `stuck?/2` (which also only reduces on `:fail`) — so, left
+  unchecked, the loop would re-observe forever with no budget. This mirrors
+  `stuck?/2`'s window logic but classifies on `:error` rather than `:fail`, and
+  has no score-progress escape (an errored predicate carries no meaningful
+  score gradient).
+
+  Returns `{:error_stuck, error_set}` or `:not_error_stuck`.
+
+  ## Examples
+
+      iex> err = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.error(%{})})
+      iex> h = [{0, err}, {1, err}, {2, err}]
+      iex> Kazi.Loop.StuckDetector.error_stuck?(h, 3)
+      {:error_stuck, MapSet.new([:a])}
+
+      iex> pass = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass()})
+      iex> Kazi.Loop.StuckDetector.error_stuck?([{0, pass}, {1, pass}, {2, pass}], 3)
+      :not_error_stuck
+  """
+  @spec error_stuck?(Kazi.Loop.history(), integer()) ::
+          {:error_stuck, failing_set()} | :not_error_stuck
+  def error_stuck?(_history, n) when not is_integer(n) or n < 1, do: :not_error_stuck
+
+  def error_stuck?(history, n) when is_list(history) do
+    window =
+      history
+      |> Enum.map(fn {_index, %PredicateVector{} = vector} -> vector end)
+      |> Enum.take(-n)
+
+    decide_error_window(window, n)
+  end
+
+  defp decide_error_window(window, n) when length(window) < n, do: :not_error_stuck
+
+  defp decide_error_window(window, _n) do
+    error_sets = Enum.map(window, fn vector -> MapSet.new(erroring(vector)) end)
+    [first | rest] = error_sets
+
+    cond do
+      MapSet.size(first) == 0 -> :not_error_stuck
+      not Enum.all?(rest, &MapSet.equal?(&1, first)) -> :not_error_stuck
+      true -> {:error_stuck, first}
+    end
+  end
+
+  # The ids whose result is `:error` — the mirror of `PredicateVector.failing/1`
+  # for the error-persistence check.
+  defp erroring(%PredicateVector{results: results}) do
+    for {id, %PredicateResult{status: :error}} <- results, do: id
+  end
 end

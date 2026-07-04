@@ -838,14 +838,33 @@ defmodule Kazi.Authoring do
 
   # Proposal config → atom-keyed map handed to the provider (the loader's
   # convention). A non-map (or absent) config is an empty map.
+  #
+  # M3 (deep-review-001): a proposal is HARNESS OUTPUT — an inner agent's raw
+  # stdout, i.e. untrusted input — so config keys are atomized via
+  # `String.to_existing_atom/1` (never the unbounded `String.to_atom/1`), and any
+  # key no provider has ever declared an atom for is dropped rather than minting
+  # a fresh atom. Every legitimate provider config key is already interned at
+  # compile time, so this never drops a real field.
   defp predicate_config(config) when is_map(config) do
-    Map.new(config, fn {key, value} -> {to_atom(key), value} end)
+    config
+    |> Enum.flat_map(fn {key, value} ->
+      case to_atom(key) do
+        {:ok, atom_key} -> [{atom_key, value}]
+        :unknown -> []
+      end
+    end)
+    |> Map.new()
   end
 
   defp predicate_config(_config), do: %{}
 
-  defp to_atom(key) when is_atom(key), do: key
-  defp to_atom(key) when is_binary(key), do: String.to_atom(key)
+  defp to_atom(key) when is_atom(key), do: {:ok, key}
+
+  defp to_atom(key) when is_binary(key) do
+    {:ok, String.to_existing_atom(key)}
+  rescue
+    ArgumentError -> :unknown
+  end
 
   # Stringify map keys for the JSON/goal-file on-disk shape (atoms don't survive
   # the round-trip; the loader re-atomises config keys).
