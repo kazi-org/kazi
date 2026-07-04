@@ -940,6 +940,9 @@ defmodule Kazi.CLI do
           # (issue #769): --permission-mode / --allowed-tools, threaded the same
           # way, so a headless claude dispatch against an untrusted workspace can
           # be pre-authorized instead of getting every tool call silently denied.
+          # T35.5 (ADR-0045 §8): --context-store/--context-budget must survive the
+          # parse layer or maybe_put_context_store/2 never sees them — the store
+          # silently stayed off (and an unknown name never warned, deep review L11).
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
@@ -948,9 +951,6 @@ defmodule Kazi.CLI do
           effort: flags[:effort],
           permission_mode: flags[:permission_mode],
           allowed_tools: flags[:allowed_tools],
-          # T35.5 (ADR-0045 §8): --context-store/--context-budget must survive the
-          # parse layer or maybe_put_context_store/2 never sees them — the store
-          # silently stayed off (and an unknown name never warned, deep review L11).
           context_store: flags[:context_store],
           context_budget: flags[:context_budget],
           json: flags[:json] || false,
