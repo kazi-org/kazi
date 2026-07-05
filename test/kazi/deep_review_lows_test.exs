@@ -234,8 +234,10 @@ defmodule Kazi.DeepReviewLowsTest do
 
   # ===========================================================================
   # L10 — notify_iteration's reported converged? must agree with the actual
-  # convergence decision (which drops quarantined predicates), not the raw
-  # full-vector satisfied?/1 (loop.ex).
+  # convergence decision (loop.ex). i795/#795 changed WHAT that decision is (a
+  # quarantined predicate — status `:unknown` — no longer manufactures a false
+  # `:converged`; see loop_test.exs), but the L10 invariant itself (the two
+  # never disagree) still applies and is pinned below.
   # ===========================================================================
 
   defmodule L10FlipProvider do
@@ -292,7 +294,7 @@ defmodule Kazi.DeepReviewLowsTest do
   end
 
   describe "L10: notify_iteration's converged? matches the real convergence decision" do
-    test "the converging iteration reports converged?: true even though a quarantined predicate still reads :fail" do
+    test "a quarantined predicate keeps every iteration's converged? false, matching the (non-converged) terminal outcome" do
       {:ok, flip_pid} = L10FlipProvider.start_link(nil)
       test = self()
 
@@ -316,8 +318,9 @@ defmodule Kazi.DeepReviewLowsTest do
           stuck_iterations: 0
         )
 
-      assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
-      assert result.outcome == :converged
+      # i795/#795: a quarantined predicate (`:unknown`) never lets the run
+      # report `:converged` — the loop just keeps re-observing.
+      assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
 
       snap = Kazi.Loop.snapshot(loop)
       assert :flaky in snap.quarantine
@@ -329,10 +332,15 @@ defmodule Kazi.DeepReviewLowsTest do
           200 -> flunk("expected at least one on_iteration event")
         end
 
-      assert converging_payload.converged? == true
+      # The L10 invariant: notify_iteration's converged? must agree with the
+      # real convergence decision. Both now delegate to the very same
+      # `all_satisfied?/1`, so they can never disagree.
+      assert converging_payload.converged? ==
+               PredicateVector.satisfied?(converging_payload.vector)
 
-      assert PredicateVector.satisfied?(converging_payload.vector) == false,
-             "the raw full-vector satisfied?/1 must still disagree (that mismatch is the bug L10 fixes)"
+      assert converging_payload.converged? == false
+
+      Kazi.Loop.stop(loop)
     end
   end
 

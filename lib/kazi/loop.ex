@@ -241,7 +241,13 @@ defmodule Kazi.Loop do
             active: boolean(),
             guarantees: [atom()],
             gaming_events: [map()]
-          }
+          },
+          # i795/#795: the predicate ids quarantined as flaky (T1.3) at the
+          # terminal observation, or `[]` if none. `all_satisfied?/1` blocks
+          # `:converged` on any of these (their status is `:unknown`, never
+          # `:pass`) — this field is WHY: it names the ids so a `:stopped` result
+          # is diagnosable without re-deriving quarantine state from the vector.
+          quarantine: [Kazi.Predicate.id()]
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -1407,9 +1413,19 @@ defmodule Kazi.Loop do
     cond do
       # 1. Whole vector satisfied (incl. live predicates).
       #    `:converged` is reachable through this clause and no other — the
-      #    objective-termination guard (T0.8, UC-005). T1.3 flake: quarantined
-      #    predicates are EXCLUDED from this check (they carry no convergence
-      #    claim), so a flake neither counts toward nor blocks convergence.
+      #    objective-termination guard (T0.8, UC-005). T1.3/i795 flake: a
+      #    quarantined predicate is EXCLUDED from the work-list (clause 2 below,
+      #    via `PredicateVector.failing/1` matching only real `:fail`s) so a
+      #    flake is never re-dispatched as an agent task — but it is NOT excluded
+      #    here. Its status is `:unknown`, `PredicateVector.satisfied?/1` requires
+      #    every result to be `:pass`, so a quarantined predicate blocks
+      #    `:converged` exactly like any other unresolved one (issue #795: an
+      #    `:unknown` verdict must never count toward the bar — a run must not
+      #    report `converged` while a predicate's true state is genuinely
+      #    unknown, quarantine included). With no work to dispatch and no
+      #    convergence reachable, the loop falls through to clause 5 and keeps
+      #    re-observing — a real fix (or a human unquarantining/re-authoring the
+      #    predicate) is required to resolve it, never a silent false positive.
       #
       #    T3.4a standing mode: in a STANDING loop satisfaction does NOT
       #    terminate — `converge_or_stay/1` records the converged observation,
@@ -1417,7 +1433,7 @@ defmodule Kazi.Loop do
       #    keeps holding the predicates true (UC-016). In the DEFAULT loop this is
       #    exactly `terminate_with(:converged, data)` — the T0.8 path is
       #    unchanged.
-      all_satisfied?(vector, data.quarantine) ->
+      all_satisfied?(vector) ->
         converge_or_stay(data)
 
       # 2. Code predicates failing: dispatch the agent with failing evidence.
@@ -1469,25 +1485,17 @@ defmodule Kazi.Loop do
   # single, self-documenting clause in `decide/1` that cannot silently regress
   # to "code green is good enough".
   #
-  # T1.3 flake: quarantined predicates are dropped from the vector before the
-  # satisfaction check — a known-flaky predicate carries no convergence claim and
-  # must neither block nor count toward convergence. The empty-vector guard still
-  # holds: a goal whose every predicate is quarantined (nothing left to assert
-  # over) is NOT satisfied, so it cannot converge vacuously.
-  @spec all_satisfied?(PredicateVector.t(), MapSet.t()) :: boolean()
-  defp all_satisfied?(%PredicateVector{} = vector, %MapSet{} = quarantine) do
-    vector
-    |> drop_quarantined(quarantine)
-    |> PredicateVector.satisfied?()
-  end
-
-  # Return the vector with all quarantined predicate ids removed.
-  @spec drop_quarantined(PredicateVector.t(), MapSet.t()) :: PredicateVector.t()
-  defp drop_quarantined(%PredicateVector{results: results}, %MapSet{} = quarantine) do
-    results
-    |> Map.drop(MapSet.to_list(quarantine))
-    |> PredicateVector.new()
-  end
+  # T1.3/i795 flake: a quarantined predicate's recorded status is `:unknown`
+  # (`Flake.quarantined_result/1`), which `PredicateVector.satisfied?/1` already
+  # treats as not-passing — so quarantine is NOT special-cased here. A goal with
+  # a quarantined predicate blocks on this exactly like any other unresolved
+  # predicate; only the WORK-LIST (`code_failing?`/`PredicateVector.failing/1`,
+  # matching only real `:fail`s) excludes it, so it is never re-dispatched as an
+  # agent task. Fixing issue #795 (a quarantined `:unknown` must never let a run
+  # report `:converged`) is exactly why this thin wrapper no longer drops
+  # anything before delegating.
+  @spec all_satisfied?(PredicateVector.t()) :: boolean()
+  defp all_satisfied?(%PredicateVector{} = vector), do: PredicateVector.satisfied?(vector)
 
   # Transition into :observing and schedule the next observation after `delay_ms`
   # via a state timeout (see the :reobserve handler for why this is a timeout and
@@ -2302,7 +2310,10 @@ defmodule Kazi.Loop do
       usage: data.usage,
       # T32.4 enforcement: the active anti-gaming guarantees + flagged gaming
       # events, so the CLI's `run --json` can report the bar was held (ADR-0042 §7).
-      enforcement: enforcement_status(data)
+      enforcement: enforcement_status(data),
+      # i795/#795: name the quarantined ids on the terminal result — the field
+      # `all_satisfied?/1`'s non-convergence is otherwise silent about.
+      quarantine: MapSet.to_list(data.quarantine)
     }
     |> maybe_attach_stuck_bundle(data)
   end
@@ -2789,11 +2800,10 @@ defmodule Kazi.Loop do
       # 0-based per-goal index matching the read-model's iteration_index column.
       iteration: data.iterations - 1,
       vector: data.vector,
-      # Reuse the SAME test `decide/2` uses (`all_satisfied?`, which drops
-      # quarantined predicates) rather than the raw full-vector `satisfied?/1` —
-      # otherwise the converging iteration's read-model row can read
-      # `converged?: false` even though the run just converged (deep review L10).
-      converged?: all_satisfied?(data.vector, data.quarantine),
+      # Reuse the SAME test `decide/2` uses (`all_satisfied?`) rather than
+      # calling `PredicateVector.satisfied?/1` directly, so this can never drift
+      # from the actual convergence gate (deep review L10).
+      converged?: all_satisfied?(data.vector),
       # T1.2 regression: the green→red flags for this observation, so the runtime
       # projects them into the read-model (making the regression queryable).
       regressions: data.regressions,

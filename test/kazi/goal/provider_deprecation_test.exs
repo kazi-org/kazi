@@ -16,7 +16,14 @@ defmodule Kazi.Goal.ProviderDeprecationTest do
       keeps STDOUT pure;
     * the migration target + v2.0.0 removal are documented.
   """
-  use ExUnit.Case, async: true
+  # `async: false` (i795/#795 suite_green hermeticity): every case here captures
+  # the NAMED `:stderr` device via `ExUnit.CaptureIO`. Capturing a named device is
+  # process-INDEPENDENT (ExUnit.CaptureIO docs) — it swaps the globally
+  # registered `:standard_error` for the duration of the capture, so any other
+  # test process emitting to stderr concurrently (a warning, another suite's own
+  # capture) leaks into this module's buffer. Serializing this module is the fix;
+  # every OTHER module stays `async: true`.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 

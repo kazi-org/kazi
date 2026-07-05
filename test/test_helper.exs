@@ -4,6 +4,21 @@
 # per-test isolation.
 Ecto.Adapters.SQL.Sandbox.mode(Kazi.Repo, :manual)
 
+# i795/#795 suite_green hermeticity: `Kazi.Goal.Loader` force-loads a
+# predicate's provider module (`Code.ensure_loaded/1`, M3 atom-safety) the
+# FIRST time any goal declares that kind. That one-time load interns every
+# atom literal in the module's own source — a real, one-off cost, not a
+# per-call one. Left to happen lazily, whichever async test process is the
+# first in the whole suite to load a given provider absorbs that atom burst,
+# and if that process happens to be
+# `Kazi.Goal.LoaderAtomSafetyTest`'s atom-count-delta assertion, the burst
+# lands inside ITS measurement window and the test flakes — not because the
+# loader mis-atomizes anything, but because the one-time load's timing is
+# nondeterministic under `async: true` scheduling. Loading every real provider
+# module here, before `ExUnit.start/1`, makes that burst happen exactly once,
+# deterministically, before any test's atom-count snapshot.
+for {_kind, module} <- Kazi.Runtime.provider_modules(), do: Code.ensure_loaded(module)
+
 # Integration tests tagged `:nats` need a real NATS JetStream server and are
 # EXCLUDED by default so the standard `mix test` stays hermetic (no NATS, no
 # network). They run only when `NATS_URL` is set in the environment:

@@ -3422,6 +3422,12 @@ defmodule Kazi.CLI do
   #   * `reason`         — the loop's stop reason (the budget dimension, or "stuck"),
   #                        as a string, or nil on a clean converge.
   #   * `release_ref`    — WHAT was shipped (the T3.3c release tag), or nil.
+  #   * `quarantine`     — i795/#795: additive, optional array of predicate ids
+  #                        quarantined as flaky (T1.3) at the terminal
+  #                        observation. Present only when non-empty. A
+  #                        quarantined predicate's status is `:unknown`, so
+  #                        `status` can never be "converged" while this is
+  #                        present — it names WHY a non-converged result stalled.
   #   * `schema_version` — the contract version (`@run_schema_version`); a breaking
   #                        change bumps it.
   #   * `usage`          — the ADR-0046 economy envelope: an ADDITIVE, optional
@@ -3455,7 +3461,18 @@ defmodule Kazi.CLI do
     |> put_economy(economy)
     |> put_context_store(result)
     |> put_stuck_bundle(result)
+    |> put_quarantine(result)
   end
+
+  # i795/#795: the additive `quarantine` array — the predicate ids quarantined
+  # as flaky (T1.3) at the terminal observation, named so a non-converged result
+  # is diagnosable without re-deriving quarantine state. Present only when
+  # non-empty; absent ⇒ byte-identical to today (the ADR-0041/0046 additive
+  # rule this whole envelope follows).
+  defp put_quarantine(map, %{quarantine: [_ | _] = ids}),
+    do: Map.put(map, :quarantine, Enum.sort_by(ids, &to_string/1) |> Enum.map(&to_string/1))
+
+  defp put_quarantine(map, _result), do: map
 
   # T35.5 (ADR-0045 §6): the additive `context_store` byte-accounting object, present
   # only when the run used a store. Absent ⇒ the result is byte-identical to today.
