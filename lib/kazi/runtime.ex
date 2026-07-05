@@ -41,6 +41,7 @@ defmodule Kazi.Runtime do
   """
 
   alias Kazi.{Enforcement, Goal, Loop, Predicate, PredicateResult, PredicateVector, ReadModel}
+  alias Kazi.ReadModel.RunRegistry
 
   require Logger
 
@@ -136,7 +137,17 @@ defmodule Kazi.Runtime do
       the same env-aware params rather than as a step of the convergence loop,
       which never rolls back a successful reconcile.
     * `:persist?` — project each iteration into the read-model (default `true`).
-      Set `false` to run without touching SQLite.
+      Set `false` to run without touching SQLite. Also gates the fleet **run
+      registry** (T46.1, ADR-0057): when persistence is on, `run/2` upserts a
+      `runs` row once the loop starts, heartbeats it on every `on_iteration`
+      tick (composed onto the same seam as the iteration projection), and
+      records the terminal status (`"converged"` / `"stuck"` / `"over_budget"`
+      / `"stopped"` / `"error"`) once the loop terminates — this is the ONLY
+      place a real `kazi apply` registers itself; `Kazi.ReadModel.RunRegistry`
+      has no other writer.
+    * `:run_id` — the registry's `run_id` for this process (default a fresh
+      `Ecto.UUID`). Passing an existing id lets a restarted process reclaim its
+      own registry row (`RunRegistry.start/1` upserts on a repeat `run_id`).
     * `:stream` — a 1-arity side-effect-only observer invoked once per observation
       with the loop's `on_iteration` payload (T15.4, ADR-0023 decision 3). Composed
       OVER the read-model projection on the SAME `on_iteration` seam, so streaming
@@ -196,6 +207,13 @@ defmodule Kazi.Runtime do
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
          :ok <- guard_not_vacuous(goal, providers, workspace) do
+      # T46.1 (ADR-0057): the fleet run registry's identity for this process —
+      # generated fresh unless the caller reclaims a prior id (a restarted
+      # process resuming its own registry row).
+      run_id = Keyword.get(opts, :run_id, Ecto.UUID.generate())
+      persist? = Keyword.get(opts, :persist?, true)
+      goal_ref = Keyword.get(opts, :goal_ref, goal.id)
+
       loop_opts =
         opts
         |> Keyword.drop([
@@ -207,6 +225,7 @@ defmodule Kazi.Runtime do
           :deploy_params,
           :persist?,
           :goal_ref,
+          :run_id,
           :providers,
           :adapter_opts,
           :extra_action_context,
@@ -245,7 +264,7 @@ defmodule Kazi.Runtime do
           deploy: @deploy,
           workspace: workspace,
           adapter_opts: build_adapter_opts(goal, opts, harness_opts),
-          on_iteration: build_on_iteration(goal, opts),
+          on_iteration: build_on_iteration(goal, opts, run_id, persist?),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
           extra_action_context: build_action_context(opts),
@@ -261,8 +280,13 @@ defmodule Kazi.Runtime do
         )
 
       with {:ok, loop} <- Loop.start_link(loop_opts) do
+        # T46.1 (ADR-0057): register the run once the loop process is actually
+        # up (never for a failed start_link, which would otherwise orphan a
+        # "running" row nothing ever finishes).
+        register_run(persist?, run_id, workspace, goal_ref, harness_opts)
         result = Loop.await(loop, await_timeout)
         Loop.stop(loop)
+        finish_run(persist?, run_id, result)
         normalize_await(result)
       end
     end
@@ -513,15 +537,19 @@ defmodule Kazi.Runtime do
   # even when persistence is off / fails), then the read-model projection. Both
   # are side-effect only; a raising stream callback is contained here so it never
   # alters convergence or blocks the projection.
-  defp build_on_iteration(goal, opts) do
+  #
+  # T46.1 (ADR-0057): the run registry's heartbeat is composed onto the SAME seam,
+  # gated by the same `persist?` flag as the iteration projection — "persistence
+  # off" means the run touches no read-model table, registry included.
+  defp build_on_iteration(goal, opts, run_id, persist?) do
     stream = Keyword.get(opts, :stream)
-    persist? = Keyword.get(opts, :persist?, true)
     goal_ref = Keyword.get(opts, :goal_ref, goal.id)
 
     cond do
       is_function(stream, 1) and persist? ->
         fn payload ->
           run_stream_observer(stream, payload)
+          RunRegistry.heartbeat(run_id)
           persist_iteration(goal_ref, payload)
         end
 
@@ -529,7 +557,10 @@ defmodule Kazi.Runtime do
         fn payload -> run_stream_observer(stream, payload) end
 
       persist? ->
-        fn payload -> persist_iteration(goal_ref, payload) end
+        fn payload ->
+          RunRegistry.heartbeat(run_id)
+          persist_iteration(goal_ref, payload)
+        end
 
       true ->
         nil
@@ -623,6 +654,86 @@ defmodule Kazi.Runtime do
   defp maybe_put_budget_stop(attrs, reason) do
     Map.put(attrs, :action, Kazi.Action.new(:budget_stop, params: %{reason: reason}))
   end
+
+  # =============================================================================
+  # Fleet run registry (T46.1, ADR-0057)
+  # =============================================================================
+  #
+  # `Kazi.ReadModel.RunRegistry` has exactly ONE writer: this module. A real
+  # `kazi apply` reaches every real user (the CLI, the mix task, the escript) by
+  # calling `run/2`, so registering/heartbeating/finishing here — rather than in
+  # the CLI layer — is what makes the registry see EVERY run regardless of entry
+  # point. Best-effort throughout: a registry write must never stall or alter
+  # convergence, matching the read-model projection's own contract above.
+
+  defp register_run(false, _run_id, _workspace, _goal_ref, _harness_opts), do: :ok
+
+  defp register_run(true, run_id, workspace, goal_ref, harness_opts) do
+    attrs = %{
+      run_id: run_id,
+      pid: inspect(self()),
+      workspace: to_string(workspace),
+      goal_ref: goal_ref,
+      harness: harness_id_string(harness_opts),
+      model: Keyword.get(harness_opts, :model)
+    }
+
+    case RunRegistry.start(attrs) do
+      {:ok, _run} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(fn ->
+          "kazi.runtime failed to register run #{run_id} for goal=#{goal_ref}: " <>
+            inspect(reason)
+        end)
+
+        :ok
+    end
+  end
+
+  # The harness id (e.g. "claude") the registry displays, read off the resolved
+  # profile threaded into adapter_opts (`Kazi.Harness.resolve/1`) — the SAME
+  # profile the adapter itself dispatches through, so the registry can never
+  # disagree with what actually ran.
+  defp harness_id_string(harness_opts) do
+    case Keyword.get(harness_opts, :profile) do
+      %{id: id} when is_atom(id) -> Atom.to_string(id)
+      _ -> nil
+    end
+  end
+
+  defp finish_run(false, _run_id, _result), do: :ok
+
+  defp finish_run(true, run_id, {:ok, %{outcome: outcome, reason: reason}}) do
+    do_finish_run(run_id, registry_status(outcome, reason))
+  end
+
+  defp finish_run(true, run_id, {:error, _reason}) do
+    do_finish_run(run_id, "error")
+  end
+
+  defp do_finish_run(run_id, status) do
+    case RunRegistry.finish(run_id, status) do
+      {:ok, _run} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(fn ->
+          "kazi.runtime failed to finish run #{run_id}: " <> inspect(reason)
+        end)
+
+        :ok
+    end
+  end
+
+  # Maps the loop's `t:Kazi.Loop.result/0` outcome to the registry's terminal
+  # status vocabulary (`Kazi.ReadModel.RunRegistry.finish/2`'s doc, mirrored by
+  # `KaziWeb.StarmapLive`'s state resolution).
+  defp registry_status(:converged, _reason), do: "converged"
+  defp registry_status(:over_budget, _reason), do: "over_budget"
+  defp registry_status(:stopped, :stuck), do: "stuck"
+  defp registry_status(:stopped, _reason), do: "stopped"
 
   # =============================================================================
   # Result normalization
