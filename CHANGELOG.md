@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.3](https://github.com/kazi-org/kazi/compare/v1.73.2...v1.73.3) (2026-07-05)
+
+
+### Bug Fixes
+
+* wire the transcript sink into the live kazi apply path (T46.3) ([f2cd369](https://github.com/kazi-org/kazi/commit/f2cd369a16877fc9c14103d5d3d79d5ba6e50604))
+
 ## [1.73.2](https://github.com/kazi-org/kazi/compare/v1.73.1...v1.73.2) (2026-07-05)
 
 
