@@ -549,12 +549,15 @@ defmodule Kazi.LoopTest do
     :ok = Kazi.Loop.stop(loop)
   end
 
-  test "a quarantined flaky predicate does NOT block convergence of the real requirements" do
+  test "a quarantined flaky predicate blocks convergence even when other requirements pass (i795/#795)" do
     {:ok, alt_pid} = AlternatingProvider.start_link(nil)
 
     # Two predicates: a genuinely-flaky one and a code predicate that is solidly
-    # green. Once the flaky one is quarantined, convergence is evaluated over the
-    # remaining (green) predicate only, so the loop converges despite the flake.
+    # green. Quarantine excludes the flaky predicate from the WORK-LIST (it is
+    # never re-dispatched), but its recorded status is `:unknown` — never `:pass`
+    # — so the whole vector is not satisfied and the run must NOT report
+    # `:converged` (issue #795: "truth lives in the controller" — an `:unknown`
+    # verdict, quarantine included, must never count toward the bar).
     goal =
       Goal.new("flake-converge",
         predicates: [
@@ -584,13 +587,15 @@ defmodule Kazi.LoopTest do
         flake_max_retries: 2
       )
 
-    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
-    assert result.outcome == :converged
+    # Never converges: the flaky predicate is quarantined (excluded from work),
+    # :solid passes, but the vector as a whole still carries an `:unknown` — so
+    # the loop just keeps re-observing rather than reporting a false positive.
+    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
 
     # The flaky predicate was quarantined and never dispatched as work.
     snap = Kazi.Loop.snapshot(loop)
     assert :flaky in snap.quarantine
-    refute :dispatch_agent in result.actions
+    refute :dispatch_agent in snap.actions
   end
 
   test "a consistently-failing predicate is NOT quarantined and still drives a dispatch" do

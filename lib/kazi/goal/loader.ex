@@ -994,7 +994,7 @@ defmodule Kazi.Goal.Loader do
          :ok <- reject_guard_acceptance(guard?, acceptance?, id),
          {:ok, held_out?} <- fetch_held_out(raw, id),
          {:ok, group} <- fetch_predicate_group(raw, id),
-         {:ok, config} <- predicate_config(raw, id),
+         {:ok, config} <- predicate_config(raw, id, kind),
          # T32.1 (ADR-0040): provider-specific config validation. Generic for
          # every other kind (config is handed verbatim to the provider); for
          # custom_script the verdict/evidence keys are checked so a mis-declared
@@ -1098,11 +1098,17 @@ defmodule Kazi.Goal.Loader do
   # MCP `kazi_apply` call) grows the BEAM atom table without limit — atoms are
   # never garbage collected, so enough distinct junk keys crash the VM. Every
   # LEGITIMATE provider config key is already a compile-time atom literal
-  # somewhere in the provider modules (already interned), so
-  # `String.to_existing_atom/1` succeeds for all real configs and only rejects
-  # keys no provider has ever declared — turning an atom-exhaustion DoS into an
-  # ordinary load error.
-  defp predicate_config(raw, id) do
+  # somewhere in the provider modules, so `String.to_existing_atom/1` succeeds
+  # for all real configs and only rejects keys no provider has ever declared —
+  # turning an atom-exhaustion DoS into an ordinary load error. That only holds
+  # if the provider module has actually been CODE-loaded, which a bare
+  # module-name reference (e.g. `Kazi.Runtime`'s dispatch table) does NOT do —
+  # so we force-load `kind`'s provider here first (a fixed, non-attacker-
+  # controlled module), otherwise a provider referenced nowhere else (e.g.
+  # `:metrics`) rejects its own real keys as "unknown" until first evaluated.
+  defp predicate_config(raw, id, kind) do
+    ensure_provider_loaded(kind)
+
     raw
     |> Map.drop(@predicate_reserved_keys)
     |> Enum.reduce_while({:ok, %{}}, fn {key, value}, {:ok, acc} ->
@@ -1120,6 +1126,18 @@ defmodule Kazi.Goal.Loader do
     {:ok, String.to_existing_atom(key)}
   rescue
     ArgumentError -> :unknown
+  end
+
+  # Force-loads `kind`'s provider module (via `Kazi.Runtime.provider_modules/0`)
+  # so any config-key atom it references in its own source is interned before
+  # `safe_config_key/1` checks it. A no-op (fast, idempotent) once the module is
+  # loaded; silently a no-op for a `kind` with no registered module (loader-level
+  # validation still runs — this only affects atom interning).
+  defp ensure_provider_loaded(kind) do
+    case Map.fetch(Kazi.Runtime.provider_modules(), kind) do
+      {:ok, module} -> Code.ensure_loaded(module)
+      :error -> :ok
+    end
   end
 
   # The verdict strings + evidence-format envelopes a custom_script predicate may

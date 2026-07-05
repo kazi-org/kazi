@@ -295,6 +295,13 @@ defmodule Kazi.Runtime do
   @doc """
   The predicate-kind → concrete-provider map the runtime dispatches on. Exposed
   for tests / introspection; mirrors the loader's provider table (ADR-0002).
+  Also used by `Kazi.Goal.Loader` to force-load a predicate's provider module
+  before validating its config keys (M3 atom-safety, `String.to_existing_atom/1`):
+  a provider referenced only as a module-name value here is never CODE-loaded by
+  that reference alone, so a legitimate key atom declared solely inside that
+  module's function bodies (e.g. `:query_url` in `Kazi.Providers.Metrics`) is
+  never interned until the module is actually invoked — which never happens
+  during goal *loading*, only during evaluation.
   """
   @spec provider_modules() :: %{optional(Predicate.provider_kind()) => module()}
   def provider_modules, do: @provider_modules
