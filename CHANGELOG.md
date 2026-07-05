@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.2](https://github.com/kazi-org/kazi/compare/v1.73.1...v1.73.2) (2026-07-05)
+
+
+### Bug Fixes
+
+* **loop:** unknown/quarantined verdicts never satisfy convergence ([#795](https://github.com/kazi-org/kazi/issues/795)) ([6bac321](https://github.com/kazi-org/kazi/commit/6bac321dab5a0ecb4f66a6421d01d764671d165c))
+
 ## [1.73.1](https://github.com/kazi-org/kazi/compare/v1.73.0...v1.73.1) (2026-07-05)
 
 
