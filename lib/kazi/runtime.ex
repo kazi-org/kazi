@@ -148,6 +148,16 @@ defmodule Kazi.Runtime do
     * `:run_id` — the registry's `run_id` for this process (default a fresh
       `Ecto.UUID`). Passing an existing id lets a restarted process reclaim its
       own registry row (`RunRegistry.start/1` upserts on a repeat `run_id`).
+    * `:sinks_dir` — the root directory the per-run transcript sink is written
+      under, as `<sinks_dir>/<run_id>/transcript.jsonl` (T46.3, ADR-0057
+      decision 3). Defaults to the `:kazi, :sinks_dir` app config, falling back
+      to `<user-home>/.kazi/runs`. Only computed/threaded when `:persist?` is
+      true; an explicit `adapter_opts: [transcript_sink_path: ...]` always
+      overrides it. The path is also recorded on the registry row's
+      `transcript_sink_path` column.
+    * `:transcript_cap_bytes` — overrides the transcript sink's default size
+      cap (`Kazi.Sink.Transcript.default_cap_bytes/0`); forwarded to the
+      harness adapter as `adapter_opts[:transcript_cap_bytes]`.
     * `:stream` — a 1-arity side-effect-only observer invoked once per observation
       with the loop's `on_iteration` payload (T15.4, ADR-0023 decision 3). Composed
       OVER the read-model projection on the SAME `on_iteration` seam, so streaming
@@ -214,6 +224,11 @@ defmodule Kazi.Runtime do
       persist? = Keyword.get(opts, :persist?, true)
       goal_ref = Keyword.get(opts, :goal_ref, goal.id)
 
+      # T46.3 (ADR-0057 decision 3): the run's transcript sink path — nil when
+      # persistence is off, matching the run registry's own persist? gate (a
+      # non-persisted run touches no fleet-observability surface at all).
+      transcript_sink_path = maybe_transcript_sink_path(persist?, run_id, opts)
+
       loop_opts =
         opts
         |> Keyword.drop([
@@ -229,6 +244,10 @@ defmodule Kazi.Runtime do
           :providers,
           :adapter_opts,
           :extra_action_context,
+          # T46.3: consumed above (maybe_transcript_sink_path/3) / below
+          # (build_adapter_opts/4), not a Loop opt.
+          :sinks_dir,
+          :transcript_cap_bytes,
           # T15.4 (ADR-0023 decision 3): the streaming observer is consumed by
           # build_on_iteration/2 (composed over the persistence projection), not
           # a Loop opt.
@@ -263,7 +282,7 @@ defmodule Kazi.Runtime do
           integrate: @integrate,
           deploy: @deploy,
           workspace: workspace,
-          adapter_opts: build_adapter_opts(goal, opts, harness_opts),
+          adapter_opts: build_adapter_opts(goal, opts, harness_opts, transcript_sink_path),
           on_iteration: build_on_iteration(goal, opts, run_id, persist?),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
@@ -283,7 +302,7 @@ defmodule Kazi.Runtime do
         # T46.1 (ADR-0057): register the run once the loop process is actually
         # up (never for a failed start_link, which would otherwise orphan a
         # "running" row nothing ever finishes).
-        register_run(persist?, run_id, workspace, goal_ref, harness_opts)
+        register_run(persist?, run_id, workspace, goal_ref, harness_opts, transcript_sink_path)
         result = Loop.await(loop, await_timeout)
         Loop.stop(loop)
         finish_run(persist?, run_id, result)
@@ -396,7 +415,7 @@ defmodule Kazi.Runtime do
   # central constraint). A goal that declares one wires it into the dispatch path.
   # The caller's explicit `:adapter_opts` still wins (it is merged last), so a
   # test/operator can override or disable the goal-declared retriever.
-  defp build_adapter_opts(%Goal{} = goal, opts, harness_opts) do
+  defp build_adapter_opts(%Goal{} = goal, opts, harness_opts, transcript_sink_path) do
     caller_opts = Keyword.get(opts, :adapter_opts, [])
 
     base =
@@ -416,7 +435,24 @@ defmodule Kazi.Runtime do
     |> maybe_put_effort(goal, opts)
     |> maybe_put_permission_mode(goal, opts)
     |> maybe_put_allowed_tools(goal, opts)
+    |> maybe_put_transcript_sink(transcript_sink_path, opts)
   end
+
+  # T46.3 (ADR-0057 decision 3): thread the computed transcript sink path (nil
+  # when persistence is off) into adapter_opts so `Kazi.Harness.CliAdapter` tees
+  # the harness stream there. `put_new` so an explicit `adapter_opts:
+  # [transcript_sink_path: ...]` from the caller (a test pointing at a fixture
+  # path) always wins. `:transcript_cap_bytes` is forwarded verbatim when given.
+  defp maybe_put_transcript_sink(adapter_opts, transcript_sink_path, opts) do
+    adapter_opts
+    |> Keyword.put_new(:transcript_sink_path, transcript_sink_path)
+    |> maybe_put_transcript_cap(Keyword.get(opts, :transcript_cap_bytes))
+  end
+
+  defp maybe_put_transcript_cap(adapter_opts, nil), do: adapter_opts
+
+  defp maybe_put_transcript_cap(adapter_opts, cap_bytes),
+    do: Keyword.put_new(adapter_opts, :transcript_cap_bytes, cap_bytes)
 
   # T36.6 (ADR-0047): the Claude-only reasoning-effort lever. Fold `:effort` into
   # adapter_opts so the claude profile renders `--effort <level>`. Precedence is the
@@ -663,6 +699,28 @@ defmodule Kazi.Runtime do
   end
 
   # =============================================================================
+  # Transcript sink path (T46.3, ADR-0057)
+  # =============================================================================
+
+  # nil when persistence is off — a non-persisted run has no registry row to
+  # point at a sink, and writes nothing under the kazi home either.
+  defp maybe_transcript_sink_path(false, _run_id, _opts), do: nil
+
+  defp maybe_transcript_sink_path(true, run_id, opts) do
+    Path.join([sinks_dir(opts), run_id, "transcript.jsonl"])
+  end
+
+  # The per-run sinks directory: an explicit `:sinks_dir` opt (the test-override
+  # seam, mirroring `:run_id`) > the `:kazi, :sinks_dir` app config > the same
+  # `<user-home>/.kazi` root the read-model DB defaults to in prod
+  # (`config/runtime.exs`), under a `runs/` subdirectory.
+  defp sinks_dir(opts) do
+    Keyword.get(opts, :sinks_dir) ||
+      Application.get_env(:kazi, :sinks_dir) ||
+      Path.join([System.user_home!() || File.cwd!(), ".kazi", "runs"])
+  end
+
+  # =============================================================================
   # Fleet run registry (T46.1, ADR-0057)
   # =============================================================================
   #
@@ -673,16 +731,18 @@ defmodule Kazi.Runtime do
   # point. Best-effort throughout: a registry write must never stall or alter
   # convergence, matching the read-model projection's own contract above.
 
-  defp register_run(false, _run_id, _workspace, _goal_ref, _harness_opts), do: :ok
+  defp register_run(false, _run_id, _workspace, _goal_ref, _harness_opts, _transcript_sink_path),
+    do: :ok
 
-  defp register_run(true, run_id, workspace, goal_ref, harness_opts) do
+  defp register_run(true, run_id, workspace, goal_ref, harness_opts, transcript_sink_path) do
     attrs = %{
       run_id: run_id,
       pid: inspect(self()),
       workspace: to_string(workspace),
       goal_ref: goal_ref,
       harness: harness_id_string(harness_opts),
-      model: Keyword.get(harness_opts, :model)
+      model: Keyword.get(harness_opts, :model),
+      transcript_sink_path: transcript_sink_path
     }
 
     case RunRegistry.start(attrs) do

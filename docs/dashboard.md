@@ -51,6 +51,29 @@ topological wave-band goal-DAG layout, the ranked attention queue, the
 convergence heatmap, and transcript peek are later `kazi dashboard` surface
 tasks (E46 Wave B/C) built on the same registry.
 
+## The transcript sink (T46.3)
+
+When a run is persisted (`persist?: true`, the default), every dispatch's raw
+harness output is teed to a per-run `transcript.jsonl` under
+`<sinks_dir>/<run_id>/transcript.jsonl` (`:kazi, :sinks_dir` app config,
+falling back to `<user-home>/.kazi/runs`), and the path is recorded on the
+run's registry row (`transcript_sink_path`). See `Kazi.Sink.Transcript`.
+
+The sink is a **passive tee**: it never changes what a dispatch returns, and a
+write failure is caught and logged rather than raised. Each line is a JSON
+event — a harness's own structured stream events pass through as-is, and
+plain-text stdout/stderr lines are wrapped as `{"type": "text", "text": ...}`
+— so the file is valid JSONL regardless of which harness produced it.
+
+Every string value is **redacted** (`Kazi.Redaction.redact/1`) before it
+touches disk, matching the prompt and context-store paths — a secret shape in
+the harness stream never lands in the transcript file. The sink also caps its
+own size (10 MiB by default, overridable per-run); once a run's transcript
+would exceed the cap, further events are dropped and a single `{"type":
+"truncated"}` marker is appended so a reader can tell an intentionally
+truncated transcript apart from a torn one. This tee is the file "transcript
+peek" (E46 Wave B/C) will read from.
+
 ## `kazi dashboard`
 
 ```
