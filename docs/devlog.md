@@ -2777,3 +2777,33 @@ Neither was a flaky ASSERTION — both were real nondeterminism from a shared,
 process-global resource (`:standard_error`, the atom table) that only a kazi
 in-loop evaluation's concurrency pattern reliably exposed; a human running
 `mix test` by hand rarely hit either race.
+
+### 2026-07-05: T46.3 transcript sink wired end-to-end
+
+`Kazi.Sink.Transcript.tee/3` (event extraction, redaction, ordering, size cap
++ single truncation marker) already existed as a pinned-in-isolation module;
+the reopen risk from T46.1 (a registry that worked in unit tests but was never
+called on the live `kazi apply` path) applied here too, so the actual task was
+wiring: `Kazi.Harness.CliAdapter`'s dispatch tees the raw captured output to
+`opts[:transcript_sink_path]` as a passive, best-effort side effect right after
+computing the base result map (never altering what dispatch returns), and
+`Kazi.Runtime.run/2` computes a per-run path
+(`<sinks_dir>/<run_id>/transcript.jsonl`, gated on the same `:persist?` flag the
+run registry and iteration projection already honor) and threads it through
+`adapter_opts` — plus records it on the `runs` registry row so a reader (the
+future transcript-peek LiveView, T46.8) can find a given run's sink without
+re-deriving the path convention.
+
+One latent bug caught along the way: `RunRegistry.start/1`'s upsert
+`on_conflict: {:replace, [...]}` column list had been written before
+`transcript_sink_path` existed on the schema and was never updated, so a
+restarted process reclaiming its own `run_id` would have silently dropped the
+sink path back to whatever the first insert wrote (or `nil`). Fixed by adding
+the column to the replace list.
+
+Proof follows the same shape as T46.1's reopen fix:
+`test/kazi/integration/transcript_sink_test.exs` drives a fixture goal through
+`Kazi.CLI.run/2` (not `Kazi.Runtime.run/2` directly) with a stub harness that
+emits a plain-text line and a line carrying a seeded `DATABASE_URL` secret,
+then reads the transcript path off the run's registry row and asserts the
+plain line landed and the secret was redacted on disk.

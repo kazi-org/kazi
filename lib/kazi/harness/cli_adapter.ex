@@ -61,6 +61,15 @@ defmodule Kazi.Harness.CliAdapter do
   When `:env` is absent or normalizes to empty, `:env` is NOT passed to
   `System.cmd` at all, so the behaviour is byte-identical to today.
 
+  ## Transcript sink (`opts[:transcript_sink_path]`)
+
+  T46.3 (ADR-0057 decision 3): when `opts[:transcript_sink_path]` is set, the
+  harness's raw captured output is teed — as a passive, best-effort side
+  effect — to that path as redacted JSONL via `Kazi.Sink.Transcript.tee/3`.
+  Absent the opt, this is a no-op and the dispatch is byte-identical to the
+  tee never having existed. `opts[:transcript_cap_bytes]` overrides the sink's
+  default size cap.
+
   ## Result map
 
   On a successful invocation (the *process* ran; whether the agent fixed anything
@@ -87,6 +96,7 @@ defmodule Kazi.Harness.CliAdapter do
   alias Kazi.Economy.PriceMap
   alias Kazi.Harness.Profile
   alias Kazi.Harness.Registry
+  alias Kazi.Sink.Transcript
 
   @default_harness :claude
 
@@ -136,6 +146,18 @@ defmodule Kazi.Harness.CliAdapter do
       # always-present base. A non-structured / field-light stdout contributes
       # nothing, so the result degrades to exactly the base map.
       result = Map.merge(base, Profile.parse(profile, output))
+
+      # T46.3 (ADR-0057 decision 3): passive tee of the raw captured output to the
+      # run's transcript sink, if configured. Best-effort and side-effect only —
+      # `Kazi.Sink.Transcript.tee/3` never raises, so the dispatch result below is
+      # byte-identical whether or not a sink path was threaded in.
+      transcript_opts =
+        case Keyword.get(build_opts, :transcript_cap_bytes) do
+          nil -> []
+          cap_bytes -> [cap_bytes: cap_bytes]
+        end
+
+      Transcript.tee(Keyword.get(build_opts, :transcript_sink_path), output, transcript_opts)
 
       # T34.5 (ADR-0046): if the harness did NOT report a dollar figure but DID
       # report a token split for a model the dated price map (`Kazi.Economy.PriceMap`)
