@@ -2691,3 +2691,34 @@ upgraded. Findings, in the order the DoD walk surfaced them:
 Net: kazi drove a real 946-line feature to converged/merged/released in two
 iterations, and the definition-of-done's live-verify step earned its place
 twice in one slice.
+
+## 2026-07-05 — T46.1 reopen closed: the run registry is wired into the real apply path
+
+The seam-level-only gap from 2026-07-04 above (`runs` table empty on a real
+converged `kazi apply`) is fixed at its actual root: `Kazi.Runtime.run/2` —
+not the CLI, not the loop — is the ONE place every real entry point (the
+escript, `mix kazi.apply`, and the scheduler's parallel path, all of which
+converge on `Runtime.run/2`) reaches, so registering there makes the registry
+see every run regardless of entry point:
+
+- `run/2` upserts a `runs` row (via `RunRegistry.start/1`) once `Loop.start_link/1`
+  actually succeeds — not before, so a failed start never orphans a `"running"`
+  row nothing finishes.
+- The heartbeat is composed onto the SAME `on_iteration` seam the read-model
+  iteration projection already uses, so every observed tick advances it — no
+  new polling loop, no new process.
+- The terminal status (`"converged"` / `"stuck"` / `"over_budget"` / `"stopped"`
+  / `"error"`) is recorded once `Loop.await/2` returns, mapped from the loop's
+  existing `t:Kazi.Loop.result/0` outcome/reason.
+- All three are gated by the SAME `:persist?` flag the iteration projection
+  already honors, so "persistence off" (as several Tier-2 tests set) still
+  means zero read-model writes, registry included — this is what let the
+  existing `Runtime`/CLI test suite pass unmodified.
+
+The regression proof is `test/kazi/integration/run_registry_wiring_test.exs`:
+unlike `Kazi.ReadModel.RunRegistryTest` (which pins the registry MODULE in
+isolation and would pass even if nothing ever called it — exactly how this gap
+shipped undetected through PR #789), the new test drives a fixture goal through
+`Kazi.CLI.run/2` — the same shared entry the escript and mix task use — and
+asserts a `runs` row lands in the real read-model with a `"converged"` terminal
+status. T46.1 (`docs/plans/E46.md`) is closed on this basis.
