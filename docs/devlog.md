@@ -2722,3 +2722,58 @@ shipped undetected through PR #789), the new test drives a fixture goal through
 `Kazi.CLI.run/2` — the same shared entry the escript and mix task use — and
 asserts a `runs` row lands in the real read-model with a `"converged"` terminal
 status. T46.1 (`docs/plans/E46.md`) is closed on this basis.
+
+## 2026-07-05 — kazi#795: an `:unknown` verdict (quarantine included) must never converge
+
+The bug (observed on v1.73.1, kazi apply'ing its own `suite_green` predicate):
+iterations evaluated `fail`, `fail`, then a genuinely-flaky predicate got
+quarantined by T1.3's flake detector (recorded `:unknown`) — and the run
+reported `converged`/exit `0` while that predicate's true state was unknown.
+Root cause: `Kazi.Loop.decide/2`'s convergence clause called
+`all_satisfied?(vector, data.quarantine)`, which DROPPED every quarantined id
+from the vector before checking satisfaction — a flake correctly carries no
+convergence claim, but the fix over-applied that principle to the wrong gate.
+Quarantine's actual job is narrower: excluding a flaky predicate from the
+WORK-LIST (`PredicateVector.failing/1`, real `:fail`s only) so it is never
+re-dispatched as an agent task. It was never supposed to also exit the
+convergence bar.
+
+The fix: `all_satisfied?/1` now takes only the vector and delegates straight to
+`PredicateVector.satisfied?/1` (already `:pass`-only) — quarantine is no longer
+special-cased there at all. A quarantined predicate's `:unknown` status blocks
+`:converged` exactly like any other unresolved predicate; with nothing to
+dispatch and no convergence reachable, the loop just keeps re-observing. The
+terminal `result()` also gained a `:quarantine` field (`kazi apply --json`'s
+additive `quarantine` array) naming which predicate ids are quarantined, so a
+non-converged stop is diagnosable without re-deriving state from the vector —
+closing the second half of the report (a quarantine mechanism silently
+widening the bar with no trace of which predicate did it).
+Regression: `test/kazi/loop/verdict_bar_test.exs`.
+
+**The `suite_green` hermeticity this exposed** (the same predicate's second,
+latent failure): `mix test` run standalone was reliably green, but the SAME
+suite evaluated as a kazi `custom_script` predicate flaked on two independent,
+unrelated tests:
+
+- `Kazi.Goal.ProviderDeprecationTest` captures the NAMED `:stderr` device via
+  `ExUnit.CaptureIO`. Capturing a named device is process-INDEPENDENT — it
+  swaps the globally registered `:standard_error` for the capture's duration,
+  so any other `async: true` test process writing to stderr concurrently
+  (a warning, another suite's own capture) leaks into this module's buffer.
+  Fix: `async: false` on this one module; every other module stays async.
+- `Kazi.Goal.LoaderAtomSafetyTest` asserts the BEAM atom table grows by fewer
+  than 50 atoms across 200 rejected-config-key load attempts. `Kazi.Goal.Loader`
+  force-loads a predicate's provider module (`Code.ensure_loaded/1`, the M3
+  atom-safety guarantee) the first time any goal declares that kind — a real,
+  one-time cost that interns every atom literal in the module's own source.
+  Left lazy, whichever async test process happens to be first in the WHOLE
+  suite to touch a given provider absorbs that one-time burst; when that
+  process was this test's own measurement window, it flaked on a timing
+  accident, not a loader defect. Fix: `test/test_helper.exs` now force-loads
+  every real provider module before `ExUnit.start/1`, so the burst happens
+  once, deterministically, before any test's atom-count snapshot.
+
+Neither was a flaky ASSERTION — both were real nondeterminism from a shared,
+process-global resource (`:standard_error`, the atom table) that only a kazi
+in-loop evaluation's concurrency pattern reliably exposed; a human running
+`mix test` by hand rarely hit either race.
