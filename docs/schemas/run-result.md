@@ -111,6 +111,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `economy`        | object              | ADR-0046 run-end KPIs derived from the per-iteration envelopes. **Additive** — `status`/`stuck`/`iterations` always present; each derived KPI omitted when unavailable (absent ≠ zero). See [`economy` — run-end KPIs](#economy--run-end-kpis-adr-0046). |
 | `context_store`  | object (optional)   | ADR-0045 context-store byte accounting, present only when the run used `--context-store`. **Additive, optional** — `{ "provider": string, "indexed_bytes": integer, "returned_bytes": integer, "saved_bytes": integer, "budget": integer }`. Absent ⇒ the store was off and the result is byte-identical to today. |
 | `stuck_bundle`   | object (optional)   | ADR-0045 §5 stuck-escalation bundle, present only on a stuck stop (`status` `stopped`, `reason` `stuck`). **Additive, optional** — `{ "failing_predicates": [{ "id": string, "failure": string }], "changed_files": [string], "snippets": [{ "source": string\|null, "text": string }], "bytes": integer }`. Bounded + redacted; the escalating orchestrator hands the higher model rung this instead of the full transcript. Absent ⇒ no stuck stop. |
+| `quarantine`     | array of strings (optional) | i795/#795: the predicate ids quarantined as flaky (T1.3, `Kazi.Loop.Flake`) at the terminal observation. **Additive, optional** — present only when non-empty. A quarantined predicate's status is `unknown`, never `pass`, so `status` can never be `converged` while this is present; it names WHICH predicate(s) keep a non-converged run from reporting a false positive over an `unknown` verdict. Absent ⇒ nothing was quarantined, byte-identical to today. |
 | `next_action`    | string (enum)       | An orchestration **hint** — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`) or `stuck`. `null` on a clean converge. |
 | `release_ref`    | string \| null      | The release tag of the artifact deployed this run (T3.3c), or `null` if nothing was deployed. |
@@ -150,6 +151,15 @@ The predicate's status string at the terminal observation: `pass`, `fail`,
 when it genuinely held against the real world (including live predicates, which
 pass only post-deploy). The vector — not a single exit code — is what makes
 regression and partial progress legible (ADR-0002).
+
+**`unknown` never counts toward `converged` (i795/#795).** `status` is
+`converged` only when EVERY predicate in the vector is `pass` — `unknown`
+(including a quarantined-as-flaky predicate, T1.3) blocks convergence exactly
+like `fail` does. A prior version of the loop silently dropped quarantined
+predicates from the convergence check before evaluating it, so a run could
+report `converged` while a predicate's true state was genuinely unknown; that
+is the bug this fix closes. See the top-level [`quarantine`](#fields) field for
+naming which predicate ids are quarantined.
 
 ### `predicates[]` — graded fields (ADR-0041)
 
