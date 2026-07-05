@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.1](https://github.com/kazi-org/kazi/compare/v1.73.0...v1.73.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* wire the fleet run registry into the live kazi apply path (T46.1) ([c9a6afe](https://github.com/kazi-org/kazi/commit/c9a6afe5982685187e0dbaae3e7a82ccdbf6e560))
+
 ## [1.73.0](https://github.com/kazi-org/kazi/compare/v1.72.2...v1.73.0) (2026-07-04)
 
 
