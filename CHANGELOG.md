@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.86.0](https://github.com/kazi-org/kazi/compare/v1.85.0...v1.86.0) (2026-07-06)
+
+
+### Features
+
+* **web:** SESSIONS rail filter -- click a session to dim the map to its goal ([1f05cf5](https://github.com/kazi-org/kazi/commit/1f05cf568225b603c27b5091f998811a927249e5))
+
 ## [1.85.0](https://github.com/kazi-org/kazi/compare/v1.84.0...v1.85.0) (2026-07-06)
 
 
