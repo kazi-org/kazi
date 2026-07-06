@@ -158,7 +158,7 @@ defmodule KaziWeb.TranscriptPeekLive do
                 phx-value-index={index}
                 id={"toggle-event-#{index}"}
               >
-                {pill_label(event)}
+                <span class="tool-pill-marker">▸</span> {pill_label(event)}
               </button>
               <pre
                 :if={MapSet.member?(@expanded, index)}
@@ -176,6 +176,13 @@ defmodule KaziWeb.TranscriptPeekLive do
           </li>
         </ol>
       </div>
+
+      <style>
+        .tool-pill button { border: 1px solid var(--line); border-radius: 999px; padding: .2rem .7rem; background: transparent; color: var(--txt); font-family: inherit; }
+        .tool-pill-marker { color: var(--cyn); }
+        .transcript-line { color: var(--txt); }
+        .truncated-notice { color: var(--amb); }
+      </style>
     </main>
     """
   end

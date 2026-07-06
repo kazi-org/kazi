@@ -90,6 +90,25 @@ defmodule KaziWeb.DrillinHeatmapLive do
 
       <div
         :if={@iterations != []}
+        id="drillin-dna-strip"
+        class="dna-strip"
+        data-square-count={length(dna_squares(@iterations))}
+      >
+        <span class="section-label">PREDICATE VECTOR</span>
+        <div class="dna-squares">
+          <span
+            :for={square <- dna_squares(@iterations)}
+            id={"dna-square-#{square.id}"}
+            class={"dna-square status-#{square.status}"}
+            data-predicate-id={square.id}
+            data-status={square.status}
+            title={square.id}
+          ></span>
+        </div>
+      </div>
+
+      <div
+        :if={@iterations != []}
         id="drillin-matrix"
         data-iteration-count={length(@iterations)}
       >
@@ -187,6 +206,19 @@ defmodule KaziWeb.DrillinHeatmapLive do
           </dd>
         </dl>
       </section>
+
+      <style>
+        .dna-strip { margin: 1rem 0; }
+        .dna-squares { display: flex; gap: 3px; flex-wrap: wrap; margin-top: .4rem; }
+        .dna-square { width: 15px; height: 15px; display: inline-block; background: #152134; border-radius: 2px; }
+        .dna-square.status-pass { background: var(--grn); box-shadow: 0 0 6px rgba(46,230,168,.5); }
+        .dna-square.status-fail { background: var(--red); box-shadow: 0 0 6px rgba(255,92,108,.5); }
+        .dna-square.status-error { background: var(--red); }
+        .dna-square.status-not_evaluated { background: #152134; }
+        .heatmap-cell.status-pass { background: var(--grn); }
+        .heatmap-cell.status-fail { background: var(--red); }
+        .heatmap-cell.regression-flip { outline: 2px solid var(--amb); }
+      </style>
     </main>
     """
   end
@@ -263,6 +295,17 @@ defmodule KaziWeb.DrillinHeatmapLive do
   end
 
   defp detail_predicates(nil), do: []
+
+  # The DNA strip (docs/dashboard-design.md): the LATEST iteration's predicate
+  # vector as a flat, stably-ordered list of squares -- the same predicates
+  # `detail_predicates/1` shows for the current iteration, just a compact
+  # glance instead of the full id/status list.
+  defp dna_squares(iterations) do
+    iterations
+    |> List.last()
+    |> detail_predicates()
+    |> Enum.map(fn {id, result} -> %{id: id, status: result.status} end)
+  end
 
   defp counter(%Iteration{} = iteration, field, key) do
     iteration
