@@ -3,10 +3,12 @@ defmodule KaziWeb.Layouts do
   Root layout for the operator dashboard (T3.6a), carrying the approved
   starmap visual design tokens (ADR-0057, `docs/dashboard-design.md`).
 
-  Kept inline and asset-free on purpose: the skeleton has no esbuild/tailwind
-  bundle, so the document references no external CSS/JS. The LiveView JS that
-  would upgrade the page to a live socket is added when a live surface needs it
-  (T3.6b onward); the server-rendered HTML stands alone for the smoke test.
+  Kept inline and build-free on purpose: the skeleton has no esbuild/tailwind
+  bundle. The LiveView client that upgrades the page to a live socket loads
+  from the hex packages' own pre-built bundles (`KaziWeb.Endpoint`'s
+  `Plug.Static` mounts) — the starmap's slide-over panel (`phx-click`) and
+  live DOM patching need it. The server-rendered HTML still stands alone for
+  the smoke test: with JS unavailable the pages render read-only, as before.
 
   The `:root` custom properties and the shared, reduced-motion-gated keyframes
   live here (not per-LiveView) so every page --  starmap, drill-in, transcript
@@ -22,6 +24,7 @@ defmodule KaziWeb.Layouts do
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
         <title>kazi · operator dashboard</title>
         <style>
           :root {
@@ -88,6 +91,24 @@ defmodule KaziWeb.Layouts do
       </head>
       <body>
         {@inner_content}
+        <script src="/assets/phoenix/phoenix.min.js">
+        </script>
+        <script src="/assets/phoenix_live_view/phoenix_live_view.min.js">
+        </script>
+        <script>
+          (function () {
+            var csrf = document
+              .querySelector("meta[name='csrf-token']")
+              .getAttribute("content");
+            var liveSocket = new window.LiveView.LiveSocket(
+              "/live",
+              window.Phoenix.Socket,
+              { params: { _csrf_token: csrf } }
+            );
+            liveSocket.connect();
+            window.liveSocket = liveSocket;
+          })();
+        </script>
       </body>
     </html>
     """
