@@ -49,3 +49,6 @@ package-lock.json
 # a dispatch (docs/devlog.md) — neither is a repo source file.
 /.kazi/
 /.mcp.json
+
+# Added by code-review-graph
+.code-review-graph/

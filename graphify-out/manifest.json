@@ -1,0 +1,3567 @@
+{
+  "/Users/dndungu/Code/kazi-org/kazi/.claude/settings.json": {
+    "mtime": 1782858849.892745,
+    "ast_hash": "a4c199fd912d2c7b133fbacec4f1d43c",
+    "semantic_hash": "a4c199fd912d2c7b133fbacec4f1d43c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.claude/settings.local.json": {
+    "mtime": 1782859144.280933,
+    "ast_hash": "9fb256700223f07703b752fdb0118ca6",
+    "semantic_hash": "9fb256700223f07703b752fdb0118ca6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.clawd-todos.json": {
+    "mtime": 1782267985.7304955,
+    "ast_hash": "e03e0987c013717e3827907b54379fcd",
+    "semantic_hash": "e03e0987c013717e3827907b54379fcd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.formatter.exs": {
+    "mtime": 1782152918.4101028,
+    "ast_hash": "8dfe7459dbc29eb5e1d5759047cb4354",
+    "semantic_hash": "8dfe7459dbc29eb5e1d5759047cb4354"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/check-doc-commands.mjs": {
+    "mtime": 1782367817.7337317,
+    "ast_hash": "cd62dfe87d4684e6ac190e28fa88cb4f",
+    "semantic_hash": "cd62dfe87d4684e6ac190e28fa88cb4f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/check-tiering-coherence.mjs": {
+    "mtime": 1783039222.079094,
+    "ast_hash": "9d4f2ff87c20a35d6d749cdc02e57d87",
+    "semantic_hash": "9d4f2ff87c20a35d6d749cdc02e57d87"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/check-tiering-coherence.test.mjs": {
+    "mtime": 1782431743.6592832,
+    "ast_hash": "d2271769bb9f7faf5fbe9bf6689b7aad",
+    "semantic_hash": "d2271769bb9f7faf5fbe9bf6689b7aad"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/check_a_commands_in_readme.sh": {
+    "mtime": 1782353749.479503,
+    "ast_hash": "d8b24248af9b05f4bd28f23ab93f626d",
+    "semantic_hash": "d8b24248af9b05f4bd28f23ab93f626d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/check_b_no_dead_command_refs.sh": {
+    "mtime": 1782689159.9919033,
+    "ast_hash": "999c2b085cb4fd52367b50cc2b80db07",
+    "semantic_hash": "999c2b085cb4fd52367b50cc2b80db07"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/check_c_adr_refs_exist.sh": {
+    "mtime": 1782353749.4797366,
+    "ast_hash": "c54166ee76c20b850c4271118ad1d089",
+    "semantic_hash": "c54166ee76c20b850c4271118ad1d089"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/check_d_plan_trimmed.sh": {
+    "mtime": 1782431743.6599414,
+    "ast_hash": "cec14bedfbad11e85e51f835a9cd7cf9",
+    "semantic_hash": "cec14bedfbad11e85e51f835a9cd7cf9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/doc_freshness.sh": {
+    "mtime": 1782353749.4799724,
+    "ast_hash": "7391db2650f63e4877ce53356fd6a2c0",
+    "semantic_hash": "7391db2650f63e4877ce53356fd6a2c0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/lib.sh": {
+    "mtime": 1782353749.4800699,
+    "ast_hash": "98435879c69e694af13d8b9922e366a1",
+    "semantic_hash": "98435879c69e694af13d8b9922e366a1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/metric_doc_coverage.sh": {
+    "mtime": 1782689159.992174,
+    "ast_hash": "4664c6abfbad2b2d5c64229fdbadeb89",
+    "semantic_hash": "4664c6abfbad2b2d5c64229fdbadeb89"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/doc_freshness/metric_stale_tasks.sh": {
+    "mtime": 1782689159.992371,
+    "ast_hash": "068cade40ba6eb5eaf1940f6cb9721df",
+    "semantic_hash": "068cade40ba6eb5eaf1940f6cb9721df"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/docs_with_code_guard.sh": {
+    "mtime": 1782342199.1318347,
+    "ast_hash": "8d88986c51dd8501078e928fa635c4bf",
+    "semantic_hash": "8d88986c51dd8501078e928fa635c4bf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/extract_knowledge.py": {
+    "mtime": 1782689159.9936783,
+    "ast_hash": "c1aaa4ca2f4f71c07f06d86490e95b05",
+    "semantic_hash": "c1aaa4ca2f4f71c07f06d86490e95b05"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/mcp_release_smoke.sh": {
+    "mtime": 1782368374.3542202,
+    "ast_hash": "e6aad9e79455106423b90e1460df9fe1",
+    "semantic_hash": "e6aad9e79455106423b90e1460df9fe1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/no_internal_leak_guard.sh": {
+    "mtime": 1782348763.759731,
+    "ast_hash": "4db823fd40d8bf1d8dcd3842bb7699d9",
+    "semantic_hash": "4db823fd40d8bf1d8dcd3842bb7699d9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/test_extract_knowledge.py": {
+    "mtime": 1782689159.993849,
+    "ast_hash": "6ead9e782cb418d93c23e281411e4c76",
+    "semantic_hash": "6ead9e782cb418d93c23e281411e4c76"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/test_trim_plan.py": {
+    "mtime": 1782431743.6603372,
+    "ast_hash": "c7904f1bc3246ee422b5458bebd35c05",
+    "semantic_hash": "c7904f1bc3246ee422b5458bebd35c05"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/scripts/trim_plan.py": {
+    "mtime": 1782431743.6608336,
+    "ast_hash": "82b17beea73cb283760480c9ac3cfe5e",
+    "semantic_hash": "82b17beea73cb283760480c9ac3cfe5e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.mcp.json": {
+    "mtime": 1782858849.8952107,
+    "ast_hash": "a3b44b84e76cdeaa1885640ba5384cd0",
+    "semantic_hash": "a3b44b84e76cdeaa1885640ba5384cd0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.opencode.json": {
+    "mtime": 1782858849.8953223,
+    "ast_hash": "ffcb8e1be4385276f25c181817d22a00",
+    "semantic_hash": "ffcb8e1be4385276f25c181817d22a00"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.release-please-manifest.json": {
+    "mtime": 1783039825.0597658,
+    "ast_hash": "55785782670478d56b294d2b32677162",
+    "semantic_hash": "55785782670478d56b294d2b32677162"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/config/config.exs": {
+    "mtime": 1782152918.410972,
+    "ast_hash": "bfedd89b8bb3375f542b2b2af27a618b",
+    "semantic_hash": "bfedd89b8bb3375f542b2b2af27a618b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/config/dev.exs": {
+    "mtime": 1782152918.411222,
+    "ast_hash": "7ef3a1fec6dd03596306e8329b43f904",
+    "semantic_hash": "7ef3a1fec6dd03596306e8329b43f904"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/config/prod.exs": {
+    "mtime": 1782152918.41167,
+    "ast_hash": "c0fa82691cf33c8b75768b5034d64b70",
+    "semantic_hash": "c0fa82691cf33c8b75768b5034d64b70"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/config/runtime.exs": {
+    "mtime": 1782170714.0832899,
+    "ast_hash": "a62c19583ccb033753477bb35ddd0811",
+    "semantic_hash": "a62c19583ccb033753477bb35ddd0811"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/config/test.exs": {
+    "mtime": 1782155104.5580504,
+    "ast_hash": "b7f1f25e25c915ae356769067a0ba211",
+    "semantic_hash": "b7f1f25e25c915ae356769067a0ba211"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/fixtures/deploy-target/.mcp.json": {
+    "mtime": 1782167053.6073625,
+    "ast_hash": "a3b44b84e76cdeaa1885640ba5384cd0",
+    "semantic_hash": "a3b44b84e76cdeaa1885640ba5384cd0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/fixtures/deploy-target/go.mod": {
+    "mtime": 1782087549.0211902,
+    "ast_hash": "6aff57ada46fea745550d5ce7573c6b6",
+    "semantic_hash": "6aff57ada46fea745550d5ce7573c6b6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/fixtures/deploy-target/main.go": {
+    "mtime": 1782167053.6075115,
+    "ast_hash": "dc9c70477499063e37992008edcdf524",
+    "semantic_hash": "dc9c70477499063e37992008edcdf524"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/fixtures/deploy-target/main_test.go": {
+    "mtime": 1782165751.8743372,
+    "ast_hash": "1d1e7a7e1d2cbd1f80e4e10d149d026e",
+    "semantic_hash": "1d1e7a7e1d2cbd1f80e4e10d149d026e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi.ex": {
+    "mtime": 1782086813.8873193,
+    "ast_hash": "aa6c631299f2e0ba484ea6af2f4be406",
+    "semantic_hash": "aa6c631299f2e0ba484ea6af2f4be406"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/action.ex": {
+    "mtime": 1782087549.0225277,
+    "ast_hash": "cb105a02673b02e5a0472b5490c0c05c",
+    "semantic_hash": "cb105a02673b02e5a0472b5490c0c05c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/actions/deploy.ex": {
+    "mtime": 1782106876.7997456,
+    "ast_hash": "1307ce6ed6b0e2d40e7234a57fe45026",
+    "semantic_hash": "1307ce6ed6b0e2d40e7234a57fe45026"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/actions/integrate.ex": {
+    "mtime": 1782088853.6778572,
+    "ast_hash": "7eeb572fbdcb01416fcf96470a5dbec8",
+    "semantic_hash": "7eeb572fbdcb01416fcf96470a5dbec8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/adopt.ex": {
+    "mtime": 1782181304.3302517,
+    "ast_hash": "36d9bd8c17ad925db65ec0bc0ab0da8f",
+    "semantic_hash": "36d9bd8c17ad925db65ec0bc0ab0da8f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/adopt/writer.ex": {
+    "mtime": 1782180118.3977823,
+    "ast_hash": "ee6f0db39feeee4ec4c9772b5f61c102",
+    "semantic_hash": "ee6f0db39feeee4ec4c9772b5f61c102"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/application.ex": {
+    "mtime": 1782689160.0125308,
+    "ast_hash": "260c671586f054fae83ef1c6726b2159",
+    "semantic_hash": "260c671586f054fae83ef1c6726b2159"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/authoring.ex": {
+    "mtime": 1782689160.0132174,
+    "ast_hash": "188832601402dc3c5e4ee6534c832294",
+    "semantic_hash": "188832601402dc3c5e4ee6534c832294"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/authoring/clarify.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "3005f4fd3d87ef3521f8bc299fb51b3d",
+    "semantic_hash": "3005f4fd3d87ef3521f8bc299fb51b3d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/authoring/clarify/option.ex": {
+    "mtime": 1782257572.8676984,
+    "ast_hash": "c9733396080202f2b14f43b3a1bedf56",
+    "semantic_hash": "c9733396080202f2b14f43b3a1bedf56"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/authoring/clarify/question.ex": {
+    "mtime": 1782257572.867808,
+    "ast_hash": "06b3cd97edb971918fa02dc399fcab4c",
+    "semantic_hash": "06b3cd97edb971918fa02dc399fcab4c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/authoring/draft.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "925e2784ae8b3d113fc277cc51abfb5c",
+    "semantic_hash": "925e2784ae8b3d113fc277cc51abfb5c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/authoring/rationale_adr.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "0f0e5120b86d9dab0ea89386195aee59",
+    "semantic_hash": "0f0e5120b86d9dab0ea89386195aee59"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/bench.ex": {
+    "mtime": 1782431743.676149,
+    "ast_hash": "edb8b2bb906712825108367e8859d08a",
+    "semantic_hash": "edb8b2bb906712825108367e8859d08a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/budget.ex": {
+    "mtime": 1782370168.269015,
+    "ast_hash": "0ab089b6c78041536fe13900b20c03c4",
+    "semantic_hash": "0ab089b6c78041536fe13900b20c03c4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/cli.ex": {
+    "mtime": 1783039825.1054285,
+    "ast_hash": "7bc0aa63c30c028f71ec5390f9088757",
+    "semantic_hash": "7bc0aa63c30c028f71ec5390f9088757"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/cli/schema.ex": {
+    "mtime": 1782431743.6775186,
+    "ast_hash": "2084cdf6c4a0e65364f5c8d52a56478d",
+    "semantic_hash": "2084cdf6c4a0e65364f5c8d52a56478d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/cli/usage.ex": {
+    "mtime": 1782366192.4575539,
+    "ast_hash": "de374e42850ca20a13412473ec667d75",
+    "semantic_hash": "de374e42850ca20a13412473ec667d75"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context.ex": {
+    "mtime": 1782358367.0,
+    "ast_hash": "50235979e0bc4725f7e131d5dea17639",
+    "semantic_hash": "50235979e0bc4725f7e131d5dea17639"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/cache.ex": {
+    "mtime": 1782139880.2651262,
+    "ast_hash": "f115fec77438ca03a280c2a79ea55660",
+    "semantic_hash": "f115fec77438ca03a280c2a79ea55660"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/escalation.ex": {
+    "mtime": 1782401481.3344014,
+    "ast_hash": "f8402da9b63b651799d6020fc9bb0a7f",
+    "semantic_hash": "f8402da9b63b651799d6020fc9bb0a7f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/file_ref.ex": {
+    "mtime": 1782138750.701506,
+    "ast_hash": "ff77925f565a3ddada8431f83e397c00",
+    "semantic_hash": "ff77925f565a3ddada8431f83e397c00"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/graph_cli.ex": {
+    "mtime": 1782138750.7016826,
+    "ast_hash": "79cf566be1369f164b5e591be7d6019b",
+    "semantic_hash": "79cf566be1369f164b5e591be7d6019b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/graph_source.ex": {
+    "mtime": 1782138750.7018104,
+    "ast_hash": "6c1cdef183f2f26cee54d17faa6efe56",
+    "semantic_hash": "6c1cdef183f2f26cee54d17faa6efe56"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/pack.ex": {
+    "mtime": 1782139880.2654188,
+    "ast_hash": "ab14fe5798c094a38c96d090cba4e633",
+    "semantic_hash": "ab14fe5798c094a38c96d090cba4e633"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/repo_map_source.ex": {
+    "mtime": 1782138750.7020905,
+    "ast_hash": "bdf163bd39b0c28495fc11bda0942058",
+    "semantic_hash": "bdf163bd39b0c28495fc11bda0942058"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/stuck_bundle.ex": {
+    "mtime": 1782431743.6778088,
+    "ast_hash": "cb737c6a3034fc1c951c6eeb84cacce6",
+    "semantic_hash": "cb737c6a3034fc1c951c6eeb84cacce6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/survey.ex": {
+    "mtime": 1782138750.7022297,
+    "ast_hash": "96b5b81477d250bc727acff398fc88e3",
+    "semantic_hash": "96b5b81477d250bc727acff398fc88e3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/symbol.ex": {
+    "mtime": 1782138750.7023792,
+    "ast_hash": "bd26adcbed337c9b13f3f83301919d2c",
+    "semantic_hash": "bd26adcbed337c9b13f3f83301919d2c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context/tier.ex": {
+    "mtime": 1782401481.3346097,
+    "ast_hash": "a71666b77af35f8abce7ac8c5e964c31",
+    "semantic_hash": "a71666b77af35f8abce7ac8c5e964c31"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context_store.ex": {
+    "mtime": 1782401481.3350675,
+    "ast_hash": "ef8230c1fee9a8c7694a82b836dfb570",
+    "semantic_hash": "ef8230c1fee9a8c7694a82b836dfb570"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context_store/gist_cli.ex": {
+    "mtime": 1782401481.3353965,
+    "ast_hash": "df6977cd8f946d539566113cbfc72ed0",
+    "semantic_hash": "df6977cd8f946d539566113cbfc72ed0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context_store/gist_init.ex": {
+    "mtime": 1782401481.3356078,
+    "ast_hash": "dd34047548dd0e3605cd8fa4bf3205af",
+    "semantic_hash": "dd34047548dd0e3605cd8fa4bf3205af"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context_store/labels.ex": {
+    "mtime": 1782365653.4545548,
+    "ast_hash": "34936d0ad0cdc11bf5f7eb2b8a15c34e",
+    "semantic_hash": "34936d0ad0cdc11bf5f7eb2b8a15c34e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context_store/no_op.ex": {
+    "mtime": 1782365653.4551098,
+    "ast_hash": "93b876684243a3c2172cb0c1d685c172",
+    "semantic_hash": "93b876684243a3c2172cb0c1d685c172"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/context_store/snippet.ex": {
+    "mtime": 1782365653.4552462,
+    "ast_hash": "f74bea113b67bc1f3fa2178c10247e53",
+    "semantic_hash": "f74bea113b67bc1f3fa2178c10247e53"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/lease.ex": {
+    "mtime": 1782152553.5841668,
+    "ast_hash": "65a019e257f0e735b61fcf2e779d4a97",
+    "semantic_hash": "65a019e257f0e735b61fcf2e779d4a97"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/lease/memory.ex": {
+    "mtime": 1782152553.5843582,
+    "ast_hash": "de6e35995c0c981de0d056b4f6abb654",
+    "semantic_hash": "de6e35995c0c981de0d056b4f6abb654"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/lease/nats.ex": {
+    "mtime": 1782153982.6803393,
+    "ast_hash": "d19b50d66d7d125a19667fff63ba1a44",
+    "semantic_hash": "d19b50d66d7d125a19667fff63ba1a44"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/lease_table.ex": {
+    "mtime": 1782690400.9482014,
+    "ast_hash": "41aa587d2dbd65a1bbe6bff034f95314",
+    "semantic_hash": "41aa587d2dbd65a1bbe6bff034f95314"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/partition_lease.ex": {
+    "mtime": 1782154575.43639,
+    "ast_hash": "3105cdf0a072999d32dd814dc518bc43",
+    "semantic_hash": "3105cdf0a072999d32dd814dc518bc43"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/presence.ex": {
+    "mtime": 1782153132.1743824,
+    "ast_hash": "72426967bf48e3f7469a007e1102feb7",
+    "semantic_hash": "72426967bf48e3f7469a007e1102feb7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/transport.ex": {
+    "mtime": 1782153132.1745963,
+    "ast_hash": "99e78bc48a66fea2eb11eb7cd438b34c",
+    "semantic_hash": "99e78bc48a66fea2eb11eb7cd438b34c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/coordination/transport/memory.ex": {
+    "mtime": 1782153132.1748335,
+    "ast_hash": "4eedfabc21fdb7653ba7a2505554785f",
+    "semantic_hash": "4eedfabc21fdb7653ba7a2505554785f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/economy/kpis.ex": {
+    "mtime": 1782431743.6789558,
+    "ast_hash": "549d18c7ec053ae8884d8a33e325bd04",
+    "semantic_hash": "549d18c7ec053ae8884d8a33e325bd04"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/economy/price_map.ex": {
+    "mtime": 1783039222.0920627,
+    "ast_hash": "04d1f7505aca8f3c209e880dd7f9eb16",
+    "semantic_hash": "04d1f7505aca8f3c209e880dd7f9eb16"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/enforcement.ex": {
+    "mtime": 1782367817.743391,
+    "ast_hash": "a2ef3b741c41c7cd1142da26bf8c35ce",
+    "semantic_hash": "a2ef3b741c41c7cd1142da26bf8c35ce"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/enforcement/diff_guard.ex": {
+    "mtime": 1782370168.2702684,
+    "ast_hash": "afdb06f0c56f3d4fb2dd566be0814c51",
+    "semantic_hash": "afdb06f0c56f3d4fb2dd566be0814c51"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/enforcement/isolation.ex": {
+    "mtime": 1782367817.7435873,
+    "ast_hash": "5cd49b50eea6dc041e3fc08b5303f298",
+    "semantic_hash": "5cd49b50eea6dc041e3fc08b5303f298"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/evidence.ex": {
+    "mtime": 1782358356.052246,
+    "ast_hash": "b94bfd193ab80d6598c639cd1f008d9f",
+    "semantic_hash": "b94bfd193ab80d6598c639cd1f008d9f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/evidence/parser.ex": {
+    "mtime": 1782358356.052336,
+    "ast_hash": "0399ff9f0e108609b83df26be875d0e9",
+    "semantic_hash": "0399ff9f0e108609b83df26be875d0e9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/export/obsidian.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "4ab7d6bc6c0193d5ec8087507b5041d3",
+    "semantic_hash": "4ab7d6bc6c0193d5ec8087507b5041d3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/goal.ex": {
+    "mtime": 1782897327.649244,
+    "ast_hash": "7cefaa4cf967f83f7d4d60a3fb18dfda",
+    "semantic_hash": "7cefaa4cf967f83f7d4d60a3fb18dfda"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/goal/dep_graph.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "d17af5fd1750e3e0dc14bad09f3e2562",
+    "semantic_hash": "d17af5fd1750e3e0dc14bad09f3e2562"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/goal/group.ex": {
+    "mtime": 1782292935.049167,
+    "ast_hash": "34cce469bcad6d57c5f827595125c7f9",
+    "semantic_hash": "34cce469bcad6d57c5f827595125c7f9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/goal/group_budget.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "ace91b0f50448d49e1292f6b5541ca7a",
+    "semantic_hash": "ace91b0f50448d49e1292f6b5541ca7a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/goal/group_lint.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "5169c9ad7692d8fb142e14c8a5e9fdde",
+    "semantic_hash": "5169c9ad7692d8fb142e14c8a5e9fdde"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/goal/group_tree.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "338f2a17f8e242a6009d89797eed1fbe",
+    "semantic_hash": "338f2a17f8e242a6009d89797eed1fbe"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/goal/loader.ex": {
+    "mtime": 1782897327.6496298,
+    "ast_hash": "a5f25540d5fa3983bb9cef90c65371e8",
+    "semantic_hash": "a5f25540d5fa3983bb9cef90c65371e8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness.ex": {
+    "mtime": 1782348763.7760146,
+    "ast_hash": "32c46e9bb275da25574d40c97aeb3275",
+    "semantic_hash": "32c46e9bb275da25574d40c97aeb3275"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/claude_adapter.ex": {
+    "mtime": 1782180118.398403,
+    "ast_hash": "38bd5719b6fd9a51a9c1359338d03280",
+    "semantic_hash": "38bd5719b6fd9a51a9c1359338d03280"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/cli_adapter.ex": {
+    "mtime": 1782370168.2720494,
+    "ast_hash": "0fb5ee9fec07ea84ea2e0167d471bbda",
+    "semantic_hash": "0fb5ee9fec07ea84ea2e0167d471bbda"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/dispatch_surface.ex": {
+    "mtime": 1782431743.67941,
+    "ast_hash": "51d53dfd2ceeea73030773bb85959937",
+    "semantic_hash": "51d53dfd2ceeea73030773bb85959937"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/profile.ex": {
+    "mtime": 1782271065.6282392,
+    "ast_hash": "d99f15dbe8a40634a1bdb7302eff9bd5",
+    "semantic_hash": "d99f15dbe8a40634a1bdb7302eff9bd5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/profiles/antigravity.ex": {
+    "mtime": 1782271065.6285067,
+    "ast_hash": "6db698847ede70716f718487e9e2f4a2",
+    "semantic_hash": "6db698847ede70716f718487e9e2f4a2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/profiles/claude.ex": {
+    "mtime": 1782897327.6498642,
+    "ast_hash": "2b3369f883abac07e40fae4f523795fe",
+    "semantic_hash": "2b3369f883abac07e40fae4f523795fe"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/profiles/claw.ex": {
+    "mtime": 1782272347.882911,
+    "ast_hash": "ca6eda7b5970d311cfa4d42dbd791b40",
+    "semantic_hash": "ca6eda7b5970d311cfa4d42dbd791b40"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/profiles/codex.ex": {
+    "mtime": 1782367817.7483037,
+    "ast_hash": "45a68c1ca653304f9f2b51e0628f2524",
+    "semantic_hash": "45a68c1ca653304f9f2b51e0628f2524"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/profiles/gemini_cli.ex": {
+    "mtime": 1782689160.0173764,
+    "ast_hash": "2f1a38b8c4f5d6728404099f48d3f9cc",
+    "semantic_hash": "2f1a38b8c4f5d6728404099f48d3f9cc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/profiles/opencode.ex": {
+    "mtime": 1782348763.7770011,
+    "ast_hash": "1978fd4024af084b9921eb20c302c469",
+    "semantic_hash": "1978fd4024af084b9921eb20c302c469"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/prompt.ex": {
+    "mtime": 1782401481.3369675,
+    "ast_hash": "a11fbb8833c05e5a6f10222677f43aa7",
+    "semantic_hash": "a11fbb8833c05e5a6f10222677f43aa7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/registry.ex": {
+    "mtime": 1782700610.3494918,
+    "ast_hash": "ed1663f3e722e0aa13141bc2b81e8893",
+    "semantic_hash": "ed1663f3e722e0aa13141bc2b81e8893"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness/usage.ex": {
+    "mtime": 1782367817.7485049,
+    "ast_hash": "2c693aba37f1a8d8690b5fac144f41d6",
+    "semantic_hash": "2c693aba37f1a8d8690b5fac144f41d6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/harness_adapter.ex": {
+    "mtime": 1782087549.0237718,
+    "ast_hash": "746ce77f6518c0ab8af8e17a0f434f19",
+    "semantic_hash": "746ce77f6518c0ab8af8e17a0f434f19"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/json_path.ex": {
+    "mtime": 1782365653.4568634,
+    "ast_hash": "baaf691290468dc968a4cecfaf769769",
+    "semantic_hash": "baaf691290468dc968a4cecfaf769769"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/loop.ex": {
+    "mtime": 1782431743.680135,
+    "ast_hash": "35f1222eef65254050d5bd72adf7c338",
+    "semantic_hash": "35f1222eef65254050d5bd72adf7c338"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/loop/budget.ex": {
+    "mtime": 1782370168.273613,
+    "ast_hash": "d7077f7c26f4c9a6b8ecf8f92ddffe1b",
+    "semantic_hash": "d7077f7c26f4c9a6b8ecf8f92ddffe1b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/loop/counters.ex": {
+    "mtime": 1782401481.3379443,
+    "ast_hash": "6debfb85eda6982982867207cb057143",
+    "semantic_hash": "6debfb85eda6982982867207cb057143"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/loop/digest.ex": {
+    "mtime": 1782140533.0706031,
+    "ast_hash": "96b8ebf703514f4c77d1ca42348aef1a",
+    "semantic_hash": "96b8ebf703514f4c77d1ca42348aef1a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/loop/flake.ex": {
+    "mtime": 1782358367.0,
+    "ast_hash": "12861a653f86106908de77c55c45486b",
+    "semantic_hash": "12861a653f86106908de77c55c45486b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/loop/regression_detector.ex": {
+    "mtime": 1782358367.0,
+    "ast_hash": "62395cae0619ec7cf8066ca3fbc013d5",
+    "semantic_hash": "62395cae0619ec7cf8066ca3fbc013d5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/loop/stuck_detector.ex": {
+    "mtime": 1782358356.0536902,
+    "ast_hash": "6ff0cb9063fe6214c017a3029c420976",
+    "semantic_hash": "6ff0cb9063fe6214c017a3029c420976"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/mcp/client_config.ex": {
+    "mtime": 1782370168.2739651,
+    "ast_hash": "3b116ceef0d38ed737352eadda720305",
+    "semantic_hash": "3b116ceef0d38ed737352eadda720305"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/mcp/server.ex": {
+    "mtime": 1782401481.3386023,
+    "ast_hash": "ae497bb23dcd8d47e3f70292df256f5d",
+    "semantic_hash": "ae497bb23dcd8d47e3f70292df256f5d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/mcp/stdio.ex": {
+    "mtime": 1782366192.4610865,
+    "ast_hash": "545928cd0475159247bab57aaa8e0819",
+    "semantic_hash": "545928cd0475159247bab57aaa8e0819"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/metric.ex": {
+    "mtime": 1782365653.4570625,
+    "ast_hash": "84c56a4eb3fb948ae8ce4473b7474e7f",
+    "semantic_hash": "84c56a4eb3fb948ae8ce4473b7474e7f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/partition.ex": {
+    "mtime": 1782689160.0182946,
+    "ast_hash": "116817b80392c695282510d79627d5a7",
+    "semantic_hash": "116817b80392c695282510d79627d5a7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/pool/acc_bridge.ex": {
+    "mtime": 1782278532.8253837,
+    "ast_hash": "ecaca4752bd34ed85d53719009b268d2",
+    "semantic_hash": "ecaca4752bd34ed85d53719009b268d2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/pool/compose.ex": {
+    "mtime": 1782289952.3590155,
+    "ast_hash": "ae97074943689a2534116a59793d3c3f",
+    "semantic_hash": "ae97074943689a2534116a59793d3c3f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/pool/gate.ex": {
+    "mtime": 1782342199.1426713,
+    "ast_hash": "5c9c0b3617aab2790768908084ffdb50",
+    "semantic_hash": "5c9c0b3617aab2790768908084ffdb50"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/pool/lease.ex": {
+    "mtime": 1782281791.107372,
+    "ast_hash": "6ef7775202ea57a4613afb501914ad63",
+    "semantic_hash": "6ef7775202ea57a4613afb501914ad63"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/predicate.ex": {
+    "mtime": 1782364946.7284648,
+    "ast_hash": "06b9d71138862f70f3b333af5d1506c8",
+    "semantic_hash": "06b9d71138862f70f3b333af5d1506c8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/predicate/schema.ex": {
+    "mtime": 1782367817.7504442,
+    "ast_hash": "34d1d3cfb05e9aa0ea244eb49f3cfd91",
+    "semantic_hash": "34d1d3cfb05e9aa0ea244eb49f3cfd91"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/predicate_provider.ex": {
+    "mtime": 1782087549.024611,
+    "ast_hash": "20cae7a3ccdd54e0b010e7633f45aafb",
+    "semantic_hash": "20cae7a3ccdd54e0b010e7633f45aafb"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/predicate_result.ex": {
+    "mtime": 1782358356.0539382,
+    "ast_hash": "7bc3dca6553ef34a95963ced818ad6a7",
+    "semantic_hash": "7bc3dca6553ef34a95963ced818ad6a7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/predicate_vector.ex": {
+    "mtime": 1782358367.0,
+    "ast_hash": "120d3299d81cfb3fe2888f2fd75c426a",
+    "semantic_hash": "120d3299d81cfb3fe2888f2fd75c426a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/browser.ex": {
+    "mtime": 1783039222.0924082,
+    "ast_hash": "692e7eb1e204dac12e0b00ccf1b26eff",
+    "semantic_hash": "692e7eb1e204dac12e0b00ccf1b26eff"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/command_runner.ex": {
+    "mtime": 1783039222.0926394,
+    "ast_hash": "11582c03545c20d189a478744939e9ca",
+    "semantic_hash": "11582c03545c20d189a478744939e9ca"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/coverage.ex": {
+    "mtime": 1782367817.7506607,
+    "ast_hash": "517d083a7ca24ec690ff5ff868342adf",
+    "semantic_hash": "517d083a7ca24ec690ff5ff868342adf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/custom_script.ex": {
+    "mtime": 1782365653.4579272,
+    "ast_hash": "fe133c4f65b1ef2e86ebef532a63a6b0",
+    "semantic_hash": "fe133c4f65b1ef2e86ebef532a63a6b0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/cve.ex": {
+    "mtime": 1782367817.7510352,
+    "ast_hash": "3815f925dbead2fb25cddcf8b64641df",
+    "semantic_hash": "3815f925dbead2fb25cddcf8b64641df"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/http_probe.ex": {
+    "mtime": 1782366192.4631119,
+    "ast_hash": "217f0925d8e21d8f46a06224e7255851",
+    "semantic_hash": "217f0925d8e21d8f46a06224e7255851"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/metrics.ex": {
+    "mtime": 1782366192.4633162,
+    "ast_hash": "c5c3b4aa235a1d64be4de7cf435d7804",
+    "semantic_hash": "c5c3b4aa235a1d64be4de7cf435d7804"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/mutation.ex": {
+    "mtime": 1782367817.751233,
+    "ast_hash": "8fd7f6b7e6d9746cf7d04f571e10e87d",
+    "semantic_hash": "8fd7f6b7e6d9746cf7d04f571e10e87d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/prod_log.ex": {
+    "mtime": 1782364946.7297175,
+    "ast_hash": "ede28e21eb01950d32a86b528a972828",
+    "semantic_hash": "ede28e21eb01950d32a86b528a972828"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/property.ex": {
+    "mtime": 1782367817.751428,
+    "ast_hash": "8fd1af0b07f04bfae5e0434f77842cb3",
+    "semantic_hash": "8fd1af0b07f04bfae5e0434f77842cb3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/ratchet.ex": {
+    "mtime": 1782365653.458142,
+    "ast_hash": "4bd328c4f17f262a41acb50afe4f0b59",
+    "semantic_hash": "4bd328c4f17f262a41acb50afe4f0b59"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/static.ex": {
+    "mtime": 1783039222.0930774,
+    "ast_hash": "18b54be8265f623952b19d8df76ed11e",
+    "semantic_hash": "18b54be8265f623952b19d8df76ed11e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/providers/test_runner.ex": {
+    "mtime": 1782364946.7300127,
+    "ast_hash": "44ddcf1b54ebc4569b9ed8daf173968c",
+    "semantic_hash": "44ddcf1b54ebc4569b9ed8daf173968c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/ratchet.ex": {
+    "mtime": 1782365653.458435,
+    "ast_hash": "359f0bb269b9014d550472eb5f382453",
+    "semantic_hash": "359f0bb269b9014d550472eb5f382453"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/ratchet/store.ex": {
+    "mtime": 1782365653.4586537,
+    "ast_hash": "cc5dec22a7d74008c44a5b6a76628e70",
+    "semantic_hash": "cc5dec22a7d74008c44a5b6a76628e70"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/read_model.ex": {
+    "mtime": 1782370168.2752066,
+    "ast_hash": "1186ebd08e15990e0febc977e05b5bb8",
+    "semantic_hash": "1186ebd08e15990e0febc977e05b5bb8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/read_model/goal_summary.ex": {
+    "mtime": 1782153982.6812596,
+    "ast_hash": "21f376c49577998961281223490a7f09",
+    "semantic_hash": "21f376c49577998961281223490a7f09"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/read_model/iteration.ex": {
+    "mtime": 1782401481.3390403,
+    "ast_hash": "4d5e0c608a2a3e0daed0a07e9cfa9a5d",
+    "semantic_hash": "4d5e0c608a2a3e0daed0a07e9cfa9a5d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/read_model/orientation_pack_cache.ex": {
+    "mtime": 1782139880.2668326,
+    "ast_hash": "c769868ed4973bac50d0a5702e781716",
+    "semantic_hash": "c769868ed4973bac50d0a5702e781716"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/read_model/proposed_goal.ex": {
+    "mtime": 1782292035.835685,
+    "ast_hash": "fcd54413e04d2bf3446e01894bcfff1d",
+    "semantic_hash": "fcd54413e04d2bf3446e01894bcfff1d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/read_model/retrieval_snippet_cache.ex": {
+    "mtime": 1782158312.5557506,
+    "ast_hash": "64f44deb0c8cad10632d73da818a3c6c",
+    "semantic_hash": "64f44deb0c8cad10632d73da818a3c6c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/reconcile/coverage.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "064b893772c63649e50e0c3806735337",
+    "semantic_hash": "064b893772c63649e50e0c3806735337"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/reconcile/gherkin_importer.ex": {
+    "mtime": 1782271065.6287868,
+    "ast_hash": "2391ef55e7ff33999421206df1414f13",
+    "semantic_hash": "2391ef55e7ff33999421206df1414f13"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/reconcile/openapi_importer.ex": {
+    "mtime": 1782269544.236638,
+    "ast_hash": "daebbe16eca0c728e6377fa252a3de5e",
+    "semantic_hash": "daebbe16eca0c728e6377fa252a3de5e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/reconcile/prose_importer.ex": {
+    "mtime": 1782271065.6288788,
+    "ast_hash": "a942d3ecf3694a0e9a04c3c7483a5929",
+    "semantic_hash": "a942d3ecf3694a0e9a04c3c7483a5929"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/reconcile/surface_element.ex": {
+    "mtime": 1782268854.8772335,
+    "ast_hash": "4376cbfe358aec4110ccf51c124344f4",
+    "semantic_hash": "4376cbfe358aec4110ccf51c124344f4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/reconcile/surface_scanner.ex": {
+    "mtime": 1782268854.8774369,
+    "ast_hash": "d6e15180e70647052753ecbc666206c8",
+    "semantic_hash": "d6e15180e70647052753ecbc666206c8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/redaction.ex": {
+    "mtime": 1782401481.3393493,
+    "ast_hash": "9a664c6a16db569f0c37b98e1fb1b030",
+    "semantic_hash": "9a664c6a16db569f0c37b98e1fb1b030"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/release.ex": {
+    "mtime": 1782170714.0845907,
+    "ast_hash": "a1580039d397203169e72d26434be721",
+    "semantic_hash": "a1580039d397203169e72d26434be721"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/repo.ex": {
+    "mtime": 1782088910.3729374,
+    "ast_hash": "60841d1eab88f88b6a744e677759adf2",
+    "semantic_hash": "60841d1eab88f88b6a744e677759adf2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/retrieval.ex": {
+    "mtime": 1782158312.5559525,
+    "ast_hash": "864da44f0e82ba75b8a2bbbe7a4696b1",
+    "semantic_hash": "864da44f0e82ba75b8a2bbbe7a4696b1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/retrieval/cache.ex": {
+    "mtime": 1782158312.5561292,
+    "ast_hash": "cdf2978e4d3ecf47efb446cc7e368dca",
+    "semantic_hash": "cdf2978e4d3ecf47efb446cc7e368dca"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/retrieval/graphify.ex": {
+    "mtime": 1782358367.0,
+    "ast_hash": "1bd1b95c2bd90a8924d2ef84a375429c",
+    "semantic_hash": "1bd1b95c2bd90a8924d2ef84a375429c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/retrieval/no_op.ex": {
+    "mtime": 1782157177.8666224,
+    "ast_hash": "c4db2f0b10adba30d65b273f4d328def",
+    "semantic_hash": "c4db2f0b10adba30d65b273f4d328def"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/retrieval/snippet.ex": {
+    "mtime": 1782158312.556476,
+    "ast_hash": "2f916cfe9032d5cc03dda4039829532f",
+    "semantic_hash": "2f916cfe9032d5cc03dda4039829532f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/runtime.ex": {
+    "mtime": 1782897327.6501236,
+    "ast_hash": "dc109cfa2de5dbfa5fbbe12388ce11d5",
+    "semantic_hash": "dc109cfa2de5dbfa5fbbe12388ce11d5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler.ex": {
+    "mtime": 1782689160.0188332,
+    "ast_hash": "487abe7ff7bcf1c3f91c1e82e85a1b24",
+    "semantic_hash": "487abe7ff7bcf1c3f91c1e82e85a1b24"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/budget.ex": {
+    "mtime": 1782370168.276448,
+    "ast_hash": "b61630713e9ada64e94362b10d5b7d79",
+    "semantic_hash": "b61630713e9ada64e94362b10d5b7d79"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/dag_snapshot.ex": {
+    "mtime": 1782431743.680697,
+    "ast_hash": "1edd062dba0ba6a348c7f25a7d8beba3",
+    "semantic_hash": "1edd062dba0ba6a348c7f25a7d8beba3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/dep_scheduler.ex": {
+    "mtime": 1782431743.681634,
+    "ast_hash": "e3b2cc6dddcd047c351805550a1c53db",
+    "semantic_hash": "e3b2cc6dddcd047c351805550a1c53db"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/integration.ex": {
+    "mtime": 1782288934.3608036,
+    "ast_hash": "8f078ce6d0a6a65045fe95232f6058c5",
+    "semantic_hash": "8f078ce6d0a6a65045fe95232f6058c5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/leased_reconciler.ex": {
+    "mtime": 1782689160.0191653,
+    "ast_hash": "0f96d3a11f38d6a9c26f1344fb100e71",
+    "semantic_hash": "0f96d3a11f38d6a9c26f1344fb100e71"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/overlap_policy.ex": {
+    "mtime": 1782291195.628969,
+    "ast_hash": "c8e40f191541d457e9b612f29714ec65",
+    "semantic_hash": "c8e40f191541d457e9b612f29714ec65"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/partition_supervisor.ex": {
+    "mtime": 1782689160.0197027,
+    "ast_hash": "7b871d0add659b5572fbec8dd22009bd",
+    "semantic_hash": "7b871d0add659b5572fbec8dd22009bd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/partitioner.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "38f1cea612ceff7055c4b898ce3b8870",
+    "semantic_hash": "38f1cea612ceff7055c4b898ce3b8870"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scheduler/worktree.ex": {
+    "mtime": 1782281791.1083026,
+    "ast_hash": "def5cc007296169b8dca3908083ca2e0",
+    "semantic_hash": "def5cc007296169b8dca3908083ca2e0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/scope.ex": {
+    "mtime": 1782087549.0254967,
+    "ast_hash": "4dc56acc12ddf10ef47fd8e50202706a",
+    "semantic_hash": "4dc56acc12ddf10ef47fd8e50202706a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/teach/install_skill.ex": {
+    "mtime": 1783039222.0934143,
+    "ast_hash": "f8125ee80d33d5cf990ae182b3422efd",
+    "semantic_hash": "f8125ee80d33d5cf990ae182b3422efd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/workspace.ex": {
+    "mtime": 1782139703.8699884,
+    "ast_hash": "0be57f57f711f5b67d249e9b8573a6b9",
+    "semantic_hash": "0be57f57f711f5b67d249e9b8573a6b9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi/workspace/orientation.ex": {
+    "mtime": 1782139703.8702483,
+    "ast_hash": "a6369f6991da3cf44a25741d7c61f489",
+    "semantic_hash": "a6369f6991da3cf44a25741d7c61f489"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web.ex": {
+    "mtime": 1782152918.412894,
+    "ast_hash": "f944cc0f1a38cca5fc1ba0d40f9c53da",
+    "semantic_hash": "f944cc0f1a38cca5fc1ba0d40f9c53da"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/components/layouts.ex": {
+    "mtime": 1782152918.4135973,
+    "ast_hash": "8f3e6cd88f48a1ab323d9e138f5358bc",
+    "semantic_hash": "8f3e6cd88f48a1ab323d9e138f5358bc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/controllers/error_html.ex": {
+    "mtime": 1782152918.4137657,
+    "ast_hash": "de09fdeb3f098b6bb39eb862dadcd4ed",
+    "semantic_hash": "de09fdeb3f098b6bb39eb862dadcd4ed"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/controllers/health_controller.ex": {
+    "mtime": 1782152918.4138942,
+    "ast_hash": "4aa21a83a75bc9c036c97c7a6ae88ac9",
+    "semantic_hash": "4aa21a83a75bc9c036c97c7a6ae88ac9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/coordination_source.ex": {
+    "mtime": 1782155104.5582042,
+    "ast_hash": "799f5aa994f9cf6503670c94c5e45472",
+    "semantic_hash": "799f5aa994f9cf6503670c94c5e45472"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/coordination_source/native.ex": {
+    "mtime": 1782689160.019921,
+    "ast_hash": "f15a00772635bb33744823d5989a41f5",
+    "semantic_hash": "f15a00772635bb33744823d5989a41f5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/coordination_source/transport.ex": {
+    "mtime": 1782155104.5583687,
+    "ast_hash": "a5bd47007fc663ea93c1547109c04291",
+    "semantic_hash": "a5bd47007fc663ea93c1547109c04291"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/dag_source.ex": {
+    "mtime": 1782431743.6818614,
+    "ast_hash": "7f8dd17d85704a22dd06c3c0a8102ef4",
+    "semantic_hash": "7f8dd17d85704a22dd06c3c0a8102ef4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/dag_source/cache.ex": {
+    "mtime": 1782431743.682111,
+    "ast_hash": "1d0a6bf0356592f94ceaa0e1e92911d3",
+    "semantic_hash": "1d0a6bf0356592f94ceaa0e1e92911d3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/endpoint.ex": {
+    "mtime": 1782152918.4140162,
+    "ast_hash": "8f34d2f5dbd0b240e979339af096768f",
+    "semantic_hash": "8f34d2f5dbd0b240e979339af096768f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/live/dag_live.ex": {
+    "mtime": 1782431743.6832802,
+    "ast_hash": "b2ae107898406b8ea79c72acc3b9817f",
+    "semantic_hash": "b2ae107898406b8ea79c72acc3b9817f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/live/dashboard_live.ex": {
+    "mtime": 1782431743.6838212,
+    "ast_hash": "cbdb69e07175bcffe1187c6b3993aef6",
+    "semantic_hash": "cbdb69e07175bcffe1187c6b3993aef6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/live/goal_board_live.ex": {
+    "mtime": 1782155104.5587215,
+    "ast_hash": "6bff73c662b95f136a21f0bfbc641bcd",
+    "semantic_hash": "6bff73c662b95f136a21f0bfbc641bcd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/live/history_live.ex": {
+    "mtime": 1782845094.0,
+    "ast_hash": "107a16a5dc202dded78e839061e75670",
+    "semantic_hash": "107a16a5dc202dded78e839061e75670"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/live/lease_map_live.ex": {
+    "mtime": 1782689160.020227,
+    "ast_hash": "4fd2e1c581e5c2537fce0d7998cdce74",
+    "semantic_hash": "4fd2e1c581e5c2537fce0d7998cdce74"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/kazi_web/router.ex": {
+    "mtime": 1782431743.6839821,
+    "ast_hash": "73377431e7b6bb7eb8e49d569e4c1e3a",
+    "semantic_hash": "73377431e7b6bb7eb8e49d569e4c1e3a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/mix/tasks/kazi.apply.ex": {
+    "mtime": 1782342199.143268,
+    "ast_hash": "e125ee16f4e61dc61e8367a1d97b2393",
+    "semantic_hash": "e125ee16f4e61dc61e8367a1d97b2393"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/mix/tasks/kazi.bench.ex": {
+    "mtime": 1782431743.684233,
+    "ast_hash": "442c558ebeb5122fd934f9092cb6882f",
+    "semantic_hash": "442c558ebeb5122fd934f9092cb6882f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/lib/mix/tasks/kazi.mcp.ex": {
+    "mtime": 1782366192.4641898,
+    "ast_hash": "c9cb2c6f771645cb57fcac0fd293f6a0",
+    "semantic_hash": "c9cb2c6f771645cb57fcac0fd293f6a0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/mix.exs": {
+    "mtime": 1783039825.105956,
+    "ast_hash": "698d8b2a2998aea547ed650f2b40c762",
+    "semantic_hash": "698d8b2a2998aea547ed650f2b40c762"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/package.json": {
+    "mtime": 1782152918.4159908,
+    "ast_hash": "a705fd5bcb1f24c9e0456460a02218ca",
+    "semantic_hash": "a705fd5bcb1f24c9e0456460a02218ca"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/playwright.config.ts": {
+    "mtime": 1782155104.5593588,
+    "ast_hash": "5545f42b6d2e11e522fa9603402f2270",
+    "semantic_hash": "5545f42b6d2e11e522fa9603402f2270"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/browser/playwright_runner.js": {
+    "mtime": 1782096184.3266597,
+    "ast_hash": "9f096744745143dc60a7a344cffc9908",
+    "semantic_hash": "9f096744745143dc60a7a344cffc9908"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/checks/cve.sh": {
+    "mtime": 1782689160.0212905,
+    "ast_hash": "b8ce2cbc5d5d75449a45ae5420d8b4bf",
+    "semantic_hash": "b8ce2cbc5d5d75449a45ae5420d8b4bf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/checks/lint.sh": {
+    "mtime": 1782689160.0214303,
+    "ast_hash": "d7aa581313ceea7bd74dce9263011cd6",
+    "semantic_hash": "d7aa581313ceea7bd74dce9263011cd6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/checks/mutation.sh": {
+    "mtime": 1782689160.021735,
+    "ast_hash": "545732a56ebc174355e52cbdfa1d4684",
+    "semantic_hash": "545732a56ebc174355e52cbdfa1d4684"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/checks/patch_cov.sh": {
+    "mtime": 1782689160.021911,
+    "ast_hash": "facf37f6b6cb26bfa501824af232e86b",
+    "semantic_hash": "facf37f6b6cb26bfa501824af232e86b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/checks/project_cov.sh": {
+    "mtime": 1782689160.0228217,
+    "ast_hash": "8ed0d7056adb2443d05bb5fe720a4eff",
+    "semantic_hash": "8ed0d7056adb2443d05bb5fe720a4eff"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/src/stats.py": {
+    "mtime": 1782689160.023174,
+    "ast_hash": "ec22c35e04d4f8d044b6647921a34fd3",
+    "semantic_hash": "ec22c35e04d4f8d044b6647921a34fd3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/tests/test_stats.py": {
+    "mtime": 1782689160.023316,
+    "ast_hash": "2bc59527bc9bf4cec13b419014978007",
+    "semantic_hash": "2bc59527bc9bf4cec13b419014978007"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/hero_cast_demo/record.sh": {
+    "mtime": 1782689160.0245152,
+    "ast_hash": "7b233b481a2a9d3ec235341f296d6f0f",
+    "semantic_hash": "7b233b481a2a9d3ec235341f296d6f0f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/hero_cast_demo/workspace/go.mod": {
+    "mtime": 1782689160.024652,
+    "ast_hash": "722c6384a49052dcf14b13f853711b0c",
+    "semantic_hash": "722c6384a49052dcf14b13f853711b0c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/hero_cast_demo/workspace/greet.go": {
+    "mtime": 1782689160.0247657,
+    "ast_hash": "e66f0ef2b84bf402c936f31c30cf90b0",
+    "semantic_hash": "e66f0ef2b84bf402c936f31c30cf90b0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/hero_cast_demo/workspace/greet_test.go": {
+    "mtime": 1782689160.024962,
+    "ast_hash": "e252cdd95b081fcca186e874415a1d63",
+    "semantic_hash": "e252cdd95b081fcca186e874415a1d63"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/playwright/server.exs": {
+    "mtime": 1782155104.5595334,
+    "ast_hash": "6b47582f173d4e1dcd69b6db1dd20e93",
+    "semantic_hash": "6b47582f173d4e1dcd69b6db1dd20e93"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/repo/migrations/20260622002729_create_iterations.exs": {
+    "mtime": 1782088910.3740282,
+    "ast_hash": "e43853d6878f5e5f704a28e1ace755b0",
+    "semantic_hash": "e43853d6878f5e5f704a28e1ace755b0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/repo/migrations/20260622010000_add_regressions_to_iterations.exs": {
+    "mtime": 1782094200.3522935,
+    "ast_hash": "b5259fd802e302528f0fb8f2bd1006bf",
+    "semantic_hash": "b5259fd802e302528f0fb8f2bd1006bf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/repo/migrations/20260622053301_add_release_ref_to_iterations.exs": {
+    "mtime": 1782106876.8024795,
+    "ast_hash": "f0d01554fc5b30689eb0dbc4208d613c",
+    "semantic_hash": "f0d01554fc5b30689eb0dbc4208d613c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/repo/migrations/20260622060000_create_orientation_pack_cache.exs": {
+    "mtime": 1782139880.267078,
+    "ast_hash": "bff92253891c8c2cd79dd5ef9e49a796",
+    "semantic_hash": "bff92253891c8c2cd79dd5ef9e49a796"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/repo/migrations/20260622070000_create_proposed_goals.exs": {
+    "mtime": 1782152553.5847237,
+    "ast_hash": "a3cbf4169e61e0d79273a0b851173f13",
+    "semantic_hash": "a3cbf4169e61e0d79273a0b851173f13"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/repo/migrations/20260622080000_create_retrieval_snippet_cache.exs": {
+    "mtime": 1782158312.5572953,
+    "ast_hash": "b64bc783358c51c9e82903dfb509db2e",
+    "semantic_hash": "b64bc783358c51c9e82903dfb509db2e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/repo/migrations/20260625061808_add_context_tools_to_iterations.exs": {
+    "mtime": 1782370168.2775793,
+    "ast_hash": "aa8e34885e02548cd947934490453b0e",
+    "semantic_hash": "aa8e34885e02548cd947934490453b0e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/scripts/acc_to_predicates.exs": {
+    "mtime": 1782278532.8259773,
+    "ast_hash": "dc25307d992b5a8efc61eae347dc6828",
+    "semantic_hash": "dc25307d992b5a8efc61eae347dc6828"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/scripts/t13_6_dogfood.exs": {
+    "mtime": 1782348763.7785263,
+    "ast_hash": "14bc566cbd8ebd146b43431da8ac8661",
+    "semantic_hash": "14bc566cbd8ebd146b43431da8ac8661"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/release-please-config.json": {
+    "mtime": 1782191227.8088012,
+    "ast_hash": "83ec9a12cfe6a25843eb4b8313153327",
+    "semantic_hash": "83ec9a12cfe6a25843eb4b8313153327"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/.astro/content-assets.mjs": {
+    "mtime": 1782239349.7497303,
+    "ast_hash": "8aeea624d36ca2b4c7d0e0748b76ba28",
+    "semantic_hash": "8aeea624d36ca2b4c7d0e0748b76ba28"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/.astro/content-modules.mjs": {
+    "mtime": 1782239349.7499638,
+    "ast_hash": "8aeea624d36ca2b4c7d0e0748b76ba28",
+    "semantic_hash": "8aeea624d36ca2b4c7d0e0748b76ba28"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/.astro/content.d.ts": {
+    "mtime": 1782442798.4156508,
+    "ast_hash": "171cca75fb38067465ccb132701fdf95",
+    "semantic_hash": "171cca75fb38067465ccb132701fdf95"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/.astro/types.d.ts": {
+    "mtime": 1782442798.4158165,
+    "ast_hash": "f3d48b2aa569815a445d3509aa161559",
+    "semantic_hash": "f3d48b2aa569815a445d3509aa161559"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/astro.config.mjs": {
+    "mtime": 1782689160.0258062,
+    "ast_hash": "15602a95ca0dcae00683b0aa28380d81",
+    "semantic_hash": "15602a95ca0dcae00683b0aa28380d81"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/package.json": {
+    "mtime": 1782689160.0276494,
+    "ast_hash": "53357d286291909c335c35e4c7fbbab6",
+    "semantic_hash": "53357d286291909c335c35e4c7fbbab6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/playwright.config.mjs": {
+    "mtime": 1782268854.8802826,
+    "ast_hash": "b0b32bc5f524783bb9400c76e53ce42e",
+    "semantic_hash": "b0b32bc5f524783bb9400c76e53ce42e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/alt.json": {
+    "mtime": 1782689160.027939,
+    "ast_hash": "f92092495aa3f5eda4adc54cb4d1babd",
+    "semantic_hash": "f92092495aa3f5eda4adc54cb4d1babd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/scripts/check-coherence.mjs": {
+    "mtime": 1782357969.2628088,
+    "ast_hash": "dea35bb4c123f30c59077081e13248e2",
+    "semantic_hash": "dea35bb4c123f30c59077081e13248e2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/scripts/check-commands.mjs": {
+    "mtime": 1782689160.031371,
+    "ast_hash": "6e5d70b9220c15f6087bf1c6a0b40961",
+    "semantic_hash": "6e5d70b9220c15f6087bf1c6a0b40961"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/scripts/gen-post-art.mjs": {
+    "mtime": 1782689160.031484,
+    "ast_hash": "622e55c268a451870389dcee0ee987e6",
+    "semantic_hash": "622e55c268a451870389dcee0ee987e6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/canonical.mjs": {
+    "mtime": 1782689160.0329025,
+    "ast_hash": "0d8eab16036357c5a5c19afd779b5476",
+    "semantic_hash": "0d8eab16036357c5a5c19afd779b5476"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/components/Analytics.astro": {
+    "mtime": 1782689160.033224,
+    "ast_hash": "5abbd22727d517f13ac5f47b46f302ae",
+    "semantic_hash": "5abbd22727d517f13ac5f47b46f302ae"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content.config.ts": {
+    "mtime": 1782689160.0335808,
+    "ast_hash": "76c2970c7dccab9f262327ddc7d5a1bb",
+    "semantic_hash": "76c2970c7dccab9f262327ddc7d5a1bb"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/layouts/Layout.astro": {
+    "mtime": 1782689160.0383341,
+    "ast_hash": "55bbf51c87d058200c6ced1b691668f7",
+    "semantic_hash": "55bbf51c87d058200c6ced1b691668f7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/pages/blog/[...slug].astro": {
+    "mtime": 1782689160.0385633,
+    "ast_hash": "ee5467178dc1743c9fa39e2625151e0e",
+    "semantic_hash": "ee5467178dc1743c9fa39e2625151e0e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/pages/blog/from-vibe-coding-to-reconciliation.astro": {
+    "mtime": 1782689160.0388124,
+    "ast_hash": "91b57f594919c63d447aff285e5942cc",
+    "semantic_hash": "91b57f594919c63d447aff285e5942cc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/pages/blog/index.astro": {
+    "mtime": 1782689160.0390105,
+    "ast_hash": "9e9ec4f21f378baaa9d26ca4600c2653",
+    "semantic_hash": "9e9ec4f21f378baaa9d26ca4600c2653"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/pages/blog/rss.xml.js": {
+    "mtime": 1782689160.0392134,
+    "ast_hash": "756a124bf05e4d04ebfb1658baccd189",
+    "semantic_hash": "756a124bf05e4d04ebfb1658baccd189"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/pages/index.astro": {
+    "mtime": 1783039222.094015,
+    "ast_hash": "52d75b6aedab45b77d4b1eb27bd4f707",
+    "semantic_hash": "52d75b6aedab45b77d4b1eb27bd4f707"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/pages/proof.astro": {
+    "mtime": 1782689160.0399485,
+    "ast_hash": "f288ccc87d4669129fa1b17a494bc1a5",
+    "semantic_hash": "f288ccc87d4669129fa1b17a494bc1a5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/utm.mjs": {
+    "mtime": 1782689160.040138,
+    "ast_hash": "c972a9c26eabebd942f35ad796e0e8de",
+    "semantic_hash": "c972a9c26eabebd942f35ad796e0e8de"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/tests/blog.spec.mjs": {
+    "mtime": 1782689160.0403686,
+    "ast_hash": "9743d95c3d53760a518d10c6e6127219",
+    "semantic_hash": "9743d95c3d53760a518d10c6e6127219"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/tests/smoke.spec.mjs": {
+    "mtime": 1782689160.0408509,
+    "ast_hash": "cb17fbd4545800e9446b3cee0d8907a8",
+    "semantic_hash": "cb17fbd4545800e9446b3cee0d8907a8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/tsconfig.json": {
+    "mtime": 1782239646.4560328,
+    "ast_hash": "2468ad4201072028f1f60c1591299ac9",
+    "semantic_hash": "2468ad4201072028f1f60c1591299ac9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/elixir-coverage/mix.exs": {
+    "mtime": 1782170714.085447,
+    "ast_hash": "8d4f4f22013d234730c74104ebb85347",
+    "semantic_hash": "8d4f4f22013d234730c74104ebb85347"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/elixir/mix.exs": {
+    "mtime": 1782169421.0909975,
+    "ast_hash": "856d7eb1bd7ee951403fa9cd1c30a26f",
+    "semantic_hash": "856d7eb1bd7ee951403fa9cd1c30a26f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/go/go.mod": {
+    "mtime": 1782169421.0911405,
+    "ast_hash": "58645fffd30abe9a71783f8778447551",
+    "semantic_hash": "58645fffd30abe9a71783f8778447551"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/node-coverage/package.json": {
+    "mtime": 1782170714.085572,
+    "ast_hash": "10f57690c56c4dfe2a3cd5c836b43e77",
+    "semantic_hash": "10f57690c56c4dfe2a3cd5c836b43e77"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/node-no-test/package.json": {
+    "mtime": 1782169421.0912824,
+    "ast_hash": "2d8329006599c010e5848ab3fd64b4f4",
+    "semantic_hash": "2d8329006599c010e5848ab3fd64b4f4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/node-placeholder/package.json": {
+    "mtime": 1782169421.091437,
+    "ast_hash": "933708c6f55a8a593e813190f18b905b",
+    "semantic_hash": "933708c6f55a8a593e813190f18b905b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/node-with-test/package.json": {
+    "mtime": 1782169421.091578,
+    "ast_hash": "7fb070233beae20a2232f41beba93010",
+    "semantic_hash": "7fb070233beae20a2232f41beba93010"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/polyglot/go.mod": {
+    "mtime": 1782169421.091703,
+    "ast_hash": "58645fffd30abe9a71783f8778447551",
+    "semantic_hash": "58645fffd30abe9a71783f8778447551"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/polyglot/mix.exs": {
+    "mtime": 1782169421.0918214,
+    "ast_hash": "c198c3c6e4831883d785dac8dde4f6e7",
+    "semantic_hash": "c198c3c6e4831883d785dac8dde4f6e7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/python-coverage/pyproject.toml": {
+    "mtime": 1782170714.0856955,
+    "ast_hash": "6b38549891ad34bfcc18b7d5eadff679",
+    "semantic_hash": "6b38549891ad34bfcc18b7d5eadff679"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/python-pyproject/pyproject.toml": {
+    "mtime": 1782169421.09196,
+    "ast_hash": "3aa5acc3d8cf3ea2aecdc616a057dc72",
+    "semantic_hash": "3aa5acc3d8cf3ea2aecdc616a057dc72"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/captures/A.001.json": {
+    "mtime": 1782329532.9887056,
+    "ast_hash": "2d13132431a365b1b7718fda99de4b0f",
+    "semantic_hash": "2d13132431a365b1b7718fda99de4b0f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/captures/B.001.json": {
+    "mtime": 1782329532.9889605,
+    "ast_hash": "f83778b9831c080007b656f12e1dadc2",
+    "semantic_hash": "f83778b9831c080007b656f12e1dadc2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/captures/B.002.json": {
+    "mtime": 1782329532.9899912,
+    "ast_hash": "168f13b868b291d8f3509da3aa9be95e",
+    "semantic_hash": "168f13b868b291d8f3509da3aa9be95e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/captures/B.003.json": {
+    "mtime": 1782329532.9901137,
+    "ast_hash": "6bfc21ee77e5ea4ec9f4861fc9c2550b",
+    "semantic_hash": "6bfc21ee77e5ea4ec9f4861fc9c2550b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/captures/C.001.json": {
+    "mtime": 1782329532.99023,
+    "ast_hash": "3e68bc1012750416a52cbc6e1d0b361b",
+    "semantic_hash": "3e68bc1012750416a52cbc6e1d0b361b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/captures/C.002.json": {
+    "mtime": 1782329532.9904594,
+    "ast_hash": "bdd43fe9371f6819bcf7a50fefac09c8",
+    "semantic_hash": "bdd43fe9371f6819bcf7a50fefac09c8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/captures/C.003.json": {
+    "mtime": 1782329532.9906247,
+    "ast_hash": "ec6aeae1e82eba65fbbd68496985ef9d",
+    "semantic_hash": "ec6aeae1e82eba65fbbd68496985ef9d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/kpi_runs/B.001.json": {
+    "mtime": 1782401481.3422785,
+    "ast_hash": "d838a2ec2260699db6e3b86adfc1055a",
+    "semantic_hash": "d838a2ec2260699db6e3b86adfc1055a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/kpi_runs/C.001.json": {
+    "mtime": 1782401481.3424478,
+    "ast_hash": "5be2c296bec6439d51953731ad88916b",
+    "semantic_hash": "5be2c296bec6439d51953731ad88916b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/kpi_runs/C.002.json": {
+    "mtime": 1782401481.3430164,
+    "ast_hash": "4017f462f19d44a3f62f38836bcfb86e",
+    "semantic_hash": "4017f462f19d44a3f62f38836bcfb86e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/no_usage.json": {
+    "mtime": 1782329532.9907386,
+    "ast_hash": "0c83bb5ef41e39265674d1d76fa150dd",
+    "semantic_hash": "0c83bb5ef41e39265674d1d76fa150dd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t0-on.001.json": {
+    "mtime": 1782431743.686182,
+    "ast_hash": "b2998da5f74a3fd7601d78bf5a3778f4",
+    "semantic_hash": "b2998da5f74a3fd7601d78bf5a3778f4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t0-on.result.json": {
+    "mtime": 1782431743.6864,
+    "ast_hash": "e01ee18546b3c9b45915f3070f92bbc3",
+    "semantic_hash": "e01ee18546b3c9b45915f3070f92bbc3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t1-off.001.json": {
+    "mtime": 1782431743.6870568,
+    "ast_hash": "eb0fb6050a432316fa1ffd8e88c80b7b",
+    "semantic_hash": "eb0fb6050a432316fa1ffd8e88c80b7b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t1-off.result.json": {
+    "mtime": 1782431743.6871703,
+    "ast_hash": "e01ee18546b3c9b45915f3070f92bbc3",
+    "semantic_hash": "e01ee18546b3c9b45915f3070f92bbc3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t1-on.001.json": {
+    "mtime": 1782431743.6873913,
+    "ast_hash": "6a4b806e5d4137f5bcc0d4152aa2c565",
+    "semantic_hash": "6a4b806e5d4137f5bcc0d4152aa2c565"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t1-on.result.json": {
+    "mtime": 1782431743.6874783,
+    "ast_hash": "e01ee18546b3c9b45915f3070f92bbc3",
+    "semantic_hash": "e01ee18546b3c9b45915f3070f92bbc3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t2-on.001.json": {
+    "mtime": 1782431743.6875975,
+    "ast_hash": "fd6b169c9476addbdca87b016a8deeac",
+    "semantic_hash": "fd6b169c9476addbdca87b016a8deeac"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t2-on.result.json": {
+    "mtime": 1782431743.6876795,
+    "ast_hash": "e01ee18546b3c9b45915f3070f92bbc3",
+    "semantic_hash": "e01ee18546b3c9b45915f3070f92bbc3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t3-on.001.json": {
+    "mtime": 1782431743.6877904,
+    "ast_hash": "4a70a796301821b91c800ef61139022b",
+    "semantic_hash": "4a70a796301821b91c800ef61139022b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tier_surface/t3-on.result.json": {
+    "mtime": 1782431743.6879172,
+    "ast_hash": "83eac6d714d7966f6afda38daef49a06",
+    "semantic_hash": "83eac6d714d7966f6afda38daef49a06"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/escalating.001.json": {
+    "mtime": 1782431743.6882234,
+    "ast_hash": "9f3cccb193e36c7eab7491c971bdeb82",
+    "semantic_hash": "9f3cccb193e36c7eab7491c971bdeb82"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/escalating.002.json": {
+    "mtime": 1782431743.6884413,
+    "ast_hash": "2cbcffdb34ecfc6ae95f00e060d44072",
+    "semantic_hash": "2cbcffdb34ecfc6ae95f00e060d44072"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/escalating.003.json": {
+    "mtime": 1782431743.688602,
+    "ast_hash": "70ea89dd6f79e5d4d3e647cd0984b5b3",
+    "semantic_hash": "70ea89dd6f79e5d4d3e647cd0984b5b3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/escalating.result.json": {
+    "mtime": 1782431743.6891348,
+    "ast_hash": "b8a22fec27d7906306c650b0aaa2ec0c",
+    "semantic_hash": "b8a22fec27d7906306c650b0aaa2ec0c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/static-cheap.001.json": {
+    "mtime": 1782431743.6892393,
+    "ast_hash": "9f3cccb193e36c7eab7491c971bdeb82",
+    "semantic_hash": "9f3cccb193e36c7eab7491c971bdeb82"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/static-cheap.result.json": {
+    "mtime": 1782431743.6894233,
+    "ast_hash": "1a448bd904ed3bc61561cf4c943dcb24",
+    "semantic_hash": "1a448bd904ed3bc61561cf4c943dcb24"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/static-fails.001.json": {
+    "mtime": 1782431743.6895137,
+    "ast_hash": "9f3cccb193e36c7eab7491c971bdeb82",
+    "semantic_hash": "9f3cccb193e36c7eab7491c971bdeb82"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/static-fails.result.json": {
+    "mtime": 1782431743.689645,
+    "ast_hash": "85aa56067419df11f73c8dcf52d1b486",
+    "semantic_hash": "85aa56067419df11f73c8dcf52d1b486"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/vanilla-frontier.001.json": {
+    "mtime": 1782431743.689727,
+    "ast_hash": "70ea89dd6f79e5d4d3e647cd0984b5b3",
+    "semantic_hash": "70ea89dd6f79e5d4d3e647cd0984b5b3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/bench/tiering/vanilla-frontier.result.json": {
+    "mtime": 1782431743.6898108,
+    "ast_hash": "1a448bd904ed3bc61561cf4c943dcb24",
+    "semantic_hash": "1a448bd904ed3bc61561cf4c943dcb24"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/harness/antigravity_run.json": {
+    "mtime": 1782271065.6289754,
+    "ast_hash": "43c3b8de951f116487e3e370a64ba528",
+    "semantic_hash": "43c3b8de951f116487e3e370a64ba528"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/harness/claude_envelope.json": {
+    "mtime": 1782267197.824332,
+    "ast_hash": "18a75d401c4683926b3ae8fcc48c95a3",
+    "semantic_hash": "18a75d401c4683926b3ae8fcc48c95a3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/harness/gemini_cli_run.json": {
+    "mtime": 1782689160.0425136,
+    "ast_hash": "c390a57afe20719bf4678038fc674cca",
+    "semantic_hash": "c390a57afe20719bf4678038fc674cca"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/reconcile/petstore.openapi.json": {
+    "mtime": 1782269544.2382965,
+    "ast_hash": "0f57ab7a8c92b61f9ff12b779ec34ec4",
+    "semantic_hash": "0f57ab7a8c92b61f9ff12b779ec34ec4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/surface/lib/calc.ex": {
+    "mtime": 1782268854.8813217,
+    "ast_hash": "0188075c2bda9a6a9786b539de8eebf6",
+    "semantic_hash": "0188075c2bda9a6a9786b539de8eebf6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/surface/lib/mix/tasks/greet.ex": {
+    "mtime": 1782268854.8817043,
+    "ast_hash": "4d80ba9b9abffef0b2f6ec014d0dd914",
+    "semantic_hash": "4d80ba9b9abffef0b2f6ec014d0dd914"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/surface/lib/nested.ex": {
+    "mtime": 1782268854.8818424,
+    "ast_hash": "c98950bed92287cd52dfe3036b42bbdd",
+    "semantic_hash": "c98950bed92287cd52dfe3036b42bbdd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/action_test.exs": {
+    "mtime": 1782087549.0257597,
+    "ast_hash": "f597a14b400a43c674dedf8f8264f5b0",
+    "semantic_hash": "f597a14b400a43c674dedf8f8264f5b0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/actions/deploy_test.exs": {
+    "mtime": 1782106876.803209,
+    "ast_hash": "db24575e0e03e000548e3fa0f3857f18",
+    "semantic_hash": "db24575e0e03e000548e3fa0f3857f18"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/actions/integrate_test.exs": {
+    "mtime": 1782088853.6804993,
+    "ast_hash": "aa9f668c72bfa3aabfd9ca2c596d97d8",
+    "semantic_hash": "aa9f668c72bfa3aabfd9ca2c596d97d8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/adopt_e2e_test.exs": {
+    "mtime": 1782176047.2126818,
+    "ast_hash": "9305bfe7ef8fa5585bbefc80747df7ef",
+    "semantic_hash": "9305bfe7ef8fa5585bbefc80747df7ef"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/adopt_enrich_test.exs": {
+    "mtime": 1782170957.7880166,
+    "ast_hash": "2cde50b670b26ea6e0fe05662aa099dc",
+    "semantic_hash": "2cde50b670b26ea6e0fe05662aa099dc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/adopt_test.exs": {
+    "mtime": 1782170714.0860255,
+    "ast_hash": "b3df9e9f34ef59891626ae2ba2304045",
+    "semantic_hash": "b3df9e9f34ef59891626ae2ba2304045"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/adopt_writer_test.exs": {
+    "mtime": 1782897327.6502926,
+    "ast_hash": "fc433563787cc558c3c594d52f9bcf16",
+    "semantic_hash": "fc433563787cc558c3c594d52f9bcf16"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/antigravity_live_test.exs": {
+    "mtime": 1782271065.629177,
+    "ast_hash": "0534523ce548584aa33a1cabd42e8c61",
+    "semantic_hash": "0534523ce548584aa33a1cabd42e8c61"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/authoring/clarify_test.exs": {
+    "mtime": 1782257572.8683245,
+    "ast_hash": "240c9135a1ccdb3bbc370914989eed6b",
+    "semantic_hash": "240c9135a1ccdb3bbc370914989eed6b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/authoring/rationale_adr_test.exs": {
+    "mtime": 1782257572.8684177,
+    "ast_hash": "bb5beb776302855abde3e07c517b5b7a",
+    "semantic_hash": "bb5beb776302855abde3e07c517b5b7a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/authoring_test.exs": {
+    "mtime": 1782689160.0429308,
+    "ast_hash": "d9682c31b4e6ec4def1ae04ee63289f6",
+    "semantic_hash": "d9682c31b4e6ec4def1ae04ee63289f6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/bench_test.exs": {
+    "mtime": 1782431743.6906114,
+    "ast_hash": "f1bade26f9ae40bed1f2163fece69e9b",
+    "semantic_hash": "f1bade26f9ae40bed1f2163fece69e9b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/claw_live_test.exs": {
+    "mtime": 1782272347.8837197,
+    "ast_hash": "aad793d5dc8b4942571939554a2125ef",
+    "semantic_hash": "aad793d5dc8b4942571939554a2125ef"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli/usage_test.exs": {
+    "mtime": 1782366192.4646113,
+    "ast_hash": "e52bd908807c90a84ca847867ee79a29",
+    "semantic_hash": "e52bd908807c90a84ca847867ee79a29"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_authoring_json_test.exs": {
+    "mtime": 1782348763.780041,
+    "ast_hash": "3d9542f6de539b6ac60a003859fd8ff6",
+    "semantic_hash": "3d9542f6de539b6ac60a003859fd8ff6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_authoring_test.exs": {
+    "mtime": 1782348763.780425,
+    "ast_hash": "02af836d4105871ae510905eb6462e0c",
+    "semantic_hash": "02af836d4105871ae510905eb6462e0c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_context_test.exs": {
+    "mtime": 1782401481.343323,
+    "ast_hash": "fd7ebd3a8ef0be54cab009a3b90dd20e",
+    "semantic_hash": "fd7ebd3a8ef0be54cab009a3b90dd20e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_export_test.exs": {
+    "mtime": 1782342199.146261,
+    "ast_hash": "4d865be60e4b435cd3ef9be41f51966f",
+    "semantic_hash": "4d865be60e4b435cd3ef9be41f51966f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_harness_test.exs": {
+    "mtime": 1782897327.6504385,
+    "ast_hash": "a88564c6c711812debbe3ea9b93a5674",
+    "semantic_hash": "a88564c6c711812debbe3ea9b93a5674"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_help_schema_test.exs": {
+    "mtime": 1782402194.891074,
+    "ast_hash": "d24cf3a13cd6efd027c38543af22550f",
+    "semantic_hash": "d24cf3a13cd6efd027c38543af22550f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_install_skill_test.exs": {
+    "mtime": 1783039825.1066394,
+    "ast_hash": "22d0bb61b1a72120bc8d801cb2565aa9",
+    "semantic_hash": "22d0bb61b1a72120bc8d801cb2565aa9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_json_test.exs": {
+    "mtime": 1782348763.782087,
+    "ast_hash": "876bfcc90b063a79279443d6c9c84baf",
+    "semantic_hash": "876bfcc90b063a79279443d6c9c84baf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_lint_test.exs": {
+    "mtime": 1782342199.1478183,
+    "ast_hash": "c3068bba791d077263852ede0b83cb57",
+    "semantic_hash": "c3068bba791d077263852ede0b83cb57"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_mcp_test.exs": {
+    "mtime": 1782366192.4652638,
+    "ast_hash": "589273fb96409d1275c19e7ccb642d38",
+    "semantic_hash": "589273fb96409d1275c19e7ccb642d38"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_propose_json_test.exs": {
+    "mtime": 1782348763.7822442,
+    "ast_hash": "3aa54a1ade796b4a83a49df675da5252",
+    "semantic_hash": "3aa54a1ade796b4a83a49df675da5252"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_run_json_test.exs": {
+    "mtime": 1782431743.6908884,
+    "ast_hash": "9e6e40799ff075390c651f94a0dbc0ee",
+    "semantic_hash": "9e6e40799ff075390c651f94a0dbc0ee"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_run_parallel_json_test.exs": {
+    "mtime": 1782348763.782638,
+    "ast_hash": "c8b26d404f0d989e0544f81655b42573",
+    "semantic_hash": "c8b26d404f0d989e0544f81655b42573"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_run_parallel_lease_test.exs": {
+    "mtime": 1782690400.9483206,
+    "ast_hash": "803172e93c6f36531b0925a5c1ad60ba",
+    "semantic_hash": "803172e93c6f36531b0925a5c1ad60ba"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_run_schedule_explain_test.exs": {
+    "mtime": 1782689160.0440068,
+    "ast_hash": "8ef7c4fe66f7f738f7ff00ee42362d05",
+    "semantic_hash": "8ef7c4fe66f7f738f7ff00ee42362d05"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_run_stream_test.exs": {
+    "mtime": 1782348763.7843015,
+    "ast_hash": "32a95db5870e48b1f917084ac4f99137",
+    "semantic_hash": "32a95db5870e48b1f917084ac4f99137"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_self_conformance_test.exs": {
+    "mtime": 1782401481.3447142,
+    "ast_hash": "8b31669236ef0174ce11091769894b82",
+    "semantic_hash": "8b31669236ef0174ce11091769894b82"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_status_json_test.exs": {
+    "mtime": 1782348763.7859862,
+    "ast_hash": "4b38f11acfcf106d6b9e24261d5f8e9e",
+    "semantic_hash": "4b38f11acfcf106d6b9e24261d5f8e9e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/cli_test.exs": {
+    "mtime": 1782897327.6513646,
+    "ast_hash": "e478acc331cffb1eb9ab2ae2c0210c9c",
+    "semantic_hash": "e478acc331cffb1eb9ab2ae2c0210c9c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/codex_live_test.exs": {
+    "mtime": 1782367817.7541034,
+    "ast_hash": "79167da2f832ae2c6df4c6d776129dea",
+    "semantic_hash": "79167da2f832ae2c6df4c6d776129dea"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context/escalation_test.exs": {
+    "mtime": 1782401481.3452225,
+    "ast_hash": "1a205f61f4d27e9f6413a66818686d77",
+    "semantic_hash": "1a205f61f4d27e9f6413a66818686d77"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context/graph_cli_test.exs": {
+    "mtime": 1782138750.7046597,
+    "ast_hash": "d72b38ccfec7aca06e87f7a4a139f759",
+    "semantic_hash": "d72b38ccfec7aca06e87f7a4a139f759"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context/pack_test.exs": {
+    "mtime": 1782139880.2675462,
+    "ast_hash": "ca11464dee4e2d40047d5df4a0c6d2bc",
+    "semantic_hash": "ca11464dee4e2d40047d5df4a0c6d2bc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context/repo_map_source_test.exs": {
+    "mtime": 1782138750.705023,
+    "ast_hash": "3e8df05b74457349de07e2cdbb2bf61a",
+    "semantic_hash": "3e8df05b74457349de07e2cdbb2bf61a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context/stuck_bundle_test.exs": {
+    "mtime": 1782431743.6911118,
+    "ast_hash": "217fa096299fd82b99478994a34d86fe",
+    "semantic_hash": "217fa096299fd82b99478994a34d86fe"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context/symbol_test.exs": {
+    "mtime": 1782138750.7054183,
+    "ast_hash": "1fc35b2f730831dae824ef625a988d3e",
+    "semantic_hash": "1fc35b2f730831dae824ef625a988d3e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context/tier_test.exs": {
+    "mtime": 1782401481.3454337,
+    "ast_hash": "42e511ce17b7190c6c2c904dc7bb9a2d",
+    "semantic_hash": "42e511ce17b7190c6c2c904dc7bb9a2d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context_cache_test.exs": {
+    "mtime": 1782139880.2679586,
+    "ast_hash": "110cda2a9d616bfa5237353511328d33",
+    "semantic_hash": "110cda2a9d616bfa5237353511328d33"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context_store/gist_cli_test.exs": {
+    "mtime": 1782368374.3590243,
+    "ast_hash": "e5e727e384808b9d91d035528a4b3216",
+    "semantic_hash": "e5e727e384808b9d91d035528a4b3216"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context_store/gist_init_test.exs": {
+    "mtime": 1782401481.3456676,
+    "ast_hash": "b78d8722993b4b52c634e9b6bf1e1ec3",
+    "semantic_hash": "b78d8722993b4b52c634e9b6bf1e1ec3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context_store/labels_test.exs": {
+    "mtime": 1782365653.462156,
+    "ast_hash": "e341a126400229a7cf39621e8d63aa09",
+    "semantic_hash": "e341a126400229a7cf39621e8d63aa09"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context_store/redaction_test.exs": {
+    "mtime": 1782401481.3458717,
+    "ast_hash": "b11d0336673953f3df1124e1a54ec67b",
+    "semantic_hash": "b11d0336673953f3df1124e1a54ec67b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context_store_test.exs": {
+    "mtime": 1782365653.4622848,
+    "ast_hash": "3df2db30adc2ca49994d21d1fa261a07",
+    "semantic_hash": "3df2db30adc2ca49994d21d1fa261a07"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/context_test.exs": {
+    "mtime": 1782138750.705554,
+    "ast_hash": "0a5cde00ebc7a10b1121b3acb20d9dae",
+    "semantic_hash": "0a5cde00ebc7a10b1121b3acb20d9dae"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/coordination/lease/memory_test.exs": {
+    "mtime": 1782152553.5852432,
+    "ast_hash": "eb99b045a0f146cfa1672ce7b15b8eb9",
+    "semantic_hash": "eb99b045a0f146cfa1672ce7b15b8eb9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/coordination/lease/nats_test.exs": {
+    "mtime": 1782153982.6832428,
+    "ast_hash": "3481ba4dc86635ebe433c0ffb7211cd7",
+    "semantic_hash": "3481ba4dc86635ebe433c0ffb7211cd7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/coordination/lease_table_test.exs": {
+    "mtime": 1782690400.9484918,
+    "ast_hash": "4436c7266f780d8f9bf66fa42d5ecc05",
+    "semantic_hash": "4436c7266f780d8f9bf66fa42d5ecc05"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/coordination/partition_lease_test.exs": {
+    "mtime": 1782154575.4370787,
+    "ast_hash": "8d8ca83d25083c75b4bf296f7b7fb9c0",
+    "semantic_hash": "8d8ca83d25083c75b4bf296f7b7fb9c0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/coordination/presence_test.exs": {
+    "mtime": 1782153132.1758275,
+    "ast_hash": "5617fa3b232fda75afe22687d2f23095",
+    "semantic_hash": "5617fa3b232fda75afe22687d2f23095"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/coordination/transport/memory_test.exs": {
+    "mtime": 1782153132.1761196,
+    "ast_hash": "1e15b552739032cbe03d66e6c6640e7e",
+    "semantic_hash": "1e15b552739032cbe03d66e6c6640e7e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/creation_loop_test.exs": {
+    "mtime": 1782096184.327656,
+    "ast_hash": "2dd8a9e08163b90ad1f242609525eca9",
+    "semantic_hash": "2dd8a9e08163b90ad1f242609525eca9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/deploy_wiring_test.exs": {
+    "mtime": 1782348763.7865987,
+    "ast_hash": "2e007811abf9dfbc2f840582193bc0b0",
+    "semantic_hash": "2e007811abf9dfbc2f840582193bc0b0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/diff_guard_test.exs": {
+    "mtime": 1782370168.2783098,
+    "ast_hash": "bb8ac2e31b3f6e384285747ecddf32c7",
+    "semantic_hash": "bb8ac2e31b3f6e384285747ecddf32c7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/economy/kpis_read_model_test.exs": {
+    "mtime": 1782401481.3460479,
+    "ast_hash": "f35f9a94caaf87093b194b128dc0250a",
+    "semantic_hash": "f35f9a94caaf87093b194b128dc0250a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/economy/kpis_test.exs": {
+    "mtime": 1782431743.6914854,
+    "ast_hash": "4e85ade9c574143f6d0e0d22347dd08c",
+    "semantic_hash": "4e85ade9c574143f6d0e0d22347dd08c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/economy/price_map_test.exs": {
+    "mtime": 1783039222.0947886,
+    "ast_hash": "c58674559d691c0f4442af3876f41ebd",
+    "semantic_hash": "c58674559d691c0f4442af3876f41ebd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/enforcement_test.exs": {
+    "mtime": 1782367817.7543082,
+    "ast_hash": "6da2132cb788ea36d44fdb97c1e116d9",
+    "semantic_hash": "6da2132cb788ea36d44fdb97c1e116d9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/evidence/parser_test.exs": {
+    "mtime": 1782358356.0546987,
+    "ast_hash": "94ac0d7294e8d3ee6f2a9ea0e5786822",
+    "semantic_hash": "94ac0d7294e8d3ee6f2a9ea0e5786822"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/evidence_test.exs": {
+    "mtime": 1782358356.054832,
+    "ast_hash": "6f31a0f7b9f46d61943db2a7075511c0",
+    "semantic_hash": "6f31a0f7b9f46d61943db2a7075511c0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/export/obsidian_test.exs": {
+    "mtime": 1782276037.286806,
+    "ast_hash": "9efbbe01f23c5496f02aba59b9633e95",
+    "semantic_hash": "9efbbe01f23c5496f02aba59b9633e95"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/full_loop_test.exs": {
+    "mtime": 1782091656.1567154,
+    "ast_hash": "57a6c338259c19700489f88506bfb794",
+    "semantic_hash": "57a6c338259c19700489f88506bfb794"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/gemini_cli_live_test.exs": {
+    "mtime": 1782689160.0444603,
+    "ast_hash": "9b4e9bb9f3e5e02dfdc10d3b992870a1",
+    "semantic_hash": "9b4e9bb9f3e5e02dfdc10d3b992870a1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/custom_script_loader_test.exs": {
+    "mtime": 1782357969.2646575,
+    "ast_hash": "edfda0486d909600de26fa0e4ce162e8",
+    "semantic_hash": "edfda0486d909600de26fa0e4ce162e8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/cve_loader_test.exs": {
+    "mtime": 1782367817.7545,
+    "ast_hash": "75b350f82368a7941d49a5003a6ef230",
+    "semantic_hash": "75b350f82368a7941d49a5003a6ef230"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/dep_graph_test.exs": {
+    "mtime": 1782296296.188478,
+    "ast_hash": "aa14ba8e66928dca2ffca4e35231b987",
+    "semantic_hash": "aa14ba8e66928dca2ffca4e35231b987"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/doc_lifecycle_goal_test.exs": {
+    "mtime": 1782689160.044669,
+    "ast_hash": "2153bfe50200b7c236bc2be416633666",
+    "semantic_hash": "2153bfe50200b7c236bc2be416633666"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/examples_runnable_test.exs": {
+    "mtime": 1782288934.3632424,
+    "ast_hash": "80ab902d9e8333e796a1b656888358b9",
+    "semantic_hash": "80ab902d9e8333e796a1b656888358b9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/group_budget_test.exs": {
+    "mtime": 1782292035.8358245,
+    "ast_hash": "5f4d86bd053ec0df0cd11059da32574e",
+    "semantic_hash": "5f4d86bd053ec0df0cd11059da32574e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/group_lint_test.exs": {
+    "mtime": 1782278532.8273768,
+    "ast_hash": "6ab2cfa3aa22e634a991c359814d42e5",
+    "semantic_hash": "6ab2cfa3aa22e634a991c359814d42e5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/group_test.exs": {
+    "mtime": 1782292935.050516,
+    "ast_hash": "eac9e0a0820456ac136fbde71616c07b",
+    "semantic_hash": "eac9e0a0820456ac136fbde71616c07b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/group_tree_test.exs": {
+    "mtime": 1782269544.2394547,
+    "ast_hash": "18fed821d89111b3ebdd64038b8d703f",
+    "semantic_hash": "18fed821d89111b3ebdd64038b8d703f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/loader_test.exs": {
+    "mtime": 1782897327.6516862,
+    "ast_hash": "d572792bc173900df699d82334cccddb",
+    "semantic_hash": "d572792bc173900df699d82334cccddb"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/metrics_loader_test.exs": {
+    "mtime": 1782366192.465817,
+    "ast_hash": "b8f8b442288edb63084c26c0bd08212d",
+    "semantic_hash": "b8f8b442288edb63084c26c0bd08212d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/mutation_loader_test.exs": {
+    "mtime": 1782367817.754684,
+    "ast_hash": "05b80bdc78214f99e415ad2603c33599",
+    "semantic_hash": "05b80bdc78214f99e415ad2603c33599"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/provider_deprecation_test.exs": {
+    "mtime": 1782364946.731348,
+    "ast_hash": "afb0592d6c8b5013544a3a2ff3abef59",
+    "semantic_hash": "afb0592d6c8b5013544a3a2ff3abef59"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal/ratchet_loader_test.exs": {
+    "mtime": 1782365653.4625475,
+    "ast_hash": "737735f15523f64074c54221a3065f35",
+    "semantic_hash": "737735f15523f64074c54221a3065f35"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goal_test.exs": {
+    "mtime": 1782087549.0260515,
+    "ast_hash": "f2a27e58da6ff95e1a2b0943f7cc655e",
+    "semantic_hash": "f2a27e58da6ff95e1a2b0943f7cc655e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/goals/e3_t34_standing_reconciler_test.exs": {
+    "mtime": 1782097742.8068767,
+    "ast_hash": "57ad6b68e7182fa43cba1e3885154d3b",
+    "semantic_hash": "57ad6b68e7182fa43cba1e3885154d3b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/antigravity_profile_test.exs": {
+    "mtime": 1782271065.629379,
+    "ast_hash": "875d5dce4cc513ce5d855ee015478f9c",
+    "semantic_hash": "875d5dce4cc513ce5d855ee015478f9c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/claude_adapter_budget_test.exs": {
+    "mtime": 1782138750.7057717,
+    "ast_hash": "06a31171c6cf7e50a7c81bda2aaeb876",
+    "semantic_hash": "06a31171c6cf7e50a7c81bda2aaeb876"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/claude_adapter_test.exs": {
+    "mtime": 1782157177.867258,
+    "ast_hash": "3c4efc55313ac367568fee29adc941ae",
+    "semantic_hash": "3c4efc55313ac367568fee29adc941ae"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/claude_economy_flags_test.exs": {
+    "mtime": 1782700610.3520951,
+    "ast_hash": "56edfec61f168bd4bc3a3e3ca4975b73",
+    "semantic_hash": "56edfec61f168bd4bc3a3e3ca4975b73"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/claw_profile_test.exs": {
+    "mtime": 1782272347.8843803,
+    "ast_hash": "7769d0696ec4529a1d8194516f0a9077",
+    "semantic_hash": "7769d0696ec4529a1d8194516f0a9077"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/cli_adapter_test.exs": {
+    "mtime": 1782370168.2793386,
+    "ast_hash": "5cdca2c06c89d71f87cc27e7d2092faf",
+    "semantic_hash": "5cdca2c06c89d71f87cc27e7d2092faf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/codex_profile_test.exs": {
+    "mtime": 1782367817.7548828,
+    "ast_hash": "9c781bddbf58fc5c93456db0847f13db",
+    "semantic_hash": "9c781bddbf58fc5c93456db0847f13db"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/conformance_test.exs": {
+    "mtime": 1782689160.0452886,
+    "ast_hash": "c3f937c34ac43e18e33de02e3a7b9e0d",
+    "semantic_hash": "c3f937c34ac43e18e33de02e3a7b9e0d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/dispatch_surface_test.exs": {
+    "mtime": 1782431743.6917646,
+    "ast_hash": "b63ae197f0bce20893e49f94174a5d8d",
+    "semantic_hash": "b63ae197f0bce20893e49f94174a5d8d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/gemini_cli_profile_test.exs": {
+    "mtime": 1782689160.045523,
+    "ast_hash": "49e245223ed389d0f0600670f2fa8082",
+    "semantic_hash": "49e245223ed389d0f0600670f2fa8082"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/opencode_profile_test.exs": {
+    "mtime": 1782348763.788053,
+    "ast_hash": "d5c5305aaf4007e0e8dc49e6c1ebd53c",
+    "semantic_hash": "d5c5305aaf4007e0e8dc49e6c1ebd53c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/profile_registry_test.exs": {
+    "mtime": 1782367817.75604,
+    "ast_hash": "8eb68528b1181afc954ffcd384689197",
+    "semantic_hash": "8eb68528b1181afc954ffcd384689197"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/prompt_test.exs": {
+    "mtime": 1782180118.3995316,
+    "ast_hash": "e4a09daa15c46c0089882b58554d50cd",
+    "semantic_hash": "e4a09daa15c46c0089882b58554d50cd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness/usage_test.exs": {
+    "mtime": 1782897327.651915,
+    "ast_hash": "55f4fe95f96e47295bdf1415dccfd071",
+    "semantic_hash": "55f4fe95f96e47295bdf1415dccfd071"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness_adapter_test.exs": {
+    "mtime": 1782087549.0262694,
+    "ast_hash": "2e26613da05858dec463cb443424ae21",
+    "semantic_hash": "2e26613da05858dec463cb443424ae21"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/harness_test.exs": {
+    "mtime": 1782689160.0460565,
+    "ast_hash": "30b419f49fa0e74acdbff9c098c05d4b",
+    "semantic_hash": "30b419f49fa0e74acdbff9c098c05d4b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/json_path_test.exs": {
+    "mtime": 1782365653.4631505,
+    "ast_hash": "e6a4cac90a52abd586efd2d6f84f7767",
+    "semantic_hash": "e6a4cac90a52abd586efd2d6f84f7767"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/budget_test.exs": {
+    "mtime": 1782370168.2800796,
+    "ast_hash": "08b7aa13d69d853e8e4ea5cc253b8f22",
+    "semantic_hash": "08b7aa13d69d853e8e4ea5cc253b8f22"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/context_escalation_test.exs": {
+    "mtime": 1782401481.3470228,
+    "ast_hash": "ed2e27d793ff6cc950a82ca880ac81d1",
+    "semantic_hash": "ed2e27d793ff6cc950a82ca880ac81d1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/context_store_test.exs": {
+    "mtime": 1782431743.6920469,
+    "ast_hash": "dc6d61196585c5e32433632e93367036",
+    "semantic_hash": "dc6d61196585c5e32433632e93367036"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/context_tier_test.exs": {
+    "mtime": 1782401481.3474944,
+    "ast_hash": "04eef60e0e62c120ffa47afa8c819955",
+    "semantic_hash": "04eef60e0e62c120ffa47afa8c819955"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/counters_test.exs": {
+    "mtime": 1782401481.3477716,
+    "ast_hash": "f97e797d1c702b4ecfa610af8a7a67ba",
+    "semantic_hash": "f97e797d1c702b4ecfa610af8a7a67ba"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/digest_test.exs": {
+    "mtime": 1782140533.071224,
+    "ast_hash": "53f6d46efe82d2111abc18bd2c3443f1",
+    "semantic_hash": "53f6d46efe82d2111abc18bd2c3443f1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/flake_test.exs": {
+    "mtime": 1782093176.9576802,
+    "ast_hash": "65f0a9ebdd67ade3cc9c6cd8050adae2",
+    "semantic_hash": "65f0a9ebdd67ade3cc9c6cd8050adae2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/held_out_test.exs": {
+    "mtime": 1782364946.731563,
+    "ast_hash": "17d0c90cc1b178d9607682d8a7b5a9c2",
+    "semantic_hash": "17d0c90cc1b178d9607682d8a7b5a9c2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/iteration_counters_test.exs": {
+    "mtime": 1782370168.2804725,
+    "ast_hash": "a259d524b051cc1a4f1bc432f16bc0b1",
+    "semantic_hash": "a259d524b051cc1a4f1bc432f16bc0b1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/orientation_prefix_test.exs": {
+    "mtime": 1782329532.991415,
+    "ast_hash": "2815b5999d15279b3750d7f2d8303bc8",
+    "semantic_hash": "2815b5999d15279b3750d7f2d8303bc8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/prior_score_thread_test.exs": {
+    "mtime": 1782358356.0550523,
+    "ast_hash": "bf24890866b1817ea4210fa6b9b2636a",
+    "semantic_hash": "bf24890866b1817ea4210fa6b9b2636a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/regression_detector_test.exs": {
+    "mtime": 1782094200.3524988,
+    "ast_hash": "5e283481ab202fb8e089722fc7c9d1a5",
+    "semantic_hash": "5e283481ab202fb8e089722fc7c9d1a5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/retrieval_opt_in_test.exs": {
+    "mtime": 1782158312.557487,
+    "ast_hash": "b44bc5eb1b7321822dc543217e6f894d",
+    "semantic_hash": "b44bc5eb1b7321822dc543217e6f894d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/stuck_bundle_test.exs": {
+    "mtime": 1782431743.6922536,
+    "ast_hash": "8de3095b10fc7715db58bdca82a35022",
+    "semantic_hash": "8de3095b10fc7715db58bdca82a35022"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/stuck_detector_test.exs": {
+    "mtime": 1782358356.0551574,
+    "ast_hash": "fa70ae56b63a7ef936c9e26c4196505b",
+    "semantic_hash": "fa70ae56b63a7ef936c9e26c4196505b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/working_set_digest_test.exs": {
+    "mtime": 1782140533.0714512,
+    "ast_hash": "fce15a5ce3a607d215ec3a391a56fe95",
+    "semantic_hash": "fce15a5ce3a607d215ec3a391a56fe95"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop/workspace_prep_test.exs": {
+    "mtime": 1782139703.8712666,
+    "ast_hash": "ae26482d3063288f0745fa78118533d7",
+    "semantic_hash": "ae26482d3063288f0745fa78118533d7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop_budget_test.exs": {
+    "mtime": 1782370168.2818356,
+    "ast_hash": "77ecbb28cdfae62fd467212621bef1a7",
+    "semantic_hash": "77ecbb28cdfae62fd467212621bef1a7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop_lease_test.exs": {
+    "mtime": 1782154873.8781219,
+    "ast_hash": "8960489c0e25a1891dbede65bd1c4d1f",
+    "semantic_hash": "8960489c0e25a1891dbede65bd1c4d1f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/loop_test.exs": {
+    "mtime": 1782094200.353432,
+    "ast_hash": "063a2d79ff96f622ddd93e957a115f0b",
+    "semantic_hash": "063a2d79ff96f622ddd93e957a115f0b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/mcp/client_config_test.exs": {
+    "mtime": 1782370168.2820783,
+    "ast_hash": "f0c01e75ab173a8af1077045794a7686",
+    "semantic_hash": "f0c01e75ab173a8af1077045794a7686"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/mcp/server_test.exs": {
+    "mtime": 1782401481.348313,
+    "ast_hash": "613b47a630752abc7876a76d64462e5e",
+    "semantic_hash": "613b47a630752abc7876a76d64462e5e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/metric_test.exs": {
+    "mtime": 1782365653.4633594,
+    "ast_hash": "4a8274f6d315f6894628bfa9b0fbf91a",
+    "semantic_hash": "4a8274f6d315f6894628bfa9b0fbf91a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/opencode_live_test.exs": {
+    "mtime": 1782348763.78876,
+    "ast_hash": "ce73c5647939ee09cffd05b9738bbbf6",
+    "semantic_hash": "ce73c5647939ee09cffd05b9738bbbf6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/partition_test.exs": {
+    "mtime": 1782689160.046373,
+    "ast_hash": "4b9ff516c8b9cc3f76babdaa792caf55",
+    "semantic_hash": "4b9ff516c8b9cc3f76babdaa792caf55"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/pool/acc_bridge_test.exs": {
+    "mtime": 1782348763.7889051,
+    "ast_hash": "6e1029257549e93888dd4e656e917329",
+    "semantic_hash": "6e1029257549e93888dd4e656e917329"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/pool/compose_test.exs": {
+    "mtime": 1782289952.359463,
+    "ast_hash": "6a7ee7c95dfd84aa88c0231032515a47",
+    "semantic_hash": "6a7ee7c95dfd84aa88c0231032515a47"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/pool/gate_test.exs": {
+    "mtime": 1782342199.1521444,
+    "ast_hash": "ab2d95444b2fdd64a2541b998046ad1b",
+    "semantic_hash": "ab2d95444b2fdd64a2541b998046ad1b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/pool/lease_test.exs": {
+    "mtime": 1782281791.1085424,
+    "ast_hash": "f5445efc554347d799005ca96c412a7e",
+    "semantic_hash": "f5445efc554347d799005ca96c412a7e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/predicate/ratchet_schema_test.exs": {
+    "mtime": 1782365653.4640424,
+    "ast_hash": "a571445488c8770f6d90912691431ae4",
+    "semantic_hash": "a571445488c8770f6d90912691431ae4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/predicate/schema_test.exs": {
+    "mtime": 1782366192.4661958,
+    "ast_hash": "884c0e547121b89208b468daa7af9bb6",
+    "semantic_hash": "884c0e547121b89208b468daa7af9bb6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/predicate_provider_test.exs": {
+    "mtime": 1782087549.0267665,
+    "ast_hash": "d10a4604deccedca1ef03d84558824da",
+    "semantic_hash": "d10a4604deccedca1ef03d84558824da"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/predicate_result_test.exs": {
+    "mtime": 1782358356.055434,
+    "ast_hash": "f74f029fe4d4a6ada296e45ac93e4b67",
+    "semantic_hash": "f74f029fe4d4a6ada296e45ac93e4b67"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/predicate_test.exs": {
+    "mtime": 1782364946.732332,
+    "ast_hash": "c2359eaff49317a71a3a8b772212521a",
+    "semantic_hash": "c2359eaff49317a71a3a8b772212521a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/predicate_vector_test.exs": {
+    "mtime": 1782087549.0279713,
+    "ast_hash": "aaa4e237bd0b9958840b957df3e8be43",
+    "semantic_hash": "aaa4e237bd0b9958840b957df3e8be43"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/browser_test.exs": {
+    "mtime": 1782366192.4665627,
+    "ast_hash": "74673a35e338d68d464930f8ef1b89d5",
+    "semantic_hash": "74673a35e338d68d464930f8ef1b89d5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/command_runner_test.exs": {
+    "mtime": 1783039222.0950727,
+    "ast_hash": "8028ba9f88f142ccc22177b44609829d",
+    "semantic_hash": "8028ba9f88f142ccc22177b44609829d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/coverage_test.exs": {
+    "mtime": 1782367817.7567294,
+    "ast_hash": "522e0315a78c242da18da9daf0c648c8",
+    "semantic_hash": "522e0315a78c242da18da9daf0c648c8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/custom_script_examples_test.exs": {
+    "mtime": 1782357969.2656453,
+    "ast_hash": "7e45d2cd39848eff8f2f48711fa008f7",
+    "semantic_hash": "7e45d2cd39848eff8f2f48711fa008f7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/custom_script_test.exs": {
+    "mtime": 1782357969.2658885,
+    "ast_hash": "381af5e7e1ce04b9e8cf57d295a208dd",
+    "semantic_hash": "381af5e7e1ce04b9e8cf57d295a208dd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/cve_test.exs": {
+    "mtime": 1782367817.7569287,
+    "ast_hash": "311a0aa33a269e6d441aaeded0da8e52",
+    "semantic_hash": "311a0aa33a269e6d441aaeded0da8e52"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/http_probe_test.exs": {
+    "mtime": 1782366192.4667807,
+    "ast_hash": "41037fdb35592b165d21ff8e829a7569",
+    "semantic_hash": "41037fdb35592b165d21ff8e829a7569"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/metrics_test.exs": {
+    "mtime": 1782366192.4669747,
+    "ast_hash": "ceede14c0ec6caa79eb64e8be98fc399",
+    "semantic_hash": "ceede14c0ec6caa79eb64e8be98fc399"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/mutation_test.exs": {
+    "mtime": 1782367817.7571344,
+    "ast_hash": "a3fcc1514c0934ce8de2ca114db19a01",
+    "semantic_hash": "a3fcc1514c0934ce8de2ca114db19a01"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/prod_log_test.exs": {
+    "mtime": 1782092162.3360436,
+    "ast_hash": "5cdbfdbd62404042ffb7b0008f963498",
+    "semantic_hash": "5cdbfdbd62404042ffb7b0008f963498"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/property_test.exs": {
+    "mtime": 1782367817.757331,
+    "ast_hash": "1154a1d4bf76db6fa82607cc81f96a0b",
+    "semantic_hash": "1154a1d4bf76db6fa82607cc81f96a0b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/ratchet_examples_test.exs": {
+    "mtime": 1782365653.4642537,
+    "ast_hash": "524afeb6a2f5895eb39608163e7cc9bb",
+    "semantic_hash": "524afeb6a2f5895eb39608163e7cc9bb"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/ratchet_test.exs": {
+    "mtime": 1782365653.4643753,
+    "ast_hash": "86ebf709e5c9d2bac25181570cfb460b",
+    "semantic_hash": "86ebf709e5c9d2bac25181570cfb460b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/recipe_examples_test.exs": {
+    "mtime": 1782366810.2666922,
+    "ast_hash": "3473f3080d476c258cb906b3eb5e134c",
+    "semantic_hash": "3473f3080d476c258cb906b3eb5e134c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/static_examples_test.exs": {
+    "mtime": 1782367817.7575254,
+    "ast_hash": "86d82f53132f275f7b7cc48ffd23f0b0",
+    "semantic_hash": "86d82f53132f275f7b7cc48ffd23f0b0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/static_test.exs": {
+    "mtime": 1782367817.7578151,
+    "ast_hash": "f2129767360d866964bffe51e91b361c",
+    "semantic_hash": "f2129767360d866964bffe51e91b361c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/providers/test_runner_test.exs": {
+    "mtime": 1782088853.6815593,
+    "ast_hash": "f1a2e6f00e2d3a358110afaa361dc3f0",
+    "semantic_hash": "f1a2e6f00e2d3a358110afaa361dc3f0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/ratchet_test.exs": {
+    "mtime": 1782365653.464513,
+    "ast_hash": "1364f20eae3a5c24fdfba5fd47316bb0",
+    "semantic_hash": "1364f20eae3a5c24fdfba5fd47316bb0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/read_model/orientation_pack_cache_test.exs": {
+    "mtime": 1782139880.2682078,
+    "ast_hash": "d42438bdca02a95c6ea9c8fa52f3c8d7",
+    "semantic_hash": "d42438bdca02a95c6ea9c8fa52f3c8d7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/read_model/retrieval_snippet_cache_test.exs": {
+    "mtime": 1782158312.5576868,
+    "ast_hash": "f0e793b6b5ec1dde84b47c55f8253646",
+    "semantic_hash": "f0e793b6b5ec1dde84b47c55f8253646"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/read_model_test.exs": {
+    "mtime": 1782370168.2831333,
+    "ast_hash": "5715695517a09e647fa45f70bb1c7a8a",
+    "semantic_hash": "5715695517a09e647fa45f70bb1c7a8a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/reconcile/coverage_test.exs": {
+    "mtime": 1782269544.2397032,
+    "ast_hash": "418dd9d86b71cfbd7a0890be4acaa043",
+    "semantic_hash": "418dd9d86b71cfbd7a0890be4acaa043"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/reconcile/gherkin_importer_test.exs": {
+    "mtime": 1782271065.6301157,
+    "ast_hash": "231e7b0a56e2c42b02ae035fd415f20e",
+    "semantic_hash": "231e7b0a56e2c42b02ae035fd415f20e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/reconcile/openapi_importer_test.exs": {
+    "mtime": 1782269544.2399163,
+    "ast_hash": "aa9c33e7d164361786c9b5d10d288732",
+    "semantic_hash": "aa9c33e7d164361786c9b5d10d288732"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/reconcile/prose_importer_test.exs": {
+    "mtime": 1782271065.6308563,
+    "ast_hash": "1240cb6d6ce06edadb51a8217fe62361",
+    "semantic_hash": "1240cb6d6ce06edadb51a8217fe62361"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/reconcile/surface_scanner_test.exs": {
+    "mtime": 1782268854.8836288,
+    "ast_hash": "fa89e51a3d98929fc3e3c486b5ac4aab",
+    "semantic_hash": "fa89e51a3d98929fc3e3c486b5ac4aab"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/redaction_test.exs": {
+    "mtime": 1782401481.3487332,
+    "ast_hash": "6e81e4d48aedd315d50854c340ba8679",
+    "semantic_hash": "6e81e4d48aedd315d50854c340ba8679"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/release_test.exs": {
+    "mtime": 1782170714.08626,
+    "ast_hash": "597512e15c7c52de3b1d3957ae220434",
+    "semantic_hash": "597512e15c7c52de3b1d3957ae220434"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/retrieval/graphify_integration_test.exs": {
+    "mtime": 1782157751.0898302,
+    "ast_hash": "9ce0b4b2e8deb8f2db04a7313a68d847",
+    "semantic_hash": "9ce0b4b2e8deb8f2db04a7313a68d847"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/retrieval/graphify_test.exs": {
+    "mtime": 1782157751.0899522,
+    "ast_hash": "4a329e6a0ba7b549214c685e81f41a60",
+    "semantic_hash": "4a329e6a0ba7b549214c685e81f41a60"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/retrieval_test.exs": {
+    "mtime": 1782158312.558504,
+    "ast_hash": "6780e257362e2a2a4fdda3bbcc860024",
+    "semantic_hash": "6780e257362e2a2a4fdda3bbcc860024"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/runtime_test.exs": {
+    "mtime": 1782896551.3459246,
+    "ast_hash": "4c7f7be184d7ece47b6c10b14c2080c0",
+    "semantic_hash": "4c7f7be184d7ece47b6c10b14c2080c0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/budget_test.exs": {
+    "mtime": 1782291195.6290932,
+    "ast_hash": "4e9675fc9478ef6a02b2895c1b4a7695",
+    "semantic_hash": "4e9675fc9478ef6a02b2895c1b4a7695"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/dep_scheduler_test.exs": {
+    "mtime": 1782296296.1889915,
+    "ast_hash": "5fddb21da4ce893db6568119ae7aa36f",
+    "semantic_hash": "5fddb21da4ce893db6568119ae7aa36f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/integration_test.exs": {
+    "mtime": 1782288934.3640308,
+    "ast_hash": "ba61c69752d0cce12daf0afa2720f734",
+    "semantic_hash": "ba61c69752d0cce12daf0afa2720f734"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/leased_reconciler_test.exs": {
+    "mtime": 1782689160.0466254,
+    "ast_hash": "d7735711a92304a5bc479e339b76c501",
+    "semantic_hash": "d7735711a92304a5bc479e339b76c501"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/overlap_policy_test.exs": {
+    "mtime": 1782291195.6292107,
+    "ast_hash": "bd9df11b21eb8a474adf0f7433056983",
+    "semantic_hash": "bd9df11b21eb8a474adf0f7433056983"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/partition_supervisor_test.exs": {
+    "mtime": 1782689160.0468428,
+    "ast_hash": "d27eddf0e04b7ea4067652632a87c86e",
+    "semantic_hash": "d27eddf0e04b7ea4067652632a87c86e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/partitioner_test.exs": {
+    "mtime": 1782281791.1088762,
+    "ast_hash": "12627a88a22af4c5e0b708c63a098f5c",
+    "semantic_hash": "12627a88a22af4c5e0b708c63a098f5c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/run_goals_budget_test.exs": {
+    "mtime": 1782291195.6293366,
+    "ast_hash": "f69176ba6e863f3f613c9b9b90d47725",
+    "semantic_hash": "f69176ba6e863f3f613c9b9b90d47725"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/run_goals_group_parallel_test.exs": {
+    "mtime": 1782689160.0470886,
+    "ast_hash": "0c040e7d59e84a95d4ac8a2961a41955",
+    "semantic_hash": "0c040e7d59e84a95d4ac8a2961a41955"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/run_goals_test.exs": {
+    "mtime": 1782288934.3651266,
+    "ast_hash": "0d007e7b10ef20c2647ba817c2052678",
+    "semantic_hash": "0d007e7b10ef20c2647ba817c2052678"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/supervision_test.exs": {
+    "mtime": 1782288934.3658278,
+    "ast_hash": "8207f023cbd0d68ece8ca7f648e8f112",
+    "semantic_hash": "8207f023cbd0d68ece8ca7f648e8f112"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler/worktree_test.exs": {
+    "mtime": 1782281791.1092193,
+    "ast_hash": "488101a22a4e042b90fa6963299c6642",
+    "semantic_hash": "488101a22a4e042b90fa6963299c6642"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/scheduler_test.exs": {
+    "mtime": 1782280727.037051,
+    "ast_hash": "d032e439817374ca705d6b1749ef9af8",
+    "semantic_hash": "d032e439817374ca705d6b1749ef9af8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/slice1_dogfood_test.exs": {
+    "mtime": 1782095353.814843,
+    "ast_hash": "8bc95ee2f8cebf676587c40dfb65765a",
+    "semantic_hash": "8bc95ee2f8cebf676587c40dfb65765a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/slice1_test.exs": {
+    "mtime": 1782094915.251004,
+    "ast_hash": "3bf5d541fc507bb3d350ccb45bbb870f",
+    "semantic_hash": "3bf5d541fc507bb3d350ccb45bbb870f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/slice2_dogfood_test.exs": {
+    "mtime": 1782097217.407321,
+    "ast_hash": "51a51294750aaf2c67a8d7eae0d8f69a",
+    "semantic_hash": "51a51294750aaf2c67a8d7eae0d8f69a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/slice2_test.exs": {
+    "mtime": 1782096657.5394285,
+    "ast_hash": "b7598c5d42a6dad04edf4855b8723848",
+    "semantic_hash": "b7598c5d42a6dad04edf4855b8723848"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/standing_drift_test.exs": {
+    "mtime": 1782106876.8037903,
+    "ast_hash": "2ab2250ea5aee05d22993b9184ed2dce",
+    "semantic_hash": "2ab2250ea5aee05d22993b9184ed2dce"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/standing_e2e_test.exs": {
+    "mtime": 1782348763.789201,
+    "ast_hash": "80f12510174a1036e6ff0892251b9593",
+    "semantic_hash": "80f12510174a1036e6ff0892251b9593"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/standing_loop_stop_test.exs": {
+    "mtime": 1782106876.8040204,
+    "ast_hash": "b073da01c2e1c39b33daea63fcd41426",
+    "semantic_hash": "b073da01c2e1c39b33daea63fcd41426"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/standing_loop_test.exs": {
+    "mtime": 1782106165.177854,
+    "ast_hash": "05d27bdd4b0f68b509c0c1505aa05e1c",
+    "semantic_hash": "05d27bdd4b0f68b509c0c1505aa05e1c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/stuck_loop_test.exs": {
+    "mtime": 1782094200.3540127,
+    "ast_hash": "dd871bc2153859c9571cdd892bb2a01e",
+    "semantic_hash": "dd871bc2153859c9571cdd892bb2a01e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/teach/install_skill_test.exs": {
+    "mtime": 1782370168.2834816,
+    "ast_hash": "30d478e26c84b39afd50437abe76830b",
+    "semantic_hash": "30d478e26c84b39afd50437abe76830b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/teach_coherence_test.exs": {
+    "mtime": 1782342199.1535742,
+    "ast_hash": "6e4a7963f8c46b9b6371a4ea31c9772c",
+    "semantic_hash": "6e4a7963f8c46b9b6371a4ea31c9772c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/workspace/orientation_test.exs": {
+    "mtime": 1782139703.8715825,
+    "ast_hash": "6c5a3a6dd7158c1c6219de0ca1ee478e",
+    "semantic_hash": "6c5a3a6dd7158c1c6219de0ca1ee478e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi/workspace_test.exs": {
+    "mtime": 1782139703.8718507,
+    "ast_hash": "a2485250a7f5cee286150a006ac6c04e",
+    "semantic_hash": "a2485250a7f5cee286150a006ac6c04e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_test.exs": {
+    "mtime": 1782086813.8886545,
+    "ast_hash": "b6b6ca5f59a7f7838d3d8b70025e8ac1",
+    "semantic_hash": "b6b6ca5f59a7f7838d3d8b70025e8ac1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/controllers/health_controller_test.exs": {
+    "mtime": 1782152918.4172595,
+    "ast_hash": "d365a59489f7d089fc0a005d2ad04e03",
+    "semantic_hash": "d365a59489f7d089fc0a005d2ad04e03"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/coordination_source/native_test.exs": {
+    "mtime": 1782689160.0473511,
+    "ast_hash": "aa2b97e248e69704768313b22ffb6be4",
+    "semantic_hash": "aa2b97e248e69704768313b22ffb6be4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/live/dag_live_test.exs": {
+    "mtime": 1782431743.6924946,
+    "ast_hash": "c2668f3be0ca6b198ff18c80ca1fecd6",
+    "semantic_hash": "c2668f3be0ca6b198ff18c80ca1fecd6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/live/dashboard_live_test.exs": {
+    "mtime": 1782152918.4175646,
+    "ast_hash": "87eaa05adec48464171b30bb8d76ba3b",
+    "semantic_hash": "87eaa05adec48464171b30bb8d76ba3b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/live/goal_board_live_test.exs": {
+    "mtime": 1782153982.6839252,
+    "ast_hash": "cb8f9ead6fbffd37385d2e7bbdfa1f2c",
+    "semantic_hash": "cb8f9ead6fbffd37385d2e7bbdfa1f2c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/live/history_live_test.exs": {
+    "mtime": 1782155104.5596666,
+    "ast_hash": "227552419ac4d3311a8bda3de8ff198e",
+    "semantic_hash": "227552419ac4d3311a8bda3de8ff198e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/live/lease_map_live_native_test.exs": {
+    "mtime": 1782689160.0488942,
+    "ast_hash": "5860528971ff8e7ed0fb18650f65e68c",
+    "semantic_hash": "5860528971ff8e7ed0fb18650f65e68c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/kazi_web/live/lease_map_live_test.exs": {
+    "mtime": 1782155104.5597827,
+    "ast_hash": "c4278b64fb36ff9012e92adc9bc9da87",
+    "semantic_hash": "c4278b64fb36ff9012e92adc9bc9da87"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/mix/tasks/kazi_bench_test.exs": {
+    "mtime": 1782431743.6928527,
+    "ast_hash": "fc106b85294de685a9f687a0579ec575",
+    "semantic_hash": "fc106b85294de685a9f687a0579ec575"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/playwright/goal_board.spec.ts": {
+    "mtime": 1782153982.6841285,
+    "ast_hash": "dfcdf239946329f2f4a48f9ee10baee0",
+    "semantic_hash": "dfcdf239946329f2f4a48f9ee10baee0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/playwright/history.spec.ts": {
+    "mtime": 1782155104.5598998,
+    "ast_hash": "7a2009205c2263905eb4ee2e15fb99f8",
+    "semantic_hash": "7a2009205c2263905eb4ee2e15fb99f8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/playwright/lease_map.spec.ts": {
+    "mtime": 1782155104.5600095,
+    "ast_hash": "073ecb7761f9a9ac2101a616da7116b5",
+    "semantic_hash": "073ecb7761f9a9ac2101a616da7116b5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/playwright/smoke.spec.ts": {
+    "mtime": 1782152918.4181716,
+    "ast_hash": "2de0cc015a21a9f402440cd1abc219ea",
+    "semantic_hash": "2de0cc015a21a9f402440cd1abc219ea"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/conn_case.ex": {
+    "mtime": 1782152918.4185045,
+    "ast_hash": "37734bfb845e61ad4009c273698b8f59",
+    "semantic_hash": "37734bfb845e61ad4009c273698b8f59"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/coordination_fixture_source.ex": {
+    "mtime": 1782155104.5601265,
+    "ast_hash": "0d56638a81da6208a30b276489914321",
+    "semantic_hash": "0d56638a81da6208a30b276489914321"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/counting_retriever.ex": {
+    "mtime": 1782158312.5591779,
+    "ast_hash": "81f7398fd16bebd2e521b0307ebbee1b",
+    "semantic_hash": "81f7398fd16bebd2e521b0307ebbee1b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/dag_fixture_source.ex": {
+    "mtime": 1782431743.6930249,
+    "ast_hash": "d9edd8ef22dccf2f02b9c356158c2cda",
+    "semantic_hash": "d9edd8ef22dccf2f02b9c356158c2cda"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/fake_gist.sh": {
+    "mtime": 1782401481.349497,
+    "ast_hash": "918783a0667d306ea5959a227184584d",
+    "semantic_hash": "918783a0667d306ea5959a227184584d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/harness_conformance.ex": {
+    "mtime": 1782348763.7898247,
+    "ast_hash": "01e0acf1c6cd03230bae3e5138c42724",
+    "semantic_hash": "01e0acf1c6cd03230bae3e5138c42724"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/in_memory_pack_cache.ex": {
+    "mtime": 1782139880.2684019,
+    "ast_hash": "3b25439b6d026b310a2ec0a91a713f89",
+    "semantic_hash": "3b25439b6d026b310a2ec0a91a713f89"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/in_memory_snippet_cache.ex": {
+    "mtime": 1782158312.559317,
+    "ast_hash": "09e891b4911e3409bf4bed78bf41cd9d",
+    "semantic_hash": "09e891b4911e3409bf4bed78bf41cd9d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/lease_contract.ex": {
+    "mtime": 1782152553.585404,
+    "ast_hash": "362a372d24c55f2b818d866beb8d42c1",
+    "semantic_hash": "362a372d24c55f2b818d866beb8d42c1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/lease_map_seed_controller.ex": {
+    "mtime": 1782155104.5602257,
+    "ast_hash": "205ee38ca6126e79d206e77558dc8509",
+    "semantic_hash": "205ee38ca6126e79d206e77558dc8509"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/static_graph_source.ex": {
+    "mtime": 1782138750.7067542,
+    "ast_hash": "40c49f903e0d0e8d0a9127a355eb93f6",
+    "semantic_hash": "40c49f903e0d0e8d0a9127a355eb93f6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/static_retriever.ex": {
+    "mtime": 1782158312.0,
+    "ast_hash": "bda2c74e659294d157653791be3d034a",
+    "semantic_hash": "bda2c74e659294d157653791be3d034a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_antigravity_json.sh": {
+    "mtime": 1782271065.630949,
+    "ast_hash": "28e70ce5020c2097ee423783ddb70375",
+    "semantic_hash": "28e70ce5020c2097ee423783ddb70375"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_claude.sh": {
+    "mtime": 1782088853.6818552,
+    "ast_hash": "fe4bb82df6a7e848527da6e78b2097f3",
+    "semantic_hash": "fe4bb82df6a7e848527da6e78b2097f3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_claude_args.sh": {
+    "mtime": 1782139703.8728063,
+    "ast_hash": "da12ce0e87ada46cee4631691b8e780a",
+    "semantic_hash": "da12ce0e87ada46cee4631691b8e780a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_claude_bad_json.sh": {
+    "mtime": 1782138750.707486,
+    "ast_hash": "c900d13186e5c8c489fd6711e2ba7de2",
+    "semantic_hash": "c900d13186e5c8c489fd6711e2ba7de2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_claude_json.sh": {
+    "mtime": 1782138750.7076712,
+    "ast_hash": "93db54d5283980fe0c39bc26d398fa13",
+    "semantic_hash": "93db54d5283980fe0c39bc26d398fa13"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_claude_no_cost_json.sh": {
+    "mtime": 1782370168.2836466,
+    "ast_hash": "af4fcab5b77ae1493d8813165cdaa75b",
+    "semantic_hash": "af4fcab5b77ae1493d8813165cdaa75b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_env_echo.sh": {
+    "mtime": 1782180118.3998318,
+    "ast_hash": "da2211affdafdeae1ac46f0615b986ec",
+    "semantic_hash": "da2211affdafdeae1ac46f0615b986ec"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_harness_argv.sh": {
+    "mtime": 1782181304.3322384,
+    "ast_hash": "8880de05078b8afb548b5d1168dd8310",
+    "semantic_hash": "8880de05078b8afb548b5d1168dd8310"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_opencode_json.sh": {
+    "mtime": 1782348763.7902327,
+    "ast_hash": "8c1ce8d100914c0b207b138c52ac6355",
+    "semantic_hash": "8c1ce8d100914c0b207b138c52ac6355"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/stub_playwright.sh": {
+    "mtime": 1782366192.4674094,
+    "ast_hash": "114855e8029a6ed37a6df4503afc2183",
+    "semantic_hash": "114855e8029a6ed37a6df4503afc2183"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/support/test_seed_controller.ex": {
+    "mtime": 1782153982.6843028,
+    "ast_hash": "098bc2718e2e79f58be3c62a1c7de47a",
+    "semantic_hash": "098bc2718e2e79f58be3c62a1c7de47a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/test_helper.exs": {
+    "mtime": 1782689160.0492306,
+    "ast_hash": "b3f33bf318913451f3df007f69cdc8b3",
+    "semantic_hash": "b3f33bf318913451f3df007f69cdc8b3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.claude/skills/debug-issue.md": {
+    "mtime": 1782858849.8929446,
+    "ast_hash": "f6ca42b7fce135a9dbe1b01f651e35a4",
+    "semantic_hash": "f6ca42b7fce135a9dbe1b01f651e35a4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.claude/skills/explore-codebase.md": {
+    "mtime": 1782858849.8932078,
+    "ast_hash": "72bcdd4382c8389e22970964cbdf73e3",
+    "semantic_hash": "72bcdd4382c8389e22970964cbdf73e3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.claude/skills/refactor-safely.md": {
+    "mtime": 1782858849.8940566,
+    "ast_hash": "48b6d7fd4e9a3dcef923e9e32f8a75d0",
+    "semantic_hash": "48b6d7fd4e9a3dcef923e9e32f8a75d0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.claude/skills/review-changes.md": {
+    "mtime": 1782858849.8942153,
+    "ast_hash": "255133a497797178b42746808b2fadc9",
+    "semantic_hash": "255133a497797178b42746808b2fadc9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/workflows/ci.yml": {
+    "mtime": 1782348763.7601798,
+    "ast_hash": "ec48db8e75b18bc595f07f06fd78e8e6",
+    "semantic_hash": "ec48db8e75b18bc595f07f06fd78e8e6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/workflows/deploy-fixture.yml": {
+    "mtime": 1782087549.0195985,
+    "ast_hash": "db1a92473e6cfd4868d95c19a2c30a16",
+    "semantic_hash": "db1a92473e6cfd4868d95c19a2c30a16"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/workflows/oss-gates.yml": {
+    "mtime": 1782689159.9948127,
+    "ast_hash": "9cea0a4e787babfdbc0bc75b96c65595",
+    "semantic_hash": "9cea0a4e787babfdbc0bc75b96c65595"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/workflows/pages.yml": {
+    "mtime": 1782689159.995236,
+    "ast_hash": "9a1f2bf63c55e5884065d143c1c0cd19",
+    "semantic_hash": "9a1f2bf63c55e5884065d143c1c0cd19"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/workflows/release-please.yml": {
+    "mtime": 1782342199.1335475,
+    "ast_hash": "8e581ff4876814add9211d163d0da6cc",
+    "semantic_hash": "8e581ff4876814add9211d163d0da6cc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/workflows/release.yml": {
+    "mtime": 1782431743.662086,
+    "ast_hash": "9c96cfeb35acbe8f47b1a7b058832c8b",
+    "semantic_hash": "9c96cfeb35acbe8f47b1a7b058832c8b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.github/workflows/site-smoke.yml": {
+    "mtime": 1782268854.87206,
+    "ast_hash": "d0e28185666bec672654874bb95c1bc5",
+    "semantic_hash": "d0e28185666bec672654874bb95c1bc5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/.kazi/context.md": {
+    "mtime": 1782892856.0821,
+    "ast_hash": "884cef36a8c028cecee8bd68b5bd2d58",
+    "semantic_hash": "884cef36a8c028cecee8bd68b5bd2d58"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/AGENTS.md": {
+    "mtime": 1783039825.149067,
+    "ast_hash": "7ca0559bd17e280d6aad2421e50a1200",
+    "semantic_hash": "7ca0559bd17e280d6aad2421e50a1200"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/CHANGELOG.md": {
+    "mtime": 1783039825.0672615,
+    "ast_hash": "4b12abb485c45ed94f9cd4bfcff82631",
+    "semantic_hash": "4b12abb485c45ed94f9cd4bfcff82631"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/CLAUDE.md": {
+    "mtime": 1783039825.0738711,
+    "ast_hash": "0ad2d5246e2c51ab79d1c0aeae7d6565",
+    "semantic_hash": "0ad2d5246e2c51ab79d1c0aeae7d6565"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/GEMINI.md": {
+    "mtime": 1782359837.1020792,
+    "ast_hash": "85785109b1c3db1926f650ef5d7ded5f",
+    "semantic_hash": "85785109b1c3db1926f650ef5d7ded5f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/README.md": {
+    "mtime": 1783039222.0817857,
+    "ast_hash": "86956765b2cc9171f9414dc7644c478d",
+    "semantic_hash": "86956765b2cc9171f9414dc7644c478d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/logo/README.md": {
+    "mtime": 1782237241.95652,
+    "ast_hash": "bd083f7755ced68889a2b43dd7b0cd96",
+    "semantic_hash": "bd083f7755ced68889a2b43dd7b0cd96"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/README.md": {
+    "mtime": 1782689160.000016,
+    "ast_hash": "4e52a41b1f472d03b21dc890dc43a1c8",
+    "semantic_hash": "4e52a41b1f472d03b21dc890dc43a1c8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/acc-predicates-bridge.md": {
+    "mtime": 1782367817.7363992,
+    "ast_hash": "91e8ec1dc66ab72789d946a08c2d0ddf",
+    "semantic_hash": "91e8ec1dc66ab72789d946a08c2d0ddf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/add-a-harness.md": {
+    "mtime": 1782276037.2842963,
+    "ast_hash": "a911383e9a7589a348c005b898493927",
+    "semantic_hash": "a911383e9a7589a348c005b898493927"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0001-positioning-outer-loop-reconciler.md": {
+    "mtime": 1782082712.2696881,
+    "ast_hash": "a32f7a0da3fc933168608bf708401831",
+    "semantic_hash": "a32f7a0da3fc933168608bf708401831"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0002-goals-as-predicates.md": {
+    "mtime": 1782082712.269838,
+    "ast_hash": "b1d28e8560727257b95939a5c5d0e419",
+    "semantic_hash": "b1d28e8560727257b95939a5c5d0e419"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0003-language-elixir-otp.md": {
+    "mtime": 1782348763.763699,
+    "ast_hash": "7b502866a62358e0116defaee1f1b9a9",
+    "semantic_hash": "7b502866a62358e0116defaee1f1b9a9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0004-coordination-substrate-nats-jetstream.md": {
+    "mtime": 1782348763.7639923,
+    "ast_hash": "892f067090745f2a3f901ac7ef01e5fc",
+    "semantic_hash": "892f067090745f2a3f901ac7ef01e5fc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0005-data-layer-split.md": {
+    "mtime": 1782082712.2702463,
+    "ast_hash": "2f1f795f347ff15d51a114eea48ee47d",
+    "semantic_hash": "2f1f795f347ff15d51a114eea48ee47d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0006-coordination-leases-and-graph-partitioning.md": {
+    "mtime": 1782082712.2703812,
+    "ast_hash": "e31cd21f5f2994eb7bd940b223aff6dc",
+    "semantic_hash": "e31cd21f5f2994eb7bd940b223aff6dc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0007-build-strategy-walking-skeleton.md": {
+    "mtime": 1782085623.2756534,
+    "ast_hash": "d71989a03302bc90ed732fbf2630ab10",
+    "semantic_hash": "d71989a03302bc90ed732fbf2630ab10"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0008-harness-invocation-and-context.md": {
+    "mtime": 1782095619.8408115,
+    "ast_hash": "0745c0a73624a52a8337f0c71af216d5",
+    "semantic_hash": "0745c0a73624a52a8337f0c71af216d5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0009-prompt-construction-thin-evidence-projection.md": {
+    "mtime": 1782401481.3293538,
+    "ast_hash": "c14b5a6572393d78d532d03cffdaa9f2",
+    "semantic_hash": "c14b5a6572393d78d532d03cffdaa9f2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0010-context-injection-reexploration-mitigation.md": {
+    "mtime": 1782136529.4705772,
+    "ast_hash": "b792671e2349164d0660b943750e5fc4",
+    "semantic_hash": "b792671e2349164d0660b943750e5fc4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0011-slice3-operator-surfaces.md": {
+    "mtime": 1782287373.6251318,
+    "ast_hash": "7224759a3c454ea48c948288f1f553a9",
+    "semantic_hash": "7224759a3c454ea48c948288f1f553a9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0012-pluggable-retrieval-memory-adapter.md": {
+    "mtime": 1782156681.6821373,
+    "ast_hash": "ea2749e983a018352dc156a914de2e9c",
+    "semantic_hash": "ea2749e983a018352dc156a914de2e9c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0013-adopt-reverse-engineer-goals.md": {
+    "mtime": 1782168475.4130216,
+    "ast_hash": "750c599dcd63715b63cf2c72d04a5170",
+    "semantic_hash": "750c599dcd63715b63cf2c72d04a5170"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0014-binary-distribution-burrito-homebrew.md": {
+    "mtime": 1782168493.216917,
+    "ast_hash": "a63fba5ece6500971fdc824b61f9e98b",
+    "semantic_hash": "a63fba5ece6500971fdc824b61f9e98b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0015-init-source-output-model-registry-goal-set.md": {
+    "mtime": 1782174998.2524877,
+    "ast_hash": "bffa964d6e8041ce66f6e0cbbd2f1d1b",
+    "semantic_hash": "bffa964d6e8041ce66f6e0cbbd2f1d1b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0016-generic-harness-profiles.md": {
+    "mtime": 1782348763.764773,
+    "ast_hash": "64f8aa83f2935f67f27d88e1b2b47c1a",
+    "semantic_hash": "64f8aa83f2935f67f27d88e1b2b47c1a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0017-automated-brew-release-pipeline.md": {
+    "mtime": 1782184770.8017516,
+    "ast_hash": "99cb985d48715fdc0bc1b4924d71a090",
+    "semantic_hash": "99cb985d48715fdc0bc1b4924d71a090"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0018-website-stack-hosting-domain.md": {
+    "mtime": 1782239020.0877037,
+    "ast_hash": "20119dc117a02b17bc3a904852f02ebe",
+    "semantic_hash": "20119dc117a02b17bc3a904852f02ebe"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0019-interactive-clarify-phase-for-propose.md": {
+    "mtime": 1782255869.108979,
+    "ast_hash": "72303c81dcc85264c456de309c510c98",
+    "semantic_hash": "72303c81dcc85264c456de309c510c98"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0020-hierarchical-predicate-grouping.md": {
+    "mtime": 1782348763.765452,
+    "ast_hash": "975d501e3488a046155fc1c430959c34",
+    "semantic_hash": "975d501e3488a046155fc1c430959c34"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0021-intended-vs-actual-reconciliation.md": {
+    "mtime": 1782348763.7657003,
+    "ast_hash": "4ba274846100d2114ede8dbece1ab2d9",
+    "semantic_hash": "4ba274846100d2114ede8dbece1ab2d9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0022-harness-onboarding-conformance.md": {
+    "mtime": 1782265104.870825,
+    "ast_hash": "ca69cbdd88703d65a10e495f738807f2",
+    "semantic_hash": "ca69cbdd88703d65a10e495f738807f2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0023-harness-friendly-agent-drivable-cli.md": {
+    "mtime": 1782348763.766179,
+    "ast_hash": "08cc45f4be3113f2ada57672124a6ecb",
+    "semantic_hash": "08cc45f4be3113f2ada57672124a6ecb"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0024-kazi-self-teaching-to-harnesses.md": {
+    "mtime": 1782265544.054189,
+    "ast_hash": "e5cebc80e8e61e231ab8c53e4dbd6f6b",
+    "semantic_hash": "e5cebc80e8e61e231ab8c53e4dbd6f6b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0025-docs-lead-with-agent-driven-onramp.md": {
+    "mtime": 1782274018.6911023,
+    "ast_hash": "6834700d34105ec21087f0ae40e76e21",
+    "semantic_hash": "6834700d34105ec21087f0ae40e76e21"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0026-kazi-under-apply-pool.md": {
+    "mtime": 1782279692.6767883,
+    "ast_hash": "35a8d8d41a8f9398c04386a6327ddcd7",
+    "semantic_hash": "35a8d8d41a8f9398c04386a6327ddcd7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0027-kazi-owns-parallelization-native-scheduler.md": {
+    "mtime": 1782279692.676975,
+    "ast_hash": "6e39ec2e940e143b93b83099bf0a440c",
+    "semantic_hash": "6e39ec2e940e143b93b83099bf0a440c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0028-dependency-aware-partitioning-predicate-graph-waves.md": {
+    "mtime": 1782282067.9740326,
+    "ast_hash": "9351a0176140512974ac6d51d234b9f3",
+    "semantic_hash": "9351a0176140512974ac6d51d234b9f3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0029-drop-telegram-bridge.md": {
+    "mtime": 1782348763.7665088,
+    "ast_hash": "9818d64f200d81df38d5a9053c5b7b7f",
+    "semantic_hash": "9818d64f200d81df38d5a9053c5b7b7f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0030-content-marketing-agent-native-positioning.md": {
+    "mtime": 1782329532.9843175,
+    "ast_hash": "832cfc2e0ffe9e1045bb41156e5de1db",
+    "semantic_hash": "832cfc2e0ffe9e1045bb41156e5de1db"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0031-kazi-skill-router-subsumes-loop-apply-qualify.md": {
+    "mtime": 1782342199.1355011,
+    "ast_hash": "c3fcad036fb0da1d487887a6ca01db38",
+    "semantic_hash": "c3fcad036fb0da1d487887a6ca01db38"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0032-rename-cli-verbs-run-apply-propose-plan.md": {
+    "mtime": 1782342199.1357653,
+    "ast_hash": "11dc8021af691376b5b5094fc0b33f38",
+    "semantic_hash": "11dc8021af691376b5b5094fc0b33f38"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0033-cheaper-via-in-family-claude-tiering.md": {
+    "mtime": 1782348763.7668529,
+    "ast_hash": "935c9c3fee167c6cf5096c9d1e1aeb9e",
+    "semantic_hash": "935c9c3fee167c6cf5096c9d1e1aeb9e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0034-oss-contribution-gates-docs-with-code-no-leak.md": {
+    "mtime": 1782342199.1361773,
+    "ast_hash": "150cd40b83998844353594a53e232811",
+    "semantic_hash": "150cd40b83998844353594a53e232811"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0035-skill-driven-adaptive-model-tiering.md": {
+    "mtime": 1782348763.7670715,
+    "ast_hash": "447225ae57c2d439d5eb3d91c54d78e8",
+    "semantic_hash": "447225ae57c2d439d5eb3d91c54d78e8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0036-self-maintaining-docs-via-kazi-standing-goal.md": {
+    "mtime": 1782353749.4804094,
+    "ast_hash": "dec37d51b753c4b2885d9f9a09be8edc",
+    "semantic_hash": "dec37d51b753c4b2885d9f9a09be8edc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0040-generic-predicate-protocol-custom-script.md": {
+    "mtime": 1782353749.4805162,
+    "ast_hash": "864d0f2c554e70343caffb64bcf37207",
+    "semantic_hash": "864d0f2c554e70343caffb64bcf37207"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0041-predicate-envelope-v2-score-evidence-ratchet.md": {
+    "mtime": 1782353749.4806216,
+    "ast_hash": "ed8efc501c7a59939ab340202a26520e",
+    "semantic_hash": "ed8efc501c7a59939ab340202a26520e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0042-anti-gaming-enforcement.md": {
+    "mtime": 1782370168.2654088,
+    "ast_hash": "89890bc62d0b027e64784880fdc9cc97",
+    "semantic_hash": "89890bc62d0b027e64784880fdc9cc97"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0043-predicate-catalog-expansion.md": {
+    "mtime": 1782353749.481064,
+    "ast_hash": "c5e6533de231ae9b0a26dbe6b0f4e84d",
+    "semantic_hash": "c5e6533de231ae9b0a26dbe6b0f4e84d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0044-kazi-mcp-installed-subcommand.md": {
+    "mtime": 1782368374.3566048,
+    "ast_hash": "52be7012fc63c2a30c3b1062598733be",
+    "semantic_hash": "52be7012fc63c2a30c3b1062598733be"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0045-context-store-layer-gist-provider.md": {
+    "mtime": 1782401481.3298068,
+    "ast_hash": "eac2808eed214bc1b94b909579c390f2",
+    "semantic_hash": "eac2808eed214bc1b94b909579c390f2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0046-economy-accounting-envelope.md": {
+    "mtime": 1782364768.332795,
+    "ast_hash": "b0e3bc3281b36b638127656dadeb1e1f",
+    "semantic_hash": "b0e3bc3281b36b638127656dadeb1e1f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0047-inner-harness-minimalism.md": {
+    "mtime": 1782700610.343936,
+    "ast_hash": "aeecb0480ee526cd1341c44bacd47ab6",
+    "semantic_hash": "aeecb0480ee526cd1341c44bacd47ab6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0048-adoption-blog-series-editorial-stance.md": {
+    "mtime": 1782689160.000449,
+    "ast_hash": "8916076f6530535fccaa8daea9cba011",
+    "semantic_hash": "8916076f6530535fccaa8daea9cba011"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/0049-approve-to-apply-handoff.md": {
+    "mtime": 1782692524.8772726,
+    "ast_hash": "971d2e7f8b5ca27e7ba2c1bdf09fb3f7",
+    "semantic_hash": "971d2e7f8b5ca27e7ba2c1bdf09fb3f7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/adr/README.md": {
+    "mtime": 1783039825.0821013,
+    "ast_hash": "06bd6e412c9f2570053dce167189d8bd",
+    "semantic_hash": "06bd6e412c9f2570053dce167189d8bd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/blog-series-announcement.md": {
+    "mtime": 1782689160.0007188,
+    "ast_hash": "349157ef2bca776387a2b9daa96b84e3",
+    "semantic_hash": "349157ef2bca776387a2b9daa96b84e3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/blog-series-review.md": {
+    "mtime": 1782689160.0010076,
+    "ast_hash": "b6bc0f5579d8dfabef6976a7c480b476",
+    "semantic_hash": "b6bc0f5579d8dfabef6976a7c480b476"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/blog-style.md": {
+    "mtime": 1782689160.001579,
+    "ast_hash": "3b0e3e6dc52f9f1a7b9a50de72707000",
+    "semantic_hash": "3b0e3e6dc52f9f1a7b9a50de72707000"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/concept.md": {
+    "mtime": 1783039825.0930173,
+    "ast_hash": "b2813340a2d2d7810ef87de9b24f374f",
+    "semantic_hash": "b2813340a2d2d7810ef87de9b24f374f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/context-store.md": {
+    "mtime": 1782431743.6650128,
+    "ast_hash": "bfb40e762cc3a7266e5e9b0d6da6b706",
+    "semantic_hash": "bfb40e762cc3a7266e5e9b0d6da6b706"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/coverage-predicate.md": {
+    "mtime": 1782367817.7378063,
+    "ast_hash": "88c3eb3a4e3fbe709472b2155bce86c6",
+    "semantic_hash": "88c3eb3a4e3fbe709472b2155bce86c6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/custom-script-provider.md": {
+    "mtime": 1782366810.264291,
+    "ast_hash": "71a4057387e931348acbba31edd6822a",
+    "semantic_hash": "71a4057387e931348acbba31edd6822a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/custom-script-recipes.md": {
+    "mtime": 1782366810.264521,
+    "ast_hash": "bf9bdc30ebd79521b60d93e8a463749b",
+    "semantic_hash": "bf9bdc30ebd79521b60d93e8a463749b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/cve-predicate.md": {
+    "mtime": 1782367817.7379856,
+    "ast_hash": "14d5daa3bb95d54ee3e662c2e4114ab4",
+    "semantic_hash": "14d5daa3bb95d54ee3e662c2e4114ab4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/deprecations.md": {
+    "mtime": 1782364946.7240589,
+    "ast_hash": "bb4e7156ffed1af9b29b6d162386850a",
+    "semantic_hash": "bb4e7156ffed1af9b29b6d162386850a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/devlog.md": {
+    "mtime": 1783039222.0863514,
+    "ast_hash": "0fdceb6177c98e0abaca15e2984ebf7e",
+    "semantic_hash": "0fdceb6177c98e0abaca15e2984ebf7e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/doc-freshness.md": {
+    "mtime": 1782689160.0030367,
+    "ast_hash": "cb1f5926559e9db5618a38f5b6d25211",
+    "semantic_hash": "cb1f5926559e9db5618a38f5b6d25211"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/dogfood-methodology.md": {
+    "mtime": 1782689160.0033414,
+    "ast_hash": "410256ab901be31ca4abac40c18426e6",
+    "semantic_hash": "410256ab901be31ca4abac40c18426e6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/drive-kazi-pooled-task.md": {
+    "mtime": 1782348763.7690802,
+    "ast_hash": "f629b1878f2052071d0323398240e00b",
+    "semantic_hash": "f629b1878f2052071d0323398240e00b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/how-to/enforcement.md": {
+    "mtime": 1782370168.2658741,
+    "ast_hash": "3d67cc05c3bf560809c5aaba1eb00bdc",
+    "semantic_hash": "3d67cc05c3bf560809c5aaba1eb00bdc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/how-to/predicate-graph-waves.md": {
+    "mtime": 1782689160.0035675,
+    "ast_hash": "cf3ff2549c955af405c232d3557513a8",
+    "semantic_hash": "cf3ff2549c955af405c232d3557513a8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/live-providers.md": {
+    "mtime": 1782366192.4542563,
+    "ast_hash": "e1857f4263a0af01ede2f77651f5c0e8",
+    "semantic_hash": "e1857f4263a0af01ede2f77651f5c0e8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/lore.md": {
+    "mtime": 1783039222.086654,
+    "ast_hash": "f0b8cce6c9c36da619d94da0062cc3df",
+    "semantic_hash": "f0b8cce6c9c36da619d94da0062cc3df"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/mutation-predicate.md": {
+    "mtime": 1782367817.7391672,
+    "ast_hash": "b2cecb102426d668db0091b1c1ff04bb",
+    "semantic_hash": "b2cecb102426d668db0091b1c1ff04bb"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/orchestrator-recipe.md": {
+    "mtime": 1782897327.646892,
+    "ast_hash": "ef45f69e37f08943e9cdcc912ede8c79",
+    "semantic_hash": "ef45f69e37f08943e9cdcc912ede8c79"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/oss-gates.md": {
+    "mtime": 1783039222.086925,
+    "ast_hash": "fa0db21154566d9c8ab29a827ea82bb2",
+    "semantic_hash": "fa0db21154566d9c8ab29a827ea82bb2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plan.md": {
+    "mtime": 1783039825.103204,
+    "ast_hash": "5c665bb4c8e3a710fb0076a5f6aae529",
+    "semantic_hash": "5c665bb4c8e3a710fb0076a5f6aae529"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E15.md": {
+    "mtime": 1782692524.878695,
+    "ast_hash": "f514b4d2787e612577e9c69c73990683",
+    "semantic_hash": "f514b4d2787e612577e9c69c73990683"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E19.md": {
+    "mtime": 1782431743.669946,
+    "ast_hash": "7f55e47336df0b1538246fd3ba6cb914",
+    "semantic_hash": "7f55e47336df0b1538246fd3ba6cb914"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E20.md": {
+    "mtime": 1782431743.6705308,
+    "ast_hash": "fc137583d6d6f2ed1687fee74eb6a62d",
+    "semantic_hash": "fc137583d6d6f2ed1687fee74eb6a62d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E21.md": {
+    "mtime": 1782691069.383172,
+    "ast_hash": "d751b72db6ab0c9abeb5d02ae8fc8a6d",
+    "semantic_hash": "d751b72db6ab0c9abeb5d02ae8fc8a6d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E22.md": {
+    "mtime": 1782431743.670893,
+    "ast_hash": "4a274f2bd9881e3024a91b8323fc2936",
+    "semantic_hash": "4a274f2bd9881e3024a91b8323fc2936"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E23.md": {
+    "mtime": 1782689160.0060768,
+    "ast_hash": "2c52716d50c6abd9fd85610003a7cc41",
+    "semantic_hash": "2c52716d50c6abd9fd85610003a7cc41"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E25.md": {
+    "mtime": 1782689160.0063796,
+    "ast_hash": "246521477d74373ad77eda71825f0ddc",
+    "semantic_hash": "246521477d74373ad77eda71825f0ddc"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E26.md": {
+    "mtime": 1782689160.0066545,
+    "ast_hash": "8224eb87af1d9b88e48e78c3878eb65a",
+    "semantic_hash": "8224eb87af1d9b88e48e78c3878eb65a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E27.md": {
+    "mtime": 1782431743.6718519,
+    "ast_hash": "367b6fe3ce440f7ad924114105f4bde5",
+    "semantic_hash": "367b6fe3ce440f7ad924114105f4bde5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E28.md": {
+    "mtime": 1782431743.6720858,
+    "ast_hash": "cab407e4a35dbcec4ac8c769cabd4006",
+    "semantic_hash": "cab407e4a35dbcec4ac8c769cabd4006"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E29.md": {
+    "mtime": 1782431743.6722841,
+    "ast_hash": "a6b28a5299e54b31388e6ca869fe50c1",
+    "semantic_hash": "a6b28a5299e54b31388e6ca869fe50c1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E30.md": {
+    "mtime": 1782689160.006896,
+    "ast_hash": "e9749e7c173acfb82a3d28499e272964",
+    "semantic_hash": "e9749e7c173acfb82a3d28499e272964"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E31.md": {
+    "mtime": 1782689160.0072021,
+    "ast_hash": "943308a488e964c15655270d8513d275",
+    "semantic_hash": "943308a488e964c15655270d8513d275"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E32.md": {
+    "mtime": 1782689160.0075448,
+    "ast_hash": "c8ccc9a22b0d3e7f39c10dc36c1842b9",
+    "semantic_hash": "c8ccc9a22b0d3e7f39c10dc36c1842b9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E33.md": {
+    "mtime": 1782431743.6732311,
+    "ast_hash": "b5bbcb2e8461ae940ae2e244e42182ee",
+    "semantic_hash": "b5bbcb2e8461ae940ae2e244e42182ee"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E34.md": {
+    "mtime": 1782431743.6734438,
+    "ast_hash": "1132582cf4171c8992d2cb484de8ecb7",
+    "semantic_hash": "1132582cf4171c8992d2cb484de8ecb7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E35.md": {
+    "mtime": 1782689160.007857,
+    "ast_hash": "2721e0dd99904030450eea56e9c18d12",
+    "semantic_hash": "2721e0dd99904030450eea56e9c18d12"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E36.md": {
+    "mtime": 1782700610.34641,
+    "ast_hash": "0e42a792ff52180e258c83d3e9ed4ad2",
+    "semantic_hash": "0e42a792ff52180e258c83d3e9ed4ad2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E37.md": {
+    "mtime": 1782689160.0080543,
+    "ast_hash": "1a4ea872550b0c3f9c8379a645eb8d1c",
+    "semantic_hash": "1a4ea872550b0c3f9c8379a645eb8d1c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E38.md": {
+    "mtime": 1782689160.0084372,
+    "ast_hash": "96ec85d51ac671ffe3076acedb11c90c",
+    "semantic_hash": "96ec85d51ac671ffe3076acedb11c90c"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E39.md": {
+    "mtime": 1782692524.8788104,
+    "ast_hash": "6adf42612a2deeacdf923f30d77c4ddf",
+    "semantic_hash": "6adf42612a2deeacdf923f30d77c4ddf"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/E9.md": {
+    "mtime": 1782431743.6743784,
+    "ast_hash": "995ed1918b9e22a8e02ae0b8649c2082",
+    "semantic_hash": "995ed1918b9e22a8e02ae0b8649c2082"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/archive/E12.md": {
+    "mtime": 1782689160.0095139,
+    "ast_hash": "d0701bb69ee8fba1f47285963420988d",
+    "semantic_hash": "d0701bb69ee8fba1f47285963420988d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/archive/E13.md": {
+    "mtime": 1782689160.0101168,
+    "ast_hash": "d37d0d9945850fadfe37455644a4b042",
+    "semantic_hash": "d37d0d9945850fadfe37455644a4b042"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/archive/E14.md": {
+    "mtime": 1782689160.0104284,
+    "ast_hash": "0454a6e63d8cc6d1443070be75d68545",
+    "semantic_hash": "0454a6e63d8cc6d1443070be75d68545"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/archive/E16.md": {
+    "mtime": 1782689160.0112348,
+    "ast_hash": "17e1d51709e1b523635a6ada9da42bb8",
+    "semantic_hash": "17e1d51709e1b523635a6ada9da42bb8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/archive/E17.md": {
+    "mtime": 1782689160.011508,
+    "ast_hash": "b93fcebc74db551b8701d036e654b2b8",
+    "semantic_hash": "b93fcebc74db551b8701d036e654b2b8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/archive/E18.md": {
+    "mtime": 1782689160.011739,
+    "ast_hash": "53559a966b680486f5200e40f2ad347b",
+    "semantic_hash": "53559a966b680486f5200e40f2ad347b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/plans/archive/E24.md": {
+    "mtime": 1782689160.0119996,
+    "ast_hash": "90556d1eba93f8a9eb6839b375605305",
+    "semantic_hash": "90556d1eba93f8a9eb6839b375605305"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/pool-blast-radius-lease.md": {
+    "mtime": 1782348763.7722502,
+    "ast_hash": "60f59a44eea7f9aa8d9d5677dbf45a20",
+    "semantic_hash": "60f59a44eea7f9aa8d9d5677dbf45a20"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/pool-claim-lease-deadlock-safety.md": {
+    "mtime": 1782289952.3572724,
+    "ast_hash": "7e21e290383f100870c0cfd34cf8c375",
+    "semantic_hash": "7e21e290383f100870c0cfd34cf8c375"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/pool-model-tiering.md": {
+    "mtime": 1782348763.772662,
+    "ast_hash": "279fccac27693e50a8de5075c2973386",
+    "semantic_hash": "279fccac27693e50a8de5075c2973386"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/pool-verification-gate.md": {
+    "mtime": 1782348763.7729394,
+    "ast_hash": "2a1ddb86b7fc3783d5c14690069ce4b2",
+    "semantic_hash": "2a1ddb86b7fc3783d5c14690069ce4b2"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/property-predicate.md": {
+    "mtime": 1782367817.7404568,
+    "ast_hash": "3e0fbfc19b6f034f1d03efc4690dda63",
+    "semantic_hash": "3e0fbfc19b6f034f1d03efc4690dda63"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/quickstart.md": {
+    "mtime": 1782370168.2679987,
+    "ast_hash": "c59f61a476d0613faea9ad938ebb3c7e",
+    "semantic_hash": "c59f61a476d0613faea9ad938ebb3c7e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/ratchet-predicate.md": {
+    "mtime": 1782365653.4538794,
+    "ast_hash": "2abbbe903573dfcb659c23be5fc1f523",
+    "semantic_hash": "2abbbe903573dfcb659c23be5fc1f523"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/research/predicate-verification-landscape.md": {
+    "mtime": 1782353749.4818983,
+    "ast_hash": "8576f16ffa14712496ce31530de57de6",
+    "semantic_hash": "8576f16ffa14712496ce31530de57de6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/schemas/collective-result.md": {
+    "mtime": 1782348763.773166,
+    "ast_hash": "0ca77bfeea06606356409ab72f162a86",
+    "semantic_hash": "0ca77bfeea06606356409ab72f162a86"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/schemas/run-result.md": {
+    "mtime": 1782431743.6748412,
+    "ast_hash": "15a611d44cc58a6f07c6954aafe67774",
+    "semantic_hash": "15a611d44cc58a6f07c6954aafe67774"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/schemas/status.md": {
+    "mtime": 1782358356.0509398,
+    "ast_hash": "52e2dac04ab9c1896b9a37267031f2d9",
+    "semantic_hash": "52e2dac04ab9c1896b9a37267031f2d9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/self-hosting.md": {
+    "mtime": 1782348763.774475,
+    "ast_hash": "e10661841e56a2ed5d01b0a155ee6489",
+    "semantic_hash": "e10661841e56a2ed5d01b0a155ee6489"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/site-analytics.md": {
+    "mtime": 1782689160.012205,
+    "ast_hash": "ae54f41273b37bc97790d3fbc72fd335",
+    "semantic_hash": "ae54f41273b37bc97790d3fbc72fd335"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/static-predicate.md": {
+    "mtime": 1782367817.7413032,
+    "ast_hash": "b139869db3d377a1384fb514e2309522",
+    "semantic_hash": "b139869db3d377a1384fb514e2309522"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/docs/tiering-signals.md": {
+    "mtime": 1782353749.4829588,
+    "ast_hash": "9a616386f9d32acf0c20c7813edf00d3",
+    "semantic_hash": "9a616386f9d32acf0c20c7813edf00d3"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/fixtures/deploy-target/.kazi/context.md": {
+    "mtime": 1782167053.6072512,
+    "ast_hash": "e100907122e52d872790b5dcb2e9595d",
+    "semantic_hash": "e100907122e52d872790b5dcb2e9595d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/fixtures/deploy-target/README.md": {
+    "mtime": 1782165734.8696008,
+    "ast_hash": "56191f36f9bb3169bbe33760b7f4a66f",
+    "semantic_hash": "56191f36f9bb3169bbe33760b7f4a66f"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/README.md": {
+    "mtime": 1782689160.0211158,
+    "ast_hash": "dbf0a7c594d4620681dbfa32f43ebbd1",
+    "semantic_hash": "dbf0a7c594d4620681dbfa32f43ebbd1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/expanded_catalog_dogfood/requirements.txt": {
+    "mtime": 1782689160.0230348,
+    "ast_hash": "06d78f746f555558602cf5b69cb01710",
+    "semantic_hash": "06d78f746f555558602cf5b69cb01710"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/priv/examples/hero_cast_demo/README.md": {
+    "mtime": 1782689160.0235317,
+    "ast_hash": "e6fc84e55da8086df13a12934855c13a",
+    "semantic_hash": "e6fc84e55da8086df13a12934855c13a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/a-definition-of-done-that-cant-lie.md": {
+    "mtime": 1782689160.03393,
+    "ast_hash": "c7944548d0ac46d0e7dc68ec273ab614",
+    "semantic_hash": "c7944548d0ac46d0e7dc68ec273ab614"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/decisions-need-a-home.md": {
+    "mtime": 1782689160.0344527,
+    "ast_hash": "da7723e492d5be538630af960a0e6400",
+    "semantic_hash": "da7723e492d5be538630af960a0e6400"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/from-prompts-to-skills.md": {
+    "mtime": 1782689160.0349998,
+    "ast_hash": "edfd1aa40122d6805365aac658f015b6",
+    "semantic_hash": "edfd1aa40122d6805365aac658f015b6"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/give-your-agent-eyes.md": {
+    "mtime": 1782689160.03557,
+    "ast_hash": "5ae5e4cb75832707dea8b0be0f5be5da",
+    "semantic_hash": "5ae5e4cb75832707dea8b0be0f5be5da"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/meet-kazi-done-proven.md": {
+    "mtime": 1782689160.0358574,
+    "ast_hash": "7f4df36320f7c2398993e1365ad07e51",
+    "semantic_hash": "7f4df36320f7c2398993e1365ad07e51"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/one-developer-many-agents.md": {
+    "mtime": 1782689160.036103,
+    "ast_hash": "9a3233835a5f8598b64017f80170b920",
+    "semantic_hash": "9a3233835a5f8598b64017f80170b920"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/plan-the-work-then-work-the-plan.md": {
+    "mtime": 1782689160.036394,
+    "ast_hash": "dbc9f4e11937725a5498713cb3bd90a4",
+    "semantic_hash": "dbc9f4e11937725a5498713cb3bd90a4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/stop-re-reading-the-whole-repo.md": {
+    "mtime": 1782689160.036709,
+    "ast_hash": "d0d3b86e694e320cb70648d888663f42",
+    "semantic_hash": "d0d3b86e694e320cb70648d888663f42"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/teach-your-agent-to-remember.md": {
+    "mtime": 1782689160.0369422,
+    "ast_hash": "0dc14be7fad9365ccc806ae7798991a0",
+    "semantic_hash": "0dc14be7fad9365ccc806ae7798991a0"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/the-ceiling-of-looks-good-to-me.md": {
+    "mtime": 1782689160.037157,
+    "ast_hash": "d10f293f35302c52f1c65634d3d2d335",
+    "semantic_hash": "d10f293f35302c52f1c65634d3d2d335"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/the-pattern-underneath-reconciliation.md": {
+    "mtime": 1782689160.0373883,
+    "ast_hash": "9f5f8ace43908082eb7bfed4d1ce015b",
+    "semantic_hash": "9f5f8ace43908082eb7bfed4d1ce015b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/welcome.md": {
+    "mtime": 1782689160.037597,
+    "ast_hash": "751a5668d20c3cc15cd7b5db47f4a818",
+    "semantic_hash": "751a5668d20c3cc15cd7b5db47f4a818"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/src/content/blog/your-on-ramp.md": {
+    "mtime": 1782689160.03782,
+    "ast_hash": "495603f21c67546386dcf239659698b8",
+    "semantic_hash": "495603f21c67546386dcf239659698b8"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/adopt/unknown/README.md": {
+    "mtime": 1782169421.092228,
+    "ast_hash": "cf26989b1a3baa4080513bda96c23a04",
+    "semantic_hash": "cf26989b1a3baa4080513bda96c23a04"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/harness/claude_authoring_draft_stdout.txt": {
+    "mtime": 1782689160.0422924,
+    "ast_hash": "8bf95fb1624e1e88c44670c47d652c24",
+    "semantic_hash": "8bf95fb1624e1e88c44670c47d652c24"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/test/fixtures/harness/claw_prompt.txt": {
+    "mtime": 1782272347.883626,
+    "ast_hash": "2616f605c96662cc5a9be49e8144b8d7",
+    "semantic_hash": "2616f605c96662cc5a9be49e8144b8d7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/logo/kazi-badge.svg": {
+    "mtime": 1782237241.9566712,
+    "ast_hash": "f63044246e0610768a2473e38a236058",
+    "semantic_hash": "f63044246e0610768a2473e38a236058"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/logo/kazi-mark-mono.svg": {
+    "mtime": 1782174079.7917247,
+    "ast_hash": "a75ca19b41eb92272e557b3c23701598",
+    "semantic_hash": "a75ca19b41eb92272e557b3c23701598"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/logo/kazi-mark.png": {
+    "mtime": 1782237241.9568565,
+    "ast_hash": "4c9bb05ffe2244fe441244e0d364cdf7",
+    "semantic_hash": "4c9bb05ffe2244fe441244e0d364cdf7"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/logo/kazi-mark.svg": {
+    "mtime": 1782237241.9570007,
+    "ast_hash": "db037a06a7760f2ee626b70dff7befbd",
+    "semantic_hash": "db037a06a7760f2ee626b70dff7befbd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/logo/kazi-wordmark-dark.svg": {
+    "mtime": 1782237241.9571366,
+    "ast_hash": "88cacdd2a957315fd8afd05fbcd21c1e",
+    "semantic_hash": "88cacdd2a957315fd8afd05fbcd21c1e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/logo/kazi-wordmark.svg": {
+    "mtime": 1782237241.957272,
+    "ast_hash": "578fcc8c789e1f2f8f291f0731e33d35",
+    "semantic_hash": "578fcc8c789e1f2f8f291f0731e33d35"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/assets/proof-loop.gif": {
+    "mtime": 1782689159.9979098,
+    "ast_hash": "7fe6da2631e1e3859e45b3a4a4053300",
+    "semantic_hash": "7fe6da2631e1e3859e45b3a4a4053300"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-01.svg": {
+    "mtime": 1782689160.0282454,
+    "ast_hash": "3a07667330570a54f6e80b475b2b25ab",
+    "semantic_hash": "3a07667330570a54f6e80b475b2b25ab"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-02.svg": {
+    "mtime": 1782689160.0284257,
+    "ast_hash": "721862704948ea39da7e6ea9c7c61e4d",
+    "semantic_hash": "721862704948ea39da7e6ea9c7c61e4d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-03.svg": {
+    "mtime": 1782689160.0294085,
+    "ast_hash": "b95a5b3030b4c75c4c6b626179f09a4b",
+    "semantic_hash": "b95a5b3030b4c75c4c6b626179f09a4b"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-04.svg": {
+    "mtime": 1782689160.0295317,
+    "ast_hash": "8ca9e3345342a669e5efe8a4fbc2ac31",
+    "semantic_hash": "8ca9e3345342a669e5efe8a4fbc2ac31"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-05.svg": {
+    "mtime": 1782689160.0296361,
+    "ast_hash": "46dfa11d231ae94b1b6d09b78142bbc9",
+    "semantic_hash": "46dfa11d231ae94b1b6d09b78142bbc9"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-06.svg": {
+    "mtime": 1782689160.0297358,
+    "ast_hash": "47b1523daa942b4f99c52e5b64792943",
+    "semantic_hash": "47b1523daa942b4f99c52e5b64792943"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-07.svg": {
+    "mtime": 1782689160.0298357,
+    "ast_hash": "423d1acee6802651c2a4900aa2ccc886",
+    "semantic_hash": "423d1acee6802651c2a4900aa2ccc886"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-08.svg": {
+    "mtime": 1782689160.0299444,
+    "ast_hash": "6dde0ab89194c508e6f353f9dd0d360d",
+    "semantic_hash": "6dde0ab89194c508e6f353f9dd0d360d"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-09.svg": {
+    "mtime": 1782689160.0300486,
+    "ast_hash": "a5beda417f3a745401bc0e91b6cc20c4",
+    "semantic_hash": "a5beda417f3a745401bc0e91b6cc20c4"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-10.svg": {
+    "mtime": 1782689160.0301638,
+    "ast_hash": "e3606b53f89b740acd1fffba7c79c915",
+    "semantic_hash": "e3606b53f89b740acd1fffba7c79c915"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-11.svg": {
+    "mtime": 1782689160.0302687,
+    "ast_hash": "120d717d57b1e7e7df09044e555ce660",
+    "semantic_hash": "120d717d57b1e7e7df09044e555ce660"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/blog/art/part-12.svg": {
+    "mtime": 1782689160.0303724,
+    "ast_hash": "aac36ffb0bcdea121cd61768142811d5",
+    "semantic_hash": "aac36ffb0bcdea121cd61768142811d5"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/diagrams/before-after.svg": {
+    "mtime": 1782689160.0305903,
+    "ast_hash": "6516eccee1b5eab92169c9f2e5a1e278",
+    "semantic_hash": "6516eccee1b5eab92169c9f2e5a1e278"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/diagrams/ladder.svg": {
+    "mtime": 1782689160.0307007,
+    "ast_hash": "8f046a44915c6773905ab9fb5d31362a",
+    "semantic_hash": "8f046a44915c6773905ab9fb5d31362a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/diagrams/reconcile-loop.svg": {
+    "mtime": 1782689160.0308099,
+    "ast_hash": "20520e49a73824748ed542a81a1c907a",
+    "semantic_hash": "20520e49a73824748ed542a81a1c907a"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/logo/kazi-badge.svg": {
+    "mtime": 1782239646.4549215,
+    "ast_hash": "f63044246e0610768a2473e38a236058",
+    "semantic_hash": "f63044246e0610768a2473e38a236058"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/logo/kazi-mark.svg": {
+    "mtime": 1782239646.4550176,
+    "ast_hash": "db037a06a7760f2ee626b70dff7befbd",
+    "semantic_hash": "db037a06a7760f2ee626b70dff7befbd"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/logo/kazi-wordmark-dark.svg": {
+    "mtime": 1782239646.4551148,
+    "ast_hash": "88cacdd2a957315fd8afd05fbcd21c1e",
+    "semantic_hash": "88cacdd2a957315fd8afd05fbcd21c1e"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/logo/kazi-wordmark.svg": {
+    "mtime": 1782239646.4552197,
+    "ast_hash": "578fcc8c789e1f2f8f291f0731e33d35",
+    "semantic_hash": "578fcc8c789e1f2f8f291f0731e33d35"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/og-image.png": {
+    "mtime": 1782269544.2371519,
+    "ast_hash": "f114161f0c93fe177a34984b3c8d10c1",
+    "semantic_hash": "f114161f0c93fe177a34984b3c8d10c1"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/public/proof-loop.gif": {
+    "mtime": 1782689160.030935,
+    "ast_hash": "7fe6da2631e1e3859e45b3a4a4053300",
+    "semantic_hash": "7fe6da2631e1e3859e45b3a4a4053300"
+  },
+  "/Users/dndungu/Code/kazi-org/kazi/site/scripts/og-image.svg": {
+    "mtime": 1782269544.2373266,
+    "ast_hash": "71cb51a3cd53bb6556997ba975c40ffb",
+    "semantic_hash": "71cb51a3cd53bb6556997ba975c40ffb"
+  }
+}

@@ -280,6 +280,51 @@ defmodule Kazi.Goal.DepGraph do
     collect_dependents(queue, direct, visited, acc)
   end
 
+  @doc """
+  The topological FRONTIERS of a goal's `needs`-DAG (T23.6/T46.5): a PURE
+  layering that repeatedly takes the READY SET (`ready_set/2`) as one frontier,
+  marks it `:converged`, and recomputes — exactly the order the pipelined
+  scheduler would take (this mirrors it; it does not dispatch anything). A
+  goal with no `needs` yields ONE frontier (every group ready at once — fully
+  parallel); a chain yields N frontiers (one group per wave).
+
+  This is the SAME computation `kazi apply --explain` prints (`Kazi.CLI`
+  delegates its private `frontiers/1` here) and the fleet starmap's wave-band
+  layout (`KaziWeb.StarmapLive`) reuses — one function, two renderers, so a
+  goal's schedule is never computed twice.
+
+  Returns a list of frontiers, each a list of group ids in DECLARED order.
+
+  ## Examples
+
+      iex> a = Kazi.Goal.Group.new("a", "A")
+      iex> b = Kazi.Goal.Group.new("b", "B", needs: ["a"])
+      iex> c = Kazi.Goal.Group.new("c", "C", needs: ["a"])
+      iex> goal = Kazi.Goal.new("g", groups: [a, b, c])
+      iex> Kazi.Goal.DepGraph.frontiers(goal)
+      [["a"], ["b", "c"]]
+  """
+  @spec frontiers(Goal.t()) :: [[Group.id()]]
+  def frontiers(%Goal{groups: []}), do: []
+
+  def frontiers(%Goal{} = goal) do
+    layer_frontiers(goal, %{}, [])
+  end
+
+  defp layer_frontiers(goal, states, acc) do
+    ready = ready_set(goal, states)
+
+    if ready == [] do
+      Enum.reverse(acc)
+    else
+      # Mark this frontier's groups converged so the NEXT ready-set computation
+      # sees their deps satisfied — the pure topological advance (no dispatch,
+      # no I/O).
+      states = Enum.reduce(ready, states, fn id, acc -> Map.put(acc, id, :converged) end)
+      layer_frontiers(goal, states, [ready | acc])
+    end
+  end
+
   # --- internals ---
 
   # The NEAREST blocking group on `id`'s `needs` ANCESTRY (its transitive
