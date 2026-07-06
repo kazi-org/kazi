@@ -37,6 +37,19 @@ defmodule KaziWeb.StarmapLive do
       `:over_budget` group (poisoned, folded into `:pending` for the fleet
       glance — see `Kazi.Scheduler.DagSnapshot`'s finer `:blocked`).
 
+  ## Edges, sessions, and the slide-over panel (docs/dashboard-design.md)
+
+  With a roadmap configured, the goal's declared `needs` edges also draw as
+  connector lines between the placed nodes (cyan-highlighted when either
+  endpoint is converging/stuck). Converging, stuck, and claimed nodes carry
+  session tags (`S1`, `S2`, ...) mirrored into the rail's SESSIONS section
+  (red chip for a stuck session). Clicking any canvas node — or an attention
+  entry — opens the right slide-over drill-in panel: identity chips,
+  iteration/budget burn, the predicate-vector DNA strip, the convergence
+  heatmap, and a transcript tail, with a "FULL ANALYST VIEW" link to the
+  full drill-in page. All of it reads the same projections the full-page
+  views read; nothing is fabricated.
+
   ## Attention queue (T46.6)
 
   The rail alongside the fleet list: `Kazi.Attention.Queue.build/2` ranks
@@ -60,9 +73,10 @@ defmodule KaziWeb.StarmapLive do
   alias Kazi.Attention.Queue, as: AttentionQueue
   alias Kazi.Goal
   alias Kazi.Goal.DepGraph
-  alias Kazi.ReadModel.{Run, RunRegistry}
+  alias Kazi.ReadModel.{Iteration, Run, RunRegistry}
   alias Kazi.Scheduler.DagSnapshot
   alias Kazi.Sink.Events
+  alias Kazi.Sink.Transcript
   alias KaziWeb.Starmap.GoalSource
 
   # Poll interval for picking up registry changes (T46.5 acc: "a verdict change
@@ -81,10 +95,12 @@ defmodule KaziWeb.StarmapLive do
     {:ok,
      socket
      |> assign(:page_title, "kazi · starmap")
+     |> assign(:selected_id, nil)
      |> assign_runs()
      |> assign_bands()
      |> assign_attention_queue()
      |> assign_canvas()
+     |> assign_panel()
      |> assign_river()}
   end
 
@@ -98,7 +114,21 @@ defmodule KaziWeb.StarmapLive do
      |> assign_bands()
      |> assign_attention_queue()
      |> assign_canvas()
+     |> assign_panel()
      |> assign_river()}
+  end
+
+  # Slide-over drill-in panel (docs/dashboard-design.md "Slide-over drill-in
+  # panel"): click a canvas node (or an attention entry) to peek that goal's
+  # predicate vector, convergence heatmap, and transcript tail without leaving
+  # the starmap; the panel refreshes on the same poll tick the canvas does.
+  @impl true
+  def handle_event("select_node", %{"id" => id}, socket) do
+    {:noreply, socket |> assign(:selected_id, id) |> assign_panel()}
+  end
+
+  def handle_event("close_panel", _params, socket) do
+    {:noreply, socket |> assign(:selected_id, nil) |> assign_panel()}
   end
 
   # The canvas cap (docs/dashboard-design.md "Canvas composition" overflow
@@ -195,9 +225,27 @@ defmodule KaziWeb.StarmapLive do
 
   defp assign_bands(socket) do
     case GoalSource.goal() do
-      %Goal{} = goal -> assign(socket, :bands, build_bands(goal))
-      _none -> assign(socket, :bands, [])
+      %Goal{} = goal ->
+        socket
+        |> assign(:bands, build_bands(goal))
+        |> assign(:needs_edges, needs_edges(goal))
+
+      _none ->
+        socket
+        |> assign(:bands, [])
+        |> assign(:needs_edges, [])
     end
+  end
+
+  # The roadmap goal's declared `needs` edges (docs/dashboard-design.md:
+  # "`needs` edges draw as 1.5px lines between group nodes") — dep -> group,
+  # the same edges `DepGraph.frontiers/1` topologically sorts. `[]` without a
+  # roadmap: the flat fleet fallback declares no order, so drawing lines there
+  # would fabricate structure the registry doesn't know.
+  defp needs_edges(%Goal{groups: groups}) do
+    Enum.flat_map(groups, fn %Goal.Group{id: id, needs: needs} ->
+      Enum.map(needs, &%{from: &1, to: id})
+    end)
   end
 
   defp build_bands(%Goal{} = goal) do
@@ -364,7 +412,36 @@ defmodule KaziWeb.StarmapLive do
 
     socket
     |> assign(:canvas_nodes, canvas_nodes)
+    |> assign(:canvas_edges, canvas_edges(socket.assigns.needs_edges, canvas_nodes))
     |> assign(:canvas_wave_labels, wave_labels)
+  end
+
+  # Resolves the roadmap's `needs` edges onto the placed nodes' coordinates.
+  # An edge is "active" (cyan per the spec) when either endpoint is live —
+  # converging or stuck — so the operator's eye follows the working path.
+  # Edges whose endpoint fell off the canvas (the overflow cap) are dropped.
+  defp canvas_edges(needs_edges, canvas_nodes) do
+    by_id = Map.new(canvas_nodes, &{&1.id, &1})
+
+    Enum.flat_map(needs_edges, fn %{from: from, to: to} ->
+      case {by_id[from], by_id[to]} do
+        {%{} = a, %{} = b} ->
+          [
+            %{
+              from: from,
+              to: to,
+              x1: a.cx,
+              y1: a.cy,
+              x2: b.cx,
+              y2: b.cy,
+              active: a.state in [:converging, :stuck] or b.state in [:converging, :stuck]
+            }
+          ]
+
+        _missing_endpoint ->
+          []
+      end
+    end)
   end
 
   # No roadmap configured: derive the wave bands from run state
@@ -423,12 +500,17 @@ defmodule KaziWeb.StarmapLive do
   defp default_sublabel(:pending), do: "PENDING"
   defp default_sublabel(state), do: state |> to_string() |> String.upcase()
 
-  # Session tags (`S1`, `S2`, ...): assigned in canvas order to every node
-  # whose state is "active" per the spec's zoo — dispatched-and-running
-  # (`:converging`) or eligible-right-now (`:claimed`).
+  # Session tags (`S1`, `S2`, ...): assigned in canvas order to every node a
+  # session is (or was) attached to — dispatched-and-running (`:converging`),
+  # wedged (`:stuck` — the mockup's S2, whose rail chip renders red), or
+  # eligible-right-now (`:claimed`, the goal the next session picks up).
+  # Landed/pending/stale nodes carry no tag, so the SESSIONS rail section
+  # lists exactly the sessions the operator can still act on.
   defp build_session_tags(placed) do
     placed
-    |> Enum.filter(fn {_frontier, _row, node} -> node.state in [:converging, :claimed] end)
+    |> Enum.filter(fn {_frontier, _row, node} ->
+      node.state in [:converging, :stuck, :claimed]
+    end)
     |> Enum.with_index(1)
     |> Map.new(fn {{_frontier, _row, node}, n} -> {node.id, "S#{n}"} end)
   end
@@ -441,6 +523,133 @@ defmodule KaziWeb.StarmapLive do
   defp nd_class(:claimed), do: "nd-claimed"
   defp nd_class(:pending), do: "nd-pending"
   defp nd_class(:stale), do: "nd-stale"
+
+  # ---------------------------------------------------------------------------
+  # Slide-over drill-in panel (docs/dashboard-design.md "Slide-over drill-in
+  # panel"): the selected goal's identity chips, iteration/budget burn,
+  # predicate-vector DNA strip, convergence heatmap, and transcript tail —
+  # the SAME read paths the full-page views use (`Kazi.ReadModel`'s iteration
+  # history like DrillinHeatmapLive, `Kazi.Sink.Transcript` like
+  # TranscriptPeekLive), windowed for a peek. Pure read projection.
+  # ---------------------------------------------------------------------------
+
+  # How many trailing transcript events the panel tail shows; the full-page
+  # transcript peek remains the unbounded view.
+  @panel_tail_window 12
+
+  defp assign_panel(%{assigns: %{selected_id: nil}} = socket) do
+    assign(socket, :panel, nil)
+  end
+
+  defp assign_panel(%{assigns: %{selected_id: id}} = socket) do
+    # A canvas node's id is a run_id in the flat fallback and a roadmap group
+    # id (== the goal_ref runs register under) in wave-band mode; an attention
+    # entry always selects by goal_ref. Resolve either to the goal's latest
+    # registered run (`RunRegistry.list/0` is newest-first).
+    run = Enum.find(RunRegistry.list(), &(&1.run_id == id or &1.goal_ref == id))
+    goal_ref = if run, do: run.goal_ref, else: id
+
+    node =
+      Enum.find(socket.assigns.canvas_nodes, &(&1.id == id)) ||
+        Enum.find(socket.assigns.canvas_nodes, &(&1.label == goal_ref))
+
+    iterations = drillin_source().list_iterations(goal_ref)
+
+    assign(socket, :panel, %{
+      goal_ref: goal_ref,
+      node_id: node && node.id,
+      state: (node && node.state) || (run && state(run)) || :pending,
+      sublabel: node && node.sublabel,
+      run: run,
+      iterations: iterations,
+      transcript: transcript_tail(run)
+    })
+  end
+
+  # The same injectable read-model seam DrillinHeatmapLive uses (ADR-0011 §3),
+  # so a test can drive the panel from a fixture history.
+  defp drillin_source do
+    Application.get_env(:kazi, :drillin_source, Kazi.ReadModel)
+  end
+
+  defp transcript_tail(%Run{transcript_sink_path: path}) when is_binary(path) do
+    path |> Transcript.read() |> Enum.take(-@panel_tail_window)
+  end
+
+  defp transcript_tail(_run_or_nil), do: []
+
+  defp tail_label(%Run{status: "running"} = run) do
+    if RunRegistry.stale?(run) do
+      "post-mortem · run ended without terminal status"
+    else
+      "live"
+    end
+  end
+
+  defp tail_label(_run_or_nil), do: "post-mortem"
+
+  defp panel_iter([]), do: nil
+  defp panel_iter(iterations), do: List.last(iterations).iteration_index
+
+  # Burn fraction of the run's declared iteration budget — the honest budget
+  # the registry actually knows (`max_iterations`, T46.6); nil hides the bar.
+  defp burn_pct(%{run: %Run{max_iterations: max}, iterations: iterations})
+       when is_integer(max) and max > 0 do
+    case panel_iter(iterations) do
+      nil -> nil
+      iter -> min(round((iter + 1) / max * 100), 100)
+    end
+  end
+
+  defp burn_pct(_panel), do: nil
+
+  defp burn_class(pct) when pct >= 85, do: "burn-hot"
+  defp burn_class(pct) when pct >= 70, do: "burn-warn"
+  defp burn_class(_pct), do: "burn-ok"
+
+  # The DNA strip: the LATEST iteration's predicate vector as stably-ordered
+  # squares — the same presentation DrillinHeatmapLive's strip uses.
+  defp panel_squares([]), do: []
+
+  defp panel_squares(iterations) do
+    iterations
+    |> List.last()
+    |> Kazi.ReadModel.to_predicate_vector()
+    |> Map.fetch!(:results)
+    |> Enum.sort_by(fn {pid, _result} -> pid end)
+    |> Enum.map(fn {pid, result} -> %{id: pid, status: result.status} end)
+  end
+
+  # Heatmap rows: the union of predicate ids across the goal's history, so a
+  # predicate introduced mid-run still gets a row (not-evaluated before it
+  # existed) — mirrors DrillinHeatmapLive.
+  defp panel_predicate_ids(iterations) do
+    iterations
+    |> Enum.flat_map(fn %Iteration{predicate_vector: vector} -> Map.keys(vector) end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp panel_cell_status(predicate_id, %Iteration{predicate_vector: vector}) do
+    case Map.get(vector, predicate_id) do
+      %{"status" => status} -> status
+      nil -> "not_evaluated"
+    end
+  end
+
+  defp panel_regression_flip?(predicate_id, %Iteration{regressions: regressions} = iteration) do
+    Enum.any?(regressions, fn flag ->
+      flag["predicate_id"] == predicate_id && flag["red_iteration"] == iteration.iteration_index
+    end)
+  end
+
+  defp panel_tool_event?(%{"type" => type}) when is_binary(type),
+    do: String.starts_with?(type, "tool")
+
+  defp panel_tool_event?(_event), do: false
+
+  defp panel_text_line(%{"type" => "text", "text" => text}), do: text
+  defp panel_text_line(event), do: inspect(event)
 
   # T47.1's fleet-wide event feed (`Kazi.Sink.Events`), reused here as a
   # small, bounded ticker for the bottom event-river bar — the SAME source
@@ -530,6 +739,8 @@ defmodule KaziWeb.StarmapLive do
                 data-signal={item.signal}
                 data-predicate-id={item.predicate_id}
                 class={"attention-item attention-signal-#{item.signal}"}
+                phx-click="select_node"
+                phx-value-id={item.goal_ref}
               >
                 <span class="attention-signal-label" data-signal={item.signal}>
                   {signal_label(item.signal)}
@@ -639,6 +850,19 @@ defmodule KaziWeb.StarmapLive do
             </text>
           </g>
 
+          <g :if={@canvas_edges != []} id="starmap-edges">
+            <line
+              :for={edge <- @canvas_edges}
+              class={"edge" <> if(edge.active, do: " edge-active", else: "")}
+              data-from={edge.from}
+              data-to={edge.to}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+            />
+          </g>
+
           <g
             :for={node <- @canvas_nodes}
             id={"canvas-node-group-#{node.id}"}
@@ -646,8 +870,17 @@ defmodule KaziWeb.StarmapLive do
             data-node-id={node.id}
             data-frontier={node.frontier}
             data-state={node.state}
+            phx-click="select_node"
+            phx-value-id={node.id}
           >
             <title :if={node.harness}>{node.harness}{if node.model, do: " / #{node.model}"}</title>
+            <circle
+              :if={@panel && @panel.node_id == node.id}
+              class="selring"
+              cx={node.cx}
+              cy={node.cy}
+              r="19"
+            />
             <circle
               :if={node.state in [:converging, :stuck]}
               class={"ring" <> if(node.state == :stuck, do: " redr", else: "")}
@@ -693,6 +926,109 @@ defmodule KaziWeb.StarmapLive do
           +{@older_count} older
         </.link>
       </div>
+
+      <aside
+        :if={@panel}
+        id="starmap-panel"
+        class="slide-over"
+        data-goal-ref={@panel.goal_ref}
+        data-state={@panel.state}
+      >
+        <button
+          type="button"
+          id="starmap-panel-close"
+          class="panel-close"
+          phx-click="close_panel"
+          aria-label="close panel"
+        >
+          ×
+        </button>
+
+        <h2 class="panel-title display-heading">{@panel.goal_ref}</h2>
+
+        <div class="panel-chips">
+          <span :if={@panel.run} class="chip">{@panel.run.workspace}</span>
+          <span :if={@panel.run && @panel.run.harness} class="chip">
+            {@panel.run.harness}{if @panel.run.model, do: " · #{@panel.run.model}"}
+          </span>
+          <span class={"chip state-pill pill-#{@panel.state}"}>
+            {@panel.sublabel || @panel.state |> to_string() |> String.upcase()}
+          </span>
+        </div>
+
+        <div :if={panel_iter(@panel.iterations)} id="starmap-panel-iter" class="panel-iter">
+          ITER {panel_iter(@panel.iterations)}
+          <span :if={@panel.run && @panel.run.max_iterations} class="panel-budget">
+            · budget {@panel.run.max_iterations} iterations
+          </span>
+        </div>
+
+        <div :if={burn_pct(@panel)} class="burn-bar">
+          <div
+            class={"burn-fill #{burn_class(burn_pct(@panel))}"}
+            style={"width: #{burn_pct(@panel)}%"}
+          >
+          </div>
+        </div>
+
+        <div :if={@panel.iterations != []} id="starmap-panel-dna" class="panel-section">
+          <div class="section-label">PREDICATE VECTOR</div>
+          <div class="dna-squares">
+            <span
+              :for={square <- panel_squares(@panel.iterations)}
+              class={"dna-square status-#{square.status}"}
+              data-predicate-id={square.id}
+              data-status={square.status}
+              title={square.id}
+            ></span>
+          </div>
+        </div>
+
+        <div :if={@panel.iterations != []} id="starmap-panel-heatmap" class="panel-section">
+          <div class="section-label">CONVERGENCE · PREDICATES × ITERATIONS</div>
+          <div
+            :for={predicate_id <- panel_predicate_ids(@panel.iterations)}
+            class="hm-row"
+            data-predicate-id={predicate_id}
+          >
+            <span class="hm-label">{predicate_id}</span>
+            <span class="hm-cells">
+              <span
+                :for={iteration <- @panel.iterations}
+                class={"hm-cell status-#{panel_cell_status(predicate_id, iteration)}" <>
+                  if(panel_regression_flip?(predicate_id, iteration),
+                    do: " regression-flip",
+                    else: ""
+                  )}
+                data-status={panel_cell_status(predicate_id, iteration)}
+              ></span>
+            </span>
+          </div>
+        </div>
+
+        <div id="starmap-panel-transcript" class="panel-section">
+          <div class="section-label">TRANSCRIPT TAIL · {tail_label(@panel.run)}</div>
+          <div class="panel-transcript">
+            <p :if={@panel.transcript == []} class="empty-state">No transcript events.</p>
+            <div :for={event <- @panel.transcript} class="panel-event">
+              <span :if={panel_tool_event?(event)} class="panel-pill">
+                <span class="marker">▸</span> {event["name"] || event["type"]}
+              </span>
+              <p :if={!panel_tool_event?(event)} class="panel-line">
+                {panel_text_line(event)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <.link
+          navigate={~p"/goals/#{@panel.goal_ref}/drillin"}
+          id="starmap-panel-analyst"
+          class="analyst-btn"
+        >
+          FULL ANALYST VIEW →
+        </.link>
+      </aside>
 
       <div id="starmap-event-river" class="event-river">
         <span class="event-river-label section-label">EVENT RIVER</span>
@@ -749,6 +1085,10 @@ defmodule KaziWeb.StarmapLive do
         .starmap-canvas .nd-stale { fill: #141118; stroke: var(--amb); stroke-width: 1.5; stroke-dasharray: 2 4; }
         .starmap-canvas .ring { fill: none; stroke: var(--cyn); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; }
         .starmap-canvas .ring.redr { stroke: var(--red); }
+        .starmap-canvas .edge { stroke: #152840; stroke-width: 1.5; }
+        .starmap-canvas .edge-active { stroke: rgba(86,204,242,.5); }
+        .starmap-canvas .canvas-node-group { cursor: pointer; }
+        .starmap-canvas .selring { fill: none; stroke: #EAF6FF; stroke-width: 1; stroke-dasharray: 3 5; transform-box: fill-box; transform-origin: center; }
         .starmap-canvas .band-a { fill: rgba(86,204,242,.028); }
         .starmap-canvas .band-b { fill: transparent; }
         .starmap-canvas .band-sep { stroke: rgba(22,35,58,.8); stroke-width: 1; stroke-dasharray: 2 6; }
@@ -794,6 +1134,43 @@ defmodule KaziWeb.StarmapLive do
         .starmap-canvas .nsub-stuck { fill: var(--red, #FF5C6C); }
         .starmap-canvas .nsub-stale { fill: var(--amb, #FFB454); }
         .starmap-canvas .nsub-pending { fill: #3D4F6E; }
+
+        .slide-over { position: fixed; top: 0; right: 0; bottom: 38px; width: 470px; max-width: 92vw; background: rgba(9,15,28,.97); border-left: 1px solid rgba(86,204,242,.25); box-shadow: -24px 0 60px rgba(0,0,0,.55); padding: 1.2rem 1.4rem; overflow-y: auto; z-index: 20; display: flex; flex-direction: column; gap: 1rem; }
+        .panel-close { position: absolute; top: .8rem; right: .9rem; background: transparent; border: 1px solid var(--line); color: var(--dim); border-radius: 3px; width: 22px; height: 22px; cursor: pointer; font-family: inherit; }
+        .panel-close:hover { color: var(--txt); border-color: var(--dim); }
+        .panel-title { font-size: 21px; margin: 0; padding-right: 2rem; overflow-wrap: anywhere; }
+        .panel-chips { display: flex; gap: .4rem; flex-wrap: wrap; }
+        .chip { border: 1px solid var(--line); border-radius: 3px; padding: 2px 8px; font-size: 10px; color: var(--dim); }
+        .state-pill.pill-converging, .state-pill.pill-claimed { color: var(--cyn); border-color: rgba(86,204,242,.4); }
+        .state-pill.pill-stuck { color: var(--red); border-color: rgba(255,92,108,.5); }
+        .state-pill.pill-landed { color: var(--grn); border-color: rgba(46,230,168,.4); }
+        .state-pill.pill-stale { color: var(--amb); border-color: rgba(255,180,84,.4); }
+        .panel-iter { font-size: 11px; letter-spacing: .12em; color: var(--txt); }
+        .panel-iter .panel-budget { color: var(--dim); }
+        .burn-bar { height: 4px; background: #101B30; border-radius: 2px; overflow: hidden; }
+        .burn-fill { height: 100%; }
+        .burn-ok { background: var(--cyn); }
+        .burn-warn { background: var(--amb); }
+        .burn-hot { background: var(--red); }
+        .panel-section { display: flex; flex-direction: column; gap: .45rem; }
+        .dna-squares { display: flex; gap: 3px; flex-wrap: wrap; }
+        .dna-square { width: 15px; height: 15px; border-radius: 2px; background: #152134; display: inline-block; }
+        .dna-square.status-pass { background: var(--grn); box-shadow: 0 0 6px rgba(46,230,168,.5); }
+        .dna-square.status-fail { background: var(--red); box-shadow: 0 0 6px rgba(255,92,108,.5); }
+        .dna-square.status-error { background: var(--red); }
+        .hm-row { display: flex; align-items: center; gap: 6px; }
+        .hm-label { flex: 0 0 110px; font-size: 9px; color: var(--dim); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hm-cells { display: flex; gap: 2px; flex-wrap: wrap; }
+        .hm-cell { width: 15px; height: 13px; border-radius: 2px; background: #101B30; display: inline-block; }
+        .hm-cell.status-pass { background: var(--grn); }
+        .hm-cell.status-fail, .hm-cell.status-error { background: var(--red); }
+        .hm-cell.regression-flip { outline: 1px solid var(--amb); }
+        .panel-transcript { border: 1px solid var(--line); border-radius: 4px; padding: .7rem .8rem; display: flex; flex-direction: column; gap: .5rem; max-height: 30vh; overflow-y: auto; }
+        .panel-line { font-size: 11px; color: var(--txt); margin: 0; overflow-wrap: anywhere; }
+        .panel-pill { display: inline-flex; gap: .4rem; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: .15rem .7rem; font-size: 10px; color: var(--txt); width: max-content; max-width: 100%; }
+        .panel-pill .marker { color: var(--cyn); }
+        .analyst-btn { margin-top: auto; border: 1px solid rgba(86,204,242,.5); color: var(--cyn); text-align: center; padding: .55rem; border-radius: 4px; text-decoration: none; letter-spacing: .15em; font-size: 11px; }
+        .analyst-btn:hover { background: rgba(86,204,242,.08); }
       </style>
     </main>
     """
