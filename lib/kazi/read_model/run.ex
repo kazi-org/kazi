@@ -40,6 +40,11 @@ defmodule Kazi.ReadModel.Run do
     # interactively (`claude -r <id>`). Both nil on pre-existing rows.
     field(:session_name, :string)
     field(:harness_session_id, :string)
+    # Issue #857: the OS pid of the dispatched harness subprocess (as reported
+    # by `Kazi.Harness.CliAdapter`'s child-supervision wrapper), so a fresh
+    # apply for the same goal_ref can warn when a previous run's harness child
+    # is still alive. nil until a dispatch reports one.
+    field(:harness_child_pid, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -54,7 +59,8 @@ defmodule Kazi.ReadModel.Run do
     :transcript_sink_path,
     :max_iterations,
     :session_name,
-    :harness_session_id
+    :harness_session_id,
+    :harness_child_pid
   ]
 
   @doc """

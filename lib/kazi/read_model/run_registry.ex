@@ -109,6 +109,27 @@ defmodule Kazi.ReadModel.RunRegistry do
   end
 
   @doc """
+  Records the OS pid of the dispatched harness subprocess (issue #857), so a
+  fresh apply for the same `goal_ref` can detect a still-alive prior run's
+  child (`orphan_candidates/2`). Idempotent, like `record_harness_session/2`.
+  """
+  @spec record_harness_pid(String.t(), String.t()) :: {:ok, Run.t()} | {:error, :not_found}
+  def record_harness_pid(run_id, pid) when is_binary(run_id) and is_binary(pid) do
+    case Repo.get_by(Run, run_id: run_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Run{harness_child_pid: ^pid} = run ->
+        {:ok, run}
+
+      run ->
+        run
+        |> Run.changeset(%{"harness_child_pid" => pid})
+        |> Repo.update()
+    end
+  end
+
+  @doc """
   Records a terminal verdict (`"converged"` / `"stuck"` / `"over_budget"` /
   `"error"`) and stamps `finished_at`. Terminal status excludes a run from the
   stale query regardless of how old its last heartbeat is — it exited on
@@ -141,6 +162,20 @@ defmodule Kazi.ReadModel.RunRegistry do
   @spec get(String.t()) :: Run.t() | nil
   def get(run_id) when is_binary(run_id) do
     Repo.get_by(Run, run_id: run_id)
+  end
+
+  @doc """
+  Lists every registered run for `goal_ref` other than `exclude_run_id` (the
+  caller's own, about-to-register run), most recently started first. Used by
+  the orphan-on-resume check (issue #857) to find prior runs of the SAME goal
+  whose recorded `harness_child_pid` might still be alive.
+  """
+  @spec list_by_goal_ref(String.t(), String.t()) :: [Run.t()]
+  def list_by_goal_ref(goal_ref, exclude_run_id) when is_binary(goal_ref) do
+    Run
+    |> where([r], r.goal_ref == ^goal_ref and r.run_id != ^exclude_run_id)
+    |> order_by(desc: :started_at)
+    |> Repo.all()
   end
 
   @doc """
