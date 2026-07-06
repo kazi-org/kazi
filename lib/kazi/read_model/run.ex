@@ -28,6 +28,11 @@ defmodule Kazi.ReadModel.Run do
     field(:finished_at, :utc_datetime_usec)
     field(:events_sink_path, :string)
     field(:transcript_sink_path, :string)
+    # T46.6 (ADR-0057): the run's declared iteration budget ceiling
+    # (`goal.budget.max_iterations`), captured once at registration so the
+    # attention queue can compute "budget consumed" fleet-wide with no goal
+    # reload. `nil` for an unbounded goal or a pre-T46.6 row.
+    field(:max_iterations, :integer)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -39,7 +44,8 @@ defmodule Kazi.ReadModel.Run do
     :status,
     :finished_at,
     :events_sink_path,
-    :transcript_sink_path
+    :transcript_sink_path,
+    :max_iterations
   ]
 
   @doc """

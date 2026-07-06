@@ -37,7 +37,17 @@ defmodule KaziWeb.StarmapLive do
       `:over_budget` group (poisoned, folded into `:pending` for the fleet
       glance — see `Kazi.Scheduler.DagSnapshot`'s finer `:blocked`).
 
-  the attention queue (T46.6) is a later task built on the same registry.
+  ## Attention queue (T46.6)
+
+  The rail alongside the fleet list: `Kazi.Attention.Queue.build/2` ranks
+  what needs the operator across every registered run — stuck (the same
+  `Kazi.Loop.StuckDetector` a live loop uses), budget (>=85% of the run's
+  declared `max_iterations` consumed), flake suspicion (a predicate whose
+  status has flipped more than once), and regression-recovered (a past
+  green→red flip whose predicate is back to `:pass`) — from the SAME
+  persisted per-iteration history the drill-in heatmap (T46.7) reads. Each
+  entry deep-links to that goal's `/goals/:id/drillin`. An empty fleet
+  renders no rail (nothing needs attention because nothing is running).
 
   Pure read projection (ADR-0011 §2): it never mutates a run, a goal, or a
   lease. `mount/3` reads `RunRegistry.list/0` directly; a connected mount also
@@ -47,6 +57,7 @@ defmodule KaziWeb.StarmapLive do
   """
   use KaziWeb, :live_view
 
+  alias Kazi.Attention.Queue, as: AttentionQueue
   alias Kazi.Goal
   alias Kazi.Goal.DepGraph
   alias Kazi.ReadModel.{Run, RunRegistry}
@@ -66,13 +77,15 @@ defmodule KaziWeb.StarmapLive do
      socket
      |> assign(:page_title, "kazi · starmap")
      |> assign_runs()
-     |> assign_bands()}
+     |> assign_bands()
+     |> assign_attention_queue()}
   end
 
   @impl true
   def handle_info(:tick, socket) do
     if connected?(socket), do: Process.send_after(self(), :tick, @poll_ms)
-    {:noreply, socket |> assign_runs() |> assign_bands()}
+
+    {:noreply, socket |> assign_runs() |> assign_bands() |> assign_attention_queue()}
   end
 
   defp assign_runs(socket) do
@@ -82,6 +95,12 @@ defmodule KaziWeb.StarmapLive do
     socket
     |> assign(:nodes, nodes)
     |> assign(:counts, counts)
+  end
+
+  # T46.6: the attention-queue rail, ranked from the same run registry the
+  # fleet list above renders.
+  defp assign_attention_queue(socket) do
+    assign(socket, :attention_queue, AttentionQueue.build(RunRegistry.list()))
   end
 
   defp to_node(%Run{} = run) do
@@ -193,6 +212,11 @@ defmodule KaziWeb.StarmapLive do
     if run && RunRegistry.stale?(run), do: :stale, else: :converging
   end
 
+  defp signal_label(:stuck), do: "stuck"
+  defp signal_label(:budget), do: "budget"
+  defp signal_label(:flake_suspicion), do: "flake suspicion"
+  defp signal_label(:regression_recovered), do: "regression recovered"
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -262,10 +286,45 @@ defmodule KaziWeb.StarmapLive do
         </div>
       </section>
 
+      <aside :if={@attention_queue != []} id="attention-queue" data-count={length(@attention_queue)}>
+        <h2>Attention queue</h2>
+        <ol class="attention-queue-list">
+          <li
+            :for={item <- @attention_queue}
+            id={"attention-item-#{item.goal_ref}-#{item.signal}"}
+            data-goal-ref={item.goal_ref}
+            data-signal={item.signal}
+            data-predicate-id={item.predicate_id}
+            class={"attention-item attention-signal-#{item.signal}"}
+          >
+            <span class="attention-signal-label" data-signal={item.signal}>
+              {signal_label(item.signal)}
+            </span>
+            <span class="attention-goal">{item.goal_ref}</span>
+            <span :if={item.predicate_id} class="attention-predicate">
+              {item.predicate_id}
+            </span>
+            <.link navigate={~p"/goals/#{item.goal_ref}/drillin"} class="attention-drillin-link">
+              drill in
+            </.link>
+          </li>
+        </ol>
+      </aside>
+
+      <p :if={@nodes != [] and @attention_queue == []} id="attention-queue-empty" class="empty-state">
+        Nothing needs attention right now.
+      </p>
+
       <style>
         .starmap-counts { list-style: none; display: flex; gap: 1rem; padding: 0; margin: 1rem 0; }
         .starmap-nodes { list-style: none; display: flex; flex-wrap: wrap; gap: .75rem; padding: 0; }
         .starmap-node { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid rgba(0,0,0,.2); min-width: 9rem; }
+        .attention-queue-list { list-style: none; display: flex; flex-direction: column; gap: .5rem; padding: 0; }
+        .attention-item { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: .4rem; border: 1px solid rgba(0,0,0,.2); }
+        .attention-signal-stuck { background: #ffd9d9; }
+        .attention-signal-budget { background: #ffe0c2; }
+        .attention-signal-flake_suspicion { background: #fff3b0; }
+        .attention-signal-regression_recovered { background: #eee; }
         .starmap-state-landed { background: #d8f5d8; }
         .starmap-state-converging { background: #d6e4ff; }
         .starmap-state-stale { background: #ffe0c2; }
