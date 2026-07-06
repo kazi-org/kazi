@@ -129,21 +129,21 @@ defmodule KaziWeb.DagLive do
         .dag-legend { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
         .dag-legend li { padding: .15rem .5rem; border-radius: .25rem; font-size: .8rem; }
         .dag-nodes { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1rem 0; }
-        .dag-node { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid rgba(0,0,0,.2); min-width: 9rem; display: flex; flex-direction: column; gap: .2rem; }
+        .dag-node { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid var(--line, #16233A); min-width: 9rem; display: flex; flex-direction: column; gap: .2rem; background: #0D1626; color: var(--txt, #BFD2EA); }
         .dag-node-name { font-weight: 600; }
         .dag-node-state { font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
         .dag-node-convergence { font-size: .75rem; opacity: .8; }
-        .dag-node-blocker { font-size: .75rem; color: #7a1f1f; }
+        .dag-node-blocker { font-size: .75rem; color: var(--red, #FF5C6C); }
         .dag-edges { display: flex; flex-direction: column; gap: .2rem; }
         .dag-edge { font-family: monospace; font-size: .85rem; }
         .dag-edge-arrow { opacity: .6; }
-        .dag-state-ready { background: #fff7d6; }
-        .dag-state-running { background: #d6e4ff; }
-        .dag-state-converged { background: #d8f5d8; }
-        .dag-state-blocked { background: #ffd9d9; }
-        .dag-state-pending { background: #eee; }
-        .dag-state-stuck { background: #ffe0c2; }
-        .dag-state-over_budget { background: #ffe0c2; }
+        .dag-state-ready { background: #0B1424; border-color: var(--cyn, #56CCF2); border-style: dashed; }
+        .dag-state-running { background: #0A1526; border-color: var(--cyn, #56CCF2); box-shadow: 0 0 7px rgba(86,204,242,.3); }
+        .dag-state-converged { background: #0B1F18; border-color: var(--grn, #2EE6A8); box-shadow: 0 0 7px rgba(46,230,168,.35); }
+        .dag-state-blocked { background: #160D14; border-color: var(--red, #FF5C6C); }
+        .dag-state-pending { background: #0D1626; border-color: #223350; }
+        .dag-state-stuck { background: #141118; border-color: var(--amb, #FFB454); }
+        .dag-state-over_budget { background: #141118; border-color: var(--amb, #FFB454); border-style: dotted; }
       </style>
     </main>
     """
