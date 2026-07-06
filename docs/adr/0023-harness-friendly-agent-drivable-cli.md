@@ -46,7 +46,11 @@ kazi should satisfy the bar it imposes.
    non-interactive (never prompts/blocks on stdin under `--json`/no-TTY/`--yes`),
    and returns stable exit codes. The human-readable output stays the DEFAULT;
    `--json` is the machine surface. (The `propose` clarify phase already has
-   `--yes`/no-TTY, ADR-0019; this generalizes the guarantee.)
+   `--yes`/no-TTY, ADR-0019; this generalizes the guarantee.) Stdout purity is
+   unconditional: the default `:logger` handler is configured to write to stderr
+   (`config/config.exs`), not stdout, so an OTP/Ecto log line (e.g. the migrator's
+   "Migrations already up") can never land ahead of the JSON object and break a
+   `jq`-based parse (issue #804).
 
 2. **A stable, versioned machine-readable result contract.**
    - `kazi run --json` emits on termination a JSON object: terminal `status`
