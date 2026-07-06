@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.84.0](https://github.com/kazi-org/kazi/compare/v1.83.0...v1.84.0) (2026-07-06)
+
+
+### Features
+
+* **web:** starmap density + fidelity pass -- the constellation at real fleet scale ([c540377](https://github.com/kazi-org/kazi/commit/c540377f5728c524cb7a614579acc6dc044f47dd))
+
 ## [1.83.0](https://github.com/kazi-org/kazi/compare/v1.82.1...v1.83.0) (2026-07-06)
 
 
