@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.77.0](https://github.com/kazi-org/kazi/compare/v1.76.0...v1.77.0) (2026-07-06)
+
+
+### Features
+
+* transcript peek LiveView -- tail a run's transcript.jsonl (T46.8) ([437fda6](https://github.com/kazi-org/kazi/commit/437fda6105facebba7acd7a8994b546c45b10932))
+
 ## [1.76.0](https://github.com/kazi-org/kazi/compare/v1.75.0...v1.76.0) (2026-07-06)
 
 
