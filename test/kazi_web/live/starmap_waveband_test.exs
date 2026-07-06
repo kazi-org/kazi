@@ -161,6 +161,48 @@ defmodule KaziWeb.StarmapWavebandTest do
     assert html =~ "gpt-5"
   end
 
+  test "roadmap `needs` edges render as connector lines between group nodes", %{conn: conn} do
+    put_goal(chain_goal())
+
+    for goal_ref <- ~w(a b c) do
+      run = seed(goal_ref)
+      {:ok, _} = RunRegistry.finish(run.run_id, "converged")
+    end
+
+    {:ok, _view, html} = live(conn, ~p"/starmap")
+
+    # One <line> per declared `needs` edge, dep -> group.
+    assert html =~ ~s(id="starmap-edges")
+    assert html =~ ~s(data-from="a" data-to="b")
+    assert html =~ ~s(data-from="b" data-to="c")
+
+    # All endpoints landed: base edge styling only, no active highlight.
+    assert html =~ ~s(class="edge" data-from=)
+    refute html =~ ~s(class="edge edge-active")
+  end
+
+  test "an edge touching a live (converging/stuck) endpoint highlights as active", %{conn: conn} do
+    put_goal(chain_goal())
+    run_a = seed("a")
+    {:ok, _} = RunRegistry.finish(run_a.run_id, "converged")
+    # b: fresh-heartbeat running -> converging: both its edges go active.
+    seed("b")
+
+    {:ok, _view, html} = live(conn, ~p"/starmap")
+
+    assert html =~ ~s(class="edge edge-active" data-from="a" data-to="b")
+    assert html =~ ~s(class="edge edge-active" data-from="b" data-to="c")
+  end
+
+  test "without a roadmap there are no declared edges, so no connector lines", %{conn: conn} do
+    put_goal(nil)
+    seed("flat-goal")
+
+    {:ok, _view, html} = live(conn, ~p"/starmap")
+
+    refute html =~ ~s(id="starmap-edges")
+  end
+
   test "a verdict change is reflected on the next poll tick without a restart", %{conn: conn} do
     put_goal(chain_goal())
     run = seed("a")
