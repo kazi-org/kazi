@@ -63,10 +63,18 @@ Each band node's state extends the four run-registry states above with:
 | `claimed`  | every `needs` dep converged (the live frontier), but no run has started yet |
 | `pending`  | still waiting on an unconverged dep (a later wave), or poisoned by a stuck ancestor |
 
-Wiring a real roadmap ref into the plan/dashboard surface is future work
-(no such CLI flag ships yet; ADR-0056 §Decision 1 is not yet a first-class
-read-model object); today `GoalSource` is a seam a caller (or a test) can
-point at any `Kazi.Goal.t()`.
+`kazi dashboard --roadmap <goal-file>` (T47.2) wires a REAL goal-file into
+this seam: it loads `<goal-file>` through `Kazi.Goal.Loader` — the same loader
+`apply` uses — and points `GoalSource` at the loaded goal, so the starmap
+renders ITS `needs`-DAG in wave bands. Only takes effect on a fresh standalone
+boot; like `--port`/`--bind`, it is advisory (ignored, with a printed warning)
+when this process already serves the endpoint. Absent the flag, `GoalSource`
+stays `None` and the flat-list fallback is unchanged. A bad or unloadable path
+is a loud boot error (a non-zero exit, nothing started) — never a silently
+empty starmap. ADR-0056 §Decision 1 (a first-class roadmap read-model object,
+e.g. from `kazi plan --project`) is still future work; today the CLI flag is
+the on-ramp, and `GoalSource` remains a seam a test can also point at any
+`Kazi.Goal.t()` directly.
 
 ### The attention queue (T46.6)
 
@@ -195,16 +203,24 @@ fleet renders an honest empty state. See `KaziWeb.EventRiverLive`.
 ## `kazi dashboard`
 
 ```
-kazi dashboard [--port <n>] [--bind <ip>]
+kazi dashboard [--port <n>] [--bind <ip>] [--roadmap <goal-file>]
 ```
 
 Boots the web endpoint standalone — **no goal loop in the process** — against
 the shared read-model + run registry, localhost-bound by default
 (`127.0.0.1`); pass `--bind` explicitly to listen on a non-loopback address.
-`--port`/`--bind` apply to a **fresh** standalone boot; if this process
-already supervises the endpoint (the normal dev-server / `mix kazi.apply` /
-test entry points), the verb reports the endpoint's existing bind instead of
-rebinding it.
+`--port`/`--bind`/`--roadmap` apply to a **fresh** standalone boot; if this
+process already supervises the endpoint (the normal dev-server / `mix
+kazi.apply` / test entry points), the verb reports the endpoint's existing
+bind instead of rebinding it, and `--roadmap` is ignored (printed, never
+silent).
+
+`--roadmap <goal-file>` (T47.2) loads that goal-file and renders its
+`needs`-DAG as the starmap's wave bands (see "Wave bands" above) — the first
+user-visible consumer of `KaziWeb.Starmap.GoalSource`. An unloadable path
+(missing file, malformed TOML, a schema violation) is a loud boot error: kazi
+prints the reason to stderr and exits non-zero without starting the endpoint,
+never a silently empty starmap.
 
 A standalone boot serves **every** dashboard view (`/`, `/starmap`, `/goals`,
 `/leases`, `/dag`, `/goals/:id/history`, `/goals/:id/drillin`,
