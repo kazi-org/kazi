@@ -4,6 +4,24 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-07-06 — E47 close-out: T47.3 live proof on released v1.82.1
+
+**Type:** dogfood
+**Tags:** e47, dashboard, event-river, roadmap-ref, visual-fidelity, T47.3
+
+Observed in a real browser against the standalone released binary
+(kazi 1.82.1, `kazi dashboard --bind 0.0.0.0 --roadmap <5-group needs-DAG
+goal-file>`): the starmap renders the full fleet (21 landed / 11 stuck /
+8 stale post-mortems) as the DESIGN's dark state-colored chips with glows,
+the roadmap wave bands render from the --roadmap goal-file, /events streams
+every registered run's events.jsonl newest-first with working drill-in and
+transcript deep links (verified earlier same-day with 2 concurrent live
+fixture runs on v1.82.0), and /dag wears the dark zoo. Visual fidelity took
+kazi rounds 1-3 plus one 15-line hand-finish, arbitrated by
+`kazi apply --check` (the #805 mode) reporting the full vector pass; rounds
+2/3 terminating stuck-at-3 on a quarantined suite flake (instead of
+spinning to 40) is the #820 fix observed working in production.
+
 ## 2026-07-06 — #819/#820 + E47 shipped; visual-fidelity finding: grep predicates pass on presence, only a browser catches "not actually used"
 
 **Type:** finding
