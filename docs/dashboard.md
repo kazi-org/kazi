@@ -64,10 +64,10 @@ Each band node's state extends the four run-registry states above with:
 | `claimed`  | every `needs` dep converged (the live frontier), but no run has started yet |
 | `pending`  | still waiting on an unconverged dep (a later wave), or poisoned by a stuck ancestor |
 
-Wiring a real roadmap ref into `kazi plan --project` / `kazi dashboard` is
-future work (ADR-0056 §Decision 1 is not yet a first-class read-model
-object); today `GoalSource` is a seam a caller (or a test) can point at any
-`Kazi.Goal.t()`.
+Wiring a real roadmap ref into the plan/dashboard surface is future work
+(no such CLI flag ships yet; ADR-0056 §Decision 1 is not yet a first-class
+read-model object); today `GoalSource` is a seam a caller (or a test) can
+point at any `Kazi.Goal.t()`.
 
 The ranked attention queue, the convergence heatmap, and transcript peek are
 later `kazi dashboard` surface tasks (E46 Wave B/C) built on the same
