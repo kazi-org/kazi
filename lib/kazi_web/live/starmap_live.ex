@@ -216,7 +216,9 @@ defmodule KaziWeb.StarmapLive do
       model: run.model,
       heartbeat_at: run.heartbeat_at,
       state: state,
-      sublabel: sublabel(state, run)
+      sublabel: sublabel(state, run),
+      session_name: run.session_name,
+      workspace: run.workspace
     }
   end
 
@@ -339,7 +341,9 @@ defmodule KaziWeb.StarmapLive do
       state: band_state(dag_node.state, run),
       run_id: run && run.run_id,
       harness: run && run.harness,
-      model: run && run.model
+      model: run && run.model,
+      session_name: run && run.session_name,
+      workspace: run && run.workspace
     }
   end
 
@@ -529,9 +533,21 @@ defmodule KaziWeb.StarmapLive do
       state: node.state,
       harness: node.harness,
       model: node.model,
-      sublabel: Map.get(node, :sublabel) || default_sublabel(node.state)
+      sublabel: Map.get(node, :sublabel) || default_sublabel(node.state),
+      session_name: Map.get(node, :session_name),
+      workspace: Map.get(node, :workspace)
     }
   end
+
+  # The SESSIONS row's identity: the operator-assigned name when the run has
+  # one, else the harness. The workspace basename rides alongside as the
+  # tiebreaker for several sessions driving the same repo.
+  defp session_label(node), do: node.session_name || node.harness || "agent"
+
+  defp workspace_base(%{workspace: workspace}) when is_binary(workspace),
+    do: Path.basename(workspace)
+
+  defp workspace_base(_node), do: nil
 
   # Roadmap band nodes carry no run row; their status line is the state name
   # the mockup uses ("CLAIMED · NEXT", "PENDING · NEEDS deps").
@@ -823,7 +839,11 @@ defmodule KaziWeb.StarmapLive do
               {node.session_tag}
             </span>
             <span class="session-text">
-              {node.harness || "agent"} · driving <b>{node.label}</b>
+              {session_label(node)} · driving
+              <b>{node.label}</b><span
+                :if={workspace_base(node)}
+                class="session-ws"
+              > · {workspace_base(node)}</span>
             </span>
           </div>
         </div>
@@ -994,6 +1014,9 @@ defmodule KaziWeb.StarmapLive do
         <h2 class="panel-title display-heading">{@panel.goal_ref}</h2>
 
         <div class="panel-chips">
+          <span :if={@panel.run && @panel.run.session_name} class="chip chip-session">
+            {@panel.run.session_name}
+          </span>
           <span :if={@panel.run} class="chip">{@panel.run.workspace}</span>
           <span :if={@panel.run && @panel.run.harness} class="chip">
             {@panel.run.harness}{if @panel.run.model, do: " · #{@panel.run.model}"}
@@ -1001,6 +1024,15 @@ defmodule KaziWeb.StarmapLive do
           <span class={"chip state-pill pill-#{@panel.state}"}>
             {@panel.sublabel || @panel.state |> to_string() |> String.upcase()}
           </span>
+        </div>
+
+        <div
+          :if={@panel.run && @panel.run.harness == "claude" && @panel.run.harness_session_id}
+          id="starmap-panel-resume"
+          class="panel-resume"
+        >
+          <span class="section-label">RESUME SESSION</span>
+          <code>claude -r {@panel.run.harness_session_id}</code>
         </div>
 
         <div :if={panel_iter(@panel.iterations)} id="starmap-panel-iter" class="panel-iter">
@@ -1172,6 +1204,7 @@ defmodule KaziWeb.StarmapLive do
         .rail-sessions .session-id.red { color: var(--red, #FF5C6C); border-color: rgba(255,92,108,.5); }
         .rail-sessions .session-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .rail-sessions .session-text b { color: var(--txt, #BFD2EA); }
+        .rail-sessions .session-ws { color: #34456B; }
         .fleet-tiles { display: flex; gap: .6rem; flex-wrap: wrap; align-items: stretch; }
         .fleet-tiles .section-label { flex-basis: 100%; }
         .fleet-tile { flex: 1; display: flex; flex-direction: column; align-items: center; gap: .25rem; border: 1px solid var(--line, #16233A); border-radius: 4px; background: rgba(11,20,36,.6); padding: .6rem .4rem; }
@@ -1193,6 +1226,9 @@ defmodule KaziWeb.StarmapLive do
         .panel-title { font-size: 21px; margin: 0; padding-right: 2rem; overflow-wrap: anywhere; }
         .panel-chips { display: flex; gap: .4rem; flex-wrap: wrap; }
         .chip { border: 1px solid var(--line); border-radius: 3px; padding: 2px 8px; font-size: 10px; color: var(--dim); }
+        .chip-session { color: var(--cyn); border-color: rgba(86,204,242,.4); font-weight: 700; }
+        .panel-resume { display: flex; flex-direction: column; gap: .3rem; }
+        .panel-resume code { border: 1px solid var(--line); border-radius: 4px; padding: .4rem .6rem; font-size: 10px; color: var(--txt); overflow-wrap: anywhere; user-select: all; }
         .state-pill.pill-converging, .state-pill.pill-claimed { color: var(--cyn); border-color: rgba(86,204,242,.4); }
         .state-pill.pill-stuck { color: var(--red); border-color: rgba(255,92,108,.5); }
         .state-pill.pill-landed { color: var(--grn); border-color: rgba(46,230,168,.4); }
