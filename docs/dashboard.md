@@ -9,8 +9,7 @@ read-model, and the KaziWeb LiveView assets.
 
 See [ADR-0057](adr/0057-fleet-observability-dashboard.md) for the full
 decision and [docs/plans/E46.md](plans/E46.md) for the epic. This doc is the
-cross-cutting overview; it grows as the epic's later tasks (the attention
-queue, the convergence heatmap, transcript peek) land.
+cross-cutting overview; it grows as the epic's later tasks land.
 
 ## The run registry
 
@@ -69,8 +68,24 @@ Wiring a real roadmap ref into the plan/dashboard surface is future work
 read-model object); today `GoalSource` is a seam a caller (or a test) can
 point at any `Kazi.Goal.t()`.
 
-The ranked attention queue is a later `kazi dashboard` surface task (E46 Wave
-C) built on the same registry.
+### The attention queue (T46.6)
+
+Alongside the fleet list, a rail ranks what needs the operator right now —
+`Kazi.Attention.Queue.build/2`, a pure projection over the SAME persisted
+signals the per-goal detectors already compute:
+
+| Signal                  | Severity | Fires when                                                                 |
+| ------------------------ | -------- | --------------------------------------------------------------------------- |
+| `stuck`                 | 4 (highest) | `Kazi.Loop.StuckDetector.stuck?/2` over the goal's `iteration_history/1`: N consecutive observations share the same non-empty failing set. |
+| `budget`                | 3        | the run's declared `max_iterations` (captured at registration, T46.6) is >= 85% consumed by its observed iteration count. |
+| `flake_suspicion`       | 2        | some predicate's claim-bearing status has flipped at least twice across the history -- nondeterministic-looking, even though no detector has quarantined it. |
+| `regression_recovered`  | 1 (lowest) | `Kazi.ReadModel.regressions/1` recorded a green→red flip whose predicate is back to `:pass` as of the latest observation. |
+
+Entries are ranked by severity, ties broken by recency (the triggering
+iteration index, most recent first) then `goal_ref` -- a fully pinned order.
+Each entry deep-links to that goal's `/goals/:id/drillin`. An empty fleet (or
+a fleet with nothing to flag) renders no rail. See `Kazi.Attention.Queue` and
+`KaziWeb.StarmapLive`.
 
 ## The events sink (T46.2)
 
