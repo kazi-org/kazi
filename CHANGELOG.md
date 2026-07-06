@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.81.0](https://github.com/kazi-org/kazi/compare/v1.80.0...v1.81.0) (2026-07-06)
+
+
+### Features
+
+* kazi dashboard --roadmap renders a real goal-file's wave bands (T47.2) ([8200535](https://github.com/kazi-org/kazi/commit/8200535a1dc586802e0c0bcc7d5ec7bce6c2e6b4))
+
 ## [1.80.0](https://github.com/kazi-org/kazi/compare/v1.79.2...v1.80.0) (2026-07-06)
 
 
