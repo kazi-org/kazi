@@ -176,6 +176,33 @@ defmodule KaziWeb.StarmapPanelTest do
     assert html =~ ~s(data-goal-ref="attn-goal")
   end
 
+  test "the panel shows the session-name chip and the claude resume command", %{conn: conn} do
+    run =
+      seed("resumable-goal", %{
+        session_name: "gtm-sprint",
+        harness_session_id: "abc-123-def"
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    assert html =~ ~s(class="chip chip-session")
+    assert html =~ "gtm-sprint"
+    assert html =~ ~s(id="starmap-panel-resume")
+    assert html =~ "claude -r abc-123-def"
+  end
+
+  test "no resume command without a captured harness session id", %{conn: conn} do
+    run = seed("unresumable-goal")
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    refute html =~ ~s(id="starmap-panel-resume")
+  end
+
   test "the close button dismisses the panel", %{conn: conn} do
     run = seed("closeable-goal")
 

@@ -55,6 +55,36 @@ defmodule Kazi.Integration.RunRegistryWiringTest do
     refute RunRegistry.stale?(run)
   end
 
+  test "the run row captures --session-name and the harness envelope's session_id",
+       %{tmp_dir: tmp_dir} do
+    work = Path.join(tmp_dir, "work")
+    File.mkdir_p!(work)
+
+    goal_file = write_goal_file(tmp_dir, work)
+    harness_stub = write_envelope_harness_stub(tmp_dir)
+
+    {code, _out} =
+      with_io(fn ->
+        Kazi.CLI.run(
+          ["apply", goal_file, "--workspace", work, "--session-name", "wiring-session"],
+          adapter_opts: [command: harness_stub],
+          reobserve_interval_ms: 5,
+          await_timeout: 15_000
+        )
+      end)
+
+    assert code == 0
+
+    run = Repo.get_by!(Run, goal_ref: "run-registry-wiring-fixture")
+
+    assert run.status == "converged"
+    # The operator-assigned label from --session-name.
+    assert run.session_name == "wiring-session"
+    # The claude-envelope session_id, parsed by the profile, threaded through
+    # the loop's iteration payload, and recorded by the runtime.
+    assert run.harness_session_id == "sess-wiring-fixture"
+  end
+
   defp write_goal_file(tmp_dir, work) do
     path = Path.join(tmp_dir, "goal.toml")
 
@@ -82,6 +112,22 @@ defmodule Kazi.Integration.RunRegistryWiringTest do
     File.write!(path, """
     #!/bin/sh
     echo "the converged fix" > fixed.txt
+    exit 0
+    """)
+
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  # A stub that also prints a claude-style JSON envelope carrying a session_id,
+  # so the profile-parse -> loop -> runtime -> registry chain is exercised.
+  defp write_envelope_harness_stub(tmp_dir) do
+    path = Path.join(tmp_dir, "stub_envelope_harness.sh")
+
+    File.write!(path, """
+    #!/bin/sh
+    echo "the converged fix" > fixed.txt
+    echo '{"result":"fixed","session_id":"sess-wiring-fixture"}'
     exit 0
     """)
 

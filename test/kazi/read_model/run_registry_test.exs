@@ -145,4 +145,33 @@ defmodule Kazi.ReadModel.RunRegistryTest do
       assert first.run_id == newer_row.run_id
     end
   end
+
+  describe "session identity" do
+    test "start/1 records the operator-assigned session_name" do
+      attrs = run_attrs() |> Map.put(:session_name, "starmap-pass-3")
+
+      assert {:ok, run} = RunRegistry.start(attrs)
+      assert run.session_name == "starmap-pass-3"
+    end
+
+    test "record_harness_session/2 sets, keeps idempotent, and supersedes the id" do
+      {:ok, run} = RunRegistry.start(run_attrs())
+
+      assert {:ok, updated} = RunRegistry.record_harness_session(run.run_id, "sess-1")
+      assert updated.harness_session_id == "sess-1"
+
+      # Idempotent: rewriting the same id is a no-op read.
+      assert {:ok, same} = RunRegistry.record_harness_session(run.run_id, "sess-1")
+      assert same.harness_session_id == "sess-1"
+
+      # A rotated session records the NEWEST (resumable) id.
+      assert {:ok, rotated} = RunRegistry.record_harness_session(run.run_id, "sess-2")
+      assert rotated.harness_session_id == "sess-2"
+    end
+
+    test "record_harness_session/2 on an unregistered run is :not_found" do
+      assert {:error, :not_found} =
+               RunRegistry.record_harness_session("never-started", "sess-1")
+    end
+  end
 end
