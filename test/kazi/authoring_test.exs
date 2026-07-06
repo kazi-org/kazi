@@ -470,25 +470,35 @@ defmodule Kazi.AuthoringTest do
   # (the captured stdout run through the real `:claude` profile parser), proving a
   # drafted proposal that matches what real claude returns yields a usable goal.
   describe "propose/2 — real claude draft shape (T26.8, the on-ramp step-1 fix)" do
-    test "a real claude draft yields ≥1 usable predicate (no 'no predicates')" do
-      assert {:ok, draft} =
-               Authoring.propose("a CLI tool that prints the current git branch name",
-                 harness: RealClaudeDraftHarness
-               )
+    # T26.8 layer 1: the envelope PARSES over real captured bytes (the prior bug
+    # was the harness layer dropping `:result` when claude's stderr warning
+    # prefixed the JSON, which read as "no predicates" — nothing to do with
+    # provider-config validity). Exercised via `parse_proposal/2` directly so
+    # this stays a pure pin on the parse layer, independent of the #788 plan-time
+    # load-validation gate exercised below (this exact fixture's custom_script
+    # config predates the T26.8 layer-2 prompt fix and does not load).
+    test "a real claude draft PARSES into ≥1 predicate (no 'no predicates')" do
+      {:ok, %{result: output}} = RealClaudeDraftHarness.run("idea", ".", [])
 
-      assert draft.status == :proposed
-      assert draft.goal.mode == :create
-      assert length(draft.goal.predicates) >= 1
+      assert {:ok, %Goal{} = goal} = Authoring.parse_proposal(output, "git-branch-cli")
+      assert length(goal.predicates) >= 1
+      assert :custom_script in Enum.map(goal.predicates, & &1.kind)
     end
 
-    test "a drafted predicate naming custom_script survives into the goal" do
-      assert {:ok, draft} =
+    # #788: this fixture predates the T26.8 layer-2 prompt fix — its custom_script
+    # config uses an invented `{"script", …}` shape with no `cmd`. Before #788 that
+    # PARSED fine and was persisted as `proposed`, only failing later at `approve`
+    # ("the stored goal no longer loads"). Plan-time validation now matches
+    # load-time validation, so `propose` rejects it immediately and nothing is
+    # persisted — the caller never gets a proposal that can never run.
+    test "a drafted custom_script goal missing cmd is rejected at propose, not later at approve" do
+      assert {:error, {:invalid_goal, reason}} =
                Authoring.propose("a CLI tool that prints the current git branch name",
                  harness: RealClaudeDraftHarness
                )
 
-      kinds = Enum.map(draft.goal.predicates, & &1.kind)
-      assert :custom_script in kinds
+      assert reason =~ "requires a non-empty string \"cmd\""
+      assert Repo.aggregate(ProposedGoal, :count) == 0
     end
 
     # T26.8 (layer 2, the `approve` blocker): the NEXT layer of the same bug. After
