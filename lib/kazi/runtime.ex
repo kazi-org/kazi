@@ -51,6 +51,7 @@ defmodule Kazi.Runtime do
     Scope
   }
 
+  alias Kazi.Harness.ChildSupervisor
   alias Kazi.ReadModel.{Iteration, RunRegistry}
   alias Kazi.Sink.Events, as: EventsSink
 
@@ -255,6 +256,13 @@ defmodule Kazi.Runtime do
       transcript_sink_path = maybe_transcript_sink_path(persist?, run_id, opts)
       # T46.2 (ADR-0057 decision 3): the run's events sink path — same gate.
       events_sink_path = maybe_events_sink_path(persist?, run_id, opts)
+
+      # Issue #857: warn loudly (stderr + this run's own events sink) if a
+      # PRIOR run of the SAME goal_ref recorded a harness subprocess pid that
+      # is still alive — a probable orphan (its controller crashed without
+      # reaping it, #856) racing this fresh run. Observational only: never
+      # blocks or alters this run's own start.
+      warn_on_orphans(persist?, run_id, goal_ref, events_sink_path)
 
       loop_opts =
         opts
@@ -686,6 +694,7 @@ defmodule Kazi.Runtime do
           run_stream_observer(stream, payload)
           RunRegistry.heartbeat(run_id)
           record_harness_session(run_id, payload)
+          record_harness_pid(run_id, payload)
           persist_iteration(goal_ref, payload, events_sink_path)
         end
 
@@ -696,6 +705,7 @@ defmodule Kazi.Runtime do
         fn payload ->
           RunRegistry.heartbeat(run_id)
           record_harness_session(run_id, payload)
+          record_harness_pid(run_id, payload)
           persist_iteration(goal_ref, payload, events_sink_path)
         end
 
@@ -715,6 +725,18 @@ defmodule Kazi.Runtime do
   end
 
   defp record_harness_session(_run_id, _payload), do: :ok
+
+  # Project the dispatched harness subprocess's OS pid (issue #857,
+  # ChildSupervisor's pid-file side channel, threaded via the loop's iteration
+  # payload) onto the run row, so a LATER run's orphan-on-resume check
+  # (`warn_on_orphans/4`) can see it. Best-effort like every registry write;
+  # `record_harness_pid/2` no-ops on an unchanged pid.
+  defp record_harness_pid(run_id, %{harness_pid: pid}) when is_binary(pid) do
+    RunRegistry.record_harness_pid(run_id, pid)
+    :ok
+  end
+
+  defp record_harness_pid(_run_id, _payload), do: :ok
 
   # T15.4: run the streaming observer, contained — a raising stream callback must
   # never alter convergence or block the persistence projection that follows it.
@@ -939,6 +961,63 @@ defmodule Kazi.Runtime do
       %{id: id} when is_atom(id) -> Atom.to_string(id)
       _ -> nil
     end
+  end
+
+  # =============================================================================
+  # Orphan-on-resume warning (issue #857)
+  # =============================================================================
+  #
+  # A prior run's harness subprocess can outlive that run's controller (#856's
+  # abnormal-exit path predates the #857 child-supervision fix, and even after
+  # it a pid that predates this deploy has no supervisor watching it). If a
+  # fresh apply for the SAME goal_ref sees that prior run's recorded
+  # `harness_child_pid` still alive, that is a probable orphan: an unsupervised
+  # writer racing this run with a stale view of the workspace. This check is
+  # purely observational (never blocks/alters this run's own start) and
+  # best-effort, matching every other registry touch in this module.
+
+  defp warn_on_orphans(false, _run_id, _goal_ref, _events_sink_path), do: :ok
+
+  defp warn_on_orphans(true, run_id, goal_ref, events_sink_path) do
+    goal_ref
+    |> RunRegistry.list_by_goal_ref(run_id)
+    |> Enum.filter(&orphaned?/1)
+    |> Enum.each(&emit_orphan_warning(&1, events_sink_path))
+
+    :ok
+  rescue
+    error ->
+      Logger.warning(fn ->
+        "kazi.runtime orphan-on-resume check raised: #{Exception.message(error)}"
+      end)
+
+      :ok
+  end
+
+  defp orphaned?(%ReadModel.Run{harness_child_pid: pid}) when is_binary(pid),
+    do: ChildSupervisor.alive?(pid)
+
+  defp orphaned?(%ReadModel.Run{}), do: false
+
+  defp emit_orphan_warning(%ReadModel.Run{} = run, events_sink_path) do
+    message =
+      "kazi: WARNING possible orphaned harness process: prior run #{run.run_id} " <>
+        "(goal=#{run.goal_ref}) recorded harness pid #{run.harness_child_pid}, which is " <>
+        "still alive — its controller may have exited without reaping it; that process " <>
+        "may still be mutating this workspace"
+
+    Logger.warning(fn -> message end)
+    IO.puts(:stderr, message)
+
+    EventsSink.append(events_sink_path, %{
+      type: "orphan_warning",
+      prior_run_id: run.run_id,
+      goal_ref: run.goal_ref,
+      harness_pid: run.harness_child_pid,
+      at: DateTime.to_iso8601(DateTime.utc_now())
+    })
+
+    :ok
   end
 
   defp finish_run(false, _run_id, _result), do: :ok

@@ -485,6 +485,14 @@ defmodule Kazi.Loop do
               # registry row (resumable via `claude -r <id>`). nil until a
               # dispatch reports one; a later dispatch's id supersedes.
               last_session_id: nil,
+              # Issue #857: the OS pid of the latest dispatch's harness
+              # subprocess (as reported by `Kazi.Harness.CliAdapter`'s
+              # child-supervision wrapper), carried on the iteration payload so
+              # the runtime can record it on the fleet registry row — the
+              # orphan-on-resume check reads it back on a later run's startup.
+              # nil until a dispatch reports one; a later dispatch's pid
+              # supersedes.
+              last_harness_pid: nil,
               # --- T36.4 (ADR-0047 §2/§4): context-tier escalation --------------
               # The resolved escalation `Config` (thresholds + stop-rule flag) and
               # the running escalation `State` (the active tier, the non-progress
@@ -2056,7 +2064,8 @@ defmodule Kazi.Loop do
         last_tools: Counters.tools(result),
         last_orientation_prefix: parts.orientation,
         last_retrieval_section: parts.retrieval,
-        last_session_id: harness_session_id(result, data.last_session_id)
+        last_session_id: harness_session_id(result, data.last_session_id),
+        last_harness_pid: harness_pid(result, data.last_harness_pid)
     }
   end
 
@@ -2070,6 +2079,15 @@ defmodule Kazi.Loop do
     do: session_id
 
   defp harness_session_id(_result, prior), do: prior
+
+  # The dispatch result's harness OS pid (issue #857, ChildSupervisor's
+  # pid-file side channel) when reported, else keep the previously seen one —
+  # a result with no pid (a failed dispatch) must not erase it.
+  defp harness_pid({:ok, %{} = result}, prior), do: harness_pid(result, prior)
+
+  defp harness_pid(%{harness_pid: pid}, _prior) when is_binary(pid), do: pid
+
+  defp harness_pid(_result, prior), do: prior
 
   # The stable orientation PREFIX for the live dispatch (T19.1, ADR-0010 §3). Builds
   # the ranked blast-radius pack from the current failing slice + workspace and
@@ -2584,7 +2602,8 @@ defmodule Kazi.Loop do
       # the stuck-stop record (which upserts the last observation's row) keeps them.
       context: data.last_context || Counters.empty_context(),
       tools: data.last_tools,
-      harness_session_id: data.last_session_id
+      harness_session_id: data.last_session_id,
+      harness_pid: data.last_harness_pid
     }
 
     try do
@@ -2966,7 +2985,8 @@ defmodule Kazi.Loop do
       tools: data.last_tools,
       # The inner harness's session id from the latest dispatch (nil until one
       # reports it), so the runtime records it on the fleet registry row.
-      harness_session_id: data.last_session_id
+      harness_session_id: data.last_session_id,
+      harness_pid: data.last_harness_pid
     }
 
     try do
@@ -3002,7 +3022,8 @@ defmodule Kazi.Loop do
       # the budget-stop record is attributable too.
       context: data.last_context || Counters.empty_context(),
       tools: data.last_tools,
-      harness_session_id: data.last_session_id
+      harness_session_id: data.last_session_id,
+      harness_pid: data.last_harness_pid
     }
 
     try do
