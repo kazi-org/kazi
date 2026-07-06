@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.85.0](https://github.com/kazi-org/kazi/compare/v1.84.0...v1.85.0) (2026-07-06)
+
+
+### Features
+
+* **web:** starmap edges, stuck sessions, slide-over drill-in panel ([d2c0a26](https://github.com/kazi-org/kazi/commit/d2c0a26798dea3177773527e496a658ce5cd37b3))
+* **web:** wire the no-build LiveView client so phx-click works in a browser ([c63f9f8](https://github.com/kazi-org/kazi/commit/c63f9f8fd6924864f513abb369abc5ca6c138688))
+
 ## [1.84.0](https://github.com/kazi-org/kazi/compare/v1.83.0...v1.84.0) (2026-07-06)
 
 
