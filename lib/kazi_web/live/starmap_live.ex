@@ -62,12 +62,17 @@ defmodule KaziWeb.StarmapLive do
   alias Kazi.Goal.DepGraph
   alias Kazi.ReadModel.{Run, RunRegistry}
   alias Kazi.Scheduler.DagSnapshot
+  alias Kazi.Sink.Events
   alias KaziWeb.Starmap.GoalSource
 
   # Poll interval for picking up registry changes (T46.5 acc: "a verdict change
   # is reflected on refresh without restart"). A LiveView test never waits this
   # long — it triggers the same `handle_info(:tick, ...)` message directly.
   @poll_ms 2_000
+
+  # Bound on how many of the newest fleet-wide events the bottom river ticker
+  # carries — a glance, not the full feed (`KaziWeb.EventRiverLive` is that).
+  @river_window 12
 
   @impl true
   def mount(_params, _session, socket) do
@@ -78,14 +83,22 @@ defmodule KaziWeb.StarmapLive do
      |> assign(:page_title, "kazi · starmap")
      |> assign_runs()
      |> assign_bands()
-     |> assign_attention_queue()}
+     |> assign_attention_queue()
+     |> assign_canvas()
+     |> assign_river()}
   end
 
   @impl true
   def handle_info(:tick, socket) do
     if connected?(socket), do: Process.send_after(self(), :tick, @poll_ms)
 
-    {:noreply, socket |> assign_runs() |> assign_bands() |> assign_attention_queue()}
+    {:noreply,
+     socket
+     |> assign_runs()
+     |> assign_bands()
+     |> assign_attention_queue()
+     |> assign_canvas()
+     |> assign_river()}
   end
 
   defp assign_runs(socket) do
@@ -217,105 +230,407 @@ defmodule KaziWeb.StarmapLive do
   defp signal_label(:flake_suspicion), do: "flake suspicion"
   defp signal_label(:regression_recovered), do: "regression recovered"
 
+  # ---------------------------------------------------------------------------
+  # Visual canvas (ADR-0057/docs/dashboard-design.md): the SAME nodes as the
+  # data-attribute lists above (wave bands when a roadmap is configured,
+  # otherwise the flat fleet list folded into a single synthetic frontier),
+  # laid out as an SVG wave-band DAG with per-state node classes (the "node
+  # state zoo") and session tags on the active (`:converging`/`:claimed`)
+  # nodes. Purely a rendering of state already computed by `assign_bands/1`
+  # and `assign_runs/1` — no new read.
+  # ---------------------------------------------------------------------------
+
+  @frontier_width 220
+  @node_row_height 90
+
+  defp assign_canvas(socket) do
+    canvas_bands =
+      cond do
+        socket.assigns.bands != [] -> socket.assigns.bands
+        socket.assigns.nodes != [] -> [%{frontier: 0, nodes: socket.assigns.nodes}]
+        true -> []
+      end
+
+    placed =
+      Enum.flat_map(canvas_bands, fn band ->
+        band.nodes
+        |> Enum.with_index()
+        |> Enum.map(fn {node, row} -> {band.frontier, row, normalize_canvas_node(node)} end)
+      end)
+
+    session_tags = build_session_tags(placed)
+
+    canvas_nodes =
+      Enum.map(placed, fn {frontier, row, node} ->
+        Map.merge(node, %{
+          frontier: frontier,
+          cx: 60 + frontier * @frontier_width,
+          cy: 70 + row * @node_row_height,
+          session_tag: Map.get(session_tags, node.id)
+        })
+      end)
+
+    wave_labels =
+      Enum.map(canvas_bands, fn band ->
+        %{frontier: band.frontier, x: 60 + band.frontier * @frontier_width}
+      end)
+
+    socket
+    |> assign(:canvas_nodes, canvas_nodes)
+    |> assign(:canvas_wave_labels, wave_labels)
+  end
+
+  # Normalizes a flat fleet node (`run_id`/`goal_ref`) or a band node
+  # (`id`/`name`) onto the same shape the canvas draws from.
+  defp normalize_canvas_node(node) do
+    %{
+      id: Map.get(node, :id) || Map.get(node, :run_id),
+      label: Map.get(node, :name) || Map.get(node, :goal_ref),
+      state: node.state,
+      harness: node.harness,
+      model: node.model
+    }
+  end
+
+  # Session tags (`S1`, `S2`, ...): assigned in canvas order to every node
+  # whose state is "active" per the spec's zoo — dispatched-and-running
+  # (`:converging`) or eligible-right-now (`:claimed`).
+  defp build_session_tags(placed) do
+    placed
+    |> Enum.filter(fn {_frontier, _row, node} -> node.state in [:converging, :claimed] end)
+    |> Enum.with_index(1)
+    |> Map.new(fn {{_frontier, _row, node}, n} -> {node.id, "S#{n}"} end)
+  end
+
+  # The node-state zoo class (docs/dashboard-design.md): the six states this
+  # view can render map onto the spec's `nd-*` SVG/CSS classes.
+  defp nd_class(:landed), do: "nd-landed"
+  defp nd_class(:converging), do: "nd-conv"
+  defp nd_class(:stuck), do: "nd-stuck"
+  defp nd_class(:claimed), do: "nd-claimed"
+  defp nd_class(:pending), do: "nd-pending"
+  defp nd_class(:stale), do: "nd-stale"
+
+  # T47.1's fleet-wide event feed (`Kazi.Sink.Events`), reused here as a
+  # small, bounded ticker for the bottom event-river bar — the SAME source
+  # `KaziWeb.EventRiverLive` reads, just windowed tighter for a glance.
+  defp assign_river(socket) do
+    assign(socket, :river_entries, river_entries())
+  end
+
+  defp river_entries do
+    RunRegistry.list()
+    |> Enum.flat_map(&run_river_events/1)
+    |> Enum.sort_by(& &1.observed_at, {:desc, DateTime})
+    |> Enum.take(@river_window)
+    |> Enum.map(&river_label/1)
+  end
+
+  defp run_river_events(%Run{events_sink_path: nil}), do: []
+
+  defp run_river_events(%Run{} = run) do
+    run.events_sink_path
+    |> Events.read()
+    |> Enum.map(&river_entry(&1, run))
+  end
+
+  defp river_entry(event, run) do
+    %{
+      goal_ref: event["goal_ref"] || run.goal_ref,
+      type: event["type"] || "event",
+      observed_at: parse_river_time(event["observed_at"])
+    }
+  end
+
+  defp parse_river_time(nil), do: DateTime.from_unix!(0)
+
+  defp parse_river_time(iso8601) do
+    case DateTime.from_iso8601(iso8601) do
+      {:ok, dt, _offset} -> dt
+      {:error, _reason} -> DateTime.from_unix!(0)
+    end
+  end
+
+  defp river_label(%{goal_ref: goal_ref, type: type, observed_at: observed_at}) do
+    "[#{Calendar.strftime(observed_at, "%H:%M:%S")}] #{goal_ref} · #{type}"
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
-    <main id="starmap">
-      <h1>kazi starmap</h1>
-      <p>
-        Read-only fleet view (ADR-0011 / ADR-0057): every registered `kazi apply` run
-        on this machine, at a glance.
-      </p>
-
-      <ul id="starmap-counts" class="starmap-counts">
-        <li
-          :for={s <- ~w(landed converging stale stuck)a}
-          data-state={s}
-          data-count={Map.get(@counts, s, 0)}
-        >
-          {s}: {Map.get(@counts, s, 0)}
-        </li>
-      </ul>
-
-      <ol :if={@nodes != []} id="starmap-nodes" class="starmap-nodes">
-        <li
-          :for={node <- @nodes}
-          id={"starmap-node-#{node.run_id}"}
-          data-run-id={node.run_id}
-          data-goal-ref={node.goal_ref}
-          data-state={node.state}
-          class={"starmap-node starmap-state-#{node.state}"}
-        >
-          <span class="starmap-node-goal">{node.goal_ref}</span>
-          <span class="starmap-node-state" data-state={node.state}>{node.state}</span>
-          <span :if={node.harness} class="starmap-node-tag">
-            {node.harness}<span :if={node.model}>/{node.model}</span>
+    <main id="starmap" class="shell">
+      <aside id="starmap-rail" class="rail">
+        <div class="wordmark display-heading">
+          KAZI <span class="cyn">STARMAP</span>
+          <span id="starmap-live-badge" class="live-badge">
+            <span class="live-dot"></span>LIVE
           </span>
-        </li>
-      </ol>
-
-      <p :if={@nodes == []} id="starmap-empty" class="empty-state">
-        No runs registered yet. Start a `kazi apply` and it will appear here.
-      </p>
-
-      <section :if={@bands != []} id="starmap-wavebands" data-frontiers={length(@bands)}>
-        <h2>Wave bands</h2>
-        <div
-          :for={band <- @bands}
-          id={"starmap-band-#{band.frontier}"}
-          data-frontier={band.frontier}
-          class="starmap-band"
-        >
-          <h3>Wave {band.frontier}</h3>
-          <ol class="starmap-nodes">
-            <li
-              :for={node <- band.nodes}
-              id={"starmap-band-node-#{node.id}"}
-              data-node-id={node.id}
-              data-frontier={band.frontier}
-              data-state={node.state}
-              class={"starmap-node starmap-state-#{node.state}"}
-            >
-              <span class="starmap-node-goal">{node.name}</span>
-              <span class="starmap-node-state" data-state={node.state}>{node.state}</span>
-              <span :if={node.harness} class="starmap-node-tag">
-                {node.harness}<span :if={node.model}>/{node.model}</span>
-              </span>
-            </li>
-          </ol>
         </div>
-      </section>
 
-      <aside :if={@attention_queue != []} id="attention-queue" data-count={length(@attention_queue)}>
-        <h2>Attention queue</h2>
-        <ol class="attention-queue-list">
-          <li
-            :for={item <- @attention_queue}
-            id={"attention-item-#{item.goal_ref}-#{item.signal}"}
-            data-goal-ref={item.goal_ref}
-            data-signal={item.signal}
-            data-predicate-id={item.predicate_id}
-            class={"attention-item attention-signal-#{item.signal}"}
+        <div id="starmap-fleet-tiles" class="fleet-tiles">
+          <div class="section-label">FLEET</div>
+          <div class="fleet-tile" data-tile="running">
+            <span class="fleet-tile-value nd-conv">{Map.get(@counts, :converging, 0)}</span>
+            <span class="fleet-tile-label">RUNNING</span>
+          </div>
+          <div class="fleet-tile" data-tile="landed">
+            <span class="fleet-tile-value nd-landed">{Map.get(@counts, :landed, 0)}</span>
+            <span class="fleet-tile-label">LANDED</span>
+          </div>
+          <div class="fleet-tile" data-tile="stuck">
+            <span class="fleet-tile-value nd-stuck">{Map.get(@counts, :stuck, 0)}</span>
+            <span class="fleet-tile-label">STUCK</span>
+          </div>
+        </div>
+
+        <div id="starmap-rail-attention" class="rail-attention">
+          <div class="section-label">NEEDS YOU</div>
+
+          <aside
+            :if={@attention_queue != []}
+            id="attention-queue"
+            data-count={length(@attention_queue)}
           >
-            <span class="attention-signal-label" data-signal={item.signal}>
-              {signal_label(item.signal)}
-            </span>
-            <span class="attention-goal">{item.goal_ref}</span>
-            <span :if={item.predicate_id} class="attention-predicate">
-              {item.predicate_id}
-            </span>
-            <.link navigate={~p"/goals/#{item.goal_ref}/drillin"} class="attention-drillin-link">
-              drill in
-            </.link>
+            <ol class="attention-queue-list">
+              <li
+                :for={item <- @attention_queue}
+                id={"attention-item-#{item.goal_ref}-#{item.signal}"}
+                data-goal-ref={item.goal_ref}
+                data-signal={item.signal}
+                data-predicate-id={item.predicate_id}
+                class={"attention-item attention-signal-#{item.signal}"}
+              >
+                <span class="attention-signal-label" data-signal={item.signal}>
+                  {signal_label(item.signal)}
+                </span>
+                <span class="attention-goal">{item.goal_ref}</span>
+                <span :if={item.predicate_id} class="attention-predicate">
+                  {item.predicate_id}
+                </span>
+                <.link navigate={~p"/goals/#{item.goal_ref}/drillin"} class="attention-drillin-link">
+                  drill in
+                </.link>
+              </li>
+            </ol>
+          </aside>
+
+          <p
+            :if={@nodes != [] and @attention_queue == []}
+            id="attention-queue-empty"
+            class="empty-state"
+          >
+            Nothing needs attention right now.
+          </p>
+        </div>
+
+        <ul id="starmap-legend" class="legend">
+          <li class="section-label">LEGEND</li>
+          <li class="legend-item" data-state="landed">
+            <span class="legend-dot nd-landed"></span>landed
           </li>
-        </ol>
+          <li class="legend-item" data-state="converging">
+            <span class="legend-dot nd-conv"></span>converging
+          </li>
+          <li class="legend-item" data-state="stuck">
+            <span class="legend-dot nd-stuck"></span>stuck
+          </li>
+          <li class="legend-item" data-state="claimed">
+            <span class="legend-dot nd-claimed"></span>claimed
+          </li>
+          <li class="legend-item" data-state="pending">
+            <span class="legend-dot nd-pending"></span>pending
+          </li>
+          <li class="legend-item" data-state="stale">
+            <span class="legend-dot nd-stale"></span>stale
+          </li>
+        </ul>
       </aside>
 
-      <p :if={@nodes != [] and @attention_queue == []} id="attention-queue-empty" class="empty-state">
-        Nothing needs attention right now.
-      </p>
+      <div class="canvas-shell">
+        <div class="starfield sweep" aria-hidden="true"></div>
+
+        <h1>kazi starmap</h1>
+        <p>
+          Read-only fleet view (ADR-0011 / ADR-0057): every registered `kazi apply` run
+          on this machine, at a glance.
+        </p>
+
+        <ul id="starmap-counts" class="starmap-counts">
+          <li
+            :for={s <- ~w(landed converging stale stuck)a}
+            data-state={s}
+            data-count={Map.get(@counts, s, 0)}
+          >
+            {s}: {Map.get(@counts, s, 0)}
+          </li>
+        </ul>
+
+        <ol :if={@nodes != []} id="starmap-nodes" class="starmap-nodes">
+          <li
+            :for={node <- @nodes}
+            id={"starmap-node-#{node.run_id}"}
+            data-run-id={node.run_id}
+            data-goal-ref={node.goal_ref}
+            data-state={node.state}
+            class={"starmap-node starmap-state-#{node.state} #{nd_class(node.state)}"}
+          >
+            <span class="starmap-node-goal">{node.goal_ref}</span>
+            <span class="starmap-node-state" data-state={node.state}>{node.state}</span>
+            <span :if={node.harness} class="starmap-node-tag">
+              {node.harness}<span :if={node.model}>/{node.model}</span>
+            </span>
+          </li>
+        </ol>
+
+        <p :if={@nodes == []} id="starmap-empty" class="empty-state">
+          No runs registered yet. Start a `kazi apply` and it will appear here.
+        </p>
+
+        <section :if={@bands != []} id="starmap-wavebands" data-frontiers={length(@bands)}>
+          <h2>Wave bands</h2>
+          <div
+            :for={band <- @bands}
+            id={"starmap-band-#{band.frontier}"}
+            data-frontier={band.frontier}
+            class="starmap-band"
+          >
+            <h3>Wave {band.frontier}</h3>
+            <ol class="starmap-nodes">
+              <li
+                :for={node <- band.nodes}
+                id={"starmap-band-node-#{node.id}"}
+                data-node-id={node.id}
+                data-frontier={band.frontier}
+                data-state={node.state}
+                class={"starmap-node starmap-state-#{node.state} #{nd_class(node.state)}"}
+              >
+                <span class="starmap-node-goal">{node.name}</span>
+                <span class="starmap-node-state" data-state={node.state}>{node.state}</span>
+                <span :if={node.harness} class="starmap-node-tag">
+                  {node.harness}<span :if={node.model}>/{node.model}</span>
+                </span>
+              </li>
+            </ol>
+          </div>
+        </section>
+
+        <svg
+          :if={@canvas_nodes != []}
+          id="starmap-canvas"
+          class="starmap-canvas"
+          viewBox="0 0 1160 742"
+          role="img"
+          aria-label="wave-band DAG canvas"
+        >
+          <text
+            :for={wl <- @canvas_wave_labels}
+            class="wave-label section-label"
+            x={wl.x}
+            y="24"
+          >
+            WAVE {wl.frontier}
+          </text>
+
+          <g
+            :for={node <- @canvas_nodes}
+            class="canvas-node-group"
+            data-node-id={node.id}
+            data-state={node.state}
+          >
+            <circle
+              :if={node.state in [:converging, :stuck]}
+              class={"ring" <> if(node.state == :stuck, do: " redr", else: "")}
+              cx={node.cx}
+              cy={node.cy}
+              r="14"
+            />
+            <circle
+              id={"canvas-node-#{node.id}"}
+              class={"canvas-node #{nd_class(node.state)}"}
+              data-state={node.state}
+              cx={node.cx}
+              cy={node.cy}
+              r={if node.state == :pending, do: "10", else: "13"}
+            />
+            <text class="canvas-node-label" x={node.cx} y={node.cy + 26}>{node.label}</text>
+            <text
+              :if={node.session_tag}
+              class="stag"
+              data-session-tag={node.session_tag}
+              x={node.cx + 18}
+              y={node.cy - 16}
+            >
+              {node.session_tag}
+            </text>
+          </g>
+        </svg>
+      </div>
+
+      <div id="starmap-event-river" class="event-river">
+        <span class="event-river-label section-label">EVENT RIVER</span>
+
+        <div :if={@river_entries != []} class="ticker">
+          <div class="ticker-track">
+            <span :for={entry <- @river_entries} class="ticker-entry">{entry}</span>
+            <span :for={entry <- @river_entries} class="ticker-entry" aria-hidden="true">
+              {entry}
+            </span>
+          </div>
+        </div>
+
+        <p :if={@river_entries == []} id="starmap-event-river-empty" class="empty-state">
+          No events yet.
+        </p>
+      </div>
 
       <style>
+        .shell { display: flex; min-height: 100vh; flex-wrap: wrap; }
+
+        .rail { width: 280px; flex: 0 0 280px; background: var(--rail); border-right: 1px solid var(--line); padding: 1rem; display: flex; flex-direction: column; gap: 1.1rem; }
+        .wordmark { font-size: 16px; letter-spacing: .2em; }
+        .wordmark .cyn { color: var(--cyn); }
+        .live-badge { display: inline-flex; align-items: center; gap: .3rem; color: var(--grn); font-size: 10px; margin-left: .6rem; }
+        .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--grn); box-shadow: 0 0 6px var(--grn); display: inline-block; }
+
+        .fleet-tiles { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+        .fleet-tile { display: flex; flex-direction: column; align-items: center; }
+        .fleet-tile-value { font-size: 20px; font-weight: 700; }
+        .fleet-tile-value.nd-conv { color: var(--cyn); }
+        .fleet-tile-value.nd-landed { color: var(--grn); }
+        .fleet-tile-value.nd-stuck { color: var(--red); }
+        .fleet-tile-label { font-size: 9px; letter-spacing: .2em; color: var(--dim); }
+
+        .legend { list-style: none; padding: 0; margin-top: auto; display: flex; flex-direction: column; gap: .35rem; }
+        .legend-item { display: flex; align-items: center; gap: .4rem; color: var(--dim); }
+        .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .legend-dot.nd-landed { background: var(--grn); }
+        .legend-dot.nd-conv { background: #0A1526; border: 2px solid var(--cyn); }
+        .legend-dot.nd-stuck { background: #160D14; border: 2px solid var(--red); }
+        .legend-dot.nd-claimed { background: #0B1424; border: 1.5px dashed var(--cyn); }
+        .legend-dot.nd-pending { background: #0D1626; border: 1.5px solid #223350; }
+        .legend-dot.nd-stale { background: #141118; border: 1.5px dotted var(--amb); }
+
+        .canvas-shell { position: relative; flex: 1; min-width: 0; padding: 1rem 1.5rem 3.5rem; }
+        .starfield { position: absolute; inset: 0; background-image: radial-gradient(rgba(191,210,234,.25) 1px, transparent 1px); background-size: 48px 48px; opacity: .2; pointer-events: none; }
+        .starmap-canvas { width: 100%; height: auto; margin-top: 1rem; }
+        .starmap-canvas .nd-landed { fill: var(--grn); }
+        .starmap-canvas .nd-conv { fill: #0A1526; stroke: var(--cyn); stroke-width: 2; }
+        .starmap-canvas .nd-stuck { fill: #160D14; stroke: var(--red); stroke-width: 2; }
+        .starmap-canvas .nd-claimed { fill: #0B1424; stroke: var(--cyn); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: .85; }
+        .starmap-canvas .nd-pending { fill: #0D1626; stroke: #223350; stroke-width: 1.5; }
+        .starmap-canvas .nd-stale { fill: #141118; stroke: var(--amb); stroke-width: 1.5; stroke-dasharray: 2 4; }
+        .starmap-canvas .ring { fill: none; stroke: var(--cyn); stroke-width: 1.5; }
+        .starmap-canvas .ring.redr { stroke: var(--red); }
+        .starmap-canvas .wave-label { fill: #3D4F6E; letter-spacing: .32em; }
+        .starmap-canvas .canvas-node-label { fill: #D7E4F4; font-size: 12px; font-weight: 700; text-anchor: middle; }
+        .starmap-canvas .stag { fill: var(--cyn); font-size: 10px; font-weight: 700; }
+
+        .event-river { flex: 0 0 100%; height: 38px; background: rgba(10,17,32,.92); border-top: 1px solid var(--line); display: flex; align-items: center; gap: 1rem; padding: 0 1rem; overflow: hidden; }
+        .event-river-label { flex: 0 0 auto; }
+        .ticker { flex: 1; overflow: hidden; }
+        .ticker-track { display: flex; gap: 2rem; white-space: nowrap; width: max-content; }
+        .ticker-entry { color: var(--dim); }
+
         .starmap-counts { list-style: none; display: flex; gap: 1rem; padding: 0; margin: 1rem 0; }
         .starmap-nodes { list-style: none; display: flex; flex-wrap: wrap; gap: .75rem; padding: 0; }
         .starmap-node { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid rgba(0,0,0,.2); min-width: 9rem; }
