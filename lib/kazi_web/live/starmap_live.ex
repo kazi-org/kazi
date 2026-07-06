@@ -45,7 +45,9 @@ defmodule KaziWeb.StarmapLive do
   session tags (`S1`, `S2`, ...) mirrored into the rail's SESSIONS section
   (red chip for a stuck session). Clicking a SESSIONS row filters the
   constellation to that session's goal (everything else dims); clicking the
-  same row again — or the session ending — clears the filter. Clicking any
+  same row again — or the session ending — clears the filter. The FLEET
+  tiles (RUNNING / LANDED / STUCK) filter the same way by state; the two
+  filters are mutually exclusive (setting one clears the other). Clicking any
   canvas node — or an attention
   entry — opens the right slide-over drill-in panel: identity chips,
   iteration/budget burn, the predicate-vector DNA strip, the convergence
@@ -91,6 +93,14 @@ defmodule KaziWeb.StarmapLive do
   # carries — a glance, not the full feed (`KaziWeb.EventRiverLive` is that).
   @river_window 12
 
+  # The mockup's base canvas height. A band taller than it GROWS the canvas
+  # (the viewBox height stretches at @row_pitch per node) and the canvas
+  # scrolls vertically inside its shell — nodes never wrap into extra
+  # sub-columns, keeping the mockup's one-column-per-band composition and
+  # leaving straight sight-lines for the `needs` edges.
+  @canvas_min_height 742
+  @row_pitch 96
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: Process.send_after(self(), :tick, @poll_ms)
@@ -100,6 +110,7 @@ defmodule KaziWeb.StarmapLive do
      |> assign(:page_title, "kazi · starmap")
      |> assign(:selected_id, nil)
      |> assign(:session_filter, nil)
+     |> assign(:state_filter, nil)
      |> assign_runs()
      |> assign_bands()
      |> assign_attention_queue()
@@ -140,7 +151,9 @@ defmodule KaziWeb.StarmapLive do
   # Session filter: clicking a SESSIONS rail row dims the constellation to
   # that session's goal; clicking the same row again clears the filter. The
   # filter is pinned to the node id (not just the positional S-tag, which can
-  # drift to a different goal as states change between ticks).
+  # drift to a different goal as states change between ticks). Mutually
+  # exclusive with the fleet-tile state filter — setting one clears the other,
+  # so the canvas never composes two dimming rules.
   def handle_event("toggle_session_filter", %{"id" => id, "tag" => tag}, socket) do
     filter =
       case socket.assigns.session_filter do
@@ -148,8 +161,32 @@ defmodule KaziWeb.StarmapLive do
         _other -> %{id: id, tag: tag}
       end
 
-    {:noreply, assign(socket, :session_filter, filter)}
+    {:noreply, socket |> assign(:session_filter, filter) |> assign(:state_filter, nil)}
   end
+
+  # Fleet-tile state filter: clicking RUNNING / LANDED / STUCK dims every
+  # node whose state the tile doesn't count; clicking the active tile again
+  # clears it. The state sets mirror the tile counts exactly.
+  def handle_event("toggle_state_filter", %{"key" => key}, socket) do
+    filter =
+      case socket.assigns.state_filter do
+        %{key: ^key} -> nil
+        _other -> %{key: key, states: tile_states(key)}
+      end
+
+    {:noreply, socket |> assign(:state_filter, filter) |> assign(:session_filter, nil)}
+  end
+
+  defp tile_states("running"), do: [:converging]
+  defp tile_states("landed"), do: [:landed]
+  defp tile_states("stuck"), do: [:stuck]
+  defp tile_states(_unknown), do: []
+
+  # A canvas at the base height letterboxes into the viewport exactly as
+  # before; only a GROWN canvas (a dense band) switches to natural-height
+  # rendering, which is what makes the shell scroll.
+  defp canvas_class(height) when height > @canvas_min_height, do: "starmap-canvas tall"
+  defp canvas_class(_height), do: "starmap-canvas"
 
   # A filter whose session ended (the node landed, or its tag was reassigned
   # on a state change) clears itself rather than dimming the whole canvas
@@ -164,16 +201,28 @@ defmodule KaziWeb.StarmapLive do
     end
   end
 
-  defp dimmed_node?(nil, _node), do: false
-  defp dimmed_node?(%{id: id}, node), do: node.id != id
+  # One dimming rule at a time (the toggles clear each other): a session
+  # filter keeps its node lit; a state filter keeps its tile's states lit.
+  # Edges stay lit while either endpoint survives the filter.
+  defp dimmed_node?(%{id: id}, _state_filter, node), do: node.id != id
 
-  defp dimmed_edge?(nil, _edge), do: false
-  defp dimmed_edge?(%{id: id}, edge), do: edge.from != id and edge.to != id
+  defp dimmed_node?(nil, %{states: states}, node), do: node.state not in states
+  defp dimmed_node?(nil, nil, _node), do: false
+
+  defp dimmed_edge?(%{id: id}, _state_filter, edge),
+    do: edge.from != id and edge.to != id
+
+  defp dimmed_edge?(nil, %{states: states}, edge),
+    do: edge.from_state not in states and edge.to_state not in states
+
+  defp dimmed_edge?(nil, nil, _edge), do: false
 
   # The canvas cap (docs/dashboard-design.md "Canvas composition" overflow
-  # rule): one node per GOAL (its latest run), newest ~24 on the canvas, the
-  # rest a single "+N older" pointer to /goals. Counts stay fleet-wide.
-  @canvas_node_cap 24
+  # rule): one node per GOAL (its latest run), newest ~48 on the canvas, the
+  # rest a single "+N older" pointer to /goals. Counts stay fleet-wide. The
+  # single-column scroll layout carries density the old wrap couldn't, so the
+  # cap is a DOM-size bound, not a layout one.
+  @canvas_node_cap 48
 
   defp assign_runs(socket) do
     all_nodes = RunRegistry.list() |> Enum.map(&to_node/1)
@@ -383,7 +432,6 @@ defmodule KaziWeb.StarmapLive do
   # ---------------------------------------------------------------------------
 
   @canvas_width 1160
-  @canvas_height 742
 
   defp assign_canvas(socket) do
     canvas_bands =
@@ -410,29 +458,20 @@ defmodule KaziWeb.StarmapLive do
       |> Enum.group_by(fn {frontier, _row, _node} -> frontier end)
       |> Map.new(fn {frontier, entries} -> {frontier, length(entries)} end)
 
+    tallest_band = rows_per_band |> Map.values() |> Enum.max(fn -> 0 end)
+    canvas_height = max(@canvas_min_height, tallest_band * @row_pitch + 120)
+
     canvas_nodes =
       Enum.map(placed, fn {frontier, row, node} ->
         band_center = frontier * band_width + band_width / 2
         rows = Map.fetch!(rows_per_band, frontier)
 
-        # Vertical spread with a gentle alternating x offset so the
-        # constellation reads organic (the mockup's scatter), never a rigid
-        # grid. Dense bands (> 7 nodes) split into two sub-columns so labels
-        # keep the mockup's breathing room. Deterministic — no randomness
-        # (resume-safety).
-        {cx, cy} =
-          if rows > 7 do
-            col = rem(row, 2)
-            col_rows = div(rows + 1 - col, 2)
-            col_row = div(row, 2)
-            cy = @canvas_height * (col_row + 1) / (col_rows + 1) + col * 34
-            cx = band_center + if(col == 0, do: -band_width / 4, else: band_width / 4)
-            {cx, cy}
-          else
-            cy = @canvas_height * (row + 1) / (rows + 1)
-            cx = band_center + if(rem(row, 2) == 0, do: -32, else: 32)
-            {cx, cy}
-          end
+        # One column per band (the mockup's composition): even vertical
+        # spread over the full canvas height, with a gentle alternating x
+        # offset so the constellation reads organic — never a rigid grid,
+        # never a second sub-column. Deterministic (resume-safety).
+        cy = canvas_height * (row + 1) / (rows + 1)
+        cx = band_center + if(rem(row, 2) == 0, do: -32, else: 32)
 
         Map.merge(node, %{
           frontier: frontier,
@@ -455,6 +494,7 @@ defmodule KaziWeb.StarmapLive do
 
     socket
     |> assign(:canvas_nodes, canvas_nodes)
+    |> assign(:canvas_height, canvas_height)
     |> assign(:canvas_edges, canvas_edges(socket.assigns.needs_edges, canvas_nodes))
     |> assign(:canvas_wave_labels, wave_labels)
   end
@@ -473,6 +513,8 @@ defmodule KaziWeb.StarmapLive do
             %{
               from: from,
               to: to,
+              from_state: a.state,
+              to_state: b.state,
               x1: a.cx,
               y1: a.cy,
               x2: b.cx,
@@ -764,17 +806,22 @@ defmodule KaziWeb.StarmapLive do
 
         <div id="starmap-fleet-tiles" class="fleet-tiles">
           <div class="section-label">FLEET</div>
-          <div class="fleet-tile" data-tile="running">
-            <span class="fleet-tile-value nd-conv">{Map.get(@counts, :converging, 0)}</span>
-            <span class="fleet-tile-label">RUNNING</span>
-          </div>
-          <div class="fleet-tile" data-tile="landed">
-            <span class="fleet-tile-value nd-landed">{Map.get(@counts, :landed, 0)}</span>
-            <span class="fleet-tile-label">LANDED</span>
-          </div>
-          <div class="fleet-tile" data-tile="stuck">
-            <span class="fleet-tile-value nd-stuck">{Map.get(@counts, :stuck, 0)}</span>
-            <span class="fleet-tile-label">STUCK</span>
+          <div
+            :for={
+              {key, state, cls, label} <- [
+                {"running", :converging, "nd-conv", "RUNNING"},
+                {"landed", :landed, "nd-landed", "LANDED"},
+                {"stuck", :stuck, "nd-stuck", "STUCK"}
+              ]
+            }
+            class={"fleet-tile" <>
+              if(@state_filter && @state_filter.key == key, do: " active", else: "")}
+            data-tile={key}
+            phx-click="toggle_state_filter"
+            phx-value-key={key}
+          >
+            <span class={"fleet-tile-value #{cls}"}>{Map.get(@counts, state, 0)}</span>
+            <span class="fleet-tile-label">{label}</span>
           </div>
         </div>
 
@@ -878,111 +925,114 @@ defmodule KaziWeb.StarmapLive do
           No runs registered yet. Start a `kazi apply` and it will appear here.
         </p>
 
-        <svg
-          :if={@canvas_nodes != []}
-          id="starmap-canvas"
-          class="starmap-canvas"
-          viewBox="0 0 1160 742"
-          role="img"
-          aria-label="wave-band constellation canvas"
-          data-frontiers={length(@canvas_wave_labels)}
-          data-session-filter={@session_filter && @session_filter.tag}
-        >
-          <g
-            :for={wl <- @canvas_wave_labels}
-            id={"starmap-band-#{wl.frontier}"}
-            data-frontier={wl.frontier}
-            class="band-group"
+        <div :if={@canvas_nodes != []} class="canvas-scroll">
+          <svg
+            id="starmap-canvas"
+            class={canvas_class(@canvas_height)}
+            viewBox={"0 0 1160 #{@canvas_height}"}
+            data-canvas-height={@canvas_height}
+            role="img"
+            aria-label="wave-band constellation canvas"
+            data-frontiers={length(@canvas_wave_labels)}
+            data-session-filter={@session_filter && @session_filter.tag}
+            data-fleet-filter={@state_filter && @state_filter.key}
           >
-            <rect
-              class={"band " <> if(rem(wl.frontier, 2) == 0, do: "band-a", else: "band-b")}
-              x={wl.rect_x}
-              y="0"
-              width={wl.rect_width}
-              height="742"
-            />
-            <line
-              :if={wl.frontier > 0}
-              class="band-sep"
-              x1={wl.rect_x}
-              y1="0"
-              x2={wl.rect_x}
-              y2="742"
-            />
-            <text class="wlabel section-label" text-anchor="middle" x={wl.x} y="30">
-              {wl.title}
-            </text>
-          </g>
+            <g
+              :for={wl <- @canvas_wave_labels}
+              id={"starmap-band-#{wl.frontier}"}
+              data-frontier={wl.frontier}
+              class="band-group"
+            >
+              <rect
+                class={"band " <> if(rem(wl.frontier, 2) == 0, do: "band-a", else: "band-b")}
+                x={wl.rect_x}
+                y="0"
+                width={wl.rect_width}
+                height={@canvas_height}
+              />
+              <line
+                :if={wl.frontier > 0}
+                class="band-sep"
+                x1={wl.rect_x}
+                y1="0"
+                x2={wl.rect_x}
+                y2={@canvas_height}
+              />
+              <text class="wlabel section-label" text-anchor="middle" x={wl.x} y="30">
+                {wl.title}
+              </text>
+            </g>
 
-          <g :if={@canvas_edges != []} id="starmap-edges">
-            <line
-              :for={edge <- @canvas_edges}
-              class={"edge" <>
+            <g :if={@canvas_edges != []} id="starmap-edges">
+              <line
+                :for={edge <- @canvas_edges}
+                class={"edge" <>
                 if(edge.active, do: " edge-active", else: "") <>
-                if(dimmed_edge?(@session_filter, edge), do: " dimmed", else: "")}
-              data-from={edge.from}
-              data-to={edge.to}
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-            />
-          </g>
+                if(dimmed_edge?(@session_filter, @state_filter, edge), do: " dimmed", else: "")}
+                data-from={edge.from}
+                data-to={edge.to}
+                x1={edge.x1}
+                y1={edge.y1}
+                x2={edge.x2}
+                y2={edge.y2}
+              />
+            </g>
 
-          <g
-            :for={node <- @canvas_nodes}
-            id={"canvas-node-group-#{node.id}"}
-            class={"canvas-node-group" <>
-              if(dimmed_node?(@session_filter, node), do: " dimmed", else: "")}
-            data-node-id={node.id}
-            data-frontier={node.frontier}
-            data-state={node.state}
-            phx-click="select_node"
-            phx-value-id={node.id}
-          >
-            <title :if={node.harness}>{node.harness}{if node.model, do: " / #{node.model}"}</title>
-            <circle
-              :if={@panel && @panel.node_id == node.id}
-              class="selring"
-              cx={node.cx}
-              cy={node.cy}
-              r="19"
-            />
-            <circle
-              :if={node.state in [:converging, :stuck]}
-              class={"ring" <> if(node.state == :stuck, do: " redr", else: "")}
-              cx={node.cx}
-              cy={node.cy}
-              r="14"
-            />
-            <circle
-              id={"canvas-node-#{node.id}"}
-              class={"canvas-node #{nd_class(node.state)}"}
+            <g
+              :for={node <- @canvas_nodes}
+              id={"canvas-node-group-#{node.id}"}
+              class={"canvas-node-group" <>
+              if(dimmed_node?(@session_filter, @state_filter, node), do: " dimmed", else: "")}
+              data-node-id={node.id}
+              data-frontier={node.frontier}
               data-state={node.state}
-              cx={node.cx}
-              cy={node.cy}
-              r={if node.state == :pending, do: "10", else: "13"}
-            />
-            <text class="canvas-node-label" x={node.cx} y={node.cy + 28}>{node.label}</text>
-            <text
-              :if={node.sublabel}
-              class={"canvas-node-sublabel nsub-#{node.state}"}
-              x={node.cx}
-              y={node.cy + 42}
+              phx-click="select_node"
+              phx-value-id={node.id}
             >
-              {node.sublabel}
-            </text>
-            <text
-              :if={node.session_tag}
-              class="stag"
-              data-session-tag={node.session_tag}
-              x={node.cx + 18}
-              y={node.cy - 16}
-            >
-              {node.session_tag}
-            </text>
-          </g>
-        </svg>
+              <title :if={node.harness}>{node.harness}{if node.model, do: " / #{node.model}"}</title>
+              <circle
+                :if={@panel && @panel.node_id == node.id}
+                class="selring"
+                cx={node.cx}
+                cy={node.cy}
+                r="19"
+              />
+              <circle
+                :if={node.state in [:converging, :stuck]}
+                class={"ring" <> if(node.state == :stuck, do: " redr", else: "")}
+                cx={node.cx}
+                cy={node.cy}
+                r="14"
+              />
+              <circle
+                id={"canvas-node-#{node.id}"}
+                class={"canvas-node #{nd_class(node.state)}"}
+                data-state={node.state}
+                cx={node.cx}
+                cy={node.cy}
+                r={if node.state == :pending, do: "10", else: "13"}
+              />
+              <text class="canvas-node-label" x={node.cx} y={node.cy + 28}>{node.label}</text>
+              <text
+                :if={node.sublabel}
+                class={"canvas-node-sublabel nsub-#{node.state}"}
+                x={node.cx}
+                y={node.cy + 42}
+              >
+                {node.sublabel}
+              </text>
+              <text
+                :if={node.session_tag}
+                class="stag"
+                data-session-tag={node.session_tag}
+                x={node.cx + 18}
+                y={node.cy - 16}
+              >
+                {node.session_tag}
+              </text>
+            </g>
+          </svg>
+        </div>
 
         <.link
           :if={@older_count > 0}
@@ -1155,7 +1205,9 @@ defmodule KaziWeb.StarmapLive do
 
         .canvas-shell { position: relative; flex: 1; min-width: 0; padding: 1rem 1.5rem 3.5rem; }
         .starfield { position: absolute; inset: 0; background-image: radial-gradient(rgba(191,210,234,.25) 1px, transparent 1px); background-size: 48px 48px; opacity: .2; pointer-events: none; }
-        .starmap-canvas { width: 100%; height: calc(100vh - 9.5rem); margin-top: 1rem; display: block; }
+        .canvas-scroll { overflow-y: auto; max-height: calc(100vh - 9.5rem); margin-top: 1rem; scrollbar-width: thin; scrollbar-color: #16233A transparent; }
+        .starmap-canvas { width: 100%; height: calc(100vh - 9.5rem); display: block; }
+        .starmap-canvas.tall { height: auto; }
         .starmap-canvas .nd-landed { fill: var(--grn); }
         .starmap-canvas .nd-conv { fill: #0A1526; stroke: var(--cyn); stroke-width: 2; }
         .starmap-canvas .nd-stuck { fill: #160D14; stroke: var(--red); stroke-width: 2; }
@@ -1207,7 +1259,9 @@ defmodule KaziWeb.StarmapLive do
         .rail-sessions .session-ws { color: #34456B; }
         .fleet-tiles { display: flex; gap: .6rem; flex-wrap: wrap; align-items: stretch; }
         .fleet-tiles .section-label { flex-basis: 100%; }
-        .fleet-tile { flex: 1; display: flex; flex-direction: column; align-items: center; gap: .25rem; border: 1px solid var(--line, #16233A); border-radius: 4px; background: rgba(11,20,36,.6); padding: .6rem .4rem; }
+        .fleet-tile { flex: 1; display: flex; flex-direction: column; align-items: center; gap: .25rem; border: 1px solid var(--line, #16233A); border-radius: 4px; background: rgba(11,20,36,.6); padding: .6rem .4rem; cursor: pointer; }
+        .fleet-tile:hover { border-color: #2A3D5F; }
+        .fleet-tile.active { border-color: rgba(86,204,242,.6); background: rgba(86,204,242,.08); }
         .fleet-tile-value { font-size: 20px; font-weight: 700; line-height: 1; }
         .fleet-tile-label { font-size: 8px; letter-spacing: .18em; color: var(--dim, #46587A); }
         .older-link { position: absolute; right: 1.2rem; bottom: 3.4rem; color: var(--dim, #46587A); font-size: 10px; letter-spacing: .2em; text-decoration: none; }
