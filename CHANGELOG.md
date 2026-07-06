@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.4](https://github.com/kazi-org/kazi/compare/v1.73.3...v1.73.4) (2026-07-06)
+
+
+### Bug Fixes
+
+* kazi dashboard /dag 500 when standalone (issue [#801](https://github.com/kazi-org/kazi/issues/801)) ([c63ed4e](https://github.com/kazi-org/kazi/commit/c63ed4ee3f80ef352602c7326819cc9040b3f51d))
+
 ## [1.73.3](https://github.com/kazi-org/kazi/compare/v1.73.2...v1.73.3) (2026-07-05)
 
 
