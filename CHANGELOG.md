@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.8](https://github.com/kazi-org/kazi/compare/v1.73.7...v1.73.8) (2026-07-06)
+
+
+### Bug Fixes
+
+* re-evaluate the predicate vector before a terminal over_budget result (issue [#790](https://github.com/kazi-org/kazi/issues/790)) ([5403f8c](https://github.com/kazi-org/kazi/commit/5403f8c0aaf4f06e780ba57bd7c925fd45c6e653))
+
 ## [1.73.7](https://github.com/kazi-org/kazi/compare/v1.73.6...v1.73.7) (2026-07-06)
 
 
