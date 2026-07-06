@@ -231,25 +231,29 @@ defmodule KaziWeb.StarmapLive do
   defp signal_label(:regression_recovered), do: "regression recovered"
 
   # ---------------------------------------------------------------------------
-  # Visual canvas (ADR-0057/docs/dashboard-design.md): the SAME nodes as the
-  # data-attribute lists above (wave bands when a roadmap is configured,
-  # otherwise the flat fleet list folded into a single synthetic frontier),
-  # laid out as an SVG wave-band DAG with per-state node classes (the "node
-  # state zoo") and session tags on the active (`:converging`/`:claimed`)
-  # nodes. Purely a rendering of state already computed by `assign_bands/1`
-  # and `assign_runs/1` — no new read.
+  # Visual canvas (ADR-0057/docs/dashboard-design.md "Canvas composition",
+  # NORMATIVE): the ONE rendering of the fleet — `@bands` when a roadmap is
+  # configured, otherwise the flat fleet list folded into a single synthetic
+  # frontier — as an SVG wave-band constellation with per-state node classes
+  # (the "node state zoo") and session tags on the active
+  # (`:converging`/`:claimed`) nodes. There is no separate chip/pill list:
+  # `assign_bands/1` and `assign_runs/1` compute state, this is purely its
+  # rendering.
   # ---------------------------------------------------------------------------
 
-  @frontier_width 220
-  @node_row_height 90
+  @canvas_width 1160
+  @canvas_height 742
 
   defp assign_canvas(socket) do
     canvas_bands =
       cond do
         socket.assigns.bands != [] -> socket.assigns.bands
-        socket.assigns.nodes != [] -> [%{frontier: 0, nodes: socket.assigns.nodes}]
+        socket.assigns.nodes != [] -> state_bands(socket.assigns.nodes)
         true -> []
       end
+
+    band_count = max(length(canvas_bands), 1)
+    band_width = @canvas_width / band_count
 
     placed =
       Enum.flat_map(canvas_bands, fn band ->
@@ -260,24 +264,80 @@ defmodule KaziWeb.StarmapLive do
 
     session_tags = build_session_tags(placed)
 
+    rows_per_band =
+      placed
+      |> Enum.group_by(fn {frontier, _row, _node} -> frontier end)
+      |> Map.new(fn {frontier, entries} -> {frontier, length(entries)} end)
+
     canvas_nodes =
       Enum.map(placed, fn {frontier, row, node} ->
+        band_center = frontier * band_width + band_width / 2
+        rows = Map.fetch!(rows_per_band, frontier)
+        # Vertical spread across the band, with a gentle alternating x offset
+        # so the constellation reads organic (the mockup's scatter), never a
+        # rigid grid. Deterministic — no randomness (resume-safety).
+        cy = @canvas_height * (row + 1) / (rows + 1)
+        cx = band_center + if(rem(row, 2) == 0, do: -32, else: 32)
+
         Map.merge(node, %{
           frontier: frontier,
-          cx: 60 + frontier * @frontier_width,
-          cy: 70 + row * @node_row_height,
+          cx: Float.round(cx * 1.0, 1),
+          cy: Float.round(cy * 1.0, 1),
           session_tag: Map.get(session_tags, node.id)
         })
       end)
 
     wave_labels =
       Enum.map(canvas_bands, fn band ->
-        %{frontier: band.frontier, x: 60 + band.frontier * @frontier_width}
+        %{
+          frontier: band.frontier,
+          title: band_title(band),
+          x: Float.round(band.frontier * band_width + band_width / 2, 1),
+          rect_x: Float.round(band.frontier * band_width * 1.0, 1),
+          rect_width: Float.round(band_width * 1.0, 1)
+        }
       end)
 
     socket
     |> assign(:canvas_nodes, canvas_nodes)
     |> assign(:canvas_wave_labels, wave_labels)
+  end
+
+  # No roadmap configured: derive the wave bands from run state
+  # (docs/dashboard-design.md "Canvas composition"): LANDED, then ACTIVE
+  # (converging/claimed), then FRONTIER (stuck/stale — where the operator's
+  # attention is), then HORIZON (anything pending). Empty bands are dropped
+  # and frontiers renumbered so the canvas divides among populated bands.
+  defp state_bands(nodes) do
+    order = [
+      {"LANDED", [:landed]},
+      {"ACTIVE", [:converging, :claimed]},
+      {"FRONTIER", [:stuck, :stale]},
+      {"HORIZON", [:pending]}
+    ]
+
+    order
+    |> Enum.map(fn {name, states} ->
+      %{name: name, nodes: Enum.filter(nodes, &(&1.state in states))}
+    end)
+    |> Enum.reject(&(&1.nodes == []))
+    |> Enum.with_index()
+    |> Enum.map(fn {band, i} -> %{frontier: i, name: band.name, nodes: band.nodes} end)
+  end
+
+  # "WAVE N · LANDED" per the mockup: state-derived bands carry their name;
+  # roadmap bands derive it from the dominant node state within the band.
+  defp band_title(%{frontier: frontier} = band) do
+    name =
+      Map.get(band, :name) ||
+        cond do
+          Enum.any?(band.nodes, &(&1.state in [:converging, :stuck])) -> "ACTIVE"
+          Enum.all?(band.nodes, &(&1.state == :landed)) -> "LANDED"
+          Enum.any?(band.nodes, &(&1.state == :claimed)) -> "FRONTIER"
+          true -> "HORIZON"
+        end
+
+    "WAVE #{frontier + 1} · #{name}"
   end
 
   # Normalizes a flat fleet node (`run_id`/`goal_ref`) or a band node
@@ -449,70 +509,9 @@ defmodule KaziWeb.StarmapLive do
       <div class="canvas-shell">
         <div class="starfield sweep" aria-hidden="true"></div>
 
-        <h1>kazi starmap</h1>
-        <p>
-          Read-only fleet view (ADR-0011 / ADR-0057): every registered `kazi apply` run
-          on this machine, at a glance.
-        </p>
-
-        <ul id="starmap-counts" class="starmap-counts">
-          <li
-            :for={s <- ~w(landed converging stale stuck)a}
-            data-state={s}
-            data-count={Map.get(@counts, s, 0)}
-          >
-            {s}: {Map.get(@counts, s, 0)}
-          </li>
-        </ul>
-
-        <ol :if={@nodes != []} id="starmap-nodes" class="starmap-nodes">
-          <li
-            :for={node <- @nodes}
-            id={"starmap-node-#{node.run_id}"}
-            data-run-id={node.run_id}
-            data-goal-ref={node.goal_ref}
-            data-state={node.state}
-            class={"starmap-node starmap-state-#{node.state} #{nd_class(node.state)}"}
-          >
-            <span class="starmap-node-goal">{node.goal_ref}</span>
-            <span class="starmap-node-state" data-state={node.state}>{node.state}</span>
-            <span :if={node.harness} class="starmap-node-tag">
-              {node.harness}<span :if={node.model}>/{node.model}</span>
-            </span>
-          </li>
-        </ol>
-
         <p :if={@nodes == []} id="starmap-empty" class="empty-state">
           No runs registered yet. Start a `kazi apply` and it will appear here.
         </p>
-
-        <section :if={@bands != []} id="starmap-wavebands" data-frontiers={length(@bands)}>
-          <h2>Wave bands</h2>
-          <div
-            :for={band <- @bands}
-            id={"starmap-band-#{band.frontier}"}
-            data-frontier={band.frontier}
-            class="starmap-band"
-          >
-            <h3>Wave {band.frontier}</h3>
-            <ol class="starmap-nodes">
-              <li
-                :for={node <- band.nodes}
-                id={"starmap-band-node-#{node.id}"}
-                data-node-id={node.id}
-                data-frontier={band.frontier}
-                data-state={node.state}
-                class={"starmap-node starmap-state-#{node.state} #{nd_class(node.state)}"}
-              >
-                <span class="starmap-node-goal">{node.name}</span>
-                <span class="starmap-node-state" data-state={node.state}>{node.state}</span>
-                <span :if={node.harness} class="starmap-node-tag">
-                  {node.harness}<span :if={node.model}>/{node.model}</span>
-                </span>
-              </li>
-            </ol>
-          </div>
-        </section>
 
         <svg
           :if={@canvas_nodes != []}
@@ -520,23 +519,44 @@ defmodule KaziWeb.StarmapLive do
           class="starmap-canvas"
           viewBox="0 0 1160 742"
           role="img"
-          aria-label="wave-band DAG canvas"
+          aria-label="wave-band constellation canvas"
+          data-frontiers={length(@canvas_wave_labels)}
         >
-          <text
+          <g
             :for={wl <- @canvas_wave_labels}
-            class="wave-label section-label"
-            x={wl.x}
-            y="24"
+            id={"starmap-band-#{wl.frontier}"}
+            data-frontier={wl.frontier}
+            class="band-group"
           >
-            WAVE {wl.frontier}
-          </text>
+            <rect
+              class={"band " <> if(rem(wl.frontier, 2) == 0, do: "band-a", else: "band-b")}
+              x={wl.rect_x}
+              y="0"
+              width={wl.rect_width}
+              height="742"
+            />
+            <line
+              :if={wl.frontier > 0}
+              class="band-sep"
+              x1={wl.rect_x}
+              y1="0"
+              x2={wl.rect_x}
+              y2="742"
+            />
+            <text class="wlabel section-label" text-anchor="middle" x={wl.x} y="30">
+              {wl.title}
+            </text>
+          </g>
 
           <g
             :for={node <- @canvas_nodes}
+            id={"canvas-node-group-#{node.id}"}
             class="canvas-node-group"
             data-node-id={node.id}
+            data-frontier={node.frontier}
             data-state={node.state}
           >
+            <title :if={node.harness}>{node.harness}{if node.model, do: " / #{node.model}"}</title>
             <circle
               :if={node.state in [:converging, :stuck]}
               class={"ring" <> if(node.state == :stuck, do: " redr", else: "")}
@@ -619,9 +639,12 @@ defmodule KaziWeb.StarmapLive do
         .starmap-canvas .nd-claimed { fill: #0B1424; stroke: var(--cyn); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: .85; }
         .starmap-canvas .nd-pending { fill: #0D1626; stroke: #223350; stroke-width: 1.5; }
         .starmap-canvas .nd-stale { fill: #141118; stroke: var(--amb); stroke-width: 1.5; stroke-dasharray: 2 4; }
-        .starmap-canvas .ring { fill: none; stroke: var(--cyn); stroke-width: 1.5; }
+        .starmap-canvas .ring { fill: none; stroke: var(--cyn); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; }
         .starmap-canvas .ring.redr { stroke: var(--red); }
-        .starmap-canvas .wave-label { fill: #3D4F6E; letter-spacing: .32em; }
+        .starmap-canvas .band-a { fill: rgba(86,204,242,.028); }
+        .starmap-canvas .band-b { fill: transparent; }
+        .starmap-canvas .band-sep { stroke: rgba(22,35,58,.8); stroke-width: 1; stroke-dasharray: 2 6; }
+        .starmap-canvas .wlabel { fill: #3D4F6E; letter-spacing: .32em; }
         .starmap-canvas .canvas-node-label { fill: #D7E4F4; font-size: 12px; font-weight: 700; text-anchor: middle; }
         .starmap-canvas .stag { fill: var(--cyn); font-size: 10px; font-weight: 700; }
 
@@ -631,22 +654,12 @@ defmodule KaziWeb.StarmapLive do
         .ticker-track { display: flex; gap: 2rem; white-space: nowrap; width: max-content; }
         .ticker-entry { color: var(--dim); }
 
-        .starmap-counts { list-style: none; display: flex; gap: 1rem; padding: 0; margin: 1rem 0; }
-        .starmap-nodes { list-style: none; display: flex; flex-wrap: wrap; gap: .75rem; padding: 0; }
-        .starmap-node { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid var(--line, #16233A); min-width: 9rem; background: #0D1626; color: var(--txt, #BFD2EA); }
         .attention-queue-list { list-style: none; display: flex; flex-direction: column; gap: .5rem; padding: 0; }
         .attention-item { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: .4rem; border: 1px solid var(--line, #16233A); background: #0B1424; }
         .attention-signal-stuck { background: rgba(255,92,108,.12); border-color: var(--red, #FF5C6C); }
         .attention-signal-budget { background: rgba(255,180,84,.12); border-color: var(--amb, #FFB454); }
         .attention-signal-flake_suspicion { background: rgba(255,180,84,.08); border-color: rgba(255,180,84,.5); }
         .attention-signal-regression_recovered { background: #101A2A; }
-        .starmap-state-landed { background: #0B1F18; border-color: var(--grn, #2EE6A8); box-shadow: 0 0 7px rgba(46,230,168,.35); }
-        .starmap-state-converging { background: #0A1526; border-color: var(--cyn, #56CCF2); box-shadow: 0 0 7px rgba(86,204,242,.3); }
-        .starmap-state-stale { background: #141118; border-color: var(--amb, #FFB454); border-style: dotted; }
-        .starmap-state-stuck { background: #160D14; border-color: var(--red, #FF5C6C); box-shadow: 0 0 8px rgba(255,92,108,.35); }
-        .starmap-state-claimed { background: #0B1424; border-color: var(--cyn, #56CCF2); border-style: dashed; }
-        .starmap-state-pending { background: #0D1626; border-color: #223350; }
-        .starmap-band { margin-bottom: 1rem; }
       </style>
     </main>
     """
