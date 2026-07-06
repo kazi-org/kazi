@@ -4,6 +4,55 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-07-06 — E46 shipped end-to-end by kazi driving kazi; T46.10 live proof on v1.78.0; three fresh landmines
+
+**Type:** dogfood
+**Tags:** e46, dashboard, starmap, attention-queue, transcript-peek, drillin, kazi-drives-kazi, T46.10
+
+**Task.** Execute the full E46 remainder (T46.2 events sink, T46.5 wave-band
+starmap, T46.6 attention queue, T46.7 drill-in heatmap, T46.8 transcript peek,
+T46.9 docs) plus a seven-issue fix chain (#804 #786 #787 #793 #788 #790 #805)
+as kazi goals: caller-drafts predicates, `kazi apply` converges each, PR +
+rebase-merge per change. 11 goals converged; releases v1.73.5 -> v1.78.0.
+
+**T46.10 live proof (all observed, released v1.78.0 binary, real browser).**
+Three concurrent fixture runs (one lands, one converges multi-file, one
+impossible-predicate stuck) against the standalone `kazi dashboard`:
+starmap showed every run with correct states (landed/converging/stuck plus
+stale post-mortems from prior sessions) and live fleet counts; the attention
+queue ranked a REAL stuck goal (e46-t46-9-docs-overview, predicate
+events_jsonl_documented) first with a working drill-in deep link; the
+drill-in heatmap rendered the 4-iteration predicates x iterations matrix
+including a red->green flip column-accurate; transcript peek streamed a live
+run's harness output (follow toggle) and replays finished runs through the
+same code path. Screenshots in the session scratchpad; every claim above was
+observed, not asserted.
+
+**Landmine 1 — match_count counts LINES; never pair it with `grep -c`.**
+A docs predicate `grep -c pattern file` + `verdict=match_count, pass_when=">= 2"`
+can NEVER pass: grep -c emits ONE line (the count). kazi correctly went stuck;
+the docs were actually fine. Use `grep -n` (line per match) under match_count,
+and treat a stuck goal whose evidence shows the right content as a checker bug.
+
+**Landmine 2 — integrate self-merge + add -A blast radius (issue #819).**
+First live firing of the E44 integrate wiring (v1.74.0) swept every
+untracked-unignored workspace file into a monolith commit and rebase-merged
+its own PR (#816) seconds after opening, before CI. ~1800 machine-local files
+(agent configs, a generated graph report) landed on a PUBLIC repo main; scrub
++ .gitignore hardening in #818. Also: an all-green run still converges WITHOUT
+integrating (decide/2 ordering), so auto-landing only triggers when something
+blocks clause 1 — T46.5 landed only because its suite predicate was
+quarantined. Fix tracked in #819.
+
+**Landmine 3 — quarantine has no exit (issue #820).** One flap of a known-flaky
+test quarantined suite_green; post-#795 the unknown verdict correctly blocks
+convergence, but a quarantined-then-consistently-passing predicate is never
+rehabilitated and a no-work loop fast-spins (~1 tick/s) to max_iterations.
+Also re-confirmed lore L-0023 the hard way: headless claude in a fresh
+workspace dir denies on the trust dialog and the run goes stuck with zero
+edits -- goal-file fix is `[harness] permission_mode = "bypassPermissions"`
+for throwaway fixture workspaces.
+
 ## 2026-07-05 — issue #801 dogfood: kazi drove its own /dag fix end-to-end; two operator findings
 
 **Type:** dogfood
