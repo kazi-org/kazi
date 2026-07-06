@@ -558,13 +558,20 @@ defmodule Kazi.Slice1Test do
       assert result.iterations == 3
     end
 
-    test "a flake in the failing set does NOT, by itself, sustain a stuck verdict" do
-      # The stuck detector sees the CODE-only history with quarantined ids removed
-      # (loop `code_history/1`). So a predicate that flakes (and is quarantined)
-      # cannot keep the failing set non-empty for the stuck window: once
-      # quarantined it leaves the failing set, and a goal whose ONLY predicate is
-      # the flake then has an EMPTY failing set — never stuck. Prove the loop is
-      # NOT stopped :stuck within the window it would be if the flake counted.
+    test "a flake in the failing set does NOT, by itself, sustain the ORDINARY same-failing-set stuck detector" do
+      # The ORDINARY (T1.5) stuck detector sees the CODE-only history with
+      # quarantined ids removed (loop `code_history/1`). So a predicate that
+      # flakes (and is quarantined) cannot keep the failing set non-empty for its
+      # window: once quarantined it leaves the failing set, and a goal whose ONLY
+      # predicate is the flake then has an EMPTY failing set for that detector —
+      # it can never fire on this goal, no matter how large its window.
+      #
+      # #820 note: the vector is still blocked SOLELY by quarantine with nothing
+      # dispatchable, so the loop DOES eventually stop honestly `:stuck` via the
+      # independent `Flake.quarantine_only_stuck_ticks/0` path (not idle forever,
+      # the pre-#820 bug). `stuck_iterations` is set far above that bound here so
+      # a stop this soon can only be #820's path, never the ordinary detector —
+      # proving the two are independent.
       {:ok, alt_pid} = AlternatingProvider.start_link(nil)
 
       g =
@@ -577,20 +584,17 @@ defmodule Kazi.Slice1Test do
       {:ok, loop} =
         start_loop(g, %{tests: AlternatingProvider},
           flake_max_retries: 2,
-          stuck_iterations: 3,
+          stuck_iterations: 1_000,
           adapter_opts: [collector: self()]
         )
 
-      # Once quarantined, the flake is out of the failing set; the (now empty)
-      # failing set cannot be stuck. The loop must NOT terminate :stuck.
-      assert wait_until(fn -> :flaky in Loop.snapshot(loop).quarantine end, 5_000)
-      # Give it more than a full stuck window of observations to (wrongly) escalate.
-      refute_receive {:dispatched, _}, 50
-      snap = Loop.snapshot(loop)
-      refute snap.state == :stopped
-      assert snap.stuck_failing == nil
+      assert {:ok, result} = Loop.await(loop, 5_000)
 
-      Loop.stop(loop)
+      assert result.outcome == :stopped
+      assert result.reason == :stuck
+      assert result.iterations < 1_000
+      refute_receive {:dispatched, _}
+      assert :flaky in Loop.snapshot(loop).quarantine
     end
   end
 

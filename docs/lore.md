@@ -539,3 +539,41 @@ short-circuit needed the extra re-check. Regression:
 `:fail` to `:pass` the moment the harness dispatches, budget capped at
 `max_iterations: 1`, asserting the terminal `result.vector` reports `:pass`, not
 the stale `:fail`). (2026-07-06.)
+
+### L-0027 #loop #flake #quarantine #stuck #landmine -- a quarantined-but-passing predicate had no way back onto the convergence bar, and no honest terminal either -- it spun the loop at full tick rate to `max_iterations`
+Issue #820 (live occurrence on kazi 1.74.0): `suite_green` flapped once, got
+quarantined (`:unknown`, per #795 correctly blocking `:converged`), then passed
+every subsequent real evaluation while the loop had nothing left to dispatch --
+`decide/2`'s clause 5 (`landed?`/`deployed?` both true, vector still unsatisfied)
+re-observed on the fixed `reobserve_interval_ms` (default 1s) with no exit
+condition of its own, so it ticked ~1/s to `max_iterations` (40) and stopped
+`:over_budget` reporting a passing-evidence `unknown` predicate as the reason --
+even though the code was demonstrably green. Root cause was two compounding gaps:
+(1) an already-quarantined predicate was NEVER re-evaluated by the real provider
+(`evaluate/4`'s quarantined branch returned `:unknown` unconditionally) -- so
+there was no mechanism to ever leave quarantine, and (2) the `code_history/1`
+window the ordinary T1.5 stuck detector reads DROPS quarantined ids entirely, so
+a goal blocked SOLELY by quarantine has an empty failing set forever and that
+detector can never fire on it either. FIX: `Kazi.Loop.Flake` gained
+`record_pass_streak/3` (a quarantined predicate is now polled through the real
+provider every tick; `rehab_streak/0`, 3, consecutive REAL passes un-quarantines
+it and the vector converges the same tick) and `quarantine_blocks_only?/2` (true
+iff every non-passing id in the vector is quarantined); `Kazi.Loop.decide/2`'s
+clause 5 (`handle_no_work/2`) now stops honestly `:stuck` -- naming the
+quarantined ids -- after `quarantine_only_stuck_ticks/0` (3) consecutive no-work
+observations of that condition, and otherwise backs off the reobserve interval
+(capped, doubling per consecutive no-work tick) instead of a fixed sub-second
+poll forever. INVARIANT: quarantine excludes a predicate from WORK and from the
+convergence bar, but never from OBSERVATION -- a quarantined id must keep being
+checked for real, both so it can be rehabilitated and so "blocked only by
+quarantine, nothing to do" is a distinguishable, honestly-terminable state rather
+than an indefinite idle. This is independent of `stuck_iterations` (which gates
+only the ordinary same-failing-set detector) by design -- disabling that detector
+must not resurrect the burn-to-budget bug. Regression:
+`test/kazi/loop/quarantine_exit_test.exs` (rehabilitation converging, honest
+`:stuck` bounded well under a 40-iteration budget naming the quarantined id, and
+the no-work backoff bounding tick count over a wall-clock window); four
+pre-existing tests that asserted the OLD idle-forever symptom
+(`test/kazi/loop_test.exs`, `test/kazi/loop/verdict_bar_test.exs`,
+`test/kazi/deep_review_lows_test.exs`, `test/kazi/slice1_test.exs`) were updated
+to the new, honestly-terminating expectation. (2026-07-06.)

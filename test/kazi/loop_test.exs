@@ -536,8 +536,15 @@ defmodule Kazi.LoopTest do
 
     # The flaky predicate is the only predicate; once quarantined it is excluded
     # from convergence, so the vector (with nothing left to assert) cannot
-    # converge — the loop runs on. We just need it to have observed + quarantined.
-    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+    # converge. It keeps alternating on every real re-poll (never a
+    # `Kazi.Loop.Flake.rehab_streak/0` run of consecutive passes), so it never
+    # rehabilitates either — #820: with the vector blocked SOLELY by quarantine
+    # and nothing dispatchable, the loop stops honestly `:stuck` rather than
+    # idling on the reobserve interval forever.
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    refute result.outcome == :converged
+    assert result.outcome == :stopped
+    assert result.reason == :stuck
 
     snap = Kazi.Loop.snapshot(loop)
     assert :flaky in snap.quarantine, "the alternating predicate must be quarantined"
@@ -545,8 +552,6 @@ defmodule Kazi.LoopTest do
     # It was never dispatched as work: a quarantined flake is not the work-list.
     refute :dispatch_agent in snap.actions
     refute_received {:dispatched, _prompt, _ws}
-
-    :ok = Kazi.Loop.stop(loop)
   end
 
   test "a quarantined flaky predicate blocks convergence even when other requirements pass (i795/#795)" do
@@ -589,8 +594,14 @@ defmodule Kazi.LoopTest do
 
     # Never converges: the flaky predicate is quarantined (excluded from work),
     # :solid passes, but the vector as a whole still carries an `:unknown` — so
-    # the loop just keeps re-observing rather than reporting a false positive.
-    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+    # the loop must not report a false positive. #820: with nothing dispatchable
+    # and the vector blocked SOLELY by quarantine (:flaky keeps alternating, so
+    # it never strings together a rehabilitating run of real passes), the loop
+    # stops honestly `:stuck` rather than idling forever.
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    refute result.outcome == :converged
+    assert result.outcome == :stopped
+    assert result.reason == :stuck
 
     # The flaky predicate was quarantined and never dispatched as work.
     snap = Kazi.Loop.snapshot(loop)

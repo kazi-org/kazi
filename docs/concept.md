@@ -246,12 +246,20 @@ The loop's hard parts — and therefore the product — are the failure modes:
   caused it, not counted as progress.
 - **Flaky predicates.** A flaky test would poison the loop into infinite "work."
   Predicate providers must support re-run / quarantine so a nondeterministic fail
-  is not treated as real work.
+  is not treated as real work. A quarantined predicate stays out of the
+  work-list, but (#820) is not abandoned forever: it is still polled through the
+  real provider, and a sustained run of real passes rehabilitates it back onto
+  the convergence bar.
 - **Gaming.** Guard predicates (test-count, coverage ratchet) block the "delete
   the failing test" shortcut.
 - **No-progress / runaway.** A budget ceiling plus a stuck detector (N
   iterations, same failing set) that **escalates to a human** rather than burning
-  money.
+  money. When the ONLY thing left unsatisfied is quarantined predicates and there
+  is nothing to dispatch (#820), the loop does not idle at the reobserve interval
+  to the budget ceiling either — it stops honestly `:stuck`, naming the
+  quarantined ids, after a small bounded number of no-work ticks; any other
+  no-work wait (e.g. a live predicate still pending) backs off its poll interval
+  instead of a sub-second busy-spin.
 
 `/qualify` (the original pain) is simply the goal
 `{unit, integration, api, browser, prod_logs}` run through this loop — but as a

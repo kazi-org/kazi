@@ -495,7 +495,20 @@ defmodule Kazi.Loop do
               escalation_config: nil,
               escalation_state: nil,
               escalation_prev_cost: 0,
-              escalation_events: []
+              escalation_events: [],
+              # --- #820: quarantine rehabilitation + honest no-work stop -------
+              # `quarantine_streaks` counts each quarantined id's consecutive REAL
+              # passes toward `Kazi.Loop.Flake.rehab_streak/0` (rehabilitation);
+              # an id absent from the map has a streak of zero, and it never holds
+              # an entry for a non-quarantined id. `noop_ticks` counts consecutive
+              # decide/2 ticks that hit the terminal "nothing to dispatch, not yet
+              # satisfied" clause (waiting on a live predicate or a quarantine-only
+              # blockage) — it resets to 0 the moment any OTHER clause fires
+              # (dispatch/integrate/deploy/converge) and drives both the reobserve
+              # backoff and the quarantine-only stuck bound. Both appended last so
+              # the existing field order is untouched.
+              quarantine_streaks: %{},
+              noop_ticks: 0
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -1035,7 +1048,7 @@ defmodule Kazi.Loop do
     # active; `clean_tree_active?` records whether that actually held (it degrades
     # to the working copy if the workspace is not a git repo), so the reported
     # guarantees reflect the ACTUAL level (ADR-0042 §7).
-    {vector, quarantine, clean_tree_active?} = observe_with_isolation(data)
+    {vector, quarantine, streaks, clean_tree_active?} = observe_with_isolation(data)
     data = %Data{data | clean_tree_active?: clean_tree_active?}
 
     # T32.2 / ADR-0041: thread each scored predicate's PREVIOUS-iteration score
@@ -1055,8 +1068,11 @@ defmodule Kazi.Loop do
         data
         | prev_vector: data.vector,
           vector: vector,
-          # T1.3 flake: carry the (sticky) quarantine set forward.
+          # T1.3 flake: carry the quarantine set forward (#820: no longer purely
+          # sticky — `evaluate/5` may have rehabilitated an id out of it this tick).
           quarantine: quarantine,
+          # #820: carry the rehabilitation streak map forward alongside it.
+          quarantine_streaks: streaks,
           # T3.4a standing mode: clear the steady flag for this fresh
           # observation. `converge_or_stay/1` (decide clause 1) re-sets it to
           # true iff THIS observation is satisfied, so `steady?` always reflects
@@ -1262,13 +1278,15 @@ defmodule Kazi.Loop do
   # predicates can converge once the fix satisfies them, without waiting for
   # `integrate` to commit it first. The ordinary visible predicates still evaluate
   # against the working copy so the agent's in-flight work is seen and the loop
-  # converges normally. Returns `{vector, quarantine, clean_tree_active?}`;
-  # `clean_tree_active?` is false when isolation degraded (the workspace is not a
-  # git repo / the ref is unresolvable) — the checker still ran, in the working
-  # copy, and the reported guarantees drop `:clean_tree` (honest reporting,
-  # ADR-0042 §7). With enforcement off the worktree is never created and this is
-  # exactly the pre-T32.4 single-workspace observe.
-  @spec observe_with_isolation(Data.t()) :: {PredicateVector.t(), MapSet.t(), boolean()}
+  # converges normally. Returns `{vector, quarantine, streaks, clean_tree_active?}`
+  # (`streaks` is the #820 rehabilitation counter map, threaded exactly like
+  # `quarantine` — see `observe/2`); `clean_tree_active?` is false when isolation
+  # degraded (the workspace is not a git repo / the ref is unresolvable) — the
+  # checker still ran, in the working copy, and the reported guarantees drop
+  # `:clean_tree` (honest reporting, ADR-0042 §7). With enforcement off the
+  # worktree is never created and this is exactly the pre-T32.4 single-workspace
+  # observe.
+  @spec observe_with_isolation(Data.t()) :: {PredicateVector.t(), MapSet.t(), map(), boolean()}
   defp observe_with_isolation(%Data{enforcement: enf, workspace: ws} = data) do
     if Enforcement.isolate?(enf) and is_binary(ws) and any_isolated?(data) do
       result =
@@ -1277,12 +1295,15 @@ defmodule Kazi.Loop do
         end)
 
       case result do
-        {:ok, {vector, quarantine}} -> {vector, quarantine, true}
-        {:degraded, _reason, {vector, quarantine}} -> {vector, quarantine, false}
+        {:ok, {vector, quarantine, streaks}} ->
+          {vector, quarantine, streaks, true}
+
+        {:degraded, _reason, {vector, quarantine, streaks}} ->
+          {vector, quarantine, streaks, false}
       end
     else
-      {vector, quarantine} = observe(data, fn _predicate -> ws end)
-      {vector, quarantine, false}
+      {vector, quarantine, streaks} = observe(data, fn _predicate -> ws end)
+      {vector, quarantine, streaks, false}
     end
   end
 
@@ -1312,44 +1333,60 @@ defmodule Kazi.Loop do
   # else the working copy. With enforcement off it is `fn _ -> data.workspace end`,
   # so the context is byte-identical to the pre-T32.4 path.
   #
-  # T1.3 flake: returns `{vector, quarantine}` — observation also evolves the
-  # (sticky) quarantine set, because a failing predicate is re-run through the
-  # real provider path and may be classified flaky. The fold threads the set so
-  # one observation can quarantine several predicates.
+  # T1.3 flake: returns `{vector, quarantine, streaks}` — observation also
+  # evolves the quarantine set (a failing predicate is re-run through the real
+  # provider path and may be classified flaky) AND the #820 rehabilitation streak
+  # map (an already-quarantined predicate is polled through the real provider too,
+  # so a sustained run of real passes can un-quarantine it). The fold threads both
+  # accumulators so one observation can quarantine/rehabilitate several
+  # predicates.
   #
   # T32.4 enforcement: each result passes through `Kazi.Enforcement.enforce_result/2`
   # so a checker that "passed" only by skipping/erroring/xfailing work is downgraded
   # to :fail (a no-op when enforcement is off, ADR-0042 §3).
   @spec observe(Data.t(), (Predicate.t() -> String.t() | nil)) ::
-          {PredicateVector.t(), MapSet.t()}
+          {PredicateVector.t(), MapSet.t(), map()}
   defp observe(%Data{goal: goal} = data, checker_workspace_fn) do
-    {pairs, quarantine} =
+    {pairs, {quarantine, streaks}} =
       goal
       |> Goal.all_predicates()
-      |> Enum.map_reduce(data.quarantine, fn %Predicate{} = predicate, quarantine ->
+      |> Enum.map_reduce({data.quarantine, data.quarantine_streaks}, fn %Predicate{} = predicate,
+                                                                        {quarantine, streaks} ->
         context = provider_context(data, checker_workspace_fn.(predicate))
-        {result, quarantine} = evaluate(predicate, context, data, quarantine)
+        {result, quarantine, streaks} = evaluate(predicate, context, data, quarantine, streaks)
         result = Enforcement.enforce_result(data.enforcement, result)
-        {{predicate.id, result}, quarantine}
+        {{predicate.id, result}, {quarantine, streaks}}
       end)
 
-    {PredicateVector.new(pairs), quarantine}
+    {PredicateVector.new(pairs), quarantine, streaks}
   end
 
   # Evaluate one predicate, applying the T1.3 flake re-run policy and folding any
-  # flake into `quarantine`. Returns `{result, quarantine}`.
-  @spec evaluate(Predicate.t(), map(), Data.t(), MapSet.t()) :: {PredicateResult.t(), MapSet.t()}
-  defp evaluate(%Predicate{id: id} = predicate, context, %Data{} = data, quarantine) do
+  # flake into `quarantine`, OR — if already quarantined — the #820 rehabilitation
+  # check into `streaks`. Returns `{result, quarantine, streaks}`.
+  @spec evaluate(Predicate.t(), map(), Data.t(), MapSet.t(), map()) ::
+          {PredicateResult.t(), MapSet.t(), map()}
+  defp evaluate(%Predicate{id: id} = predicate, context, %Data{} = data, quarantine, streaks) do
     cond do
-      # Already-quarantined predicates are not re-evaluated as work: record them
-      # as :unknown (no convergence claim) so they neither become work nor block
-      # convergence. Quarantine is sticky for the run.
+      # #820: an already-quarantined predicate is still polled through the real
+      # provider (unlike ordinary work it is NOT re-dispatched to an agent — see
+      # `code_failing?`/`PredicateVector.failing/1` — this is pure observation) so
+      # a sustained run of real passes can rehabilitate it. A single non-pass, or
+      # a still-short streak of passes, keeps it quarantined (:unknown, no
+      # convergence claim); `rehab_streak/0` consecutive real passes un-quarantines
+      # it and records THIS observation's genuine result.
       Flake.quarantined?(quarantine, id) ->
-        {Flake.quarantined_result(PredicateResult.unknown()), quarantine}
+        result = run_provider(predicate, context, data)
+
+        case Flake.record_pass_streak(streaks, id, result) do
+          {:rehabilitated, streaks} -> {result, MapSet.delete(quarantine, id), streaks}
+          {:still_quarantined, streaks} -> {Flake.quarantined_result(result), quarantine, streaks}
+        end
 
       true ->
         first = run_provider(predicate, context, data)
-        apply_flake_policy(predicate, context, data, quarantine, first)
+        {result, quarantine} = apply_flake_policy(predicate, context, data, quarantine, first)
+        {result, quarantine, streaks}
     end
   end
 
@@ -1433,8 +1470,14 @@ defmodule Kazi.Loop do
       #    keeps holding the predicates true (UC-016). In the DEFAULT loop this is
       #    exactly `terminate_with(:converged, data)` — the T0.8 path is
       #    unchanged.
+      #
+      #    #820: reaching :converged is also how a REHABILITATED predicate
+      #    resolves — `evaluate/5` un-quarantines an id the moment its real result
+      #    passes `rehab_streak/0` consecutive times and records that pass in THIS
+      #    tick's vector, so an otherwise-green vector converges here exactly like
+      #    any other predicate turning green — no separate rehab-termination path.
       all_satisfied?(vector) ->
-        converge_or_stay(data)
+        converge_or_stay(reset_noop_ticks(data))
 
       # 2. Code predicates failing: dispatch the agent with failing evidence.
       #
@@ -1449,23 +1492,81 @@ defmodule Kazi.Loop do
       #    the convergence machinery (rather than forking a parallel path) is the
       #    whole point of T3.4b: drift is just another unsatisfied observation.
       code_failing?(vector, data) ->
-        act(dispatch_action(vector, data), data)
+        act(dispatch_action(vector, data), reset_noop_ticks(data))
 
       # 3. Code green but not landed: integrate.
       not data.landed? ->
-        act(Action.new(:integrate, params: data.integrate_params), data)
+        act(Action.new(:integrate, params: data.integrate_params), reset_noop_ticks(data))
 
       # 4. Landed but not deployed: deploy, then re-observe live predicates.
       not data.deployed? ->
-        act(Action.new(:deploy, params: data.deploy_params), data)
+        act(Action.new(:deploy, params: data.deploy_params), reset_noop_ticks(data))
 
       # 5. Landed + deployed, code green, but the whole vector still isn't
-      #    satisfied (a live predicate is still :fail / :error / :unknown).
-      #    Re-observe on a poll interval until it flips or the operator stops the
-      #    loop (a state timeout yields the scheduler — no busy-spin).
+      #    satisfied (a live predicate is still :fail / :error / :unknown, or a
+      #    predicate is quarantined-:unknown). There is NOTHING to dispatch — see
+      #    `handle_no_work/2` (#820) for what happens next: an honest :stuck stop
+      #    if the ONLY blockage is quarantine, otherwise a backed-off reobserve
+      #    (never a sub-second busy-spin) while genuinely live work is pending.
       true ->
-        reobserve(data, data.reobserve_interval_ms)
+        handle_no_work(vector, data)
     end
+  end
+
+  # #820: the terminal "nothing to dispatch, not yet satisfied" clause of
+  # `decide/2`. Two outcomes:
+  #
+  #   * `Flake.quarantine_blocks_only?/2` — every non-passing id is quarantined,
+  #     i.e. there is no dispatchable work and never will be without rehabilitation
+  #     or a human intervening. After `Flake.quarantine_only_stuck_ticks/0`
+  #     consecutive such observations the loop stops honestly `:stuck`, naming the
+  #     quarantined ids, rather than idling at the reobserve interval until
+  #     `max_iterations`/wall-clock forces an uninformative `:over_budget` (the
+  #     live occurrence in #820: 40 iterations at ~1 tick/s, every evaluation
+  #     green, one predicate pinned `:unknown` by a single flake flap).
+  #   * otherwise — a live predicate is legitimately still pending (deploy just
+  #     happened; the probe has not gone green yet) — keep polling, but back off
+  #     the interval on each consecutive no-work tick (capped) so an indefinite
+  #     wait never busy-spins sub-second.
+  #
+  # `noop_ticks` counts consecutive calls to this clause; `decide/2`'s other four
+  # clauses reset it to 0 the moment there is real work (or convergence), so the
+  # count always reflects the CURRENT stretch of no-work ticks.
+  @spec handle_no_work(PredicateVector.t(), Data.t()) :: :gen_statem.event_handler_result(atom())
+  defp handle_no_work(vector, %Data{} = data) do
+    ticks = data.noop_ticks + 1
+    data = %Data{data | noop_ticks: ticks}
+
+    if Flake.quarantine_blocks_only?(vector, data.quarantine) and
+         ticks >= Flake.quarantine_only_stuck_ticks() do
+      terminate_stuck(data.quarantine, data)
+    else
+      reobserve(data, backoff_reobserve_ms(data.reobserve_interval_ms, ticks))
+    end
+  end
+
+  # #820: reset the no-work tick counter — called from every `decide/2` clause
+  # OTHER than the terminal no-work one, so a fresh stretch of no-work ticks
+  # (after real work happened) starts the backoff/stuck-bound count at zero
+  # rather than continuing a stale streak from before that work.
+  @spec reset_noop_ticks(Data.t()) :: Data.t()
+  defp reset_noop_ticks(%Data{noop_ticks: 0} = data), do: data
+  defp reset_noop_ticks(%Data{} = data), do: %Data{data | noop_ticks: 0}
+
+  # #820: the capped, exponentially-backed-off reobserve interval for a no-work
+  # tick. `ticks == 1` (the first no-work observation) yields exactly `base_ms` —
+  # byte-identical to the pre-#820 fixed-interval poll — so a single no-work tick
+  # (the common "just deployed, waiting on the live probe" case) is unchanged.
+  # From the second consecutive no-work tick the interval doubles each time, up to
+  # `@max_noop_backoff_ms`, so an indefinite wait never spins sub-second forever.
+  @max_noop_backoff_ms 30_000
+
+  @spec backoff_reobserve_ms(non_neg_integer(), pos_integer()) :: non_neg_integer()
+  defp backoff_reobserve_ms(base_ms, ticks) do
+    # Cap the exponent, not just the result, so a very long-lived standing loop's
+    # tick count never risks a float blow-up in :math.pow/2.
+    multiplier = trunc(:math.pow(2, min(ticks, 20) - 1))
+    min(base_ms * multiplier, @max_noop_backoff_ms)
   end
 
   # ---------------------------------------------------------------------------
@@ -2540,7 +2641,7 @@ defmodule Kazi.Loop do
   # effects, since this is a terminal re-check, not another tick.
   @spec reeval_terminal_vector(Data.t()) :: Data.t()
   defp reeval_terminal_vector(%Data{} = data) do
-    {vector, quarantine, clean_tree_active?} = observe_with_isolation(data)
+    {vector, quarantine, streaks, clean_tree_active?} = observe_with_isolation(data)
     vector = thread_prior_scores(vector, data.vector)
 
     %Data{
@@ -2548,6 +2649,7 @@ defmodule Kazi.Loop do
       | prev_vector: data.vector,
         vector: vector,
         quarantine: quarantine,
+        quarantine_streaks: streaks,
         clean_tree_active?: clean_tree_active?
     }
   end
