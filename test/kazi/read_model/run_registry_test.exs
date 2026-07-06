@@ -174,4 +174,54 @@ defmodule Kazi.ReadModel.RunRegistryTest do
                RunRegistry.record_harness_session("never-started", "sess-1")
     end
   end
+
+  describe "harness pid identity (issue #857)" do
+    test "record_harness_pid/2 sets, keeps idempotent, and supersedes the pid" do
+      {:ok, run} = RunRegistry.start(run_attrs())
+
+      assert {:ok, updated} = RunRegistry.record_harness_pid(run.run_id, "1234")
+      assert updated.harness_child_pid == "1234"
+
+      # Idempotent: rewriting the same pid is a no-op read.
+      assert {:ok, same} = RunRegistry.record_harness_pid(run.run_id, "1234")
+      assert same.harness_child_pid == "1234"
+
+      # A re-dispatched run's newer pid supersedes the prior one.
+      assert {:ok, redispatched} = RunRegistry.record_harness_pid(run.run_id, "5678")
+      assert redispatched.harness_child_pid == "5678"
+    end
+
+    test "record_harness_pid/2 on an unregistered run is :not_found" do
+      assert {:error, :not_found} = RunRegistry.record_harness_pid("never-started", "1234")
+    end
+  end
+
+  describe "list_by_goal_ref/2" do
+    test "lists only OTHER runs of the same goal_ref, most recently started first" do
+      target_goal = "goal-#{System.unique_integer([:positive])}"
+
+      {:ok, this_run} = RunRegistry.start(run_attrs(%{goal_ref: target_goal}))
+      {:ok, other_goal_run} = RunRegistry.start(run_attrs(%{goal_ref: "goal-different"}))
+
+      older = run_attrs(%{goal_ref: target_goal})
+      assert {:ok, older_run} = RunRegistry.start(older)
+
+      newer_row =
+        %Run{}
+        |> Run.changeset(
+          Map.merge(run_attrs(%{goal_ref: target_goal}), %{
+            started_at: DateTime.add(DateTime.utc_now(), 10, :second),
+            heartbeat_at: DateTime.utc_now()
+          })
+        )
+        |> Repo.insert!()
+
+      results = RunRegistry.list_by_goal_ref(target_goal, this_run.run_id)
+      result_ids = Enum.map(results, & &1.run_id)
+
+      assert result_ids == [newer_row.run_id, older_run.run_id]
+      refute this_run.run_id in result_ids
+      refute other_goal_run.run_id in result_ids
+    end
+  end
 end
