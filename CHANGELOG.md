@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.79.1](https://github.com/kazi-org/kazi/compare/v1.79.0...v1.79.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* integrate stages scoped, waits for CI, says what it landed (issue [#819](https://github.com/kazi-org/kazi/issues/819)) ([ce2b542](https://github.com/kazi-org/kazi/commit/ce2b542af71b44709a38b772e3da3551da9b09f7))
+
 ## [1.79.0](https://github.com/kazi-org/kazi/compare/v1.78.0...v1.79.0) (2026-07-06)
 
 
