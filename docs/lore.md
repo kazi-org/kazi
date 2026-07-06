@@ -477,3 +477,37 @@ must now be added to `read_only_paths` to keep it tamper-proof. Regression:
 overlay, grader-path pinning, absent-at-ref pinning, graceful degradation, and an
 end-to-end `Kazi.Loop` convergence proof). (2026-07-03, deep-review 001
 remediation.)
+
+### L-0025 #scheduler #parallel #vacuous-goal #landmine -- a killed `--parallel` run's leftover partial progress permanently poisons LATER applies as an instant, zero-evaluation `:stuck`
+Issue #786: `kazi apply <goal> --parallel` externally killed mid-collective (a
+`kill -9` of the CLI process while a wave was in progress) made every SUBSEQUENT
+`apply` for that goal terminate in ~1 second with a persisted-LOOKING `"collective":
+"stuck"` verdict and ZERO evaluations (no `kazi.loop` iterations, no `iterations`
+rows) -- and the poison SURVIVED a new goal id, renamed groups (new partition
+content-hashes), and a fresh git worktree passed via `--workspace`, which looked
+exactly like leaked scheduler/lease/partition state. It was not: `Kazi.Scheduler`
+has NO cross-process persistence at that layer (`Kazi.Coordination.LeaseTable`,
+`Kazi.Scheduler.WorktreeTable`, `Kazi.Coordination.Lease.Memory` are all per-BEAM-
+process `Agent`s that die with the killed VM). The real cause: `Kazi.Runtime.run/2`'s
+t0 vacuous-goal guard (T2.3, R3) rejects a goal whose WHOLE predicate vector already
+passes with `{:error, :vacuous_goal}` -- correct for a human-authored goal, but a
+scheduler PARTITION's or `needs`-DAG GROUP's sub-goal is authored by kazi itself and
+can legitimately already be satisfied (a killed run's fix landed in the workspace
+before the run recorded convergence, or a sibling partition's edit touched the same
+files). `Kazi.Scheduler.reconcile_partition/2` (and `reconcile_partition_with_spend/2`,
+`default_group_reconciler/2`) folded EVERY `{:error, _}` -- including `:vacuous_goal`
+-- into `:stuck`, with NO iteration recorded (the t0 observation is real, per
+`guard_not_vacuous/3`, but is never projected to the read-model). So a later apply
+re-observing the SAME already-fixed files (a new goal id / renamed groups / a fresh
+worktree checked out from the same branch all still see the same fixed files)
+DETERMINISTICALLY re-derives the identical `:stuck` verdict -- indistinguishable from
+poisoned state, because it is RECOMPUTED FRESH from the world every time, never
+replayed from anything persisted. FIX: `reconcile_partition/2` and
+`reconcile_partition_with_spend/2` now map `{:error, :vacuous_goal}` to `:converged`
+(an already-satisfied sub-goal spent nothing to get there) instead of `:stuck`.
+INVARIANT: convergence is recomputed from the world (concept §1) -- a sub-goal the
+world already satisfies IS converged, never an error, at every scheduler layer that
+folds a reconciler's terminal status. Regression: `test/kazi/scheduler/killed_run_
+recovery_test.exs` (both `reconcile_partition/2` directly and an end-to-end
+`needs`-DAG recovery through `Kazi.Scheduler.run_goals/2`, with NO injected
+reconciler -- the real production path). (2026-07-05.)

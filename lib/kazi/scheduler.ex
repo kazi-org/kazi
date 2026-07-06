@@ -1023,6 +1023,23 @@ defmodule Kazi.Scheduler do
   the skeleton this accepts a partition that exposes a `%Kazi.Goal{}` (directly or
   under `:goal`) and maps the loop result to a partition status. A partition with
   no resolvable goal is `:stuck`.
+
+  ## `:vacuous_goal` is `:converged`, not `:stuck` (#786)
+
+  `Kazi.Runtime.run/2`'s t0 guard (T2.3, R3) rejects a goal whose WHOLE predicate
+  vector already passes with `{:error, :vacuous_goal}` — a sound rule for a
+  goal a HUMAN authored (nothing to converge means it was underspecified). But a
+  partition or `needs`-DAG group's sub-goal (`default_group_reconciler/2`,
+  `run_partition_goals/3`) is authored by kazi itself, and can legitimately
+  already be satisfied: a sibling partition's edit touched its files too, or an
+  earlier `--parallel` run was externally killed mid-collective AFTER this
+  partition's fix landed in the workspace but BEFORE the run recorded it. Folding
+  `:vacuous_goal` into `:stuck` here made that recovery permanent: the poisoned
+  `:stuck` verdict re-derives on EVERY later `apply` (a new goal id, renamed
+  groups, a fresh worktree) because it is recomputed FRESH each time from the
+  same already-fixed files, not replayed from stale persisted state. Treating it
+  as `:converged` is what "convergence recomputed from the world" (concept §1)
+  actually means for a sub-goal that the world already satisfies.
   """
   @spec reconcile_partition(partition(), keyword()) :: partition_status()
   def reconcile_partition(partition, run_opts) do
@@ -1030,6 +1047,7 @@ defmodule Kazi.Scheduler do
       {:ok, goal} ->
         case Kazi.Runtime.run(goal, run_opts) do
           {:ok, result} -> result_to_status(result)
+          {:error, :vacuous_goal} -> :converged
           {:error, _reason} -> :stuck
         end
 
@@ -1044,7 +1062,9 @@ defmodule Kazi.Scheduler do
   # deterministic, hermetically-testable dimension), so spend is reported on the
   # iterations axis (tokens/wall-clock are not yet surfaced by the loop result —
   # T1.4 deepening, not this task). A partition with no resolvable goal, or a run
-  # error, spends nothing.
+  # error, spends nothing. `:vacuous_goal` is `:converged` here too (#786,
+  # `reconcile_partition/2`'s moduledoc) — an already-satisfied sub-goal spent
+  # nothing to get there.
   @spec reconcile_partition_with_spend(partition(), keyword()) ::
           {partition_status(), Kazi.Scheduler.Budget.spent()}
   defp reconcile_partition_with_spend(partition, run_opts) do
@@ -1053,6 +1073,9 @@ defmodule Kazi.Scheduler do
         case Kazi.Runtime.run(goal, run_opts) do
           {:ok, result} ->
             {result_to_status(result), %{iterations: Map.get(result, :iterations, 0)}}
+
+          {:error, :vacuous_goal} ->
+            {:converged, %{}}
 
           {:error, _reason} ->
             {:stuck, %{}}
