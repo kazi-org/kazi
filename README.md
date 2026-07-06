@@ -782,6 +782,8 @@ kazi reject  <proposal-ref>                  # discard a draft
 kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
         [--env <name>]                       #   target a deploy environment (staging/prod)
         [--standing]                         #   run continuously (re-converge on drift)
+        [--check]                            #   observe-only: evaluate the vector once, dispatch nothing (issue #805)
+        [--explain]                          #   pure planning: print the computed wave schedule, dispatch nothing
 kazi status <ref>                            # report a run's (or proposal's) current state
 kazi context index <label> <file>            # context store: index a heavy artifact
 kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provider gist)
