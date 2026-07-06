@@ -101,29 +101,79 @@ defmodule KaziWeb.StarmapLive do
      |> assign_river()}
   end
 
+  # The canvas cap (docs/dashboard-design.md "Canvas composition" overflow
+  # rule): one node per GOAL (its latest run), newest ~24 on the canvas, the
+  # rest a single "+N older" pointer to /goals. Counts stay fleet-wide.
+  @canvas_node_cap 24
+
   defp assign_runs(socket) do
-    nodes = RunRegistry.list() |> Enum.map(&to_node/1)
-    counts = Enum.frequencies_by(nodes, & &1.state)
+    all_nodes = RunRegistry.list() |> Enum.map(&to_node/1)
+    counts = Enum.frequencies_by(all_nodes, & &1.state)
+
+    deduped =
+      all_nodes
+      |> Enum.group_by(& &1.goal_ref)
+      |> Enum.map(fn {_ref, runs} -> Enum.max_by(runs, & &1.heartbeat_at, DateTime) end)
+      |> Enum.sort_by(& &1.heartbeat_at, {:desc, DateTime})
+
+    {shown, older} = Enum.split(deduped, @canvas_node_cap)
 
     socket
-    |> assign(:nodes, nodes)
+    |> assign(:nodes, shown)
+    |> assign(:older_count, length(older) + (length(all_nodes) - length(deduped)))
     |> assign(:counts, counts)
   end
 
   # T46.6: the attention-queue rail, ranked from the same run registry the
   # fleet list above renders.
   defp assign_attention_queue(socket) do
-    assign(socket, :attention_queue, AttentionQueue.build(RunRegistry.list()))
+    queue =
+      RunRegistry.list()
+      |> AttentionQueue.build()
+      # One rail entry per goal+signal: repeated runs of the same goal say
+      # nothing new to the operator; ranking already put the hottest first.
+      |> Enum.uniq_by(&{&1.goal_ref, &1.signal})
+
+    assign(socket, :attention_queue, queue)
   end
 
   defp to_node(%Run{} = run) do
+    state = state(run)
+
     %{
       run_id: run.run_id,
       goal_ref: run.goal_ref,
       harness: run.harness,
       model: run.model,
-      state: state(run)
+      heartbeat_at: run.heartbeat_at,
+      state: state,
+      sublabel: sublabel(state, run)
     }
+  end
+
+  # The mockup's per-node status line ("LANDED · v1.68.0", "STUCK · ITER 9",
+  # "STALE · NO HEARTBEAT 4m"): rendered from what the registry row actually
+  # knows — state plus heartbeat recency; never fabricated detail.
+  defp sublabel(:landed, run), do: "LANDED · #{ago(run.heartbeat_at)}"
+  defp sublabel(:converging, _run), do: "CONVERGING · LIVE"
+
+  defp sublabel(:stuck, run),
+    do: "#{String.upcase(run.status || "stuck")} · #{ago(run.heartbeat_at)}"
+
+  defp sublabel(:stale, run), do: "STALE · NO HEARTBEAT #{ago(run.heartbeat_at)}"
+  defp sublabel(_state, _run), do: nil
+
+  defp ago(nil), do: "?"
+
+  defp ago(%DateTime{} = t) do
+    s = DateTime.diff(DateTime.utc_now(), t, :second)
+
+    cond do
+      s < 90 -> "#{s}s"
+      s < 5400 -> "#{div(s, 60)}m"
+      s < 172_800 -> "#{div(s, 3600)}h"
+      true -> "#{div(s, 86_400)}d"
+    end
   end
 
   defp state(%Run{status: "converged"}), do: :landed
@@ -273,11 +323,25 @@ defmodule KaziWeb.StarmapLive do
       Enum.map(placed, fn {frontier, row, node} ->
         band_center = frontier * band_width + band_width / 2
         rows = Map.fetch!(rows_per_band, frontier)
-        # Vertical spread across the band, with a gentle alternating x offset
-        # so the constellation reads organic (the mockup's scatter), never a
-        # rigid grid. Deterministic — no randomness (resume-safety).
-        cy = @canvas_height * (row + 1) / (rows + 1)
-        cx = band_center + if(rem(row, 2) == 0, do: -32, else: 32)
+
+        # Vertical spread with a gentle alternating x offset so the
+        # constellation reads organic (the mockup's scatter), never a rigid
+        # grid. Dense bands (> 7 nodes) split into two sub-columns so labels
+        # keep the mockup's breathing room. Deterministic — no randomness
+        # (resume-safety).
+        {cx, cy} =
+          if rows > 7 do
+            col = rem(row, 2)
+            col_rows = div(rows + 1 - col, 2)
+            col_row = div(row, 2)
+            cy = @canvas_height * (col_row + 1) / (col_rows + 1) + col * 34
+            cx = band_center + if(col == 0, do: -band_width / 4, else: band_width / 4)
+            {cx, cy}
+          else
+            cy = @canvas_height * (row + 1) / (rows + 1)
+            cx = band_center + if(rem(row, 2) == 0, do: -32, else: 32)
+            {cx, cy}
+          end
 
         Map.merge(node, %{
           frontier: frontier,
@@ -348,9 +412,16 @@ defmodule KaziWeb.StarmapLive do
       label: Map.get(node, :name) || Map.get(node, :goal_ref),
       state: node.state,
       harness: node.harness,
-      model: node.model
+      model: node.model,
+      sublabel: Map.get(node, :sublabel) || default_sublabel(node.state)
     }
   end
+
+  # Roadmap band nodes carry no run row; their status line is the state name
+  # the mockup uses ("CLAIMED · NEXT", "PENDING · NEEDS deps").
+  defp default_sublabel(:claimed), do: "CLAIMED · NEXT"
+  defp default_sublabel(:pending), do: "PENDING"
+  defp default_sublabel(state), do: state |> to_string() |> String.upcase()
 
   # Session tags (`S1`, `S2`, ...): assigned in canvas order to every node
   # whose state is "active" per the spec's zoo — dispatched-and-running
@@ -483,6 +554,26 @@ defmodule KaziWeb.StarmapLive do
           </p>
         </div>
 
+        <div
+          :if={Enum.any?(@canvas_nodes, & &1.session_tag)}
+          id="starmap-sessions"
+          class="rail-sessions"
+        >
+          <div class="section-label">SESSIONS</div>
+          <div
+            :for={node <- Enum.filter(@canvas_nodes, & &1.session_tag)}
+            class="session-row"
+            data-session={node.session_tag}
+          >
+            <span class={"session-id" <> if(node.state == :stuck, do: " red", else: "")}>
+              {node.session_tag}
+            </span>
+            <span class="session-text">
+              {node.harness || "agent"} · driving <b>{node.label}</b>
+            </span>
+          </div>
+        </div>
+
         <ul id="starmap-legend" class="legend">
           <li class="section-label">LEGEND</li>
           <li class="legend-item" data-state="landed">
@@ -572,7 +663,15 @@ defmodule KaziWeb.StarmapLive do
               cy={node.cy}
               r={if node.state == :pending, do: "10", else: "13"}
             />
-            <text class="canvas-node-label" x={node.cx} y={node.cy + 26}>{node.label}</text>
+            <text class="canvas-node-label" x={node.cx} y={node.cy + 28}>{node.label}</text>
+            <text
+              :if={node.sublabel}
+              class={"canvas-node-sublabel nsub-#{node.state}"}
+              x={node.cx}
+              y={node.cy + 42}
+            >
+              {node.sublabel}
+            </text>
             <text
               :if={node.session_tag}
               class="stag"
@@ -584,6 +683,15 @@ defmodule KaziWeb.StarmapLive do
             </text>
           </g>
         </svg>
+
+        <.link
+          :if={@older_count > 0}
+          id="starmap-older"
+          navigate={~p"/goals"}
+          class="older-link"
+        >
+          +{@older_count} older
+        </.link>
       </div>
 
       <div id="starmap-event-river" class="event-river">
@@ -632,7 +740,7 @@ defmodule KaziWeb.StarmapLive do
 
         .canvas-shell { position: relative; flex: 1; min-width: 0; padding: 1rem 1.5rem 3.5rem; }
         .starfield { position: absolute; inset: 0; background-image: radial-gradient(rgba(191,210,234,.25) 1px, transparent 1px); background-size: 48px 48px; opacity: .2; pointer-events: none; }
-        .starmap-canvas { width: 100%; height: auto; margin-top: 1rem; }
+        .starmap-canvas { width: 100%; height: calc(100vh - 9.5rem); margin-top: 1rem; display: block; }
         .starmap-canvas .nd-landed { fill: var(--grn); }
         .starmap-canvas .nd-conv { fill: #0A1526; stroke: var(--cyn); stroke-width: 2; }
         .starmap-canvas .nd-stuck { fill: #160D14; stroke: var(--red); stroke-width: 2; }
@@ -654,12 +762,38 @@ defmodule KaziWeb.StarmapLive do
         .ticker-track { display: flex; gap: 2rem; white-space: nowrap; width: max-content; }
         .ticker-entry { color: var(--dim); }
 
-        .attention-queue-list { list-style: none; display: flex; flex-direction: column; gap: .5rem; padding: 0; }
-        .attention-item { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: .4rem; border: 1px solid var(--line, #16233A); background: #0B1424; }
-        .attention-signal-stuck { background: rgba(255,92,108,.12); border-color: var(--red, #FF5C6C); }
-        .attention-signal-budget { background: rgba(255,180,84,.12); border-color: var(--amb, #FFB454); }
-        .attention-signal-flake_suspicion { background: rgba(255,180,84,.08); border-color: rgba(255,180,84,.5); }
-        .attention-signal-regression_recovered { background: #101A2A; }
+        .attention-queue-list { list-style: none; display: flex; flex-direction: column; padding: 0; margin: 0; max-height: 30vh; overflow-y: auto; }
+        .attention-item { display: flex; align-items: baseline; gap: .45rem; padding: .45rem 0; border: none; background: transparent; border-bottom: 1px solid rgba(22,35,58,.6); font-size: 11px; line-height: 1.5; }
+        .attention-item:last-child { border-bottom: none; }
+        .attention-item::before { content: ""; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; align-self: center; }
+        .attention-signal-stuck::before { background: var(--red, #FF5C6C); box-shadow: 0 0 8px var(--red, #FF5C6C); }
+        .attention-signal-budget::before { background: var(--amb, #FFB454); box-shadow: 0 0 8px var(--amb, #FFB454); }
+        .attention-signal-flake_suspicion::before { background: rgba(255,180,84,.7); }
+        .attention-signal-regression_recovered::before { background: #46587A; }
+        .attention-goal { color: var(--txt, #BFD2EA); font-weight: 700; }
+        .attention-signal-label, .attention-predicate { color: var(--dim, #46587A); }
+        .attention-drillin-link { color: var(--cyn, #56CCF2); text-decoration: none; font-size: 10px; margin-left: auto; flex: 0 0 auto; }
+        .attention-drillin-link:hover { text-decoration: underline; }
+        .rail-sessions .session-row { display: flex; align-items: center; gap: .6rem; padding: .4rem 0; border-bottom: 1px solid rgba(22,35,58,.6); font-size: 10px; color: var(--dim, #46587A); }
+        .rail-sessions .session-row:last-child { border-bottom: none; }
+        .rail-sessions .session-id { color: var(--cyn, #56CCF2); border: 1px solid rgba(86,204,242,.4); border-radius: 3px; padding: 1px 6px; font-weight: 700; flex: 0 0 auto; }
+        .rail-sessions .session-id.red { color: var(--red, #FF5C6C); border-color: rgba(255,92,108,.5); }
+        .rail-sessions .session-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .rail-sessions .session-text b { color: var(--txt, #BFD2EA); }
+        .fleet-tiles { display: flex; gap: .6rem; flex-wrap: wrap; align-items: stretch; }
+        .fleet-tiles .section-label { flex-basis: 100%; }
+        .fleet-tile { flex: 1; display: flex; flex-direction: column; align-items: center; gap: .25rem; border: 1px solid var(--line, #16233A); border-radius: 4px; background: rgba(11,20,36,.6); padding: .6rem .4rem; }
+        .fleet-tile-value { font-size: 20px; font-weight: 700; line-height: 1; }
+        .fleet-tile-label { font-size: 8px; letter-spacing: .18em; color: var(--dim, #46587A); }
+        .older-link { position: absolute; right: 1.2rem; bottom: 3.4rem; color: var(--dim, #46587A); font-size: 10px; letter-spacing: .2em; text-decoration: none; }
+        .older-link:hover { color: var(--cyn, #56CCF2); }
+        .starmap-canvas .canvas-node-sublabel { font-size: 8px; letter-spacing: .22em; text-anchor: middle; }
+        .starmap-canvas .nsub-landed { fill: var(--grn, #2EE6A8); }
+        .starmap-canvas .nsub-converging { fill: var(--cyn, #56CCF2); }
+        .starmap-canvas .nsub-claimed { fill: var(--cyn, #56CCF2); }
+        .starmap-canvas .nsub-stuck { fill: var(--red, #FF5C6C); }
+        .starmap-canvas .nsub-stale { fill: var(--amb, #FFB454); }
+        .starmap-canvas .nsub-pending { fill: #3D4F6E; }
       </style>
     </main>
     """
