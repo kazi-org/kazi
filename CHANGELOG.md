@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.87.0](https://github.com/kazi-org/kazi/compare/v1.86.0...v1.87.0) (2026-07-06)
+
+
+### Features
+
+* **apply:** --session-name flag + claude session_id capture ([03644be](https://github.com/kazi-org/kazi/commit/03644be655a903b88e1f52c66977c36b260ef068))
+* **registry:** session identity on the run row ([2ebf228](https://github.com/kazi-org/kazi/commit/2ebf228c784d5655a0eac255094410b7f9f4aebc))
+* **web:** session names on the rail, resume command in the panel ([809c42c](https://github.com/kazi-org/kazi/commit/809c42c71bf1747107085608cebbe07ce973d4c5))
+
 ## [1.86.0](https://github.com/kazi-org/kazi/compare/v1.85.0...v1.86.0) (2026-07-06)
 
 
