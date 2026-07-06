@@ -137,6 +137,7 @@ defmodule Kazi.CLI do
     budget: :integer,
     context_store: :string,
     context_budget: :integer,
+    session_name: :string,
     port: :integer,
     bind: :string,
     roadmap: :string,
@@ -206,6 +207,8 @@ defmodule Kazi.CLI do
       "`apply` only: opt into the context store for the run — index oversized failing evidence and inject budget-fitted snippets instead of inlining it each iteration (currently `gist`). Off by default; absent, the dispatch + result are byte-identical (ADR-0045).",
     context_budget:
       "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
+    session_name:
+      "`apply` only: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown in the starmap's SESSIONS rail so concurrent runs are tellable apart. Falls back to the KAZI_SESSION_NAME environment variable when the flag is absent; both absent leaves the row unlabeled (unchanged behavior).",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -246,7 +249,8 @@ defmodule Kazi.CLI do
         :dry_run,
         :check,
         :context_store,
-        :context_budget
+        :context_budget,
+        :session_name
       ]
     },
     %{
@@ -1015,6 +1019,7 @@ defmodule Kazi.CLI do
           allowed_tools: flags[:allowed_tools],
           context_store: flags[:context_store],
           context_budget: flags[:context_budget],
+          session_name: flags[:session_name],
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1318,6 +1323,10 @@ defmodule Kazi.CLI do
       # workspace instead of silently denying every tool call.
       |> maybe_put(:permission_mode, opts[:permission_mode])
       |> maybe_put(:allowed_tools, opts[:allowed_tools])
+      # Session identity: --session-name (or the KAZI_SESSION_NAME env var)
+      # labels the run's fleet-registry row for the starmap's SESSIONS rail.
+      # Only set when one of them is given, so the default path is unchanged.
+      |> maybe_put(:session_name, opts[:session_name] || System.get_env("KAZI_SESSION_NAME"))
       # T15.4 (ADR-0023 decision 3): under --json --stream, thread a per-iteration
       # streaming observer into the runtime's `:stream` seam, which composes it
       # OVER the read-model projection (one `on_iteration` fires both). It emits
@@ -1595,6 +1604,7 @@ defmodule Kazi.CLI do
     |> maybe_put(:effort, opts[:effort])
     |> maybe_put(:permission_mode, opts[:permission_mode])
     |> maybe_put(:allowed_tools, opts[:allowed_tools])
+    |> maybe_put(:session_name, opts[:session_name] || System.get_env("KAZI_SESSION_NAME"))
   end
 
   # Merge the CLI-owned per-goal opts OVER any caller-supplied `:run_opts` (tests),

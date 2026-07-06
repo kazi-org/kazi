@@ -253,6 +253,8 @@ defmodule Kazi.Runtime do
           # (build_adapter_opts/4), not a Loop opt.
           :sinks_dir,
           :transcript_cap_bytes,
+          # Session identity: consumed by register_run/9 above, not a Loop opt.
+          :session_name,
           # T15.4 (ADR-0023 decision 3): the streaming observer is consumed by
           # build_on_iteration/2 (composed over the persistence projection), not
           # a Loop opt.
@@ -315,7 +317,8 @@ defmodule Kazi.Runtime do
           harness_opts,
           transcript_sink_path,
           events_sink_path,
-          goal.budget.max_iterations
+          goal.budget.max_iterations,
+          Keyword.get(opts, :session_name)
         )
 
         result = Loop.await(loop, await_timeout)
@@ -654,6 +657,7 @@ defmodule Kazi.Runtime do
         fn payload ->
           run_stream_observer(stream, payload)
           RunRegistry.heartbeat(run_id)
+          record_harness_session(run_id, payload)
           persist_iteration(goal_ref, payload, events_sink_path)
         end
 
@@ -663,6 +667,7 @@ defmodule Kazi.Runtime do
       persist? ->
         fn payload ->
           RunRegistry.heartbeat(run_id)
+          record_harness_session(run_id, payload)
           persist_iteration(goal_ref, payload, events_sink_path)
         end
 
@@ -670,6 +675,18 @@ defmodule Kazi.Runtime do
         nil
     end
   end
+
+  # Project the inner harness's session id (claude's envelope `session_id`,
+  # threaded via the loop's iteration payload) onto the run row, so the
+  # dashboard can offer an interactive resume. Best-effort like every registry
+  # write; `record_harness_session/2` no-ops on an unchanged id.
+  defp record_harness_session(run_id, %{harness_session_id: session_id})
+       when is_binary(session_id) do
+    RunRegistry.record_harness_session(run_id, session_id)
+    :ok
+  end
+
+  defp record_harness_session(_run_id, _payload), do: :ok
 
   # T15.4: run the streaming observer, contained — a raising stream callback must
   # never alter convergence or block the persistence projection that follows it.
@@ -840,7 +857,8 @@ defmodule Kazi.Runtime do
          _harness_opts,
          _transcript_sink_path,
          _events_sink_path,
-         _max_iterations
+         _max_iterations,
+         _session_name
        ),
        do: :ok
 
@@ -852,7 +870,8 @@ defmodule Kazi.Runtime do
          harness_opts,
          transcript_sink_path,
          events_sink_path,
-         max_iterations
+         max_iterations,
+         session_name
        ) do
     attrs = %{
       run_id: run_id,
@@ -863,7 +882,10 @@ defmodule Kazi.Runtime do
       model: Keyword.get(harness_opts, :model),
       transcript_sink_path: transcript_sink_path,
       events_sink_path: events_sink_path,
-      max_iterations: max_iterations
+      max_iterations: max_iterations,
+      # The operator-assigned session label (`--session-name` /
+      # KAZI_SESSION_NAME), telling concurrent runs apart on the starmap rail.
+      session_name: session_name
     }
 
     case RunRegistry.start(attrs) do

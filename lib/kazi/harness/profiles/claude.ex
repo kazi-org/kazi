@@ -286,7 +286,16 @@ defmodule Kazi.Harness.Profiles.Claude do
     |> put_touched(envelope)
     |> put_tool_uses(envelope)
     |> put_permission_denials(envelope)
+    |> put_session_id(envelope)
   end
+
+  # The envelope's own session id — what `claude --resume <id>` accepts. Parsed
+  # additively (absent key omitted) so the fleet registry can record it and the
+  # dashboard can offer an interactive resume of the run's harness session.
+  defp put_session_id(acc, %{"session_id" => session_id}) when is_binary(session_id),
+    do: Map.put(acc, :session_id, session_id)
+
+  defp put_session_id(acc, _envelope), do: acc
 
   defp put_result(acc, %{"result" => result}) when is_binary(result),
     do: Map.put(acc, :result, result)
