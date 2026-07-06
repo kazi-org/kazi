@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.74.0](https://github.com/kazi-org/kazi/compare/v1.73.8...v1.74.0) (2026-07-06)
+
+
+### Features
+
+* first-class `kazi apply --check` observe-only mode (issue [#805](https://github.com/kazi-org/kazi/issues/805)) ([48db05e](https://github.com/kazi-org/kazi/commit/48db05eb0ef66213257ac950fbe5982445ef6653))
+
 ## [1.73.8](https://github.com/kazi-org/kazi/compare/v1.73.7...v1.73.8) (2026-07-06)
 
 
