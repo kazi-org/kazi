@@ -139,7 +139,7 @@ defmodule KaziWeb.StarmapVisualTest do
          %{conn: conn} do
       seed("named-goal", %{
         session_name: "starmap-pass-3",
-        workspace: "/Users/op/wt/kazi-t99"
+        workspace: "/tmp/wt/kazi-t99"
       })
 
       {:ok, _view, html} = live(conn, ~p"/starmap")
