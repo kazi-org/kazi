@@ -33,8 +33,10 @@ Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
   box-shadow glow); FLEET stat tiles (big 20px numbers: cyan RUNNING, green
   LANDED, red STUCK); NEEDS YOU (attention queue: glowing 7px dot red/amber +
   one-line summary, bold goal name); SESSIONS (S1..Sn chips, cyan border —
-  red variant for a stuck session's chip); a dashed-border hint box; LEGEND
-  pinned to bottom (six state dots, see zoo).
+  red variant for a stuck session's chip; clicking a row filters the canvas
+  to that session's goal — everything else dims to ~.12 opacity — and
+  clicking the active row again clears the filter); a dashed-border hint
+  box; LEGEND pinned to bottom (six state dots, see zoo).
 - Canvas: flex-1, starfield via layered 1px radial-gradients; a slow conic
   "radar sweep" overlay (18s rotate, cyan 5% alpha) behind the SVG.
 - SVG DAG (viewBox ~1160x742): alternating vertical wave bands (band-a fill

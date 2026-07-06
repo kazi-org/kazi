@@ -51,7 +51,10 @@ them.
 Converging, stuck, and claimed nodes carry session tags (`S1`, `S2`, ...)
 mirrored into the rail's **SESSIONS** section (a stuck session's chip renders
 red), so the rail always answers "who is driving what" — including a fleet
-whose only live work is stuck.
+whose only live work is stuck. Clicking a SESSIONS row filters the
+constellation to that session's goal (every other node and unrelated edge
+dims); clicking the same row again — or the session ending — clears the
+filter.
 
 **Clicking any canvas node — or an attention entry — opens the slide-over
 drill-in panel** (docs/dashboard-design.md "Slide-over drill-in panel"): the
