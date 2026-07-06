@@ -32,6 +32,7 @@ defmodule Kazi.Harness.ConformanceTest do
             cost: %{tokens: 5350},
             cost_usd: 0.0123,
             touched: ["lib/app/widget.ex", "test/app/widget_test.exs"],
+            session_id: "golden-session-0001",
             # T34.2: the four Anthropic fields mapped onto the economy envelope —
             # cache_creation -> cache_write, cache_read -> cached_input — with the
             # raw object kept and a full-fidelity marker (all four reported).
@@ -112,6 +113,7 @@ defmodule Kazi.Harness.ConformanceTest do
           cost: %{tokens: 5350},
           cost_usd: 0.0123,
           touched: ["lib/app/widget.ex", "test/app/widget_test.exs"],
+          session_id: "golden-session-0001",
           usage: %{
             input_tokens: 100,
             output_tokens: 250,
@@ -151,6 +153,7 @@ defmodule Kazi.Harness.ConformanceTest do
           cost: %{tokens: 5350},
           cost_usd: 0.0123,
           touched: ["lib/app/widget.ex", "test/app/widget_test.exs"],
+          session_id: "golden-session-0001",
           usage: %{
             input_tokens: 100,
             output_tokens: 250,

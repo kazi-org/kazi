@@ -135,6 +135,21 @@ defmodule KaziWeb.StarmapVisualTest do
       assert html =~ "wedged-goal"
     end
 
+    test "a session row shows the operator-assigned session name and workspace basename",
+         %{conn: conn} do
+      seed("named-goal", %{
+        session_name: "starmap-pass-3",
+        workspace: "/Users/op/wt/kazi-t99"
+      })
+
+      {:ok, _view, html} = live(conn, ~p"/starmap")
+
+      # The name replaces the generic harness label; the workspace basename
+      # rides alongside as the tiebreaker for same-repo sessions.
+      assert html =~ "starmap-pass-3 · driving"
+      assert html =~ "kazi-t99"
+    end
+
     test "the bottom event-river bar renders", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/starmap")
 

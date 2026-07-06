@@ -199,4 +199,21 @@ defmodule Kazi.Harness.UsageTest do
       assert parsed.permission_denials == [%{tool_name: "Edit"}]
     end
   end
+
+  describe "Claude.parse/1 — session id (fleet resume)" do
+    test "the envelope's session_id surfaces as :session_id" do
+      parsed = Claude.parse(~s({"result":"done","session_id":"abc-123"}))
+      assert parsed.session_id == "abc-123"
+    end
+
+    test "an envelope without session_id omits the key (additive)" do
+      parsed = Claude.parse(~s({"result":"done"}))
+      refute Map.has_key?(parsed, :session_id)
+    end
+
+    test "a non-string session_id is ignored rather than crashing" do
+      parsed = Claude.parse(~s({"result":"done","session_id":42}))
+      refute Map.has_key?(parsed, :session_id)
+    end
+  end
 end
