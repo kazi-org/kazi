@@ -124,6 +124,7 @@ defmodule Kazi.CLI do
     strict: :boolean,
     adr: :boolean,
     predicates: :string,
+    replace: :boolean,
     obsidian: :string,
     json: :boolean,
     stream: :boolean,
@@ -180,6 +181,8 @@ defmodule Kazi.CLI do
       "`plan` only: also write an ADR-lite rationale doc under docs/adr/ for the drafted goal.",
     predicates:
       "`plan` only (caller-drafts): a proposal payload the caller already authored; kazi spawns no model.",
+    replace:
+      "`plan` only: allow re-proposing onto a proposal_ref that already holds an APPROVED proposal (default: refused, to protect against silently discarding an approved goal's audit trail).",
     obsidian:
       "`export` only: the target directory for the Obsidian vault (group/predicate notes + Mermaid).",
     json:
@@ -276,7 +279,7 @@ defmodule Kazi.CLI do
       summary:
         "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates).",
       args: [%{name: "idea", required: false}],
-      flags: [:workspace, :yes, :strict, :adr, :json, :predicates]
+      flags: [:workspace, :yes, :strict, :adr, :json, :predicates, :replace]
     },
     %{
       name: "list-proposed",
@@ -354,7 +357,7 @@ defmodule Kazi.CLI do
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
-      kazi plan --json [--predicates <json>]      # caller-drafts (predicates supplied)
+      kazi plan --json [--predicates <json>] [--replace]   # caller-drafts (predicates supplied)
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
@@ -430,7 +433,14 @@ defmodule Kazi.CLI do
                              it applies the deterministic clarify floor (flags a
                              missing live-verification target + scope), persists,
                              and gates approval. Alternatively supply it on stdin
-                             under --json. The orchestrator's drive mode.
+                             under --json. The orchestrator's drive mode. The
+                             goal id / proposal_ref are derived from the
+                             payload's own "id"/"name" (#787/#793), not a
+                             hardcoded placeholder, so distinct payloads coexist.
+      --replace              `plan` only: allow re-proposing onto a proposal_ref
+                             that already holds an APPROVED proposal (#787/#793).
+                             Default: refused, so a new draft never silently
+                             discards an approved goal's audit trail.
       --json                 Emit a single JSON object to stdout instead of human
                              prose (the machine surface, ADR-0023). Implies
                              NON-INTERACTIVE: kazi never prompts/blocks on stdin
@@ -2695,6 +2705,7 @@ defmodule Kazi.CLI do
       inject_opts
       |> Keyword.take([:harness, :adapter_opts])
       |> Keyword.put(:workspace, opts[:workspace] || ".")
+      |> Keyword.put(:replace, opts[:replace] || false)
 
     ask = propose_ask(opts, inject_opts)
 
@@ -2742,6 +2753,7 @@ defmodule Kazi.CLI do
           |> Keyword.take([:harness, :adapter_opts])
           |> Keyword.put(:workspace, opts[:workspace] || ".")
           |> Keyword.put(:proposal, proposal)
+          |> Keyword.put(:replace, opts[:replace] || false)
 
         case Authoring.propose(caller_idea(idea), propose_opts) do
           {:ok, draft} ->
@@ -3266,7 +3278,10 @@ defmodule Kazi.CLI do
     do: "the harness produced no usable acceptance predicate (#{reason})"
 
   defp format_authoring_error({:invalid_goal, reason}),
-    do: "the stored goal no longer loads: #{inspect(reason)}"
+    do: "the goal does not load: #{inspect(reason)}"
+
+  defp format_authoring_error({:proposal_locked, ref, status}),
+    do: "#{ref} already holds an #{status} proposal; pass --replace to overwrite it"
 
   defp format_authoring_error(%Ecto.Changeset{} = changeset),
     do: "could not persist the proposal: #{inspect(changeset.errors)}"
