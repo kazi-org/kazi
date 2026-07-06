@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.88.0](https://github.com/kazi-org/kazi/compare/v1.87.0...v1.88.0) (2026-07-06)
+
+
+### Features
+
+* **web:** fleet-tile filters + single-column bands with vertical scroll ([865f5c4](https://github.com/kazi-org/kazi/commit/865f5c4120476870e157288de5c452acfab85fc0))
+
 ## [1.87.0](https://github.com/kazi-org/kazi/compare/v1.86.0...v1.87.0) (2026-07-06)
 
 
