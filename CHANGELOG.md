@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.5](https://github.com/kazi-org/kazi/compare/v1.73.4...v1.73.5) (2026-07-06)
+
+
+### Bug Fixes
+
+* route the default logger handler to stderr -- stdout purity under --json (issue [#804](https://github.com/kazi-org/kazi/issues/804)) ([1be4b8d](https://github.com/kazi-org/kazi/commit/1be4b8d927e8a9bce18471304ce08dbcd37b3855))
+
 ## [1.73.4](https://github.com/kazi-org/kazi/compare/v1.73.3...v1.73.4) (2026-07-06)
 
 
