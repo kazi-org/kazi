@@ -59,8 +59,10 @@ The main content area is ONE full-height SVG constellation, not a list:
   "ITER n · k/m GREEN", "STUCK · ITER n", "STALE · NO HEARTBEAT nm".
   There is NO chip/pill list of runs anywhere on the page — the circles ARE
   the fleet view. Active (converging/stuck) nodes get the pulse `.ring`
-  circle behind them and a session tag (`.stag`, S-number) at the upper
-  right.
+  circle behind them; session tags (`.stag`, S-number, upper right) go on
+  converging, stuck, AND claimed nodes (the mockup's S1 sits on a
+  CLAIMED · NEXT node — the session that picks it up next), and every tagged
+  node is listed in the rail's SESSIONS section.
 - **Nodes are laid out in vertical wave-band columns** spanning the full
   canvas height: alternating band fills (band-a rgba(86,204,242,0.028) /
   band-b transparent), dashed separators, and a top-center `.wlabel` per
@@ -96,8 +98,8 @@ dasharray 3 5 slow-spin 9s. Node label 12px bold #D7E4F4 below node; sublabel
 8px letter-spacing .22em colored by state (g/c/r/a/d classes), e.g.
 "LANDED · v1.68.0", "ITER 4 · 5/8 GREEN", "STUCK · ITER 9",
 "CLAIMED · NEXT", "PENDING · NEEDS 3", "STALE · NO HEARTBEAT 4m".
-Session tag `.stag` next to active nodes: S-number, 10px bold cyan (red when
-that session drives a stuck goal).
+Session tag `.stag` next to converging/stuck/claimed nodes: S-number, 10px
+bold cyan (red when that session drives a stuck goal).
 
 ## Slide-over drill-in panel (click node or attention entry)
 
