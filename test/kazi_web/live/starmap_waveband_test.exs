@@ -83,7 +83,7 @@ defmodule KaziWeb.StarmapWavebandTest do
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    refute html =~ ~s(id="starmap-wavebands")
+    refute html =~ ~s(id="starmap-canvas")
   end
 
   test "a seeded 3-wave DAG renders bands matching --explain frontiers", %{conn: conn} do
@@ -91,13 +91,20 @@ defmodule KaziWeb.StarmapWavebandTest do
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    assert html =~ ~s(id="starmap-wavebands" data-frontiers="3")
+    assert html =~ ~s(id="starmap-canvas")
+    assert html =~ ~s(data-frontiers="3")
     assert html =~ ~s(id="starmap-band-0" data-frontier="0")
     assert html =~ ~s(id="starmap-band-1" data-frontier="1")
     assert html =~ ~s(id="starmap-band-2" data-frontier="2")
-    assert html =~ ~s(id="starmap-band-node-a" data-node-id="a" data-frontier="0")
-    assert html =~ ~s(id="starmap-band-node-b" data-node-id="b" data-frontier="1")
-    assert html =~ ~s(id="starmap-band-node-c" data-node-id="c" data-frontier="2")
+
+    assert html =~
+             ~s(id="canvas-node-group-a" class="canvas-node-group" data-node-id="a" data-frontier="0")
+
+    assert html =~
+             ~s(id="canvas-node-group-b" class="canvas-node-group" data-node-id="b" data-frontier="1")
+
+    assert html =~
+             ~s(id="canvas-node-group-c" class="canvas-node-group" data-node-id="c" data-frontier="2")
   end
 
   test "a landed dep, an eligible (claimed) node, and a blocked (pending) node", %{conn: conn} do
@@ -107,14 +114,9 @@ defmodule KaziWeb.StarmapWavebandTest do
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    assert html =~
-             ~s(id="starmap-band-node-a" data-node-id="a" data-frontier="0" data-state="landed")
-
-    assert html =~
-             ~s(id="starmap-band-node-b" data-node-id="b" data-frontier="1" data-state="claimed")
-
-    assert html =~
-             ~s(id="starmap-band-node-c" data-node-id="c" data-frontier="2" data-state="pending")
+    assert html =~ ~s(data-node-id="a" data-frontier="0" data-state="landed")
+    assert html =~ ~s(data-node-id="b" data-frontier="1" data-state="claimed")
+    assert html =~ ~s(data-node-id="c" data-frontier="2" data-state="pending")
   end
 
   test "a stuck dep renders as stuck and poisons its dependent to pending", %{conn: conn} do

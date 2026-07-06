@@ -116,7 +116,7 @@ defmodule KaziWeb.StarmapVisualTest do
       assert html =~ ~s(id="canvas-node-c" class="canvas-node nd-pending")
 
       # The active (claimed) node carries a session tag; the pending one does not.
-      assert html =~ ~s(data-node-id="b" data-state="claimed")
+      assert html =~ ~s(data-node-id="b" data-frontier="1" data-state="claimed")
       assert html =~ "S1"
     end
 
@@ -135,11 +135,8 @@ defmodule KaziWeb.StarmapVisualTest do
 
       {:ok, _view, html} = live(conn, ~p"/starmap")
 
-      assert html =~ ~s(id="starmap-node-#{run.run_id}")
-      assert html =~ ~s(data-state="landed")
-
-      assert html =~
-               ~s(id="starmap-band-node-a" data-node-id="a" data-frontier="0" data-state="landed")
+      assert html =~ ~s(id="canvas-node-a")
+      assert html =~ ~s(data-node-id="a" data-frontier="0" data-state="landed")
     end
   end
 

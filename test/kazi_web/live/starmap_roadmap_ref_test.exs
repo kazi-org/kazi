@@ -143,10 +143,11 @@ defmodule KaziWeb.StarmapRoadmapRefTest do
 
       {:ok, _view, html} = live(conn, ~p"/starmap")
 
-      assert html =~ ~s(id="starmap-wavebands" data-frontiers="3")
-      assert html =~ ~s(id="starmap-band-node-a" data-node-id="a" data-frontier="0")
-      assert html =~ ~s(id="starmap-band-node-b" data-node-id="b" data-frontier="1")
-      assert html =~ ~s(id="starmap-band-node-c" data-node-id="c" data-frontier="2")
+      assert html =~ ~s(id="starmap-canvas")
+      assert html =~ ~s(data-frontiers="3")
+      assert html =~ ~s(data-node-id="a" data-frontier="0")
+      assert html =~ ~s(data-node-id="b" data-frontier="1")
+      assert html =~ ~s(data-node-id="c" data-frontier="2")
     end
   end
 
