@@ -41,7 +41,8 @@ defmodule Kazi.Runtime do
   """
 
   alias Kazi.{Enforcement, Goal, Loop, Predicate, PredicateResult, PredicateVector, ReadModel}
-  alias Kazi.ReadModel.RunRegistry
+  alias Kazi.ReadModel.{Iteration, RunRegistry}
+  alias Kazi.Sink.Events, as: EventsSink
 
   require Logger
 
@@ -148,13 +149,15 @@ defmodule Kazi.Runtime do
     * `:run_id` — the registry's `run_id` for this process (default a fresh
       `Ecto.UUID`). Passing an existing id lets a restarted process reclaim its
       own registry row (`RunRegistry.start/1` upserts on a repeat `run_id`).
-    * `:sinks_dir` — the root directory the per-run transcript sink is written
-      under, as `<sinks_dir>/<run_id>/transcript.jsonl` (T46.3, ADR-0057
-      decision 3). Defaults to the `:kazi, :sinks_dir` app config, falling back
-      to `<user-home>/.kazi/runs`. Only computed/threaded when `:persist?` is
-      true; an explicit `adapter_opts: [transcript_sink_path: ...]` always
-      overrides it. The path is also recorded on the registry row's
-      `transcript_sink_path` column.
+    * `:sinks_dir` — the root directory the per-run transcript AND events sinks
+      are written under, as `<sinks_dir>/<run_id>/transcript.jsonl` (T46.3,
+      ADR-0057 decision 3) and `<sinks_dir>/<run_id>/events.jsonl` (T46.2,
+      ADR-0057 decision 3). Defaults to the `:kazi, :sinks_dir` app config,
+      falling back to `<user-home>/.kazi/runs`. Only computed/threaded when
+      `:persist?` is true; an explicit `adapter_opts: [transcript_sink_path:
+      ...]` always overrides the transcript path. Both paths are also recorded
+      on the registry row's `transcript_sink_path` / `events_sink_path`
+      columns.
     * `:transcript_cap_bytes` — overrides the transcript sink's default size
       cap (`Kazi.Sink.Transcript.default_cap_bytes/0`); forwarded to the
       harness adapter as `adapter_opts[:transcript_cap_bytes]`.
@@ -228,6 +231,8 @@ defmodule Kazi.Runtime do
       # persistence is off, matching the run registry's own persist? gate (a
       # non-persisted run touches no fleet-observability surface at all).
       transcript_sink_path = maybe_transcript_sink_path(persist?, run_id, opts)
+      # T46.2 (ADR-0057 decision 3): the run's events sink path — same gate.
+      events_sink_path = maybe_events_sink_path(persist?, run_id, opts)
 
       loop_opts =
         opts
@@ -283,7 +288,7 @@ defmodule Kazi.Runtime do
           deploy: @deploy,
           workspace: workspace,
           adapter_opts: build_adapter_opts(goal, opts, harness_opts, transcript_sink_path),
-          on_iteration: build_on_iteration(goal, opts, run_id, persist?),
+          on_iteration: build_on_iteration(goal, opts, run_id, persist?, events_sink_path),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
           extra_action_context: build_action_context(opts),
@@ -302,7 +307,16 @@ defmodule Kazi.Runtime do
         # T46.1 (ADR-0057): register the run once the loop process is actually
         # up (never for a failed start_link, which would otherwise orphan a
         # "running" row nothing ever finishes).
-        register_run(persist?, run_id, workspace, goal_ref, harness_opts, transcript_sink_path)
+        register_run(
+          persist?,
+          run_id,
+          workspace,
+          goal_ref,
+          harness_opts,
+          transcript_sink_path,
+          events_sink_path
+        )
+
         result = Loop.await(loop, await_timeout)
         Loop.stop(loop)
         finish_run(persist?, run_id, result)
@@ -625,7 +639,12 @@ defmodule Kazi.Runtime do
   # T46.1 (ADR-0057): the run registry's heartbeat is composed onto the SAME seam,
   # gated by the same `persist?` flag as the iteration projection — "persistence
   # off" means the run touches no read-model table, registry included.
-  defp build_on_iteration(goal, opts, run_id, persist?) do
+  #
+  # T46.2 (ADR-0057 decision 3): the events sink append is likewise composed onto
+  # this seam, INSIDE `persist_iteration/3` — it fires only after the read-model
+  # write succeeds, so a sink line and its read-model row are built from the SAME
+  # inserted `Kazi.ReadModel.Iteration` struct and can never disagree.
+  defp build_on_iteration(goal, opts, run_id, persist?, events_sink_path) do
     stream = Keyword.get(opts, :stream)
     goal_ref = Keyword.get(opts, :goal_ref, goal.id)
 
@@ -634,7 +653,7 @@ defmodule Kazi.Runtime do
         fn payload ->
           run_stream_observer(stream, payload)
           RunRegistry.heartbeat(run_id)
-          persist_iteration(goal_ref, payload)
+          persist_iteration(goal_ref, payload, events_sink_path)
         end
 
       is_function(stream, 1) ->
@@ -643,7 +662,7 @@ defmodule Kazi.Runtime do
       persist? ->
         fn payload ->
           RunRegistry.heartbeat(run_id)
-          persist_iteration(goal_ref, payload)
+          persist_iteration(goal_ref, payload, events_sink_path)
         end
 
       true ->
@@ -671,13 +690,20 @@ defmodule Kazi.Runtime do
   # T1.4 budget: an optional `:stop_reason` (present only on the loop's budget-stop
   # projection) is recorded as a `budget_stop` action so the exceeded dimension is
   # visible in the persisted iteration log.
+  #
+  # T46.2 (ADR-0057 decision 3): on a successful insert, ALSO append the same
+  # inserted row to the run's events sink (`events_sink_path`, nil when
+  # persistence is off) — the sink line is built from the returned
+  # `Kazi.ReadModel.Iteration` struct, not re-derived from `payload`, so it can
+  # never drift from what the read-model actually stored for this iteration.
   defp persist_iteration(
          goal_ref,
          %{
            iteration: index,
            vector: vector,
            converged?: converged?
-         } = payload
+         } = payload,
+         events_sink_path
        ) do
     attrs =
       %{
@@ -710,7 +736,8 @@ defmodule Kazi.Runtime do
       |> Map.put(:upsert?, true)
 
     case ReadModel.record_iteration(attrs) do
-      {:ok, _iteration} ->
+      {:ok, iteration} ->
+        EventsSink.append(events_sink_path, iteration_event(iteration))
         :ok
 
       {:error, reason} ->
@@ -721,6 +748,27 @@ defmodule Kazi.Runtime do
 
         :ok
     end
+  end
+
+  # The events-sink line for one iteration (T46.2): built from the read-model
+  # row `record_iteration/1` just inserted, so its shape/values are exactly the
+  # ones a reader would see querying the read-model for the same
+  # (goal_ref, iteration_index).
+  defp iteration_event(%Iteration{} = iteration) do
+    %{
+      "type" => "iteration",
+      "goal_ref" => iteration.goal_ref,
+      "iteration" => iteration.iteration_index,
+      "converged" => iteration.converged,
+      "predicates" => iteration.predicate_vector,
+      "regressions" => iteration.regressions,
+      "action_kind" => iteration.action_kind,
+      "action_params" => iteration.action_params,
+      "release_ref" => iteration.release_ref,
+      "context" => iteration.context,
+      "tools" => iteration.tools,
+      "observed_at" => DateTime.to_iso8601(iteration.observed_at)
+    }
   end
 
   # T3.3d deploy wiring: stamp the iteration with the release ref of the deployed
@@ -751,6 +799,17 @@ defmodule Kazi.Runtime do
     Path.join([sinks_dir(opts), run_id, "transcript.jsonl"])
   end
 
+  # =============================================================================
+  # Events sink path (T46.2, ADR-0057)
+  # =============================================================================
+
+  # Same gate/layout as the transcript sink path above, one directory over.
+  defp maybe_events_sink_path(false, _run_id, _opts), do: nil
+
+  defp maybe_events_sink_path(true, run_id, opts) do
+    Path.join([sinks_dir(opts), run_id, "events.jsonl"])
+  end
+
   # The per-run sinks directory: an explicit `:sinks_dir` opt (the test-override
   # seam, mirroring `:run_id`) > the `:kazi, :sinks_dir` app config > the same
   # `<user-home>/.kazi` root the read-model DB defaults to in prod
@@ -772,10 +831,26 @@ defmodule Kazi.Runtime do
   # point. Best-effort throughout: a registry write must never stall or alter
   # convergence, matching the read-model projection's own contract above.
 
-  defp register_run(false, _run_id, _workspace, _goal_ref, _harness_opts, _transcript_sink_path),
-    do: :ok
+  defp register_run(
+         false,
+         _run_id,
+         _workspace,
+         _goal_ref,
+         _harness_opts,
+         _transcript_sink_path,
+         _events_sink_path
+       ),
+       do: :ok
 
-  defp register_run(true, run_id, workspace, goal_ref, harness_opts, transcript_sink_path) do
+  defp register_run(
+         true,
+         run_id,
+         workspace,
+         goal_ref,
+         harness_opts,
+         transcript_sink_path,
+         events_sink_path
+       ) do
     attrs = %{
       run_id: run_id,
       pid: inspect(self()),
@@ -783,7 +858,8 @@ defmodule Kazi.Runtime do
       goal_ref: goal_ref,
       harness: harness_id_string(harness_opts),
       model: Keyword.get(harness_opts, :model),
-      transcript_sink_path: transcript_sink_path
+      transcript_sink_path: transcript_sink_path,
+      events_sink_path: events_sink_path
     }
 
     case RunRegistry.start(attrs) do

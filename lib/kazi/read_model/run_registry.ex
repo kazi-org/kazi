@@ -55,6 +55,7 @@ defmodule Kazi.ReadModel.RunRegistry do
            :heartbeat_at,
            :finished_at,
            :transcript_sink_path,
+           :events_sink_path,
            :updated_at
          ]},
       conflict_target: :run_id,
