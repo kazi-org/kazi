@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.6](https://github.com/kazi-org/kazi/compare/v1.73.5...v1.73.6) (2026-07-06)
+
+
+### Bug Fixes
+
+* stop folding a partition's vacuous-goal outcome into :stuck (issue [#786](https://github.com/kazi-org/kazi/issues/786)) ([6707853](https://github.com/kazi-org/kazi/commit/6707853f60f27eb7bc5dd858b48a63cdcd7b891c))
+
 ## [1.73.5](https://github.com/kazi-org/kazi/compare/v1.73.4...v1.73.5) (2026-07-06)
 
 
