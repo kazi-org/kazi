@@ -56,6 +56,7 @@ defmodule Kazi.ReadModel.RunRegistry do
            :finished_at,
            :transcript_sink_path,
            :events_sink_path,
+           :max_iterations,
            :updated_at
          ]},
       conflict_target: :run_id,

@@ -314,7 +314,8 @@ defmodule Kazi.Runtime do
           goal_ref,
           harness_opts,
           transcript_sink_path,
-          events_sink_path
+          events_sink_path,
+          goal.budget.max_iterations
         )
 
         result = Loop.await(loop, await_timeout)
@@ -838,7 +839,8 @@ defmodule Kazi.Runtime do
          _goal_ref,
          _harness_opts,
          _transcript_sink_path,
-         _events_sink_path
+         _events_sink_path,
+         _max_iterations
        ),
        do: :ok
 
@@ -849,7 +851,8 @@ defmodule Kazi.Runtime do
          goal_ref,
          harness_opts,
          transcript_sink_path,
-         events_sink_path
+         events_sink_path,
+         max_iterations
        ) do
     attrs = %{
       run_id: run_id,
@@ -859,7 +862,8 @@ defmodule Kazi.Runtime do
       harness: harness_id_string(harness_opts),
       model: Keyword.get(harness_opts, :model),
       transcript_sink_path: transcript_sink_path,
-      events_sink_path: events_sink_path
+      events_sink_path: events_sink_path,
+      max_iterations: max_iterations
     }
 
     case RunRegistry.start(attrs) do
