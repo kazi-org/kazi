@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.73.7](https://github.com/kazi-org/kazi/compare/v1.73.6...v1.73.7) (2026-07-06)
+
+
+### Bug Fixes
+
+* caller-drafts proposal identity + plan-time validation (issues [#787](https://github.com/kazi-org/kazi/issues/787), [#793](https://github.com/kazi-org/kazi/issues/793), [#788](https://github.com/kazi-org/kazi/issues/788)) ([960a3b7](https://github.com/kazi-org/kazi/commit/960a3b784bcb5aeab5930f317347429c64eab595))
+
 ## [1.73.6](https://github.com/kazi-org/kazi/compare/v1.73.5...v1.73.6) (2026-07-06)
 
 
