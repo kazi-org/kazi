@@ -51,6 +51,9 @@ defmodule KaziWeb.Router do
     # T46.8: the transcript peek -- tails a run's transcript.jsonl, live or
     # post-mortem, the same code path either way (ADR-0011, ADR-0057).
     live("/runs/:run_id/transcript", TranscriptPeekLive, :index)
+    # T47.1: the event river -- fleet-wide feed of every run's events.jsonl,
+    # newest first (ADR-0011 read projection, ADR-0057).
+    live("/events", EventRiverLive, :index)
   end
 
   # Test-only seed/reset endpoints for the Playwright harness (T3.6b). Mounted
