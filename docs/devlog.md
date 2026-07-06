@@ -4,6 +4,35 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-07-06 — #819/#820 + E47 shipped; visual-fidelity finding: grep predicates pass on presence, only a browser catches "not actually used"
+
+**Type:** finding
+**Tags:** e47, dashboard, visual-fidelity, predicate-authoring, integrate, quarantine
+
+**Problem:** Restyling the dashboard to the committed design spec
+(docs/dashboard-design.md) converged on all six predicates (token hexes
+present, nd-* zoo classes present, reduced-motion gated, structure regression,
+suite, format) — yet the browser showed the OLD pastel light-mode pills on the
+run list and a plain-text /events. The tokens and classes existed in CSS but
+the markup never used them.
+**Investigation:** Screenshot review against the design mockups after
+convergence; grep confirmed legacy pastel hexes (#d8f5d8 #ffd9d9 #ffe0c2 ...)
+still live in starmap_live.ex and dag_live.ex.
+**Root cause:** Presence-greps are satisfiable by ADDING alongside instead of
+REPLACING. A visual-fidelity bar needs (a) negative predicates — the legacy
+styles must hit ZERO — and (b) markup-level assertions that entries render
+through the new classes; and a human/browser review stays the final gate.
+**Fix:** Goal sharpened with no_pastel_pills (== 0) + starmap_uses_zoo (>= 6
+in HEEx, not CSS); round 2 converging at session end (see checkpoint).
+**Impact:** Same session shipped: #804/#786/#787/#793/#788/#790/#805 (all
+closed, live-verified), E46 complete (T46.10 proof, v1.78.0), #819 integrate
+discipline + #820 quarantine exit (v1.79.x, both re-confirmed by later runs
+terminating promptly instead of spinning), E47 T47.1 /events river + T47.2
+--roadmap (v1.82.0, live-verified: river streams real runs, roadmap renders
+wave bands). Recurring landmine: inner agents twice documented an unshipped
+`kazi plan --project` flag — the T28.4 doc-accuracy gate caught both; goal
+descriptions should say "do not name unshipped flags in docs".
+
 ## 2026-07-06 — E46 shipped end-to-end by kazi driving kazi; T46.10 live proof on v1.78.0; three fresh landmines
 
 **Type:** dogfood
