@@ -311,6 +311,47 @@ defmodule Kazi.Runtime do
     end
   end
 
+  @typedoc "The observe-only result of `check/2`: a status plus the observed vector."
+  @type check_result :: %{status: :pass | :fail, vector: PredicateVector.t()}
+
+  @doc """
+  Observes a goal's full predicate vector EXACTLY ONCE, through the same real
+  provider dispatch `run/2` uses at t0 — and returns a terminal verdict without
+  ever starting the convergence loop (issue #805). No harness is dispatched, and
+  no integrate/deploy action runs; this is the observe-only surface for merge
+  gates (ADR-0026 L1) and release qualification, which need "does the vector
+  hold right now", not a reconcile.
+
+  Unlike `run/2`, an all-pass vector is a valid, intended outcome here (`:pass`)
+  rather than the vacuous-goal rejection — confirming an already-satisfied vector
+  IS the point of a check, not a misconfigured goal.
+
+  Returns `{:ok, %{status: :pass | :fail, vector: PredicateVector.t()}}`, or
+  `{:error, reason}` if the goal names a predicate kind with no registered
+  provider (the same resolution error `run/2` returns).
+
+  ## Options
+
+  Accepts `:workspace`, `:providers`, and `:enforcement` — the same meaning as in
+  `run/2`. Every other `run/2` option (harness, budget, persistence, streaming,
+  deploy/integrate params, ...) is irrelevant here, since nothing is dispatched.
+  """
+  @spec check(Goal.t(), keyword()) :: {:ok, check_result()} | {:error, term()}
+  def check(%Goal{} = goal, opts \\ []) do
+    workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
+
+    # T32.4 (ADR-0042): fold the enforcement profile's guards in, same as run/2, so
+    # a check reports the SAME vector a real run would gate convergence on.
+    enforcement = Keyword.get(opts, :enforcement) || Enforcement.resolve(goal)
+    goal = %Goal{goal | guards: goal.guards ++ Enforcement.guard_predicates(enforcement)}
+
+    with {:ok, providers} <- resolve_providers(goal, opts) do
+      vector = observe_t0(goal, providers, workspace)
+      status = if PredicateVector.satisfied?(vector), do: :pass, else: :fail
+      {:ok, %{status: status, vector: vector}}
+    end
+  end
+
   @doc """
   The predicate-kind → concrete-provider map the runtime dispatches on. Exposed
   for tests / introspection; mirrors the loader's provider table (ADR-0002).
