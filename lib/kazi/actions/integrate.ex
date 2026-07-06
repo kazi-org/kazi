@@ -45,11 +45,35 @@ defmodule Kazi.Actions.Integrate do
 
   On failure `{:error, reason}` — e.g. `{:error, {:push_failed, output}}` — so the
   loop can decide its next action rather than crashing.
+
+  ## Integrate discipline (issue #819)
+
+  A live firing of this action once committed ~1800 untracked-but-unignored
+  machine-local files (agent configs, a generated graph report) onto a public
+  repo's default branch via a blind `git add -A`, and merged the PR seconds
+  after opening it, before CI ran. Three guardrails close that gap:
+
+    * **Scoped staging** — when the goal declares `[scope] paths = [...]`,
+      staging is restricted to tracked modifications everywhere (`git add -u`)
+      plus exactly those declared paths; an untracked file elsewhere in the
+      workspace is never staged, let alone committed. A goal with no declared
+      scope paths keeps the prior whole-workspace behavior (backward compatible
+      default) — declaring `paths` is how a goal opts into the stricter guard.
+    * **CI wait** — the integrator seam now takes a `:wait_for_checks` option
+      (default `true`); the default `GhIntegrator` blocks on `gh pr checks
+      --watch` before merging, so a red or still-running check blocks the
+      merge. Opt out per-action via `params[:wait_for_checks] = false`.
+    * **Informative landing artifacts** — the default commit message and PR
+      title/body always carry the goal's id/name and the list of predicates
+      that converged, never a bare "land converged change".
   """
 
   @behaviour Kazi.Action
 
   alias Kazi.Action
+  alias Kazi.PredicateResult
+  alias Kazi.PredicateVector
+  alias Kazi.Scope
 
   @typedoc """
   The request handed to the integrator seam to open + merge a PR. The local git
@@ -99,22 +123,29 @@ defmodule Kazi.Actions.Integrate do
   @impl Kazi.Action
   @spec execute(Action.t(), Action.context()) :: Action.result()
   def execute(%Action{kind: :integrate} = action, context) do
+    goal = context[:goal]
+    passed = passed_predicates(context[:vector])
+
     with {:ok, workspace} <- fetch_workspace(action, context),
          {:ok, base} <- resolve_base(workspace, action.params),
          branch = resolve_branch(action.params),
-         message = resolve_message(action.params, branch),
+         message = resolve_message(action.params, branch, base, goal, passed),
          {:ok, _} <- create_branch(workspace, branch),
-         :ok <- stage_all(workspace),
+         :ok <- stage_all(workspace, resolve_scope(context)),
          {:ok, commit} <- commit(workspace, message),
          {:ok, _} <- push(workspace, branch),
          {:ok, remote} <-
-           run_integrator(context, %{
-             workspace: workspace,
-             branch: branch,
-             base: base,
-             title: resolve_title(action.params, message),
-             body: resolve_body(action.params, branch, base)
-           }) do
+           run_integrator(
+             context,
+             %{
+               workspace: workspace,
+               branch: branch,
+               base: base,
+               title: resolve_title(action.params, message),
+               body: resolve_body(action.params, branch, base, goal, passed)
+             },
+             wait_for_checks: resolve_wait_for_checks(action.params)
+           ) do
       {:ok,
        remote
        |> Map.put_new(:branch, branch)
@@ -146,10 +177,10 @@ defmodule Kazi.Actions.Integrate do
     end
   end
 
-  defp resolve_message(params, branch) do
+  defp resolve_message(params, branch, base, goal, passed) do
     case params[:message] do
       m when is_binary(m) and m != "" -> m
-      _ -> "fix: land converged change (#{branch})"
+      _ -> default_message(branch, base, goal, passed)
     end
   end
 
@@ -160,13 +191,67 @@ defmodule Kazi.Actions.Integrate do
     end
   end
 
-  defp resolve_body(params, branch, base) do
+  defp resolve_body(params, branch, base, goal, passed) do
     case params[:body] do
       b when is_binary(b) and b != "" ->
         b
 
       _ ->
-        "Converged change landed by kazi integrate action.\n\nBranch `#{branch}` → `#{base}` (rebase-merge)."
+        "Converged change for #{goal_ref(goal)} (#{goal_name(goal)}) landed by kazi integrate.\n\n" <>
+          "Converged predicates: #{predicate_list(passed)}\n\n" <>
+          "Branch `#{branch}` → `#{base}` (rebase-merge)."
+    end
+  end
+
+  # Whether to block on required CI checks before merging (issue #819). Default
+  # ON; a goal opts out explicitly via `params[:wait_for_checks] = false`.
+  defp resolve_wait_for_checks(params) do
+    case params[:wait_for_checks] do
+      false -> false
+      _ -> true
+    end
+  end
+
+  # The default commit subject/body: always carries the goal id/name and the
+  # predicates that converged (issue #819) — never a bare "land converged
+  # change".
+  defp default_message(branch, base, goal, passed) do
+    default_subject(goal, passed) <>
+      "\n\n" <>
+      "Converged predicates: #{predicate_list(passed)}\n\n" <>
+      "Branch `#{branch}` → `#{base}` (rebase-merge)."
+  end
+
+  defp default_subject(goal, passed) do
+    "integrate(#{goal_ref(goal)}): #{goal_name(goal)} [#{predicate_list(passed)}]"
+  end
+
+  defp goal_ref(%{id: id}) when is_binary(id) and id != "", do: id
+  defp goal_ref(_), do: "unknown-goal"
+
+  defp goal_name(%{name: name}) when is_binary(name) and name != "", do: name
+  defp goal_name(%{id: id}) when is_binary(id) and id != "", do: id
+  defp goal_name(_), do: "converged change"
+
+  defp predicate_list([]), do: "(none recorded)"
+  defp predicate_list(ids), do: Enum.join(ids, ", ")
+
+  # The predicate ids whose result is `:pass` — the "what converged" summary
+  # (issue #819). `nil` (no vector threaded, e.g. a bare unit test) yields none.
+  defp passed_predicates(%PredicateVector{results: results}) do
+    for {id, %PredicateResult{status: :pass}} <- results, do: id
+  end
+
+  defp passed_predicates(_), do: []
+
+  # The goal's declared scope, from wherever the caller threads it — the loop's
+  # `action_context/2` sets `context[:goal]` (whose `.scope` carries it); a
+  # direct `context[:scope]` is honoured too. Defaults to an unscoped
+  # `%Scope{}` (empty `paths`), which preserves prior whole-workspace staging.
+  defp resolve_scope(context) do
+    case context[:goal] do
+      %{scope: %Scope{} = scope} -> scope
+      _ -> context[:scope] || %Scope{}
     end
   end
 
@@ -193,9 +278,25 @@ defmodule Kazi.Actions.Integrate do
     git(workspace, ["checkout", "-B", branch])
   end
 
-  defp stage_all(workspace) do
+  # Scoped staging (issue #819): a goal with no declared `[scope] paths` keeps
+  # the prior whole-workspace `git add -A` (backward compatible default). A
+  # goal that DOES declare `paths` gets the stricter guard: tracked
+  # modifications are staged everywhere (`git add -u`, never introduces a new
+  # untracked file), and only the explicitly declared paths are staged for
+  # untracked content — an untracked file elsewhere in the workspace is never
+  # swept into the commit.
+  defp stage_all(workspace, %Scope{paths: []}) do
     case git(workspace, ["add", "-A"]) do
       {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:stage_failed, reason}}
+    end
+  end
+
+  defp stage_all(workspace, %Scope{paths: paths}) do
+    with {:ok, _} <- git(workspace, ["add", "-u"]),
+         {:ok, _} <- git(workspace, ["add", "--"] ++ paths) do
+      :ok
+    else
       {:error, reason} -> {:error, {:stage_failed, reason}}
     end
   end
@@ -227,11 +328,11 @@ defmodule Kazi.Actions.Integrate do
 
   # --- integrator seam ----------------------------------------------------------
 
-  defp run_integrator(context, request) do
+  defp run_integrator(context, request, opts) do
     integrator = context[:integrator] || (&__MODULE__.GhIntegrator.integrate/2)
 
     try do
-      case integrator.(request, []) do
+      case integrator.(request, opts) do
         {:ok, refs} when is_map(refs) -> {:ok, refs}
         {:error, _} = err -> err
         other -> {:error, {:bad_integrator_result, other}}
@@ -276,6 +377,14 @@ defmodule Kazi.Actions.Integrate do
 
     Honours the house rule: `gh pr merge --rebase` (never squash, never a merge
     commit).
+
+    ## CI wait (issue #819)
+
+    Before merging, blocks on `gh pr checks --watch` so a required check that
+    is still running or has failed blocks the merge — closing the gap where a
+    PR could be rebase-merged seconds after opening, before CI ran. Default
+    `:wait_for_checks` is `true`; pass `wait_for_checks: false` in `opts` to
+    skip the wait (e.g. a repo with no configured checks).
     """
 
     @network_attempts 3
@@ -288,12 +397,31 @@ defmodule Kazi.Actions.Integrate do
     """
     @spec integrate(Kazi.Actions.Integrate.remote_request(), keyword()) ::
             {:ok, map()} | {:error, term()}
-    def integrate(request, _opts) do
+    def integrate(request, opts) do
       with {:ok, _} <- open_pr(request),
            {:ok, number} <- pr_number(request),
+           :ok <- maybe_wait_for_checks(request, number, wait_for_checks?(opts)),
            {:ok, _} <- merge_pr(request, number),
            {:ok, merge_commit} <- merge_commit(request) do
         {:ok, %{pr: number, merge_commit: merge_commit}}
+      end
+    end
+
+    defp wait_for_checks?(opts) do
+      case Keyword.get(opts, :wait_for_checks, true) do
+        false -> false
+        _ -> true
+      end
+    end
+
+    defp maybe_wait_for_checks(_request, _number, false), do: :ok
+
+    defp maybe_wait_for_checks(request, number, true) do
+      args = ["pr", "checks", to_string(number), "--watch", "--fail-fast"]
+
+      case gh(request.workspace, args) do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, {:checks_failed, reason}}
       end
     end
 
