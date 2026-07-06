@@ -108,6 +108,12 @@ defmodule Kazi.ReadModel.RunRegistry do
     |> Repo.all()
   end
 
+  @doc "Fetches a single run by its `run_id`, or `nil` when it isn't registered."
+  @spec get(String.t()) :: Run.t() | nil
+  def get(run_id) when is_binary(run_id) do
+    Repo.get_by(Run, run_id: run_id)
+  end
+
   @doc """
   True when `run` has no terminal status and its heartbeat is older than
   `stale_after_seconds` (default #{@stale_after_seconds}s). A terminal run is

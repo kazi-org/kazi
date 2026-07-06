@@ -48,6 +48,9 @@ defmodule KaziWeb.Router do
     # T46.7: the drill-in convergence heatmap + iteration scrubber (ADR-0011
     # read projection of the per-iteration vector history, ADR-0057).
     live("/goals/:id/drillin", DrillinHeatmapLive, :index)
+    # T46.8: the transcript peek -- tails a run's transcript.jsonl, live or
+    # post-mortem, the same code path either way (ADR-0011, ADR-0057).
+    live("/runs/:run_id/transcript", TranscriptPeekLive, :index)
   end
 
   # Test-only seed/reset endpoints for the Playwright harness (T3.6b). Mounted

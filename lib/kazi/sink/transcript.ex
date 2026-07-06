@@ -50,6 +50,32 @@ defmodule Kazi.Sink.Transcript do
   def default_cap_bytes, do: @default_cap_bytes
 
   @doc """
+  Reads `path` back into a list of decoded event maps, oldest first — the same
+  contract as `Kazi.Sink.Events.read/1`. A torn final line (a process killed
+  mid-write) is silently dropped rather than raising; every earlier line is
+  still returned. A missing file reads as an empty list. This is the reader a
+  "transcript peek" view (T46.8) polls, and the one a post-mortem view reads
+  once for a finished/dead run's sink -- the same code path either way.
+  """
+  @spec read(String.t()) :: [map()]
+  def read(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        content
+        |> String.split("\n", trim: true)
+        |> Enum.flat_map(fn line ->
+          case Jason.decode(line) do
+            {:ok, decoded} -> [decoded]
+            {:error, _} -> []
+          end
+        end)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  @doc """
   Tees `raw_output` to `path` as redacted JSONL, appending to any existing
   content. `path` may be `nil` (no sink configured) — a no-op. Best-effort:
   any failure (an unwritable directory, a transient I/O error) is caught and
