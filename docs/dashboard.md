@@ -179,6 +179,19 @@ folding or silently vanishing. The **follow** toggle pauses/resumes picking up
 newly tailed lines without discarding what's already rendered. See
 `KaziWeb.TranscriptPeekLive`.
 
+## The event river (`/events`, T47.1)
+
+A single fleet-wide feed of every registered run's `events.jsonl`, newest
+first (bounded to the 100 most recent entries across the whole fleet): each
+entry is one loop observation, tagged with its goal ref and run id, with
+deep links to that run's transcript peek and that goal's drill-in. A run
+with no events sink (not persisted) or an unreadable/missing sink file
+contributes zero events rather than erroring the feed; a torn final line is
+dropped the same way `Kazi.Sink.Events.read/1` already tolerates it
+everywhere else. A connected mount polls (2s) and rereads every run's sink,
+so a newly appended event appears on the next tick with no restart. An empty
+fleet renders an honest empty state. See `KaziWeb.EventRiverLive`.
+
 ## `kazi dashboard`
 
 ```
@@ -195,7 +208,7 @@ rebinding it.
 
 A standalone boot serves **every** dashboard view (`/`, `/starmap`, `/goals`,
 `/leases`, `/dag`, `/goals/:id/history`, `/goals/:id/drillin`,
-`/runs/:run_id/transcript`), with web-tree parity to the full
+`/runs/:run_id/transcript`, `/events`), with web-tree parity to the full
 app's supervision tree: views whose live source has nothing to show (no
 active run registered in this node) render their honest empty state, never a
 500 (issue #801).
