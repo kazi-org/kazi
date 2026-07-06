@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.75.0](https://github.com/kazi-org/kazi/compare/v1.74.1...v1.75.0) (2026-07-06)
+
+
+### Features
+
+* per-run events.jsonl sink -- append-only loop events, retention-capped (T46.2) ([042d120](https://github.com/kazi-org/kazi/commit/042d120f99fecfbc61b2b482665500658fabfa84))
+
 ## [1.74.1](https://github.com/kazi-org/kazi/compare/v1.74.0...v1.74.1) (2026-07-06)
 
 
