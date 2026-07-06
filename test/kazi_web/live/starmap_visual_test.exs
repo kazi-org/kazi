@@ -120,6 +120,21 @@ defmodule KaziWeb.StarmapVisualTest do
       assert html =~ "S1"
     end
 
+    test "a stuck run keeps its session visible: SESSIONS section with a red chip", %{conn: conn} do
+      run = seed("wedged-goal")
+      {:ok, _} = RunRegistry.finish(run.run_id, "stuck")
+
+      {:ok, _view, html} = live(conn, ~p"/starmap")
+
+      # The mockup's S2: a stuck goal's driving session stays listed in the
+      # rail (red chip variant), so a fleet with zero RUNNING but stuck work
+      # still shows WHO was driving what.
+      assert html =~ ~s(id="starmap-sessions")
+      assert html =~ "SESSIONS"
+      assert html =~ ~s(class="session-id red")
+      assert html =~ "wedged-goal"
+    end
+
     test "the bottom event-river bar renders", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/starmap")
 
