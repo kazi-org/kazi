@@ -94,6 +94,7 @@ defmodule Kazi.Harness.CliAdapter do
   @behaviour Kazi.HarnessAdapter
 
   alias Kazi.Economy.PriceMap
+  alias Kazi.Harness.ChildSupervisor
   alias Kazi.Harness.Profile
   alias Kazi.Harness.Registry
   alias Kazi.Sink.Transcript
@@ -128,12 +129,37 @@ defmodule Kazi.Harness.CliAdapter do
 
   # Render the argv, run the harness in the workspace, and merge the parsed subset
   # over the always-present base map. Shared by every prompt-delivery mode.
+  #
+  # Issue #857: the command actually run is WRAPPED (`ChildSupervisor.wrap/3`) so
+  # the harness subprocess dies if this controller does (including an abnormal
+  # exit), and so its OS pid — read back from the pid-file side channel after
+  # `System.cmd/3` returns — can be recorded on the run registry
+  # (`:harness_pid` in the result map). The pid file lives under the system tmp
+  # dir (never the workspace), and is always removed, so it can never appear as
+  # workspace drift regardless of dispatch outcome.
+  #
+  # Wrapping through `sh` means a missing `command` binary would otherwise
+  # surface as an ordinary non-zero wrapper exit rather than the ErlangError
+  # `:enoent` `System.cmd/3` raises for a direct exec — so the binary's
+  # existence is checked BEFORE wrapping, preserving the
+  # `{:error, {:command_not_found, command}}` contract.
   defp dispatch(profile, command, prompt, workspace, build_opts) do
+    case System.find_executable(command) do
+      nil -> {:error, {:command_not_found, command}}
+      _resolved -> do_dispatch(profile, command, prompt, workspace, build_opts)
+    end
+  end
+
+  defp do_dispatch(profile, command, prompt, workspace, build_opts) do
     args = Profile.build_args(profile, prompt, build_opts)
     cmd_opts = cmd_opts(workspace, build_opts)
+    pid_file = harness_pid_file()
+
+    {wrapped_command, wrapped_args} =
+      ChildSupervisor.wrap(command, args, supervise_opts(build_opts, pid_file))
 
     try do
-      {output, exit_status} = System.cmd(command, args, cmd_opts)
+      {output, exit_status} = System.cmd(wrapped_command, wrapped_args, cmd_opts)
 
       base = %{
         output: output,
@@ -164,7 +190,7 @@ defmodule Kazi.Harness.CliAdapter do
       # prices, derive `cost_usd` from the accounted tokens. A harness-reported
       # `cost_usd` always wins (kept untouched); an unknown model omits cost
       # entirely — never a guessed figure (honest-unknown).
-      {:ok, put_priced_cost(result, build_opts)}
+      {:ok, result |> put_priced_cost(build_opts) |> put_harness_pid(pid_file)}
     rescue
       error in ErlangError ->
         # :enoent surfaces here when the configured binary is not on PATH —
@@ -173,6 +199,49 @@ defmodule Kazi.Harness.CliAdapter do
           :enoent -> {:error, {:command_not_found, command}}
           other -> {:error, other}
         end
+    after
+      File.rm(pid_file)
+    end
+  end
+
+  # A fresh, private pid-file path under the system tmp dir (never the
+  # workspace, so it can never show up as workspace drift) for one dispatch's
+  # ChildSupervisor-reported harness pid.
+  @spec harness_pid_file() :: String.t()
+  defp harness_pid_file do
+    Path.join(System.tmp_dir!(), "kazi-harness-pid-#{System.unique_integer([:positive])}.txt")
+  end
+
+  # Threads the test-only override opts (`:supervise_parent_pid`/
+  # `:supervise_poll_ms` — a synthetic controller pid / a fast poll interval so
+  # a test can simulate "the controller died" without killing the real BEAM
+  # process) alongside the required `:pid_file`. Absent the overrides,
+  # `ChildSupervisor.wrap/3` defaults to the real controller (`System.pid/0`)
+  # and its production poll interval.
+  @spec supervise_opts(keyword(), String.t()) :: keyword()
+  defp supervise_opts(build_opts, pid_file) do
+    [pid_file: pid_file]
+    |> maybe_put(:parent_pid, Keyword.get(build_opts, :supervise_parent_pid))
+    |> maybe_put(:poll_ms, Keyword.get(build_opts, :supervise_poll_ms))
+  end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  # Reads back the harness subprocess's OS pid ChildSupervisor's wrapper wrote
+  # to `pid_file`, adding it to the result as `:harness_pid` — absent when the
+  # file was never written (e.g. the wrapper itself failed to start).
+  @spec put_harness_pid(map(), String.t()) :: map()
+  defp put_harness_pid(result, pid_file) do
+    case File.read(pid_file) do
+      {:ok, contents} ->
+        case String.trim(contents) do
+          "" -> result
+          pid -> Map.put(result, :harness_pid, pid)
+        end
+
+      {:error, _reason} ->
+        result
     end
   end
 
