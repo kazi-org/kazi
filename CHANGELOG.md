@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.80.0](https://github.com/kazi-org/kazi/compare/v1.79.2...v1.80.0) (2026-07-06)
+
+
+### Features
+
+* fleet-wide event river over the per-run events.jsonl sinks (T47.1) ([ed3a7a5](https://github.com/kazi-org/kazi/commit/ed3a7a5913f73e7ab5c29715741e473c189a0076))
+
 ## [1.79.2](https://github.com/kazi-org/kazi/compare/v1.79.1...v1.79.2) (2026-07-06)
 
 
