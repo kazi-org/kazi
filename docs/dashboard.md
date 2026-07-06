@@ -88,6 +88,12 @@ already supervises the endpoint (the normal dev-server / `mix kazi.apply` /
 test entry points), the verb reports the endpoint's existing bind instead of
 rebinding it.
 
+A standalone boot serves **every** dashboard view (`/`, `/starmap`, `/goals`,
+`/leases`, `/dag`, `/goals/:id/history`), with web-tree parity to the full
+app's supervision tree: views whose live source has nothing to show (no
+active run registered in this node) render their honest empty state, never a
+500 (issue #801).
+
 ## Retention and scope
 
 Single-machine scope for now: the shared SQLite read-model requires zero new
