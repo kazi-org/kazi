@@ -88,7 +88,9 @@ defmodule Kazi.ReadModel.RunRegistry do
   stale query regardless of how old its last heartbeat is — it exited on
   purpose, it didn't hang.
   """
-  @spec finish(String.t(), String.t()) :: {:ok, Run.t()} | {:error, :not_found}
+  @spec finish(String.t() | Run.t(), String.t()) :: {:ok, Run.t()} | {:error, :not_found}
+  def finish(%Run{run_id: run_id}, status) when is_binary(status), do: finish(run_id, status)
+
   def finish(run_id, status) when is_binary(run_id) and is_binary(status) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
