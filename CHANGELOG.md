@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.83.0](https://github.com/kazi-org/kazi/compare/v1.82.1...v1.83.0) (2026-07-06)
+
+
+### Features
+
+* **web:** starmap constellation canvas -- the fleet renders as SVG nodes in wave bands ([00f0051](https://github.com/kazi-org/kazi/commit/00f0051122675a041b67cc439e20ecccb1964751))
+
 ## [1.82.1](https://github.com/kazi-org/kazi/compare/v1.82.0...v1.82.1) (2026-07-06)
 
 
