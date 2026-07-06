@@ -131,6 +131,28 @@ The `:antigravity_live` smoke is the catch if a future release regresses the
 workaround (a dropped stdout -> no `:result` -> no convergence, reported honestly);
 Antigravity may need version pinning. (T14.3, 2026-06-23.)
 
+### L-0029 #harness #childsupervisor #processgroup #shell #landmine -- a `kill <pid>` on a background watchdog leaves its OWN `sleep` grandchild running, delaying `System.cmd/3` by a whole poll interval
+`Kazi.Harness.ChildSupervisor.wrap/3` (issue #857) wraps every harness dispatch
+in a small `sh` script: a background watchdog subshell polls whether the
+controller is alive, sleeping `poll_interval` between checks. The FIRST version
+reaped that watchdog with a plain `kill "$watchdog_pid"` once the real dispatch
+finished. `kill <pid>` (no leading `-`) targets only that ONE process -- the
+watchdog SUBSHELL -- not its current `sleep N` invocation, which is a SEPARATE
+exec'd process (a child of the subshell). Killing the subshell does not kill
+that lingering `sleep`; it keeps running for up to one whole `poll_interval`,
+holding the SAME inherited stdout/stderr pipe `System.cmd/3` is reading from
+open the entire time. Since `System.cmd/3` waits for that pipe to reach EOF (all
+writers to close) before returning, EVERY dispatch was silently ~1 second
+slower than it needed to be (`poll_interval`'s default) -- invisible in an
+isolated shell-script prototype (which doesn't share a pipe with anything), only
+showing up as the WHOLE ExUnit suite mysteriously taking 100x longer once wired
+into `CliAdapter`. FIX: group-kill with the leading `-` (`kill -TERM
+-"$watchdog_pid"`), which (under `set -m` job control, where each backgrounded
+job gets its own process group) kills the subshell AND its `sleep` child
+together. Lesson: reaping a shell background job by pid alone is not enough
+when that job itself forks further children sharing your process's file
+descriptors -- always target the GROUP. (2026-07-06.)
+
 ## Context / token efficiency
 
 ### L-0008 #context #prompt #orientation #landmine -- T4.3 orientation-prefix is built but UNWIRED on the live loop

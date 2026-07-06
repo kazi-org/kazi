@@ -20,6 +20,12 @@ every profile) so you know what the adapter already does for you: it runs
 `System.cmd` in the workspace, captures `output`/`exit`, and ALWAYS provides the
 base result map. Your parser only adds to it.
 
+Every dispatch is also automatically tied to the controller's lifetime (issue
+#857, [`child_supervisor.ex`](../lib/kazi/harness/child_supervisor.ex)): the
+adapter wraps your harness's command so it cannot outlive a crashed/killed kazi
+process, and reports the harness subprocess's own OS pid as `:harness_pid` on
+the result map. This is transparent -- no profile opts into or configures it.
+
 ## The conformance contract (ADR-0022)
 
 kazi drives every harness as a **non-interactive subprocess with no TTY** and
