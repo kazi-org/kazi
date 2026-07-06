@@ -43,7 +43,10 @@ defmodule KaziWeb.StarmapLive do
   connector lines between the placed nodes (cyan-highlighted when either
   endpoint is converging/stuck). Converging, stuck, and claimed nodes carry
   session tags (`S1`, `S2`, ...) mirrored into the rail's SESSIONS section
-  (red chip for a stuck session). Clicking any canvas node — or an attention
+  (red chip for a stuck session). Clicking a SESSIONS row filters the
+  constellation to that session's goal (everything else dims); clicking the
+  same row again — or the session ending — clears the filter. Clicking any
+  canvas node — or an attention
   entry — opens the right slide-over drill-in panel: identity chips,
   iteration/budget burn, the predicate-vector DNA strip, the convergence
   heatmap, and a transcript tail, with a "FULL ANALYST VIEW" link to the
@@ -96,10 +99,12 @@ defmodule KaziWeb.StarmapLive do
      socket
      |> assign(:page_title, "kazi · starmap")
      |> assign(:selected_id, nil)
+     |> assign(:session_filter, nil)
      |> assign_runs()
      |> assign_bands()
      |> assign_attention_queue()
      |> assign_canvas()
+     |> validate_session_filter()
      |> assign_panel()
      |> assign_river()}
   end
@@ -114,6 +119,7 @@ defmodule KaziWeb.StarmapLive do
      |> assign_bands()
      |> assign_attention_queue()
      |> assign_canvas()
+     |> validate_session_filter()
      |> assign_panel()
      |> assign_river()}
   end
@@ -130,6 +136,39 @@ defmodule KaziWeb.StarmapLive do
   def handle_event("close_panel", _params, socket) do
     {:noreply, socket |> assign(:selected_id, nil) |> assign_panel()}
   end
+
+  # Session filter: clicking a SESSIONS rail row dims the constellation to
+  # that session's goal; clicking the same row again clears the filter. The
+  # filter is pinned to the node id (not just the positional S-tag, which can
+  # drift to a different goal as states change between ticks).
+  def handle_event("toggle_session_filter", %{"id" => id, "tag" => tag}, socket) do
+    filter =
+      case socket.assigns.session_filter do
+        %{id: ^id} -> nil
+        _other -> %{id: id, tag: tag}
+      end
+
+    {:noreply, assign(socket, :session_filter, filter)}
+  end
+
+  # A filter whose session ended (the node landed, or its tag was reassigned
+  # on a state change) clears itself rather than dimming the whole canvas
+  # against a node that no longer carries it.
+  defp validate_session_filter(%{assigns: %{session_filter: nil}} = socket), do: socket
+
+  defp validate_session_filter(%{assigns: %{session_filter: %{id: id, tag: tag}}} = socket) do
+    if Enum.any?(socket.assigns.canvas_nodes, &(&1.id == id and &1.session_tag == tag)) do
+      socket
+    else
+      assign(socket, :session_filter, nil)
+    end
+  end
+
+  defp dimmed_node?(nil, _node), do: false
+  defp dimmed_node?(%{id: id}, node), do: node.id != id
+
+  defp dimmed_edge?(nil, _edge), do: false
+  defp dimmed_edge?(%{id: id}, edge), do: edge.from != id and edge.to != id
 
   # The canvas cap (docs/dashboard-design.md "Canvas composition" overflow
   # rule): one node per GOAL (its latest run), newest ~24 on the canvas, the
@@ -773,8 +812,12 @@ defmodule KaziWeb.StarmapLive do
           <div class="section-label">SESSIONS</div>
           <div
             :for={node <- Enum.filter(@canvas_nodes, & &1.session_tag)}
-            class="session-row"
+            class={"session-row" <>
+              if(@session_filter && @session_filter.id == node.id, do: " active", else: "")}
             data-session={node.session_tag}
+            phx-click="toggle_session_filter"
+            phx-value-id={node.id}
+            phx-value-tag={node.session_tag}
           >
             <span class={"session-id" <> if(node.state == :stuck, do: " red", else: "")}>
               {node.session_tag}
@@ -823,6 +866,7 @@ defmodule KaziWeb.StarmapLive do
           role="img"
           aria-label="wave-band constellation canvas"
           data-frontiers={length(@canvas_wave_labels)}
+          data-session-filter={@session_filter && @session_filter.tag}
         >
           <g
             :for={wl <- @canvas_wave_labels}
@@ -853,7 +897,9 @@ defmodule KaziWeb.StarmapLive do
           <g :if={@canvas_edges != []} id="starmap-edges">
             <line
               :for={edge <- @canvas_edges}
-              class={"edge" <> if(edge.active, do: " edge-active", else: "")}
+              class={"edge" <>
+                if(edge.active, do: " edge-active", else: "") <>
+                if(dimmed_edge?(@session_filter, edge), do: " dimmed", else: "")}
               data-from={edge.from}
               data-to={edge.to}
               x1={edge.x1}
@@ -866,7 +912,8 @@ defmodule KaziWeb.StarmapLive do
           <g
             :for={node <- @canvas_nodes}
             id={"canvas-node-group-#{node.id}"}
-            class="canvas-node-group"
+            class={"canvas-node-group" <>
+              if(dimmed_node?(@session_filter, node), do: " dimmed", else: "")}
             data-node-id={node.id}
             data-frontier={node.frontier}
             data-state={node.state}
@@ -1088,6 +1135,8 @@ defmodule KaziWeb.StarmapLive do
         .starmap-canvas .edge { stroke: #152840; stroke-width: 1.5; }
         .starmap-canvas .edge-active { stroke: rgba(86,204,242,.5); }
         .starmap-canvas .canvas-node-group { cursor: pointer; }
+        .starmap-canvas .canvas-node-group.dimmed { opacity: .12; }
+        .starmap-canvas .edge.dimmed { opacity: .12; }
         .starmap-canvas .selring { fill: none; stroke: #EAF6FF; stroke-width: 1; stroke-dasharray: 3 5; transform-box: fill-box; transform-origin: center; }
         .starmap-canvas .band-a { fill: rgba(86,204,242,.028); }
         .starmap-canvas .band-b { fill: transparent; }
@@ -1114,8 +1163,11 @@ defmodule KaziWeb.StarmapLive do
         .attention-signal-label, .attention-predicate { color: var(--dim, #46587A); }
         .attention-drillin-link { color: var(--cyn, #56CCF2); text-decoration: none; font-size: 10px; margin-left: auto; flex: 0 0 auto; }
         .attention-drillin-link:hover { text-decoration: underline; }
-        .rail-sessions .session-row { display: flex; align-items: center; gap: .6rem; padding: .4rem 0; border-bottom: 1px solid rgba(22,35,58,.6); font-size: 10px; color: var(--dim, #46587A); }
+        .rail-sessions .session-row { display: flex; align-items: center; gap: .6rem; padding: .4rem 0; border-bottom: 1px solid rgba(22,35,58,.6); font-size: 10px; color: var(--dim, #46587A); cursor: pointer; }
         .rail-sessions .session-row:last-child { border-bottom: none; }
+        .rail-sessions .session-row:hover { color: var(--txt, #BFD2EA); }
+        .rail-sessions .session-row.active { background: rgba(86,204,242,.07); box-shadow: inset 2px 0 0 var(--cyn, #56CCF2); padding-left: .4rem; }
+        .rail-sessions .session-row.active .session-id { background: rgba(86,204,242,.18); }
         .rail-sessions .session-id { color: var(--cyn, #56CCF2); border: 1px solid rgba(86,204,242,.4); border-radius: 3px; padding: 1px 6px; font-weight: 700; flex: 0 0 auto; }
         .rail-sessions .session-id.red { color: var(--red, #FF5C6C); border-color: rgba(255,92,108,.5); }
         .rail-sessions .session-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
