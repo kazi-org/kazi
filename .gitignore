@@ -52,3 +52,10 @@ package-lock.json
 
 # Added by code-review-graph
 .code-review-graph/
+
+# Machine-local agent/tooling artifacts (never repo sources)
+/.claude/
+/.cursorrules
+/.opencode.json
+/.windsurfrules
+/graphify-out/

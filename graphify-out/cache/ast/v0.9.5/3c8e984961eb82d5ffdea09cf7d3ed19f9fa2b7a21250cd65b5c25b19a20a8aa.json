@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_greet", "label": "greet", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "priv/examples/hero_cast_demo/workspace/go.mod", "source_location": "L1"}], "edges": []}

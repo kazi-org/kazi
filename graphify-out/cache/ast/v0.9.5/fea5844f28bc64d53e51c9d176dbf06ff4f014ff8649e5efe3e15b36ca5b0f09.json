@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_example_com_app", "label": "example.com/app", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "test/fixtures/adopt/go/go.mod", "source_location": "L1"}], "edges": []}

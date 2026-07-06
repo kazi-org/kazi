@@ -1,1 +1,0 @@
-{"nodes": [{"id": "pkg_demo", "label": "demo", "file_type": "code", "type": "package", "ecosystem": "python", "source_file": "test/fixtures/adopt/python-pyproject/pyproject.toml", "source_location": "L1", "version": "0.1.0"}], "edges": []}
