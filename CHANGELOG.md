@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.78.0](https://github.com/kazi-org/kazi/compare/v1.77.0...v1.78.0) (2026-07-06)
+
+
+### Features
+
+* attention queue -- rank what needs the operator (T46.6) ([7f23dd3](https://github.com/kazi-org/kazi/commit/7f23dd3b8bbe7ae8fb110bbba8ce1d0be052b9d8))
+
 ## [1.77.0](https://github.com/kazi-org/kazi/compare/v1.76.0...v1.77.0) (2026-07-06)
 
 
