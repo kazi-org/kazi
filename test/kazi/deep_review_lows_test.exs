@@ -319,8 +319,14 @@ defmodule Kazi.DeepReviewLowsTest do
         )
 
       # i795/#795: a quarantined predicate (`:unknown`) never lets the run
-      # report `:converged` — the loop just keeps re-observing.
-      assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+      # report `:converged`. #820: it never rehabilitates here either (it keeps
+      # alternating on every real re-poll), so with the vector blocked SOLELY by
+      # quarantine and nothing dispatchable, the loop stops honestly `:stuck`
+      # rather than idling forever.
+      assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+      refute result.outcome == :converged
+      assert result.outcome == :stopped
+      assert result.reason == :stuck
 
       snap = Kazi.Loop.snapshot(loop)
       assert :flaky in snap.quarantine

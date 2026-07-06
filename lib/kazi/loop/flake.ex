@@ -53,13 +53,47 @@ defmodule Kazi.Loop.Flake do
   This is the faithful reading of concept §5 ("re-run / quarantine so a
   nondeterministic fail is not treated as real work"): a flake is neither real
   failing work nor a real failing requirement, so it is set aside rather than
-  allowed to drive or block the loop. Quarantine is *sticky*: once a predicate has
-  proven nondeterministic it stays quarantined for the remainder of the run, even
-  if a later observation happens to pass it — re-admitting it would just risk the
-  poison loop the policy exists to prevent.
+  allowed to drive or block the loop. Quarantine bookkeeping (`quarantine/3`) is
+  *sticky*: a single `:fail`/`:pass` re-run verdict never re-admits an id. The
+  only way OUT of quarantine is deliberate rehabilitation (below), which demands
+  much stronger evidence than one lucky re-run.
+
+  ## Rehabilitation (#820)
+
+  A quarantine with no way out has a failure mode of its own: once a predicate is
+  quarantined its result is pinned `:unknown` forever, which (issue #795) can
+  never satisfy `Kazi.PredicateVector.satisfied?/1` — an otherwise fully-green run
+  can never reach `:converged`, only spin re-observing or eventually stop
+  `:stuck`/`:over_budget`. If the flake was transient (the underlying flakiness
+  resolved, or it was mis-classified from one bad re-run), that is a false
+  negative the loop should be able to recover from.
+
+  `record_pass_streak/3` is the rehabilitation counter: the loop keeps polling a
+  quarantined predicate through the real provider (see `Kazi.Loop`) and feeds
+  each fresh result here. `rehab_streak/0` (#{3}) consecutive **real** passes —
+  observed one per tick, not a burst of re-runs — un-quarantines the id; a single
+  non-pass resets the streak to zero (still no re-admission on a lucky blip, just
+  a much higher bar than the original one-flip quarantine trigger). This is
+  deliberately asymmetric: quarantine is easy to enter (one flip) and hard to
+  leave (a sustained run of passes), so a genuinely-flaky check stays quarantined
+  in practice while a resolved one is not stuck `:unknown` forever.
+
+  ## Honest termination on quarantine-only blockage (#820)
+
+  Rehabilitation only helps a predicate that actually starts passing again. If it
+  does not, an otherwise-satisfied vector blocked SOLELY by quarantined-`:unknown`
+  ids has no dispatchable work (the quarantined ids are not in the failing
+  work-list either) — the loop cannot make progress by dispatching an agent, and
+  should not silently poll it into the ground. `quarantine_blocks_only?/2`
+  identifies exactly this condition (every non-passing id in the vector is
+  quarantined); `Kazi.Loop` uses it to stop `:stuck` — naming the quarantined ids
+  as the reason — after `quarantine_only_stuck_ticks/0` (#{3}) consecutive
+  no-work observations, rather than idling at the reobserve interval until
+  `max_iterations`/wall-clock forces an uninformative `:over_budget`.
   """
 
   alias Kazi.PredicateResult
+  alias Kazi.PredicateVector
 
   # Default number of EXTRA evaluations after the first failing one. Two retries
   # → up to three total evaluations of a failing predicate before the result is
@@ -178,5 +212,98 @@ defmodule Kazi.Loop.Flake do
   @spec quarantined_result(PredicateResult.t()) :: PredicateResult.t()
   def quarantined_result(%PredicateResult{evidence: evidence}) do
     PredicateResult.unknown(Map.put(evidence, :quarantined, :flaky))
+  end
+
+  # Number of consecutive REAL passing observations (one per tick, via the actual
+  # provider) a quarantined predicate needs before it is rehabilitated. Small and
+  # documented per #820: a single lucky re-run quarantines (the existing, cheap,
+  # false-positive-tolerant trigger); leaving quarantine demands sustained
+  # evidence, so a genuinely-flaky check is not casually re-admitted.
+  @default_rehab_streak 3
+
+  @doc "Consecutive real passes a quarantined predicate needs to be rehabilitated (#820)."
+  @spec rehab_streak() :: pos_integer()
+  def rehab_streak, do: @default_rehab_streak
+
+  @doc """
+  Folds one fresh (real provider) evaluation of an already-quarantined predicate
+  into its rehabilitation streak.
+
+    * a `:pass` bumps the streak; once it reaches `rehab_streak/0` the id is
+      rehabilitated — callers should un-quarantine it and record THIS result
+      (the genuine pass), not the `:unknown` quarantine placeholder.
+    * anything else (`:fail`/`:error`) resets the streak to zero — still
+      quarantined, no partial credit carried across a broken streak.
+
+  `streaks` maps predicate id to its current consecutive-pass count; an id absent
+  from the map has a streak of zero. Returns `{:rehabilitated, streaks}` (id
+  removed from the map) or `{:still_quarantined, streaks}`.
+
+  ## Examples
+
+      iex> {:still_quarantined, s} = Kazi.Loop.Flake.record_pass_streak(%{}, :a, Kazi.PredicateResult.pass())
+      iex> s
+      %{a: 1}
+
+      iex> s = %{a: 2}
+      iex> Kazi.Loop.Flake.record_pass_streak(s, :a, Kazi.PredicateResult.pass())
+      {:rehabilitated, %{}}
+
+      iex> s = %{a: 2}
+      iex> Kazi.Loop.Flake.record_pass_streak(s, :a, Kazi.PredicateResult.fail())
+      {:still_quarantined, %{}}
+  """
+  @spec record_pass_streak(map(), Kazi.Predicate.id(), PredicateResult.t()) ::
+          {:rehabilitated, map()} | {:still_quarantined, map()}
+  def record_pass_streak(streaks, id, %PredicateResult{} = result) when is_map(streaks) do
+    if PredicateResult.passed?(result) do
+      count = Map.get(streaks, id, 0) + 1
+
+      if count >= rehab_streak() do
+        {:rehabilitated, Map.delete(streaks, id)}
+      else
+        {:still_quarantined, Map.put(streaks, id, count)}
+      end
+    else
+      {:still_quarantined, Map.delete(streaks, id)}
+    end
+  end
+
+  # Consecutive no-dispatchable-work observations (#820) the loop tolerates once
+  # blocked ONLY by quarantined-unknown ids before it stops honestly `:stuck`
+  # instead of idling at the reobserve interval to `max_iterations`/wall-clock.
+  # Small and documented, matching the rehab streak's order of magnitude.
+  @default_quarantine_only_stuck_ticks 3
+
+  @doc "No-work ticks tolerated before a quarantine-only blockage stops :stuck (#820)."
+  @spec quarantine_only_stuck_ticks() :: pos_integer()
+  def quarantine_only_stuck_ticks, do: @default_quarantine_only_stuck_ticks
+
+  @doc """
+  True iff the vector is unsatisfied SOLELY because of quarantined ids: at least
+  one non-passing result exists, and every non-passing id is in `quarantine`. A
+  false result means either the vector is fully satisfied (nothing non-passing)
+  or something OTHER than quarantine is blocking it (a real failure, or a live
+  predicate legitimately still pending) — in either case the ordinary loop
+  behaviour (dispatch or keep polling) applies unchanged.
+
+  ## Examples
+
+      iex> v = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass(), b: Kazi.PredicateResult.unknown()})
+      iex> Kazi.Loop.Flake.quarantine_blocks_only?(v, MapSet.new([:b]))
+      true
+
+      iex> v = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass(), b: Kazi.PredicateResult.fail()})
+      iex> Kazi.Loop.Flake.quarantine_blocks_only?(v, MapSet.new())
+      false
+
+      iex> v = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass()})
+      iex> Kazi.Loop.Flake.quarantine_blocks_only?(v, MapSet.new())
+      false
+  """
+  @spec quarantine_blocks_only?(PredicateVector.t(), MapSet.t()) :: boolean()
+  def quarantine_blocks_only?(%PredicateVector{results: results}, %MapSet{} = quarantine) do
+    non_passing = for {id, result} <- results, not PredicateResult.passed?(result), do: id
+    non_passing != [] and Enum.all?(non_passing, &MapSet.member?(quarantine, &1))
   end
 end

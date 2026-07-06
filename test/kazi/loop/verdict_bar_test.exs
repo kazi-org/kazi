@@ -9,6 +9,15 @@ defmodule Kazi.Loop.VerdictBarTest do
   Regression coverage for the fix in `Kazi.Loop.decide/2` / `all_satisfied?/1`
   (loop.ex) and the underlying `Kazi.PredicateVector.satisfied?/1` guarantee it
   now relies on unconditionally.
+
+  #820 note: fixing #795 (never silently converge on a quarantined `:unknown`)
+  left the loop with no terminal escape when quarantine was the ONLY blockage —
+  it idled at the reobserve interval forever (or to `max_iterations`). The first
+  test below originally asserted exactly that idle (`{:error, :timeout}`); #820's
+  honest-termination path (`Kazi.Loop.Flake.quarantine_blocks_only?/2`, see
+  `Kazi.Loop.QuarantineExitTest`) now stops it `:stuck` instead — updated here to
+  match, while still proving the core #795 invariant: never `:converged`, never
+  re-dispatched as work.
   """
   use ExUnit.Case, async: true
 
@@ -112,15 +121,24 @@ defmodule Kazi.Loop.VerdictBarTest do
         stuck_iterations: 0
       )
 
-    assert {:error, :timeout} = Kazi.Loop.await(loop, 200)
+    # #820: `stuck_iterations: 0` disables the ORDINARY (T1.5) stuck detector, but
+    # `:flaky` never rehabilitates here (it keeps alternating fail/pass on every
+    # real re-poll, never stringing together `Kazi.Loop.Flake.rehab_streak/0`
+    # consecutive passes) — the vector stays blocked SOLELY by quarantine with
+    # nothing dispatchable, so the independent honest-termination path stops the
+    # loop `:stuck` rather than idling at the reobserve interval forever (the
+    # pre-#820 bug this suite's moduledoc predates: it used to assert
+    # `{:error, :timeout}` here, i.e. the loop never terminating at all).
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    refute result.outcome == :converged
+    assert result.outcome == :stopped
+    assert result.reason == :stuck
 
     snap = Kazi.Loop.snapshot(loop)
     assert :flaky in snap.quarantine, "the alternating predicate must be quarantined as flaky"
 
     refute :dispatch_agent in snap.actions,
            "a quarantined predicate must not be re-dispatched as work"
-
-    Kazi.Loop.stop(loop)
   end
 
   # ===========================================================================
