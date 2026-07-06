@@ -56,6 +56,17 @@ constellation to that session's goal (every other node and unrelated edge
 dims); clicking the same row again — or the session ending — clears the
 filter.
 
+Each SESSIONS row identifies its run by the **operator-assigned session
+name** when one was given (`kazi apply --session-name <label>`, or the
+`KAZI_SESSION_NAME` environment variable — useful when an orchestrating
+agent session labels every run it dispatches), falling back to the harness
+name, with the workspace basename alongside as the tiebreaker for several
+sessions driving the same repo. When the claude harness reports its own
+`session_id` in the result envelope, kazi records it on the run row and the
+slide-over panel shows the ready-to-paste resume command
+(`claude -r <session-id>`), so any starmap node can be picked up
+interactively.
+
 **Clicking any canvas node — or an attention entry — opens the slide-over
 drill-in panel** (docs/dashboard-design.md "Slide-over drill-in panel"): the
 goal's identity chips (workspace, harness · model, state), its
