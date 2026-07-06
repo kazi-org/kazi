@@ -47,4 +47,18 @@ defmodule KaziWeb.Starmap.GoalSource do
     @impl true
     def goal, do: nil
   end
+
+  defmodule Static do
+    @moduledoc """
+    The `GoalSource` `kazi dashboard --roadmap <goal-file>` configures (T47.2):
+    returns whatever `Kazi.Goal.t()` was loaded at boot and stashed in
+    application env (`:kazi, :starmap_roadmap_goal`) — the same cross-process
+    seam the wave-band tests' stub source uses, since application env (unlike
+    the process dictionary) is visible from the LiveView's own process.
+    """
+    @behaviour KaziWeb.Starmap.GoalSource
+
+    @impl true
+    def goal, do: Application.get_env(:kazi, :starmap_roadmap_goal)
+  end
 end

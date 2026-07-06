@@ -139,6 +139,7 @@ defmodule Kazi.CLI do
     context_budget: :integer,
     port: :integer,
     bind: :string,
+    roadmap: :string,
     help: :boolean,
     version: :boolean
   ]
@@ -209,6 +210,8 @@ defmodule Kazi.CLI do
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
       "`dashboard` only: interface to bind (default 127.0.0.1 -- loopback only). Set explicitly to bind a non-loopback address; overriding is loud (printed at boot), never silent.",
+    roadmap:
+      "`dashboard` only (T47.2, ADR-0056/ADR-0057): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. The starmap loads it through `KaziWeb.Starmap.GoalSource` and renders its needs-DAG in wave-band frontiers, the SAME computation `kazi apply --explain` prints. Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, the starmap keeps its flat-list fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty starmap.",
     help: "Show this help and exit.",
     version: "Print the kazi version and exit."
   }
@@ -276,7 +279,7 @@ defmodule Kazi.CLI do
       summary:
         "Boot the standalone fleet-mode web endpoint (the starmap: every registered run, read-only, no goal loop) against the shared read-model.",
       args: [],
-      flags: [:port, :bind]
+      flags: [:port, :bind, :roadmap]
     },
     %{
       name: "plan",
@@ -845,11 +848,12 @@ defmodule Kazi.CLI do
   # T46.4 (ADR-0057): `kazi dashboard` boots the standalone fleet-mode web
   # endpoint (the starmap) with NO goal loop in the process — a read-only
   # projection over the shared read-model + run registry. `--port`/`--bind`
-  # only take effect on a FRESH boot of the endpoint (a dev/test process that
-  # already supervises it keeps its existing bind; see `execute_dashboard/2`).
+  # (and, as of T47.2, `--roadmap`) only take effect on a FRESH boot of the
+  # endpoint (a dev/test process that already supervises it keeps its existing
+  # bind; see `execute_dashboard/2`).
   defp parse_command(["dashboard" | rest], flags) do
     case rest do
-      [] -> {:dashboard, port: flags[:port], bind: flags[:bind]}
+      [] -> {:dashboard, port: flags[:port], bind: flags[:bind], roadmap: flags[:roadmap]}
       extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
@@ -2157,22 +2161,50 @@ defmodule Kazi.CLI do
   # `inject_opts`): production leaves the default (block forever so the process
   # keeps serving until Ctrl-C); the CLI boundary test overrides it with a no-op
   # so `run/2` returns instead of hanging.
+  #
+  # `--roadmap <goal-file>` (T47.2, ADR-0056/ADR-0057): the first user-visible
+  # consumer of `KaziWeb.Starmap.GoalSource` — loads a REAL goal-file so the
+  # starmap renders ITS `needs`-DAG in wave bands instead of only a test
+  # fixture's. Like `--port`/`--bind`, it's advisory-only when this process
+  # already serves the endpoint (nothing to reconfigure); on a fresh boot a
+  # bad/unloadable path is a LOUD boot error (non-zero exit, nothing started),
+  # never a silently-empty starmap.
   defp execute_dashboard(opts, inject_opts) do
     ensure_read_model()
 
-    {mode, bind, port} =
-      case Process.whereis(KaziWeb.Endpoint) do
-        pid when is_pid(pid) ->
-          http = KaziWeb.Endpoint.config(:http) || []
-          {:already_running, format_bind(http[:ip]), http[:port]}
+    case Process.whereis(KaziWeb.Endpoint) do
+      pid when is_pid(pid) ->
+        if opts[:roadmap] do
+          IO.puts(
+            :stderr,
+            "kazi dashboard: --roadmap ignored -- this process already serves the starmap " <>
+              "(--roadmap only takes effect on a fresh standalone boot, like --port/--bind)"
+          )
+        end
 
-        nil ->
-          bind = opts[:bind] || "127.0.0.1"
-          port = opts[:port] || 4050
-          start_standalone_endpoint(bind, port)
-          {:booted, bind, port}
-      end
+        http = KaziWeb.Endpoint.config(:http) || []
+        serve_dashboard(:already_running, format_bind(http[:ip]), http[:port], inject_opts)
 
+      nil ->
+        case configure_roadmap(opts[:roadmap]) do
+          :ok ->
+            bind = opts[:bind] || "127.0.0.1"
+            port = opts[:port] || 4050
+            start_standalone_endpoint(bind, port)
+            serve_dashboard(:booted, bind, port, inject_opts)
+
+          {:error, reason} ->
+            IO.puts(
+              :stderr,
+              "error: kazi dashboard: could not load --roadmap goal-file #{opts[:roadmap]}: #{reason}"
+            )
+
+            1
+        end
+    end
+  end
+
+  defp serve_dashboard(mode, bind, port, inject_opts) do
     case mode do
       :already_running ->
         IO.puts(
@@ -2190,6 +2222,34 @@ defmodule Kazi.CLI do
     serve_forever.()
 
     0
+  end
+
+  @doc """
+  Loads `path` (when given) through `Kazi.Goal.Loader` — the SAME loader
+  `apply` uses — and points `KaziWeb.Starmap.GoalSource` at the loaded goal via
+  `KaziWeb.Starmap.GoalSource.Static` (application env is the seam: visible
+  from the LiveView's separate process, unlike the process dictionary).
+  Absent `--roadmap` (`path` is `nil`), this is a no-op — the default
+  `GoalSource` (`None`) keeps the starmap's flat-list fallback pinned
+  unchanged.
+
+  A public seam (T47.2), mirroring `standalone_dashboard_children/0`: exercises
+  the `--roadmap` load/wire-up in isolation, with no need to tear down the
+  shared `KaziWeb.Endpoint` a test's own HTTP assertions depend on.
+  """
+  @spec configure_roadmap(Path.t() | nil) :: :ok | {:error, String.t()}
+  def configure_roadmap(nil), do: :ok
+
+  def configure_roadmap(path) do
+    case Goal.Loader.load(path) do
+      {:ok, goal} ->
+        Application.put_env(:kazi, :starmap_roadmap_goal, goal)
+        Application.put_env(:kazi, :starmap_goal_source, KaziWeb.Starmap.GoalSource.Static)
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   # Boots a standalone endpoint (no scheduler/loop children, ADR-0057 decision 4)
