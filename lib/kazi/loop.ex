@@ -479,6 +479,12 @@ defmodule Kazi.Loop do
               last_tools: %{},
               last_orientation_prefix: nil,
               last_retrieval_section: nil,
+              # The inner harness's own session id from the latest dispatch
+              # result (the claude envelope's `session_id`), carried on the
+              # iteration payload so the runtime can record it on the fleet
+              # registry row (resumable via `claude -r <id>`). nil until a
+              # dispatch reports one; a later dispatch's id supersedes.
+              last_session_id: nil,
               # --- T36.4 (ADR-0047 §2/§4): context-tier escalation --------------
               # The resolved escalation `Config` (thresholds + stop-rule flag) and
               # the running escalation `State` (the active tier, the non-progress
@@ -2049,9 +2055,21 @@ defmodule Kazi.Loop do
       | last_context: context,
         last_tools: Counters.tools(result),
         last_orientation_prefix: parts.orientation,
-        last_retrieval_section: parts.retrieval
+        last_retrieval_section: parts.retrieval,
+        last_session_id: harness_session_id(result, data.last_session_id)
     }
   end
+
+  # The dispatch result's harness session id when the profile parsed one
+  # (claude's envelope `session_id`), else keep the previously seen id — a
+  # result with no envelope (a failed dispatch) must not erase it. Accepts the
+  # same shapes `Counters.tools/1` does ({:ok, map} | map | anything).
+  defp harness_session_id({:ok, %{} = result}, prior), do: harness_session_id(result, prior)
+
+  defp harness_session_id(%{session_id: session_id}, _prior) when is_binary(session_id),
+    do: session_id
+
+  defp harness_session_id(_result, prior), do: prior
 
   # The stable orientation PREFIX for the live dispatch (T19.1, ADR-0010 §3). Builds
   # the ranked blast-radius pack from the current failing slice + workspace and
@@ -2565,7 +2583,8 @@ defmodule Kazi.Loop do
       # T34.3 (ADR-0046 §2): carry the last dispatch's context + tool counters so
       # the stuck-stop record (which upserts the last observation's row) keeps them.
       context: data.last_context || Counters.empty_context(),
-      tools: data.last_tools
+      tools: data.last_tools,
+      harness_session_id: data.last_session_id
     }
 
     try do
@@ -2944,7 +2963,10 @@ defmodule Kazi.Loop do
       # owns the prompt — all-disabled/zero before the first dispatch); `tools` is
       # empty when the harness exposed no tool-use stream (absent ≠ zero).
       context: data.last_context || Counters.empty_context(),
-      tools: data.last_tools
+      tools: data.last_tools,
+      # The inner harness's session id from the latest dispatch (nil until one
+      # reports it), so the runtime records it on the fleet registry row.
+      harness_session_id: data.last_session_id
     }
 
     try do
@@ -2979,7 +3001,8 @@ defmodule Kazi.Loop do
       # T34.3 (ADR-0046 §2): carry the last dispatch's context + tool counters so
       # the budget-stop record is attributable too.
       context: data.last_context || Counters.empty_context(),
-      tools: data.last_tools
+      tools: data.last_tools,
+      harness_session_id: data.last_session_id
     }
 
     try do
