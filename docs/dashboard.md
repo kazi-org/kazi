@@ -69,9 +69,8 @@ Wiring a real roadmap ref into the plan/dashboard surface is future work
 read-model object); today `GoalSource` is a seam a caller (or a test) can
 point at any `Kazi.Goal.t()`.
 
-The ranked attention queue, the convergence heatmap, and transcript peek are
-later `kazi dashboard` surface tasks (E46 Wave B/C) built on the same
-registry.
+The ranked attention queue and transcript peek are later `kazi dashboard`
+surface tasks (E46 Wave B/C) built on the same registry.
 
 ## The events sink (T46.2)
 
@@ -123,6 +122,28 @@ would exceed the cap, further events are dropped and a single `{"type":
 truncated transcript apart from a torn one. This tee is the file "transcript
 peek" (E46 Wave B/C) will read from.
 
+## The drill-in convergence heatmap (`/goals/:id/drillin`, T46.7)
+
+Per-goal, below the full history timeline (`/goals/:id/history`): a
+**predicates x iterations matrix** built straight from
+`Kazi.ReadModel.list_iterations/1` — one row per predicate id (the union seen
+across the goal's whole history, so a predicate introduced mid-run still gets
+a row), one column per iteration oldest-to-newest, each cell that predicate's
+status at that observation (`pass`/`fail`/`error`/`unknown`, or
+`not_evaluated` for an iteration before the predicate existed). The newest
+column is marked **current**; a green→red regression flip
+(`Kazi.Loop.RegressionDetector`, T1.2) is marked `regression-flip` on the exact
+cell where it was first observed, so a pinned green→red→green run is visually
+distinct from ordinary outstanding work in the same row.
+
+Clicking a column header (the **scrubber**) selects that iteration; the detail
+panel below then shows that iteration's full predicate vector (id + status),
+its dispatch action (`action_kind`, when the loop dispatched), and the
+ADR-0046 context/tool counters (`tool_calls`, `file_reads`,
+`orientation_tokens`, `evidence_tokens`, `tier`). With nothing scrubbed the
+panel follows the current (latest) iteration live, matching the matrix's
+current-column marker. See `KaziWeb.DrillinHeatmapLive`.
+
 ## `kazi dashboard`
 
 ```
@@ -138,7 +159,8 @@ test entry points), the verb reports the endpoint's existing bind instead of
 rebinding it.
 
 A standalone boot serves **every** dashboard view (`/`, `/starmap`, `/goals`,
-`/leases`, `/dag`, `/goals/:id/history`), with web-tree parity to the full
+`/leases`, `/dag`, `/goals/:id/history`, `/goals/:id/drillin`), with web-tree
+parity to the full
 app's supervision tree: views whose live source has nothing to show (no
 active run registered in this node) render their honest empty state, never a
 500 (issue #801).

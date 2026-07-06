@@ -45,6 +45,9 @@ defmodule KaziWeb.Router do
     # read projection of the dependency-graph scheduler, ADR-0028).
     live("/dag", DagLive, :index)
     live("/goals/:id/history", HistoryLive, :index)
+    # T46.7: the drill-in convergence heatmap + iteration scrubber (ADR-0011
+    # read projection of the per-iteration vector history, ADR-0057).
+    live("/goals/:id/drillin", DrillinHeatmapLive, :index)
   end
 
   # Test-only seed/reset endpoints for the Playwright harness (T3.6b). Mounted
