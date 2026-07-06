@@ -26,9 +26,19 @@ defmodule KaziWeb.DagSource.Cache do
     GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
   end
 
-  @doc "The latest broadcast DAG snapshot, or `DagSnapshot.empty/0` if no run has broadcast yet."
+  @doc """
+  The latest broadcast DAG snapshot, or `DagSnapshot.empty/0` if no run has
+  broadcast yet -- or if the cache isn't supervised in this process at all
+  (the standalone `kazi dashboard` boot before T46.4's fix, or any other
+  entry point that hasn't started it; issue #801). The read path must not
+  assume a supervised singleton is always alive.
+  """
   @spec current() :: DagSnapshot.t()
-  def current, do: GenServer.call(__MODULE__, :current)
+  def current do
+    GenServer.call(__MODULE__, :current)
+  catch
+    :exit, _ -> DagSnapshot.empty()
+  end
 
   @impl GenServer
   def init(:ok) do
