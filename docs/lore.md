@@ -577,3 +577,22 @@ pre-existing tests that asserted the OLD idle-forever symptom
 (`test/kazi/loop_test.exs`, `test/kazi/loop/verdict_bar_test.exs`,
 `test/kazi/deep_review_lows_test.exs`, `test/kazi/slice1_test.exs`) were updated
 to the new, honestly-terminating expectation. (2026-07-06.)
+
+### L-0028 #dashboard #liveview #phx-click #landmine -- the dashboard shipped ZERO JavaScript, so every `phx-click`/live-patch silently did nothing in a real browser
+
+Until the starmap slide-over panel (2026-07-06), no dashboard page loaded any
+JS: the root layout was deliberately asset-free, so LiveViews rendered as dead
+server-side snapshots. LiveView tests (`render_click/1`) still pass against
+such a page -- they drive the server directly and never notice the browser
+gap -- so an interactive feature can be fully "test-green" yet do nothing when
+clicked in Chrome. Symptom in the wild: `window.liveSocket` is `undefined`,
+`[data-phx-main]` never gains `phx-connected`, clicks are inert, and pages
+only update on manual refresh. Fix (no-build, release-safe): serve
+`phoenix.min.js` + `phoenix_live_view.min.js` straight from the hex packages
+via `Plug.Static` (`from: {:phoenix, "priv/static"}` resolves via
+`:code.priv_dir/1` inside a release too), add the csrf meta + connect script
+to the root layout, and `protect_from_forgery` in the browser pipeline so the
+socket's csrf check has a session token. INVARIANT: any new `phx-*` binding
+on a dashboard page must be verified in a REAL browser (agent-browser),
+not only via `Phoenix.LiveViewTest` -- the test harness cannot see a missing
+client. Regression: `test/kazi_web/live_client_test.exs`. (2026-07-06.)
