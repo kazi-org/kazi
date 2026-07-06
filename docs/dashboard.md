@@ -48,6 +48,19 @@ With no roadmap configured this flat list already satisfies "single-goal
 groups" (ADR-0056): every run is its own node with no declared order between
 them.
 
+Converging, stuck, and claimed nodes carry session tags (`S1`, `S2`, ...)
+mirrored into the rail's **SESSIONS** section (a stuck session's chip renders
+red), so the rail always answers "who is driving what" — including a fleet
+whose only live work is stuck.
+
+**Clicking any canvas node — or an attention entry — opens the slide-over
+drill-in panel** (docs/dashboard-design.md "Slide-over drill-in panel"): the
+goal's identity chips (workspace, harness · model, state), its
+iteration/budget burn bar, the predicate-vector DNA strip, the convergence
+heatmap (predicates × iterations), and a transcript tail, plus a
+"FULL ANALYST VIEW →" link to `/goals/:id/drillin`. It reads the same
+projections the full-page drill-in and transcript-peek views read.
+
 ### Wave bands
 
 When a roadmap ref IS configured (`KaziWeb.Starmap.GoalSource`, the ADR-0011
@@ -62,6 +75,12 @@ Each band node's state extends the four run-registry states above with:
 | ---------- | ------------------------------------------------------------------------- |
 | `claimed`  | every `needs` dep converged (the live frontier), but no run has started yet |
 | `pending`  | still waiting on an unconverged dep (a later wave), or poisoned by a stuck ancestor |
+
+The roadmap's declared `needs` edges also draw as connector lines between the
+placed nodes (highlighted cyan when either endpoint is converging or stuck),
+so the canvas shows the same dependency structure `--explain` prints. Without
+a roadmap there are no declared edges, so none are drawn — the flat fleet
+fallback declares no order and the starmap never fabricates one.
 
 `kazi dashboard --roadmap <goal-file>` (T47.2) wires a REAL goal-file into
 this seam: it loads `<goal-file>` through `Kazi.Goal.Loader` — the same loader
