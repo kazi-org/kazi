@@ -119,13 +119,19 @@ defmodule Kazi.Authoring do
       (e.g. a stub's control pid, a model, a per-dispatch budget).
     * `:proposal_ref` — the proposal's review handle. Default: a deterministic id
       derived from the idea, so re-proposing the same idea upserts rather than
-      duplicating.
+      duplicating. In caller-drafts mode the default instead derives from the
+      proposal payload's own `"id"`/`"name"` (#787/#793) — see `:proposal` below.
     * `:proposal` — caller-drafts mode (ADR-0023 decision 4): a proposal payload
       (the `%{"name", "predicates", "rationale"}` map, or its JSON string) the
       caller already authored. When present, kazi does NOT spawn a harness/model
       to draft — it parses, applies the deterministic floor, and persists. The
       same one write path; only the drafter changes (the caller, not an inner
-      model).
+      model). The goal id and `proposal_ref` are derived from the payload's own
+      `"id"` (used verbatim) or `"name"` (slugged) so distinct payloads coexist
+      instead of colliding on one hardcoded id.
+    * `:replace` — when the resolved `proposal_ref` already holds an `approved`
+      proposal, the upsert is refused (`{:proposal_locked, ref, "approved"}`)
+      unless this is `true` (#787/#793). Default `false`.
   """
   @type opts :: keyword()
 
@@ -141,6 +147,12 @@ defmodule Kazi.Authoring do
     * `{:error, {:harness_failed, term}}` — the harness could not be run.
     * `{:error, {:invalid_proposal, reason}}` — the harness produced no usable
       acceptance predicate.
+    * `{:error, {:invalid_goal, reason}}` — the drafted goal parsed but does not
+      LOAD (e.g. a `custom_script` predicate with no non-empty `cmd`, #788):
+      caught here at propose time, not later at `approve`.
+    * `{:error, {:proposal_locked, proposal_ref, "approved"}}` — the resolved
+      `proposal_ref` already holds an `approved` proposal and `:replace` was not
+      passed (#787/#793): refused rather than silently resetting it.
     * `{:error, %Ecto.Changeset{}}` — the proposal could not be persisted.
 
   ## Examples
@@ -161,7 +173,10 @@ defmodule Kazi.Authoring do
     with {:ok, idea} <- validate_idea(idea),
          {:ok, clarifications} <- run_clarify(idea, opts),
          {:ok, proposal} <- obtain_proposal(idea, clarifications, opts),
-         {:ok, goal} <- parse_proposal(proposal, idea_to_goal_id(idea)),
+         {goal_id, proposal_ref} = resolve_identity(proposal, idea, opts),
+         {:ok, goal} <- parse_proposal(proposal, goal_id),
+         :ok <- validate_loadable(goal),
+         opts = Keyword.put_new(opts, :proposal_ref, proposal_ref),
          {:ok, draft} <- persist(idea, goal, opts) do
       {:ok, draft}
     end
@@ -357,6 +372,21 @@ defmodule Kazi.Authoring do
     case Loader.from_map(goal_map) do
       {:ok, %Goal{} = goal} -> {:ok, goal}
       {:error, reason} -> {:error, {:invalid_goal, reason}}
+    end
+  end
+
+  # #788: plan-time validation must match load-time validation -- a proposal
+  # that cannot LOAD (e.g. a custom_script predicate with no non-empty "cmd")
+  # must be rejected here, at `propose`, never accepted-then-failed later at
+  # `approve`. Round-trips the just-drafted goal through the SAME canonical path
+  # `approve/2` rehydrates through (`serialize_goal/1` -> `rehydrate/1`), so
+  # there is exactly one provider-config validation to maintain -- no second
+  # copy of the rules that could drift out of sync.
+  @spec validate_loadable(Goal.t()) :: :ok | {:error, {:invalid_goal, term()}}
+  defp validate_loadable(%Goal{} = goal) do
+    case rehydrate(serialize_goal(goal)) do
+      {:ok, _goal} -> :ok
+      {:error, _reason} = error -> error
     end
   end
 
@@ -684,29 +714,36 @@ defmodule Kazi.Authoring do
   # Persist the draft goal as a `proposed` row. The goal is serialized into the
   # canonical goal-file map (`serialize_goal/1`) so T3.5b rehydrates it through
   # `Kazi.Goal.Loader.from_map/1`. Upserts on `proposal_ref` so re-proposing the
-  # same idea refreshes the draft rather than failing on the unique index.
-  @spec persist(idea(), Goal.t(), opts()) :: {:ok, Draft.t()} | {:error, Ecto.Changeset.t()}
+  # same idea refreshes the draft rather than failing on the unique index — UNLESS
+  # the existing row is already `approved` (#787/#793): an upsert there would
+  # silently reset an approved proposal (and its audit trail) back to `proposed`
+  # with different predicates, so it is refused unless the caller passes
+  # `replace: true` explicitly.
+  @spec persist(idea(), Goal.t(), opts()) :: {:ok, Draft.t()} | {:error, term()}
   defp persist(idea, %Goal{} = goal, opts) do
     proposal_ref = Keyword.get(opts, :proposal_ref, idea_to_proposal_ref(idea))
-    serialized = serialize_goal(goal)
 
-    attrs = %{
-      proposal_ref: proposal_ref,
-      idea: idea,
-      goal_id: to_string(goal.id),
-      status: "proposed",
-      goal: serialized
-    }
+    with :ok <- guard_replace(proposal_ref, opts) do
+      serialized = serialize_goal(goal)
 
-    %ProposedGoal{}
-    |> ProposedGoal.changeset(attrs)
-    |> Repo.insert(
-      on_conflict: {:replace, [:idea, :goal_id, :status, :goal, :updated_at]},
-      conflict_target: :proposal_ref
-    )
-    |> case do
-      {:ok, row} -> {:ok, Draft.from_row(row, goal)}
-      {:error, changeset} -> {:error, changeset}
+      attrs = %{
+        proposal_ref: proposal_ref,
+        idea: idea,
+        goal_id: to_string(goal.id),
+        status: "proposed",
+        goal: serialized
+      }
+
+      %ProposedGoal{}
+      |> ProposedGoal.changeset(attrs)
+      |> Repo.insert(
+        on_conflict: {:replace, [:idea, :goal_id, :status, :goal, :updated_at]},
+        conflict_target: :proposal_ref
+      )
+      |> case do
+        {:ok, row} -> {:ok, Draft.from_row(row, goal)}
+        {:error, changeset} -> {:error, changeset}
+      end
     end
   end
 
@@ -803,6 +840,66 @@ defmodule Kazi.Authoring do
   defp idea_to_proposal_ref(idea) do
     digest = :crypto.hash(:sha256, idea) |> Base.encode16(case: :lower) |> binary_part(0, 12)
     "prop-" <> idea_to_goal_id(idea) <> "-" <> digest
+  end
+
+  # The `{goal_id, proposal_ref}` pair a proposal is identified by (#787/#793).
+  # Kazi-drafts (no `:proposal` opt) keeps the historical idea-derived pair
+  # unchanged. Caller-drafts derives identity from the PAYLOAD itself instead of
+  # the (often placeholder, e.g. "caller-supplied predicates") idea text, so two
+  # differently-identified payloads land as DISTINCT proposals rather than
+  # collapsing onto the same upsert slot.
+  @spec resolve_identity(term(), idea(), opts()) :: {Goal.id(), String.t()}
+  defp resolve_identity(proposal, idea, opts) do
+    if Keyword.has_key?(opts, :proposal) do
+      caller_drafts_identity(proposal, idea)
+    else
+      {idea_to_goal_id(idea), idea_to_proposal_ref(idea)}
+    end
+  end
+
+  # Prefers an explicit payload `"id"` (used verbatim — the caller's own stable
+  # handle, so re-submitting the SAME id upserts the SAME slot, same as an
+  # idea-derived ref does for kazi-drafts); else a payload `"name"` (slugged,
+  # digest-salted like the idea-derived ref); else falls back to the idea-derived
+  # pair unchanged (the historical anonymous-payload behavior).
+  defp caller_drafts_identity(proposal, idea) do
+    with {:ok, decoded} <- decode_proposal(proposal) do
+      map = unwrap_proposal(decoded)
+
+      case optional_string(Map.get(map, "id")) do
+        nil ->
+          case optional_string(Map.get(map, "name")) do
+            nil -> {idea_to_goal_id(idea), idea_to_proposal_ref(idea)}
+            name -> {idea_to_goal_id(name), idea_to_proposal_ref(name)}
+          end
+
+        id ->
+          {id, "prop-" <> id}
+      end
+    else
+      _ -> {idea_to_goal_id(idea), idea_to_proposal_ref(idea)}
+    end
+  end
+
+  # A CALLER-DRAFTS upsert onto a proposal_ref already `approved` would silently
+  # discard that goal's approval + audit trail (#787/#793) — refuse it unless the
+  # caller opts in loudly via `replace: true`. Scoped to caller-drafts (a
+  # `:proposal` opt) only: kazi-drafts keeps its documented "re-proposing the
+  # same idea upserts" idempotency (the idea, not the id, IS the identity there,
+  # and there is no distinct-payload-collision risk to guard against).
+  @spec guard_replace(String.t(), opts()) ::
+          :ok | {:error, {:proposal_locked, String.t(), String.t()}}
+  defp guard_replace(proposal_ref, opts) do
+    caller_drafts? = Keyword.has_key?(opts, :proposal)
+    replace? = Keyword.get(opts, :replace, false)
+
+    case {caller_drafts?, ReadModel.get_proposed_goal(proposal_ref), replace?} do
+      {true, %ProposedGoal{status: "approved"}, false} ->
+        {:error, {:proposal_locked, proposal_ref, "approved"}}
+
+      _ ->
+        :ok
+    end
   end
 
   # --- provider mapping ------------------------------------------------------
