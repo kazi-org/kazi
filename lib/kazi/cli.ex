@@ -132,6 +132,7 @@ defmodule Kazi.CLI do
     parallelism: :integer,
     explain: :boolean,
     dry_run: :boolean,
+    check: :boolean,
     provider: :string,
     budget: :integer,
     context_store: :string,
@@ -194,6 +195,8 @@ defmodule Kazi.CLI do
       "`apply` only: PRINT the computed wave schedule (the topological `needs`-DAG frontiers + the blast-radius parallelism within each) and EXIT 0 WITHOUT EXECUTING — dispatches nothing, so over-constraint is visible before a run. Under --json emits the schedule as JSON. Alias of --dry-run.",
     dry_run:
       "`apply` only: alias of --explain — print the computed schedule and exit 0 without dispatching anything.",
+    check:
+      "`apply` only (issue #805): observe-only mode — evaluate the predicate vector EXACTLY ONCE via the real provider path and exit; never dispatches a harness, integrates, or deploys. All-pass exits 0 (`status: \"pass\"`, NOT the vacuous_goal error a normal run would give); any failing predicate exits 1 (`status: \"fail\"`) carrying predicates[] with captured evidence for the failures. For merge gates (ADR-0026) and release qualification.",
     provider:
       "`context` only: the context-store provider to proxy to (currently `gist`, the default). The provider stays independently usable; this is a thin wrapper so users learn one CLI (ADR-0045).",
     budget:
@@ -238,6 +241,7 @@ defmodule Kazi.CLI do
         :parallel,
         :explain,
         :dry_run,
+        :check,
         :context_store,
         :context_budget
       ]
@@ -352,6 +356,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --json [--stream]
       kazi apply <goal-file> --workspace <path> --parallel [N] [--json] # parallel scheduler
       kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
+      kazi apply <goal-file> --workspace <path> --check [--json]        # observe the vector once, dispatch nothing
       kazi status <ref> [--json]
       kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
@@ -476,6 +481,18 @@ defmodule Kazi.CLI do
                              planning: no reconciler/harness/lease is touched. Under
                              --json the schedule is emitted as a JSON object;
                              NON-INTERACTIVE. `--dry-run` is an alias of `--explain`.
+      --check                `apply` only (issue #805): observe-only mode. Evaluates
+                             the goal's FULL predicate vector EXACTLY ONCE via the
+                             real provider path and exits — never dispatches a
+                             harness, integrates, or deploys. All-pass exits 0 with
+                             `status: "pass"` (the vacuous_goal guard does NOT apply
+                             here — a check confirming an already-green vector is the
+                             point, not a misconfigured goal); any failing predicate
+                             exits 1 with `status: "fail"`, carrying `predicates[]`
+                             plus captured evidence for the failures. For merge gates
+                             (ADR-0026 L1) and release qualification — a cheap,
+                             objective "does the vector hold" read. Under --json emits
+                             a single JSON object; NON-INTERACTIVE.
       --obsidian <dir>       `export` only: write an Obsidian vault to <dir> — one
                              note per group and per predicate, [[wikilinked]]
                              parent↔child, tagged with the verdict (intended/
@@ -982,6 +999,8 @@ defmodule Kazi.CLI do
           # T35.5 (ADR-0045 §8): --context-store/--context-budget must survive the
           # parse layer or maybe_put_context_store/2 never sees them — the store
           # silently stayed off (and an unknown name never warned, deep review L11).
+          # (issue #805): --check is observe-only, checked in run_goal/4 before any
+          # execution branch (see explain above).
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
@@ -996,7 +1015,8 @@ defmodule Kazi.CLI do
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
           parallelism: flags[:parallelism],
-          explain: flags[:explain] || flags[:dry_run] || false
+          explain: flags[:explain] || flags[:dry_run] || false,
+          check: flags[:check] || false
         }
 
       extra ->
@@ -1246,6 +1266,11 @@ defmodule Kazi.CLI do
       # invoked). It runs before any execution branch regardless of --parallel.
       opts[:explain] == true ->
         explain_schedule(goal, opts, runtime_opts)
+
+      # (issue #805): --check is observe-only, same as --explain — checked before
+      # any execution branch so it never dispatches a harness/reconciler either.
+      opts[:check] == true ->
+        check_goal(goal, opts, runtime_opts)
 
       opts[:parallel] == true ->
         run_goal_parallel(goal, opts, persist?, runtime_opts)
@@ -4026,5 +4051,83 @@ defmodule Kazi.CLI do
           }
         end)
     }
+  end
+
+  # ===========================================================================
+  # --check: observe-only mode (issue #805, ADR-0026 L1)
+  # ===========================================================================
+  #
+  # Evaluates the goal's full predicate vector EXACTLY ONCE through
+  # `Kazi.Runtime.check/2` (the same real provider dispatch `run/2` uses at t0)
+  # and reports a terminal PASS/FAIL — no harness dispatch, no integrate/deploy,
+  # ever. Unlike a normal `apply`, an all-pass vector is the intended success case
+  # (`status: "pass"`, exit 0), not the vacuous_goal rejection: confirming an
+  # already-green vector is the whole point of a check.
+
+  defp check_goal(%Goal{} = goal, opts, runtime_opts) do
+    workspace = opts[:workspace] || goal.scope.workspace
+    json? = opts[:json] == true
+
+    check_opts = Keyword.take(runtime_opts, [:providers, :enforcement]) ++ [workspace: workspace]
+
+    case Runtime.check(goal, check_opts) do
+      {:ok, %{status: status, vector: vector}} ->
+        report_check(goal, status, vector, json?)
+        if status == :pass, do: 0, else: 1
+
+      {:error, reason} ->
+        report_run_error(goal, reason, json?)
+        1
+    end
+  end
+
+  defp report_check(%Goal{} = goal, status, vector, json?) do
+    emit(json?, check_result_json(goal, status, vector), fn ->
+      check_human(goal, status, vector)
+    end)
+  end
+
+  defp check_human(%Goal{id: id}, status, vector) do
+    IO.puts("CHECK (observe-only, nothing dispatched)  goal=#{id}")
+    IO.puts("status: #{status}")
+
+    Enum.each(check_predicates_json(vector), fn %{id: id, verdict: verdict} ->
+      IO.puts("  #{id}: #{verdict}")
+    end)
+  end
+
+  # The `--check --json` object: a single terminal verdict (never a loop
+  # outcome — `run_status/2` doesn't apply here) with `dispatched: false` making
+  # the no-execution contract explicit and machine-checkable, mirroring the
+  # `--explain` JSON shape.
+  defp check_result_json(%Goal{id: id}, status, vector) do
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(id),
+      mode: "check",
+      status: to_string(status),
+      dispatched: false,
+      predicates: check_predicates_json(vector),
+      next_action: if(status == :pass, do: "done", else: "investigate")
+    }
+  end
+
+  # The check-mode predicate list: `{id, verdict}` (same shape as
+  # `predicate_vector_json/1`) PLUS the raw captured `evidence` for a failing
+  # predicate — there is no later iteration to carry it, so a check's failure
+  # report must be self-contained (issue #805). Passing predicates omit
+  # `evidence` (nothing to investigate).
+  defp check_predicates_json(%Kazi.PredicateVector{results: results}) do
+    results
+    |> Enum.sort_by(fn {id, _} -> to_string(id) end)
+    |> Enum.map(fn {id, result} ->
+      base = %{id: to_string(id), verdict: to_string(result.status)}
+
+      if result.status == :fail do
+        Map.put(base, :evidence, result.evidence)
+      else
+        base
+      end
+    end)
   end
 end
