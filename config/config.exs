@@ -6,6 +6,15 @@ import Config
 # SQLite is a disposable projection).
 config :kazi, ecto_repos: [Kazi.Repo]
 
+# kazi is a CLI: stdout is the program's output surface (prose, or a single JSON
+# object under --json), stderr is diagnostics. The default `:logger` handler
+# writes to `:standard_io` (stdout) unless told otherwise, so an Ecto migrator/OTP
+# log line (e.g. "Migrations already up") would otherwise land on stdout ahead of
+# the JSON object and break a `jq`-based parse (issue #804). Route it to stderr
+# everywhere, not just under --json, so the byte-clean-stdout contract holds
+# unconditionally.
+config :logger, :default_handler, config: [type: :standard_error]
+
 # JSON library Ecto uses to (de)serialize :map columns (the predicate vector and
 # action params are stored as JSON text in SQLite).
 config :ecto_sqlite3, json_library: Jason
