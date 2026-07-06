@@ -91,6 +91,14 @@ The payload is a `{"name", "predicates": [...], "rationale"}` object (a bare JSO
 array of predicate entries is also accepted and wrapped for you). A positional
 idea is OPTIONAL in caller-drafts mode -- the predicates carry the intent.
 
+The goal id and `proposal_ref` are derived from the payload's own `"id"` (used
+verbatim) or `"name"` (slugged) -- never from a shared placeholder -- so two
+differently identified payloads coexist as distinct proposals instead of
+colliding onto one upsert slot. Re-proposing onto a `proposal_ref` that already
+holds an **approved** proposal is refused (loudly, as a JSON error) unless you
+pass `--replace`; this protects an approved goal's audit trail from being
+silently reset by an unrelated draft.
+
 **kazi-drafts** -- for a human at the CLI or a thin non-model script that hands
 kazi only a prose idea; kazi spawns a harness to draft the predicates:
 
