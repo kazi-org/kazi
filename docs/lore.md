@@ -511,3 +511,31 @@ folds a reconciler's terminal status. Regression: `test/kazi/scheduler/killed_ru
 recovery_test.exs` (both `reconcile_partition/2` directly and an end-to-end
 `needs`-DAG recovery through `Kazi.Scheduler.run_goals/2`, with NO injected
 reconciler -- the real production path). (2026-07-05.)
+
+### L-0026 #loop #budget #terminal-vector #landmine -- an `:over_budget` stop reported the PRE-dispatch vector, hiding work the budget-blowing dispatch actually finished
+Issue #790: `Kazi.Loop`'s hard budget guard (T1.4) checks the ceiling ONCE at the
+START of every tick, BEFORE observing again (`handle_event(:internal, :observe,
+...)` calls `budget_check/1` first and only falls through to `observe_tick/1` on
+`:ok`) -- by design, so a dispatch that would blow the budget is never even
+started. But this meant a dispatch that FINISHED all the remaining work while
+itself consuming the last of the budget (a completed fix, reported over-budget
+purely on cost/iterations/wall-clock) terminated on the STALE vector from the
+observation before that dispatch ran -- `result.vector` reported the predicates
+as still failing even though the workspace was, at that moment, fully converged.
+This is more than cosmetic: `budget_spent.tokens` is cache-inclusive (ADR-0046),
+so a modest cap can be a small fraction of one dispatch's cost, and the ADR-0035
+model-ladder escalation reads the terminal vector to decide whether to re-dispatch
+a higher-rung model -- a stale all-failing vector drove it to re-spend a frontier
+model's budget re-doing work that was already done. FIX: `terminate_over_budget/2`
+now runs `reeval_terminal_vector/1` (a one-shot re-observation mirroring the
+relevant slice of `observe_tick/1` -- fresh vector, prior-score threading,
+quarantine -- WITHOUT bumping `iterations`/history/regressions, since this is a
+terminal re-check, not another tick) before building the result. INVARIANT: any
+terminal outcome's `result.vector` must reflect the workspace as the loop actually
+leaves it, not as of the last full tick -- `:stuck` already satisfied this (its
+stuck-check runs AFTER that tick's fresh observation), only `:over_budget`'s early
+short-circuit needed the extra re-check. Regression:
+`test/kazi/loop/terminal_vector_fresh_test.exs` (a provider that flips from
+`:fail` to `:pass` the moment the harness dispatches, budget capped at
+`max_iterations: 1`, asserting the terminal `result.vector` reports `:pass`, not
+the stale `:fail`). (2026-07-06.)
