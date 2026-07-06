@@ -1,0 +1,50 @@
+defmodule KaziWeb.Starmap.GoalSource do
+  @moduledoc """
+  The injectable read seam the starmap's wave-band goal-DAG layout renders
+  from (T46.5, ADR-0057, extending ADR-0056's roadmap-DAG concept).
+
+  The starmap's home view is a fleet-wide projection of the run registry; the
+  wave-band layout ADDITIONALLY overlays that fleet onto a `needs`-DAG so
+  runs render as topological BANDS (reusing `Kazi.Goal.DepGraph.frontiers/1`,
+  the same computation `kazi apply --explain` prints) instead of a flat list.
+  That DAG is:
+
+    * the **ADR-0056 roadmap DAG** — a goal whose declared groups are the
+      roadmap's goal-level `needs` edges — when a roadmap ref has been
+      configured (`kazi plan --project`'s eventual output; not yet a
+      first-class read-model object), or
+    * **absent**, in which case the starmap falls back to "single-goal
+      groups": a flat list of the currently registered runs with no declared
+      ordering, exactly the walking-skeleton behavior T46.5's first slice
+      shipped.
+
+  This module is the ADR-0011 §3 injection point (mirroring
+  `KaziWeb.DagSource`/`KaziWeb.CoordinationSource`): production defaults to
+  `KaziWeb.Starmap.GoalSource.None` (no roadmap configured — always the flat
+  fallback); a test points `Application.put_env(:kazi, :starmap_goal_source,
+  ...)` at a fixture module returning a seeded `Kazi.Goal.t()` so the
+  wave-band layout certifies with no scheduler, no CLI, and no goal-file on
+  disk.
+  """
+
+  alias Kazi.Goal
+
+  @doc "The roadmap goal to lay out in wave bands, or `nil` for the flat fallback."
+  @callback goal() :: Goal.t() | nil
+
+  @doc "The currently configured source (default: `None`, i.e. no roadmap)."
+  @spec source() :: module()
+  def source, do: Application.get_env(:kazi, :starmap_goal_source, __MODULE__.None)
+
+  @doc "The current roadmap goal from the configured source, or `nil`."
+  @spec goal() :: Goal.t() | nil
+  def goal, do: source().goal()
+
+  defmodule None do
+    @moduledoc "The default `GoalSource`: no roadmap configured, always `nil`."
+    @behaviour KaziWeb.Starmap.GoalSource
+
+    @impl true
+    def goal, do: nil
+  end
+end

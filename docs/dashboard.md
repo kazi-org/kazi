@@ -9,9 +9,8 @@ read-model, and the KaziWeb LiveView assets.
 
 See [ADR-0057](adr/0057-fleet-observability-dashboard.md) for the full
 decision and [docs/plans/E46.md](plans/E46.md) for the epic. This doc is the
-cross-cutting overview; it grows as the epic's later tasks (the wave-band
-goal-DAG layout, the attention queue, the convergence heatmap, transcript
-peek) land.
+cross-cutting overview; it grows as the epic's later tasks (the attention
+queue, the convergence heatmap, transcript peek) land.
 
 ## The run registry
 
@@ -46,10 +45,33 @@ alongside fleet-wide counts per state and each node's run tags
 ([ADR-0011](adr/0011-slice3-operator-surfaces.md) reaffirmed at fleet scope):
 it never mutates a run, a goal, or a lease.
 
-This is the walking-skeleton slice of the full starmap design (ADR-0057): the
-topological wave-band goal-DAG layout, the ranked attention queue, the
-convergence heatmap, and transcript peek are later `kazi dashboard` surface
-tasks (E46 Wave B/C) built on the same registry.
+With no roadmap configured this flat list already satisfies "single-goal
+groups" (ADR-0056): every run is its own node with no declared order between
+them.
+
+### Wave bands
+
+When a roadmap ref IS configured (`KaziWeb.Starmap.GoalSource`, the ADR-0011
+§3 injection seam — production defaults to `GoalSource.None`, i.e. no
+roadmap), the starmap ADDITIONALLY lays that goal's `needs`-DAG out as
+topological wave bands, reusing `Kazi.Goal.DepGraph.frontiers/1` — the exact
+same computation `kazi apply --explain` prints, so the bands can never
+disagree with the schedule a real `kazi apply --parallel` run would take.
+Each band node's state extends the four run-registry states above with:
+
+| State      | Meaning                                                                  |
+| ---------- | ------------------------------------------------------------------------- |
+| `claimed`  | every `needs` dep converged (the live frontier), but no run has started yet |
+| `pending`  | still waiting on an unconverged dep (a later wave), or poisoned by a stuck ancestor |
+
+Wiring a real roadmap ref into `kazi plan --project` / `kazi dashboard` is
+future work (ADR-0056 §Decision 1 is not yet a first-class read-model
+object); today `GoalSource` is a seam a caller (or a test) can point at any
+`Kazi.Goal.t()`.
+
+The ranked attention queue, the convergence heatmap, and transcript peek are
+later `kazi dashboard` surface tasks (E46 Wave B/C) built on the same
+registry.
 
 ## The transcript sink (T46.3)
 

@@ -3858,36 +3858,12 @@ defmodule Kazi.CLI do
   # logic (the planner the real scheduler drives) to layer the `needs`-DAG into
   # topological FRONTIERS, without touching the scheduler or dispatching anything.
 
-  # The topological FRONTIERS of a goal's `needs`-DAG: a PURE layering that mirrors
-  # the scheduler's planner (`Kazi.Goal.DepGraph`). Repeatedly take the READY SET
-  # (groups whose every `needs` dep is satisfied by earlier frontiers), emit it as a
-  # frontier, then mark those groups converged and recompute — exactly the order the
-  # pipelined `DepScheduler` WOULD take (we mirror it; we do not call it). A goal with
-  # NO `needs` yields ONE frontier (every group ready at once — fully parallel); a
-  # chain yields N frontiers (one group per wave). Groups that can never become ready
-  # (none, for a valid load-time DAG) are excluded — the `needs` graph is a validated
-  # DAG (T23.1), so the layering terminates and covers every group.
-  #
-  # Returns a list of frontiers, each a list of group ids in DECLARED order.
+  # The topological FRONTIERS of a goal's `needs`-DAG (T23.6): delegates to
+  # `Kazi.Goal.DepGraph.frontiers/1`, the ONE place this layering is computed —
+  # the fleet starmap's wave-band layout (T46.5) reuses the same function, so
+  # `--explain` and the starmap can never disagree on a goal's schedule.
   @spec frontiers(Goal.t()) :: [[Group.id()]]
-  defp frontiers(%Goal{groups: []}), do: []
-
-  defp frontiers(%Goal{} = goal) do
-    layer_frontiers(goal, %{}, [])
-  end
-
-  defp layer_frontiers(goal, states, acc) do
-    ready = DepGraph.ready_set(goal, states)
-
-    if ready == [] do
-      Enum.reverse(acc)
-    else
-      # Mark this frontier's groups converged so the NEXT ready-set computation sees
-      # their deps satisfied — the pure topological advance (no dispatch, no I/O).
-      states = Enum.reduce(ready, states, fn id, acc -> Map.put(acc, id, :converged) end)
-      layer_frontiers(goal, states, [ready | acc])
-    end
-  end
+  defp frontiers(%Goal{} = goal), do: DepGraph.frontiers(goal)
 
   # The per-group SCHEDULE VIEW shared by the human + JSON collective renderers
   # (T23.6): one entry per frontier, in topological order, each carrying its groups

@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_github_com_kazi_org_kazi_fixtures_deploy_target", "label": "github.com/kazi-org/kazi/fixtures/deploy-target", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "fixtures/deploy-target/go.mod", "source_location": "L1"}], "edges": []}
