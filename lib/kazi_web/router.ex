@@ -10,11 +10,13 @@ defmodule KaziWeb.Router do
   use KaziWeb, :router
 
   # Browser-facing pages: session + LiveView need the session cookie and the
-  # root layout. The pipeline is deliberately minimal (no CSRF-protected forms
-  # yet — the skeleton is read-only).
+  # root layout. CSRF protection seeds the session token the LiveView socket
+  # connect verifies (the layout's csrf-token meta + `_csrf_token` param) —
+  # required for the live client, harmless for the GET-only pages.
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    plug(:protect_from_forgery)
     plug(:put_root_layout, html: {KaziWeb.Layouts, :root})
   end
 
