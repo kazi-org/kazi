@@ -633,19 +633,19 @@ defmodule KaziWeb.StarmapLive do
 
         .starmap-counts { list-style: none; display: flex; gap: 1rem; padding: 0; margin: 1rem 0; }
         .starmap-nodes { list-style: none; display: flex; flex-wrap: wrap; gap: .75rem; padding: 0; }
-        .starmap-node { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid rgba(0,0,0,.2); min-width: 9rem; }
+        .starmap-node { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid var(--line, #16233A); min-width: 9rem; background: #0D1626; color: var(--txt, #BFD2EA); }
         .attention-queue-list { list-style: none; display: flex; flex-direction: column; gap: .5rem; padding: 0; }
-        .attention-item { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: .4rem; border: 1px solid rgba(0,0,0,.2); }
-        .attention-signal-stuck { background: #ffd9d9; }
-        .attention-signal-budget { background: #ffe0c2; }
-        .attention-signal-flake_suspicion { background: #fff3b0; }
-        .attention-signal-regression_recovered { background: #eee; }
-        .starmap-state-landed { background: #d8f5d8; }
-        .starmap-state-converging { background: #d6e4ff; }
-        .starmap-state-stale { background: #ffe0c2; }
-        .starmap-state-stuck { background: #ffd9d9; }
-        .starmap-state-claimed { background: #fff3b0; }
-        .starmap-state-pending { background: #eee; }
+        .attention-item { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: .4rem; border: 1px solid var(--line, #16233A); background: #0B1424; }
+        .attention-signal-stuck { background: rgba(255,92,108,.12); border-color: var(--red, #FF5C6C); }
+        .attention-signal-budget { background: rgba(255,180,84,.12); border-color: var(--amb, #FFB454); }
+        .attention-signal-flake_suspicion { background: rgba(255,180,84,.08); border-color: rgba(255,180,84,.5); }
+        .attention-signal-regression_recovered { background: #101A2A; }
+        .starmap-state-landed { background: #0B1F18; border-color: var(--grn, #2EE6A8); box-shadow: 0 0 7px rgba(46,230,168,.35); }
+        .starmap-state-converging { background: #0A1526; border-color: var(--cyn, #56CCF2); box-shadow: 0 0 7px rgba(86,204,242,.3); }
+        .starmap-state-stale { background: #141118; border-color: var(--amb, #FFB454); border-style: dotted; }
+        .starmap-state-stuck { background: #160D14; border-color: var(--red, #FF5C6C); box-shadow: 0 0 8px rgba(255,92,108,.35); }
+        .starmap-state-claimed { background: #0B1424; border-color: var(--cyn, #56CCF2); border-style: dashed; }
+        .starmap-state-pending { background: #0D1626; border-color: #223350; }
         .starmap-band { margin-bottom: 1rem; }
       </style>
     </main>
