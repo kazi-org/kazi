@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.82.0](https://github.com/kazi-org/kazi/compare/v1.81.0...v1.82.0) (2026-07-06)
+
+
+### Features
+
+* **web:** restyle the dashboard to the approved starmap design ([726cfd7](https://github.com/kazi-org/kazi/commit/726cfd7334637b8c5f61071c962602f1ebc7f4f4))
+
 ## [1.81.0](https://github.com/kazi-org/kazi/compare/v1.80.0...v1.81.0) (2026-07-06)
 
 
