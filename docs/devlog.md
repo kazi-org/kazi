@@ -4,6 +4,43 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-07-05 — issue #801 dogfood: kazi drove its own /dag fix end-to-end; two operator findings
+
+**Type:** dogfood
+**Tags:** dashboard, dag, standalone-boot, kazi-drives-kazi, vacuous-goal, integrate, issue-801
+
+**Task.** `kazi dashboard` (standalone boot, T46.4) 500'd on `/dag` with no
+active `apply --parallel` run — `KaziWeb.DagSource.Cache` was only supervised
+by the full app tree, and `DagLive` did a raw `GenServer.call` to it (issue
+#801). Fixed the kazi way: a read-only regression checker
+(`test/kazi_web/live/dag_live_standalone_test.exs`, committed at t0, held via
+`[enforcement] read_only_paths`) encoding graceful degradation + standalone
+supervision-tree parity, three acceptance predicates (checker, full suite,
+format), then `kazi apply --harness claude --model claude-sonnet-5` to
+converge it. Shipped v1.73.4 (PR #802); all six dashboard routes verified 200
+live on the released binary, `/dag` rendering the "No active run" empty state.
+
+**Finding 1 — the inner agent lands work unprompted.** The sonnet-5 inner
+agent committed the fix (clean conventional-commit message) AND opened PR #802
+on its own initiative — no `landed` predicate in the goal. The known
+"converges before :integrate, never commits" gap (2026-07-03) is therefore
+stale as a *prediction* on current binaries with a capable model, though the
+loop still doesn't *require* landing: keep adding a `landed` predicate when
+landing must be guaranteed.
+
+**Finding 2 — `vacuous_goal` can mean "already done", not "misauthored".**
+The first run was killed externally (SIGTERM) mid-iteration after the agent
+had already committed the fix; the resumed run terminated
+`{"status":"error","reason":"vacuous_goal"}` because every predicate passed
+at its t0. On a killed-then-resumed goal, check `git log` before re-authoring:
+the R3 vacuous-goal guard firing at resume is convergence evidence in
+disguise.
+
+**Operational footnote.** A stale `kazi dashboard` process holding the port
+makes a fresh boot crash `:eaddrinuse` — and a live-verify curl then silently
+grades the OLD binary still listening there. Free the port (`lsof
+-tnP -iTCP:<port> -sTCP:LISTEN`) before trusting route probes.
+
 ## 2026-06-28 — T15.9 nested-loop dogfood: WIRING PROVEN over `--json`; local model SUCCEEDED but its edit escaped the `--workspace` (opencode `--dir` not threaded)
 
 **Type:** dogfood
