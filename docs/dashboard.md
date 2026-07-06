@@ -69,8 +69,8 @@ Wiring a real roadmap ref into the plan/dashboard surface is future work
 read-model object); today `GoalSource` is a seam a caller (or a test) can
 point at any `Kazi.Goal.t()`.
 
-The ranked attention queue and transcript peek are later `kazi dashboard`
-surface tasks (E46 Wave B/C) built on the same registry.
+The ranked attention queue is a later `kazi dashboard` surface task (E46 Wave
+C) built on the same registry.
 
 ## The events sink (T46.2)
 
@@ -119,8 +119,10 @@ the harness stream never lands in the transcript file. The sink also caps its
 own size (10 MiB by default, overridable per-run); once a run's transcript
 would exceed the cap, further events are dropped and a single `{"type":
 "truncated"}` marker is appended so a reader can tell an intentionally
-truncated transcript apart from a torn one. This tee is the file "transcript
-peek" (E46 Wave B/C) will read from.
+truncated transcript apart from a torn one. `Kazi.Sink.Transcript.read/1`
+tails a sink file back into decoded maps (dropping a torn final line), the
+same contract as `Kazi.Sink.Events.read/1` -- the reader the transcript peek
+view below polls.
 
 ## The drill-in convergence heatmap (`/goals/:id/drillin`, T46.7)
 
@@ -144,6 +146,24 @@ ADR-0046 context/tool counters (`tool_calls`, `file_reads`,
 panel follows the current (latest) iteration live, matching the matrix's
 current-column marker. See `KaziWeb.DrillinHeatmapLive`.
 
+## The transcript peek (`/runs/:run_id/transcript`, T46.8)
+
+Per-run: tails the run's `transcript.jsonl` (`Kazi.Sink.Transcript`). There is
+exactly **one code path** for a live run and a finished/dead one -- `mount/3`
+resolves the run (`Kazi.ReadModel.RunRegistry.get/1`) and reads its sink fully,
+so opening a terminal run's transcript renders the whole thing immediately
+with no watcher required; a connected mount additionally polls on a short
+interval and reloads the sink when a growing file has new lines to tail in
+(for a finished run the file never grows, so the same poll is simply a no-op).
+
+Tool-shaped events (a `"type"` starting with `"tool"`, e.g. `tool_use` /
+`tool_result`) collapse to a one-line pill (the tool name); clicking a pill
+expands it to its full JSON payload. A `{"type": "truncated"}` marker (the
+transcript sink's size-cap event) renders as an explicit notice rather than
+folding or silently vanishing. The **follow** toggle pauses/resumes picking up
+newly tailed lines without discarding what's already rendered. See
+`KaziWeb.TranscriptPeekLive`.
+
 ## `kazi dashboard`
 
 ```
@@ -159,8 +179,8 @@ test entry points), the verb reports the endpoint's existing bind instead of
 rebinding it.
 
 A standalone boot serves **every** dashboard view (`/`, `/starmap`, `/goals`,
-`/leases`, `/dag`, `/goals/:id/history`, `/goals/:id/drillin`), with web-tree
-parity to the full
+`/leases`, `/dag`, `/goals/:id/history`, `/goals/:id/drillin`,
+`/runs/:run_id/transcript`), with web-tree parity to the full
 app's supervision tree: views whose live source has nothing to show (no
 active run registered in this node) render their honest empty state, never a
 500 (issue #801).
