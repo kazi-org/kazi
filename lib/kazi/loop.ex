@@ -2523,8 +2523,33 @@ defmodule Kazi.Loop do
   # state. No further agent/integrate/deploy is dispatched (concept §5).
   defp terminate_over_budget(reason, %Data{} = data) do
     data = %Data{data | budget_reason: reason}
+    data = reeval_terminal_vector(data)
     notify_budget_stop(data)
     terminate_with(:over_budget, data)
+  end
+
+  # #790: the budget guard fires at the START of a tick, before observing
+  # again — so a dispatch that finishes the remaining work but blows the
+  # budget doing it would otherwise leave `data.vector` at its PRE-dispatch
+  # reading (stale: reports failure even though the workspace is now green,
+  # misleading escalation ladders into re-dispatching frontier models onto
+  # already-green work). Re-run the predicates ONE more time here so the
+  # terminal vector reflects the workspace as the loop actually leaves it.
+  # Mirrors the relevant slice of `observe_tick/1` (fresh vector + prior-score
+  # threading + quarantine) without its iteration/history/regression side
+  # effects, since this is a terminal re-check, not another tick.
+  @spec reeval_terminal_vector(Data.t()) :: Data.t()
+  defp reeval_terminal_vector(%Data{} = data) do
+    {vector, quarantine, clean_tree_active?} = observe_with_isolation(data)
+    vector = thread_prior_scores(vector, data.vector)
+
+    %Data{
+      data
+      | prev_vector: data.vector,
+        vector: vector,
+        quarantine: quarantine,
+        clean_tree_active?: clean_tree_active?
+    }
   end
 
   # Add a harness run's token estimate to the running total. The estimate is read
