@@ -50,7 +50,7 @@ defmodule KaziWeb.StarmapLiveTest do
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    assert html =~ ~s(id="starmap-node-#{run.run_id}")
+    assert html =~ ~s(id="canvas-node-#{run.run_id}")
     assert html =~ ~s(data-state="landed")
   end
 
@@ -60,7 +60,7 @@ defmodule KaziWeb.StarmapLiveTest do
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    assert html =~ ~s(id="starmap-node-#{run.run_id}")
+    assert html =~ ~s(id="canvas-node-#{run.run_id}")
     assert html =~ ~s(data-state="stuck")
   end
 
@@ -69,7 +69,7 @@ defmodule KaziWeb.StarmapLiveTest do
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    assert html =~ ~s(id="starmap-node-#{run.run_id}")
+    assert html =~ ~s(id="canvas-node-#{run.run_id}")
     assert html =~ ~s(data-state="converging")
   end
 
@@ -79,7 +79,7 @@ defmodule KaziWeb.StarmapLiveTest do
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    assert html =~ ~s(id="starmap-node-#{run.run_id}")
+    assert html =~ ~s(id="canvas-node-#{run.run_id}")
     assert html =~ ~s(data-state="stale")
   end
 
@@ -93,8 +93,8 @@ defmodule KaziWeb.StarmapLiveTest do
 
     assert html =~ "codex"
     assert html =~ "gpt-5"
-    assert html =~ ~s(data-state="converging" data-count="2")
-    assert html =~ ~s(data-state="landed" data-count="1")
+    assert html =~ ~s(<span class="fleet-tile-value nd-conv">2</span>)
+    assert html =~ ~s(<span class="fleet-tile-value nd-landed">1</span>)
   end
 
   test "a status change is reflected on the next poll tick without a restart", %{conn: conn} do
@@ -108,7 +108,7 @@ defmodule KaziWeb.StarmapLiveTest do
     send(view.pid, :tick)
     html = render(view)
 
-    assert html =~ ~s(id="starmap-node-#{run.run_id}")
+    assert html =~ ~s(id="canvas-node-#{run.run_id}")
     assert html =~ ~s(data-state="landed")
   end
 end
