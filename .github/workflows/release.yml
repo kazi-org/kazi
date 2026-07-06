@@ -48,21 +48,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ONE target per job on its NATIVE-arch runner. Two reasons:
-        #  * Burrito's BURRITO_TARGET accepts a SINGLE target name, not a list.
-        #  * the bundled exqlite NIF is a native artifact compiled for the BUILD
-        #    host's arch -- cross-compiling it would ship the wrong-arch NIF, so each
-        #    target must build on a runner of that arch.
-        # macos-15 (not 26) for the Zig link (R-E6-1); macos-13 is the Intel runner.
+        # ONE target per job. Burrito's BURRITO_TARGET accepts a SINGLE target name,
+        # not a list. Where the target arch matches the runner's native arch, the
+        # exqlite NIF builds natively; where it doesn't (macos_x86_64 on macos-15,
+        # which is arm64), Burrito's own Patch phase cross-compiles the NIF via
+        # `zig cc -target <triplet>` (lib/steps/patch/recompile_nifs.ex) -- verified
+        # working locally (reverse direction: macos_aarch64 built from an x86_64
+        # host produced a genuine arm64 Mach-O). No native Intel-macOS runner is
+        # needed: GitHub only offers those as paid "larger runners".
+        # macos-15 (not 26) for the Zig link (R-E6-1); macos-13 is the deprecated Intel runner.
         include:
           - runner: macos-15
             target: macos_aarch64
+          - runner: macos-15
+            target: macos_x86_64
           - runner: ubuntu-24.04
             target: linux_x86_64
           # linux_aarch64 (ARM Linux) builds in the separate container job below
-          # (setup-beam has no arm64-Linux OTP). DEFERRED: macos_x86_64 (Intel macOS)
-          # -- GitHub's macos-13 Intel runners are deprecated/scarce and the job
-          # queues indefinitely; Intel Macs are a shrinking minority for a dev tool.
+          # (setup-beam has no arm64-Linux OTP).
     env:
       MIX_ENV: prod
       # A single Burrito target for this native-arch job.
@@ -130,6 +133,11 @@ jobs:
 
       - name: Build Burrito binaries
         run: mix release --overwrite
+
+      - name: Install Rosetta 2 (macos_x86_64 is cross-built on this arm64 runner
+          and needs Rosetta to execute for the smoke tests below)
+        if: matrix.target == 'macos_x86_64'
+        run: softwareupdate --install-rosetta --agree-to-license
 
       - name: Smoke-test the binary (it must execute on its native arch)
         shell: bash
