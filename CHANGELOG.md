@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.76.0](https://github.com/kazi-org/kazi/compare/v1.75.0...v1.76.0) (2026-07-06)
+
+
+### Features
+
+* drill-in convergence heatmap + iteration scrubber LiveView (T46.7) ([2ca81e5](https://github.com/kazi-org/kazi/commit/2ca81e53fd2614717785ec847b6f53ed051a2999))
+
 ## [1.75.0](https://github.com/kazi-org/kazi/compare/v1.74.1...v1.75.0) (2026-07-06)
 
 
