@@ -273,6 +273,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E44 -- Landing is part of convergence: `[integration]` + implicit `landed` predicate + controller-owned process contract (P1, ADR-0055) -> plans/E44.md
 ### E45 -- One system: roadmap-scope planning, plan-as-generated-view, escalation-as-data, skill retirement (P1, ADR-0056) -> plans/E45.md
 ### E46 -- Fleet observability: run registry, per-run sinks, `kazi dashboard` starmap (P1, ADR-0057) -> plans/E46.md
+
+### E47 -- Fleet observability follow-up: event river + roadmap-ref starmap (P2, ADR-0057/ADR-0056) -> plans/E47.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
