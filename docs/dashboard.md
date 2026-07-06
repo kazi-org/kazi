@@ -61,6 +61,12 @@ heatmap (predicates × iterations), and a transcript tail, plus a
 "FULL ANALYST VIEW →" link to `/goals/:id/drillin`. It reads the same
 projections the full-page drill-in and transcript-peek views read.
 
+Click interactions (and live DOM patching generally) ride the LiveView
+socket: the endpoint serves the pre-built `phoenix` / `phoenix_live_view`
+client bundles straight from the hex packages (no node, no bundler) and the
+root layout connects the socket. With JavaScript unavailable the pages
+still render as read-only snapshots, exactly the pre-panel behavior.
+
 ### Wave bands
 
 When a roadmap ref IS configured (`KaziWeb.Starmap.GoalSource`, the ADR-0011
