@@ -57,6 +57,7 @@ defmodule Kazi.ReadModel.RunRegistry do
            :transcript_sink_path,
            :events_sink_path,
            :max_iterations,
+           :session_name,
            :updated_at
          ]},
       conflict_target: :run_id,
@@ -78,6 +79,31 @@ defmodule Kazi.ReadModel.RunRegistry do
       run ->
         run
         |> Run.changeset(%{"heartbeat_at" => DateTime.utc_now()})
+        |> Repo.update()
+    end
+  end
+
+  @doc """
+  Records the inner harness's own session id (e.g. the claude envelope's
+  `session_id`) on the run row, so the dashboard can offer an interactive
+  resume (`claude -r <id>`). Idempotent: rewriting the same id is a no-op
+  read; a changed id (the harness rotated sessions mid-run) records the
+  newest one — the resumable one.
+  """
+  @spec record_harness_session(String.t(), String.t()) ::
+          {:ok, Run.t()} | {:error, :not_found}
+  def record_harness_session(run_id, session_id)
+      when is_binary(run_id) and is_binary(session_id) do
+    case Repo.get_by(Run, run_id: run_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Run{harness_session_id: ^session_id} = run ->
+        {:ok, run}
+
+      run ->
+        run
+        |> Run.changeset(%{"harness_session_id" => session_id})
         |> Repo.update()
     end
   end
