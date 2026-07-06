@@ -31,7 +31,10 @@ Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
 - Left rail: 280px fixed, bg --rail, right hairline --line; sections in order:
   wordmark ("KAZI STARMAP", STARMAP in --cyn) + LIVE badge (green pulsing dot,
   box-shadow glow); FLEET stat tiles (big 20px numbers: cyan RUNNING, green
-  LANDED, red STUCK); NEEDS YOU (attention queue: glowing 7px dot red/amber +
+  LANDED, red STUCK; clicking a tile filters the canvas to that state --
+  everything else dims -- and clicking the active tile again clears it;
+  mutually exclusive with the SESSIONS filter); NEEDS YOU (attention queue:
+  glowing 7px dot red/amber +
   one-line summary, bold goal name); SESSIONS (S1..Sn chips, cyan border —
   red variant for a stuck session's chip; clicking a row filters the canvas
   to that session's goal — everything else dims to ~.12 opacity — and
@@ -39,7 +42,11 @@ Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
   box; LEGEND pinned to bottom (six state dots, see zoo).
 - Canvas: flex-1, starfield via layered 1px radial-gradients; a slow conic
   "radar sweep" overlay (18s rotate, cyan 5% alpha) behind the SVG.
-- SVG DAG (viewBox ~1160x742): alternating vertical wave bands (band-a fill
+- SVG DAG (viewBox 1160 wide x 742 base height; a band taller than the base
+  GROWS the viewBox height at ~96px per node and the canvas scrolls
+  vertically inside its shell -- nodes never wrap into extra sub-columns, so
+  every band stays ONE column and `needs` edges keep straight sight-lines):
+  alternating vertical wave bands (band-a fill
   rgba(86,204,242,0.028), band-b transparent), dashed band separators
   (stroke rgba(22,35,58,0.8), dasharray 2 6), wave labels top-center per band
   (10px, letter-spacing .32em, fill #3D4F6E): "WAVE N · LANDED/ACTIVE/
@@ -72,16 +79,19 @@ The main content area is ONE full-height SVG constellation, not a list:
   goal-file, bands = its --explain frontiers and nodes = its groups (runs
   attach to their group's node); without one, bands derive from run state
   (landed | active | stuck/stale | horizon). Within a band, nodes distribute
-  vertically with even spacing.
+  vertically with even spacing in a SINGLE column -- a dense band stretches
+  the canvas downward (scroll) rather than wrapping.
 - **`needs` edges** draw as 1.5px lines (#152840; rgba(86,204,242,0.5) when
   either endpoint is active) between group nodes.
 - **The event river is a 38px bottom bar ON the starmap page** (rgba(10,17,32,.92),
   top hairline): "EVENT RIVER" label + a masked, seamlessly-looping ticker of
   the newest events ("[HH:MM:SS] goal · event"), duplicated span, 52s scroll
   (reduced-motion-gated). The /events page remains the full feed.
-- Overflow rule: the canvas shows the most recent ~24 runs as nodes (newest
-  heartbeats first); a single dim `.wlabel`-style count ("+N older") links to
-  the full registry list on /goals. Fleet counts stay in the rail tiles.
+- Overflow rule: the canvas shows the most recent ~48 runs as nodes (newest
+  heartbeats first; the scroll layout carries the density, so the cap is a
+  DOM-size bound, not a layout one); a single dim `.wlabel`-style count
+  ("+N older") links to the full registry list on /goals. Fleet counts stay
+  in the rail tiles.
 
 ## Node state zoo (SVG circles r=13; pending r=10)
 
