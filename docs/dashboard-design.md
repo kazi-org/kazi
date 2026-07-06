@@ -47,6 +47,38 @@ Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
   "EVENT RIVER" label + masked marquee ticker (52s linear scroll, duplicated
   span for seamless loop), entries `[HH:MM:SS] goal · event`.
 
+
+## Canvas composition (NORMATIVE — the part that makes it a starmap)
+
+The main content area is ONE full-height SVG constellation, not a list:
+
+- **Every registered run renders as an SVG `<circle>` node ON the canvas**
+  (r=13; pending r=10), carrying its `nd-*` state class, with its goal name
+  as a `<text>` label beneath (12px bold #D7E4F4) and a state sublabel under
+  that (8px, letter-spacing .22em, state-colored): "LANDED · vX.Y.Z",
+  "ITER n · k/m GREEN", "STUCK · ITER n", "STALE · NO HEARTBEAT nm".
+  There is NO chip/pill list of runs anywhere on the page — the circles ARE
+  the fleet view. Active (converging/stuck) nodes get the pulse `.ring`
+  circle behind them and a session tag (`.stag`, S-number) at the upper
+  right.
+- **Nodes are laid out in vertical wave-band columns** spanning the full
+  canvas height: alternating band fills (band-a rgba(86,204,242,0.028) /
+  band-b transparent), dashed separators, and a top-center `.wlabel` per
+  band ("WAVE N · LANDED / ACTIVE / FRONTIER / HORIZON"). With a roadmap
+  goal-file, bands = its --explain frontiers and nodes = its groups (runs
+  attach to their group's node); without one, bands derive from run state
+  (landed | active | stuck/stale | horizon). Within a band, nodes distribute
+  vertically with even spacing.
+- **`needs` edges** draw as 1.5px lines (#152840; rgba(86,204,242,0.5) when
+  either endpoint is active) between group nodes.
+- **The event river is a 38px bottom bar ON the starmap page** (rgba(10,17,32,.92),
+  top hairline): "EVENT RIVER" label + a masked, seamlessly-looping ticker of
+  the newest events ("[HH:MM:SS] goal · event"), duplicated span, 52s scroll
+  (reduced-motion-gated). The /events page remains the full feed.
+- Overflow rule: the canvas shows the most recent ~24 runs as nodes (newest
+  heartbeats first); a single dim `.wlabel`-style count ("+N older") links to
+  the full registry list on /goals. Fleet counts stay in the rail tiles.
+
 ## Node state zoo (SVG circles r=13; pending r=10)
 
 | state      | class       | fill      | stroke                    | extra |
