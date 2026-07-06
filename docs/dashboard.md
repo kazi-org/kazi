@@ -56,6 +56,13 @@ constellation to that session's goal (every other node and unrelated edge
 dims); clicking the same row again — or the session ending — clears the
 filter.
 
+The FLEET tiles (RUNNING / LANDED / STUCK) filter the canvas the same way
+the SESSIONS rows do: click a tile to dim everything but that state, click
+it again to clear; the two filters are mutually exclusive. Dense fleets no
+longer wrap nodes into sub-columns — each band is a single column and the
+canvas grows downward and scrolls, which keeps `needs` edges on straight
+sight-lines at any fleet size.
+
 Each SESSIONS row identifies its run by the **operator-assigned session
 name** when one was given (`kazi apply --session-name <label>`, or the
 `KAZI_SESSION_NAME` environment variable — useful when an orchestrating
