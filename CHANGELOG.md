@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.82.1](https://github.com/kazi-org/kazi/compare/v1.82.0...v1.82.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* **web:** retire the last pastel light-mode styles -- starmap chips, attention signals, /dag nodes go dark-zoo ([9cee018](https://github.com/kazi-org/kazi/commit/9cee0186582a9f74752d58a2dcae9ef3decc18c2))
+
 ## [1.82.0](https://github.com/kazi-org/kazi/compare/v1.81.0...v1.82.0) (2026-07-06)
 
 
