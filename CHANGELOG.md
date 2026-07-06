@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.79.0](https://github.com/kazi-org/kazi/compare/v1.78.0...v1.79.0) (2026-07-06)
+
+
+### Features
+
+* **site:** add fleet dashboard feature card (T46.9) ([827396d](https://github.com/kazi-org/kazi/commit/827396d879d73bc14de9e783c31537010099f894))
+
 ## [1.78.0](https://github.com/kazi-org/kazi/compare/v1.77.0...v1.78.0) (2026-07-06)
 
 
