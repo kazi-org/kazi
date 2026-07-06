@@ -73,6 +73,33 @@ The ranked attention queue, the convergence heatmap, and transcript peek are
 later `kazi dashboard` surface tasks (E46 Wave B/C) built on the same
 registry.
 
+## The events sink (T46.2)
+
+When a run is persisted (`persist?: true`, the default), every observed
+iteration is appended as one JSON line to a per-run `events.jsonl` under
+`<sinks_dir>/<run_id>/events.jsonl` (the same `:kazi, :sinks_dir` app config
+as the transcript sink, alongside `transcript.jsonl`), and the path is
+recorded on the run's registry row (`events_sink_path`). See
+`Kazi.Sink.Events`.
+
+Each line is built from the SAME `Kazi.ReadModel.Iteration` row the read-model
+projection just inserted for that observation — the predicate vector, the
+`converged` flag, dispatch metadata (`action_kind`/`action_params`, e.g. a
+budget-stop stamp), the regression-detector's green→red firings, the release
+ref, and the ADR-0046 context/tool counters — so an events-sink line and its
+read-model row can never disagree in shape or values. Every string value is
+redacted the same way the transcript sink is. `Kazi.Sink.Events.read/1` tails
+the file back into decoded maps and tolerates a torn final line (a process
+killed mid-write) by dropping it rather than erroring the whole read.
+
+Retention is a separate, explicit pass rather than something the write path
+does automatically: `Kazi.Sink.Events.sweep/2` deletes a run's whole sink
+directory once it is aged past `:max_age_seconds` (default 7 days,
+`default_max_age_seconds/0`) OR sized past `:max_bytes` (default 200 MiB per
+run directory, `default_max_bytes/0`) — except any run_id passed in
+`:live_run_ids` (e.g. the non-stale rows from `Kazi.ReadModel.RunRegistry.list/0`),
+which is never touched regardless of age or size.
+
 ## The transcript sink (T46.3)
 
 When a run is persisted (`persist?: true`, the default), every dispatch's raw
