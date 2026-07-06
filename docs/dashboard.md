@@ -72,8 +72,8 @@ when this process already serves the endpoint. Absent the flag, `GoalSource`
 stays `None` and the flat-list fallback is unchanged. A bad or unloadable path
 is a loud boot error (a non-zero exit, nothing started) — never a silently
 empty starmap. ADR-0056 §Decision 1 (a first-class roadmap read-model object,
-e.g. from `kazi plan --project`) is still future work; today the CLI flag is
-the on-ramp, and `GoalSource` remains a seam a test can also point at any
+written by a future plan-side surface) is still future work; today `--roadmap`
+is the on-ramp, and `GoalSource` remains a seam a test can also point at any
 `Kazi.Goal.t()` directly.
 
 ### The attention queue (T46.6)
