@@ -116,8 +116,11 @@ defmodule Kazi.Harness.ProfileRegistryTest do
 
       assert {:ok, result} = ClaudeAdapter.run("fix it", workspace, command: @json_stub)
 
-      # The structured subset the adapter merged over its base map...
-      adapter_structured = Map.drop(result, [:output, :exit, :command, :workspace])
+      # The structured subset the adapter merged over its base map... `:harness_pid`
+      # (issue #857) is dropped too: it is dispatch-identity metadata the adapter
+      # adds AFTER parsing (the OS pid of the actual subprocess), not something
+      # `Profile.parse/2` (a pure function of stdout) could ever produce.
+      adapter_structured = Map.drop(result, [:output, :exit, :command, :workspace, :harness_pid])
       # ...must equal what the profile parser extracts from the same raw stdout.
       assert Profile.parse(profile, result.output) == adapter_structured
 

@@ -80,7 +80,10 @@ defmodule Kazi.Harness.CliAdapterTest do
                ClaudeAdapter.run("fix it", workspace, command: @json_stub)
 
       # The structured subset both adapters merged over their base map must agree.
-      drop = [:output, :exit, :command, :workspace]
+      # `:harness_pid` (issue #857) is dropped too: it is real dispatch-identity
+      # metadata like `:output`/`:command`, but the OS legitimately assigns each
+      # of these two independent subprocess dispatches its OWN pid.
+      drop = [:output, :exit, :command, :workspace, :harness_pid]
       cli_structured = Map.drop(cli_result, drop)
       legacy_structured = Map.drop(legacy_result, drop)
       assert cli_structured == legacy_structured
@@ -95,6 +98,10 @@ defmodule Kazi.Harness.CliAdapterTest do
       # The base map carries the resolved command + workspace.
       assert cli_result.command == @json_stub
       assert cli_result.workspace == workspace
+
+      # Issue #857: the dispatched (stub) harness subprocess's OS pid is reported.
+      assert {pid, ""} = Integer.parse(cli_result.harness_pid)
+      assert pid > 0
     end
   end
 
@@ -108,7 +115,9 @@ defmodule Kazi.Harness.CliAdapterTest do
       assert {:ok, via_harness} =
                CliAdapter.run("fix it", workspace, harness: :claude, command: @json_stub)
 
-      assert via_profile == via_harness
+      # `:harness_pid` (issue #857) legitimately differs between these two
+      # independent subprocess dispatches — the OS assigns each its own pid.
+      assert Map.drop(via_profile, [:harness_pid]) == Map.drop(via_harness, [:harness_pid])
     end
 
     test "no harness opt defaults to :claude", %{workspace: workspace} do
