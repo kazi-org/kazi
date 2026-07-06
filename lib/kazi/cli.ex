@@ -2158,8 +2158,16 @@ defmodule Kazi.CLI do
   end
 
   # Boots a standalone endpoint (no scheduler/loop children, ADR-0057 decision 4)
-  # under its own supervisor: Phoenix.PubSub (unless already running under this
-  # process) then KaziWeb.Endpoint, configured to the requested bind/port.
+  # under its own supervisor: Phoenix.PubSub, Kazi.Coordination.LeaseTable, and
+  # KaziWeb.DagSource.Cache (unless already running under this process), then
+  # KaziWeb.Endpoint, configured to the requested bind/port.
+  #
+  # Issue #801: a fresh standalone boot has no full-app tree (`Kazi.Application`)
+  # behind it, so anything the dashboard reads from must be started here too --
+  # notably `KaziWeb.DagSource.Cache`, whose absence was the root cause of the
+  # `/dag` 500. `standalone_dashboard_children/0` is the public seam so a test
+  # can assert this tree has parity with the app web tree without booting a
+  # second HTTP listener.
   defp start_standalone_endpoint(bind, port) do
     base_config = Application.get_env(:kazi, KaziWeb.Endpoint, [])
 
@@ -2176,16 +2184,43 @@ defmodule Kazi.CLI do
       )
     )
 
-    pubsub_children =
-      if Process.whereis(Kazi.PubSub), do: [], else: [{Phoenix.PubSub, name: Kazi.PubSub}]
+    running_children =
+      standalone_dashboard_children()
+      |> Enum.reject(fn
+        {Phoenix.PubSub, _} -> Process.whereis(Kazi.PubSub) != nil
+        Kazi.Coordination.LeaseTable -> Process.whereis(Kazi.Coordination.LeaseTable) != nil
+        KaziWeb.DagSource.Cache -> Process.whereis(KaziWeb.DagSource.Cache) != nil
+        KaziWeb.Endpoint -> Process.whereis(KaziWeb.Endpoint) != nil
+      end)
 
     {:ok, _pid} =
-      Supervisor.start_link(pubsub_children ++ [KaziWeb.Endpoint],
+      Supervisor.start_link(running_children,
         strategy: :one_for_one,
         name: Kazi.Dashboard.Supervisor
       )
 
     :ok
+  end
+
+  @doc """
+  The child specs a fresh `kazi dashboard` boot supervises, in start order:
+  `Phoenix.PubSub`, then `Kazi.Coordination.LeaseTable`, then
+  `KaziWeb.DagSource.Cache`, then `KaziWeb.Endpoint` -- mirroring the app web
+  tree's composition (`Kazi.Application`) so a standalone boot has the same
+  read surface (issue #801). This is the full static list; `start_standalone_endpoint/2`
+  filters out any singleton already running in this node (e.g. under `mix
+  test`) before starting it, so it isn't started twice.
+  """
+  @spec standalone_dashboard_children() :: [
+          Supervisor.child_spec() | {module(), term()} | module()
+        ]
+  def standalone_dashboard_children do
+    [
+      {Phoenix.PubSub, name: Kazi.PubSub},
+      Kazi.Coordination.LeaseTable,
+      KaziWeb.DagSource.Cache,
+      KaziWeb.Endpoint
+    ]
   end
 
   defp parse_bind_ip(bind) do
