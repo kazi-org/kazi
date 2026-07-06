@@ -33,6 +33,13 @@ defmodule Kazi.ReadModel.Run do
     # attention queue can compute "budget consumed" fleet-wide with no goal
     # reload. `nil` for an unbounded goal or a pre-T46.6 row.
     field(:max_iterations, :integer)
+    # Session identity (ADR-0057 follow-up): the operator-assigned label
+    # (`kazi apply --session-name` / KAZI_SESSION_NAME) telling concurrent
+    # runs apart on the starmap rail, and the inner harness's own session id
+    # (the claude envelope's `session_id`) so a run can be resumed
+    # interactively (`claude -r <id>`). Both nil on pre-existing rows.
+    field(:session_name, :string)
+    field(:harness_session_id, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -45,7 +52,9 @@ defmodule Kazi.ReadModel.Run do
     :finished_at,
     :events_sink_path,
     :transcript_sink_path,
-    :max_iterations
+    :max_iterations,
+    :session_name,
+    :harness_session_id
   ]
 
   @doc """
