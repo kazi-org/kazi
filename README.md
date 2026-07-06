@@ -759,8 +759,10 @@ pins this output, so the example never drifts from what the tool produces.
 
 - **LiveView dashboard** — a goal board, live agent presence, the lease map, a
   live dependency-DAG "wave" view (`/dag`: groups by running / ready / blocked /
-  converged, the `needs` edges, per-group convergence), and per-goal convergence
-  history. Read-only inspection, decoupled from the loop
+  converged, the `needs` edges, per-group convergence), per-goal convergence
+  history, and a drill-in convergence heatmap with an iteration scrubber
+  (`/goals/:id/drillin`: predicates x iterations, regression flips visually
+  distinct). Read-only inspection, decoupled from the loop
   ([ADR-0011](docs/adr/0011-slice3-operator-surfaces.md)).
 - **`kazi dashboard` — the fleet starmap** — several concurrent `kazi apply`
   runs on one machine are a black box by default; `kazi dashboard` boots a
