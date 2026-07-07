@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.92.0](https://github.com/kazi-org/kazi/compare/v1.91.0...v1.92.0) (2026-07-07)
+
+
+### Features
+
+* **dashboard:** serve the starmap at the root route ([df42a63](https://github.com/kazi-org/kazi/commit/df42a63483f6b4999f4fe6a6f16905cca0fd1d4d))
+
 ## [1.91.0](https://github.com/kazi-org/kazi/compare/v1.90.0...v1.91.0) (2026-07-07)
 
 
