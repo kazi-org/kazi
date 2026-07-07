@@ -112,6 +112,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `context_store`  | object (optional)   | ADR-0045 context-store byte accounting, present only when the run used `--context-store`. **Additive, optional** — `{ "provider": string, "indexed_bytes": integer, "returned_bytes": integer, "saved_bytes": integer, "budget": integer }`. Absent ⇒ the store was off and the result is byte-identical to today. |
 | `stuck_bundle`   | object (optional)   | ADR-0045 §5 stuck-escalation bundle, present only on a stuck stop (`status` `stopped`, `reason` `stuck`). **Additive, optional** — `{ "failing_predicates": [{ "id": string, "failure": string }], "changed_files": [string], "snippets": [{ "source": string\|null, "text": string }], "bytes": integer }`. Bounded + redacted; the escalating orchestrator hands the higher model rung this instead of the full transcript. Absent ⇒ no stuck stop. |
 | `quarantine`     | array of strings (optional) | i795/#795: the predicate ids quarantined as flaky (T1.3, `Kazi.Loop.Flake`) at the terminal observation. **Additive, optional** — present only when non-empty. A quarantined predicate's status is `unknown`, never `pass`, so `status` can never be `converged` while this is present; it names WHICH predicate(s) keep a non-converged run from reporting a false positive over an `unknown` verdict. Absent ⇒ nothing was quarantined, byte-identical to today. |
+| `collateral`     | array of objects (optional) | issue #860: files changed this run that sit OUTSIDE the goal's write scope, net-deletion entries first. **Additive, optional** — present only when non-empty. See [`collateral` — out-of-intent diff report](#collateral--out-of-intent-diff-report-issue-860) below. Absent ⇒ nothing collateral was found, byte-identical to before this field existed. |
 | `next_action`    | string (enum)       | An orchestration **hint** — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`) or `stuck`. `null` on a clean converge. |
 | `release_ref`    | string \| null      | The release tag of the artifact deployed this run (T3.3c), or `null` if nothing was deployed. |
@@ -324,6 +325,54 @@ The E19/E36 benchmark (`mix kazi.bench --kpis <dir>`) folds a directory of
 recorded `apply --json` results into a per-arm breakdown table
 (cost/converged-predicate, stuck-rate, and the avoided-token deltas by
 harness/model/context-tier), consuming **this** object — re-deriving nothing.
+
+## `collateral` — out-of-intent diff report (issue #860)
+
+The motivating incident: an inner agent deleted an unrelated auth-config key
+while working a goal whose `[scope].paths` covered the whole platform
+directory — every predicate passed, and the regression was silent until a
+human eyeballed the commit stats. `collateral` is the machine-readable version
+of that eyeball check: files changed during the run that sit **outside** the
+goal's intended write scope, so an orchestrator (or a human) reviews a 5-line
+list instead of the full diff.
+
+A path is collateral when it changed since the run's base ref (the merge-base
+with `origin/main`, falling back to the repo's root commit) AND it falls
+outside scope:
+
+- `[scope].write_paths` is declared and non-empty → any changed path **not**
+  under one of those prefixes is collateral; or
+- `write_paths` is absent → any changed path that **no predicate's own
+  config** plausibly references (its full relative path or basename does not
+  appear in any predicate's rendered config) is collateral.
+
+```json
+"collateral": [
+  { "path": "ios/Runner/Info.plist", "additions": 0, "deletions": 10, "net_deletion": true },
+  { "path": "docs/notes.md", "additions": 4, "deletions": 0, "net_deletion": false }
+]
+```
+
+| Field          | Type              | Meaning |
+|----------------|-------------------|---------|
+| `path`         | string            | The changed path, repo-relative. |
+| `additions`    | integer \| null   | Added lines since the base ref (`git diff --numstat`); `null` for an unmeasurable (binary) file. |
+| `deletions`    | integer \| null   | Removed lines since the base ref; `null` for an unmeasurable (binary) file. |
+| `net_deletion` | boolean           | `true` when `deletions > additions` — ranked **first**, since a majority/pure deletion in a file nothing referenced is the highest-signal shape of an out-of-intent regression (the motivating incident). |
+
+Rules:
+
+- **Additive, optional.** Present only when at least one collateral path was
+  found; absent on a clean run (byte-identical to before this field existed).
+- **Ordering.** Net-deletion entries first, then by deletion count descending —
+  the highest-signal entries lead the list.
+- **Advisory, not blocking.** `collateral` is observability only; it never
+  fails a predicate or blocks convergence by itself. Pairing it with
+  `[scope].deny` (`Kazi.Scope.guard_predicates/1`, `docs/how-to/scope-write-guard.md`)
+  gives a HARD guarantee for the specific paths that must never move.
+- Computed by `Kazi.CollateralReport.collateral/2`, over the SAME diff
+  `Kazi.Providers.ScopeGuard` measures (`Kazi.ScopeDiff`) — the two features
+  share one notion of "what changed this run".
 
 ## Error object
 
