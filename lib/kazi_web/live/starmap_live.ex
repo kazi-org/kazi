@@ -716,6 +716,37 @@ defmodule KaziWeb.StarmapLive do
   defp burn_class(pct) when pct >= 70, do: "burn-warn"
   defp burn_class(_pct), do: "burn-ok"
 
+  # T48.4 (ADR-0058 decision 4, UC-064): the honest terminal cause line for a
+  # FINISHED run — read straight off the read-model row (`Run.outcome_cause_class`
+  # / `Run.outcome_cause_detail`, T48.7/T48.4), since a finished run's process is
+  # gone and the loop's in-process `t:Kazi.Loop.result/0` no longer exists. `nil`
+  # when no cause was classified (a clean converge, or a stop that is exactly
+  # what its status already says — see `Kazi.Loop.CauseClass`), which hides the
+  # line entirely.
+  defp cause_line(%Run{outcome_cause_class: nil}), do: nil
+
+  defp cause_line(%Run{outcome_cause_class: class, outcome_cause_detail: detail}) do
+    "cause: #{class}#{cause_detail_suffix(detail)}"
+  end
+
+  defp cause_line(_run), do: nil
+
+  defp cause_detail_suffix(%{"reasons" => reasons})
+       when is_map(reasons) and map_size(reasons) > 0 do
+    text =
+      reasons
+      |> Enum.sort_by(fn {id, _reason} -> id end)
+      |> Enum.map_join(", ", fn {id, reason} -> "#{id}: #{reason}" end)
+
+    " (#{text})"
+  end
+
+  defp cause_detail_suffix(%{"exhausted" => exhausted}) when is_binary(exhausted),
+    do: " (#{exhausted})"
+
+  defp cause_detail_suffix(%{"ids" => [_ | _] = ids}), do: " (#{Enum.join(ids, ", ")})"
+  defp cause_detail_suffix(_detail), do: ""
+
   # The DNA strip: the LATEST iteration's predicate vector as stably-ordered
   # squares — the same presentation DrillinHeatmapLive's strip uses.
   defp panel_squares([]), do: []
@@ -1128,6 +1159,10 @@ defmodule KaziWeb.StarmapLive do
           </div>
         </div>
 
+        <div :if={@panel.run && cause_line(@panel.run)} id="starmap-panel-cause" class="panel-cause">
+          {cause_line(@panel.run)}
+        </div>
+
         <div :if={@panel.iterations != []} id="starmap-panel-dna" class="panel-section">
           <div class="section-label">PREDICATE VECTOR</div>
           <div class="dna-squares">
@@ -1345,6 +1380,7 @@ defmodule KaziWeb.StarmapLive do
         .burn-ok { background: var(--cyn); }
         .burn-warn { background: var(--amb); }
         .burn-hot { background: var(--red); }
+        .panel-cause { font-size: 10px; color: var(--amb); border: 1px solid rgba(255,180,84,.3); border-radius: 4px; padding: .35rem .5rem; overflow-wrap: anywhere; }
         .panel-section { display: flex; flex-direction: column; gap: .45rem; }
         .dna-squares { display: flex; gap: 3px; flex-wrap: wrap; }
         .dna-square { width: 15px; height: 15px; border-radius: 2px; background: #152134; display: inline-block; }
