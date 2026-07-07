@@ -35,7 +35,8 @@ defmodule Kazi.AuthoringTest do
          "description": "GET /healthz returns 200",
          "config": {"url": "https://example.test/healthz"}},
         {"id": "smoke", "provider": "browser",
-         "description": "home page renders"}
+         "description": "home page renders",
+         "config": {"url": "https://example.test/"}}
       ]
     })
 
@@ -290,7 +291,12 @@ defmodule Kazi.AuthoringTest do
              }}
 
           true ->
-            {:ok, %{result: ~s({"name":"G","predicates":[{"id":"h","provider":"http_probe"}]})}}
+            {:ok,
+             %{
+               result:
+                 ~s({"name":"G","predicates":[{"id":"h","provider":"http_probe",) <>
+                   ~s("config":{"url":"https://example.test/healthz"}}]})
+             }}
         end
       end
     end

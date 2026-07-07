@@ -85,7 +85,7 @@ defmodule Kazi.Goal.LoaderTest do
       # criteria are "GET /widgets returns 200 (with the expected body)" — failing
       # at t0 because the endpoint does not exist yet.
       [list, body] = goal.predicates
-      assert list.config[:path] == "/widgets"
+      assert list.config[:url] =~ "/widgets"
       assert list.config[:expect_status] == 200
       assert body.config[:expect_body] == "widgets"
     end
@@ -93,7 +93,13 @@ defmodule Kazi.Goal.LoaderTest do
 
   describe "creation mode (T2.1) — schema additions" do
     test "goal mode defaults to :repair when omitted" do
-      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "http_probe"}]}
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "p", "provider" => "http_probe", "url" => "https://example.test"}
+        ]
+      }
+
       assert {:ok, %Goal{mode: :repair}} = Loader.from_map(data)
     end
 
@@ -101,7 +107,14 @@ defmodule Kazi.Goal.LoaderTest do
       data = %{
         "id" => "g",
         "mode" => "create",
-        "predicate" => [%{"id" => "p", "provider" => "http_probe", "acceptance" => true}]
+        "predicate" => [
+          %{
+            "id" => "p",
+            "provider" => "http_probe",
+            "acceptance" => true,
+            "url" => "https://example.test"
+          }
+        ]
       }
 
       assert {:ok, %Goal{mode: :create} = goal} = Loader.from_map(data)
@@ -134,7 +147,14 @@ defmodule Kazi.Goal.LoaderTest do
     test "acceptance = true marks a predicate as an acceptance criterion" do
       data = %{
         "id" => "g",
-        "predicate" => [%{"id" => "p", "provider" => "http_probe", "acceptance" => true}]
+        "predicate" => [
+          %{
+            "id" => "p",
+            "provider" => "http_probe",
+            "acceptance" => true,
+            "url" => "https://example.test"
+          }
+        ]
       }
 
       assert {:ok, goal} = Loader.from_map(data)
@@ -142,7 +162,13 @@ defmodule Kazi.Goal.LoaderTest do
     end
 
     test "acceptance defaults to false and is not collected into config" do
-      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "http_probe"}]}
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "p", "provider" => "http_probe", "url" => "https://example.test"}
+        ]
+      }
+
       assert {:ok, goal} = Loader.from_map(data)
       assert [%Predicate{acceptance?: false, config: config}] = goal.predicates
       refute Map.has_key?(config, :acceptance)
@@ -171,7 +197,13 @@ defmodule Kazi.Goal.LoaderTest do
     end
 
     test "held_out defaults to false and is not collected into config" do
-      data = %{"id" => "g", "predicate" => [%{"id" => "p", "provider" => "http_probe"}]}
+      data = %{
+        "id" => "g",
+        "predicate" => [
+          %{"id" => "p", "provider" => "http_probe", "url" => "https://example.test"}
+        ]
+      }
+
       assert {:ok, goal} = Loader.from_map(data)
       assert [%Predicate{held_out?: false, config: config}] = goal.predicates
       refute Map.has_key?(config, :held_out)
@@ -474,7 +506,7 @@ defmodule Kazi.Goal.LoaderTest do
         "predicate" => [
           %{"id" => "p1", "provider" => "test_runner"},
           %{"id" => "inv", "provider" => "test_runner", "guard" => true},
-          %{"id" => "p2", "provider" => "http_probe"}
+          %{"id" => "p2", "provider" => "http_probe", "url" => "https://example.test"}
         ]
       }
 
@@ -886,7 +918,12 @@ defmodule Kazi.Goal.LoaderTest do
         "id" => "g",
         "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
         "predicate" => [
-          %{"id" => "signup", "provider" => "browser", "group" => "identity-access"}
+          %{
+            "id" => "signup",
+            "provider" => "browser",
+            "group" => "identity-access",
+            "url" => "https://example.test"
+          }
         ]
       }
 
@@ -901,7 +938,12 @@ defmodule Kazi.Goal.LoaderTest do
         "id" => "g",
         "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
         "predicate" => [
-          %{"id" => "signup", "provider" => "browser", "group" => "Identity & Access"}
+          %{
+            "id" => "signup",
+            "provider" => "browser",
+            "group" => "Identity & Access",
+            "url" => "https://example.test"
+          }
         ]
       }
 
@@ -914,7 +956,12 @@ defmodule Kazi.Goal.LoaderTest do
         "id" => "g",
         "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
         "predicate" => [
-          %{"id" => "signup", "provider" => "browser", "group" => "identty-access"}
+          %{
+            "id" => "signup",
+            "provider" => "browser",
+            "group" => "identty-access",
+            "url" => "https://example.test"
+          }
         ]
       }
 
@@ -929,7 +976,12 @@ defmodule Kazi.Goal.LoaderTest do
       data = %{
         "id" => "g",
         "predicate" => [
-          %{"id" => "signup", "provider" => "browser", "group" => "identity-access"}
+          %{
+            "id" => "signup",
+            "provider" => "browser",
+            "group" => "identity-access",
+            "url" => "https://example.test"
+          }
         ]
       }
 
@@ -1034,7 +1086,12 @@ defmodule Kazi.Goal.LoaderTest do
         "id" => "g",
         "predicate" => [
           %{"id" => "p", "provider" => "test_runner"},
-          %{"id" => "q", "provider" => "http_probe", "guard" => true}
+          %{
+            "id" => "q",
+            "provider" => "http_probe",
+            "guard" => true,
+            "url" => "https://example.test"
+          }
         ]
       }
 
@@ -1072,7 +1129,12 @@ defmodule Kazi.Goal.LoaderTest do
         "id" => "g",
         "group" => [%{"id" => "identity-access", "name" => "Identity & Access"}],
         "predicate" => [
-          %{"id" => "signup", "provider" => "browser", "group" => "identity-access"}
+          %{
+            "id" => "signup",
+            "provider" => "browser",
+            "group" => "identity-access",
+            "url" => "https://example.test"
+          }
         ]
       }
 

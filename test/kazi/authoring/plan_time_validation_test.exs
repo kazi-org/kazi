@@ -103,5 +103,33 @@ defmodule Kazi.Authoring.PlanTimeValidationTest do
 
       assert reason =~ "unknown verdict"
     end
+
+    # T48.1 (ADR-0058): the same class of bug, one level up -- a live predicate
+    # with no `url` previously loaded fine and only errored `missing_url` at
+    # dispatch (potentially never surfacing until the loop burned its whole
+    # budget). It is now refused here, at propose, for the same reason a bare
+    # custom_script is: a payload that cannot load must never be persisted as
+    # `proposed`.
+    test "an http_probe predicate with no url is refused, not persisted" do
+      payload = %{
+        "name" => "x",
+        "predicates" => [
+          %{
+            "id" => "healthz-live",
+            "provider" => "http_probe",
+            "description" => "GET /healthz returns 200"
+          }
+        ]
+      }
+
+      assert {:error, {:invalid_goal, reason}} =
+               Authoring.propose("caller-supplied predicates",
+                 harness: ExplodingHarness,
+                 proposal: payload
+               )
+
+      assert reason =~ "missing required key \"url\""
+      assert Repo.aggregate(ProposedGoal, :count) == 0
+    end
   end
 end

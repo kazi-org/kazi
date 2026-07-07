@@ -180,7 +180,12 @@ defmodule Kazi.CLIAuthoringTest do
            }}
 
         true ->
-          {:ok, %{result: ~s({"name":"G","predicates":[{"id":"h","provider":"http_probe"}]})}}
+          {:ok,
+           %{
+             result:
+               ~s({"name":"G","predicates":[{"id":"h","provider":"http_probe",) <>
+                 ~s("config":{"url":"https://example.test/healthz"}}]})
+           }}
       end
     end
   end

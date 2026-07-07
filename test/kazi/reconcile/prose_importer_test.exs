@@ -49,7 +49,10 @@ defmodule Kazi.Reconcile.ProseImporterTest do
           {:ok,
            %{
              result:
-               ~s({"name":"Health surface","predicates":[{"id":"healthz","provider":"http_probe","description":"GET /healthz returns 200"}],"rationale":"the ADR requires a live health surface"})
+               ~s({"name":"Health surface","predicates":[{"id":"healthz","provider":"http_probe",) <>
+                 ~s("description":"GET /healthz returns 200",) <>
+                 ~s("config":{"url":"https://example.test/healthz"}}],) <>
+                 ~s("rationale":"the ADR requires a live health surface"})
            }}
 
         true ->
