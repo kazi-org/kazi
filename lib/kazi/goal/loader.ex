@@ -202,6 +202,18 @@ defmodule Kazi.Goal.Loader do
   An unknown `provider` is a validation error rather than a silently-accepted
   atom, so a typo fails loudly at load time instead of at dispatch time.
 
+  An `http_probe` or `browser` predicate REQUIRES a non-empty `url` (T48.1,
+  ADR-0058) -- a missing or blank `url` is a load error naming the predicate
+  and the key. Neither provider resolves any other key into a url at dispatch
+  time: `Kazi.Providers.HttpProbe` and `Kazi.Providers.Browser` both bail with
+  a bare `:missing_url` `:error` on every observation when `url` is absent, so
+  without this check the failure is only ever discovered at dispatch --
+  potentially not until the loop exhausts its budget (the motivating
+  production incident behind ADR-0058 burned 40 iterations against exactly
+  this config error). A relative `path` (an authoring-time-only shorthand some
+  drafts emit before the real deployment target is known, see
+  `Kazi.Pool.AccBridge`) does NOT satisfy this check.
+
   A `custom_script` predicate carries extra keys (`verdict`, `path`, `pass_when`,
   `pass_codes`/`fail_codes`, `error_codes`, `evidence_format`, `timeout_ms`) that
   are VALIDATED at load time (an unknown verdict, a `json` verdict missing
@@ -1257,7 +1269,39 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T48.1 (ADR-0058): a live predicate (http_probe, browser) with no `url`
+  # cannot ever pass or fail meaningfully -- both providers bail with a bare
+  # `:missing_url` :error on every dispatch cycle (Kazi.Providers.HttpProbe /
+  # Kazi.Providers.Browser `fetch_url/1`), which the loop previously could only
+  # discover at OBSERVATION time. A production run burned 40 iterations against
+  # exactly this config error before `max_iterations` finally tripped it as a
+  # (mislabeled) `:over_budget`. `:url` is REQUIRED for these two kinds, checked
+  # loudly here -- mirroring the `[budget]` table's load-time validation style --
+  # so a missing/blank url fails at goal-load, naming the predicate and the key,
+  # instead of silently wedging the loop. There is no runtime resolution of a
+  # relative `path` into a `url` anywhere in the providers, so a `path`-only
+  # config (an authoring-time-only shorthand some drafts emit before the real
+  # target is known, see `Kazi.Pool.AccBridge`) does NOT satisfy this check --
+  # it must be resolved to a full `url` before the goal is loadable.
+  defp validate_provider_config(:http_probe, config, id),
+    do: require_live_url(config, id, "http_probe")
+
+  defp validate_provider_config(:browser, config, id),
+    do: require_live_url(config, id, "browser")
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  defp require_live_url(config, id, provider) do
+    case Map.get(config, :url) do
+      url when is_binary(url) and url != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "#{provider} predicate #{inspect(id)} is missing required key \"url\" " <>
+           "(a live predicate needs a url to probe)"}
+    end
+  end
 
   # --- static (T32.7, ADR-0043) ----------------------------------------------
 
