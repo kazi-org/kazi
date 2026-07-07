@@ -26,6 +26,13 @@ defmodule Kazi.Bench do
   live `claude` on PATH lives in `Mix.Tasks.Kazi.Bench` and is executed by a
   maintainer (T19.5). Tests drive these functions with recorded envelopes only.
 
+  Beyond the A/B/C prefix arms this module also folds three later comparisons
+  over the same recorded-envelope/recorded-result shape: in-family MODEL
+  tiering (`tiering_arm/3`, T19.7), the context TIER × tool-SURFACE knobs
+  (`tier_surface_arm/3`, T36.5), and prompt/context PACK variants
+  (`variant_arm/3`, T48.12/ADR-0058 decision 3 — the benchmark gate a
+  candidate orientation pack must clear before it ships).
+
   ## Token model
 
   Mirrors `Kazi.Harness.Profiles.Claude.parse/1` and the devlog capture method:
@@ -36,6 +43,8 @@ defmodule Kazi.Bench do
   cache-hit story turns on) plus the convenience `total` (sum of all four token
   fields, the same total `Profiles.Claude` surfaces).
   """
+
+  alias Kazi.Economy.KPIs
 
   @typedoc """
   One dispatch's token + cost capture, parsed from a single
@@ -378,6 +387,162 @@ defmodule Kazi.Bench do
 
     Enum.join([header, divider | rows], "\n") <> "\n"
   end
+
+  @typedoc """
+  One PROMPT/CONTEXT-VARIANT arm's roll-up (T48.12, ADR-0058 decision 3 — the
+  benchmark gate). Where the T19.7/T36.5 arms above isolate the MODEL and the
+  TIER/SURFACE, a variant arm isolates a dispatch-prompt/context PACK: the
+  `"baseline"` orientation pack versus a candidate pack constructed (by a
+  human or agent) from `kazi economy --rediscovery` candidates (T48.10) and/or
+  debrief hypotheses (T48.11). ADR-0058 decision 3 makes this benchmark the
+  ONLY path a candidate pack can ship through — behavior proposes (T48.10),
+  self-report hypothesizes (T48.11), and this comparison disposes:
+
+    * `:arm`      — the group/match key the caller assigns (e.g. a
+      harness/model/tier combination under test) — an arbitrary label, NOT
+      re-derived, shared by a `"baseline"` row and its candidate row(s) so
+      they pair for the delta.
+    * `:variant`  — `"baseline"` or the candidate pack's name.
+    * `:tokens` / `:iterations_to_convergence` — the two headline metrics
+      ADR-0058 decision 3 names ("a measured reduction in tokens-to-converge
+      or iterations"), read back from `Kazi.Economy.KPIs.from_run_result/1` —
+      re-derived from nothing, the run's own reported `economy`/`usage`.
+    * `:converged` — whether the terminal run reached `converged` (a variant
+      that "wins" on tokens but stops converging is never a silent win).
+    * `:delta_tokens` / `:delta_iterations` — `(this arm) - (matching
+      baseline)`; **negative means fewer tokens/iterations — a reduction**,
+      the ADR-0058 shipping condition. `nil` when there is no matching
+      baseline row, or either side left the metric unreported
+      (honest-unknown, never a fabricated comparison). Always `nil` on a
+      `"baseline"` row itself (it is compared against, not compared).
+  """
+  @type variant_arm :: %{
+          arm: String.t(),
+          variant: String.t(),
+          harness: String.t() | nil,
+          model: String.t() | nil,
+          context_tier: String.t() | nil,
+          tokens: non_neg_integer() | nil,
+          iterations_to_convergence: non_neg_integer() | nil,
+          converged: boolean(),
+          delta_tokens: integer() | nil,
+          delta_iterations: integer() | nil
+        }
+
+  @doc """
+  Fold one prompt/context VARIANT arm (T48.12, ADR-0058 decision 3) from its
+  terminal `kazi apply --json` result.
+
+  `arm` is the group/match key a baseline and its candidate(s) share (an
+  arbitrary caller-chosen label, e.g. the harness/model/tier under test);
+  `variant` is `"baseline"` or a candidate pack name. `result` is the decoded
+  `apply --json` object, folded via `Kazi.Economy.KPIs.from_run_result/1` for
+  its `tokens` and `iterations_to_convergence` — this function re-derives
+  nothing, it only reads the KPIs fold back and adds the arm/variant labels.
+  `delta_tokens`/`delta_iterations` start `nil`; `variant_report/1` fills them
+  in once every arm in the comparison is built (a single arm cannot compute
+  its own delta).
+  """
+  @spec variant_arm(String.t(), String.t(), map()) :: variant_arm()
+  def variant_arm(arm, variant, result)
+      when is_binary(arm) and is_binary(variant) and is_map(result) do
+    kpis = KPIs.from_run_result(result)
+
+    %{
+      arm: arm,
+      variant: variant,
+      harness: kpis.harness,
+      model: kpis.model,
+      context_tier: kpis.context_tier,
+      tokens: kpis.tokens,
+      iterations_to_convergence: kpis.iterations_to_convergence,
+      converged: kpis.status == "converged",
+      delta_tokens: nil,
+      delta_iterations: nil
+    }
+  end
+
+  @doc """
+  Build the variant report from an ordered list of `{arm, variant, result}`
+  triples (order preserved — a caller lists baseline/candidate pairs together
+  so the report reads group by group).
+
+  For every non-`"baseline"` row, fills `delta_tokens`/`delta_iterations` as
+  `(this row's metric) - (the matching baseline row's metric)` — **negative
+  means the variant used fewer tokens/iterations than baseline**, the
+  ADR-0058 shipping condition. The matching baseline is the row sharing the
+  same `:arm` key with `variant == "baseline"`; absent a match, or either
+  side's metric unreported, the delta stays `nil` (honest-unknown, never a
+  fabricated comparison). A `"baseline"` row's own deltas are always `nil`.
+  """
+  @spec variant_report([{String.t(), String.t(), map()}]) :: [variant_arm()]
+  def variant_report(arms) when is_list(arms) do
+    built = Enum.map(arms, fn {arm, variant, result} -> variant_arm(arm, variant, result) end)
+    baselines = Enum.filter(built, &(&1.variant == "baseline"))
+
+    Enum.map(built, &with_delta(&1, baselines))
+  end
+
+  @doc """
+  Render a list of `t:variant_arm/0` as a deterministic markdown table — the
+  per-arm tokens-to-converge + iterations-to-convergence comparison, with
+  each variant's delta against its matching baseline (ADR-0058 decision 3,
+  T48.12).
+
+  Columns: Arm | Variant | Harness | Model | Tier | Tokens | Δ Tokens |
+  Iters-to-conv | Δ Iters | Converged. A `nil` tokens/iterations/delta cell
+  prints `n/a` (never a fabricated `0`); a baseline row's own delta columns
+  are always `n/a`. Byte-stable for a given arm list, so a test can assert
+  on it.
+  """
+  @spec render_variant_table([variant_arm()]) :: String.t()
+  def render_variant_table(arms) when is_list(arms) do
+    header =
+      "| Arm | Variant | Harness | Model | Tier | Tokens | Δ Tokens | " <>
+        "Iters-to-conv | Δ Iters | Converged |"
+
+    divider = "|---|---|---|---|---|---|---|---|---|---|"
+
+    rows =
+      Enum.map(arms, fn a ->
+        "| #{a.arm} | #{a.variant} | #{variant_label(a.harness)} | #{variant_label(a.model)} | " <>
+          "#{variant_label(a.context_tier)} | #{fmt_variant_int(a.tokens)} | " <>
+          "#{fmt_delta(a.delta_tokens)} | #{fmt_variant_int(a.iterations_to_convergence)} | " <>
+          "#{fmt_delta(a.delta_iterations)} | #{yes_no(a.converged)} |"
+      end)
+
+    Enum.join([header, divider | rows], "\n") <> "\n"
+  end
+
+  defp with_delta(%{variant: "baseline"} = arm, _baselines), do: arm
+
+  defp with_delta(arm, baselines) do
+    case Enum.find(baselines, &(&1.arm == arm.arm)) do
+      nil ->
+        arm
+
+      base ->
+        %{
+          arm
+          | delta_tokens: delta(arm.tokens, base.tokens),
+            delta_iterations: delta(arm.iterations_to_convergence, base.iterations_to_convergence)
+        }
+    end
+  end
+
+  defp delta(nil, _base), do: nil
+  defp delta(_value, nil), do: nil
+  defp delta(value, base), do: value - base
+
+  defp variant_label(nil), do: "—"
+  defp variant_label(value), do: to_string(value)
+
+  defp fmt_variant_int(nil), do: "n/a"
+  defp fmt_variant_int(value) when is_integer(value), do: Integer.to_string(value)
+
+  defp fmt_delta(nil), do: "n/a"
+  defp fmt_delta(value) when value >= 0, do: "+#{value}"
+  defp fmt_delta(value), do: Integer.to_string(value)
 
   # --- helpers ---------------------------------------------------------------
 

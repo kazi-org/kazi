@@ -90,6 +90,21 @@ defmodule Mix.Tasks.Kazi.Bench do
       `$`/tokens come from the envelopes; tier/surface from the label; convergence
       + correctness + stuck from the result. The benchmark whose verdict SETS the
       tier/surface defaults (docs/devlog.md).
+    * `--variant <dir>`    — **the T48.12/ADR-0058 decision 3 benchmark GATE**:
+      aggregate recorded prompt/context-VARIANT arms into the per-arm
+      tokens-to-converge + iterations-to-convergence table, with each variant's
+      DELTA against its matching baseline. Files are named
+      `<group>__<variant>.result.json`, e.g. `t1-sonnet__baseline.result.json` and
+      `t1-sonnet__candidate-rediscovery.result.json` — `<group>` is the
+      caller-chosen match key (a harness/model/tier combination under test, or
+      anything else that groups a fair comparison); `<variant>` is `baseline` or a
+      candidate pack name (constructed from a `kazi economy --rediscovery`
+      candidate, T48.10, and/or a debrief hypothesis, T48.11). Each contributes ONE
+      `kazi apply --json` result; `Δ Tokens`/`Δ Iters` are negative when the
+      variant used FEWER — the measured reduction ADR-0058 requires before a
+      candidate pack ships. See "The T48.12 benchmark gate" in docs/economy.md for
+      the shipping procedure — **this flag only tables the comparison; nothing
+      here ever mutates a prompt.**
     * `--help`             — print this usage (the 3 arms + how to run) and exit.
   """
 
@@ -112,6 +127,7 @@ defmodule Mix.Tasks.Kazi.Bench do
           kpis: :string,
           tiering: :string,
           tier_surface: :string,
+          variant: :string,
           help: :boolean
         ],
         aliases: [h: :help]
@@ -120,6 +136,9 @@ defmodule Mix.Tasks.Kazi.Bench do
     cond do
       opts[:help] ->
         Mix.shell().info(usage())
+
+      opts[:variant] ->
+        variant_from_runs(opts[:variant])
 
       opts[:tier_surface] ->
         tier_surface_from_runs(opts[:tier_surface])
@@ -288,6 +307,43 @@ defmodule Mix.Tasks.Kazi.Bench do
     |> Enum.map(&File.read!/1)
   end
 
+  # T48.12/ADR-0058 decision 3: aggregate recorded prompt/context-VARIANT arms
+  # from `<dir>/<group>__<variant>.result.json` into the per-arm tokens-to-converge
+  # + iterations-to-convergence table, with each variant's delta against its
+  # matching baseline (the row sharing its `<group>` key with `<variant>` ==
+  # "baseline"). This is the ONLY path a candidate prompt/context pack ships
+  # through (see docs/economy.md, "The T48.12 benchmark gate") — the flag only
+  # tables the comparison, it never mutates a prompt. The deterministic offline
+  # path the bench-shaped acceptance exercises.
+  defp variant_from_runs(dir) do
+    report =
+      dir
+      |> variant_labels()
+      |> Enum.map(fn {group, variant} ->
+        {group, variant, read_result(dir, "#{group}__#{variant}")}
+      end)
+
+    table = report |> Bench.variant_report() |> Bench.render_variant_table()
+    Mix.shell().info("kazi.bench — per-arm prompt/context-variant table (T48.12, ADR-0058)\n")
+    Mix.shell().info(table)
+  end
+
+  # Discover `{group, variant}` pairs from `<dir>/<group>__<variant>.result.json`
+  # filenames, sorted so each group's baseline row precedes its candidate row(s).
+  defp variant_labels(dir) do
+    dir
+    |> Path.join("*__*.result.json")
+    |> Path.wildcard()
+    |> Enum.map(&(Path.basename(&1) |> String.replace_suffix(".result.json", "")))
+    |> Enum.map(fn name ->
+      case String.split(name, "__", parts: 2) do
+        [group, variant] -> {group, variant}
+        _ -> {name, "baseline"}
+      end
+    end)
+    |> Enum.sort_by(fn {group, variant} -> {group, variant != "baseline", variant} end)
+  end
+
   # Discover the arm labels in `dir` from the `<arm>.result.json` files, ordering
   # the canonical tiering arms first (in ladder order) and any extras alpha-sorted.
   @tiering_canonical ["vanilla-frontier", "static-cheap", "escalating"]
@@ -364,6 +420,14 @@ defmodule Mix.Tasks.Kazi.Bench do
                           context tier 0-4 × tool-surface on/off knobs). Arm labels
                           `t<tier>-<on|off>`; each: <arm>.result.json + captured
                           <arm>.NNN.json envelopes. Sets the tier/surface defaults.
+      --variant <dir>     THE BENCHMARK GATE (T48.12, ADR-0058 decision 3): table
+                          prompt/context-variant arms on tokens-to-converge +
+                          iterations-to-convergence, with each variant's delta vs
+                          its matching baseline. Files: <group>__<variant>.result.json
+                          (e.g. t1-sonnet__baseline.result.json,
+                          t1-sonnet__candidate-rediscovery.result.json). Negative
+                          delta = fewer tokens/iterations = the reduction a
+                          candidate pack needs before it ships. See docs/economy.md.
       --help, -h          print this usage and exit
     """
   end
