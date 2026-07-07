@@ -62,6 +62,7 @@ defmodule Kazi.CLI do
   alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
   alias Kazi.ContextStore.GistInit
+  alias Kazi.Economy.History
   alias Kazi.Export.Obsidian
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
@@ -142,6 +143,7 @@ defmodule Kazi.CLI do
     port: :integer,
     bind: :string,
     roadmap: :string,
+    goal: :string,
     help: :boolean,
     version: :boolean
   ]
@@ -218,6 +220,8 @@ defmodule Kazi.CLI do
       "`dashboard` only: interface to bind (default 127.0.0.1 -- loopback only). Set explicitly to bind a non-loopback address; overriding is loud (printed at boot), never silent.",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0057): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. The starmap loads it through `KaziWeb.Starmap.GoalSource` and renders its needs-DAG in wave-band frontiers, the SAME computation `kazi apply --explain` prints. Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, the starmap keeps its flat-list fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty starmap.",
+    goal:
+      "`economy` only: restrict the run-economics history aggregate to one goal_ref. Default: aggregate across every goal on this read-model (ADR-0058).",
     help: "Show this help and exit.",
     version: "Print the kazi version and exit."
   }
@@ -288,6 +292,13 @@ defmodule Kazi.CLI do
         "Boot the standalone fleet-mode web endpoint (the starmap: every registered run, read-only, no goal loop) against the shared read-model.",
       args: [],
       flags: [:port, :bind, :roadmap]
+    },
+    %{
+      name: "economy",
+      summary:
+        "Aggregate persisted run-end economics into p50/p95 percentiles by goal shape/model/harness (ADR-0058, a pure read).",
+      args: [],
+      flags: [:goal, :json]
     },
     %{
       name: "plan",
@@ -369,6 +380,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
       kazi apply <goal-file> --workspace <path> --check [--json]        # observe the vector once, dispatch nothing
       kazi status <ref> [--json]
+      kazi economy [--goal <ref>] [--json]         # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
@@ -439,6 +451,9 @@ defmodule Kazi.CLI do
                              Overrides the goal-file's `[economy] debrief` field.
       --status <state>       Filter `list-proposed` to one lifecycle state
                              (proposed / approved / rejected). Default: all.
+      --goal <ref>           `economy` only: restrict the run-economics history
+                             aggregate to one goal_ref. Default: every goal on
+                             this read-model (ADR-0058).
       --yes                  `plan` only: skip the interactive clarify
                              questions and draft best-effort (also implied when
                              no TTY is attached, e.g. piped/CI).
@@ -655,6 +670,9 @@ defmodule Kazi.CLI do
       {:context, subcommand, args, opts} ->
         execute_context(subcommand, args, opts, inject_opts)
 
+      {:economy, opts} ->
+        execute_economy(opts)
+
       {:error, message} ->
         IO.puts(:stderr, "error: #{message}\n")
         IO.puts(:stderr, @usage)
@@ -684,6 +702,7 @@ defmodule Kazi.CLI do
           | {:export, Path.t(), keyword()}
           | {:lint, Path.t(), keyword()}
           | {:context, String.t(), [String.t()], keyword()}
+          | {:economy, keyword()}
           | {:error, String.t()}
 
   @doc """
@@ -708,6 +727,9 @@ defmodule Kazi.CLI do
     * `{:approve, proposal_ref, opts}` / `{:reject, proposal_ref, opts}` — the
       approval transitions over a proposal's review handle (T3.5b); `opts` carries
       `[json: boolean]` (T15.6, ADR-0023 decision 2).
+    * `{:economy, opts}` — the `economy` subcommand (T48.8, ADR-0058) with
+      `opts` (`[goal: goal_ref | nil, json: boolean]`, an optional goal_ref
+      filter over the aggregated run-economics history).
     * `{:error, message}` — a usage error (unknown command, missing goal-file).
   """
   @spec parse([String.t()]) :: parsed()
@@ -952,10 +974,20 @@ defmodule Kazi.CLI do
   # through to `execute_context/4`, which proxies to the resolved provider.
   defp parse_command(["context" | rest], flags), do: parse_context(rest, flags)
 
+  # T48.8 (ADR-0058 decision 2 precursor): `economy [--goal <ref>] [--json]`
+  # aggregates the persisted run-end economics (T48.7) into p50/p95 history
+  # groups. A pure read: no positional argument, an optional --goal filter.
+  defp parse_command(["economy" | rest], flags) do
+    case rest do
+      [] -> {:economy, goal: flags[:goal], json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
@@ -4278,4 +4310,81 @@ defmodule Kazi.CLI do
       end
     end)
   end
+
+  # =============================================================================
+  # economy (T48.8, ADR-0058 decision 2 precursor): run-economics history
+  # =============================================================================
+  #
+  # `kazi economy [--goal <ref>] [--json]` is a PURE READ over the run-end
+  # economics T48.7 persists onto `Kazi.ReadModel.Run` -- it drives no loop and
+  # mutates nothing. The percentile grouping + honest-unknown nil-safety
+  # (ADR-0046) live in `Kazi.Economy.History`; this layer only renders the
+  # aggregate on the --json / human surfaces, the same split as
+  # `list-proposed`/`status`. An empty aggregate (a fresh read-model with no
+  # finished runs yet) is a legitimate, honestly-reported answer -- `{"groups":
+  # []}` at exit 0, never an error.
+  defp execute_economy(opts) do
+    with_read_model(opts, fn ->
+      history = History.aggregate(goal_ref: opts[:goal])
+
+      emit(json?(opts), economy_json(history, opts[:goal]), fn ->
+        report_economy(history, opts[:goal])
+      end)
+
+      0
+    end)
+  end
+
+  # The `economy --json` result (T48.8): `groups` mirrors
+  # `Kazi.Economy.History.aggregate/1`'s shape; `goal_filter` echoes the
+  # optional --goal so a caller confirms what was aggregated (nil means every
+  # goal on this read-model).
+  defp economy_json(%{groups: groups}, goal_filter) do
+    %{
+      schema_version: @run_schema_version,
+      goal_filter: goal_filter,
+      groups: Enum.map(groups, &economy_group_json/1)
+    }
+  end
+
+  defp economy_group_json(group) do
+    %{
+      goal_shape_bucket: group.goal_shape_bucket,
+      model: group.model,
+      harness: group.harness,
+      n: group.n,
+      n_with_usage: group.n_with_usage,
+      tokens: group.tokens,
+      cost_usd: group.cost_usd,
+      dispatch_count: group.dispatch_count,
+      wall_clock_s: group.wall_clock_s
+    }
+  end
+
+  defp report_economy(%{groups: []}, goal_filter) do
+    IO.puts("ECONOMY    filter=#{goal_filter || "(all goals)"}")
+    IO.puts("(no finished-run history yet)")
+  end
+
+  defp report_economy(%{groups: groups}, goal_filter) do
+    IO.puts("ECONOMY    filter=#{goal_filter || "(all goals)"}")
+    IO.puts("#{length(groups)} group(s):\n")
+
+    Enum.each(groups, fn group ->
+      IO.puts(
+        "  bucket=#{group.goal_shape_bucket} model=#{group.model || "unknown"} " <>
+          "harness=#{group.harness || "unknown"} n=#{group.n} n_with_usage=#{group.n_with_usage}"
+      )
+
+      IO.puts("    tokens p50/p95:         #{fmt_pair(group.tokens)}")
+      IO.puts("    cost_usd p50/p95:       #{fmt_pair(group.cost_usd)}")
+      IO.puts("    dispatch_count p50/p95: #{fmt_pair(group.dispatch_count)}")
+      IO.puts("    wall_clock_s p50/p95:   #{fmt_pair(group.wall_clock_s)}")
+    end)
+  end
+
+  defp fmt_pair(%{p50: p50, p95: p95}), do: "#{fmt_metric(p50)}/#{fmt_metric(p95)}"
+
+  defp fmt_metric(nil), do: "unknown"
+  defp fmt_metric(value), do: to_string(value)
 end
