@@ -3791,6 +3791,18 @@ defmodule Kazi.CLI do
   #                        ceiling was set but a dispatch this run reported no
   #                        usage the loop could count — the ceiling could never
   #                        bind. Absent on every other run.
+  #   * `cause`          — T48.4 (ADR-0058 decision 4, UC-064): an ADDITIVE,
+  #                        optional object naming the honest terminal cause
+  #                        alongside `status`/`reason` — `over_budget` is not
+  #                        always genuine budget exhaustion, and `stuck` is not
+  #                        always an ordinary failing-set stall. Present only
+  #                        when the loop classified one: `{ "class": string,
+  #                        "ids": [string] (optional), "reasons": object
+  #                        (optional), "exhausted": string (optional) }`, class
+  #                        one of `budget_exhausted` / `error_wedged` /
+  #                        `quarantine_blocked`. Absent ⇒ no cause classified,
+  #                        byte-identical to before this field existed. See
+  #                        `Kazi.Loop.CauseClass`.
   #   * `collateral`     — issue #860 proposal 3: an ADDITIVE array of files
   #                        changed during the run that sit outside the goal's
   #                        write scope, net-deletion entries ranked first (see
@@ -3826,6 +3838,7 @@ defmodule Kazi.CLI do
     |> put_context_store(result)
     |> put_stuck_bundle(result)
     |> put_quarantine(result)
+    |> put_cause(result)
     |> put_collateral(goal, workspace)
   end
 
@@ -3858,6 +3871,56 @@ defmodule Kazi.CLI do
     do: Map.put(map, :quarantine, Enum.sort_by(ids, &to_string/1) |> Enum.map(&to_string/1))
 
   defp put_quarantine(map, _result), do: map
+
+  # T48.4 (ADR-0058 decision 4, UC-064): the additive `cause` object — the
+  # honest terminal cause class alongside `status`/`reason`, so `over_budget`
+  # is never the whole story (an operator seeing it should not always raise
+  # the budget — a config error stays a config error no matter how big the
+  # ceiling is). Present only when the loop classified one (see
+  # `Kazi.Loop.CauseClass`); absent ⇒ byte-identical to before this field
+  # existed.
+  defp put_cause(map, %{cause: %{class: class} = cause}) when is_atom(class) do
+    Map.put(map, :cause, cause_json(cause))
+  end
+
+  defp put_cause(map, _result), do: map
+
+  defp cause_json(%{class: class, ids: ids, reasons: reasons, exhausted: exhausted}) do
+    %{class: to_string(class)}
+    |> put_cause_ids(ids)
+    |> put_cause_reasons(reasons)
+    |> put_cause_exhausted(exhausted)
+  end
+
+  defp put_cause_ids(map, [_ | _] = ids),
+    do: Map.put(map, :ids, ids |> Enum.sort_by(&to_string/1) |> Enum.map(&to_string/1))
+
+  defp put_cause_ids(map, _ids), do: map
+
+  defp put_cause_reasons(map, reasons) when is_map(reasons) and map_size(reasons) > 0 do
+    Map.put(
+      map,
+      :reasons,
+      Map.new(reasons, fn {id, reason} -> {to_string(id), cause_reason_string(reason)} end)
+    )
+  end
+
+  defp put_cause_reasons(map, _reasons), do: map
+
+  defp put_cause_exhausted(map, nil), do: map
+  defp put_cause_exhausted(map, exhausted), do: Map.put(map, :exhausted, to_string(exhausted))
+
+  # A `Kazi.Loop.ErrorPermanence` reason is a bare atom, a `{tag, detail}`
+  # tuple, or a string (the live HTTP providers inspect connection errors) —
+  # only the atom/string shapes render as plain JSON strings; anything else
+  # (a tuple) is rendered with `inspect/1` so the JSON contract never breaks on
+  # an un-encodable term.
+  defp cause_reason_string(reason) when is_binary(reason), do: reason
+
+  defp cause_reason_string(reason) when is_atom(reason) and not is_nil(reason),
+    do: to_string(reason)
+
+  defp cause_reason_string(reason), do: inspect(reason)
 
   # T35.5 (ADR-0045 §6): the additive `context_store` byte-accounting object, present
   # only when the run used a store. Absent ⇒ the result is byte-identical to today.
