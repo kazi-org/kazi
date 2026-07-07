@@ -130,7 +130,7 @@ written by a future plan-side surface) is still future work; today `--roadmap`
 is the on-ramp, and `GoalSource` remains a seam a test can also point at any
 `Kazi.Goal.t()` directly.
 
-### The attention queue (T46.6)
+### The attention queue (T46.6, cause-ranked T48.14)
 
 Alongside the fleet list, a rail ranks what needs the operator right now —
 `Kazi.Attention.Queue.build/2`, a pure projection over the SAME persisted
@@ -138,15 +138,22 @@ signals the per-goal detectors already compute:
 
 | Signal                  | Severity | Fires when                                                                 |
 | ------------------------ | -------- | --------------------------------------------------------------------------- |
-| `stuck`                 | 4 (highest) | `Kazi.Loop.StuckDetector.stuck?/2` over the goal's `iteration_history/1`: N consecutive observations share the same non-empty failing set. |
+| `cause`                 | 5 (highest) | a FINISHED run's read-model row carries a T48.4 terminal cause of `error_wedged` or `quarantine_blocked` -- a config error or a flake-pinned predicate an agent cannot fix by itself. `budget_exhausted` and a run with no classified cause raise no `cause` entry (the operator can reasonably raise the budget, or there is simply nothing to explain beyond the outcome already shown). |
+| `stuck`                 | 4        | `Kazi.Loop.StuckDetector.stuck?/2` over the goal's `iteration_history/1`: N consecutive observations share the same non-empty failing set. |
 | `budget`                | 3        | the run's declared `max_iterations` (captured at registration, T46.6) is >= 85% consumed by its observed iteration count. |
 | `flake_suspicion`       | 2        | some predicate's claim-bearing status has flipped at least twice across the history -- nondeterministic-looking, even though no detector has quarantined it. |
 | `regression_recovered`  | 1 (lowest) | `Kazi.ReadModel.regressions/1` recorded a green→red flip whose predicate is back to `:pass` as of the latest observation. |
 
 Entries are ranked by severity, ties broken by recency (the triggering
 iteration index, most recent first) then `goal_ref` -- a fully pinned order.
-Each entry deep-links to that goal's `/goals/:id/drillin`. An empty fleet (or
-a fleet with nothing to flag) renders no rail. See `Kazi.Attention.Queue` and
+Each entry deep-links to that goal's `/goals/:id/drillin`; a `cause` entry
+additionally renders its compact cause line (`Kazi.Loop.CauseClass.format/2`,
+e.g. `error_wedged (live_route: missing_url)`) -- the SAME formatter the
+slide-over drill-in panel's cause line uses, so the two surfaces never
+disagree on how a cause reads. An empty fleet (or a fleet with nothing to
+flag) renders no rail. On the mobile bottom-tab layout the cause line wraps
+onto its own row inside the entry and is truncated with an ellipsis rather
+than pushing the entry's height unbounded. See `Kazi.Attention.Queue` and
 `KaziWeb.StarmapLive`.
 
 ## The events sink (T46.2)

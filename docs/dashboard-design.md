@@ -34,8 +34,11 @@ Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
   LANDED, red STUCK; clicking a tile filters the canvas to that state --
   everything else dims -- and clicking the active tile again clears it;
   mutually exclusive with the SESSIONS filter); NEEDS YOU (attention queue:
-  glowing 7px dot red/amber +
-  one-line summary, bold goal name); SESSIONS (S1..Sn chips, cyan border —
+  glowing 7px dot red/amber/magenta +
+  one-line summary, bold goal name; a finished `error_wedged`/
+  `quarantine_blocked` cause entry (T48.14, magenta dot) ranks above every
+  other entry and wraps a second, truncated line with the compact cause
+  text -- "error_wedged (live_route: missing_url)"); SESSIONS (S1..Sn chips, cyan border —
   red variant for a stuck session's chip; clicking a row filters the canvas
   to that session's goal — everything else dims to ~.12 opacity — and
   clicking the active row again clears the filter); a dashed-border hint
