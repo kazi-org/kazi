@@ -5,8 +5,12 @@ defmodule Kazi.LoopBudgetTest do
   The pure decision is unit-tested in `Kazi.Loop.BudgetTest`; here we prove the
   loop ENFORCES it as a hard stop — with a never-converging predicate set so the
   only way the loop terminates is the budget. Each dimension (iterations,
-  wall-clock, tokens) stops the loop with the correct reason, and the stop is
-  visible in `Kazi.Loop.snapshot/1` and the terminal result.
+  wall-clock, tokens, dispatches) stops the loop with the correct reason, and the
+  stop is visible in `Kazi.Loop.snapshot/1` and the terminal result.
+
+  The `max_dispatches` dimension (T48.6, ADR-0058) additionally needs proof that
+  it counts ONLY `:dispatch_agent` actions, not observe ticks — see the "dispatch
+  ceiling" section below.
   """
   use ExUnit.Case, async: true
 
@@ -73,9 +77,76 @@ defmodule Kazi.LoopBudgetTest do
     def execute(%Action{kind: :deploy}, _context), do: {:ok, %{ref: "v1"}}
   end
 
+  # A provider whose predicate is ALWAYS :pass — the vector is satisfied from the
+  # first observation, so `decide/2` never reaches the dispatch clause. Paired
+  # with `standing: true` this proves an observe-only loop (no agent dispatch,
+  # ever) cannot trip `max_dispatches` no matter how many times it re-observes.
+  defmodule AlwaysGreenProvider do
+    @behaviour Kazi.PredicateProvider
+
+    @impl true
+    def evaluate(%Predicate{id: id}, _context),
+      do: PredicateResult.pass(%{id: id, status: :pass})
+  end
+
+  # A provider driven by a per-test Agent holding a list of scripted statuses (one
+  # per observation, last value sticky) keyed by predicate id — mirrors
+  # `Kazi.StandingDriftTest.ScriptedProvider`. Lets a test interleave dispatch-
+  # triggering `:fail`s with `:pass` no-op ticks, and the test process can push a
+  # fresh `:fail` mid-run to script a SECOND drift after some no-op ticks have run.
+  defmodule ScriptedProvider do
+    @behaviour Kazi.PredicateProvider
+
+    @impl true
+    def evaluate(%Predicate{id: id}, context) do
+      script_pid = Kazi.LoopBudgetTest.script_name(context.goal.id) |> Process.whereis()
+
+      case next_status(script_pid, id) do
+        :pass -> PredicateResult.pass(%{id: id, status: :pass})
+        :fail -> PredicateResult.fail(%{id: id, status: :fail})
+      end
+    end
+
+    defp next_status(script_pid, id) do
+      Agent.get_and_update(script_pid, fn scripts ->
+        case Map.fetch(scripts, id) do
+          {:ok, [last]} -> {last, Map.put(scripts, id, [last])}
+          {:ok, [head | tail]} -> {head, Map.put(scripts, id, tail)}
+          :error -> {:pass, scripts}
+        end
+      end)
+    end
+  end
+
+  # A harness double that counts dispatches (via `dispatch_pid`) and, like
+  # `Kazi.StandingDriftTest.FixingHarness`, "fixes" the drifted predicate by
+  # forcing the script back to sticky `:pass` — emulating the coding agent landing
+  # a fix so the loop re-converges rather than dispatching every tick.
+  defmodule CountingFixingHarness do
+    @behaviour Kazi.HarnessAdapter
+
+    @impl true
+    def run(_prompt, _workspace, opts) do
+      dispatch_pid = Keyword.fetch!(opts, :dispatch_pid)
+      script_pid = Keyword.fetch!(opts, :script_pid)
+
+      Agent.update(dispatch_pid, fn n -> n + 1 end)
+
+      Agent.update(script_pid, fn scripts -> Map.new(scripts, fn {id, _} -> {id, [:pass]} end) end)
+
+      {:ok, %{output: "fixed"}}
+    end
+  end
+
   # ===========================================================================
   # Helpers
   # ===========================================================================
+
+  # The registered name under which a test's script Agent lives, derived from the
+  # goal id so `ScriptedProvider` can find it from the provider context (which
+  # carries the goal but not arbitrary test-only keys). Public so the provider
+  # module can call it.
+  def script_name(goal_id), do: :"kazi_loop_budget_script_#{goal_id}"
 
   defp never_converging_goal(budget) do
     Goal.new("budget-test",
@@ -104,6 +175,27 @@ defmodule Kazi.LoopBudgetTest do
     ]
 
     Kazi.Loop.start_link(Keyword.merge(base, opts))
+  end
+
+  defp poll_until(loop, fun, timeout_ms \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_poll_until(loop, fun, deadline)
+  end
+
+  defp do_poll_until(loop, fun, deadline) do
+    snap = Kazi.Loop.snapshot(loop)
+
+    cond do
+      fun.(snap) ->
+        snap
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("poll_until timed out; last snapshot: #{inspect(snap)}")
+
+      true ->
+        Process.sleep(2)
+        do_poll_until(loop, fun, deadline)
+    end
   end
 
   # ===========================================================================
@@ -226,6 +318,123 @@ defmodule Kazi.LoopBudgetTest do
     assert result.outcome == :over_budget
     assert result.reason == :max_iterations
     assert result.iterations == 2
+  end
+
+  # ===========================================================================
+  # Dispatch-count ceiling (T48.6, ADR-0058): max_dispatches counts ONLY
+  # :dispatch_agent actions — an observe-only tick never consumes it. This is
+  # what makes it a better proxy for spend than max_iterations for a wedged run:
+  # a run stuck polling a persistently-erroring live predicate can burn dozens of
+  # cheap observe ticks against max_iterations while dispatching nothing.
+  # ===========================================================================
+
+  test "stops at the dispatch ceiling with reason :max_dispatches" do
+    # NeverConvergingProvider dispatches the agent on every tick, so dispatches
+    # == iterations here — a direct trip of the new dimension.
+    goal = never_converging_goal(Kazi.Budget.new(max_dispatches: 3))
+
+    {:ok, loop} = start_loop(goal, adapter_opts: [tokens_per_run: 0])
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :over_budget
+    assert result.reason == :max_dispatches
+
+    snap = Kazi.Loop.snapshot(loop)
+    assert snap.state == :over_budget
+    assert snap.budget_reason == :max_dispatches
+    assert snap.dispatches == 3
+  end
+
+  test "a loop with only observe ticks never trips max_dispatches" do
+    # AlwaysGreenProvider satisfies the vector from the first observation, so
+    # decide/2 never reaches the dispatch clause — every tick past the first is a
+    # standing-mode re-observe (T3.4a), never a dispatch. A max_dispatches: 1
+    # ceiling must NOT trip no matter how many times it re-observes.
+    goal =
+      Goal.new("budget-test-observe-only",
+        predicates: [Predicate.new(:code, :tests)],
+        budget: Kazi.Budget.new(max_dispatches: 1)
+      )
+
+    {:ok, loop} =
+      Kazi.Loop.start_link(
+        goal: goal,
+        providers: %{tests: AlwaysGreenProvider},
+        harness: TokenHarness,
+        integrate: NoopIntegrate,
+        deploy: NoopDeploy,
+        adapter_opts: [tokens_per_run: 0],
+        reobserve_interval_ms: 2,
+        standing: true,
+        flake_max_retries: 0,
+        stuck_iterations: 0
+      )
+
+    # Let it re-observe well past the ceiling's count.
+    snap = poll_until(loop, fn s -> s.steady_observations >= 5 end)
+
+    refute snap.state == :over_budget
+    assert snap.dispatches == 0
+    assert snap.budget_reason == nil
+
+    :ok = Kazi.Loop.stop(loop)
+  end
+
+  test "the gate stops after N dispatches regardless of intervening no-op ticks" do
+    # Script: an initial failure (dispatch #1), then several ticks holding
+    # steady (no-op — the standing loop re-observing past convergence, T3.4a),
+    # then the test injects a SECOND drift (dispatch #2). max_dispatches: 2 must
+    # trip on dispatch #2 even though many no-op ticks ran in between and
+    # `iterations` is far larger than the dispatch ceiling.
+    goal_id = "budget-test-dispatch-ceiling-#{System.unique_integer([:positive])}"
+
+    goal =
+      Goal.new(goal_id,
+        predicates: [Predicate.new(:code, :tests)],
+        budget: Kazi.Budget.new(max_dispatches: 2)
+      )
+
+    {:ok, script_pid} = Agent.start_link(fn -> %{code: [:fail]} end, name: script_name(goal_id))
+    {:ok, dispatch_pid} = Agent.start_link(fn -> 0 end)
+
+    {:ok, loop} =
+      Kazi.Loop.start_link(
+        goal: goal,
+        providers: %{tests: ScriptedProvider},
+        harness: CountingFixingHarness,
+        integrate: NoopIntegrate,
+        deploy: NoopDeploy,
+        adapter_opts: [script_pid: script_pid, dispatch_pid: dispatch_pid],
+        reobserve_interval_ms: 2,
+        standing: true,
+        flake_max_retries: 0,
+        stuck_iterations: 0
+      )
+
+    # 1. The scripted failure fires dispatch #1; the harness "fixes" it.
+    poll_until(loop, fn _ -> Agent.get(dispatch_pid, & &1) >= 1 end)
+    assert Kazi.Loop.snapshot(loop).dispatches == 1
+
+    # 2. Let SEVERAL no-op (steady, re-observe) ticks run before the next drift —
+    #    these must NOT move the dispatch counter.
+    pre_drift = poll_until(loop, fn s -> s.steady_observations >= 3 end)
+    assert pre_drift.dispatches == 1
+    assert pre_drift.iterations > pre_drift.dispatches
+
+    # 3. Inject a second drift from the test process (simulating a later
+    #    regression) — this fires dispatch #2, which trips the ceiling.
+    Agent.update(script_pid, fn scripts -> Map.new(scripts, fn {id, _} -> {id, [:fail]} end) end)
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :over_budget
+    assert result.reason == :max_dispatches
+
+    snap = Kazi.Loop.snapshot(loop)
+    assert snap.dispatches == 2
+    assert Agent.get(dispatch_pid, & &1) == 2
+    # The hard proof this counts DISPATCHES, not ticks: iterations vastly
+    # exceeds the 2-dispatch ceiling because of the no-op ticks in between.
+    assert snap.iterations > snap.dispatches
   end
 
   # ===========================================================================
