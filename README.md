@@ -811,6 +811,7 @@ kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provide
 kazi context stats                           #   byte accounting (indexed/returned/saved)
 kazi export <goal-file> --obsidian <dir>     # write an Obsidian vault of the goal tree
 kazi lint <goal-file>                        # advisory near-duplicate group-name warnings
+kazi economy --rediscovery <goal>            # ranked rediscovery-pressure report (report-only)
 kazi mcp                                      # start the MCP server over stdio (ADR-0044)
 kazi dashboard [--port <n>] [--bind <ip>]    # the fleet starmap: every registered run, read-only (ADR-0057)
 kazi help [--json]                           # the command/flag surface (--json for machines)
@@ -832,6 +833,16 @@ kazi version                                 # print the kazi version and exit
 > read-model on startup, so every iteration is persisted. The standalone escript
 > can't bundle the native SQLite NIF, so it runs without persistence (it still
 > converges; it just won't record history).
+
+> **`kazi economy --rediscovery <goal>` (T48.10, ADR-0058 decision 3).** Folds a
+> goal's recorded per-iteration tool counters (file reads / search calls / code-graph
+> queries) into a RANKED, report-only candidate list: a tool category that keeps
+> recurring past the first dispatch instead of falling off is a candidate for a
+> stronger orientation pack / retrieval cache. A goal with no recorded tool-use
+> stream reports `unknown`, never a fabricated empty ranking (ADR-0046
+> honest-unknown). This is advisory only — it feeds nothing back into a dispatch
+> prompt; a candidate ships as an actual prompt/context change only once the
+> benchmark gate (T48.12) measures a real reduction.
 
 ---
 
