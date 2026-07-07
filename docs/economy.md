@@ -89,3 +89,23 @@ finished a run) reports `{"groups": []}` at exit `0` — never an error.
 
 `goal_filter` echoes the optional `--goal` (`null` means every goal on this
 read-model was aggregated).
+
+## `--rediscovery <goal>`: rediscovery-pressure report (ADR-0058 decision 3)
+
+```
+kazi economy --rediscovery <goal_ref> [--json]
+```
+
+A second, distinct view on the same command: instead of aggregating
+run-end economics across goals, it reads one goal's recorded per-iteration
+`tools` counters (T34.3) and folds them into a RANKED, report-only
+rediscovery-pressure candidate list — which tool category (file reads /
+search calls / code-graph queries) keeps recurring across dispatches instead
+of falling off after the first, a signal that a stronger orientation pack or
+retrieval cache could help. A goal with no recorded tool-use stream reports
+`status: "unknown"` with a reason, never a fabricated empty ranking
+(ADR-0046 honest-unknown).
+
+This is advisory only: nothing here feeds back into a dispatch prompt. A
+candidate becomes an actual prompt/context change only once the T48.12
+benchmark gate measures a real reduction.
