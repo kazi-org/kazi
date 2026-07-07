@@ -106,6 +106,38 @@ defmodule Kazi.Economy.History do
   def goal_shape_bucket(count) when is_integer(count) and count >= 9, do: "9+"
   def goal_shape_bucket(_count), do: "unknown"
 
+  @doc """
+  Pools every finished run within one goal-shape `bucket` (as returned by
+  `goal_shape_bucket/1`), collapsing the `model`/`harness` dimensions `aggregate/1`
+  groups by (T48.9, ADR-0058 decision 2): `Kazi.Economy.BudgetSuggestion` calls
+  this when a drafted/adopted goal's target model or harness is not yet known
+  (the common case at `kazi plan`/`kazi adopt` time), so the suggestion draws on
+  the FULL bucket's run history instead of a single, possibly sample-of-one
+  model/harness slice.
+
+  `opts[:goal_ref]` restricts to one goal's own history, exactly as in
+  `aggregate/1`.
+
+  Returns `nil` on an empty bucket (no finished run of that shape anywhere in
+  history) — an honest "nothing to learn from" the caller treats as no
+  suggestion, never a fabricated number — or a single `group()`-shaped map
+  computed with the SAME percentile method as `aggregate/1`. Its `model` and
+  `harness` fields are both `nil`, marking the pooled fallback; that is the same
+  representation `aggregate/1` uses for a group whose runs genuinely never
+  reported a harness identity, so a caller that must tell the two apart should
+  use `aggregate/1` directly instead of this pooled view.
+  """
+  @spec aggregate_by_shape_bucket(String.t(), keyword()) :: group() | nil
+  def aggregate_by_shape_bucket(bucket, opts \\ []) when is_binary(bucket) do
+    opts
+    |> finished_runs()
+    |> Enum.filter(&(goal_shape_bucket(&1.predicate_count) == bucket))
+    |> case do
+      [] -> nil
+      runs -> build_group({bucket, nil, nil}, runs)
+    end
+  end
+
   defp finished_runs(opts) do
     query = from(r in Run, where: not is_nil(r.finished_at))
 
