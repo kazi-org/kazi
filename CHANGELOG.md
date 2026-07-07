@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.93.0](https://github.com/kazi-org/kazi/compare/v1.92.0...v1.93.0) (2026-07-07)
+
+
+### Features
+
+* **dashboard:** mobile bottom-tab layout for the starmap ([dbb1d30](https://github.com/kazi-org/kazi/commit/dbb1d3093c8b2193c57d68b89478712aa4f7184b))
+
 ## [1.92.0](https://github.com/kazi-org/kazi/compare/v1.91.0...v1.92.0) (2026-07-07)
 
 
