@@ -55,17 +55,23 @@ defmodule KaziWeb.StarmapLive do
   full drill-in page. All of it reads the same projections the full-page
   views read; nothing is fabricated.
 
-  ## Attention queue (T46.6)
+  ## Attention queue (T46.6, cause-ranked T48.14)
 
   The rail alongside the fleet list: `Kazi.Attention.Queue.build/2` ranks
-  what needs the operator across every registered run — stuck (the same
-  `Kazi.Loop.StuckDetector` a live loop uses), budget (>=85% of the run's
-  declared `max_iterations` consumed), flake suspicion (a predicate whose
-  status has flipped more than once), and regression-recovered (a past
-  green→red flip whose predicate is back to `:pass`) — from the SAME
-  persisted per-iteration history the drill-in heatmap (T46.7) reads. Each
-  entry deep-links to that goal's `/goals/:id/drillin`. An empty fleet
-  renders no rail (nothing needs attention because nothing is running).
+  what needs the operator across every registered run — a finished run's
+  honest terminal cause when it names something an agent cannot fix by
+  itself (`error_wedged`/`quarantine_blocked`, T48.14, ranked HIGHEST — see
+  `Kazi.Loop.CauseClass`), stuck (the same `Kazi.Loop.StuckDetector` a live
+  loop uses), budget (>=85% of the run's declared `max_iterations`
+  consumed), flake suspicion (a predicate whose status has flipped more than
+  once), and regression-recovered (a past green→red flip whose predicate is
+  back to `:pass`) — from the SAME persisted per-iteration history the
+  drill-in heatmap (T46.7) reads, plus the read-model run row for the cause
+  signal. Each entry deep-links to that goal's `/goals/:id/drillin`; a cause
+  entry additionally renders its compact cause line (e.g. `error_wedged
+  (live_route: missing_url)`, `Kazi.Loop.CauseClass.format/2`). An empty
+  fleet renders no rail (nothing needs attention because nothing is
+  running).
 
   Pure read projection (ADR-0011 §2): it never mutates a run, a goal, or a
   lease. `mount/3` reads `RunRegistry.list/0` directly; a connected mount also
@@ -78,6 +84,7 @@ defmodule KaziWeb.StarmapLive do
   alias Kazi.Attention.Queue, as: AttentionQueue
   alias Kazi.Goal
   alias Kazi.Goal.DepGraph
+  alias Kazi.Loop.CauseClass
   alias Kazi.ReadModel.{Iteration, Run, RunRegistry}
   alias Kazi.Scheduler.DagSnapshot
   alias Kazi.Sink.Events
@@ -427,10 +434,23 @@ defmodule KaziWeb.StarmapLive do
     if run && RunRegistry.stale?(run), do: :stale, else: :converging
   end
 
+  defp signal_label(:cause), do: "needs you"
   defp signal_label(:stuck), do: "stuck"
   defp signal_label(:budget), do: "budget"
   defp signal_label(:flake_suspicion), do: "flake suspicion"
   defp signal_label(:regression_recovered), do: "regression recovered"
+
+  # T48.14: the attention-queue rail's compact cause line for a `:cause`
+  # signal entry -- same formatter the drill-in panel's `cause_line/1` uses
+  # (`Kazi.Loop.CauseClass.format/2`), so the two surfaces never drift on how
+  # a cause reads. `nil` for every other signal (hides the line).
+  defp attention_cause_line(%{
+         signal: :cause,
+         detail: %{cause_class: class, cause_detail: detail}
+       }),
+       do: CauseClass.format(class, detail)
+
+  defp attention_cause_line(_item), do: nil
 
   # ---------------------------------------------------------------------------
   # Visual canvas (ADR-0057/docs/dashboard-design.md "Canvas composition",
@@ -726,26 +746,10 @@ defmodule KaziWeb.StarmapLive do
   defp cause_line(%Run{outcome_cause_class: nil}), do: nil
 
   defp cause_line(%Run{outcome_cause_class: class, outcome_cause_detail: detail}) do
-    "cause: #{class}#{cause_detail_suffix(detail)}"
+    "cause: " <> CauseClass.format(class, detail)
   end
 
   defp cause_line(_run), do: nil
-
-  defp cause_detail_suffix(%{"reasons" => reasons})
-       when is_map(reasons) and map_size(reasons) > 0 do
-    text =
-      reasons
-      |> Enum.sort_by(fn {id, _reason} -> id end)
-      |> Enum.map_join(", ", fn {id, reason} -> "#{id}: #{reason}" end)
-
-    " (#{text})"
-  end
-
-  defp cause_detail_suffix(%{"exhausted" => exhausted}) when is_binary(exhausted),
-    do: " (#{exhausted})"
-
-  defp cause_detail_suffix(%{"ids" => [_ | _] = ids}), do: " (#{Enum.join(ids, ", ")})"
-  defp cause_detail_suffix(_detail), do: ""
 
   # The DNA strip: the LATEST iteration's predicate vector as stably-ordered
   # squares — the same presentation DrillinHeatmapLive's strip uses.
@@ -893,6 +897,13 @@ defmodule KaziWeb.StarmapLive do
                 <span class="attention-goal">{item.goal_ref}</span>
                 <span :if={item.predicate_id} class="attention-predicate">
                   {item.predicate_id}
+                </span>
+                <span
+                  :if={attention_cause_line(item)}
+                  class="attention-cause-line"
+                  title={attention_cause_line(item)}
+                >
+                  {attention_cause_line(item)}
                 </span>
                 <.link navigate={~p"/goals/#{item.goal_ref}/drillin"} class="attention-drillin-link">
                   drill in
@@ -1322,15 +1333,17 @@ defmodule KaziWeb.StarmapLive do
         .ticker-entry { color: var(--dim); }
 
         .attention-queue-list { list-style: none; display: flex; flex-direction: column; padding: 0; margin: 0; max-height: 30vh; overflow-y: auto; }
-        .attention-item { display: flex; align-items: baseline; gap: .45rem; padding: .45rem 0; border: none; background: transparent; border-bottom: 1px solid rgba(22,35,58,.6); font-size: 11px; line-height: 1.5; }
+        .attention-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: .45rem; padding: .45rem 0; border: none; background: transparent; border-bottom: 1px solid rgba(22,35,58,.6); font-size: 11px; line-height: 1.5; }
         .attention-item:last-child { border-bottom: none; }
         .attention-item::before { content: ""; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; align-self: center; }
+        .attention-signal-cause::before { background: #FF4FD8; box-shadow: 0 0 8px #FF4FD8; }
         .attention-signal-stuck::before { background: var(--red, #FF5C6C); box-shadow: 0 0 8px var(--red, #FF5C6C); }
         .attention-signal-budget::before { background: var(--amb, #FFB454); box-shadow: 0 0 8px var(--amb, #FFB454); }
         .attention-signal-flake_suspicion::before { background: rgba(255,180,84,.7); }
         .attention-signal-regression_recovered::before { background: #46587A; }
         .attention-goal { color: var(--txt, #BFD2EA); font-weight: 700; }
         .attention-signal-label, .attention-predicate { color: var(--dim, #46587A); }
+        .attention-cause-line { flex-basis: 100%; color: var(--dim, #46587A); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .attention-drillin-link { color: var(--cyn, #56CCF2); text-decoration: none; font-size: 10px; margin-left: auto; flex: 0 0 auto; }
         .attention-drillin-link:hover { text-decoration: underline; }
         .rail-sessions .session-row { display: flex; align-items: center; gap: .6rem; padding: .4rem 0; border-bottom: 1px solid rgba(22,35,58,.6); font-size: 10px; color: var(--dim, #46587A); cursor: pointer; }
