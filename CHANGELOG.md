@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.99.0](https://github.com/kazi-org/kazi/compare/v1.98.1...v1.99.0) (2026-07-07)
+
+
+### Features
+
+* **economy:** add debrief_hypotheses read-model table (T48.11) ([f19f70e](https://github.com/kazi-org/kazi/commit/f19f70e222c713e9af7314e5e52265d1a1d3d1b9))
+* **economy:** opt-in post-dispatch debrief capture as hypotheses (T48.11) ([5dcbbb6](https://github.com/kazi-org/kazi/commit/5dcbbb60b5ad650709e619f4a3c6fbf6049ea056))
+
 ## [1.98.1](https://github.com/kazi-org/kazi/compare/v1.98.0...v1.98.1) (2026-07-07)
 
 
