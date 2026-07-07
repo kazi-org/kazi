@@ -641,3 +641,24 @@ not just macOS sh — locally: `dash script.sh` plus a `setsid` shim
 (python3 os.setsid+exec) to simulate the Ubuntu group semantics.
 Regression: the wrapper itself in `Kazi.Harness.ChildSupervisor` (moduledoc
 documents all three); test/kazi/harness/child_lifetime_test.exs. (2026-07-06.)
+
+### L-0030 #dashboard #liveview #websocket #check_origin #landmine -- a released `kazi dashboard` on any non-default host/port renders fine but every phx-click is silently dead: prod check_origin rejects the LV socket
+
+The standalone `kazi dashboard` boot (released binary, prod config) never
+set `check_origin`, so Phoenix defaulted to checking the websocket Origin
+against the compiled url host -- which cannot know what the operator will
+browse (`localhost`, `127.0.0.1`, a LAN IP, a `--port` override). Result:
+the page server-renders perfectly, `phoenix*.min.js` load 200, but
+`liveSocket.isConnected()` stays false and the server log repeats "Could
+not check origin for Phoenix.Socket transport" -- every interaction
+(slide-over panel, fleet/session filters, mobile tabs) silently no-ops.
+This is L-0028's evil twin: the CLIENT was present, the SOCKET was refused;
+LiveViewTest is blind to both. Fix: the standalone boot merges
+`check_origin: :conn` (origin must match the host the request arrived on --
+works for any browse host, still blocks cross-site pages / CSWSH). See
+`Kazi.CLI.standalone_endpoint_config/3`. INVARIANT: dashboard interactivity
+must be browser-verified against the RELEASED binary on a NON-default
+host:port (e.g. `--port 4050` via the machine's LAN IP), not just a dev
+`mix` boot on 4000 -- the dev/test configs set `check_origin: false`, so
+they can never catch this class. Regression:
+test/kazi/cli/dashboard_test.exs "standalone_endpoint_config/3". (2026-07-07.)
