@@ -68,6 +68,29 @@ defmodule Kazi.CLI.DashboardTest do
   # Tier 2 — the real `kazi dashboard` entry point
   # ===========================================================================
 
+  describe "standalone_endpoint_config/3 — the fresh-boot endpoint config" do
+    test "pins check_origin to :conn so the LV socket connects on any host" do
+      config = Kazi.CLI.standalone_endpoint_config([], "127.0.0.1", 4321)
+
+      # Regression: the compiled prod config cannot know the browsing host
+      # (localhost / 127.0.0.1 / a LAN IP), and Phoenix's default origin check
+      # rejected the websocket on any non-default host/port -- the page
+      # rendered but every phx-click interaction was silently dead.
+      assert config[:check_origin] == :conn
+      assert config[:server] == true
+      assert config[:http][:port] == 4321
+      assert is_binary(config[:secret_key_base])
+    end
+
+    test "keeps a configured secret_key_base instead of generating one" do
+      config =
+        Kazi.CLI.standalone_endpoint_config([secret_key_base: "keep-me"], "0.0.0.0", 4050)
+
+      assert config[:secret_key_base] == "keep-me"
+      assert config[:check_origin] == :conn
+    end
+  end
+
   describe "kazi dashboard — standalone fleet-mode boot" do
     setup do
       :ok = Ecto.Adapters.SQL.Sandbox.checkout(Kazi.Repo)
