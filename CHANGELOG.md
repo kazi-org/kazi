@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.94.0](https://github.com/kazi-org/kazi/compare/v1.93.1...v1.94.0) (2026-07-07)
+
+
+### Features
+
+* **loop:** error permanence taxonomy (permanent vs transient) ([9cd7a68](https://github.com/kazi-org/kazi/commit/9cd7a686335ad688b2b9a0cc66b21486f1a6bbdd))
+
 ## [1.93.1](https://github.com/kazi-org/kazi/compare/v1.93.0...v1.93.1) (2026-07-07)
 
 
