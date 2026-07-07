@@ -203,6 +203,61 @@ defmodule KaziWeb.StarmapPanelTest do
     refute html =~ ~s(id="starmap-panel-resume")
   end
 
+  test "a finished run's honest terminal cause renders as an additive drill-in line (T48.4, ADR-0058)",
+       %{conn: conn} do
+    run = seed("wedged-goal")
+
+    {:ok, _} =
+      RunRegistry.finish(run.run_id, "stuck", %{
+        outcome_cause_class: "error_wedged",
+        outcome_cause_detail: %{
+          "ids" => ["live_route"],
+          "reasons" => %{"live_route" => "missing_url"},
+          "exhausted" => nil
+        }
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    assert html =~ ~s(id="starmap-panel-cause")
+    assert html =~ "cause: error_wedged"
+    assert html =~ "live_route: missing_url"
+  end
+
+  test "a budget_exhausted cause renders the exhausted dimension", %{conn: conn} do
+    run = seed("exhausted-goal")
+
+    {:ok, _} =
+      RunRegistry.finish(run.run_id, "over_budget", %{
+        outcome_cause_class: "budget_exhausted",
+        outcome_cause_detail: %{
+          "ids" => ["code"],
+          "reasons" => %{},
+          "exhausted" => "max_iterations"
+        }
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    assert html =~ "cause: budget_exhausted"
+    assert html =~ "max_iterations"
+  end
+
+  test "no cause classified renders no cause line", %{conn: conn} do
+    run = seed("clean-goal")
+    {:ok, _} = RunRegistry.finish(run.run_id, "converged")
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    refute html =~ ~s(id="starmap-panel-cause")
+  end
+
   test "the close button dismisses the panel", %{conn: conn} do
     run = seed("closeable-goal")
 
