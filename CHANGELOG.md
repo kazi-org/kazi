@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.103.0](https://github.com/kazi-org/kazi/compare/v1.102.0...v1.103.0) (2026-07-07)
+
+
+### Features
+
+* **bench:** prompt/context-variant arms + benchmark gate (T48.12) ([8205860](https://github.com/kazi-org/kazi/commit/8205860a3a38d73270797b7f68abfc08ab8139a7))
+
 ## [1.102.0](https://github.com/kazi-org/kazi/compare/v1.101.0...v1.102.0) (2026-07-07)
 
 
