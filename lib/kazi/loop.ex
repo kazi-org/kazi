@@ -127,6 +127,9 @@ defmodule Kazi.Loop do
   # dispatch — injected MCP servers + standard edit/shell tools, not the ambient
   # set. Consumed in `dispatch_agent/2`.
   alias Kazi.Harness.DispatchSurface
+  # T48.11 (ADR-0058 §3): the opt-in post-dispatch debrief question + the
+  # write-only extraction of a capped hypothesis list from a dispatch result.
+  alias Kazi.Harness.Debrief
   # T3.1d resource lease: the per-key lease substrate (acquire/renew/release via
   # CAS + TTL on an injected clock, ADR-0006). The loop leases the goal's resource
   # key before dispatch so contending instances serialize (see the dispatch-prep
@@ -579,7 +582,18 @@ defmodule Kazi.Loop do
               # ceiling cannot bind" flag, surfaced on `snapshot/1` and the
               # terminal result so the CLI/read-model can say so. Appended last
               # so the existing field order is untouched.
-              usage_fidelity: nil
+              usage_fidelity: nil,
+              # --- T48.11 (ADR-0058 §3): opt-in post-dispatch debrief -----------
+              # `debrief` opts the loop into appending the capped debrief question
+              # to every dispatch prompt (default false = byte-identical to
+              # today). `last_debrief` is the MOST RECENT dispatch's extracted,
+              # capped hypothesis list, attached to the NEXT iteration event —
+              # same "measured this dispatch, surfaced on the following
+              # observation" shape as `last_context`/`last_tools` (T34.3). `[]`
+              # until a dispatch reports one (or when debrief is disabled).
+              # Appended last so the existing field order is untouched.
+              debrief: false,
+              last_debrief: []
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -624,6 +638,13 @@ defmodule Kazi.Loop do
       state, and keeps re-observing on `:reobserve_interval_ms` to hold the
       predicates true forever. When `false` (default) the loop converges-and-stops
       exactly as the T0.8 guard prescribes.
+    * `:debrief` — opt into post-dispatch debrief capture (T48.11, ADR-0058 §3).
+      When `true`, every dispatch prompt carries one capped debrief question
+      (`Kazi.Harness.Debrief.question/0`) and a fixture-shaped structured answer
+      in the reply is parsed, capped, and surfaced on the NEXT iteration event
+      (`Kazi.Runtime` persists it as hypothesis rows). When `false` (default)
+      the prompt and the iteration event's `:debrief` field are byte-identical
+      to today.
     * `:flake_max_retries` — extra evaluations spent re-running a failing
       predicate to tell a real failure from a flake (T1.3); default
       `Kazi.Loop.Flake.max_retries/0`. `0` disables flake detection (a single
@@ -891,6 +912,9 @@ defmodule Kazi.Loop do
       # T3.4a standing mode: opt the loop into the continuous-maintenance
       # behaviour (default false = converge-and-stop).
       standing: Keyword.get(opts, :standing, false),
+      # T48.11 (ADR-0058 §3): opt the loop into appending the debrief question
+      # to every dispatch prompt (default false = byte-identical to today).
+      debrief: Keyword.get(opts, :debrief, false),
       on_iteration: Keyword.get(opts, :on_iteration),
       integrate_params: Map.new(Keyword.get(opts, :integrate_params, %{})),
       deploy_params: Map.new(Keyword.get(opts, :deploy_params, %{})),
@@ -1900,6 +1924,14 @@ defmodule Kazi.Loop do
     # is the most recent iteration that actually reported one.
     data = record_working_set(data, result)
 
+    # T48.11 (ADR-0058 §3): when the goal opted in, extract this dispatch's
+    # capped hypothesis list from the reply text and carry it forward the same
+    # way `record_counters/3` carries `context`/`tools` — surfaced on the NEXT
+    # iteration event, never read back into a prompt (write-only, see
+    # `Kazi.Harness.Debrief`'s moduledoc). Disabled (default) always resets to
+    # `[]`, so the iteration event stays byte-identical to today.
+    data = record_debrief(data, result)
+
     # The code changed under us: any prior land/deploy is now stale. Re-observe
     # on the poll interval (not zero) so a goal whose code predicate never goes
     # green polls rather than busy-spinning, and stays interruptible by `:stop`.
@@ -2000,7 +2032,8 @@ defmodule Kazi.Loop do
           digest: String.t(),
           evidence: String.t(),
           context_store: String.t() | nil,
-          retrieval: String.t() | nil
+          retrieval: String.t() | nil,
+          debrief_question: String.t() | nil
         }
   defp dispatch_prompt_parts(%Action{params: params}, %Data{goal: goal} = data) do
     failing = Map.get(params, :failing, [])
@@ -2025,9 +2058,23 @@ defmodule Kazi.Loop do
       digest: Digest.render(data.working_set_digest),
       evidence: evidence,
       context_store: context_store,
-      retrieval: retrieval_section(data)
+      retrieval: retrieval_section(data),
+      # T48.11 (ADR-0058 §3): the opt-in debrief question, appended LAST (the
+      # most volatile-looking section, but it's actually fixed text — ordering
+      # after retrieval keeps every EARLIER section's cache-stability analysis
+      # unchanged). `nil` when the goal did not opt in, so `append_section/2`
+      # renders nothing and the prompt is byte-identical to pre-T48.11.
+      debrief_question: debrief_question(data)
     }
   end
+
+  # T48.11: the debrief question is FIXED text (`Kazi.Harness.Debrief.question/0`
+  # takes no goal-specific input), so a goal that opts in gets the SAME bytes
+  # every dispatch — purely additive, and it never depends on any previously
+  # persisted hypothesis (the write-only rule, ADR-0058 §3).
+  @spec debrief_question(Data.t()) :: String.t() | nil
+  defp debrief_question(%Data{debrief: true}), do: Debrief.question()
+  defp debrief_question(%Data{debrief: false}), do: nil
 
   # T35.4 (ADR-0045 §3): evidence compression. Returns `{evidence_slot,
   # context_store_section}`.
@@ -2137,7 +2184,8 @@ defmodule Kazi.Loop do
          digest: digest,
          evidence: evidence,
          context_store: context_store,
-         retrieval: retrieval
+         retrieval: retrieval,
+         debrief_question: debrief_question
        }) do
     body =
       case digest do
@@ -2155,7 +2203,11 @@ defmodule Kazi.Loop do
     # and BEFORE retrieval; nil when no artifact was compressed this iteration, so
     # the default path is unchanged.
     prompt = append_section(prompt, context_store)
-    append_section(prompt, retrieval)
+    prompt = append_section(prompt, retrieval)
+    # T48.11 (ADR-0058 §3): the opt-in debrief question is appended LAST, after
+    # retrieval; nil when the goal did not opt in, so `append_section/2` is a
+    # no-op and the prompt is BYTE-IDENTICAL to the pre-T48.11 path.
+    append_section(prompt, debrief_question)
   end
 
   @spec append_section(String.t(), String.t() | nil) :: String.t()
@@ -2197,6 +2249,18 @@ defmodule Kazi.Loop do
         last_session_id: harness_session_id(result, data.last_session_id),
         last_harness_pid: harness_pid(result, data.last_harness_pid)
     }
+  end
+
+  # T48.11 (ADR-0058 §3): fold this dispatch's capped debrief hypothesis list
+  # into the loop state, attached to the NEXT iteration event (mirroring
+  # `record_counters/3`'s context/tools carry-forward, T34.3). Disabled ⇒ always
+  # `[]`, regardless of what the reply text contained — a goal that never opted
+  # in never even calls `Debrief.extract_from_result/1`.
+  @spec record_debrief(Data.t(), Kazi.HarnessAdapter.result()) :: Data.t()
+  defp record_debrief(%Data{debrief: false} = data, _result), do: %Data{data | last_debrief: []}
+
+  defp record_debrief(%Data{debrief: true} = data, result) do
+    %Data{data | last_debrief: Debrief.extract_from_result(result)}
   end
 
   # The dispatch result's harness session id when the profile parsed one
@@ -2774,7 +2838,10 @@ defmodule Kazi.Loop do
       context: data.last_context || Counters.empty_context(),
       tools: data.last_tools,
       harness_session_id: data.last_session_id,
-      harness_pid: data.last_harness_pid
+      harness_pid: data.last_harness_pid,
+      # T48.11 (ADR-0058 §3): the last dispatch's capped hypothesis list — `[]`
+      # when the goal never opted in, so this key stays byte-identical to today.
+      debrief: data.last_debrief
     }
 
     try do
@@ -3217,7 +3284,10 @@ defmodule Kazi.Loop do
       # The inner harness's session id from the latest dispatch (nil until one
       # reports it), so the runtime records it on the fleet registry row.
       harness_session_id: data.last_session_id,
-      harness_pid: data.last_harness_pid
+      harness_pid: data.last_harness_pid,
+      # T48.11 (ADR-0058 §3): the last dispatch's capped hypothesis list — `[]`
+      # when the goal never opted in, so this key stays byte-identical to today.
+      debrief: data.last_debrief
     }
 
     try do
@@ -3254,7 +3324,10 @@ defmodule Kazi.Loop do
       context: data.last_context || Counters.empty_context(),
       tools: data.last_tools,
       harness_session_id: data.last_session_id,
-      harness_pid: data.last_harness_pid
+      harness_pid: data.last_harness_pid,
+      # T48.11 (ADR-0058 §3): the last dispatch's capped hypothesis list — `[]`
+      # when the goal never opted in, so this key stays byte-identical to today.
+      debrief: data.last_debrief
     }
 
     try do

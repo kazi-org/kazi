@@ -199,6 +199,11 @@ defmodule Kazi.Runtime do
       declared `standing` field (so a goal-file `standing = true` runs standing
       without a flag); an explicit `:standing` here (the CLI `--standing` flag)
       OVERRIDES the goal-file. Default (neither set) `false` (converge-and-stop).
+    * `:debrief` — opt into post-dispatch debrief capture (T48.11, ADR-0058 §3).
+      Forwarded to `Kazi.Loop.start_link/1`. When omitted it DEFAULTS to the
+      goal's own declared `debrief` field (`[economy] debrief = true`); an
+      explicit `:debrief` here (the CLI `--debrief` flag) OVERRIDES the
+      goal-file. Default (neither set) `false` (byte-identical to today).
     * any other option (`:live_kinds`, `:reobserve_interval_ms`, `:name`) is
       forwarded verbatim to `Kazi.Loop.start_link/1`.
 
@@ -304,6 +309,10 @@ defmodule Kazi.Runtime do
           # the loop's standing mode defaults to the goal-file's declared
           # `standing`, overridable by an explicit `:standing` opt (CLI flag).
           :standing,
+          # T48.11 (ADR-0058 §3): dropped here and re-set in the merge below so
+          # the loop's debrief mode defaults to the goal-file's declared
+          # `debrief`, overridable by an explicit `:debrief` opt (CLI flag).
+          :debrief,
           # T32.4: resolved above and re-set in the merge below as the loop's
           # `:enforcement` profile.
           :enforcement
@@ -329,6 +338,10 @@ defmodule Kazi.Runtime do
           # declared `standing` field. So a goal authored standing runs standing
           # with no flag, and the flag can still force it on for any goal.
           standing: Keyword.get(opts, :standing, goal.standing),
+          # T48.11 (ADR-0058 §3): the CLI `--debrief` flag (an explicit
+          # `:debrief` opt) wins; otherwise fall back to the goal-file's own
+          # declared `debrief` field (`[economy] debrief = true`).
+          debrief: Keyword.get(opts, :debrief, goal.debrief),
           # T32.4 anti-gaming enforcement (ADR-0042): thread the resolved profile so
           # the loop composes clean-tree isolation + read-only flagging + the
           # skip→fail mapping onto the reconcile tick.
@@ -696,6 +709,7 @@ defmodule Kazi.Runtime do
           record_harness_session(run_id, payload)
           record_harness_pid(run_id, payload)
           persist_iteration(goal_ref, payload, events_sink_path)
+          persist_debrief(run_id, goal_ref, payload)
         end
 
       is_function(stream, 1) ->
@@ -707,6 +721,7 @@ defmodule Kazi.Runtime do
           record_harness_session(run_id, payload)
           record_harness_pid(run_id, payload)
           persist_iteration(goal_ref, payload, events_sink_path)
+          persist_debrief(run_id, goal_ref, payload)
         end
 
       true ->
@@ -817,6 +832,34 @@ defmodule Kazi.Runtime do
         :ok
     end
   end
+
+  # T48.11 (ADR-0058 §3): project the opted-in debrief answer's capped
+  # hypothesis list (folded onto the payload by `Kazi.Loop.record_debrief/2`) as
+  # read-model rows. A no-op when the list is empty (disabled, or nothing
+  # reported this iteration) — this is the ONLY place a debrief answer is ever
+  # written; nothing reads it back into a prompt (the write-only rule).
+  # Best-effort like every other registry/read-model write in this module.
+  defp persist_debrief(run_id, goal_ref, %{debrief: [_ | _] = items, iteration: index}) do
+    case ReadModel.record_debrief_hypotheses(%{
+           goal_ref: goal_ref,
+           run_id: run_id,
+           iteration: index,
+           items: items
+         }) do
+      {:ok, _hypotheses} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(fn ->
+          "kazi.runtime failed to persist debrief hypotheses for goal=#{goal_ref}: " <>
+            inspect(reason)
+        end)
+
+        :ok
+    end
+  end
+
+  defp persist_debrief(_run_id, _goal_ref, _payload), do: :ok
 
   # The events-sink line for one iteration (T46.2): built from the read-model
   # row `record_iteration/1` just inserted, so its shape/values are exactly the

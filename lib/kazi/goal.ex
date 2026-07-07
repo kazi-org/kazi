@@ -57,6 +57,12 @@ defmodule Kazi.Goal do
       before). Like `harness`/`standing`, this is appended additively so the
       existing field order is untouched. Predicates referencing a group, and
       parent reference / cycle validation, are a separate task (T12.2).
+    * `debrief` — opt-in post-dispatch debrief capture (T48.11, ADR-0058 §3
+      "self-report" tier), declared in the goal-file's `[economy]` table. When
+      `true`, each dispatch prompt carries one capped debrief question and any
+      structured answer the agent gives is persisted as HYPOTHESIS rows in the
+      read-model — the answer never mutates a future prompt (the gaming-surface
+      rule, cf. T32.5). Default `false` (byte-identical to today).
 
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
@@ -102,6 +108,7 @@ defmodule Kazi.Goal do
           harness: harness() | nil,
           groups: [Group.t()],
           enforcement: Kazi.Enforcement.t() | nil,
+          debrief: boolean(),
           metadata: map()
         }
 
@@ -134,6 +141,11 @@ defmodule Kazi.Goal do
             # `Kazi.Enforcement.resolve/1`). Appended additively so the existing
             # field order is untouched.
             enforcement: nil,
+            # T48.11 (ADR-0058 §3): opt-in post-dispatch debrief capture, declared
+            # in the goal-file's `[economy]` table. Default false = byte-identical
+            # to today (no debrief question, no hypothesis rows). Appended
+            # additively so the existing field order is untouched.
+            debrief: false,
             metadata: %{}
 
   @doc """
@@ -148,9 +160,10 @@ defmodule Kazi.Goal do
   criteria, T2.1). `:standing` (default `false`) declares a standing/maintenance
   goal (T3.4d, UC-016). `:harness` (default `nil`) is the goal's harness
   selection map (T8.6, ADR-0016). `:groups` (default `[]`) is the declared group
-  taxonomy (`Kazi.Goal.Group` list, T12.1, ADR-0020). `:budget` and `:scope`
-  accept either a struct or a keyword list (forwarded to `Kazi.Budget.new/1` /
-  `Kazi.Scope.new/1`).
+  taxonomy (`Kazi.Goal.Group` list, T12.1, ADR-0020). `:debrief` (default
+  `false`) opts into post-dispatch debrief capture (T48.11, ADR-0058 §3).
+  `:budget` and `:scope` accept either a struct or a keyword list (forwarded to
+  `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
 
   ## Examples
 
@@ -184,6 +197,8 @@ defmodule Kazi.Goal do
       groups: Keyword.get(opts, :groups, []),
       # T32.4 anti-gaming enforcement (ADR-0042): the authored enforcement profile.
       enforcement: Keyword.get(opts, :enforcement),
+      # T48.11 (ADR-0058 §3): opt-in post-dispatch debrief capture.
+      debrief: Keyword.get(opts, :debrief, false),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
