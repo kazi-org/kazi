@@ -1357,6 +1357,7 @@ defmodule Kazi.CLI do
           :converged,
           result,
           run_economy(goal, :converged, result, opts, persist?),
+          workspace,
           json?
         )
 
@@ -1368,6 +1369,7 @@ defmodule Kazi.CLI do
           :over_budget,
           result,
           run_economy(goal, :over_budget, result, opts, persist?),
+          workspace,
           json?
         )
 
@@ -1379,6 +1381,7 @@ defmodule Kazi.CLI do
           :stopped,
           result,
           run_economy(goal, :stopped, result, opts, persist?),
+          workspace,
           json?
         )
 
@@ -1633,8 +1636,8 @@ defmodule Kazi.CLI do
   # Render the loop's terminal result on the requested surface (T15.3): the
   # versioned JSON result object under --json, the existing human report
   # otherwise. Both share the SAME loop result; only the OUTPUT shape differs.
-  defp report_outcome(%Goal{} = goal, outcome, result, economy, json?) do
-    emit(json?, run_result_json(goal, outcome, result, economy), fn ->
+  defp report_outcome(%Goal{} = goal, outcome, result, economy, workspace, json?) do
+    emit(json?, run_result_json(goal, outcome, result, economy, workspace), fn ->
       report(goal, human_outcome(outcome), result)
     end)
   end
@@ -3590,8 +3593,21 @@ defmodule Kazi.CLI do
   #                        ADR-0041's predicate envelope followed; the single
   #                        rolled-up total stays in `budget_spent.tokens` for
   #                        back-compat. See `Kazi.CLI.Usage`.
-  @spec run_result_json(Goal.t(), :converged | :stopped | :over_budget, map(), map()) :: map()
-  defp run_result_json(%Goal{id: id}, outcome, result, economy) do
+  #   * `collateral`     — issue #860 proposal 3: an ADDITIVE array of files
+  #                        changed during the run that sit outside the goal's
+  #                        write scope, net-deletion entries ranked first (see
+  #                        `Kazi.CollateralReport`). Present only when non-empty
+  #                        (absent ⇒ nothing collateral was found, byte-identical
+  #                        to before this field existed).
+  @spec run_result_json(
+          Goal.t(),
+          :converged | :stopped | :over_budget,
+          map(),
+          map(),
+          String.t() | nil
+        ) ::
+          map()
+  defp run_result_json(%Goal{id: id} = goal, outcome, result, economy, workspace) do
     status = run_status(outcome, result)
 
     %{
@@ -3611,6 +3627,27 @@ defmodule Kazi.CLI do
     |> put_context_store(result)
     |> put_stuck_bundle(result)
     |> put_quarantine(result)
+    |> put_collateral(goal, workspace)
+  end
+
+  # issue #860: the additive `collateral` array — files changed this run that
+  # sit outside the goal's write scope, net-deletion first. Present only when
+  # non-empty; a missing/non-git workspace yields `[]` (degrades to absent,
+  # never an error) via `Kazi.CollateralReport.collateral/2`.
+  defp put_collateral(map, %Goal{} = goal, workspace) do
+    case Kazi.CollateralReport.collateral(goal, workspace) do
+      [] -> map
+      entries -> Map.put(map, :collateral, Enum.map(entries, &collateral_entry_json/1))
+    end
+  end
+
+  defp collateral_entry_json(%{
+         path: path,
+         additions: additions,
+         deletions: deletions,
+         net_deletion: net_deletion
+       }) do
+    %{path: path, additions: additions, deletions: deletions, net_deletion: net_deletion}
   end
 
   # i795/#795: the additive `quarantine` array — the predicate ids quarantined
