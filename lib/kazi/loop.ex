@@ -389,15 +389,6 @@ defmodule Kazi.Loop do
               # for O(1) prepend; the detector sorts by index. Appended last so the
               # existing field order is untouched.
               dispatch_log: [],
-              # T48.7 (ADR-0058 decision 1): a first-class dispatch counter —
-              # incremented once per `:dispatch_agent` action actually run, so the
-              # read-model can persist a run's dispatch count without re-deriving
-              # it from `dispatch_log` (which exists for regression attribution, a
-              # different concern). Loop-tracked, not harness-reported: always
-              # known, never subject to the honest-unknown discipline the
-              # token/cost fields below need. Appended last so the existing field
-              # order is untouched.
-              dispatches: 0,
               # The current list of flagged regressions (the detector's output for
               # the latest observation): each a map of predicate_id,
               # green_iteration, red_iteration, status, attributed_dispatch.
@@ -1815,10 +1806,6 @@ defmodule Kazi.Loop do
     # seeded it (data.iterations - 1, the last completed observation), so the
     # detector can attribute a later green→red edge to it.
     data = log_dispatch(data, action)
-    # T48.7 (ADR-0058 decision 1): count this dispatch toward the run's
-    # first-class dispatch total, surfaced in the terminal result and persisted
-    # to the read-model.
-    data = %Data{data | dispatches: data.dispatches + 1}
     reobserve(data, data.reobserve_interval_ms)
   end
 
