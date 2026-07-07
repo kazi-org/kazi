@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.104.0](https://github.com/kazi-org/kazi/compare/v1.103.1...v1.104.0) (2026-07-07)
+
+
+### Features
+
+* **cli:** plan/init surface a learned [budget] suggestion (T48.9) ([45fc606](https://github.com/kazi-org/kazi/commit/45fc606505fbec3b80ce60ae4c79268074555d3c))
+* **economy:** learned budget suggestion derivation (T48.9, ADR-0058) ([ec83b16](https://github.com/kazi-org/kazi/commit/ec83b16180f5502d685858a82a1355f6b37bd224))
+* **economy:** pool run history across a shape bucket (T48.9) ([2dd2055](https://github.com/kazi-org/kazi/commit/2dd20558f2ebd6f7af29696db4a2f53298975634))
+
 ## [1.103.1](https://github.com/kazi-org/kazi/compare/v1.103.0...v1.103.1) (2026-07-07)
 
 
