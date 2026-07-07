@@ -25,6 +25,7 @@ defmodule Kazi.RuntimeTest do
   use ExUnit.Case, async: false
 
   alias Kazi.{Goal, Predicate, PredicateVector, ReadModel, Repo, Runtime, Scope}
+  alias Kazi.ReadModel.Run
 
   @moduletag :tmp_dir
 
@@ -212,6 +213,15 @@ defmodule Kazi.RuntimeTest do
     assert result.outcome == :over_budget
     assert result.reason == :max_iterations
     assert result.iterations == 2
+    # T48.4 (ADR-0058 decision 4): a REAL failing predicate is still `:fail` at
+    # the terminal re-observation -- this is honestly `:budget_exhausted`, not
+    # a mislabeled config wedge.
+    assert result.cause == %{
+             class: :budget_exhausted,
+             ids: [:code],
+             reasons: nil,
+             exhausted: :max_iterations
+           }
 
     # The stop is visible in the persisted iteration log: a budget_stop row
     # naming the exceeded dimension, beyond the last observed iteration index.
@@ -223,6 +233,66 @@ defmodule Kazi.RuntimeTest do
     # read back as its string form.
     assert to_string(budget_stop.action_params["reason"]) == "max_iterations"
     refute budget_stop.converged
+
+    # T48.4 (ADR-0058 decision 4): the cause is ALSO projected onto the run
+    # registry row (T48.7's `runs` table), so a finished run's cause survives
+    # after the in-process loop is gone (the dashboard drill-in reads this).
+    run = Repo.get_by!(Run, goal_ref: "over-budget")
+    assert run.outcome_cause_class == "budget_exhausted"
+    assert run.outcome_cause_detail["ids"] == ["code"]
+    assert run.outcome_cause_detail["exhausted"] == "max_iterations"
+    assert run.outcome_cause_detail["reasons"] == %{}
+  end
+
+  test "a genuine token-ceiling over_budget stop (real failing work, tokens exhausted first) carries cause budget_exhausted with the token_budget dimension (T48.4, ADR-0058)",
+       %{tmp_dir: tmp_dir} do
+    %{work: work} = setup_repo(tmp_dir)
+
+    # A harness stub that reports a real usage envelope (so tokens accumulate)
+    # but NEVER satisfies the code predicate -- it stays :fail forever, so the
+    # loop can only stop on the token ceiling, not by converging.
+    stub = Path.join(tmp_dir, "stub_token_ceiling.sh")
+
+    File.write!(stub, """
+    #!/bin/sh
+    echo '{"result":"still broken","total_cost_usd":0.01,"usage":{"input_tokens":80,"output_tokens":80}}'
+    exit 0
+    """)
+
+    File.chmod!(stub, 0o755)
+
+    goal =
+      Goal.new("over-budget-tokens",
+        predicates: [
+          Predicate.new(:code, :tests, config: %{cmd: "sh", args: ["-c", "false"]})
+        ],
+        # A generous iteration ceiling and a tight token ceiling -- tokens must
+        # be what actually trips the stop, not iterations.
+        budget: [max_iterations: 20, max_tokens: 100],
+        scope: Scope.new(workspace: work)
+      )
+
+    assert {:ok, result} =
+             Runtime.run(goal,
+               workspace: work,
+               adapter_opts: [command: stub],
+               reobserve_interval_ms: 5,
+               await_timeout: 10_000
+             )
+
+    assert result.outcome == :over_budget
+    assert result.reason == :token_budget
+
+    assert result.cause == %{
+             class: :budget_exhausted,
+             ids: [:code],
+             reasons: nil,
+             exhausted: :token_budget
+           }
+
+    run = Repo.get_by!(Run, goal_ref: "over-budget-tokens")
+    assert run.outcome_cause_class == "budget_exhausted"
+    assert run.outcome_cause_detail["exhausted"] == "token_budget"
   end
 
   test "rejects a vacuous goal whose predicates all pass at t0 and never starts the loop (T2.3, R3)",
