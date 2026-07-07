@@ -247,7 +247,20 @@ defmodule Kazi.Loop do
           # `:converged` on any of these (their status is `:unknown`, never
           # `:pass`) — this field is WHY: it names the ids so a `:stopped` result
           # is diagnosable without re-deriving quarantine state from the vector.
-          quarantine: [Kazi.Predicate.id()]
+          quarantine: [Kazi.Predicate.id()],
+          # T48.7 (ADR-0058 decision 1): the number of `:dispatch_agent` actions
+          # actually run this run (loop-tracked, always known — never nil).
+          dispatches: non_neg_integer(),
+          # T48.7: the active ADR-0047 context tier at termination (the same
+          # value `snapshot/1` reads via `active_tier/1`).
+          context_tier: Tier.t(),
+          # T48.7: the goal shape — predicate count + kind histogram — computed
+          # from the goal at termination, so the read-model can persist it
+          # alongside the economics without reloading the goal file.
+          goal_shape: %{
+            predicate_count: non_neg_integer(),
+            kind_histogram: %{optional(Kazi.Predicate.provider_kind()) => pos_integer()}
+          }
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -370,6 +383,15 @@ defmodule Kazi.Loop do
               # for O(1) prepend; the detector sorts by index. Appended last so the
               # existing field order is untouched.
               dispatch_log: [],
+              # T48.7 (ADR-0058 decision 1): a first-class dispatch counter —
+              # incremented once per `:dispatch_agent` action actually run, so the
+              # read-model can persist a run's dispatch count without re-deriving
+              # it from `dispatch_log` (which exists for regression attribution, a
+              # different concern). Loop-tracked, not harness-reported: always
+              # known, never subject to the honest-unknown discipline the
+              # token/cost fields below need. Appended last so the existing field
+              # order is untouched.
+              dispatches: 0,
               # The current list of flagged regressions (the detector's output for
               # the latest observation): each a map of predicate_id,
               # green_iteration, red_iteration, status, attributed_dispatch.
@@ -1778,6 +1800,10 @@ defmodule Kazi.Loop do
     # seeded it (data.iterations - 1, the last completed observation), so the
     # detector can attribute a later green→red edge to it.
     data = log_dispatch(data, action)
+    # T48.7 (ADR-0058 decision 1): count this dispatch toward the run's
+    # first-class dispatch total, surfaced in the terminal result and persisted
+    # to the read-model.
+    data = %Data{data | dispatches: data.dispatches + 1}
     reobserve(data, data.reobserve_interval_ms)
   end
 
@@ -2450,9 +2476,33 @@ defmodule Kazi.Loop do
       enforcement: enforcement_status(data),
       # i795/#795: name the quarantined ids on the terminal result — the field
       # `all_satisfied?/1`'s non-convergence is otherwise silent about.
-      quarantine: MapSet.to_list(data.quarantine)
+      quarantine: MapSet.to_list(data.quarantine),
+      # T48.7 (ADR-0058 decision 1): run-end economics inputs the read-model
+      # projection needs beyond tokens_used/usage above — the dispatch count,
+      # the active context tier, and the goal shape.
+      dispatches: data.dispatches,
+      context_tier: active_tier(data),
+      goal_shape: goal_shape(data.goal)
     }
     |> maybe_attach_stuck_bundle(data)
+  end
+
+  # T48.7 (ADR-0058 decision 1): the goal's shape — how many predicates it
+  # declares and their kind breakdown — computed once at termination so the
+  # read-model can group persisted run economics by "similar goal" (T48.8/T48.9)
+  # without reloading the goal file. Reuses `Goal.all_predicates/1`, the same
+  # source `predicate_kinds/1` reads.
+  @spec goal_shape(Goal.t()) :: %{
+          predicate_count: non_neg_integer(),
+          kind_histogram: %{optional(Kazi.Predicate.provider_kind()) => pos_integer()}
+        }
+  defp goal_shape(%Goal{} = goal) do
+    predicates = Goal.all_predicates(goal)
+
+    %{
+      predicate_count: length(predicates),
+      kind_histogram: Enum.frequencies_by(predicates, & &1.kind)
+    }
   end
 
   # T35.6 (ADR-0045 §5): on a stuck stop, attach a compact, bounded bundle so the
