@@ -468,6 +468,16 @@ The binary persists its read-model to `$KAZI_DB` if set, otherwise
 `~/.kazi/kazi.db` (created on first run; see `config/runtime.exs`). Unlike the
 escript, every iteration and proposal is persisted — the NIF is bundled.
 
+If the VM crashes (e.g. the installed binary was replaced mid-run by an
+in-place upgrade), `erl_crash.dump` is written under `$KAZI_STATE_DIR/crash` if
+set, otherwise `~/.kazi/crash` — never the workspace CWD (`Kazi.CrashDump`,
+issue #856). And if the crash is specifically caused by the on-disk release
+having changed underneath the running VM, every entry point (escript, `mix
+kazi.run`, the release `eval` path, the Burrito binary) reports one clear line
+— `installed release changed under a running VM -- re-run under the new
+binary` — instead of a harness stack trace plus Logger formatter-crash spam
+(`Kazi.SwapDiagnosis`).
+
 > **macOS 26 + Zig note.** Burrito 1.5.0 pins Zig **0.15.2**, which cannot link
 > native binaries against the macOS 26 SDK (Xcode 26); Zig 0.16 links it but is
 > API-incompatible with Burrito's `build.zig`. On a macOS 26 host the wrap step
