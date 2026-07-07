@@ -586,6 +586,11 @@ expect_body = "ok"
 body_match = "exact"      # exact, not substring — "ok" is a substring of "not-ok"!
 ```
 
+Picking `[budget]` numbers by hand? `kazi plan` and `kazi init` will suggest
+one LEARNED from your own run history once you have some (p95 x 1.5
+headroom, with provenance — advisory only, never applied silently; see
+[docs/economy.md](docs/economy.md#learned-budget-proposals-kazi-plan--kazi-init-t489)).
+
 Run it:
 
 ```sh

@@ -143,6 +143,11 @@ next move, so raising the budget is never the reflexive fix for a config error
 (T48.4, ADR-0058 §4; see
 [`cause` — honest terminal cause class](schemas/run-result.md#cause--honest-terminal-cause-class-adr-0058)).
 
+Don't have to guess these numbers: `kazi plan` and `kazi init` each suggest a
+`[budget]` block LEARNED from local run history (p95 x 1.5 headroom, with
+provenance) when one exists — advisory only, never applied automatically. See
+[docs/economy.md](economy.md#learned-budget-proposals-kazi-plan--kazi-init-t489).
+
 #### Held-out acceptance predicates (anti-gaming)
 
 A `[[predicate]]` may set `held_out = true`:

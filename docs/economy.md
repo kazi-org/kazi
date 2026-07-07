@@ -5,9 +5,9 @@
 outcome, harness/model/context tier, and the goal's shape (predicate count +
 kind histogram). `kazi economy` is the pure-read query over that history —
 it aggregates every FINISHED run into p50/p95 percentile groups so an
-operator (or, later, the learned budget suggestions `kazi plan` and
-`kazi init` will surface, T48.9) can see what a goal of a given shape
-typically costs.
+operator (or the learned budget suggestions `kazi plan` and `kazi init`
+surface, T48.9 — [see below](#learned-budget-proposals-kazi-plan--kazi-init-t489))
+can see what a goal of a given shape typically costs.
 
 See [ADR-0058](adr/0058-economy-feedback-loop.md) for the full decision and
 [docs/plans/E48.md](plans/E48.md) for the epic.
@@ -166,3 +166,50 @@ result. The gate is a human/agent decision informed by a measured table --
 exactly the ADR-0058 write-only boundary (kazi's behavior/self-report
 layers observe and record; only a human-approved change to the pack itself
 ships).
+
+## Learned budget proposals (`kazi plan` / `kazi init`, T48.9)
+
+`kazi plan` and `kazi init` (the repo-adoption command) each SUGGEST a
+`[budget]` block for the goal they are producing, derived from this same
+aggregate — never applied
+automatically. A suggestion is p95 x 1.5 headroom over the matching history
+group, rounded to a granularity a human would actually type (`max_tokens` to
+the nearest 10k, `max_wall_clock_ms` to the nearest minute, `max_dispatches`
+to the next whole dispatch). A metric with no reported history contributes no
+key at all (honest-unknown, ADR-0046) — never a fabricated number.
+
+Grouping falls back the same way in both cases: when the goal's target model
+and harness are both already known and an exact `{shape, model, harness}`
+group exists, the suggestion is scored against it; otherwise (the common
+case — neither `plan` nor `init` knows the target harness yet) every run in
+the goal's shape bucket is pooled regardless of model/harness, and the
+provenance line says so ("any model/harness").
+
+With no usable local history (an empty read-model, or a shape bucket with no
+runs), both commands' output is **byte-identical** to a build without this
+feature — no `suggested_budget` key, no suggestion text, no comment block.
+
+- **`kazi plan`** (`Kazi.Authoring`) renders the suggestion as a
+  `suggested_budget` field on `plan --json`'s draft object (present only when
+  a suggestion exists), or an advisory text block in human output. Either way
+  it is metadata about the draft, never written into the goal itself:
+  approving the proposal (`kazi approve`) yields a goal whose `[budget]` is
+  the loader's ordinary default (all ceilings `nil`) unless the human copied
+  the suggestion into the goal-file/predicates themselves.
+- **`kazi init`** (`Kazi.Adopt`/`Kazi.Adopt.Writer`) renders the suggestion as
+  a COMMENTED `[budget]` block in the generated goal-file — the same
+  comment-only pattern the live-predicate scaffold already uses. It never
+  parses, so loading the generated goal-file carries no budget until a human
+  uncomments it.
+
+```toml
+# suggested by kazi economy: learned from 12 runs (shape 4-8, any model/harness), p95 x 1.5
+# kazi NEVER applies a learned budget silently -- uncomment to opt in.
+# [budget]
+# max_tokens = 750000
+# max_dispatches = 6
+# max_wall_clock_ms = 600000
+```
+
+See [ADR-0058](adr/0058-economy-feedback-loop.md) decision 2 for the full
+rationale.
