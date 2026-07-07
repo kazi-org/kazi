@@ -121,10 +121,12 @@ The goal's acceptance is the **conjunction** of all predicates — there is no
 `deploy_target.toml`, `browser_acceptance.toml`, …). See
 [concept.md §5](concept.md#5-the-goal-contract-adr-0002) for the full goal
 contract and the [`[budget]`](../lib/kazi/goal/loader.ex) keys
-(`max_iterations`, `max_wall_clock_ms`, `max_tokens`, and `cached_read_weight` —
-the discount cached-read input tokens get against the `max_tokens` ceiling so a
-cache-hit-heavy run is not falsely flagged `over_budget`; defaults to a low flat
-weight, ADR-0046).
+(`max_iterations`, `max_wall_clock_ms`, `max_tokens`, `max_dispatches` — a
+ceiling on `:dispatch_agent` actions only, so a run stuck polling a
+persistently-erroring live predicate can't trip it by spinning cheap observe
+ticks (T48.6, ADR-0058) — and `cached_read_weight`, the discount cached-read
+input tokens get against the `max_tokens` ceiling so a cache-hit-heavy run is
+not falsely flagged `over_budget`; defaults to a low flat weight, ADR-0046).
 
 #### Held-out acceptance predicates (anti-gaming)
 
