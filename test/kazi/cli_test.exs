@@ -180,7 +180,7 @@ defmodule Kazi.CLITest do
       assert propose_msg =~ "unknown command"
     end
 
-    test "`apply` carries the run flags through (env / standing / harness / json / parallel)" do
+    test "`apply` carries the run flags through (env / standing / debrief / harness / json / parallel)" do
       assert {:run, "g.toml", opts} =
                Kazi.CLI.parse([
                  "apply",
@@ -190,6 +190,7 @@ defmodule Kazi.CLITest do
                  "--env",
                  "prod",
                  "--standing",
+                 "--debrief",
                  "--harness",
                  "opencode",
                  "--json",
@@ -198,6 +199,7 @@ defmodule Kazi.CLITest do
 
       assert opts[:env] == "prod"
       assert opts[:standing] == true
+      assert opts[:debrief] == true
       assert opts[:harness] == "opencode"
       assert opts[:json] == true
       assert opts[:parallel] == true
