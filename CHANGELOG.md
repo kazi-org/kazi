@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.89.0](https://github.com/kazi-org/kazi/compare/v1.88.0...v1.89.0) (2026-07-07)
+
+
+### Features
+
+* **boot:** pin erl_crash.dump under kazi's state dir + diagnose binary swaps ([88ad45b](https://github.com/kazi-org/kazi/commit/88ad45bfa2ed1ca2533793e8f605be00fecfe9b9)), closes [#856](https://github.com/kazi-org/kazi/issues/856)
+
 ## [1.88.0](https://github.com/kazi-org/kazi/compare/v1.87.0...v1.88.0) (2026-07-06)
 
 
