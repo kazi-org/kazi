@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.102.0](https://github.com/kazi-org/kazi/compare/v1.101.0...v1.102.0) (2026-07-07)
+
+
+### Features
+
+* **cli:** surface honest cause in run --json (T48.4) ([68fb99d](https://github.com/kazi-org/kazi/commit/68fb99dd703d01aca0ffd400466a2fd01c2bc02b))
+* **dashboard:** show honest cause in the drill-in panel (T48.4) ([34586ee](https://github.com/kazi-org/kazi/commit/34586ee2ca56bf847f936bac445ba21e877373c8))
+* **loop:** honest terminal cause classifier (T48.4, ADR-0058 decision 4) ([2231ef2](https://github.com/kazi-org/kazi/commit/2231ef2f9d66f4eb490d954a2e8edfe3f4a23c71))
+* **read-model:** add outcome_cause_detail field to Run schema (T48.4) ([fd1c047](https://github.com/kazi-org/kazi/commit/fd1c04718ec1603cf531d11644dd482136d68a4f))
+* **read-model:** migrate runs table for honest terminal cause detail (T48.4) ([e316869](https://github.com/kazi-org/kazi/commit/e3168693723c6cba0e5daa6aa5b13625aa58ccc4))
+* **runtime:** project honest cause onto the read-model (T48.4) ([9a40379](https://github.com/kazi-org/kazi/commit/9a403792d48612bd6105a8b8bccc655e2893f8f0))
+
 ## [1.101.0](https://github.com/kazi-org/kazi/compare/v1.100.0...v1.101.0) (2026-07-07)
 
 
