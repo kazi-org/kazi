@@ -7,6 +7,12 @@ defmodule Kazi.Application do
 
   @impl true
   def start(_type, _args) do
+    # Pin erl_crash.dump under kazi's own state dir, not the workspace CWD
+    # (issue #856). This runs before anything else below so it covers every
+    # entry point that reaches this callback (escript, `mix kazi.run`, the
+    # release `eval` path, and the Burrito binary dispatch just below).
+    Kazi.CrashDump.configure!()
+
     # Burrito binary entry (T6.2, ADR-0014). A Burrito-wrapped binary boots this
     # release instead of running an `eval` command, so the CLI args the operator
     # typed (`kazi run goal.toml ...`) arrive as Burrito's argv, not via an `eval`
