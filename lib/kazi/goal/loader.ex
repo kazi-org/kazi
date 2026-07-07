@@ -44,13 +44,18 @@ defmodule Kazi.Goal.Loader do
   | `max_iterations`     | positive integer | `Budget.max_iterations`  |
   | `max_wall_clock_ms`  | positive integer | `Budget.max_wall_clock_ms` |
   | `max_tokens`         | positive integer | `Budget.max_tokens`      |
+  | `max_dispatches`     | positive integer | `Budget.max_dispatches`  |
   | `cached_read_weight` | float `0.0..1.0` | `Budget.cached_read_weight` |
 
-  Omitted ceiling dimensions are unbounded (`nil`). `cached_read_weight` is not a
-  ceiling: it is the fraction of a fresh token each cached-read input token counts
-  as in the token budget (T34.4, ADR-0046) — cached reads are far cheaper than
-  fresh input, so a cache-hit-heavy run is not falsely flagged `over_budget`. When
-  omitted it defaults to `Budget.default_cached_read_weight/0`.
+  Omitted ceiling dimensions are unbounded (`nil`). `max_dispatches` (T48.6,
+  ADR-0058) counts only `:dispatch_agent` actions — unlike `max_iterations`, a
+  no-op observe tick never consumes it, so a run wedged on a persistently
+  erroring predicate cannot trip `max_dispatches` by spinning observe ticks
+  alone. `cached_read_weight` is not a ceiling: it is the fraction of a fresh
+  token each cached-read input token counts as in the token budget (T34.4,
+  ADR-0046) — cached reads are far cheaper than fresh input, so a cache-hit-heavy
+  run is not falsely flagged `over_budget`. When omitted it defaults to
+  `Budget.default_cached_read_weight/0`.
 
   ### `[scope]` table (optional, → `Kazi.Scope`)
 
@@ -428,7 +433,7 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_budget(budget) when is_map(budget) do
-    keys = [:max_iterations, :max_wall_clock_ms, :max_tokens]
+    keys = [:max_iterations, :max_wall_clock_ms, :max_tokens, :max_dispatches]
 
     Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, acc} ->
       case Map.get(budget, Atom.to_string(key)) do

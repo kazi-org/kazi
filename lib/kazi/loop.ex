@@ -351,6 +351,12 @@ defmodule Kazi.Loop do
               # token dimension). Each :dispatch_agent result that carries a token
               # estimate adds to this running total.
               tokens_used: 0,
+              # T48.6 (ADR-0058) budget: count of completed :dispatch_agent actions
+              # (the max_dispatches dimension). Incremented ONLY in dispatch_agent/2,
+              # once per agent dispatch — an observe-only tick never touches this, so
+              # a run wedged on a persistently erroring predicate cannot trip
+              # max_dispatches by spinning no-op ticks alone (unlike max_iterations).
+              dispatches: 0,
               # The budget dimension that forced an :over_budget stop, if any
               # (surfaced in snapshot/1 and the terminal result).
               budget_reason: nil,
@@ -789,6 +795,7 @@ defmodule Kazi.Loop do
           release_ref: String.t() | nil,
           quarantine: [Kazi.Predicate.id()],
           tokens_used: non_neg_integer(),
+          dispatches: non_neg_integer(),
           budget_reason: Budget.reason() | nil,
           stuck_failing: [Kazi.Predicate.id()] | nil,
           regressions: [RegressionDetector.flag()],
@@ -1043,6 +1050,9 @@ defmodule Kazi.Loop do
       # T1.4 budget: current token spend + the dimension that stopped the loop
       # (nil unless it stopped :over_budget).
       tokens_used: data.tokens_used,
+      # T48.6 (ADR-0058) budget: completed :dispatch_agent actions so far (the
+      # max_dispatches dimension) — observe-only ticks never increment this.
+      dispatches: data.dispatches,
       budget_reason: data.budget_reason,
       # T1.5 stuck: the persistent failing set the loop stopped stuck on, or nil
       # if it did not stop stuck.
@@ -1770,6 +1780,11 @@ defmodule Kazi.Loop do
     # T1.4 budget: accumulate this run's token estimate (if the harness reported
     # one) into the running total the budget guard checks next tick.
     data = accumulate_tokens(data, result)
+
+    # T48.6 (ADR-0058) budget: this IS a completed :dispatch_agent action, so it
+    # counts against max_dispatches regardless of the result (success or error) —
+    # the dimension budgets dispatch attempts, not successful ones.
+    data = accumulate_dispatches(data)
 
     # T34.1 (ADR-0046): accumulate the run-aggregate usage envelope — the
     # cached-vs-fresh token/cost components the harness reported — surfaced in the
@@ -2683,7 +2698,8 @@ defmodule Kazi.Loop do
     Budget.check(budget, %{
       iterations: data.iterations,
       elapsed_ms: elapsed_ms(data),
-      tokens: budgeted_tokens(data)
+      tokens: budgeted_tokens(data),
+      dispatches: data.dispatches
     })
   end
 
@@ -2755,6 +2771,15 @@ defmodule Kazi.Loop do
     do: tokens
 
   defp token_estimate(_), do: 0
+
+  # T48.6 (ADR-0058) budget: count this completed :dispatch_agent action toward
+  # max_dispatches. Called exactly once per dispatch, from dispatch_agent/2 only
+  # — observe_tick/1 never calls this, which is what keeps max_dispatches from
+  # tripping on no-op observe ticks.
+  @spec accumulate_dispatches(Data.t()) :: Data.t()
+  defp accumulate_dispatches(%Data{} = data) do
+    %Data{data | dispatches: data.dispatches + 1}
+  end
 
   # T34.1 (ADR-0046): fold a harness run's reported usage components into the
   # run-aggregate envelope. Only components the harness actually reported are

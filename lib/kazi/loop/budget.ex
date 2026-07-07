@@ -4,11 +4,14 @@ defmodule Kazi.Loop.Budget do
 
   A goal carries a hard ceiling (`Kazi.Budget`, ADR-0002, concept §4): the loop
   must stop — rather than burn money or spin forever — once it crosses any of
-  three independent limits:
+  four independent limits:
 
     * `:max_iterations`    — the loop has run too many observe→decide cycles;
     * `:max_wall_clock_ms` — too much elapsed wall-clock since it started;
-    * `:max_tokens`        — too many estimated tokens spent across harness runs.
+    * `:max_tokens`        — too many estimated tokens spent across harness runs;
+    * `:max_dispatches`    — too many `:dispatch_agent` actions (T48.6,
+      ADR-0058) — unlike `:max_iterations`, a no-op observe tick never counts
+      against this one.
 
   This module holds ONLY the decision: given the budget config and the current
   usage, it returns `:ok` or `{:stop, dimension}` naming the exceeded dimension.
@@ -17,28 +20,34 @@ defmodule Kazi.Loop.Budget do
   isolation and cannot silently couple to the state machine.
 
   A `nil` budget field means that dimension is unbounded and never trips. Limits
-  are checked in a fixed order (iterations, wall-clock, tokens) so a usage that
-  crosses several at once yields one deterministic reason.
+  are checked in a fixed order (iterations, wall-clock, tokens, dispatches) so a
+  usage that crosses several at once yields one deterministic reason.
+  `:max_dispatches` is checked LAST, after the original three (T48.6): it is the
+  newest dimension, so appending it to the end keeps the original
+  iterations/wall-clock/tokens precedence byte-identical to before it existed.
   """
 
   alias Kazi.Budget
 
   @typedoc "The budget dimension that forced the stop."
-  @type reason :: :max_iterations | :wall_clock | :token_budget
+  @type reason :: :max_iterations | :wall_clock | :token_budget | :max_dispatches
 
   @typedoc """
   Current usage fed to `check/2`. Each field is the running total the loop tracks:
 
     * `:iterations`   — observe→decide cycles completed so far;
     * `:elapsed_ms`   — wall-clock elapsed since the loop started, in ms;
-    * `:tokens`       — accumulated token estimate across harness invocations.
+    * `:tokens`       — accumulated token estimate across harness invocations;
+    * `:dispatches`   — `:dispatch_agent` actions completed so far (T48.6);
+      observe-only ticks do not increment this.
 
   Any field may be omitted; it defaults to `0` (nothing spent on that dimension).
   """
   @type usage :: %{
           optional(:iterations) => non_neg_integer(),
           optional(:elapsed_ms) => non_neg_integer(),
-          optional(:tokens) => non_neg_integer()
+          optional(:tokens) => non_neg_integer(),
+          optional(:dispatches) => non_neg_integer()
         }
 
   @doc """
@@ -46,11 +55,13 @@ defmodule Kazi.Loop.Budget do
 
   Returns `:ok` while every bounded dimension is still within budget, or
   `{:stop, reason}` naming the first exceeded dimension (checked in the order
-  iterations → wall-clock → tokens). An unbounded (`nil`) dimension never trips.
+  iterations → wall-clock → tokens → dispatches). An unbounded (`nil`)
+  dimension never trips.
 
   A limit trips when usage reaches OR exceeds it (`>=`): a `max_iterations: 10`
   budget permits iterations 0..9 and stops as the loop is about to begin the
-  10th — a hard ceiling, not a soft target.
+  10th — a hard ceiling, not a soft target. The same `>=` rule applies to
+  `max_dispatches` against `:dispatches`.
 
   ## Examples
 
@@ -62,6 +73,12 @@ defmodule Kazi.Loop.Budget do
 
       iex> Kazi.Loop.Budget.check(%Kazi.Budget{max_tokens: 100}, %{tokens: 150})
       {:stop, :token_budget}
+
+      iex> Kazi.Loop.Budget.check(%Kazi.Budget{max_dispatches: 2}, %{dispatches: 2, iterations: 40})
+      {:stop, :max_dispatches}
+
+      iex> Kazi.Loop.Budget.check(%Kazi.Budget{max_dispatches: 2}, %{dispatches: 0, iterations: 40})
+      :ok
 
       iex> Kazi.Loop.Budget.check(%Kazi.Budget{}, %{iterations: 9_999})
       :ok
@@ -77,6 +94,9 @@ defmodule Kazi.Loop.Budget do
 
       exceeded?(budget.max_tokens, Map.get(usage, :tokens, 0)) ->
         {:stop, :token_budget}
+
+      exceeded?(budget.max_dispatches, Map.get(usage, :dispatches, 0)) ->
+        {:stop, :max_dispatches}
 
       true ->
         :ok
