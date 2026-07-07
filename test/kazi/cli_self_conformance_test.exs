@@ -485,6 +485,10 @@ defmodule Kazi.CLISelfConformanceTest do
         # `context` requires a <subcommand>; probe with a real one so we observe
         # dispatch (a command tuple), not the missing-subcommand usage error.
         "context" -> ["context", "stats"]
+        # `economy` takes no positional; --rediscovery selects the rediscovery
+        # view over the default aggregate view (ADR-0058 decisions 2 and 3).
+        # Either dispatches; probe with --rediscovery to exercise both flags.
+        "economy" -> ["economy", "--rediscovery", "dummy"]
         _ -> [name]
       end
 
