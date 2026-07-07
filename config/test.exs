@@ -28,3 +28,8 @@ config :kazi, KaziWeb.Endpoint,
   check_origin: false
 
 config :logger, level: :warning
+
+# Crash-dump dir override (issue #856): keep `mix test` from ever pointing
+# `ERL_CRASH_DUMP` at a real `~/.kazi/crash`, mirroring the tmp/-scoped DB path
+# above. See `Kazi.CrashDump`.
+config :kazi, :crash_dump_dir, Path.expand("../tmp/crash", __DIR__)
