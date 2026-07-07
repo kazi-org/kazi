@@ -805,6 +805,7 @@ kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
         [--check]                            #   observe-only: evaluate the vector once, dispatch nothing (issue #805)
         [--explain]                          #   pure planning: print the computed wave schedule, dispatch nothing
 kazi status <ref>                            # report a run's (or proposal's) current state
+kazi economy [--goal <ref>]                  # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
 kazi context index <label> <file>            # context store: index a heavy artifact
 kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provider gist)
 kazi context stats                           #   byte accounting (indexed/returned/saved)
