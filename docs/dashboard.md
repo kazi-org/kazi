@@ -27,10 +27,11 @@ never deleted; a dead run's last state is exactly the fleet dashboard's
 post-mortem record. See `Kazi.ReadModel.RunRegistry` (`start/1`,
 `heartbeat/1`, `finish/2`, `stale?/2`, `list_stale/1`).
 
-## The starmap (`/starmap`)
+## The starmap (`/`, alias `/starmap`)
 
-The dashboard's home view renders one node per registered run, resolved to a
-display state:
+The starmap is the landing page: the root route serves it directly, and
+`/starmap` remains an alias for existing links. It renders one node per
+registered run, resolved to a display state:
 
 | State        | Meaning                                                          |
 | ------------ | ----------------------------------------------------------------- |
