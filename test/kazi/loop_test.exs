@@ -705,4 +705,81 @@ defmodule Kazi.LoopTest do
 
     assert Kazi.Loop.snapshot(loop).regressions == []
   end
+
+  # ===========================================================================
+  # T48.7 (ADR-0058 decision 1): run-end economics inputs on the terminal result
+  #
+  # `Kazi.Runtime` projects these onto the read-model at `terminate_with/2`; this
+  # suite pins the LOOP's half of that contract — the fields it must hand the
+  # runtime, computed correctly at termination.
+  # ===========================================================================
+
+  test "the terminal result reports the dispatch count, active context tier, and goal shape" do
+    script_pid = start_scripted(%{code: [:fail, :pass]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:code, :tests), Predicate.new(:live, :http_probe)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: ScriptedProvider, http_probe: DeployGatedLiveProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.outcome == :converged
+
+    # Exactly one :dispatch_agent ran (code failed once, then went green).
+    assert result.dispatches == 1
+    assert Enum.count(result.actions, &(&1 == :dispatch_agent)) == result.dispatches
+
+    # Default base tier, no escalation configured for this loop.
+    assert result.context_tier in 0..4
+
+    # Goal shape: the two authored predicates, by kind.
+    assert result.goal_shape == %{
+             predicate_count: 2,
+             kind_histogram: %{tests: 1, http_probe: 1}
+           }
+  end
+
+  test "dispatches stays 0 when the goal never needs an agent dispatch" do
+    script_pid = start_scripted(%{code: [:pass], live: [:pass]})
+
+    goal =
+      goal_with(
+        [Predicate.new(:code, :tests), Predicate.new(:live, :tests)],
+        script_pid,
+        self()
+      )
+
+    {:ok, loop} = start_loop(goal, %{tests: ScriptedProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop)
+    assert result.outcome == :converged
+    assert result.actions == []
+    assert result.dispatches == 0
+    assert result.goal_shape == %{predicate_count: 2, kind_histogram: %{tests: 2}}
+  end
+
+  test "the RecordingHarness's bare `cost.tokens` report is NOT the T34.1 usage envelope" do
+    # ADR-0058 honest-unknown: `Kazi.Runtime`'s read-model projection gates
+    # nil-vs-real tokens/cost on `result.usage` (the T34.1 additive envelope),
+    # NOT on the legacy `tokens_used` rolled-up total. `RecordingHarness` (used
+    # by every other test in this module) reports only `cost: %{tokens: 1}` —
+    # no `:usage`/`:cost_usd` — exactly the shape a harness that "reports no
+    # usage" produces. This pins that `result.usage` really does stay empty in
+    # that case even though `tokens_used` is nonzero, so the runtime's honest
+    # projection has the signal it needs.
+    script_pid = start_scripted(%{code: [:fail, :pass]})
+    goal = goal_with([Predicate.new(:code, :tests)], script_pid, self())
+
+    {:ok, loop} = start_loop(goal, %{tests: ScriptedProvider}, self())
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.dispatches == 1
+    assert result.tokens_used == 1
+    assert result.usage == %{}
+  end
 end
