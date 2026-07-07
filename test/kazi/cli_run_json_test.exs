@@ -225,6 +225,13 @@ defmodule Kazi.CLIRunJsonTest do
       # The predicate vector is still present and names the failing predicate.
       vector = Map.new(payload["predicates"], &{&1["id"], &1["verdict"]})
       assert vector["code"] == "fail"
+
+      # T48.4 (ADR-0058 decision 4): a REAL failing predicate is still :fail at
+      # the terminal re-observation -- honestly budget_exhausted, not a
+      # mislabeled config wedge.
+      assert payload["cause"]["class"] == "budget_exhausted"
+      assert payload["cause"]["ids"] == ["code"]
+      assert payload["cause"]["exhausted"] == "max_iterations"
     end
 
     test "a max_tokens ceiling that never binds (no usage reported) flags usage_fidelity",
@@ -296,6 +303,43 @@ defmodule Kazi.CLIRunJsonTest do
 
       vector = Map.new(payload["predicates"], &{&1["id"], &1["verdict"]})
       assert vector["code"] == "fail"
+
+      # T48.4 (ADR-0058 decision 4): an ordinary failing-set stuck stop is
+      # exactly what it says it is -- no cause class, key absent entirely.
+      refute Map.has_key?(payload, "cause")
+    end
+
+    test "a live permanent-error stop carries cause error_wedged with the erroring ids and reasons (T48.4, ADR-0058)",
+         %{tmp_dir: tmp_dir} do
+      %{work: work, bare: bare} = setup_repo(tmp_dir)
+
+      goal_file = write_live_wedge_goal_file(tmp_dir, work)
+
+      runtime_opts =
+        converge_runtime_opts(
+          tmp_dir,
+          work,
+          "http://unused.invalid/healthz",
+          Path.join(tmp_dir, "unused_body"),
+          bare
+        )
+        |> Keyword.merge(stuck_iterations: 3, flake_max_retries: 0)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+                   1
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["status"] == "stuck"
+      assert payload["reason"] == "stuck"
+
+      assert payload["cause"] == %{
+               "class" => "error_wedged",
+               "ids" => ["live_route"],
+               "reasons" => %{"live_route" => "missing_url"}
+             }
     end
   end
 
@@ -411,6 +455,36 @@ defmodule Kazi.CLIRunJsonTest do
     provider = "test_runner"
     cmd = "sh"
     args = ["-c", "test -f never_created.txt"]
+    """)
+
+    path
+  end
+
+  # A code predicate the harness stub satisfies immediately (so the loop
+  # reaches "landed + deployed, only the live predicate unsatisfied") plus a
+  # live `http_probe` predicate with NO `url` configured -- the real
+  # `Kazi.Providers.HttpProbe` errors `:missing_url` on EVERY observation
+  # (T48.3, ADR-0058), the residual config-error wedge T48.4's cause class
+  # names.
+  defp write_live_wedge_goal_file(tmp_dir, work) do
+    path = Path.join(tmp_dir, "live_wedge_goal.toml")
+
+    File.write!(path, """
+    id = "cli-live-wedge"
+    name = "CLI run --json live permanent-error wedge"
+
+    [scope]
+    workspace = "#{work}"
+
+    [[predicate]]
+    id = "code"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+
+    [[predicate]]
+    id = "live_route"
+    provider = "http_probe"
     """)
 
     path
