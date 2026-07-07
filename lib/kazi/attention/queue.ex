@@ -18,13 +18,24 @@ defmodule Kazi.Attention.Queue do
 
   ## Signals and ranking (the exact choice)
 
-  Four signal types, each producing at most one queue entry per run
+  Five signal types, each producing at most one queue entry per run
   (multiple triggering predicates fold into one entry; `detail.predicate_ids`
   carries the full set):
 
-    * `:stuck` (severity 4, highest) — `Kazi.Loop.StuckDetector.stuck?/2`
-      fires on the goal's history: N consecutive observations share the same
-      non-empty failing set with no score progress.
+    * `:cause` (severity 5, highest — T48.14, ADR-0058 decision 4, UC-064) —
+      a FINISHED run's read-model row carries a `Kazi.Loop.CauseClass`
+      terminal cause of `"error_wedged"` or `"quarantine_blocked"`: a
+      config error or a flake-pinned predicate an agent cannot fix by
+      itself, so it outranks every other signal — including ordinary
+      `:stuck` and a genuine `:budget`/`budget_exhausted` stop, neither of
+      which needs the boost (an agent-actionable stuck loop, or a budget the
+      operator can reasonably choose to raise). A `"budget_exhausted"` cause
+      — or no cause at all (a clean converge, or a stop that is exactly what
+      it says it is) — raises no `:cause` entry; those runs are byte-identical
+      to before this signal existed.
+    * `:stuck` (severity 4) — `Kazi.Loop.StuckDetector.stuck?/2` fires on the
+      goal's history: N consecutive observations share the same non-empty
+      failing set with no score progress.
     * `:budget` (severity 3) — the run's declared `max_iterations` (captured
       at registration, T46.6) is >= 85% consumed by the observed iteration
       count. Absent `max_iterations` (unbounded goal, or a pre-T46.6 row)
@@ -52,8 +63,16 @@ defmodule Kazi.Attention.Queue do
 
   @budget_threshold 0.85
 
+  # T48.14: the cause classes that name a stop an agent cannot fix by
+  # itself (a config error, or every remaining failure quarantined as
+  # flaky) — the ONLY classes that raise a `:cause` entry. `"budget_exhausted"`
+  # is deliberately excluded: it is a genuine budget stop the operator can
+  # reasonably resolve by raising the ceiling, so it keeps today's behavior
+  # (no new entry; the existing `:budget` signal already covers it).
+  @needs_human_causes ~w(error_wedged quarantine_blocked)
+
   @typedoc "The signal type a queue entry was raised for."
-  @type signal :: :stuck | :budget | :flake_suspicion | :regression_recovered
+  @type signal :: :cause | :stuck | :budget | :flake_suspicion | :regression_recovered
 
   @typedoc "One ranked attention-queue entry."
   @type entry :: %{
@@ -66,7 +85,7 @@ defmodule Kazi.Attention.Queue do
           iteration_index: integer()
         }
 
-  @severity %{stuck: 4, budget: 3, flake_suspicion: 2, regression_recovered: 1}
+  @severity %{cause: 5, stuck: 4, budget: 3, flake_suspicion: 2, regression_recovered: 1}
 
   @doc """
   Builds the ranked attention queue over `runs` (typically
@@ -92,11 +111,37 @@ defmodule Kazi.Attention.Queue do
   defp entries_for_run(%Run{} = run, history_fn, regressions_fn) do
     history = history_fn.(run.goal_ref) |> Enum.sort_by(fn {index, _vector} -> index end)
 
-    stuck_entries(run, history) ++
+    cause_entries(run, history) ++
+      stuck_entries(run, history) ++
       budget_entries(run, history) ++
       flake_entries(run, history) ++
       regression_recovered_entries(run, history, regressions_fn)
   end
+
+  # ===========================================================================
+  # :cause (T48.14) -- the T48.4 honest terminal cause on a FINISHED run's
+  # read-model row, boosted above every other signal for the two classes that
+  # name a stop needing a HUMAN (a config error `error_wedged`, or a
+  # `quarantine_blocked` set with nothing left an agent can act on). No
+  # history lookup needed to classify -- `outcome_cause_class` is only ever
+  # populated at terminal projection (`Kazi.Runtime`'s `cause_attrs/1`), so a
+  # non-nil value already implies the run finished.
+  # ===========================================================================
+
+  defp cause_entries(%Run{outcome_cause_class: class} = run, history)
+       when class in @needs_human_causes do
+    [
+      entry(run, :cause, cause_predicate_id(run), last_iteration_index(history), %{
+        cause_class: class,
+        cause_detail: run.outcome_cause_detail
+      })
+    ]
+  end
+
+  defp cause_entries(_run, _history), do: []
+
+  defp cause_predicate_id(%Run{outcome_cause_detail: %{"ids" => [id | _]}}), do: id
+  defp cause_predicate_id(_run), do: nil
 
   # ===========================================================================
   # :stuck -- the same detector a live loop uses, read over the persisted history
