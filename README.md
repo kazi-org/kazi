@@ -607,13 +607,20 @@ OUTCOME: :converged   (tests pass · live /livez = "ok")
 | `provider`     | checks… | key config |
 |----------------|---------|------------|
 | `test_runner`  | a command's exit code (unit/integration tests) | `cmd`, `args` |
-| `http_probe`   | a live URL's status + body, optionally **sustained** over N samples | `url`, `expect_status`, `expect_body`, `body_match`, `samples`, `interval_ms` |
-| `browser`      | a real browser flow (Playwright), optionally a **journey** over N runs | per-flow config, `samples` |
+| `http_probe`   | a live URL's status + body, optionally **sustained** over N samples | `url` (**required**), `expect_status`, `expect_body`, `body_match`, `samples`, `interval_ms` |
+| `browser`      | a real browser flow (Playwright), optionally a **journey** over N runs | `url` (**required**), per-flow config, `samples` |
 | `prod_log`     | a production-log condition (e.g. 5xx rate) — a coarse safety net | per-check config |
 | `metrics`      | a live **RED/SLO** signal (PromQL): windowed quantile, error-rate, or **burn-rate** gate | `query_url`, `query`, `pass_when`, `quantile`, `burn_rate` |
 | `custom_script`| ANY CLI checker (scanner, mutation tester, contract check) | `cmd`, `args`, `verdict`, `path`, `pass_when` |
 | `ratchet`      | a metric may not regress vs a baseline (coverage, perf, size) | `metric`, `baseline`, `direction`, `allowed_regression` |
 | `static`       | static analysis / type-check / lint (Dialyzer-led, SARIF-general) | `cmd`, `args`, `format`, `baseline`, `allowed_regression` |
+
+`http_probe` and `browser` are the **live** predicates: `url` is VALIDATED at
+goal-load time (`Kazi.Goal.Loader`, T48.1, ADR-0058) — a missing or blank `url`
+fails loudly, naming the predicate and the key, instead of silently erroring
+`missing_url` on every observation until the loop exhausts its budget. Neither
+provider resolves any other key (e.g. a relative `path`) into a url at dispatch
+time, so `url` must be the full target.
 
 `custom_script` is the **escape hatch**: it turns any command-line tool into a
 predicate without a kazi release. Crucially the **verdict is declared, not

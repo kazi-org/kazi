@@ -48,9 +48,18 @@ and each clause is classified to a provider kind:
 | `` `mix format` clean ``, `--check-formatted` | `test_runner` | `{"cmd":"mix","args":["format","--check-formatted"]}` |
 | `--warnings-as-errors` clean | `test_runner` | `{"cmd":"mix","args":["compile","--warnings-as-errors"]}` |
 | `npx playwright test` / playwright | `test_runner` | `{"cmd":"npx","args":["playwright","test"]}` |
-| "the endpoint returns `<status>`", `GET /path returns 200` | `http_probe` | `{"path"\|"url":...,"expect_status":<code>}` (a full URL wins; only a path → relative `path`) |
+| "the endpoint returns `<status>`", `GET /path returns 200` | `http_probe` | `{"path"\|"url":...,"expect_status":<code>}` (a full URL wins; only a path → relative `path`, see note below) |
 | "a prod log line ...", "the live predicate passes" | `prod_log` | `{}` |
 | anything else | `test_runner` (DESCRIBED) | `{}` — the clause text is kept as `description`; NO command/status is invented |
+
+> **Note (T48.1, ADR-0058):** `Kazi.Goal.Loader` REQUIRES a non-empty `url` on
+> every `http_probe`/`browser` predicate — a relative `path` alone does not
+> satisfy this, since neither provider ever resolves it into a url at dispatch
+> time. A bridged predicate carrying only `path` will fail `kazi plan`
+> (caller-drafts persists through the same validated loader `propose/2` uses,
+> per PR #788's plan-time-matches-load-time invariant) until the `live-target`
+> clarify gap is resolved and the relative path is sharpened into the real
+> deployed `url` (step 3 of the procedure below).
 
 Two deliberate non-fabrication rules:
 
