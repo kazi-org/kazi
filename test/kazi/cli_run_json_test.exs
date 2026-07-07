@@ -226,6 +226,40 @@ defmodule Kazi.CLIRunJsonTest do
       vector = Map.new(payload["predicates"], &{&1["id"], &1["verdict"]})
       assert vector["code"] == "fail"
     end
+
+    test "a max_tokens ceiling that never binds (no usage reported) flags usage_fidelity",
+         %{tmp_dir: tmp_dir} do
+      # T48.5 (ADR-0058 §4): the same noop stub the converged-suite test above
+      # proves reports NO usage at all — with a max_tokens ceiling ALSO set, the
+      # loop's token total can never grow, so the ceiling can never bind. The
+      # iteration ceiling is what actually stops the run; `usage_fidelity`
+      # names WHY the token ceiling was never enforced.
+      %{work: work} = setup_repo(tmp_dir)
+
+      goal_file = write_unfixable_goal_file(tmp_dir, work)
+
+      runtime_opts = [
+        adapter_opts: [command: write_noop_harness_stub(tmp_dir)],
+        budget: Kazi.Budget.new(max_iterations: 1, max_tokens: 100),
+        flake_max_retries: 0,
+        stuck_iterations: 0,
+        reobserve_interval_ms: 5,
+        await_timeout: 15_000
+      ]
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+                   1
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["status"] == "over_budget"
+      # The ITERATION dimension tripped first, not tokens — direct proof the
+      # token ceiling never bound.
+      assert payload["reason"] == "max_iterations"
+      assert payload["usage_fidelity"] == "unreported"
+    end
   end
 
   describe "run --json — stuck" do
