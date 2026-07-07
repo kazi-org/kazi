@@ -55,6 +55,41 @@ Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
 - Event river: fixed 38px bottom bar (rgba(10,17,32,.92), top hairline),
   "EVENT RIVER" label + masked marquee ticker (52s linear scroll, duplicated
   span for seamless loop), entries `[HH:MM:SS] goal · event`.
+- VIEWS nav: plain links to `/goals`, `/dag`, `/leases`, `/events`, pinned
+  above the LEGEND at the rail's bottom (dim text, cyan on hover).
+
+
+## Mobile layout (≤820px, bottom tab bar)
+
+Below 820px the rail cannot coexist with the canvas, so the shell becomes a
+full-height column and the rail's sections become tab panes — the phone
+use-case is triage ("is anything stuck, and can I grab its resume command"),
+so the tab bar sits in the thumb zone. Desktop above the breakpoint is
+untouched; everything here is CSS keyed off `data-mtab` on the shell plus a
+`set_mtab` LiveView event (a server assign, so poll-tick DOM patches preserve
+the active tab).
+
+- Tab bar: fixed bottom row of four buttons — MAP ✦ / NEEDS YOU ◉ /
+  SESSIONS ⌁ / MORE ☰ — 48px min height, active tab cyan with a 2px top
+  indicator. NEEDS YOU carries a red badge with the live attention-queue
+  count whenever the queue is non-empty: the "anything on fire" answer with
+  zero taps.
+- MAP: wordmark + LIVE badge, the FLEET tiles as a horizontally scrollable
+  strip (labels' section header hidden, tiles stay tappable filters at
+  44px+), then the canvas filling the remaining height. The constellation
+  keeps its desktop geometry and PANS: the SVG holds a min-width of 880px
+  inside a two-axis scroll container (scale never drops below readable), and
+  the canvas node label/sublabel/wave-label font sizes bump up (15/11/12px
+  viewBox units) to compensate for the smaller scale.
+- NEEDS YOU: the attention queue as the whole pane, roomier rows (.7rem
+  padding, 12px), no max-height clamp.
+- SESSIONS: the sessions rows as the whole pane, plus a "No active sessions."
+  empty state (hidden on desktop, where the section simply doesn't render).
+- MORE: the VIEWS nav as full-width tappable rows + the LEGEND.
+- The slide-over drill-in panel becomes a full-width bottom sheet: top 24%,
+  rounded top corners, cyan top hairline, covering ticker and tab bar (close
+  with ✕).
+- The event river stays as the thin strip above the tab bar on every pane.
 
 
 ## Canvas composition (NORMATIVE — the part that makes it a starmap)
