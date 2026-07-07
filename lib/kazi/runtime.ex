@@ -40,7 +40,17 @@ defmodule Kazi.Runtime do
   provider fails loudly here, not silently at dispatch).
   """
 
-  alias Kazi.{Enforcement, Goal, Loop, Predicate, PredicateResult, PredicateVector, ReadModel}
+  alias Kazi.{
+    Enforcement,
+    Goal,
+    Loop,
+    Predicate,
+    PredicateResult,
+    PredicateVector,
+    ReadModel,
+    Scope
+  }
+
   alias Kazi.ReadModel.{Iteration, RunRegistry}
   alias Kazi.Sink.Events, as: EventsSink
 
@@ -81,7 +91,10 @@ defmodule Kazi.Runtime do
     # T32.8 (ADR-0043): `:cve` is dependency vuln scanning led by govulncheck
     # reachability (fail on a transitively-called vuln, call stack as proof);
     # trivy/grype/npm-audit are manifest-only, ratcheted vs a baseline.
-    cve: Kazi.Providers.Cve
+    cve: Kazi.Providers.Cve,
+    # issue #860: the scope `deny`-path guard, synthesized by
+    # `Kazi.Scope.guard_predicates/1` — independent of the `[enforcement]` profile.
+    scope_guard: Kazi.Providers.ScopeGuard
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
@@ -215,7 +228,16 @@ defmodule Kazi.Runtime do
     # BEFORE the loop observes, so they gate convergence exactly like authored
     # guards. An `:enforcement` opt overrides the goal's authored/derived profile.
     enforcement = Keyword.get(opts, :enforcement) || Enforcement.resolve(goal)
-    goal = %Goal{goal | guards: goal.guards ++ Enforcement.guard_predicates(enforcement)}
+
+    # issue #860: SYNTHESIZE the scope's `deny`-path guard the same way — it is a
+    # SCOPE contract, not an anti-gaming one, so it applies regardless of whether
+    # `[enforcement]` is active.
+    goal = %Goal{
+      goal
+      | guards:
+          goal.guards ++
+            Enforcement.guard_predicates(enforcement) ++ Scope.guard_predicates(goal.scope)
+    }
 
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
@@ -361,7 +383,13 @@ defmodule Kazi.Runtime do
     # T32.4 (ADR-0042): fold the enforcement profile's guards in, same as run/2, so
     # a check reports the SAME vector a real run would gate convergence on.
     enforcement = Keyword.get(opts, :enforcement) || Enforcement.resolve(goal)
-    goal = %Goal{goal | guards: goal.guards ++ Enforcement.guard_predicates(enforcement)}
+
+    goal = %Goal{
+      goal
+      | guards:
+          goal.guards ++
+            Enforcement.guard_predicates(enforcement) ++ Scope.guard_predicates(goal.scope)
+    }
 
     with {:ok, providers} <- resolve_providers(goal, opts) do
       vector = observe_t0(goal, providers, workspace)
