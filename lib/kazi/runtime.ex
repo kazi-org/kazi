@@ -1103,30 +1103,64 @@ defmodule Kazi.Runtime do
   # even though the field it publishes is `tokens_used`.
   @spec economics_attrs(Kazi.Loop.result()) :: map()
   defp economics_attrs(%{usage: usage} = result) when map_size(usage) == 0 do
-    %{
-      budget_tokens: nil,
-      budget_cached_input_tokens: nil,
-      budget_cost_usd: nil,
-      dispatch_count: Map.get(result, :dispatches, 0),
-      context_tier: Map.get(result, :context_tier),
-      predicate_count: get_in(result, [:goal_shape, :predicate_count]),
-      predicate_kind_histogram: get_in(result, [:goal_shape, :kind_histogram]) || %{}
-    }
+    Map.merge(
+      %{
+        budget_tokens: nil,
+        budget_cached_input_tokens: nil,
+        budget_cost_usd: nil,
+        dispatch_count: Map.get(result, :dispatches, 0),
+        context_tier: Map.get(result, :context_tier),
+        predicate_count: get_in(result, [:goal_shape, :predicate_count]),
+        predicate_kind_histogram: get_in(result, [:goal_shape, :kind_histogram]) || %{}
+      },
+      cause_attrs(result)
+    )
   end
 
   defp economics_attrs(%{usage: usage, tokens_used: tokens_used} = result) do
-    %{
-      budget_tokens: tokens_used,
-      budget_cached_input_tokens: Map.get(usage, :cached_input_tokens),
-      budget_cost_usd: Map.get(usage, :cost_usd),
-      dispatch_count: Map.get(result, :dispatches, 0),
-      context_tier: Map.get(result, :context_tier),
-      predicate_count: get_in(result, [:goal_shape, :predicate_count]),
-      predicate_kind_histogram: get_in(result, [:goal_shape, :kind_histogram]) || %{}
-    }
+    Map.merge(
+      %{
+        budget_tokens: tokens_used,
+        budget_cached_input_tokens: Map.get(usage, :cached_input_tokens),
+        budget_cost_usd: Map.get(usage, :cost_usd),
+        dispatch_count: Map.get(result, :dispatches, 0),
+        context_tier: Map.get(result, :context_tier),
+        predicate_count: get_in(result, [:goal_shape, :predicate_count]),
+        predicate_kind_histogram: get_in(result, [:goal_shape, :kind_histogram]) || %{}
+      },
+      cause_attrs(result)
+    )
   end
 
   defp economics_attrs(_result), do: %{}
+
+  # T48.4 (ADR-0058 decision 4): project the loop's `:cause` (a
+  # `Kazi.Loop.CauseClass.t()` or nil) onto the two read-model columns.
+  # Honest-unknown: no cause classified persists NULL for both, never a
+  # zero-filled placeholder. `outcome_cause_detail`'s reasons are rendered with
+  # `inspect/1` — a `Kazi.Loop.ErrorPermanence` reason can be a bare atom OR a
+  # `{tag, detail}` tuple, and Ecto's `:map` (JSON) column cannot round-trip a
+  # tuple, so the DETAIL is a human-readable string; the in-process
+  # `result.cause` (surfaced via `--json`/snapshot) keeps the raw term.
+  @spec cause_attrs(Kazi.Loop.result()) :: map()
+  defp cause_attrs(%{cause: %{class: class} = cause}) when is_atom(class) do
+    %{
+      outcome_cause_class: Atom.to_string(class),
+      outcome_cause_detail: %{
+        "ids" => Enum.map(cause.ids, &to_string/1),
+        "reasons" => cause_reasons_for_storage(cause.reasons),
+        "exhausted" => cause.exhausted && Atom.to_string(cause.exhausted)
+      }
+    }
+  end
+
+  defp cause_attrs(_result), do: %{outcome_cause_class: nil, outcome_cause_detail: nil}
+
+  defp cause_reasons_for_storage(nil), do: %{}
+
+  defp cause_reasons_for_storage(reasons) do
+    Map.new(reasons, fn {id, reason} -> {to_string(id), inspect(reason)} end)
+  end
 
   # Maps the loop's `t:Kazi.Loop.result/0` outcome to the registry's terminal
   # status vocabulary (`Kazi.ReadModel.RunRegistry.finish/2`'s doc, mirrored by
