@@ -260,6 +260,20 @@ The loop's hard parts — and therefore the product — are the failure modes:
   quarantined ids, after a small bounded number of no-work ticks; any other
   no-work wait (e.g. a live predicate still pending) backs off its poll interval
   instead of a sub-second busy-spin.
+- **Persistent live errors (ADR-0058, UC-064).** A live predicate (`http_probe`
+  and friends) that errors on EVERY observation is invisible to the ordinary
+  stuck check above — it is reduced away deliberately, since step 5 legitimately
+  polls a live predicate rather than dispatching an agent to "fix" it. Left
+  alone, a config problem knowable on the first observation (an `http_probe`
+  missing its required `url`) would instead spin every remaining iteration to
+  `:over_budget`, mislabeling a wedge as budget exhaustion. Each `:error` reason
+  carries a permanence class — `:permanent` (a config/wiring problem that will
+  never clear, e.g. `:missing_url`, `:no_provider`) or `:transient` (may clear,
+  e.g. a timeout). A persistent, same-id, all-`:permanent` stretch across the
+  stuck window stops the loop honestly `:stuck`, naming the predicate and its
+  last-observed reason; a persistent `:transient` stretch is unaffected and
+  keeps polling at the existing backed-off interval — a probe that is
+  legitimately still warming up sees no behavior change.
 
 `/qualify` (the original pain) is simply the goal
 `{unit, integration, api, browser, prod_logs}` run through this loop — but as a
