@@ -54,8 +54,15 @@ defmodule Kazi.ReadModel.Run do
     field(:budget_cost_usd, :float)
     # Loop-tracked (not harness-reported): always known, defaults to 0.
     field(:dispatch_count, :integer, default: 0)
-    # The T48.4 error-permanence cause class; nil until that classifier lands.
+    # The T48.4 (ADR-0058 decision 4) honest terminal cause class —
+    # "budget_exhausted" / "error_wedged" / "quarantine_blocked" — or nil when
+    # no mislabel applies (a clean converge, or a stop that is exactly what it
+    # says it is; see `Kazi.Loop.CauseClass`).
     field(:outcome_cause_class, :string)
+    # T48.4: the cause detail — implicated predicate ids, their stringified
+    # last-observed reasons, and the exhausted budget dimension. Nullable, no
+    # default (honest-unknown: absent means "no cause classified").
+    field(:outcome_cause_detail, :map)
     # The active ADR-0047 context tier at termination.
     field(:context_tier, :integer)
     # Goal shape, computed from the goal at run start.
@@ -82,6 +89,7 @@ defmodule Kazi.ReadModel.Run do
     :budget_cost_usd,
     :dispatch_count,
     :outcome_cause_class,
+    :outcome_cause_detail,
     :context_tier,
     :predicate_count,
     :predicate_kind_histogram
