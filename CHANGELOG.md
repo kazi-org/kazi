@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.101.0](https://github.com/kazi-org/kazi/compare/v1.100.0...v1.101.0) (2026-07-07)
+
+
+### Features
+
+* **cli:** kazi economy --rediscovery -- ranked rediscovery-pressure report (T48.10) ([3b6ceb4](https://github.com/kazi-org/kazi/commit/3b6ceb42fd3d04ceb9ed0dd1040e3c3df1cdc043))
+* **economy:** rediscovery-pressure fold from recorded tool counters (T48.10) ([8cd289a](https://github.com/kazi-org/kazi/commit/8cd289a7b5899bf01bfa1845b2c550ac0b279f3c))
+
 ## [1.100.0](https://github.com/kazi-org/kazi/compare/v1.99.0...v1.100.0) (2026-07-07)
 
 
