@@ -50,6 +50,58 @@ defmodule Kazi.Attention.QueueTest do
     end
   end
 
+  describe ":cause signal (T48.14)" do
+    test "a finished run with an error_wedged cause raises a :cause entry with the cause detail" do
+      r =
+        run(%{
+          outcome_cause_class: "error_wedged",
+          outcome_cause_detail: %{
+            "ids" => ["live_route"],
+            "reasons" => %{"live_route" => "missing_url"},
+            "exhausted" => nil
+          }
+        })
+
+      [entry] = build([r], %{})
+
+      assert entry.signal == :cause
+      assert entry.severity == 5
+      assert entry.predicate_id == "live_route"
+      assert entry.detail.cause_class == "error_wedged"
+      assert entry.detail.cause_detail["reasons"] == %{"live_route" => "missing_url"}
+    end
+
+    test "a finished run with a quarantine_blocked cause raises a :cause entry" do
+      r =
+        run(%{
+          outcome_cause_class: "quarantine_blocked",
+          outcome_cause_detail: %{"ids" => ["flappy"], "reasons" => %{}, "exhausted" => nil}
+        })
+
+      [entry] = build([r], %{})
+
+      assert entry.signal == :cause
+      assert entry.severity == 5
+      assert entry.predicate_id == "flappy"
+    end
+
+    test "a budget_exhausted cause raises NO :cause entry (the operator can raise the budget)" do
+      r =
+        run(%{
+          outcome_cause_class: "budget_exhausted",
+          outcome_cause_detail: %{"ids" => [], "reasons" => %{}, "exhausted" => "max_iterations"}
+        })
+
+      assert build([r], %{}) == []
+    end
+
+    test "a run with no cause classified raises nothing -- byte-identical to today" do
+      r = run(%{outcome_cause_class: nil, outcome_cause_detail: nil})
+
+      assert build([r], %{}) == []
+    end
+  end
+
   describe ":stuck signal" do
     test "the same non-empty failing set for the stuck window raises a :stuck entry" do
       r = run()
@@ -151,6 +203,35 @@ defmodule Kazi.Attention.QueueTest do
   end
 
   describe "ranking" do
+    test "an error_wedged cause outranks an otherwise-equal ordinary stuck run (T48.14)" do
+      stuck_run = run()
+      stuck_history = history([vector(["a"]), vector(["a"]), vector(["a"])])
+
+      wedged_run =
+        run(%{outcome_cause_class: "error_wedged", outcome_cause_detail: %{"ids" => ["live"]}})
+
+      entries =
+        build([stuck_run, wedged_run], %{stuck_run.goal_ref => stuck_history})
+
+      assert Enum.map(entries, & &1.signal) == [:cause, :stuck]
+    end
+
+    test "a quarantine_blocked cause outranks an otherwise-equal ordinary stuck run (T48.14)" do
+      stuck_run = run()
+      stuck_history = history([vector(["a"]), vector(["a"]), vector(["a"])])
+
+      blocked_run =
+        run(%{
+          outcome_cause_class: "quarantine_blocked",
+          outcome_cause_detail: %{"ids" => ["flappy"]}
+        })
+
+      entries =
+        build([stuck_run, blocked_run], %{stuck_run.goal_ref => stuck_history})
+
+      assert Enum.map(entries, & &1.signal) == [:cause, :stuck]
+    end
+
     test "stuck outranks budget outranks regression-recovered" do
       stuck_run = run()
       stuck_history = history([vector(["a"]), vector(["a"]), vector(["a"])])
