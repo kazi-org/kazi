@@ -45,6 +45,22 @@ defmodule Kazi.ReadModel.Run do
     # apply for the same goal_ref can warn when a previous run's harness child
     # is still alive. nil until a dispatch reports one.
     field(:harness_child_pid, :string)
+    # --- T48.7 (ADR-0058 decision 1): run-end economics ---------------------
+    # Persisted at terminal projection (`RunRegistry.finish/3`) alongside the
+    # terminal status. Honest-unknown (ADR-0046): the token/cost fields are
+    # nil when the harness never reported usage this run — never coerced to 0.
+    field(:budget_tokens, :integer)
+    field(:budget_cached_input_tokens, :integer)
+    field(:budget_cost_usd, :float)
+    # Loop-tracked (not harness-reported): always known, defaults to 0.
+    field(:dispatch_count, :integer, default: 0)
+    # The T48.4 error-permanence cause class; nil until that classifier lands.
+    field(:outcome_cause_class, :string)
+    # The active ADR-0047 context tier at termination.
+    field(:context_tier, :integer)
+    # Goal shape, computed from the goal at run start.
+    field(:predicate_count, :integer)
+    field(:predicate_kind_histogram, :map, default: %{})
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -60,7 +76,15 @@ defmodule Kazi.ReadModel.Run do
     :max_iterations,
     :session_name,
     :harness_session_id,
-    :harness_child_pid
+    :harness_child_pid,
+    :budget_tokens,
+    :budget_cached_input_tokens,
+    :budget_cost_usd,
+    :dispatch_count,
+    :outcome_cause_class,
+    :context_tier,
+    :predicate_count,
+    :predicate_kind_histogram
   ]
 
   @doc """

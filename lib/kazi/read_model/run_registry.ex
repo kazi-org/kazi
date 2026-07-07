@@ -134,18 +134,38 @@ defmodule Kazi.ReadModel.RunRegistry do
   `"error"`) and stamps `finished_at`. Terminal status excludes a run from the
   stale query regardless of how old its last heartbeat is — it exited on
   purpose, it didn't hang.
-  """
-  @spec finish(String.t() | Run.t(), String.t()) :: {:ok, Run.t()} | {:error, :not_found}
-  def finish(%Run{run_id: run_id}, status) when is_binary(status), do: finish(run_id, status)
 
-  def finish(run_id, status) when is_binary(run_id) and is_binary(status) do
+  `economics` (T48.7, ADR-0058 decision 1) carries the optional run-end
+  figures projected alongside the status: `:budget_tokens`,
+  `:budget_cached_input_tokens`, `:budget_cost_usd`, `:dispatch_count`,
+  `:outcome_cause_class`, `:context_tier`, `:predicate_count`,
+  `:predicate_kind_histogram`. Defaults to `%{}` (byte-identical to the
+  pre-T48.7 call) so every existing caller is unaffected. The caller is
+  responsible for the honest-unknown discipline (ADR-0046) — a key it omits
+  here is left at its column default/nil, never coerced to 0 by this module.
+  """
+  @spec finish(String.t() | Run.t(), String.t(), map()) ::
+          {:ok, Run.t()} | {:error, :not_found}
+  def finish(run_or_id, status, economics \\ %{})
+
+  def finish(%Run{run_id: run_id}, status, economics) when is_binary(status),
+    do: finish(run_id, status, economics)
+
+  def finish(run_id, status, economics)
+      when is_binary(run_id) and is_binary(status) and is_map(economics) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
         {:error, :not_found}
 
       run ->
+        attrs =
+          economics
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+          |> Map.put("status", status)
+          |> Map.put("finished_at", DateTime.utc_now())
+
         run
-        |> Run.changeset(%{"status" => status, "finished_at" => DateTime.utc_now()})
+        |> Run.changeset(attrs)
         |> Repo.update()
     end
   end
