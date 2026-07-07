@@ -27,6 +27,15 @@ defmodule Kazi.Harness.Profiles.Claw do
 
   Both functions are PURE; `System.cmd` lives in the CliAdapter.
 
+  **Cannot honor a `max_tokens` budget (T48.5, ADR-0058 §4).** Because every
+  dispatch reports no usage at all, a goal's `[budget] max_tokens` ceiling can
+  never bind against claw — the loop's token total simply never grows. `Kazi.Loop`
+  warns once per run and flags the run's `usage_fidelity` as `:unreported`
+  (surfaced on `Kazi.Loop.snapshot/1`, the terminal result, and the additive
+  `usage_fidelity` key on `kazi apply --json`) rather than silently letting the
+  ceiling sit unenforced. Bound a claw-driven goal on `max_iterations` or
+  `max_wall_clock_ms` instead.
+
   ## argv assembly
 
     * `prompt <text>` — claw's only non-interactive invocation. There is no JSON
