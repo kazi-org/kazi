@@ -26,6 +26,7 @@ defmodule Kazi.ReadModel do
   alias Kazi.{Action, PredicateResult, PredicateVector, Repo}
 
   alias Kazi.ReadModel.{
+    DebriefHypothesis,
     GoalSummary,
     Iteration,
     OrientationPackCache,
@@ -251,6 +252,65 @@ defmodule Kazi.ReadModel do
         ref -> [{index, ref}]
       end
     end)
+  end
+
+  @typedoc """
+  Attributes for `record_debrief_hypotheses/1`. `:goal_ref`, `:iteration`, and
+  `:items` are required; `:run_id` is optional (nullable — recorded honestly as
+  `nil` when the loop is driven without a run identity).
+  """
+  @type debrief_attrs :: %{
+          required(:goal_ref) => Kazi.Goal.id(),
+          required(:iteration) => non_neg_integer(),
+          required(:items) => [String.t()],
+          optional(:run_id) => String.t() | nil
+        }
+
+  @doc """
+  Records (projects) one debrief answer's items as hypothesis rows (T48.11,
+  ADR-0058 §3) — one row per item in `:items`. `:items` is expected to already
+  be capped/redacted (`Kazi.Harness.Debrief.extract/1` does this); an empty list
+  is a no-op (`{:ok, []}`), so a goal with debrief enabled but no items reported
+  this iteration writes nothing rather than an empty marker row.
+
+  **WRITE-ONLY.** This function only INSERTS. There is no corresponding read
+  path wired into any prompt-building code — see the write-only invariant on
+  `Kazi.ReadModel.DebriefHypothesis` and `Kazi.Harness.Debrief`.
+  """
+  @spec record_debrief_hypotheses(debrief_attrs()) ::
+          {:ok, [DebriefHypothesis.t()]} | {:error, Ecto.Changeset.t()}
+  def record_debrief_hypotheses(%{items: items} = attrs) when is_list(items) do
+    goal_ref = to_string(Map.fetch!(attrs, :goal_ref))
+    iteration = Map.fetch!(attrs, :iteration)
+    run_id = Map.get(attrs, :run_id)
+
+    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, acc} ->
+      row = %{goal_ref: goal_ref, run_id: run_id, iteration: iteration, item: item}
+
+      case %DebriefHypothesis{} |> DebriefHypothesis.changeset(row) |> Repo.insert() do
+        {:ok, hypothesis} -> {:cont, {:ok, [hypothesis | acc]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, hypotheses} -> {:ok, Enum.reverse(hypotheses)}
+      error -> error
+    end
+  end
+
+  @doc """
+  Returns the goal's recorded debrief hypotheses (T48.11), in ascending
+  `iteration` order. Read-only tooling surface for a later analysis pass
+  (T48.10/T48.12) — never consumed by prompt construction.
+  """
+  @spec list_debrief_hypotheses(Kazi.Goal.id()) :: [DebriefHypothesis.t()]
+  def list_debrief_hypotheses(goal_ref) do
+    Repo.all(
+      from(h in DebriefHypothesis,
+        where: h.goal_ref == ^to_string(goal_ref),
+        order_by: [asc: h.iteration, asc: h.id]
+      )
+    )
   end
 
   @doc """

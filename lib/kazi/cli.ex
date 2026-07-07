@@ -109,6 +109,7 @@ defmodule Kazi.CLI do
     workspace: :string,
     env: :string,
     standing: :boolean,
+    debrief: :boolean,
     status: :string,
     enrich: :boolean,
     with_mcp: :boolean,
@@ -157,6 +158,8 @@ defmodule Kazi.CLI do
       "Deploy environment to target (e.g. staging / prod); selects the goal/deploy's per-env target.",
     standing:
       "Run as a STANDING (continuous/maintenance) reconciler instead of converging and stopping.",
+    debrief:
+      "Opt into post-dispatch debrief capture (ADR-0058): append one capped debrief question to the dispatch prompt and persist the agent's structured answer as hypothesis rows. Overrides the goal-file's [economy] debrief field.",
     status:
       "Filter `list-proposed` to one lifecycle state (proposed / approved / rejected). Default: all.",
     enrich:
@@ -237,6 +240,7 @@ defmodule Kazi.CLI do
         :workspace,
         :env,
         :standing,
+        :debrief,
         :harness,
         :model,
         :effort,
@@ -428,6 +432,11 @@ defmodule Kazi.CLI do
                              stopping, hold the goal's predicates true forever,
                              re-converging whenever one drifts. Overrides the
                              goal-file's `standing` field.
+      --debrief              Opt into post-dispatch debrief capture (ADR-0058):
+                             append one capped debrief question to the dispatch
+                             prompt and persist the agent's structured answer as
+                             hypothesis rows (never read back into a prompt).
+                             Overrides the goal-file's `[economy] debrief` field.
       --status <state>       Filter `list-proposed` to one lifecycle state
                              (proposed / approved / rejected). Default: all.
       --yes                  `plan` only: skip the interactive clarify
@@ -685,10 +694,13 @@ defmodule Kazi.CLI do
     * `{:help, opts}` — `--help` was requested.
     * `{:run, goal_file, opts}` — the `apply` subcommand with its positional
       goal-file and `opts`
-      (`[workspace: path | nil, env: name | nil, standing: boolean | nil]`).
+      (`[workspace: path | nil, env: name | nil, standing: boolean | nil,
+      debrief: boolean | nil]`).
       `:env` is the T3.3d deploy-environment selector. `:standing` is `nil` when
       `--standing` was not given (the goal-file's own `standing` field then
-      decides); `true` forces standing mode (T3.4d).
+      decides); `true` forces standing mode (T3.4d). `:debrief` is `nil` when
+      `--debrief` was not given (the goal-file's own `[economy] debrief` field
+      then decides); `true` forces debrief capture on (T48.11, ADR-0058 §3).
     * `{:propose, idea, opts}` — the `plan` subcommand (T3.5c) with its
       positional prose idea and `opts` (`[workspace: path | nil]`).
     * `{:list_proposed, opts}` — the `list-proposed` subcommand with `opts`
@@ -1016,6 +1028,7 @@ defmodule Kazi.CLI do
           workspace: flags[:workspace],
           env: flags[:env],
           standing: flags[:standing],
+          debrief: flags[:debrief],
           harness: flags[:harness],
           model: flags[:model],
           effort: flags[:effort],
@@ -1313,6 +1326,11 @@ defmodule Kazi.CLI do
       # passing their own deploy_params keep working and an explicit --env wins.
       |> maybe_put_deploy_env(opts[:env])
       |> maybe_put_standing(opts[:standing])
+      # T48.11 (ADR-0058 §3): only forward `:debrief` when `--debrief` was
+      # actually given, same rationale as `:standing` above — absent (nil)
+      # leaves it unset so `Kazi.Runtime.run/2` falls back to the goal-file's
+      # own declared `[economy] debrief` field.
+      |> maybe_put_debrief(opts[:debrief])
       # T8.7 harness wiring: forward --harness/--model to Kazi.Runtime, which
       # resolves the adapter (Kazi.Harness.resolve/1). Only set when given, so the
       # default path (no flags) stays byte-identical to the pre-T8.7 claude path.
@@ -1686,6 +1704,13 @@ defmodule Kazi.CLI do
   # goal-file's declared `standing` decides (the flag overrides, never forces off).
   defp maybe_put_standing(run_opts, true), do: Keyword.put(run_opts, :standing, true)
   defp maybe_put_standing(run_opts, _), do: run_opts
+
+  # T48.11 (ADR-0058 §3): forward `:debrief` to the runtime ONLY when the
+  # `--debrief` flag was given (true). A nil/false flag is left unset so the
+  # goal-file's declared `[economy] debrief` decides (the flag overrides, never
+  # forces it off).
+  defp maybe_put_debrief(run_opts, true), do: Keyword.put(run_opts, :debrief, true)
+  defp maybe_put_debrief(run_opts, _), do: run_opts
 
   # Set a run opt only when the value is present (a CLI flag was given). Keeping
   # absent flags unset means the default path is byte-identical to pre-T8.7.

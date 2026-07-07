@@ -117,6 +117,21 @@ defmodule Kazi.Goal.Loader do
   See ADR-0042 and `docs/how-to/enforcement.md`; `kazi schema apply` documents the
   `enforcement` object surfaced in the `--json` run result.
 
+  ### `[economy]` table (optional, → `Goal.debrief`, T48.11/ADR-0058)
+
+  Opts a goal into the economy feedback loop's SELF-REPORT (hypothesis) tier
+  (ADR-0058 §3). Absent → `Goal.debrief` stays `false`, and the dispatch prompt
+  and envelope handling are BYTE-IDENTICAL to a goal-file with no `[economy]`
+  table at all.
+
+  | Key       | TOML type | Default | Maps to / effect |
+  |-----------|-----------|---------|-------------------|
+  | `debrief` | boolean   | `false` | when `true`, each dispatch prompt carries ONE capped debrief question ("list files/facts you needed but had to discover yourself"); a fenced structured answer in the agent's reply is parsed, capped, and persisted as HYPOTHESIS rows in the read-model. A debrief answer is WRITE-ONLY: no code path reads it back into a prompt (the gaming-surface rule, cf. T32.5) |
+
+  A non-boolean `debrief` is a validation error. The CLI `--debrief` flag
+  (`kazi apply … --debrief`) overrides whatever the goal-file declares, the
+  same way `--standing` overrides `standing`.
+
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
   Declares the goal's *group taxonomy* — the vocabulary by which a large goal
@@ -354,6 +369,8 @@ defmodule Kazi.Goal.Loader do
          {:ok, groups} <- build_groups(Map.get(data, "group", [])),
          # T32.4 anti-gaming enforcement (ADR-0042): optional `[enforcement]` table.
          {:ok, enforcement} <- build_enforcement(Map.get(data, "enforcement")),
+         # T48.11 (ADR-0058 §3): optional `[economy]` table (debrief opt-in).
+         {:ok, debrief} <- build_economy(Map.get(data, "economy")),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
@@ -380,6 +397,7 @@ defmodule Kazi.Goal.Loader do
          harness: harness,
          groups: groups,
          enforcement: enforcement,
+         debrief: debrief,
          metadata: Map.get(data, "metadata", %{})
        )}
     end
@@ -568,6 +586,20 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_enforcement(_), do: {:error, "[enforcement] must be a table"}
+
+  # T48.11 (ADR-0058 §3): the optional `[economy]` table — currently a single
+  # `debrief` boolean opt-in. Absent (nil) → `false` (byte-identical to today).
+  # A non-boolean `debrief` fails loudly at load time rather than being coerced.
+  defp build_economy(nil), do: {:ok, false}
+
+  defp build_economy(econ) when is_map(econ) do
+    case Map.get(econ, "debrief", false) do
+      debrief when is_boolean(debrief) -> {:ok, debrief}
+      _ -> {:error, "economy \"debrief\" must be a boolean"}
+    end
+  end
+
+  defp build_economy(_), do: {:error, "[economy] must be a table"}
 
   defp enforcement_bool(enf, key, default) do
     case Map.get(enf, key, default) do
