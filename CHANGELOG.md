@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.97.0](https://github.com/kazi-org/kazi/compare/v1.96.0...v1.97.0) (2026-07-07)
+
+
+### Features
+
+* **cli:** surface usage_fidelity on the run --json result ([53fff04](https://github.com/kazi-org/kazi/commit/53fff04db13a6321abbae9d49d9fa640639348e3))
+* **loop:** warn once per run when max_tokens is set but usage is unreported ([c1c152d](https://github.com/kazi-org/kazi/commit/c1c152d8278699234dc2ff03b4f3815ce951ff0d))
+
 ## [1.96.0](https://github.com/kazi-org/kazi/compare/v1.95.0...v1.96.0) (2026-07-07)
 
 
