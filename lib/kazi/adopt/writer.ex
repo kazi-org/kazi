@@ -25,6 +25,12 @@ defmodule Kazi.Adopt.Writer do
       human to fill in. It is a comment, so it does not parse: that is the
       intended product output, not a stub (ADR-0013 §3 — live predicates are
       scaffolded, never guessed).
+    * an optional COMMENTED `[budget]` suggestion (T48.9, ADR-0058 decision
+      2) when `to_toml/2`'s second argument is a
+      `Kazi.Economy.BudgetSuggestion.t()` — learned ceilings with an explicit
+      provenance line, uncommented by a human to opt in. `nil` (the `to_toml/1`
+      default, and the honest outcome when local run history has nothing to
+      learn from) renders nothing extra.
 
   ## Invariants
 
@@ -45,23 +51,36 @@ defmodule Kazi.Adopt.Writer do
   # then human description, then the guard/acceptance markers.
   @reserved_order ~w(id provider description guard acceptance)
 
+  # Budget keys rendered (in this order) inside the T48.9 suggestion comment,
+  # when present -- mirrors the `[budget]` table's own key order (T48.6).
+  @suggested_budget_order ~w(max_tokens max_dispatches max_wall_clock_ms)a
+
   @doc """
-  Renders the goal `map` to a TOML goal-file string.
+  Renders the goal `map` to a TOML goal-file string, with an optional T48.9
+  learned-`[budget]`-suggestion comment block (ADR-0058 decision 2).
 
   `map` is string-keyed in the `Kazi.Goal.Loader.from_map/1` shape: a required
   `"id"`, an optional `"name"`, an optional `"scope"` table, and a `"predicate"`
-  array of predicate maps. The output ends with a commented live-predicate
-  scaffold (an `http_probe` with `TODO` placeholders) for a human to complete.
+  array of predicate maps. `suggested_budget` (default `nil`) is a
+  `Kazi.Economy.BudgetSuggestion.t()` -- when present it is rendered as a
+  COMMENTED `[budget]` block (never a live one; kazi never silently applies a
+  learned budget) with an explicit provenance line, ahead of the live-predicate
+  scaffold. `nil` renders nothing extra, so `to_toml/1` (no suggestion) is
+  byte-identical to `to_toml/2` called with `nil` -- the honest behavior when
+  local run history has nothing to learn from for this goal's shape.
 
-  Pure, total, and deterministic — the same map always renders byte-identically.
+  Pure, total, and deterministic — the same inputs always render byte-identically.
   """
-  @spec to_toml(map()) :: String.t()
-  def to_toml(%{} = map) do
+  @spec to_toml(map(), Kazi.Economy.BudgetSuggestion.t() | nil) :: String.t()
+  def to_toml(map, suggested_budget \\ nil)
+
+  def to_toml(%{} = map, suggested_budget) do
     [
       render_header(map),
       render_scope(Map.get(map, "scope")),
       render_harness(Map.get(map, "harness")),
       render_predicates(Map.get(map, "predicate", [])),
+      render_suggested_budget(suggested_budget),
       live_predicate_scaffold()
     ]
     |> Enum.reject(&(&1 == ""))
@@ -154,6 +173,32 @@ defmodule Kazi.Adopt.Writer do
   end
 
   defp render_harness(_other), do: ""
+
+  # The T48.9 learned-`[budget]`-suggestion comment block (ADR-0058 decision 2):
+  # a COMMENTED `[budget]` table (so it never parses -- a human uncomments it to
+  # opt in) preceded by the required provenance line. `nil` (no usable local
+  # history) renders nothing, keeping `to_toml/1` byte-identical to `to_toml/2`
+  # called with `nil`.
+  defp render_suggested_budget(nil), do: ""
+
+  defp render_suggested_budget(%{provenance: provenance} = suggestion) do
+    lines =
+      @suggested_budget_order
+      |> Enum.map(&commented_kv(&1, Map.get(suggestion, &1)))
+      |> Enum.reject(&(&1 == ""))
+
+    [
+      "# suggested by kazi economy: #{provenance}",
+      "# kazi NEVER applies a learned budget silently -- uncomment to opt in.",
+      "# [budget]" | lines
+    ]
+    |> Enum.join("\n")
+  end
+
+  # A commented key/value line for the suggested-budget block; `nil` (that
+  # metric had no reported history) emits nothing (honest-unknown, ADR-0046).
+  defp commented_kv(_key, nil), do: ""
+  defp commented_kv(key, value), do: "# #{key} = #{render_value(value)}"
 
   # Render each predicate as its own `[[predicate]]` block, in input order
   # (deterministic). A non-list or empty predicate list renders nothing here —

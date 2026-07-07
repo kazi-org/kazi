@@ -62,7 +62,7 @@ defmodule Kazi.CLI do
   alias Kazi.Authoring.Clarify.Question
   alias Kazi.Authoring.RationaleAdr
   alias Kazi.ContextStore.GistInit
-  alias Kazi.Economy.History
+  alias Kazi.Economy.{BudgetSuggestion, History}
   alias Kazi.Export.Obsidian
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
@@ -272,7 +272,8 @@ defmodule Kazi.CLI do
     },
     %{
       name: "init",
-      summary: "Adopt a repo by stack detection and write a starter goal-file.",
+      summary:
+        "Adopt a repo by stack detection and write a starter goal-file (incl. a learned [budget] suggestion when local history has one, ADR-0058).",
       args: [%{name: "repo-dir", required: true}],
       flags: [:out, :enrich, :with_mcp, :with_gist, :workspace]
     },
@@ -306,7 +307,7 @@ defmodule Kazi.CLI do
     %{
       name: "plan",
       summary:
-        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates).",
+        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058).",
       args: [%{name: "idea", required: false}],
       flags: [:workspace, :yes, :strict, :adr, :json, :predicates, :replace]
     },
@@ -2084,8 +2085,9 @@ defmodule Kazi.CLI do
       {:ok, adoption} ->
         goal_map = stack_goal_map(repo_dir, adoption, opts)
         out = opts[:out] || Path.join(repo_dir, @default_stack_out)
+        suggestion = suggested_budget_for_predicates(Map.get(goal_map, "predicate"))
 
-        case write_goal_file(out, Adopt.to_toml(goal_map)) do
+        case write_goal_file(out, Adopt.to_toml(goal_map, suggestion)) do
           0 ->
             # Both opt-in setups are additive and independent; run each and fail
             # the command if either step fails (max of the exit codes).
@@ -2125,6 +2127,17 @@ defmodule Kazi.CLI do
       "predicate" => [adoption.predicate | guards] ++ proposed
     }
   end
+
+  # T48.9 (ADR-0058 decision 2): the adopted goal's predicate COUNT (acceptance
+  # + guards + any enriched live predicates) is its shape for a learned budget
+  # lookup. `kazi init` has never required the read-model (ADR-0013 -- pure
+  # filesystem detection); `BudgetSuggestion.suggest/2` degrades to `nil` on any
+  # read-model failure, so this stays best-effort and never blocks adoption.
+  defp suggested_budget_for_predicates(predicates) when is_list(predicates) do
+    BudgetSuggestion.suggest(length(predicates))
+  end
+
+  defp suggested_budget_for_predicates(_predicates), do: nil
 
   # `--with-mcp` (T33.3, ADR-0044): after the goal-file lands, additively write the
   # canonical kazi MCP client config to the repo's `.mcp.json` so an MCP-speaking
@@ -3425,7 +3438,53 @@ defmodule Kazi.CLI do
     IO.puts("\npredicates (acceptance criteria):")
     IO.puts(format_proposed_predicates(draft.goal))
     report_rationale(draft.goal)
+    report_suggested_budget(draft.goal)
     IO.puts("\nReview, then: kazi approve #{draft.proposal_ref}")
+  end
+
+  # T48.9 (ADR-0058 decision 2): a learned `[budget]` suggestion for the drafted
+  # goal's shape, printed as ADVISORY text -- never written into the draft
+  # itself (`Kazi.Authoring.serialize_goal/1` carries no budget, so a suggestion
+  # here can never silently reach an approved goal). Absent when local history
+  # has nothing usable for this shape (no line printed at all).
+  defp report_suggested_budget(%Goal{} = goal) do
+    case suggested_budget(goal) do
+      nil ->
+        :ok
+
+      suggestion ->
+        IO.puts(
+          "\nsuggested [budget] (advisory -- not applied; copy into the goal-file to opt in):"
+        )
+
+        IO.puts(format_suggested_budget_lines(suggestion))
+    end
+  end
+
+  defp format_suggested_budget_lines(suggestion) do
+    lines =
+      [
+        maybe_budget_line("max_tokens", suggestion[:max_tokens]),
+        maybe_budget_line("max_dispatches", suggestion[:max_dispatches]),
+        maybe_budget_line("max_wall_clock_ms", suggestion[:max_wall_clock_ms])
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    Enum.join(["  # #{suggestion.provenance}" | lines], "\n")
+  end
+
+  defp maybe_budget_line(_key, nil), do: nil
+  defp maybe_budget_line(key, value), do: "  #{key} = #{value}"
+
+  # The T48.9 suggestion input is the drafted goal's own predicate count (its
+  # "shape", `Kazi.Economy.History.goal_shape_bucket/1`) -- model/harness are
+  # not yet chosen at draft time, so the lookup pools across the shape bucket
+  # (see `Kazi.Economy.BudgetSuggestion`).
+  defp suggested_budget(%Goal{} = goal) do
+    goal
+    |> Goal.all_predicates()
+    |> length()
+    |> BudgetSuggestion.suggest()
   end
 
   # =============================================================================
@@ -3441,7 +3500,7 @@ defmodule Kazi.CLI do
   # interactively. The floor applies in BOTH drive modes (kazi-drafts and
   # caller-drafts) because both produce the same `Kazi.Authoring.Draft` here.
   defp proposed_json(draft) do
-    %{
+    base = %{
       schema_version: @run_schema_version,
       goal_id: to_string(draft.goal.id),
       proposal_ref: draft.proposal_ref,
@@ -3451,6 +3510,15 @@ defmodule Kazi.CLI do
       rationale: rationale_text(draft.goal),
       clarify: clarify_json(draft)
     }
+
+    # T48.9 (ADR-0058 decision 2): the `suggested_budget` key is present ONLY
+    # when local history has something usable for this goal's shape -- absent
+    # (not `null`), so a fresh/empty read-model's `plan --json` output is
+    # BYTE-IDENTICAL to before this feature existed.
+    case suggested_budget(draft.goal) do
+      nil -> base
+      suggestion -> Map.put(base, :suggested_budget, suggestion)
+    end
   end
 
   defp predicate_json(predicate) do
