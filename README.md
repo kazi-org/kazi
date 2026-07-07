@@ -776,9 +776,10 @@ pins this output, so the example never drifts from what the tool produces.
   ([ADR-0011](docs/adr/0011-slice3-operator-surfaces.md)).
 - **`kazi dashboard` — the fleet starmap** — several concurrent `kazi apply`
   runs on one machine are a black box by default; `kazi dashboard` boots a
-  standalone, read-only web endpoint over the shared run registry (`/starmap`:
-  every registered run at a glance, state landed / converging / stale / stuck,
-  run tags, fleet counts). See [docs/dashboard.md](docs/dashboard.md)
+  standalone, read-only web endpoint over the shared run registry. The starmap
+  is the landing page (`/`, alias `/starmap`): every registered run at a
+  glance, state landed / converging / stale / stuck, run tags, fleet counts.
+  See [docs/dashboard.md](docs/dashboard.md)
   ([ADR-0057](docs/adr/0057-fleet-observability-dashboard.md)).
 
 ---
