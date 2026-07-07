@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.98.0](https://github.com/kazi-org/kazi/compare/v1.97.0...v1.98.0) (2026-07-07)
+
+
+### Features
+
+* **loop:** live permanent-error stuck detection (T48.3) ([2433840](https://github.com/kazi-org/kazi/commit/2433840517f3a93af9657c01a6192f5364612ef9))
+
 ## [1.97.0](https://github.com/kazi-org/kazi/compare/v1.96.0...v1.97.0) (2026-07-07)
 
 
