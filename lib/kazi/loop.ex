@@ -260,7 +260,17 @@ defmodule Kazi.Loop do
           goal_shape: %{
             predicate_count: non_neg_integer(),
             kind_histogram: %{optional(Kazi.Predicate.provider_kind()) => pos_integer()}
-          }
+          },
+          # T48.5 (ADR-0058 §4): degraded-fidelity flag for the RUN's budget
+          # honesty — `:unreported` once any dispatch under a `max_tokens`
+          # ceiling came back with no usage the loop could count (the `claw`
+          # profile, ADR-0022, reports none by design), `nil` otherwise. This is
+          # distinct from the per-dispatch `:usage_fidelity` (`:full`/`:partial`/
+          # `:none`) a harness PROFILE parses onto ONE result (T34.2) — that one
+          # says "how much of THIS envelope did we get"; this one says "can the
+          # goal's token ceiling bind AT ALL this run". A ceiling that cannot
+          # bind must say so rather than silently never tripping.
+          usage_fidelity: :unreported | nil
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -541,7 +551,17 @@ defmodule Kazi.Loop do
               # backoff and the quarantine-only stuck bound. Both appended last so
               # the existing field order is untouched.
               quarantine_streaks: %{},
-              noop_ticks: 0
+              noop_ticks: 0,
+              # --- T48.5 (ADR-0058 §4): token-ceiling honesty ------------------
+              # `nil` until a dispatch under a `max_tokens` ceiling reports no
+              # usage the loop can count; then `:unreported` for the rest of the
+              # run (set once, never cleared — see `maybe_flag_unreported_usage/2`).
+              # Distinct from the per-dispatch `usage_fidelity` a harness PROFILE
+              # parses onto one result (T34.2); this is the RUN-level "the
+              # ceiling cannot bind" flag, surfaced on `snapshot/1` and the
+              # terminal result so the CLI/read-model can say so. Appended last
+              # so the existing field order is untouched.
+              usage_fidelity: nil
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -796,7 +816,8 @@ defmodule Kazi.Loop do
             gaming_events: [map()]
           },
           context_tier: Tier.t(),
-          context_tier_escalations: [map()]
+          context_tier_escalations: [map()],
+          usage_fidelity: :unreported | nil
         }
   def snapshot(ref) do
     :gen_statem.call(ref, :snapshot)
@@ -1061,7 +1082,10 @@ defmodule Kazi.Loop do
       # so a test / `kazi status` can confirm a stalled run escalated and a
       # net-negative bump was reverted.
       context_tier: active_tier(data),
-      context_tier_escalations: Enum.reverse(data.escalation_events)
+      context_tier_escalations: Enum.reverse(data.escalation_events),
+      # T48.5 (ADR-0058 §4): `:unreported` once a max_tokens ceiling has seen a
+      # dispatch report no usage this run (the ceiling cannot bind), else nil.
+      usage_fidelity: data.usage_fidelity
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -1782,6 +1806,12 @@ defmodule Kazi.Loop do
     # terminal `--json` result. Only reported components are summed (absent ≠ zero).
     data = accumulate_usage(data, result)
 
+    # T48.5 (ADR-0058 §4): if `max_tokens` is set and THIS dispatch reported no
+    # usage at all, the ceiling cannot bind — warn loudly once per run and flag
+    # the run's degraded usage fidelity so the operator sees WHY a budget never
+    # trips rather than assuming the run is simply cheap.
+    data = maybe_flag_unreported_usage(data, result)
+
     # T34.3 (ADR-0046 §2): record this dispatch's per-iteration `context` + `tools`
     # counters on the loop state so the NEXT observation's iteration event carries
     # them. `context` is computed from the prompt sections just built (orientation/
@@ -2484,7 +2514,11 @@ defmodule Kazi.Loop do
       # the active context tier, and the goal shape.
       dispatches: data.dispatches,
       context_tier: active_tier(data),
-      goal_shape: goal_shape(data.goal)
+      goal_shape: goal_shape(data.goal),
+      # T48.5 (ADR-0058 §4): `:unreported` if a max_tokens ceiling ever saw a
+      # dispatch with no usage this run (so the ceiling could not bind), nil
+      # otherwise.
+      usage_fidelity: data.usage_fidelity
     }
     |> maybe_attach_stuck_bundle(data)
   end
@@ -2800,6 +2834,56 @@ defmodule Kazi.Loop do
 
   defp put_token_split(components, %{usage: %{} = usage}), do: Map.merge(components, usage)
   defp put_token_split(components, _result), do: components
+
+  # T48.5 (ADR-0058 §4): when a `max_tokens` ceiling is set, a dispatch that
+  # reports NO usage at all means the ceiling cannot bind — the loop's token
+  # total only grows when a harness reports one (`token_estimate/1` above), so
+  # an unreported run silently sits at (or near) zero forever and the ceiling
+  # never trips. Warn loudly ONCE per run (not once per dispatch — repeated
+  # warnings against a harness that reports no usage BY DESIGN, e.g. `claw`,
+  # ADR-0022, would just be noise) and stick the run's `usage_fidelity` at
+  # `:unreported` so the CLI/read-model can say so. Once flagged, later
+  # dispatches (even ones that DO report usage) leave the flag set — the run
+  # already proved the ceiling was unenforceable at least once.
+  @spec maybe_flag_unreported_usage(Data.t(), Kazi.HarnessAdapter.result()) :: Data.t()
+  defp maybe_flag_unreported_usage(%Data{budget: nil} = data, _result), do: data
+  defp maybe_flag_unreported_usage(%Data{usage_fidelity: :unreported} = data, _result), do: data
+  defp maybe_flag_unreported_usage(%Data{budget: %{max_tokens: nil}} = data, _result), do: data
+
+  defp maybe_flag_unreported_usage(%Data{budget: %{max_tokens: max_tokens}} = data, result) do
+    if usage_reported?(result) do
+      data
+    else
+      Logger.warning(fn ->
+        "kazi.loop goal=#{goal_id(data.goal)} max_tokens=#{max_tokens} is set but a " <>
+          "harness dispatch reported no usage — the token ceiling cannot bind " <>
+          "(ADR-0058 #4). Degraded usage fidelity: :unreported."
+      end)
+
+      %Data{data | usage_fidelity: :unreported}
+    end
+  end
+
+  # Whether a harness result carries ANY usage signal the budget/economy code
+  # can count: the rolled-up token estimate (`cost.tokens`, T1.4), the per-field
+  # cached/fresh split (`usage`, T34.1/T34.2), or a reported per-dispatch
+  # `usage_fidelity` of `:full`/`:partial` (T34.2). A profile that reports
+  # NOTHING (the `claw` best-effort profile, ADR-0022 — no cost, no tokens, no
+  # fidelity) or an `{:error, _}` dispatch is "no usage reported".
+  @spec usage_reported?(Kazi.HarnessAdapter.result()) :: boolean()
+  defp usage_reported?({:ok, %{} = result}) do
+    match?(%{tokens: tokens} when is_integer(tokens), Map.get(result, :cost, %{})) or
+      Map.get(result, :usage_fidelity) in [:full, :partial] or
+      map_size(Map.get(result, :usage, %{})) > 0
+  end
+
+  defp usage_reported?(_result), do: false
+
+  # T48.5: the goal id for the warning, or "unknown" if the loop somehow has no
+  # goal bound yet (defensive — `dispatch_agent/2` always runs with one).
+  @spec goal_id(Goal.t() | nil) :: String.t()
+  defp goal_id(%Goal{id: id}), do: id
+  defp goal_id(_goal), do: "unknown"
 
   # Sum two usage maps component-wise; a component present in only one side is
   # carried through, so the aggregate reports exactly the union of what was
