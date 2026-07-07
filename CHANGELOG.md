@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.98.1](https://github.com/kazi-org/kazi/compare/v1.98.0...v1.98.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **examples:** http_probe predicates carry url, not dead path config ([4d3b817](https://github.com/kazi-org/kazi/commit/4d3b817539fceb299c2b8721590d12bb85792a88))
+* **loader:** validate live predicate url at goal-load (T48.1) ([238e1f5](https://github.com/kazi-org/kazi/commit/238e1f5754b777e2a17c18795480ef0b1f1a3735))
+
 ## [1.98.0](https://github.com/kazi-org/kazi/compare/v1.97.0...v1.98.0) (2026-07-07)
 
 
