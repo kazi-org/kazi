@@ -54,11 +54,13 @@ defmodule Kazi.Goal.Loader do
 
   ### `[scope]` table (optional, → `Kazi.Scope`)
 
-  | Key         | TOML type        | Maps to          |
-  |-------------|------------------|------------------|
-  | `workspace` | string           | `Scope.workspace` |
-  | `repo`      | string           | `Scope.repo`     |
-  | `paths`     | array of strings | `Scope.paths`    |
+  | Key           | TOML type        | Maps to               |
+  |---------------|------------------|------------------------|
+  | `workspace`   | string           | `Scope.workspace`     |
+  | `repo`        | string           | `Scope.repo`          |
+  | `paths`       | array of strings | `Scope.paths`         |
+  | `write_paths` | array of strings | `Scope.write_paths` — issue #860: the EDITABLE subset of `paths` (distinct from the readable allow-list); absent/empty keeps today's `paths`-only behavior byte-identical. Used by `kazi apply --json`'s `collateral` field to flag out-of-write-scope changes. |
+  | `deny`        | array of strings | `Scope.deny` — issue #860: protected paths that must NEVER be modified by this goal (entitlements, auth config, CI workflows). `Kazi.Scope.guard_predicates/1` synthesizes a `:scope_guard` GUARD predicate from it (independent of `[enforcement]`) that fails — with the offending paths as evidence — if a run changes anything under a `deny` path; absent/empty synthesizes no guard. |
 
   ### `[harness]` table (optional, → `Goal.harness`, T8.6/ADR-0016)
 
@@ -464,8 +466,17 @@ defmodule Kazi.Goal.Loader do
   defp build_scope(scope) when is_map(scope) do
     with {:ok, workspace} <- optional_string(scope, "workspace", "scope"),
          {:ok, repo} <- optional_string(scope, "repo", "scope"),
-         {:ok, paths} <- optional_string_list(scope, "paths", "scope") do
-      {:ok, Scope.new(workspace: workspace, repo: repo, paths: paths)}
+         {:ok, paths} <- optional_string_list(scope, "paths", "scope"),
+         {:ok, write_paths} <- optional_string_list(scope, "write_paths", "scope"),
+         {:ok, deny} <- optional_string_list(scope, "deny", "scope") do
+      {:ok,
+       Scope.new(
+         workspace: workspace,
+         repo: repo,
+         paths: paths,
+         write_paths: write_paths,
+         deny: deny
+       )}
     end
   end
 
