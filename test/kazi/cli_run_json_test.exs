@@ -309,7 +309,15 @@ defmodule Kazi.CLIRunJsonTest do
       refute Map.has_key?(payload, "cause")
     end
 
-    test "a live permanent-error stop carries cause error_wedged with the erroring ids and reasons (T48.4, ADR-0058)",
+    # T48.1 (ADR-0058) made the url-less live wedge STRUCTURALLY IMPOSSIBLE from
+    # a goal-file: the loader rejects it before a loop ever starts, so `kazi
+    # apply` can no longer reach the `error_wedged` stop this way -- the JSON
+    # error envelope naming the predicate and the missing key IS the honest
+    # outcome now. (The `error_wedged` cause itself stays pinned at loop/runtime
+    # level in permanent_live_error_stuck_test.exs, where the goal is built
+    # programmatically, and the CLI's present-`cause` rendering is pinned by the
+    # budget_exhausted case above.)
+    test "a url-less live predicate is rejected at goal-load with a JSON error, not run to a wedge (T48.1/T48.4, ADR-0058)",
          %{tmp_dir: tmp_dir} do
       %{work: work, bare: bare} = setup_repo(tmp_dir)
 
@@ -332,14 +340,10 @@ defmodule Kazi.CLIRunJsonTest do
         end)
 
       assert {:ok, payload} = Jason.decode(String.trim(out))
-      assert payload["status"] == "stuck"
-      assert payload["reason"] == "stuck"
-
-      assert payload["cause"] == %{
-               "class" => "error_wedged",
-               "ids" => ["live_route"],
-               "reasons" => %{"live_route" => "missing_url"}
-             }
+      assert payload["error"] =~ "could not load goal-file"
+      assert payload["error"] =~ "live_route"
+      assert payload["error"] =~ "url"
+      refute Map.has_key?(payload, "status")
     end
   end
 
