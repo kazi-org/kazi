@@ -211,4 +211,53 @@ defmodule Kazi.Loop.CauseClass do
 
   defp sorted_ids(nil), do: []
   defp sorted_ids(ids), do: Enum.sort(ids)
+
+  @doc """
+  Formats a PERSISTED cause class + its read-model detail map into the single
+  human-readable line rendered at both call sites that show a finished run's
+  cause (T48.14): the starmap drill-in panel's `cause_line/1`
+  (`KaziWeb.StarmapLive`) and the fleet-wide attention queue
+  (`Kazi.Attention.Queue`). One formatter, two call sites, so the two surfaces
+  can never drift on how a cause reads.
+
+  `class` is the read-model's `outcome_cause_class` string (`Kazi.ReadModel.Run`);
+  `detail` is `outcome_cause_detail` — a string-keyed map (`"reasons"` /
+  `"exhausted"` / `"ids"`) as `Kazi.Runtime`'s `cause_attrs/1` persists it, or
+  `nil`/anything unrecognized, which yields no suffix.
+
+  ## Examples
+
+      iex> Kazi.Loop.CauseClass.format("error_wedged", %{"reasons" => %{"live_route" => "missing_url"}})
+      "error_wedged (live_route: missing_url)"
+
+      iex> Kazi.Loop.CauseClass.format("budget_exhausted", %{"exhausted" => "max_iterations"})
+      "budget_exhausted (max_iterations)"
+
+      iex> Kazi.Loop.CauseClass.format("quarantine_blocked", %{"ids" => ["flappy"]})
+      "quarantine_blocked (flappy)"
+
+      iex> Kazi.Loop.CauseClass.format("budget_exhausted", %{})
+      "budget_exhausted"
+
+  """
+  @spec format(String.t(), map() | nil) :: String.t()
+  def format(class, detail) when is_binary(class) do
+    class <> detail_suffix(detail)
+  end
+
+  defp detail_suffix(%{"reasons" => reasons})
+       when is_map(reasons) and map_size(reasons) > 0 do
+    text =
+      reasons
+      |> Enum.sort_by(fn {id, _reason} -> id end)
+      |> Enum.map_join(", ", fn {id, reason} -> "#{id}: #{reason}" end)
+
+    " (#{text})"
+  end
+
+  defp detail_suffix(%{"exhausted" => exhausted}) when is_binary(exhausted),
+    do: " (#{exhausted})"
+
+  defp detail_suffix(%{"ids" => [_ | _] = ids}), do: " (#{Enum.join(ids, ", ")})"
+  defp detail_suffix(_detail), do: ""
 end
