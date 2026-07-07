@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.100.0](https://github.com/kazi-org/kazi/compare/v1.99.0...v1.100.0) (2026-07-07)
+
+
+### Features
+
+* **cli:** kazi economy -- run-economics history over the read-model (T48.8) ([c80bade](https://github.com/kazi-org/kazi/commit/c80bade3a24fe8b2bf32768e72be94a8ce8f3664))
+* **economy:** run-economics history aggregation (T48.8, ADR-0058) ([c36bbf7](https://github.com/kazi-org/kazi/commit/c36bbf7090c51bb007a1228b11c30003828e03a6))
+
 ## [1.99.0](https://github.com/kazi-org/kazi/compare/v1.98.1...v1.99.0) (2026-07-07)
 
 
