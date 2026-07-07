@@ -99,6 +99,91 @@ defmodule KaziWeb.AttentionQueueTest do
     assert html =~ ~s(data-signal="regression_recovered")
   end
 
+  test "an error_wedged run renders its cause line and ranks above an otherwise-equal stuck run (T48.14)",
+       %{conn: conn} do
+    wedged = seed()
+
+    {:ok, _} =
+      RunRegistry.finish(wedged.run_id, "stuck", %{
+        outcome_cause_class: "error_wedged",
+        outcome_cause_detail: %{
+          "ids" => ["live_route"],
+          "reasons" => %{"live_route" => "missing_url"},
+          "exhausted" => nil
+        }
+      })
+
+    stuck = seed()
+
+    for index <- 0..2 do
+      record(stuck.goal_ref, index, PredicateVector.new(%{"unit" => PredicateResult.fail()}))
+    end
+
+    {:ok, _view, html} = live(conn, ~p"/starmap")
+
+    assert html =~ ~s(id="attention-item-#{wedged.goal_ref}-cause")
+    assert html =~ ~s(data-signal="cause")
+    assert html =~ "error_wedged (live_route: missing_url)"
+    assert html =~ ~s(href="/goals/#{wedged.goal_ref}/drillin")
+
+    # Ranking: the cause entry (severity 5) precedes the ordinary stuck entry
+    # (severity 4) in document order.
+    {cause_pos, _} = :binary.match(html, ~s(id="attention-item-#{wedged.goal_ref}-cause"))
+    {stuck_pos, _} = :binary.match(html, ~s(id="attention-item-#{stuck.goal_ref}-stuck"))
+    assert cause_pos < stuck_pos
+  end
+
+  test "a quarantine_blocked run renders its cause line and ranks above an otherwise-equal stuck run (T48.14)",
+       %{conn: conn} do
+    blocked = seed()
+
+    {:ok, _} =
+      RunRegistry.finish(blocked.run_id, "stuck", %{
+        outcome_cause_class: "quarantine_blocked",
+        outcome_cause_detail: %{"ids" => ["flappy"], "reasons" => %{}, "exhausted" => nil}
+      })
+
+    stuck = seed()
+
+    for index <- 0..2 do
+      record(stuck.goal_ref, index, PredicateVector.new(%{"unit" => PredicateResult.fail()}))
+    end
+
+    {:ok, _view, html} = live(conn, ~p"/starmap")
+
+    assert html =~ ~s(id="attention-item-#{blocked.goal_ref}-cause")
+    assert html =~ "quarantine_blocked (flappy)"
+
+    {cause_pos, _} = :binary.match(html, ~s(id="attention-item-#{blocked.goal_ref}-cause"))
+    {stuck_pos, _} = :binary.match(html, ~s(id="attention-item-#{stuck.goal_ref}-stuck"))
+    assert cause_pos < stuck_pos
+  end
+
+  test "a finished run with no cause classified renders and ranks unchanged (byte-identical, T48.14)",
+       %{conn: conn} do
+    clean = seed()
+    {:ok, _} = RunRegistry.finish(clean.run_id, "converged")
+
+    {:ok, _view, html} = live(conn, ~p"/starmap")
+
+    refute html =~ ~s(id="attention-item-#{clean.goal_ref}-cause")
+  end
+
+  test "a finished budget_exhausted run raises no :cause entry (the operator can raise the budget)",
+       %{conn: conn} do
+    exhausted = seed()
+
+    {:ok, _} =
+      RunRegistry.finish(exhausted.run_id, "over_budget", %{
+        outcome_cause_class: "budget_exhausted",
+        outcome_cause_detail: %{"ids" => [], "reasons" => %{}, "exhausted" => "max_iterations"}
+      })
+
+    {:ok, _view, html} = live(conn, ~p"/starmap")
+
+    refute html =~ ~s(id="attention-item-#{exhausted.goal_ref}-cause")
+  end
+
   test "a plain converging run with no signal renders the queue's empty state", %{conn: conn} do
     seed()
 
