@@ -141,6 +141,12 @@ defmodule Kazi.Loop do
   # set). The loop only feeds it the T1.1 history and fires the human-escalation
   # hook + terminal stop on its verdict (see observe_tick/1).
   alias Kazi.Loop.StuckDetector
+  # T48.3 (ADR-0058, UC-064): the pure error-permanence taxonomy classifying a
+  # `:error` reason as `:permanent` (config/wiring, never clears) or `:transient`
+  # (may clear). The loop passes `classify_result/1` into
+  # `StuckDetector.permanent_error_stuck?/3` (see `live_history/1` below) —
+  # neither module depends on the other at runtime.
+  alias Kazi.Loop.ErrorPermanence
   # T1.2 regression: the pure green→red detector + dispatch attribution. The loop
   # only feeds it the per-iteration history (T1.1) + dispatch log and records the
   # flags it returns (see observe_tick/1).
@@ -270,7 +276,15 @@ defmodule Kazi.Loop do
           # says "how much of THIS envelope did we get"; this one says "can the
           # goal's token ceiling bind AT ALL this run". A ceiling that cannot
           # bind must say so rather than silently never tripping.
-          usage_fidelity: :unreported | nil
+          usage_fidelity: :unreported | nil,
+          # T48.3 (ADR-0058, UC-064): the persistent failing set's last-observed
+          # `:error` reason per id, keyed the same as `:stuck_failing`, when the
+          # stop was a LIVE permanent-error verdict (`permanent_error_stuck?/3`);
+          # `nil` for every other `:stuck` stop (the ordinary T1.5 failing-set or
+          # code error_stuck? verdicts carry no reason taxonomy) and for every
+          # non-stuck outcome. Additive — the existing `:stuck_failing` id list
+          # shape is unchanged; this only adds WHY those ids are stuck.
+          stuck_reasons: %{Kazi.Predicate.id() => term()} | nil
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -389,6 +403,10 @@ defmodule Kazi.Loop do
               stuck_iterations: nil,
               on_escalation: nil,
               stuck_failing: nil,
+              # T48.3 (ADR-0058, UC-064): the reason map for a LIVE permanent-error
+              # stuck stop (see `stuck_reasons` in `t:result/0`). nil for every
+              # other stop. Appended last so the existing field order is untouched.
+              stuck_reasons: nil,
               # --- T1.2 regression: dispatch log + flagged regressions --------
               # Append-only log of {iteration_index, %Action{}} for every agent
               # dispatch, where iteration_index is the observation index the loop
@@ -786,7 +804,10 @@ defmodule Kazi.Loop do
   snapshot. Also includes `:quarantine` — the list of predicate ids currently
   quarantined as flaky (T1.3), which are excluded from the convergence/work
   calculus; `:stuck_failing` — the list of predicate ids the loop stopped stuck
-  on (T1.5), or `nil` if it did not stop stuck; `:regressions` (T1.2) — the
+  on (T1.5), or `nil` if it did not stop stuck; `:stuck_reasons` (T48.3,
+  ADR-0058) — the persistent set's last-observed `:error` reason per id when the
+  stop was a LIVE permanent-error verdict, or `nil` for every other stop;
+  `:regressions` (T1.2) — the
   green→red predicate flags detected over the history so far, each with the
   dispatch it is attributed to (see `Kazi.Loop.RegressionDetector`); and
   `:release_ref` (T3.3d) — the release ref of the most recent successful deploy
@@ -809,6 +830,7 @@ defmodule Kazi.Loop do
           dispatches: non_neg_integer(),
           budget_reason: Budget.reason() | nil,
           stuck_failing: [Kazi.Predicate.id()] | nil,
+          stuck_reasons: %{Kazi.Predicate.id() => term()} | nil,
           regressions: [RegressionDetector.flag()],
           enforcement: %{
             active: boolean(),
@@ -1069,6 +1091,9 @@ defmodule Kazi.Loop do
       # T1.5 stuck: the persistent failing set the loop stopped stuck on, or nil
       # if it did not stop stuck.
       stuck_failing: stuck_failing_list(data.stuck_failing),
+      # T48.3 (ADR-0058, UC-064): the reason map for a LIVE permanent-error stuck
+      # stop, or nil for every other stop (see `build_result/2`).
+      stuck_reasons: data.stuck_reasons,
       # T1.2 regression: the green→red flags detected over the history so far,
       # each with its attributed dispatch (see Kazi.Loop.RegressionDetector).
       regressions: data.regressions,
@@ -1191,8 +1216,34 @@ defmodule Kazi.Loop do
         # declared). Reuse the same terminal :stuck stop rather than a new
         # terminal state, on the SAME window the ordinary stuck check uses.
         case StuckDetector.error_stuck?(code_history(data), data.stuck_iterations) do
-          {:error_stuck, erroring} -> terminate_stuck(erroring, data)
-          :not_error_stuck -> decide(vector, data)
+          {:error_stuck, erroring} ->
+            terminate_stuck(erroring, data)
+
+          :not_error_stuck ->
+            # T48.3 (ADR-0058, UC-064): the ABOVE error_stuck? check reduces to
+            # `code_history/1`, which drops live predicates entirely (by design —
+            # step 5 legitimately polls them) — so a live predicate erroring
+            # forever (e.g. an `:http_probe` missing its required `:url`) is
+            # invisible to it and the loop falls through to `decide/2`'s
+            # `handle_no_work/2` backoff FOREVER, spinning to `:max_iterations`/
+            # `:over_budget` (the ADR-0058 wedge: a config error the loop could
+            # have named on the first observation). Mirror the check over the
+            # LIVE-only complement (`live_history/1`), but gate it on
+            # `ErrorPermanence` classification: only a PERSISTENT PERMANENT
+            # reason stops promptly; a persistent TRANSIENT reason (a probe
+            # still legitimately warming up) falls through unchanged to the
+            # existing bounded-backoff polling below.
+            case StuckDetector.permanent_error_stuck?(
+                   live_history(data),
+                   data.stuck_iterations,
+                   &ErrorPermanence.classify_result/1
+                 ) do
+              {:permanent_error_stuck, erroring, reasons} ->
+                terminate_stuck(erroring, data, reasons)
+
+              :not_permanent_error_stuck ->
+                decide(vector, data)
+            end
         end
     end
   end
@@ -1218,6 +1269,27 @@ defmodule Kazi.Loop do
       # vector keeps its real score, and the boolean failing-set logic is untouched,
       # so convergence is never blocked (advisory, not a hard guard).
       results = discount_if_flagged(results, MapSet.member?(flagged, index))
+      {index, PredicateVector.new(results)}
+    end
+  end
+
+  # T48.3 (ADR-0058, UC-064): the per-iteration history reduced to only LIVE,
+  # non-quarantined predicates — the mirror image of `code_history/1` (which
+  # DROPS these same ids). This is what feeds `permanent_error_stuck?/3`: a live
+  # predicate erroring every observation is invisible to `code_history/1` by
+  # design (step 5 polls it, the agent cannot "fix" it by re-dispatching), so
+  # its persistent-error detection needs its OWN reduced view over the identical
+  # goal/quarantine state. A quarantined live predicate is excluded here exactly
+  # as `code_history/1` excludes it — its flakiness is already being tolerated by
+  # the T1.3 quarantine mechanism, not the ADR-0058 permanence taxonomy.
+  @spec live_history(Data.t()) :: history()
+  defp live_history(%Data{goal: goal, live_kinds: live_kinds, quarantine: quarantine} = data) do
+    kinds = predicate_kinds(goal)
+    live_ids = for {id, kind} <- kinds, MapSet.member?(live_kinds, kind), do: id
+    keep_ids = MapSet.difference(MapSet.new(live_ids), quarantine)
+
+    for {index, %PredicateVector{results: results}} <- ordered_history(data) do
+      results = Map.take(results, MapSet.to_list(keep_ids))
       {index, PredicateVector.new(results)}
     end
   end
@@ -2518,7 +2590,12 @@ defmodule Kazi.Loop do
       # T48.5 (ADR-0058 §4): `:unreported` if a max_tokens ceiling ever saw a
       # dispatch with no usage this run (so the ceiling could not bind), nil
       # otherwise.
-      usage_fidelity: data.usage_fidelity
+      usage_fidelity: data.usage_fidelity,
+      # T48.3 (ADR-0058, UC-064): the persistent failing set's last-observed
+      # `:error` reason per id, when the stop was a LIVE permanent-error verdict
+      # — nil for every other stop, so an operator sees WHY a live predicate is
+      # named in `:stuck_failing` (a wedge, not a fixable code failure).
+      stuck_reasons: data.stuck_reasons
     }
     |> maybe_attach_stuck_bundle(data)
   end
@@ -2622,9 +2699,17 @@ defmodule Kazi.Loop do
   # through the persistence seam, then transition to the terminal `:stopped`
   # state. No further agent/integrate/deploy is dispatched (concept §5:
   # escalate rather than keep burning iterations). The result's reason is `:stuck`
-  # (see `stop_reason/1`).
-  defp terminate_stuck(failing, %Data{} = data) do
-    data = %Data{data | stuck_failing: failing}
+  # (see `stop_reason/1`). `reasons` (T48.3, ADR-0058) is the LIVE
+  # permanent-error verdict's `%{id => reason}` map, or nil for every other
+  # stuck stop (the ordinary failing-set / code error_stuck? call sites below
+  # pass no third argument, so they are byte-identical to before this change).
+  @spec terminate_stuck(
+          StuckDetector.failing_set(),
+          Data.t(),
+          %{Kazi.Predicate.id() => term()} | nil
+        ) :: :gen_statem.event_handler_result(atom())
+  defp terminate_stuck(failing, %Data{} = data, reasons \\ nil) do
+    data = %Data{data | stuck_failing: failing, stuck_reasons: reasons}
     notify_escalation(data, failing)
     notify_stuck_stop(data)
     terminate_with(:stopped, data)

@@ -60,6 +60,7 @@ defmodule Kazi.Loop.StuckDetector do
   """
 
   alias Kazi.{PredicateResult, PredicateVector}
+  alias Kazi.Loop.ErrorPermanence
 
   @typedoc "A failing-predicate-id set for one observation."
   @type failing_set :: MapSet.t(Kazi.Predicate.id())
@@ -243,5 +244,142 @@ defmodule Kazi.Loop.StuckDetector do
   # for the error-persistence check.
   defp erroring(%PredicateVector{results: results}) do
     for {id, %PredicateResult{status: :error}} <- results, do: id
+  end
+
+  # ===========================================================================
+  # Persistent LIVE permanent-error detection (T48.3, ADR-0058, UC-064)
+  # ===========================================================================
+
+  @doc """
+  Decides whether `history` is stuck on a PERSISTENT, PERMANENTLY-classified
+  `:error` over the last `n` observations (T48.3, ADR-0058 §Decision "budget
+  honesty"). This is `error_stuck?/2`'s taxonomy-aware sibling: `error_stuck?/2`
+  fires on ANY persistent error (transient or permanent alike), which is correct
+  for CODE predicates (`Kazi.Loop.code_history/1` — a checker that errors every
+  run needs a human regardless of why). LIVE predicates are different: a
+  transient live error (a probe timing out while a service is still starting) is
+  legitimately still pending and must keep polling (`Kazi.Loop.handle_no_work/2`'s
+  bounded backoff) — only a PERMANENT reason (a config problem no amount of
+  waiting fixes, e.g. `:missing_url`) justifies stopping promptly instead of
+  spinning to `:max_iterations`/`:over_budget` (the ADR-0058 wedge).
+
+  `classify_fun` receives each erroring `PredicateResult` and returns
+  `:permanent` or `:transient` (pass `Kazi.Loop.ErrorPermanence.classify_result/1`
+  in production; a test can inject any function to script both outcomes without
+  depending on the real taxonomy). The verdict requires, across EVERY
+  observation in the window:
+
+    * the SAME non-empty set of ids reports `:error` (identical to
+      `error_stuck?/2`'s persistence rule), AND
+    * EVERY id in that set classifies `:permanent` on THAT observation.
+
+  A single transient-classified observation anywhere in the window withholds
+  the verdict entirely (`:not_permanent_error_stuck`) — the window exists to
+  tolerate a permanent reason's wording flapping between observations (e.g.
+  `:missing_url` today, `:invalid_config` tomorrow, both `:permanent`), not to
+  fast-track a mixed transient/permanent stretch. A probe that starts transient
+  (still warming up) and only later turns permanent must accumulate a FRESH
+  all-permanent window before this fires — exactly "no behavior change for a
+  probe that is legitimately warming up" (T48.3 acceptance).
+
+  Returns `{:permanent_error_stuck, error_set, reasons}` where `reasons` is
+  `%{id => last_observed_reason}` (the window's most recent observation, for a
+  human-readable stop message) or `:not_permanent_error_stuck`.
+
+  ## Examples
+
+      iex> permanent = fn _result -> :permanent end
+      iex> err = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.error(%{reason: :missing_url})})
+      iex> h = [{0, err}, {1, err}, {2, err}]
+      iex> Kazi.Loop.StuckDetector.permanent_error_stuck?(h, 3, permanent)
+      {:permanent_error_stuck, MapSet.new([:a]), %{a: :missing_url}}
+
+      iex> transient = fn _result -> :transient end
+      iex> err = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.error(%{reason: {:timeout_ms, 100}})})
+      iex> h = [{0, err}, {1, err}, {2, err}]
+      iex> Kazi.Loop.StuckDetector.permanent_error_stuck?(h, 3, transient)
+      :not_permanent_error_stuck
+
+      iex> pass = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass()})
+      iex> Kazi.Loop.StuckDetector.permanent_error_stuck?([{0, pass}, {1, pass}, {2, pass}], 3, fn _ -> :permanent end)
+      :not_permanent_error_stuck
+  """
+  @spec permanent_error_stuck?(
+          Kazi.Loop.history(),
+          integer(),
+          (PredicateResult.t() -> ErrorPermanence.permanence())
+        ) ::
+          {:permanent_error_stuck, failing_set(), %{Kazi.Predicate.id() => term()}}
+          | :not_permanent_error_stuck
+  def permanent_error_stuck?(_history, n, _classify_fun) when not is_integer(n) or n < 1,
+    do: :not_permanent_error_stuck
+
+  def permanent_error_stuck?(history, n, classify_fun)
+      when is_list(history) and is_function(classify_fun, 1) do
+    window =
+      history
+      |> Enum.map(fn {_index, %PredicateVector{} = vector} -> vector end)
+      |> Enum.take(-n)
+
+    decide_permanent_error_window(window, n, classify_fun)
+  end
+
+  defp decide_permanent_error_window(window, n, _classify_fun) when length(window) < n,
+    do: :not_permanent_error_stuck
+
+  defp decide_permanent_error_window(window, _n, classify_fun) do
+    error_sets = Enum.map(window, fn vector -> MapSet.new(erroring(vector)) end)
+    [first | rest] = error_sets
+
+    cond do
+      MapSet.size(first) == 0 ->
+        :not_permanent_error_stuck
+
+      not Enum.all?(rest, &MapSet.equal?(&1, first)) ->
+        :not_permanent_error_stuck
+
+      not all_permanent_across_window?(window, first, classify_fun) ->
+        :not_permanent_error_stuck
+
+      true ->
+        {:permanent_error_stuck, first, latest_reasons(window, first)}
+    end
+  end
+
+  # True iff every id in `ids` classifies `:permanent` on EVERY vector in
+  # `window` — a single transient-classified (or missing/non-error) observation
+  # withholds the verdict (see moduledoc "reason flapping" note).
+  @spec all_permanent_across_window?([PredicateVector.t()], failing_set(), function()) ::
+          boolean()
+  defp all_permanent_across_window?(window, ids, classify_fun) do
+    Enum.all?(window, fn vector ->
+      Enum.all?(ids, fn id ->
+        case PredicateVector.get(vector, id) do
+          %PredicateResult{status: :error} = result -> classify_fun.(result) == :permanent
+          _ -> false
+        end
+      end)
+    end)
+  end
+
+  # The persistent set's most recently observed `:reason` per id (the window's
+  # LAST vector), for a human-readable stop — `nil` for a provider that emitted a
+  # bare `:error` with no reason evidence (mirrors `ErrorPermanence.classify_result/1`'s
+  # own "absence of a reason" handling).
+  @spec latest_reasons([PredicateVector.t()], failing_set()) :: %{
+          Kazi.Predicate.id() => term()
+        }
+  defp latest_reasons(window, ids) do
+    last = List.last(window)
+
+    Map.new(ids, fn id ->
+      reason =
+        case PredicateVector.get(last, id) do
+          %PredicateResult{evidence: evidence} -> Map.get(evidence, :reason)
+          _ -> nil
+        end
+
+      {id, reason}
+    end)
   end
 end
