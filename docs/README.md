@@ -84,6 +84,9 @@ its config at runtime via `kazi schema <kind>`.
   - [`status` schema](schemas/status.md) — the `kazi status --json` read.
   - [Collective result schema](schemas/collective-result.md) — the parallel /
     multi-goal result.
+- **[Run-economics history (`kazi economy`)](economy.md)** — persisted
+  run-end economics (ADR-0058) aggregated into p50/p95 percentiles by goal
+  shape/model/harness; the grouping T48.9's learned budget proposals reuse.
 - **[`--json` signals → skill-side escalation](tiering-signals.md)** — how the
   structured output triggers adaptive model tiering.
 - **[Deprecations & removal schedule](deprecations.md)** — removed verbs and the
