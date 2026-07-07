@@ -350,4 +350,97 @@ defmodule Kazi.BenchTest do
       assert Bench.render_tier_surface_table(report) == table
     end
   end
+
+  describe "prompt/context-variant arms (T48.12, ADR-0058 decision 3 -- the benchmark gate)" do
+    @variant Path.expand("../fixtures/bench/variant", __DIR__)
+
+    defp variant_result(file),
+      do: Path.join(@variant, "#{file}.result.json") |> File.read!() |> Jason.decode!()
+
+    test "variant_arm/3 folds one arm's tokens-to-converge + iterations-to-convergence" do
+      arm =
+        Bench.variant_arm(
+          "t1-sonnet",
+          "baseline",
+          variant_result("t1-sonnet__baseline")
+        )
+
+      assert arm.arm == "t1-sonnet"
+      assert arm.variant == "baseline"
+      assert arm.tokens == 41_000
+      assert arm.iterations_to_convergence == 4
+      assert arm.converged
+      # a lone arm carries no delta yet -- variant_report/1 fills that in.
+      assert arm.delta_tokens == nil
+      assert arm.delta_iterations == nil
+    end
+
+    test "variant_report/1 fills a REDUCTION delta (negative) for a winning candidate" do
+      report =
+        Bench.variant_report([
+          {"t1-sonnet", "baseline", variant_result("t1-sonnet__baseline")},
+          {"t1-sonnet", "candidate-rediscovery",
+           variant_result("t1-sonnet__candidate-rediscovery")}
+        ])
+
+      [baseline, candidate] = report
+
+      assert baseline.delta_tokens == nil
+      assert baseline.delta_iterations == nil
+
+      assert candidate.tokens == 21_000
+      assert candidate.delta_tokens == -20_000
+      assert candidate.iterations_to_convergence == 3
+      assert candidate.delta_iterations == -1
+    end
+
+    test "variant_report/1 fills a REGRESSION delta (positive) for a losing candidate" do
+      report =
+        Bench.variant_report([
+          {"t2-haiku", "baseline", variant_result("t2-haiku__baseline")},
+          {"t2-haiku", "candidate-noisy", variant_result("t2-haiku__candidate-noisy")}
+        ])
+
+      [_baseline, candidate] = report
+
+      assert candidate.delta_tokens == 4_000
+      assert candidate.delta_iterations == 1
+    end
+
+    test "a candidate arm with no matching baseline gets a nil delta (honest-unknown, no fabricated comparison)" do
+      [arm] =
+        Bench.variant_report([
+          {"t9-solo", "candidate-only", variant_result("t9-solo__candidate-only")}
+        ])
+
+      refute arm.converged
+      assert arm.tokens == 22_000
+      assert arm.iterations_to_convergence == nil
+      assert arm.delta_tokens == nil
+      assert arm.delta_iterations == nil
+    end
+
+    test "render_variant_table/1 renders a deterministic markdown table with n/a for nil cells" do
+      report =
+        Bench.variant_report([
+          {"t1-sonnet", "baseline", variant_result("t1-sonnet__baseline")},
+          {"t1-sonnet", "candidate-rediscovery",
+           variant_result("t1-sonnet__candidate-rediscovery")},
+          {"t9-solo", "candidate-only", variant_result("t9-solo__candidate-only")}
+        ])
+
+      table = Bench.render_variant_table(report)
+
+      assert table ==
+               """
+               | Arm | Variant | Harness | Model | Tier | Tokens | Δ Tokens | Iters-to-conv | Δ Iters | Converged |
+               |---|---|---|---|---|---|---|---|---|---|
+               | t1-sonnet | baseline | — | — | — | 41000 | n/a | 4 | n/a | yes |
+               | t1-sonnet | candidate-rediscovery | — | — | — | 21000 | -20000 | 3 | -1 | yes |
+               | t9-solo | candidate-only | — | — | — | 22000 | n/a | n/a | n/a | no |
+               """
+
+      assert Bench.render_variant_table(report) == table
+    end
+  end
 end

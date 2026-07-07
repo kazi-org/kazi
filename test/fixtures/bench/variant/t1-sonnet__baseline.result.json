@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "status": "converged",
+  "predicates": [{ "id": "code", "verdict": "pass" }],
+  "iterations": 4,
+  "usage": { "input_tokens": 38000, "cached_input_tokens": 0, "output_tokens": 3000, "cost_usd": 0.18 },
+  "economy": { "status": "converged", "iterations_to_convergence": 4 }
+}

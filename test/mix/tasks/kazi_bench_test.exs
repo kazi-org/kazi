@@ -16,6 +16,7 @@ defmodule Mix.Tasks.Kazi.BenchTest do
   @kpi_runs Path.expand("../../fixtures/bench/kpi_runs", __DIR__)
   @tiering Path.expand("../../fixtures/bench/tiering", __DIR__)
   @tier_surface Path.expand("../../fixtures/bench/tier_surface", __DIR__)
+  @variant Path.expand("../../fixtures/bench/variant", __DIR__)
 
   setup do
     prev = Mix.shell()
@@ -130,6 +131,28 @@ defmodule Mix.Tasks.Kazi.BenchTest do
     assert out =~ "| t2-on | 2 | on | 1 | 38680 | 0.0600 | 0.0600 | yes | yes | no |"
     # A stuck arm with no passing predicate: cost/conv-pred is n/a, stuck visible.
     assert out =~ "| t3-on | 3 | on | 1 | 40900 | 0.0900 | n/a | no | no | yes |"
+  end
+
+  test "--variant tables the prompt/context-variant arms with per-arm delta (T48.12, ADR-0058)" do
+    Mix.Tasks.Kazi.Bench.run(["--variant", @variant])
+    out = shell_output()
+
+    assert out =~ "per-arm prompt/context-variant table (T48.12, ADR-0058)"
+
+    assert out =~
+             "| Arm | Variant | Harness | Model | Tier | Tokens | Δ Tokens | " <>
+               "Iters-to-conv | Δ Iters | Converged |"
+
+    # t1-sonnet: candidate-rediscovery is a measured REDUCTION (negative deltas).
+    assert out =~ "| t1-sonnet | baseline |"
+
+    assert out =~
+             "| t1-sonnet | candidate-rediscovery | — | — | — | 21000 | -20000 | 3 | -1 | yes |"
+
+    # t2-haiku: candidate-noisy REGRESSES (positive deltas) -- visible, not hidden.
+    assert out =~ "| t2-haiku | candidate-noisy | — | — | — | 10000 | +4000 | 3 | +1 | yes |"
+    # t9-solo has no baseline recorded: delta is honest n/a, never a fabricated comparison.
+    assert out =~ "| t9-solo | candidate-only | — | — | — | 22000 | n/a | n/a | n/a | no |"
   end
 
   test "no --captures and no --help points at the maintainer live run (T19.5), runs nothing live" do
