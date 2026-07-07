@@ -4,6 +4,92 @@ Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
 `docs/adr/`.
 
+## 2026-07-07: E48 live proof -- economy feedback loop + honest budget stops on v1.104.0
+
+**Type:** finding  **Tags:** [economy, budget, over_budget, ADR-0058, live-verification]
+
+**Problem/Observation:** T48.13 live-verified the E48 economy feedback loop
+(UC-063/UC-064, ADR-0058) against the RELEASED `kazi` binary (`kazi version` ->
+`1.104.0`), all runs against a scratch workspace outside the repo.
+
+1. **missing_url class rejected at goal-load, not burned as `over_budget`.**
+   A goal.toml with one trivially-passing `custom_script` predicate and one
+   `http_probe` predicate with no `url` key, `max_iterations = 40`:
+   ```
+   kazi apply <scratch>/goal.toml --workspace <scratch> --json
+   ```
+   Output (verbatim, exit code 1, zero iterations, zero dispatches):
+   ```
+   {"error":"could not load goal-file <scratch>/goal.toml: http_probe predicate \"no-url-probe\" is missing required key \"url\" (a live predicate needs a url to probe)","schema_version":2}
+   ```
+   This is exactly the incident class ADR-0058 was written for: before the
+   fix, a missing url burned all 40 iterations and finished as a bare, opaque
+   `over_budget`. On v1.104.0 it never enters the loop at all -- the JSON
+   error envelope names both the offending predicate id and the missing key.
+   Honest gap: because T48.1 closes this at goal-LOAD, the in-loop
+   `error_wedged` path (T48.3/T48.4) is no longer reachable from a goal-FILE
+   for a `missing_url` case specifically -- that path's live behavior is
+   pinned by loop-level ExUnit against the real provider, not by this
+   goal-file proof. (Observation 2 below independently exercises the OTHER
+   half of the cause taxonomy -- an ordinary stuck, correctly left
+   uncaused -- so the classifier's "don't over-attribute" contract is also
+   live-verified, just not the `error_wedged`/missing_url branch itself.)
+
+2. **Economics row + cause surface on real convergent AND stuck runs.** Ran a
+   tiny real goal on the claude harness (`model = "claude-haiku-4-5"`, single
+   `custom_script` predicate `test -f hello.txt`, `max_iterations = 5`)
+   twice against the released binary.
+   - First attempt (`permission_mode` unset): the inner harness hit a
+     `Write` permission denial in its own transcript ("I need permission to
+     write to the workspace directory") and never created the file. The loop
+     correctly did NOT grind to `over_budget` at iteration 5 -- it stopped
+     EARLY (iteration 3 of 5) as a named `stuck` (`"reason":"stuck"`,
+     "same failing set persisted") the moment the failing set held steady,
+     exactly the honest-early-stop behavior ADR-0058 argues for, just via
+     the ordinary T1.5 failing-set path rather than the missing_url path.
+   - Second attempt, `[harness] permission_mode = "acceptEdits"` added (a
+     documented CLI/goal-file flag, `lib/kazi/cli.ex:184` -- not a kazi bug,
+     an environment precondition for headless dispatch): converged in 2
+     iterations. Terminal JSON: `"status":"converged"`,
+     `"usage":{"cost_usd":0.0504182,"cached_input_tokens":60232,"input_tokens":26,"output_tokens":743,"cache_write_tokens":20327}`,
+     `"budget_spent":{"tokens":81328,"iterations":2,"exceeded":null}`.
+   - Persisted read-model rows for both runs (`sqlite3 ~/.kazi/kazi.db
+     "SELECT goal_ref,status,dispatch_count,budget_tokens,budget_cost_usd,predicate_count,outcome_cause_class FROM runs ORDER BY id DESC LIMIT 3;"`):
+     ```
+     t48-13-hello-convergence-2|converged|1|81328|0.0504182|1|
+     t48-13-hello-convergence|stuck|2|81070|0.0815196|1|
+     ```
+     Both rows have non-NULL `dispatch_count`/`budget_tokens`/`budget_cost_usd`/
+     `predicate_count` (the T48.7 economics columns populated from real
+     harness `usage`). `outcome_cause_class` is correctly EMPTY/NULL for
+     BOTH rows -- per `Kazi.Loop.CauseClass`'s moduledoc, an ordinary
+     converge and an ordinary T1.5 failing-set stuck are "not mislabels,
+     they are exactly what they say they are," so `nil` here is the
+     honest-unknown contract working as designed, not a gap.
+
+3. **Economy aggregate.** `kazi economy --json` after the two runs above
+   groups them correctly:
+   ```
+   {"harness":"claude","model":"claude-haiku-4-5","goal_shape_bucket":"1-3","n":2,"n_with_usage":2,"tokens":{"p50":81070,"p95":81328},"cost_usd":{"p50":0.0504182,"p95":0.0815196},"dispatch_count":{"p50":1,"p95":2},"wall_clock_s":{"p50":18.882025,"p95":25.648338}}
+   ```
+   (plus four other groups from unrelated prior runs on this machine, each
+   correctly reporting `n_with_usage: 0` / `unknown` p50/p95 where no `usage`
+   was ever recorded). `kazi economy` (human view) renders the same numbers
+   per group in plain text. The aggregate covers the T48.13 run pair exactly
+   as expected.
+
+**Root cause:** N/A (verification entry).
+
+**Fix:** N/A.
+
+**Impact:** the missing_url incident class is closed at goal-load on the
+released binary; run economics are persisted and queryable per-run and in
+aggregate; budgets can now be learned from history (T48.9). The one honest
+gap: the in-loop `error_wedged` classification branch for `missing_url`
+specifically is not independently exercised by a goal-file in this proof
+(T48.1's load-time rejection makes it unreachable from that entry point by
+design) -- its live behavior remains pinned by existing loop-level ExUnit.
+
 ## 2026-07-06 — E47 close-out: T47.3 live proof on released v1.82.1
 
 **Type:** dogfood
