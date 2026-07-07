@@ -191,6 +191,56 @@ defmodule Kazi.Economy.HistoryTest do
     end
   end
 
+  describe "aggregate_by_shape_bucket/2 — pooled across model/harness (T48.9)" do
+    test "pools every run in the bucket regardless of model/harness" do
+      goal_ref = "goal-pooled"
+
+      seed_run(%{
+        goal_ref: goal_ref,
+        predicate_count: 2,
+        harness: "claude",
+        model: "claude-sonnet-5",
+        budget_tokens: 1000,
+        dispatch_count: 2
+      })
+
+      seed_run(%{
+        goal_ref: goal_ref,
+        predicate_count: 3,
+        harness: "opencode",
+        model: "local-model",
+        budget_tokens: 3000,
+        dispatch_count: 6
+      })
+
+      group = History.aggregate_by_shape_bucket("1-3", goal_ref: goal_ref)
+
+      assert group.goal_shape_bucket == "1-3"
+      assert group.model == nil
+      assert group.harness == nil
+      assert group.n == 2
+      # Pooled percentiles over [1000, 3000] regardless of the differing
+      # model/harness identities on each run.
+      assert group.tokens == %{p50: 1000, p95: 3000}
+      assert group.dispatch_count == %{p50: 2, p95: 6}
+    end
+
+    test "a run outside the requested bucket is excluded" do
+      goal_ref = "goal-pooled-exclude"
+      seed_run(%{goal_ref: goal_ref, predicate_count: 2, budget_tokens: 100})
+      seed_run(%{goal_ref: goal_ref, predicate_count: 10, budget_tokens: 900})
+
+      group = History.aggregate_by_shape_bucket("1-3", goal_ref: goal_ref)
+
+      assert group.n == 1
+      assert group.tokens == %{p50: 100, p95: 100}
+    end
+
+    test "an empty bucket returns nil (honest no-history), never an empty group" do
+      assert History.aggregate_by_shape_bucket("1-3", goal_ref: "goal-never-seen") == nil
+    end
+  end
+
   describe "goal_shape_bucket/1" do
     test "bands 1-3, 4-8, 9+ and unknown for nil/non-positive" do
       assert History.goal_shape_bucket(1) == "1-3"
