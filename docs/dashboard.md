@@ -89,6 +89,13 @@ client bundles straight from the hex packages (no node, no bundler) and the
 root layout connects the socket. With JavaScript unavailable the pages
 still render as read-only snapshots, exactly the pre-panel behavior.
 
+On a phone (below 820px) the starmap re-flows into a bottom tab bar — MAP /
+NEEDS YOU (with a live attention-count badge) / SESSIONS / MORE — the rail's
+sections becoming thumb-reachable tab panes, the constellation panning at a
+readable scale, and the drill-in panel opening as a full-width bottom sheet.
+Desktop is untouched. See docs/dashboard-design.md "Mobile layout" for the
+normative spec.
+
 ### Wave bands
 
 When a roadmap ref IS configured (`KaziWeb.Starmap.GoalSource`, the ADR-0011
