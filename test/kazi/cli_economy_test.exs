@@ -1,20 +1,29 @@
 defmodule Kazi.CLIEconomyTest do
   @moduledoc """
-  T48.8 (ADR-0058 decision 2 precursor): `kazi economy [--goal <ref>] [--json]`
-  (NEW command) — a pure read aggregating the persisted run-end economics
-  (T48.7) into p50/p95 history groups via `Kazi.Economy.History`.
+  ADR-0058: `kazi economy [--goal <ref>] [--json]` and `kazi economy
+  --rediscovery <goal> [--json]`.
+
+  T48.8 (decision 2 precursor): the default (no `--rediscovery`) view is a
+  pure read aggregating the persisted run-end economics (T48.7) into p50/p95
+  history groups via `Kazi.Economy.History`.
+
+  T48.10 (decision 3): `--rediscovery` folds a goal's RECORDED per-iteration
+  `tools` counters (T34.3) into a ranked, report-only rediscovery-pressure
+  candidate list — a pure read over the read-model, no goal loaded, no
+  harness touched, and (the hard boundary this task pins) nothing here
+  reaches a dispatch prompt.
 
   Tier 1 pins the argv boundary. Tier 2 drives the REAL CLI exec core
   (`Kazi.CLI.run/2`) through `ExUnit.CaptureIO` against the test SQLite
-  Sandbox read-model, seeding runs through the real `RunRegistry` write path —
+  Sandbox read-model, seeding runs/iterations through the real write paths —
   no real harness, git, or network.
   """
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 
+  alias Kazi.{PredicateResult, PredicateVector, ReadModel, Repo}
   alias Kazi.ReadModel.RunRegistry
-  alias Kazi.Repo
 
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
@@ -54,9 +63,10 @@ defmodule Kazi.CLIEconomyTest do
   # ===========================================================================
 
   describe "parse/1 — economy" do
-    test "parses `economy` with no args, defaulting goal/json" do
+    test "parses `economy` with no args, defaulting goal/json (aggregate view)" do
       assert {:economy, opts} = Kazi.CLI.parse(["economy"])
       assert opts[:goal] == nil
+      assert opts[:rediscovery] == nil
       assert opts[:json] == false
     end
 
@@ -66,14 +76,25 @@ defmodule Kazi.CLIEconomyTest do
       assert opts[:json] == true
     end
 
-    test "an unexpected positional is a usage error" do
+    test "parses `economy --rediscovery <goal>` with and without --json" do
+      assert {:economy, opts} = Kazi.CLI.parse(["economy", "--rediscovery", "cli-e2e"])
+      assert opts[:rediscovery] == "cli-e2e"
+      assert opts[:json] == false
+
+      assert {:economy, json_opts} =
+               Kazi.CLI.parse(["economy", "--rediscovery", "cli-e2e", "--json"])
+
+      assert json_opts[:json] == true
+    end
+
+    test "an extra positional is an error" do
       assert {:error, message} = Kazi.CLI.parse(["economy", "extra"])
       assert message =~ "unexpected argument"
     end
   end
 
   # ===========================================================================
-  # Tier 2 — economy --json (seeded aggregate)
+  # Tier 2 — economy --json (seeded aggregate, T48.8)
   # ===========================================================================
 
   describe "economy --json — seeded history" do
@@ -149,6 +170,136 @@ defmodule Kazi.CLIEconomyTest do
 
       assert code == 0
       assert out =~ "no finished-run history yet"
+    end
+  end
+
+  # ===========================================================================
+  # Tier 2 — economy --rediscovery reports the folded signal (T48.10)
+  # ===========================================================================
+
+  describe "economy --rediscovery --json — a goal with recurring tool calls" do
+    test "returns a ranked candidate list" do
+      goal_ref = "econ-cli-recurring"
+      failing = PredicateVector.new(%{code: PredicateResult.fail()})
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: goal_ref,
+          iteration_index: 0,
+          predicate_vector: failing,
+          converged: false,
+          tools: %{tool_calls: 12, file_reads: 8, search_calls: 3, graph_calls: 1}
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: goal_ref,
+          iteration_index: 1,
+          predicate_vector: failing,
+          converged: false,
+          tools: %{tool_calls: 5, file_reads: 0, search_calls: 4, graph_calls: 0}
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: goal_ref,
+          iteration_index: 2,
+          predicate_vector: failing,
+          converged: false,
+          tools: %{tool_calls: 4, file_reads: 0, search_calls: 3, graph_calls: 0}
+        })
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["economy", "--rediscovery", goal_ref, "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["goal_ref"] == goal_ref
+      assert payload["status"] == "ranked"
+      assert [top | _] = payload["candidates"]
+      assert top["category"] == "search_calls"
+      assert top["recurring_calls"] == 7
+    end
+  end
+
+  describe "economy --rediscovery --json — a goal with no tool-use stream" do
+    test "reports unknown, never a fabricated empty ranking" do
+      goal_ref = "econ-cli-no-tools"
+      vector = PredicateVector.new(%{code: PredicateResult.pass()})
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: goal_ref,
+          iteration_index: 0,
+          predicate_vector: vector,
+          converged: true
+        })
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["economy", "--rediscovery", goal_ref, "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["status"] == "unknown"
+      assert payload["reason"] =~ "no tool-use stream recorded"
+      refute Map.has_key?(payload, "candidates")
+    end
+
+    test "an unregistered goal ref reports unknown (zero recorded iterations)" do
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["economy", "--rediscovery", "goal-that-never-ran", "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["status"] == "unknown"
+      assert payload["reason"] =~ "no iterations recorded"
+    end
+  end
+
+  describe "economy --rediscovery (human) — unchanged default surface" do
+    test "reports the ranked candidates in human prose" do
+      goal_ref = "econ-cli-human"
+      failing = PredicateVector.new(%{code: PredicateResult.fail()})
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: goal_ref,
+          iteration_index: 0,
+          predicate_vector: failing,
+          converged: false,
+          tools: %{tool_calls: 10, file_reads: 8, search_calls: 2, graph_calls: 0}
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: goal_ref,
+          iteration_index: 1,
+          predicate_vector: failing,
+          converged: false,
+          tools: %{tool_calls: 6, file_reads: 5, search_calls: 0, graph_calls: 0}
+        })
+
+      {code, out} =
+        with_io(fn -> Kazi.CLI.run(["economy", "--rediscovery", goal_ref]) end)
+
+      assert code == 0
+      assert out =~ "REDISCOVERY"
+      assert out =~ "status=ranked"
+      assert out =~ "file_reads"
+      assert out =~ "report-only"
+      refute out =~ "schema_version"
+    end
+
+    test "an unknown goal prints the honest-unknown reason, still exit 0" do
+      {code, out} =
+        with_io(fn -> Kazi.CLI.run(["economy", "--rediscovery", "nope-human"]) end)
+
+      assert code == 0
+      assert out =~ "status=unknown"
+      assert out =~ "no iterations recorded"
     end
   end
 end

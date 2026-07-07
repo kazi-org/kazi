@@ -284,6 +284,11 @@ defmodule Kazi.CLIHelpSchemaTest do
         "context" ->
           ["context", "stats"]
 
+        # `economy` requires --rediscovery <goal> (no positional); probe with
+        # it so we observe dispatch, not the missing-flag error (T48.10).
+        "economy" ->
+          ["economy", "--rediscovery", "dummy"]
+
         n ->
           [n]
       end
