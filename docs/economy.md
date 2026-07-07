@@ -109,3 +109,60 @@ retrieval cache could help. A goal with no recorded tool-use stream reports
 This is advisory only: nothing here feeds back into a dispatch prompt. A
 candidate becomes an actual prompt/context change only once the T48.12
 benchmark gate measures a real reduction.
+
+## The T48.12 benchmark gate: the ONLY path a variant ships
+
+ADR-0058 decision 3 puts prompt/context changes in trust order: behavior
+(`--rediscovery` above) proposes candidates; an opt-in debrief (T48.11)
+records self-reported hypotheses; **neither ever ships on its own**. A
+candidate orientation/context pack becomes a real dispatch-prompt change
+only when this gate -- the `mix kazi.bench --variant <dir>` rig
+(`Kazi.Bench.variant_arm/3`, `variant_report/1`, `render_variant_table/1`,
+T48.12) -- measures it.
+
+### Procedure
+
+1. **Construct the candidate pack.** Take a ranked candidate from
+   `kazi economy --rediscovery <goal>` and/or a debrief hypothesis (T48.11)
+   and turn it into a concrete orientation/context-pack change (e.g. an
+   added retrieval-cache entry, a reordered orientation section). This step
+   is manual/agent-assisted -- kazi never applies a candidate automatically.
+2. **Run the SAME fixture goal twice**, once with the current pack
+   (`baseline`) and once with the candidate pack (`<candidate-name>`),
+   recording each run's terminal `kazi apply --json` result.
+3. **Table the comparison**:
+
+   ```
+   mix kazi.bench --variant <dir>
+   ```
+
+   where `<dir>` holds `<group>__<variant>.result.json` files -- `<group>`
+   is any label that keeps a fair comparison together (e.g. the
+   harness/model/tier under test), `<variant>` is `baseline` or the
+   candidate's name. Example: `t1-sonnet__baseline.result.json` and
+   `t1-sonnet__candidate-rediscovery.result.json`.
+4. **Read the `Δ Tokens` / `Δ Iters` columns.** They are
+   `(candidate) - (baseline)` on tokens-to-converge and
+   iterations-to-convergence -- **negative means the candidate used
+   fewer**, which is the reduction ADR-0058 requires.
+5. **Ship only when ALL of these hold**, on the fixture set:
+   - `Δ Tokens < 0` **or** `Δ Iters < 0` (a measured reduction on at least
+     one headline metric);
+   - the candidate's `Converged` column stays `yes` wherever the baseline
+     did (no convergence-rate regression -- a cheaper run that stops
+     converging is not a win, mirroring the T19.7/T36.5 "cheaper-but-WRONG
+     is visible" rule);
+   - a row with no matching baseline, or an unreported metric, renders
+     `n/a` -- that is not a pass, it is unmeasured; run the missing
+     baseline before deciding.
+6. **If the gate passes**, land the candidate pack as the new default in
+   the same change as the benchmark evidence (PR body links the
+   `--variant` table). **If it does not**, the candidate stays a
+   documented hypothesis -- nothing about the dispatch prompt changes.
+
+Nothing in this procedure is automated end-to-end: kazi never mutates a
+prompt from a rediscovery candidate, a debrief hypothesis, or a benchmark
+result. The gate is a human/agent decision informed by a measured table --
+exactly the ADR-0058 write-only boundary (kazi's behavior/self-report
+layers observe and record; only a human-approved change to the pack itself
+ships).
