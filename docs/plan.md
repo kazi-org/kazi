@@ -236,6 +236,20 @@ Open work:
   peek into any goal live or post-mortem: the convergence heatmap (predicates x
   iterations) with an iteration scrubber, and transcript peek with tool-call
   folding; peeking equals tailing a file, ADR-0057) -- E46.
+- **UC-063** (budgets are estimated from data, not guessed: run-end economics --
+  budget_spent tokens/USD/dispatches, outcome + cause, harness/model/tier, goal
+  shape -- persist to the local read-model (honest-unknown NULLs, no telemetry)
+  and `kazi plan`/`adopt` propose provenance-annotated `[budget]` values from
+  history percentiles, ADR-0058) -- E48.
+- **UC-064** (budget stops are honest: live-predicate config errors fail at
+  goal-load; persistent permanent errors terminate early as a named `:stuck`
+  (never 40 wasted iterations to a mislabeled `over_budget`); terminal results
+  carry a cause class; a token ceiling that cannot bind warns loudly;
+  `max_dispatches` counts dispatches, not observe ticks, ADR-0058) -- E48.
+- **UC-065** (dispatch prompting improves from measured behavior: tools-counter
+  rediscovery candidates + opt-in debrief hypotheses (never direct prompt
+  mutation) gated by the E19/T34.7 benchmark rig -- a variant ships only on a
+  measured tokens-to-converge reduction, ADR-0058) -- E48.
 
 ## Checkable Work Breakdown
 
@@ -275,6 +289,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E46 -- Fleet observability: run registry, per-run sinks, `kazi dashboard` starmap (P1, ADR-0057) -> plans/E46.md
 
 ### E47 -- Fleet observability follow-up: event river + roadmap-ref starmap (P2, ADR-0057/ADR-0056) -> plans/E47.md
+
+### E48 -- Economy feedback loop: persisted run economics, learned budgets, behavior-first prompting, honest budget stops (P1, ADR-0058) -> plans/E48.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -367,6 +383,32 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-07 -- Change Summary (E48: economy feedback loop + honest budget stops; ADR-0058)
+- Grounding: an audit of every `over_budget` run in the live read-model (54
+  finished runs, 5 over_budget) found all 3 diagnosable real cases were
+  mislabeled ERROR-WEDGES -- a live predicate stuck in `:error` (e.g.
+  `missing_url`) spinning no-op ticks to `max_iterations` in under a minute --
+  because `error_stuck?` only sees `code_history` (live ids dropped), there is
+  no error permanence taxonomy, and the terminal label prescribes the wrong fix.
+  Budgets are hand-authored round numbers with no data feedback (run-end
+  economics never persisted); a `max_tokens` ceiling is silently unbounded when
+  the harness reports no usage (claw reports none).
+- ADR-0058 written (Accepted, extends ADR-0046/ADR-0041, refines ADR-0002):
+  persist run-end economics locally (honest-unknown NULLs, no telemetry);
+  learned `[budget]` proposals from history percentiles with provenance;
+  behavior-first prompt improvement (tools-counter rediscovery candidates;
+  opt-in debrief stored as hypotheses only -- never direct prompt mutation, a
+  T32.5-class gaming surface; E19/T34.7 benchmark rig as the only shipping
+  gate); budget honesty (load-time live-config validation, permanent/transient
+  error taxonomy, live-predicate persistent-error detection, terminal cause
+  classes, no-usage warning, `max_dispatches`).
+- E48 added (13 tasks, plans/E48.md; UC-063/UC-064/UC-065): Wave A honesty
+  spine + persistence (T48.1/2/5/6/7/11), Wave B detection + queries
+  (T48.3/8/10), Wave C proposals + labels + benchmark gate (T48.4/9/12),
+  Wave D live proof on the released binary (T48.13).
+- Use Case Summary: UC-063 (data-grounded budgets), UC-064 (honest budget
+  stops), UC-065 (measured prompt improvement) added.
 
 ### 2026-07-03 -- Change Summary (E46: fleet observability -- run registry, per-run sinks, `kazi dashboard`; ADR-0057)
 - Operator problem: several concurrent sessions each drive a `kazi apply` and the
