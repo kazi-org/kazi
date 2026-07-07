@@ -416,16 +416,18 @@ defmodule Kazi.Adopt do
   Renders an adopted goal **map** (the `Kazi.Goal.Loader.from_map/1` shape) to a
   TOML goal-file STRING (T5.3, ADR-0013, ADR-0015).
 
-  Delegates to `Kazi.Adopt.Writer.to_toml/1` — the deterministic hand-renderer
+  Delegates to `Kazi.Adopt.Writer.to_toml/2` — the deterministic hand-renderer
   that emits the goal-file subset `kazi init` writes (top-level `id`/`name`, an
-  optional `[scope]`, the `[[predicate]]` blocks incl. guards) and appends a
-  COMMENTED live-predicate scaffold (an `http_probe` with `TODO` placeholders for
-  a human to fill in). Pure and deterministic: the same map renders
-  byte-identically, and decoding the uncommented part round-trips through
+  optional `[scope]`, the `[[predicate]]` blocks incl. guards), an optional
+  COMMENTED T48.9 learned-`[budget]`-suggestion block (`suggested_budget`,
+  default `nil` — see `Kazi.Economy.BudgetSuggestion`), and appends a COMMENTED
+  live-predicate scaffold (an `http_probe` with `TODO` placeholders for a human
+  to fill in). Pure and deterministic: the same inputs render byte-identically,
+  and decoding the uncommented part round-trips through
   `Kazi.Goal.Loader.from_map/1`.
   """
-  @spec to_toml(map()) :: String.t()
-  defdelegate to_toml(map), to: Kazi.Adopt.Writer
+  @spec to_toml(map(), Kazi.Economy.BudgetSuggestion.t() | nil) :: String.t()
+  defdelegate to_toml(map, suggested_budget \\ nil), to: Kazi.Adopt.Writer
 
   # Drive the injectable harness for live-predicate proposals. Any failure path
   # (harness error, unparseable payload, no usable predicate) yields `[]` — the
