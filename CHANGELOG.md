@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.96.0](https://github.com/kazi-org/kazi/compare/v1.95.0...v1.96.0) (2026-07-07)
+
+
+### Features
+
+* **budget:** max_dispatches dimension -- dispatches, not ticks ([2e1a929](https://github.com/kazi-org/kazi/commit/2e1a929e3bfe5f0e30fef6ec5d48e448bb723123))
+
+
+### Bug Fixes
+
+* **loop:** single dispatches counter after T48.7 rebase ([6d734c4](https://github.com/kazi-org/kazi/commit/6d734c4a3257652df6db670dd7f57ff396c438d8))
+
 ## [1.95.0](https://github.com/kazi-org/kazi/compare/v1.94.0...v1.95.0) (2026-07-07)
 
 
