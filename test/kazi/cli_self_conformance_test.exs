@@ -275,6 +275,16 @@ defmodule Kazi.CLISelfConformanceTest do
       assert payload["ref"] == "self-conf-run"
     end
 
+    test "economy --json" do
+      payload =
+        assert_conformant("economy --json",
+          argv: ["economy", "--goal", "self-conf-econ-never-seen", "--json"],
+          expected_exit: 0
+        )
+
+      assert payload["groups"] == []
+    end
+
     test "list-proposed --json" do
       {0, _} =
         with_io(fn -> Kazi.CLI.run(["plan", "a listed idea"], harness: StubHarness) end)

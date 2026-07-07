@@ -91,7 +91,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       # aliases were removed in v0.6.0, so the table (and help --json) omits them.
       expected =
         MapSet.new(
-          ~w(apply status init install-skill mcp dashboard plan list-proposed approve reject export lint context help schema version)
+          ~w(apply status init install-skill mcp dashboard economy plan list-proposed approve reject export lint context help schema version)
         )
 
       assert reported == expected,
