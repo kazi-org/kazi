@@ -618,3 +618,26 @@ socket's csrf check has a session token. INVARIANT: any new `phx-*` binding
 on a dashboard page must be verified in a REAL browser (agent-browser),
 not only via `Phoenix.LiveViewTest` -- the test harness cannot see a missing
 client. Regression: `test/kazi_web/live_client_test.exs`. (2026-07-06.)
+
+### L-0029 #harness #shell #portability #dash #landmine -- "works on macOS sh" means bash: dash ignores `set -m`, its builtin `kill` cannot group-kill, and bash prints job notices into merged output
+
+The #857 child-supervision wrapper converged green on macOS (2,556 tests) and
+hard-failed CI on Ubuntu, three distinct ways. (1) Non-interactive dash
+(Ubuntu /bin/sh) accepts `set -m` but creates NO process groups for
+background jobs, so any `kill -- -$pid` group signal has nothing to hit —
+make children real group leaders with `setsid` where it exists (Linux; macOS
+ships none but its /bin/sh is bash, whose non-interactive `set -m` works).
+(2) dash's BUILTIN `kill` rejects negative-pid group syntax outright
+("Illegal number: -"), even with `--`; route group kills through `env kill`
+so the external binary handles them, with a single-pid fallback. (3) On the
+bash side, a background helper killed by the script becomes an asynchronous
+"Terminated" job notice in the shell's output — which `stderr_to_stdout`
+merges into the harness envelope; double-fork helpers (`( (...) & )`) so
+they are never jobs, detach all three fds to /dev/null so a surviving helper
+can never hold the port's stdout-EOF hostage (the exact Linux hang: an
+orphaned grandchild `sleep` kept the pipe open and every dispatch timed
+out). INVARIANT: any /bin/sh script kazi ships must be proven under dash,
+not just macOS sh — locally: `dash script.sh` plus a `setsid` shim
+(python3 os.setsid+exec) to simulate the Ubuntu group semantics.
+Regression: the wrapper itself in `Kazi.Harness.ChildSupervisor` (moduledoc
+documents all three); test/kazi/harness/child_lifetime_test.exs. (2026-07-06.)
