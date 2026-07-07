@@ -2283,17 +2283,10 @@ defmodule Kazi.CLI do
   defp start_standalone_endpoint(bind, port) do
     base_config = Application.get_env(:kazi, KaziWeb.Endpoint, [])
 
-    secret_key_base =
-      base_config[:secret_key_base] || Base.encode64(:crypto.strong_rand_bytes(48))
-
     Application.put_env(
       :kazi,
       KaziWeb.Endpoint,
-      Keyword.merge(base_config,
-        http: [ip: parse_bind_ip(bind), port: port],
-        server: true,
-        secret_key_base: secret_key_base
-      )
+      standalone_endpoint_config(base_config, bind, port)
     )
 
     running_children =
@@ -2312,6 +2305,32 @@ defmodule Kazi.CLI do
       )
 
     :ok
+  end
+
+  @doc """
+  The endpoint config a standalone `kazi dashboard` boot runs with, merged
+  over the compiled (prod) config.
+
+  `check_origin: :conn` pins the LiveView socket's origin check to the host
+  the request itself arrived on. The compiled prod config cannot know what
+  host the operator will browse — `localhost`, `127.0.0.1`, a LAN IP — and
+  Phoenix's default checks the origin against the configured url host, so on
+  any non-default host/port the websocket was rejected and every `phx-click`
+  interaction (panel, filters, mobile tabs) silently died while the page
+  still rendered. `:conn` accepts exactly the host serving the page and
+  still rejects cross-site pages (CSWSH).
+  """
+  @spec standalone_endpoint_config(Keyword.t(), String.t(), pos_integer()) :: Keyword.t()
+  def standalone_endpoint_config(base_config, bind, port) do
+    secret_key_base =
+      base_config[:secret_key_base] || Base.encode64(:crypto.strong_rand_bytes(48))
+
+    Keyword.merge(base_config,
+      http: [ip: parse_bind_ip(bind), port: port],
+      server: true,
+      secret_key_base: secret_key_base,
+      check_origin: :conn
+    )
   end
 
   @doc """
