@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.103.1](https://github.com/kazi-org/kazi/compare/v1.103.0...v1.103.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **test:** url-less live wedge now asserts the T48.1 load rejection ([ba9d07f](https://github.com/kazi-org/kazi/commit/ba9d07f190a4df336394933b4f2e43624e4d9634))
+
 ## [1.103.0](https://github.com/kazi-org/kazi/compare/v1.102.0...v1.103.0) (2026-07-07)
 
 
