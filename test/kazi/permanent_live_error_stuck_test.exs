@@ -22,6 +22,14 @@ defmodule Kazi.PermanentLiveErrorStuckTest do
     * the EXISTING code-predicate `error_stuck?` path (M5, deep-review-001) is
       pinned: a code predicate erroring forever still stops `:stuck` with no
       `stuck_reasons` (that field is LIVE-permanent-error-only).
+
+  T48.4 (ADR-0058 decision 4) extends this suite: the live wedge's `result.cause`
+  is `:error_wedged` naming the same ids/reasons as `stuck_reasons`, the pinned
+  code `error_stuck?` stop carries NO cause (nil, not a mislabel), and a NEW
+  test proves the residual `:over_budget` wedge — a `stuck_iterations` window
+  longer than the budget ceiling, so the T48.3 stuck stop never gets a chance
+  to fire before the ceiling trips — still classifies `:error_wedged` via the
+  terminal re-observation (`Kazi.Loop.CauseClass`), not a bare `:budget_exhausted`.
   """
   use ExUnit.Case, async: true
 
@@ -131,6 +139,14 @@ defmodule Kazi.PermanentLiveErrorStuckTest do
     assert result.outcome == :stopped
     assert result.reason == :stuck
     assert result.stuck_reasons == %{live: :missing_url}
+    # T48.4 (ADR-0058 decision 4): the honest terminal cause names this
+    # exactly what it is — a config error, not a fixable code failure.
+    assert result.cause == %{
+             class: :error_wedged,
+             ids: [:live],
+             reasons: %{live: :missing_url},
+             exhausted: nil
+           }
 
     # Stopped well before the 20-iteration budget ceiling would have tripped
     # :over_budget — the whole point of the fix (ADR-0058 "budget honesty").
@@ -139,6 +155,45 @@ defmodule Kazi.PermanentLiveErrorStuckTest do
     snap = Kazi.Loop.snapshot(loop)
     assert snap.stuck_failing == [:live]
     assert snap.stuck_reasons == %{live: :missing_url}
+    assert snap.cause == result.cause
+  end
+
+  test "an over_budget stop whose stuck window never closes still classifies error_wedged, not a bare budget_exhausted" do
+    # T48.4 (ADR-0058 decision 4): the residual case T48.3's stuck window does
+    # not get a chance to catch — a `stuck_iterations` window (10) LONGER than
+    # the iteration budget (2), so the ceiling trips before the persistent-error
+    # stuck check ever fires. The terminal re-observation (#790,
+    # `reeval_terminal_vector/1`) still sees the SAME missing-:url error, zero
+    # :fail — `Kazi.Loop.CauseClass` must still name this a config-error wedge,
+    # not let it fall back to an uninformative :budget_exhausted.
+    goal =
+      Goal.new("missing-url-wedge-budget",
+        predicates: [
+          Predicate.new(:code, :tests),
+          Predicate.new(:live, :http_probe, config: %{})
+        ],
+        budget: Budget.new(max_iterations: 2)
+      )
+
+    {:ok, loop} =
+      start_loop(goal, %{tests: AlwaysPassProvider, http_probe: Kazi.Providers.HttpProbe},
+        stuck_iterations: 10
+      )
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+
+    assert result.outcome == :over_budget
+    assert result.reason == :max_iterations
+    # No T48.3 stuck-path breadcrumbs on this stop -- it terminated via the
+    # BUDGET path, not `terminate_stuck/4`.
+    assert result.stuck_reasons == nil
+
+    assert result.cause == %{
+             class: :error_wedged,
+             ids: [:live],
+             reasons: %{live: :missing_url},
+             exhausted: nil
+           }
   end
 
   test "a live predicate erroring with a TRANSIENT reason keeps polling (no stuck stop)" do
@@ -191,9 +246,14 @@ defmodule Kazi.PermanentLiveErrorStuckTest do
     # carries no reason taxonomy, so this stays nil (additive, not a
     # replacement for the pre-T48.3 shape).
     assert result.stuck_reasons == nil
+    # T48.4 (ADR-0058 decision 4): this stop is exactly what it says it is —
+    # a code checker persistently unrunnable, not one of the three named
+    # mislabels — so it carries NO cause class.
+    assert result.cause == nil
 
     snap = Kazi.Loop.snapshot(loop)
     assert snap.stuck_failing == [:code]
     assert snap.stuck_reasons == nil
+    assert snap.cause == nil
   end
 end

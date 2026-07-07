@@ -159,9 +159,19 @@ defmodule Kazi.Loop.QuarantineExitTest do
       assert result.iterations < 10
       # Still quarantined (never rehabilitated) -- the honest reason.
       assert result.quarantine == [:flappy]
+      # T48.4 (ADR-0058 decision 4): the honest terminal cause names this
+      # stop as blocked SOLELY by quarantine -- the fix is rehabilitation or a
+      # human, not raising the budget.
+      assert result.cause == %{
+               class: :quarantine_blocked,
+               ids: [:flappy],
+               reasons: nil,
+               exhausted: nil
+             }
 
       snap = Kazi.Loop.snapshot(loop)
       assert snap.stuck_failing == [:flappy]
+      assert snap.cause == result.cause
 
       # The stuck bundle (T35.6) names the quarantined id as the blocking cause.
       failing_ids = Enum.map(result.stuck_bundle["failing_predicates"], & &1["id"])
