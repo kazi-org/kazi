@@ -69,8 +69,9 @@ defmodule Kazi.Release do
       {:ok, _started} = Application.ensure_all_started(:kazi)
     end
 
-    argv
-    |> Kazi.CLI.run()
+    # See `Kazi.CLI.main/1` — same swap-diagnosis guard (issue #856), shared
+    # across every entry point that ends in a halt.
+    Kazi.SwapDiagnosis.guard(fn -> Kazi.CLI.run(argv) end)
     |> System.halt()
   end
 
@@ -96,8 +97,9 @@ defmodule Kazi.Release do
   """
   @spec burrito_main() :: no_return()
   def burrito_main do
-    Burrito.Util.Args.argv()
-    |> Kazi.CLI.run()
+    argv = Burrito.Util.Args.argv()
+
+    Kazi.SwapDiagnosis.guard(fn -> Kazi.CLI.run(argv) end)
     |> System.halt()
   end
 

@@ -549,11 +549,15 @@ defmodule Kazi.CLI do
   @doc """
   Escript entry point. Parses `argv`, runs, and halts the VM with the resulting
   exit code (`0` converged, non-zero otherwise / on error).
+
+  Wrapped in `Kazi.SwapDiagnosis.guard/1` (issue #856): an exception raised
+  while the installed release has changed underneath this VM is reported as
+  one clear line instead of a misleading stack trace; any other exception is
+  re-raised unchanged.
   """
   @spec main([String.t()]) :: no_return()
   def main(argv) do
-    argv
-    |> run()
+    Kazi.SwapDiagnosis.guard(fn -> run(argv) end)
     |> System.halt()
   end
 
