@@ -83,10 +83,14 @@ args = ["test", "./..."]
 # LIVE predicate (http_probe): the deployed /healthz must keep returning 200 "ok".
 # This is the production probe that makes "still healthy" objective, not assumed
 # (concept §1) — a standing goal polls it forever and re-converges on any drift.
+# Set `url` to the concrete deployed target when driving a real run (T48.1,
+# ADR-0058) — http_probe only ever reads `url`; a bare relative path is never
+# resolved at dispatch time, so it would silently error `missing_url` on every
+# observation instead of ever holding green.
 [[predicate]]
 id = "healthz-live"
 provider = "http_probe"
 description = "deployed GET /healthz keeps returning 200 with body \"ok\""
-path = "/healthz"
+url = "https://REPLACE-WITH-DEPLOYED-SERVICE-URL/healthz"
 expect_status = 200
 expect_body = "ok"
