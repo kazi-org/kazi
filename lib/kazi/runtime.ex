@@ -1022,16 +1022,16 @@ defmodule Kazi.Runtime do
 
   defp finish_run(false, _run_id, _result), do: :ok
 
-  defp finish_run(true, run_id, {:ok, %{outcome: outcome, reason: reason}}) do
-    do_finish_run(run_id, registry_status(outcome, reason))
+  defp finish_run(true, run_id, {:ok, %{outcome: outcome, reason: reason} = result}) do
+    do_finish_run(run_id, registry_status(outcome, reason), economics_attrs(result))
   end
 
   defp finish_run(true, run_id, {:error, _reason}) do
-    do_finish_run(run_id, "error")
+    do_finish_run(run_id, "error", %{})
   end
 
-  defp do_finish_run(run_id, status) do
-    case RunRegistry.finish(run_id, status) do
+  defp do_finish_run(run_id, status, economics) do
+    case RunRegistry.finish(run_id, status, economics) do
       {:ok, _run} ->
         :ok
 
@@ -1043,6 +1043,47 @@ defmodule Kazi.Runtime do
         :ok
     end
   end
+
+  # =============================================================================
+  # Run-end economics projection (T48.7, ADR-0058 decision 1)
+  # =============================================================================
+  #
+  # Maps `Kazi.Loop.result/0` onto the `RunRegistry.finish/3` economics attrs.
+  # Honest-unknown (ADR-0046): when the loop's `usage` envelope is empty (no
+  # dispatch this run ever reported ANY usage component — the `claw` profile
+  # reports none by design, and a run with zero dispatches trivially has none
+  # either), the token/cost fields persist nil, never 0. `usage` is the T34.1
+  # additive envelope (only reported components present); `tokens_used` is the
+  # separate legacy rolled-up total the budget gate reads and is NOT itself
+  # honest-unknown (it defaults 0 on an unreported estimate) — gating on `usage`
+  # being empty, not on `tokens_used == 0`, is what keeps this projection honest
+  # even though the field it publishes is `tokens_used`.
+  @spec economics_attrs(Kazi.Loop.result()) :: map()
+  defp economics_attrs(%{usage: usage} = result) when map_size(usage) == 0 do
+    %{
+      budget_tokens: nil,
+      budget_cached_input_tokens: nil,
+      budget_cost_usd: nil,
+      dispatch_count: Map.get(result, :dispatches, 0),
+      context_tier: Map.get(result, :context_tier),
+      predicate_count: get_in(result, [:goal_shape, :predicate_count]),
+      predicate_kind_histogram: get_in(result, [:goal_shape, :kind_histogram]) || %{}
+    }
+  end
+
+  defp economics_attrs(%{usage: usage, tokens_used: tokens_used} = result) do
+    %{
+      budget_tokens: tokens_used,
+      budget_cached_input_tokens: Map.get(usage, :cached_input_tokens),
+      budget_cost_usd: Map.get(usage, :cost_usd),
+      dispatch_count: Map.get(result, :dispatches, 0),
+      context_tier: Map.get(result, :context_tier),
+      predicate_count: get_in(result, [:goal_shape, :predicate_count]),
+      predicate_kind_histogram: get_in(result, [:goal_shape, :kind_histogram]) || %{}
+    }
+  end
+
+  defp economics_attrs(_result), do: %{}
 
   # Maps the loop's `t:Kazi.Loop.result/0` outcome to the registry's terminal
   # status vocabulary (`Kazi.ReadModel.RunRegistry.finish/2`'s doc, mirrored by
