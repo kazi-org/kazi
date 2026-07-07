@@ -58,6 +58,15 @@ only as `"unreported"` when a `max_tokens` ceiling was set but a dispatch report
 no usage the loop could count (the ceiling could never bind), absent on every
 other run — so `schema_version` stays **2**.
 
+ADR-0058 (T48.4) adds the OPTIONAL `cause` object naming the honest terminal
+cause alongside `status`/`reason` — `over_budget` is not always genuine budget
+exhaustion, and `stuck` is not always an ordinary failing-set stall. **Additive**
+— present only when the loop classified one (`budget_exhausted` / `error_wedged`
+/ `quarantine_blocked`), absent on a clean converge or a stop that is exactly
+what it says it is — so `schema_version` stays **2**. See
+[`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058)
+below.
+
 ## Shape
 
 ```json
@@ -98,6 +107,21 @@ other run — so `schema_version` stays **2**.
 }
 ```
 
+A stuck run whose cause was classified (ADR-0058, T48.4) carries the additive
+`cause` object alongside `status`/`reason`:
+
+```json
+{
+  "status": "stuck",
+  "reason": "stuck",
+  "cause": {
+    "class": "error_wedged",
+    "ids": ["live_route"],
+    "reasons": { "live_route": "missing_url" }
+  }
+}
+```
+
 (`usage` is present only when the harness reported usage, and each of its fields is
 omitted when unreported — the example above shows a Claude run that reported no
 `reasoning_tokens`.)
@@ -118,6 +142,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `context_store`  | object (optional)   | ADR-0045 context-store byte accounting, present only when the run used `--context-store`. **Additive, optional** — `{ "provider": string, "indexed_bytes": integer, "returned_bytes": integer, "saved_bytes": integer, "budget": integer }`. Absent ⇒ the store was off and the result is byte-identical to today. |
 | `stuck_bundle`   | object (optional)   | ADR-0045 §5 stuck-escalation bundle, present only on a stuck stop (`status` `stopped`, `reason` `stuck`). **Additive, optional** — `{ "failing_predicates": [{ "id": string, "failure": string }], "changed_files": [string], "snippets": [{ "source": string\|null, "text": string }], "bytes": integer }`. Bounded + redacted; the escalating orchestrator hands the higher model rung this instead of the full transcript. Absent ⇒ no stuck stop. |
 | `quarantine`     | array of strings (optional) | i795/#795: the predicate ids quarantined as flaky (T1.3, `Kazi.Loop.Flake`) at the terminal observation. **Additive, optional** — present only when non-empty. A quarantined predicate's status is `unknown`, never `pass`, so `status` can never be `converged` while this is present; it names WHICH predicate(s) keep a non-converged run from reporting a false positive over an `unknown` verdict. Absent ⇒ nothing was quarantined, byte-identical to today. |
+| `cause`          | object (optional)   | T48.4 (ADR-0058 decision 4): the honest terminal cause class alongside `status`/`reason`. **Additive, optional** — present only when the loop classified one. See [`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058). |
 | `collateral`     | array of objects (optional) | issue #860: files changed this run that sit OUTSIDE the goal's write scope, net-deletion entries first. **Additive, optional** — present only when non-empty. See [`collateral` — out-of-intent diff report](#collateral--out-of-intent-diff-report-issue-860) below. Absent ⇒ nothing collateral was found, byte-identical to before this field existed. |
 | `next_action`    | string (enum)       | An orchestration **hint** — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`, `max_dispatches` — T48.6, ADR-0058) or `stuck`. `null` on a clean converge. |
@@ -331,6 +356,64 @@ The E19/E36 benchmark (`mix kazi.bench --kpis <dir>`) folds a directory of
 recorded `apply --json` results into a per-arm breakdown table
 (cost/converged-predicate, stuck-rate, and the avoided-token deltas by
 harness/model/context-tier), consuming **this** object — re-deriving nothing.
+
+## `cause` — honest terminal cause class (ADR-0058)
+
+The motivating incident (ADR-0058 §Context): every diagnosable
+`over_budget` run in a live operator read-model turned out to be a
+mislabeled error-wedge — a live predicate stuck in `:error` (e.g. `http_probe`
+missing its required `url`) that spun every remaining iteration to
+`max_iterations`. The operator's obvious next move on seeing `over_budget` —
+raise the budget — changes nothing about a config error. `cause` names the
+RIGHT next move instead of leaving `status`/`reason` as the only signal.
+
+```json
+"cause": {
+  "class": "error_wedged",
+  "ids": ["live_route"],
+  "reasons": { "live_route": "missing_url" }
+}
+```
+
+```json
+"cause": {
+  "class": "budget_exhausted",
+  "ids": ["code"],
+  "exhausted": "max_iterations"
+}
+```
+
+| Field       | Type                | Meaning |
+|-------------|---------------------|---------|
+| `class`     | string (enum)       | One of `budget_exhausted`, `error_wedged`, `quarantine_blocked` (see below). |
+| `ids`       | array of strings (optional) | The implicated predicate ids, sorted. Present only when non-empty. |
+| `reasons`   | object (optional)   | `{ id: reason }` — the implicated ids' last-observed error reasons, as strings. Present only for `error_wedged`. |
+| `exhausted` | string (optional)   | The exceeded budget dimension (`max_iterations` / `wall_clock` / `token_budget` / `max_dispatches`, T48.6). Present only for `budget_exhausted`. |
+
+The three classes:
+
+- **`budget_exhausted`** — a genuine `over_budget` stop: the terminal
+  re-observation still shows real work `fail`ing (or nothing at all
+  blocking — a live predicate legitimately still pending). Raising the
+  budget, or waiting longer, really is the right move.
+- **`error_wedged`** — either the T48.3 live-permanent-error stuck stop, or
+  an `over_budget` stop whose terminal re-observation shows ZERO `fail` but
+  at least one PERSISTENT `error` (the residual case a `stuck_iterations`
+  window longer than the budget ceiling doesn't get a chance to catch).
+  Raising the budget does nothing; the fix is the named predicate's config.
+- **`quarantine_blocked`** — the #820 quarantine-only stuck stop: the vector
+  is unsatisfied solely because every non-passing id is quarantined as
+  flaky (T1.3). The fix is rehabilitation or a human, not budget.
+
+Every other stop — a clean `converged`, an ordinary failing-set `stuck`, or
+the pre-existing code `error_stuck?` (M5) `stuck` — carries **no** `cause`
+(absent from the object): those are not mislabels, they are exactly what
+`status`/`reason` already say. **Additive, optional** — absent ⇒
+byte-identical to before this field existed. Computed by
+`Kazi.Loop.CauseClass.classify/1`; persisted to the read-model's `runs` table
+as `outcome_cause_class` (the `class` string) and `outcome_cause_detail`
+(`ids`/`reasons`/`exhausted`, nullable JSON), and surfaced on the starmap
+dashboard's drill-in panel for a finished run.
 
 ## `collateral` — out-of-intent diff report (issue #860)
 

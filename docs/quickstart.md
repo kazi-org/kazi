@@ -135,6 +135,14 @@ once per run and marks the terminal result's `usage_fidelity` as `"unreported"`
 rather than silently letting the budget sit unenforced (T48.5, ADR-0058 §4).
 Bound a claw-driven goal on `max_iterations` / `max_wall_clock_ms` instead.
 
+`over_budget` is not always genuine budget exhaustion, and `stuck` is not
+always an ordinary failing-set stall — the terminal result, `--json` output,
+and read-model carry an additive `cause` alongside the outcome
+(`budget_exhausted` / `error_wedged` / `quarantine_blocked`) naming the RIGHT
+next move, so raising the budget is never the reflexive fix for a config error
+(T48.4, ADR-0058 §4; see
+[`cause` — honest terminal cause class](schemas/run-result.md#cause--honest-terminal-cause-class-adr-0058)).
+
 #### Held-out acceptance predicates (anti-gaming)
 
 A `[[predicate]]` may set `held_out = true`:
