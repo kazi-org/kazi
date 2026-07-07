@@ -153,7 +153,11 @@ bold cyan (red when that session drives a stuck goal).
 470px right slide-over, rgba(9,15,28,.97), cyan-tinted left hairline,
 -24px 0 60px shadow. Contents top→bottom: goal name (Space Grotesk 21px) +
 chips (workspace, harness · model, state pill cyan/red); ITER n + budget
-line; burn bar (4px: cyan ok / amber warn ≥~70% / red hot ≥~85%);
+line; burn bar (4px: cyan ok / amber warn ≥~70% / red hot ≥~85%); honest
+terminal CAUSE line (T48.4, ADR-0058 -- "cause: error_wedged (live_route:
+missing_url)", amber-bordered; only present when the finished run's
+`outcome_cause_class` was classified -- absent on a clean converge or an
+ordinary failing-set stuck stop);
 PREDICATE VECTOR as DNA strip (15px squares: green glow pass, red glow fail,
 #152134 not-evaluated); CONVERGENCE heatmap (predicate rows × iteration
 cells, 15x13px, green/red/void — regression flips visible); TRANSCRIPT TAIL
