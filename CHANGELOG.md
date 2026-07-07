@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.91.0](https://github.com/kazi-org/kazi/compare/v1.90.0...v1.91.0) (2026-07-07)
+
+
+### Features
+
+* **harness:** tie the dispatched child's lifetime to the controller ([57ac3e1](https://github.com/kazi-org/kazi/commit/57ac3e1827a799708523d14a9cbb0c1f478bbac8))
+* **registry:** record the dispatched harness subprocess's OS pid ([1b66c9d](https://github.com/kazi-org/kazi/commit/1b66c9d169b5033543a4295e591ccdc178719570))
+* warn loudly when a resumed goal's prior harness pid is still alive ([2301820](https://github.com/kazi-org/kazi/commit/230182087a13d56483c3e93064a5a61db3d933d3))
+
+
+### Bug Fixes
+
+* **harness:** portable child supervision -- setsid groups, env kill, jobless watchdog ([d93523a](https://github.com/kazi-org/kazi/commit/d93523a8ea4ad894ecc3dda90c145802aa399f11))
+
 ## [1.90.0](https://github.com/kazi-org/kazi/compare/v1.89.0...v1.90.0) (2026-07-07)
 
 
