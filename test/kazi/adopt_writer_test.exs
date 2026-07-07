@@ -222,6 +222,70 @@ defmodule Kazi.AdoptWriterTest do
     end
   end
 
+  describe "to_toml/2 — T48.9 learned [budget] suggestion (ADR-0058 decision 2)" do
+    @suggestion %{
+      max_tokens: 750_000,
+      max_dispatches: 6,
+      max_wall_clock_ms: 600_000,
+      provenance: "learned from 12 runs (shape 4-8, any model/harness), p95 x 1.5"
+    }
+
+    test "to_toml/1 (no suggestion) is byte-identical to to_toml/2 called with nil" do
+      assert Writer.to_toml(goal_map()) == Writer.to_toml(goal_map(), nil)
+    end
+
+    test "a nil suggestion adds nothing (no [budget] mention at all)" do
+      refute Writer.to_toml(goal_map(), nil) =~ "budget"
+    end
+
+    test "renders a COMMENTED [budget] block with the provenance line" do
+      toml = Writer.to_toml(goal_map(), @suggestion)
+
+      assert toml =~ "# suggested by kazi economy: #{@suggestion.provenance}"
+      assert toml =~ "# [budget]"
+      assert toml =~ "# max_tokens = 750000"
+      assert toml =~ "# max_dispatches = 6"
+      assert toml =~ "# max_wall_clock_ms = 600000"
+      # It is a COMMENT: it never introduces a real [[predicate]] or a live
+      # [budget] table.
+      refute toml =~ ~r/^\[budget\]/m
+    end
+
+    test "the suggestion NEVER parses into a real budget (never silently applied)" do
+      toml = Writer.to_toml(goal_map(), @suggestion)
+
+      assert {:ok, decoded} = Toml.decode(toml)
+      assert {:ok, %Goal{budget: budget}} = Loader.from_map(decoded)
+
+      # A commented [budget] table does not parse -- the loaded goal carries
+      # the loader's all-nil default, never the suggested ceilings.
+      assert budget.max_tokens == nil
+      assert budget.max_dispatches == nil
+      assert budget.max_wall_clock_ms == nil
+    end
+
+    test "a metric absent from the suggestion (honest-unknown) renders no line for it" do
+      partial = %{
+        max_dispatches: 3,
+        provenance: "learned from 2 runs (shape 1-3, any model/harness), p95 x 1.5"
+      }
+
+      toml = Writer.to_toml(goal_map(), partial)
+
+      assert toml =~ "# max_dispatches = 3"
+      refute toml =~ "max_tokens"
+      refute toml =~ "max_wall_clock_ms"
+    end
+
+    test "is deterministic — the same suggestion renders byte-identically" do
+      assert Writer.to_toml(goal_map(), @suggestion) == Writer.to_toml(goal_map(), @suggestion)
+    end
+
+    test "Kazi.Adopt.to_toml/2 delegates to the writer (same output)" do
+      assert Adopt.to_toml(goal_map(), @suggestion) == Writer.to_toml(goal_map(), @suggestion)
+    end
+  end
+
   describe "live_predicate_scaffold/0" do
     test "is a comment block that does NOT parse as a predicate" do
       scaffold = Writer.live_predicate_scaffold()
