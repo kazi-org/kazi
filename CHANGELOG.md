@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.93.1](https://github.com/kazi-org/kazi/compare/v1.93.0...v1.93.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **dashboard:** LV socket dead on released binary -- check_origin :conn for standalone boots ([f958e4d](https://github.com/kazi-org/kazi/commit/f958e4d7fcc360912b997fe2b104949eaf46d62b))
+
 ## [1.93.0](https://github.com/kazi-org/kazi/compare/v1.92.0...v1.93.0) (2026-07-07)
 
 
