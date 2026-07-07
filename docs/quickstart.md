@@ -128,6 +128,13 @@ ticks (T48.6, ADR-0058) — and `cached_read_weight`, the discount cached-read
 input tokens get against the `max_tokens` ceiling so a cache-hit-heavy run is
 not falsely flagged `over_budget`; defaults to a low flat weight, ADR-0046).
 
+`max_tokens` only binds against a harness that reports usage. The best-effort
+`:claw` profile ([ADR-0022](adr/0022-harness-onboarding-conformance.md)) reports
+none by design, so a claw-driven goal's token ceiling can never trip; kazi warns
+once per run and marks the terminal result's `usage_fidelity` as `"unreported"`
+rather than silently letting the budget sit unenforced (T48.5, ADR-0058 §4).
+Bound a claw-driven goal on `max_iterations` / `max_wall_clock_ms` instead.
+
 #### Held-out acceptance predicates (anti-gaming)
 
 A `[[predicate]]` may set `held_out = true`:
