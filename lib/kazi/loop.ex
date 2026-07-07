@@ -147,6 +147,12 @@ defmodule Kazi.Loop do
   # `StuckDetector.permanent_error_stuck?/3` (see `live_history/1` below) —
   # neither module depends on the other at runtime.
   alias Kazi.Loop.ErrorPermanence
+  # T48.4 (ADR-0058 decision 4, UC-064): the pure, closed classifier deciding
+  # whether an `:over_budget` or `:stuck` stop is honestly what it says it is,
+  # or a mislabel (`:budget_exhausted` vs `:error_wedged` vs
+  # `:quarantine_blocked`) — see `cause_for/2` below, the single seam that
+  # feeds it from `build_result/2` and the `:snapshot` handler.
+  alias Kazi.Loop.CauseClass
   # T1.2 regression: the pure green→red detector + dispatch attribution. The loop
   # only feeds it the per-iteration history (T1.1) + dispatch log and records the
   # flags it returns (see observe_tick/1).
@@ -284,7 +290,13 @@ defmodule Kazi.Loop do
           # code error_stuck? verdicts carry no reason taxonomy) and for every
           # non-stuck outcome. Additive — the existing `:stuck_failing` id list
           # shape is unchanged; this only adds WHY those ids are stuck.
-          stuck_reasons: %{Kazi.Predicate.id() => term()} | nil
+          stuck_reasons: %{Kazi.Predicate.id() => term()} | nil,
+          # T48.4 (ADR-0058 decision 4, UC-064): the honest terminal cause
+          # class alongside the outcome — `nil` unless the stop is one of the
+          # three named mislabels (`Kazi.Loop.CauseClass`'s moduledoc). An
+          # `:over_budget` stop is NOT always `:budget_exhausted`, and a
+          # `:stuck` stop is NOT always an ordinary failing-set stall.
+          cause: CauseClass.t() | nil
         }
 
   # --- gen_statem data ---------------------------------------------------------
@@ -407,6 +419,13 @@ defmodule Kazi.Loop do
               # stuck stop (see `stuck_reasons` in `t:result/0`). nil for every
               # other stop. Appended last so the existing field order is untouched.
               stuck_reasons: nil,
+              # T48.4 (ADR-0058 decision 4, UC-064): which of the THREE named
+              # cause classes a `:stuck` stop is, set explicitly by the call site
+              # in `terminate_stuck/4` (not inferred — the call site already knows
+              # exactly why it is stopping). `nil` for the ordinary T1.5
+              # failing-set stop and the pre-existing code `error_stuck?` (M5)
+              # stop — see `cause_for/2`.
+              stuck_cause: nil,
               # --- T1.2 regression: dispatch log + flagged regressions --------
               # Append-only log of {iteration_index, %Action{}} for every agent
               # dispatch, where iteration_index is the observation index the loop
@@ -807,7 +826,10 @@ defmodule Kazi.Loop do
   on (T1.5), or `nil` if it did not stop stuck; `:stuck_reasons` (T48.3,
   ADR-0058) — the persistent set's last-observed `:error` reason per id when the
   stop was a LIVE permanent-error verdict, or `nil` for every other stop;
-  `:regressions` (T1.2) — the
+  `:cause` (T48.4, ADR-0058 decision 4) — the honest terminal cause class
+  alongside the outcome (`:budget_exhausted` / `:error_wedged` /
+  `:quarantine_blocked`), or `nil` when no mislabel applies (see
+  `Kazi.Loop.CauseClass`); `:regressions` (T1.2) — the
   green→red predicate flags detected over the history so far, each with the
   dispatch it is attributed to (see `Kazi.Loop.RegressionDetector`); and
   `:release_ref` (T3.3d) — the release ref of the most recent successful deploy
@@ -831,6 +853,7 @@ defmodule Kazi.Loop do
           budget_reason: Budget.reason() | nil,
           stuck_failing: [Kazi.Predicate.id()] | nil,
           stuck_reasons: %{Kazi.Predicate.id() => term()} | nil,
+          cause: CauseClass.t() | nil,
           regressions: [RegressionDetector.flag()],
           enforcement: %{
             active: boolean(),
@@ -1094,6 +1117,9 @@ defmodule Kazi.Loop do
       # T48.3 (ADR-0058, UC-064): the reason map for a LIVE permanent-error stuck
       # stop, or nil for every other stop (see `build_result/2`).
       stuck_reasons: data.stuck_reasons,
+      # T48.4 (ADR-0058 decision 4, UC-064): the honest terminal cause class, or
+      # nil pre-termination / on a non-mislabel stop (see `cause_for/2`).
+      cause: cause_for(state, data),
       # T1.2 regression: the green→red flags detected over the history so far,
       # each with its attributed dispatch (see Kazi.Loop.RegressionDetector).
       regressions: data.regressions,
@@ -1239,7 +1265,10 @@ defmodule Kazi.Loop do
                    &ErrorPermanence.classify_result/1
                  ) do
               {:permanent_error_stuck, erroring, reasons} ->
-                terminate_stuck(erroring, data, reasons)
+                # T48.4 (ADR-0058 decision 4): this IS the error-wedge — a live
+                # predicate stuck in a permanent `:error` — so tag the cause
+                # explicitly rather than leaving `cause_for/2` to infer it.
+                terminate_stuck(erroring, data, reasons, :error_wedged)
 
               :not_permanent_error_stuck ->
                 decide(vector, data)
@@ -1672,7 +1701,9 @@ defmodule Kazi.Loop do
 
     if Flake.quarantine_blocks_only?(vector, data.quarantine) and
          ticks >= Flake.quarantine_only_stuck_ticks() do
-      terminate_stuck(data.quarantine, data)
+      # T48.4 (ADR-0058 decision 4): this stop is blocked SOLELY by quarantine —
+      # tag the cause explicitly (there is no reason map for this class).
+      terminate_stuck(data.quarantine, data, nil, :quarantine_blocked)
     else
       reobserve(data, backoff_reobserve_ms(data.reobserve_interval_ms, ticks))
     end
@@ -2595,9 +2626,38 @@ defmodule Kazi.Loop do
       # `:error` reason per id, when the stop was a LIVE permanent-error verdict
       # — nil for every other stop, so an operator sees WHY a live predicate is
       # named in `:stuck_failing` (a wedge, not a fixable code failure).
-      stuck_reasons: data.stuck_reasons
+      stuck_reasons: data.stuck_reasons,
+      # T48.4 (ADR-0058 decision 4, UC-064): the honest terminal cause class
+      # alongside the outcome — nil unless this stop is one of the three named
+      # mislabels (`Kazi.Loop.CauseClass`).
+      cause: cause_for(state, data)
     }
     |> maybe_attach_stuck_bundle(data)
+  end
+
+  # T48.4 (ADR-0058 decision 4, UC-064): the single seam that feeds
+  # `Kazi.Loop.CauseClass.classify/1` from the loop's terminal state — shared by
+  # `build_result/2` (the cached terminal result) and the `:snapshot` handler
+  # (a live peek, where `state` may not yet be terminal — `stuck_cause`,
+  # `stuck_failing`, and `budget_reason` are all nil pre-termination, so
+  # `classify/1` safely returns nil rather than guessing early).
+  @spec cause_for(atom(), Data.t()) :: CauseClass.t() | nil
+  defp cause_for(state, %Data{} = data) do
+    outcome =
+      case state do
+        :converged -> :converged
+        :over_budget -> :over_budget
+        _ -> :stopped
+      end
+
+    CauseClass.classify(%{
+      outcome: outcome,
+      reason: stop_reason(data),
+      vector: data.vector,
+      stuck_cause: data.stuck_cause,
+      stuck_failing: stuck_failing_list(data.stuck_failing),
+      stuck_reasons: data.stuck_reasons
+    })
   end
 
   # T48.7 (ADR-0058 decision 1): the goal's shape — how many predicates it
@@ -2701,15 +2761,20 @@ defmodule Kazi.Loop do
   # escalate rather than keep burning iterations). The result's reason is `:stuck`
   # (see `stop_reason/1`). `reasons` (T48.3, ADR-0058) is the LIVE
   # permanent-error verdict's `%{id => reason}` map, or nil for every other
-  # stuck stop (the ordinary failing-set / code error_stuck? call sites below
-  # pass no third argument, so they are byte-identical to before this change).
+  # stuck stop. `cause` (T48.4, ADR-0058 decision 4) is the explicit
+  # `Kazi.Loop.CauseClass` tag the CALL SITE assigns — `:error_wedged` for the
+  # T48.3 live-permanent-error path, `:quarantine_blocked` for the #820
+  # quarantine-only path, or `nil` (default) for the ordinary T1.5 failing-set
+  # and pre-existing code `error_stuck?` (M5) call sites, which pass neither
+  # extra argument and so are byte-identical to before this change.
   @spec terminate_stuck(
           StuckDetector.failing_set(),
           Data.t(),
-          %{Kazi.Predicate.id() => term()} | nil
+          %{Kazi.Predicate.id() => term()} | nil,
+          CauseClass.class() | nil
         ) :: :gen_statem.event_handler_result(atom())
-  defp terminate_stuck(failing, %Data{} = data, reasons \\ nil) do
-    data = %Data{data | stuck_failing: failing, stuck_reasons: reasons}
+  defp terminate_stuck(failing, %Data{} = data, reasons \\ nil, cause \\ nil) do
+    data = %Data{data | stuck_failing: failing, stuck_reasons: reasons, stuck_cause: cause}
     notify_escalation(data, failing)
     notify_stuck_stop(data)
     terminate_with(:stopped, data)
