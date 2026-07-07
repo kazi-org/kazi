@@ -34,7 +34,8 @@ defmodule Kazi.MCP.ServerTest do
       "name": "Health endpoint",
       "predicates": [
         {"id": "health", "provider": "http_probe",
-         "description": "GET /healthz returns 200"}
+         "description": "GET /healthz returns 200",
+         "config": {"url": "https://example.test/healthz"}}
       ]
     })
 
