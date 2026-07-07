@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.105.0](https://github.com/kazi-org/kazi/compare/v1.104.0...v1.105.0) (2026-07-07)
+
+
+### Features
+
+* **dashboard:** attention queue ranks by terminal cause (T48.14) ([2cdca96](https://github.com/kazi-org/kazi/commit/2cdca966805b647948133b670b14e0e22ee21429))
+* **dashboard:** render cause-ranked attention-queue entries (T48.14) ([3040b76](https://github.com/kazi-org/kazi/commit/3040b7679e077b5985fea4f2bc5af9293eb6d96d))
+* **loop:** extract cause-line formatter for reuse (T48.14) ([99c4887](https://github.com/kazi-org/kazi/commit/99c4887debd181f124efb72a52667665ecc53ccd))
+
 ## [1.104.0](https://github.com/kazi-org/kazi/compare/v1.103.1...v1.104.0) (2026-07-07)
 
 
