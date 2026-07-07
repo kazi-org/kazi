@@ -65,31 +65,91 @@ defmodule Kazi.Loop.BudgetTest do
     end
   end
 
+  # ===========================================================================
+  # T48.6 (ADR-0058): max_dispatches — a ceiling on :dispatch_agent actions
+  # only. The loop feeds `:dispatches` (not `:iterations`) so an observe-only
+  # tick never counts toward it.
+  # ===========================================================================
+
+  describe "max_dispatches dimension (T48.6, ADR-0058)" do
+    test "ok while dispatches are within the ceiling" do
+      budget = Budget.new(max_dispatches: 3)
+      assert Guard.check(budget, %{dispatches: 0}) == :ok
+      assert Guard.check(budget, %{dispatches: 2}) == :ok
+    end
+
+    test "stops with :max_dispatches once dispatches reach the ceiling (>=)" do
+      budget = Budget.new(max_dispatches: 3)
+      assert Guard.check(budget, %{dispatches: 3}) == {:stop, :max_dispatches}
+      assert Guard.check(budget, %{dispatches: 10}) == {:stop, :max_dispatches}
+    end
+
+    test "is unbounded when nil" do
+      assert Guard.check(%Budget{max_dispatches: nil}, %{dispatches: 1_000_000}) == :ok
+    end
+
+    test "a high iteration count with zero dispatches never trips it" do
+      # The whole point of the dimension: an observe-only tick does not consume
+      # it, however many of them run.
+      budget = Budget.new(max_dispatches: 1)
+      assert Guard.check(budget, %{iterations: 9_999, dispatches: 0}) == :ok
+    end
+  end
+
   describe "missing usage fields default to zero spend" do
     test "an empty usage map never trips a bounded budget" do
-      budget = Budget.new(max_iterations: 1, max_wall_clock_ms: 1, max_tokens: 1)
+      budget =
+        Budget.new(max_iterations: 1, max_wall_clock_ms: 1, max_tokens: 1, max_dispatches: 1)
+
       assert Guard.check(budget, %{}) == :ok
     end
   end
 
   describe "an empty (all-nil) budget" do
     test "never trips regardless of usage" do
-      usage = %{iterations: 9_999, elapsed_ms: 9_999_999, tokens: 9_999_999}
+      usage = %{
+        iterations: 9_999,
+        elapsed_ms: 9_999_999,
+        tokens: 9_999_999,
+        dispatches: 9_999_999
+      }
+
       assert Guard.check(%Budget{}, usage) == :ok
     end
   end
 
   describe "ordering when several dimensions are exceeded at once" do
-    test "iterations is reported before wall-clock and tokens" do
-      budget = Budget.new(max_iterations: 1, max_wall_clock_ms: 1, max_tokens: 1)
-      usage = %{iterations: 5, elapsed_ms: 5, tokens: 5}
+    test "iterations is reported before wall-clock, tokens, and dispatches" do
+      budget =
+        Budget.new(max_iterations: 1, max_wall_clock_ms: 1, max_tokens: 1, max_dispatches: 1)
+
+      usage = %{iterations: 5, elapsed_ms: 5, tokens: 5, dispatches: 5}
       assert Guard.check(budget, usage) == {:stop, :max_iterations}
     end
 
-    test "wall-clock is reported before tokens" do
-      budget = Budget.new(max_wall_clock_ms: 1, max_tokens: 1)
-      usage = %{elapsed_ms: 5, tokens: 5}
+    test "wall-clock is reported before tokens and dispatches" do
+      budget = Budget.new(max_wall_clock_ms: 1, max_tokens: 1, max_dispatches: 1)
+      usage = %{elapsed_ms: 5, tokens: 5, dispatches: 5}
       assert Guard.check(budget, usage) == {:stop, :wall_clock}
+    end
+
+    test "tokens is reported before dispatches (T48.6: the new dimension checks last)" do
+      budget = Budget.new(max_tokens: 1, max_dispatches: 1)
+      usage = %{tokens: 5, dispatches: 5}
+      assert Guard.check(budget, usage) == {:stop, :token_budget}
+    end
+
+    test "dispatches alone is reported when it is the only exceeded dimension" do
+      budget =
+        Budget.new(
+          max_iterations: 100,
+          max_wall_clock_ms: 100,
+          max_tokens: 100,
+          max_dispatches: 1
+        )
+
+      usage = %{iterations: 5, elapsed_ms: 5, tokens: 5, dispatches: 5}
+      assert Guard.check(budget, usage) == {:stop, :max_dispatches}
     end
   end
 

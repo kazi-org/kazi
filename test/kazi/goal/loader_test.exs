@@ -535,6 +535,28 @@ defmodule Kazi.Goal.LoaderTest do
       assert {:ok, goal} = Loader.from_map(data)
       assert goal.budget.cached_read_weight == 0.25
     end
+
+    test "budget.max_dispatches maps onto the budget (T48.6, ADR-0058)" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"max_dispatches" => 5},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert goal.budget.max_dispatches == 5
+    end
+
+    test "an omitted budget.max_dispatches is unbounded (T48.6, ADR-0058)" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"max_iterations" => 10},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, goal} = Loader.from_map(data)
+      assert goal.budget.max_dispatches == nil
+    end
   end
 
   describe "load/1 / from_map/1 — validation errors" do
@@ -589,6 +611,28 @@ defmodule Kazi.Goal.LoaderTest do
 
       assert {:error, reason} = Loader.from_map(data)
       assert reason =~ "budget.max_iterations must be a positive integer"
+    end
+
+    test "a non-positive budget.max_dispatches is rejected (T48.6, ADR-0058)" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"max_dispatches" => 0},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "budget.max_dispatches must be a positive integer"
+    end
+
+    test "a non-integer budget.max_dispatches is rejected (T48.6, ADR-0058)" do
+      data = %{
+        "id" => "g",
+        "budget" => %{"max_dispatches" => 1.5},
+        "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:error, reason} = Loader.from_map(data)
+      assert reason =~ "budget.max_dispatches must be a positive integer"
     end
 
     test "an out-of-range budget.cached_read_weight is rejected (T34.4)" do
