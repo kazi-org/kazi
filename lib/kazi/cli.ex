@@ -140,6 +140,7 @@ defmodule Kazi.CLI do
     context_store: :string,
     context_budget: :integer,
     session_name: :string,
+    rediscovery: :string,
     port: :integer,
     bind: :string,
     roadmap: :string,
@@ -223,7 +224,9 @@ defmodule Kazi.CLI do
     goal:
       "`economy` only: restrict the run-economics history aggregate to one goal_ref. Default: aggregate across every goal on this read-model (ADR-0058).",
     help: "Show this help and exit.",
-    version: "Print the kazi version and exit."
+    version: "Print the kazi version and exit.",
+    rediscovery:
+      "`economy` only (T48.10, ADR-0058 decision 3): fold the goal's recorded per-iteration `tools` counters into a RANKED, REPORT-ONLY rediscovery-pressure candidate list (which tool category keeps recurring across dispatches instead of falling off after the first). A goal with no recorded tool-use stream reports `unknown`, never a fabricated empty ranking (ADR-0046). Feeds nothing back into a dispatch prompt."
   }
 
   # The command table. Each entry: a one-line summary, the positional args (name +
@@ -296,9 +299,9 @@ defmodule Kazi.CLI do
     %{
       name: "economy",
       summary:
-        "Aggregate persisted run-end economics into p50/p95 percentiles by goal shape/model/harness (ADR-0058, a pure read).",
+        "Read-only run economics (ADR-0058): aggregate persisted run-end economics into p50/p95 percentiles by goal shape/model/harness, or --rediscovery <goal> for a ranked rediscovery-pressure candidate report.",
       args: [],
-      flags: [:goal, :json]
+      flags: [:goal, :rediscovery, :json]
     },
     %{
       name: "plan",
@@ -381,6 +384,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --check [--json]        # observe the vector once, dispatch nothing
       kazi status <ref> [--json]
       kazi economy [--goal <ref>] [--json]         # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
+      kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
@@ -545,6 +549,18 @@ defmodule Kazi.CLI do
       --budget <N>           `context search` only: cap the search result at N bytes
                              (the byte budget the provider fits ranked snippets
                              into). Default: the provider's own default.
+      --rediscovery <goal>   `economy` only (T48.10, ADR-0058 decision 3): fold
+                             the goal's recorded per-iteration `tools` counters
+                             into a RANKED, REPORT-ONLY rediscovery-pressure
+                             candidate list (which tool category -- file reads /
+                             search calls / graph queries -- keeps recurring
+                             across dispatches instead of falling off after the
+                             first). A goal with no recorded tool-use stream
+                             reports `unknown`, never a fabricated empty
+                             ranking (ADR-0046 honest-unknown). Feeds NOTHING
+                             back into a dispatch prompt -- purely advisory
+                             until the T48.12 benchmark gate measures a real
+                             win.
       --help, -h             Show this help and exit.
       --version, -v          Print the kazi version and exit.
 
@@ -568,6 +584,8 @@ defmodule Kazi.CLI do
       kazi context index workspace-docs ./docs/concept.md --provider gist
       kazi context search "session cookie" --budget 4000 --json
       kazi context stats --json
+      kazi economy --json
+      kazi economy --rediscovery cli-e2e --json
   """
 
   @doc """
@@ -974,13 +992,23 @@ defmodule Kazi.CLI do
   # through to `execute_context/4`, which proxies to the resolved provider.
   defp parse_command(["context" | rest], flags), do: parse_context(rest, flags)
 
-  # T48.8 (ADR-0058 decision 2 precursor): `economy [--goal <ref>] [--json]`
-  # aggregates the persisted run-end economics (T48.7) into p50/p95 history
-  # groups. A pure read: no positional argument, an optional --goal filter.
+  # T48.8 (ADR-0058 decision 2 precursor) + T48.10 (ADR-0058 decision 3):
+  # `economy [--goal <ref>] [--json]` aggregates the persisted run-end
+  # economics (T48.7) into p50/p95 history groups; `economy --rediscovery
+  # <goal> [--json]` instead folds the goal's recorded per-iteration tool
+  # counters into a ranked, report-only rediscovery-pressure candidate list.
+  # Both are pure reads over the same command -- no positional argument,
+  # `--rediscovery` selects which view renders.
   defp parse_command(["economy" | rest], flags) do
     case rest do
-      [] -> {:economy, goal: flags[:goal], json: flags[:json] || false}
-      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+      [] ->
+        case flags[:rediscovery] do
+          nil -> {:economy, goal: flags[:goal], json: flags[:json] || false}
+          goal_ref -> {:economy, rediscovery: goal_ref, json: flags[:json] || false}
+        end
+
+      extra ->
+        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
 
@@ -1940,6 +1968,95 @@ defmodule Kazi.CLI do
 
   defp status_timestamp(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   defp status_timestamp(other), do: other
+
+  # =============================================================================
+  # economy command (ADR-0058): report-only economics views
+  # =============================================================================
+  #
+  # `kazi economy [--goal <ref>] [--json]` (T48.8, ADR-0058 decision 2
+  # precursor) is a PURE READ over the run-end economics T48.7 persists onto
+  # `Kazi.ReadModel.Run`, aggregated into p50/p95 history groups by
+  # `Kazi.Economy.History` — it drives no loop and mutates nothing. An empty
+  # aggregate (a fresh read-model with no finished runs yet) is a legitimate,
+  # honestly-reported answer -- `{"groups": []}` at exit 0, never an error.
+  #
+  # `--rediscovery <goal>` (T48.10, ADR-0058 decision 3) instead reads the
+  # goal's recorded iterations back from the read-model and folds their
+  # `tools` counters (T34.3) into a ranked candidate report via
+  # `Kazi.Economy.Rediscovery`. Same pure-read boundary — no goal loaded, no
+  # harness touched, and (the hard boundary this task pins) NOTHING here
+  # feeds back into a dispatch prompt.
+  defp execute_economy(opts) do
+    with_read_model(opts, fn ->
+      case opts[:rediscovery] do
+        goal_ref when is_binary(goal_ref) ->
+          execute_economy_rediscovery(goal_ref, opts)
+
+        nil ->
+          history = History.aggregate(goal_ref: opts[:goal])
+
+          emit(json?(opts), economy_json(history, opts[:goal]), fn ->
+            report_economy(history, opts[:goal])
+          end)
+
+          0
+      end
+    end)
+  end
+
+  # Always exit 0: unlike `status` (which looks up a specific run/proposal
+  # ENTITY and errors when neither exists), this command folds "whatever
+  # iterations are recorded for this ref" -- an unstarted or mistyped goal_ref
+  # legitimately folds to zero iterations, and `Kazi.Economy.Rediscovery`
+  # already reports that honestly as `status: "unknown"` with a reason. The
+  # report's `status` field is the signal a caller branches on, not the exit
+  # code.
+  defp execute_economy_rediscovery(goal_ref, opts) do
+    report =
+      goal_ref
+      |> ReadModel.list_iterations()
+      |> Kazi.Economy.Rediscovery.candidates()
+
+    emit(json?(opts), rediscovery_json(goal_ref, report), fn ->
+      print_rediscovery_report(goal_ref, report)
+    end)
+
+    0
+  end
+
+  # `Kazi.Economy.Rediscovery.to_json/1` already omits `candidates` on an
+  # `:unknown` report — merging its STRING-keyed map onto this ATOM-keyed
+  # envelope is fine, `Jason.encode!/1` renders either key type identically.
+  defp rediscovery_json(goal_ref, report) do
+    %{schema_version: @run_schema_version, goal_ref: goal_ref}
+    |> Map.merge(Kazi.Economy.Rediscovery.to_json(report))
+  end
+
+  defp print_rediscovery_report(goal_ref, %{status: :unknown, reason: reason}) do
+    IO.puts("REDISCOVERY goal=#{goal_ref} status=unknown")
+    IO.puts("reason: #{reason}")
+  end
+
+  defp print_rediscovery_report(goal_ref, %{status: :ranked, candidates: []}) do
+    IO.puts("REDISCOVERY goal=#{goal_ref} status=ranked")
+
+    IO.puts(
+      "no rediscovery pressure detected (report-only; not a suggestion to change anything)."
+    )
+  end
+
+  defp print_rediscovery_report(goal_ref, %{status: :ranked, candidates: candidates}) do
+    IO.puts("REDISCOVERY goal=#{goal_ref} status=ranked")
+    IO.puts("\nranked candidates (report-only -- feeds no prompt):")
+
+    Enum.each(candidates, fn c ->
+      IO.puts(
+        "  #{c.category}: #{c.label}\n" <>
+          "    recurring_calls=#{c.recurring_calls} recurring_dispatches=#{c.recurring_dispatches}/#{c.dispatches_compared} " <>
+          "total_calls=#{c.total_calls} pressure=#{Float.round(c.pressure * 1.0, 3)}"
+      )
+    end)
+  end
 
   # =============================================================================
   # init command (T5.5, UC-023, ADR-0013): adopt a repo by stack detection
@@ -4312,28 +4429,14 @@ defmodule Kazi.CLI do
   end
 
   # =============================================================================
-  # economy (T48.8, ADR-0058 decision 2 precursor): run-economics history
+  # economy (T48.8, ADR-0058 decision 2 precursor): aggregate-view rendering
   # =============================================================================
   #
-  # `kazi economy [--goal <ref>] [--json]` is a PURE READ over the run-end
-  # economics T48.7 persists onto `Kazi.ReadModel.Run` -- it drives no loop and
-  # mutates nothing. The percentile grouping + honest-unknown nil-safety
-  # (ADR-0046) live in `Kazi.Economy.History`; this layer only renders the
-  # aggregate on the --json / human surfaces, the same split as
-  # `list-proposed`/`status`. An empty aggregate (a fresh read-model with no
-  # finished runs yet) is a legitimate, honestly-reported answer -- `{"groups":
-  # []}` at exit 0, never an error.
-  defp execute_economy(opts) do
-    with_read_model(opts, fn ->
-      history = History.aggregate(goal_ref: opts[:goal])
-
-      emit(json?(opts), economy_json(history, opts[:goal]), fn ->
-        report_economy(history, opts[:goal])
-      end)
-
-      0
-    end)
-  end
+  # `execute_economy/1` above dispatches here for the default (non
+  # `--rediscovery`) view. The percentile grouping + honest-unknown
+  # nil-safety (ADR-0046) live in `Kazi.Economy.History`; this layer only
+  # renders the aggregate on the --json / human surfaces, the same split as
+  # `list-proposed`/`status`.
 
   # The `economy --json` result (T48.8): `groups` mirrors
   # `Kazi.Economy.History.aggregate/1`'s shape; `goal_filter` echoes the
