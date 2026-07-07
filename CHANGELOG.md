@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.90.0](https://github.com/kazi-org/kazi/compare/v1.89.0...v1.90.0) (2026-07-07)
+
+
+### Features
+
+* **cli:** terminal collateral field for out-of-write-scope changes ([55c14d4](https://github.com/kazi-org/kazi/commit/55c14d4cb52e91988ef612018d0509a28e4b6c95))
+* **goal:** [scope] gains write_paths and deny (issue [#860](https://github.com/kazi-org/kazi/issues/860)) ([0c1b097](https://github.com/kazi-org/kazi/commit/0c1b0971c9002e6b6f6061c5beaac23dcc4c846e))
+* **providers:** scope_guard predicate provider for deny-path violations ([ebb1721](https://github.com/kazi-org/kazi/commit/ebb172185d0b3e99271405bb40aef82d674c4407))
+
 ## [1.89.0](https://github.com/kazi-org/kazi/compare/v1.88.0...v1.89.0) (2026-07-07)
 
 
