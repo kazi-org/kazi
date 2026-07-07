@@ -40,34 +40,63 @@ defmodule Kazi.Harness.ChildSupervisor do
   # Default watchdog poll interval: responsive without meaningfully polling.
   @default_poll_ms 1_000
 
+  # PORTABILITY (the Linux-CI hang): `set -m` gives every background job its
+  # own process group under bash (macOS /bin/sh), but NON-INTERACTIVE dash
+  # (Ubuntu /bin/sh) quietly ignores it — background jobs stay in the
+  # wrapper's own group, so a group-kill (`kill -- -$pid`) fails with "no such
+  # process group". Two consequences the script must survive: (1) the
+  # watchdog cannot be assumed killable BY GROUP, so every group-kill carries
+  # a single-pid fallback; (2) more fundamentally, the watchdog must NEVER
+  # hold the dispatch's stdout/stderr pipe — it is forked with all three fds
+  # detached to /dev/null, so even a watchdog that outlives the wrapper (dash,
+  # fallback kill racing a poll `sleep`) cannot delay the port's EOF and hang
+  # `System.cmd/3`. On dash the child also runs in the wrapper's group, so
+  # the watchdog's group-kill of the child degrades to a direct kill of the
+  # child pid — the harness process itself still dies with the controller;
+  # only grandchildren it spawned may need their own reaping there.
   @script """
-  set -m
+  { set -m; } 2>/dev/null
   parent_pid="$1"; shift
   poll_interval="$1"; shift
   pid_file="$1"; shift
-  "$@" &
+  wrapper_pid=$$
+  # Make the child a REAL process-group leader everywhere: `setsid` where it
+  # exists (Linux -- dash's inert `set -m` gives background jobs no group of
+  # their own), plain `&` where it does not (macOS ships no setsid binary, but
+  # its /bin/sh is bash, whose non-interactive `set -m` genuinely groups
+  # background jobs).
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" &
+  else
+    "$@" &
+  fi
   child_pid=$!
   echo "$child_pid" > "$pid_file" 2>/dev/null
+  # The watchdog is DOUBLE-FORKED ( ( ... & ) ) so it is never a job of this
+  # shell: no asynchronous "Terminated" job notice can ever leak into the
+  # dispatch's merged output, and the wrapper never has to kill or wait for
+  # it. It self-exits within one poll once EITHER pid is gone: the controller
+  # (then it reaps the child's whole group first -- the issue #857 case) or
+  # this wrapper (normal completion -- nothing to do). All three fds are
+  # detached so it can never hold the dispatch pipe's EOF hostage.
+  # Group kills go through `env kill` (the EXTERNAL kill): dash's builtin
+  # rejects negative-pid group syntax outright ("Illegal number"), which is
+  # exactly how the child's grandchildren survived on Linux CI. The single-pid
+  # fallback covers a shell where no group was created at all.
   (
-    while kill -0 "$parent_pid" 2>/dev/null; do
-      sleep "$poll_interval"
-    done
-    kill -TERM -"$child_pid" 2>/dev/null
-    sleep 1
-    kill -KILL -"$child_pid" 2>/dev/null
-  ) &
-  watchdog_pid=$!
+    (
+      while kill -0 "$parent_pid" 2>/dev/null && kill -0 "$wrapper_pid" 2>/dev/null; do
+        sleep "$poll_interval"
+      done
+      if ! kill -0 "$parent_pid" 2>/dev/null; then
+        env kill -TERM -- -"$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+        sleep 1
+        env kill -KILL -- -"$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+      fi
+    ) </dev/null >/dev/null 2>&1 &
+  )
   wait "$child_pid" 2>/dev/null
-  status=$?
-  # Group-kill (note the leading "-"): the watchdog's own `sleep` between polls
-  # is a SEPARATE exec'd process (a child of the watchdog subshell, its own
-  # process group under `set -m`), so a plain `kill "$watchdog_pid"` only kills
-  # the subshell and leaves that `sleep` running or up to one whole poll
-  # interval, holding the shared stdout/stderr pipe open and delaying
-  # `System.cmd/3` (which waits for that pipe's EOF) by the same amount.
-  kill -TERM -"$watchdog_pid" 2>/dev/null
-  wait "$watchdog_pid" 2>/dev/null
-  exit "$status"
+  exit $?
   """
 
   @doc """
