@@ -85,6 +85,98 @@ defmodule Kazi.ReadModel.RunRegistryTest do
     end
   end
 
+  describe "finish/3 -- run-end economics (T48.7, ADR-0058 decision 1)" do
+    test "persists tokens/USD/dispatch-count and goal shape alongside the terminal status" do
+      attrs = run_attrs()
+      assert {:ok, _} = RunRegistry.start(attrs)
+
+      economics = %{
+        budget_tokens: 4200,
+        budget_cached_input_tokens: 1500,
+        budget_cost_usd: 0.0837,
+        dispatch_count: 3,
+        context_tier: 2,
+        predicate_count: 5,
+        predicate_kind_histogram: %{"custom_script" => 3, "http_probe" => 2}
+      }
+
+      assert {:ok, finished} = RunRegistry.finish(attrs.run_id, "converged", economics)
+
+      assert finished.status == "converged"
+      assert finished.budget_tokens == 4200
+      assert finished.budget_cached_input_tokens == 1500
+      assert finished.budget_cost_usd == 0.0837
+      assert finished.dispatch_count == 3
+      assert finished.context_tier == 2
+      assert finished.predicate_count == 5
+      assert finished.predicate_kind_histogram == %{"custom_script" => 3, "http_probe" => 2}
+      # T48.4 lands the classifier later -- nil until then.
+      assert finished.outcome_cause_class == nil
+    end
+
+    test "a run whose harness reported no usage persists NULL for tokens and cost, not 0" do
+      attrs = run_attrs()
+      assert {:ok, _} = RunRegistry.start(attrs)
+
+      # The caller (Kazi.Runtime) omits the token/cost keys entirely when the
+      # loop's usage envelope was empty all run -- honest-unknown (ADR-0046),
+      # never a zero-filled economics map.
+      economics = %{
+        dispatch_count: 1,
+        context_tier: 1,
+        predicate_count: 1,
+        predicate_kind_histogram: %{"custom_script" => 1}
+      }
+
+      assert {:ok, finished} = RunRegistry.finish(attrs.run_id, "over_budget", economics)
+
+      assert finished.budget_tokens == nil
+      assert finished.budget_cached_input_tokens == nil
+      assert finished.budget_cost_usd == nil
+      assert finished.dispatch_count == 1
+    end
+
+    test "defaults to %{} -- byte-identical to the pre-T48.7 two-arg call" do
+      attrs = run_attrs()
+      assert {:ok, _} = RunRegistry.start(attrs)
+
+      assert {:ok, finished} = RunRegistry.finish(attrs.run_id, "stopped")
+
+      assert finished.status == "stopped"
+      assert finished.budget_tokens == nil
+      assert finished.dispatch_count == 0
+      assert finished.predicate_kind_histogram == %{}
+    end
+
+    test "finish/3 on a %Run{} struct dispatches through the run_id clause" do
+      attrs = run_attrs()
+      assert {:ok, run} = RunRegistry.start(attrs)
+
+      assert {:ok, finished} = RunRegistry.finish(run, "converged", %{dispatch_count: 2})
+      assert finished.dispatch_count == 2
+    end
+
+    test "a pre-T48.7 row (no economics ever written) reads back NULL/default new columns" do
+      # Simulates a row from before this migration: only the columns
+      # `RunRegistry.start/1` writes are populated; the new economics columns
+      # were never touched by any `finish/3` call.
+      attrs = run_attrs()
+      assert {:ok, run} = RunRegistry.start(attrs)
+
+      reloaded = Repo.get_by!(Run, run_id: attrs.run_id)
+
+      assert reloaded.budget_tokens == nil
+      assert reloaded.budget_cached_input_tokens == nil
+      assert reloaded.budget_cost_usd == nil
+      assert reloaded.outcome_cause_class == nil
+      assert reloaded.context_tier == nil
+      assert reloaded.predicate_count == nil
+      assert reloaded.predicate_kind_histogram == %{}
+      assert reloaded.dispatch_count == 0
+      assert run.status == "running"
+    end
+  end
+
   describe "stale?/2 and list_stale/1" do
     test "a running row with an old heartbeat is stale" do
       attrs = run_attrs()
