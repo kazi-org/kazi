@@ -110,8 +110,10 @@ defmodule Kazi.ReadModel.RunRegistryTest do
       assert finished.context_tier == 2
       assert finished.predicate_count == 5
       assert finished.predicate_kind_histogram == %{"custom_script" => 3, "http_probe" => 2}
-      # T48.4 lands the classifier later -- nil until then.
+      # This economics map omits the T48.4 cause keys entirely (no cause was
+      # classified this run) -- stays nil, not a zero-filled placeholder.
       assert finished.outcome_cause_class == nil
+      assert finished.outcome_cause_detail == nil
     end
 
     test "a run whose harness reported no usage persists NULL for tokens and cost, not 0" do
@@ -169,11 +171,68 @@ defmodule Kazi.ReadModel.RunRegistryTest do
       assert reloaded.budget_cached_input_tokens == nil
       assert reloaded.budget_cost_usd == nil
       assert reloaded.outcome_cause_class == nil
+      assert reloaded.outcome_cause_detail == nil
       assert reloaded.context_tier == nil
       assert reloaded.predicate_count == nil
       assert reloaded.predicate_kind_histogram == %{}
       assert reloaded.dispatch_count == 0
       assert run.status == "running"
+    end
+  end
+
+  describe "finish/3 -- honest terminal cause class (T48.4, ADR-0058 decision 4)" do
+    test "persists the cause class + detail alongside the terminal status" do
+      attrs = run_attrs()
+      assert {:ok, _} = RunRegistry.start(attrs)
+
+      economics = %{
+        outcome_cause_class: "error_wedged",
+        outcome_cause_detail: %{
+          "ids" => ["live_route"],
+          "reasons" => %{"live_route" => "missing_url"},
+          "exhausted" => nil
+        }
+      }
+
+      assert {:ok, finished} = RunRegistry.finish(attrs.run_id, "stuck", economics)
+
+      assert finished.status == "stuck"
+      assert finished.outcome_cause_class == "error_wedged"
+
+      assert finished.outcome_cause_detail == %{
+               "ids" => ["live_route"],
+               "reasons" => %{"live_route" => "missing_url"},
+               "exhausted" => nil
+             }
+    end
+
+    test "a budget_exhausted cause persists the exhausted dimension with no reasons" do
+      attrs = run_attrs()
+      assert {:ok, _} = RunRegistry.start(attrs)
+
+      economics = %{
+        outcome_cause_class: "budget_exhausted",
+        outcome_cause_detail: %{
+          "ids" => ["code"],
+          "reasons" => %{},
+          "exhausted" => "max_iterations"
+        }
+      }
+
+      assert {:ok, finished} = RunRegistry.finish(attrs.run_id, "over_budget", economics)
+
+      assert finished.outcome_cause_class == "budget_exhausted"
+      assert finished.outcome_cause_detail["exhausted"] == "max_iterations"
+    end
+
+    test "a run with no cause classified persists NULL for both columns, not a zero-filled object" do
+      attrs = run_attrs()
+      assert {:ok, _} = RunRegistry.start(attrs)
+
+      assert {:ok, finished} = RunRegistry.finish(attrs.run_id, "converged", %{dispatch_count: 1})
+
+      assert finished.outcome_cause_class == nil
+      assert finished.outcome_cause_detail == nil
     end
   end
 
