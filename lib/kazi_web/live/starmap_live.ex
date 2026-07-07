@@ -111,6 +111,7 @@ defmodule KaziWeb.StarmapLive do
      |> assign(:selected_id, nil)
      |> assign(:session_filter, nil)
      |> assign(:state_filter, nil)
+     |> assign(:mtab, "map")
      |> assign_runs()
      |> assign_bands()
      |> assign_attention_queue()
@@ -176,6 +177,17 @@ defmodule KaziWeb.StarmapLive do
 
     {:noreply, socket |> assign(:state_filter, filter) |> assign(:session_filter, nil)}
   end
+
+  # Mobile bottom-tab bar (docs/dashboard-design.md "Mobile layout"): below
+  # the breakpoint the rail's sections become tab panes keyed off `data-mtab`
+  # on the shell. The active tab is a server assign so the poll-tick DOM
+  # patches preserve it; desktop CSS never reads the attribute.
+  def handle_event("set_mtab", %{"tab" => tab}, socket)
+      when tab in ~w(map needs sessions more) do
+    {:noreply, assign(socket, :mtab, tab)}
+  end
+
+  def handle_event("set_mtab", _params, socket), do: {:noreply, socket}
 
   defp tile_states("running"), do: [:converging]
   defp tile_states("landed"), do: [:landed]
@@ -795,7 +807,7 @@ defmodule KaziWeb.StarmapLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main id="starmap" class="shell">
+    <main id="starmap" class="shell" data-mtab={@mtab}>
       <aside id="starmap-rail" class="rail">
         <div class="wordmark display-heading">
           KAZI <span class="cyn">STARMAP</span>
@@ -894,6 +906,22 @@ defmodule KaziWeb.StarmapLive do
             </span>
           </div>
         </div>
+
+        <p
+          :if={not Enum.any?(@canvas_nodes, & &1.session_tag)}
+          id="starmap-sessions-empty"
+          class="empty-state msessions-empty"
+        >
+          No active sessions.
+        </p>
+
+        <nav id="starmap-nav" class="rail-nav" aria-label="dashboard views">
+          <div class="section-label">VIEWS</div>
+          <.link navigate={~p"/goals"}>goal board</.link>
+          <.link navigate={~p"/dag"}>dependency dag</.link>
+          <.link navigate={~p"/leases"}>lease map</.link>
+          <.link navigate={~p"/events"}>event river</.link>
+        </nav>
 
         <ul id="starmap-legend" class="legend">
           <li class="section-label">LEGEND</li>
@@ -1176,6 +1204,29 @@ defmodule KaziWeb.StarmapLive do
         </p>
       </div>
 
+      <nav id="starmap-tabbar" class="mtabbar" aria-label="starmap sections">
+        <button
+          :for={
+            {tab, glyph, label} <- [
+              {"map", "✦", "MAP"},
+              {"needs", "◉", "NEEDS YOU"},
+              {"sessions", "⌁", "SESSIONS"},
+              {"more", "☰", "MORE"}
+            ]
+          }
+          type="button"
+          id={"starmap-mtab-#{tab}"}
+          class={"mtab" <> if(@mtab == tab, do: " on", else: "")}
+          phx-click="set_mtab"
+          phx-value-tab={tab}
+        >
+          <span class="mtab-glyph" aria-hidden="true">{glyph}</span>{label}
+          <span :if={tab == "needs" && @attention_queue != []} class="mtab-badge">
+            {length(@attention_queue)}
+          </span>
+        </button>
+      </nav>
+
       <style>
         .shell { display: flex; min-height: 100vh; flex-wrap: wrap; }
 
@@ -1313,6 +1364,61 @@ defmodule KaziWeb.StarmapLive do
         .panel-pill .marker { color: var(--cyn); }
         .analyst-btn { margin-top: auto; border: 1px solid rgba(86,204,242,.5); color: var(--cyn); text-align: center; padding: .55rem; border-radius: 4px; text-decoration: none; letter-spacing: .15em; font-size: 11px; }
         .analyst-btn:hover { background: rgba(86,204,242,.08); }
+
+        .rail-nav { margin-top: auto; display: flex; flex-direction: column; gap: .35rem; }
+        .rail-nav + .legend { margin-top: 0; }
+        .rail-nav a { color: var(--dim); text-decoration: none; font-size: 11px; }
+        .rail-nav a:hover { color: var(--cyn); }
+        .mtabbar { display: none; }
+        .msessions-empty { display: none; }
+
+        /* Mobile (docs/dashboard-design.md "Mobile layout"): below the
+           breakpoint the shell becomes a full-height column and the rail's
+           sections become tab panes -- MAP / NEEDS YOU / SESSIONS / MORE --
+           selected by the data-mtab attribute the set_mtab event drives.
+           Desktop above the breakpoint is untouched. */
+        @media (max-width: 820px) {
+          .shell { flex-direction: column; flex-wrap: nowrap; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+          .rail { width: 100%; flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--line); padding: .75rem .9rem; gap: .8rem; min-height: 0; }
+          .fleet-tiles, .rail-attention, .rail-sessions, .rail-nav, .legend, .msessions-empty { display: none; }
+          .canvas-shell { display: none; }
+
+          .shell[data-mtab="map"] .fleet-tiles { display: flex; flex-wrap: nowrap; overflow-x: auto; }
+          .shell[data-mtab="map"] .fleet-tiles .section-label { display: none; }
+          .shell[data-mtab="map"] .fleet-tile { min-width: 72px; min-height: 44px; }
+          .shell[data-mtab="map"] .canvas-shell { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: .4rem .75rem 0; }
+          .shell[data-mtab="map"] .canvas-scroll { flex: 1; max-height: none; overflow-x: auto; margin-top: .25rem; }
+          .shell[data-mtab="map"] .starmap-canvas { min-width: 880px; height: 100%; }
+          .shell[data-mtab="map"] .starmap-canvas.tall { height: auto; }
+          .shell[data-mtab="map"] .canvas-node-label { font-size: 15px; }
+          .shell[data-mtab="map"] .canvas-node-sublabel { font-size: 11px; }
+          .shell[data-mtab="map"] .wlabel { font-size: 12px; }
+          .shell[data-mtab="map"] .older-link { bottom: .5rem; right: .9rem; }
+
+          .shell[data-mtab="needs"] .rail,
+          .shell[data-mtab="sessions"] .rail,
+          .shell[data-mtab="more"] .rail { flex: 1; overflow-y: auto; }
+          .shell[data-mtab="needs"] .rail-attention { display: block; }
+          .shell[data-mtab="needs"] .attention-queue-list { max-height: none; }
+          .shell[data-mtab="needs"] .attention-item { padding: .7rem 0; font-size: 12px; }
+          .shell[data-mtab="sessions"] .rail-sessions { display: block; }
+          .shell[data-mtab="sessions"] .session-row { padding: .7rem 0; font-size: 11px; }
+          .shell[data-mtab="sessions"] .msessions-empty { display: block; }
+          .shell[data-mtab="more"] .rail-nav { display: flex; margin-top: 0; gap: 0; }
+          .shell[data-mtab="more"] .rail-nav a { padding: .8rem 0; border-bottom: 1px solid rgba(22,35,58,.7); color: var(--txt); font-size: 12px; }
+          .shell[data-mtab="more"] .legend { display: flex; margin-top: .8rem; }
+
+          .event-river { flex: 0 0 auto; }
+
+          .mtabbar { display: flex; flex: 0 0 auto; border-top: 1px solid var(--line); background: rgba(10,17,32,.97); padding-bottom: env(safe-area-inset-bottom); }
+          .mtab { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: .55rem 0 .7rem; min-height: 48px; background: none; border: none; color: var(--dim); font-family: inherit; font-size: 9px; letter-spacing: .14em; cursor: pointer; }
+          .mtab-glyph { font-size: 15px; line-height: 1; }
+          .mtab.on { color: var(--cyn); }
+          .mtab.on::before { content: ""; position: absolute; top: -1px; left: 22%; right: 22%; height: 2px; background: var(--cyn); }
+          .mtab-badge { position: absolute; top: 4px; right: 16%; min-width: 15px; height: 15px; border-radius: 8px; background: var(--red); color: #fff; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+
+          .slide-over { top: 24%; left: 0; right: 0; bottom: 0; width: 100%; max-width: none; background: #090F1C; border-left: none; border-top: 1px solid rgba(86,204,242,.3); border-radius: 14px 14px 0 0; box-shadow: 0 -18px 50px rgba(0,0,0,.6); }
+        }
       </style>
     </main>
     """
