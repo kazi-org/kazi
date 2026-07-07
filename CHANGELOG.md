@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.95.0](https://github.com/kazi-org/kazi/compare/v1.94.0...v1.95.0) (2026-07-07)
+
+
+### Features
+
+* **loop:** surface dispatch count, context tier, and goal shape (T48.7) ([fea4bd4](https://github.com/kazi-org/kazi/commit/fea4bd4d4ff2466df4b15a42d46543fb37ff1fa9))
+* **read-model:** migrate runs table for run-end economics (T48.7) ([7a6bd1c](https://github.com/kazi-org/kazi/commit/7a6bd1c735dbb0a5bef533b47d511284dbed1976))
+* **read-model:** persist run-end economics via RunRegistry.finish/3 (T48.7) ([fae43e6](https://github.com/kazi-org/kazi/commit/fae43e6da677ae628a2468f3a721442964cf3125))
+* **runtime:** project run-end economics onto RunRegistry.finish (T48.7) ([142502a](https://github.com/kazi-org/kazi/commit/142502adb88038b706c13ad9c77370aa8d8b136b))
+
 ## [1.94.0](https://github.com/kazi-org/kazi/compare/v1.93.1...v1.94.0) (2026-07-07)
 
 
