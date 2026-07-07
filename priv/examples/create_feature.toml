@@ -51,13 +51,17 @@ paths = ["lib/", "test/"]
 # ACCEPTANCE predicate (http_probe): the NEW endpoint must exist and serve the
 # widgets list. FAILS at t0 — there is no GET /widgets route yet, so the deployed
 # service 404s and the status assertion does not hold. PASSES once kazi builds the
-# endpoint. This is the criterion that DEFINES the feature.
+# endpoint. This is the criterion that DEFINES the feature. Set `url` to the
+# concrete deployed target when driving a real run (T48.1, ADR-0058) — http_probe
+# only ever reads `url`; a bare relative path is never resolved at dispatch time,
+# so it would silently error `missing_url` on every observation instead of ever
+# passing.
 [[predicate]]
 id = "widgets-list-200"
 provider = "http_probe"
 description = "GET /widgets returns 200 (the new endpoint exists) — fails at t0, no such route"
 acceptance = true
-path = "/widgets"
+url = "https://REPLACE-WITH-DEPLOYED-SERVICE-URL/widgets"
 expect_status = 200
 
 # ACCEPTANCE predicate (http_probe): the new endpoint must return the expected
@@ -68,6 +72,6 @@ id = "widgets-list-body"
 provider = "http_probe"
 description = "GET /widgets body contains \"widgets\" (serves the collection) — fails at t0"
 acceptance = true
-path = "/widgets"
+url = "https://REPLACE-WITH-DEPLOYED-SERVICE-URL/widgets"
 expect_status = 200
 expect_body = "widgets"
