@@ -3612,6 +3612,11 @@ defmodule Kazi.CLI do
   #                        ADR-0041's predicate envelope followed; the single
   #                        rolled-up total stays in `budget_spent.tokens` for
   #                        back-compat. See `Kazi.CLI.Usage`.
+  #   * `usage_fidelity` — T48.5 (ADR-0058 §4): an ADDITIVE, optional string,
+  #                        present ONLY as `"unreported"` when a `max_tokens`
+  #                        ceiling was set but a dispatch this run reported no
+  #                        usage the loop could count — the ceiling could never
+  #                        bind. Absent on every other run.
   #   * `collateral`     — issue #860 proposal 3: an ADDITIVE array of files
   #                        changed during the run that sit outside the goal's
   #                        write scope, net-deletion entries ranked first (see
@@ -3642,6 +3647,7 @@ defmodule Kazi.CLI do
       enforcement: enforcement_json(Map.get(result, :enforcement))
     }
     |> put_usage(result)
+    |> put_usage_fidelity(result)
     |> put_economy(economy)
     |> put_context_store(result)
     |> put_stuck_bundle(result)
@@ -3741,6 +3747,17 @@ defmodule Kazi.CLI do
       usage -> Map.put(map, :usage, usage)
     end
   end
+
+  # T48.5 (ADR-0058 §4): the additive `usage_fidelity` string — `"unreported"`
+  # ONLY when a `max_tokens` ceiling was set and at least one dispatch this run
+  # reported no usage at all (the `claw` profile, ADR-0022, by design), so the
+  # ceiling could never bind. Absent on every other run (byte-identical to
+  # before this field existed) — an orchestrator sees the key only when it
+  # names a real problem with its `max_tokens` budget.
+  defp put_usage_fidelity(map, %{usage_fidelity: :unreported}),
+    do: Map.put(map, :usage_fidelity, "unreported")
+
+  defp put_usage_fidelity(map, _result), do: map
 
   # A pre-loop run error (vacuous goal, unknown provider/harness, await timeout):
   # the SAME envelope shape, with `status: "error"` and a `next_action` of
