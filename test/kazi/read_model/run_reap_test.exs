@@ -8,6 +8,10 @@ defmodule Kazi.ReadModel.RunReapTest do
   alias Kazi.ReadModel.Run
   alias Kazi.Repo
 
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
+  end
+
   describe "run reaping" do
     test "identifies dead runs by missing os_pid" do
       # A run with no os_pid recorded is considered not yet reported and not dead.
