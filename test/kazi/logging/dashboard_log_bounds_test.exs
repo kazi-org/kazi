@@ -1,11 +1,9 @@
 defmodule Kazi.Logging.DashboardLogBoundsTest do
   use ExUnit.Case, async: true
 
-  # Verifies that dashboard logging is bounded to prevent info/debug spam
-  # from overwhelming the LiveView console and monitoring systems.
-  test "logger level is bounded in production config" do
-    # config/runtime.exs should configure logger level to :info or higher
-    # so debug/trace messages don't leak into production dashboards.
-    assert :ok == :ok
+  test "logger level is bounded to info or higher in production" do
+    # Verify that debug and trace messages are not logged, only info and above
+    level = Application.get_env(:logger, :level)
+    assert level in [:info, :warning, :error]
   end
 end
