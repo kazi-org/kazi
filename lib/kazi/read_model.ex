@@ -31,6 +31,7 @@ defmodule Kazi.ReadModel do
     Iteration,
     OrientationPackCache,
     ProposedGoal,
+    ProposedMemory,
     RetrievalSnippetCache
   }
 
@@ -394,6 +395,83 @@ defmodule Kazi.ReadModel do
         row
         |> ProposedGoal.transition_changeset(%{status: status, goal: goal})
         |> Repo.update()
+    end
+  end
+
+  # --- proposed-memory store (ADR-0063 Slice 3: gated harvest + promotion) --
+
+  @doc """
+  Records (projects) one memory candidate `Kazi.Memory.Harvest` detected as a
+  proposed-memory row, IDEMPOTENTLY keyed by `attrs[:fingerprint]` (ADR-0063
+  decision 3: a candidate is never re-proposed). A row already carrying that
+  fingerprint -- `proposed`, `approved`, or `rejected` -- is returned as-is;
+  only a genuinely new fingerprint inserts.
+
+  Returns `{:ok, row}` (new or pre-existing) or `{:error, changeset}` on a
+  validation failure.
+  """
+  @spec propose_memory(map()) :: {:ok, ProposedMemory.t()} | {:error, Ecto.Changeset.t()}
+  def propose_memory(attrs) when is_map(attrs) do
+    fingerprint = Map.get(attrs, :fingerprint) || Map.get(attrs, "fingerprint")
+
+    case Repo.get_by(ProposedMemory, fingerprint: fingerprint) do
+      nil -> %ProposedMemory{} |> ProposedMemory.changeset(attrs) |> Repo.insert()
+      %ProposedMemory{} = existing -> {:ok, existing}
+    end
+  end
+
+  @doc """
+  Fetches one proposed-memory row by its `proposal_ref` (the review handle),
+  or `nil`.
+  """
+  @spec get_proposed_memory(String.t()) :: ProposedMemory.t() | nil
+  def get_proposed_memory(proposal_ref) when is_binary(proposal_ref) do
+    Repo.get_by(ProposedMemory, proposal_ref: proposal_ref)
+  end
+
+  @doc """
+  Lists proposed-memory rows, newest first, optionally filtered by lifecycle
+  `status` (`"proposed"` / `"approved"` / `"rejected"`) -- the review queue
+  `kazi memory list-proposed` reads.
+  """
+  @spec list_proposed_memories(keyword()) :: [ProposedMemory.t()]
+  def list_proposed_memories(opts \\ []) when is_list(opts) do
+    base = from(m in ProposedMemory, order_by: [desc: m.inserted_at, desc: m.id])
+
+    query =
+      case Keyword.get(opts, :status) do
+        nil -> base
+        status -> from(m in base, where: m.status == ^to_string(status))
+      end
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Transitions a proposed-memory row identified by `proposal_ref` to `status`
+  (`"approved"` / `"rejected"`). Only a `"proposed"` row may transition; an
+  already-`approved`/`rejected` row refuses with `{:error, {:invalid_transition,
+  from, to}}` so a proposal's terminal state can never be silently overwritten.
+
+  Returns `{:ok, row}`, `{:error, :not_found}` when no proposal carries that
+  ref, `{:error, {:invalid_transition, from, to}}`, or `{:error, changeset}`
+  on a validation failure.
+  """
+  @spec transition_proposed_memory(String.t(), String.t()) ::
+          {:ok, ProposedMemory.t()}
+          | {:error,
+             :not_found | {:invalid_transition, String.t(), String.t()} | Ecto.Changeset.t()}
+  def transition_proposed_memory(proposal_ref, status)
+      when is_binary(proposal_ref) and is_binary(status) do
+    case get_proposed_memory(proposal_ref) do
+      nil ->
+        {:error, :not_found}
+
+      %ProposedMemory{status: "proposed"} = row ->
+        row |> ProposedMemory.transition_changeset(%{status: status}) |> Repo.update()
+
+      %ProposedMemory{status: current} ->
+        {:error, {:invalid_transition, current, status}}
     end
   end
 
