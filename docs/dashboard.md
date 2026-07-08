@@ -65,10 +65,11 @@ canvas grows downward and scrolls, which keeps `needs` edges on straight
 sight-lines at any fleet size.
 
 Each SESSIONS row identifies its run by the **operator-assigned session
-name** when one was given (`kazi apply --session-name <label>`, or the
-`KAZI_SESSION_NAME` environment variable — useful when an orchestrating
-agent session labels every run it dispatches), falling back to the harness
-name, with the workspace basename alongside as the tiebreaker for several
+name** when one was given (`kazi apply --session-name <label>`, the
+`KAZI_SESSION_NAME` environment variable, or — auto-detected with no
+operator action needed — `CLAUDE_CODE_SESSION_ID` when kazi runs as a
+subprocess of a Claude Code session), falling back to the harness name,
+with the workspace basename alongside as the tiebreaker for several
 sessions driving the same repo. When the claude harness reports its own
 `session_id` in the result envelope, kazi records it on the run row and the
 slide-over panel shows the ready-to-paste resume command
