@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.112.1](https://github.com/kazi-org/kazi/compare/v1.112.0...v1.112.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **cli:** start the read-model before kazi memory subcommands ([ca0c4b0](https://github.com/kazi-org/kazi/commit/ca0c4b093f5b9f353e5d7ce312f6e3fab87608bd))
+
 ## [1.112.0](https://github.com/kazi-org/kazi/compare/v1.111.0...v1.112.0) (2026-07-08)
 
 
