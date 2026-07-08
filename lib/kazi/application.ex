@@ -53,7 +53,10 @@ defmodule Kazi.Application do
       # brutal-killed or self-killed partition's worktree can always be reaped by
       # the surviving coordinator/`invoke_reconciler` process, on any entry point
       # (escript, `mix kazi.run`, a release) that can run a parallel scheduler.
-      Kazi.Scheduler.WorktreeTable
+      Kazi.Scheduler.WorktreeTable,
+      # Dashboard log rotation: prevents unbounded growth of dashboard logs in
+      # production environments by rotating logs when they exceed size limits.
+      Kazi.Logging.DashboardLogRotation
     ]
 
     children =
