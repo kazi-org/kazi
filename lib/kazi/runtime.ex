@@ -52,7 +52,7 @@ defmodule Kazi.Runtime do
   }
 
   alias Kazi.Harness.ChildSupervisor
-  alias Kazi.ReadModel.{Iteration, RunRegistry}
+  alias Kazi.ReadModel.{HeartbeatTicker, Iteration, RunRegistry}
   alias Kazi.Sink.Events, as: EventsSink
 
   require Logger
@@ -363,6 +363,11 @@ defmodule Kazi.Runtime do
           goal.budget.max_iterations,
           Keyword.get(opts, :session_name)
         )
+
+        # T31: start the heartbeat ticker (a supervised periodic timer that advances
+        # the heartbeat_at timestamp every ~30 seconds, independent of loop iterations).
+        # This keeps healthy long-running dispatches from appearing stale in the starmap.
+        _ticker = start_heartbeat_ticker(persist?, run_id)
 
         result = Loop.await(loop, await_timeout)
         Loop.stop(loop)
@@ -1003,6 +1008,26 @@ defmodule Kazi.Runtime do
     case Keyword.get(harness_opts, :profile) do
       %{id: id} when is_atom(id) -> Atom.to_string(id)
       _ -> nil
+    end
+  end
+
+  # T31: start the heartbeat ticker process (a supervised periodic timer that
+  # advances the heartbeat_at timestamp every ~30 seconds, independent of loop
+  # iterations). This keeps healthy long-running dispatches from appearing stale.
+  defp start_heartbeat_ticker(false, _run_id), do: nil
+
+  defp start_heartbeat_ticker(true, run_id) do
+    case HeartbeatTicker.start_link(run_id) do
+      {:ok, pid} ->
+        pid
+
+      {:error, reason} ->
+        Logger.warning(fn ->
+          "kazi.runtime failed to start heartbeat ticker for run #{run_id}: " <>
+            inspect(reason)
+        end)
+
+        nil
     end
   end
 
