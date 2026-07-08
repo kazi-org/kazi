@@ -6,6 +6,7 @@ defmodule Kazi.ReadModel.RunReapTest do
   use ExUnit.Case, async: true
 
   alias Kazi.ReadModel.Run
+  alias Kazi.ReadModel.RunReaper
   alias Kazi.Repo
 
   setup do
@@ -23,6 +24,30 @@ defmodule Kazi.ReadModel.RunReapTest do
       # A run with an os_pid can be checked for liveness.
       run = insert_run(os_pid: "12345")
       assert run.os_pid == "12345"
+    end
+
+    test "reaper never kills an alive process" do
+      # The reaper function must never reap a process that is still alive.
+      # This test ensures the liveness check respects active processes. We use
+      # this process's own PID as a guaranteed-alive process.
+      own_pid = System.os_pid()
+      run = insert_run(os_pid: to_string(own_pid), status: "running")
+      assert run.os_pid == to_string(own_pid)
+
+      {:ok, reaped} = RunReaper.reap()
+
+      # The alive process (ourselves) should not have been reaped
+      refuted Enum.any?(reaped, fn r -> r.run_id == run.run_id end)
+    end
+
+    test "reaper transitions dead runs to abandoned" do
+      # When a run's OS process has terminated, the reaper should mark it abandoned.
+      run = insert_run(os_pid: "999999", status: "running")
+
+      {:ok, reaped} = RunReaper.reap()
+
+      # The non-existent process should be marked abandoned
+      assert Enum.any?(reaped, fn r -> r.run_id == run.run_id and r.status == "abandoned" end)
     end
   end
 
