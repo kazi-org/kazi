@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.115.0](https://github.com/kazi-org/kazi/compare/v1.114.0...v1.115.0) (2026-07-08)
+
+
+### Features
+
+* **cli:** refuse an executing apply against a primary-worktree workspace ([#937](https://github.com/kazi-org/kazi/issues/937) Gap A) ([c8b357b](https://github.com/kazi-org/kazi/commit/c8b357b1b84585f38375783213391a4cfd778554))
+
 ## [1.114.0](https://github.com/kazi-org/kazi/compare/v1.113.0...v1.114.0) (2026-07-08)
 
 
