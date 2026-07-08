@@ -265,6 +265,25 @@ loop can inject into a dispatch prompt (opt-in, `docs/memory.md`). Use it to
 check what the project already knows before re-deriving an invariant a prior
 run already recorded.
 
+## Gated memory harvest and promotion (ADR-0063)
+
+kazi detects candidate memory entries (deterministically, controller-side,
+never from the harness/dispatch path) at run termination and stores them as
+PROPOSALS -- never straight into the corpus. Review and promote them:
+
+```sh
+kazi memory list-proposed [--status proposed|approved|rejected] [--json]
+kazi memory approve <proposal-ref> --workspace <path> [--json]   # writes into
+                                                                  # docs/lore.md /
+                                                                  # docs/devlog.md /
+                                                                  # a drafted ADR
+kazi memory reject <proposal-ref> [--json]                       # declined, audited
+```
+
+`approve` writes an ordinary working-tree edit (a `kx:<fingerprint>`
+provenance trailer, ADR-0063); review the diff and land it like any other doc
+change (ADR-0034) -- kazi never commits memory on its own authority.
+
 ## Verifying a pooled task with kazi
 
 In an /apply --pool session, gate your task's MERGE on objective convergence
