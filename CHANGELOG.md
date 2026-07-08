@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.112.0](https://github.com/kazi-org/kazi/compare/v1.111.0...v1.112.0) (2026-07-08)
+
+
+### Features
+
+* **cli:** kazi memory list-proposed / approve / reject (ADR-0063) ([6397f3e](https://github.com/kazi-org/kazi/commit/6397f3e5aebd59d81b71b586b8add59cc416f3c1))
+* **memory:** deterministic harvest + gated promotion (ADR-0063) ([25a9347](https://github.com/kazi-org/kazi/commit/25a934775b7202d6fa8da773e0737dbdb92ef7ca))
+* **read_model:** proposed-memory store for gated harvest (ADR-0063) ([dfc4da4](https://github.com/kazi-org/kazi/commit/dfc4da42ddd0aa534a4f3630a06b7b3f216e35a0))
+
 ## [1.111.0](https://github.com/kazi-org/kazi/compare/v1.110.0...v1.111.0) (2026-07-08)
 
 
