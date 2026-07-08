@@ -124,4 +124,87 @@ defmodule Kazi.CLIMemoryTest do
       assert payload["error"] =~ "requires a <query>"
     end
   end
+
+  describe "parse/1 — memory list-proposed / approve / reject (ADR-0063 Slice 3)" do
+    test "list-proposed parses with an optional --status filter" do
+      assert {:memory, "list-proposed", [], opts} =
+               CLI.parse(["memory", "list-proposed", "--status", "proposed", "--json"])
+
+      assert opts[:status] == "proposed"
+      assert opts[:json] == true
+    end
+
+    test "approve/reject parse with their proposal-ref" do
+      assert {:memory, "approve", ["mem-abc"], _opts} =
+               CLI.parse(["memory", "approve", "mem-abc"])
+
+      assert {:memory, "reject", ["mem-abc"], _opts} = CLI.parse(["memory", "reject", "mem-abc"])
+    end
+
+    test "approve/reject with no ref is a clear usage error" do
+      assert {:error, message} = CLI.parse(["memory", "approve"])
+      assert message =~ "requires a <proposal-ref>"
+    end
+  end
+
+  describe "run/2 — memory list-proposed / approve / reject end to end" do
+    test "list-proposed / approve promotes into the routed corpus file" do
+      dir = fixture_dir()
+      goal_ref = "cli-memory-goal-#{System.unique_integer([:positive])}"
+
+      {:ok, proposal} =
+        Kazi.ReadModel.propose_memory(%{
+          proposal_ref: "mem-cli-#{System.unique_integer([:positive])}",
+          fingerprint: "fp-cli-#{System.unique_integer([:positive])}",
+          class: "landmine",
+          content: "predicate a repeated 3 times without change",
+          goal_ref: goal_ref,
+          target_doc: "docs/lore.md",
+          status: "proposed"
+        })
+
+      {list_code, list_out} = run_capture(["memory", "list-proposed", "--json"])
+      assert list_code == 0
+      assert {:ok, list_payload} = Jason.decode(String.trim(list_out))
+      assert Enum.any?(list_payload["proposals"], &(&1["proposal_ref"] == proposal.proposal_ref))
+
+      {approve_code, approve_out} =
+        run_capture(["memory", "approve", proposal.proposal_ref, "--workspace", dir, "--json"])
+
+      assert approve_code == 0
+      assert {:ok, approve_payload} = Jason.decode(String.trim(approve_out))
+      assert approve_payload["status"] == "approved"
+
+      lore_path = Path.join(dir, "docs/lore.md")
+      assert File.read!(lore_path) =~ "predicate a repeated 3 times without change"
+      assert File.read!(lore_path) =~ "kx:#{proposal.fingerprint}"
+    end
+
+    test "reject transitions the proposal without touching any corpus file" do
+      {:ok, proposal} =
+        Kazi.ReadModel.propose_memory(%{
+          proposal_ref: "mem-cli-reject-#{System.unique_integer([:positive])}",
+          fingerprint: "fp-cli-reject-#{System.unique_integer([:positive])}",
+          class: "landmine",
+          content: "predicate b repeated without change",
+          goal_ref: "cli-memory-reject-goal",
+          target_doc: "docs/devlog.md",
+          status: "proposed"
+        })
+
+      {code, out} = run_capture(["memory", "reject", proposal.proposal_ref, "--json"])
+
+      assert code == 0
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["status"] == "rejected"
+    end
+
+    test "approving an unknown proposal ref is a clear JSON error" do
+      {code, out} = run_capture(["memory", "approve", "mem-does-not-exist", "--json"])
+
+      assert code != 0
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["error"] =~ "no proposal carries that ref"
+    end
+  end
 end

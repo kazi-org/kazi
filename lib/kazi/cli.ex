@@ -70,6 +70,7 @@ defmodule Kazi.CLI do
   alias Kazi.Memory.SemanticIndex
   alias Kazi.Partition
   alias Kazi.ReadModel.ProposedGoal
+  alias Kazi.ReadModel.ProposedMemory
   alias Kazi.Teach.InstallSkill
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -165,7 +166,7 @@ defmodule Kazi.CLI do
     debrief:
       "Opt into post-dispatch debrief capture (ADR-0058): append one capped debrief question to the dispatch prompt and persist the agent's structured answer as hypothesis rows. Overrides the goal-file's [economy] debrief field.",
     status:
-      "Filter `list-proposed` to one lifecycle state (proposed / approved / rejected). Default: all.",
+      "Filter `list-proposed` (goal proposals) or `memory list-proposed` (harvested memory proposals, ADR-0063) to one lifecycle state (proposed / approved / rejected). Default: all.",
     enrich:
       "`init` only: opt into harness enrichment (off by default) to propose live predicates.",
     with_mcp:
@@ -357,12 +358,12 @@ defmodule Kazi.CLI do
     %{
       name: "memory",
       summary:
-        "Budgeted FTS recall over the git-native corpus: `memory recall <query>` (ADR-0062).",
+        "Budgeted FTS recall (`memory recall <query>`, ADR-0062) and the gated-harvest promotion queue (`memory list-proposed` / `approve` / `reject`, ADR-0063).",
       args: [
         %{name: "subcommand", required: true},
         %{name: "args", required: false}
       ],
-      flags: [:workspace, :budget, :json]
+      flags: [:workspace, :budget, :status, :json]
     },
     %{
       name: "help",
@@ -410,6 +411,10 @@ defmodule Kazi.CLI do
       kazi context index <label> <file> [--provider gist] [--json]   # index an artifact
       kazi context search "<query>" [--budget N] [--provider gist] [--json]
       kazi context stats [--provider gist] [--json]                  # byte accounting
+      kazi memory recall "<query>" [--budget N] [--json]              # budgeted FTS recall (ADR-0062)
+      kazi memory list-proposed [--status <state>] [--json]           # harvested memory proposals (ADR-0063)
+      kazi memory approve <proposal-ref> [--json]                     # promote into its routed corpus file
+      kazi memory reject <proposal-ref> [--json]                      # decline (kept for audit)
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
 
@@ -1066,19 +1071,39 @@ defmodule Kazi.CLI do
     ]
   end
 
-  # ADR-0062: the `memory` parse body. `recall` is the ONLY subcommand today
-  # (mirrors the `context` shape above); an unknown one is a clear usage
-  # error, not the top-level "unknown command".
-  @memory_subcommands ~w(recall)
+  # ADR-0062 (`recall`) + ADR-0063 Slice 3 (`list-proposed` / `approve` /
+  # `reject`, the gated-harvest promotion verbs): the `memory` parse body.
+  # An unknown subcommand is a clear usage error, not the top-level
+  # "unknown command".
+  defp parse_memory(["recall" | rest], flags), do: {:memory, "recall", rest, memory_flags(flags)}
 
-  defp parse_memory([sub | rest], flags) when sub in @memory_subcommands,
-    do: {:memory, sub, rest, memory_flags(flags)}
+  defp parse_memory(["list-proposed" | rest], flags) do
+    case rest do
+      [] -> {:memory, "list-proposed", [], status: flags[:status], json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_memory([sub, proposal_ref | rest], flags) when sub in ~w(approve reject) do
+    case rest do
+      [] -> {:memory, sub, [proposal_ref], memory_flags(flags)}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_memory([sub], _flags) when sub in ~w(approve reject),
+    do: {:error, "the `memory #{sub}` command requires a <proposal-ref> argument"}
 
   defp parse_memory([sub | _], _flags),
-    do: {:error, "unknown memory subcommand #{inspect(sub)} (expected `recall`)"}
+    do:
+      {:error,
+       "unknown memory subcommand #{inspect(sub)} " <>
+         "(expected `recall`, `list-proposed`, `approve`, or `reject`)"}
 
   defp parse_memory([], _flags),
-    do: {:error, "the `memory` command requires a <subcommand> (`recall`)"}
+    do:
+      {:error,
+       "the `memory` command requires a <subcommand> (`recall`, `list-proposed`, `approve`, `reject`)"}
 
   defp memory_flags(flags) do
     [
@@ -3045,6 +3070,61 @@ defmodule Kazi.CLI do
         opts
       )
 
+  # `memory list-proposed [--status <state>] [--json]`: the ADR-0063 review
+  # queue -- candidates `Kazi.Memory.Harvest` proposed at run termination,
+  # never anything the corpus already holds.
+  defp run_memory("list-proposed", [], opts) do
+    with_read_model(opts, fn ->
+      rows = ReadModel.list_proposed_memories(memory_list_filter(opts[:status]))
+
+      emit(json?(opts), memory_list_proposed_json(rows, opts[:status]), fn ->
+        report_proposed_memories(rows, opts[:status])
+      end)
+
+      0
+    end)
+  end
+
+  # `memory approve <proposal-ref> [--json]`: transition proposed → approved
+  # AND write the entry into its routed corpus file (`Kazi.Memory.Promote`) --
+  # an ordinary working-tree edit; kazi never commits it (ADR-0063 decision 3).
+  defp run_memory("approve", [proposal_ref], opts) do
+    with_read_model(opts, fn ->
+      workspace = Keyword.get(opts, :workspace, ".")
+
+      with {:ok, approved} <- ReadModel.transition_proposed_memory(proposal_ref, "approved"),
+           {:ok, path} <- Kazi.Memory.Promote.promote(approved, workspace) do
+        emit(json?(opts), memory_approval_json("approved", approved, path), fn ->
+          IO.puts("APPROVED   proposal=#{proposal_ref}")
+          IO.puts("promoted -> #{path}")
+          IO.puts("Review the diff and land it like any other doc change (ADR-0034).")
+        end)
+
+        0
+      else
+        {:error, reason} -> memory_transition_error("approve", proposal_ref, reason, opts)
+      end
+    end)
+  end
+
+  # `memory reject <proposal-ref> [--json]`: transition proposed → rejected
+  # (declined, kept for audit -- the fingerprint is never re-proposed).
+  defp run_memory("reject", [proposal_ref], opts) do
+    with_read_model(opts, fn ->
+      case ReadModel.transition_proposed_memory(proposal_ref, "rejected") do
+        {:ok, rejected} ->
+          emit(json?(opts), memory_approval_json("rejected", rejected, nil), fn ->
+            IO.puts("REJECTED   proposal=#{proposal_ref}")
+          end)
+
+          0
+
+        {:error, reason} ->
+          memory_transition_error("reject", proposal_ref, reason, opts)
+      end
+    end)
+  end
+
   defp memory_recall_json(query, budget, snippets) do
     %{
       schema_version: @run_schema_version,
@@ -3085,6 +3165,84 @@ defmodule Kazi.CLI do
     end
 
     1
+  end
+
+  # =============================================================================
+  # memory list-proposed / approve / reject (ADR-0063 Slice 3, gated harvest)
+  # =============================================================================
+  #
+  # `Kazi.Memory.Harvest` proposes candidate memory entries controller-side, at
+  # run termination — never directly into the corpus. These three verbs are the
+  # human review gate: browse the queue, then approve (which ALSO writes the
+  # entry into its routed corpus file, `Kazi.Memory.Promote` — an ordinary
+  # working-tree edit the operator reviews and lands like any other doc change)
+  # or reject (declined, kept for audit — never re-proposed).
+
+  defp memory_list_filter(nil), do: []
+  defp memory_list_filter(status), do: [status: status]
+
+  defp memory_transition_error(verb, proposal_ref, reason, opts),
+    do: memory_error("could not #{verb} #{proposal_ref}: #{format_memory_error(reason)}", opts)
+
+  defp format_memory_error(:not_found), do: "no proposal carries that ref"
+
+  defp format_memory_error({:invalid_transition, from, to}),
+    do: "cannot transition a #{from} proposal to #{to}"
+
+  defp format_memory_error(%Ecto.Changeset{} = changeset),
+    do: "could not persist the transition: #{inspect(changeset.errors)}"
+
+  defp format_memory_error(other), do: inspect(other)
+
+  defp report_proposed_memories([], status) do
+    IO.puts("(no #{status || "proposed-memory"} proposals)")
+  end
+
+  defp report_proposed_memories(rows, status) do
+    IO.puts("#{length(rows)} #{status || "proposed-memory"} proposal(s):\n")
+
+    Enum.each(rows, fn %ProposedMemory{} = row ->
+      IO.puts("  #{row.status}\t#{row.proposal_ref}\t#{row.class}\t-> #{row.target_doc}")
+      IO.puts("    #{row.content}")
+    end)
+  end
+
+  defp memory_list_proposed_json(rows, status_filter) do
+    %{
+      schema_version: @run_schema_version,
+      command: "memory",
+      subcommand: "list-proposed",
+      status_filter: status_filter,
+      count: length(rows),
+      proposals: Enum.map(rows, &proposed_memory_json/1)
+    }
+  end
+
+  defp proposed_memory_json(%ProposedMemory{} = row) do
+    %{
+      proposal_ref: row.proposal_ref,
+      fingerprint: row.fingerprint,
+      status: row.status,
+      class: row.class,
+      goal_ref: row.goal_ref,
+      run_id: row.run_id,
+      target_doc: row.target_doc,
+      content: row.content,
+      evidence: row.evidence
+    }
+  end
+
+  defp memory_approval_json(status, %ProposedMemory{} = row, path) do
+    %{
+      schema_version: @run_schema_version,
+      command: "memory",
+      subcommand: status,
+      proposal_ref: row.proposal_ref,
+      status: status,
+      class: row.class,
+      target_doc: row.target_doc,
+      promoted_to: path
+    }
   end
 
   # =============================================================================
