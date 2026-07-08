@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.112.3](https://github.com/kazi-org/kazi/compare/v1.112.2...v1.112.3) (2026-07-08)
+
+
+### Bug Fixes
+
+* **logging:** resolve dashboard.log path at runtime, not compile time ([b0b5565](https://github.com/kazi-org/kazi/commit/b0b55659cce92705a24229c0119598d68b95eff1))
+
 ## [1.112.2](https://github.com/kazi-org/kazi/compare/v1.112.1...v1.112.2) (2026-07-08)
 
 
