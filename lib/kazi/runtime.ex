@@ -380,6 +380,7 @@ defmodule Kazi.Runtime do
         Loop.stop(loop)
         Kazi.Runtime.Finalizer.finalize(result, run_id, persist?, signal_trap)
         finish_run(persist?, run_id, result)
+        harvest_memory(persist?, run_id, goal_ref, result)
         normalize_await(result)
       end
     end
@@ -1106,6 +1107,28 @@ defmodule Kazi.Runtime do
 
   defp finish_run(true, run_id, {:error, _reason}) do
     do_finish_run(run_id, "error", %{})
+  end
+
+  # ADR-0063 (Slice 3): at the SAME terminal point `finish_run/3` records the
+  # run's economics, run the deterministic harvest detector over the goal's
+  # own recorded facts (`Kazi.Memory.Harvest`, controller-side only -- never
+  # reachable from the harness/dispatch path). Best-effort like every other
+  # projection here: a harvest failure must never alter the reported outcome.
+  # A no-op when persistence is off (there is no read-model to harvest from
+  # or propose into) or on a `Loop.await/2` timeout.
+  defp harvest_memory(false, _run_id, _goal_ref, _result), do: :ok
+  defp harvest_memory(true, _run_id, _goal_ref, {:error, _reason}), do: :ok
+
+  defp harvest_memory(true, run_id, goal_ref, {:ok, result}) do
+    Kazi.Memory.Harvest.harvest(run_id, goal_ref, result)
+    :ok
+  rescue
+    error ->
+      Logger.warning(fn ->
+        "kazi.runtime harvest failed for goal=#{goal_ref}: " <> Exception.message(error)
+      end)
+
+      :ok
   end
 
   defp do_finish_run(run_id, status, economics) do
