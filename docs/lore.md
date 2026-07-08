@@ -743,3 +743,38 @@ a real regression when it shows up red:
 Before treating any of these three as a real failure, re-run the single file
 in isolation (`mix test <path>`) -- if it's green alone, it's this landmine,
 not your diff.
+
+## Agent-driven git safety
+
+### L-0034 #agents #git #worktree #bypasspermissions #data-loss #landmine -- an inner agent's unrestricted Bash can do anything git can do; no kazi config sandboxes it. Two git-level defenses now standing.
+
+Three incidents in ONE day (2026-07-08, a sibling repo's lore records them in
+detail) established that `allowed_tools` / `[scope]` / goal-file config do
+NOT constrain what a dispatched agent with Bash + bypassPermissions does via
+git: (1) a serial `kazi apply` pointed at a repo's PRIMARY checkout instead
+of a worktree ended with every untracked file in that checkout wiped --
+including a CONCURRENT session's uncommitted docs (issue #937 Gap A); (2) an
+agent escaped its assigned branch, checked out main inside its worktree, and
+pushed unreviewed work straight to an auto-deploying origin/main, breaking a
+production migration state; (3) a repo-wide clean-tree predicate instructed
+an agent to delete unrelated untracked production files. kazi CORE never
+runs `git reset`/`git clean` against a workspace (enforcement graders use
+throwaway detached worktrees) -- every wipe was the INNER AGENT's own shell.
+
+Standing defenses in THIS repo (both must stay):
+
+  * `main` is pinned permanently checked out in a dedicated sibling worktree
+    (`../kazi-main`), so `git checkout main` fails instantly in any other
+    checkout on the machine ("already used by worktree at ..."). Per-machine;
+    re-pin after a fresh clone.
+  * `.githooks/pre-push` (wired by `mix setup` via `core.hooksPath`) rejects
+    any push updating `refs/heads/main` -- main auto-releases via
+    release-please, so a direct push ships unreviewed code to users. The
+    deliberate HUMAN override is `ALLOW_PUSH_TO_MAIN=1`; an agent is never
+    given it.
+
+INVARIANTS when driving kazi natively against this repo: `--workspace` is a
+task-specific worktree, never the primary checkout (the operator's own
+memory-slice runs on 2026-07-08 violated this and got lucky); scope any
+clean-tree/`landed` predicate to the goal's own paths, never repo-wide; after
+any agent run, `git reflog` before trusting the working tree. (2026-07-08.)

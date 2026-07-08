@@ -145,8 +145,11 @@ defmodule Kazi.MixProject do
   # Run "mix help do" / "mix help aliases" for more.
   defp aliases do
     [
-      # Set up the local read-model: create the SQLite DB and run migrations.
-      setup: ["deps.get", "ecto.setup"],
+      # Set up the local read-model (SQLite DB + migrations) and point git at
+      # the committed hooks dir (.githooks/ -- notably the pre-push guard that
+      # keeps anyone, human or agent, from pushing straight to the
+      # auto-releasing main branch; see .githooks/pre-push).
+      setup: ["deps.get", "ecto.setup", &setup_git_hooks/1],
       "ecto.setup": ["ecto.create", "ecto.migrate"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       # Self-contained `mix test`: create + migrate the SQLite read-model before
@@ -155,5 +158,17 @@ defmodule Kazi.MixProject do
       # its Sandbox-pooled repo.
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
+  end
+
+  # Point git at the committed hooks dir. Best-effort: a non-git context (a
+  # source tarball, a hex build sandbox) or a machine without git skips the
+  # wiring without failing `mix setup`.
+  defp setup_git_hooks(_args) do
+    case System.cmd("git", ["config", "core.hooksPath", ".githooks"], stderr_to_stdout: true) do
+      {_, 0} -> Mix.shell().info("git hooks wired: core.hooksPath -> .githooks")
+      {out, _} -> Mix.shell().info("skipping git hook wiring (not a git checkout?): #{out}")
+    end
+  rescue
+    ErlangError -> Mix.shell().info("skipping git hook wiring (git not on PATH)")
   end
 end

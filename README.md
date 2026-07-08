@@ -299,9 +299,15 @@ deploys)* **gcloud** / a deploy command and `gh`:
 
 ```sh
 git clone https://github.com/kazi-org/kazi && cd kazi
-mix deps.get
-mix test          # ~850 hermetic tests, should be green
+mix setup         # deps + SQLite read-model + git hooks (core.hooksPath -> .githooks)
+mix test          # hermetic test suite, should be green
 ```
+
+Contributing? `mix setup` also wires the repo's committed git hooks
+(`.githooks/`), including a pre-push guard that rejects direct pushes to
+`main` — `main` auto-releases via release-please, so all changes go through a
+branch + PR + rebase-merge. If you skip `mix setup`, wire the hooks by hand
+with `git config core.hooksPath .githooks`.
 
 Two ways to invoke kazi (same behavior):
 
