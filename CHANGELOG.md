@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.116.0](https://github.com/kazi-org/kazi/compare/v1.115.0...v1.116.0) (2026-07-08)
+
+
+### Features
+
+* **runtime:** refuse a second apply while a LIVE run holds the same goal ([#941](https://github.com/kazi-org/kazi/issues/941)-incident) ([8904ad1](https://github.com/kazi-org/kazi/commit/8904ad159d76f5acdadac6d2a82b52f91d9b0bf6))
+
 ## [1.115.0](https://github.com/kazi-org/kazi/compare/v1.114.0...v1.115.0) (2026-07-08)
 
 
