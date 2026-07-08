@@ -23,6 +23,14 @@ defmodule Kazi.ReadModel.ProposedGoal do
     * `goal` — the serialized draft `Kazi.Goal` in the canonical goal-file map
       shape `Kazi.Goal.Loader.from_map/1` accepts, so T3.5b rehydrates it into a
       runnable goal through the same validated loader the CLI uses.
+    * `session_name` — the operator/orchestrator session that authored this
+      proposal (`kazi plan --session-name`, `KAZI_SESSION_NAME`, or an
+      auto-detected `CLAUDE_CODE_SESSION_ID`; nil when none resolved). The
+      plan → approve → apply lifecycle is DESIGNED to be cross-session (a
+      different session may approve or apply what this one planned) -- this
+      field is what lets that handoff be traced afterward instead of just
+      inferred. `Kazi.Runtime` copies it (plus `proposal_ref`) onto a run's
+      `runs` row at registration time, best-effort, by matching `goal_id`.
   """
 
   use Ecto.Schema
@@ -46,11 +54,13 @@ defmodule Kazi.ReadModel.ProposedGoal do
     field(:goal_id, :string)
     field(:status, :string, default: "proposed")
     field(:goal, :map, default: %{})
+    field(:session_name, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:proposal_ref, :idea, :goal_id, :status, :goal]
+  @optional [:session_name]
 
   @doc """
   Builds a changeset for inserting a proposed-goal row.
@@ -63,7 +73,7 @@ defmodule Kazi.ReadModel.ProposedGoal do
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(row, attrs) do
     row
-    |> cast(attrs, @required)
+    |> cast(attrs, @required ++ @optional)
     |> validate_required(@required)
     |> validate_inclusion(:status, @statuses)
     |> unique_constraint(:proposal_ref, name: :proposed_goals_proposal_ref_index)
