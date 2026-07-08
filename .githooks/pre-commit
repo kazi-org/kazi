@@ -1,0 +1,12 @@
+#!/bin/sh
+# core.hooksPath points git at .githooks/ ONLY -- git does not fall back to
+# .git/hooks/ for hook names missing here. This passthrough keeps any
+# developer-local .git/hooks/pre-commit (personal tooling, not repo content)
+# firing exactly as it did before the repo adopted a committed hooks dir.
+
+local_hook="$(git rev-parse --git-dir)/hooks/pre-commit"
+if [ -x "$local_hook" ]; then
+    exec "$local_hook" "$@"
+fi
+
+exit 0

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Reject any push that updates refs/heads/main unless a human explicitly
+# allows it with ALLOW_PUSH_TO_MAIN=1.
+#
+# Why: main auto-releases. A push to main fires ci.yml + release-please.yml,
+# which cuts a tagged release and publishes binaries -- so an unreviewed
+# direct push ships straight to users. The PR path (branch -> PR -> CI ->
+# rebase-merge) is the only sanctioned route. This hook exists specifically
+# because an autonomous coding agent with unrestricted Bash can run git
+# commands no kazi/goal-file config can sandbox: a live incident (2026-07-08,
+# recorded in a sibling repo's lore) had an agent check out main inside its
+# worktree and push unreviewed work straight to a production-deploying main.
+# Agents do not get ALLOW_PUSH_TO_MAIN; humans doing a deliberate override do.
+#
+# Wiring: `git config core.hooksPath .githooks` (run by `mix setup`, or by
+# hand -- see README). Git runs this from the repo root with the remote name
+# and URL as arguments and one "<local-ref> <local-sha> <remote-ref>
+# <remote-sha>" line per ref on stdin.
+
+if [ "$ALLOW_PUSH_TO_MAIN" = "1" ]; then
+    exit 0
+fi
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    if [ "$remote_ref" = "refs/heads/main" ]; then
+        echo "pre-push: refusing to push directly to main." >&2
+        echo "pre-push: main auto-releases (release-please) -- use a branch + PR + rebase-merge." >&2
+        echo "pre-push: a deliberate human override is ALLOW_PUSH_TO_MAIN=1 git push ..." >&2
+        exit 1
+    fi
+done
+
+exit 0
