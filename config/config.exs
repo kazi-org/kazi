@@ -28,6 +28,13 @@ config :phoenix, :json_library, Jason
 # section — byte-identical to before the ledger existed (see docs/memory.md).
 config :kazi, :attempt_ledger, false
 
+# ADR-0062 decision 4 / ADR-0060 guardrail 4: semantic recall over the
+# git-native corpus (`Kazi.Memory.SemanticIndex`) also ships behind a flag,
+# DEFAULT OFF, until it pays rent under the ADR-0046 envelope. With the
+# default `false` the dispatch prompt carries no recalled-knowledge section —
+# byte-identical to before this layer existed (see docs/memory.md).
+config :kazi, :memory_recall, false
+
 # Slice-3 operator dashboard endpoint (ADR-0011, T3.6). Compile-time defaults
 # shared by all envs; per-env http binding / server enablement / secrets are set
 # in dev.exs / test.exs / prod.exs. The endpoint is asset-free (no esbuild), so
