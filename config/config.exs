@@ -22,6 +22,12 @@ config :ecto_sqlite3, json_library: Jason
 # Phoenix uses Jason for JSON across the framework.
 config :phoenix, :json_library, Jason
 
+# ADR-0061 decision 6 / ADR-0060 guardrail 4: the episodic attempt ledger ships
+# behind a flag, DEFAULT OFF, until the ADR-0046 benchmark proves it pays rent.
+# With the default `false` the dispatch prompt carries no ATTEMPT LEDGER
+# section — byte-identical to before the ledger existed (see docs/memory.md).
+config :kazi, :attempt_ledger, false
+
 # Slice-3 operator dashboard endpoint (ADR-0011, T3.6). Compile-time defaults
 # shared by all envs; per-env http binding / server enablement / secrets are set
 # in dev.exs / test.exs / prod.exs. The endpoint is asset-free (no esbuild), so

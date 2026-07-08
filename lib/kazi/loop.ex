@@ -160,6 +160,7 @@ defmodule Kazi.Loop do
   # only feeds it the per-iteration history (T1.1) + dispatch log and records the
   # flags it returns (see observe_tick/1).
   alias Kazi.Loop.RegressionDetector
+  alias Kazi.Memory.AttemptLedger
   # T4.7 working-set digest: the pure, bounded "files touched last iteration"
   # distiller. The loop reads the harness result's `:touched` working set through
   # it (map memory ONLY — never the transcript) and threads the digest into the
@@ -2063,6 +2064,7 @@ defmodule Kazi.Loop do
           digest: String.t(),
           evidence: String.t(),
           context_store: String.t() | nil,
+          attempt_ledger: String.t() | nil,
           retrieval: String.t() | nil,
           debrief_question: String.t() | nil
         }
@@ -2089,6 +2091,12 @@ defmodule Kazi.Loop do
       digest: Digest.render(data.working_set_digest),
       evidence: evidence,
       context_store: context_store,
+      # ADR-0061 decision 2: the episodic ATTEMPT LEDGER section, appended after
+      # evidence. `nil` unless the `:attempt_ledger` flag is on (default off,
+      # config.exs) AND the fold over the recorded history/dispatch log yields at
+      # least one entry — so the prompt is byte-identical to before the ledger
+      # existed unless a goal both opts in and has repeated attempts to report.
+      attempt_ledger: attempt_ledger_section(data),
       retrieval: retrieval_section(data),
       # T48.11 (ADR-0058 §3): the opt-in debrief question, appended LAST (the
       # most volatile-looking section, but it's actually fixed text — ordering
@@ -2215,6 +2223,7 @@ defmodule Kazi.Loop do
          digest: digest,
          evidence: evidence,
          context_store: context_store,
+         attempt_ledger: attempt_ledger,
          retrieval: retrieval,
          debrief_question: debrief_question
        }) do
@@ -2234,6 +2243,10 @@ defmodule Kazi.Loop do
     # and BEFORE retrieval; nil when no artifact was compressed this iteration, so
     # the default path is unchanged.
     prompt = append_section(prompt, context_store)
+    # ADR-0061 decision 2: the ATTEMPT LEDGER sits after evidence/context-store,
+    # before retrieval; nil unless the flag is on and the fold is non-empty, so
+    # the prompt is byte-identical to before the ledger existed by default.
+    prompt = append_section(prompt, attempt_ledger)
     prompt = append_section(prompt, retrieval)
     # T48.11 (ADR-0058 §3): the opt-in debrief question is appended LAST, after
     # retrieval; nil when the goal did not opt in, so `append_section/2` is a
@@ -2403,6 +2416,49 @@ defmodule Kazi.Loop do
   # rest of the adapter opts). Absent a `:retriever`, this yields `[]` and the
   # resolved default is the no-op — off by default.
   defp retrieval_opts(adapter_opts), do: Keyword.take(adapter_opts, [:retriever])
+
+  # ADR-0061 decision 2: the episodic ATTEMPT LEDGER section. Gated on
+  # `attempt_ledger?/1` (default off, `config :kazi, :attempt_ledger`, T19.4-style
+  # `:attempt_ledger` adapter-opt override); when off this is `nil` and the prompt
+  # is byte-identical to before the ledger existed. When on, folds the loop's OWN
+  # recorded oldest-first history + dispatch log (`Kazi.Memory.AttemptLedger`,
+  # decision 1 — never model/transcript prose) and renders the bounded section
+  # (decision 2); an empty fold (no dispatches yet, or none repeated) also
+  # renders to `""`, which is normalised to `nil` here so `append_section/2`
+  # adds nothing.
+  @spec attempt_ledger_section(Data.t()) :: String.t() | nil
+  defp attempt_ledger_section(%Data{} = data) do
+    if attempt_ledger?(data) do
+      entries = AttemptLedger.fold(ordered_history(data), Enum.reverse(data.dispatch_log))
+
+      case AttemptLedger.render(entries, attempt_ledger_opts(data)) do
+        "" -> nil
+        section -> section
+      end
+    else
+      nil
+    end
+  end
+
+  # The `:attempt_ledger` flag (ADR-0061 decision 6, ADR-0060 guardrail 4):
+  # an explicit `adapter_opts[:attempt_ledger]` wins; absent that, the resolved
+  # app config `config :kazi, :attempt_ledger` (default `false`) decides. Mirrors
+  # `orientation_prefix?/1`'s opt-then-default shape.
+  @spec attempt_ledger?(Data.t()) :: boolean()
+  defp attempt_ledger?(%Data{adapter_opts: adapter_opts}) do
+    case Keyword.fetch(adapter_opts, :attempt_ledger) do
+      {:ok, value} -> value == true
+      :error -> Application.get_env(:kazi, :attempt_ledger, false) == true
+    end
+  end
+
+  # Forward only the ledger-rendering opt to `Kazi.Memory.AttemptLedger.render/2`.
+  defp attempt_ledger_opts(%Data{adapter_opts: adapter_opts}) do
+    case Keyword.fetch(adapter_opts, :attempt_ledger_max_tokens) do
+      {:ok, max_tokens} -> [max_tokens: max_tokens]
+      :error -> []
+    end
+  end
 
   # T4.5/T4.4 context injection (ADR-0010 §3): prepare the target workspace for the
   # imminent stateless dispatch — expose the code-review-graph MCP in its
