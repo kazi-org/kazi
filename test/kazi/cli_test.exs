@@ -345,7 +345,10 @@ defmodule Kazi.CLITest do
 
       {code, out} =
         with_io(fn ->
-          Kazi.CLI.run(["apply", goal_file, "--workspace", work], runtime_opts)
+          Kazi.CLI.run(
+            ["apply", goal_file, "--workspace", work, "--allow-primary-workspace"],
+            runtime_opts
+          )
         end)
 
       assert code == 0
@@ -385,7 +388,12 @@ defmodule Kazi.CLITest do
       stderr =
         capture_io(:stderr, fn ->
           {code, out} =
-            with_io(fn -> Kazi.CLI.run(["apply", goal_file, "--workspace", work], opts) end)
+            with_io(fn ->
+              Kazi.CLI.run(
+                ["apply", goal_file, "--workspace", work, "--allow-primary-workspace"],
+                opts
+              )
+            end)
 
           assert code == 0
           assert out =~ "CONVERGED"
@@ -402,7 +410,7 @@ defmodule Kazi.CLITest do
 
       {code, stderr} =
         with_io(:stderr, fn ->
-          Kazi.CLI.run(["run", goal_file, "--workspace", work], opts)
+          Kazi.CLI.run(["run", goal_file, "--workspace", work, "--allow-primary-workspace"], opts)
         end)
 
       assert code == 2
@@ -459,7 +467,10 @@ defmodule Kazi.CLITest do
         capture_log(fn ->
           {c, out} =
             with_io(fn ->
-              Kazi.CLI.run(["apply", goal_file, "--workspace", work], runtime_opts)
+              Kazi.CLI.run(
+                ["apply", goal_file, "--workspace", work, "--allow-primary-workspace"],
+                runtime_opts
+              )
             end)
 
           send(self(), {:result, c, out})
@@ -474,7 +485,10 @@ defmodule Kazi.CLITest do
       # JSON surface: a parseable over_budget result object, also exit 1, no raise.
       {json_code, json_out} =
         with_io(fn ->
-          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts)
+          Kazi.CLI.run(
+            ["apply", goal_file, "--workspace", work, "--allow-primary-workspace", "--json"],
+            runtime_opts
+          )
         end)
 
       assert json_code == 1
@@ -551,7 +565,10 @@ defmodule Kazi.CLITest do
 
       {_code, out} =
         with_io(fn ->
-          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], opts)
+          Kazi.CLI.run(
+            ["apply", goal_file, "--workspace", work, "--allow-primary-workspace", "--json"],
+            opts
+          )
         end)
 
       assert {:ok, decoded} = Jason.decode(out)
@@ -569,7 +586,10 @@ defmodule Kazi.CLITest do
 
       {_code, out} =
         with_io(fn ->
-          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], opts)
+          Kazi.CLI.run(
+            ["apply", goal_file, "--workspace", work, "--allow-primary-workspace", "--json"],
+            opts
+          )
         end)
 
       assert {:ok, decoded} = Jason.decode(out)
@@ -596,7 +616,7 @@ defmodule Kazi.CLITest do
 
       {code, stderr} =
         with_io(:stderr, fn ->
-          Kazi.CLI.run(["apply", goal_file, "--workspace", work])
+          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--allow-primary-workspace"])
         end)
 
       # Non-zero exit + a clear vacuous-goal message; the loop never started.

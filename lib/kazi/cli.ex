@@ -142,6 +142,7 @@ defmodule Kazi.CLI do
     context_store: :string,
     context_budget: :integer,
     session_name: :string,
+    allow_primary_workspace: :boolean,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -217,6 +218,8 @@ defmodule Kazi.CLI do
       "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
     session_name:
       "`apply` only: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown in the starmap's SESSIONS rail so concurrent runs are tellable apart. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; all three absent leaves the row unlabeled (unchanged behavior).",
+    allow_primary_workspace:
+      "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -263,7 +266,8 @@ defmodule Kazi.CLI do
         :check,
         :context_store,
         :context_budget,
-        :session_name
+        :session_name,
+        :allow_primary_workspace
       ]
     },
     %{
@@ -1162,6 +1166,7 @@ defmodule Kazi.CLI do
           context_store: flags[:context_store],
           context_budget: flags[:context_budget],
           session_name: flags[:session_name],
+          allow_primary_workspace: flags[:allow_primary_workspace] || false,
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1423,12 +1428,90 @@ defmodule Kazi.CLI do
       opts[:check] == true ->
         check_goal(goal, opts, runtime_opts)
 
+      # (issue #937 Gap A): an EXECUTING apply refuses a workspace that is a git
+      # repo's PRIMARY worktree unless --allow-primary-workspace. The dispatched
+      # agent's shell can reset/clean the whole checkout, and a primary checkout
+      # routinely holds untracked state a wipe destroys (a live incident lost a
+      # concurrent session's files exactly this way; lore L-0034). Checked AFTER
+      # --explain/--check (read-only, safe anywhere) and before both execution
+      # branches, so serial and --parallel are guarded alike. A non-git
+      # workspace is unaffected.
+      primary_workspace_refused?(goal, opts) ->
+        refuse_primary_workspace(goal, opts)
+
       opts[:parallel] == true ->
         run_goal_parallel(goal, opts, persist?, runtime_opts)
 
       true ->
         run_goal_serial(goal, opts, persist?, runtime_opts)
     end
+  end
+
+  # Whether the resolved workspace IS a git repo's primary (non-linked)
+  # worktree root AND the caller did not opt in with
+  # --allow-primary-workspace. Two conditions, both from one `git rev-parse`:
+  #
+  #   * primary vs linked — in the primary worktree `--git-dir` and
+  #     `--git-common-dir` answer the SAME path; in a linked worktree the
+  #     git-dir is `.git/worktrees/<name>` while the common dir stays the main
+  #     `.git` (the discriminator `git worktree list` itself uses);
+  #   * the workspace is the worktree's TOP LEVEL — a workspace nested INSIDE
+  #     a checkout (a scratch subdir, a fixture under a repo's tmp/) is not
+  #     the incident shape (#937's wipe hit a workspace that WAS the checkout
+  #     root) and stays unguarded, matching how every test/harness scratch
+  #     dir has always worked.
+  #
+  # Fail-open on anything unexpected (no git, not a repo, weird output): the
+  # guard is a tripwire for the shared-checkout incident class, never a new
+  # way for a healthy run to break.
+  defp primary_workspace_refused?(%Goal{} = goal, opts) do
+    opts[:allow_primary_workspace] != true and
+      primary_worktree_root?(opts[:workspace] || goal.scope.workspace)
+  end
+
+  defp primary_worktree_root?(workspace) when is_binary(workspace) do
+    case System.cmd(
+           "git",
+           ["-C", workspace, "rev-parse", "--git-dir", "--git-common-dir", "--show-toplevel"],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} ->
+        case String.split(out, "\n", trim: true) do
+          [git_dir, common_dir, toplevel] ->
+            Path.expand(git_dir, workspace) == Path.expand(common_dir, workspace) and
+              Path.expand(toplevel) == Path.expand(workspace)
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp primary_worktree_root?(_workspace), do: false
+
+  defp refuse_primary_workspace(%Goal{} = goal, opts) do
+    workspace = opts[:workspace] || goal.scope.workspace
+
+    message =
+      "workspace #{workspace} is a git repo's PRIMARY worktree; an executing " <>
+        "apply refuses it (issue #937) because the dispatched agent's shell can " <>
+        "reset/clean the whole checkout, destroying untracked state that is not " <>
+        "this goal's to touch. Run against a dedicated task worktree " <>
+        "(git worktree add <path> <branch>), or pass --allow-primary-workspace " <>
+        "to accept the risk. --check/--explain stay available without the flag."
+
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
   end
 
   defp run_goal_serial(%Goal{} = goal, opts, persist?, runtime_opts) do

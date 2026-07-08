@@ -66,7 +66,17 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
+                   runtime_opts
+                 ) ==
                    0
         end)
 
@@ -132,7 +142,17 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
+                   runtime_opts
+                 ) ==
                    0
         end)
 
@@ -211,7 +231,17 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
+                   runtime_opts
+                 ) ==
                    1
         end)
 
@@ -256,7 +286,17 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
+                   runtime_opts
+                 ) ==
                    1
         end)
 
@@ -291,7 +331,17 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
+                   runtime_opts
+                 ) ==
                    1
         end)
 
@@ -335,7 +385,17 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
+                   runtime_opts
+                 ) ==
                    1
         end)
 
@@ -363,7 +423,14 @@ defmodule Kazi.CLIRunJsonTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"]) == 1
+          assert Kazi.CLI.run([
+                   "apply",
+                   goal_file,
+                   "--workspace",
+                   work,
+                   "--allow-primary-workspace",
+                   "--json"
+                 ]) == 1
         end)
 
       # The error is a JSON object on STDOUT (not stderr prose), so the

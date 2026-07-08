@@ -233,7 +233,18 @@ defmodule Kazi.DeployWiringTest do
 
     {code, out} =
       with_io(fn ->
-        Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--env", "staging"], runtime_opts)
+        Kazi.CLI.run(
+          [
+            "apply",
+            goal_file,
+            "--workspace",
+            work,
+            "--allow-primary-workspace",
+            "--env",
+            "staging"
+          ],
+          runtime_opts
+        )
       end)
 
     assert code == 0

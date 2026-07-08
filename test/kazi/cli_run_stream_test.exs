@@ -72,7 +72,15 @@ defmodule Kazi.CLIRunStreamTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["apply", goal_file, "--workspace", work, "--json", "--stream"],
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json",
+                     "--stream"
+                   ],
                    runtime_opts
                  ) == 0
         end)
@@ -136,7 +144,17 @@ defmodule Kazi.CLIRunStreamTest do
 
       out =
         capture_io(fn ->
-          assert Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--json"], runtime_opts) ==
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
+                   runtime_opts
+                 ) ==
                    0
         end)
 

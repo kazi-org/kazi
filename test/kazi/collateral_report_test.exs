@@ -170,7 +170,14 @@ defmodule Kazi.CollateralReportTest do
       out =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["apply", goal_file, "--workspace", work, "--json"],
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace",
+                     "--json"
+                   ],
                    adapter_opts: [command: harness_stub],
                    reobserve_interval_ms: 5,
                    await_timeout: 10_000

@@ -243,7 +243,7 @@ defmodule Kazi.CLISelfConformanceTest do
 
       payload =
         assert_conformant("apply --json",
-          argv: ["apply", goal_file, "--workspace", work, "--json"],
+          argv: ["apply", goal_file, "--workspace", work, "--allow-primary-workspace", "--json"],
           inject: opts,
           expected_exit: 0
         )
@@ -349,7 +349,7 @@ defmodule Kazi.CLISelfConformanceTest do
 
       payload =
         assert_conformant("apply --json (vacuous → error)",
-          argv: ["apply", goal_file, "--workspace", work, "--json"],
+          argv: ["apply", goal_file, "--workspace", work, "--allow-primary-workspace", "--json"],
           expected_exit: 1
         )
 
