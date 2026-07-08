@@ -983,7 +983,9 @@ defmodule Kazi.Runtime do
       max_iterations: max_iterations,
       # The operator-assigned session label (`--session-name` /
       # KAZI_SESSION_NAME), telling concurrent runs apart on the starmap rail.
-      session_name: session_name
+      session_name: session_name,
+      # T48.15: record the OS process id for liveness detection in run reaping.
+      os_pid: to_string(System.pid())
     }
 
     case RunRegistry.start(attrs) do
