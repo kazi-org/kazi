@@ -23,4 +23,8 @@ if config_env() == :prod do
   File.mkdir_p!(Path.dirname(db_path))
 
   config :kazi, Kazi.Repo, database: db_path
+
+  # Bound logger output to info level in production to avoid debug/trace spam
+  # and reduce noise in dashboards and monitoring systems.
+  config :logger, level: :info
 end
