@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.112.2](https://github.com/kazi-org/kazi/compare/v1.112.1...v1.112.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* **cli:** wire the run reaper ticker + log rotation into standalone dashboard boot ([1bf09b4](https://github.com/kazi-org/kazi/commit/1bf09b4a1912d47a3cc0b80d65d7997c7567fb7c))
+
 ## [1.112.1](https://github.com/kazi-org/kazi/compare/v1.112.0...v1.112.1) (2026-07-08)
 
 
