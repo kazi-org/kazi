@@ -67,6 +67,7 @@ defmodule Kazi.CLI do
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
   alias Kazi.Goal.GroupLint
+  alias Kazi.Memory.SemanticIndex
   alias Kazi.Partition
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.Teach.InstallSkill
@@ -208,7 +209,7 @@ defmodule Kazi.CLI do
     provider:
       "`context` only: the context-store provider to proxy to (currently `gist`, the default). The provider stays independently usable; this is a thin wrapper so users learn one CLI (ADR-0045).",
     budget:
-      "`context search` only: cap the search result at N bytes (the byte budget the provider fits ranked snippets into). Default: the provider's own default.",
+      "`context search`: cap the search result at N bytes (the byte budget the provider fits ranked snippets into). Default: the provider's own default. `memory recall`: cap the result at N TOKENS (ADR-0062's budgeted-recall guarantee, ~4 chars/token). Default: 0 (empty result).",
     context_store:
       "`apply` only: opt into the context store for the run — index oversized failing evidence and inject budget-fitted snippets instead of inlining it each iteration (currently `gist`). Off by default; absent, the dispatch + result are byte-identical (ADR-0045).",
     context_budget:
@@ -352,6 +353,16 @@ defmodule Kazi.CLI do
         %{name: "args", required: false}
       ],
       flags: [:provider, :budget, :json]
+    },
+    %{
+      name: "memory",
+      summary:
+        "Budgeted FTS recall over the git-native corpus: `memory recall <query>` (ADR-0062).",
+      args: [
+        %{name: "subcommand", required: true},
+        %{name: "args", required: false}
+      ],
+      flags: [:workspace, :budget, :json]
     },
     %{
       name: "help",
@@ -689,6 +700,9 @@ defmodule Kazi.CLI do
       {:context, subcommand, args, opts} ->
         execute_context(subcommand, args, opts, inject_opts)
 
+      {:memory, subcommand, args, opts} ->
+        execute_memory(subcommand, args, opts)
+
       {:economy, opts} ->
         execute_economy(opts)
 
@@ -721,6 +735,7 @@ defmodule Kazi.CLI do
           | {:export, Path.t(), keyword()}
           | {:lint, Path.t(), keyword()}
           | {:context, String.t(), [String.t()], keyword()}
+          | {:memory, String.t(), [String.t()], keyword()}
           | {:economy, keyword()}
           | {:error, String.t()}
 
@@ -993,6 +1008,8 @@ defmodule Kazi.CLI do
   # through to `execute_context/4`, which proxies to the resolved provider.
   defp parse_command(["context" | rest], flags), do: parse_context(rest, flags)
 
+  defp parse_command(["memory" | rest], flags), do: parse_memory(rest, flags)
+
   # T48.8 (ADR-0058 decision 2 precursor) + T48.10 (ADR-0058 decision 3):
   # `economy [--goal <ref>] [--json]` aggregates the persisted run-end
   # economics (T48.7) into p50/p95 history groups; `economy --rediscovery
@@ -1044,6 +1061,28 @@ defmodule Kazi.CLI do
   defp context_flags(flags) do
     [
       provider: flags[:provider] || "gist",
+      budget: flags[:budget],
+      json: flags[:json] || false
+    ]
+  end
+
+  # ADR-0062: the `memory` parse body. `recall` is the ONLY subcommand today
+  # (mirrors the `context` shape above); an unknown one is a clear usage
+  # error, not the top-level "unknown command".
+  @memory_subcommands ~w(recall)
+
+  defp parse_memory([sub | rest], flags) when sub in @memory_subcommands,
+    do: {:memory, sub, rest, memory_flags(flags)}
+
+  defp parse_memory([sub | _], _flags),
+    do: {:error, "unknown memory subcommand #{inspect(sub)} (expected `recall`)"}
+
+  defp parse_memory([], _flags),
+    do: {:error, "the `memory` command requires a <subcommand> (`recall`)"}
+
+  defp memory_flags(flags) do
+    [
+      workspace: flags[:workspace] || ".",
       budget: flags[:budget],
       json: flags[:json] || false
     ]
@@ -2962,6 +3001,83 @@ defmodule Kazi.CLI do
   # stdout under --json (the NON-INTERACTIVE contract), a human stderr line
   # otherwise; a stable non-zero exit either way.
   defp context_error(message, opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  # =============================================================================
+  # memory recall (ADR-0062): `memory recall <query> [--budget N] [--json]`
+  # =============================================================================
+  #
+  # The loop's own third surface for `Kazi.Memory.SemanticIndex.recall/3`
+  # (decision 3: "surfaced three ways, all the same function") — an operator or
+  # orchestrating agent runs the SAME budgeted recall the dispatch-time
+  # injection uses (T39.x), against a real workspace.
+
+  defp execute_memory(subcommand, args, opts), do: run_memory(subcommand, args, opts)
+
+  # `memory recall "<query>" [--budget N] [--workspace <path>]` — proxy to
+  # `SemanticIndex.recall/3` and report the ranked, budget-fitted snippets.
+  defp run_memory("recall", [query], opts) do
+    workspace = Keyword.get(opts, :workspace, ".")
+    budget = Keyword.get(opts, :budget) || 0
+    snippets = SemanticIndex.recall(query, budget, workspace: workspace)
+
+    emit(json?(opts), memory_recall_json(query, budget, snippets), fn ->
+      print_memory_recall(query, snippets)
+    end)
+
+    0
+  end
+
+  defp run_memory("recall", [], opts),
+    do: memory_error("`memory recall` requires a <query> argument (quote it)", opts)
+
+  defp run_memory("recall", [_query | extra], opts),
+    do:
+      memory_error(
+        "unexpected argument(s) after the recall query: #{Enum.join(extra, " ")}",
+        opts
+      )
+
+  defp memory_recall_json(query, budget, snippets) do
+    %{
+      schema_version: @run_schema_version,
+      command: "memory",
+      subcommand: "recall",
+      query: query,
+      budget: budget,
+      count: length(snippets),
+      snippets: Enum.map(snippets, &memory_snippet_json/1)
+    }
+  end
+
+  defp memory_snippet_json(%{path: path, line: line, text: text, score: score}) do
+    %{"path" => path, "line" => line, "text" => text, "score" => score}
+  end
+
+  defp print_memory_recall(query, []) do
+    IO.puts("no recalled snippets for #{inspect(query)}")
+  end
+
+  defp print_memory_recall(query, snippets) do
+    IO.puts("recall #{inspect(query)} — #{length(snippets)} snippet(s):\n")
+
+    Enum.each(snippets, fn %{path: path, line: line, text: text} ->
+      IO.puts("### #{path}:#{line}\n#{text}\n")
+    end)
+  end
+
+  # The error surface for `memory` subcommands: a JSON error envelope on stdout
+  # under --json (the NON-INTERACTIVE contract — never a prompt), a human
+  # stderr line otherwise; a stable non-zero exit either way. Mirrors
+  # `context_error/2`.
+  defp memory_error(message, opts) do
     if json?(opts) do
       emit_json_error(message)
     else
