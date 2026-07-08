@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.111.0](https://github.com/kazi-org/kazi/compare/v1.110.0...v1.111.0) (2026-07-08)
+
+
+### Features
+
+* **cli:** kazi memory recall -- budgeted FTS recall verb (ADR-0062) ([eba66f5](https://github.com/kazi-org/kazi/commit/eba66f5359c72b53694c5fee9bb9ae3316d89843))
+* **goal:** [memory] corpus override for semantic recall (ADR-0062) ([39957ee](https://github.com/kazi-org/kazi/commit/39957eef4e35238293ed3421cc0f159569751daa))
+* **loop:** inject semantic recall into the dispatch prompt, default off (ADR-0062) ([223c4e9](https://github.com/kazi-org/kazi/commit/223c4e918ff199cf6fdaf38012d85b60496febea))
+* **memory:** SemanticIndex -- budgeted FTS5 recall over git-native corpus (ADR-0062) ([24d8595](https://github.com/kazi-org/kazi/commit/24d8595cee49c3b2b99e8c5e87503b69b8f55989))
+
 ## [1.110.0](https://github.com/kazi-org/kazi/compare/v1.109.0...v1.110.0) (2026-07-08)
 
 
