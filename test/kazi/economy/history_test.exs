@@ -254,4 +254,54 @@ defmodule Kazi.Economy.HistoryTest do
       assert History.goal_shape_bucket(nil) == "unknown"
     end
   end
+
+  describe "aggregate/1 — model ID normalization" do
+    test "normalizes model IDs so variants group together" do
+      goal_ref = "goal-model-norm"
+
+      # Same semantic model, different case and version suffix.
+      seed_run(%{
+        goal_ref: goal_ref,
+        harness: "claude",
+        model: "claude-opus-4-8",
+        predicate_count: 2,
+        budget_tokens: 1000,
+        dispatch_count: 1
+      })
+
+      seed_run(%{
+        goal_ref: goal_ref,
+        harness: "claude",
+        model: "CLAUDE-OPUS-4-8-20260101",
+        predicate_count: 2,
+        budget_tokens: 2000,
+        dispatch_count: 2
+      })
+
+      %{groups: groups} = History.aggregate(goal_ref: goal_ref)
+
+      # Both runs should group together under the normalized model ID.
+      assert [group] = groups
+      assert group.model == "claude-opus-4-8"
+      assert group.n == 2
+      assert group.tokens == %{p50: 1000, p95: 2000}
+    end
+
+    test "nil model remains nil after normalization" do
+      goal_ref = "goal-nil-model"
+
+      seed_run(%{
+        goal_ref: goal_ref,
+        harness: "claude",
+        model: nil,
+        predicate_count: 2,
+        budget_tokens: 500,
+        dispatch_count: 1
+      })
+
+      %{groups: [group]} = History.aggregate(goal_ref: goal_ref)
+
+      assert group.model == nil
+    end
+  end
 end

@@ -11,10 +11,11 @@ defmodule Kazi.Economy.History do
   Runs group by `{goal_shape_bucket, model, harness}` — `model`/`harness` are
   the run's recorded harness identity; `goal_shape_bucket` is `predicate_count`
   banded via `goal_shape_bucket/1` (public, reusable — see its doc for the
-  banding rationale). A `nil` `model`/`harness` groups together as its own
-  bucket (a pre-T46 row or a run whose harness never reported an identity) —
-  it is a real, distinct group, never silently dropped or merged into a
-  "known" one.
+  banding rationale). Model IDs are normalized via `ModelIdNormalization.normalize/1`
+  before grouping so semantic models with case/version-suffix variations group
+  together. A `nil` `model`/`harness` groups together as its own bucket (a pre-T46
+  row or a run whose harness never reported an identity) — it is a real, distinct
+  group, never silently dropped or merged into a "known" one.
 
   ## Honest-unknown (ADR-0046)
 
@@ -44,6 +45,7 @@ defmodule Kazi.Economy.History do
 
   import Ecto.Query, only: [from: 2]
 
+  alias Kazi.Economy.ModelIdNormalization
   alias Kazi.ReadModel.Run
   alias Kazi.Repo
 
@@ -151,7 +153,7 @@ defmodule Kazi.Economy.History do
   end
 
   defp group_key(%Run{predicate_count: predicate_count, model: model, harness: harness}) do
-    {goal_shape_bucket(predicate_count), model, harness}
+    {goal_shape_bucket(predicate_count), ModelIdNormalization.normalize(model), harness}
   end
 
   defp build_group({bucket, model, harness}, runs) do
