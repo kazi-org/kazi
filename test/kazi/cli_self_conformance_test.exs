@@ -485,6 +485,9 @@ defmodule Kazi.CLISelfConformanceTest do
         # `context` requires a <subcommand>; probe with a real one so we observe
         # dispatch (a command tuple), not the missing-subcommand usage error.
         "context" -> ["context", "stats"]
+        # `memory` requires a <subcommand>; `recall` itself needs a <query> —
+        # supply a dummy one too so we observe dispatch (ADR-0062).
+        "memory" -> ["memory", "recall", "dummy"]
         # `economy` takes no positional; --rediscovery selects the rediscovery
         # view over the default aggregate view (ADR-0058 decisions 2 and 3).
         # Either dispatches; probe with --rediscovery to exercise both flags.
