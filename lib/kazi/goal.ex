@@ -63,6 +63,12 @@ defmodule Kazi.Goal do
       structured answer the agent gives is persisted as HYPOTHESIS rows in the
       read-model — the answer never mutates a future prompt (the gaming-surface
       rule, cf. T32.5). Default `false` (byte-identical to today).
+    * `memory_corpus` — the semantic-recall corpus override (ADR-0062 decision
+      1), declared in the goal-file's `[memory]` table's `corpus` key: a list
+      of glob patterns (relative to the workspace) `Kazi.Memory.SemanticIndex`
+      indexes instead of its own built-in default corpus. `nil` (the default)
+      means "use the default corpus"; an explicit `[]` opts the goal OUT of
+      recall entirely (zero recall, zero cost).
 
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
@@ -109,6 +115,7 @@ defmodule Kazi.Goal do
           groups: [Group.t()],
           enforcement: Kazi.Enforcement.t() | nil,
           debrief: boolean(),
+          memory_corpus: [String.t()] | nil,
           metadata: map()
         }
 
@@ -146,6 +153,10 @@ defmodule Kazi.Goal do
             # to today (no debrief question, no hypothesis rows). Appended
             # additively so the existing field order is untouched.
             debrief: false,
+            # ADR-0062: the declared `[memory] corpus` override. Default nil =
+            # use `Kazi.Memory.SemanticIndex.default_corpus/0`. Appended
+            # additively so the existing field order is untouched.
+            memory_corpus: nil,
             metadata: %{}
 
   @doc """
@@ -162,6 +173,8 @@ defmodule Kazi.Goal do
   selection map (T8.6, ADR-0016). `:groups` (default `[]`) is the declared group
   taxonomy (`Kazi.Goal.Group` list, T12.1, ADR-0020). `:debrief` (default
   `false`) opts into post-dispatch debrief capture (T48.11, ADR-0058 §3).
+  `:memory_corpus` (default `nil`) overrides the semantic-recall corpus
+  (ADR-0062); `nil` means "use the built-in default corpus".
   `:budget` and `:scope` accept either a struct or a keyword list (forwarded to
   `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
 
@@ -199,6 +212,8 @@ defmodule Kazi.Goal do
       enforcement: Keyword.get(opts, :enforcement),
       # T48.11 (ADR-0058 §3): opt-in post-dispatch debrief capture.
       debrief: Keyword.get(opts, :debrief, false),
+      # ADR-0062: the declared `[memory] corpus` override.
+      memory_corpus: Keyword.get(opts, :memory_corpus),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end

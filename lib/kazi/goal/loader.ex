@@ -132,6 +132,19 @@ defmodule Kazi.Goal.Loader do
   (`kazi apply … --debrief`) overrides whatever the goal-file declares, the
   same way `--standing` overrides `standing`.
 
+  ### `[memory]` table (optional, → `Goal.memory_corpus`, ADR-0062)
+
+  Overrides the semantic-recall corpus `Kazi.Memory.SemanticIndex` indexes for
+  this goal. Absent, or present with no `corpus` key → `Goal.memory_corpus`
+  stays `nil` (use `SemanticIndex.default_corpus/0`: `docs/adr/**/*.md`,
+  `docs/lore.md`, `docs/devlog.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`).
+
+  | Key      | TOML type        | Maps to / effect |
+  |----------|------------------|-------------------|
+  | `corpus` | array of strings | `Goal.memory_corpus` — glob patterns relative to the workspace. An explicit `corpus = []` opts the goal OUT of recall entirely (zero recall, zero cost); this is distinct from omitting the key (default corpus). |
+
+  A non-string-list `corpus` is a validation error.
+
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
   Declares the goal's *group taxonomy* — the vocabulary by which a large goal
@@ -371,6 +384,8 @@ defmodule Kazi.Goal.Loader do
          {:ok, enforcement} <- build_enforcement(Map.get(data, "enforcement")),
          # T48.11 (ADR-0058 §3): optional `[economy]` table (debrief opt-in).
          {:ok, debrief} <- build_economy(Map.get(data, "economy")),
+         # ADR-0062: optional `[memory]` table (semantic-recall corpus override).
+         {:ok, memory_corpus} <- build_memory(Map.get(data, "memory")),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
@@ -398,6 +413,7 @@ defmodule Kazi.Goal.Loader do
          groups: groups,
          enforcement: enforcement,
          debrief: debrief,
+         memory_corpus: memory_corpus,
          metadata: Map.get(data, "metadata", %{})
        )}
     end
@@ -600,6 +616,32 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_economy(_), do: {:error, "[economy] must be a table"}
+
+  # ADR-0062: the optional `[memory]` table — currently a single `corpus`
+  # glob-list override. Absent (nil) -> `nil` (`Goal.memory_corpus` stays nil,
+  # meaning "use `Kazi.Memory.SemanticIndex.default_corpus/0`"). A present
+  # table with NO `corpus` key ALSO yields `nil` (same default), so declaring
+  # an empty `[memory]` table is a no-op; an explicit `corpus = []` is the
+  # only way to opt a goal OUT of recall entirely. A non-list/non-string-list
+  # `corpus` fails loudly at load time.
+  defp build_memory(nil), do: {:ok, nil}
+
+  defp build_memory(mem) when is_map(mem) do
+    case Map.get(mem, "corpus") do
+      nil ->
+        {:ok, nil}
+
+      list when is_list(list) ->
+        if Enum.all?(list, &is_binary/1),
+          do: {:ok, list},
+          else: {:error, "memory \"corpus\" must be an array of strings"}
+
+      _ ->
+        {:error, "memory \"corpus\" must be an array of strings"}
+    end
+  end
+
+  defp build_memory(_), do: {:error, "[memory] must be a table"}
 
   defp enforcement_bool(enf, key, default) do
     case Map.get(enf, key, default) do
