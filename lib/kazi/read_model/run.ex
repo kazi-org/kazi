@@ -45,6 +45,9 @@ defmodule Kazi.ReadModel.Run do
     # apply for the same goal_ref can warn when a previous run's harness child
     # is still alive. nil until a dispatch reports one.
     field(:harness_child_pid, :string)
+    # T48.15: the OS process id (as an integer stored as string) for liveness
+    # detection in run reaping. Recorded when a dispatch starts the child process.
+    field(:os_pid, :string)
     # --- T48.7 (ADR-0058 decision 1): run-end economics ---------------------
     # Persisted at terminal projection (`RunRegistry.finish/3`) alongside the
     # terminal status. Honest-unknown (ADR-0046): the token/cost fields are
@@ -84,6 +87,7 @@ defmodule Kazi.ReadModel.Run do
     :session_name,
     :harness_session_id,
     :harness_child_pid,
+    :os_pid,
     :budget_tokens,
     :budget_cached_input_tokens,
     :budget_cost_usd,
