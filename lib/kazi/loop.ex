@@ -161,6 +161,7 @@ defmodule Kazi.Loop do
   # flags it returns (see observe_tick/1).
   alias Kazi.Loop.RegressionDetector
   alias Kazi.Memory.AttemptLedger
+  alias Kazi.Memory.SemanticIndex
   # T4.7 working-set digest: the pure, bounded "files touched last iteration"
   # distiller. The loop reads the harness result's `:touched` working set through
   # it (map memory ONLY — never the transcript) and threads the digest into the
@@ -2065,6 +2066,7 @@ defmodule Kazi.Loop do
           evidence: String.t(),
           context_store: String.t() | nil,
           attempt_ledger: String.t() | nil,
+          memory_recall: String.t() | nil,
           retrieval: String.t() | nil,
           debrief_question: String.t() | nil
         }
@@ -2097,6 +2099,13 @@ defmodule Kazi.Loop do
       # least one entry — so the prompt is byte-identical to before the ledger
       # existed unless a goal both opts in and has repeated attempts to report.
       attempt_ledger: attempt_ledger_section(data),
+      # ADR-0062 decision 4: the semantic-recall section, appended after the
+      # attempt ledger. `nil` unless the `:memory_recall` flag is on (default
+      # off, config.exs) AND the deterministic query (failing-predicate ids +
+      # touched paths — NEVER model-authored) recalls at least one snippet —
+      # so the prompt is byte-identical to before this slice unless a goal
+      # both opts in and the corpus has something relevant to surface.
+      memory_recall: memory_recall_section(failing, data),
       retrieval: retrieval_section(data),
       # T48.11 (ADR-0058 §3): the opt-in debrief question, appended LAST (the
       # most volatile-looking section, but it's actually fixed text — ordering
@@ -2224,6 +2233,7 @@ defmodule Kazi.Loop do
          evidence: evidence,
          context_store: context_store,
          attempt_ledger: attempt_ledger,
+         memory_recall: memory_recall,
          retrieval: retrieval,
          debrief_question: debrief_question
        }) do
@@ -2247,6 +2257,11 @@ defmodule Kazi.Loop do
     # before retrieval; nil unless the flag is on and the fold is non-empty, so
     # the prompt is byte-identical to before the ledger existed by default.
     prompt = append_section(prompt, attempt_ledger)
+    # ADR-0062 decision 4: the recalled-knowledge section sits after the
+    # attempt ledger, before retrieval; nil unless the flag is on and the
+    # corpus has a relevant snippet, so the prompt is byte-identical to before
+    # this slice by default.
+    prompt = append_section(prompt, memory_recall)
     prompt = append_section(prompt, retrieval)
     # T48.11 (ADR-0058 §3): the opt-in debrief question is appended LAST, after
     # retrieval; nil when the goal did not opt in, so `append_section/2` is a
@@ -2458,6 +2473,71 @@ defmodule Kazi.Loop do
       {:ok, max_tokens} -> [max_tokens: max_tokens]
       :error -> []
     end
+  end
+
+  # ADR-0062 decision 4: the semantic-recall section. Gated on
+  # `memory_recall?/1` (default off, `config :kazi, :memory_recall`, mirroring
+  # `attempt_ledger?/1`); when off this is `nil` and the prompt is unchanged.
+  # When on, `SemanticIndex.recall/3` runs against a query DERIVED
+  # deterministically from `failing` (the dispatch's failing-predicate ids)
+  # and the working-set digest's touched paths — never model-authored (the
+  # same "facts only" discipline `Kazi.Memory.AttemptLedger` follows). An
+  # empty recall renders `nil` too, so a goal with an empty/thin corpus adds
+  # no section.
+  @spec memory_recall_section([Predicate.id()], Data.t()) :: String.t() | nil
+  defp memory_recall_section(failing, %Data{} = data) do
+    if memory_recall?(data) do
+      case SemanticIndex.recall(memory_recall_query(failing, data), memory_recall_budget(data),
+             workspace: memory_recall_workspace(data),
+             corpus: data.goal.memory_corpus
+           ) do
+        [] -> nil
+        snippets -> render_memory_recall_section(snippets)
+      end
+    else
+      nil
+    end
+  end
+
+  # The `:memory_recall` flag (ADR-0062, ADR-0060 guardrail 4): an explicit
+  # `adapter_opts[:memory_recall]` wins; absent that, the resolved app config
+  # `config :kazi, :memory_recall` (default `false`) decides.
+  @spec memory_recall?(Data.t()) :: boolean()
+  defp memory_recall?(%Data{adapter_opts: adapter_opts}) do
+    case Keyword.fetch(adapter_opts, :memory_recall) do
+      {:ok, value} -> value == true
+      :error -> Application.get_env(:kazi, :memory_recall, false) == true
+    end
+  end
+
+  # The recall query: the failing-predicate ids plus the working-set digest's
+  # touched paths (ADR-0062 decision 4), sorted so the query — and therefore
+  # anything cached against it — is deterministic regardless of enumeration
+  # order.
+  @spec memory_recall_query([Predicate.id()], Data.t()) :: String.t()
+  defp memory_recall_query(failing, %Data{working_set_digest: digest}) do
+    ids = failing |> Enum.map(&to_string/1) |> Enum.sort()
+    touched = digest.files |> Enum.sort()
+    Enum.join(ids ++ touched, " ")
+  end
+
+  @default_memory_recall_max_tokens 1_500
+
+  defp memory_recall_budget(%Data{adapter_opts: adapter_opts}) do
+    Keyword.get(adapter_opts, :memory_recall_max_tokens, @default_memory_recall_max_tokens)
+  end
+
+  defp memory_recall_workspace(%Data{workspace: workspace}) when is_binary(workspace),
+    do: workspace
+
+  defp memory_recall_workspace(%Data{}), do: "."
+
+  @spec render_memory_recall_section([SemanticIndex.snippet()]) :: String.t()
+  defp render_memory_recall_section(snippets) do
+    "## Recalled project knowledge (kazi memory, ADR-0062)\n\n" <>
+      Enum.map_join(snippets, "\n\n", fn %{path: path, line: line, text: text} ->
+        "### #{path}:#{line}\n```\n#{text}\n```"
+      end)
   end
 
   # T4.5/T4.4 context injection (ADR-0010 §3): prepare the target workspace for the
