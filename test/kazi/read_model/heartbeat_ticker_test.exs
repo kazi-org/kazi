@@ -54,8 +54,8 @@ defmodule Kazi.ReadModel.HeartbeatTickerTest do
         |> Run.changeset(%{heartbeat_at: DateTime.add(DateTime.utc_now(), -3600)})
         |> Repo.update()
 
-      # A stale run should be queryable as stale
-      stale_runs = RunRegistry.list_stale(timeout_seconds: 1800)
+      # A stale run should be queryable as stale (stale_after 1800 seconds = 30 minutes)
+      stale_runs = RunRegistry.list_stale(1800)
       assert Enum.any?(stale_runs, &(&1.run_id == run.run_id))
     end
 
@@ -75,7 +75,7 @@ defmodule Kazi.ReadModel.HeartbeatTickerTest do
         |> Run.changeset(%{heartbeat_at: DateTime.add(DateTime.utc_now(), -3600)})
         |> Repo.update()
 
-      stale_runs = RunRegistry.list_stale(timeout_seconds: 1800)
+      stale_runs = RunRegistry.list_stale(1800)
       assert not Enum.any?(stale_runs, &(&1.run_id == run.run_id))
     end
   end
