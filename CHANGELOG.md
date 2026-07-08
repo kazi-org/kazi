@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.114.0](https://github.com/kazi-org/kazi/compare/v1.113.0...v1.114.0) (2026-07-08)
+
+
+### Features
+
+* **repo:** pre-push guard for the auto-releasing main + committed hooks dir ([939c955](https://github.com/kazi-org/kazi/commit/939c9553dbd242d873b09a610e361534ca376949))
+
 ## [1.113.0](https://github.com/kazi-org/kazi/compare/v1.112.3...v1.113.0) (2026-07-08)
 
 
