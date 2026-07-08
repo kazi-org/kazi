@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.109.0](https://github.com/kazi-org/kazi/compare/v1.108.0...v1.109.0) (2026-07-08)
+
+
+### Features
+
+* **read-model:** wire RunReaper.reap/0 into a periodic ticker ([bc7e868](https://github.com/kazi-org/kazi/commit/bc7e86886b32be52db19db62b44f18a5653f7d48))
+
 ## [1.108.0](https://github.com/kazi-org/kazi/compare/v1.107.0...v1.108.0) (2026-07-08)
 
 
