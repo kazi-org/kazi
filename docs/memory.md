@@ -185,3 +185,56 @@ files; every write targets the SQLite index, never the source markdown.
 Corpus files are eligible `[enforcement] read_only_paths` (ADR-0042), so a
 goal can lease its corpus read-only during a run and the inner agent cannot
 edit the project's beliefs to make recall agree with its work.
+
+## Gated harvest and promotion (ADR-0063)
+
+Recall (ADR-0062) only ever *reads* the corpus; nothing before this layer
+*grows* it except a human remembering to write. `Kazi.Memory.Harvest` closes
+that gap at run termination without opening a write path an inner agent could
+ever reach — a wrong belief injected straight into the corpus is worse than
+none, since it would be recalled into every future relevant dispatch.
+
+### Harvest: deterministic detection, into PROPOSALS only
+
+`Kazi.Memory.Harvest.harvest/3` runs controller-side, from `Kazi.Runtime.run/2`
+right after the loop reaches a terminal state (converged / stopped /
+over_budget) — never from `Kazi.Harness` or an action module, so the
+dispatched agent has no path to influence what gets proposed. On a
+non-`:converged` outcome it reads the goal's own persisted iteration log
+(`Kazi.ReadModel.list_iterations/1`, the same episodic facts the attempt
+ledger folds) and looks for a dispatch APPROACH — the same `(failing
+predicates, touched files, normalized error head)` fingerprint
+`Kazi.Memory.AttemptLedger.fingerprint/3` already defines — repeated three or
+more times with no change to the failing set. That is the ADR's own example:
+"a predicate that wedged three different goals the same way is a landmine."
+
+No model runs in the detector; every candidate's `content` is a template
+filled from facts already on record (the same confabulation stance ADR-0058
+takes for debrief hypotheses). A candidate is stored as a row in
+`Kazi.ReadModel.ProposedMemory` (the `proposed_memories` table, mirroring
+`proposed_goals`) via `Kazi.ReadModel.propose_memory/1`, keyed idempotently by
+the detector's fingerprint — harvesting the same facts twice (a resumed goal,
+a re-run over the same history) never inserts a duplicate, whether the
+existing row is still `proposed` or has already been `rejected`.
+
+### Promotion: a human-approved diff, never a kazi commit
+
+`kazi memory list-proposed [--status <state>] [--json]` is the review queue.
+`kazi memory approve <proposal-ref> [--json]` transitions a proposal to
+`approved` AND writes its content into the routed corpus file:
+
+| class | target |
+|---|---|
+| `invariant` / `landmine` | `docs/lore.md` |
+| `finding` / `benchmark` | `docs/devlog.md` |
+| `decision` | a drafted `docs/adr/NNNN-*.md` stub |
+
+`Kazi.Memory.Promote` does the writing — an ORDINARY working-tree edit the
+operator reviews and lands like any other doc change (ADR-0034). kazi never
+commits memory on its own authority. Every written entry carries a
+`<!-- kx:<fingerprint> -->` trailer (the same provenance-marker convention
+`.github/scripts/extract_knowledge.py` uses for archived-plan knowledge), so
+promoting an already-promoted proposal is a no-op rather than a duplicate
+entry. `kazi memory reject <proposal-ref> [--json]` declines a proposal
+(kept for audit) without touching any corpus file — its fingerprint is never
+re-proposed.
