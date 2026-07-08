@@ -369,8 +369,16 @@ defmodule Kazi.Runtime do
         # This keeps healthy long-running dispatches from appearing stale in the starmap.
         _ticker = start_heartbeat_ticker(persist?, run_id)
 
+        # Issue #857: install OS-termination-signal handlers (SIGTERM/SIGINT) so an
+        # externally-killed run still records its termination in the registry before
+        # the VM halts, instead of leaving a stale `running` row. No-op when
+        # persistence is off (nothing to record). The handles are removed by
+        # `finalize/4` on the normal terminal path.
+        signal_trap = Kazi.Runtime.Finalizer.install_signal_trap(run_id, persist?)
+
         result = Loop.await(loop, await_timeout)
         Loop.stop(loop)
+        Kazi.Runtime.Finalizer.finalize(result, run_id, persist?, signal_trap)
         finish_run(persist?, run_id, result)
         normalize_await(result)
       end

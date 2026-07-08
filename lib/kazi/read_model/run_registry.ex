@@ -218,4 +218,26 @@ defmodule Kazi.ReadModel.RunRegistry do
   def list_stale(stale_after_seconds \\ @stale_after_seconds) do
     Enum.filter(list(), &stale?(&1, stale_after_seconds))
   end
+
+  @doc """
+  Records an external termination event (SIGTERM, SIGKILL, abnormal exit) for
+  a run during the finalization phase. Used when the controller process receives
+  a termination signal, allowing post-mortem observability even when the run
+  exits abnormally. Idempotent: multiple calls do not alter the status.
+  """
+  @spec record_termination(String.t(), term()) :: {:ok, Run.t()} | {:error, :not_found}
+  def record_termination(run_id, _reason) when is_binary(run_id) do
+    case Repo.get_by(Run, run_id: run_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Run{status: status} = run when status != "running" ->
+        {:ok, run}
+
+      run ->
+        run
+        |> Run.changeset(%{"status" => "terminated", "finished_at" => DateTime.utc_now()})
+        |> Repo.update()
+    end
+  end
 end
