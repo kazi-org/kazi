@@ -85,6 +85,84 @@ defmodule Kazi.Integration.RunRegistryWiringTest do
     assert run.harness_session_id == "sess-wiring-fixture"
   end
 
+  test "the run row falls back to CLAUDE_CODE_SESSION_ID when neither --session-name nor KAZI_SESSION_NAME is given",
+       %{tmp_dir: tmp_dir} do
+    work = Path.join(tmp_dir, "work")
+    File.mkdir_p!(work)
+
+    goal_file = write_goal_file(tmp_dir, work)
+    harness_stub = write_harness_stub(tmp_dir)
+
+    original_kazi = System.get_env("KAZI_SESSION_NAME")
+    original_claude = System.get_env("CLAUDE_CODE_SESSION_ID")
+    System.delete_env("KAZI_SESSION_NAME")
+    System.put_env("CLAUDE_CODE_SESSION_ID", "claude-code-session-abc123")
+
+    try do
+      {code, _out} =
+        with_io(fn ->
+          Kazi.CLI.run(
+            ["apply", goal_file, "--workspace", work],
+            adapter_opts: [command: harness_stub],
+            reobserve_interval_ms: 5,
+            await_timeout: 15_000
+          )
+        end)
+
+      assert code == 0
+
+      run = Repo.get_by!(Run, goal_ref: "run-registry-wiring-fixture")
+      assert run.session_name == "claude-code-session-abc123"
+    after
+      if original_kazi,
+        do: System.put_env("KAZI_SESSION_NAME", original_kazi),
+        else: System.delete_env("KAZI_SESSION_NAME")
+
+      if original_claude,
+        do: System.put_env("CLAUDE_CODE_SESSION_ID", original_claude),
+        else: System.delete_env("CLAUDE_CODE_SESSION_ID")
+    end
+  end
+
+  test "an explicit --session-name wins over both KAZI_SESSION_NAME and CLAUDE_CODE_SESSION_ID",
+       %{tmp_dir: tmp_dir} do
+    work = Path.join(tmp_dir, "work")
+    File.mkdir_p!(work)
+
+    goal_file = write_goal_file(tmp_dir, work)
+    harness_stub = write_harness_stub(tmp_dir)
+
+    original_kazi = System.get_env("KAZI_SESSION_NAME")
+    original_claude = System.get_env("CLAUDE_CODE_SESSION_ID")
+    System.put_env("KAZI_SESSION_NAME", "env-session")
+    System.put_env("CLAUDE_CODE_SESSION_ID", "claude-code-session-xyz")
+
+    try do
+      {code, _out} =
+        with_io(fn ->
+          Kazi.CLI.run(
+            ["apply", goal_file, "--workspace", work, "--session-name", "explicit-session"],
+            adapter_opts: [command: harness_stub],
+            reobserve_interval_ms: 5,
+            await_timeout: 15_000
+          )
+        end)
+
+      assert code == 0
+
+      run = Repo.get_by!(Run, goal_ref: "run-registry-wiring-fixture")
+      assert run.session_name == "explicit-session"
+    after
+      if original_kazi,
+        do: System.put_env("KAZI_SESSION_NAME", original_kazi),
+        else: System.delete_env("KAZI_SESSION_NAME")
+
+      if original_claude,
+        do: System.put_env("CLAUDE_CODE_SESSION_ID", original_claude),
+        else: System.delete_env("CLAUDE_CODE_SESSION_ID")
+    end
+  end
+
   test "a run whose harness reports NO usage envelope persists NULL tokens/cost, and the dispatch count + goal shape (T48.7, ADR-0058 decision 1)",
        %{tmp_dir: tmp_dir} do
     work = Path.join(tmp_dir, "work")
