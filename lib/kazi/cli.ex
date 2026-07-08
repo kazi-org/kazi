@@ -2543,10 +2543,23 @@ defmodule Kazi.CLI do
     running_children =
       standalone_dashboard_children()
       |> Enum.reject(fn
-        {Phoenix.PubSub, _} -> Process.whereis(Kazi.PubSub) != nil
-        Kazi.Coordination.LeaseTable -> Process.whereis(Kazi.Coordination.LeaseTable) != nil
-        KaziWeb.DagSource.Cache -> Process.whereis(KaziWeb.DagSource.Cache) != nil
-        KaziWeb.Endpoint -> Process.whereis(KaziWeb.Endpoint) != nil
+        {Phoenix.PubSub, _} ->
+          Process.whereis(Kazi.PubSub) != nil
+
+        Kazi.Coordination.LeaseTable ->
+          Process.whereis(Kazi.Coordination.LeaseTable) != nil
+
+        KaziWeb.DagSource.Cache ->
+          Process.whereis(KaziWeb.DagSource.Cache) != nil
+
+        KaziWeb.Endpoint ->
+          Process.whereis(KaziWeb.Endpoint) != nil
+
+        Kazi.ReadModel.RunReaperTicker ->
+          Process.whereis(Kazi.ReadModel.RunReaperTicker) != nil
+
+        Kazi.Logging.DashboardLogRotation ->
+          Process.whereis(Kazi.Logging.DashboardLogRotation) != nil
       end)
 
     {:ok, _pid} =
@@ -2587,11 +2600,19 @@ defmodule Kazi.CLI do
   @doc """
   The child specs a fresh `kazi dashboard` boot supervises, in start order:
   `Phoenix.PubSub`, then `Kazi.Coordination.LeaseTable`, then
-  `KaziWeb.DagSource.Cache`, then `KaziWeb.Endpoint` -- mirroring the app web
-  tree's composition (`Kazi.Application`) so a standalone boot has the same
-  read surface (issue #801). This is the full static list; `start_standalone_endpoint/2`
-  filters out any singleton already running in this node (e.g. under `mix
-  test`) before starting it, so it isn't started twice.
+  `KaziWeb.DagSource.Cache`, then `KaziWeb.Endpoint`, then the periodic
+  maintenance tickers (`Kazi.ReadModel.RunReaperTicker`,
+  `Kazi.Logging.DashboardLogRotation`) -- mirroring the app web tree's
+  composition (`Kazi.Application`) so a standalone boot has the same read
+  surface (issue #801) AND the same background upkeep. Both tickers
+  previously lived only in `Kazi.Application`'s child list, so neither ran
+  under the actual `kazi dashboard` deployment mode -- the Burrito binary's
+  standalone entry (`running_standalone?/0`) hands off to the CLI before that
+  supervision tree ever starts (live-verified: a synthetic zombie run sat
+  unreaped across multiple ticker intervals on a released binary). This is
+  the full static list; `start_standalone_endpoint/2` filters out any
+  singleton already running in this node (e.g. under `mix test`) before
+  starting it, so nothing is started twice.
   """
   @spec standalone_dashboard_children() :: [
           Supervisor.child_spec() | {module(), term()} | module()
@@ -2601,7 +2622,9 @@ defmodule Kazi.CLI do
       {Phoenix.PubSub, name: Kazi.PubSub},
       Kazi.Coordination.LeaseTable,
       KaziWeb.DagSource.Cache,
-      KaziWeb.Endpoint
+      KaziWeb.Endpoint,
+      Kazi.ReadModel.RunReaperTicker,
+      Kazi.Logging.DashboardLogRotation
     ]
   end
 
