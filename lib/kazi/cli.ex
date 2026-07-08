@@ -218,7 +218,7 @@ defmodule Kazi.CLI do
     context_budget:
       "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
     session_name:
-      "`apply` only: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown in the starmap's SESSIONS rail so concurrent runs are tellable apart. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; all three absent leaves the row unlabeled (unchanged behavior).",
+      "`apply`: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown in the starmap's SESSIONS rail so concurrent runs are tellable apart. `plan`: the same label, recorded on the proposal so a later `kazi approve`/`kazi apply` (possibly from a DIFFERENT session) can trace a run back to who planned it. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; all three absent leaves it unlabeled (unchanged behavior).",
     allow_primary_workspace:
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
@@ -320,7 +320,7 @@ defmodule Kazi.CLI do
       summary:
         "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058).",
       args: [%{name: "idea", required: false}],
-      flags: [:workspace, :yes, :strict, :adr, :json, :predicates, :replace]
+      flags: [:workspace, :yes, :strict, :adr, :json, :predicates, :replace, :session_name]
     },
     %{
       name: "list-proposed",
@@ -3551,6 +3551,7 @@ defmodule Kazi.CLI do
       |> Keyword.take([:harness, :adapter_opts])
       |> Keyword.put(:workspace, opts[:workspace] || ".")
       |> Keyword.put(:replace, opts[:replace] || false)
+      |> Keyword.put(:session_name, resolve_session_name(opts))
 
     ask = propose_ask(opts, inject_opts)
 
@@ -3599,6 +3600,7 @@ defmodule Kazi.CLI do
           |> Keyword.put(:workspace, opts[:workspace] || ".")
           |> Keyword.put(:proposal, proposal)
           |> Keyword.put(:replace, opts[:replace] || false)
+          |> Keyword.put(:session_name, resolve_session_name(opts))
 
         case Authoring.propose(caller_idea(idea), propose_opts) do
           {:ok, draft} ->
