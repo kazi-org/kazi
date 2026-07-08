@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.110.0](https://github.com/kazi-org/kazi/compare/v1.109.0...v1.110.0) (2026-07-08)
+
+
+### Features
+
+* **memory:** episodic attempt ledger (ADR-0061) ([cece52e](https://github.com/kazi-org/kazi/commit/cece52e372617f3ea85f47ded8f86697e10bbb36))
+
 ## [1.109.0](https://github.com/kazi-org/kazi/compare/v1.108.0...v1.109.0) (2026-07-08)
 
 
