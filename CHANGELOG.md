@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.113.0](https://github.com/kazi-org/kazi/compare/v1.112.3...v1.113.0) (2026-07-08)
+
+
+### Features
+
+* **cli:** auto-detect CLAUDE_CODE_SESSION_ID as a session_name fallback ([04d323a](https://github.com/kazi-org/kazi/commit/04d323aca67d0bd3100254786e3aa9b9b3cc717e))
+
 ## [1.112.3](https://github.com/kazi-org/kazi/compare/v1.112.2...v1.112.3) (2026-07-08)
 
 
