@@ -143,6 +143,7 @@ defmodule Kazi.CLI do
     context_budget: :integer,
     session_name: :string,
     allow_primary_workspace: :boolean,
+    allow_duplicate_run: :boolean,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -220,6 +221,8 @@ defmodule Kazi.CLI do
       "`apply` only: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown in the starmap's SESSIONS rail so concurrent runs are tellable apart. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; all three absent leaves the row unlabeled (unchanged behavior).",
     allow_primary_workspace:
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
+    allow_duplicate_run:
+      "`apply` only: start this run even when the run registry already shows a LIVE run (status running, fresh heartbeat) for the same goal id. Without this flag, an executing apply refuses the duplicate -- a second concurrent apply of one goal burns a second budget and races the first's edits. Zombie rows never block (a dead run's heartbeat goes stale within ~90s); pass this flag only for a deliberate re-run alongside a live one.",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -267,7 +270,8 @@ defmodule Kazi.CLI do
         :context_store,
         :context_budget,
         :session_name,
-        :allow_primary_workspace
+        :allow_primary_workspace,
+        :allow_duplicate_run
       ]
     },
     %{
@@ -1167,6 +1171,7 @@ defmodule Kazi.CLI do
           context_budget: flags[:context_budget],
           session_name: flags[:session_name],
           allow_primary_workspace: flags[:allow_primary_workspace] || false,
+          allow_duplicate_run: flags[:allow_duplicate_run] || false,
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1558,6 +1563,7 @@ defmodule Kazi.CLI do
       # the run's fleet-registry row for the starmap's SESSIONS rail. Only set
       # when one resolves, so the default path is unchanged when none do.
       |> maybe_put(:session_name, resolve_session_name(opts))
+      |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
       # T15.4 (ADR-0023 decision 3): under --json --stream, thread a per-iteration
       # streaming observer into the runtime's `:stream` seam, which composes it
       # OVER the read-model projection (one `on_iteration` fires both). It emits
@@ -1839,6 +1845,7 @@ defmodule Kazi.CLI do
     |> maybe_put(:permission_mode, opts[:permission_mode])
     |> maybe_put(:allowed_tools, opts[:allowed_tools])
     |> maybe_put(:session_name, resolve_session_name(opts))
+    |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
   end
 
   # Merge the CLI-owned per-goal opts OVER any caller-supplied `:run_opts` (tests),
@@ -2019,6 +2026,17 @@ defmodule Kazi.CLI do
 
   defp format_run_error(:await_timeout),
     do: "the loop did not reach a terminal state within the await timeout"
+
+  defp format_run_error({:duplicate_run, %{run_id: run_id} = live}) do
+    session = if live[:session_name], do: " session=#{live[:session_name]}", else: ""
+
+    "a LIVE run for this goal is already in flight: run #{run_id}#{session} " <>
+      "workspace=#{live[:workspace]} last heartbeat #{live[:heartbeat_at]}. A second " <>
+      "concurrent apply of one goal burns a second budget and races the first's " <>
+      "edits. Wait for it (kazi status <goal-id>), stop it, or pass " <>
+      "--allow-duplicate-run for a deliberate re-run alongside it. A dead run " <>
+      "stops blocking on its own once its heartbeat goes stale (~90s)."
+  end
 
   defp format_run_error(other), do: inspect(other)
 
