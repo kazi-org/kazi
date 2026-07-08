@@ -56,7 +56,12 @@ defmodule Kazi.Application do
       Kazi.Scheduler.WorktreeTable,
       # Dashboard log rotation: prevents unbounded growth of dashboard logs in
       # production environments by rotating logs when they exceed size limits.
-      Kazi.Logging.DashboardLogRotation
+      Kazi.Logging.DashboardLogRotation,
+      # T48.15: periodically reap zombie `running` rows (dead OS process, stale
+      # heartbeat) so the fleet dashboard doesn't accumulate them forever.
+      # `RunReaper.reap/0` itself was already correct and tested; nothing
+      # called it until this ticker was added.
+      Kazi.ReadModel.RunReaperTicker
     ]
 
     children =
