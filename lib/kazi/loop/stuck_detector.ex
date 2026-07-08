@@ -61,6 +61,7 @@ defmodule Kazi.Loop.StuckDetector do
 
   alias Kazi.{PredicateResult, PredicateVector}
   alias Kazi.Loop.ErrorPermanence
+  alias Kazi.Memory.AttemptLedger
 
   @typedoc "A failing-predicate-id set for one observation."
   @type failing_set :: MapSet.t(Kazi.Predicate.id())
@@ -127,16 +128,22 @@ defmodule Kazi.Loop.StuckDetector do
       |> Enum.map(fn {_index, %PredicateVector{} = vector} -> vector end)
       |> Enum.take(-n)
 
-    decide_window(window, n)
+    # ADR-0061 decision 4: the failing-set-per-observation fold is read from
+    # `Kazi.Memory.AttemptLedger` — the SAME fold the attempt ledger renders into
+    # the dispatch prompt — so controller policy (this stuck verdict) and
+    # inner-model context (the ledger section) can never disagree about what the
+    # recorded history says.
+    failing_sets = history |> AttemptLedger.failing_sets() |> Enum.take(-n)
+
+    decide_window(window, failing_sets, n)
   end
 
   # Not enough observations recorded yet to fill the window → not stuck.
-  defp decide_window(window, n) when length(window) < n, do: :not_stuck
+  defp decide_window(window, _failing_sets, n) when length(window) < n, do: :not_stuck
 
   # The window is full. Stuck iff every failing set is identical AND non-empty AND
   # no failing predicate's graded score improved across the window.
-  defp decide_window(window, _n) do
-    failing_sets = Enum.map(window, fn vector -> MapSet.new(PredicateVector.failing(vector)) end)
+  defp decide_window(window, failing_sets, _n) do
     [first | rest] = failing_sets
 
     cond do

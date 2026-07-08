@@ -494,6 +494,10 @@ change from one machine to many — single-machine is the same substrates with t
 cluster degenerate to one node. Nothing gets swapped later (the explicit
 requirement that drove ADR-0004/0005).
 
+Memory is a fourth read of these same stores, not a fifth store (ADR-0060): see
+[docs/memory.md](memory.md) for the four-layer map and how each layer is
+projected from data this section already describes.
+
 ---
 
 ## 10. The agent drives kazi (ADR-0024, ADR-0031)
