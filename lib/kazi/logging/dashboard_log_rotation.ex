@@ -9,7 +9,6 @@ defmodule Kazi.Logging.DashboardLogRotation do
   use GenServer
   require Logger
 
-  @default_log_path Path.join([System.user_home!() || File.cwd!(), ".kazi", "dashboard.log"])
   @default_max_size 10_000_000
   @rotation_check_interval :timer.minutes(5)
 
@@ -19,7 +18,7 @@ defmodule Kazi.Logging.DashboardLogRotation do
 
   @impl true
   def init(opts) do
-    log_path = Keyword.get(opts, :log_path, @default_log_path)
+    log_path = Keyword.get(opts, :log_path, default_log_path())
     max_size = Keyword.get(opts, :max_size, @default_max_size)
 
     log_dir = Path.dirname(log_path)
@@ -70,5 +69,26 @@ defmodule Kazi.Logging.DashboardLogRotation do
 
   defp schedule_rotation_check do
     Process.send_after(self(), :check_rotation, @rotation_check_interval)
+  end
+
+  @doc """
+  The default `dashboard.log` path: `KAZI_STATE_DIR` > `<user-home>/.kazi`,
+  mirroring `Kazi.CrashDump.dir/0`. Resolved at RUNTIME (called from `init/1`
+  on every boot), never a compile-time module attribute -- a `@default_log_path
+  Path.join([System.user_home!() ...])` attribute would freeze
+  `System.user_home!()` to whatever machine BUILT the release. For a Burrito
+  binary that's the CI runner, not the operator's machine, so every fresh
+  `kazi dashboard` boot tried to mkdir a path like `/Users/runner/.kazi` and
+  crashed the whole VM with `:eacces` (live-verified 2026-07-08). Public so a
+  test can assert the resolution honors `KAZI_STATE_DIR` without needing to
+  fake a foreign machine's home directory.
+  """
+  @spec default_log_path() :: Path.t()
+  def default_log_path do
+    state_dir =
+      System.get_env("KAZI_STATE_DIR") ||
+        Path.join([System.user_home!() || File.cwd!(), ".kazi"])
+
+    Path.join(state_dir, "dashboard.log")
   end
 end
