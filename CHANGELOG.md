@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.106.0](https://github.com/kazi-org/kazi/compare/v1.105.0...v1.106.0) (2026-07-08)
+
+
+### Features
+
+* **read-model:** add wall-clock heartbeat ticker for run liveness ([6680198](https://github.com/kazi-org/kazi/commit/66801983ee92e1e72f932ae54245f48819583276))
+
 ## [1.105.0](https://github.com/kazi-org/kazi/compare/v1.104.0...v1.105.0) (2026-07-07)
 
 
