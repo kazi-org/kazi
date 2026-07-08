@@ -256,6 +256,15 @@ the JSON-CLI shell-out entirely. `kazi mcp` starts the MCP server over stdio
 / status tools self-describe through their schemas. The canonical client config is
 `{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }`.
 
+## Semantic recall (ADR-0062)
+
+`kazi memory recall "<query>" [--budget <tokens>] [--json]` is a budgeted FTS
+search over the project's git-native corpus (ADRs, `docs/lore.md`,
+`docs/devlog.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`) — the same recall the
+loop can inject into a dispatch prompt (opt-in, `docs/memory.md`). Use it to
+check what the project already knows before re-deriving an invariant a prior
+run already recorded.
+
 ## Verifying a pooled task with kazi
 
 In an /apply --pool session, gate your task's MERGE on objective convergence

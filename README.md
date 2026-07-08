@@ -814,6 +814,7 @@ kazi economy [--goal <ref>]                  # run-economics history: p50/p95 by
 kazi context index <label> <file>            # context store: index a heavy artifact
 kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provider gist)
 kazi context stats                           #   byte accounting (indexed/returned/saved)
+kazi memory recall "<query>" [--budget N]    # budgeted FTS recall over the git-native corpus (ADR-0062)
 kazi export <goal-file> --obsidian <dir>     # write an Obsidian vault of the goal tree
 kazi lint <goal-file>                        # advisory near-duplicate group-name warnings
 kazi economy --rediscovery <goal>            # ranked rediscovery-pressure report (report-only)
