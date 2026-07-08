@@ -94,3 +94,94 @@ The fold has no notion of a run boundary: it keys on whatever history the
 caller hands it. Querying the read-model by GOAL identity (not run id) and
 folding the concatenated history means a resumed goal starts with its full
 prior-run history instead of amnesia — free, by construction.
+
+## Semantic memory: git-native recall (ADR-0062)
+
+`Kazi.Memory.SemanticIndex` (`lib/kazi/memory/semantic_index.ex`) answers "what
+does this project already know that bears on THIS failing predicate?" inside a
+strict token budget, at dispatch-assembly time.
+
+### The store of record is repo markdown
+
+kazi never copies project knowledge into an opaque database — the corpus IS
+the truth (the "librarian, never vault" guardrail above). The default corpus:
+
+```
+docs/adr/**/*.md
+docs/lore.md
+docs/devlog.md
+AGENTS.md
+CLAUDE.md
+README.md
+```
+
+A goal overrides the set entirely via its `[memory]` table:
+
+```toml
+[memory]
+corpus = ["docs/**/*.md", "AGENTS.md"]
+```
+
+Absent, or present with no `corpus` key, the default corpus applies. An
+explicit `corpus = []` opts the goal OUT of recall entirely — zero recall, zero
+cost, valid for any project (one with no lore/devlog gets exactly today's
+behavior since its globs simply match no file).
+
+### Index: SQLite FTS5, zero new dependencies
+
+Corpus files are chunked at heading/entry granularity — each chunk keeps its
+source `path` + line span — and indexed into a `memory_chunks_fts` FTS5
+virtual table living in the SAME SQLite read-model every other projection
+uses. FTS5 ships inside the `ecto_sqlite3`/`exqlite` stack already, so this
+adds no new dependency. A refresh re-chunks a file only when its sha256
+content hash has changed since it was last indexed (tracked in
+`Kazi.ReadModel.MemoryIndexFile`) — an unchanged file is never re-indexed.
+Embeddings/vector search are explicitly out until a benchmark shows FTS
+ranking is the binding constraint (a superseding ADR would be required to add
+one, per the stack-conventions no-heavy-deps rule).
+
+### The API is budgeted recall, not search
+
+```elixir
+Kazi.Memory.SemanticIndex.recall("budget overflow", 200, workspace: ".")
+# => [%{path: "docs/lore.md", line: 3, text: "...", score: 1.87}, ...]
+```
+
+One function, one contract: query terms in, a ranked slice out GUARANTEED to
+fit the caller's token budget (an approximate 4-chars-per-token heuristic,
+like the attempt ledger's rendering cap above). The top-ranked chunk alone
+exceeding the budget is truncated — never dropped-with-overflow.
+
+Surfaced three ways, all the same function:
+
+- the loop, at dispatch-assembly time (below);
+- `kazi memory recall <query> --budget <tokens> [--json]` for operators and
+  orchestrating agents;
+- `kazi mcp` (ADR-0044), for an interactive session.
+
+### Prompt injection — default OFF
+
+When enabled, `Kazi.Loop` appends a `## Recalled project knowledge` section
+after the attempt ledger and before retrieval. The recall query is derived
+DETERMINISTICALLY from the dispatch's failing-predicate ids and the
+working-set digest's touched paths — never model-authored (the same
+facts-only discipline the attempt ledger follows).
+
+```elixir
+# config/config.exs
+config :kazi, :memory_recall, false
+```
+
+With the **default `false`**, the dispatch prompt carries no recalled-knowledge
+section at all — byte-identical to before this layer existed. Override
+per-run via the loop's `:adapter_opts` (`memory_recall: true`,
+`memory_recall_max_tokens: <n>`, default 1500). Promotion to default-on
+requires the same ADR-0046 benchmark discipline as the attempt ledger.
+
+### Recall is read-only
+
+`SemanticIndex` adds no write path to the corpus — it only ever reads corpus
+files; every write targets the SQLite index, never the source markdown.
+Corpus files are eligible `[enforcement] read_only_paths` (ADR-0042), so a
+goal can lease its corpus read-only during a run and the inner agent cannot
+edit the project's beliefs to make recall agree with its work.
