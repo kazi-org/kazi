@@ -247,7 +247,8 @@ defmodule Kazi.Runtime do
 
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
-         :ok <- guard_not_vacuous(goal, providers, workspace) do
+         :ok <- guard_not_vacuous(goal, providers, workspace),
+         :ok <- guard_no_live_duplicate(goal, opts) do
       # T46.1 (ADR-0057): the fleet run registry's identity for this process —
       # generated fresh unless the caller reclaims a prior id (a restarted
       # process resuming its own registry row).
@@ -290,6 +291,8 @@ defmodule Kazi.Runtime do
           :transcript_cap_bytes,
           # Session identity: consumed by register_run/9 above, not a Loop opt.
           :session_name,
+          # Consumed by guard_no_live_duplicate/2 above, not a Loop opt.
+          :allow_duplicate_run,
           # T15.4 (ADR-0023 decision 3): the streaming observer is consumed by
           # build_on_iteration/2 (composed over the persistence projection), not
           # a Loop opt.
@@ -489,6 +492,54 @@ defmodule Kazi.Runtime do
     else
       :ok
     end
+  end
+
+  # Refuse to START a run when the registry already holds a LIVE run for the
+  # same goal_ref: status "running" with a FRESH heartbeat (within the same
+  # staleness window `list_stale`/the dashboard use). A second concurrent apply
+  # of one goal burns a second full budget and races the first's edits -- a
+  # live incident had a fresh process pick up a goal another process had been
+  # converging for 1.5 hours. Zombie rows never block: a dead run stops
+  # heartbeating (the wall-clock ticker only beats while its process lives), so
+  # it goes stale within ~90s and this guard ignores it -- no os_pid check
+  # needed, and pre-os_pid rows age out the same way. Deliberate re-runs pass
+  # `:allow_duplicate_run` (CLI: --allow-duplicate-run). Best-effort fail-open
+  # like every registry touch: no read-model, no guard.
+  defp guard_no_live_duplicate(%Goal{} = goal, opts) do
+    if Keyword.get(opts, :allow_duplicate_run) == true or
+         Keyword.get(opts, :persist?, true) == false do
+      :ok
+    else
+      goal_ref = Keyword.get(opts, :goal_ref, to_string(goal.id))
+      run_id = Keyword.get(opts, :run_id) || ""
+
+      goal_ref
+      |> RunRegistry.list_by_goal_ref(run_id)
+      |> Enum.find(fn run -> run.status == "running" and not RunRegistry.stale?(run) end)
+      |> case do
+        nil -> :ok
+        %ReadModel.Run{} = live -> {:error, {:duplicate_run, duplicate_info(live)}}
+      end
+    end
+  rescue
+    error ->
+      Logger.warning(fn ->
+        "kazi.runtime duplicate-run guard raised (failing open): #{Exception.message(error)}"
+      end)
+
+      :ok
+  end
+
+  # The refusal payload: enough for the caller to find and inspect the live
+  # run (or decide to override) without another registry query.
+  defp duplicate_info(%ReadModel.Run{} = run) do
+    %{
+      run_id: run.run_id,
+      goal_ref: run.goal_ref,
+      workspace: run.workspace,
+      session_name: run.session_name,
+      heartbeat_at: run.heartbeat_at && DateTime.to_iso8601(run.heartbeat_at)
+    }
   end
 
   # The t0 observation: evaluate every predicate the goal carries (predicates ++

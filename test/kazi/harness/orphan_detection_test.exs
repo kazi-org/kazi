@@ -60,6 +60,12 @@ defmodule Kazi.Harness.OrphanDetectionTest do
 
     assert {:ok, _} = RunRegistry.start(prior_attrs)
     assert {:ok, _} = RunRegistry.record_harness_pid("prior-run-alive", to_string(orphan_pid))
+    # A crashed controller stops heartbeating: backdate the prior row so it
+    # models the REAL orphan shape (stale heartbeat, live harness child). The
+    # duplicate-run guard correctly refuses a FRESH-heartbeat prior run before
+    # the orphan check would even fire -- that refusal has its own test
+    # (runtime_duplicate_run_test.exs); this one needs the stale shape.
+    backdate_heartbeat("prior-run-alive")
 
     stderr =
       capture_io(:stderr, fn ->
@@ -119,6 +125,10 @@ defmodule Kazi.Harness.OrphanDetectionTest do
 
     assert {:ok, _} = RunRegistry.start(prior_attrs)
     assert {:ok, _} = RunRegistry.record_harness_pid("prior-run-dead", dead_pid)
+    # Same stale-heartbeat shape as the alive-orphan test above: a crashed
+    # controller stops heartbeating, and a fresh heartbeat would (correctly)
+    # trip the duplicate-run guard before this test's subject even runs.
+    backdate_heartbeat("prior-run-dead")
 
     stderr =
       capture_io(:stderr, fn ->
@@ -146,6 +156,16 @@ defmodule Kazi.Harness.OrphanDetectionTest do
       |> Enum.map(&Jason.decode!/1)
 
     refute Enum.any?(events, &(&1["type"] == "orphan_warning"))
+  end
+
+  # Model the real orphan shape: the crashed controller stopped heartbeating,
+  # so the prior row's heartbeat is STALE (which keeps it out of the
+  # duplicate-run guard's way) while its recorded harness child may live on.
+  # `RunRegistry.start/1` force-stamps heartbeat_at to now, so backdate after.
+  defp backdate_heartbeat(run_id) do
+    stale = DateTime.utc_now(:microsecond) |> DateTime.add(-2, :hour)
+    run = Repo.get_by!(Run, run_id: run_id)
+    {:ok, _} = run |> Run.changeset(%{"heartbeat_at" => stale}) |> Repo.update()
   end
 
   defp write_goal_file(tmp_dir, work, goal_ref) do
