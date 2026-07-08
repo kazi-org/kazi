@@ -9,7 +9,7 @@ defmodule Kazi.Logging.DashboardLogRotation do
   use GenServer
   require Logger
 
-  @default_log_dir Path.join([System.user_home!() || File.cwd!(), ".kazi", "logs"])
+  @default_log_path Path.join([System.user_home!() || File.cwd!(), ".kazi", "dashboard.log"])
   @default_max_size 10_000_000
   @rotation_check_interval :timer.minutes(5)
 
@@ -19,30 +19,29 @@ defmodule Kazi.Logging.DashboardLogRotation do
 
   @impl true
   def init(opts) do
-    log_dir = Keyword.get(opts, :log_dir, @default_log_dir)
+    log_path = Keyword.get(opts, :log_path, @default_log_path)
     max_size = Keyword.get(opts, :max_size, @default_max_size)
 
+    log_dir = Path.dirname(log_path)
     File.mkdir_p!(log_dir)
 
     # Schedule periodic rotation checks
     schedule_rotation_check()
 
-    {:ok, %{log_dir: log_dir, max_size: max_size}}
+    {:ok, %{log_path: log_path, max_size: max_size}}
   end
 
   @impl true
   def handle_info(:check_rotation, state) do
-    check_and_rotate(state)
+    perform_rotation_check(state)
     schedule_rotation_check()
     {:noreply, state}
   end
 
-  defp check_and_rotate(%{log_dir: log_dir, max_size: max_size}) do
-    dashboard_log = Path.join(log_dir, "dashboard.log")
-
-    case File.stat(dashboard_log) do
+  defp perform_rotation_check(%{log_path: log_path, max_size: max_size}) do
+    case File.stat(log_path) do
       {:ok, stat} when stat.size >= max_size ->
-        rotate_log(dashboard_log)
+        rotate_log(log_path)
 
       _ ->
         :ok
