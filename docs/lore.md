@@ -662,3 +662,84 @@ host:port (e.g. `--port 4050` via the machine's LAN IP), not just a dev
 `mix` boot on 4000 -- the dev/test configs set `check_origin: false`, so
 they can never catch this class. Regression:
 test/kazi/cli/dashboard_test.exs "standalone_endpoint_config/3". (2026-07-07.)
+
+## CLI / release boot
+
+### L-0031 #cli #readmodel #repo #with_read_model #landmine -- any CLI command that touches `Kazi.Repo` MUST route through `with_read_model`, or the released binary crashes the whole VM
+
+`kazi memory recall`/`list-proposed`/`approve`/`reject` called into
+`Kazi.Repo` directly (`execute_memory/3` skipped the wrapper every other
+repo-touching command uses). Under `mix test`, this is invisible: ExUnit's
+setup already has `Kazi.Repo` running before any CLI dispatch, so a missing
+`with_read_model` call never surfaces. Under the Burrito standalone entry
+(`running_standalone?/0`), the read-model supervision tree only starts on
+demand -- so the FIRST real invocation of the unwrapped command crashed with
+`RuntimeError: could not lookup Ecto repo Kazi.Repo because it was not
+started`, which Kernel then escalated to `Kernel pid terminated
+(application_controller)` -- the whole VM, not just the command. Fix: wrap
+the command's dispatch in `with_read_model(opts, fn -> ... end)`, exactly
+like `execute_list_proposed/1`, `execute_approve/2`, etc. already do. A
+source-level coherence guard (`deep_review_lows_test.exs`, "L2:
+with_read_model surfaces --json errors") pins the EXACT count of
+`with_read_model(opts, fn ->` call sites in `cli.ex` -- when you add a new
+repo-touching command, that count assertion WILL fail until you bump it,
+which is the guard doing its job, not a false positive. INVARIANT: never
+trust `mix test` alone for a new CLI command that reads/writes the
+read-model -- hand-verify it against the actual released binary
+(`kazi <command> ...` with the freshly-installed release) before calling it
+done. Regression: PR#927 (2026-07-08), `test/kazi/deep_review_lows_test.exs`.
+
+### L-0032 #burrito #release #compile-time #module-attribute #landmine -- a `@attr System.user_home!()`-style module attribute freezes at COMPILE time, baking the CI RUNNER's home directory into the shipped binary
+
+`Kazi.Logging.DashboardLogRotation` resolved its default log path via
+`@default_log_path Path.join([System.user_home!() || File.cwd!(), ".kazi",
+"dashboard.log"])` -- a module attribute, evaluated ONCE when the module
+compiles. Every other codebase site that needs the same `<user-home>/.kazi`
+root (`Kazi.CrashDump.dir/0`, `Kazi.Runtime`'s `sinks_dir/1`) does this
+correctly as a FUNCTION, re-evaluated on every call. For a `mix test`/`mix
+compile` run, this distinction is invisible -- you compile locally, so
+`System.user_home!()` correctly resolves to your own home either way. For a
+Burrito release built in CI, the module attribute bakes in the CI RUNNER's
+home directory (`/Users/runner`) into the compiled bytecode; every operator
+who then runs the shipped binary gets `mkdir_p!("/Users/runner/.kazi")`,
+which fails `:eacces` on their machine and crashes the VM on boot. This bug
+sat completely latent since the module shipped (#907) because
+`DashboardLogRotation` only ran under `Kazi.Application`'s always-supervised
+tree, never under a genuinely FRESH `kazi dashboard` boot -- it was exposed
+the moment L-0031's sibling fix (wiring it into
+`standalone_dashboard_children/0`, PR#929) gave it its first real chance to
+`init/1` outside dev/test. INVARIANT: any module-level default that reads
+`System.user_home!()`, `System.get_env/1`, `System.cwd/0`, or
+`Application.get_env/2` for something environment-dependent MUST be a
+function called at runtime, never a `@module_attribute` literal -- grepped
+`lib/` for this exact shape (`^\s*@[a-z_]* .*System\.` and
+`^\s*@[a-z_]*.*Application\.get_env`) after this fix; ZERO other instances
+found as of 2026-07-08, so this was an isolated latent bug, not a systemic
+one -- but re-run that grep after any new module ships a compile-time-looking
+default. Regression: PR#931 (2026-07-08),
+`test/kazi/logging/dashboard_log_rotation_test.exs` (first-ever coverage for
+this module).
+
+## Test flakiness (known-flaky, not a real regression)
+
+### L-0033 #test #flaky #ci #known-issue -- three tests are timing-flaky under full-suite concurrency; a solo re-run greens all three
+
+Three ExUnit cases fail intermittently ONLY under the full `mix test` run
+(concurrent async cases contending for timing/process-lifecycle windows),
+and pass cleanly every time when re-run in isolation -- none of the three is
+a real regression when it shows up red:
+
+  * `Kazi.Scheduler.SupervisionTest` (crash-containment case) -- `:converged`
+    vs `:stuck` timing race.
+  * `Kazi.Providers.ProviderDeprecationTest` ("emits NO hint" case) --
+    process-global `capture_io(:stderr)` races a concurrent module.
+  * `Kazi.Harness.ChildLifetimeTest` ("a dispatched harness subprocess is
+    killed when the controller dies") -- "the stub harness never reported
+    its pid -- dispatch never started"; a subprocess-spawn timing race under
+    concurrent load, confirmed transient by re-running
+    `test/kazi/harness/child_lifetime_test.exs` alone (passes in 0.2s, every
+    time). First observed 2026-07-08.
+
+Before treating any of these three as a real failure, re-run the single file
+in isolation (`mix test <path>`) -- if it's green alone, it's this landmine,
+not your diff.
