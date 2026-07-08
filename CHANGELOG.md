@@ -16,6 +16,22 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.108.0](https://github.com/kazi-org/kazi/compare/v1.107.0...v1.108.0) (2026-07-08)
+
+
+### Features
+
+* **run-liveness:** add os_pid field for reap detection ([b39e718](https://github.com/kazi-org/kazi/commit/b39e718fea5e001ad6bb2a3e02a67d6e942da48a))
+* **run-liveness:** implement reaper for OS process liveness detection ([bb07f1b](https://github.com/kazi-org/kazi/commit/bb07f1bd74155a43207d090bb515d15cd518b152))
+* **run-liveness:** populate os_pid at registration for reap detection ([7c58995](https://github.com/kazi-org/kazi/commit/7c589952e67133d4bab435b2d9804602c650defe))
+* **runtime:** trap OS termination signals so externally-killed runs finalize ([132410f](https://github.com/kazi-org/kazi/commit/132410fccf78c66f2226ed68ee13d26fe78a8b3f))
+
+
+### Bug Fixes
+
+* **test:** checkout sandbox connection in run reaper tests (T48.15) ([7e6c8fe](https://github.com/kazi-org/kazi/commit/7e6c8fe604f47f7f916f25485fe12e9a0f61c1f8))
+* **test:** correct run reaper liveness detection tests ([04fe3a2](https://github.com/kazi-org/kazi/commit/04fe3a21c6cfdb617206c03ed3ce02416f670f45))
+
 ## [1.107.0](https://github.com/kazi-org/kazi/compare/v1.106.0...v1.107.0) (2026-07-08)
 
 
