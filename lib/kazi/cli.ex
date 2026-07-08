@@ -3044,7 +3044,9 @@ defmodule Kazi.CLI do
   # orchestrating agent runs the SAME budgeted recall the dispatch-time
   # injection uses (T39.x), against a real workspace.
 
-  defp execute_memory(subcommand, args, opts), do: run_memory(subcommand, args, opts)
+  defp execute_memory(subcommand, args, opts) do
+    with_read_model(opts, fn -> run_memory(subcommand, args, opts) end)
+  end
 
   # `memory recall "<query>" [--budget N] [--workspace <path>]` — proxy to
   # `SemanticIndex.recall/3` and report the ranked, budget-fitted snippets.
