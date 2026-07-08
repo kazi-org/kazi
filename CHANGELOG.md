@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.107.0](https://github.com/kazi-org/kazi/compare/v1.106.0...v1.107.0) (2026-07-08)
+
+
+### Features
+
+* **logging:** bound logger level in production to prevent dashboard spam ([503ff39](https://github.com/kazi-org/kazi/commit/503ff39e423cbe757aa33e679826ad5743bcd1d2))
+* **logging:** implement dashboard log rotation to prevent unbounded growth ([30f0242](https://github.com/kazi-org/kazi/commit/30f0242ee469e925005a2e42329b7319b15a6f78))
+* **logging:** implement dashboard log rotation to prevent unbounded growth ([cceb452](https://github.com/kazi-org/kazi/commit/cceb45272f97bbde116a0df8380114fa3d3540e3))
+
+
+### Bug Fixes
+
+* **logging:** replace tautological test with actual assertion ([da40b75](https://github.com/kazi-org/kazi/commit/da40b7593cb1adba345fb5eaeaab4de203b377e6))
+
 ## [1.106.0](https://github.com/kazi-org/kazi/compare/v1.105.0...v1.106.0) (2026-07-08)
 
 
