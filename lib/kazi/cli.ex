@@ -1874,6 +1874,14 @@ defmodule Kazi.CLI do
     # otherwise. The exit code is the same on both surfaces: 0 only on convergence.
     case attach_run_context_store(Runtime.run(goal, run_opts), run_opts) do
       {:ok, %{outcome: :converged} = result} ->
+        # T50.2 (ADR-0065 decision 2): a worktree-isolated serial run that
+        # converged LANDS its task-branch commits on the base before the
+        # worktree is cleaned up. Runs BEFORE report_outcome so the result
+        # object carries the landing verdict, and the exit code is 0 only when
+        # the work both converged AND landed (or there was nothing to land).
+        {result, exit_code} =
+          land_converged_serial(goal, result, runtime_opts, base_workspace, workspace)
+
         report_outcome(
           goal,
           :converged,
@@ -1883,7 +1891,7 @@ defmodule Kazi.CLI do
           json?
         )
 
-        0
+        exit_code
 
       {:ok, %{outcome: :over_budget} = result} ->
         report_outcome(
@@ -1914,6 +1922,152 @@ defmodule Kazi.CLI do
         1
     end
   end
+
+  # =============================================================================
+  # serial landing (T50.2, ADR-0065 decision 2)
+  # =============================================================================
+
+  # A T50.1-isolated serial run that CONVERGED must land its task-branch commits
+  # on the base before the ephemeral worktree is cleaned up — converging in a
+  # worktree nobody integrates is a silent drop. The landing follows T21.5
+  # exactly: `Kazi.Scheduler.Integration.integrate/2` over the single worktree
+  # entry, `:base` set explicitly to the CALLER's checked-out branch (never the
+  # module's hardcoded "main" default), the integrator seam injectable via
+  # `runtime_opts[:integrate]` (the same opts shape the group scheduler's
+  # `:integrate` takes), and a conflict routed through Integration's
+  # `:redispatcher` seam bounded by `:max_attempts`. A landing failure downgrades
+  # the exit code to 1 — a converged-but-not-landed run is NOT a clean success —
+  # and surfaces the surviving task-branch ref (the branch outlives worktree
+  # removal by design, so the work is never lost). Nothing on this path ever
+  # runs `git reset` or `git clean` against the base checkout.
+  defp land_converged_serial(%Goal{} = goal, result, runtime_opts, base_workspace, workspace) do
+    if Path.expand(base_workspace) == Path.expand(workspace) do
+      # In-place (or non-git) run: the work already lives in the caller's checkout.
+      {result, 0}
+    else
+      case serial_landing(goal, runtime_opts, base_workspace, workspace) do
+        :nothing_to_land ->
+          {result, 0}
+
+        {:landed, info} ->
+          {Map.put(result, :integration, info), 0}
+
+        {:unlanded, info} ->
+          IO.puts(
+            :stderr,
+            "warning: goal #{goal.id} converged but its work did NOT land on " <>
+              "#{info[:base] || "the base"}: #{info[:reason] || "integration failed"}; " <>
+              "the task branch #{info[:task_branch]} survives in #{base_workspace}"
+          )
+
+          {Map.put(result, :integration, info), 1}
+      end
+    end
+  end
+
+  # Land only COMMITTED work: the worktree's commits ahead of the base HEAD. An
+  # uncommitted working tree is the goal's own `landed`-predicate problem (the
+  # T50.1 contract keeps the base byte-identical for such runs); a worktree at
+  # the base tip has nothing to land. A detached base checkout has no branch to
+  # rebase-merge onto — surfaced honestly rather than guessing a target.
+  defp serial_landing(%Goal{} = goal, runtime_opts, base_workspace, worktree) do
+    with {:ok, base_sha} <- serial_git(base_workspace, ["rev-parse", "HEAD"]),
+         {:ok, task_branch} <- serial_git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]),
+         {:ok, ahead} <- serial_git(worktree, ["rev-list", "--count", base_sha <> "..HEAD"]),
+         true <- ahead != "0" do
+      case serial_git(base_workspace, ["rev-parse", "--abbrev-ref", "HEAD"]) do
+        {:ok, "HEAD"} ->
+          {:unlanded,
+           %{
+             landed: false,
+             task_branch: task_branch,
+             reason: "base checkout is detached (no branch to land on)"
+           }}
+
+        {:ok, base_branch} ->
+          integrate_serial(goal, runtime_opts, base_workspace, worktree, base_branch, task_branch)
+
+        {:error, reason} ->
+          {:unlanded, %{landed: false, task_branch: task_branch, reason: inspect(reason)}}
+      end
+    else
+      # No commits ahead, or the worktree/base state is unreadable — nothing
+      # integrable. Fail-open: landing is additive; it never breaks a converge.
+      _ -> :nothing_to_land
+    end
+  end
+
+  defp integrate_serial(%Goal{} = goal, runtime_opts, base_workspace, worktree, base, branch) do
+    integrate_opts =
+      runtime_opts
+      |> Keyword.get(:integrate, [])
+      |> Keyword.put_new(:base, base)
+      |> Keyword.put_new_lazy(:integrator, fn -> default_serial_integrator(base_workspace) end)
+      |> Keyword.update(
+        :integrator_opts,
+        [base_repo: base_workspace],
+        &Keyword.put_new(&1, :base_repo, base_workspace)
+      )
+
+    {:ok, integration} =
+      Kazi.Scheduler.Integration.integrate([{%{key: goal.id}, worktree}], integrate_opts)
+
+    base = Keyword.get(integrate_opts, :base, base)
+
+    case integration do
+      %{collective: :converged, integrated: [{_partition, refs}]} ->
+        {:landed, %{landed: true, base: base, task_branch: branch, refs: json_safe_refs(refs)}}
+
+      %{conflicts: conflicts} ->
+        {:unlanded,
+         %{
+           landed: false,
+           base: base,
+           task_branch: branch,
+           reason: Enum.map_join(conflicts, "; ", fn {_partition, r} -> inspect(r) end)
+         }}
+    end
+  end
+
+  # ADR-0065 decision 2: land exactly as a parallel partition does. With an
+  # origin remote and `gh` on PATH the default is the REAL ActionIntegrator
+  # (branch → push → PR → rebase-merge); a local-only repo (no remote, or no
+  # gh) lands by a plain local rebase-merge instead — a surviving task branch
+  # is the honest degraded mode when even that fails, never a silent drop.
+  defp default_serial_integrator(base_workspace) do
+    if has_origin_remote?(base_workspace) and System.find_executable("gh") do
+      &Kazi.Scheduler.Integration.ActionIntegrator.integrate/2
+    else
+      &Kazi.Scheduler.Integration.LocalIntegrator.integrate/2
+    end
+  end
+
+  defp has_origin_remote?(workspace) do
+    match?(
+      {_, 0},
+      System.cmd("git", ["-C", workspace, "remote", "get-url", "origin"], stderr_to_stdout: true)
+    )
+  rescue
+    _ -> false
+  end
+
+  defp serial_git(repo, args) do
+    case System.cmd("git", args, cd: repo, stderr_to_stdout: true) do
+      {out, 0} -> {:ok, String.trim(out)}
+      {out, _} -> {:error, String.trim(out)}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # The integrator's refs must survive Jason encoding whatever a stub returned.
+  defp json_safe_refs(refs) when is_map(refs) do
+    Map.new(refs, fn {k, v} -> {k, json_safe_value(v)} end)
+  end
+
+  defp json_safe_value(v) when is_binary(v) or is_number(v) or is_boolean(v) or is_nil(v), do: v
+  defp json_safe_value(v) when is_atom(v), do: to_string(v)
+  defp json_safe_value(v), do: inspect(v)
 
   # T34.6 (ADR-0046 §5): fold the run's per-iteration accounting envelopes into the
   # run-end economy KPIs. The cost split comes from the run-aggregate `usage`
@@ -4764,8 +4918,19 @@ defmodule Kazi.CLI do
     |> put_stuck_bundle(result)
     |> put_quarantine(result)
     |> put_cause(result)
+    |> put_integration(result)
     |> put_collateral(goal, workspace)
   end
+
+  # T50.2 (ADR-0065 decision 2): the additive `integration` object — how a
+  # worktree-isolated serial run's converged commits landed on the base
+  # (`landed: true` + refs), or the surviving `task_branch` + reason when they
+  # did not (converged-but-unlanded exits 1). Present only when a landing was
+  # attempted; absent ⇒ byte-identical to before this field existed.
+  defp put_integration(map, %{integration: info}) when is_map(info),
+    do: Map.put(map, :integration, info)
+
+  defp put_integration(map, _result), do: map
 
   # issue #860: the additive `collateral` array — files changed this run that
   # sit outside the goal's write scope, net-deletion first. Present only when
