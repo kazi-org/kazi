@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.123.0](https://github.com/kazi-org/kazi/compare/v1.122.0...v1.123.0) (2026-07-09)
+
+
+### Features
+
+* **authoring:** implementation-brief depth is the authoring default ([e9f43a3](https://github.com/kazi-org/kazi/commit/e9f43a3d50d7f72c8f724dd84d546148dfede0da))
+
 ## [1.122.0](https://github.com/kazi-org/kazi/compare/v1.121.0...v1.122.0) (2026-07-09)
 
 
