@@ -389,10 +389,10 @@ const personas = [
       </p>
       <ul class="mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-2">
         <li class="ui-card rounded-xl border p-4">
-          <div class="ui-strong font-semibold">Easy iterations &rarr; cheap model</div>
+          <div class="ui-strong font-semibold">The grind &rarr; default grind tier</div>
           <div class="ui-muted mt-1 text-sm">
-            The N-iteration grind runs on a cheap Claude model
-            (e.g. Haiku 4.5, <code class="ui-body">claude-haiku-4-5</code>).
+            The N-iteration grind runs on the default grind tier
+            (Sonnet 5, <code class="ui-body">claude-sonnet-5</code>).
           </div>
         </li>
         <li class="ui-card rounded-xl border p-4">
@@ -426,8 +426,8 @@ const personas = [
 kazi plan "add a /healthz endpoint that returns 200 ok" --workspace ./svc
 kazi approve &lt;proposal-ref&gt;
 
-# Drive the grind on a cheap Claude model &mdash; no local model needed:
-kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-4-5</code></pre>
+# Drive the grind on the default grind tier &mdash; no local model needed:
+kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-sonnet-5</code></pre>
         <p class="ui-muted mt-2 text-xs">
           <code class="ui-body">--harness claude --model &lt;id&gt;</code> selects which
           Claude model runs that call; <code class="ui-body">claude</code> is already the
