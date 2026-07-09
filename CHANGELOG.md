@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.117.0](https://github.com/kazi-org/kazi/compare/v1.116.0...v1.117.0) (2026-07-09)
+
+
+### Features
+
+* **cli:** redirect logging off stdout for --json runs (E39 T39.4, issue [#804](https://github.com/kazi-org/kazi/issues/804)) ([f031721](https://github.com/kazi-org/kazi/commit/f0317219a21fe6a1394de7fffde0e046a7e21f85))
+
 ## [1.116.0](https://github.com/kazi-org/kazi/compare/v1.115.0...v1.116.0) (2026-07-08)
 
 
