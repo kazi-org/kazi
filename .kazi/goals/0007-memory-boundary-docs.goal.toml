@@ -1,0 +1,36 @@
+id = "memory-boundary-docs"
+name = "issue #975: state the boundary between kazi memory, Claude's native per-project memory, and docs/lore.md/devlog.md"
+
+[[predicate]]
+id = "boundary-documented"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #975): `kazi memory` (budgeted FTS recall via `memory recall <query>`, ADR-0062; gated-harvest promotion queue via `memory list-proposed/approve/reject`, ADR-0063) is a complete, separate memory system with NO documented relationship to two other memory-shaped systems an orchestrating agent already has: Claude Code's own native per-project memory, and this project's committed docs/lore.md / docs/devlog.md wiki convention (where a durable finding gets recorded today, per docs/lore.md and docs/devlog.md's own moduledocs). Nothing currently says when to reach for which -- risk is duplication (same finding written three places) or, more likely, `kazi memory` staying unused because nothing tells an agent it is the right place for a given fact.\nAdd a short boundary note answering: does `kazi memory` hold run-specific/predicate-specific recall (e.g. \"this provider config worked for this kind of goal before\") that is meaningfully DIFFERENT in scope from the project-level architectural/incident knowledge docs/lore.md holds, or is `kazi memory` a mechanism the lore/devlog convention could eventually harvest from (or vice versa)? State it plainly -- no grand unification needed, just an explicit statement of what each is for. Concretely: kazi memory's corpus IS docs/lore.md + docs/devlog.md + AGENTS.md + ADRs (per ADR-0062, `[memory]`-configurable) -- it is a RETRIEVAL layer OVER those same files at dispatch time, not a separate store of new facts; the gated-write half (ADR-0063) is how NEW candidate facts get proposed FROM a run BACK INTO those same repo docs (human-reviewed before landing) -- so kazi memory and docs/lore.md/devlog.md are the SAME store of record, viewed from two ends (recall-in / harvest-out), and Claude Code's own native per-project memory is a THIRD, separate thing: it lives outside the repo (per Claude Code install, not git-tracked, not shared with other harnesses/CI) and should hold operator/session preferences and cross-repo context, never the kind of repo-durable finding that belongs in docs/lore.md or docs/devlog.md (verify this framing against the actual ADR-0062/0063 text and docs/memory.md before writing -- do not invent claims the ADRs don't support).\nLand this in docs/memory.md (the existing per-command memory reference) as a new short section near the top (e.g. right after the intro, before the recall API details), cross-linked from docs/lore.md's and docs/devlog.md's own header prose if they don't already point at docs/memory.md. Extend an existing memory doc test (search test/ for a doc-freshness or memory-doc test) or add a minimal one asserting docs/memory.md contains a section addressing the boundary (grep for a stable heading string). PROCESS: branch task/memory-boundary-docs, small conventional commits, push with -u. This predicate passes when the new/extended test passes."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/memory/ test/kazi/teach/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
