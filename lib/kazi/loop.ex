@@ -2283,6 +2283,13 @@ defmodule Kazi.Loop do
   #
   # T36.3 (ADR-0047 §3): the active context tier is recorded alongside the section
   # counters, so each iteration's `context` envelope reports which tier it ran at.
+  #
+  # Issue #978: the attempt-ledger/memory-recall FLAGS are threaded alongside
+  # `parts.attempt_ledger`/`parts.memory_recall` (already nil-collapsed by
+  # `attempt_ledger_section/1`/`memory_recall_section/2` for the prompt itself) so
+  # `Counters.context/8` can tell "flag off" (`:off` ⇒ `nil` token field) apart from
+  # "flag on but rendered nothing" (nil text ⇒ a real `0`) — the two currently
+  # collapse to the same `nil` in the prompt-section value alone.
   @spec record_counters(Data.t(), map(), Kazi.HarnessAdapter.result()) :: Data.t()
   defp record_counters(%Data{} = data, parts, result) do
     context =
@@ -2296,7 +2303,9 @@ defmodule Kazi.Loop do
         # the per-iteration `context` envelope attributes outcomes to the live tier
         # (which may have stepped up from the base on non-progress), not the static
         # base opt.
-        active_tier(data)
+        active_tier(data),
+        memory_section_arg(attempt_ledger?(data), parts.attempt_ledger),
+        memory_section_arg(memory_recall?(data), parts.memory_recall)
       )
 
     %Data{
@@ -2309,6 +2318,13 @@ defmodule Kazi.Loop do
         last_harness_pid: harness_pid(result, data.last_harness_pid)
     }
   end
+
+  # Issue #978: a memory layer's `Counters.context/8` argument — `:off` when the
+  # layer's flag is disabled (⇒ the counter reports `nil`), else the layer's
+  # rendered section text (nil-included, ⇒ a real `0` when it rendered nothing).
+  @spec memory_section_arg(boolean(), String.t() | nil) :: Counters.memory_section()
+  defp memory_section_arg(false, _section), do: :off
+  defp memory_section_arg(true, section), do: section
 
   # T48.11 (ADR-0058 §3): fold this dispatch's capped debrief hypothesis list
   # into the loop state, attached to the NEXT iteration event (mirroring

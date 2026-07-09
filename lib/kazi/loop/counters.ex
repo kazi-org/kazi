@@ -18,6 +18,7 @@ defmodule Kazi.Loop.Counters do
           %{ orientation_cache: "hit"|"miss"|"disabled",
              retrieval_cache:   "hit"|"miss"|"disabled",
              orientation_tokens: 0, evidence_tokens: 0, retrieval_tokens: 0,
+             attempt_ledger_tokens: nil | 0, memory_recall_tokens: nil | 0,
              tier: 0..4 | nil }
 
       `tier` is the resolved `Kazi.Context.Tier` (default 1) the dispatch assembled
@@ -35,7 +36,13 @@ defmodule Kazi.Loop.Counters do
 
     * `context` is ALWAYS fully populated — kazi owns the prompt, so a `0` here is
       a real, measured zero (e.g. orientation off ⇒ `orientation_tokens: 0` and
-      `orientation_cache: "disabled"`), never "unknown".
+      `orientation_cache: "disabled"`), never "unknown". The two opt-in memory
+      layers (issue #978) are the ONE exception to "0 not unknown": their token
+      fields are `nil` when the layer's flag is off (ADR-0061/0062 default) and a
+      real `non_neg_integer` (0 when the layer rendered nothing, positive when it
+      rendered a section) when on — so "flag off" stays distinguishable from
+      "flag on but the corpus/ledger had nothing to say" (the T35.10 postmortem
+      failure mode: a silent no-op looking identical to a disabled feature).
     * `tools` is populated ONLY when the harness surfaced a tool-use signal
       (`result[:tool_uses]`). With a signal, every bucket is reported (an unused
       category is a real `0`); WITHOUT one (e.g. Claude's `--output-format json`
@@ -62,8 +69,19 @@ defmodule Kazi.Loop.Counters do
           orientation_tokens: non_neg_integer(),
           evidence_tokens: non_neg_integer(),
           retrieval_tokens: non_neg_integer(),
+          attempt_ledger_tokens: non_neg_integer() | nil,
+          memory_recall_tokens: non_neg_integer() | nil,
           tier: Kazi.Context.Tier.t() | nil
         }
+
+  @typedoc """
+  A memory-layer section's contribution to the token counters: `:off` when the
+  layer's flag (ADR-0061 `:attempt_ledger` / ADR-0062 `:memory_recall`) is
+  disabled — the field is reported `nil` — or the layer's rendered section text
+  when the flag is on, `nil`/`""` included (an enabled-but-empty render is a
+  real, measured `0`, not absence).
+  """
+  @type memory_section :: :off | String.t() | nil
 
   @typedoc "The per-iteration tool counters (empty when the harness reported none)."
   @type tools :: %{optional(atom()) => non_neg_integer()}
@@ -84,6 +102,14 @@ defmodule Kazi.Loop.Counters do
   assembled its context at; it defaults to `nil` so the pure section-counting
   contract is unchanged for callers that do not track a tier. `Kazi.Loop` passes
   the live tier so each iteration records the one it ran at.
+
+  `attempt_ledger` / `memory_recall` (issue #978, ADR-0061/0062) each default to
+  `:off` — the memory-layer flag disabled, so `attempt_ledger_tokens` /
+  `memory_recall_tokens` are `nil` and the pure section-counting contract is
+  unchanged for callers that do not track these layers. `Kazi.Loop` passes the
+  layer's rendered section text (nil-included) when its flag is on, so the field
+  reports a real `0` for "on but rendered nothing" instead of collapsing into the
+  same `nil` a disabled flag reports.
   """
   @spec context(
           String.t() | nil,
@@ -91,16 +117,29 @@ defmodule Kazi.Loop.Counters do
           String.t() | nil,
           String.t() | nil,
           String.t() | nil,
-          Kazi.Context.Tier.t() | nil
+          Kazi.Context.Tier.t() | nil,
+          memory_section(),
+          memory_section()
         ) ::
           context()
-  def context(orientation, evidence, retrieval, prev_orientation, prev_retrieval, tier \\ nil) do
+  def context(
+        orientation,
+        evidence,
+        retrieval,
+        prev_orientation,
+        prev_retrieval,
+        tier \\ nil,
+        attempt_ledger \\ :off,
+        memory_recall \\ :off
+      ) do
     %{
       orientation_cache: cache_state(orientation, prev_orientation),
       retrieval_cache: cache_state(retrieval, prev_retrieval),
       orientation_tokens: estimate_tokens(orientation),
       evidence_tokens: estimate_tokens(evidence),
       retrieval_tokens: estimate_tokens(retrieval),
+      attempt_ledger_tokens: memory_section_tokens(attempt_ledger),
+      memory_recall_tokens: memory_section_tokens(memory_recall),
       tier: tier
     }
   end
@@ -148,6 +187,14 @@ defmodule Kazi.Loop.Counters do
     chars = String.length(text)
     div(chars + @chars_per_token - 1, @chars_per_token)
   end
+
+  # A memory layer's token count: `:off` (the flag is disabled) stays `nil` —
+  # the honest-unknown-vs-off distinction (issue #978) — while any other value
+  # (the layer's rendered text, or `nil` when the flag is on but the render was
+  # empty) is a real, measured `estimate_tokens/1` (0 when empty).
+  @spec memory_section_tokens(memory_section()) :: non_neg_integer() | nil
+  defp memory_section_tokens(:off), do: nil
+  defp memory_section_tokens(text), do: estimate_tokens(text)
 
   # A section's cache verdict: not sent ⇒ "disabled"; byte-identical to the prior
   # dispatch's section ⇒ "hit" (the inner harness's prompt cache can reuse it);

@@ -1,0 +1,36 @@
+id = "memory-token-observability"
+name = "issue #978: events context gains attempt_ledger_tokens/memory_recall_tokens, mirroring orientation/retrieval accounting"
+
+[[predicate]]
+id = "context-carries-memory-tokens"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #978): the per-iteration `context` object written to events.jsonl carries `orientation_tokens`/`retrieval_tokens`/`evidence_tokens` but NOT `attempt_ledger_tokens`/`memory_recall_tokens` (the ADR-0061 episodic-memory / ADR-0062 semantic-memory-recall dispatch-prompt sections), so there is no retained evidence that these opt-in layers rendered anything into any dispatch prompt -- \"flags on\" is indistinguishable from \"flags silently no-oped\" (the exact failure mode ADR-0045's Gist provider suffered, per the T35.10 postmortem). Already researched -- exact seams, do not re-derive:\n- Type + construction: lib/kazi/loop/counters.ex:59-66 (`@type context`) and :97-106 (`Counters.context/6`, builds the map); called from lib/kazi/loop.ex:2286-2311 (`record_counters/3`), which folds the result into `data.last_context` (the events.jsonl field).\n- `orientation_tokens` pattern to copy: counters.ex:101 `orientation_tokens: estimate_tokens(orientation)`; `estimate_tokens/1` at counters.ex:143-150 (`nil`/`\"\"` -> 0, else `ceil(chars/4)`, ADR-0010 chars-per-token approximation).\n- Attempt-ledger section: lib/kazi/loop.ex:2444-2456 `attempt_ledger_section/1`, gated by `attempt_ledger?/1` (2462-2468, reads `adapter_opts[:attempt_ledger]` then `Application.get_env(:kazi, :attempt_ledger, false)`); rendered via `Kazi.Memory.AttemptLedger.render/2` (lib/kazi/memory/attempt_ledger.ex:204-207, empty history -> \"\"); flows into `dispatch_prompt_parts/2` at loop.ex:2101.\n- Memory-recall section: lib/kazi/loop.ex:2487-2500 `memory_recall_section/2`, gated by `memory_recall?/1` (2505-2511, same opt-then-config pattern); calls `Kazi.Memory.SemanticIndex.recall/3`; empty list -> nil, else `render_memory_recall_section/1` (2535-2541); flows into parts at loop.ex:2108.\n- IMPORTANT gap already found: today `attempt_ledger_section`/`memory_recall_section` collapse \"flag off\" and \"rendered empty\" into the SAME `nil` (loop.ex:2450,2454-2455 and 2494,2498-2499), and `estimate_tokens(nil) == 0` -- so as written there is currently no way to distinguish \"off\" from \"on-but-empty\" purely from the section value. To honor this issue's expected null(off)-vs-0(on,empty) semantics, thread the `attempt_ledger?/1`/`memory_recall?/1` boolean itself (not just the rendered text) into `Counters.context/6` (or pass an explicit sentinel through `dispatch_prompt_parts`) so the new fields can be `nil` when the layer is off and `0`/positive when on. This is real new plumbing, not a one-line copy of the orientation pattern -- do it properly.\nAdd `attempt_ledger_tokens` and `memory_recall_tokens` to the `context` type + `Counters.context/6` (or add a `context/8` variant / new arity, whichever keeps call sites clean) using the off/empty-aware estimate above. Extend test/kazi/loop/counters_test.exs (the `context/5 -- token estimates` describe block, ~lines 56-75, including the exact-map assertion at 65-74) with the two new keys; extend test/kazi/loop/iteration_counters_test.exs (~130-187, end-to-end events.jsonl assertions) to assert the new fields appear correctly (nil when the corresponding flag is off, 0 or positive when on and the section is empty/non-empty respectively) in a real recorded event. Also check test/kazi/read_model_test.exs and test/kazi/economy/kpis_test.exs for exhaustive-map pattern matches on the `context` shape that may need the new keys added so they don't spuriously fail. PROCESS: branch task/memory-token-observability, small conventional commits, push with -u. This predicate passes when the extended tests pass."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/loop/counters_test.exs test/kazi/loop/iteration_counters_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

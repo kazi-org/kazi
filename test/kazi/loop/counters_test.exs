@@ -69,8 +69,51 @@ defmodule Kazi.Loop.CountersTest do
                orientation_tokens: 0,
                evidence_tokens: 0,
                retrieval_tokens: 0,
+               attempt_ledger_tokens: nil,
+               memory_recall_tokens: nil,
                tier: nil
              }
+    end
+  end
+
+  describe "context/8 — memory-layer tokens (issue #978, ADR-0061/0062)" do
+    test "both memory layers default to :off, so their token fields are nil (not 0)" do
+      ctx = Counters.context("abcdefgh", "evidence!", nil, nil, nil)
+      assert ctx.attempt_ledger_tokens == nil
+      assert ctx.memory_recall_tokens == nil
+    end
+
+    test "a layer that is ON but rendered nothing is a real 0, distinguishable from off" do
+      ctx = Counters.context("abcdefgh", "evidence!", nil, nil, nil, nil, nil, nil)
+      assert ctx.attempt_ledger_tokens == 0
+      assert ctx.memory_recall_tokens == 0
+    end
+
+    test "a layer that is ON and rendered a section estimates its tokens" do
+      ctx =
+        Counters.context(
+          "abcdefgh",
+          "evidence!",
+          nil,
+          nil,
+          nil,
+          nil,
+          "## Attempt ledger\nabcd",
+          "## Recalled project knowledge\nabcdefgh"
+        )
+
+      assert ctx.attempt_ledger_tokens == Counters.estimate_tokens("## Attempt ledger\nabcd")
+      assert ctx.memory_recall_tokens > 0
+    end
+
+    test "the two layers are tracked independently" do
+      on_only_ledger = Counters.context(nil, "ev", nil, nil, nil, nil, "ledger text", :off)
+      assert on_only_ledger.attempt_ledger_tokens > 0
+      assert on_only_ledger.memory_recall_tokens == nil
+
+      on_only_recall = Counters.context(nil, "ev", nil, nil, nil, nil, :off, "recall text")
+      assert on_only_recall.attempt_ledger_tokens == nil
+      assert on_only_recall.memory_recall_tokens > 0
     end
   end
 
