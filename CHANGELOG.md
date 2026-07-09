@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.127.0](https://github.com/kazi-org/kazi/compare/v1.126.1...v1.127.0) (2026-07-09)
+
+
+### Features
+
+* **dashboard:** honest state columns in the no-roadmap starmap fallback ([b136c83](https://github.com/kazi-org/kazi/commit/b136c83f39ea497f8f28a30cce62936824ac9783))
+
 ## [1.126.1](https://github.com/kazi-org/kazi/compare/v1.126.0...v1.126.1) (2026-07-09)
 
 
