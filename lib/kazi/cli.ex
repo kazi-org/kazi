@@ -147,6 +147,7 @@ defmodule Kazi.CLI do
     session_name: :string,
     allow_primary_workspace: :boolean,
     allow_duplicate_run: :boolean,
+    in_place: :boolean,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -228,6 +229,8 @@ defmodule Kazi.CLI do
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
       "`apply` only: start this run even when the run registry already shows a LIVE run (status running, fresh heartbeat) for the same goal id. Without this flag, an executing apply refuses the duplicate -- a second concurrent apply of one goal burns a second budget and races the first's edits. Zombie rows never block (a dead run's heartbeat goes stale within ~90s); pass this flag only for a deliberate re-run alongside a live one.",
+    in_place:
+      "`apply` only (T50.1, ADR-0065 decision 1): edit --workspace directly instead of kazi's default of creating a kazi-owned task worktree off its HEAD and editing there. Without this flag, --workspace is the base the run integrates ONTO, not the edit site itself -- the dispatched agent's shell, and every predicate, runs inside a worktree kazi creates and removes on every terminal state (converged / stuck / over_budget / error / crash). Pass this flag to reproduce pre-T50.1 direct-edit behavior byte-identically (e.g. a throwaway clone where isolation buys nothing). A non-git workspace always runs in place -- worktree isolation needs a git repo.",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -278,7 +281,8 @@ defmodule Kazi.CLI do
         :context_budget,
         :session_name,
         :allow_primary_workspace,
-        :allow_duplicate_run
+        :allow_duplicate_run,
+        :in_place
       ]
     },
     %{
@@ -1207,6 +1211,7 @@ defmodule Kazi.CLI do
           session_name: flags[:session_name],
           allow_primary_workspace: flags[:allow_primary_workspace] || false,
           allow_duplicate_run: flags[:allow_duplicate_run] || false,
+          in_place: flags[:in_place] || false,
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1645,7 +1650,13 @@ defmodule Kazi.CLI do
       # --explain/--check (read-only, safe anywhere) and before both execution
       # branches, so serial and --parallel are guarded alike. A non-git
       # workspace is unaffected.
-      primary_workspace_refused?(goal, opts) ->
+      # T50.1 (ADR-0065 decision 1): the guard now applies ONLY to the
+      # --in-place serial path (and, unchanged, to --parallel). The DEFAULT
+      # serial path (no --in-place) creates its own task worktree off the
+      # requested workspace, so a primary-worktree target is unreachable and
+      # the refusal is unnecessary there.
+      primary_workspace_refused?(goal, opts) and
+          (opts[:parallel] == true or opts[:in_place] == true) ->
         refuse_primary_workspace(goal, opts)
 
       opts[:parallel] == true ->
@@ -1723,9 +1734,77 @@ defmodule Kazi.CLI do
     1
   end
 
+  # T50.1 (ADR-0065 decision 1): a serial `apply` no longer trusts `--workspace`
+  # as the edit site directly. By default it creates a kazi-owned task
+  # worktree off that workspace's HEAD, threads the WORKTREE path in as
+  # `:workspace` (so the loop, the dispatched agent, and predicate evaluation
+  # all operate there), and removes it on every terminal state — the serial
+  # 1-partition degenerate case of the parallel scheduler's own worktree
+  # isolation (Kazi.Scheduler.Worktree). `--in-place` opts out and reproduces
+  # today's direct-edit behavior byte-identically. A workspace that is not a
+  # git repo cannot host a worktree at all, so it fails open to in-place
+  # (unchanged behavior — worktree isolation is simply unavailable there).
   defp run_goal_serial(%Goal{} = goal, opts, persist?, runtime_opts) do
-    workspace = opts[:workspace] || goal.scope.workspace
+    base_workspace = opts[:workspace] || goal.scope.workspace
 
+    if opts[:in_place] == true or not git_repo?(base_workspace) do
+      run_goal_serial_at(goal, opts, persist?, runtime_opts, base_workspace, base_workspace)
+    else
+      run_goal_serial_in_worktree(goal, opts, persist?, runtime_opts, base_workspace)
+    end
+  end
+
+  # `workspace` is only "a git repo" for T50.1's purposes when it is itself a
+  # repo/worktree ROOT (`--show-toplevel` resolves back to it) — matching
+  # `primary_worktree_root?/1`'s own check. A plain directory NESTED inside
+  # some ancestor repo (e.g. a throwaway scratch dir under this project's own
+  # checkout) must NOT be treated as isolatable via `git worktree add`, which
+  # would silently branch off the ANCESTOR repo's HEAD instead — it falls open
+  # to in-place, unchanged pre-T50.1 behavior.
+  defp git_repo?(workspace) when is_binary(workspace) do
+    case System.cmd("git", ["-C", workspace, "rev-parse", "--show-toplevel"],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} -> Path.expand(String.trim(out)) == Path.expand(workspace)
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp git_repo?(_workspace), do: false
+
+  # Wraps the run in a task worktree via the parallel scheduler's own worktree
+  # machinery (Kazi.Scheduler.Worktree.wrap/2) — a 1-partition degenerate case:
+  # create off `base_workspace`'s HEAD, run the loop with the worktree path as
+  # `:workspace`, remove it on every exit (normal, error, or crash) via the
+  # wrapper's `try/after`. `reconciler.(...)` returns whatever `run_goal_serial_at/6`
+  # returns (an exit code) on a normal run, or `:stuck` if the worktree itself
+  # could not be created (e.g. a permissions failure) — reported as a run error.
+  defp run_goal_serial_in_worktree(%Goal{} = goal, opts, persist?, runtime_opts, base_workspace) do
+    reconciler =
+      Kazi.Scheduler.Worktree.wrap(
+        fn _partition, worktree_path ->
+          run_goal_serial_at(goal, opts, persist?, runtime_opts, base_workspace, worktree_path)
+        end,
+        repo: base_workspace
+      )
+
+    case reconciler.(%{key: goal.id}) do
+      code when is_integer(code) ->
+        code
+
+      _stuck ->
+        IO.puts(
+          :stderr,
+          "error: could not create an isolated task worktree for #{base_workspace}"
+        )
+
+        1
+    end
+  end
+
+  defp run_goal_serial_at(%Goal{} = goal, opts, persist?, runtime_opts, base_workspace, workspace) do
     # The caller's static run config; CLI-owned keys (workspace/persist?) win, and
     # an explicit :persist? in runtime_opts can still override (tests).
     #
@@ -1737,6 +1816,11 @@ defmodule Kazi.CLI do
       runtime_opts
       |> Keyword.put_new(:persist?, persist?)
       |> Keyword.put(:workspace, workspace)
+      # T50.1: the caller's base workspace stays available on the run opts
+      # (the follow-up integration task, T50.2, needs it to integrate the
+      # worktree's edits back onto the base) — absent only for :in_place runs,
+      # where base_workspace == workspace anyway.
+      |> Keyword.put(:base_workspace, base_workspace)
       # T3.3d deploy wiring: fold the operator's --env selection into the deploy
       # action's params, so the deepened deploy (T3.3a) selects that environment's
       # per-env target. Merged OVER any caller-supplied :deploy_params so tests
