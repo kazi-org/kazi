@@ -80,7 +80,16 @@ defmodule Kazi.Enforcement.Isolation do
           {:ok, String.t(), (-> :ok)} | {:degraded, term()}
   def prepare(workspace, ref, read_only_paths)
       when is_binary(workspace) and is_binary(ref) and is_list(read_only_paths) do
-    tmp = Path.join(System.tmp_dir!(), "kazi-enforce-#{System.unique_integer([:positive])}")
+    # `System.unique_integer/1` is only unique WITHIN this BEAM VM, but this tmp
+    # dir lives under a machine-wide `$TMPDIR` -- two concurrent kazi/enforcement
+    # processes (e.g. separate worktrees running their own guards, E50) can pick
+    # the same counter value at the same time and collide on disk. The OS pid
+    # makes it unique across processes too.
+    tmp =
+      Path.join(
+        System.tmp_dir!(),
+        "kazi-enforce-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
 
     with {:ok, _output} <- git(workspace, ["worktree", "add", "--detach", tmp, ref]),
          :ok <- overlay_working_tree(workspace, tmp, ref),
@@ -144,7 +153,7 @@ defmodule Kazi.Enforcement.Isolation do
   defp apply_diff(_tmp, ""), do: :ok
 
   defp apply_diff(tmp, diff) do
-    name = "kazi-overlay-#{System.unique_integer([:positive])}.patch"
+    name = "kazi-overlay-#{System.pid()}-#{System.unique_integer([:positive])}.patch"
     patch = Path.join(System.tmp_dir!(), name)
     File.write!(patch, diff)
 

@@ -5,8 +5,28 @@ import Config
 # isolated and self-contained — CI runs `mix test` with no external DB step
 # (the test setup migrates this DB itself). SQLite has a single writer, so the
 # pool is sized to one connection.
+#
+# E50 (safe concurrent work): the db FILENAME carries the OS pid. Sandbox only
+# isolates tests WITHIN one BEAM VM — it does nothing for TWO SEPARATE `mix
+# test` OS processes against the same worktree (e.g. a standing guard
+# predicate re-checking `full-suite-green` while a fixer session is ALSO
+# verifying locally, this epic's own failure mode). Sharing one file across
+# processes caused live `Database busy` (Exqlite.Error) failures AND read-model
+# row pollution across unrelated runs (e.g. `Kazi.Economy.BudgetSuggestionTest`
+# seeing another process's seeded rows) under real concurrent `mix test`. The
+# `test` mix alias runs `ecto.create`/`ecto.migrate` fresh before every
+# invocation (mix.exs), so a new pid gets a clean, fully-migrated db for free.
+#
+# `KAZI_TEST_DB` overrides the path outright: `Kazi.CLI.JsonStdoutPurityTest`
+# spawns a REAL `mix run` (not `mix test`) child to exercise a genuine `kazi`
+# process boundary, and a bare `mix run` never runs `ecto.create`/`ecto.migrate`
+# — so a fresh pid-scoped path there would be an unmigrated, unusable db. The
+# test threads its OWN already-migrated db path down via this env var so the
+# child reuses it instead of pointing at a brand-new one.
 config :kazi, Kazi.Repo,
-  database: Path.expand("../tmp/kazi_test.db", __DIR__),
+  database:
+    System.get_env("KAZI_TEST_DB") ||
+      Path.expand("../tmp/kazi_test-#{System.pid()}.db", __DIR__),
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 1
 

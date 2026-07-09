@@ -108,10 +108,18 @@ defmodule Kazi.CLI.JsonStdoutPurityTest do
     System.halt(Kazi.CLI.run(["list-proposed", "--json"]))
     """
 
+    # E50 (safe concurrent work): `config/test.exs` scopes the read-model db
+    # PATH to this OS pid, so two concurrent `mix test` processes never share
+    # one SQLite file. A bare `mix run` (unlike the `test` mix alias) never
+    # runs `ecto.create`/`ecto.migrate`, so the CHILD must reuse THIS process's
+    # own already-migrated db rather than pointing at a brand-new, unmigrated
+    # one — `KAZI_TEST_DB` is that override seam.
+    db_path = Application.fetch_env!(:kazi, Kazi.Repo) |> Keyword.fetch!(:database)
+
     {out, status} =
       System.cmd("mix", ["run", "-e", eval],
         cd: project_root,
-        env: [{"MIX_ENV", "test"}, {"TEST_SERVER", "false"}]
+        env: [{"MIX_ENV", "test"}, {"TEST_SERVER", "false"}, {"KAZI_TEST_DB", db_path}]
       )
 
     assert status == 0

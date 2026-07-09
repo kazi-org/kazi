@@ -47,9 +47,21 @@ config :kazi, KaziWeb.Endpoint,
 
 # Default (dev) read-model database. WAL keeps reads (the LiveView console,
 # analytics queries) from blocking the projector's writes (concept §7).
+#
+# E50 (safe concurrent work): the exqlite default `busy_timeout` is only 2000ms.
+# That's too short whenever a SECOND OS process legitimately holds the write
+# lock for a moment against this SAME db file -- e.g. the standing
+# `full-suite-green` guard re-running `mix test` while a fixer session is ALSO
+# running it in the same workspace (exactly this epic's failure mode: bumped it
+# after live `Database busy` (Exqlite.Error) failures under real concurrent
+# `mix test` runs). Raising it makes a second writer WAIT instead of erroring,
+# which is what WAL mode is supposed to buy us. Set here (not just test.exs) so
+# dev/prod get the same protection; `pool_size`/`database` are still overridden
+# per-env below.
 config :kazi, Kazi.Repo,
   database: Path.expand("../priv/kazi_dev.db", __DIR__),
   journal_mode: :wal,
+  busy_timeout: 30_000,
   pool_size: 5
 
 import_config "#{config_env()}.exs"

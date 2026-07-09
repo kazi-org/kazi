@@ -229,11 +229,16 @@ defmodule Kazi.Scheduler.Worktree do
 
   # A distinct (path, branch) target under the managed base dir. The slug keeps it
   # legible; a per-call nonce makes it unique even for the same partition key
-  # across runs, so two worktrees never collide on disk. The branch carries the
+  # across runs, so two worktrees never collide on disk. `:erlang.unique_integer/1`
+  # is only unique WITHIN this BEAM VM -- `default_base_dir/0` is a fixed,
+  # machine-wide path (`$TMPDIR/kazi-worktrees`), so two SEPARATE `kazi`/`mix
+  # test` OS processes (e.g. concurrent worktrees on the same machine, E50) can
+  # legitimately pick the same nonce at the same time and collide on disk. The
+  # OS pid makes the nonce unique across processes too. The branch carries the
   # configured prefix so a partition's branch is recognizable in `git branch`.
   defp worktree_target(base_dir, branch_prefix, slug) do
     nonce = :erlang.unique_integer([:positive, :monotonic])
-    name = slug <> "-" <> Integer.to_string(nonce)
+    name = slug <> "-" <> System.pid() <> "-" <> Integer.to_string(nonce)
     branch = branch_prefix <> "/" <> name
     {Path.join(base_dir, name), branch}
   end
