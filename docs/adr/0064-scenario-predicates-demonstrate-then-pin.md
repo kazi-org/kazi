@@ -1,7 +1,7 @@
 # ADR 0064: Scenario predicates -- capability-level verification by demonstrate-then-pin
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-07-08
