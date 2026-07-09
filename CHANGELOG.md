@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.131.0](https://github.com/kazi-org/kazi/compare/v1.130.0...v1.131.0) (2026-07-09)
+
+
+### Features
+
+* **dashboard:** fleet-tile filter lifts the state-column cap ([bf74908](https://github.com/kazi-org/kazi/commit/bf74908040ba30ba2c5dc2025be2325c73c7a0a5))
+* **dashboard:** richer starmap drill-in panel ([16b8069](https://github.com/kazi-org/kazi/commit/16b8069c17c11bdcf81e967bd1a51fa6a589512f))
+* **goal:** optional top-level description field ([af1884f](https://github.com/kazi-org/kazi/commit/af1884f20de5f37f262e8ecc64ff0d5fe74c8eff))
+* **read-model:** capture goal name + description on the run row ([b35062c](https://github.com/kazi-org/kazi/commit/b35062c35c61b5abad775fdf420a1c8575781422))
+
 ## [1.130.0](https://github.com/kazi-org/kazi/compare/v1.129.0...v1.130.0) (2026-07-09)
 
 
