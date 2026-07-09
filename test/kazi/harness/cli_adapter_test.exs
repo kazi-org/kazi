@@ -264,7 +264,7 @@ defmodule Kazi.Harness.CliAdapterTest do
       refute Map.has_key?(result, :cost_usd)
     end
 
-    test "the dispatched argv is the opencode shape: run <prompt> --format json --model <m>",
+    test "the dispatched argv is the opencode shape: run <prompt> --format json --dir <ws> --model <m>",
          %{workspace: workspace} do
       assert {:ok, %{exit: 0}} =
                CliAdapter.run("do the thing", workspace,
@@ -275,11 +275,16 @@ defmodule Kazi.Harness.CliAdapterTest do
 
       argv = recorded_argv(workspace)
 
+      # T39.7: the RUN's workspace is threaded into the argv as `--dir <ws>` —
+      # `opencode run` ignores the launch cwd, so `cd: workspace` alone would
+      # let the inner agent edit outside the goal's workspace.
       assert argv == [
                "run",
                "do the thing",
                "--format",
                "json",
+               "--dir",
+               workspace,
                "--model",
                "local-ollama/qwen3.6:35b-a3b-q8_0"
              ]
