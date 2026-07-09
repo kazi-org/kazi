@@ -245,6 +245,71 @@ kazi status <proposal-ref> --json   # kind: "proposal" -- lifecycle state
 
 An unknown ref is a JSON error envelope with a non-zero exit.
 
+### Fleets: several goal-files as one DAG (`kazi apply --fleet <dir|manifest> --explain --json`)
+
+Real work often spans several goal-files with cross-file dependencies. A
+**fleet** (T50.4, ADR-0065 decision 3) is a DAG of goal-files, loaded from
+either:
+
+  * a DIRECTORY -- every `*.goal.toml` file in it, non-recursive, loaded in
+    sorted filename order (`.kazi/goals/` convention, ADR-0059); or
+  * a manifest `.toml` file -- a minimal `[[member]]` list:
+
+    ```toml
+    [[member]]
+    path = "0013-first.goal.toml"
+
+    [[member]]
+    path = "0014-second.goal.toml"
+    ```
+
+    `path` is resolved relative to the manifest's own directory; an absolute
+    path passes through unchanged.
+
+Each loaded goal-file becomes a fleet NODE, keyed by its goal id (duplicate ids
+across members are a load error naming both files). Two kinds of edge order the
+nodes:
+
+  * **explicit** -- an OPTIONAL `[metadata] depends_on = ["<goal-id>", ...]`
+    key on a member goal-file (loaded verbatim by the existing loader onto
+    `Goal.metadata` -- no goal-file schema change). A `depends_on` on an
+    unknown goal id, or a cycle among explicit edges, is a load error naming
+    the offending file(s).
+  * **inferred (scope overlap)** -- between any two nodes whose declared
+    `[scope]` paths overlap (one path prefix-contains the other) when no
+    explicit edge already orders them -- the same "same blast radius = never
+    concurrent" rule the in-goal-file scheduler applies, lifted across files.
+    Ordered by file sequence (earlier file first). A node with NO declared
+    scope paths gets NO inferred edges -- an unscoped goal does not serialize
+    the whole fleet. Escape hatches: declare an explicit edge, or narrow
+    `[scope] paths`/`write_paths` so two goals no longer overlap.
+
+Today only `--explain` is implemented -- it prints the fleet's nodes, its
+kind-tagged edges (an `inferred_overlap` edge also carries the overlapping
+paths), and the resulting topological frontiers, and dispatches nothing:
+
+```sh
+kazi apply --fleet .kazi/goals/ --explain --json
+```
+
+```json
+{
+  "schema_version": 1,
+  "mode": "fleet_explain",
+  "dispatched": false,
+  "nodes": [{"id": "a", "file": ".kazi/goals/0001-a.goal.toml"}, "..."],
+  "edges": [
+    {"from": "a", "to": "c", "kind": "explicit"},
+    {"from": "d", "to": "e", "kind": "inferred_overlap", "overlap": [{"a": "lib/", "b": "lib/kazi/"}]}
+  ],
+  "frontiers": [["a", "b", "d"], ["c", "e"]],
+  "next_action": "schedule"
+}
+```
+
+Running a fleet WITHOUT `--explain` refuses loudly ("fleet execution lands in
+a follow-up; use --explain") -- fleet execution is a separate follow-up
+(T50.5), not yet wired.
 
 ## 3. The versioned result schemas (pin `schema_version`)
 

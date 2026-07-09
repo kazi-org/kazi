@@ -208,6 +208,20 @@ For a long convergence add `--stream` for a JSONL progress stream -- one
 result object (the one line with NO `event` field). Read lines until you see the
 object without an `event`; that is the terminal result you branch on.
 
+### Fleets: several goal-files as one DAG -- `kazi apply --fleet <dir> --explain --json`
+
+`--fleet <path>` (T50.4, ADR-0065 decision 3) treats the positional argument as
+a fleet -- a DIRECTORY of `*.goal.toml` files (non-recursive, sorted) or a
+manifest `.toml` file (`[[member]] path = "..."` entries) -- instead of a
+single goal-file. Each member becomes a fleet node; edges come from an OPTIONAL
+per-file `[metadata] depends_on = ["<goal-id>", ...]` (explicit) plus an
+INFERRED serialization edge between any two nodes whose declared `[scope]`
+paths overlap (goals with no declared scope paths get no inferred edges).
+Today only `--explain` (print the fleet schedule -- nodes, kind-tagged edges,
+topological frontiers -- and exit, dispatching nothing) is implemented;
+running a fleet without `--explain` fails loudly ("fleet execution lands in a
+follow-up") until execution ships (T50.5).
+
 ### 4. parse and branch on `next_action`
 
 `apply --json` gives the terminal `status` plus a derived `next_action` hint, so
