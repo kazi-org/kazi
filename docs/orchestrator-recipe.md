@@ -199,6 +199,25 @@ clear errors with a non-zero exit -- approve first, then apply.
 The exit code mirrors convergence: `0` only on `converged`, non-zero otherwise --
 identical on both the human and `--json` surfaces.
 
+**Workspace semantics (ADR-0065).** By default a serial `apply` against a git
+repo does NOT edit `--workspace` directly: it creates a kazi-owned task
+worktree off that workspace's HEAD, the agent and every predicate run there,
+and the worktree is removed on every terminal state (decision 1, T50.1). When
+the run CONVERGES with commits on its task branch, those commits LAND on the
+base -- `--workspace`'s checked-out branch -- exactly as a parallel partition's
+do (decision 2, T50.2): rebase-merge onto the base, a conflict routed through
+the re-dispatch seam bounded by an attempt budget, and NEVER `git reset` /
+`git clean` against your checkout. With an `origin` remote and `gh` available
+the landing is branch -> push -> PR -> rebase-merge; a local-only repo lands by
+a plain local rebase-merge. The result's additive `integration` object carries
+the verdict; if the landing ultimately fails, the run exits 1 even though
+`status` is `converged`, and the degraded mode is a SURVIVING task branch
+(`integration.task_branch`) in the base repo -- the work is never silently
+dropped. An agent that converged without committing lands nothing (the base
+stays byte-identical); pair the goal with a `landed` predicate to make commit
+discipline part of convergence. `--in-place` opts out of the whole indirection
+and edits `--workspace` directly, pre-T50.1 style.
+
 For a LONG convergence, add `--stream` for a JSONL progress stream -- one
 `{"event": "iteration", ...}` line per loop iteration, TERMINATED by the final
 run-result object (the one line with NO `event` field). Read lines until you see

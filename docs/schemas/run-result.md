@@ -74,6 +74,16 @@ what it says it is — so `schema_version` stays **2**. See
 [`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058)
 below.
 
+ADR-0065 (T50.2) adds the OPTIONAL `integration` object reporting how a
+worktree-isolated serial run's converged commits landed on the base.
+**Additive** — present only when a landing was attempted, absent on in-place
+runs and runs with nothing integrable — so `schema_version` stays **2**. One
+behavioral note an orchestrator should absorb: a `converged` result with
+`integration.landed == false` exits **1** (converged-but-not-landed is not a
+clean success; the work survives on the reported `task_branch`). See
+[`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065)
+below.
+
 ## Shape
 
 ```json
@@ -150,6 +160,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `stuck_bundle`   | object (optional)   | ADR-0045 §5 stuck-escalation bundle, present only on a stuck stop (`status` `stopped`, `reason` `stuck`). **Additive, optional** — `{ "failing_predicates": [{ "id": string, "failure": string }], "changed_files": [string], "snippets": [{ "source": string\|null, "text": string }], "bytes": integer }`. Bounded + redacted; the escalating orchestrator hands the higher model rung this instead of the full transcript. Absent ⇒ no stuck stop. |
 | `quarantine`     | array of strings (optional) | i795/#795: the predicate ids quarantined as flaky (T1.3, `Kazi.Loop.Flake`) at the terminal observation. **Additive, optional** — present only when non-empty. A quarantined predicate's status is `unknown`, never `pass`, so `status` can never be `converged` while this is present; it names WHICH predicate(s) keep a non-converged run from reporting a false positive over an `unknown` verdict. Absent ⇒ nothing was quarantined, byte-identical to today. |
 | `cause`          | object (optional)   | T48.4 (ADR-0058 decision 4): the honest terminal cause class alongside `status`/`reason`. **Additive, optional** — present only when the loop classified one. See [`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058). |
+| `integration`    | object (optional)   | T50.2 (ADR-0065 decision 2): how a worktree-isolated serial run's converged task-branch commits LANDED on the base. **Additive, optional** — present only when a landing was attempted. See [`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065) below. Absent ⇒ nothing was integrable (in-place run, or no commits ahead of the base), byte-identical to before this field existed. |
 | `collateral`     | array of objects (optional) | issue #860: files changed this run that sit OUTSIDE the goal's write scope, net-deletion entries first. **Additive, optional** — present only when non-empty. See [`collateral` — out-of-intent diff report](#collateral--out-of-intent-diff-report-issue-860) below. Absent ⇒ nothing collateral was found, byte-identical to before this field existed. |
 | `next_action`    | string (enum)       | An orchestration **hint** — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`, `max_dispatches` — T48.6, ADR-0058) or `stuck`. `null` on a clean converge. |
@@ -421,6 +432,58 @@ byte-identical to before this field existed. Computed by
 as `outcome_cause_class` (the `class` string) and `outcome_cause_detail`
 (`ids`/`reasons`/`exhausted`, nullable JSON), and surfaced on the starmap
 dashboard's drill-in panel for a finished run.
+
+## `integration` — serial landing verdict (ADR-0065)
+
+T50.2 (ADR-0065 decision 2): a serial run isolated into a kazi-owned task
+worktree (T50.1) that converges with COMMITS on its task branch must LAND them
+on the base (`--workspace`'s checked-out branch) before the ephemeral worktree
+is cleaned up — the landing follows the parallel path's T21.5 semantics
+(rebase-merge, conflict → re-dispatch bounded by an attempt budget, never
+`git reset`/`git clean` against the caller's checkout). `integration` reports
+that landing's verdict:
+
+```json
+"integration": {
+  "landed": true,
+  "base": "main",
+  "task_branch": "kazi-partition/p-my-goal-3",
+  "refs": { "branch": "kazi-partition/p-my-goal-3", "base": "main", "merge_commit": "abc123...", "local": true }
+}
+```
+
+```json
+"integration": {
+  "landed": false,
+  "base": "main",
+  "task_branch": "kazi-partition/p-my-goal-3",
+  "reason": "{:conflict, {:rebase_failed, \"...\"}}"
+}
+```
+
+| Field         | Type              | Meaning |
+|---------------|-------------------|---------|
+| `landed`      | boolean           | Whether the task-branch commits landed on the base. `false` ⇒ the run exits **1** even though `status` is `converged` — a converged-but-not-landed run is not a clean success. |
+| `base`        | string            | The base ref the landing targeted: the caller's checked-out branch, never a hardcoded default. |
+| `task_branch` | string            | The task branch holding the converged commits. On `landed: false` this branch SURVIVES worktree cleanup in the base repo — the work is never lost; integrate it by hand or re-run. |
+| `refs`        | object (optional) | The integrator's refs on success — `pr`/`merge_commit` from the remote (gh) integrator, or `merge_commit` + `local: true` from the remote-less local rebase-merge. |
+| `reason`      | string (optional) | On `landed: false`: the conflict/failure detail (after the re-dispatch budget was exhausted). |
+
+Rules:
+
+- **Additive, optional.** Present only when a landing was attempted: the run
+  was worktree-isolated (not `--in-place`, a git workspace) AND its worktree
+  held commits ahead of the base. An agent that converged without committing
+  lands nothing and the field is absent (the base stays byte-identical, the
+  T50.1 contract).
+- **Exit code.** `landed: false` downgrades the exit code to 1; `status` stays
+  `converged` (the loop's verdict is honest) — branch on `integration.landed`
+  to distinguish "converged and landed" from "converged, work parked on the
+  surviving task branch".
+- **Integrator selection.** With an `origin` remote and `gh` on PATH the
+  landing is branch → push → PR → rebase-merge (the parallel path's real
+  integrator); otherwise a plain LOCAL rebase-merge of the task branch onto
+  the base checkout. Both are injectable seams for tests.
 
 ## `collateral` — out-of-intent diff report (issue #860)
 
