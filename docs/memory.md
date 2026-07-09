@@ -26,6 +26,29 @@ Two guardrails hold across every layer (ADR-0060):
   semantic layer only through propose-then-confirm (ADR-0063). The inner agent
   never writes memory directly.
 
+## Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md / docs/devlog.md
+
+kazi memory is not a fifth place to write a fact — it is a RETRIEVAL and
+HARVEST layer over the same two files the project already writes durable
+findings to by hand. The corpus semantic recall reads (ADR-0062, above) IS
+`docs/lore.md` + `docs/devlog.md` + `AGENTS.md`/`CLAUDE.md` + `docs/adr/**` +
+`README.md`; harvest (ADR-0063, below) proposes NEW candidate entries FROM a
+run's history BACK INTO those same files, gated on human approval before they
+land. Recall-in and harvest-out are two ends of one store of record, not two
+stores — `kazi memory` never holds a fact that isn't (or won't become, once
+approved) a line in `docs/lore.md` or `docs/devlog.md`.
+
+Claude Code's own native per-project memory is a THIRD, unrelated thing. It
+lives outside this repo (scoped to the Claude Code install, not git-tracked,
+not visible to CI or to any other harness kazi drives) and is the right place
+for operator/session preferences and cross-repo context — never for a
+repo-durable finding. The practical rule: if a fact is true about THIS
+project and should outlive the session, it belongs in `docs/lore.md` /
+`docs/devlog.md` (by hand, or via `kazi memory approve` after harvest) — and
+`kazi memory recall` then surfaces it to every future dispatch automatically.
+If it is a preference about how you personally like to work, that is Claude
+Code's own memory, not kazi's, and kazi never reads it.
+
 ## Episodic memory: the attempt ledger (ADR-0061)
 
 `Kazi.Memory.AttemptLedger` (`lib/kazi/memory/attempt_ledger.ex`) is a

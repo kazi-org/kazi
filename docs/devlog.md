@@ -2,7 +2,10 @@
 
 Session findings, dogfood results, and benchmarks. Append-only; newest entries
 at the top. For invariants/landmines see `docs/lore.md`; for decisions see
-`docs/adr/`.
+`docs/adr/`. This file is part of kazi memory's corpus (`docs/memory.md` --
+see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
+docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
+new ones can be proposed here by harvest (ADR-0063).
 
 ## 2026-07-07: E48 live proof -- economy feedback loop + honest budget stops on v1.104.0
 
