@@ -295,6 +295,40 @@ defmodule Kazi.Authoring do
   end
 
   @doc """
+  Loads the APPROVED proposal identified by `proposal_ref` as a runnable
+  `Kazi.Goal` (T39.2, ADR-0049) — a pure read, no state transition.
+
+  This is the `kazi apply <proposal-ref>` seam: `plan`/`approve` never write a
+  goal-file, so `apply` loads the approved goal straight from the read-model
+  instead of forcing the caller to reconstruct one on disk. The stored goal-file
+  map is rehydrated through `Kazi.Goal.Loader.from_map/1` — the same validated
+  loader a goal-file path goes through — so the returned goal is exactly what
+  `Kazi.Runtime.run/2` accepts, guards included.
+
+  Returns `{:ok, %Kazi.Goal{}}`, or `{:error, reason}`:
+
+    * `{:error, :not_found}` — no proposal carries that `proposal_ref`.
+    * `{:error, {:not_approved, status}}` — the proposal exists but is not
+      `approved` (still `proposed`, or `rejected`): only an approved proposal
+      may run.
+    * `{:error, {:invalid_goal, reason}}` — the stored goal-file map no longer
+      rehydrates into a runnable goal.
+  """
+  @spec load_approved(String.t()) :: {:ok, Goal.t()} | {:error, term()}
+  def load_approved(proposal_ref) when is_binary(proposal_ref) do
+    with {:ok, row} <- fetch_proposed(proposal_ref),
+         :ok <- ensure_approved(row.status) do
+      rehydrate(row.goal)
+    end
+  end
+
+  # Only an `approved` proposal is runnable; anything else names its actual
+  # state so the surface can say "approve it first" vs "it was rejected".
+  @spec ensure_approved(String.t()) :: :ok | {:error, {:not_approved, String.t()}}
+  defp ensure_approved("approved"), do: :ok
+  defp ensure_approved(status), do: {:error, {:not_approved, status}}
+
+  @doc """
   Rejects the proposed goal identified by `proposal_ref`: transitions it
   `proposed → rejected` and returns the updated `Kazi.Authoring.Draft`.
 
