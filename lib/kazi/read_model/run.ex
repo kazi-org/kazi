@@ -78,6 +78,11 @@ defmodule Kazi.ReadModel.Run do
     # Goal shape, computed from the goal at run start.
     field(:predicate_count, :integer)
     field(:predicate_kind_histogram, :map, default: %{})
+    # The goal's authored display name + one-line description (both optional
+    # in the goal-file), captured at registration so the dashboard drill-in
+    # can say WHAT is being worked on without reloading the goal.
+    field(:goal_name, :string)
+    field(:goal_description, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -105,7 +110,9 @@ defmodule Kazi.ReadModel.Run do
     :outcome_cause_detail,
     :context_tier,
     :predicate_count,
-    :predicate_kind_histogram
+    :predicate_kind_histogram,
+    :goal_name,
+    :goal_description
   ]
 
   @doc """
