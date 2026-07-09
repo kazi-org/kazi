@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.122.0](https://github.com/kazi-org/kazi/compare/v1.121.0...v1.122.0) (2026-07-09)
+
+
+### Features
+
+* **teach:** flip installed SKILL.md default grind tier to claude-sonnet-5 ([84e29ff](https://github.com/kazi-org/kazi/commit/84e29ff42e32bf3f92787160032604908a1f12fe))
+* **teach:** teach the apply safety refusals, current subsumption status, live-economy grounding ([#955](https://github.com/kazi-org/kazi/issues/955), [#957](https://github.com/kazi-org/kazi/issues/957), [#958](https://github.com/kazi-org/kazi/issues/958)) ([ae8c6cf](https://github.com/kazi-org/kazi/commit/ae8c6cf256736dba9f4cbd9992fb16d3c79818d6))
+
 ## [1.121.0](https://github.com/kazi-org/kazi/compare/v1.120.0...v1.121.0) (2026-07-09)
 
 
