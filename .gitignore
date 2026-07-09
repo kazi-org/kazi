@@ -46,8 +46,14 @@ package-lock.json
 # Per-dispatch, per-workspace kazi artifacts (T4.4, ADR-0010): the orientation
 # pack (`.kazi/context.md`) is regenerated fresh each dispatch, and `.mcp.json`
 # is machine-local MCP client wiring written into the target workspace ahead of
-# a dispatch (docs/devlog.md) — neither is a repo source file.
-/.kazi/
+# a dispatch (docs/devlog.md) — neither is a repo source file. `.kazi/goals/`
+# is the opposite: hand-authored, durable goal-files with their own lifecycle
+# (ADR-0059) — un-ignore that one subdirectory explicitly. A bare `/.kazi/`
+# blocks git from descending into it at all, so this ignores `.kazi/`'s direct
+# children instead and re-includes `goals/` specifically (a landmine found and
+# fixed live in a downstream repo before it bit this one — see ADR-0059).
+/.kazi/*
+!/.kazi/goals/
 /.mcp.json
 
 # Added by code-review-graph
