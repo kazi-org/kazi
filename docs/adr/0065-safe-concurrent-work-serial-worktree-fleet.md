@@ -83,6 +83,25 @@ goal-files there is nothing, which is #937's Gap D.
    coordination dependency. Cross-node fleets remain Slice 3 (ADR-0004)
    territory and are out of scope.
 
+5. **The indirection covers every workspace-mutating verb, and the base
+   must be demonstrably fresh.** Decision 1 is not an apply-only rule: any
+   kazi verb that writes into a workspace -- an executing apply (serial,
+   parallel, fleet), goal-file materialization (`.kazi/goals/`, ADR-0059),
+   `kazi plan render` (ADR-0056), a roadmap expansion -- routes through the
+   same worktree indirection; kazi core never mutates the caller's checkout
+   by default. Separately, isolation without freshness is a quieter bug:
+   the worktree machinery cuts from the workspace's HEAD, and a checkout
+   parked on a stale feature branch yields an isolated-but-stale base whose
+   work integrates only through avoidable conflict re-dispatch (observed on
+   this repo: a planning session's checkout was behind origin/main far
+   enough that the current ADR was not visible locally). So the base ref is
+   explicit and validated: creation defaults to the workspace's HEAD,
+   `--base <ref>` (e.g. `origin/main`) overrides, and when the base is
+   behind its locally-known upstream kazi WARNS loudly -- never an implicit
+   network fetch. The fresh-worktree ritual living in operator skills and
+   session lore is exactly the class of convention ADR-0056 requires kazi
+   to own.
+
 ## Consequences
 
 Positive: the data-loss class #937 documents becomes structurally
@@ -98,7 +117,9 @@ serial path (measured in E49 before default-flip -- the ADR-0047 discipline);
 in-place edits (mitigated by `--in-place` and a deprecation window);
 scope-overlap inference can over-serialize a fleet whose goals share broad
 `[scope]` globs (explicit `depends_on = []` edges and narrower scopes are
-the escape hatch).
+the escape hatch); the staleness warning can nag a caller who deliberately
+pins an old base (mitigated: `--base` states intent and silences it, and it
+is a warning, never a refusal).
 
 ## Alternatives rejected
 
