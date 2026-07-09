@@ -565,11 +565,39 @@ envelope carries no per-tool breakdown, so `tools` is typically absent for the
 | `search_calls` | integer | Search/grep tool calls (e.g. `Grep`/`Glob`) — the "rediscovery" calls a stable prefix should reduce. |
 | `graph_calls`  | integer | Code-graph / semantic-navigation tool calls (the code-review-graph MCP surface). |
 
+### Frontier-complete event (`apply --parallel --json --stream`, issue #936)
+
+Under `kazi apply --parallel --json --stream` against a goal whose predicates
+are organized into `needs`-DAG groups (ADR-0028), the stream additionally emits
+one `frontier_complete` line at each **wave boundary** — the moment every group
+in a topological frontier has reached a terminal state, and **before** any
+group of the next frontier dispatches. A goal with no groups / no `needs`-DAG
+(the flat `--parallel` path) emits none of these — there are no frontiers to
+report, only the terminal collective result.
+
+```json
+{ "schema_version": 2, "event": "frontier_complete", "frontier": 0, "groups": [ { "id": "a", "status": "converged" }, { "id": "b", "status": "converged" } ] }
+```
+
+| Field            | Type             | Meaning |
+|------------------|------------------|---------|
+| `event`          | string           | Always `"frontier_complete"`. Distinguishes this marker from an `"iteration"` progress line and from the terminal result object (no `event`). |
+| `frontier`       | integer          | The 0-based topological frontier index that just settled (same layering as `kazi apply --explain`). |
+| `groups`         | array of objects | The frontier's members, `{ "id", "status" }`, in declared order — `status` is each group's terminal `Kazi.Scheduler.DepScheduler` outcome (`"converged"` / `"stuck"` / `"over_budget"` / `"stopped"` / `"crashed"` / `"blocked"`). |
+| `schema_version` | integer          | The contract version, same as the result object. |
+
+This is a reporting marker, not a barrier: a later frontier still dispatches the
+instant its OWN `needs` are satisfied (pipelining is unchanged, ADR-0028), so
+`frontier_complete(N)` precedes frontier `N+1`'s dispatch only insofar as
+frontier `N+1`'s groups actually `needs` frontier `N`'s members.
+
 ### Stream shape
 
 ```
 { "event": "iteration", "iteration": 0, ... }   ← one per observation
 { "event": "iteration", "iteration": 1, ... }
+...
+{ "event": "frontier_complete", "frontier": 0, ... }   ← --parallel only, at each needs-DAG wave boundary
 ...
 { "schema_version": 2, "status": "converged", ... }   ← the terminal result object (no "event"), the stream terminator
 ```
