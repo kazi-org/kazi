@@ -186,4 +186,123 @@ defmodule Kazi.Authoring.CallerDraftsIdentityTest do
                Repo.get_by(ProposedGoal, proposal_ref: draft.proposal_ref)
     end
   end
+
+  describe "T39.1 (ADR-0049): the payload's goal_id and idea are honored" do
+    test "a payload \"goal_id\" names the goal verbatim and derives the proposal_ref" do
+      payload = %{
+        "goal_id" => "orchestrator-named-goal",
+        "predicates" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Draft{goal: goal} = draft} =
+               Authoring.propose("caller-supplied predicates",
+                 harness: ExplodingHarness,
+                 proposal: payload
+               )
+
+      assert goal.id == "orchestrator-named-goal"
+      assert draft.proposal_ref == "prop-orchestrator-named-goal"
+
+      # Persisted under the supplied identity, not the placeholder-derived one.
+      assert %ProposedGoal{goal_id: "orchestrator-named-goal"} =
+               Repo.get_by(ProposedGoal, proposal_ref: draft.proposal_ref)
+    end
+
+    test "a payload \"goal_id\" wins over \"id\" and \"name\"" do
+      payload = %{
+        "goal_id" => "the-explicit-goal-id",
+        "id" => "the-legacy-id",
+        "name" => "Some Name",
+        "predicates" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Draft{goal: goal} = draft} =
+               Authoring.propose("caller-supplied predicates",
+                 harness: ExplodingHarness,
+                 proposal: payload
+               )
+
+      assert goal.id == "the-explicit-goal-id"
+      assert draft.proposal_ref == "prop-the-explicit-goal-id"
+    end
+
+    test "a payload \"idea\" replaces the surface's placeholder idea and persists" do
+      payload = %{
+        "goal_id" => "named-goal",
+        "idea" => "ship the widget checkout flow",
+        "predicates" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Draft{} = draft} =
+               Authoring.propose("caller-supplied predicates",
+                 harness: ExplodingHarness,
+                 proposal: payload
+               )
+
+      assert draft.idea == "ship the widget checkout flow"
+
+      assert %ProposedGoal{idea: "ship the widget checkout flow"} =
+               Repo.get_by(ProposedGoal, proposal_ref: draft.proposal_ref)
+    end
+
+    test "absent goal_id/idea keep today's generated defaults" do
+      payload = %{"predicates" => [%{"id" => "p", "provider" => "test_runner"}]}
+
+      assert {:ok, %Draft{goal: goal} = draft} =
+               Authoring.propose("caller-supplied predicates",
+                 harness: ExplodingHarness,
+                 proposal: payload
+               )
+
+      # The historical placeholder-derived identity, byte-identical to before.
+      assert goal.id == "caller-supplied-predicates"
+      assert draft.proposal_ref =~ ~r/^prop-caller-supplied-predicates-[0-9a-f]{12}$/
+      assert draft.idea == "caller-supplied predicates"
+    end
+
+    test "a blank payload idea is ignored (the given idea stands)" do
+      payload = %{
+        "goal_id" => "blank-idea-goal",
+        "idea" => "   ",
+        "predicates" => [%{"id" => "p", "provider" => "test_runner"}]
+      }
+
+      assert {:ok, %Draft{} = draft} =
+               Authoring.propose("caller-supplied predicates",
+                 harness: ExplodingHarness,
+                 proposal: payload
+               )
+
+      assert draft.idea == "caller-supplied predicates"
+    end
+
+    test "kazi-drafts (no :proposal) is unchanged by the T39.1 threading" do
+      defmodule OneShotIdentityHarness do
+        @behaviour Kazi.HarnessAdapter
+
+        @impl true
+        def run(prompt, _workspace, _opts) do
+          if prompt =~ "clarifying questions" do
+            {:ok, %{result: "[]"}}
+          else
+            {:ok,
+             %{
+               result:
+                 ~s({"goal_id":"must-not-leak","idea":"must not leak","name":"Drafted",) <>
+                   ~s("predicates":[{"id":"p","provider":"test_runner"}]})
+             }}
+          end
+        end
+      end
+
+      # Even when a DRAFTING HARNESS emits goal_id/idea keys, kazi-drafts keeps
+      # the idea-derived identity: honoring those keys is a caller-drafts
+      # contract (the orchestrator reasoned), never a harness-output one.
+      assert {:ok, %Draft{goal: goal} = draft} =
+               Authoring.propose("ship a tiny fixture", harness: OneShotIdentityHarness)
+
+      assert goal.id == "ship-a-tiny-fixture"
+      assert draft.idea == "ship a tiny fixture"
+    end
+  end
 end
