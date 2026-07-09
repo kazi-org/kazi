@@ -8,9 +8,16 @@ defmodule Kazi.Harness.Profiles.Opencode do
   opencode diverges from Claude at the same two boundary points a profile
   captures:
 
-    * **argv** — `opencode run <prompt> --format json [--model <provider/model>]`
-      (verified against the installed `opencode` CLI, v1.17.9: `opencode run
-      --help`). `--model` is `provider/model` (e.g. `local-ollama/qwen3.6:35b-a3b`).
+    * **argv** — `opencode run <prompt> --format json [--dir <workspace>]
+      [--model <provider/model>]` (verified against the installed `opencode`
+      CLI, v1.17.9: `opencode run --help`). `--model` is `provider/model`
+      (e.g. `local-ollama/qwen3.6:35b-a3b`). `--dir` ("directory to run in")
+      pins the run to the goal's workspace: unlike Claude, `opencode run` does
+      NOT honor the launch cwd the CliAdapter sets via `System.cmd(..., cd:
+      workspace)` — it resolves its own project root (and may attach to a
+      persistent server), so without `--dir` the inner agent's edits land
+      OUTSIDE the workspace and kazi's workspace-scoped predicates never see
+      them (T39.7; docs/lore.md L-0035).
     * **stdout** — unlike Claude's single JSON envelope, `--format json` emits a
       **stream of JSON events, one per line (NDJSON)**: server-bus MessageV2
       events such as `message.part.updated` (carrying a `part`) and
@@ -54,13 +61,24 @@ defmodule Kazi.Harness.Profiles.Opencode do
   Renders the args AFTER the `opencode` command for `prompt`/`opts`.
 
   `run <prompt> --format json` is the always-present non-interactive +
-  NDJSON-event shape. `--model <provider/model>` is appended ONLY when
-  `opts[:model]` is a non-empty string, so with no model the argv is the bare
+  NDJSON-event shape. `--dir <workspace>` is appended when `opts[:workspace]`
+  is a non-empty string (the CliAdapter threads the run's workspace in;
+  T39.7 — `opencode run` ignores the launch cwd, so `--dir` is what actually
+  scopes the inner agent's edits to the goal's workspace). `--model
+  <provider/model>` is appended ONLY when `opts[:model]` is a non-empty
+  string, so with neither the argv is the bare
   `["run", prompt, "--format", "json"]`.
   """
   @spec build_args(String.t(), keyword()) :: [String.t()]
   def build_args(prompt, opts) when is_binary(prompt) and is_list(opts) do
-    ["run", prompt, "--format", "json"] ++ model_args(opts)
+    ["run", prompt, "--format", "json"] ++ dir_args(opts) ++ model_args(opts)
+  end
+
+  defp dir_args(opts) do
+    case Keyword.get(opts, :workspace) do
+      workspace when is_binary(workspace) and workspace != "" -> ["--dir", workspace]
+      _ -> []
+    end
   end
 
   defp model_args(opts) do
