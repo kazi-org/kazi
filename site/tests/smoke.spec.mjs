@@ -124,14 +124,15 @@ test.describe("kazi website smoke", () => {
 
   test("shows the in-family token-economy section", async ({ page }) => {
     await page.goto("/");
-    // T25.11 (ADR-0033/0035): the token-economy section leads with in-family
-    // Claude tiering — a cheap-model grind, no local model required.
+    // T25.11 (ADR-0033/0035, amended on fleet data): the token-economy section
+    // leads with in-family Claude tiering — the grind on the default grind tier
+    // (sonnet-5), no local model required.
     await expect(
       page.getByRole("heading", { name: "Token economy without local models" }),
     ).toBeVisible();
-    // The worked example shows `kazi apply --harness claude --model <cheap-id>`.
+    // The worked example shows `kazi apply --harness claude --model <grind-id>`.
     await expect(
-      page.locator("pre", { hasText: "--harness claude --model claude-haiku-4-5" }),
+      page.locator("pre", { hasText: "--harness claude --model claude-sonnet-5" }),
     ).toBeVisible();
     // And the escalate-on-stuck ladder is documented.
     await expect(
