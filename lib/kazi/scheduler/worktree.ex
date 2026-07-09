@@ -40,6 +40,28 @@ defmodule Kazi.Scheduler.Worktree do
   network and no real harness. The reconciler seam is unchanged: `wrap/2` returns
   a `t:Kazi.Scheduler.reconciler/0`; the inner it wraps receives the partition AND
   the created worktree path.
+
+  ## The base-ref contract (T50.8, ADR-0065 decision 5)
+
+  Every workspace-mutating verb MUST route its edit site through this module's
+  create/cleanup pair with an EXPLICIT base ref and the same fresh-base check:
+
+    * the worktree is created FROM `:base_ref` (default the repo's `HEAD`); an
+      explicitly-passed base states intent, a defaulted one is checked for
+      staleness against its locally-known upstream and warns LOUDLY on stderr
+      when behind — a warning, never a refusal;
+    * a base ref that does not resolve to a commit fails worktree creation with
+      an error naming the ref — never a guess, never a fallback;
+    * NO call on this path ever touches the network: staleness is judged purely
+      against what the local ref store already knows (`<base>@{u}`, or a
+      locally-present `origin/HEAD`/`origin/main`), and kazi NEVER fetches — an
+      implicit fetch inside a build tool is its own bug class.
+
+  Today `kazi apply` is the only shipped workspace-mutating verb and it routes
+  here (`--base` on the CLI threads `:base_ref`). Future mutating surfaces —
+  goal-file materialization (ADR-0059), `kazi plan render` (ADR-0056) — must
+  route through this same pair so they inherit the guarantee by construction,
+  not by re-implementation.
   """
 
   require Logger
@@ -72,7 +94,13 @@ defmodule Kazi.Scheduler.Worktree do
     * `:git_cmd` — the git executable (default `"git"`); injected so a fixture
       test can pin it.
     * `:branch_prefix` — prefix for the per-worktree branch name (default
-      `"kazi-partition"`). Each worktree gets a unique branch off the repo HEAD.
+      `"kazi-partition"`). Each worktree gets a unique branch off the base ref.
+    * `:base_ref` — the git ref each worktree is created FROM (T50.8, ADR-0065
+      decision 5). Default: the repo's `HEAD`, checked for staleness against its
+      locally-known upstream (a stale default base warns loudly on stderr, once,
+      at wrap time). Passing a ref explicitly states intent and SILENCES the
+      staleness warning; a ref that does not resolve to a commit fails worktree
+      creation with an error naming it. Never triggers a fetch either way.
     * `:worktree_table` — the readable registry (M8, deep-review-001) this
       records the in-flight worktree into for the duration of the run (default
       `Kazi.Scheduler.WorktreeTable`), so a SURVIVING process can finish the
@@ -87,12 +115,20 @@ defmodule Kazi.Scheduler.Worktree do
     git_cmd = Keyword.get(opts, :git_cmd, "git")
     branch_prefix = Keyword.get(opts, :branch_prefix, "kazi-partition")
     worktree_table = Keyword.get(opts, :worktree_table, WorktreeTable)
+    base_ref = Keyword.get(opts, :base_ref)
+    effective_base = base_ref || "HEAD"
+
+    # T50.8 (ADR-0065 decision 5): a DEFAULTED base is checked for staleness
+    # once, at wrap time (the base is a property of the run, not of any one
+    # partition). An explicit `:base_ref` states intent and skips the check
+    # entirely (R-E50-4: the warning must not nag pinned-base callers).
+    if is_nil(base_ref), do: warn_if_stale_base(git_cmd, repo, effective_base)
 
     fn partition ->
       slug = slug_for(partition)
       {path, branch} = worktree_target(base_dir, branch_prefix, slug)
 
-      case create(git_cmd, repo, path, branch) do
+      case create(git_cmd, repo, path, branch, effective_base) do
         :ok ->
           # M8 (deep-review-001): record BEFORE running the risky work, so a
           # process that gets brutal-killed mid-run (never reaching `after`)
@@ -154,14 +190,94 @@ defmodule Kazi.Scheduler.Worktree do
 
   # --- worktree lifecycle -----------------------------------------------------
 
-  # Create a worktree at `path` on a fresh branch off the repo HEAD. The base dir
-  # is created first; the worktree dir itself must NOT pre-exist (git refuses).
-  defp create(git_cmd, repo, path, branch) do
-    File.mkdir_p!(Path.dirname(path))
+  # Create a worktree at `path` on a fresh branch off `base_ref` (T50.8: the
+  # base is a parameter, HEAD only by default). The ref is validated FIRST —
+  # an unresolvable base fails with an error NAMING it, before any worktree
+  # exists — then the base dir is created; the worktree dir itself must NOT
+  # pre-exist (git refuses).
+  defp create(git_cmd, repo, path, branch, base_ref) do
+    case verify_base_ref(git_cmd, repo, base_ref) do
+      :ok ->
+        File.mkdir_p!(Path.dirname(path))
 
-    case git(git_cmd, repo, ["worktree", "add", "-b", branch, path, "HEAD"]) do
-      {:ok, _out} -> :ok
+        case git(git_cmd, repo, ["worktree", "add", "-b", branch, path, base_ref]) do
+          {:ok, _out} -> :ok
+          {:error, _} = error -> error
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # The base ref must already resolve to a commit IN THE LOCAL REF STORE
+  # (`rev-parse --verify <ref>^{commit}` — a pure local read, never a fetch).
+  defp verify_base_ref(git_cmd, repo, base_ref) do
+    case git(git_cmd, repo, ["rev-parse", "--verify", "--quiet", base_ref <> "^{commit}"]) do
+      {:ok, _sha} ->
+        :ok
+
+      {:error, _out} ->
+        {:error,
+         "base ref #{inspect(base_ref)} does not resolve to a commit in #{repo} " <>
+           "(git rev-parse --verify #{base_ref}^{commit} failed); kazi never fetches — " <>
+           "fetch it yourself and re-run, or pass a ref the local repo already knows"}
+    end
+  end
+
+  # --- fresh-base staleness check (T50.8, ADR-0065 decision 5) -----------------
+
+  # Warn (stderr, never a refusal) when the DEFAULTED base is behind what the
+  # local repo ALREADY KNOWS about its upstream. Every git call here reads the
+  # local ref store only — a fetch is exactly the bug class this guards against.
+  # No configured upstream and no locally-known remote default → silent (nothing
+  # to compare against).
+  defp warn_if_stale_base(git_cmd, repo, base) do
+    with upstream when is_binary(upstream) <- locally_known_upstream(git_cmd, repo, base),
+         {:ok, base_sha} <- rev_parse(git_cmd, repo, base),
+         {:ok, upstream_sha} <- rev_parse(git_cmd, repo, upstream),
+         {:ok, behind} when behind > 0 <- behind_count(git_cmd, repo, base, upstream) do
+      IO.puts(
+        :stderr,
+        "warning: worktree base #{base} (#{base_sha}) is #{behind} commit(s) behind " <>
+          "its locally-known upstream #{upstream} (#{upstream_sha}); " <>
+          "fetch and re-run, or pass --base to state intent — kazi never fetches for you"
+      )
+    else
+      _ -> :ok
+    end
+
+    :ok
+  end
+
+  # The upstream the local ref store already knows for `base`: the configured
+  # upstream (`<base>@{u}`) when there is one, else a locally-present remote
+  # default (`origin/HEAD`, then `origin/main`), else nil.
+  defp locally_known_upstream(git_cmd, repo, base) do
+    case git(git_cmd, repo, ["rev-parse", "--abbrev-ref", "--verify", "--quiet", base <> "@{u}"]) do
+      {:ok, upstream} ->
+        String.trim(upstream)
+
+      {:error, _} ->
+        Enum.find(["origin/HEAD", "origin/main"], fn ref ->
+          match?({:ok, _}, git(git_cmd, repo, ["rev-parse", "--verify", "--quiet", ref]))
+        end)
+    end
+  end
+
+  defp rev_parse(git_cmd, repo, ref) do
+    case git(git_cmd, repo, ["rev-parse", "--verify", "--quiet", ref <> "^{commit}"]) do
+      {:ok, out} -> {:ok, String.trim(out)}
       {:error, _} = error -> error
+    end
+  end
+
+  defp behind_count(git_cmd, repo, base, upstream) do
+    with {:ok, out} <- git(git_cmd, repo, ["rev-list", "--count", base <> ".." <> upstream]),
+         {count, _} <- Integer.parse(String.trim(out)) do
+      {:ok, count}
+    else
+      _ -> :error
     end
   end
 
