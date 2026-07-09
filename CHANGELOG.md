@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.118.0](https://github.com/kazi-org/kazi/compare/v1.117.0...v1.118.0) (2026-07-09)
+
+
+### Features
+
+* **harness:** thread the run's workspace into the opencode argv as --dir (T39.7) ([a1d7ffa](https://github.com/kazi-org/kazi/commit/a1d7ffadf54a716ea8ed6959c24adba788db2efd))
+
 ## [1.117.0](https://github.com/kazi-org/kazi/compare/v1.116.0...v1.117.0) (2026-07-09)
 
 
