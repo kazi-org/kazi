@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.132.0](https://github.com/kazi-org/kazi/compare/v1.131.2...v1.132.0) (2026-07-09)
+
+
+### Features
+
+* **cli:** serial apply isolates into a task worktree by default ([00104dc](https://github.com/kazi-org/kazi/commit/00104dce97847633121fc38f5b7e0b74d66d5084))
+
 ## [1.131.2](https://github.com/kazi-org/kazi/compare/v1.131.1...v1.131.2) (2026-07-09)
 
 
