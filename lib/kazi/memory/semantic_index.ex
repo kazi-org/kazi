@@ -21,6 +21,15 @@ defmodule Kazi.Memory.SemanticIndex do
   `Kazi.ReadModel.MemoryIndexFile`) has changed since the last refresh — an
   unchanged file is never re-indexed.
 
+  ## Rows are scoped per workspace (issue #977)
+
+  Both `memory_index_files` and `memory_chunks_fts` carry a `workspace_root` —
+  `workspace` canonicalized via `Path.expand/1` — alongside `path`. Two
+  workspaces sharing one read-model (`~/.kazi/kazi.db`) can each have a file
+  at the same relative path (e.g. "CLAUDE.md"); scoping every read/write by
+  `{workspace_root, path}` instead of `path` alone means those rows can never
+  clobber or leak into each other's recall.
+
   ## The API is budgeted recall, not search (decision 3)
 
   `recall/3` is the one entry point: query terms in, a ranked slice out that
@@ -116,6 +125,16 @@ defmodule Kazi.Memory.SemanticIndex do
   end
 
   @doc """
+  The stable scoping key for a workspace (issue #977): its canonicalized
+  absolute path (`Path.expand/1`), so `"."` and its real absolute path always
+  resolve to the same `workspace_root` — the identity two different callers
+  (a goal's own `--workspace` vs. `Kazi.Loop`'s stored one) must agree on for
+  scoping to actually prevent cross-workspace collisions.
+  """
+  @spec workspace_root(String.t()) :: String.t()
+  def workspace_root(workspace) when is_binary(workspace), do: Path.expand(workspace)
+
+  @doc """
   Incrementally refreshes the FTS index for `corpus` (glob patterns relative
   to `workspace`): each matching file is re-chunked ONLY when its current
   sha256 content hash differs from the one it was last indexed at
@@ -123,9 +142,11 @@ defmodule Kazi.Memory.SemanticIndex do
   """
   @spec refresh(String.t(), [String.t()]) :: :ok
   def refresh(workspace, corpus) when is_binary(workspace) and is_list(corpus) do
+    root = workspace_root(workspace)
+
     workspace
     |> expand_corpus(corpus)
-    |> Enum.each(&refresh_file(workspace, &1))
+    |> Enum.each(&refresh_file(workspace, root, &1))
 
     :ok
   end
@@ -202,15 +223,15 @@ defmodule Kazi.Memory.SemanticIndex do
     |> Enum.sort()
   end
 
-  defp refresh_file(workspace, abs_path) do
+  defp refresh_file(workspace, root, abs_path) do
     rel_path = Path.relative_to(abs_path, workspace)
 
     with {:ok, content} <- File.read(abs_path) do
       hash = content_hash(content)
 
-      case fetch_hash(rel_path) do
+      case fetch_hash(root, rel_path) do
         {:ok, ^hash} -> :ok
-        _ -> reindex_file(rel_path, content, hash)
+        _ -> reindex_file(root, rel_path, content, hash)
       end
     else
       {:error, _posix} -> :ok
@@ -219,40 +240,43 @@ defmodule Kazi.Memory.SemanticIndex do
 
   defp content_hash(content), do: :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
 
-  defp fetch_hash(path) do
-    case Repo.get_by(MemoryIndexFile, path: path) do
+  defp fetch_hash(root, path) do
+    case Repo.get_by(MemoryIndexFile, workspace_root: root, path: path) do
       nil -> :error
       %MemoryIndexFile{content_hash: hash} -> {:ok, hash}
     end
   end
 
-  defp reindex_file(path, content, hash) do
-    delete_chunks(path)
+  defp reindex_file(root, path, content, hash) do
+    delete_chunks(root, path)
 
     content
     |> chunk_markdown()
-    |> Enum.each(&insert_chunk(path, &1))
+    |> Enum.each(&insert_chunk(root, path, &1))
 
-    upsert_hash(path, hash)
+    upsert_hash(root, path, hash)
   end
 
-  defp delete_chunks(path) do
-    Repo.query!("DELETE FROM memory_chunks_fts WHERE path = ?", [path])
+  defp delete_chunks(root, path) do
+    Repo.query!("DELETE FROM memory_chunks_fts WHERE workspace_root = ? AND path = ?", [
+      root,
+      path
+    ])
   end
 
-  defp insert_chunk(path, %{heading: heading, line_start: s, line_end: e, text: text}) do
+  defp insert_chunk(root, path, %{heading: heading, line_start: s, line_end: e, text: text}) do
     Repo.query!(
-      "INSERT INTO memory_chunks_fts (path, heading, line_start, line_end, body) VALUES (?, ?, ?, ?, ?)",
-      [path, heading, s, e, text]
+      "INSERT INTO memory_chunks_fts (workspace_root, path, heading, line_start, line_end, body) VALUES (?, ?, ?, ?, ?, ?)",
+      [root, path, heading, s, e, text]
     )
   end
 
-  defp upsert_hash(path, hash) do
+  defp upsert_hash(root, path, hash) do
     %MemoryIndexFile{}
-    |> MemoryIndexFile.changeset(%{path: path, content_hash: hash})
+    |> MemoryIndexFile.changeset(%{workspace_root: root, path: path, content_hash: hash})
     |> Repo.insert!(
       on_conflict: {:replace, [:content_hash, :updated_at]},
-      conflict_target: :path
+      conflict_target: [:workspace_root, :path]
     )
   end
 
@@ -263,12 +287,16 @@ defmodule Kazi.Memory.SemanticIndex do
   # An empty resolved corpus (no glob matched a file) searches nothing rather
   # than erroring against a table that may hold stale rows from a PRIOR
   # corpus — the "empty/missing corpus is valid, zero recall" contract. The
-  # `path IN (...)` clause scopes every match to files the CURRENT corpus
-  # actually resolves to, so a goal that narrows its corpus never recalls a
-  # stale row indexed under a broader one on the same workspace.
+  # `workspace_root = ?` clause (issue #977) scopes every match to the CURRENT
+  # workspace BEFORE the `path IN (...)` clause narrows to files the CURRENT
+  # corpus actually resolves to, so neither a broader prior corpus on the same
+  # workspace NOR another workspace entirely can leak a stale/foreign row into
+  # this recall.
   defp search(_match, _workspace, []), do: []
 
   defp search(match, workspace, corpus) do
+    root = workspace_root(workspace)
+
     case workspace |> expand_corpus(corpus) |> Enum.map(&Path.relative_to(&1, workspace)) do
       [] ->
         []
@@ -279,12 +307,12 @@ defmodule Kazi.Memory.SemanticIndex do
         sql = """
         SELECT path, line_start, body, bm25(memory_chunks_fts) AS rank
         FROM memory_chunks_fts
-        WHERE memory_chunks_fts MATCH ? AND path IN (#{placeholders})
+        WHERE memory_chunks_fts MATCH ? AND workspace_root = ? AND path IN (#{placeholders})
         ORDER BY rank
         LIMIT #{@candidate_limit}
         """
 
-        case Repo.query(sql, [match | paths]) do
+        case Repo.query(sql, [match, root | paths]) do
           {:ok, %{rows: rows}} ->
             Enum.map(rows, fn [path, line_start, body, rank] ->
               %{path: path, line: line_start, text: body, score: rank * -1.0}
