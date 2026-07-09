@@ -82,30 +82,9 @@ defmodule Kazi.MCP.Stdio do
   end
 
   # Point every `:logger` handler that writes to `:standard_io` at
-  # `:standard_error` instead, so no log line lands on stdout (the MCP transport).
-  # `:logger` forbids changing a live handler's `type` in place
-  # (`:illegal_config_change`), so each such handler is removed and re-added with
-  # the same module/config but `type: :standard_error`. Best-effort: a handler
-  # that does not re-add cleanly is left as-is (logging still works, on stdout).
-  defp redirect_logging_to_stderr do
-    for handler_id <- :logger.get_handler_ids() do
-      case :logger.get_handler_config(handler_id) do
-        {:ok, %{module: module, config: %{type: :standard_io} = config} = handler} ->
-          :ok = :logger.remove_handler(handler_id)
-
-          :logger.add_handler(
-            handler_id,
-            module,
-            handler
-            |> Map.delete(:id)
-            |> Map.put(:config, %{config | type: :standard_error})
-          )
-
-        _ ->
-          :ok
-      end
-    end
-
-    :ok
-  end
+  # `:standard_error` instead, so no log line lands on stdout (the MCP
+  # transport). The handler surgery lives in `Kazi.Logging.StderrRedirect`,
+  # shared with the CLI's `--json` guard (T39.4) so the two byte-clean-stdout
+  # surfaces cannot drift.
+  defp redirect_logging_to_stderr, do: Kazi.Logging.StderrRedirect.redirect()
 end
