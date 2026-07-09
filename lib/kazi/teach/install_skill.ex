@@ -331,8 +331,11 @@ defmodule Kazi.Teach.InstallSkill do
     ### Step 2 -- review and approve (`kazi approve --json`)
 
     Read the proposed `predicates` and the `clarify` gaps. If a gap matters (e.g.
-    no live-verification predicate), re-run `kazi plan` with it closed. When
-    satisfied, approve the `proposal_ref` from Step 1:
+    no live-verification predicate), re-run `kazi plan` with it closed. Before
+    approving, run `kazi lint <goal-file>` -- a read-only advisory check that warns
+    on near-duplicate group NAMES (a cheap authoring-mistake net; exit 0 even with
+    warnings, so it never blocks the approve). When satisfied, approve the
+    `proposal_ref` from Step 1:
 
     ```sh
     kazi approve <proposal-ref> --json
@@ -447,6 +450,11 @@ defmodule Kazi.Teach.InstallSkill do
     | `error`       | `investigate`  | != 0 | Pre-loop failure (vacuous goal, unknown harness); read `error`, fix. |
 
     `next_action` is an orchestration HINT, not a kazi action -- you own the policy.
+    When a goal keeps landing back on `stuck`/`over_budget` (the same slice, several
+    invocations), don't just re-read the predicate vector by eye -- run `kazi
+    economy --rediscovery <goal>` for the concrete next step: it folds the goal's
+    per-iteration `tools` counters into a ranked, report-only rediscovery-pressure
+    list naming which predicate/step is burning the repeat attempts.
 
     ### Escalate-on-stuck: the bounded model ladder (the DEFAULT adaptive recipe)
 
@@ -565,11 +573,12 @@ defmodule Kazi.Teach.InstallSkill do
     after the fact.
 
     For a human watching multiple goals at once, the SAME read-model is rendered by
-    kazi's LiveView dashboard: start the app's web endpoint and open its root URL
-    (`http://localhost:4000/` by default) to see the live convergence view instead of
-    polling `status` by hand. The dashboard is a READ of the same projection -- it
-    drives nothing. (There is no separate `kazi` dashboard command; the CLI surface
-    for state is `kazi status`, and the dashboard is the web view of it.)
+    `kazi dashboard [--port N] [--bind addr] [--roadmap <goal-file>]`: it boots the
+    standalone fleet-mode web endpoint (the starmap -- every registered run,
+    read-only, no goal loop) against the shared read-model, on `http://127.0.0.1:4050/`
+    by default. It is a READ of the same projection -- it drives nothing -- a
+    plausible replacement for repeatedly polling `status` by hand across multiple
+    sessions/goals.
 
     ### The `adopt` verb -- bring kazi into a repo (`kazi init <repo-dir>`)
 
@@ -587,6 +596,11 @@ defmodule Kazi.Teach.InstallSkill do
     Then review the drafted goal-set, refine it via the `plan` verb, approve, and
     `apply`. Use `adopt` once per repo to bootstrap; it is the on-ramp, not a step in
     the per-goal loop.
+
+    For anyone who keeps notes in Obsidian, `kazi export <goal-file> --obsidian
+    <dir>` is a complete, ready integration: it exports a goal's group tree +
+    verdicts to an Obsidian vault (notes + Mermaid rollup) for a snapshot of where
+    a goal stands, outside kazi's own dashboard/status surfaces.
 
     ## Pin `schema_version`
 
