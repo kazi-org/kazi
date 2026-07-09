@@ -131,19 +131,31 @@ defmodule Kazi.Fleet.DiscoveryTest do
     assert {:ok, %Fleet{edges: []}} = Fleet.load(dir)
   end
 
-  test "executing --fleet without --explain refuses with a clear not-yet-implemented error", %{
-    dir: dir
-  } do
-    write_goal(dir, "0001-a.goal.toml", "a")
-
-    argv = ["apply", dir, "--fleet", "--json"]
+  # T50.5 replaced the staged not-yet-implemented refusal: --fleet without
+  # --explain now EXECUTES (test/kazi/fleet/execution_test.exs). The execute
+  # path's load-time errors still surface loudly before anything dispatches.
+  test "executing --fleet against a missing path fails loudly at load", %{dir: dir} do
+    argv = ["apply", Path.join(dir, "no-such-fleet"), "--fleet", "--json"]
 
     {exit_code, output} =
       with_io_and_exit(fn -> CLI.run(argv) end)
 
     assert exit_code == 1
     payload = Jason.decode!(output)
-    assert payload["error"] =~ "fleet execution lands in a follow-up"
+    assert payload["error"] =~ "does not exist"
+  end
+
+  test "--fleet + --in-place is rejected before anything executes", %{dir: dir} do
+    write_goal(dir, "0001-a.goal.toml", "a")
+
+    argv = ["apply", dir, "--fleet", "--in-place", "--json"]
+
+    {exit_code, output} =
+      with_io_and_exit(fn -> CLI.run(argv) end)
+
+    assert exit_code == 1
+    payload = Jason.decode!(output)
+    assert payload["error"] =~ "contradictory"
   end
 
   defp with_io_and_exit(fun) do
