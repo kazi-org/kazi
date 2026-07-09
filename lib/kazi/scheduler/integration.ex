@@ -378,4 +378,99 @@ defmodule Kazi.Scheduler.Integration do
 
     defp normalize_conflict(reason), do: reason
   end
+
+  defmodule LocalIntegrator do
+    @moduledoc """
+    The remote-less landing (T50.2, ADR-0065 decision 2): rebase the worktree's
+    task branch onto the base and fast-forward the base checkout's branch to it
+    — a plain LOCAL rebase-merge, no push, no PR, no `gh`. The serial
+    (1-partition) path defaults to this integrator when the base repo has no
+    usable remote, so a local-only repo still LANDS converged work instead of
+    silently dropping it with the worktree.
+
+    Requires `opts[:base_repo]` — the caller's checkout the work lands in (the
+    worktree shares its refs, so the rebase in the worktree and the
+    fast-forward in the base see the same branches).
+
+    Safety: the rebase runs only in the kazi-owned worktree (aborted there on
+    conflict), and the base checkout is only ever ADVANCED by `git merge
+    --ff-only` — never `git reset`, never `git clean`, never a force. A rebase
+    or fast-forward failure is signaled as `{:error, {:conflict, reason}}` so
+    the collective routes it through the re-dispatch seam, exactly like
+    `ActionIntegrator`'s conflict mapping.
+    """
+
+    @doc """
+    Rebase-merges one worktree's task branch onto `request.base` locally.
+
+    Returns `{:ok, %{branch:, base:, merge_commit:, local: true}}` on a clean
+    landing, `{:error, {:conflict, reason}}` on a rebase/fast-forward failure
+    (re-dispatchable), or a hard error for a missing worktree/base_repo.
+    """
+    @spec integrate(Kazi.Scheduler.Integration.integration_request(), keyword()) ::
+            {:ok, map()} | {:error, term()}
+    def integrate(%{worktree: worktree, base: base}, opts) when is_binary(worktree) do
+      case Keyword.fetch(opts, :base_repo) do
+        {:ok, base_repo} when is_binary(base_repo) ->
+          with {:ok, branch} <- current_branch(worktree),
+               :ok <- rebase_onto_base(worktree, base),
+               {:ok, merge_commit} <- fast_forward(base_repo, branch) do
+            {:ok, %{branch: branch, base: base, merge_commit: merge_commit, local: true}}
+          end
+
+        _ ->
+          {:error, :missing_base_repo}
+      end
+    end
+
+    def integrate(%{worktree: nil}, _opts), do: {:error, :no_worktree}
+
+    defp current_branch(worktree) do
+      case git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]) do
+        {:ok, out} -> {:ok, String.trim(out)}
+        {:error, reason} -> {:error, {:branch_resolve_failed, reason}}
+      end
+    end
+
+    # Rebase the task branch onto the (possibly advanced) base, in the WORKTREE.
+    # Any failure — a content conflict, or a dirty tree blocking the rebase — is
+    # aborted there (the worktree is kazi-owned; the base is never touched) and
+    # signaled as a re-dispatchable conflict.
+    defp rebase_onto_base(worktree, base) do
+      case git(worktree, ["rebase", base]) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          _ = git(worktree, ["rebase", "--abort"])
+          {:error, {:conflict, {:rebase_failed, reason}}}
+      end
+    end
+
+    # Advance the base checkout's branch to the rebased task branch.
+    # `--ff-only` can only move the ref forward — it can never rewrite base
+    # history or leave a conflicted tree. A refusal (the base advanced again
+    # between rebase and merge) is a conflict: the re-attempt re-rebases.
+    defp fast_forward(base_repo, branch) do
+      case git(base_repo, ["merge", "--ff-only", branch]) do
+        {:ok, _} ->
+          case git(base_repo, ["rev-parse", "HEAD"]) do
+            {:ok, sha} -> {:ok, String.trim(sha)}
+            {:error, reason} -> {:error, {:merge_commit_failed, reason}}
+          end
+
+        {:error, reason} ->
+          {:error, {:conflict, {:ff_merge_failed, reason}}}
+      end
+    end
+
+    defp git(repo, args) do
+      {out, status} = System.cmd("git", args, cd: repo, stderr_to_stdout: true)
+
+      case status do
+        0 -> {:ok, out}
+        _ -> {:error, String.trim(out)}
+      end
+    end
+  end
 end
