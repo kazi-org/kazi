@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.121.0](https://github.com/kazi-org/kazi/compare/v1.120.0...v1.121.0) (2026-07-09)
+
+
+### Features
+
+* **config:** KAZI_ATTEMPT_LEDGER / KAZI_MEMORY_RECALL runtime env hooks ([c2e2394](https://github.com/kazi-org/kazi/commit/c2e2394b41698d4631ab3a1801001c3430f4855a))
+
 ## [1.120.0](https://github.com/kazi-org/kazi/compare/v1.119.2...v1.120.0) (2026-07-09)
 
 
