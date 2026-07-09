@@ -473,9 +473,12 @@ Rules:
 
 - **Additive, optional.** Present only when a landing was attempted: the run
   was worktree-isolated (not `--in-place`, a git workspace) AND its worktree
-  held commits ahead of the base. An agent that converged without committing
-  lands nothing and the field is absent (the base stays byte-identical, the
-  T50.1 contract).
+  held commits ahead of the base ON the kazi-owned task branch. An agent that
+  converged without committing lands nothing and the field is absent (the base
+  stays byte-identical, the T50.1 contract); a run whose checkout moved off
+  the task branch owns its own landing — most importantly a goal whose own
+  `:integrate` action already landed the work on the remote mid-run
+  (ADR-0055) — and the field is likewise absent.
 - **Exit code.** `landed: false` downgrades the exit code to 1; `status` stays
   `converged` (the loop's verdict is honest) — branch on `integration.landed`
   to distinguish "converged and landed" from "converged, work parked on the

@@ -216,7 +216,9 @@ object reports the verdict; a landing that ultimately fails exits 1 with the
 work parked on a surviving task branch (`integration.task_branch`) -- never a
 silent drop. Converging without committing lands nothing (the base stays
 byte-identical), so give the goal a `landed` predicate if commits are part of
-done.
+done. A run whose own `:integrate` action already landed the work mid-run
+(ADR-0055) is not double-integrated -- the landing only touches the kazi-owned
+task branch.
 
 `--check` / `--explain` stay available without either flag.
 
