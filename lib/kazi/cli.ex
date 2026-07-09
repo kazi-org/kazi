@@ -1869,6 +1869,7 @@ defmodule Kazi.CLI do
         &merge_parallel_run_opts(&1, opts, persist?)
       )
       |> maybe_put_default_lease()
+      |> maybe_put_frontier_stream(opts)
 
     case Kazi.Scheduler.run_goals([goal], scheduler_opts) do
       {:ok, result} ->
@@ -1911,6 +1912,38 @@ defmodule Kazi.CLI do
         lease_table: Kazi.Coordination.LeaseTable
       )
     end
+  end
+
+  # issue #936: wire the DepScheduler's `:on_frontier_complete` seam to the same
+  # JSONL stream `--stream` drives for iteration events, so `apply --parallel
+  # --json --stream` gets a `frontier_complete` marker at each needs-DAG wave
+  # boundary. Only under BOTH --json and --stream (mirrors `maybe_put_stream/2`);
+  # skipped when the caller already injected `:on_frontier_complete` (a boundary
+  # test driving its own seam).
+  defp maybe_put_frontier_stream(scheduler_opts, opts) do
+    if opts[:json] == true and opts[:stream] == true and
+         not Keyword.has_key?(scheduler_opts, :on_frontier_complete) do
+      Keyword.put(scheduler_opts, :on_frontier_complete, &emit_frontier_complete_event/1)
+    else
+      scheduler_opts
+    end
+  end
+
+  # The frontier-boundary stream event (issue #936): one JSON object per LINE
+  # (JSONL), `"event": "frontier_complete"`, emitted by the DepScheduler once a
+  # topological frontier fully settles and before the next frontier dispatches.
+  # Distinguished from the per-iteration event by its `event` value; both
+  # terminate at the same terminal result object.
+  defp emit_frontier_complete_event(payload) do
+    event = %{
+      schema_version: @run_schema_version,
+      event: "frontier_complete",
+      frontier: payload.frontier,
+      groups:
+        Enum.map(payload.groups, fn %{id: id, status: status} -> %{id: id, status: status} end)
+    }
+
+    IO.puts(Jason.encode!(event))
   end
 
   # The per-goal loop opts the default scheduler reconciler forwards to

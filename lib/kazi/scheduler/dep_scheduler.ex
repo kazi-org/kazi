@@ -42,6 +42,23 @@ defmodule Kazi.Scheduler.DepScheduler do
   integrates or merges against a regressed dep: it leaves the ready set the instant
   the dep flips, and re-converges only after the dep does.
 
+  ## Frontier-complete events (issue #936, minimal slice)
+
+  An OPTIONAL `:on_frontier_complete` callback (a 1-arity fn) is invoked once per
+  TOPOLOGICAL FRONTIER (`Kazi.Goal.DepGraph.frontiers/1` — the SAME pure layering
+  `kazi apply --explain` prints), the moment every group in that frontier has
+  reached a terminal/blocked state, and BEFORE any group of a later frontier is
+  dispatched. It is handed `%{event: "frontier_complete", frontier: index,
+  groups: [%{id:, status:}, ...]}` (zero-based `frontier`, groups in declared
+  order carrying each group's terminal status). This is a REPORTING hook only —
+  it does not gate dispatch or introduce a barrier; a later frontier's group can
+  still dispatch the instant ITS OWN `needs` are satisfied (pipelining is
+  unchanged), so the callback fires "before frontier N+1 dispatches" only insofar
+  as frontier N+1's readiness is itself gated on frontier N's members by `needs`.
+  The CLI's `--parallel --json --stream` path wires this to emit one JSONL line
+  per frontier boundary, distinguishable from the per-iteration events by
+  `"event": "frontier_complete"`.
+
   ## Blocked-dependency escalation (T23.5, ADR-0028 §Decision 5)
 
   A `:stuck`/`:over_budget` dep poisons every group transitively behind it. Beyond
@@ -183,6 +200,9 @@ defmodule Kazi.Scheduler.DepScheduler do
       Defaults to the application-tree instance.
     * `:reconcile_timeout` — per-group terminal timeout (ms, or `:infinity`).
       Default `:infinity`. A group that does not terminate in time is `:stuck`.
+    * `:on_frontier_complete` — an optional 1-arity callback invoked once per
+      topological frontier as it fully settles (see moduledoc "Frontier-complete
+      events"). Default `nil` (no callback — the pre-existing behavior).
 
   Returns `{:ok, result}` (see `t:result/0`) once every group is terminal or
   blocked, or `{:error, reason}` if the scheduler could not be started.
@@ -192,12 +212,14 @@ defmodule Kazi.Scheduler.DepScheduler do
     reconciler = Keyword.fetch!(opts, :reconciler)
     supervisor = Keyword.get(opts, :supervisor, PartitionSupervisor)
     timeout = Keyword.get(opts, :reconcile_timeout, @default_reconcile_timeout)
+    on_frontier_complete = Keyword.get(opts, :on_frontier_complete)
 
     init_arg = %{
       goal: goal,
       reconciler: reconciler,
       supervisor: supervisor,
-      timeout: timeout
+      timeout: timeout,
+      on_frontier_complete: on_frontier_complete
     }
 
     case GenServer.start_link(__MODULE__, init_arg) do
@@ -229,6 +251,7 @@ defmodule Kazi.Scheduler.DepScheduler do
   @impl true
   def init(%{goal: goal} = arg) do
     %{reconciler: reconciler, supervisor: supervisor, timeout: timeout} = arg
+    on_frontier_complete = Map.get(arg, :on_frontier_complete)
 
     # Every group starts :pending (declared, unobserved). The states map is the
     # single source of truth the planner re-evaluates against each cycle.
@@ -252,7 +275,13 @@ defmodule Kazi.Scheduler.DepScheduler do
       running: %{},
       # ref → group_id, the reverse map for {:DOWN, ...}.
       ref_to_group: %{},
-      awaiting: nil
+      awaiting: nil,
+      # The STATIC topological frontier layering (DepGraph.frontiers/1, computed
+      # once from the DAG shape alone — pure, independent of observed state), and
+      # the callback + which frontier indices have already fired (issue #936).
+      frontiers: DepGraph.frontiers(goal),
+      on_frontier_complete: on_frontier_complete,
+      reported_frontiers: MapSet.new()
     }
 
     # Dispatch the first frontier (the no-needs ready set) before awaiting, so the
@@ -351,6 +380,12 @@ defmodule Kazi.Scheduler.DepScheduler do
       Enum.reduce(blocked, state, fn %{group: id}, acc ->
         put_state(acc, id, :blocked)
       end)
+
+    # issue #936: fire :on_frontier_complete for any frontier that just fully
+    # settled, BEFORE starting this cycle's newly-ready groups — so a caller
+    # streaming these events sees frontier N's boundary ahead of any frontier
+    # N+1 dispatch this same cycle triggers.
+    state = maybe_emit_frontier_events(state)
 
     state =
       Enum.reduce(ready, state, fn group_id, acc ->
@@ -534,6 +569,7 @@ defmodule Kazi.Scheduler.DepScheduler do
       | states: Map.put(state.states, group_id, new_state),
         outcomes: Map.delete(state.outcomes, group_id)
     }
+    |> unreport_frontier(group_id)
   end
 
   # A regressed dep that landed in a non-converging terminal: store its planner
@@ -589,6 +625,53 @@ defmodule Kazi.Scheduler.DepScheduler do
   # keeps the run waiting.
   defp settled?(state, group_id) do
     Map.get(state.states, group_id) in [:converged, :stuck, :over_budget, :blocked]
+  end
+
+  # =============================================================================
+  # Frontier-complete events (issue #936, minimal slice)
+  # =============================================================================
+
+  # No callback ⇒ nothing to compute (skip the frontier scan entirely).
+  defp maybe_emit_frontier_events(%{on_frontier_complete: nil} = state), do: state
+
+  defp maybe_emit_frontier_events(state) do
+    Enum.reduce(newly_settled_frontiers(state), state, &emit_frontier_complete(&2, &1))
+  end
+
+  # The indices of frontiers that are now FULLY settled (every member group
+  # terminal/blocked) but have not yet fired, in ascending order.
+  defp newly_settled_frontiers(state) do
+    state.frontiers
+    |> Enum.with_index()
+    |> Enum.filter(fn {group_ids, index} ->
+      not MapSet.member?(state.reported_frontiers, index) and
+        Enum.all?(group_ids, &settled?(state, &1))
+    end)
+    |> Enum.map(fn {_group_ids, index} -> index end)
+  end
+
+  defp emit_frontier_complete(state, index) do
+    group_ids = Enum.at(state.frontiers, index)
+
+    payload = %{
+      event: "frontier_complete",
+      frontier: index,
+      groups: Enum.map(group_ids, fn id -> %{id: id, status: group_outcome(state, id)} end)
+    }
+
+    state.on_frontier_complete.(payload)
+
+    %{state | reported_frontiers: MapSet.put(state.reported_frontiers, index)}
+  end
+
+  # A regressed group (T23.4) may un-settle a frontier that already fired; drop it
+  # from `reported_frontiers` so it is free to fire again once it RE-settles,
+  # rather than staying permanently silent for that frontier.
+  defp unreport_frontier(state, group_id) do
+    case Enum.find_index(state.frontiers, &(group_id in &1)) do
+      nil -> state
+      index -> %{state | reported_frontiers: MapSet.delete(state.reported_frontiers, index)}
+    end
   end
 
   defp build_result(state) do
