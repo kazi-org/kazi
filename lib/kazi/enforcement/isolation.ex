@@ -53,6 +53,19 @@ defmodule Kazi.Enforcement.Isolation do
   worktree mechanism is the same `git worktree add --detach` pattern
   `Kazi.Ratchet.resolve_git_ref/3` already uses for its baseline comparison.
 
+  ## Dependency cache reuse
+
+  A `git worktree add --detach` clean tree never has `deps`/`_build` (both
+  gitignored) -- fine for most checkers, but fatal for a Mix-based one whose
+  `.formatter.exs`/compile step needs fetched dependencies just to START (this
+  bit kazi's own self-hosted `full-suite-green`/`format-clean` guards: E50,
+  2026-07-09). `prepare/3` symlinks an existing `workspace/deps` into the clean
+  tree (best-effort, see `link_dependency_cache/2`) so the checker reuses
+  already-fetched dependency SOURCE without a redundant fetch; it deliberately
+  does NOT share `_build` (compiled output), so each isolated run's compiled
+  artifacts are always freshly derived from the overlaid candidate + pinned
+  grader paths, never a stale cache standing in for them.
+
   ## Graceful degradation (honest reporting)
 
   Isolation needs a git workspace with `ref` checkable out. When that is not true
@@ -94,6 +107,7 @@ defmodule Kazi.Enforcement.Isolation do
     with {:ok, _output} <- git(workspace, ["worktree", "add", "--detach", tmp, ref]),
          :ok <- overlay_working_tree(workspace, tmp, ref),
          :ok <- restore_grader_paths(tmp, ref, read_only_paths) do
+      link_dependency_cache(workspace, tmp)
       {:ok, tmp, fn -> remove(workspace, tmp) end}
     else
       {:error, reason} ->
@@ -165,6 +179,33 @@ defmodule Kazi.Enforcement.Isolation do
 
     File.rm(patch)
     result
+  end
+
+  # Symlinks `workspace/deps` into the clean worktree `tmp`, when present. `deps`
+  # is gitignored (a fetched, third-party dependency SOURCE tree, never the
+  # candidate under test), so it is never overlaid by `overlay_working_tree/3` --
+  # a fresh `git worktree add` gets an EMPTY `deps`, and a Mix project's
+  # `.formatter.exs` (`import_deps: [...]`) or any compile step then fails outright
+  # ("Unknown dependency :ecto ... run \"mix deps.get\"") before the checker's own
+  # logic ever runs, on a workspace that already has `deps` fetched. Sharing the
+  # already-fetched deps SOURCE is safe (it is not part of the candidate the agent
+  # can tamper with to change a verdict) and avoids a redundant hex fetch per
+  # isolated run; deliberately NOT `_build` (compiled OUTPUT) -- letting each
+  # isolated run compile its own `_build` from the overlaid candidate source is
+  # what makes the compiled result actually reflect what is under test, rather
+  # than risking a stale cached artifact standing in for it. Best-effort: a
+  # missing/unlinkable `deps` just leaves the checker to fail on its own (as
+  # today), never turns isolation itself `:degraded`.
+  @spec link_dependency_cache(String.t(), String.t()) :: :ok
+  defp link_dependency_cache(workspace, tmp) do
+    source = Path.join(workspace, "deps")
+    dest = Path.join(tmp, "deps")
+
+    if File.dir?(source) and not File.exists?(dest) do
+      File.ln_s(source, dest)
+    end
+
+    :ok
   end
 
   defp copy_untracked(_workspace, _tmp, ""), do: :ok

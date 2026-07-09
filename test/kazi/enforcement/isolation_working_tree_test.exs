@@ -94,6 +94,29 @@ defmodule Kazi.Enforcement.IsolationWorkingTreeTest do
     end
   end
 
+  describe "prepare/3 — dependency cache reuse" do
+    test "an existing workspace `deps` dir is symlinked into the clean tree" do
+      dir = git_repo_with(%{"a.txt" => "one\n"})
+      deps = Path.join(dir, "deps")
+      File.mkdir_p!(Path.join(deps, "some_pkg"))
+      File.write!(Path.join(deps, "some_pkg/mix.exs"), "# fetched dep\n")
+
+      {:ok, clean_path, cleanup} = Isolation.prepare(dir, "HEAD", [])
+      linked = Path.join(clean_path, "deps")
+      assert File.dir?(linked)
+      assert File.read!(Path.join(linked, "some_pkg/mix.exs")) == "# fetched dep\n"
+      cleanup.()
+    end
+
+    test "no workspace `deps` dir leaves the clean tree without one (no-op, no crash)" do
+      dir = git_repo_with(%{"a.txt" => "one\n"})
+
+      {:ok, clean_path, cleanup} = Isolation.prepare(dir, "HEAD", [])
+      refute File.exists?(Path.join(clean_path, "deps"))
+      cleanup.()
+    end
+  end
+
   test "prepare/3 degrades gracefully on a non-git workspace (unchanged)" do
     dir = tmp_dir()
     assert {:degraded, {:worktree_add_failed, _reason}} = Isolation.prepare(dir, "HEAD", [])
