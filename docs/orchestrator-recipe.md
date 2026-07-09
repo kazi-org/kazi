@@ -157,6 +157,17 @@ count, proposals: [...]}`.
 > straight into Step 3, never touching the filesystem. A goal-file path still
 > works exactly as before; `plan`/`approve` themselves never write one.
 
+> **Session provenance.** `--session-name` (or `KAZI_SESSION_NAME` /
+> an auto-detected `CLAUDE_CODE_SESSION_ID`) labels whichever session
+> passes it. `kazi plan --session-name <label>` records that label on the
+> proposal; `kazi apply <proposal-ref>` records the proposal's own
+> `proposal_ref` (and, at registration, the session that planned it) on the
+> run row. The plan -> approve -> apply lifecycle is designed to be
+> cross-session -- a different session may approve or apply what another
+> planned -- so this is what makes that handoff traceable afterward instead
+> of just inferred. A plain goal-file-path `apply` leaves the run's
+> `proposal_ref` nil (unchanged behavior).
+
 ### Step 3 -- converge (`kazi apply --harness <cheap> --json [--stream]`)
 
 Run the approved goal with the CHEAP harness (the two-tier split), by the
