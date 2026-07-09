@@ -140,7 +140,7 @@ defmodule Kazi.Teach.InstallSkill do
     | sub-skill verb | routes to     | what it does                                            |
     |----------------|---------------|---------------------------------------------------------|
     | `plan`         | `kazi plan`   | author/refine the goal's acceptance predicates (authoring path). |
-    | `apply`        | `kazi apply`  | converge the goal -- the reconcile loop (subsumes loop + apply + qualify for code goals; see Step 3, "coming"). |
+    | `apply`        | `kazi apply`  | converge the goal -- the reconcile loop (subsumes loop + apply + qualify for code goals; see Step 3). |
     | `status`       | `kazi status` | read convergence/proposal state from the read-model (a pure read). |
     | `adopt`        | `kazi init`   | reverse-engineer a starter goal-file from an existing repo.        |
 
@@ -214,9 +214,12 @@ defmodule Kazi.Teach.InstallSkill do
     claude-sonnet-5`. The default tier is `claude-sonnet-5` (step up to
     `claude-opus-4-8` for harder slices). This needs only a Claude API key -- no
     local model, no special hardware -- so the economics apply to anyone running
-    Claude Code. Fleet data (2026-07-08, ~100 finished runs) showed
-    `claude-haiku-4-5` stuck+over_budget on ~37% of non-trivial runs vs ~13% for
-    Sonnet -- a net cost LOSS once escalation is priced in -- so Haiku is now an
+    Claude Code. The rationale is EMPIRICAL and re-derivable from your own fleet:
+    `kazi economy --json` aggregates cost, wall-clock, and outcome percentiles per
+    model and goal shape from the local run registry -- consult it periodically
+    rather than trusting any frozen figure (the dated finding that flipped this
+    default lives in ADR-0035's amendment; kazi issue #924 records the
+    vacuous-convergence failure mode cheap-tier grinding produced). Haiku is an
     explicit OPT-DOWN, not the default: pass `--model claude-haiku-4-5` yourself
     only for a slice you already know is trivial (a one-line fix, a lint/format
     pass, a doc typo).
@@ -366,18 +369,38 @@ defmodule Kazi.Teach.InstallSkill do
     WOULD do (and to catch over-constraint -- too many `needs` edges serializing
     everything) before committing to a real converge.
 
-    **What `apply` subsumes for CODE goals (coming).** The intent (ADR-0031
-    decision 1) is that for code goals `kazi apply` (with `--parallel`) REPLACES the
-    manual outer loop the operator hand-assembles -- the /loop + /apply --pool
-    parallel pool -- AND the separate /qualify pass: the native scheduler is the
-    parallel wave executor, and "launch-ready" is not a heuristic to infer -- the
-    OBJECTIVE predicate vector (including a live prod probe) IS the launch gate, so
-    qualification is a facet of `apply`, not a separate verb. That subsumption claim
-    is GATED ON PROOF (ADR-0031 decision 6): it is asserted only once the E21/E23
-    live dogfoods (T21.12, T23.9) pass. Until then it is COMING -- the /apply --pool
-    plus /claim outer loop stays the documented interop fallback (ADR-0026), and
-    `kazi apply --parallel` is offered as the native path, not yet the proven
-    replacement.
+    **What `apply` subsumes for CODE goals (proven, one open caveat).** For code
+    goals `kazi apply` (with `--parallel`) replaces the manual outer loop the
+    operator hand-assembles -- the /loop + /apply --pool parallel pool -- AND the
+    separate /qualify pass: the native scheduler is the parallel wave executor, and
+    "launch-ready" is not a heuristic to infer -- the OBJECTIVE predicate vector
+    (including a live prod probe) IS the launch gate, so qualification is a facet
+    of `apply`, not a separate verb. ADR-0031 decision 6 gated that claim on proof,
+    and the proof LANDED: the E21/E23 live dogfoods (T21.12, T23.9) passed
+    2026-06-26 on the released binary (v1.64.2) -- wave execution, blast-radius
+    parallelism, and pipelined frontier gating are proven. ONE OPEN CAVEAT (kazi
+    issue #936): the scheduler runs all `needs`-DAG frontiers back-to-back with no
+    supervised checkpoint between waves, so a wave whose predicates pass vacuously
+    can cascade into dependent waves unreviewed. Until a checkpoint mode lands,
+    arrange pause points yourself when waves build on each other: split the DAG
+    into one goal-file per wave, or watch the `frontier_complete` events on the
+    `--stream` output and stop at a boundary you want to inspect.
+
+    **Two safety refusals `apply` makes by default -- do NOT reflexively override
+    them.** An executing `apply` refuses (a) a `--workspace` that is a git repo's
+    PRIMARY worktree root (the dispatched agent's shell can reset/clean the whole
+    checkout, destroying untracked state that is not this goal's to touch) -- run
+    against a dedicated task worktree (`git worktree add <path> <branch>`) instead,
+    and pass `--allow-primary-workspace` only for a throwaway checkout you accept
+    losing; and (b) a goal the run registry already shows as LIVE (status running,
+    heartbeat fresher than ~90s) -- a second concurrent apply of one goal burns a
+    second budget and races the first's edits, so wait or stop the first, and pass
+    `--allow-duplicate-run` only for a deliberate re-run alongside it (a dead run's
+    row stops blocking on its own once its heartbeat goes stale). When one of these
+    refusals surfaces, the correct first move is to fix the CONDITION, not to add
+    the flag: the flag exists for the rare deliberate exception, and adding it on
+    reflex defeats the exact protection it names. `--check`/`--explain` stay
+    available without either flag.
 
     ### Step 4 -- parse the result and branch on `next_action`
 
@@ -413,9 +436,11 @@ defmodule Kazi.Teach.InstallSkill do
     **Opt down for a KNOWN-trivial slice.** `claude-haiku-4-5` is NOT a rung on this
     ladder -- it is an explicit opt-down you choose yourself for a slice you already
     know is trivial (a one-line fix, a lint/format pass, a doc typo), by pinning
-    `--model claude-haiku-4-5`. Fleet data (2026-07-08, ~100 finished runs) showed
-    Haiku stuck+over_budget on ~37% of non-trivial runs vs ~13% for Sonnet, so an
-    unqualified slice should never start there.
+    `--model claude-haiku-4-5`. An unqualified slice should never start there:
+    check `kazi economy --json` (per-model, per-goal-shape cost/outcome percentiles
+    from YOUR fleet's run registry) whenever you doubt the tiering call -- the
+    measured stuck/over-budget gap that demoted Haiku is recorded in ADR-0035's
+    dated amendment, and re-deriving it live beats trusting prose.
 
     **The trigger (which `--json` fields).** After each `kazi apply --harness claude
     --model <rung> --json` on a slice, read the terminal result object and branch on
