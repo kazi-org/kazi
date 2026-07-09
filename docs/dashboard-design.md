@@ -52,8 +52,10 @@ Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
   alternating vertical wave bands (band-a fill
   rgba(86,204,242,0.028), band-b transparent), dashed band separators
   (stroke rgba(22,35,58,0.8), dasharray 2 6), wave labels top-center per band
-  (10px, letter-spacing .32em, fill #3D4F6E): "WAVE N · LANDED/ACTIVE/
-  FRONTIER/HORIZON".
+  (10px, letter-spacing .32em, fill #3D4F6E): "WAVE N · <state>" in roadmap
+  mode; in the no-roadmap fallback the columns are state-derived and labeled
+  honestly with counts ("ATTENTION / ACTIVE / QUEUED / LANDED · N" — or
+  "· shown OF total" when a column is capped; never "WAVE").
 - Edges: 1.5px, #152840; edges on the active path: rgba(86,204,242,0.5).
 - Event river: fixed 38px bottom bar (rgba(10,17,32,.92), top hairline),
   "EVENT RIVER" label + masked marquee ticker (52s linear scroll, duplicated
@@ -110,15 +112,20 @@ The main content area is ONE full-height SVG constellation, not a list:
   converging, stuck, AND claimed nodes (the mockup's S1 sits on a
   CLAIMED · NEXT node — the session that picks it up next), and every tagged
   node is listed in the rail's SESSIONS section.
-- **Nodes are laid out in vertical wave-band columns** spanning the full
+- **Nodes are laid out in vertical band columns** spanning the full
   canvas height: alternating band fills (band-a rgba(86,204,242,0.028) /
   band-b transparent), dashed separators, and a top-center `.wlabel` per
-  band ("WAVE N · LANDED / ACTIVE / FRONTIER / HORIZON"). With a roadmap
-  goal-file, bands = its --explain frontiers and nodes = its groups (runs
-  attach to their group's node); without one, bands derive from run state
-  (landed | active | stuck/stale | horizon). Within a band, nodes distribute
-  vertically with even spacing in a SINGLE column -- a dense band stretches
-  the canvas downward (scroll) rather than wrapping.
+  band. With a roadmap goal-file, bands = its --explain frontiers ("WAVE N ·
+  <state>") and nodes = its groups (runs attach to their group's node).
+  Without one, columns are state-derived — ordered by operator attention,
+  left to right: ATTENTION (stuck/stale), ACTIVE (converging/claimed),
+  QUEUED (pending), LANDED — labeled "NAME · N", never "WAVE" (no
+  topological order exists without a roadmap). Each state column renders at
+  most 8 nodes, NEWEST heartbeat first (top of the column); overflow folds
+  into the label as "NAME · 8 OF M", so a long-lived fleet's landed pile
+  never stretches the canvas into a scroll. Within a band, nodes distribute
+  vertically with even spacing in a SINGLE column -- a dense roadmap band
+  stretches the canvas downward (scroll) rather than wrapping.
 - **`needs` edges** draw as 1.5px lines (#152840; rgba(86,204,242,0.5) when
   either endpoint is active) between group nodes.
 - **The event river is a 38px bottom bar ON the starmap page** (rgba(10,17,32,.92),

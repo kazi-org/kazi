@@ -70,17 +70,16 @@ defmodule KaziWeb.StarmapFleetFilterTest do
     refute html =~ "data-fleet-filter"
   end
 
-  test "a dense band grows the canvas height instead of wrapping into sub-columns",
+  test "a dense landed pile caps at the column limit instead of stretching the canvas",
        %{conn: conn} do
     for n <- 1..12, do: seed("dense-goal-#{n}", "converged")
 
     {:ok, _view, html} = live(conn, ~p"/starmap")
 
-    # 12 rows * 96 pitch + 120 padding = 1272 > the 742 base.
-    assert html =~ ~s(viewBox="0 0 1160 1272")
-    assert html =~ ~s(data-canvas-height="1272")
-    # Band chrome stretches with the canvas.
-    assert html =~ ~s(height="1272")
+    # State columns cap at 8 nodes (newest first); overflow folds into the
+    # label, so the canvas stays at the base height instead of scrolling.
+    assert html =~ "LANDED · 8 OF 12"
+    assert html =~ ~s(viewBox="0 0 1160 888")
   end
 
   test "a small fleet keeps the mockup's base canvas height", %{conn: conn} do
