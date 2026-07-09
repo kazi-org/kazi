@@ -123,9 +123,13 @@ defmodule Kazi.Teach.InstallSkillTest do
     # aliases (ADR-0032) so the router may name them when flagging the deprecation.
     # `mcp` is the installed MCP-server verb (T33.1, ADR-0044). `economy` is the
     # run-economics report (ADR-0058), `context` the context-store verbs
-    # (ADR-0045), `memory` the recall/harvest verbs (ADR-0062/0063).
-    real = MapSet.new(~w(apply run plan propose status init install-skill list-proposed approve
-                         reject export lint help schema version mcp economy context memory))
+    # (ADR-0045), `memory` the recall/harvest verbs (ADR-0062/0063). `dashboard` is
+    # the standalone fleet-mode web endpoint (T46.4, ADR-0057).
+    real =
+      MapSet.new(
+        ~w(apply run plan propose status init install-skill list-proposed approve
+                         reject export lint help schema version mcp economy context memory dashboard)
+      )
 
     referenced =
       Regex.scan(~r/`kazi ([a-z][a-z-]*)/, content)
