@@ -188,7 +188,10 @@ kazi makes that an **in-family Claude** move, so any Claude Code user gets it wi
 ([ADR-0033](docs/adr/0033-cheaper-via-in-family-claude-tiering.md)):
 
 - You **chat with Claude Code**; it drives kazi.
-- **Easy iterations** run on a **cheap Claude model** (e.g. **Haiku 4.5**, `claude-haiku-4-5`).
+- **The grind** runs on the **default grind tier** (**Sonnet 5**, `claude-sonnet-5`) —
+  cheaper than the frontier, reliable enough that the loop converges instead of
+  burning iterations (re-derive the tiering call from your own fleet any time:
+  `kazi economy --json`).
 - **Hard reasoning** runs on a **frontier model** (e.g. **Opus 4.8**, `claude-opus-4-8`).
 - The **predicates keep the cheap model honest** — it cannot declare a false "done,"
   because convergence is gated on objective checks, not the model's say-so.
@@ -206,8 +209,8 @@ kazi plan "add a /healthz endpoint that returns 200 ok" --workspace ./svc
 # it by passing the ref `kazi plan` printed:
 kazi approve <proposal-ref>
 
-# 2. Drive the N-iteration grind on a CHEAP Claude model — no local model needed:
-kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-4-5
+# 2. Drive the N-iteration grind on the default grind tier — no local model needed:
+kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-sonnet-5
 ```
 
 `--harness claude --model <id>` selects which Claude model runs that call
@@ -215,15 +218,17 @@ kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-haiku-
 already the default harness, so the only new thing is naming a cheaper model for
 the grind.
 
-### Start cheap, escalate on stuck (the smart default)
+### Start on the default tier, escalate on stuck (the smart default)
 
-Static tiering always grinds on one cheap model. The adaptive default — **start
-cheapest, step UP only when kazi reports the same slice is stuck** — pays frontier
-rates only for the slices that actually need them
-([ADR-0035](docs/adr/0035-skill-driven-adaptive-model-tiering.md)):
+Static tiering always grinds on one model. The adaptive default — **start on the
+default grind tier, step UP only when kazi reports the same slice is stuck** —
+pays frontier rates only for the slices that actually need them
+([ADR-0035](docs/adr/0035-skill-driven-adaptive-model-tiering.md), amended on
+fleet data — `claude-haiku-4-5` is an explicit opt-down for known-trivial
+slices, not a ladder rung):
 
 ```
-claude-haiku-4-5  ->  claude-sonnet-5  ->  claude-opus-4-8   (cap — do not escalate past Opus)
+claude-sonnet-5  ->  claude-opus-4-8   (cap — do not escalate past Opus)
 ```
 
 The policy lives in the orchestrating skill, **never in kazi**: kazi reports
