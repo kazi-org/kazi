@@ -163,6 +163,12 @@ defmodule Kazi.Runtime do
     * `:run_id` — the registry's `run_id` for this process (default a fresh
       `Ecto.UUID`). Passing an existing id lets a restarted process reclaim its
       own registry row (`RunRegistry.start/1` upserts on a repeat `run_id`).
+    * `:proposal_ref` — session provenance part 2: when this run was started
+      from an approved proposal (`kazi apply <proposal-ref>`), the proposal's
+      own `proposal_ref`, copied onto the registry row at registration so a
+      run traces back to the proposal (and its `session_name`) even when the
+      applying session differs from the planning one. Default `nil`
+      (unchanged behavior for a plain goal-file-path run).
     * `:sinks_dir` — the root directory the per-run transcript AND events sinks
       are written under, as `<sinks_dir>/<run_id>/transcript.jsonl` (T46.3,
       ADR-0057 decision 3) and `<sinks_dir>/<run_id>/events.jsonl` (T46.2,
@@ -282,6 +288,9 @@ defmodule Kazi.Runtime do
           :persist?,
           :goal_ref,
           :run_id,
+          # Session provenance part 2: consumed by register_run/10 above, not
+          # a Loop opt.
+          :proposal_ref,
           :providers,
           :adapter_opts,
           :extra_action_context,
@@ -364,7 +373,8 @@ defmodule Kazi.Runtime do
           transcript_sink_path,
           events_sink_path,
           goal.budget.max_iterations,
-          Keyword.get(opts, :session_name)
+          Keyword.get(opts, :session_name),
+          Keyword.get(opts, :proposal_ref)
         )
 
         # T31: start the heartbeat ticker (a supervised periodic timer that advances
@@ -1016,7 +1026,8 @@ defmodule Kazi.Runtime do
          _transcript_sink_path,
          _events_sink_path,
          _max_iterations,
-         _session_name
+         _session_name,
+         _proposal_ref
        ),
        do: :ok
 
@@ -1029,7 +1040,8 @@ defmodule Kazi.Runtime do
          transcript_sink_path,
          events_sink_path,
          max_iterations,
-         session_name
+         session_name,
+         proposal_ref
        ) do
     attrs = %{
       run_id: run_id,
@@ -1044,6 +1056,10 @@ defmodule Kazi.Runtime do
       # The operator-assigned session label (`--session-name` /
       # KAZI_SESSION_NAME), telling concurrent runs apart on the starmap rail.
       session_name: session_name,
+      # Session provenance part 2: the approved proposal this run was
+      # started from (`kazi apply <proposal-ref>`), or nil for a plain
+      # goal-file-path run.
+      proposal_ref: proposal_ref,
       # T48.15: record the OS process id for liveness detection in run reaping.
       os_pid: to_string(System.pid())
     }

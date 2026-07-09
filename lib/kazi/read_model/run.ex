@@ -40,6 +40,12 @@ defmodule Kazi.ReadModel.Run do
     # interactively (`claude -r <id>`). Both nil on pre-existing rows.
     field(:session_name, :string)
     field(:harness_session_id, :string)
+    # Session provenance part 2: when this run was registered from an
+    # approved proposal (`kazi apply <proposal-ref>`), the proposal_ref it
+    # came from -- copied at registration so a run traces back to the
+    # proposal (and its session_name) even when the applying session differs
+    # from the planning one. Nil for a plain goal-file-path run.
+    field(:proposal_ref, :string)
     # Issue #857: the OS pid of the dispatched harness subprocess (as reported
     # by `Kazi.Harness.CliAdapter`'s child-supervision wrapper), so a fresh
     # apply for the same goal_ref can warn when a previous run's harness child
@@ -86,6 +92,7 @@ defmodule Kazi.ReadModel.Run do
     :max_iterations,
     :session_name,
     :harness_session_id,
+    :proposal_ref,
     :harness_child_pid,
     :os_pid,
     :budget_tokens,

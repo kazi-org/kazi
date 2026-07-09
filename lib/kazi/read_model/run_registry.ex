@@ -58,6 +58,7 @@ defmodule Kazi.ReadModel.RunRegistry do
            :events_sink_path,
            :max_iterations,
            :session_name,
+           :proposal_ref,
            :os_pid,
            :updated_at
          ]},

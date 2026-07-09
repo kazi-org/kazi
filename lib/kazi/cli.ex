@@ -1238,7 +1238,9 @@ defmodule Kazi.CLI do
       strict: flags[:strict] || false,
       adr: flags[:adr] || false,
       json: flags[:json] || false,
-      predicates: flags[:predicates]
+      predicates: flags[:predicates],
+      replace: flags[:replace] || false,
+      session_name: flags[:session_name]
     ]
   end
 
@@ -1417,8 +1419,13 @@ defmodule Kazi.CLI do
     persist? = ensure_read_model()
 
     case load_goal_source(goal_source, persist?) do
-      {:ok, goal} ->
-        run_goal(goal, opts, persist?, runtime_opts)
+      {:ok, goal, proposal_ref, proposal_session_name} ->
+        run_opts =
+          opts
+          |> maybe_put(:proposal_ref, proposal_ref)
+          |> maybe_put(:proposal_session_name, proposal_session_name)
+
+        run_goal(goal, run_opts, persist?, runtime_opts)
 
       {:error, message} ->
         # M9 (deep-review-001): under --json this must still emit a JSON error
@@ -1445,13 +1452,14 @@ defmodule Kazi.CLI do
   # Both sources yield a goal through the same validated loader
   # (`Kazi.Goal.Loader`), so the runtime's pre-loop guards (vacuous-goal,
   # primary-workspace, duplicate-run) apply identically.
-  @spec load_goal_source(String.t(), boolean()) :: {:ok, Goal.t()} | {:error, String.t()}
+  @spec load_goal_source(String.t(), boolean()) ::
+          {:ok, Goal.t(), String.t() | nil, String.t() | nil} | {:error, String.t()}
   defp load_goal_source(source, persist?) do
     if proposal_ref?(source) do
       load_approved_proposal(source, persist?)
     else
       case Goal.Loader.load(source) do
-        {:ok, goal} -> {:ok, goal}
+        {:ok, goal} -> {:ok, goal, nil, nil}
         {:error, reason} -> {:error, "could not load goal-file #{source}: #{reason}"}
       end
     end
@@ -1475,7 +1483,18 @@ defmodule Kazi.CLI do
   defp load_approved_proposal(ref, true) do
     case Authoring.load_approved(ref) do
       {:ok, goal} ->
-        {:ok, goal}
+        # Session provenance part 2: carry the proposal's own session_name
+        # (the session that authored it) alongside its ref, so an applying
+        # session that names none of its own falls back to who planned it
+        # (resolve_session_name/1) — the plan -> approve -> apply lifecycle
+        # is designed to be cross-session.
+        proposal_session_name =
+          case ReadModel.get_proposed_goal(ref) do
+            %ProposedGoal{session_name: session_name} -> session_name
+            nil -> nil
+          end
+
+        {:ok, goal, ref, proposal_session_name}
 
       {:error, :not_found} ->
         {:error,
@@ -1642,6 +1661,7 @@ defmodule Kazi.CLI do
       # the run's fleet-registry row for the starmap's SESSIONS rail. Only set
       # when one resolves, so the default path is unchanged when none do.
       |> maybe_put(:session_name, resolve_session_name(opts))
+      |> maybe_put(:proposal_ref, opts[:proposal_ref])
       |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
       # T15.4 (ADR-0023 decision 3): under --json --stream, thread a per-iteration
       # streaming observer into the runtime's `:stream` seam, which composes it
@@ -1924,6 +1944,7 @@ defmodule Kazi.CLI do
     |> maybe_put(:permission_mode, opts[:permission_mode])
     |> maybe_put(:allowed_tools, opts[:allowed_tools])
     |> maybe_put(:session_name, resolve_session_name(opts))
+    |> maybe_put(:proposal_ref, opts[:proposal_ref])
     |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
   end
 
@@ -1938,6 +1959,7 @@ defmodule Kazi.CLI do
     |> maybe_put(:effort, opts[:effort])
     |> maybe_put(:permission_mode, opts[:permission_mode])
     |> maybe_put(:allowed_tools, opts[:allowed_tools])
+    |> maybe_put(:proposal_ref, opts[:proposal_ref])
   end
 
   # The collective run's exit code: 0 only when the whole goal-set collectively
@@ -2025,6 +2047,13 @@ defmodule Kazi.CLI do
   #      subprocess of a Claude Code session (the orchestrator's OWN session id,
   #      set in every Claude Code subprocess's environment, distinct from
   #      `--harness`/`--model`, which name the INNER harness kazi dispatches TO).
+  #   4. session provenance part 2: when this `apply` is running an APPROVED
+  #      proposal ref, that proposal's OWN recorded session_name (the session
+  #      that planned it) -- so an applying session naming none of its own
+  #      still traces the run back to who planned it, instead of the run
+  #      landing unlabeled. Only reached when 1-3 are all absent, so an
+  #      applying session that names itself is never overridden by the
+  #      proposal's provenance.
   #
   # A future harness-agnostic addition can extend step 3 with more orchestrator
   # session env vars as they're confirmed to exist; this only adds the one this
@@ -2033,7 +2062,8 @@ defmodule Kazi.CLI do
   defp resolve_session_name(opts) do
     opts[:session_name] ||
       System.get_env("KAZI_SESSION_NAME") ||
-      System.get_env("CLAUDE_CODE_SESSION_ID")
+      System.get_env("CLAUDE_CODE_SESSION_ID") ||
+      opts[:proposal_session_name]
   end
 
   # T15.4 (ADR-0023 decision 3): install the JSONL streaming observer only when

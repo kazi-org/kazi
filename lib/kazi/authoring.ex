@@ -768,13 +768,17 @@ defmodule Kazi.Authoring do
         idea: idea,
         goal_id: to_string(goal.id),
         status: "proposed",
-        goal: serialized
+        goal: serialized,
+        # session provenance (part 2): the authoring session's label, so a
+        # later `approve`/`apply` (possibly from a DIFFERENT session) can
+        # trace this proposal back to who planned it.
+        session_name: Keyword.get(opts, :session_name)
       }
 
       %ProposedGoal{}
       |> ProposedGoal.changeset(attrs)
       |> Repo.insert(
-        on_conflict: {:replace, [:idea, :goal_id, :status, :goal, :updated_at]},
+        on_conflict: {:replace, [:idea, :goal_id, :status, :goal, :session_name, :updated_at]},
         conflict_target: :proposal_ref
       )
       |> case do
