@@ -98,6 +98,9 @@ echo "$PAYLOAD" | kazi plan --json
 
 The payload is a `{"name", "predicates": [...], "rationale"}` object (a bare JSON
 array of predicate entries is also accepted). A positional idea is OPTIONAL here.
+A payload `"goal_id"` names the drafted goal verbatim and a payload `"idea"` is
+persisted as the proposal's idea (T39.1, ADR-0049); absent, kazi derives them
+from `"id"`/`"name"` or generates defaults.
 
 If a `/plan` strategy doc already exists for this work, DERIVE the predicates from
 its `acc:` lines rather than inventing them -- those lines ARE the predicate set.
@@ -131,17 +134,20 @@ Emits `{schema_version, proposal_ref, status: "approved", goal_id}`. `kazi rejec
 <proposal-ref> --json` declines (kept for audit). Browse the queue with
 `kazi list-proposed [--status proposed|approved|rejected] --json`.
 
-> `approve` returns a goal id, but `kazi apply` takes a GOAL-FILE path, not the id.
-> plan/approve persist the approved goal into a loadable goal-file; apply that
-> file's path in step 3.
+> `kazi apply` runs the APPROVED proposal directly by its `prop-...` ref
+> (T39.2, ADR-0049): carry the `proposal_ref` from step 1 through `approve`
+> straight into step 3 -- no goal-file reconstruction. A goal-file path also
+> works, exactly as before.
 
 ### 3. converge -- `kazi apply --harness claude --model <cheap-claude-id> --json [--stream]`
 
-Apply the approved goal with the cheap tier. The DEFAULT is in-family Claude
-tiering: you authored on a frontier model, so grind on a cheap Claude model:
+Apply the approved goal with the cheap tier. The argument is the approved
+`prop-...` proposal-ref from step 2 (or a goal-file path). The DEFAULT is
+in-family Claude tiering: you authored on a frontier model, so grind on a cheap
+Claude model:
 
 ```sh
-kazi apply <goal-file> --workspace <path> --harness claude --model claude-haiku-4-5 --json
+kazi apply <proposal-ref> --workspace <path> --harness claude --model claude-haiku-4-5 --json
 ```
 
 SECONDARY (privacy / no-cloud): keep the grind on local hardware via opencode --
