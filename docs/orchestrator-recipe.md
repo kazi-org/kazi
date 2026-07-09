@@ -344,6 +344,14 @@ It consumes the same proven JSON contract this recipe documents. For any non-MCP
 agent, this recipe plus the two schemas is the complete, universal way to drive
 kazi.
 
+**The setup nudge (issue #972).** Nothing requires `.mcp.json` to declare the
+`kazi` entry -- an MCP-speaking harness with no entry just silently falls back
+to this JSON-CLI shell-out path. A serial `kazi apply`'s human (non `--json`)
+report detects that omission and prints a one-line nudge toward `kazi init
+--with-mcp` pointing back here. It shows AT MOST ONCE per project (a marker
+under the workspace's `.kazi/` dir records that it fired) and never appears
+under `--json` -- that surface stays pure per the stdout contract above.
+
 
 ## See also
 
