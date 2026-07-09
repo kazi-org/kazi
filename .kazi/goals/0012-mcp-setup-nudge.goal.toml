@@ -1,0 +1,36 @@
+id = "mcp-setup-nudge"
+name = "issue #972: nudge toward kazi init --with-mcp once per project when .mcp.json has no kazi entry"
+
+[[predicate]]
+id = "nudge-on-missing-mcp"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #972): kazi ships `kazi mcp` + `kazi init --with-mcp` (writes a `kazi` entry into `.mcp.json`), but nothing detects or nudges toward MCP setup when it's missing -- every call silently falls back to the more expensive JSON-CLI shell-out path with no signal that this is happening by omission, not choice. Already researched -- exact seams, do not re-derive:\n- MCP config writer: lib/kazi/mcp/client_config.ex:22-24 (`@server_name \"kazi\"`, `@server_entry %{\"command\" => \"kazi\", \"args\" => [\"mcp\"]}`) and :71-89 (`ensure_in_dir/1`, additive merge into `<dir>/.mcp.json`).\n- Call site: lib/kazi/cli.ex:2479-2502 `maybe_write_mcp_config/2` -- ONLY runs `ClientConfig.ensure_in_dir/1` when `opts[:with_mcp]` is truthy, else no-op (2499-2500); called from `execute_init/3` at :2426. Nothing currently reads `.mcp.json` to check for a `kazi` entry absent the flag.\n- Apply's prose (non --json) result path: lib/kazi/cli.ex:2007-2011 `report_outcome/6` (branches JSON vs human via `emit/3`) -> :4345-4355 `report/3` (assembles the prose summary: outcome line, iterations, actions, predicate vector) -- the natural place to append a one-time nudge line. Callers at cli.ex:1687,1699,1711 inside `run_goal_serial/4` (converged/over_budget/stopped branches).\n- Workspace resolution for `apply`/`plan` (use this, NOT File.cwd!(), to check the CALLER's project dir, not kazi's install dir): lib/kazi/cli.ex:1621 `run_goal_serial/4` -- `workspace = opts[:workspace] || goal.scope.workspace` (also 1601,1874,4954,5081); `goal.scope.workspace` set at `kazi init` time (lib/kazi/scope.ex:47-58) to the repo dir.\n- Reusable \"record whether X already happened\" idiom for a once-per-project nudge (don't invent a new state format): lib/kazi/ratchet/store.ex:1-30 -- project-local `<workspace>/.kazi/ratchets.json`, small JSON keyed store, `:none` on missing file. Or the simpler global idiom: lib/kazi/crash_dump.ex:22-25 `state_dir/0` (`KAZI_STATE_DIR` env var else `<home>/.kazi`).\nIMPLEMENT: after a serial `apply` run's prose (non --json) report, if the resolved workspace's `.mcp.json` either does not exist OR exists but has no `kazi` server entry (reuse `Kazi.Mcp.ClientConfig`'s knowledge of what the entry looks like -- add a read-side `configured_in_dir?/1` alongside `ensure_in_dir/1` rather than duplicating the entry shape check), print ONE short line: something like \"MCP not configured for this project -- run `kazi init --with-mcp` to expose kazi as a typed MCP tool instead of the JSON-CLI shell-out (docs: <skill/README pointer>).\" Show it AT MOST ONCE per project: record a boolean in the project-local `.kazi/` state (ratchet-store style) the first time it's shown, and never show it again for that workspace (even across separate `kazi` invocations) once recorded -- this must NOT print under `--json` (prose-only, since --json output must stay parseable/pure per the existing JSON-stdout-purity discipline -- grep for that convention if unsure). Write test/kazi/cli/mcp_nudge_test.exs covering: no .mcp.json -> nudge shown once, not shown on a second run against the same workspace; .mcp.json exists without a kazi entry -> nudge shown; .mcp.json already has the kazi entry -> never nudges; --json mode never prints the nudge text. PROCESS: branch task/mcp-setup-nudge, small conventional commits (lib/ vs test/ vs docs/ separate -- doc the nudge behavior in docs/orchestrator-recipe.md or the skill per ADR-0034), push with -u. This predicate passes when the new test passes."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/cli/ test/kazi/mcp/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
