@@ -298,6 +298,11 @@ defmodule Kazi.Scheduler do
       `run/2`'s result (the pre-T21.5 behavior — backward-compatible for the CLI,
       T21.8).
     * `:supervisor`, `:reconcile_timeout` — forwarded to `run/2`.
+    * `:on_frontier_complete` — OPT-IN (issue #936), forwarded to
+      `Kazi.Scheduler.DepScheduler.run/2` ONLY when the goal routes through the
+      `needs`-DAG group scheduler (a no-op otherwise, since a flat goal-set has no
+      frontiers to report). See `Kazi.Scheduler.DepScheduler`'s moduledoc
+      "Frontier-complete events" for the callback shape.
 
   Returns `run/2`'s result, but each `result.partitions` entry is keyed by the
   `Kazi.Scheduler.Partitioner` partition (not a bare term). With `:integrate`, the
@@ -369,7 +374,7 @@ defmodule Kazi.Scheduler do
 
     dep_opts =
       opts
-      |> Keyword.take([:supervisor, :reconcile_timeout])
+      |> Keyword.take([:supervisor, :reconcile_timeout, :on_frontier_complete])
       |> Keyword.put(:reconciler, group_reconciler)
 
     Kazi.Scheduler.DepScheduler.run(goal, dep_opts)
