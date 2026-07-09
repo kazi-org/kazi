@@ -51,12 +51,16 @@ doing the keystrokes. You (FRONTIER model) AUTHOR predicates; a cheap harness
 (`--harness claude --model <cheap-claude-id>`) RUNS the loop; kazi holds the bar
 still.
 
-The DEFAULT recipe is in-family Claude tiering (ADR-0033/0035): you are a frontier
-Claude model (e.g. `claude-opus-4-8`) authoring predicates in this session, and you
-grind on a CHEAP Claude model -- `claude-haiku-4-5` (step up to `claude-sonnet-5`
-for harder slices) -- via `--harness claude --model <id>`. It needs only a Claude API
-key: no local model, no special hardware. The cost win is BEING MEASURED -- treat it
-as the intended economics, not a measured figure.
+The DEFAULT recipe is in-family Claude tiering (ADR-0033/0035, amended 2026-07-08 on
+fleet data): you are a frontier Claude model (e.g. `claude-opus-4-8`) authoring
+predicates in this session, and you grind on the DEFAULT grind tier --
+`claude-sonnet-5` (step up to `claude-opus-4-8` for harder slices) -- via
+`--harness claude --model <id>`. It needs only a Claude API key: no local model, no
+special hardware. Fleet data (2026-07-08, ~100 finished runs) showed
+`claude-haiku-4-5` stuck+over_budget on ~37% of non-trivial runs vs ~13% for Sonnet
+-- a net cost LOSS once escalation is priced in -- so Haiku is now an explicit
+OPT-DOWN, not the default: pin `--model claude-haiku-4-5` yourself only for a slice
+you already know is trivial (a one-line fix, a lint/format pass, a doc typo).
 
 Local / BYOM is the SECONDARY privacy add-on: if code must never leave your hardware,
 grind on a local model instead -- `--harness opencode --model <local-model>` (a local
@@ -65,7 +69,7 @@ Qwen/Llama via opencode). Same two-tier shape, no cloud; explicitly secondary.
 ## The loop: plan -> approve -> apply -> branch
 
 ```
-plan --json -> (review) -> approve --json -> apply --harness claude --model <cheap-claude-id> --json [--stream]
+plan --json -> (review) -> approve --json -> apply --harness claude --model claude-sonnet-5 --json [--stream]
                                                     |
                                        parse result, branch on next_action
 ```
@@ -139,16 +143,20 @@ Emits `{schema_version, proposal_ref, status: "approved", goal_id}`. `kazi rejec
 > straight into step 3 -- no goal-file reconstruction. A goal-file path also
 > works, exactly as before.
 
-### 3. converge -- `kazi apply --harness claude --model <cheap-claude-id> --json [--stream]`
+### 3. converge -- `kazi apply --harness claude --model claude-sonnet-5 --json [--stream]`
 
-Apply the approved goal with the cheap tier. The argument is the approved
+Apply the approved goal with the DEFAULT grind tier. The argument is the approved
 `prop-...` proposal-ref from step 2 (or a goal-file path). The DEFAULT is
-in-family Claude tiering: you authored on a frontier model, so grind on a cheap
-Claude model:
+in-family Claude tiering: you authored on a frontier model, so grind on
+`claude-sonnet-5`:
 
 ```sh
-kazi apply <proposal-ref> --workspace <path> --harness claude --model claude-haiku-4-5 --json
+kazi apply <proposal-ref> --workspace <path> --harness claude --model claude-sonnet-5 --json
 ```
+
+OPT-DOWN (a slice you already know is trivial): pin `--model claude-haiku-4-5`
+yourself. This is a deliberate opt-down, never the default rung (see the
+fleet-data note above).
 
 SECONDARY (privacy / no-cloud): keep the grind on local hardware via opencode --
 same loop, no cloud:
@@ -181,17 +189,24 @@ you never re-derive the branch from the predicate vector:
 
 ### Escalate-on-stuck: the bounded model ladder (ADR-0035)
 
-Static cheap-tiering always grinds on one cheap model. The ADAPTIVE refinement
-starts cheapest and steps UP only when kazi reports the SAME slice not progressing,
-so you pay frontier rates only for the slices that need them. The policy lives
-ENTIRELY in the skill -- kazi reports per-invocation state, YOU own the ladder and
-the rung counter. kazi-core has NO model-selection logic (ADR-0035 decision 1).
+Static default-tiering always grinds on `claude-sonnet-5`. The ADAPTIVE refinement
+(amended 2026-07-08) starts on the default tier and steps UP only when kazi reports
+the SAME slice not progressing, so you pay frontier rates only for the slices that
+need them. The policy lives ENTIRELY in the skill -- kazi reports per-invocation
+state, YOU own the ladder and the rung counter. kazi-core has NO model-selection
+logic (ADR-0035 decision 1).
 
 The ladder is capped at the frontier and STOPS there:
 
 ```
-claude-haiku-4-5  ->  claude-sonnet-5  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
+claude-sonnet-5  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
 ```
+
+`claude-haiku-4-5` is NOT a rung on this ladder -- it is an explicit opt-down you
+choose yourself for a slice you already know is trivial, by pinning `--model
+claude-haiku-4-5`. Fleet data (2026-07-08, ~100 finished runs) showed Haiku
+stuck+over_budget on ~37% of non-trivial runs vs ~13% for Sonnet, so an unqualified
+slice should never start there.
 
 Trigger (the `--json` fields, T30.3 -- `docs/tiering-signals.md`): after each
 `kazi apply --harness claude --model <rung> --json`, read the terminal result and
@@ -206,12 +221,14 @@ In one line: on a result for the slice's `goal_id` whose `status` is `stuck` or
 increment the per-`goal_id` rung counter and re-dispatch the SAME slice with the
 next `--model` UP the ladder.
 
-- RESET on a fresh slice: a new `goal_id` starts at rung 1 (`claude-haiku-4-5`).
+- RESET on a fresh slice: a new `goal_id` starts at rung 1 (`claude-sonnet-5`),
+  unless you are opting a known-trivial slice down to Haiku yourself.
 - BOUNDED by kazi: escalation rides on kazi's own budget/stuck termination (each
   rung is one bounded `kazi apply`) and the ladder caps at `claude-opus-4-8`, so it
-  cannot loop unboundedly -- at worst three rungs, then stop.
+  cannot loop unboundedly -- at worst two rungs, then stop.
 - DISABLE -> static tiering: pin `--model` to one rung and never step up; the recipe
-  degenerates to static cheap-tiering (always `claude-haiku-4-5`).
+  degenerates to static default-tiering (always `claude-sonnet-5`, or a deliberate
+  `claude-haiku-4-5` opt-down).
 
 The full copy-paste sh recipe (ladder + trigger + reset + cap) is in the installed
 kazi SKILL.md ("Escalate-on-stuck") -- kept in lockstep with this section.
@@ -232,7 +249,7 @@ it off the first object you parse and refuse (or branch) if it is not the versio
 you were written against:
 
 ```sh
-result=$(kazi apply "$GOAL" --workspace "$WS" --harness claude --model claude-haiku-4-5 --json)
+result=$(kazi apply "$GOAL" --workspace "$WS" --harness claude --model claude-sonnet-5 --json)
 ver=$(printf '%s' "$result" | jq -r .schema_version)
 [ "$ver" = "2" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
 next=$(printf '%s' "$result" | jq -r .next_action)
