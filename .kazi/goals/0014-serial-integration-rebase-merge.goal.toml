@@ -1,0 +1,59 @@
+# E50/T50.2 (ADR-0065 decision 2). DEPENDS ON: goal 0013 (T50.1) merged to main.
+# Do not start this goal until `git log origin/main` shows the serial worktree
+# indirection landed -- the brief's precondition check enforces this.
+# Conflict surface: lib/kazi/cli.ex serial path + lib/kazi/scheduler/integration.ex.
+
+id = "serial-integration-rebase-merge"
+name = "T50.2: a converged serial run lands its worktree work like a partition does -- task-branch commits, rebase-merge onto the base, conflict -> re-dispatch (ADR-0065 decision 2)"
+
+[[predicate]]
+id = "serial-integration-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E50 task T50.2, ADR-0065 decision 2, docs/adr/0065-safe-concurrent-work-serial-worktree-fleet.md).
+
+PRECONDITION: T50.1 (goal 0013, serial worktree indirection) must already be on main -- verify `grep -rn "in_place" lib/kazi/cli.ex` finds the flag and test/kazi/serial_worktree_indirection_test.exs exists. If absent, STOP: this goal is premature; report that instead of building on a missing seam.
+
+WHY: with T50.1, a serial run's work lives in a kazi-owned task worktree, not the caller's checkout -- so converging is no longer enough; the work must LAND on the base or it is lost when the worktree is cleaned up. ADR-0065 decision 2: the 1-partition path lands its work exactly as a parallel partition does (T21.5 semantics), and kazi core NEVER runs `git reset`/`git clean` against operator state.
+
+BUILD THIS: when a T50.1-isolated serial run reaches :converged, integrate the worktree's commits onto the base (the caller's --workspace checkout / its current branch) before cleaning the worktree up: (1) reuse Kazi.Scheduler.Integration (lib/kazi/scheduler/integration.ex) -- integrate/2 takes converged entries as {partition-like, worktree_path} plus opts; pass :base explicitly as the base ref of the caller's workspace (its checked-out branch), NOT the hardcoded "main" default; (2) the default integrator is Integration.ActionIntegrator.integrate/2 which drives Kazi.Actions.Integrate (branch -> push -> PR -> rebase-merge via the gh CLI); keep the :integrator seam injectable so tests use a stub and a LOCAL-ONLY landing (no remote) can be a plain rebase-merge of the task branch onto the base checkout -- when no remote/gh is available, a pushed-branch or local-branch handoff (leave the task branch in the base repo, report its ref in the result) is the honest degraded mode, NEVER a silent drop; (3) on a conflict (Integration's conflict_signaled?/normalize_conflict path: push/merge output matching conflict), route to re-dispatch with the conflict evidence exactly as the parallel path does (Integration's :redispatcher seam, bounded by :max_attempts default 3) -- never force, never resolve by resetting the base; (4) if integration ultimately fails, the run result must say so (a converged-but-not-landed run is NOT a clean success -- surface the task-branch ref so no work is lost) and the worktree cleanup must still not destroy the unmerged commits (the branch survives worktree removal by design -- rely on that, and pin it in a test); (5) NEVER invoke `git reset` or `git clean` against the base/operator checkout anywhere in the serial path -- pin structurally (see tests).
+
+NOTE ON [integration]/landing contracts: E44's `[integration]` goal-file block (ADR-0055 T44.1) is NOT shipped on main -- do not reference or invent it. Scope this task to the T50.1 worktree path's landing with the Integration module; when E44 lands, its contract will select modes on top of this seam.
+
+EXACT SEAMS (verified on main at v1.125.0): Kazi.Scheduler.Integration.integrate/2 (lib/kazi/scheduler/integration.ex, ~line 156) -- serial join, :base opt (default "main", ~159), :integrator seam (~99/157), :redispatcher + :max_attempts (~68), result %{collective, integrated, conflicts, redispatched} (~111), :converged only when conflicts == []; ActionIntegrator (~326-380) builds Action.new(:integrate, params: %{base, workspace: worktree}) and normalize_conflict/1 (~374) maps conflicty push/merge failures to {:conflict, reason}. The parallel wiring to mirror: Kazi.Scheduler.maybe_integrate/2 (lib/kazi/scheduler.ex ~563-582) runs only when :integrate opts are supplied and downgrades a merge-conflicted collective to :stuck. The serial call site: lib/kazi/cli.ex run_goal_serial/4 -- after Kazi.Runtime.run/2 returns and before worktree cleanup; T50.1 stored the caller's base path on the run opts (:base_workspace or equivalent -- read what 0013 actually named it). Existing tests to mirror: test/kazi/scheduler/integration_test.exs (stub integrator/redispatcher).
+
+WRITE test/kazi/serial_integration_test.exs (fixture git repos in tmp -- a base repo with a commit history; no network: inject a stub or local-only integrator; no real harness -- vacuous/trivial predicates): (1) a converged serial run whose worktree holds commits integrates them onto the base via rebase-merge (fixture-local), the base's log contains the task commits afterwards, and the worktree is cleaned up; (2) a conflicting base advance (commit to the base between worktree creation and integration that conflicts) triggers the re-dispatch seam (stub redispatcher observes the call) and never force-pushes or resets the base; (3) integration failure surfaces in the run result (converged-but-unlanded is visible, the task-branch ref is reported) and the task branch still exists in the base repo after worktree cleanup; (4) STRUCTURAL: the serial path never invokes `git reset` or `git clean` against the base -- assert via the recorded git argv seam (the Worktree/Integration modules shell out through System.cmd-style helpers; capture or grep the invocations the way worktree_test does) or, minimally, grep lib/kazi/cli.ex + lib/kazi/scheduler/integration.ex for reset/clean call sites and assert none target the base workspace.
+
+DOCS LAND WITH CODE (ADR-0034): docs/orchestrator-recipe.md -- extend the T50.1 workspace-semantics section: converged serial work lands on the base by rebase-merge, conflicts re-dispatch, degraded mode is a surviving task branch. Cross-reference ADR-0065 decision 2.
+
+PROCESS: branch task/serial-integration-rebase-merge off main; small conventional commits (lib/ vs test/ vs docs/ separate); push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/serial_integration_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green -- Integration and the serial path are shared machinery."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

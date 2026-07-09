@@ -1,0 +1,56 @@
+# E50/T50.1 (ADR-0065 decision 1). No dependencies -- Wave E50-1.
+# Conflict surface: lib/kazi/cli.ex (run_goal routing + flags). Merge-order
+# against 0015/0016, which also touch cli.ex flag parsing.
+
+id = "serial-worktree-indirection"
+name = "T50.1: an executing serial apply runs in a kazi-owned task worktree by default; --in-place opts out (ADR-0065 decision 1)"
+
+[[predicate]]
+id = "serial-worktree-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E50 task T50.1, ADR-0065 decision 1, docs/adr/0065-safe-concurrent-work-serial-worktree-fleet.md).
+
+WHY: issue #937 records a real data-loss incident -- a serial `kazi apply <goal> --workspace <path>` trusts --workspace completely and edits it in place; a dispatched agent's shell destroyed unrelated untracked state in a real checkout. The #940 guard (shipped) merely REFUSES a primary-worktree target; refusal is a tripwire, not a capability. This task makes serial apply the 1-partition degenerate case of the parallel scheduler's worktree isolation: kazi creates (and cleans up) a task worktree, the dispatched agent works there, and --workspace comes to mean 'the base I want this goal integrated onto'.
+
+BUILD THIS: when `kazi apply <goal> --workspace <ws>` EXECUTES (i.e. not --explain, not --check) and a new flag --in-place is NOT given: (1) create a task worktree from <ws>'s HEAD using the existing worktree machinery; (2) thread the WORKTREE path (not <ws>) as :workspace into Kazi.Runtime.run/2 so the loop, the dispatched agent, and predicate evaluation all operate in the worktree; (3) keep the caller's base path available on the run opts (e.g. :base_workspace) -- the follow-up integration task (T50.2, goal 0014) needs it; the RunRegistry row's workspace field should record the worktree path the run actually edits in; (4) clean the worktree up on EVERY terminal state (converged / stuck / over_budget / error / crash) -- an `after` block, exactly like the parallel path; (5) `--in-place` preserves today's direct-edit behavior byte-identically.
+
+GUARD INTERPLAY (must hold): the #940 primary-worktree refusal (Kazi.CLI.primary_workspace_refused?/2, invoked in the run_goal/4 cond before the execution branches, override --allow-primary-workspace) now applies ONLY to the --in-place path -- the default worktree path makes the dangerous target unreachable, so pointing at a primary worktree root WITHOUT --in-place must NOT refuse. The #942 duplicate-run guard (Kazi.Runtime.guard_no_live_duplicate/2, keyed by goal_ref not path) is unaffected -- do not touch it.
+
+EXACT SEAMS (verified on main at v1.125.0; line numbers approximate, trust function names): lib/kazi/cli.ex -- run_goal/4 (~line 1526) is the cond that routes explain -> check -> primary-workspace refusal -> parallel -> run_goal_serial/4 (~1626), which computes `workspace = opts[:workspace] || goal.scope.workspace` and calls Kazi.Runtime.run(goal, run_opts) (~1691). Serial has NO worktree indirection today (confirmed). The worktree machinery to reuse: Kazi.Scheduler.Worktree (lib/kazi/scheduler/worktree.ex) -- wrap/2 wraps a reconciler with create -> inner -> after-cleanup; create/4 runs `git worktree add -b <branch> <path> HEAD`; safe_cleanup/3 prefers `git worktree remove --force`, falls back to guarded_rm_rf/2 (refuses cwd/repo/ancestor), then prunes; Kazi.Scheduler.WorktreeTable records live worktrees BEFORE the inner runs so a brutal kill can be reaped later (Worktree.reap/2). Reuse wrap/2 directly if its reconciler shape fits the serial call, or extract/reuse create/4 + safe_cleanup/3 + WorktreeTable record/forget around the Runtime.run call -- keep the crash-survival property either way. NOTE the machinery creates from HEAD of :repo -- pass the caller's <ws> as :repo so the worktree is based on the workspace's HEAD. New flag wiring in lib/kazi/cli.ex: add in_place to @switches (~113-160, `in_place: :boolean`), @flag_docs (~163-225), the apply command's flags allow-list (~257-277), and the parse_run opts map (~1148-1211); thread into run_goal like allow_primary_workspace is (~1203).
+
+WRITE test/kazi/serial_worktree_indirection_test.exs (mirror the setup style of test/kazi/cli_workspace_guard_test.exs and test/kazi/scheduler/worktree_test.exs -- real fixture git repo in tmp, no network, no real harness): (1) an executing serial apply against a fixture repo containing a tracked file AND an untracked file leaves the base checkout byte-identical (untracked file still present, no new files, git status unchanged) while the run's effective workspace was a kazi-owned worktree that no longer exists after the run; (2) --in-place reproduces today's behavior: no worktree created, the run edits <ws> directly; (3) guard interplay: --in-place against a primary worktree root refuses (exit 1, same error as today); the DEFAULT path against a primary worktree root does NOT refuse; (4) cleanup fires on a non-converged terminal too (e.g. a goal that goes stuck/over_budget still removes its worktree). Use vacuous or trivially-satisfied custom_script predicates so no harness dispatch is needed, as the existing CLI tests do.
+
+DOCS LAND WITH CODE (ADR-0034): document --in-place in the cli.ex @flag_docs help text and add the workspace-semantics change ('--workspace is the base; kazi owns the edit site; --in-place opts out') to docs/orchestrator-recipe.md. Cross-reference ADR-0065.
+
+PROCESS: branch task/serial-worktree-indirection off main; small conventional commits, lib/ vs test/ vs docs/ in separate commits; push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/serial_worktree_indirection_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green -- the serial apply path is load-bearing for every existing CLI/runtime test."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
