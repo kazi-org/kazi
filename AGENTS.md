@@ -240,19 +240,29 @@ For a long convergence add `--stream` for a JSONL progress stream -- one
 result object (the one line with NO `event` field). Read lines until you see the
 object without an `event`; that is the terminal result you branch on.
 
-### Fleets: several goal-files as one DAG -- `kazi apply --fleet <dir> --explain --json`
+### Fleets: several goal-files as one DAG -- `kazi apply --fleet <dir|manifest>`
 
-`--fleet <path>` (T50.4, ADR-0065 decision 3) treats the positional argument as
-a fleet -- a DIRECTORY of `*.goal.toml` files (non-recursive, sorted) or a
-manifest `.toml` file (`[[member]] path = "..."` entries) -- instead of a
-single goal-file. Each member becomes a fleet node; edges come from an OPTIONAL
-per-file `[metadata] depends_on = ["<goal-id>", ...]` (explicit) plus an
-INFERRED serialization edge between any two nodes whose declared `[scope]`
-paths overlap (goals with no declared scope paths get no inferred edges).
-Today only `--explain` (print the fleet schedule -- nodes, kind-tagged edges,
-topological frontiers -- and exit, dispatching nothing) is implemented;
-running a fleet without `--explain` fails loudly ("fleet execution lands in a
-follow-up") until execution ships (T50.5).
+`--fleet <path>` (T50.4/T50.5, ADR-0065 decision 3) treats the positional
+argument as a fleet -- a DIRECTORY of `*.goal.toml` files (non-recursive,
+sorted) or a manifest `.toml` file (`[[member]] path = "..."` entries) --
+instead of a single goal-file. Each member becomes a fleet node; edges come
+from an OPTIONAL per-file `[metadata] depends_on = ["<goal-id>", ...]`
+(explicit) plus an INFERRED serialization edge between any two nodes whose
+declared `[scope]` paths overlap (goals with no declared scope paths get no
+inferred edges). `--explain` prints the fleet schedule -- nodes, kind-tagged
+edges, topological frontiers -- and exits, dispatching nothing.
+
+Without `--explain` the fleet EXECUTES: pipelined frontiers (a member
+dispatches the instant its deps settle), each member in its own kazi-owned
+task worktree off the shared `--workspace` base (`--base <ref>` picks the
+worktree base ref; `--in-place` is rejected), converged work landing on the
+base BEFORE dependents dispatch, a run-registry row per member, and an
+honest-unknown per-member economy rollup in the terminal object (same
+`collective`/`schedule`/`blocked` keys as a needs-DAG result, plus
+`mode: "fleet"`, `members`, `economy`). `--fleet-concurrency N` caps how many
+members run at once (default: unbounded within a frontier). Exit 0 only when
+the fleet collectively converged. See docs/orchestrator-recipe.md ("Fleets")
+and docs/schemas/collective-result.md ("The fleet shape").
 
 ### 4. parse and branch on `next_action`
 
