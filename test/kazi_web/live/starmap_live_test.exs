@@ -65,6 +65,15 @@ defmodule KaziWeb.StarmapLiveTest do
     assert html =~ ~s(data-state="stuck")
   end
 
+  test "a converging run's LIVE sublabel carries its elapsed runtime", %{conn: conn} do
+    seed(%{goal_ref: "live-elapsed"})
+
+    html = conn |> get("/starmap") |> html_response(200)
+
+    # "CONVERGING · LIVE <elapsed>" — a fresh run reads in seconds.
+    assert html =~ ~r/CONVERGING · LIVE \d+[smhd]/
+  end
+
   test "a fresh-heartbeat running run renders as converging", %{conn: conn} do
     run = seed()
 

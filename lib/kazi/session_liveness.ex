@@ -33,16 +33,22 @@ defmodule Kazi.SessionLiveness do
   defp walk(pid, _depth) when pid in [nil, "0", "1"], do: nil
 
   defp walk(pid, depth) do
-    case parent_of(pid) do
+    case probe(pid) do
       {ppid, comm} ->
-        if session_command?(comm), do: ppid, else: walk(ppid, depth + 1)
+        # `comm` is PID's OWN command: when it matches, PID itself is the
+        # session process — return it, never its parent. (Returning `ppid`
+        # here recorded the shell that spawned claude, whose comm then
+        # failed the liveness check and mis-filed live runs as CLOSED.)
+        if session_command?(comm), do: pid, else: walk(ppid, depth + 1)
 
       nil ->
         nil
     end
   end
 
-  defp parent_of(pid) do
+  # {ppid, comm} for PID — the parent pid to continue the walk, and PID's
+  # own command name for the session check.
+  defp probe(pid) do
     case System.cmd("ps", ["-o", "ppid=,comm=", "-p", pid], stderr_to_stdout: true) do
       {out, 0} ->
         case String.split(String.trim(out), " ", parts: 2, trim: true) do

@@ -355,7 +355,9 @@ defmodule KaziWeb.StarmapLive do
   # "STALE · NO HEARTBEAT 4m"): rendered from what the registry row actually
   # knows — state plus heartbeat recency; never fabricated detail.
   defp sublabel(:landed, run), do: "LANDED · #{ago(run.heartbeat_at)}"
-  defp sublabel(:converging, _run), do: "CONVERGING · LIVE"
+  # LIVE carries the run's elapsed wall clock (since started_at), so the
+  # operator can spot a marathon run without drilling in.
+  defp sublabel(:converging, run), do: "CONVERGING · LIVE #{ago(run.started_at)}"
 
   defp sublabel(:stuck, run),
     do: "#{String.upcase(run.status || "stuck")} · #{ago(run.heartbeat_at)}"
