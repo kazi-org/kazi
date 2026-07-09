@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.119.2](https://github.com/kazi-org/kazi/compare/v1.119.1...v1.119.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **authoring:** stop clarify's endpoint sniff naked-grepping prose slashes ([412e56e](https://github.com/kazi-org/kazi/commit/412e56ef36904caed1ec8fc0027bc9251c06fcfb))
+
 ## [1.119.1](https://github.com/kazi-org/kazi/compare/v1.119.0...v1.119.1) (2026-07-09)
 
 
