@@ -28,3 +28,20 @@ if config_env() == :prod do
   # and reduce noise in dashboards and monitoring systems.
   config :logger, level: :info
 end
+
+# ADR-0060 guardrail 4 / ADR-0061 / ADR-0062: the episodic attempt ledger and
+# semantic recall ship DEFAULT OFF (config/config.exs) until they prove they
+# pay rent under the ADR-0046 envelope. That proof requires running a RELEASED
+# binary with the layer ON against real goals — but compile-time config is
+# baked false into the artifact, so without a runtime override the benchmark
+# the guardrail demands is impossible to run on the shipped binary. These env
+# hooks are that override: opt-in per PROCESS, nothing baked, default
+# unchanged ("1"/"true" enable; anything else — including unset — leaves the
+# compile-time default in force).
+if System.get_env("KAZI_ATTEMPT_LEDGER") in ~w(1 true) do
+  config :kazi, :attempt_ledger, true
+end
+
+if System.get_env("KAZI_MEMORY_RECALL") in ~w(1 true) do
+  config :kazi, :memory_recall, true
+end
