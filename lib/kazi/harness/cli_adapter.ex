@@ -151,7 +151,15 @@ defmodule Kazi.Harness.CliAdapter do
   end
 
   defp do_dispatch(profile, command, prompt, workspace, build_opts) do
-    args = Profile.build_args(profile, prompt, build_opts)
+    # The run's workspace is threaded into build_args as `opts[:workspace]`
+    # (overriding any caller-passed value — the positional workspace is
+    # authoritative). `cd: workspace` alone is NOT enough for every harness:
+    # `opencode run` ignores the launch cwd (it resolves its own project root
+    # and may attach to a persistent server), so its profile must render an
+    # explicit `--dir <workspace>` or the inner agent's edits land outside the
+    # workspace and the goal's predicates never see them (T39.7). Profiles
+    # that honor the cwd simply ignore the key.
+    args = Profile.build_args(profile, prompt, Keyword.put(build_opts, :workspace, workspace))
     cmd_opts = cmd_opts(workspace, build_opts)
     pid_file = harness_pid_file()
 

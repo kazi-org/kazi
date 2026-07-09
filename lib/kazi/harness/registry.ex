@@ -84,10 +84,14 @@ defmodule Kazi.Harness.Registry do
   end
 
   # The :opencode profile (T8.4, ADR-0016). argv is `run <prompt> --format json`
-  # plus an optional `--model <provider/model>`; the parser consumes opencode's
-  # NDJSON event stream (`Kazi.Harness.Profiles.Opencode`). supported_opts are the
-  # per-run `:command` override (the test-stub seam) and `:model` — opencode does
-  # NOT understand Claude's hygiene flags, so resolution (T8.5) drops them.
+  # plus `--dir <workspace>` (T39.7: `opencode run` ignores the launch cwd, so
+  # the CliAdapter-threaded workspace must be an explicit flag or the inner
+  # agent edits outside the goal's workspace) and an optional `--model
+  # <provider/model>`; the parser consumes opencode's NDJSON event stream
+  # (`Kazi.Harness.Profiles.Opencode`). supported_opts are the per-run
+  # `:command` override (the test-stub seam), `:model`, and `:workspace` —
+  # opencode does NOT understand Claude's hygiene flags, so resolution (T8.5)
+  # drops them.
   @spec opencode() :: Profile.t()
   defp opencode do
     %Profile{
@@ -95,7 +99,7 @@ defmodule Kazi.Harness.Registry do
       command: "opencode",
       build_args: &Profiles.Opencode.build_args/2,
       parse: &Profiles.Opencode.parse/1,
-      supported_opts: [:command, :model]
+      supported_opts: [:command, :model, :workspace]
     }
   end
 
