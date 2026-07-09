@@ -278,6 +278,38 @@ defmodule Kazi.Teach.InstallSkill do
     the predicates from the idea directly. Either way it stays caller-drafts: you
     supply the result and kazi spawns no model.
 
+    **Author for the grind tier -- maximum implementable detail is the DEFAULT,
+    not something the operator has to ask for.** The predicate `description`
+    fields are effectively the ONLY brief the grind model receives: kazi's
+    dispatch prompt is the goal name + the failing predicates + evidence -- the
+    grind model never sees your session or the strategy doc. A thin description
+    makes a mid-tier model flail or converge vacuously; a dense one converges in
+    a dispatch or two. Every payload you author carries:
+
+    - A TASK BRIEF in the first acceptance predicate's description: one
+      sentence of WHY, the exact files/modules to touch (read the repo first if
+      you do not know them), the pieces known to be missing, what NOT to change,
+      and issue/ADR numbers with "read these first". Write it like a ticket a
+      new hire could execute without asking anything.
+    - A PROCESS contract in the same brief (branch `task/<goal-id>`, small
+      conventional commits, push with `-u`) plus a `landed` predicate (clean
+      tree AND `HEAD == @{u}`), so convergence means PUSHED work.
+    - ONE requirement per predicate (or per named assertion). Never fold N
+      requirements into a single "the new test file passes" check: the grind
+      model authors that test, and a self-authored test can satisfy one of N
+      requirements and still go green -- the compound brief silently
+      under-delivers. Enumerate every requirement.
+    - Negative-space companions for any text-presence check (a bare `grep -q`
+      is satisfiable by string-stuffing or an unrelated pre-existing match --
+      the clarify floor warns on this).
+    - Guard predicates for what must not break (full suite, formatter),
+      hermetically wrapped when the checker boots the app
+      (`sh -c 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" ... '`).
+
+    If you catch yourself writing a one-line description, expand it: tokens
+    spent on the brief are repaid by the dispatches the grind tier does not
+    burn.
+
     For a human or a thin non-model script that has only a prose idea, kazi-drafts
     mode spawns a harness to draft the predicates instead:
 
