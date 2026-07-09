@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.130.0](https://github.com/kazi-org/kazi/compare/v1.129.0...v1.130.0) (2026-07-09)
+
+
+### Features
+
+* **cli:** wire kazi apply --fleet &lt;dir|manifest&gt; --explain (T50.4) ([e00fac9](https://github.com/kazi-org/kazi/commit/e00fac9cd3574864cf11f5b2e03790f07eca75dc))
+* **fleet:** add Kazi.Fleet -- goal-DAG discovery across goal-files (T50.4) ([b247adf](https://github.com/kazi-org/kazi/commit/b247adf9b5f8d5f6977f2351689ae5635f88236c))
+
 ## [1.129.0](https://github.com/kazi-org/kazi/compare/v1.128.0...v1.129.0) (2026-07-09)
 
 
