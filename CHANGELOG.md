@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.119.0](https://github.com/kazi-org/kazi/compare/v1.118.0...v1.119.0) (2026-07-09)
+
+
+### Features
+
+* **authoring:** honor a caller-drafts payload's goal_id and idea (T39.1, ADR-0049) ([36f84c2](https://github.com/kazi-org/kazi/commit/36f84c25a90d5a0282e1e09e99f5ba11c1b481fa))
+* **cli:** apply accepts an approved proposal's prop- ref, no goal-file (T39.2, ADR-0049) ([ca32986](https://github.com/kazi-org/kazi/commit/ca32986e465d9cfb3fe5bd5c9043c0e7e0589b8d))
+
 ## [1.118.0](https://github.com/kazi-org/kazi/compare/v1.117.0...v1.118.0) (2026-07-09)
 
 
