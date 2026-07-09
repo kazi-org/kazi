@@ -262,6 +262,67 @@ defmodule Kazi.CLIProposeJsonTest do
   end
 
   # ===========================================================================
+  # T39.1 (ADR-0049): caller-drafts honors the payload's goal_id and idea
+  # ===========================================================================
+
+  describe "caller-drafts — supplied goal_id/idea (T39.1, ADR-0049)" do
+    test "a payload goal_id/idea are returned in the --json result and persisted" do
+      payload =
+        ~s({"goal_id":"orchestrator-goal","idea":"ship the widget checkout flow",) <>
+          ~s("predicates":[{"id":"code","provider":"test_runner",) <>
+          ~s("config":{"cmd":"sh","args":["-c","true"]}}]})
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", payload],
+                   harness: SpyHarness,
+                   adapter_opts: [spy_pid: self()]
+                 ) == 0
+        end)
+
+      refute_received :harness_invoked
+      assert {:ok, draft} = Jason.decode(String.trim(out))
+
+      # The --json result carries the SUPPLIED identity, not the placeholder.
+      assert draft["goal_id"] == "orchestrator-goal"
+      assert draft["idea"] == "ship the widget checkout flow"
+      assert draft["proposal_ref"] == "prop-orchestrator-goal"
+
+      # …and the persisted proposal row carries the same values.
+      assert [%ProposedGoal{} = row] = ReadModel.list_proposed_goals(status: "proposed")
+      assert row.goal_id == "orchestrator-goal"
+      assert row.idea == "ship the widget checkout flow"
+      assert row.proposal_ref == "prop-orchestrator-goal"
+    end
+
+    test "omitting goal_id/idea keeps today's generated defaults" do
+      payload =
+        ~s({"predicates":[{"id":"code","provider":"test_runner",) <>
+          ~s("config":{"cmd":"sh","args":["-c","true"]}}]})
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", payload],
+                   harness: SpyHarness,
+                   adapter_opts: [spy_pid: self()]
+                 ) == 0
+        end)
+
+      refute_received :harness_invoked
+      assert {:ok, draft} = Jason.decode(String.trim(out))
+
+      # The historical placeholder-derived defaults, unchanged.
+      assert draft["goal_id"] == "caller-supplied-predicates"
+      assert draft["idea"] == "caller-supplied predicates"
+      assert draft["proposal_ref"] =~ ~r/^prop-caller-supplied-predicates-[0-9a-f]{12}$/
+
+      assert [%ProposedGoal{} = row] = ReadModel.list_proposed_goals(status: "proposed")
+      assert row.goal_id == "caller-supplied-predicates"
+      assert row.idea == "caller-supplied predicates"
+    end
+  end
+
+  # ===========================================================================
   # the non-interactive guarantee holds in caller-drafts too
   # ===========================================================================
 
