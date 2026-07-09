@@ -1,0 +1,36 @@
+id = "memory-index-workspace-scope"
+name = "issue #977: scope memory_index_files + FTS chunks per workspace, not by relative path alone"
+
+[[predicate]]
+id = "workspace-scoped-index"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #977): the read-model's `memory_index_files` table is keyed ONLY on a workspace-RELATIVE `path` (e.g. \"CLAUDE.md\"), so two different workspaces sharing one read-model (~/.kazi/kazi.db) clobber each other's rows when both repos have files at the same relative path, and recall's glob-based corpus filtering can serve one project's chunks as \"recalled project knowledge\" to a dispatch running against a different project. Already researched -- exact seams, do not re-derive:\n- Migration: priv/repo/migrations/20260707193000_create_memory_index_files.exs:19-27 -- columns are only `path` (string, not null) + `content_hash` (string, not null) + timestamps; unique_index(:memory_index_files, [:path]) at line 26 is the sole unique constraint.\n- Schema: lib/kazi/read_model/memory_index_file.ex:18-32 -- schema fields `path`/`content_hash`(+timestamps); `@required [:path, :content_hash]`; `unique_constraint(:path, name: :memory_index_files_path_index)`.\n- Indexer: lib/kazi/memory/semantic_index.ex -- `expand_corpus/2` (198-203) globs absolute paths under `workspace`; `refresh_file/2` (205-218) computes `rel_path = Path.relative_to(abs_path, workspace)` at line 206 -- THIS relative path is the stored `path`; `fetch_hash/1` (222-227) does `Repo.get_by(MemoryIndexFile, path: path)` keyed on relative path alone (the collision point); `upsert_hash/2` (250-257) `on_conflict: {:replace, [:content_hash, :updated_at]}, conflict_target: :path` (the clobber point); `delete_chunks/1`/`insert_chunk/2` (239-248) write `memory_chunks_fts` ALSO keyed only by `path` -- same contamination surface in the FTS table.\n- Recall: `search/3` (semantic_index.ex:271-297) scopes the `path IN (...)` clause (276-285) to the CURRENT corpus's resolved relative paths but is workspace-blind between calls -- two repos with the same relative path are indistinguishable.\n- Workspace IS already available everywhere it's needed: `recall/3` opts (semantic_index.ex:96,106); callers `Kazi.Loop.memory_recall_workspace/1` (lib/kazi/loop.ex:2530-2533, falls back to \".\"); `cli.ex:3345` (`memory recall` CLI, `Keyword.get(opts, :workspace, \".\")`).\n\nFIX: add a `workspace_root` (or `workspace_hash`, your call -- a stable identifier for the workspace, e.g. the absolute canonicalized workspace path or its SHA) column to `memory_index_files` (new migration) and thread it through: (1) the unique index becomes `[:workspace_root, :path]` (composite, not `:path` alone); (2) `refresh_file/2`/`fetch_hash/1`/`upsert_hash/2` all scope lookups/writes/conflict_target by `{workspace_root, path}`; (3) `memory_chunks_fts` gets the same scoping (its inserts/deletes keyed by path today -- add the same column, or prefix `path` with the workspace root consistently -- pick whichever keeps FTS5 query syntax simplest, document the choice); (4) `search/3`'s WHERE clause filters on the CURRENT run's `workspace_root` before the existing glob/path filtering, so cross-workspace rows are structurally unreachable, not just usually-filtered.\nWrite/extend test/kazi/memory/semantic_index_test.exs (or the relevant existing test file) covering: two workspaces indexing files at the same relative path store DISTINCT rows (no clobber -- both content_hash values survive); recall against workspace A never returns workspace B's chunks even when B was indexed more recently; the migration is reversible / existing single-workspace behavior is unaffected (no regression for the common one-workspace-per-db case). PROCESS: branch task/memory-index-workspace-scope, small conventional commits (migration+schema vs indexer vs recall vs test separate), push with -u. This predicate passes when the new/extended test passes."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/memory/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
