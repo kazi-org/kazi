@@ -18,7 +18,9 @@ pins. Current version: **2** (bumped by ADR-0032 with the apply/plan verb rename
 
 ## Ref resolution
 
-The positional `<ref>` resolves in order:
+The positional `<ref>` is **optional**. With no `<ref>` at all, `status` reports
+every currently **LIVE** run (`kind: "live_runs"`, below) — the pre-upgrade check
+(issue #971). With a `<ref>`, it resolves in order:
 
 1. a **run**'s `goal_ref` (a goal id the loop has recorded iterations for) →
    `kind: "run"`, the latest iteration's state; otherwise
@@ -26,6 +28,46 @@ The positional `<ref>` resolves in order:
    lifecycle state.
 
 An unknown ref is the error object below with a non-zero exit.
+
+## Live-run list (`kind: "live_runs"`, no `<ref>`)
+
+`kazi status` with **no** `<ref>` argument lists every run
+`Kazi.ReadModel.RunRegistry.list_live/1` currently considers LIVE: `status ==
+"running"` AND a heartbeat fresher than the registry's existing staleness
+window (`stale?/2`'s `@stale_after_seconds`, 90s) — the SAME staleness
+definition the fleet dashboard uses, not a new one. This is the intended
+pre-upgrade check: run it before `brew upgrade`/reinstalling a newer
+burrito-built `kazi` binary, and wait until it reports `"count": 0` (see
+`docs/lore.md`, Release / CI / Burrito, L-0036, for why installing over a
+LIVE run can crash it). The exit code is always `0` — an empty list is not an
+error, it is "safe to upgrade."
+
+```json
+{
+  "schema_version": 2,
+  "kind": "live_runs",
+  "count": 1,
+  "runs": [
+    {
+      "goal_ref": "goal-fresh",
+      "run_id": "run-42",
+      "status": "running",
+      "heartbeat_age_s": 3
+    }
+  ]
+}
+```
+
+| Field              | Type             | Meaning |
+|--------------------|------------------|---------|
+| `kind`             | string           | Always `"live_runs"`. |
+| `count`            | integer          | `length(runs)`. |
+| `runs`             | array of objects | One entry per LIVE run, most recently started first. |
+| `runs[].goal_ref`  | string           | The run's goal id. |
+| `runs[].run_id`    | string           | The run registry's unique run id. |
+| `runs[].status`    | string           | Always `"running"` (a terminal or stale run is excluded). |
+| `runs[].heartbeat_age_s` | integer    | Seconds since the last heartbeat. |
+| `schema_version`   | integer          | The contract version. |
 
 ## Run status (`kind: "run"`)
 

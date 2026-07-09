@@ -86,6 +86,28 @@ verify on-ramp behavior against the DOWNLOADED release binary
 (`gh release download <tag> -R kazi-org/kazi`), never the `brew`-installed one,
 and tell brew users to upgrade. (E16 / T16.6, 2026-06-25.)
 
+### L-0036 #release #burrito #vendored-zig #landmine -- installing/running a newer burrito binary can UNCONDITIONALLY DELETE a still-executing older BEAM's own unpacked ERTS payload
+Every burrito-built `kazi` launch runs `do_clean_old_versions` (vendored Zig,
+`deps/burrito/src/maintenance.zig:75-108`, called from
+`deps/burrito/src/wrapper.zig:109-110`) BEFORE any BEAM/Elixir code loads. It
+iterates sibling install dirs under `~/Library/Application
+Support/.burrito/` and unconditionally `std.fs.deleteTreeAbsolute`s any
+OLDER-version payload -- with NO PID/liveness check. There is no Elixir-side
+seam to intercept this: it is native code that runs ahead of the runtime that
+would otherwise host a fix. Consequence: a long `kazi apply` run (or a standing
+`kazi dashboard`) built from an older payload does not always crash
+immediately when a newer binary is installed/run alongside it -- it can keep
+running for a while on already-loaded/mmap'd pages -- but WILL crash on its
+next LAZY module load (observed failure signature: `io_lib_pretty,nofile` ->
+kernel logger crash -> Kernel pid terminated). Patching the vendored Zig (or
+keeping N-1 payloads with a liveness check) is real work, deliberately NOT done
+here. MITIGATION (issue #971): `kazi status` called with NO ref lists every
+run the registry currently considers LIVE (`Kazi.ReadModel.RunRegistry.list_live/1`
+-- `status == "running"` AND a heartbeat fresher than the existing staleness
+window, `stale?/2`'s `@stale_after_seconds`). Run this BEFORE `brew upgrade`/
+reinstalling a newer `kazi`; never install/run a newer binary while it reports
+any LIVE run. (Issue #971.)
+
 ## Reconcile / surface scanner
 
 ### L-0006 #reconcile #surface #scanner #deadcode -- the surface scan is APPROXIMATE: reflection and string-dispatch are invisible
