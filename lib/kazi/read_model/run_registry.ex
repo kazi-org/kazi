@@ -7,6 +7,10 @@ defmodule Kazi.ReadModel.RunRegistry do
   than silently absent, and a dead run's row is never deleted (it is the fleet
   dashboard's post-mortem record).
 
+  Every write here runs under `Kazi.ReadModel.Guard` — a hard deadline that
+  degrades to `{:error, :read_model_unavailable}` instead of blocking, so the
+  reconcile loop never hangs on its own telemetry (lore L-0035).
+
   This module is the ONLY writer/reader of `Kazi.ReadModel.Run`; callers
   (`Kazi.Loop`, `kazi dashboard`) go through it rather than touching `Kazi.Repo`
   directly, matching the read-model's other projections (`Kazi.ReadModel`).
@@ -14,6 +18,7 @@ defmodule Kazi.ReadModel.RunRegistry do
 
   import Ecto.Query
 
+  alias Kazi.ReadModel.Guard
   alias Kazi.ReadModel.Run
   alias Kazi.Repo
 
@@ -28,8 +33,12 @@ defmodule Kazi.ReadModel.RunRegistry do
   `run_id`) back to `"running"` with a fresh heartbeat — used both to register a
   new run and to have a restarted process reclaim its own registry row.
   """
-  @spec start(map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  @spec start(map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | :read_model_unavailable}
   def start(attrs) do
+    Guard.run("run register", fn -> do_start(attrs) end)
+  end
+
+  defp do_start(attrs) do
     now = DateTime.utc_now()
 
     attrs =
@@ -72,8 +81,12 @@ defmodule Kazi.ReadModel.RunRegistry do
   when the run_id isn't registered, so a caller can distinguish "never started"
   from a transient write failure.
   """
-  @spec heartbeat(String.t()) :: {:ok, Run.t()} | {:error, :not_found}
+  @spec heartbeat(String.t()) :: {:ok, Run.t()} | {:error, :not_found | :read_model_unavailable}
   def heartbeat(run_id) when is_binary(run_id) do
+    Guard.run("heartbeat", fn -> do_heartbeat(run_id) end)
+  end
+
+  defp do_heartbeat(run_id) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
         {:error, :not_found}
@@ -93,9 +106,13 @@ defmodule Kazi.ReadModel.RunRegistry do
   newest one — the resumable one.
   """
   @spec record_harness_session(String.t(), String.t()) ::
-          {:ok, Run.t()} | {:error, :not_found}
+          {:ok, Run.t()} | {:error, :not_found | :read_model_unavailable}
   def record_harness_session(run_id, session_id)
       when is_binary(run_id) and is_binary(session_id) do
+    Guard.run("harness-session record", fn -> do_record_harness_session(run_id, session_id) end)
+  end
+
+  defp do_record_harness_session(run_id, session_id) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
         {:error, :not_found}
@@ -115,8 +132,13 @@ defmodule Kazi.ReadModel.RunRegistry do
   fresh apply for the same `goal_ref` can detect a still-alive prior run's
   child (`orphan_candidates/2`). Idempotent, like `record_harness_session/2`.
   """
-  @spec record_harness_pid(String.t(), String.t()) :: {:ok, Run.t()} | {:error, :not_found}
+  @spec record_harness_pid(String.t(), String.t()) ::
+          {:ok, Run.t()} | {:error, :not_found | :read_model_unavailable}
   def record_harness_pid(run_id, pid) when is_binary(run_id) and is_binary(pid) do
+    Guard.run("harness-pid record", fn -> do_record_harness_pid(run_id, pid) end)
+  end
+
+  defp do_record_harness_pid(run_id, pid) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
         {:error, :not_found}
@@ -147,7 +169,7 @@ defmodule Kazi.ReadModel.RunRegistry do
   here is left at its column default/nil, never coerced to 0 by this module.
   """
   @spec finish(String.t() | Run.t(), String.t(), map()) ::
-          {:ok, Run.t()} | {:error, :not_found}
+          {:ok, Run.t()} | {:error, :not_found | :read_model_unavailable}
   def finish(run_or_id, status, economics \\ %{})
 
   def finish(%Run{run_id: run_id}, status, economics) when is_binary(status),
@@ -155,6 +177,10 @@ defmodule Kazi.ReadModel.RunRegistry do
 
   def finish(run_id, status, economics)
       when is_binary(run_id) and is_binary(status) and is_map(economics) do
+    Guard.run("run finish", fn -> do_finish(run_id, status, economics) end)
+  end
+
+  defp do_finish(run_id, status, economics) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
         {:error, :not_found}
@@ -241,8 +267,13 @@ defmodule Kazi.ReadModel.RunRegistry do
   a termination signal, allowing post-mortem observability even when the run
   exits abnormally. Idempotent: multiple calls do not alter the status.
   """
-  @spec record_termination(String.t(), term()) :: {:ok, Run.t()} | {:error, :not_found}
+  @spec record_termination(String.t(), term()) ::
+          {:ok, Run.t()} | {:error, :not_found | :read_model_unavailable}
   def record_termination(run_id, _reason) when is_binary(run_id) do
+    Guard.run("termination record", fn -> do_record_termination(run_id) end)
+  end
+
+  defp do_record_termination(run_id) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
         {:error, :not_found}

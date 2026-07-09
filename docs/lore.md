@@ -838,3 +838,12 @@ CPU (2026-07-09 incident). Fix: `busy_timeout: 60_000` on `Kazi.Repo`
 (config.exs), pinned by `test/kazi/repo_busy_timeout_test.exs`. If a fleet
 still wedges, suspect a long write transaction holding the WAL writer, not
 the timeout.
+
+INVARIANT (follow-up fix): kazi never hangs on its own telemetry. The
+read-model is authoritative for nothing, so no run-path touch of it may
+block the reconcile loop: every registry/projection write and the boot
+migration runs under `Kazi.ReadModel.Guard` — a hard deadline (15s writes,
+60s migrate) that kills the blocked task, logs a warning, and returns
+`{:error, :read_model_unavailable}` so the run continues without
+persistence. Pinned by `test/kazi/read_model/guard_test.exs`. When adding a
+NEW read-model write to the run path, route it through the Guard.

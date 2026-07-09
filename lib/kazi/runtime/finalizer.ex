@@ -109,6 +109,12 @@ defmodule Kazi.Runtime.Finalizer do
 
   defp handle_trapped_exits(run_id) do
     receive do
+      # A `:normal` exit from a linked process (e.g. a completed helper task)
+      # is not a termination event — recording it would also re-enter a
+      # registry write whose own helper task could feed this drain forever.
+      {:EXIT, _pid, :normal} ->
+        handle_trapped_exits(run_id)
+
       {:EXIT, _pid, reason} ->
         record_termination(run_id, reason)
         handle_trapped_exits(run_id)
