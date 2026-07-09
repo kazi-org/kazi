@@ -164,6 +164,61 @@ observable). `[]` when nothing is blocked.
 | `blocked_by` | string        | The nearest transitive `needs` dep in a non-converging terminal state that makes this group unsatisfiable. |
 | `reason`     | string (enum) | That blocking dep's state — `stuck`, `over_budget`, or `blocked`. |
 
+## The fleet shape (T50.5, ADR-0065 decision 3)
+
+`kazi apply --fleet <dir|manifest> --json` executes a DAG of GOAL-FILES (see
+`docs/orchestrator-recipe.md`, "Fleets") and terminates with the SAME collective
+shape one level up: `schema_version` / `collective` / `schedule` / `blocked` /
+`next_action` keep their DAG meaning with fleet MEMBERS (goal ids) in place of
+groups; `mode`, `fleet`, `members`, `economy`, and `resume_token` are ADDITIVE.
+The schedule is the same `Kazi.Goal.DepGraph` layering the fleet scheduler ran,
+so the report and the execution can never disagree on a member's frontier.
+
+```json
+{
+  "schema_version": 2,
+  "mode": "fleet",
+  "fleet": ".kazi/goals/",
+  "collective": "converged",
+  "members": [
+    {
+      "id": "a",
+      "status": "converged",
+      "economy": { "iterations": 2, "elapsed_ms": 41200, "tokens": 18240 },
+      "integration": { "landed": true, "base": "main", "task_branch": "kazi-partition/p-a-12" },
+      "error": null
+    },
+    { "id": "b", "status": "converged", "economy": null, "integration": null, "error": null },
+    { "id": "c", "status": "converged", "economy": null, "integration": null, "error": null }
+  ],
+  "schedule": [
+    { "frontier": 0, "groups": [{ "group": "a", "state": "converged" }, { "group": "b", "state": "converged" }] },
+    { "frontier": 1, "groups": [{ "group": "c", "state": "converged" }] }
+  ],
+  "blocked": [],
+  "economy": {
+    "members_total": 3,
+    "members_reported": 1,
+    "totals": { "iterations": 2, "elapsed_ms": 41200, "tokens": 18240 }
+  },
+  "resume_token": null,
+  "next_action": "done"
+}
+```
+
+| Field          | Type            | Meaning |
+|----------------|-----------------|---------|
+| `mode`         | string          | `"fleet"` — distinguishes the fleet terminal object from a single-goal collective result. |
+| `fleet`        | string          | The fleet source as given: the directory or manifest path. |
+| `members[]`    | array of object | One entry per member goal in loaded order: `{id, status, economy, integration, error}`. `status` uses the partition-status vocabulary (`converged` / `stuck` / `over_budget` / `stopped` / `crashed` / `blocked`, plus `pending` on a paused run). `economy` is the member's observed spend, or `null` when its run reported no usage (honest-unknown, ADR-0046). `integration` is the T50.2 landing info (`landed`, `base`, `task_branch`, ...) for a worktree-isolated converged member, or `null`. A member that converged but could NOT land reports `stuck` with `integration.landed = false` naming the surviving task branch. |
+| `economy`      | object          | The fleet rollup: `members_total`, `members_reported` (how many members contributed a spend), and `totals` — the dimension-wise sum over REPORTING members only, or `null` when none reported (never fabricated zeros). |
+| `resume_token` | string \| null  | Set when the run PAUSED at a fleet frontier boundary (the T50.3 checkpoint, one level up); `collective` is then `"paused"` and the exit code is `0`. |
+
+`schedule` and `blocked` are exactly the DAG shapes documented above, with member
+goal ids as the group ids. Under `--json --stream`, fleet frontier boundaries emit
+the same `frontier_complete` JSONL event as a `needs`-DAG run — one mechanism,
+two levels.
+
 ## `apply --explain` / `--dry-run`: the schedule, dispatched nothing (T23.6)
 
 `kazi apply <goal> --explain` (alias `--dry-run`) is PURE PLANNING: it computes the
