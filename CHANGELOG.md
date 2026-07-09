@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.120.0](https://github.com/kazi-org/kazi/compare/v1.119.2...v1.120.0) (2026-07-09)
+
+
+### Features
+
+* **authoring:** thread session_name through plan, proposal_ref through apply ([e3cb0e5](https://github.com/kazi-org/kazi/commit/e3cb0e55b8a6f228f0edfe7c5ae7472992f90319))
+* **authoring:** warn on vacuous naked-grep acceptance predicates ([8ba86ca](https://github.com/kazi-org/kazi/commit/8ba86ca307acee4276506bdc455dc127382d03a9))
+* **scheduler:** emit frontier_complete stream event at needs-DAG wave boundaries ([11401f4](https://github.com/kazi-org/kazi/commit/11401f49f6bad366e301d180eccdeff0ad44159f))
+
+
+### Bug Fixes
+
+* **authoring:** reject an unloadable proposal ([#945](https://github.com/kazi-org/kazi/issues/945)) ([13ee078](https://github.com/kazi-org/kazi/commit/13ee07859a12f00e17c3d481e7a8480e2fac2462))
+
 ## [1.119.2](https://github.com/kazi-org/kazi/compare/v1.119.1...v1.119.2) (2026-07-09)
 
 
