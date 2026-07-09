@@ -47,9 +47,16 @@ config :kazi, KaziWeb.Endpoint,
 
 # Default (dev) read-model database. WAL keeps reads (the LiveView console,
 # analytics queries) from blocking the projector's writes (concept §7).
+#
+# `busy_timeout`: every `kazi` process on a machine shares one read-model DB
+# (`~/.kazi/kazi.db`, runtime.exs), so a fleet of concurrent `kazi apply`
+# runs contend for the single WAL writer. exqlite's 2s default surfaces as
+# SQLITE_BUSY wedges once a handful of processes overlap; 60s lets a waiting
+# writer ride out another process's write burst instead of erroring.
 config :kazi, Kazi.Repo,
   database: Path.expand("../priv/kazi_dev.db", __DIR__),
   journal_mode: :wal,
+  busy_timeout: 60_000,
   pool_size: 5
 
 import_config "#{config_env()}.exs"

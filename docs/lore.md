@@ -827,3 +827,14 @@ task-specific worktree, never the primary checkout (the operator's own
 memory-slice runs on 2026-07-08 violated this and got lucky); scope any
 clean-tree/`landed` predicate to the goal's own paths, never repo-wide; after
 any agent run, `git reflog` before trusting the working tree. (2026-07-08.)
+
+### L-0035 #sqlite #read-model #concurrency #busy-timeout #landmine -- the shared read-model DB wedges under concurrent kazi processes without a generous busy_timeout
+
+`~/.kazi/kazi.db` is one SQLite file shared by EVERY kazi process on the
+machine (CLI applies, the dashboard). WAL allows one writer at a time;
+exqlite's default `busy_timeout` is 2000ms. With 5+ concurrent `kazi apply`
+runs, writers exceeded the 2s window and runs wedged for ~20 minutes at 0%
+CPU (2026-07-09 incident). Fix: `busy_timeout: 60_000` on `Kazi.Repo`
+(config.exs), pinned by `test/kazi/repo_busy_timeout_test.exs`. If a fleet
+still wedges, suspect a long write transaction holding the WAL writer, not
+the timeout.
