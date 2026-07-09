@@ -221,6 +221,20 @@ predicates) is not double-integrated -- the landing step only touches the
 kazi-owned task branch. `--in-place` opts out of the whole indirection and
 edits `--workspace` directly, pre-T50.1 style.
 
+**Base selection and the fresh-base guard (ADR-0065 decision 5, T50.8).** By
+default the task worktree is created from the workspace's current HEAD; `--base
+<ref>` (e.g. `--base origin/main`) creates it from that ref instead. The ref
+must already resolve in the LOCAL ref store -- kazi NEVER fetches to make a
+base fresh (an implicit fetch inside a build tool is its own bug class); an
+unknown ref is a loud error naming it, before any worktree exists. When the
+DEFAULT base is behind what the local repo already knows about its upstream
+(the checked-out branch's `@{u}`, else a locally-present `origin/HEAD` /
+`origin/main`), the run WARNS on stderr -- both SHAs plus the behind-count --
+and proceeds; the remedy is to fetch and re-run, or pass `--base` to state
+intent, which silences the warning entirely. It is a warning, never a refusal,
+and it never triggers a network call. `--in-place` + `--base` together are
+rejected as contradictory: an in-place run has no worktree to base.
+
 For a LONG convergence, add `--stream` for a JSONL progress stream -- one
 `{"event": "iteration", ...}` line per loop iteration, TERMINATED by the final
 run-result object (the one line with NO `event` field). Read lines until you see
