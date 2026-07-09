@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.126.0](https://github.com/kazi-org/kazi/compare/v1.125.0...v1.126.0) (2026-07-09)
+
+
+### Features
+
+* **read-model:** add pause_checkpoints table for scheduler resume state (T50.3) ([1a97af6](https://github.com/kazi-org/kazi/commit/1a97af6d9e6ab02b0772369d62250ebc71b0e49b))
+* **scheduler:** DepScheduler stops at frontier boundary with --pause-between-waves, resumes from checkpoint (T50.3) ([ccded1c](https://github.com/kazi-org/kazi/commit/ccded1c8667585534020cb426670e298b5ee44dd))
+
 ## [1.125.0](https://github.com/kazi-org/kazi/compare/v1.124.0...v1.125.0) (2026-07-09)
 
 
