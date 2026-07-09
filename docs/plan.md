@@ -406,6 +406,24 @@ never swept into your commit.
 
 ## Progress Log
 
+### 2026-07-09 -- Change Summary (E50 second pass: ADR-0065 decision 5 -- mutating-verb coverage + fresh-base guard; goal batch PR #994)
+- Operator observation while authoring the E50 goal batch: the planning session
+  itself had to hand-build a fresh worktree off origin/main because the shared
+  checkout was parked on a stale feature branch -- the exact ritual ADR-0065
+  exists to absorb, and a freshness gap decision 1 did not cover (worktrees cut
+  from the workspace HEAD are isolated but can be stale).
+- ADR-0065 amended (decision 5): the worktree indirection covers EVERY
+  workspace-mutating verb (executing apply serial/parallel/fleet, goal-file
+  materialization per ADR-0059, `kazi plan render` per ADR-0056), and the base
+  ref is explicit + validated -- default = workspace HEAD, `--base <ref>`
+  overrides, behind-upstream emits a loud warning, never an implicit network
+  fetch. Grounded in ADR-0056 (operator-skill conventions migrate into kazi).
+- T50.8 added to plans/E50.md (Wave E50-2, deps T50.1; risk R-E50-4); the epic
+  acceptance now requires stale-base visibility.
+- kazi layer authored separately: PR #994 adds `.kazi/goals/0013-0018`, one
+  grind-ready goal-file per code task T50.1-T50.6 (ADR-0059 batch shape,
+  seams verified at v1.125.0); T50.7 stays operator-run post-release.
+
 ### 2026-07-08 -- Change Summary (E49: scenario predicates -- demonstrate-then-pin; ADR-0064)
 - Operator directive: higher-level / UX-level predicate checkers ("form
   validates input", "a user can create and download a PAT") -- there is no
