@@ -34,10 +34,13 @@ defmodule Kazi.Harness.OpencodeProfileTest do
 
       assert is_function(profile.build_args, 2)
       assert is_function(profile.parse, 1)
-      # :model is declared so resolution forwards it; Claude-only hygiene flags are
-      # NOT in supported_opts, so they are never passed to opencode.
+      # :model is declared so resolution forwards it; :workspace is declared so
+      # the CliAdapter-threaded workspace renders as --dir (T39.7); Claude-only
+      # hygiene flags are NOT in supported_opts, so they are never passed to
+      # opencode.
       assert :model in profile.supported_opts
       assert :command in profile.supported_opts
+      assert :workspace in profile.supported_opts
       refute :max_budget_usd in profile.supported_opts
       refute :permission_mode in profile.supported_opts
     end
@@ -67,6 +70,44 @@ defmodule Kazi.Harness.OpencodeProfileTest do
       profile = Registry.fetch!(:opencode)
 
       assert Profile.build_args(profile, "do X", model: "") ==
+               ["run", "do X", "--format", "json"]
+    end
+
+    # T39.7 regression: `opencode run` ignores the launch cwd (it resolves its
+    # own project root / attaches to a persistent server), so the workspace the
+    # CliAdapter threads in MUST render as an explicit `--dir <workspace>` —
+    # without it the inner agent's edits land outside the goal's workspace and
+    # kazi's workspace-scoped predicates never converge.
+    test "with a workspace: --dir <workspace> is rendered (T39.7)" do
+      profile = Registry.fetch!(:opencode)
+
+      assert Profile.build_args(profile, "do X", workspace: "/tmp/goal-ws") ==
+               ["run", "do X", "--format", "json", "--dir", "/tmp/goal-ws"]
+    end
+
+    test "workspace and model together: --dir precedes --model (T39.7)" do
+      profile = Registry.fetch!(:opencode)
+
+      assert Profile.build_args(profile, "do X",
+               workspace: "/tmp/goal-ws",
+               model: "local/qwen3.6"
+             ) ==
+               [
+                 "run",
+                 "do X",
+                 "--format",
+                 "json",
+                 "--dir",
+                 "/tmp/goal-ws",
+                 "--model",
+                 "local/qwen3.6"
+               ]
+    end
+
+    test "an empty-string workspace is treated as no workspace (no --dir flag)" do
+      profile = Registry.fetch!(:opencode)
+
+      assert Profile.build_args(profile, "do X", workspace: "") ==
                ["run", "do X", "--format", "json"]
     end
   end
