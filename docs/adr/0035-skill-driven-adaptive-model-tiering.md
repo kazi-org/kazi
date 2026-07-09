@@ -98,3 +98,25 @@ belongs INSIDE kazi or in the orchestrator.
   the fallback the ladder degenerates to when escalation is disabled.
 - **A separate "tier-manager" daemon.** Over-engineered; the skill state machine
   over kazi's existing `--json` signal is sufficient single-node.
+
+## Amendment (2026-07-08): the DEFAULT rung flips from Haiku to Sonnet
+
+Fleet data across ~100 finished runs showed `claude-haiku-4-5` landing
+`stuck`/`over_budget` on ~37% of non-trivial slices, vs ~13% for `claude-sonnet-5`
+-- once escalation cost is priced in, "always start on Haiku" was a net cost LOSS,
+not the savings decision 2 assumed. This does not reopen decisions 1, 3, or 4 (the
+policy still lives in the skill, the ladder is still bounded and capped at the
+frontier, kazi-core still gains no model-selection logic) -- it corrects WHICH rung
+the ladder starts on:
+
+- The default grind tier is now `claude-sonnet-5`, not `claude-haiku-4-5`. The
+  ladder is `claude-sonnet-5 -> claude-opus-4-8` (two rungs, capped at the frontier
+  as before).
+- `claude-haiku-4-5` is demoted to an explicit, orchestrator-chosen OPT-DOWN for a
+  slice already known to be trivial (a one-line fix, a lint/format pass, a doc
+  typo) -- it is no longer a rung the ladder starts on or escalates through.
+- The installed skill (`lib/kazi/teach/install_skill.ex`) and `AGENTS.md` were
+  updated to match (`task/sonnet-default-tier-flip`); the T30.5 tiering
+  accuracy/coherence gate (`.github/scripts/check-tiering-coherence.mjs`) stays
+  green since both `claude-sonnet-5` and `claude-haiku-4-5` are current, allowed
+  model ids.
