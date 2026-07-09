@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.131.2](https://github.com/kazi-org/kazi/compare/v1.131.1...v1.131.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **release:** pin burrito to the kazi-org payload-liveness fork ([#1018](https://github.com/kazi-org/kazi/issues/1018)) ([a25bc72](https://github.com/kazi-org/kazi/commit/a25bc72e59560628ea947ea2bc0c9ea80d6e4ce0))
+
 ## [1.131.1](https://github.com/kazi-org/kazi/compare/v1.131.0...v1.131.1) (2026-07-09)
 
 
