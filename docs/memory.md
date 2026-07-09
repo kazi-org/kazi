@@ -84,6 +84,18 @@ existed. Override per-run via the loop's `:adapter_opts`:
 Kazi.Loop.start_link(goal: goal, adapter_opts: [attempt_ledger: true], ...)
 ```
 
+On the **released binary** (where compile-time config is baked in and
+`:adapter_opts` is not reachable from the CLI), enable it per process with an
+environment variable — this is how the ADR-0046 pays-rent benchmark runs
+against real goals on the shipped artifact:
+
+```sh
+KAZI_ATTEMPT_LEDGER=1 kazi apply <goal> --workspace <dir> ...
+```
+
+(`KAZI_MEMORY_RECALL=1` is the same hook for semantic recall, below. `1` or
+`true` enables; unset/anything else keeps the compiled default.)
+
 Promotion to default-on requires the ADR-0046 benchmark to show a measured
 win (iterations-to-converge, stuck rate, cost-to-converge, with vs. without,
 fixed model + budget) — a null result means removal, not tuning forever.
@@ -175,8 +187,11 @@ config :kazi, :memory_recall, false
 With the **default `false`**, the dispatch prompt carries no recalled-knowledge
 section at all — byte-identical to before this layer existed. Override
 per-run via the loop's `:adapter_opts` (`memory_recall: true`,
-`memory_recall_max_tokens: <n>`, default 1500). Promotion to default-on
-requires the same ADR-0046 benchmark discipline as the attempt ledger.
+`memory_recall_max_tokens: <n>`, default 1500), or on the released binary via
+the per-process environment hook `KAZI_MEMORY_RECALL=1` (see the attempt
+ledger's flag section — same mechanism, same benchmark discipline). Promotion
+to default-on requires the same ADR-0046 benchmark discipline as the attempt
+ledger.
 
 ### Recall is read-only
 
