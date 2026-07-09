@@ -349,6 +349,12 @@ provider/endpoint environment variables to the harness subprocess when a local
 setup expects them — declare them as the harness `:env` and kazi passes them
 straight through to the underlying call.
 
+**Workspace isolation.** `opencode run` resolves its own project root rather
+than honoring the directory it is launched from, so kazi passes the goal's
+`--workspace` explicitly as `opencode run … --dir <workspace>` — the inner
+agent's edits always land in the goal's workspace, where the acceptance
+predicates are evaluated.
+
 #### A per-goal or global default
 
 You don't have to pass `--harness`/`--model` on every run. A goal-file can carry
@@ -415,7 +421,7 @@ added with a documented workaround, and one is **best-effort only**:
 | Harness (`--harness`) | Tier | Notes |
 | --- | --- | --- |
 | `claude` (default) | First-class | single JSON envelope; full cost/token parse. |
-| `opencode` | First-class | NDJSON event stream; point it at a local model. |
+| `opencode` | First-class | NDJSON event stream; point it at a local model. kazi passes `--dir <workspace>` (opencode ignores the launch cwd), so edits land in the goal's workspace. |
 | `codex` | First-class | `codex exec … --json` JSONL stream; auth `OPENAI_API_KEY` / `codex login`. |
 | `antigravity` | Conformant **with a workaround** | non-TTY stdout bug (`antigravity-cli#76`) handled via `--prompt-file --output json`; auth `GEMINI_API_KEY` / `ANTIGRAVITY_API_KEY`. |
 | `claw` | **Best-effort / demo-grade** | claw-code emits **no** structured output and has no model flag — kazi surfaces its raw stdout as the result with **no cost/token extraction**. It runs, but fidelity is degraded; treat it as a demo ("an agent-managed museum exhibit, not a production tool"), not a budgeted production run. Auth is via env API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). |
