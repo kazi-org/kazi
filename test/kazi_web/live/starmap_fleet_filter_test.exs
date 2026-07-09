@@ -83,6 +83,26 @@ defmodule KaziWeb.StarmapFleetFilterTest do
     assert html =~ ~s(viewBox="0 0 1160 888")
   end
 
+  test "an active fleet tile lifts the column cap: all matching goals render", %{conn: conn} do
+    for n <- 1..12, do: seed("filtered-goal-#{n}", "converged")
+
+    {:ok, view, html} = live(conn, ~p"/starmap")
+    assert html =~ "LANDED · 8 OF 12"
+
+    html = view |> element(~s(.fleet-tile[data-tile="landed"])) |> render_click()
+
+    # The operator asked for exactly these goals: the LANDED column shows all
+    # 12 (no "OF" folding), and the canvas grows to carry them.
+    assert html =~ "LANDED · 12"
+    refute html =~ "LANDED · 8 OF 12"
+    assert html =~ "filtered-goal-1"
+    assert html =~ "filtered-goal-12"
+
+    # Clearing the filter restores the capped glance.
+    html = view |> element(~s(.fleet-tile[data-tile="landed"])) |> render_click()
+    assert html =~ "LANDED · 8 OF 12"
+  end
+
   test "a small fleet keeps the mockup's base canvas height", %{conn: conn} do
     seed("small-goal", "converged")
 

@@ -203,7 +203,11 @@ defmodule KaziWeb.StarmapLive do
         _other -> %{key: key, states: tile_states(key)}
       end
 
-    {:noreply, socket |> assign(:state_filter, filter) |> assign(:session_filter, nil)}
+    {:noreply,
+     socket
+     |> assign(:state_filter, filter)
+     |> assign(:session_filter, nil)
+     |> assign_canvas()}
   end
 
   # Mobile bottom-tab bar (docs/dashboard-design.md "Mobile layout"): below
@@ -525,9 +529,14 @@ defmodule KaziWeb.StarmapLive do
   defp assign_canvas(socket) do
     canvas_bands =
       cond do
-        socket.assigns.bands != [] -> socket.assigns.bands
-        socket.assigns.nodes != [] -> state_bands(socket.assigns.nodes)
-        true -> []
+        socket.assigns.bands != [] ->
+          socket.assigns.bands
+
+        socket.assigns.nodes != [] ->
+          state_bands(socket.assigns.nodes, socket.assigns[:state_filter])
+
+        true ->
+          []
       end
 
     band_count = max(length(canvas_bands), 1)
@@ -628,7 +637,7 @@ defmodule KaziWeb.StarmapLive do
   # pile can never stretch the canvas into a scroll. Empty columns are
   # dropped and frontiers renumbered so the canvas divides among populated
   # columns.
-  defp state_bands(nodes) do
+  defp state_bands(nodes, state_filter) do
     order = [
       {"ATTENTION", [:stuck, :stale]},
       {"ACTIVE", [:converging, :claimed]},
@@ -638,13 +647,30 @@ defmodule KaziWeb.StarmapLive do
 
     order
     |> Enum.map(fn {name, states} ->
-      {shown, hidden} = nodes |> Enum.filter(&(&1.state in states)) |> Enum.split(@state_band_cap)
+      matching = Enum.filter(nodes, &(&1.state in states))
+
+      {shown, hidden} =
+        case band_cap(states, state_filter) do
+          :all -> {matching, []}
+          cap -> Enum.split(matching, cap)
+        end
+
       %{name: name, nodes: shown, hidden: length(hidden)}
     end)
     |> Enum.reject(&(&1.nodes == []))
     |> Enum.with_index()
     |> Enum.map(fn {band, i} -> Map.put(band, :frontier, i) end)
   end
+
+  # An active fleet-tile filter (RUNNING/LANDED/STUCK) lifts the cap for the
+  # band(s) it matches: the operator asked for exactly those goals, and the
+  # scrollable canvas can carry the full list — "N OF M" folding is only for
+  # the unfiltered glance.
+  defp band_cap(states, %{states: filtered}) do
+    if Enum.any?(states, &(&1 in filtered)), do: :all, else: @state_band_cap
+  end
+
+  defp band_cap(_states, _no_filter), do: @state_band_cap
 
   # State-derived columns title as "NAME · shown OF total" (or just the count
   # when nothing is hidden); "WAVE N" is reserved for roadmap bands below,

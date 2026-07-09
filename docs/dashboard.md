@@ -59,7 +59,9 @@ filter.
 
 The FLEET tiles (RUNNING / LANDED / STUCK) filter the canvas the same way
 the SESSIONS rows do: click a tile to dim everything but that state, click
-it again to clear; the two filters are mutually exclusive. Dense fleets no
+it again to clear; the two filters are mutually exclusive. An active tile
+also lifts the matching column's 8-node cap — the operator asked for exactly
+those goals, so the column shows all of them and the canvas scrolls. Dense fleets no
 longer wrap nodes into sub-columns — each band is a single column and the
 canvas grows downward and scrolls, which keeps `needs` edges on straight
 sight-lines at any fleet size.
