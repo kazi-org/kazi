@@ -373,7 +373,8 @@ defmodule Kazi.Authoring.Clarify do
   end
 
   defp mentions_http_endpoint?(idea) do
-    idea =~ ~r/\bendpoint\b|\bhttp\b|\bapi\b|\broute\b|\bGET\b|\bPOST\b|\/[a-z]/
+    idea =~
+      ~r/\bendpoint\b|\bhttp\b|\bapi\b|\broute\b|\bGET\b|\bPOST\b|(?<![a-zA-Z0-9])\/[a-zA-Z]/
   end
 
   defp pins_http_status?(idea) do
