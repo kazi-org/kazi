@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -152,3 +152,18 @@ Extends ADR-0036 (the direct precedent: master index + deterministic archive
 + standing-goal-driven lifecycle, applied here to goal files instead of
 plan/doc epics). Depends on ADR-0023 (caller-drafts) being made collision-safe
 via the #793 fix before Decision 1 is implemented.
+
+## Accepted 2026-07-09
+
+The convention was already in operational use in a downstream repo (blink)
+ahead of formal acceptance here, and that use surfaced a gap this ADR never
+addressed: `.kazi/` was already blanket-`.gitignore`d in every repo kazi
+touches, for a different reason entirely (T4.4/ADR-0010's per-dispatch
+orientation pack + `.mcp.json`). The blanket rule silently swallowed
+`.kazi/goals/` too -- new goal-files and an entire `archive/` subdirectory (22
+files in blink) were falling through `git add -A` with zero warning, some
+never once captured in git history. Fixed in both repos by narrowing the
+ignore to `.kazi/*` + an explicit `!.kazi/goals/` re-include, so the ephemeral
+per-dispatch artifacts stay ignored while the durable convention this ADR
+defines stays tracked. Any repo adopting this convention should carry the same
+gitignore shape, not a bare `.kazi/` rule.
