@@ -56,11 +56,14 @@ fleet data): you are a frontier Claude model (e.g. `claude-opus-4-8`) authoring
 predicates in this session, and you grind on the DEFAULT grind tier --
 `claude-sonnet-5` (step up to `claude-opus-4-8` for harder slices) -- via
 `--harness claude --model <id>`. It needs only a Claude API key: no local model, no
-special hardware. Fleet data (2026-07-08, ~100 finished runs) showed
-`claude-haiku-4-5` stuck+over_budget on ~37% of non-trivial runs vs ~13% for Sonnet
--- a net cost LOSS once escalation is priced in -- so Haiku is now an explicit
-OPT-DOWN, not the default: pin `--model claude-haiku-4-5` yourself only for a slice
-you already know is trivial (a one-line fix, a lint/format pass, a doc typo).
+special hardware. The rationale is empirical and re-derivable from your own fleet:
+`kazi economy --json` aggregates cost, wall-clock, and outcome percentiles per model
+and goal shape from the local run registry -- consult it periodically instead of
+trusting any frozen figure (the dated finding that flipped this default lives in
+ADR-0035's amendment; kazi issue #924 records the vacuous-convergence failure mode
+cheap-tier grinding produced). Haiku is an explicit OPT-DOWN, not the default: pin
+`--model claude-haiku-4-5` yourself only for a slice you already know is trivial (a
+one-line fix, a lint/format pass, a doc typo).
 
 Local / BYOM is the SECONDARY privacy add-on: if code must never leave your hardware,
 grind on a local model instead -- `--harness opencode --model <local-model>` (a local
@@ -165,6 +168,22 @@ same loop, no cloud:
 kazi apply <goal-file> --workspace <path> --harness opencode --model <local-model> --json
 ```
 
+Two safety refusals an executing `apply` makes by default -- fix the CONDITION,
+do not reflexively add the override flag:
+
+- A `--workspace` that is a git repo's PRIMARY worktree root is refused: the
+  dispatched agent's shell can reset/clean the whole checkout, destroying
+  untracked state that is not this goal's to touch. Run against a dedicated task
+  worktree (`git worktree add <path> <branch>`); `--allow-primary-workspace` is
+  only for a throwaway checkout you accept losing.
+- A goal the run registry already shows LIVE (status running, heartbeat fresher
+  than ~90s) is refused: a second concurrent apply burns a second budget and
+  races the first's edits. Wait or stop the first; `--allow-duplicate-run` is
+  only for a deliberate re-run alongside it. A dead run's row stops blocking on
+  its own once its heartbeat goes stale.
+
+`--check` / `--explain` stay available without either flag.
+
 Emits ONE terminal result object. Exit code mirrors convergence: `0` only on
 `converged`, non-zero otherwise (same on the human and `--json` surfaces).
 
@@ -204,9 +223,10 @@ claude-sonnet-5  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
 
 `claude-haiku-4-5` is NOT a rung on this ladder -- it is an explicit opt-down you
 choose yourself for a slice you already know is trivial, by pinning `--model
-claude-haiku-4-5`. Fleet data (2026-07-08, ~100 finished runs) showed Haiku
-stuck+over_budget on ~37% of non-trivial runs vs ~13% for Sonnet, so an unqualified
-slice should never start there.
+claude-haiku-4-5`. An unqualified slice should never start there: check
+`kazi economy --json` (per-model, per-goal-shape cost/outcome percentiles from your
+fleet's run registry) whenever you doubt the tiering call -- the measured gap that
+demoted Haiku is recorded in ADR-0035's dated amendment.
 
 Trigger (the `--json` fields, T30.3 -- `docs/tiering-signals.md`): after each
 `kazi apply --harness claude --model <rung> --json`, read the terminal result and
