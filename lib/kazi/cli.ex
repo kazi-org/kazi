@@ -1774,6 +1774,15 @@ defmodule Kazi.CLI do
 
   defp git_repo?(_workspace), do: false
 
+  # The branch prefix of the kazi-owned serial task worktree (the same value
+  # Kazi.Scheduler.Worktree defaults to, made explicit here because the T50.2
+  # landing step keys off it). The serial landing ONLY lands this branch: a run
+  # whose worktree checkout moved OFF it owns its own landing — most importantly
+  # the run's own :integrate ACTION (ADR-0055: a goal with live predicates lands
+  # itself on the remote from a `kazi/integrate-*` branch mid-run), and likewise
+  # an agent that created its own branch (which survives worktree removal).
+  @serial_task_branch_prefix "kazi-partition"
+
   # Wraps the run in a task worktree via the parallel scheduler's own worktree
   # machinery (Kazi.Scheduler.Worktree.wrap/2) — a 1-partition degenerate case:
   # create off `base_workspace`'s HEAD, run the loop with the worktree path as
@@ -1787,7 +1796,10 @@ defmodule Kazi.CLI do
         fn _partition, worktree_path ->
           run_goal_serial_at(goal, opts, persist?, runtime_opts, base_workspace, worktree_path)
         end,
-        repo: base_workspace
+        repo: base_workspace,
+        # T50.2: the landing step (serial_landing/4) recognizes the kazi-owned
+        # task branch by this prefix — pinned here so the two stay in lockstep.
+        branch_prefix: @serial_task_branch_prefix
       )
 
     case reconciler.(%{key: goal.id}) do
@@ -1965,14 +1977,18 @@ defmodule Kazi.CLI do
     end
   end
 
-  # Land only COMMITTED work: the worktree's commits ahead of the base HEAD. An
-  # uncommitted working tree is the goal's own `landed`-predicate problem (the
-  # T50.1 contract keeps the base byte-identical for such runs); a worktree at
-  # the base tip has nothing to land. A detached base checkout has no branch to
-  # rebase-merge onto — surfaced honestly rather than guessing a target.
+  # Land only COMMITTED work ON THE KAZI-OWNED TASK BRANCH: the worktree's
+  # commits ahead of the base HEAD, while the worktree is still checked out on
+  # its `@serial_task_branch_prefix` branch. A checkout that moved off it owns
+  # its own landing (see the attribute's comment). An uncommitted working tree
+  # is the goal's own `landed`-predicate problem (the T50.1 contract keeps the
+  # base byte-identical for such runs); a worktree at the base tip has nothing
+  # to land. A detached base checkout has no branch to rebase-merge onto —
+  # surfaced honestly rather than guessing a target.
   defp serial_landing(%Goal{} = goal, runtime_opts, base_workspace, worktree) do
     with {:ok, base_sha} <- serial_git(base_workspace, ["rev-parse", "HEAD"]),
          {:ok, task_branch} <- serial_git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]),
+         true <- String.starts_with?(task_branch, @serial_task_branch_prefix <> "/"),
          {:ok, ahead} <- serial_git(worktree, ["rev-list", "--count", base_sha <> "..HEAD"]),
          true <- ahead != "0" do
       case serial_git(base_workspace, ["rev-parse", "--abbrev-ref", "HEAD"]) do
