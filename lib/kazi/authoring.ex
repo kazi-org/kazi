@@ -127,8 +127,10 @@ defmodule Kazi.Authoring do
       to draft — it parses, applies the deterministic floor, and persists. The
       same one write path; only the drafter changes (the caller, not an inner
       model). The goal id and `proposal_ref` are derived from the payload's own
-      `"id"` (used verbatim) or `"name"` (slugged) so distinct payloads coexist
-      instead of colliding on one hardcoded id.
+      `"goal_id"`/`"id"` (used verbatim) or `"name"` (slugged) so distinct
+      payloads coexist instead of colliding on one hardcoded id, and a payload
+      `"idea"` replaces the surface's (often placeholder) idea in the persisted
+      proposal (T39.1, ADR-0049).
     * `:replace` — when the resolved `proposal_ref` already holds an `approved`
       proposal, the upsert is refused (`{:proposal_locked, ref, "approved"}`)
       unless this is `true` (#787/#793). Default `false`.
@@ -173,6 +175,7 @@ defmodule Kazi.Authoring do
     with {:ok, idea} <- validate_idea(idea),
          {:ok, clarifications} <- run_clarify(idea, opts),
          {:ok, proposal} <- obtain_proposal(idea, clarifications, opts),
+         idea = resolve_idea(proposal, idea, opts),
          {goal_id, proposal_ref} = resolve_identity(proposal, idea, opts),
          {:ok, goal} <- parse_proposal(proposal, goal_id),
          :ok <- validate_loadable(goal),
@@ -842,6 +845,25 @@ defmodule Kazi.Authoring do
     "prop-" <> idea_to_goal_id(idea) <> "-" <> digest
   end
 
+  # T39.1 (ADR-0049): in caller-drafts mode the payload's own `"idea"` — the
+  # orchestrator naming the intent it is authoring — replaces the (often
+  # placeholder, e.g. "caller-supplied predicates") idea the surface passed in,
+  # so the persisted proposal and the `--json` result carry the caller's words.
+  # Absent (or blank / undecodable payload — the parse error surfaces later in
+  # `parse_proposal/2`), the given idea stands. Kazi-drafts is unchanged.
+  @spec resolve_idea(term(), idea(), opts()) :: idea()
+  defp resolve_idea(proposal, idea, opts) do
+    with true <- Keyword.has_key?(opts, :proposal),
+         {:ok, decoded} <- decode_proposal(proposal),
+         map = unwrap_proposal(decoded),
+         supplied when is_binary(supplied) <- Map.get(map, "idea"),
+         trimmed when trimmed != "" <- String.trim(supplied) do
+      trimmed
+    else
+      _ -> idea
+    end
+  end
+
   # The `{goal_id, proposal_ref}` pair a proposal is identified by (#787/#793).
   # Kazi-drafts (no `:proposal` opt) keeps the historical idea-derived pair
   # unchanged. Caller-drafts derives identity from the PAYLOAD itself instead of
@@ -857,8 +879,9 @@ defmodule Kazi.Authoring do
     end
   end
 
-  # Prefers an explicit payload `"id"` (used verbatim — the caller's own stable
-  # handle, so re-submitting the SAME id upserts the SAME slot, same as an
+  # Prefers an explicit payload `"goal_id"` (T39.1/ADR-0049: the orchestrator's
+  # own name for the goal, used verbatim) or `"id"` (#787/#793, same verbatim
+  # treatment — so re-submitting the SAME id upserts the SAME slot, same as an
   # idea-derived ref does for kazi-drafts); else a payload `"name"` (slugged,
   # digest-salted like the idea-derived ref); else falls back to the idea-derived
   # pair unchanged (the historical anonymous-payload behavior).
@@ -866,7 +889,7 @@ defmodule Kazi.Authoring do
     with {:ok, decoded} <- decode_proposal(proposal) do
       map = unwrap_proposal(decoded)
 
-      case optional_string(Map.get(map, "id")) do
+      case optional_string(Map.get(map, "goal_id")) || optional_string(Map.get(map, "id")) do
         nil ->
           case optional_string(Map.get(map, "name")) do
             nil -> {idea_to_goal_id(idea), idea_to_proposal_ref(idea)}
