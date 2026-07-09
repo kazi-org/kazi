@@ -61,9 +61,12 @@ defmodule Kazi.CLIStatusJsonTest do
       assert json_opts[:json] == true
     end
 
-    test "a missing ref is an error" do
-      assert {:error, message} = Kazi.CLI.parse(["status"])
-      assert message =~ "requires a <ref>"
+    test "a missing ref parses as the no-ref live-run listing, NOT an error (issue #971)" do
+      assert {:status, nil, opts} = Kazi.CLI.parse(["status"])
+      assert opts[:json] == false
+
+      assert {:status, nil, json_opts} = Kazi.CLI.parse(["status", "--json"])
+      assert json_opts[:json] == true
     end
 
     test "an extra positional is an error" do
