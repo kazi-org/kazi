@@ -31,6 +31,17 @@ defmodule Kazi.Authoring.Clarify do
     * `http-status` -- when the idea names an HTTP endpoint but pins no status code,
       ask what status/auth the endpoint must return (so an `http_probe` predicate
       has a concrete `config`).
+    * `naked-grep-predicate` -- ADVISORY (issue #924): when the draft carries a
+      `custom_script` predicate whose whole command is a bare, POSITIVE
+      `grep`/`grep -q`/`grep -rqiE`-style text-presence match, and no OTHER
+      predicate in the draft asserts the corresponding old/stale pattern is
+      ABSENT (a negated grep, e.g. `grep -qv`/`grep -L`/`! grep -q`). A naked
+      positive grep is satisfiable vacuously -- string-stuffing an unrelated
+      file, or matching pre-existing content -- without the feature actually
+      being built. This gap is a WARN only: unlike `live-target`/`scope`, it can
+      only be computed AFTER a draft exists (predicates are the harness's
+      choice, not the idea's), so it never participates in the pre-draft
+      `--strict` refusal and never blocks drafting or persisting.
 
   ## Folding answers (`fold_answers/2`)
 
@@ -64,7 +75,8 @@ defmodule Kazi.Authoring.Clarify do
     [
       live_target_question(idea, draft),
       scope_question(idea),
-      http_status_question(idea)
+      http_status_question(idea),
+      naked_grep_question(draft)
     ]
     |> Enum.reject(&is_nil/1)
   end
@@ -339,6 +351,34 @@ defmodule Kazi.Authoring.Clarify do
     end
   end
 
+  # When the draft carries a bare, POSITIVE grep-only custom_script predicate and
+  # no companion predicate asserts the old pattern is ABSENT, warn (issue #924).
+  # Advisory only -- see the naked-grep-predicate floor entry in the moduledoc.
+  defp naked_grep_question(draft) do
+    commands = custom_script_commands(draft)
+
+    if Enum.any?(commands, &naked_positive_grep?/1) and
+         not Enum.any?(commands, &absence_grep?/1) do
+      Question.new(
+        "naked-grep-predicate",
+        "One of this goal's custom_script predicates is a bare grep " <>
+          "text-presence check, which can pass vacuously -- string-stuffed " <>
+          "into an unrelated file, or an accidental match against " <>
+          "pre-existing content -- without the feature actually being " <>
+          "built. Pair it with a negative-space companion that asserts the " <>
+          "OLD/removed pattern is ABSENT (e.g. `grep -qv <old-pattern>`), " <>
+          "swap it for a structural check (parse/AST, not raw text search), " <>
+          "or add a minimum-diff floor.",
+        options: [
+          Option.new("Add a companion absence assertion", "absence_companion"),
+          Option.new("Replace it with a structural check", "structural_check"),
+          Option.new("Leave as-is -- accept the risk", "accept_risk")
+        ],
+        recommended: "absence_companion"
+      )
+    end
+  end
+
   # --- signal detectors (pure) -----------------------------------------------
 
   defp live_target_present?(idea) do
@@ -379,5 +419,99 @@ defmodule Kazi.Authoring.Clarify do
 
   defp pins_http_status?(idea) do
     idea =~ ~r/\b[1-5][0-9][0-9]\b/
+  end
+
+  # --- naked-grep-predicate signal (issue #924) -------------------------------
+
+  # Shell wrappers whose `-c` argument carries the real command, so a
+  # `custom_script` predicate declared as `cmd: "sh", args: ["-c", "grep -q ..."]`
+  # (the common shape, mirroring the goal.toml convention) is sniffed on its
+  # actual script rather than the literal string "sh".
+  @shell_wrappers ~w(sh bash zsh)
+  # Any shell combinator marks a command as MORE than a single bare grep (a
+  # pipeline, a chained command, or a multi-line script), so it is never flagged
+  # as "naked" even if it happens to contain a grep call.
+  @shell_combinator_re ~r/&&|\|\||;|\n|\|/
+  # A short-opt cluster containing a case-sensitive `v` (invert-match) or `L`
+  # (files-without-match) -- grep's negation flags.
+  @grep_negation_flag_re ~r/^-[A-Za-z]*[vL][A-Za-z]*$/
+
+  # The command text of every `custom_script` predicate in `draft` (nil, a
+  # `Kazi.Goal`, or a string-keyed proposal map -- mirrors
+  # `draft_has_live_predicate?/1`'s two accepted shapes).
+  defp custom_script_commands(nil), do: []
+
+  defp custom_script_commands(%Kazi.Goal{} = goal) do
+    goal
+    |> Kazi.Goal.all_predicates()
+    |> Enum.filter(&(&1.kind == :custom_script))
+    |> Enum.map(&command_text(&1.config))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp custom_script_commands(%{} = map) do
+    case Map.get(map, "predicates") do
+      list when is_list(list) ->
+        list
+        |> Enum.filter(&(Map.get(&1, "provider") == "custom_script"))
+        |> Enum.map(&command_text/1)
+        |> Enum.reject(&is_nil/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp custom_script_commands(_draft), do: []
+
+  # Resolves a predicate config/map's `cmd`+`args` (atom or string keys) to the
+  # actual command text it runs, unwrapping a shell -c script.
+  defp command_text(%{} = config) do
+    cmd = Map.get(config, :cmd) || Map.get(config, "cmd")
+    args = List.wrap(Map.get(config, :args) || Map.get(config, "args") || [])
+
+    if is_binary(cmd), do: script_from(cmd, Enum.filter(args, &is_binary/1))
+  end
+
+  defp command_text(_config), do: nil
+
+  defp script_from(cmd, args) do
+    if Path.basename(cmd) in @shell_wrappers do
+      case args do
+        ["-c", script | _rest] -> script
+        _ -> Enum.join([cmd | args], " ")
+      end
+    else
+      Enum.join([cmd | args], " ")
+    end
+  end
+
+  # A bare, POSITIVE grep-only command: a single grep invocation (no pipeline or
+  # chained commands) that is not negated. Combinators are checked with quoted
+  # spans stripped first, so a `|` inside the grep PATTERN itself (a regex
+  # alternation like `'foo|bar'`) is not mistaken for a shell pipeline.
+  defp naked_positive_grep?(text) do
+    trimmed = String.trim(text)
+
+    grep_command?(trimmed) and not (strip_quoted(trimmed) =~ @shell_combinator_re) and
+      not negated_grep?(trimmed)
+  end
+
+  # A companion negative-space assertion: a grep invocation that IS negated
+  # (asserts the old/stale pattern is absent).
+  defp absence_grep?(text) do
+    trimmed = String.trim(text)
+    grep_command?(trimmed) and negated_grep?(trimmed)
+  end
+
+  defp grep_command?(text), do: text =~ ~r/^!?\s*grep\b/
+
+  # Strips single- and double-quoted spans (so a regex alternation like
+  # `'foo|bar'` inside a grep pattern is not mistaken for a shell pipe).
+  defp strip_quoted(text), do: Regex.replace(~r/'[^']*'|"[^"]*"/, text, "")
+
+  defp negated_grep?(text) do
+    String.starts_with?(text, "!") or
+      text |> String.split() |> Enum.any?(&(&1 =~ @grep_negation_flag_re))
   end
 end
