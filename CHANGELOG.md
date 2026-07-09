@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.124.0](https://github.com/kazi-org/kazi/compare/v1.123.0...v1.124.0) (2026-07-09)
+
+
+### Features
+
+* **loop:** record attempt_ledger_tokens/memory_recall_tokens in context ([#978](https://github.com/kazi-org/kazi/issues/978)) ([b95b0e8](https://github.com/kazi-org/kazi/commit/b95b0e838e5a34cf5b56456f0277eb4a44b2fb0d))
+* **mcp:** nudge toward `kazi init --with-mcp` when unconfigured ([#972](https://github.com/kazi-org/kazi/issues/972)) ([5ad1326](https://github.com/kazi-org/kazi/commit/5ad13266d608ad147544324b37f9f36d2d02c540))
+
 ## [1.123.0](https://github.com/kazi-org/kazi/compare/v1.122.0...v1.123.0) (2026-07-09)
 
 
