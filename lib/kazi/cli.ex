@@ -1744,12 +1744,29 @@ defmodule Kazi.CLI do
   defp run_goal_serial(%Goal{} = goal, opts, persist?, runtime_opts) do
     workspace = opts[:workspace] || goal.scope.workspace
 
-    if opts[:in_place] == true do
+    # `git worktree add` requires the base to BE a git repo. A non-git
+    # workspace (a plain scratch dir -- common in tests and some non-repo
+    # targets) can never be worktree-indirected, so it falls back to the
+    # pre-E50 direct-edit path exactly like `--in-place` -- fail-open, same
+    # philosophy as `primary_worktree_root?/1` below: never a NEW way for a
+    # healthy non-git run to break.
+    if opts[:in_place] == true or not git_workspace?(workspace) do
       run_goal_serial_dispatch(goal, opts, persist?, runtime_opts, workspace)
     else
       run_goal_serial_worktree(goal, opts, persist?, runtime_opts, workspace)
     end
   end
+
+  defp git_workspace?(workspace) when is_binary(workspace) do
+    match?(
+      {_out, 0},
+      System.cmd("git", ["-C", workspace, "rev-parse", "--git-dir"], stderr_to_stdout: true)
+    )
+  rescue
+    _ -> false
+  end
+
+  defp git_workspace?(_workspace), do: false
 
   # T50.1: create a task worktree off `base_workspace` (kazi-owned, under the
   # managed base dir -- `Kazi.Scheduler.Worktree.default_base_dir/0` --
