@@ -206,10 +206,23 @@ removes it on every terminal state. `--in-place` opts out and edits
 -- pass it only when isolation buys nothing (e.g. a throwaway clone). A
 non-git workspace always runs in place; worktree isolation needs a git repo.
 
+A worktree-isolated run that CONVERGES with commits on its task branch LANDS
+them on the base -- `--workspace`'s checked-out branch -- like a parallel
+partition does (T50.2, ADR-0065 decision 2): rebase-merge (push -> PR ->
+rebase-merge with an `origin` remote + `gh`, a plain local rebase-merge
+without), conflicts routed through the re-dispatch seam, never `git reset` /
+`git clean` against the caller's checkout. The result's additive `integration`
+object reports the verdict; a landing that ultimately fails exits 1 with the
+work parked on a surviving task branch (`integration.task_branch`) -- never a
+silent drop. Converging without committing lands nothing (the base stays
+byte-identical), so give the goal a `landed` predicate if commits are part of
+done.
+
 `--check` / `--explain` stay available without either flag.
 
-Emits ONE terminal result object. Exit code mirrors convergence: `0` only on
-`converged`, non-zero otherwise (same on the human and `--json` surfaces).
+Emits ONE terminal result object. Exit code mirrors convergence AND landing:
+`0` only on `converged` whose work landed (or had nothing to land), non-zero
+otherwise (same on the human and `--json` surfaces).
 
 For a long convergence add `--stream` for a JSONL progress stream -- one
 `{"event": "iteration", ...}` line per loop iteration, TERMINATED by the final
