@@ -281,7 +281,7 @@ kazi status <proposal-ref> --json   # kind: "proposal" -- lifecycle state
 
 An unknown ref is a JSON error envelope with a non-zero exit.
 
-### Fleets: several goal-files as one DAG (`kazi apply --fleet <dir|manifest> --explain --json`)
+### Fleets: several goal-files as one DAG (`kazi apply --fleet <dir|manifest>`)
 
 Real work often spans several goal-files with cross-file dependencies. A
 **fleet** (T50.4, ADR-0065 decision 3) is a DAG of goal-files, loaded from
@@ -320,9 +320,9 @@ nodes:
     the whole fleet. Escape hatches: declare an explicit edge, or narrow
     `[scope] paths`/`write_paths` so two goals no longer overlap.
 
-Today only `--explain` is implemented -- it prints the fleet's nodes, its
-kind-tagged edges (an `inferred_overlap` edge also carries the overlapping
-paths), and the resulting topological frontiers, and dispatches nothing:
+`--explain` prints the fleet's nodes, its kind-tagged edges (an
+`inferred_overlap` edge also carries the overlapping paths), and the resulting
+topological frontiers, and dispatches nothing:
 
 ```sh
 kazi apply --fleet .kazi/goals/ --explain --json
@@ -343,9 +343,56 @@ kazi apply --fleet .kazi/goals/ --explain --json
 }
 ```
 
-Running a fleet WITHOUT `--explain` refuses loudly ("fleet execution lands in
-a follow-up; use --explain") -- fleet execution is a separate follow-up
-(T50.5), not yet wired.
+#### Executing a fleet (T50.5)
+
+Without `--explain`, the fleet EXECUTES: the DAG runs through the partition
+scheduler one level up, with pipelined frontier advancement -- a member
+dispatches the INSTANT its deps settle; a still-running sibling in the same
+frontier does not gate it (no wave barrier).
+
+```sh
+kazi apply --fleet .kazi/goals/ --workspace /path/to/repo --json
+```
+
+Semantics per member:
+
+  * **worktree per goal** -- each member runs in its own kazi-owned task
+    worktree created off the shared `--workspace` base's HEAD (`--base <ref>`
+    selects a different base ref for every member worktree, T50.8; the
+    stale-base warning applies to the defaulted HEAD exactly as in a serial
+    apply). `--fleet` + `--in-place` is rejected: member isolation is the
+    fleet contract. A non-git workspace runs members in place (isolation
+    needs a git repo).
+  * **landing before dependents** -- a converged member's COMMITTED
+    task-branch work lands on the base through the serial landing (T50.2:
+    rebase-merge, or PR when a remote + `gh` exist) BEFORE its terminal
+    status is reported, so a dependent's worktree branches from a base that
+    already carries it. A member that converged but could NOT land reports
+    `stuck` (its dependents block rather than build on a base missing the
+    work); the surviving task branch is named in the member's `integration`.
+  * **registry + duplicate guard** -- every executing member registers its own
+    run-registry row (visible to `kazi status` / the starmap), and the
+    duplicate-run guard composes per member goal id: a second apply on a goal
+    a live fleet member holds refuses.
+  * **`--fleet-concurrency N`** -- caps how many members RUN at once (a gate
+    around the member runner; DAG readiness is untouched). Default:
+    unbounded within a frontier.
+  * **`frontier_complete` at fleet boundaries** -- under `--json --stream`,
+    each fleet frontier boundary emits the SAME JSONL `frontier_complete`
+    event the `--parallel` needs-DAG path emits (one mechanism, two levels).
+    The T50.3 pause/resume checkpoint seam (`pause_between_waves` /
+    `resume_token`) applies to fleet frontiers with the same semantics; a
+    paused fleet exits 0 with `"collective": "paused"` and a `resume_token`
+    in the terminal object.
+
+The terminal object mirrors the DAG collective result (same
+`collective`/`schedule`/`blocked`/`next_action` keys), with additive fleet
+fields -- `mode: "fleet"`, per-member statuses, and an HONEST-UNKNOWN economy
+rollup (a member whose run reported no usage contributes `null`, never
+fabricated zeros; the rollup says how many members reported). See
+`docs/schemas/collective-result.md` ("The fleet shape") for the full shape.
+Exit code: `0` only when the collective converged (or paused with a resume
+token); anything else is `1`.
 
 ## 3. The versioned result schemas (pin `schema_version`)
 
