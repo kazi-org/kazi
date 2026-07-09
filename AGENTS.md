@@ -198,6 +198,14 @@ do not reflexively add the override flag:
   only for a deliberate re-run alongside it. A dead run's row stops blocking on
   its own once its heartbeat goes stale.
 
+By default a serial `apply` against a git repo does not edit `--workspace`
+directly either (T50.1, ADR-0065 decision 1): it creates its own task worktree
+off that workspace's HEAD, runs the agent and every predicate there, and
+removes it on every terminal state. `--in-place` opts out and edits
+`--workspace` itself, reproducing pre-T50.1 direct-edit behavior byte-identically
+-- pass it only when isolation buys nothing (e.g. a throwaway clone). A
+non-git workspace always runs in place; worktree isolation needs a git repo.
+
 `--check` / `--explain` stay available without either flag.
 
 Emits ONE terminal result object. Exit code mirrors convergence: `0` only on

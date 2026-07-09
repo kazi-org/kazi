@@ -346,7 +346,14 @@ defmodule Kazi.CLITest do
       {code, out} =
         with_io(fn ->
           Kazi.CLI.run(
-            ["apply", goal_file, "--workspace", work, "--allow-primary-workspace"],
+            [
+              "apply",
+              goal_file,
+              "--workspace",
+              work,
+              "--allow-primary-workspace",
+              "--in-place"
+            ],
             runtime_opts
           )
         end)
@@ -616,7 +623,14 @@ defmodule Kazi.CLITest do
 
       {code, stderr} =
         with_io(:stderr, fn ->
-          Kazi.CLI.run(["apply", goal_file, "--workspace", work, "--allow-primary-workspace"])
+          Kazi.CLI.run([
+            "apply",
+            goal_file,
+            "--workspace",
+            work,
+            "--allow-primary-workspace",
+            "--in-place"
+          ])
         end)
 
       # Non-zero exit + a clear vacuous-goal message; the loop never started.

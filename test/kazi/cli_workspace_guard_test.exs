@@ -34,15 +34,18 @@ defmodule Kazi.CLIWorkspaceGuardTest do
     :ok
   end
 
-  test "an executing apply REFUSES a primary-worktree workspace: JSON error, exit 1, no dispatch",
+  test "an executing --in-place apply REFUSES a primary-worktree workspace: JSON error, exit 1, no dispatch",
        %{tmp_dir: tmp_dir} do
+    # T50.1 (ADR-0065 decision 1): the guard now applies only to --in-place --
+    # the DEFAULT serial path isolates into a task worktree, making the
+    # dangerous target unreachable (see test/kazi/serial_worktree_indirection_test.exs).
     work = primary_repo(tmp_dir)
     goal_file = write_goal_file(tmp_dir, work)
 
     {out, code} =
       with_io(fn ->
         Kazi.CLI.run(
-          ["apply", goal_file, "--workspace", work, "--json"],
+          ["apply", goal_file, "--workspace", work, "--in-place", "--json"],
           adapter_opts: [command: never_called_harness(tmp_dir)]
         )
       end)
