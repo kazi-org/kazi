@@ -153,6 +153,29 @@ together. Lesson: reaping a shell background job by pid alone is not enough
 when that job itself forks further children sharing your process's file
 descriptors -- always target the GROUP. (2026-07-06.)
 
+### L-0035 #harness #opencode #workspace #cwd #dir #landmine -- `opencode run` IGNORES the launch cwd; without `--dir <workspace>` the inner agent edits OUTSIDE the goal's workspace and the run never converges
+The `Kazi.Harness.CliAdapter` runs every harness with `System.cmd(..., cd:
+workspace)`, and for most harnesses that is what scopes the inner agent to the
+goal's `--workspace`. `opencode run` does NOT honor that launch cwd: it
+resolves its OWN project root (and may attach to a persistent opencode server
+whose working directory was fixed at server start), so the dispatched agent's
+edits land in opencode's resolved directory, not kazi's workspace. A dogfood
+run proved the failure mode is SILENT and looks like model failure: the inner
+local model SUCCEEDED at the fixture task (it wrote `hello.txt`), but the file
+landed in opencode's git/server root -- kazi's workspace-scoped predicate never
+saw it, so the run never converged and burned iterations on an agent that had
+already finished. FIX (T39.7): opencode exposes `--dir <path>` ("directory to
+run in, path on remote server if attaching"; verified against `opencode run
+--help`, v1.17.9), and the `:opencode` profile now renders `--dir <workspace>`
+from the CliAdapter-threaded `opts[:workspace]` on every dispatch. VERSION
+SENSITIVITY: both the cwd-ignoring behavior and the `--dir` flag are opencode
+implementation details pinned only against v1.17.9 -- if a future opencode
+release renames/drops `--dir` or changes project-root resolution, the same
+silent non-convergence returns; re-verify with `opencode run --help` and the
+`:opencode_live` smoke before trusting a bumped opencode. NEVER assume `cd:`
+alone isolates a harness -- prove it by asserting the edit lands in the
+workspace. (2026-07-08.)
+
 ## Context / token efficiency
 
 ### L-0008 #context #prompt #orientation #landmine -- T4.3 orientation-prefix is built but UNWIRED on the live loop
