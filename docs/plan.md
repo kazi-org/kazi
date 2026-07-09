@@ -308,6 +308,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E48 -- Economy feedback loop: persisted run economics, learned budgets, behavior-first prompting, honest budget stops (P1, ADR-0058) -> plans/E48.md
 
 ### E49 -- Scenario predicates: capability-level verification by demonstrate-then-pin (P1, ADR-0064) -> plans/E49.md
+### E50 -- Safe concurrent work: serial worktree indirection, wave checkpoints, fleets over goal-files (P1, ADR-0065) -> plans/E50.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
