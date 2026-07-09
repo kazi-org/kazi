@@ -156,7 +156,8 @@ defmodule KaziWeb.StarmapPanelTest do
     html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
 
     assert html =~ "TRANSCRIPT TAIL · post-mortem"
-    assert html =~ "No transcript events."
+    # This run registered no transcript sink, and the empty state says so.
+    assert html =~ "No transcript sink registered for this run."
     assert html =~ "pill-stuck"
   end
 
@@ -269,5 +270,73 @@ defmodule KaziWeb.StarmapPanelTest do
 
     html = view |> element("#starmap-panel-close") |> render_click()
     refute html =~ ~s(id="starmap-panel")
+  end
+
+  test "the panel shows the goal name, description, timing, NOW action, and failing reasons",
+       %{conn: conn} do
+    run =
+      seed("detail-goal", %{
+        goal_name: "Fleet discovery DAG",
+        goal_description: "Teach the scheduler to discover cross-goal dependencies.",
+        started_at: DateTime.add(DateTime.utc_now(), -125),
+        heartbeat_at: DateTime.utc_now()
+      })
+
+    {:ok, _iteration} =
+      ReadModel.record_iteration(%{
+        goal_ref: "detail-goal",
+        iteration_index: 0,
+        predicate_vector:
+          PredicateVector.new(%{
+            unit: PredicateResult.new(:fail, %{"reason" => "2 tests failed in fleet_test.exs"}),
+            probe: PredicateResult.new(:pass, %{http_status: 200})
+          }),
+        action: %Kazi.Action{kind: :dispatch_agent, params: %{prompt: "fix the failing tests"}}
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    # Goal name replaces the ref as the title; the ref demotes to a subtitle;
+    # the description renders beneath.
+    assert html =~ "Fleet discovery DAG"
+    assert html =~ ~s(id="starmap-panel-description")
+    assert html =~ "Teach the scheduler to discover cross-goal dependencies."
+
+    # Timing: run elapsed + heartbeat age off the run row's timestamps.
+    assert html =~ ~s(id="starmap-panel-timing")
+    assert html =~ "elapsed 2m"
+    assert html =~ "heartbeat"
+
+    # NOW: the latest iteration's decided action.
+    assert html =~ ~s(id="starmap-panel-now")
+    assert html =~ "dispatch_agent"
+    assert html =~ "fix the failing tests"
+
+    # Failing predicates carry their last-observed reason.
+    assert html =~ ~s(id="starmap-panel-failing")
+    assert html =~ "2 tests failed in fleet_test.exs"
+  end
+
+  test "without goal_name/description the title stays the goal_ref and the new sections hide",
+       %{conn: conn} do
+    run = seed("bare-goal")
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    assert html =~ "bare-goal"
+    refute html =~ ~s(id="starmap-panel-description")
+    refute html =~ ~s(id="starmap-panel-now")
+    refute html =~ ~s(id="starmap-panel-failing")
+  end
+
+  test "a run without a transcript sink explains the empty tail", %{conn: conn} do
+    run = seed("sinkless-goal")
+
+    {:ok, view, _html} = live(conn, ~p"/starmap")
+    html = view |> element("#canvas-node-group-#{run.run_id}") |> render_click()
+
+    assert html =~ "No transcript sink registered for this run."
   end
 end

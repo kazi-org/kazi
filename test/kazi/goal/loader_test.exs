@@ -283,6 +283,7 @@ defmodule Kazi.Goal.LoaderTest do
       data = %{
         "id" => "legacy",
         "name" => "Legacy goal",
+        "description" => "A one-line summary for the dashboard.",
         "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
       }
 
@@ -290,6 +291,7 @@ defmodule Kazi.Goal.LoaderTest do
       assert goal.harness == nil
       assert goal.id == "legacy"
       assert goal.name == "Legacy goal"
+      assert goal.description == "A one-line summary for the dashboard."
       assert goal.mode == :repair
       assert goal.standing == false
       assert [%Predicate{id: "p", kind: :tests}] = goal.predicates
