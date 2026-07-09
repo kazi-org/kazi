@@ -138,7 +138,11 @@ defmodule Kazi.MixProject do
       # reads its argv at runtime via `Burrito.Util.Args.argv()` — so it must be a
       # normal runtime dependency (its modules ship inside the binary), not
       # `runtime: false`.
-      {:burrito, "~> 1.5"}
+      # Pinned to the kazi-org fork until the payload-liveness guard lands
+      # upstream (ADR-0066, issue #1018): stock burrito 1.5 deletes older
+      # versions' install dirs on every launch with no liveness check, killing
+      # still-running kazi processes mid-run during release windows.
+      {:burrito, github: "kazi-org/burrito", ref: "084e1e3372561209ab3f7d6de26f0d8814ebb4de"}
     ]
   end
 
