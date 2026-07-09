@@ -243,6 +243,11 @@ defmodule KaziWeb.StarmapLive do
   # cap is a DOM-size bound, not a layout one.
   @canvas_node_cap 48
 
+  # Max nodes a state-derived column renders (newest first); the rest fold
+  # into the column label's "N OF M" count. Bounds canvas height in the
+  # no-roadmap fallback.
+  @state_band_cap 8
+
   defp assign_runs(socket) do
     all_nodes = RunRegistry.list() |> Enum.map(&to_node/1)
     counts = Enum.frequencies_by(all_nodes, & &1.state)
@@ -561,39 +566,55 @@ defmodule KaziWeb.StarmapLive do
     end)
   end
 
-  # No roadmap configured: derive the wave bands from run state
-  # (docs/dashboard-design.md "Canvas composition"): LANDED, then ACTIVE
-  # (converging/claimed), then FRONTIER (stuck/stale — where the operator's
-  # attention is), then HORIZON (anything pending). Empty bands are dropped
-  # and frontiers renumbered so the canvas divides among populated bands.
+  # No roadmap configured: derive state columns from run state. These are NOT
+  # waves (no topological order exists without a roadmap), so they are named
+  # honestly and ordered by operator attention, left to right: ATTENTION
+  # (stuck/stale) first, then ACTIVE (converging/claimed), QUEUED (pending),
+  # and LANDED last. Each column shows at most @state_band_cap nodes — the
+  # NEWEST first (nodes arrive heartbeat-desc from assign_runs/1) — with the
+  # overflow counted into the column label, so a long-lived fleet's landed
+  # pile can never stretch the canvas into a scroll. Empty columns are
+  # dropped and frontiers renumbered so the canvas divides among populated
+  # columns.
   defp state_bands(nodes) do
     order = [
-      {"LANDED", [:landed]},
+      {"ATTENTION", [:stuck, :stale]},
       {"ACTIVE", [:converging, :claimed]},
-      {"FRONTIER", [:stuck, :stale]},
-      {"HORIZON", [:pending]}
+      {"QUEUED", [:pending]},
+      {"LANDED", [:landed]}
     ]
 
     order
     |> Enum.map(fn {name, states} ->
-      %{name: name, nodes: Enum.filter(nodes, &(&1.state in states))}
+      {shown, hidden} = nodes |> Enum.filter(&(&1.state in states)) |> Enum.split(@state_band_cap)
+      %{name: name, nodes: shown, hidden: length(hidden)}
     end)
     |> Enum.reject(&(&1.nodes == []))
     |> Enum.with_index()
-    |> Enum.map(fn {band, i} -> %{frontier: i, name: band.name, nodes: band.nodes} end)
+    |> Enum.map(fn {band, i} -> Map.put(band, :frontier, i) end)
   end
 
-  # "WAVE N · LANDED" per the mockup: state-derived bands carry their name;
-  # roadmap bands derive it from the dominant node state within the band.
+  # State-derived columns title as "NAME · shown OF total" (or just the count
+  # when nothing is hidden); "WAVE N" is reserved for roadmap bands below,
+  # where the columns really are topological waves of the `needs`-DAG.
+  defp band_title(%{name: name, nodes: nodes, hidden: hidden}) do
+    shown = length(nodes)
+
+    if hidden > 0 do
+      "#{name} · #{shown} OF #{shown + hidden}"
+    else
+      "#{name} · #{shown}"
+    end
+  end
+
   defp band_title(%{frontier: frontier} = band) do
     name =
-      Map.get(band, :name) ||
-        cond do
-          Enum.any?(band.nodes, &(&1.state in [:converging, :stuck])) -> "ACTIVE"
-          Enum.all?(band.nodes, &(&1.state == :landed)) -> "LANDED"
-          Enum.any?(band.nodes, &(&1.state == :claimed)) -> "FRONTIER"
-          true -> "HORIZON"
-        end
+      cond do
+        Enum.any?(band.nodes, &(&1.state in [:converging, :stuck])) -> "ACTIVE"
+        Enum.all?(band.nodes, &(&1.state == :landed)) -> "LANDED"
+        Enum.any?(band.nodes, &(&1.state == :claimed)) -> "FRONTIER"
+        true -> "HORIZON"
+      end
 
     "WAVE #{frontier + 1} · #{name}"
   end

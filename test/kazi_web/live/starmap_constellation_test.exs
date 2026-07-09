@@ -76,7 +76,7 @@ defmodule KaziWeb.StarmapConstellationTest do
              "no .starmap-node chips on the constellation canvas"
     end
 
-    test "wave-band columns render: band fills, separators, and WAVE labels",
+    test "state columns render: band fills, separators, and honest state labels",
          %{conn: conn} do
       seed("b-landed", "converged")
       seed("b-active", nil)
@@ -84,8 +84,26 @@ defmodule KaziWeb.StarmapConstellationTest do
       html = conn |> get("/starmap") |> html_response(200)
 
       assert html =~ ~r/<rect[^>]*band/, "expected band background rects"
-      assert html =~ ~r/wlabel/, "expected .wlabel wave headings"
-      assert html =~ ~r/WAVE/, "expected WAVE N band titles"
+      assert html =~ ~r/wlabel/, "expected .wlabel column headings"
+
+      # Without a roadmap the columns are state-derived, named honestly with
+      # their counts — never "WAVE N", which is reserved for roadmap frontiers.
+      assert html =~ "ACTIVE · 1", "expected the ACTIVE column with its count"
+      assert html =~ "LANDED · 1", "expected the LANDED column with its count"
+      refute html =~ "WAVE", "WAVE labels only render for roadmap frontiers"
+    end
+
+    test "a landed pile past the column cap folds into an N OF M label",
+         %{conn: conn} do
+      for i <- 1..11, do: seed("cap-landed-#{i}", "converged")
+
+      html = conn |> get("/starmap") |> html_response(200)
+
+      assert html =~ "LANDED · 8 OF 11",
+             "expected the capped LANDED column to count its overflow"
+
+      # Only the 8 newest landed nodes render as circles.
+      assert length(Regex.scan(~r/<circle[^>]*nd-landed/, html)) == 8
     end
 
     test "active nodes carry the pulse ring; the event river bar is on the page",
