@@ -78,9 +78,14 @@ interactively.
 
 **Clicking any canvas node — or an attention entry — opens the slide-over
 drill-in panel** (docs/dashboard-design.md "Slide-over drill-in panel"): the
-goal's identity chips (workspace, harness · model, state), its
-iteration/budget burn bar, the predicate-vector DNA strip, the convergence
-heatmap (predicates × iterations), and a transcript tail, plus a
+goal's authored `name` and `description` (from the goal-file, captured on the
+run row at registration), its identity chips (workspace, harness · model,
+state), run timing (elapsed, heartbeat age for a live run), run economics
+when reported (dispatches, tokens, cost), the iteration/budget burn bar, a
+"NOW" line with the latest iteration's decided action (dispatch / integrate /
+deploy and its parameters), the predicate-vector DNA strip, a "FAILING" list
+giving each red predicate's last-observed reason, the convergence heatmap
+(predicates × iterations), and a transcript tail, plus a
 "FULL ANALYST VIEW →" link to `/goals/:id/drillin`. It reads the same
 projections the full-page drill-in and transcript-peek views read.
 

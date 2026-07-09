@@ -89,6 +89,8 @@ pass *and* a deployed endpoint answers:
 ```toml
 id = "ship-healthz"
 name = "ship a /healthz endpoint and prove it live"
+# optional one-line summary; the dashboard drill-in panel shows it
+description = "Add /healthz to the router and verify it answers in production."
 
 [budget]
 max_iterations = 15        # a hard ceiling so the loop can never run forever
