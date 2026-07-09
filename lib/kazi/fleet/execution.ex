@@ -117,7 +117,11 @@ defmodule Kazi.Fleet.Execution do
             members_total: non_neg_integer(),
             members_reported: non_neg_integer(),
             totals:
-              %{iterations: non_neg_integer(), elapsed_ms: non_neg_integer(), tokens: non_neg_integer()}
+              %{
+                iterations: non_neg_integer(),
+                elapsed_ms: non_neg_integer(),
+                tokens: non_neg_integer()
+              }
               | nil
           },
           blocked: list(),
@@ -155,7 +159,9 @@ defmodule Kazi.Fleet.Execution do
   @spec run(Fleet.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def run(%Fleet{} = fleet, opts) when is_list(opts) do
     workspace = Keyword.fetch!(opts, :workspace)
-    member_runner = Keyword.get_lazy(opts, :member_runner, fn -> default_runner(workspace, opts) end)
+
+    member_runner =
+      Keyword.get_lazy(opts, :member_runner, fn -> default_runner(workspace, opts) end)
 
     {:ok, results} = Agent.start_link(fn -> %{} end)
     slots = start_slots(Keyword.get(opts, :fleet_concurrency))
