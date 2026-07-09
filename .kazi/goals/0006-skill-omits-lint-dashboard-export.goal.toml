@@ -1,0 +1,36 @@
+id = "skill-omits-lint-dashboard-export"
+name = "issue #974: teach kazi lint, kazi dashboard, kazi export, and economy --rediscovery at their natural points in the skill"
+
+[[predicate]]
+id = "skill-mentions-four-commands"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #974): lib/kazi/teach/install_skill.ex's rendered SKILL.md never mentions four real, shipped commands (`kazi help --json` lists them: lint, dashboard, export, economy --rediscovery), so an orchestrating agent driving kazi never learns they exist. Add a short, targeted mention of each at its natural point in the EXISTING recipe -- do not add a bolted-on 'other commands' appendix:\n(1) `kazi lint <goal-file>` -- mention at Step 2 (\"review and approve\", around the `kazi approve --json` block): run it right before approving to catch near-duplicate group-name authoring mistakes for the cost of one read-only advisory call (exit 0 even with warnings).\n(2) `kazi economy --rediscovery <goal>` -- mention in Step 4's stuck/over_budget branch (the `next_action: investigate` row / the surrounding prose): cite it as the concrete next step for \"why does this goal keep needing rework\" instead of the current open-ended \"inspect the predicate vector.\" It folds a goal's per-iteration `tools` counters into a ranked, report-only rediscovery-pressure list.\n(3) `kazi dashboard` -- IMPORTANT: fix, don't just add. The current `### The status verb` section (search for \"kazi's LiveView dashboard\") states \"There is no separate `kazi` dashboard command; the CLI surface for state is `kazi status`, and the dashboard is the web view of it.\" This is now FALSE -- `kazi help --json` lists `dashboard` as a real, distinct top-level command (`kazi dashboard [--port N] [--bind addr] [--roadmap <goal-file>]`, summary: \"Boot the standalone fleet-mode web endpoint (the starmap: every registered run, read-only, no goal loop) against the shared read-model\"). Correct that sentence and add the real invocation form + a one-line note that it's read-only (drives nothing), a plausible replacement for repeatedly polling `kazi status` by hand across multiple sessions/goals.\n(4) `kazi export <goal-file> --obsidian <dir>` -- mention near the `adopt` verb section (end of the per-goal recipe, before 'Pin schema_version'): a complete, ready integration exporting a goal's group tree + verdicts to an Obsidian vault (notes + Mermaid rollup) for anyone who keeps notes in Obsidian.\nWrite/extend a coherence-style test (a new test/kazi/teach/skill_covers_commands_test.exs, or extend test/kazi/teach_coherence_test.exs) asserting the rendered SKILL.md text contains the literal substrings `kazi lint`, `kazi dashboard`, `kazi export`, and `economy --rediscovery`. PROCESS: branch task/skill-omits-lint-dashboard-export, small conventional commits, push with -u. This predicate passes when the new/extended test passes."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/teach/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
