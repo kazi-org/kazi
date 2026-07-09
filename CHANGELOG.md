@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.129.0](https://github.com/kazi-org/kazi/compare/v1.128.0...v1.129.0) (2026-07-09)
+
+
+### Features
+
+* **dashboard:** session-scope toggle (CURRENT/CLOSED) + viewport-locked layout ([3a95d7d](https://github.com/kazi-org/kazi/commit/3a95d7d12e1d4e7e3a606570c94df32295148d19))
+
 ## [1.128.0](https://github.com/kazi-org/kazi/compare/v1.127.0...v1.128.0) (2026-07-09)
 
 
