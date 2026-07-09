@@ -2007,6 +2007,7 @@ defmodule Kazi.CLI do
   defp report_outcome(%Goal{} = goal, outcome, result, economy, workspace, json?) do
     emit(json?, run_result_json(goal, outcome, result, economy, workspace), fn ->
       report(goal, human_outcome(outcome), result)
+      Kazi.MCP.Nudge.maybe_print(workspace)
     end)
   end
 

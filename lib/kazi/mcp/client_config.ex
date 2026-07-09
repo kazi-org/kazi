@@ -88,6 +88,24 @@ defmodule Kazi.MCP.ClientConfig do
     end
   end
 
+  @doc """
+  Read-side check (issue #972): does `dir`'s `.mcp.json` already declare the
+  canonical `kazi` server entry? `true` only when the file exists, parses, and
+  its `mcpServers.kazi` entry equals `server_entry/0` exactly — a missing file,
+  an unparsable file, or a `kazi` entry that doesn't match all read as `false`,
+  same as `ensure_in_dir/1`'s own "needs a write" check.
+  """
+  @spec configured_in_dir?(String.t()) :: boolean()
+  def configured_in_dir?(dir) when is_binary(dir) do
+    case read_config(Path.join(dir, @mcp_filename)) do
+      {:ok, true, existing} ->
+        Map.get(existing, "mcpServers", %{}) |> Map.get(@server_name) == @server_entry
+
+      _ ->
+        false
+    end
+  end
+
   # A missing file is an empty config (existed? false). A present-but-malformed
   # file is a hard error — never silently clobber a `.mcp.json` we cannot parse.
   @spec read_config(String.t()) :: {:ok, boolean(), map()} | {:error, term()}
