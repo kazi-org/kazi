@@ -148,6 +148,7 @@ defmodule Kazi.CLI do
     allow_primary_workspace: :boolean,
     allow_duplicate_run: :boolean,
     in_place: :boolean,
+    base: :string,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -231,6 +232,8 @@ defmodule Kazi.CLI do
       "`apply` only: start this run even when the run registry already shows a LIVE run (status running, fresh heartbeat) for the same goal id. Without this flag, an executing apply refuses the duplicate -- a second concurrent apply of one goal burns a second budget and races the first's edits. Zombie rows never block (a dead run's heartbeat goes stale within ~90s); pass this flag only for a deliberate re-run alongside a live one.",
     in_place:
       "`apply` only (T50.1, ADR-0065 decision 1): edit --workspace directly instead of kazi's default of creating a kazi-owned task worktree off its HEAD and editing there. Without this flag, --workspace is the base the run integrates ONTO, not the edit site itself -- the dispatched agent's shell, and every predicate, runs inside a worktree kazi creates and removes on every terminal state (converged / stuck / over_budget / error / crash). Pass this flag to reproduce pre-T50.1 direct-edit behavior byte-identically (e.g. a throwaway clone where isolation buys nothing). A non-git workspace always runs in place -- worktree isolation needs a git repo.",
+    base:
+      "`apply` only (T50.8, ADR-0065 decision 5): the git ref the kazi-owned task worktree is created FROM (e.g. origin/main), instead of the default — the workspace's current HEAD. Passing it states intent: the stale-base warning (emitted when the defaulted HEAD base is behind its locally-known upstream) is silenced. The ref must already resolve in the local ref store — kazi NEVER fetches; an unknown ref is an error naming it, not a network call. Contradicts --in-place (there is no worktree to base): the combination is rejected.",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -282,7 +285,8 @@ defmodule Kazi.CLI do
         :session_name,
         :allow_primary_workspace,
         :allow_duplicate_run,
-        :in_place
+        :in_place,
+        :base
       ]
     },
     %{
@@ -1212,6 +1216,7 @@ defmodule Kazi.CLI do
           allow_primary_workspace: flags[:allow_primary_workspace] || false,
           allow_duplicate_run: flags[:allow_duplicate_run] || false,
           in_place: flags[:in_place] || false,
+          base: flags[:base],
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1630,6 +1635,13 @@ defmodule Kazi.CLI do
   # `--parallel` the run is byte-identical to the pre-T21.8 serial path.
   defp run_goal(%Goal{} = goal, opts, persist?, runtime_opts) do
     cond do
+      # T50.8 (ADR-0065 decision 5): --in-place + --base is CONTRADICTORY —
+      # --base selects the ref the kazi-owned task worktree is created FROM,
+      # and --in-place runs with no worktree at all. Rejected up front, before
+      # any execution branch, like the other flag-interplay checks below.
+      opts[:in_place] == true and is_binary(opts[:base]) ->
+        refuse_contradictory_base(opts)
+
       # T23.6 (ADR-0028): --explain / --dry-run is PURE PLANNING — compute and print
       # the wave schedule, dispatch NOTHING, exit 0. Checked FIRST so it never falls
       # through to a real serial/parallel run (the spy seam asserts no reconciler is
@@ -1746,12 +1758,70 @@ defmodule Kazi.CLI do
   # (unchanged behavior — worktree isolation is simply unavailable there).
   defp run_goal_serial(%Goal{} = goal, opts, persist?, runtime_opts) do
     base_workspace = opts[:workspace] || goal.scope.workspace
+    base_ref = opts[:base]
 
-    if opts[:in_place] == true or not git_repo?(base_workspace) do
-      run_goal_serial_at(goal, opts, persist?, runtime_opts, base_workspace, base_workspace)
-    else
-      run_goal_serial_in_worktree(goal, opts, persist?, runtime_opts, base_workspace)
+    cond do
+      # T50.8 (ADR-0065 decision 5): an explicit --base must resolve to a commit
+      # the local ref store ALREADY KNOWS — checked here, before any worktree is
+      # created, so the error names the ref instead of surfacing as a generic
+      # worktree-creation failure. kazi never fetches to make a ref resolve.
+      is_binary(base_ref) and not base_ref_resolves?(base_workspace, base_ref) ->
+        refuse_unresolvable_base(base_ref, base_workspace, opts)
+
+      opts[:in_place] == true or not git_repo?(base_workspace) ->
+        run_goal_serial_at(goal, opts, persist?, runtime_opts, base_workspace, base_workspace)
+
+      true ->
+        run_goal_serial_in_worktree(goal, opts, persist?, runtime_opts, base_workspace)
     end
+  end
+
+  # A pure local read (`rev-parse --verify <ref>^{commit}`), mirroring
+  # `Kazi.Scheduler.Worktree`'s own validation — never a fetch. Fail-closed:
+  # anything unexpected (no git, not a repo) means the ref cannot be honored.
+  defp base_ref_resolves?(workspace, base_ref) when is_binary(workspace) do
+    case System.cmd(
+           "git",
+           ["-C", workspace, "rev-parse", "--verify", "--quiet", base_ref <> "^{commit}"],
+           stderr_to_stdout: true
+         ) do
+      {_out, 0} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp base_ref_resolves?(_workspace, _base_ref), do: false
+
+  defp refuse_contradictory_base(opts) do
+    message =
+      "--in-place and --base are contradictory: --base <ref> selects the ref the " <>
+        "kazi-owned task worktree is created from (ADR-0065 decision 5), and " <>
+        "--in-place runs without a task worktree at all. Drop one of the two flags."
+
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  defp refuse_unresolvable_base(base_ref, workspace, opts) do
+    message =
+      "--base #{base_ref} does not resolve to a commit in #{workspace} " <>
+        "(git rev-parse --verify #{base_ref}^{commit} failed); kazi never fetches — " <>
+        "fetch it yourself and re-run, or pass a ref the local repo already knows"
+
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
   end
 
   # `workspace` is only "a git repo" for T50.1's purposes when it is itself a
@@ -1799,7 +1869,11 @@ defmodule Kazi.CLI do
         repo: base_workspace,
         # T50.2: the landing step (serial_landing/4) recognizes the kazi-owned
         # task branch by this prefix — pinned here so the two stay in lockstep.
-        branch_prefix: @serial_task_branch_prefix
+        branch_prefix: @serial_task_branch_prefix,
+        # T50.8 (ADR-0065 decision 5): --base selects the worktree's base ref;
+        # nil (flag absent) keeps the HEAD default WITH the stale-base warning,
+        # an explicit ref states intent and silences it.
+        base_ref: opts[:base]
       )
 
     case reconciler.(%{key: goal.id}) do
