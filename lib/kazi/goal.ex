@@ -105,6 +105,7 @@ defmodule Kazi.Goal do
   @type t :: %__MODULE__{
           id: id(),
           name: String.t() | nil,
+          description: String.t() | nil,
           mode: mode(),
           predicates: [Predicate.t()],
           guards: [Predicate.t()],
@@ -122,6 +123,9 @@ defmodule Kazi.Goal do
   @enforce_keys [:id]
   defstruct id: nil,
             name: nil,
+            # Optional one-line human summary of the goal ("what is being
+            # worked on"), surfaced by the dashboard drill-in panel.
+            description: nil,
             mode: :repair,
             predicates: [],
             guards: [],
@@ -197,6 +201,7 @@ defmodule Kazi.Goal do
     %__MODULE__{
       id: id,
       name: Keyword.get(opts, :name),
+      description: Keyword.get(opts, :description),
       mode: Keyword.get(opts, :mode, :repair),
       predicates: Keyword.get(opts, :predicates, []),
       guards: Keyword.get(opts, :guards, []),

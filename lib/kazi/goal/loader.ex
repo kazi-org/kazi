@@ -403,6 +403,7 @@ defmodule Kazi.Goal.Loader do
       {:ok,
        Goal.new(id,
          name: Map.get(data, "name"),
+         description: Map.get(data, "description"),
          mode: mode,
          predicates: predicates,
          guards: guards,
