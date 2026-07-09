@@ -64,6 +64,7 @@ defmodule Kazi.CLI do
   alias Kazi.ContextStore.GistInit
   alias Kazi.Economy.{BudgetSuggestion, History}
   alias Kazi.Export.Obsidian
+  alias Kazi.Fleet.Discovery
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
   alias Kazi.Goal.GroupLint
@@ -138,6 +139,7 @@ defmodule Kazi.CLI do
     explain: :boolean,
     dry_run: :boolean,
     check: :boolean,
+    fleet: :string,
     provider: :string,
     budget: :integer,
     context_store: :string,
@@ -210,6 +212,8 @@ defmodule Kazi.CLI do
       "`apply` only: alias of --explain — print the computed schedule and exit 0 without dispatching anything.",
     check:
       "`apply` only (issue #805): observe-only mode — evaluate the predicate vector EXACTLY ONCE via the real provider path and exit; never dispatches a harness, integrates, or deploys. All-pass exits 0 (`status: \"pass\"`, NOT the vacuous_goal error a normal run would give); any failing predicate exits 1 (`status: \"fail\"`) carrying predicates[] with captured evidence for the failures. For merge gates (ADR-0026) and release qualification.",
+    fleet:
+      "`apply` only (T50.4, ADR-0065): a DIRECTORY of `*.goal.toml` goal-files driven as one fleet instead of a single goal-file/proposal-ref. kazi builds a goal-DAG from each file's `[metadata] depends_on` and any INFERRED overlap between `[scope] paths` globs (an overlapping pair with no explicit edge serializes rather than erroring). Currently requires `--explain`/`--dry-run` — it prints the computed fleet schedule (which goal runs in which frontier, and why) and exits 0 without dispatching anything; fleet EXECUTION ships in T50.5.",
     provider:
       "`context` only: the context-store provider to proxy to (currently `gist`, the default). The provider stays independently usable; this is a thin wrapper so users learn one CLI (ADR-0045).",
     budget:
@@ -269,6 +273,7 @@ defmodule Kazi.CLI do
         :explain,
         :dry_run,
         :check,
+        :fleet,
         :context_store,
         :context_budget,
         :session_name,
@@ -703,6 +708,9 @@ defmodule Kazi.CLI do
       {:run, goal_file, opts} ->
         execute_run(goal_file, opts, inject_opts)
 
+      {:fleet, dir, opts} ->
+        execute_fleet(dir, opts, inject_opts)
+
       {:status, ref, opts} ->
         execute_status(ref, opts)
 
@@ -762,6 +770,7 @@ defmodule Kazi.CLI do
           | {:schema, String.t() | nil, keyword()}
           | {:version, keyword()}
           | {:run, Path.t(), keyword()}
+          | {:fleet, Path.t(), keyword()}
           | {:status, String.t() | nil, keyword()}
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
@@ -863,8 +872,19 @@ defmodule Kazi.CLI do
   defp parse_command(["apply", goal_file | rest], flags),
     do: parse_run(goal_file, rest, flags)
 
-  defp parse_command(["apply"], _flags),
-    do: {:error, "the `apply` command requires a <goal-file> argument"}
+  # T50.4 (ADR-0065): `apply --fleet <dir>` has no positional goal-file — the
+  # directory IS the argument, carried on the flag so `--fleet` composes with
+  # the goal-file/proposal-ref positional grammar with no ambiguity.
+  defp parse_command(["apply"], flags) do
+    case Keyword.get(flags, :fleet) do
+      dir when is_binary(dir) ->
+        {:fleet, dir,
+         explain: flags[:explain] || flags[:dry_run] || false, json: flags[:json] || false}
+
+      _ ->
+        {:error, "the `apply` command requires a <goal-file> argument"}
+    end
+  end
 
   # T16.1 (ADR-0024 decision 2): `kazi help` is the positional form of `--help`
   # (the leading `--help` flag is already handled in `parse/1`). Under --json it
@@ -1445,6 +1465,80 @@ defmodule Kazi.CLI do
         end
 
         1
+    end
+  end
+
+  # =============================================================================
+  # apply --fleet: goal-DAG discovery over a directory of goal-files (T50.4,
+  # ADR-0065)
+  # =============================================================================
+  #
+  # Currently `--explain`/`--dry-run` ONLY — prints the computed fleet schedule
+  # (which goal runs in which frontier, and why) and exits, dispatching nothing.
+  # Fleet EXECUTION (one worktree per goal, pipelined across goal-files) is T50.5.
+  defp execute_fleet(dir, opts, _runtime_opts) do
+    json? = opts[:json] == true
+
+    case Discovery.discover(dir) do
+      {:ok, fleet} ->
+        if opts[:explain] == true do
+          emit(json?, fleet_explain_json(dir, fleet), fn -> fleet_explain_human(dir, fleet) end)
+          0
+        else
+          fleet_error(
+            json?,
+            "kazi apply --fleet requires --explain (fleet execution ships in T50.5)"
+          )
+        end
+
+      {:error, message} ->
+        fleet_error(json?, message)
+    end
+  end
+
+  defp fleet_error(json?, message) do
+    if json?, do: emit_json_error(message), else: IO.puts(:stderr, "error: #{message}")
+    1
+  end
+
+  defp fleet_explain_json(dir, %Discovery{} = fleet) do
+    %{
+      schema_version: @run_schema_version,
+      mode: "fleet_explain",
+      dispatched: false,
+      fleet_dir: dir,
+      goals: Enum.map(fleet.members, &to_string(&1.goal.id)),
+      frontiers:
+        fleet.frontiers
+        |> Enum.with_index()
+        |> Enum.map(fn {ids, index} ->
+          %{frontier: index, goals: Enum.map(ids, &to_string/1)}
+        end),
+      edges: Enum.map(fleet.edges, &fleet_edge_json/1),
+      next_action: "schedule"
+    }
+  end
+
+  defp fleet_edge_json(%{from: from, to: to, kind: kind}) do
+    %{from: to_string(from), to: to_string(to), kind: to_string(kind)}
+  end
+
+  defp fleet_explain_human(dir, %Discovery{} = fleet) do
+    IO.puts("FLEET SCHEDULE (dry-run, nothing dispatched)  dir=#{dir}")
+    IO.puts("frontiers: #{length(fleet.frontiers)}")
+
+    fleet.frontiers
+    |> Enum.with_index()
+    |> Enum.each(fn {ids, index} ->
+      IO.puts("  frontier #{index}: #{Enum.join(ids, ", ")}")
+    end)
+
+    if fleet.edges != [] do
+      IO.puts("edges:")
+
+      Enum.each(fleet.edges, fn %{from: from, to: to, kind: kind} ->
+        IO.puts("  #{from} -> #{to} (#{kind})")
+      end)
     end
   end
 

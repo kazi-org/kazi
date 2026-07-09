@@ -59,6 +59,27 @@ defmodule Kazi.Scheduler.DepScheduler do
   per frontier boundary, distinguishable from the per-iteration events by
   `"event": "frontier_complete"`.
 
+  ## Supervised checkpoint mode (T50.3, ADR-0065)
+
+  An OPT-IN `:pause_between_waves` boolean STOPS the loop at a topological
+  frontier boundary instead of dispatching the next frontier: the moment a
+  frontier fully settles (the same instant `:on_frontier_complete`, if given,
+  fires for it) and at least one group of a LATER frontier has not yet
+  dispatched, the scheduler halts without starting any further groups and
+  `run/2` returns `{:ok, %{paused: true, frontier: index, groups: [...],
+  resume_state: %{group_id => status}}}` instead of the collective result. No
+  barrier is introduced when the flag is unset — this is a pure opt-in halt,
+  so byte-identical to today's pipelined behavior otherwise.
+
+  A caller resumes a paused run by passing the recorded `:resume_state` (or a
+  token produced by `resume_token/1`, decoded via `decode_resume_token/1`) back
+  in as `run/2`'s `:resume_state` option on a FRESH `run/2` call over the SAME
+  goal: the already-settled groups seed the initial state map (so they are
+  never re-dispatched) and the loop continues from the next ready frontier —
+  the exact same re-evaluate-on-terminal loop, just seeded mid-flight. One
+  mechanism for both the goal-internal wave boundary here and the fleet-node
+  boundary T50.5 reuses.
+
   ## Blocked-dependency escalation (T23.5, ADR-0028 §Decision 5)
 
   A `:stuck`/`:over_budget` dep poisons every group transitively behind it. Beyond
@@ -181,6 +202,32 @@ defmodule Kazi.Scheduler.DepScheduler do
           escalations: [escalation()]
         }
 
+  @typedoc """
+  The result of a `:pause_between_waves` halt (T50.3, ADR-0065): returned
+  INSTEAD OF `t:result/0` when the loop stops at a frontier boundary rather
+  than running to collective convergence.
+
+    * `:paused`       — always `true` (the discriminant against `t:result/0`,
+      which carries no `:paused` key).
+    * `:frontier`     — the zero-based index of the frontier that just fully
+      settled, triggering the halt.
+    * `:groups`       — `{group_id, status}` per group in declared order; a
+      settled group carries its terminal status, an un-dispatched later-frontier
+      group carries `:pending`.
+    * `:resume_state` — `group_id => status` for every settled group, the exact
+      map to hand back to `run/2`'s `:resume_state` option (or pass through
+      `resume_token/1`/`decode_resume_token/1`) to continue from the next
+      frontier.
+  """
+  @type paused_result :: %{
+          paused: true,
+          frontier: non_neg_integer(),
+          groups: [{Group.id(), DepGraph.state() | :pending}],
+          resume_state: %{Group.id() => Scheduler.partition_status()}
+        }
+
+  @resume_token_schema_version 1
+
   @default_reconcile_timeout :infinity
 
   @doc """
@@ -203,23 +250,38 @@ defmodule Kazi.Scheduler.DepScheduler do
     * `:on_frontier_complete` — an optional 1-arity callback invoked once per
       topological frontier as it fully settles (see moduledoc "Frontier-complete
       events"). Default `nil` (no callback — the pre-existing behavior).
+    * `:pause_between_waves` — an optional boolean (default `false`, T50.3,
+      ADR-0065). When `true`, the loop halts right after a frontier fully
+      settles (rather than dispatching the next one) and `run/2` returns
+      `{:ok, paused_result}` (see `t:paused_result/0`) instead of the collective
+      `t:result/0`. See moduledoc "Supervised checkpoint mode".
+    * `:resume_state` — an optional `%{group_id => status}` map (T50.3) seeding
+      already-settled groups so a resumed run never re-dispatches them; the
+      exact shape `t:paused_result/0`'s `:resume_state` carries. Default `%{}`
+      (fresh run — the pre-existing behavior).
 
   Returns `{:ok, result}` (see `t:result/0`) once every group is terminal or
-  blocked, or `{:error, reason}` if the scheduler could not be started.
+  blocked, `{:ok, paused_result}` (see `t:paused_result/0`) if
+  `:pause_between_waves` halted the loop at a frontier boundary first, or
+  `{:error, reason}` if the scheduler could not be started.
   """
-  @spec run(Goal.t(), keyword()) :: {:ok, result()} | {:error, term()}
+  @spec run(Goal.t(), keyword()) :: {:ok, result() | paused_result()} | {:error, term()}
   def run(%Goal{} = goal, opts) when is_list(opts) do
     reconciler = Keyword.fetch!(opts, :reconciler)
     supervisor = Keyword.get(opts, :supervisor, PartitionSupervisor)
     timeout = Keyword.get(opts, :reconcile_timeout, @default_reconcile_timeout)
     on_frontier_complete = Keyword.get(opts, :on_frontier_complete)
+    pause_between_waves = Keyword.get(opts, :pause_between_waves, false)
+    resume_state = Keyword.get(opts, :resume_state, %{})
 
     init_arg = %{
       goal: goal,
       reconciler: reconciler,
       supervisor: supervisor,
       timeout: timeout,
-      on_frontier_complete: on_frontier_complete
+      on_frontier_complete: on_frontier_complete,
+      pause_between_waves: pause_between_waves,
+      resume_state: resume_state
     }
 
     case GenServer.start_link(__MODULE__, init_arg) do
@@ -231,6 +293,52 @@ defmodule Kazi.Scheduler.DepScheduler do
       {:error, _reason} = error ->
         error
     end
+  end
+
+  @doc """
+  Encodes a `t:paused_result/0`'s resume state into an OPAQUE, URL-safe token
+  string — the compact serialization `kazi apply --resume <token>` (T50.3)
+  carries: `schema_version`, the next frontier index to dispatch, and each
+  settled group's status. Round-trips through `decode_resume_token/1` back into
+  the `:resume_state` map `run/2` accepts.
+  """
+  @spec resume_token(paused_result()) :: {:ok, String.t()} | :error
+  def resume_token(%{paused: true, frontier: frontier, resume_state: resume_state})
+      when is_integer(frontier) and is_map(resume_state) do
+    payload = %{
+      schema_version: @resume_token_schema_version,
+      next_frontier: frontier + 1,
+      groups: resume_state
+    }
+
+    {:ok, payload |> :erlang.term_to_binary() |> Base.url_encode64(padding: false)}
+  end
+
+  def resume_token(_other), do: :error
+
+  @doc """
+  Decodes a `resume_token/1` string back into the `:resume_state` map `run/2`
+  accepts. `{:error, :invalid_token}` on anything malformed, wrong schema
+  version, or not produced by `resume_token/1` — never raises on untrusted
+  operator input.
+  """
+  @spec decode_resume_token(String.t()) ::
+          {:ok, %{Group.id() => Scheduler.partition_status()}} | {:error, :invalid_token}
+  def decode_resume_token(token) when is_binary(token) do
+    with {:ok, binary} <- Base.url_decode64(token, padding: false),
+         {:ok, term} <- safe_binary_to_term(binary),
+         %{schema_version: @resume_token_schema_version, groups: groups} when is_map(groups) <-
+           term do
+      {:ok, groups}
+    else
+      _ -> {:error, :invalid_token}
+    end
+  end
+
+  defp safe_binary_to_term(binary) do
+    {:ok, :erlang.binary_to_term(binary, [:safe])}
+  rescue
+    ArgumentError -> :error
   end
 
   @doc """
@@ -252,10 +360,33 @@ defmodule Kazi.Scheduler.DepScheduler do
   def init(%{goal: goal} = arg) do
     %{reconciler: reconciler, supervisor: supervisor, timeout: timeout} = arg
     on_frontier_complete = Map.get(arg, :on_frontier_complete)
+    pause_between_waves = Map.get(arg, :pause_between_waves, false)
+    resume_state = Map.get(arg, :resume_state, %{})
 
-    # Every group starts :pending (declared, unobserved). The states map is the
-    # single source of truth the planner re-evaluates against each cycle.
-    states = Map.new(goal.groups, fn %Group{id: id} -> {id, :pending} end)
+    # Every group starts :pending (declared, unobserved) EXCEPT those seeded by a
+    # resumed run's :resume_state (T50.3) — a group already settled in an earlier
+    # paused run seeds straight into its normalized terminal state, so the
+    # ready-set evaluation below never re-dispatches it.
+    base_states = Map.new(goal.groups, fn %Group{id: id} -> {id, :pending} end)
+
+    states =
+      Enum.reduce(resume_state, base_states, fn {id, status}, acc ->
+        Map.put(acc, id, planner_state(status))
+      end)
+
+    frontiers = DepGraph.frontiers(goal)
+
+    # A frontier fully covered by the seeded resume state already fired its
+    # frontier_complete event in the run that produced the token — never
+    # re-report it here.
+    reported_frontiers =
+      frontiers
+      |> Enum.with_index()
+      |> Enum.filter(fn {group_ids, _index} ->
+        group_ids != [] and Enum.all?(group_ids, &Map.has_key?(resume_state, &1))
+      end)
+      |> Enum.map(fn {_group_ids, index} -> index end)
+      |> MapSet.new()
 
     state = %{
       goal: goal,
@@ -269,8 +400,9 @@ defmodule Kazi.Scheduler.DepScheduler do
       states: states,
       # group_id → its RAW reconciler terminal status (`:crashed`/`:stopped`
       # preserved), for the per-group result view. Distinct from `states`, which
-      # carries the normalized planner vocabulary.
-      outcomes: %{},
+      # carries the normalized planner vocabulary. Seeded from :resume_state so a
+      # resumed run's final result still reports the earlier frontier's outcomes.
+      outcomes: resume_state,
       # group_id → monitor ref for in-flight groups (so a {:DOWN, ...} resolves).
       running: %{},
       # ref → group_id, the reverse map for {:DOWN, ...}.
@@ -279,9 +411,14 @@ defmodule Kazi.Scheduler.DepScheduler do
       # The STATIC topological frontier layering (DepGraph.frontiers/1, computed
       # once from the DAG shape alone — pure, independent of observed state), and
       # the callback + which frontier indices have already fired (issue #936).
-      frontiers: DepGraph.frontiers(goal),
+      frontiers: frontiers,
       on_frontier_complete: on_frontier_complete,
-      reported_frontiers: MapSet.new()
+      reported_frontiers: reported_frontiers,
+      # T50.3 (ADR-0065): opt-in halt at a frontier boundary, and whether this
+      # loop has already halted (paused/pause_frontier).
+      pause_between_waves: pause_between_waves,
+      paused: false,
+      pause_frontier: nil
     }
 
     # Dispatch the first frontier (the no-needs ready set) before awaiting, so the
@@ -385,12 +522,20 @@ defmodule Kazi.Scheduler.DepScheduler do
     # settled, BEFORE starting this cycle's newly-ready groups — so a caller
     # streaming these events sees frontier N's boundary ahead of any frontier
     # N+1 dispatch this same cycle triggers.
-    state = maybe_emit_frontier_events(state)
+    {state, newly_settled} = maybe_emit_frontier_events(state)
 
     state =
-      Enum.reduce(ready, state, fn group_id, acc ->
-        start_group(acc, group_id)
-      end)
+      if pause_now?(state, newly_settled) do
+        # T50.3 (ADR-0065): a frontier just settled and later work remains —
+        # halt here instead of dispatching `ready` (which belongs to that later
+        # work). No group is started; the paused result is built once the
+        # caller awaits (finished_result/1).
+        %{state | paused: true, pause_frontier: Enum.max(newly_settled)}
+      else
+        Enum.reduce(ready, state, fn group_id, acc ->
+          start_group(acc, group_id)
+        end)
+      end
 
     # Publish the post-transition DAG snapshot so the live dependency-DAG
     # dashboard (T23.7, ADR-0011) reflects the run as it progresses. This is the
@@ -400,6 +545,17 @@ defmodule Kazi.Scheduler.DepScheduler do
     # never calls back in (ADR-0011 §2).
     broadcast_dag(state)
     state
+  end
+
+  # True iff :pause_between_waves is set, a frontier genuinely just settled this
+  # cycle, and there is still un-settled work beyond it (pausing when the whole
+  # goal just finished would be a pointless halt with nothing left to resume —
+  # let it fall through to the ordinary converged/blocked result instead).
+  defp pause_now?(%{pause_between_waves: false}, _newly_settled), do: false
+  defp pause_now?(_state, []), do: false
+
+  defp pause_now?(state, _newly_settled) do
+    not Enum.all?(state.goal.groups, fn %Group{id: id} -> settled?(state, id) end)
   end
 
   # Best-effort publish of the render-ready DAG snapshot. The dashboard's PubSub
@@ -610,13 +766,46 @@ defmodule Kazi.Scheduler.DepScheduler do
   end
 
   # The result once EVERY group has reached a terminal/blocked state (none
-  # :pending or :running). Until then nil — but a BLOCKED group is terminal, so a
-  # poisoned sub-DAG never keeps the run waiting (it does NOT hang).
+  # :pending or :running), OR once :pause_between_waves halted the loop at a
+  # frontier boundary (T50.3) — a paused loop is "finished" for the purposes of
+  # this await even though later-frontier groups are still :pending, since
+  # nothing further will dispatch until a fresh `run/2` call resumes it. Until
+  # either, nil — but a BLOCKED group is terminal, so a poisoned sub-DAG never
+  # keeps the run waiting (it does NOT hang).
+  defp finished_result(%{paused: true} = state), do: build_paused_result(state)
+
   defp finished_result(state) do
     if Enum.all?(state.goal.groups, fn %Group{id: id} -> settled?(state, id) end) do
       build_result(state)
     else
       nil
+    end
+  end
+
+  # T50.3 (ADR-0065): the halt-at-a-frontier-boundary result — `:frontier` names
+  # the boundary that triggered the halt, `:groups` reports every group's
+  # current status (settled groups their terminal outcome, un-dispatched
+  # later-frontier groups :pending), and `:resume_state` is the exact seed a
+  # follow-up `run/2` call's `:resume_state` option needs to continue from the
+  # next frontier without re-dispatching anything already settled.
+  defp build_paused_result(state) do
+    groups =
+      Enum.map(state.goal.groups, fn %Group{id: id} ->
+        {id, group_status_for_pause(state, id)}
+      end)
+
+    %{
+      paused: true,
+      frontier: state.pause_frontier,
+      groups: groups,
+      resume_state: state.outcomes
+    }
+  end
+
+  defp group_status_for_pause(state, id) do
+    case Map.get(state.outcomes, id) do
+      nil -> Map.get(state.states, id)
+      status -> status
     end
   end
 
@@ -631,11 +820,14 @@ defmodule Kazi.Scheduler.DepScheduler do
   # Frontier-complete events (issue #936, minimal slice)
   # =============================================================================
 
-  # No callback ⇒ nothing to compute (skip the frontier scan entirely).
-  defp maybe_emit_frontier_events(%{on_frontier_complete: nil} = state), do: state
-
+  # Returns `{state, newly_settled_indices}` — the indices are needed by
+  # `pause_now?/2` even when no :on_frontier_complete callback is registered
+  # (T50.3's :pause_between_waves is independent of the stream callback), so
+  # this always scans rather than short-circuiting on a nil callback.
   defp maybe_emit_frontier_events(state) do
-    Enum.reduce(newly_settled_frontiers(state), state, &emit_frontier_complete(&2, &1))
+    newly = newly_settled_frontiers(state)
+    state = Enum.reduce(newly, state, &emit_frontier_complete(&2, &1))
+    {state, newly}
   end
 
   # The indices of frontiers that are now FULLY settled (every member group
@@ -651,15 +843,17 @@ defmodule Kazi.Scheduler.DepScheduler do
   end
 
   defp emit_frontier_complete(state, index) do
-    group_ids = Enum.at(state.frontiers, index)
+    if state.on_frontier_complete do
+      group_ids = Enum.at(state.frontiers, index)
 
-    payload = %{
-      event: "frontier_complete",
-      frontier: index,
-      groups: Enum.map(group_ids, fn id -> %{id: id, status: group_outcome(state, id)} end)
-    }
+      payload = %{
+        event: "frontier_complete",
+        frontier: index,
+        groups: Enum.map(group_ids, fn id -> %{id: id, status: group_outcome(state, id)} end)
+      }
 
-    state.on_frontier_complete.(payload)
+      state.on_frontier_complete.(payload)
+    end
 
     %{state | reported_frontiers: MapSet.put(state.reported_frontiers, index)}
   end
