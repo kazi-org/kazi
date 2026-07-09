@@ -22,7 +22,8 @@ defmodule KaziWeb.StarmapFleetFilterTest do
         workspace: "/tmp/ws",
         goal_ref: goal_ref,
         harness: "claude",
-        model: "claude-sonnet-5"
+        model: "claude-sonnet-5",
+        session_os_pid: "424242"
       })
 
     if status_or_nil, do: {:ok, _} = RunRegistry.finish(run.run_id, status_or_nil)

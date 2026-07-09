@@ -22,7 +22,8 @@ defmodule KaziWeb.StarmapLiveTest do
           workspace: "/tmp/ws",
           goal_ref: "goal-#{System.unique_integer([:positive])}",
           harness: "claude",
-          model: "claude-sonnet-5"
+          model: "claude-sonnet-5",
+          session_os_pid: "424242"
         },
         overrides
       )

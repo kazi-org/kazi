@@ -63,7 +63,8 @@ defmodule KaziWeb.StarmapWavebandTest do
           workspace: "/tmp/ws",
           goal_ref: goal_ref,
           harness: "claude",
-          model: "claude-sonnet-5"
+          model: "claude-sonnet-5",
+          session_os_pid: "424242"
         },
         overrides
       )

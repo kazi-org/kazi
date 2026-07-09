@@ -29,6 +29,10 @@ config :kazi, KaziWeb.Endpoint,
 
 config :logger, level: :warning
 
+# Dashboard session-liveness is deterministic in tests (no `ps` calls):
+# pids starting with "dead" are closed sessions, everything else is live.
+config :kazi, :session_liveness_source, Kazi.TestSupport.SessionLivenessStub
+
 # Crash-dump dir override (issue #856): keep `mix test` from ever pointing
 # `ERL_CRASH_DUMP` at a real `~/.kazi/crash`, mirroring the tmp/-scoped DB path
 # above. See `Kazi.CrashDump`.
