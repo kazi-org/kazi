@@ -650,6 +650,17 @@ defmodule Kazi.CLI do
   """
   @spec run([String.t()], keyword()) :: exit_code()
   def run(argv, inject_opts \\ []) when is_list(argv) and is_list(inject_opts) do
+    # T39.4 (ADR-0049 decision 4, issue #804): under `--json`, stdout must carry
+    # EXACTLY one JSON object (JSONL under `--stream`) on every entrypoint —
+    # release, escript, `mix run`. `config/config.exs` already routes the default
+    # `:logger` handler to stderr, but a dev/`mix run` environment can point a
+    # handler back at stdout (a local logger config, a dependency's setup), and
+    # then a mid-run log line (Ecto's "Migrations already up" was the observed
+    # leak) lands ahead of the JSON object and breaks a `jq` parse. Redirect any
+    # stdout-writing handler to stderr BEFORE parse/dispatch, so every log fired
+    # during the run goes to stderr. Non-`--json` runs are untouched.
+    if "--json" in argv, do: Kazi.Logging.StderrRedirect.redirect()
+
     case parse(argv) do
       {:help, flags} ->
         # T16.1 (ADR-0024 decision 2): under --json emit the command/flag surface
