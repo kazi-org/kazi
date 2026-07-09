@@ -112,6 +112,22 @@ from `"id"`/`"name"` or generates defaults.
 If a `/plan` strategy doc already exists for this work, DERIVE the predicates from
 its `acc:` lines rather than inventing them -- those lines ARE the predicate set.
 
+Author for the grind tier -- maximum implementable detail is the DEFAULT, not
+something the operator has to ask for. The predicate `description` fields are
+effectively the ONLY brief the grind model receives (the dispatch prompt is the
+goal name + failing predicates + evidence; it never sees your session). Every
+payload you author carries: a TASK BRIEF in the first acceptance predicate's
+description (one sentence of WHY, exact files/modules to touch, the pieces
+known to be missing, what NOT to change, issue/ADR numbers with "read these
+first" -- a ticket a new hire could execute without asking anything); a
+PROCESS contract (branch `task/<goal-id>`, small conventional commits, push
+with `-u`) plus a `landed` predicate (clean tree AND `HEAD == @{u}`); ONE
+requirement per predicate -- never a compound "the new test passes" check that
+a partial implementation could satisfy, since the grind model authors that
+test; negative-space companions for any text-presence check; and hermetic
+guard predicates for what must not break (full suite, formatter). A one-line
+description is an authoring bug: expand it.
+
 kazi-drafts (hand kazi only a prose idea; it drafts the predicates for you):
 
 ```sh
