@@ -304,13 +304,25 @@ defmodule Kazi.Actions.Integrate do
   defp commit(workspace, message) do
     case git(workspace, ["commit", "-m", message]) do
       {:ok, _} ->
-        case git(workspace, ["rev-parse", "HEAD"]) do
-          {:ok, sha} -> {:ok, String.trim(sha)}
-          {:error, reason} -> {:error, {:commit_rev_failed, reason}}
-        end
+        head_sha(workspace)
 
+      # T50.2 (ADR-0065 decision 2): a serial task worktree routinely arrives
+      # here with its work ALREADY committed on the task branch and a clean
+      # tree, so "nothing to commit" is not a failure — the pushed branch is
+      # the existing HEAD.
       {:error, reason} ->
-        {:error, {:commit_failed, reason}}
+        if reason =~ ~r/nothing to commit|nothing added to commit|no changes added/i do
+          head_sha(workspace)
+        else
+          {:error, {:commit_failed, reason}}
+        end
+    end
+  end
+
+  defp head_sha(workspace) do
+    case git(workspace, ["rev-parse", "HEAD"]) do
+      {:ok, sha} -> {:ok, String.trim(sha)}
+      {:error, reason} -> {:error, {:commit_rev_failed, reason}}
     end
   end
 
