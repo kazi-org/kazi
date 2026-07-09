@@ -250,6 +250,21 @@ Open work:
   rediscovery candidates + opt-in debrief hypotheses (never direct prompt
   mutation) gated by the E19/T34.7 benchmark rig -- a variant ships only on a
   measured tokens-to-converge reduction, ADR-0058) -- E48.
+- **UC-066** (a goal asserts a CAPABILITY -- "a user can create and download a
+  PAT" -- as a first-class `scenario` predicate: one tagged Gherkin Scenario
+  bound to a committed PIN (a replayable trace in the existing `:browser`/`:cli`
+  config vocabulary), passing ONLY when the pin validates (every When -> >=1
+  step, every Then -> >=1 assertion, Scenario-hash current) and replays green
+  through the delegated surface provider -- hand-authored pins work day one; an
+  agent claim never grades, ADR-0064) -- E49.
+- **UC-067** (pins author and repair THEMSELVES without entering the fixer's
+  reach: a DEMONSTRATOR dispatch role, write-disjoint from the fixer via
+  role-scoped `read_only_paths` (demonstrator writes ONLY pins; fixer never
+  does), authors a pin accepted only on validate-plus-green-replay;
+  repin-with-diff distinguishes selector rot from capability regression;
+  repeated demonstration failure terminates as `:stuck` cause
+  `capability_unreachable`; standing goals replay pins as live capability
+  monitors -- the DoD "verified live" step as a predicate, ADR-0064) -- E49.
 
 ## Checkable Work Breakdown
 
@@ -291,6 +306,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E47 -- Fleet observability follow-up: event river + roadmap-ref starmap (P2, ADR-0057/ADR-0056) -> plans/E47.md
 
 ### E48 -- Economy feedback loop: persisted run economics, learned budgets, behavior-first prompting, honest budget stops (P1, ADR-0058) -> plans/E48.md
+
+### E49 -- Scenario predicates: capability-level verification by demonstrate-then-pin (P1, ADR-0064) -> plans/E49.md
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -358,6 +375,10 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 | R-E43-1 | The UI-pack assertions (T43.2/T43.3/T43.10) drag runner-side deps (axe-core, a screenshot-diff lib, Maestro) into the browser runner, inflating its footprint or breaking `mix test`. | Med | Med | Deps stay runner-side and OPTIONAL: an assertion whose dep is absent returns `:error` "unavailable", never `:fail` (exactly how Playwright is handled today); `mix test` drives the STUB runner and never installs a browser dep; ADR-0053 §1/§4. |
 | R-E43-2 | `:cli` overlaps `:tests`/`:custom_script`, confusing authors about which to reach for. | Low | Med | ADR-0053 delineates them: `:tests`=the suite (compile+unit truth), `:custom_script`=an arbitrary tool with a declared parse, `:cli`=turnkey golden-invocation of a SHIPPED binary (exit/stdout/stderr matrix + `--help` golden). `kazi schema cli` + the docs how-to state the boundary (T43.7). |
 | R-E43-3 | `:cli`/UI live dogfoods (T43.6/T43.9) need a real browser or a real built binary that a headless pool session may lack, so the wave stalls or reports a false "verified". | Med | Med | Both tasks are `kind: any` and REPORT HONESTLY which path ran (stub vs live; mix/escript/burrito) per the global Definition-of-Done; the stub-path ExUnit in T43.1-T43.5/T43.7-T43.8 is the machine-checkable backbone, the live run is the confirmation, never the gate. |
+| R-E49-1 | A demonstrator authors a WEAK-but-structurally-mapped pin (a `Then` realized by a trivial assertion), so replay passes without proving the capability -- the residual gaming gap ADR-0064 names. | Med | Med | The T49.1 step-map floor kills VACUOUS pins deterministically; pins land via PR (repin diffs are review artifacts); `repin = "manual"` for high-stakes goals; the demonstrator prompt is controller-owned + versioned (T49.7) so hardening is central; semantic-faithfulness checking stays future work and is NEVER an LLM judgment inside the envelope. |
+| R-E49-2 | The demonstrator needs a REACHABLE app (base_url/built binary) and browser/CLI automation the harness may lack in a headless pool session, so Wave B stalls or a false "demonstrated" is reported. | Med | Med | Wave A ships hand-authored-pin value with zero demonstrator involvement; T49.7's acceptance gate (validate + green replay) makes a false "demonstrated" structurally impossible -- a claim without a replaying pin changes nothing; T49.13 is `kind: any` with the R-E43-3 honest-report discipline. |
+| R-E49-3 | Cross-epic deps (T43.1/T43.7-8, T40.2, T41.1 -- all OPEN) stall the epic if encoded as epic-wide gates. | Med | High (known) | Deps are isolated per-task: Waves A/B depend ONLY on code shipped on main today (verified against main 2026-07-08, seams pinned in the epic's Implementation contract); only T49.10/T49.11/T49.13 gate on E43/E40/E41 tasks and the pool schedules them whenever those land. |
+| R-E49-4 | The two-role loop thrashes: repin churn masks a real regression, or demonstrate-fail loops burn budget. | Med | Med | At most ONE re-demonstration per iteration; a red replay at the minted commit routes to the FIXER (never re-demonstrated); two failed demonstrations on an unchanged workspace terminate `:stuck` cause `capability_unreachable` (T49.8) ranked needs-a-human (T48.14); demonstrator dispatches are budget-counted + economy-attributed (T49.9). |
 
 ## Operating Procedure
 
@@ -383,6 +404,34 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-08 -- Change Summary (E49: scenario predicates -- demonstrate-then-pin; ADR-0064)
+- Operator directive: higher-level / UX-level predicate checkers ("form
+  validates input", "a user can create and download a PAT") -- there is no
+  standard way of verifying software BEHAVIOR. Analysis: "form validates
+  input" was already decided (ADR-0053/E43 assertion pack); the CAPABILITY
+  level was the unowned gap -- ADR-0054 d3 lowers `@interface:web` Scenarios
+  to `:browser` predicates but nothing owns prose -> executable steps.
+- ADR-0064 written and ACCEPTED (operator sign-off 2026-07-08, PR #981):
+  a first-class `scenario` provider binds a tagged Gherkin Scenario to a
+  committed PIN (replayable trace in the existing `:browser`/`:cli` config
+  vocabulary); `:pass` comes ONLY from a validated pin replaying green --
+  judgment never grades (ADR-0002/0009). Pins are authored/repaired by a
+  DEMONSTRATOR dispatch role write-disjoint from the fixer (role-scoped
+  ADR-0042 `read_only_paths`); repin-with-diff distinguishes selector rot
+  from capability regression; standing goals replay pins as capability
+  monitors (the DoD "verified live" step as a predicate).
+- E49 added (13 tasks, plans/E49.md; UC-066/UC-067): Wave A pin
+  schema/extraction/provider/generators/docs (T49.1-T49.5, hand-authored pins
+  work day one, depends only on shipped code -- seams pinned in the epic's
+  Implementation contract, verified against main); Wave B demonstrator role +
+  role-scoped enforcement + repin lifecycle + `capability_unreachable` stuck
+  cause + economy attribution (T49.6-T49.9); Wave C `download` assertion
+  (gates T43.1), importer lowering (gates T40.2/T41.1), standing monitors,
+  and the released-binary dogfood (T49.10-T49.13).
+- Use Case Summary: UC-066 (capability predicates via pinned replay), UC-067
+  (self-authoring/repairing pins + capability monitors) added. Risk rows
+  R-E49-1..4.
 
 ### 2026-07-07 -- Change Summary (E48: economy feedback loop + honest budget stops; ADR-0058)
 - Grounding: an audit of every `over_budget` run in the live read-model (54
