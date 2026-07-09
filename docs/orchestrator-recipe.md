@@ -5,6 +5,15 @@ today, any capable harness tomorrow -- to drive kazi programmatically through th
 whole loop: author predicates -> review -> approve -> converge -> branch on the
 result. The agent parses kazi's `--json` output, never its prose (ADR-0023).
 
+**The stdout contract (ADR-0049 decision 4).** Under `--json`, stdout carries
+exactly ONE JSON object (JSONL under `--stream`) on every entrypoint -- the
+release binary, the escript, and a dev `mix run`. All logging goes to stderr:
+the default logger handler is configured off stdout, and a `--json` invocation
+additionally redirects any handler the environment pointed back at stdout
+before dispatching, so even a mid-run Ecto/Phoenix log line (the "Migrations
+already up" leak of issue #804) can never land ahead of the object. Parse
+stdout, ignore stderr -- no "grep for the `{` line" workaround is needed.
+
 If you are a Claude Code user, the most ergonomic path is `kazi install-skill`
 (E16, ADR-0024) -- it writes this recipe as a skill so the agent already knows
 it. This doc is the source of truth that skill teaches, and the recipe any
