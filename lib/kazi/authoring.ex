@@ -513,6 +513,18 @@ defmodule Kazi.Authoring do
 
     Author at least one predicate. These are acceptance criteria for NEW
     behavior: they are expected to fail now and pass once the idea is built.
+
+    Write each `description` as an IMPLEMENTATION BRIEF, not a label: the
+    model that later converges this goal sees ONLY the goal name, the failing
+    predicates, and evidence — never this conversation. Maximum implementable
+    detail is the default. In the first acceptance predicate's description,
+    front-load the task brief: one sentence of WHY, the exact files/modules to
+    touch when known, the pieces known to be missing, and what must NOT
+    change. Keep one requirement per predicate — never fold N requirements
+    into one catch-all check that a partial implementation could satisfy. Pair
+    any text-presence (grep-style) check with a negative-space or structural
+    companion (a bare text match is satisfiable by an unrelated or stuffed
+    string).
     """
   end
 
