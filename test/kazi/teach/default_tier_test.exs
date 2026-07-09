@@ -83,11 +83,12 @@ defmodule Kazi.Teach.DefaultTierTest do
   end
 
   describe "SKILL.md <-> AGENTS.md coherence on the tiering flip" do
-    test "both surfaces cite the same fleet-data rationale (~37% vs ~13%)" do
+    test "both surfaces ground the rationale in live economy + the ADR amendment (#958)" do
+      # The dated fleet figures live ONLY in ADR-0035's amendment; the teaching
+      # surfaces must point at re-derivable evidence instead of frozen prose.
       for doc <- [@skill_md, @agents_md] do
-        assert doc =~ "~37%"
-        assert doc =~ "~13%"
-        assert doc =~ "stuck+over_budget"
+        assert doc =~ "kazi economy --json"
+        assert doc =~ ~r/ADR-0035's (dated )?amendment/
       end
     end
 
@@ -125,6 +126,53 @@ defmodule Kazi.Teach.DefaultTierTest do
         assert "claude-opus-4-8" in ids
         assert "claude-haiku-4-5" in ids
       end
+    end
+  end
+
+  describe "the tiering rationale points at live economy, not a frozen snapshot (#958)" do
+    test "both surfaces tell the reader to re-derive tiering from kazi economy" do
+      assert @skill_md =~ "kazi economy --json"
+      assert @agents_md =~ "kazi economy --json"
+    end
+
+    test "neither surface bakes the dated fleet snapshot into its prose" do
+      # The dated figure belongs ONLY in ADR-0035's amendment; skill/AGENTS.md
+      # must point at `kazi economy` instead (kazi issue #958).
+      refute @skill_md =~ "~100 finished runs"
+      refute @agents_md =~ "~100 finished runs"
+    end
+  end
+
+  describe "the apply safety refusals are taught (#955)" do
+    test "the rendered SKILL.md teaches both refusal flags and the worktree remedy" do
+      assert @skill_md =~ "--allow-primary-workspace"
+      assert @skill_md =~ "--allow-duplicate-run"
+      assert @skill_md =~ "git worktree add"
+    end
+
+    test "AGENTS.md teaches both refusal flags and the worktree remedy" do
+      assert @agents_md =~ "--allow-primary-workspace"
+      assert @agents_md =~ "--allow-duplicate-run"
+      assert @agents_md =~ "git worktree add"
+    end
+
+    test "both surfaces warn against reflexively overriding the refusals" do
+      # The doc-side half of #955: the failure mode is an agent adding the
+      # flag that makes the error go away, defeating the protection.
+      assert @skill_md =~ ~r/do (?:NOT|not) reflexively/i
+      assert @agents_md =~ ~r/do not reflexively/i
+    end
+  end
+
+  describe "the ADR-0031 subsumption claim is current (#957)" do
+    test "the rendered SKILL.md no longer frames apply's subsumption as coming" do
+      refute @skill_md =~ "(coming)"
+      refute @skill_md =~ "it is COMING"
+    end
+
+    test "the proven claim carries the open #936 wave-checkpoint caveat" do
+      assert @skill_md =~ "#936"
+      assert @skill_md =~ ~r/no\s+supervised\s+checkpoint\s+between\s+waves/i
     end
   end
 end
