@@ -112,6 +112,20 @@ The main content area is ONE full-height SVG constellation, not a list:
   converging, stuck, AND claimed nodes (the mockup's S1 sits on a
   CLAIMED · NEXT node — the session that picks it up next), and every tagged
   node is listed in the rail's SESSIONS section.
+- **Session scope (CURRENT/CLOSED toggle)**: every run records the OS pid of
+  its driving agent session (`session_os_pid`, the nearest `claude`-like
+  ancestor at registration). The rail carries a two-button toggle under the
+  FLEET tiles — "CURRENT · N / CLOSED · M". CURRENT (the default) shows only
+  runs whose session process is still alive (probed per poll tick, one
+  batched `ps`); CLOSED shows the rest — dead history. Rows with no recorded
+  session pid (older binaries) count as CURRENT only while actively
+  converging. The canvas, fleet counts, and attention queue all honor the
+  scope; roadmap bands do not (groups are goals, not history rows).
+- **No page scroll (desktop)**: the shell is locked to the viewport
+  (height: 100vh, overflow hidden); the rail and the canvas each scroll
+  internally and the event river stays pinned to the bottom edge — never a
+  page scrollbar stacked on a canvas scrollbar. The ≤820px mobile layout
+  keeps its stacked page flow.
 - **Nodes are laid out in vertical band columns** spanning the full
   canvas height: alternating band fills (band-a rgba(86,204,242,0.028) /
   band-b transparent), dashed separators, and a top-center `.wlabel` per

@@ -86,6 +86,7 @@ defmodule KaziWeb.StarmapLive do
   alias Kazi.Goal.DepGraph
   alias Kazi.Loop.CauseClass
   alias Kazi.ReadModel.{Iteration, Run, RunRegistry}
+  alias Kazi.SessionLiveness
   alias Kazi.Scheduler.DagSnapshot
   alias Kazi.Sink.Events
   alias Kazi.Sink.Transcript
@@ -118,6 +119,7 @@ defmodule KaziWeb.StarmapLive do
      |> assign(:selected_id, nil)
      |> assign(:session_filter, nil)
      |> assign(:state_filter, nil)
+     |> assign(:session_scope, :current)
      |> assign(:mtab, "map")
      |> assign_runs()
      |> assign_bands()
@@ -175,6 +177,25 @@ defmodule KaziWeb.StarmapLive do
   # Fleet-tile state filter: clicking RUNNING / LANDED / STUCK dims every
   # node whose state the tile doesn't count; clicking the active tile again
   # clears it. The state sets mirror the tile counts exactly.
+  # CURRENT/CLOSED session-scope toggle: CURRENT shows runs whose driving
+  # agent session is still alive (or, for rows the registry recorded before
+  # session pids existed, runs still actively converging); CLOSED shows the
+  # rest — dead history. Recomputed from the registry on every poll tick.
+  def handle_event("set_session_scope", %{"scope" => scope}, socket) do
+    scope = if scope == "closed", do: :closed, else: :current
+
+    {:noreply,
+     socket
+     |> assign(:session_scope, scope)
+     |> assign(:selected_id, nil)
+     |> assign_runs()
+     |> assign_bands()
+     |> assign_attention_queue()
+     |> assign_canvas()
+     |> validate_session_filter()
+     |> assign_panel()}
+  end
+
   def handle_event("toggle_state_filter", %{"key" => key}, socket) do
     filter =
       case socket.assigns.state_filter do
@@ -249,7 +270,16 @@ defmodule KaziWeb.StarmapLive do
   @state_band_cap 8
 
   defp assign_runs(socket) do
-    all_nodes = RunRegistry.list() |> Enum.map(&to_node/1)
+    scope = socket.assigns[:session_scope] || :current
+    all_runs = RunRegistry.list()
+
+    live_map = liveness_source().alive_map(Enum.map(all_runs, & &1.session_os_pid))
+
+    {current_runs, closed_runs} =
+      Enum.split_with(all_runs, &session_current?(&1, live_map))
+
+    scoped_runs = if scope == :closed, do: closed_runs, else: current_runs
+    all_nodes = Enum.map(scoped_runs, &to_node/1)
     counts = Enum.frequencies_by(all_nodes, & &1.state)
 
     deduped =
@@ -264,13 +294,35 @@ defmodule KaziWeb.StarmapLive do
     |> assign(:nodes, shown)
     |> assign(:older_count, length(older) + (length(all_nodes) - length(deduped)))
     |> assign(:counts, counts)
+    |> assign(:scoped_runs, scoped_runs)
+    |> assign(:scope_counts, %{current: length(current_runs), closed: length(closed_runs)})
   end
 
-  # T46.6: the attention-queue rail, ranked from the same run registry the
-  # fleet list above renders.
+  # Injectable liveness seam (ADR-0011 §3, same pattern as drillin_source/0):
+  # production probes `ps` via Kazi.SessionLiveness; tests configure the
+  # deterministic stub so no test shells out.
+  defp liveness_source do
+    Application.get_env(:kazi, :session_liveness_source, SessionLiveness)
+  end
+
+  # Whether a run belongs to the CURRENT scope: its recorded agent-session
+  # pid is alive. Rows without a recorded session pid (registered by an older
+  # binary, or launched outside any agent session) fall back to run liveness:
+  # still-converging (fresh heartbeat) counts as current; everything else is
+  # history. `state/1` already folds heartbeat staleness in.
+  defp session_current?(%Run{session_os_pid: pid} = run, live_map) do
+    case pid do
+      p when is_binary(p) and p != "" -> Map.get(live_map, p, false)
+      _unrecorded -> state(run) == :converging
+    end
+  end
+
+  # T46.6: the attention-queue rail, ranked from the same scoped run set the
+  # fleet canvas renders — a CLOSED-scope glance ranks the dead history, the
+  # default CURRENT scope never mixes it in.
   defp assign_attention_queue(socket) do
     queue =
-      RunRegistry.list()
+      socket.assigns.scoped_runs
       |> AttentionQueue.build()
       # One rail entry per goal+signal: repeated runs of the same goal say
       # nothing new to the operator; ranking already put the hottest first.
@@ -893,6 +945,24 @@ defmodule KaziWeb.StarmapLive do
           </div>
         </div>
 
+        <div id="starmap-session-scope" class="scope-toggle" data-scope={@session_scope}>
+          <button
+            :for={
+              {scope, label, count} <- [
+                {:current, "CURRENT", @scope_counts.current},
+                {:closed, "CLOSED", @scope_counts.closed}
+              ]
+            }
+            type="button"
+            class={"scope-btn" <> if(@session_scope == scope, do: " active", else: "")}
+            data-scope-option={scope}
+            phx-click="set_session_scope"
+            phx-value-scope={scope}
+          >
+            {label} · {count}
+          </button>
+        </div>
+
         <div id="starmap-rail-attention" class="rail-attention">
           <div class="section-label">NEEDS YOU</div>
 
@@ -1295,10 +1365,13 @@ defmodule KaziWeb.StarmapLive do
       </nav>
 
       <style>
-        .shell { display: flex; min-height: 100vh; flex-wrap: wrap; }
+        .shell { display: flex; height: 100vh; overflow: hidden; flex-wrap: wrap; }
 
-        .rail { width: 280px; flex: 0 0 280px; background: var(--rail); border-right: 1px solid var(--line); padding: 1rem; display: flex; flex-direction: column; gap: 1.1rem; }
+        .rail { width: 280px; flex: 0 0 280px; background: var(--rail); border-right: 1px solid var(--line); padding: 1rem; display: flex; flex-direction: column; gap: 1.1rem; height: calc(100vh - 38px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #16233A transparent; }
         .wordmark { font-size: 16px; letter-spacing: .2em; }
+        .scope-toggle { display: flex; gap: .4rem; }
+        .scope-btn { flex: 1; background: transparent; border: 1px solid var(--line); color: var(--dim); font: inherit; font-size: 9px; letter-spacing: .22em; padding: .45rem 0; cursor: pointer; }
+        .scope-btn.active { color: var(--cyn); border-color: var(--cyn); background: rgba(86,204,242,.06); }
         .wordmark .cyn { color: var(--cyn); }
         .live-badge { display: inline-flex; align-items: center; gap: .3rem; color: var(--grn); font-size: 10px; margin-left: .6rem; }
         .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--grn); box-shadow: 0 0 6px var(--grn); display: inline-block; }
@@ -1321,7 +1394,7 @@ defmodule KaziWeb.StarmapLive do
         .legend-dot.nd-pending { background: #0D1626; border: 1.5px solid #223350; }
         .legend-dot.nd-stale { background: #141118; border: 1.5px dotted var(--amb); }
 
-        .canvas-shell { position: relative; flex: 1; min-width: 0; padding: 1rem 1.5rem 3.5rem; }
+        .canvas-shell { position: relative; flex: 1; min-width: 0; padding: 1rem 1.5rem 3.5rem; height: calc(100vh - 38px); overflow: hidden; }
         .starfield { position: absolute; inset: 0; background-image: radial-gradient(rgba(191,210,234,.25) 1px, transparent 1px); background-size: 48px 48px; opacity: .2; pointer-events: none; }
         .canvas-scroll { overflow-y: auto; max-height: calc(100vh - 9.5rem); margin-top: 1rem; scrollbar-width: thin; scrollbar-color: #16233A transparent; }
         .starmap-canvas { width: 100%; height: calc(100vh - 9.5rem); display: block; }
@@ -1448,6 +1521,9 @@ defmodule KaziWeb.StarmapLive do
            selected by the data-mtab attribute the set_mtab event drives.
            Desktop above the breakpoint is untouched. */
         @media (max-width: 820px) {
+          .shell { height: auto; min-height: 100vh; overflow: visible; }
+          .rail { height: auto; overflow-y: visible; }
+          .canvas-shell { height: auto; overflow: visible; }
           .shell { flex-direction: column; flex-wrap: nowrap; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
           .rail { width: 100%; flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--line); padding: .75rem .9rem; gap: .8rem; min-height: 0; }
           .fleet-tiles, .rail-attention, .rail-sessions, .rail-nav, .legend, .msessions-empty { display: none; }

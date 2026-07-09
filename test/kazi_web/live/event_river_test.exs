@@ -29,6 +29,7 @@ defmodule KaziWeb.EventRiverLiveTest do
           goal_ref: "goal-#{System.unique_integer([:positive])}",
           harness: "claude",
           model: "claude-sonnet-5",
+          session_os_pid: "424242",
           events_sink_path: path
         },
         overrides

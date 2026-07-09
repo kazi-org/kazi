@@ -1061,7 +1061,10 @@ defmodule Kazi.Runtime do
       # goal-file-path run.
       proposal_ref: proposal_ref,
       # T48.15: record the OS process id for liveness detection in run reaping.
-      os_pid: to_string(System.pid())
+      os_pid: to_string(System.pid()),
+      # The driving agent session's OS pid (nearest `claude`-like ancestor),
+      # so the dashboard can tell live-session runs from dead history.
+      session_os_pid: Kazi.SessionLiveness.find_session_pid()
     }
 
     case RunRegistry.start(attrs) do

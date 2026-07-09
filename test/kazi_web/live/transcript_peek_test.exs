@@ -30,6 +30,7 @@ defmodule KaziWeb.TranscriptPeekLiveTest do
           goal_ref: "goal-#{System.unique_integer([:positive])}",
           harness: "claude",
           model: "claude-sonnet-5",
+          session_os_pid: "424242",
           transcript_sink_path: path
         },
         overrides

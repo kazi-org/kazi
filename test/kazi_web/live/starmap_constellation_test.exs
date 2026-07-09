@@ -25,7 +25,8 @@ defmodule KaziWeb.StarmapConstellationTest do
         workspace: "/tmp/ws",
         goal_ref: goal,
         harness: "claude",
-        model: "claude-sonnet-5"
+        model: "claude-sonnet-5",
+        session_os_pid: "424242"
       })
 
     if status_or_nil, do: RunRegistry.finish(run, status_or_nil)
