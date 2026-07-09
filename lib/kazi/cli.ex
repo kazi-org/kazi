@@ -71,6 +71,7 @@ defmodule Kazi.CLI do
   alias Kazi.Partition
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.ReadModel.ProposedMemory
+  alias Kazi.ReadModel.RunRegistry
   alias Kazi.Teach.InstallSkill
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -277,8 +278,9 @@ defmodule Kazi.CLI do
     },
     %{
       name: "status",
-      summary: "Report a run/proposal's current state from the read-model (a pure read).",
-      args: [%{name: "ref", required: true}],
+      summary:
+        "Report a run/proposal's current state from the read-model (a pure read); with no <ref>, list every currently LIVE run (the pre-upgrade check, issue #971).",
+      args: [%{name: "ref", required: false}],
       flags: [:json]
     },
     %{
@@ -760,7 +762,7 @@ defmodule Kazi.CLI do
           | {:schema, String.t() | nil, keyword()}
           | {:version, keyword()}
           | {:run, Path.t(), keyword()}
-          | {:status, String.t(), keyword()}
+          | {:status, String.t() | nil, keyword()}
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
           | {:mcp, keyword()}
@@ -908,8 +910,12 @@ defmodule Kazi.CLI do
     end
   end
 
-  defp parse_command(["status"], _flags),
-    do: {:error, "the `status` command requires a <ref> argument (a goal or proposal ref)"}
+  # Issue #971: `status` with NO ref is the pre-upgrade check — list every
+  # currently LIVE run (see `execute_status/2`'s nil-ref branch) rather than
+  # erroring, so an operator can run this before installing a newer
+  # burrito-built binary.
+  defp parse_command(["status"], flags),
+    do: {:status, nil, json: flags[:json] || false}
 
   # T5.5 adopt: `kazi init <repo-dir>` reverse-engineers a starter goal-file by
   # deterministic stack detection (ADR-0013). --out is the output file; --enrich
@@ -2200,6 +2206,10 @@ defmodule Kazi.CLI do
   # An unknown ref is a clear error (a JSON error envelope under --json, a human
   # stderr line otherwise) with a NON-ZERO exit, so an orchestrator branches on
   # the exit code, never on prose.
+  defp execute_status(nil, opts) do
+    with_read_model(opts, fn -> report_live_runs(opts) end)
+  end
+
   defp execute_status(ref, opts) do
     with_read_model(opts, fn ->
       cond do
@@ -2214,6 +2224,64 @@ defmodule Kazi.CLI do
       end
     end)
   end
+
+  # Report every currently LIVE run (issue #971): `status` called with NO ref is
+  # the pre-upgrade check an operator runs before installing a newer
+  # burrito-built kazi binary (see `docs/lore.md`, Release / CI / Burrito, for
+  # why burrito's do_clean_old_versions makes this necessary). "Live" reuses
+  # `RunRegistry`'s existing staleness definition (`list_live/1` — status
+  # `"running"` AND a heartbeat fresher than `stale?/2`'s window) rather than
+  # inventing a new one.
+  defp report_live_runs(opts) do
+    live_runs = RunRegistry.list_live()
+
+    emit(json?(opts), live_runs_json(live_runs), fn ->
+      case live_runs do
+        [] ->
+          IO.puts("no LIVE runs (safe to install/upgrade kazi)")
+
+        runs ->
+          IO.puts("#{length(runs)} LIVE run(s):\n")
+
+          Enum.each(runs, fn run ->
+            IO.puts(
+              "  #{run.goal_ref}\trun_id=#{run.run_id}\tstatus=#{run.status}\t" <>
+                "heartbeat_age_s=#{heartbeat_age_seconds(run)}"
+            )
+          end)
+      end
+    end)
+
+    0
+  end
+
+  # The `status --json` result for the no-ref live-run list (issue #971): an
+  # array of `{goal_ref, run_id, status, heartbeat_age_s}`, `schema_version`-
+  # tagged like every other --json surface. `kind: "live_runs"` distinguishes it
+  # from the single-ref run/proposal status shapes.
+  defp live_runs_json(live_runs) do
+    %{
+      schema_version: @run_schema_version,
+      kind: "live_runs",
+      count: length(live_runs),
+      runs: Enum.map(live_runs, &live_run_json/1)
+    }
+  end
+
+  defp live_run_json(run) do
+    %{
+      goal_ref: run.goal_ref,
+      run_id: run.run_id,
+      status: run.status,
+      heartbeat_age_s: heartbeat_age_seconds(run)
+    }
+  end
+
+  defp heartbeat_age_seconds(%{heartbeat_at: %DateTime{} = heartbeat_at}) do
+    DateTime.diff(DateTime.utc_now(), heartbeat_at, :second)
+  end
+
+  defp heartbeat_age_seconds(_run), do: nil
 
   # Report a RUN's current state from its latest recorded iteration (T15.5): a
   # JSON object under --json, a human block otherwise.
