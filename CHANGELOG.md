@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.133.0](https://github.com/kazi-org/kazi/compare/v1.132.0...v1.133.0) (2026-07-09)
+
+
+### Features
+
+* **cli:** a converged serial worktree run lands on the base by rebase-merge ([12910ee](https://github.com/kazi-org/kazi/commit/12910ee71cfcb94bfd8ffbccef4cebd13eaa4a18))
+* **scheduler:** LocalIntegrator -- remote-less rebase-merge landing ([8e1731d](https://github.com/kazi-org/kazi/commit/8e1731d8e0adba27278a370760f6834b9195812b))
+
+
+### Bug Fixes
+
+* **actions:** integrate tolerates an already-committed task branch ([aefe49b](https://github.com/kazi-org/kazi/commit/aefe49bb61d9c561d31f425417f220dd43f1edf4))
+* **cli:** serial landing only lands the kazi-owned task branch ([05bfcd4](https://github.com/kazi-org/kazi/commit/05bfcd414f56f4177625d6ca8b398c599d7ceab9))
+
 ## [1.132.0](https://github.com/kazi-org/kazi/compare/v1.131.2...v1.132.0) (2026-07-09)
 
 
