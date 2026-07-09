@@ -64,7 +64,9 @@ defmodule Kazi.TeachCoherenceReverseTest do
     "--session-name" =>
       "run-labeling flag; documented in docs/dashboard.md and docs/orchestrator-recipe.md",
     "--fleet" =>
-      "T50.4 (ADR-0065): fleet-DAG discovery, currently --explain-only (fleet execution ships in T50.5); the full recipe (--fleet + --fleet-concurrency) lands in SKILL.md/AGENTS.md/docs/orchestrator-recipe.md together in T50.6, once execution exists to walk through"
+      "T50.4 (ADR-0065): fleet-DAG discovery, currently --explain-only (fleet execution ships in T50.5); the full recipe (--fleet + --fleet-concurrency) lands in SKILL.md/AGENTS.md/docs/orchestrator-recipe.md together in T50.6, once execution exists to walk through",
+    "--in-place" =>
+      "T50.1 (ADR-0065): opts an executing serial apply back into today's pre-E50 direct-edit behavior instead of the new default worktree-indirected path; documented alongside the other E50 flags (--pause-between-waves/--resume/--fleet/--fleet-concurrency) in SKILL.md/AGENTS.md/docs/orchestrator-recipe.md together in T50.6, once the whole set exists to walk through"
   }
 
   describe "every real `apply` flag is documented somewhere (the reverse guard, issue #973)" do

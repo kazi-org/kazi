@@ -428,6 +428,7 @@ defmodule Kazi.CLIRunJsonTest do
                    goal_file,
                    "--workspace",
                    work,
+                   "--in-place",
                    "--allow-primary-workspace",
                    "--json"
                  ]) == 1

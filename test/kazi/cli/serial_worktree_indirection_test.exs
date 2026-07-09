@@ -105,7 +105,15 @@ defmodule Kazi.CLI.SerialWorktreeIndirectionTest do
       {code, _out} =
         with_io(fn ->
           Kazi.CLI.run(
-            ["apply", goal_file, "--workspace", base, "--in-place", "--json"],
+            [
+              "apply",
+              goal_file,
+              "--workspace",
+              base,
+              "--in-place",
+              "--allow-primary-workspace",
+              "--json"
+            ],
             adapter_opts: [command: recording_harness(tmp_dir, cwd_marker)],
             reobserve_interval_ms: 5,
             await_timeout: 60_000
@@ -225,12 +233,12 @@ defmodule Kazi.CLI.SerialWorktreeIndirectionTest do
     write_stub(
       tmp_dir,
       "recording",
-      "pwd > #{cwd_marker}\necho \"the converged fix\" > fixed.txt\nexit 0"
+      "pwd > #{shq(cwd_marker)}\necho \"the converged fix\" > fixed.txt\nexit 0"
     )
   end
 
   defp never_called_harness(tmp_dir, marker) do
-    write_stub(tmp_dir, "never-called", "touch #{marker}\nexit 0")
+    write_stub(tmp_dir, "never-called", "touch #{shq(marker)}\nexit 0")
   end
 
   defp write_stub(tmp_dir, name, body) do
@@ -239,4 +247,15 @@ defmodule Kazi.CLI.SerialWorktreeIndirectionTest do
     File.chmod!(path, 0o755)
     path
   end
+
+  # Single-quotes `str` for safe embedding in generated shell script TEXT
+  # (never argv, which System.cmd/3 already passes shell-injection-safe).
+  # ExUnit's `:tmp_dir` tag derives directory names from the describe/test
+  # title VERBATIM, and this file's titles carry an apostrophe ("today's") and
+  # parentheses ("(worktree-indirected)") -- both shell metacharacters. Left
+  # unquoted, embedding the resulting tmp_dir path directly in a stub's body
+  # broke the generated script's own syntax ("unexpected EOF"), so the stub
+  # silently never ran and every predicate observation saw a permanent
+  # false-fail (STUCK), not a real convergence failure.
+  defp shq(str), do: "'" <> String.replace(str, "'", "'\\''") <> "'"
 end

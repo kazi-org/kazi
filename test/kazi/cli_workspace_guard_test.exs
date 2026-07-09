@@ -21,6 +21,12 @@ defmodule Kazi.CLIWorkspaceGuardTest do
 
   plus: read-only `--check` stays available on a primary worktree without the
   flag (inspecting a live checkout is safe and load-bearing for triage).
+
+  T50.1 (ADR-0065): the DEFAULT executing path no longer touches the caller's
+  checkout at all (it worktree-indirects), so this guard now only applies to
+  `--in-place` (direct-edit opt-out) and `--parallel` -- direction 1 below
+  passes `--in-place` to still exercise it; `Kazi.CLI.SerialWorktreeIndirectionTest`
+  pins the complementary "default path never refuses" behavior.
   """
   use ExUnit.Case, async: false
 
@@ -42,7 +48,7 @@ defmodule Kazi.CLIWorkspaceGuardTest do
     {out, code} =
       with_io(fn ->
         Kazi.CLI.run(
-          ["apply", goal_file, "--workspace", work, "--json"],
+          ["apply", goal_file, "--workspace", work, "--in-place", "--json"],
           adapter_opts: [command: never_called_harness(tmp_dir)]
         )
       end)
