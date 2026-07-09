@@ -336,6 +336,13 @@ defmodule Kazi.Authoring do
   (`Kazi.ReadModel.list_proposed_goals(status: "rejected")`) for audit but never
   runs. The goal payload is left untouched.
 
+  Rejection is a pure lifecycle transition on the read-model row — it performs
+  no reconciliation and never runs the goal — so, unlike `approve/2`, it does
+  NOT require the stored goal-file map to load (#945). A proposal authored
+  against a since-changed predicate schema is still rejectable: the returned
+  draft carries `goal: nil` and `loadable?: false` (`goal_id` is still the
+  row's, so the caller can still name what was rejected) instead of failing.
+
   Returns `{:ok, %Kazi.Authoring.Draft{}}` (status `:rejected`), or `{:error,
   reason}`: `{:error, :not_found}`, `{:error, {:invalid_transition, from,
   :rejected}}`, or `{:error, %Ecto.Changeset{}}`.
@@ -345,9 +352,19 @@ defmodule Kazi.Authoring do
     with {:ok, row} <- fetch_proposed(proposal_ref),
          :ok <- check_transition(row.status, "rejected"),
          {:ok, updated} <-
-           ReadModel.transition_proposed_goal(proposal_ref, "rejected", row.goal),
-         {:ok, goal} <- rehydrate(updated.goal) do
-      {:ok, Draft.from_row(updated, goal)}
+           ReadModel.transition_proposed_goal(proposal_ref, "rejected", row.goal) do
+      {:ok, Draft.from_row(updated, rehydrate_or_nil(updated.goal))}
+    end
+  end
+
+  # The goal for a `reject/2` draft, best-effort (#945): a rejected proposal
+  # need not still load, so a rehydrate failure degrades to `nil` (the draft
+  # carries `loadable?: false`) rather than failing the whole rejection.
+  @spec rehydrate_or_nil(map()) :: Goal.t() | nil
+  defp rehydrate_or_nil(goal_map) do
+    case rehydrate(goal_map) do
+      {:ok, goal} -> goal
+      {:error, _reason} -> nil
     end
   end
 

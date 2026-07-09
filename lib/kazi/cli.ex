@@ -3879,14 +3879,27 @@ defmodule Kazi.CLI do
   end
 
   # `reject <proposal-ref> [--json]`: transition proposed → rejected (declined,
-  # audited). T15.6: same JSON/human split as approve.
+  # audited). T15.6: same JSON/human split as approve. #945: rejection never
+  # requires the stored goal to load, so a stale/unloadable proposal still
+  # rejects — the JSON result carries `loadable: false` for audit instead of
+  # failing.
   defp execute_reject(proposal_ref, opts) do
     with_read_model(opts, fn ->
       case Authoring.reject(proposal_ref) do
         {:ok, draft} ->
-          emit(json?(opts), approval_json("rejected", proposal_ref, draft.goal.id), fn ->
-            IO.puts("REJECTED   proposal=#{proposal_ref}")
-          end)
+          extra = if draft.loadable?, do: %{}, else: %{loadable: false}
+
+          emit(
+            json?(opts),
+            approval_json("rejected", proposal_ref, draft.goal_id, extra),
+            fn ->
+              IO.puts("REJECTED   proposal=#{proposal_ref}")
+
+              unless draft.loadable? do
+                IO.puts("note: the stored goal is unloadable (kept for audit)")
+              end
+            end
+          )
 
           0
 
@@ -4122,14 +4135,17 @@ defmodule Kazi.CLI do
 
   # The approve/reject transition result (T15.6): the resulting lifecycle state,
   # the proposal ref, and the goal id, so the orchestrator confirms the transition
-  # and pipes the goal id into the next step.
-  defp approval_json(status, proposal_ref, goal_id) do
+  # and pipes the goal id into the next step. `extra` carries an optional
+  # `%{loadable: false}` (#945) when `reject` succeeded on a proposal whose
+  # stored goal no longer loads — an audit note, not an error.
+  defp approval_json(status, proposal_ref, goal_id, extra \\ %{}) do
     %{
       schema_version: @run_schema_version,
       proposal_ref: proposal_ref,
       status: status,
       goal_id: to_string(goal_id)
     }
+    |> Map.merge(extra)
   end
 
   defp format_authoring_error(:empty_idea), do: "the idea was blank"
