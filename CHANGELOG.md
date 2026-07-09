@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.126.1](https://github.com/kazi-org/kazi/compare/v1.126.0...v1.126.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **repo:** 60s SQLite busy_timeout on the shared read-model DB ([35bfbbf](https://github.com/kazi-org/kazi/commit/35bfbbfbaf5fc42748d3cd7851ea028c8c36f542))
+
 ## [1.126.0](https://github.com/kazi-org/kazi/compare/v1.125.0...v1.126.0) (2026-07-09)
 
 
