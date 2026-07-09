@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.134.0](https://github.com/kazi-org/kazi/compare/v1.133.0...v1.134.0) (2026-07-09)
+
+
+### Features
+
+* **cli:** kazi apply --base &lt;ref&gt; selects the task worktree base (T50.8) ([ad9336e](https://github.com/kazi-org/kazi/commit/ad9336e5ccf9956aa9c06f1f944f13c7a708dfe7))
+* **scheduler:** worktree base ref is a parameter with a fresh-base check ([f0547a1](https://github.com/kazi-org/kazi/commit/f0547a17644d0fe0077b361e146a585f135dbe8d))
+
 ## [1.133.0](https://github.com/kazi-org/kazi/compare/v1.132.0...v1.133.0) (2026-07-09)
 
 
