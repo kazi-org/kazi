@@ -837,6 +837,116 @@ defmodule KaziWeb.StarmapLive do
     |> Enum.map(fn {pid, result} -> %{id: pid, status: result.status} end)
   end
 
+  # "NOW" line: the latest iteration's decided action, so the panel says what
+  # the loop is actually doing (dispatch/wait/integrate/...), not just state.
+  defp panel_now_line([]), do: nil
+
+  defp panel_now_line(iterations) do
+    case List.last(iterations) do
+      %Iteration{action_kind: nil} -> nil
+      %Iteration{action_kind: kind, action_params: params} -> format_action(kind, params)
+    end
+  end
+
+  defp format_action(kind, params) when is_map(params) and params != %{} do
+    detail =
+      params
+      |> Enum.map(fn {k, v} -> "#{k}=#{format_param(v)}" end)
+      |> Enum.sort()
+      |> Enum.join(" · ")
+      |> truncate(140)
+
+    "#{kind} — #{detail}"
+  end
+
+  defp format_action(kind, _params), do: to_string(kind)
+
+  defp format_param(v) when is_binary(v), do: truncate(v, 60)
+  defp format_param(v), do: v |> inspect() |> truncate(60)
+
+  defp truncate(text, max) do
+    if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
+  end
+
+  # Failing predicates with their last-observed reason, read off the LATEST
+  # iteration's stored evidence — the "why is that square red" answer.
+  defp panel_failing([]), do: []
+
+  defp panel_failing(iterations) do
+    iterations
+    |> List.last()
+    |> Kazi.ReadModel.to_predicate_vector()
+    |> Map.fetch!(:results)
+    |> Enum.reject(fn {_id, result} -> result.status in [:pass, :not_evaluated] end)
+    |> Enum.sort_by(fn {id, _result} -> id end)
+    |> Enum.map(fn {id, result} ->
+      %{id: id, status: result.status, reason: failure_reason(result.evidence)}
+    end)
+  end
+
+  defp failure_reason(evidence) when is_map(evidence) do
+    reason =
+      Enum.find_value(["reason", "message", "error", "output", "stderr"], fn key ->
+        case Map.get(evidence, key) do
+          text when is_binary(text) and text != "" -> text
+          _other -> nil
+        end
+      end)
+
+    case reason || (evidence != %{} && inspect(evidence)) do
+      false -> nil
+      text -> text |> String.replace(~r/\s+/, " ") |> truncate(160)
+    end
+  end
+
+  defp failure_reason(evidence) when is_binary(evidence) and evidence != "",
+    do: evidence |> String.replace(~r/\s+/, " ") |> truncate(160)
+
+  defp failure_reason(_evidence), do: nil
+
+  # Liveness/age readouts off the run row's timestamps.
+  defp heartbeat_age(%Run{status: "running", heartbeat_at: %DateTime{} = at}),
+    do: "heartbeat #{humanize_seconds(DateTime.diff(DateTime.utc_now(), at))} ago"
+
+  defp heartbeat_age(_run), do: nil
+
+  defp run_elapsed(%Run{started_at: %DateTime{} = started} = run) do
+    ended =
+      case run do
+        %Run{finished_at: %DateTime{} = finished} -> finished
+        _still_running -> DateTime.utc_now()
+      end
+
+    "elapsed #{humanize_seconds(DateTime.diff(ended, started))}"
+  end
+
+  defp run_elapsed(_run), do: nil
+
+  defp humanize_seconds(s) when s < 0, do: "0s"
+  defp humanize_seconds(s) when s < 60, do: "#{s}s"
+  defp humanize_seconds(s) when s < 3600, do: "#{div(s, 60)}m #{rem(s, 60)}s"
+  defp humanize_seconds(s), do: "#{div(s, 3600)}h #{rem(div(s, 60), 60)}m"
+
+  # Run economics (T48.7): shown only for the fields the harness actually
+  # reported — honest-unknown, never coerced to 0.
+  defp economy_line(%Run{} = run) do
+    parts =
+      [
+        run.dispatch_count && run.dispatch_count > 0 && "#{run.dispatch_count} dispatches",
+        run.budget_tokens && "#{format_tokens(run.budget_tokens)} tokens",
+        run.budget_cost_usd && "$#{:erlang.float_to_binary(run.budget_cost_usd, decimals: 2)}"
+      ]
+      |> Enum.filter(&is_binary/1)
+
+    if parts == [], do: nil, else: Enum.join(parts, " · ")
+  end
+
+  defp economy_line(_run), do: nil
+
+  defp format_tokens(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)}M"
+  defp format_tokens(n) when n >= 1_000, do: "#{Float.round(n / 1_000, 1)}k"
+  defp format_tokens(n), do: "#{n}"
+
   # Heatmap rows: the union of predicate ids across the goal's history, so a
   # predicate introduced mid-run still gets a row (not-evaluated before it
   # existed) — mirrors DrillinHeatmapLive.
@@ -1222,7 +1332,22 @@ defmodule KaziWeb.StarmapLive do
           ×
         </button>
 
-        <h2 class="panel-title display-heading">{@panel.goal_ref}</h2>
+        <h2 class="panel-title display-heading">
+          {(@panel.run && @panel.run.goal_name) || @panel.goal_ref}
+        </h2>
+        <p
+          :if={@panel.run && @panel.run.goal_name && @panel.run.goal_name != @panel.goal_ref}
+          class="panel-subtitle"
+        >
+          {@panel.goal_ref}
+        </p>
+        <p
+          :if={@panel.run && @panel.run.goal_description}
+          id="starmap-panel-description"
+          class="panel-description"
+        >
+          {@panel.run.goal_description}
+        </p>
 
         <div class="panel-chips">
           <span :if={@panel.run && @panel.run.session_name} class="chip chip-session">
@@ -1253,6 +1378,33 @@ defmodule KaziWeb.StarmapLive do
           </span>
         </div>
 
+        <div
+          :if={@panel.run && (run_elapsed(@panel.run) || heartbeat_age(@panel.run))}
+          id="starmap-panel-timing"
+          class="panel-timing"
+        >
+          {[run_elapsed(@panel.run), heartbeat_age(@panel.run)]
+          |> Enum.filter(& &1)
+          |> Enum.join(" · ")}
+        </div>
+
+        <div
+          :if={@panel.run && economy_line(@panel.run)}
+          id="starmap-panel-economy"
+          class="panel-timing"
+        >
+          {economy_line(@panel.run)}
+        </div>
+
+        <div
+          :if={panel_now_line(@panel.iterations)}
+          id="starmap-panel-now"
+          class="panel-now"
+        >
+          <span class="section-label">NOW</span>
+          <span class="panel-now-line">{panel_now_line(@panel.iterations)}</span>
+        </div>
+
         <div :if={burn_pct(@panel)} class="burn-bar">
           <div
             class={"burn-fill #{burn_class(burn_pct(@panel))}"}
@@ -1275,6 +1427,18 @@ defmodule KaziWeb.StarmapLive do
               data-status={square.status}
               title={square.id}
             ></span>
+          </div>
+        </div>
+
+        <div
+          :if={panel_failing(@panel.iterations) != []}
+          id="starmap-panel-failing"
+          class="panel-section"
+        >
+          <div class="section-label">FAILING · LAST OBSERVED REASON</div>
+          <div :for={failing <- panel_failing(@panel.iterations)} class="panel-failing-row">
+            <span class={"panel-failing-id status-#{failing.status}"}>{failing.id}</span>
+            <p :if={failing.reason} class="panel-failing-reason">{failing.reason}</p>
           </div>
         </div>
 
@@ -1303,7 +1467,11 @@ defmodule KaziWeb.StarmapLive do
         <div id="starmap-panel-transcript" class="panel-section">
           <div class="section-label">TRANSCRIPT TAIL · {tail_label(@panel.run)}</div>
           <div class="panel-transcript">
-            <p :if={@panel.transcript == []} class="empty-state">No transcript events.</p>
+            <p :if={@panel.transcript == []} class="empty-state">
+              {if @panel.run && is_nil(@panel.run.transcript_sink_path),
+                do: "No transcript sink registered for this run.",
+                else: "No transcript events."}
+            </p>
             <div :for={event <- @panel.transcript} class="panel-event">
               <span :if={panel_tool_event?(event)} class="panel-pill">
                 <span class="marker">▸</span> {event["name"] || event["type"]}
@@ -1471,6 +1639,15 @@ defmodule KaziWeb.StarmapLive do
         .panel-close { position: absolute; top: .8rem; right: .9rem; background: transparent; border: 1px solid var(--line); color: var(--dim); border-radius: 3px; width: 22px; height: 22px; cursor: pointer; font-family: inherit; }
         .panel-close:hover { color: var(--txt); border-color: var(--dim); }
         .panel-title { font-size: 21px; margin: 0; padding-right: 2rem; overflow-wrap: anywhere; }
+        .panel-subtitle { font-size: 10px; color: var(--dim); margin: 0; overflow-wrap: anywhere; }
+        .panel-description { font-size: 12px; line-height: 1.5; color: var(--txt); margin: 0; }
+        .panel-timing { font-size: 10px; letter-spacing: .08em; color: var(--dim); }
+        .panel-now { display: flex; flex-direction: column; gap: .3rem; }
+        .panel-now-line { font-size: 11px; color: var(--cyn); overflow-wrap: anywhere; }
+        .panel-failing-row { display: flex; flex-direction: column; gap: .15rem; }
+        .panel-failing-id { font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+        .panel-failing-id.status-fail, .panel-failing-id.status-error { color: var(--red); }
+        .panel-failing-reason { font-size: 10px; color: var(--dim); margin: 0; overflow-wrap: anywhere; }
         .panel-chips { display: flex; gap: .4rem; flex-wrap: wrap; }
         .chip { border: 1px solid var(--line); border-radius: 3px; padding: 2px 8px; font-size: 10px; color: var(--dim); }
         .chip-session { color: var(--cyn); border-color: rgba(86,204,242,.4); font-weight: 700; }
