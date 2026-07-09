@@ -4368,8 +4368,7 @@ defmodule Kazi.CLI do
         # transient connection here to `storage_up` races the supervised pool and
         # SQLite's single writer ("database is locked"); instead just run pending
         # migrations against the live, already-connected repo.
-        _ = Ecto.Migrator.run(repo, :up, all: true)
-        :ok
+        run_migrations_bounded(repo)
       else
         # Standalone binary path (the Burrito release): no supervised repo, because
         # `Kazi.Application.start/2` hands straight to the CLI before standing up the
@@ -4392,14 +4391,34 @@ defmodule Kazi.CLI do
           {:error, {:already_started, _pid}} -> :ok
         end
 
-        _ = Ecto.Migrator.run(repo, :up, all: true)
-
-        :ok
+        run_migrations_bounded(repo)
       end
     rescue
       error -> {:error, Exception.message(error)}
     catch
       kind, reason -> {:error, {kind, reason}}
+    end
+  end
+
+  # Boot migrations run under the read-model Guard's hard deadline ("kazi
+  # never hangs on its own telemetry", lore L-0035): with several concurrent
+  # kazi processes sharing ~/.kazi/kazi.db, an unbounded `Ecto.Migrator.run`
+  # can block on the locked DB for as long as the lock holder lives. On
+  # timeout the run degrades to no-persistence (the same path as a raised
+  # migration error) instead of hanging the whole process at boot.
+  @migrate_timeout_ms 60_000
+
+  defp run_migrations_bounded(repo) do
+    case Kazi.ReadModel.Guard.run(
+           "migrate",
+           fn ->
+             _ = Ecto.Migrator.run(repo, :up, all: true)
+             :ok
+           end,
+           @migrate_timeout_ms
+         ) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

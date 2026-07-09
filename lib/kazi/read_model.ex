@@ -73,8 +73,12 @@ defmodule Kazi.ReadModel do
   defaults to now.
   """
   @spec record_iteration(record_attrs()) ::
-          {:ok, Iteration.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Iteration.t()} | {:error, Ecto.Changeset.t() | :read_model_unavailable}
   def record_iteration(attrs) do
+    Kazi.ReadModel.Guard.run("iteration record", fn -> do_record_iteration(attrs) end)
+  end
+
+  defp do_record_iteration(attrs) do
     vector = normalize_vector(Map.get(attrs, :predicate_vector, PredicateVector.new()))
     action = Map.get(attrs, :action)
     observed_at = Map.get(attrs, :observed_at, DateTime.utc_now())
