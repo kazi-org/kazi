@@ -541,11 +541,17 @@ defmodule Kazi.CLISelfConformanceTest do
   end
 
   # A vacuous goal: the code predicate already passes at t0, so the whole vector
-  # is satisfied before kazi acts — a pre-loop "error" surface (R3).
+  # is satisfied before kazi acts — a pre-loop "error" surface (R3). The
+  # satisfying state is COMMITTED because the default serial path (T50.1,
+  # ADR-0065) observes predicates in a task worktree branched off the
+  # workspace's HEAD — uncommitted files are not part of the base a run acts
+  # on, so vacuousness, like any other predicate truth, is judged at HEAD.
   defp vacuous_run do
     tmp = mktmp("self-conf-vacuous")
     %{work: work} = setup_repo(tmp)
     File.write!(Path.join(work, "fixed.txt"), "already there\n")
+    {_, 0} = System.cmd("git", ["add", "-A"], cd: work)
+    {_, 0} = System.cmd("git", ["commit", "-m", "already fixed"], cd: work)
     goal_file = write_vacuous_goal_file(tmp, work)
     %{work: work, goal_file: goal_file}
   end
