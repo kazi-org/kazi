@@ -1,0 +1,14 @@
+id = "fleet-b"
+name = "Fleet B -- explicit depends_on fleet-a"
+
+[metadata]
+depends_on = ["fleet-a"]
+
+[scope]
+paths = ["lib/b/**"]
+
+[[predicate]]
+id = "noop"
+provider = "custom_script"
+description = "fixture placeholder predicate"
+cmd = "true"

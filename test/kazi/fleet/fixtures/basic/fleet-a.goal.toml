@@ -1,0 +1,11 @@
+id = "fleet-a"
+name = "Fleet A -- independent seed"
+
+[scope]
+paths = ["lib/a/**"]
+
+[[predicate]]
+id = "noop"
+provider = "custom_script"
+description = "fixture placeholder predicate"
+cmd = "true"

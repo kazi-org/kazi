@@ -62,7 +62,9 @@ defmodule Kazi.TeachCoherenceReverseTest do
     "--context-budget" =>
       "paired with --context-store (ADR-0045); documented in docs/context-store.md",
     "--session-name" =>
-      "run-labeling flag; documented in docs/dashboard.md and docs/orchestrator-recipe.md"
+      "run-labeling flag; documented in docs/dashboard.md and docs/orchestrator-recipe.md",
+    "--fleet" =>
+      "T50.4 (ADR-0065): fleet-DAG discovery, currently --explain-only (fleet execution ships in T50.5); the full recipe (--fleet + --fleet-concurrency) lands in SKILL.md/AGENTS.md/docs/orchestrator-recipe.md together in T50.6, once execution exists to walk through"
   }
 
   describe "every real `apply` flag is documented somewhere (the reverse guard, issue #973)" do

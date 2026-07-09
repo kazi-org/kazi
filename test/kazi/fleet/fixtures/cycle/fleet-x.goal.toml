@@ -1,0 +1,14 @@
+id = "fleet-x"
+name = "Fleet X -- cycles with fleet-y"
+
+[metadata]
+depends_on = ["fleet-y"]
+
+[scope]
+paths = ["lib/x/**"]
+
+[[predicate]]
+id = "noop"
+provider = "custom_script"
+description = "fixture placeholder predicate"
+cmd = "true"

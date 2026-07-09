@@ -1,0 +1,11 @@
+id = "fleet-c"
+name = "Fleet C -- scope overlaps fleet-a, no explicit edge"
+
+[scope]
+paths = ["lib/a/sub/**"]
+
+[[predicate]]
+id = "noop"
+provider = "custom_script"
+description = "fixture placeholder predicate"
+cmd = "true"

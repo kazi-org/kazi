@@ -1,0 +1,14 @@
+id = "fleet-only"
+name = "Fleet Only -- depends on a goal-id that does not exist"
+
+[metadata]
+depends_on = ["fleet-ghost"]
+
+[scope]
+paths = ["lib/only/**"]
+
+[[predicate]]
+id = "noop"
+provider = "custom_script"
+description = "fixture placeholder predicate"
+cmd = "true"
