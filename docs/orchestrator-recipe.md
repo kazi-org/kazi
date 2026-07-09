@@ -182,6 +182,15 @@ the object without an `event`; that is the terminal result you branch on:
 kazi apply <proposal-ref> --workspace <path> --harness opencode --json --stream
 ```
 
+Under `--parallel --json --stream` against a `needs`-DAG goal (ADR-0028), the
+stream ALSO carries `{"event": "frontier_complete", "frontier": N, "groups":
+[...]}` lines -- one per topological wave boundary, emitted once every group in
+that frontier has terminated and before the next frontier dispatches. An
+orchestrator that wants to pause/inspect between waves watches for this event
+instead of polling; one that only cares about the final verdict can ignore it
+alongside the `iteration` events (see `docs/schemas/run-result.md`'s
+"Frontier-complete event" section).
+
 ### Step 4 -- parse the result and branch on `next_action`
 
 `run --json` gives you both the terminal `status` and a single derived
