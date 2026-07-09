@@ -203,7 +203,13 @@ defmodule Kazi.Actions.IntegrateDisciplineTest do
   end
 
   defp local_rebase_merge(bare, branch, base) do
-    tmp = Path.join(System.tmp_dir!(), "merge-#{System.unique_integer([:positive])}")
+    # Qualify with the OS pid, not just System.unique_integer/1: that counter
+    # resets per-BEAM-VM, so two concurrent `mix test` runs (e.g. sibling
+    # worktrees on the same machine) can pick the identical /tmp/merge-N path
+    # and one clone fails with "destination path already exists".
+    tmp =
+      Path.join(System.tmp_dir!(), "merge-#{System.pid()}-#{System.unique_integer([:positive])}")
+
     {_, 0} = System.cmd("git", ["clone", bare, tmp], stderr_to_stdout: true)
     config(tmp)
 
