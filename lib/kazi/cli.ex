@@ -139,6 +139,7 @@ defmodule Kazi.CLI do
     explain: :boolean,
     dry_run: :boolean,
     fleet: :boolean,
+    fleet_concurrency: :integer,
     check: :boolean,
     provider: :string,
     budget: :integer,
@@ -213,7 +214,9 @@ defmodule Kazi.CLI do
     dry_run:
       "`apply` only: alias of --explain — print the computed schedule and exit 0 without dispatching anything.",
     fleet:
-      "`apply` only (T50.4, ADR-0065 decision 3): treat the positional argument as a fleet — a DIRECTORY of *.goal.toml files (non-recursive, sorted) or a manifest .toml file ([[member]] path = \"...\" entries) — instead of a single goal-file. Builds a fleet DAG (explicit [metadata] depends_on edges + inferred scope-overlap serialization) and requires --explain (print the schedule, dispatch nothing); executing a fleet without --explain fails loudly for now (fleet execution is a follow-up, T50.5).",
+      "`apply` only (T50.4/T50.5, ADR-0065 decision 3): treat the positional argument as a fleet — a DIRECTORY of *.goal.toml files (non-recursive, sorted) or a manifest .toml file ([[member]] path = \"...\" entries) — instead of a single goal-file. Builds a fleet DAG (explicit [metadata] depends_on edges + inferred scope-overlap serialization) and EXECUTES it through the partition scheduler one level up: each member goal runs in its own kazi-owned task worktree off the shared --workspace base, dispatching the instant its deps settle (pipelined frontiers), landing converged work on the base per the serial landing, with a registry row per member and an honest-unknown economy rollup in the terminal object. With --explain: print the schedule and dispatch nothing.",
+    fleet_concurrency:
+      "`apply --fleet` only (T50.5): cap how many fleet member goals RUN at once (a counting-semaphore gate around the member runner; DAG readiness/frontier semantics are untouched). Default: unbounded within a frontier — every ready member runs concurrently, the same behavior as a needs-DAG goal's groups.",
     check:
       "`apply` only (issue #805): observe-only mode — evaluate the predicate vector EXACTLY ONCE via the real provider path and exit; never dispatches a harness, integrates, or deploys. All-pass exits 0 (`status: \"pass\"`, NOT the vacuous_goal error a normal run would give); any failing predicate exits 1 (`status: \"fail\"`) carrying predicates[] with captured evidence for the failures. For merge gates (ADR-0026) and release qualification.",
     provider:
@@ -279,6 +282,7 @@ defmodule Kazi.CLI do
         :explain,
         :dry_run,
         :fleet,
+        :fleet_concurrency,
         :check,
         :context_store,
         :context_budget,
@@ -1223,6 +1227,7 @@ defmodule Kazi.CLI do
           parallelism: flags[:parallelism],
           explain: flags[:explain] || flags[:dry_run] || false,
           fleet: flags[:fleet] || false,
+          fleet_concurrency: flags[:fleet_concurrency],
           check: flags[:check] || false
         }
 
@@ -1439,7 +1444,7 @@ defmodule Kazi.CLI do
   # code (never halts) so it stays testable.
   defp execute_run(goal_source, opts, runtime_opts) do
     if opts[:fleet] == true do
-      execute_fleet(goal_source, opts)
+      execute_fleet(goal_source, opts, runtime_opts)
     else
       execute_single_run(goal_source, opts, runtime_opts)
     end
@@ -1472,26 +1477,202 @@ defmodule Kazi.CLI do
     end
   end
 
-  # T50.4 (ADR-0065 decision 3): `--fleet <dir|manifest>` loads a DAG of
-  # goal-files instead of one goal (`Kazi.Fleet.load/1`). Only `--explain` is
-  # implemented today — it prints the fleet schedule and dispatches nothing;
-  # execution (a fleet run without `--explain`) is a follow-up (T50.5), so it
-  # refuses loudly here rather than pretending to run.
-  defp execute_fleet(path, opts) do
+  # T50.4/T50.5 (ADR-0065 decision 3): `--fleet <dir|manifest>` loads a DAG of
+  # goal-files instead of one goal (`Kazi.Fleet.load/1`). `--explain` prints
+  # the fleet schedule and dispatches nothing; without it the fleet EXECUTES
+  # through `Kazi.Fleet.Execution` (the partition scheduler one level up).
+  defp execute_fleet(path, opts, runtime_opts) do
     case Fleet.load(path) do
       {:ok, fleet} ->
-        if opts[:explain] == true do
-          explain_fleet(fleet, opts)
-        else
-          fleet_error(
-            "fleet execution lands in a follow-up; use --explain",
-            opts
-          )
+        cond do
+          opts[:explain] == true ->
+            explain_fleet(fleet, opts)
+
+          # Fleet members ALWAYS run in their own task worktrees (isolation is
+          # the fleet-level contract, ADR-0065); an in-place fleet would race
+          # every member inside one checkout. Rejected loudly, like
+          # --in-place + --base.
+          opts[:in_place] == true ->
+            fleet_error(
+              "--fleet and --in-place are contradictory: every fleet member runs in " <>
+                "its own kazi-owned task worktree off the shared base (ADR-0065 " <>
+                "decision 3). Drop --in-place.",
+              opts
+            )
+
+          true ->
+            run_fleet(path, fleet, opts, runtime_opts)
         end
 
       {:error, message} ->
         fleet_error(message, opts)
     end
+  end
+
+  # Execute the fleet DAG (T50.5). The member seams (`:member_runner`,
+  # `:supervisor`, `:reconcile_timeout`, `:on_frontier_complete`,
+  # `:pause_between_waves`, `:resume_token`) pass through from `runtime_opts`
+  # so the boundary test stays hermetic; everything else in `runtime_opts`
+  # (adapter_opts, await_timeout, integrate seams, ...) is forwarded to each
+  # member's `Kazi.Runtime.run/2`, mirroring the serial path.
+  @fleet_seam_opts [
+    :member_runner,
+    :supervisor,
+    :reconcile_timeout,
+    :on_frontier_complete,
+    :pause_between_waves,
+    :resume_token
+  ]
+
+  defp run_fleet(path, %Fleet{} = fleet, opts, runtime_opts) do
+    persist? = ensure_read_model()
+    # T21.12: the standalone binary hands straight to the CLI before the app
+    # supervision tree is up — ensure the partition supervisor the DepScheduler
+    # dispatches under is running (idempotent under mix/test).
+    {:ok, _supervisor} = Kazi.Scheduler.PartitionSupervisor.ensure_started()
+
+    workspace = opts[:workspace] || "."
+    json? = json?(opts)
+
+    exec_opts =
+      runtime_opts
+      |> Keyword.take(@fleet_seam_opts)
+      |> Keyword.put(:workspace, workspace)
+      |> Keyword.put(:persist?, persist?)
+      |> Keyword.put(:runtime_opts, fleet_member_runtime_opts(opts, runtime_opts))
+      |> maybe_put(:fleet_concurrency, opts[:fleet_concurrency])
+      # T50.8: --base selects every member worktree's base ref (nil keeps the
+      # HEAD default with the stale-base warning).
+      |> maybe_put(:base_ref, opts[:base])
+      # issue #936 one level up: under --json --stream, fleet frontier
+      # boundaries emit the same-shaped frontier_complete JSONL event the
+      # --parallel needs-DAG path emits (same helper, same schema).
+      |> maybe_put_frontier_stream(opts)
+
+    case Fleet.Execution.run(fleet, exec_opts) do
+      {:ok, result} ->
+        report_fleet(path, fleet, result, json?)
+        fleet_exit_code(result)
+
+      {:error, {:resume_not_found, token}} ->
+        fleet_error("resume token #{token} not found; re-run without it", opts)
+
+      {:error, {:goal_changed, message}} ->
+        fleet_error("cannot resume: #{message}", opts)
+
+      {:error, reason} ->
+        fleet_error("fleet execution failed: #{inspect(reason)}", opts)
+    end
+  end
+
+  # The per-member `Kazi.Runtime.run/2` opts: the caller's runtime seams (minus
+  # the fleet-level ones) with the CLI flag levers threaded exactly like the
+  # serial/parallel paths (harness/model/effort/permissions/session identity/
+  # deploy env/standing/debrief).
+  defp fleet_member_runtime_opts(opts, runtime_opts) do
+    runtime_opts
+    |> Keyword.drop(@fleet_seam_opts)
+    |> maybe_put_deploy_env(opts[:env])
+    |> maybe_put_standing(opts[:standing])
+    |> maybe_put_debrief(opts[:debrief])
+    |> maybe_put(:harness, opts[:harness])
+    |> maybe_put(:model, opts[:model])
+    |> maybe_put(:effort, opts[:effort])
+    |> maybe_put(:permission_mode, opts[:permission_mode])
+    |> maybe_put(:allowed_tools, opts[:allowed_tools])
+    |> maybe_put(:session_name, resolve_session_name(opts))
+    |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
+  end
+
+  # 0 on a converged collective — and on a PAUSE (T50.3 one level up: a pause
+  # is the requested outcome, carrying the resume token; mirroring the
+  # pause-between-waves contract "exit 0 with a resumable state token").
+  defp fleet_exit_code(%{collective: :converged}), do: 0
+  defp fleet_exit_code(%{collective: :paused}), do: 0
+  defp fleet_exit_code(_result), do: 1
+
+  # ---------------------------------------------------------------------------
+  # fleet terminal report (T50.5): mirrors the DAG collective shape
+  # ---------------------------------------------------------------------------
+
+  # The fleet terminal object mirrors the DAG collective result
+  # (docs/schemas/collective-result.md): schema_version / collective /
+  # schedule / blocked / next_action are the SAME keys with the same meaning;
+  # `mode`, `members` (per-member status + honest-unknown economy +
+  # landing info), the fleet-level `economy` rollup, and `resume_token` are
+  # ADDITIVE. The schedule renders through the SAME DepGraph layering the
+  # scheduler ran (`Kazi.Fleet.Execution.synthetic_goal/2`), so report and
+  # execution can never disagree on a member's frontier.
+  defp report_fleet(path, %Fleet{} = fleet, result, json?) do
+    emit(json?, fleet_result_json(path, fleet, result), fn ->
+      report_fleet_human(path, fleet, result)
+    end)
+  end
+
+  defp fleet_result_json(path, %Fleet{} = fleet, result) do
+    collective_str = to_string(result.collective)
+    synthetic = Fleet.Execution.synthetic_goal(fleet, ".")
+
+    %{
+      schema_version: @run_schema_version,
+      mode: "fleet",
+      fleet: path,
+      collective: collective_str,
+      members: fleet_members_json(result),
+      schedule: schedule_json(synthetic, result.members),
+      blocked: blocked_json(Map.get(result, :blocked, [])),
+      economy: result.economy,
+      resume_token: result.resume_token,
+      next_action: fleet_next_action(collective_str)
+    }
+  end
+
+  defp fleet_members_json(result) do
+    Enum.map(result.members, fn {id, status} ->
+      member = Map.get(result.member_results, id, %{})
+
+      %{
+        id: id,
+        status: to_string(status),
+        economy: Map.get(member, :economy),
+        integration: Map.get(member, :integration),
+        error: fleet_member_error(Map.get(member, :error))
+      }
+    end)
+  end
+
+  defp fleet_member_error(nil), do: nil
+  defp fleet_member_error(error) when is_binary(error), do: error
+  defp fleet_member_error(error), do: inspect(error)
+
+  defp fleet_next_action("paused"),
+    do: "paused at a fleet frontier; resume by re-running with the resume_token"
+
+  defp fleet_next_action(collective_str), do: next_action(collective_str)
+
+  defp report_fleet_human(path, %Fleet{} = fleet, result) do
+    synthetic = Fleet.Execution.synthetic_goal(fleet, ".")
+
+    IO.puts("FLEET #{result.collective |> to_string() |> String.upcase()}  source=#{path}")
+    IO.puts("members: #{length(result.members)}")
+    print_schedule_frontiers(schedule_view(synthetic, result.members))
+    print_blocked_human(Map.get(result, :blocked, []))
+    print_fleet_economy_human(result.economy)
+
+    if result.resume_token do
+      IO.puts("resume_token: #{result.resume_token}")
+    end
+  end
+
+  defp print_fleet_economy_human(%{totals: nil} = economy) do
+    IO.puts("economy: #{economy.members_reported}/#{economy.members_total} members reported")
+  end
+
+  defp print_fleet_economy_human(%{totals: totals} = economy) do
+    IO.puts(
+      "economy: #{economy.members_reported}/#{economy.members_total} members reported; " <>
+        "iterations=#{totals.iterations} tokens=#{totals.tokens} elapsed_ms=#{totals.elapsed_ms}"
+    )
   end
 
   defp fleet_error(message, opts) do
@@ -1523,7 +1704,7 @@ defmodule Kazi.CLI do
       nodes: Enum.map(nodes, fn n -> %{id: n.id, file: n.file} end),
       edges: Enum.map(edges, &fleet_edge_json/1),
       frontiers: frontiers,
-      next_action: "fleet execution lands in a follow-up; use --explain"
+      next_action: "run without --explain to execute the fleet"
     }
   end
 
