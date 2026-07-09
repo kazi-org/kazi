@@ -129,6 +129,11 @@ defmodule Kazi.Loop.IterationCountersTest do
     assert first.context.orientation_cache == "disabled"
     assert first.context.orientation_tokens == 0
     assert first.context.evidence_tokens == 0
+    # Neither memory layer opted in (issue #978, ADR-0061/0062 default off) ⇒ nil,
+    # not 0 — indistinguishable-from-disabled would hide "flag on but silently
+    # rendered nothing".
+    assert first.context.attempt_ledger_tokens == nil
+    assert first.context.memory_recall_tokens == nil
     assert first.tools == %{}
 
     # --- Iteration 1: the FIRST dispatch's context. A real orientation prefix was
@@ -138,6 +143,8 @@ defmodule Kazi.Loop.IterationCountersTest do
     assert second.context.orientation_cache == "miss"
     assert second.context.orientation_tokens > 0
     assert second.context.evidence_tokens > 0
+    assert second.context.attempt_ledger_tokens == nil
+    assert second.context.memory_recall_tokens == nil
 
     assert second.tools == %{
              tool_calls: 4,
@@ -185,5 +192,40 @@ defmodule Kazi.Loop.IterationCountersTest do
     assert second.context.orientation_tokens == 0
     # The evidence section is always sent, so it always carries a real token count.
     assert second.context.evidence_tokens > 0
+  end
+
+  test "opting into the memory layers records a real 0 (on, empty), not nil (off)" do
+    {:ok, script_pid} = ScriptedProvider.start_link(%{code: [:fail, :pass]})
+    test = self()
+
+    goal =
+      Goal.new("iter-counters-memory-on",
+        predicates: [Predicate.new(:code, :tests)],
+        metadata: %{script_pid: script_pid}
+      )
+
+    {:ok, loop} =
+      Kazi.Loop.start_link(
+        goal: goal,
+        providers: %{tests: ScriptedProvider},
+        harness: ToolReportingHarness,
+        integrate: NoopIntegrate,
+        deploy: NoopDeploy,
+        workspace: "/fixture/ws",
+        # Both flags on; a fresh run has no ledger history and no corpus, so each
+        # layer renders nothing — this is the "on but empty" case the token field
+        # must report as a real 0, distinct from the flag-off nil above.
+        adapter_opts: [attempt_ledger: true, memory_recall: true],
+        on_iteration: fn payload -> send(test, {:iteration, payload}) end,
+        reobserve_interval_ms: 5,
+        flake_max_retries: 0,
+        stuck_iterations: 0
+      )
+
+    {:ok, _result} = Kazi.Loop.await(loop, 5_000)
+    [_first, second | _] = collect_iterations([])
+
+    assert second.context.attempt_ledger_tokens == 0
+    assert second.context.memory_recall_tokens == 0
   end
 end
