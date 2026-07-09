@@ -64,6 +64,7 @@ defmodule Kazi.CLI do
   alias Kazi.ContextStore.GistInit
   alias Kazi.Economy.{BudgetSuggestion, History}
   alias Kazi.Export.Obsidian
+  alias Kazi.Fleet
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
   alias Kazi.Goal.GroupLint
@@ -137,6 +138,7 @@ defmodule Kazi.CLI do
     parallelism: :integer,
     explain: :boolean,
     dry_run: :boolean,
+    fleet: :boolean,
     check: :boolean,
     provider: :string,
     budget: :integer,
@@ -208,6 +210,8 @@ defmodule Kazi.CLI do
       "`apply` only: PRINT the computed wave schedule (the topological `needs`-DAG frontiers + the blast-radius parallelism within each) and EXIT 0 WITHOUT EXECUTING — dispatches nothing, so over-constraint is visible before a run. Under --json emits the schedule as JSON. Alias of --dry-run.",
     dry_run:
       "`apply` only: alias of --explain — print the computed schedule and exit 0 without dispatching anything.",
+    fleet:
+      "`apply` only (T50.4, ADR-0065 decision 3): treat the positional argument as a fleet — a DIRECTORY of *.goal.toml files (non-recursive, sorted) or a manifest .toml file ([[member]] path = \"...\" entries) — instead of a single goal-file. Builds a fleet DAG (explicit [metadata] depends_on edges + inferred scope-overlap serialization) and requires --explain (print the schedule, dispatch nothing); executing a fleet without --explain fails loudly for now (fleet execution is a follow-up, T50.5).",
     check:
       "`apply` only (issue #805): observe-only mode — evaluate the predicate vector EXACTLY ONCE via the real provider path and exit; never dispatches a harness, integrates, or deploys. All-pass exits 0 (`status: \"pass\"`, NOT the vacuous_goal error a normal run would give); any failing predicate exits 1 (`status: \"fail\"`) carrying predicates[] with captured evidence for the failures. For merge gates (ADR-0026) and release qualification.",
     provider:
@@ -268,6 +272,7 @@ defmodule Kazi.CLI do
         :parallel,
         :explain,
         :dry_run,
+        :fleet,
         :check,
         :context_store,
         :context_budget,
@@ -1207,6 +1212,7 @@ defmodule Kazi.CLI do
           parallel: flags[:parallel] || false,
           parallelism: flags[:parallelism],
           explain: flags[:explain] || flags[:dry_run] || false,
+          fleet: flags[:fleet] || false,
           check: flags[:check] || false
         }
 
@@ -1422,6 +1428,14 @@ defmodule Kazi.CLI do
   # Boot the app + read-model, load the goal, run it, report. Returns the exit
   # code (never halts) so it stays testable.
   defp execute_run(goal_source, opts, runtime_opts) do
+    if opts[:fleet] == true do
+      execute_fleet(goal_source, opts)
+    else
+      execute_single_run(goal_source, opts, runtime_opts)
+    end
+  end
+
+  defp execute_single_run(goal_source, opts, runtime_opts) do
     persist? = ensure_read_model()
 
     case load_goal_source(goal_source, persist?) do
@@ -1446,6 +1460,92 @@ defmodule Kazi.CLI do
 
         1
     end
+  end
+
+  # T50.4 (ADR-0065 decision 3): `--fleet <dir|manifest>` loads a DAG of
+  # goal-files instead of one goal (`Kazi.Fleet.load/1`). Only `--explain` is
+  # implemented today — it prints the fleet schedule and dispatches nothing;
+  # execution (a fleet run without `--explain`) is a follow-up (T50.5), so it
+  # refuses loudly here rather than pretending to run.
+  defp execute_fleet(path, opts) do
+    case Fleet.load(path) do
+      {:ok, fleet} ->
+        if opts[:explain] == true do
+          explain_fleet(fleet, opts)
+        else
+          fleet_error(
+            "fleet execution lands in a follow-up; use --explain",
+            opts
+          )
+        end
+
+      {:error, message} ->
+        fleet_error(message, opts)
+    end
+  end
+
+  defp fleet_error(message, opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  defp explain_fleet(%Fleet{} = fleet, opts) do
+    json? = json?(opts)
+    frontiers = Fleet.frontiers(fleet)
+
+    emit(json?, fleet_explain_json(fleet, frontiers), fn ->
+      fleet_explain_human(fleet, frontiers)
+    end)
+
+    0
+  end
+
+  defp fleet_explain_json(%Fleet{nodes: nodes, edges: edges}, frontiers) do
+    %{
+      schema_version: @run_schema_version,
+      mode: "fleet_explain",
+      dispatched: false,
+      nodes: Enum.map(nodes, fn n -> %{id: n.id, file: n.file} end),
+      edges: Enum.map(edges, &fleet_edge_json/1),
+      frontiers: frontiers,
+      next_action: "fleet execution lands in a follow-up; use --explain"
+    }
+  end
+
+  defp fleet_edge_json(%Fleet.Edge{from: from, to: to, kind: :explicit}) do
+    %{from: from, to: to, kind: "explicit"}
+  end
+
+  defp fleet_edge_json(%Fleet.Edge{from: from, to: to, kind: :inferred_overlap, overlap: overlap}) do
+    %{
+      from: from,
+      to: to,
+      kind: "inferred_overlap",
+      overlap: Enum.map(overlap, fn {a, b} -> %{a: a, b: b} end)
+    }
+  end
+
+  defp fleet_explain_human(%Fleet{edges: edges}, frontiers) do
+    IO.puts("FLEET SCHEDULE (explain, nothing dispatched)")
+    IO.puts("frontiers: #{length(frontiers)}")
+
+    frontiers
+    |> Enum.with_index()
+    |> Enum.each(fn {ids, index} -> IO.puts("  frontier #{index}: #{Enum.join(ids, ", ")}") end)
+
+    Enum.each(edges, fn
+      %Fleet.Edge{from: from, to: to, kind: :explicit} ->
+        IO.puts("  edge: #{from} -> #{to} (explicit)")
+
+      %Fleet.Edge{from: from, to: to, kind: :inferred_overlap, overlap: overlap} ->
+        pairs = Enum.map_join(overlap, ", ", fn {a, b} -> "#{a}~#{b}" end)
+        IO.puts("  edge: #{from} -> #{to} (inferred overlap: #{pairs})")
+    end)
   end
 
   # T39.2 (ADR-0049): `apply` accepts either a goal-file PATH (the historical
