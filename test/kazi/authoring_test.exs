@@ -559,6 +559,18 @@ defmodule Kazi.AuthoringTest do
       assert prompt =~ "JSON"
     end
 
+    # Authoring depth is the DEFAULT: the drafting prompt must instruct dense,
+    # dispatch-sufficient descriptions (the converging model sees only the
+    # goal + failing predicates), one requirement per predicate, and
+    # negative-space companions for text-presence checks -- without the
+    # operator having to ask each time.
+    test "instructs implementation-brief descriptions by default" do
+      prompt = Authoring.build_prompt("ship a /healthz route")
+      assert prompt =~ "IMPLEMENTATION BRIEF"
+      assert prompt =~ "one requirement per predicate"
+      assert prompt =~ "negative-space"
+    end
+
     # T26.8 (layer 2): the prompt must PIN the provider config contract so the
     # harness drafts a loader-valid `config` instead of an invented one. It must
     # teach that `custom_script` requires `cmd` and must NOT use the invented
