@@ -174,4 +174,78 @@ defmodule Kazi.Memory.SemanticIndexTest do
       assert Enum.any?(rows, fn [body] -> body =~ "fresh content here" end)
     end
   end
+
+  describe "workspace scoping (issue #977)" do
+    @other_lore """
+    # Other Lore
+
+    ## Landmine: totally different project
+    This workspace has nothing to do with the first one.
+    """
+
+    test "two workspaces indexing the same relative path store distinct rows, no clobber" do
+      dir_a = fixture_dir()
+      dir_b = fixture_dir()
+      write_lore(dir_a, @lore)
+      write_lore(dir_b, @other_lore)
+
+      :ok = SemanticIndex.refresh(dir_a, ["docs/**/*.md"])
+      :ok = SemanticIndex.refresh(dir_b, ["docs/**/*.md"])
+
+      {:ok, %{rows: rows}} =
+        Repo.query(
+          "SELECT workspace_root, content_hash FROM memory_index_files WHERE path = ? ORDER BY workspace_root",
+          ["docs/lore.md"]
+        )
+
+      assert [[root_a, hash_a], [root_b, hash_b]] = rows
+      assert root_a == Path.expand(dir_a)
+      assert root_b == Path.expand(dir_b)
+      refute hash_a == hash_b
+    end
+
+    test "recall against workspace A never returns workspace B's chunks, even indexed more recently" do
+      dir_a = fixture_dir()
+      dir_b = fixture_dir()
+      write_lore(dir_a, @lore)
+      write_lore(dir_b, @other_lore)
+
+      # Index B (the "more recently indexed" workspace) AFTER A, at the same
+      # relative path, so a workspace-blind query would surface B's row first.
+      :ok = SemanticIndex.refresh(dir_a, ["docs/**/*.md"])
+      :ok = SemanticIndex.refresh(dir_b, ["docs/**/*.md"])
+
+      snippets =
+        SemanticIndex.recall("totally different project", 200,
+          workspace: dir_a,
+          corpus: ["docs/**/*.md"]
+        )
+
+      assert snippets == []
+
+      [snippet | _] =
+        SemanticIndex.recall("budget overflow", 200, workspace: dir_a, corpus: ["docs/**/*.md"])
+
+      assert snippet.path == "docs/lore.md"
+    end
+
+    test "the same relative path can be re-indexed under a different workspace_root without disturbing the other" do
+      dir_a = fixture_dir()
+      dir_b = fixture_dir()
+      write_lore(dir_a, @lore)
+      write_lore(dir_b, @other_lore)
+
+      :ok = SemanticIndex.refresh(dir_a, ["docs/**/*.md"])
+      :ok = SemanticIndex.refresh(dir_b, ["docs/**/*.md"])
+
+      [snippet | _] =
+        SemanticIndex.recall("totally different project", 200,
+          workspace: dir_b,
+          corpus: ["docs/**/*.md"]
+        )
+
+      assert snippet.path == "docs/lore.md"
+      assert snippet.text =~ "totally different project"
+    end
+  end
 end
