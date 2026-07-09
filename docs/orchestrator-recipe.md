@@ -156,6 +156,17 @@ Browse the queue any time with `kazi list-proposed --json` (optionally
 `--status proposed|approved|rejected`); it emits `{schema_version, status_filter,
 count, proposals: [...]}`.
 
+> **Anti-pattern: naked-grep predicates.** A `custom_script` predicate whose
+> whole command is a bare, positive text-presence `grep` (`grep -q "..."`,
+> `grep -rqiE "..."`) is satisfiable VACUOUSLY -- the fix can string-stuff the
+> pattern into an unrelated file, or accidentally match pre-existing content --
+> without the feature actually being built. The `clarify` array flags this as
+> `naked-grep-predicate` (WARN, never a blocker) when a draft has a bare
+> positive grep and no companion predicate asserting the OLD/stale pattern is
+> ABSENT. Pair it with a negative-space assertion (`grep -qv <old-pattern>`),
+> replace it with a structural check (parse/AST, not raw text search), or add a
+> minimum-diff floor.
+
 > Note: once approved, `kazi apply` runs the proposal DIRECTLY by its `prop-...`
 > ref (T39.2, ADR-0049) -- carry the `proposal_ref` from Step 1 through `approve`
 > straight into Step 3, never touching the filesystem. A goal-file path still
