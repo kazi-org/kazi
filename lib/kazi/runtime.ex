@@ -117,6 +117,13 @@ defmodule Kazi.Runtime do
     * `:workspace` — the target workspace path threaded to providers / harness /
       actions (where the agent edits and where code predicates are evaluated). If
       omitted, falls back to `goal.scope.workspace`.
+    * `:registry_workspace` — T50.1 (ADR-0065): the workspace path RECORDED on
+      the run registry row, when it must differ from `:workspace` — e.g. the
+      default worktree-indirected serial path, where the agent actually edits a
+      kazi-owned task worktree but the registry (dedup detection,
+      `guard_no_live_duplicate/2`; the starmap/dashboard) should still show the
+      caller's own `--workspace`, not an ephemeral internal path. Defaults to
+      `:workspace`.
     * `:adapter_opts` — keyword opts forwarded to the harness adapter (e.g.
       `[command: "/path/to/stub"]` in tests, model/flags in production).
     * `:workspace_opts` — keyword opts forwarded verbatim to
@@ -232,6 +239,7 @@ defmodule Kazi.Runtime do
   @spec run(Goal.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def run(%Goal{} = goal, opts \\ []) do
     workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
+    registry_workspace = Keyword.get(opts, :registry_workspace, workspace)
     await_timeout = Keyword.get(opts, :await_timeout, :infinity)
 
     # T32.4 anti-gaming enforcement (ADR-0042): resolve the profile (default-on for
@@ -280,6 +288,9 @@ defmodule Kazi.Runtime do
         opts
         |> Keyword.drop([
           :workspace,
+          # T50.1 (ADR-0065): consumed above (register_run/10's workspace arg),
+          # never a Loop opt.
+          :registry_workspace,
           :await_timeout,
           :integrator,
           :deploy_cmd,
@@ -367,7 +378,7 @@ defmodule Kazi.Runtime do
         register_run(
           persist?,
           run_id,
-          workspace,
+          registry_workspace,
           goal_ref,
           harness_opts,
           transcript_sink_path,

@@ -1757,11 +1757,25 @@ defmodule Kazi.CLI do
     end
   end
 
+  # Whether `workspace` is itself the ROOT of a git working tree -- deliberately
+  # NOT "is `workspace` somewhere inside a git working tree" (a bare `rev-parse
+  # --git-dir` check, which `git` resolves by walking UP to the nearest
+  # ancestor `.git`). A workspace that is merely NESTED under some unrelated
+  # ancestor repo (a plain scratch dir under kazi's OWN checkout, e.g. an
+  # ExUnit `:tmp_dir` fixture, or any caller-supplied subdir with no `.git` of
+  # its own) would otherwise false-positive as "a git workspace": `git worktree
+  # add -b branch path HEAD` then silently branches off the AMBIENT ancestor
+  # repo's HEAD instead of the caller's intended content, and the fixer's fix
+  # never reaches the workspace the caller actually pointed at. Compares
+  # `--show-toplevel` to `workspace` itself, the same technique
+  # `primary_worktree_root?/1` already uses for the same reason.
   defp git_workspace?(workspace) when is_binary(workspace) do
-    match?(
-      {_out, 0},
-      System.cmd("git", ["-C", workspace, "rev-parse", "--git-dir"], stderr_to_stdout: true)
-    )
+    case System.cmd("git", ["-C", workspace, "rev-parse", "--show-toplevel"],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} -> Path.expand(String.trim(out)) == Path.expand(workspace)
+      _ -> false
+    end
   rescue
     _ -> false
   end
@@ -1786,6 +1800,13 @@ defmodule Kazi.CLI do
     {worktree_overrides, runtime_opts} = Keyword.pop(runtime_opts, :worktree, [])
     worktree_opts = Keyword.put_new(worktree_overrides, :repo, base_workspace)
 
+    # T50.1: the run registry (dedup detection, the starmap/dashboard) should
+    # show the CALLER's own `--workspace`, not the ephemeral kazi-owned task
+    # worktree `run_goal_serial_dispatch/5` actually runs against below --
+    # `Kazi.Runtime.run/2`'s `:registry_workspace` opt (default `:workspace`)
+    # exists exactly for this split.
+    runtime_opts = Keyword.put_new(runtime_opts, :registry_workspace, base_workspace)
+
     partition = %{key: goal.id}
 
     inner = fn _partition, worktree_path ->
@@ -1809,6 +1830,16 @@ defmodule Kazi.CLI do
   # dispatch, the economy rollup, and the reported `collateral` diff all see
   # the SAME (isolated) tree.
   defp run_goal_serial_dispatch(%Goal{} = goal, opts, persist?, runtime_opts, workspace) do
+    # T50.1 (ADR-0065): the project-local `.mcp.json` nudge marker is
+    # "once per project" state (`Kazi.MCP.Nudge`'s own moduledoc) -- it must
+    # land in the CALLER's own workspace, never in an ephemeral kazi-owned task
+    # worktree that gets deleted on terminal, or the nudge would fire on every
+    # single worktree-indirected run forever, never actually suppressing
+    # itself. `opts[:workspace]` is the caller's ORIGINAL `--workspace` value,
+    # untouched by worktree indirection (only the `workspace` param above,
+    # threaded to the harness/predicates/collateral diff, changes).
+    nudge_workspace = opts[:workspace] || goal.scope.workspace
+
     # The caller's static run config; CLI-owned keys (workspace/persist?) win, and
     # an explicit :persist? in runtime_opts can still override (tests).
     #
@@ -1879,6 +1910,7 @@ defmodule Kazi.CLI do
           result,
           run_economy(goal, :converged, result, opts, persist?),
           workspace,
+          nudge_workspace,
           json?
         )
 
@@ -1891,6 +1923,7 @@ defmodule Kazi.CLI do
           result,
           run_economy(goal, :over_budget, result, opts, persist?),
           workspace,
+          nudge_workspace,
           json?
         )
 
@@ -1903,6 +1936,7 @@ defmodule Kazi.CLI do
           result,
           run_economy(goal, :stopped, result, opts, persist?),
           workspace,
+          nudge_workspace,
           json?
         )
 
@@ -2193,10 +2227,10 @@ defmodule Kazi.CLI do
   # Render the loop's terminal result on the requested surface (T15.3): the
   # versioned JSON result object under --json, the existing human report
   # otherwise. Both share the SAME loop result; only the OUTPUT shape differs.
-  defp report_outcome(%Goal{} = goal, outcome, result, economy, workspace, json?) do
+  defp report_outcome(%Goal{} = goal, outcome, result, economy, workspace, nudge_workspace, json?) do
     emit(json?, run_result_json(goal, outcome, result, economy, workspace), fn ->
       report(goal, human_outcome(outcome), result)
-      Kazi.MCP.Nudge.maybe_print(workspace)
+      Kazi.MCP.Nudge.maybe_print(nudge_workspace)
     end)
   end
 
