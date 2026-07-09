@@ -1,0 +1,66 @@
+# E50/T50.5 (ADR-0065 decision 3, execution half). DEPENDS ON: goals 0013 (T50.1),
+# 0015 (T50.3), and 0016 (T50.4) all merged to main -- the brief's precondition
+# check enforces this. Wave E50-2.
+# Conflict surface: lib/kazi/cli.ex, lib/kazi/scheduler.ex, the fleet module from 0016.
+
+id = "fleet-execution"
+name = "T50.5: kazi apply --fleet executes the goal-DAG through the partition scheduler one level up -- worktree per goal, pipelined frontiers, concurrency cap, registry rows, budget rollup"
+
+[[predicate]]
+id = "fleet-execution-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E50 task T50.5, ADR-0065 decision 3, docs/adr/0065-safe-concurrent-work-serial-worktree-fleet.md).
+
+PRECONDITIONS (verify on main before starting; if ANY is absent, STOP and report -- this goal is premature): (a) serial worktree indirection shipped (grep lib/kazi/cli.ex for in_place; test/kazi/serial_worktree_indirection_test.exs exists) -- T50.1/goal 0013; (b) pause/resume shipped (grep for pause_between_waves; test/kazi/scheduler/pause_between_waves_test.exs exists) -- T50.3/goal 0015; (c) fleet discovery shipped (test/kazi/fleet/discovery_test.exs exists and --fleet --explain works) -- T50.4/goal 0016.
+
+WHY: T50.4 built the fleet DAG and --explain; this task makes `kazi apply --fleet <path>` EXECUTE it, replacing the staged not-yet-implemented error. ADR-0065: reuse E21's machinery one level up -- worktree per goal, leases across the fleet, pipelined frontier advancement, per-fleet concurrency cap and budget rollup.
+
+BUILD THIS: (1) execute the fleet DAG with pipelined frontier advancement (a member dispatches the instant its deps settle -- mirror Kazi.Scheduler.DepScheduler's dispatch_ready model; consider whether DepScheduler itself can drive fleet nodes by mapping each member goal to a synthetic group, or write a sibling FleetScheduler that reuses its shape -- prefer whichever keeps the frontier/pause semantics IDENTICAL, and record the choice in the moduledoc); (2) each member goal runs in its OWN kazi-owned task worktree via the T50.1 machinery against the shared --workspace base (the fleet-level analog of worktree-per-partition), and lands per T50.2's path when that is shipped -- if T50.2 (goal 0014) is not on main yet, keep landing per-member as whatever the serial path does at that point and note it honestly in the PR; (3) per-fleet concurrency cap: --fleet-concurrency N bounds how many member goals run at once (default: unbounded within a frontier, or a small sane default -- document the choice); (4) REGISTRY: every executing member registers its own run row (this comes free if members run through Kazi.Runtime.run/2 -- verify Kazi.ReadModel.RunRegistry.start/1 fires per member via Kazi.Runtime.register_run, runtime.ex ~1034) so concurrent operator sessions see fleet members as live runs and the #942 duplicate-run guard composes per goal_ref (a second apply on a goal a live fleet member holds refuses); (5) BUDGET/ECONOMY ROLLUP: the fleet terminal object aggregates per-member economy into a fleet total. KNOWN GAP (verified): the DAG/group collective result carries NO economy today -- only the flat partition result has budget_spent/partitions_budget (Kazi.Scheduler.Budget.split/2 + rollup/1, lib/kazi/scheduler/budget.ex ~106/~162, surfaced at lib/kazi/scheduler.ex ~121-132). Reuse Kazi.Scheduler.Budget.rollup/1's dimension-wise summing for the fleet level; per-member spent comes from each member's run result (the runtime already computes economics_attrs, runtime.ex ~1229) -- honest-unknown: a member with no usage reported contributes nil, never fabricated zeros, and the rollup says how many members reported; (6) frontier_complete generalizes to fleet-node boundaries: emit the same-shaped stream event (schema_version 2, event frontier_complete, frontier index, per-member id+status) at each fleet frontier boundary under --json --stream, and --pause-between-waves (T50.3) applies to fleet frontiers with the same resume semantics (one mechanism, two levels -- ADR-0065); (7) the fleet terminal JSON mirrors the DAG collective shape (collective verdict + per-member statuses + schedule + economy rollup; additive fields, schema_version 2), rendered through the existing report path.
+
+EXACT SEAMS (verified on main at v1.125.0): Kazi.Scheduler.run_goals/2 (lib/kazi/scheduler.ex ~313) -- routes a single DAG goal to DepScheduler (~343-380, forwards :on_frontier_complete via Keyword.take ~377); compose_reconciler/3 (~592) is where lease + worktree wrap a reconciler -- NOTE (load-bearing, verified): the production CLI parallel path NEVER injects :worktree or :integrate opts today (run_goal_parallel builds scheduler_opts without them; only tests inject) -- the fleet path must ACTUALLY wire worktree isolation, not assume it; use the T50.1 serial-path machinery per member rather than resurrecting the uninjected scheduler seams, unless reusing compose_reconciler with real :worktree opts is cleaner -- either way the test pins REAL isolation. Kazi.Scheduler.DepScheduler (lib/kazi/scheduler/dep_scheduler.ex): dispatch_ready/1 (~374-403), emit_frontier_complete/2 (~653), state model (~260-285). Kazi.Scheduler.Budget.split/2+rollup/1 (lib/kazi/scheduler/budget.ex). Registry: Kazi.ReadModel.RunRegistry (lib/kazi/read_model/run_registry.ex) start/1 (~32) heartbeat/1 (~76) finish/3 (~151) list_live/1 (~232); duplicate guard Kazi.Runtime.guard_no_live_duplicate/2 (lib/kazi/runtime.ex ~518). CLI: run_goal_parallel/4 (lib/kazi/cli.ex ~1870) and collective_result_json/2 DAG clause (~4909) as the shape to mirror; the 0016 fleet module + its not-yet-implemented execution stub is the entry point to replace; add fleet_concurrency to @switches/@flag_docs/apply flags/parse_run.
+
+WRITE test/kazi/fleet/execution_test.exs (fixture git repos + goal files in tmp; vacuous/trivially-true custom_script predicates so members converge without a harness; no network): a 3-goal fixture fleet -- A and B independent (disjoint scopes), C with depends_on = [A]. Assert: (1) execution order: A and B run before C is dispatched; C dispatches only after A settles (pipelined: B still running must not block C once A converged); (2) ISOLATION: each member ran in its own worktree (the base checkout is byte-identical after the run; per-member worktrees existed during and are cleaned after -- observe via the WorktreeTable or the registry rows' workspace fields); (3) --fleet-concurrency 1 serializes: at no point are two members running concurrently (observe via registry rows or an instrumented stub); (4) the terminal object carries the collective verdict, per-member statuses, and the economy rollup (with honest-unknown semantics when members report no usage); (5) a registry row exists PER member while it executes (list_live during the run from the test process) and each row reaches a terminal status after; (6) fleet frontier_complete events emit at boundaries under the stream seam (collect via :on_frontier_complete or the CLI stream fn, mirroring frontier_complete_event_test).
+
+DOCS LAND WITH CODE (ADR-0034): docs/orchestrator-recipe.md fleet section gains the execution walkthrough (cap, rollup, pause/resume at fleet boundaries); docs/schemas/collective-result.md documents the fleet terminal shape (or a new docs/schemas/fleet-result.md if the shape earns its own file -- keep the shapes cross-referenced); cli.ex @flag_docs covers --fleet-concurrency. Cross-reference ADR-0065.
+
+PROCESS: branch task/fleet-execution off main; small conventional commits (lib/ vs test/ vs docs/ separate); push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/fleet/execution_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "fleet-discovery-still-pinned"
+provider = "custom_script"
+description = "GUARD: the T50.4 discovery/DAG suite stays green -- execution must not regress the model (only the staged not-yet-implemented assertion may be updated)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/fleet/discovery_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
