@@ -16,6 +16,19 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.125.0](https://github.com/kazi-org/kazi/compare/v1.124.0...v1.125.0) (2026-07-09)
+
+
+### Features
+
+* **cli:** kazi status with no ref lists LIVE runs (issue [#971](https://github.com/kazi-org/kazi/issues/971)) ([f565f80](https://github.com/kazi-org/kazi/commit/f565f808c496d001f06ae3c6b37e3ebd1453dd14))
+* **memory:** scope memory_index_files by workspace_root ([#977](https://github.com/kazi-org/kazi/issues/977)) ([60e0cbc](https://github.com/kazi-org/kazi/commit/60e0cbcb3a8d9b12a3baf55c51f4b9936f5ff505))
+
+
+### Bug Fixes
+
+* **memory:** thread workspace_root through indexing and recall ([#977](https://github.com/kazi-org/kazi/issues/977)) ([444844d](https://github.com/kazi-org/kazi/commit/444844d1304f837901410e7e8ae0ca429bc97d89))
+
 ## [1.124.0](https://github.com/kazi-org/kazi/compare/v1.123.0...v1.124.0) (2026-07-09)
 
 
