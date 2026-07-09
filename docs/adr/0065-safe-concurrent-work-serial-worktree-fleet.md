@@ -1,4 +1,4 @@
-# ADR 0064: Safe concurrent work -- serial apply owns its working directory; fleets over goal-files
+# ADR 0065: Safe concurrent work -- serial apply owns its working directory; fleets over goal-files
 
 ## Status
 
