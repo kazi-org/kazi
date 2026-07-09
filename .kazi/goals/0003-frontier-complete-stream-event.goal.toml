@@ -1,0 +1,36 @@
+id = "frontier-complete-stream-event"
+name = "issue #936 (minimal slice): apply --parallel --json --stream emits a frontier_complete event at each needs-DAG wave boundary"
+
+[[predicate]]
+id = "frontier-event-test"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #936, the smallest suggested slice): under `kazi apply --parallel --json --stream`, the JSONL stream today carries iteration events only -- there is NO distinguishable marker between needs-DAG waves (frontiers), so an external caller cannot detect and pause at a wave boundary. Add a `frontier_complete` stream event: when a frontier's groups have all reached a terminal state and BEFORE the next frontier's groups are dispatched, emit one JSONL object with an \"event\": \"frontier_complete\" field, the zero-based frontier index, and the per-group terminal statuses of that frontier. Wire it where the parallel scheduler advances between frontiers (lib/kazi/scheduler.ex and the stream projection the CLI --stream path uses). Serial (non-parallel) runs are unchanged. Write test/kazi/scheduler/frontier_complete_event_test.exs: drive a multi-frontier fixture (two independent groups at frontier 0, one group with needs on a frontier-0 group at frontier 1) through the scheduler with a stub harness, collect emitted stream events, and assert (1) a frontier_complete event with frontier index 0 appears after frontier 0's groups converge and before frontier 1 dispatches; (2) a frontier_complete event for the final frontier appears before the terminal result; (3) event objects parse as JSON with the documented fields. Document the new event in docs/schemas/run-result.md (the --stream section) and docs/orchestrator-recipe.md in the same change (docs land with code, ADR-0034). PROCESS: branch task/frontier-complete-stream-event, small conventional commits (lib/ vs test/ vs docs/ separate), push with -u. This predicate passes when the new test file passes."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/scheduler/frontier_complete_event_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green -- existing stream consumers and scheduler tests must not break."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
