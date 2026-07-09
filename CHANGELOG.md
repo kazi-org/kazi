@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.131.1](https://github.com/kazi-org/kazi/compare/v1.131.0...v1.131.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **dashboard:** session-pid walk recorded the wrong ancestor; LIVE shows elapsed runtime ([49e8ef5](https://github.com/kazi-org/kazi/commit/49e8ef56a82118052d8b906b3a3c0684b93e905b))
+
 ## [1.131.0](https://github.com/kazi-org/kazi/compare/v1.130.0...v1.131.0) (2026-07-09)
 
 
