@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.128.0](https://github.com/kazi-org/kazi/compare/v1.127.0...v1.128.0) (2026-07-09)
+
+
+### Features
+
+* **runtime:** kazi never hangs on its own telemetry (read-model Guard) ([f2a41b7](https://github.com/kazi-org/kazi/commit/f2a41b72002222ae09e03dbacd26757f72951b10))
+
 ## [1.127.0](https://github.com/kazi-org/kazi/compare/v1.126.1...v1.127.0) (2026-07-09)
 
 
