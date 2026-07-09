@@ -221,6 +221,21 @@ defmodule Kazi.ReadModel.RunRegistry do
   end
 
   @doc """
+  Lists every run currently classified LIVE (issue #971): `status == "running"`
+  AND its heartbeat is fresher than `stale_after_seconds` — i.e. every
+  `"running"` row that `stale?/2` does NOT flag. This is the pre-upgrade check
+  (`kazi status` with no ref): an operator installing a newer burrito-built
+  binary should wait until this returns `[]` (see `docs/lore.md`, Release / CI /
+  Burrito, for why a live run matters here).
+  """
+  @spec list_live(non_neg_integer()) :: [Run.t()]
+  def list_live(stale_after_seconds \\ @stale_after_seconds) do
+    Enum.filter(list(), fn run ->
+      run.status == "running" and not stale?(run, stale_after_seconds)
+    end)
+  end
+
+  @doc """
   Records an external termination event (SIGTERM, SIGKILL, abnormal exit) for
   a run during the finalization phase. Used when the controller process receives
   a termination signal, allowing post-mortem observability even when the run
