@@ -307,11 +307,13 @@ defmodule Kazi.Teach.InstallSkill do
 
     Apply the approved goal with the CHEAP tier (the two-tier split). This is the
     `apply` verb -- the reconcile loop. `kazi apply` drives the goal to a TERMINAL
-    VERDICT on the current release and takes a GOAL-FILE path. The DEFAULT is in-family
+    VERDICT on the current release and takes either the APPROVED `prop-...`
+    proposal-ref from Step 2 (loaded straight from the read-model -- no goal-file
+    reconstruction, ADR-0049) or a goal-file path. The DEFAULT is in-family
     Claude tiering: you authored on a frontier model, so grind on a cheap Claude model:
 
     ```sh
-    kazi apply <goal-file> --workspace <path> --harness claude --model claude-haiku-4-5 --json
+    kazi apply <proposal-ref> --workspace <path> --harness claude --model claude-haiku-4-5 --json
     ```
 
     `apply --json` emits ONE terminal result object on termination. The exit code

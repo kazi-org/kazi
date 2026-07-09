@@ -193,7 +193,7 @@ defmodule Kazi.CLI do
     adr:
       "`plan` only: also write an ADR-lite rationale doc under docs/adr/ for the drafted goal.",
     predicates:
-      "`plan` only (caller-drafts): a proposal payload the caller already authored; kazi spawns no model.",
+      "`plan` only (caller-drafts): a proposal payload the caller already authored; kazi spawns no model. A payload \"goal_id\"/\"idea\" names the goal and its idea verbatim (T39.1, ADR-0049); absent, they are derived from \"id\"/\"name\" or generated.",
     replace:
       "`plan` only: allow re-proposing onto a proposal_ref that already holds an APPROVED proposal (default: refused, to protect against silently discarding an approved goal's audit trail).",
     obsidian:
@@ -249,8 +249,9 @@ defmodule Kazi.CLI do
   @commands [
     %{
       name: "apply",
-      summary: "Drive a goal-file to convergence against a target workspace.",
-      args: [%{name: "goal-file", required: true}],
+      summary:
+        "Drive a goal to convergence against a target workspace, from a goal-file path or an APPROVED proposal's prop-... ref (T39.2, ADR-0049).",
+      args: [%{name: "goal-file|proposal-ref", required: true}],
       flags: [
         :workspace,
         :env,
@@ -399,6 +400,7 @@ defmodule Kazi.CLI do
 
   USAGE:
       kazi apply <goal-file> --workspace <path> [--harness <id>] [--model <m>] [options]
+      kazi apply <proposal-ref> --workspace <path> [options]   # run an APPROVED proposal, no goal-file
       kazi apply <goal-file> --workspace <path> --json [--stream]
       kazi apply <goal-file> --workspace <path> --parallel [N] [--json] # parallel scheduler
       kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
@@ -428,11 +430,19 @@ defmodule Kazi.CLI do
 
   ARGUMENTS:
       <goal-file>            Path to a TOML goal-file (see Kazi.Goal.Loader).
+                             `apply` also accepts a `prop-...` proposal-ref in
+                             this position (T39.2, ADR-0049): an APPROVED
+                             proposal is loaded from the read-model and run
+                             directly — no goal-file reconstruction. A
+                             non-approved or unknown ref is a clear error; an
+                             existing file path always behaves as before.
       <repo-dir>             A repo root to adopt — kazi detects the stack and
                              writes a starter goal-file (T5.5, UC-023, ADR-0013).
       <idea>                 A prose idea to draft into a goal of acceptance
                              predicates (T3.5a, UC-017).
       <proposal-ref>         A proposal's review handle (printed by `plan`).
+                             `approve`/`reject` transition it; `apply` runs an
+                             approved one directly.
       <ref>                  `status` only: a run's goal id (recorded iterations)
                              or a proposal-ref to report the current state of.
 
@@ -498,10 +508,13 @@ defmodule Kazi.CLI do
                              it applies the deterministic clarify floor (flags a
                              missing live-verification target + scope), persists,
                              and gates approval. Alternatively supply it on stdin
-                             under --json. The orchestrator's drive mode. The
-                             goal id / proposal_ref are derived from the
-                             payload's own "id"/"name" (#787/#793), not a
-                             hardcoded placeholder, so distinct payloads coexist.
+                             under --json. The orchestrator's drive mode. A
+                             payload "goal_id" names the goal verbatim and a
+                             payload "idea" is persisted as the proposal's idea
+                             (T39.1, ADR-0049); absent those, the goal id /
+                             proposal_ref are derived from the payload's own
+                             "id"/"name" (#787/#793), not a hardcoded
+                             placeholder, so distinct payloads coexist.
       --replace              `plan` only: allow re-proposing onto a proposal_ref
                              that already holds an APPROVED proposal (#787/#793).
                              Default: refused, so a new draft never silently
@@ -1400,16 +1413,14 @@ defmodule Kazi.CLI do
 
   # Boot the app + read-model, load the goal, run it, report. Returns the exit
   # code (never halts) so it stays testable.
-  defp execute_run(goal_file, opts, runtime_opts) do
+  defp execute_run(goal_source, opts, runtime_opts) do
     persist? = ensure_read_model()
 
-    case Goal.Loader.load(goal_file) do
+    case load_goal_source(goal_source, persist?) do
       {:ok, goal} ->
         run_goal(goal, opts, persist?, runtime_opts)
 
-      {:error, reason} ->
-        message = "could not load goal-file #{goal_file}: #{reason}"
-
+      {:error, message} ->
         # M9 (deep-review-001): under --json this must still emit a JSON error
         # object on stdout (not just a human line to stderr), matching every
         # other --json command's `emit_json_error` convention -- an
@@ -1421,6 +1432,63 @@ defmodule Kazi.CLI do
         end
 
         1
+    end
+  end
+
+  # T39.2 (ADR-0049): `apply` accepts either a goal-file PATH (the historical
+  # argument, behavior unchanged) or an APPROVED proposal's `prop-...` ref —
+  # the handle `plan` mints and `approve` flips — loaded straight from the
+  # read-model, so the plan -> approve -> apply spine closes with no
+  # orchestrator-side goal-file reconstruction. The `prop-` prefix is the
+  # discriminator (ADR-0049); an EXISTING file always wins the tie, so a
+  # goal-file that happens to be named `prop-...` still loads as a path.
+  # Both sources yield a goal through the same validated loader
+  # (`Kazi.Goal.Loader`), so the runtime's pre-loop guards (vacuous-goal,
+  # primary-workspace, duplicate-run) apply identically.
+  @spec load_goal_source(String.t(), boolean()) :: {:ok, Goal.t()} | {:error, String.t()}
+  defp load_goal_source(source, persist?) do
+    if proposal_ref?(source) do
+      load_approved_proposal(source, persist?)
+    else
+      case Goal.Loader.load(source) do
+        {:ok, goal} -> {:ok, goal}
+        {:error, reason} -> {:error, "could not load goal-file #{source}: #{reason}"}
+      end
+    end
+  end
+
+  defp proposal_ref?(source) do
+    String.starts_with?(source, "prop-") and not File.exists?(source)
+  end
+
+  # A proposal ref lives in the read-model, so without one (the escript's
+  # missing SQLite NIF, a failed migration) the ref cannot resolve — refuse
+  # clearly rather than reporting a misleading "could not load goal-file"
+  # (repo lore L-0031: every CLI path touching the read-model must degrade
+  # cleanly, never crash).
+  defp load_approved_proposal(ref, false) do
+    {:error,
+     "proposal ref #{ref} requires the read-model, which is unavailable here; " <>
+       "run via the release binary or `mix kazi.apply`, or pass a goal-file path"}
+  end
+
+  defp load_approved_proposal(ref, true) do
+    case Authoring.load_approved(ref) do
+      {:ok, goal} ->
+        {:ok, goal}
+
+      {:error, :not_found} ->
+        {:error,
+         "no proposal #{ref} in the read-model; draft one with `kazi plan` " <>
+           "(see `kazi list-proposed`), or pass a goal-file path"}
+
+      {:error, {:not_approved, status}} ->
+        {:error,
+         "proposal #{ref} is #{status}, not approved; only an approved proposal " <>
+           "runs — approve it first (`kazi approve #{ref}`)"}
+
+      {:error, {:invalid_goal, reason}} ->
+        {:error, "proposal #{ref} no longer loads as a runnable goal: #{inspect(reason)}"}
     end
   end
 

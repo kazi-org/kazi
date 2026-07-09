@@ -37,7 +37,11 @@ defmodule Kazi.CLI.Schema do
       title: "kazi apply --json result",
       description:
         "The single, versioned JSON object `kazi apply --json` emits on termination — " <>
-          "the convergence loop's own terminal result the orchestrator branches on.",
+          "the convergence loop's own terminal result the orchestrator branches on. " <>
+          "`apply` takes a goal-file path OR an APPROVED proposal's `prop-...` ref " <>
+          "(T39.2, ADR-0049) — the ref `plan --json` mints and `approve --json` flips — " <>
+          "loaded from the read-model, so no goal-file reconstruction is needed; the " <>
+          "result object is identical either way.",
       fields: [
         %{name: "schema_version", type: "integer", description: "The contract version."},
         %{name: "goal_id", type: "string", description: "The goal's id."},
@@ -176,18 +180,34 @@ defmodule Kazi.CLI.Schema do
           "goal of acceptance predicates an orchestrator approves then applies.",
       fields: [
         %{name: "schema_version", type: "integer", description: "The contract version."},
-        %{name: "goal_id", type: "string", description: "The drafted goal's id."},
+        %{
+          name: "goal_id",
+          type: "string",
+          description:
+            "The drafted goal's id. Caller-drafts honors a payload-supplied \"goal_id\" " <>
+              "verbatim (T39.1, ADR-0049); absent, it is derived from \"id\"/\"name\" or the idea."
+        },
         %{
           name: "proposal_ref",
           type: "string",
-          description: "The proposal handle (`prop-…`) used to approve/reject/status the draft."
+          description:
+            "The proposal handle (`prop-…`) used to approve/reject/status the draft — " <>
+              "and to run it directly via `kazi apply <proposal-ref>` once approved " <>
+              "(T39.2, ADR-0049)."
         },
         %{
           name: "status",
           type: "string",
           description: "The proposal's lifecycle state — proposed at draft time."
         },
-        %{name: "idea", type: "string", description: "The prose idea the goal was drafted from."},
+        %{
+          name: "idea",
+          type: "string",
+          description:
+            "The prose idea the goal was drafted from. Caller-drafts honors a " <>
+              "payload-supplied \"idea\" (T39.1, ADR-0049); absent, the positional idea " <>
+              "or the generated placeholder stands."
+        },
         %{
           name: "predicates",
           type: "array<object>",
