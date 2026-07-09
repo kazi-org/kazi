@@ -146,7 +146,11 @@ kazi approve <proposal-ref> --json
 
 `approve --json` emits `{schema_version, proposal_ref, status: "approved",
 goal_id}`. On success the goal is now runnable by `kazi apply`. (`kazi reject
-<proposal-ref> --json` declines a proposal, kept for audit.)
+<proposal-ref> --json` declines a proposal, kept for audit -- rejection is a
+pure lifecycle transition and never requires the stored goal to still load, so
+even a proposal drafted against a since-changed predicate schema rejects
+cleanly; its JSON result carries `loadable: false` in that case, for audit.
+`approve` is unaffected -- approving an unloadable goal stays refused.)
 
 Browse the queue any time with `kazi list-proposed --json` (optionally
 `--status proposed|approved|rejected`); it emits `{schema_version, status_filter,
