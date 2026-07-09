@@ -1,10 +1,10 @@
 defmodule Kazi.Fleet do
   @moduledoc """
   A **fleet** is a DAG of goal-files (T50.4, ADR-0065 decision 3): the MODEL and
-  DISCOVERY half of `kazi apply --fleet <dir|manifest>`. Execution is a separate
-  follow-up (T50.5) — this module only loads members into nodes, computes the
-  edges between them, and exposes the topological frontiers. It never dispatches
-  a harness or mutates a workspace.
+  DISCOVERY half of `kazi apply --fleet <dir|manifest>`. Execution lives in
+  `Kazi.Fleet.Execution` (T50.5) — this module only loads members into nodes,
+  computes the edges between them, and exposes the topological frontiers. It
+  never dispatches a harness or mutates a workspace.
 
   ## Members
 
