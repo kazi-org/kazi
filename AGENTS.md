@@ -206,6 +206,15 @@ removes it on every terminal state. `--in-place` opts out and edits
 -- pass it only when isolation buys nothing (e.g. a throwaway clone). A
 non-git workspace always runs in place; worktree isolation needs a git repo.
 
+`--base <ref>` (T50.8, ADR-0065 decision 5) creates the task worktree from
+THAT ref (e.g. `--base origin/main`) instead of the workspace's HEAD. The ref
+must already resolve locally -- kazi NEVER fetches; an unknown ref is a loud
+error naming it. When the DEFAULT (HEAD) base is behind its locally-known
+upstream, the run warns on stderr (both SHAs + the behind-count) and proceeds;
+fetch and re-run, or pass `--base` to state intent, which silences the
+warning. `--in-place` + `--base` together are rejected as contradictory (an
+in-place run has no worktree to base).
+
 A worktree-isolated run that CONVERGES with commits on its task branch LANDS
 them on the base -- `--workspace`'s checked-out branch -- like a parallel
 partition does (T50.2, ADR-0065 decision 2): rebase-merge (push -> PR ->
