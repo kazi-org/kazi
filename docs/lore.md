@@ -1,6 +1,10 @@
 # kazi lore -- invariants, landmines, gotchas
 
-Append-only, topic-ordered, greppable by tag. Grep before debugging.
+Append-only, topic-ordered, greppable by tag. Grep before debugging. This file
+is part of kazi memory's corpus (`docs/memory.md` -- see "Boundary: kazi
+memory vs. Claude Code memory vs. docs/lore.md / docs/devlog.md"): entries
+here are recalled at dispatch time (ADR-0062) and new ones can be proposed
+here by harvest (ADR-0063).
 
 ## Deploy / Cloud Run
 
