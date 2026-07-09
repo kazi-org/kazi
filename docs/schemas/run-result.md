@@ -11,6 +11,13 @@ emitted on stdout and the process exits `0` on convergence, non-zero otherwise.
 The exit code is the same on both surfaces; `--json` chooses only the output
 shape.
 
+`apply` takes either a goal-file path or an **approved** proposal's `prop-...`
+ref (T39.2, ADR-0049) — the handle `plan --json` mints and `approve --json`
+flips — loaded straight from the read-model, so an orchestrator never
+reconstructs a goal-file. The result object is identical either way; a
+non-approved or unknown ref is the standard `{"error": ..., "schema_version"}`
+envelope with a non-zero exit.
+
 ## Command key (`apply`)
 
 The verb that produces this object is **`apply`** (`kazi apply --json`). The old
