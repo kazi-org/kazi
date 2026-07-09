@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.119.1](https://github.com/kazi-org/kazi/compare/v1.119.0...v1.119.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **repo:** stop .kazi/goals/ from being silently swallowed by .gitignore ([affe2d7](https://github.com/kazi-org/kazi/commit/affe2d7761b11d74b3bee5a465834da373e29540))
+
 ## [1.119.0](https://github.com/kazi-org/kazi/compare/v1.118.0...v1.119.0) (2026-07-09)
 
 
