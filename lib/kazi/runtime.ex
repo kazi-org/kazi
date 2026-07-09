@@ -372,7 +372,7 @@ defmodule Kazi.Runtime do
           harness_opts,
           transcript_sink_path,
           events_sink_path,
-          goal.budget.max_iterations,
+          goal,
           Keyword.get(opts, :session_name),
           Keyword.get(opts, :proposal_ref)
         )
@@ -1025,7 +1025,7 @@ defmodule Kazi.Runtime do
          _harness_opts,
          _transcript_sink_path,
          _events_sink_path,
-         _max_iterations,
+         _goal,
          _session_name,
          _proposal_ref
        ),
@@ -1039,7 +1039,7 @@ defmodule Kazi.Runtime do
          harness_opts,
          transcript_sink_path,
          events_sink_path,
-         max_iterations,
+         goal,
          session_name,
          proposal_ref
        ) do
@@ -1052,7 +1052,11 @@ defmodule Kazi.Runtime do
       model: Keyword.get(harness_opts, :model),
       transcript_sink_path: transcript_sink_path,
       events_sink_path: events_sink_path,
-      max_iterations: max_iterations,
+      max_iterations: goal.budget.max_iterations,
+      # The goal's authored display name + one-line description, so the
+      # dashboard drill-in can say WHAT is being worked on.
+      goal_name: goal.name,
+      goal_description: goal.description,
       # The operator-assigned session label (`--session-name` /
       # KAZI_SESSION_NAME), telling concurrent runs apart on the starmap rail.
       session_name: session_name,
