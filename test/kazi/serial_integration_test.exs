@@ -10,7 +10,10 @@ defmodule Kazi.SerialIntegrationTest do
 
     1. a converged serial run whose worktree holds commits integrates them
        onto the base by rebase-merge: the base's log contains the task commits
-       afterwards, and the worktree is cleaned up;
+       afterwards, and the worktree is cleaned up (and conversely: no commits
+       ahead ⇒ nothing lands and the result is byte-identical, and a checkout
+       that moved OFF the kazi-owned task branch owns its own landing — the
+       ADR-0055 self-integrating run is not double-integrated);
     2. a conflicting base advance (a commit to the base between worktree
        creation and integration) routes through Integration's `:redispatcher`
        seam (a stub observes the call) and never force-pushes or resets the
@@ -70,6 +73,27 @@ defmodule Kazi.SerialIntegrationTest do
     assert code == 0
     refute File.exists?(Path.join(work, "fixed.txt"))
     refute Map.has_key?(Jason.decode!(out), "integration")
+  end
+
+  test "a run that moved off the kazi-owned task branch owns its own landing (no double-integration)",
+       %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    # The ADR-0055 shape: the run's own :integrate action checks out its own
+    # branch mid-run (here simulated by the harness) and lands on the remote
+    # itself — the serial landing must not re-integrate that branch locally.
+    goal_file = write_goal_file(tmp_dir, work, "test -f fixed.txt")
+
+    {out, code} = run_apply(goal_file, work, own_branch_harness(tmp_dir), [])
+
+    assert code == 0
+    refute Map.has_key?(Jason.decode!(out), "integration")
+
+    {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work)
+    refute log =~ "own-branch commit", "the base must not receive the off-task-branch commit"
+
+    # The branch (and its commit) survives worktree cleanup regardless.
+    {branch_log, 0} = System.cmd("git", ["log", "--oneline", "own-branch"], cd: work)
+    assert branch_log =~ "own-branch commit"
   end
 
   test "a conflicting base advance routes through the redispatcher seam and never resets the base",
@@ -218,6 +242,18 @@ defmodule Kazi.SerialIntegrationTest do
     echo "the converged fix" > fixed.txt
     git add fixed.txt
     git commit -q -m "task commit: converged fix"
+    exit 0
+    """)
+  end
+
+  # Checks out its OWN branch before committing the fix — the "run owns its
+  # landing" shape (a goal's own :integrate action does exactly this).
+  defp own_branch_harness(tmp_dir) do
+    write_stub(tmp_dir, "own-branch", """
+    git checkout -q -b own-branch
+    echo "the converged fix" > fixed.txt
+    git add fixed.txt
+    git commit -q -m "own-branch commit"
     exit 0
     """)
   end
