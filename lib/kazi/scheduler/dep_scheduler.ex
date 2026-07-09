@@ -119,6 +119,7 @@ defmodule Kazi.Scheduler.DepScheduler do
   alias Kazi.Goal
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
+  alias Kazi.ReadModel.PauseCheckpointStore
   alias Kazi.Scheduler
   alias Kazi.Scheduler.DagSnapshot
   alias Kazi.Scheduler.PartitionSupervisor
@@ -175,10 +176,11 @@ defmodule Kazi.Scheduler.DepScheduler do
       list of blocked dependents.
   """
   @type result :: %{
-          collective: Scheduler.collective(),
-          groups: [{Group.id(), DepGraph.state()}],
+          collective: Scheduler.collective() | :paused,
+          groups: [{Group.id(), DepGraph.state() | :pending}],
           blocked: [DepGraph.blocked_entry()],
-          escalations: [escalation()]
+          escalations: [escalation()],
+          resume_token: String.t() | nil
         }
 
   @default_reconcile_timeout :infinity
@@ -203,9 +205,23 @@ defmodule Kazi.Scheduler.DepScheduler do
     * `:on_frontier_complete` — an optional 1-arity callback invoked once per
       topological frontier as it fully settles (see moduledoc "Frontier-complete
       events"). Default `nil` (no callback — the pre-existing behavior).
+    * `:pause_between_waves` — T50.3 (ADR-0065 decision 3, issue #936 full ask):
+      once ANY frontier fully settles, stop dispatching further groups (in-flight
+      groups still finish), persist the minimal resume state, and return a
+      `:paused` collective carrying a `:resume_token` instead of continuing to
+      the next frontier. Default `false` — behavior is byte-identical without it
+      (the pinned `frontier_complete_event_test.exs` suite).
+    * `:resume_token` — resumes a previously-paused run: reloads its persisted
+      checkpoint (`Kazi.ReadModel.PauseCheckpointStore`), restores the completed
+      groups' terminal statuses, and continues dispatch from the next ready
+      frontier. The checkpoint's `goal_hash` is recomputed against `goal` and
+      compared; a mismatch REFUSES with `{:error, {:goal_changed, message}}`
+      rather than silently resuming stale work (risk R-E50-3). An unknown token
+      returns `{:error, {:resume_not_found, token}}`.
 
   Returns `{:ok, result}` (see `t:result/0`) once every group is terminal or
-  blocked, or `{:error, reason}` if the scheduler could not be started.
+  blocked (or the run paused), or `{:error, reason}` if the scheduler could not
+  be started or a resume was refused.
   """
   @spec run(Goal.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def run(%Goal{} = goal, opts) when is_list(opts) do
@@ -213,25 +229,59 @@ defmodule Kazi.Scheduler.DepScheduler do
     supervisor = Keyword.get(opts, :supervisor, PartitionSupervisor)
     timeout = Keyword.get(opts, :reconcile_timeout, @default_reconcile_timeout)
     on_frontier_complete = Keyword.get(opts, :on_frontier_complete)
+    pause_between_waves = Keyword.get(opts, :pause_between_waves, false)
+    resume_token = Keyword.get(opts, :resume_token)
 
-    init_arg = %{
-      goal: goal,
-      reconciler: reconciler,
-      supervisor: supervisor,
-      timeout: timeout,
-      on_frontier_complete: on_frontier_complete
-    }
+    with {:ok, resume_seed} <- resolve_resume_seed(goal, resume_token) do
+      init_arg = %{
+        goal: goal,
+        reconciler: reconciler,
+        supervisor: supervisor,
+        timeout: timeout,
+        on_frontier_complete: on_frontier_complete,
+        pause_between_waves: pause_between_waves,
+        resume_seed: resume_seed
+      }
 
-    case GenServer.start_link(__MODULE__, init_arg) do
-      {:ok, scheduler} ->
-        result = GenServer.call(scheduler, :await, await_call_timeout(timeout))
-        GenServer.stop(scheduler)
-        {:ok, result}
+      case GenServer.start_link(__MODULE__, init_arg) do
+        {:ok, scheduler} ->
+          result = GenServer.call(scheduler, :await, await_call_timeout(timeout))
+          GenServer.stop(scheduler)
+          {:ok, result}
 
-      {:error, _reason} = error ->
-        error
+        {:error, _reason} = error ->
+          error
+      end
     end
   end
+
+  # No :resume_token ⇒ a fresh run, no seed to restore.
+  defp resolve_resume_seed(_goal, nil), do: {:ok, nil}
+
+  defp resolve_resume_seed(goal, token) do
+    case PauseCheckpointStore.fetch(token) do
+      :error ->
+        {:error, {:resume_not_found, token}}
+
+      {:ok, checkpoint} ->
+        if checkpoint.goal_hash == PauseCheckpointStore.goal_hash(goal) do
+          PauseCheckpointStore.delete(token)
+          {:ok, decode_checkpoint(checkpoint)}
+        else
+          {:error, {:goal_changed, "goal file changed since pause; re-run instead"}}
+        end
+    end
+  end
+
+  defp decode_checkpoint(checkpoint) do
+    %{
+      states: checkpoint.states_json |> Jason.decode!() |> Map.new(&decode_status_entry/1),
+      outcomes: checkpoint.outcomes_json |> Jason.decode!() |> Map.new(&decode_status_entry/1),
+      reported_frontiers: checkpoint.reported_frontiers_json |> Jason.decode!() |> MapSet.new()
+    }
+  end
+
+  defp decode_status_entry({group_id, status}), do: {group_id, String.to_existing_atom(status)}
 
   @doc """
   True iff the goal declares any `needs` edge — i.e. its schedule is a non-trivial
@@ -252,10 +302,20 @@ defmodule Kazi.Scheduler.DepScheduler do
   def init(%{goal: goal} = arg) do
     %{reconciler: reconciler, supervisor: supervisor, timeout: timeout} = arg
     on_frontier_complete = Map.get(arg, :on_frontier_complete)
+    pause_between_waves = Map.get(arg, :pause_between_waves, false)
+    resume_seed = Map.get(arg, :resume_seed)
 
-    # Every group starts :pending (declared, unobserved). The states map is the
-    # single source of truth the planner re-evaluates against each cycle.
-    states = Map.new(goal.groups, fn %Group{id: id} -> {id, :pending} end)
+    # Every group starts :pending (declared, unobserved) — UNLESS a resume seed
+    # (T50.3) restores the completed groups' terminal statuses from a prior,
+    # separate process lifecycle's checkpoint.
+    {states, outcomes, reported_frontiers} =
+      case resume_seed do
+        nil ->
+          {Map.new(goal.groups, fn %Group{id: id} -> {id, :pending} end), %{}, MapSet.new()}
+
+        %{states: states, outcomes: outcomes, reported_frontiers: reported_frontiers} ->
+          {states, outcomes, reported_frontiers}
+      end
 
     state = %{
       goal: goal,
@@ -270,7 +330,7 @@ defmodule Kazi.Scheduler.DepScheduler do
       # group_id → its RAW reconciler terminal status (`:crashed`/`:stopped`
       # preserved), for the per-group result view. Distinct from `states`, which
       # carries the normalized planner vocabulary.
-      outcomes: %{},
+      outcomes: outcomes,
       # group_id → monitor ref for in-flight groups (so a {:DOWN, ...} resolves).
       running: %{},
       # ref → group_id, the reverse map for {:DOWN, ...}.
@@ -281,7 +341,15 @@ defmodule Kazi.Scheduler.DepScheduler do
       # the callback + which frontier indices have already fired (issue #936).
       frontiers: DepGraph.frontiers(goal),
       on_frontier_complete: on_frontier_complete,
-      reported_frontiers: MapSet.new()
+      reported_frontiers: reported_frontiers,
+      # T50.3 (ADR-0065 decision 3): pause-at-frontier-boundary state. `pause_armed`
+      # flips true the first time ANY frontier fully settles while
+      # `pause_between_waves` is set; once armed, dispatch of further groups stops.
+      # `checkpoint_token` is set once the wind-down actually persists (armed AND
+      # nothing left in flight AND the goal is not already fully settled).
+      pause_between_waves: pause_between_waves,
+      pause_armed: false,
+      checkpoint_token: nil
     }
 
     # Dispatch the first frontier (the no-needs ready set) before awaiting, so the
@@ -387,10 +455,24 @@ defmodule Kazi.Scheduler.DepScheduler do
     # N+1 dispatch this same cycle triggers.
     state = maybe_emit_frontier_events(state)
 
+    # T50.3: arm the pause the first time ANY frontier fires while
+    # `pause_between_waves` is set — once armed, no further group dispatches.
+    state = maybe_arm_pause(state)
+
     state =
-      Enum.reduce(ready, state, fn group_id, acc ->
-        start_group(acc, group_id)
-      end)
+      if state.pause_armed do
+        state
+      else
+        Enum.reduce(ready, state, fn group_id, acc ->
+          start_group(acc, group_id)
+        end)
+      end
+
+    # T50.3: once armed AND nothing is left in flight AND the goal is not
+    # already fully settled (i.e. this really is a wind-down, not a coincident
+    # final frontier), persist the minimal resume checkpoint and record its
+    # token — the wound-down terminal condition `finished_result/1` checks.
+    state = maybe_persist_pause_checkpoint(state)
 
     # Publish the post-transition DAG snapshot so the live dependency-DAG
     # dashboard (T23.7, ADR-0011) reflects the run as it progresses. This is the
@@ -610,14 +692,20 @@ defmodule Kazi.Scheduler.DepScheduler do
   end
 
   # The result once EVERY group has reached a terminal/blocked state (none
-  # :pending or :running). Until then nil — but a BLOCKED group is terminal, so a
-  # poisoned sub-DAG never keeps the run waiting (it does NOT hang).
+  # :pending or :running) — OR (T50.3) once a `:pause_between_waves` run has
+  # wound down (armed, nothing left in flight, and genuinely not fully settled).
+  # Until then nil — but a BLOCKED group is terminal, so a poisoned sub-DAG never
+  # keeps the run waiting (it does NOT hang).
   defp finished_result(state) do
-    if Enum.all?(state.goal.groups, fn %Group{id: id} -> settled?(state, id) end) do
-      build_result(state)
-    else
-      nil
+    cond do
+      fully_settled?(state) -> build_result(state)
+      state.checkpoint_token != nil -> build_paused_result(state)
+      true -> nil
     end
+  end
+
+  defp fully_settled?(state) do
+    Enum.all?(state.goal.groups, fn %Group{id: id} -> settled?(state, id) end)
   end
 
   # A group is settled once its PLANNER state is terminal/blocked (none
@@ -693,8 +781,86 @@ defmodule Kazi.Scheduler.DepScheduler do
       collective: Scheduler.collective_verdict(statuses),
       groups: groups,
       blocked: blocked,
-      escalations: escalations(blocked)
+      escalations: escalations(blocked),
+      resume_token: nil
     }
+  end
+
+  # =============================================================================
+  # Pause-between-waves (T50.3, ADR-0065 decision 3, issue #936 full ask)
+  # =============================================================================
+
+  # A run without :pause_between_waves never arms — dispatch is unaffected
+  # (byte-identical to pre-T50.3 behavior).
+  defp maybe_arm_pause(%{pause_between_waves: false} = state), do: state
+  defp maybe_arm_pause(%{pause_armed: true} = state), do: state
+
+  # Arm the instant ANY frontier has fully settled and fired — from that point
+  # on `dispatch_ready/1` starts nothing further, letting only already-in-flight
+  # groups (earlier pipelining) finish out.
+  # Detected directly off `state.frontiers` + `settled?/2` rather than
+  # `reported_frontiers` — the latter is populated ONLY when an
+  # `:on_frontier_complete` callback is injected, but pause/resume must work
+  # with or without one (an independent feature of issue #936, not a
+  # dependent of the minimal-slice streaming seam).
+  defp maybe_arm_pause(state) do
+    if Enum.any?(state.frontiers, fn group_ids -> Enum.all?(group_ids, &settled?(state, &1)) end) do
+      %{state | pause_armed: true}
+    else
+      state
+    end
+  end
+
+  # Persist the minimal resume checkpoint the moment the wind-down is REAL: armed,
+  # nothing left running, and the goal genuinely is not fully settled (armed on
+  # the very last frontier is just an ordinary converge, not a pause). Idempotent
+  # — a `checkpoint_token` already set is left alone.
+  defp maybe_persist_pause_checkpoint(
+         %{pause_armed: true, checkpoint_token: nil, running: running} = state
+       ) do
+    if Enum.empty?(running) and not fully_settled?(state) do
+      token = Ecto.UUID.generate()
+
+      {:ok, _checkpoint} =
+        PauseCheckpointStore.put(%{
+          token: token,
+          goal_hash: PauseCheckpointStore.goal_hash(state.goal),
+          states_json: Jason.encode!(state.states),
+          outcomes_json: Jason.encode!(state.outcomes),
+          reported_frontiers_json: Jason.encode!(MapSet.to_list(state.reported_frontiers))
+        })
+
+      %{state | checkpoint_token: token}
+    else
+      state
+    end
+  end
+
+  defp maybe_persist_pause_checkpoint(state), do: state
+
+  # The paused terminal result (T50.3): per-group outcomes for what settled,
+  # `:pending` for what a next `--resume` will pick up, and the resume token the
+  # caller persists/relays to the operator.
+  defp build_paused_result(state) do
+    groups =
+      Enum.map(state.goal.groups, fn %Group{id: id} ->
+        {id, paused_group_status(state, id)}
+      end)
+
+    %{
+      collective: :paused,
+      groups: groups,
+      blocked: [],
+      escalations: [],
+      resume_token: state.checkpoint_token
+    }
+  end
+
+  defp paused_group_status(state, id) do
+    case Map.get(state.outcomes, id) do
+      nil -> Map.get(state.states, id, :pending)
+      status -> status
+    end
   end
 
   # T23.5: group the flat blocked entries BY their blocking dep into explicit
