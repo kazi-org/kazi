@@ -91,10 +91,14 @@ The payload is a `{"name", "predicates": [...], "rationale"}` object (a bare JSO
 array of predicate entries is also accepted and wrapped for you). A positional
 idea is OPTIONAL in caller-drafts mode -- the predicates carry the intent.
 
-The goal id and `proposal_ref` are derived from the payload's own `"id"` (used
-verbatim) or `"name"` (slugged) -- never from a shared placeholder -- so two
-differently identified payloads coexist as distinct proposals instead of
-colliding onto one upsert slot. Re-proposing onto a `proposal_ref` that already
+kazi honors the identity fields you supply (T39.1, ADR-0049): a payload
+`"goal_id"` names the drafted goal VERBATIM (and the `proposal_ref` becomes
+`prop-<goal_id>`), and a payload `"idea"` is persisted as the proposal's idea
+and echoed in the `--json` result -- so the goal you author is the goal you can
+name, poll, and apply. Absent those, the goal id and `proposal_ref` are derived
+from the payload's own `"id"` (used verbatim) or `"name"` (slugged) -- never
+from a shared placeholder -- so two differently identified payloads coexist as
+distinct proposals instead of colliding onto one upsert slot. Re-proposing onto a `proposal_ref` that already
 holds an **approved** proposal is refused (loudly, as a JSON error) unless you
 pass `--replace`; this protects an approved goal's audit trail from being
 silently reset by an unrelated draft.
@@ -139,17 +143,22 @@ Browse the queue any time with `kazi list-proposed --json` (optionally
 `--status proposed|approved|rejected`); it emits `{schema_version, status_filter,
 count, proposals: [...]}`.
 
-> Note: `approve` returns the goal id; `kazi apply` takes a GOAL-FILE path, not a
-> goal id. `plan`/`approve` persist the approved goal into a loadable
-> goal-file -- run that file's path in Step 3.
+> Note: once approved, `kazi apply` runs the proposal DIRECTLY by its `prop-...`
+> ref (T39.2, ADR-0049) -- carry the `proposal_ref` from Step 1 through `approve`
+> straight into Step 3, never touching the filesystem. A goal-file path still
+> works exactly as before; `plan`/`approve` themselves never write one.
 
 ### Step 3 -- converge (`kazi apply --harness <cheap> --json [--stream]`)
 
-Run the approved goal with the CHEAP harness (the two-tier split):
+Run the approved goal with the CHEAP harness (the two-tier split), by the
+approved `prop-...` proposal-ref from Step 2 (or a goal-file path):
 
 ```sh
-kazi apply <goal-file> --workspace <path> --harness opencode --model local/qwen3.6 --json
+kazi apply <proposal-ref> --workspace <path> --harness opencode --model local/qwen3.6 --json
 ```
+
+A non-approved ref (still `proposed`, or `rejected`) and an unknown ref are
+clear errors with a non-zero exit -- approve first, then apply.
 
 `run --json` emits ONE terminal result object on termination (the schema below).
 The exit code mirrors convergence: `0` only on `converged`, non-zero otherwise --
@@ -161,7 +170,7 @@ run-result object (the one line with NO `event` field). Read lines until you see
 the object without an `event`; that is the terminal result you branch on:
 
 ```sh
-kazi apply <goal-file> --workspace <path> --harness opencode --json --stream
+kazi apply <proposal-ref> --workspace <path> --harness opencode --json --stream
 ```
 
 ### Step 4 -- parse the result and branch on `next_action`
