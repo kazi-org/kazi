@@ -34,7 +34,13 @@ defmodule Kazi.Authoring.RationaleAdrTest do
         metadata: %{"rationale" => rationale}
       )
 
-    %Draft{proposal_ref: ref, idea: "a /healthz endpoint", status: :proposed, goal: goal}
+    %Draft{
+      proposal_ref: ref,
+      idea: "a /healthz endpoint",
+      status: :proposed,
+      goal: goal,
+      goal_id: to_string(goal.id)
+    }
   end
 
   test "writes a well-formed ADR-lite file at the next number", %{dir: dir} do
