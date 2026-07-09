@@ -106,6 +106,11 @@ defmodule Kazi.Teach.InstallSkillTest do
 
     # The two-tier economics (the WHY).
     assert content =~ "two-tier"
+
+    # Authoring depth is the default (operator request 2026-07-09): the skill
+    # teaches dense, dispatch-sufficient predicate descriptions up front.
+    assert content =~ "Author for the grind tier"
+    assert content =~ "ONE requirement per predicate"
   end
 
   test "the body names no command kazi does not have (drift guard)", %{dir: dir} do
