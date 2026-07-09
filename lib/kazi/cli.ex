@@ -73,6 +73,7 @@ defmodule Kazi.CLI do
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.ReadModel.ProposedMemory
   alias Kazi.ReadModel.RunRegistry
+  alias Kazi.Scheduler.Worktree
   alias Kazi.Teach.InstallSkill
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -147,6 +148,7 @@ defmodule Kazi.CLI do
     session_name: :string,
     allow_primary_workspace: :boolean,
     allow_duplicate_run: :boolean,
+    in_place: :boolean,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -228,6 +230,8 @@ defmodule Kazi.CLI do
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
       "`apply` only: start this run even when the run registry already shows a LIVE run (status running, fresh heartbeat) for the same goal id. Without this flag, an executing apply refuses the duplicate -- a second concurrent apply of one goal burns a second budget and races the first's edits. Zombie rows never block (a dead run's heartbeat goes stale within ~90s); pass this flag only for a deliberate re-run alongside a live one.",
+    in_place:
+      "`apply` only (T50.1, ADR-0065): edit `--workspace` DIRECTLY instead of the default worktree-indirected serial path -- today's pre-E50 behavior. Without this flag, an executing serial (non-`--parallel`) apply creates its own task worktree off `--workspace` (kazi-owned, reused verbatim from the parallel scheduler's T21.4 machinery), dispatches the fixer there, and removes it on every terminal state, so the caller's checkout is never mutated. `--in-place` opts back into direct edits, and is the only serial mode the primary-worktree guard (`--allow-primary-workspace`) still applies to -- the default worktree-indirected path never touches the caller's checkout, so the guard has nothing to protect there.",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -278,7 +282,8 @@ defmodule Kazi.CLI do
         :context_budget,
         :session_name,
         :allow_primary_workspace,
-        :allow_duplicate_run
+        :allow_duplicate_run,
+        :in_place
       ]
     },
     %{
@@ -1222,6 +1227,7 @@ defmodule Kazi.CLI do
           session_name: flags[:session_name],
           allow_primary_workspace: flags[:allow_primary_workspace] || false,
           allow_duplicate_run: flags[:allow_duplicate_run] || false,
+          in_place: flags[:in_place] || false,
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -1637,8 +1643,11 @@ defmodule Kazi.CLI do
       # routinely holds untracked state a wipe destroys (a live incident lost a
       # concurrent session's files exactly this way; lore L-0034). Checked AFTER
       # --explain/--check (read-only, safe anywhere) and before both execution
-      # branches, so serial and --parallel are guarded alike. A non-git
-      # workspace is unaffected.
+      # branches. T50.1 (ADR-0065): the default serial path no longer touches the
+      # caller's checkout at all (it worktree-indirects, see run_goal_serial/4), so
+      # this guard now only applies to `--parallel` (still unisolated by default)
+      # and `--in-place` serial (today's direct-edit opt-out). A non-git workspace
+      # is unaffected.
       primary_workspace_refused?(goal, opts) ->
         refuse_primary_workspace(goal, opts)
 
@@ -1669,7 +1678,17 @@ defmodule Kazi.CLI do
   # way for a healthy run to break.
   defp primary_workspace_refused?(%Goal{} = goal, opts) do
     opts[:allow_primary_workspace] != true and
+      guarded_execution_path?(opts) and
       primary_worktree_root?(opts[:workspace] || goal.scope.workspace)
+  end
+
+  # T50.1 (ADR-0065): the paths that still edit the caller's workspace directly
+  # (and so still need the primary-worktree tripwire) -- `--parallel` (unisolated
+  # by default absent injected `:worktree` opts) and `--in-place` serial (the
+  # explicit direct-edit opt-out). The DEFAULT serial path (worktree-indirected)
+  # never touches the caller's checkout, so it is excluded.
+  defp guarded_execution_path?(opts) do
+    opts[:parallel] == true or opts[:in_place] == true
   end
 
   defp primary_worktree_root?(workspace) when is_binary(workspace) do
@@ -1717,9 +1736,62 @@ defmodule Kazi.CLI do
     1
   end
 
+  # T50.1 (ADR-0065): the serial path's ROUTER. `--in-place` preserves the
+  # pre-E50 behavior (dispatch directly against `--workspace`); the default
+  # now routes through `run_goal_serial_worktree/5`, which reuses the T21.4
+  # worktree machinery a `--parallel` 1-partition group already gets, just for
+  # the degenerate N=1 serial case.
   defp run_goal_serial(%Goal{} = goal, opts, persist?, runtime_opts) do
     workspace = opts[:workspace] || goal.scope.workspace
 
+    if opts[:in_place] == true do
+      run_goal_serial_dispatch(goal, opts, persist?, runtime_opts, workspace)
+    else
+      run_goal_serial_worktree(goal, opts, persist?, runtime_opts, workspace)
+    end
+  end
+
+  # T50.1: create a task worktree off `base_workspace` (kazi-owned, under the
+  # managed base dir -- `Kazi.Scheduler.Worktree.default_base_dir/0` --
+  # NEVER inside the caller's checkout), dispatch the fixer THERE via
+  # `run_goal_serial_dispatch/5`, and remove the worktree on every terminal
+  # state (converged/stuck/over_budget/crash) -- `Worktree.wrap/2` tears down
+  # in an `after`, so this covers a crash/timeout too, mirroring exactly how a
+  # parallel partition already behaves. The base checkout is never touched:
+  # `run_goal_serial_dispatch/5` runs entirely against the worktree path, and
+  # `Worktree.safe_cleanup/3` refuses to `rm` a cwd/repo path (the T21.4
+  # guard, unchanged).
+  #
+  # `run_goal_serial_dispatch/5`'s return is an exit code (an integer), never
+  # the atom `:stuck` -- so `:stuck` unambiguously means `Worktree.wrap/2`
+  # itself failed to CREATE the worktree (never reached dispatch at all).
+  defp run_goal_serial_worktree(%Goal{} = goal, opts, persist?, runtime_opts, base_workspace) do
+    {worktree_overrides, runtime_opts} = Keyword.pop(runtime_opts, :worktree, [])
+    worktree_opts = Keyword.put_new(worktree_overrides, :repo, base_workspace)
+
+    partition = %{key: goal.id}
+
+    inner = fn _partition, worktree_path ->
+      run_goal_serial_dispatch(goal, opts, persist?, runtime_opts, worktree_path)
+    end
+
+    case Worktree.wrap(inner, worktree_opts).(partition) do
+      :stuck ->
+        report_run_error(goal, {:worktree_create_failed, base_workspace}, opts[:json] == true)
+        1
+
+      exit_code when is_integer(exit_code) ->
+        exit_code
+    end
+  end
+
+  # The pre-E50 serial dispatch, unchanged, now parameterized on the
+  # WORKSPACE it actually runs against: `--in-place` passes the caller's own
+  # `--workspace`; the default worktree-indirected path (above) passes the
+  # freshly-created worktree path instead, so predicates, the harness
+  # dispatch, the economy rollup, and the reported `collateral` diff all see
+  # the SAME (isolated) tree.
+  defp run_goal_serial_dispatch(%Goal{} = goal, opts, persist?, runtime_opts, workspace) do
     # The caller's static run config; CLI-owned keys (workspace/persist?) win, and
     # an explicit :persist? in runtime_opts can still override (tests).
     #
@@ -2279,6 +2351,16 @@ defmodule Kazi.CLI do
       "edits. Wait for it (kazi status <goal-id>), stop it, or pass " <>
       "--allow-duplicate-run for a deliberate re-run alongside it. A dead run " <>
       "stops blocking on its own once its heartbeat goes stale (~90s)."
+  end
+
+  # T50.1 (ADR-0065): `Kazi.Scheduler.Worktree.wrap/2` could not create the
+  # task worktree for the default serial worktree-indirected path -- nothing
+  # was dispatched, and (unlike every other run error) the workspace itself
+  # was never touched either.
+  defp format_run_error({:worktree_create_failed, workspace}) do
+    "could not create a task worktree off #{workspace} (T50.1); nothing was " <>
+      "dispatched, and the workspace was not touched. Pass --in-place to edit " <>
+      "the workspace directly instead."
   end
 
   defp format_run_error(other), do: inspect(other)
