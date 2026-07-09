@@ -215,8 +215,11 @@ the verdict; if the landing ultimately fails, the run exits 1 even though
 (`integration.task_branch`) in the base repo -- the work is never silently
 dropped. An agent that converged without committing lands nothing (the base
 stays byte-identical); pair the goal with a `landed` predicate to make commit
-discipline part of convergence. `--in-place` opts out of the whole indirection
-and edits `--workspace` directly, pre-T50.1 style.
+discipline part of convergence. A goal whose own `:integrate` action already
+landed the work on the remote mid-run (ADR-0055, e.g. a goal with live
+predicates) is not double-integrated -- the landing step only touches the
+kazi-owned task branch. `--in-place` opts out of the whole indirection and
+edits `--workspace` directly, pre-T50.1 style.
 
 For a LONG convergence, add `--stream` for a JSONL progress stream -- one
 `{"event": "iteration", ...}` line per loop iteration, TERMINATED by the final
