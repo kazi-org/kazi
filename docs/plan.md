@@ -309,6 +309,13 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E49 -- Scenario predicates: capability-level verification by demonstrate-then-pin (P1, ADR-0064) -> plans/E49.md
 ### E50 -- Safe concurrent work: serial worktree indirection, wave checkpoints, fleets over goal-files (P1, ADR-0065) -> plans/E50.md
+
+### E51 -- Session coordination bus: `kazi daemon` + bus primitives on the JetStream substrate (P1, ADR-0067) -> plans/E51.md
+
+### E52 -- The daemon becomes the single writer for the read-model (P2, ADR-0068) -> plans/E52.md
+
+### E53 -- Reliability hardening: the four open runtime bugs from the E50 execution sweep (P0/P1) -> plans/E53.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -405,6 +412,27 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-10 -- Change Summary (E50 execution swept done; E51/E52/E53 planned off ADR-0067/0068 + the bug triage)
+- E50 executed: T50.1-T50.6 + T50.8 marked done (goals 0013-0019 driven via
+  `kazi apply`; PRs #1016/#1026/#999/#1010/#1031/#1033/#1029, all rebase-merged,
+  released through v1.136.0). T50.7 (live fleet dogfood on the released binary)
+  is the epic's only open task and is scheduled to run AS the E51 Wave-A fleet.
+- ADR-0067 (session coordination bus) + ADR-0068 (daemon single-writer
+  read-model) written and Accepted (PR #1035). New epics: E51 (executable --
+  daemon lifecycle, bus MVP over supervised nats-server, surfaces; Wave A =
+  T51.1->T51.2->T51.3), E52 (outline -- single planning task gated on the E51
+  daemon shapes, rolling-wave rule), E53 (executable -- the four triaged
+  runtime bugs #1027/#1022/#1020/#1013 as tasks T53.1-T53.4, Wave E53-1
+  ordered to unblock landings then CI trust).
+- Goal-files 0020-0023 (E53) and 0024-0026 (E51 Wave A, with `[metadata]
+  depends_on` + `[scope]` so the batch doubles as the T50.7 fleet DAG)
+  authored in this change; new-goal `landed` predicates pin the NAMED task
+  branch (the #1027 fix-direction-2 shape) so runs cannot loop or
+  false-converge on a substituted integrate branch.
+- Bug triage recorded on GitHub: #1018 closed (fixed v1.131.2), #1006
+  reclassified enhancement, #1005 annotated shipped-pending-dogfood,
+  bug labels added to #1027/#1020/#1019.
 
 ### 2026-07-09 -- Change Summary (E50 second pass: ADR-0065 decision 5 -- mutating-verb coverage + fresh-base guard; goal batch PR #994)
 - Operator observation while authoring the E50 goal batch: the planning session
