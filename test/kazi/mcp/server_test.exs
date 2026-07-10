@@ -63,7 +63,7 @@ defmodule Kazi.MCP.ServerTest do
   end
 
   describe "tools/list — self-describing tools" do
-    test "returns the five primary kazi tools, each with name + description + inputSchema" do
+    test "returns the primary kazi tools, each with name + description + inputSchema" do
       response = Server.handle_request(request("tools/list", %{}, 2))
       tools = response["result"]["tools"]
 
@@ -72,9 +72,14 @@ defmodule Kazi.MCP.ServerTest do
       # T27.5/T27.9 (ADR-0032): the tool names match the CLI verbs —
       # `kazi_plan`/`kazi_apply` (was `kazi_propose`/`kazi_run`). The deprecated
       # `kazi_propose`/`kazi_run` tool aliases were REMOVED in v0.6.0 (T27.9).
+      # T51.3 (ADR-0067) added the four session-bus tools alongside these five.
       assert names == [
                "kazi_apply",
                "kazi_approve",
+               "kazi_bus_post",
+               "kazi_bus_read",
+               "kazi_bus_tell",
+               "kazi_bus_who",
                "kazi_list_proposed",
                "kazi_plan",
                "kazi_status"

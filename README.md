@@ -851,8 +851,12 @@ kazi version                                 # print the kazi version and exit
 
 > **Drive kazi over MCP (preferred).** An MCP-speaking harness wires kazi as an MCP
 > server and drives its self-describing `kazi_plan` / `kazi_approve` / `kazi_apply` /
-> `kazi_status` tools — no JSON-CLI shell-out. The canonical client config references
-> the installed binary verb (`kazi init --with-mcp` writes exactly this `.mcp.json`):
+> `kazi_status` / `kazi_list_proposed` tools — no JSON-CLI shell-out. The same server
+> also exposes the session-bus verbs (ADR-0067) as `kazi_bus_post` / `kazi_bus_read` /
+> `kazi_bus_who` / `kazi_bus_tell`, mirroring `kazi bus post|read|who|tell` — each
+> requires a running `kazi daemon` and reports a structured `no_daemon` tool error
+> otherwise. The canonical client config references the installed binary verb
+> (`kazi init --with-mcp` writes exactly this `.mcp.json`):
 >
 > ```json
 > { "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }

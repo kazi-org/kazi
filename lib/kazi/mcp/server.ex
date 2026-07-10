@@ -50,6 +50,7 @@ defmodule Kazi.MCP.Server do
   """
 
   alias Kazi.Authoring
+  alias Kazi.Bus
   alias Kazi.CLI.Schema
   alias Kazi.Goal
   alias Kazi.Goal.Loader
@@ -212,6 +213,79 @@ defmodule Kazi.MCP.Server do
             }
           }
         }
+      },
+      %{
+        "name" => "kazi_bus_post",
+        "description" =>
+          "Post a message to the session bus (ADR-0067), over a running `kazi daemon`. " <>
+            "Requires `kind` and `text` (capped at 1024 bytes client-side). Returns " <>
+            "{ok: true} on success, or a structured error (no_daemon when no daemon is " <>
+            "running -- start one with `kazi daemon start`).",
+        "inputSchema" => %{
+          "type" => "object",
+          "required" => ["kind", "text"],
+          "properties" => %{
+            "kind" => %{"type" => "string", "description" => "The message kind, e.g. \"note\"."},
+            "text" => %{"type" => "string", "description" => "The message body (max 1024 bytes)."},
+            "topic" => %{"type" => "string", "description" => "Optional subject topic."},
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            },
+            "sev" => %{"type" => "string", "description" => "Severity, default \"info\"."}
+          }
+        }
+      },
+      %{
+        "name" => "kazi_bus_read",
+        "description" =>
+          "Pull all currently-available messages off this session's durable bus consumer " <>
+            "(ADR-0067), acking them so a second read returns nothing new. Returns " <>
+            "{ok: true, messages: [...]}, or a structured error (no_daemon).",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            }
+          }
+        }
+      },
+      %{
+        "name" => "kazi_bus_who",
+        "description" =>
+          "List sessions that have posted presence to the bus (ADR-0067). Returns " <>
+            "{ok: true, sessions: [...]}, or a structured error (no_daemon).",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            }
+          }
+        }
+      },
+      %{
+        "name" => "kazi_bus_tell",
+        "description" =>
+          "Post a message directed at one named session (ADR-0067). Requires `session` and " <>
+            "`text` (capped at 1024 bytes client-side). Returns {ok: true}, or a structured " <>
+            "error (no_daemon).",
+        "inputSchema" => %{
+          "type" => "object",
+          "required" => ["session", "text"],
+          "properties" => %{
+            "session" => %{"type" => "string", "description" => "The target session id."},
+            "text" => %{"type" => "string", "description" => "The message body (max 1024 bytes)."},
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            },
+            "sev" => %{"type" => "string", "description" => "Severity, default \"info\"."}
+          }
+        }
       }
     ]
   end
@@ -358,8 +432,88 @@ defmodule Kazi.MCP.Server do
     {:ok, list_proposed_result(proposals)}
   end
 
+  defp call_tool("kazi_bus_post", args, opts) do
+    with {:ok, kind} <- fetch_string_or(args, "kind", "kazi_bus_post requires `kind`"),
+         {:ok, text} <- fetch_string_or(args, "text", "kazi_bus_post requires `text`") do
+      case Bus.post(kind, text, bus_opts(args, opts)) do
+        :ok -> {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true}}
+        {:error, reason} -> {:tool_error, bus_error(reason)}
+      end
+    end
+  end
+
+  defp call_tool("kazi_bus_read", args, opts) do
+    case Bus.read(bus_opts(args, opts)) do
+      {:ok, messages} ->
+        {:ok,
+         %{"schema_version" => Schema.schema_version(), "ok" => true, "messages" => messages}}
+
+      {:error, reason} ->
+        {:tool_error, bus_error(reason)}
+    end
+  end
+
+  defp call_tool("kazi_bus_who", args, opts) do
+    case Bus.who(bus_opts(args, opts)) do
+      {:ok, sessions} ->
+        {:ok,
+         %{"schema_version" => Schema.schema_version(), "ok" => true, "sessions" => sessions}}
+
+      {:error, reason} ->
+        {:tool_error, bus_error(reason)}
+    end
+  end
+
+  defp call_tool("kazi_bus_tell", args, opts) do
+    with {:ok, session} <- fetch_string_or(args, "session", "kazi_bus_tell requires `session`"),
+         {:ok, text} <- fetch_string_or(args, "text", "kazi_bus_tell requires `text`") do
+      case Bus.tell(session, text, bus_opts(args, opts)) do
+        :ok -> {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true}}
+        {:error, reason} -> {:tool_error, bus_error(reason)}
+      end
+    end
+  end
+
   defp call_tool(name, _args, _opts) do
     {:error, @method_not_found, "unknown tool: #{inspect(name)}"}
+  end
+
+  # The bus tools' `opts` -- scope/topic/sev from the tool arguments, plus any
+  # test-only seams (`:conn`, `:sock_path`) a caller injected via `opts` (mirrors
+  # the `:harness`/`:adapter_opts` seams `kazi_plan`/`kazi_apply` take).
+  defp bus_opts(args, opts) do
+    opts
+    |> Keyword.take([:conn, :sock_path])
+    |> maybe_put_opt(:scope, Map.get(args, "scope"))
+    |> maybe_put_opt(:topic, Map.get(args, "topic"))
+    |> maybe_put_opt(:sev, Map.get(args, "sev"))
+  end
+
+  defp bus_error(:no_daemon) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" => "no daemon running -- start one with `kazi daemon start`",
+      "reason" => "no_daemon"
+    }
+  end
+
+  defp bus_error({:text_too_large, cap}) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" => "message exceeds the #{cap}-byte bus cap",
+      "reason" => "text_too_large"
+    }
+  end
+
+  defp bus_error(reason) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" => "bus error: #{inspect(reason)}",
+      "reason" => reason_string(reason)
+    }
   end
 
   # --- goal loading (kazi_apply) ---------------------------------------------
@@ -672,6 +826,13 @@ defmodule Kazi.MCP.Server do
     case Map.get(args, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
       _ -> :error
+    end
+  end
+
+  defp fetch_string_or(args, key, message) do
+    case fetch_string(args, key) do
+      {:ok, value} -> {:ok, value}
+      :error -> {:error, @invalid_params, message}
     end
   end
 
