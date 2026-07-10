@@ -28,7 +28,7 @@ defmodule Kazi.Daemon.Listener do
 
   alias Kazi.Daemon.Control
 
-  defstruct [:sock_path, :pid_path, :listen_socket, :acceptor, :started_at, :sup_pid]
+  defstruct [:sock_path, :pid_path, :listen_socket, :acceptor, :started_at, :sup_pid, :nats_name]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -43,6 +43,7 @@ defmodule Kazi.Daemon.Listener do
     sock_path = Keyword.fetch!(opts, :sock_path)
     pid_path = Keyword.fetch!(opts, :pid_path)
     sup_pid = Keyword.get(opts, :sup_pid)
+    nats_name = Keyword.get(opts, :nats_name, Kazi.Daemon.Nats)
 
     File.mkdir_p!(Path.dirname(sock_path))
     File.mkdir_p!(Path.dirname(pid_path))
@@ -64,7 +65,7 @@ defmodule Kazi.Daemon.Listener do
         File.write!(pid_path, to_string(os_pid()))
 
         owner = self()
-        acceptor = spawn_link(fn -> accept_loop(listen_socket, owner, started_at) end)
+        acceptor = spawn_link(fn -> accept_loop(listen_socket, owner, started_at, nats_name) end)
 
         {:ok,
          %__MODULE__{
@@ -73,7 +74,8 @@ defmodule Kazi.Daemon.Listener do
            listen_socket: listen_socket,
            acceptor: acceptor,
            started_at: started_at,
-           sup_pid: sup_pid
+           sup_pid: sup_pid,
+           nats_name: nats_name
          }}
 
       {:error, reason} ->
@@ -100,25 +102,25 @@ defmodule Kazi.Daemon.Listener do
     :ok
   end
 
-  defp accept_loop(listen_socket, owner, started_at) do
+  defp accept_loop(listen_socket, owner, started_at, nats_name) do
     case :gen_tcp.accept(listen_socket) do
       {:ok, socket} ->
-        spawn(fn -> handle_conn(socket, owner, started_at) end)
-        accept_loop(listen_socket, owner, started_at)
+        spawn(fn -> handle_conn(socket, owner, started_at, nats_name) end)
+        accept_loop(listen_socket, owner, started_at, nats_name)
 
       {:error, :closed} ->
         :ok
 
       {:error, reason} ->
         Logger.warning("kazi daemon: accept failed: #{inspect(reason)}")
-        accept_loop(listen_socket, owner, started_at)
+        accept_loop(listen_socket, owner, started_at, nats_name)
     end
   end
 
-  defp handle_conn(socket, owner, started_at) do
+  defp handle_conn(socket, owner, started_at, nats_name) do
     with {:ok, line} <- :gen_tcp.recv(socket, 0, 5000),
          {:ok, request} <- Jason.decode(line) do
-      response = Control.handle(request, started_at: started_at)
+      response = Control.handle(request, started_at: started_at, nats_name: nats_name)
       _ = :gen_tcp.send(socket, Jason.encode!(response) <> "\n")
       if request["op"] == "shutdown", do: send(owner, :shutdown_requested)
     else

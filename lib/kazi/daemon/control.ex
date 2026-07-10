@@ -21,7 +21,8 @@ defmodule Kazi.Daemon.Control do
       "ok" => true,
       "vsn" => vsn(),
       "uptime_s" => uptime_s(Keyword.get(opts, :started_at)),
-      "pid" => os_pid()
+      "pid" => os_pid(),
+      "nats_port" => nats_port(Keyword.get(opts, :nats_name))
     }
   end
 
@@ -42,4 +43,12 @@ defmodule Kazi.Daemon.Control do
 
   defp uptime_s(nil), do: 0
   defp uptime_s(started_at), do: max(System.monotonic_time(:second) - started_at, 0)
+
+  defp nats_port(nil), do: nil
+
+  defp nats_port(nats_name) do
+    Kazi.Daemon.Nats.port(nats_name)
+  catch
+    :exit, _ -> nil
+  end
 end

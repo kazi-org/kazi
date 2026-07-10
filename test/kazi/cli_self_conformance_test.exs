@@ -495,6 +495,9 @@ defmodule Kazi.CLISelfConformanceTest do
         # `daemon` requires a <subcommand>; probe with `status` -- a pure
         # parse, never starts anything (T51.1).
         "daemon" -> ["daemon", "status"]
+        # `bus` requires a <subcommand>; `read`/`who` take no positional args,
+        # so this is a pure parse, never connects to anything (T51.2).
+        "bus" -> ["bus", "read"]
         _ -> [name]
       end
 
