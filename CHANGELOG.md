@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.136.0](https://github.com/kazi-org/kazi/compare/v1.135.0...v1.136.0) (2026-07-10)
+
+
+### Features
+
+* **cli:** surface --pause-between-waves/--resume as documented flags (T50.6) ([81b7a70](https://github.com/kazi-org/kazi/commit/81b7a70de016e16492e4229aaf1b7a14d8f43acf))
+
 ## [1.135.0](https://github.com/kazi-org/kazi/compare/v1.134.0...v1.135.0) (2026-07-10)
 
 
