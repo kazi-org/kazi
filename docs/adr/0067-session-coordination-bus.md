@@ -1,7 +1,7 @@
 # ADR 0067: Session coordination bus -- operator sessions become first-class participants on the JetStream substrate
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-07-10

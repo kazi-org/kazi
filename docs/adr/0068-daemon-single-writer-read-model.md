@@ -1,7 +1,7 @@
 # ADR 0068: The kazi daemon is the single writer for the read-model
 
 ## Status
-Proposed (builds on the `kazi daemon` introduced in ADR-0067; independently
+Accepted (builds on the `kazi daemon` introduced in ADR-0067; independently
 acceptable -- the daemon could ship with this role alone)
 
 ## Date
