@@ -1,0 +1,72 @@
+# E51/T51.1 (ADR-0067). First node of the E51 Wave-A fleet DAG (0024 -> 0025 -> 0026).
+# Conflict surface: lib/kazi/cli.ex (command wiring), new lib/kazi/daemon/.
+
+id = "daemon-skeleton"
+name = "T51.1: `kazi daemon start|stop|status` -- lifecycle + Unix-socket control plane with a version handshake (ADR-0067, no NATS yet)"
+
+[metadata]
+epic = "E51"
+task = "T51.1"
+
+[scope]
+paths = ["lib/kazi/daemon/", "lib/kazi/cli.ex", "test/kazi/daemon/"]
+
+[[predicate]]
+id = "daemon-lifecycle-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E51 task T51.1, ADR-0067 -- read docs/adr/0067-session-coordination-bus.md first; this task builds ONLY decision point 1's lifecycle skeleton, NO NATS, NO bus).
+
+WHY: ADR-0067 introduces a long-lived per-machine `kazi daemon` that will host the session bus (and later, per ADR-0068, own the read-model). This task lands the daemon's skeleton: process lifecycle + a local control plane other kazi processes can discover and query. Keeping NATS out of this task makes it hermetically testable and gives goal 0025 a stable seam.
+
+BUILD THIS:
+(1) New `Kazi.Daemon` supervision tree (new dir lib/kazi/daemon/): a supervisor + a control-socket listener. The listener accepts connections on a Unix domain socket at `~/.kazi/daemon/daemon.sock` (`:gen_tcp.listen(0, [{:ifaddr, {:local, path}}, :binary, packet: :line, ...])`; create the dir; remove a pre-existing socket file only after probing it is dead -- see (4)). Protocol: line-delimited JSON. Implement one request now: `{"op":"ping"}` -> `{"ok":true,"vsn":"<Application.spec(:kazi,:vsn)>","uptime_s":N,"pid":<os pid>}`; unknown ops -> `{"ok":false,"error":"unknown_op"}`. Keep the protocol handling in its own module (Kazi.Daemon.Control) so 0025 can add ops without touching the listener.
+(2) A pidfile at `~/.kazi/daemon/daemon.pid` written on start, removed on clean stop.
+(3) CLI command group `kazi daemon <start|stop|status>` -- wire exactly like the existing `kazi dashboard` command (lib/kazi/cli.ex ~1013 region: command table, help text, dispatch). `start`: runs the daemon supervision tree in the FOREGROUND (the operator backgrounds it -- same convention as `kazi dashboard`; print a one-line "kazi daemon listening on <sock> (vsn X)" then block). `status`: connect to the socket, send ping, print the handshake human-readably; `--json` prints the raw response object. `stop`: send `{"op":"shutdown"}`; the daemon replies `{"ok":true}` then exits cleanly (supervisor stop), removing socket + pidfile.
+(4) Down/stale handling: `status`/`stop` with no socket file -> one clear line ("no daemon running (no socket at <path>)") exit 1 (and under --json a JSON error object -- follow the CLI's existing --json error idiom). A socket FILE present but connection refused (dead daemon) -> report stale, remove the stale socket + pidfile, exit 1 with a line saying it was cleaned. `start` when a LIVE daemon already holds the socket -> refuse with "daemon already running (vsn X)".
+(5) The daemon does NOT start in normal kazi invocations -- only under `kazi daemon start`. Nothing else in the codebase may depend on it (ADR-0067: convergence never depends on the bus).
+
+WRITE test/kazi/daemon/daemon_lifecycle_test.exs (in-test supervision tree, NOT the released binary; use a tmp dir for socket/pidfile paths -- make the paths configurable via opts to the supervisor, defaulting to ~/.kazi/daemon/): (1) start the tree, connect, ping -> vsn matches Application.spec, uptime present; (2) shutdown op -> tree terminates, socket + pidfile gone; (3) status-style connect against a missing socket path errors distinctly; (4) a stale socket file (create the file, no listener) is detected as dead (connect refused) -- the probe helper reports :stale, and the CLI path cleans it; (5) double-start against a live socket refuses. Plus a CLI-level test if the existing dashboard command has one to mirror (grep test/ for the dashboard command's test pattern).
+
+DOCS LAND WITH CODE (ADR-0034): `kazi help` text for the new command group (all three verbs + --json); a new docs/session-bus.md is NOT this task (0026 owns it) -- instead add the daemon lifecycle section stub to `kazi help daemon` output and cross-reference ADR-0067 in the moduledoc. AGENTS.md: add `kazi daemon` to the command surface list (the teach-coherence guard reds the suite if a new command is missing there -- issue #973 landmine).
+
+PROCESS: branch task/daemon-skeleton off main; small conventional commits (lib/ vs test/ vs docs/AGENTS.md separate); push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/daemon/daemon_lifecycle_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "teach-coherence-green"
+provider = "custom_script"
+description = "GUARD: the AGENTS.md/SKILL coherence guard stays green (new command must be taught)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/teach_coherence_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The NAMED task branch exists, is pushed, and is current with its remote (pinned to the branch, not HEAD)."
+cmd = "sh"
+args = ["-c", 'git rev-parse --verify refs/heads/task/daemon-skeleton >/dev/null 2>&1 && git rev-parse --verify refs/remotes/origin/task/daemon-skeleton >/dev/null 2>&1 && [ "$(git rev-parse task/daemon-skeleton)" = "$(git rev-parse origin/task/daemon-skeleton)" ] && [ -n "$(git log --oneline origin/main..task/daemon-skeleton)" ]']
+timeout_ms = 30000

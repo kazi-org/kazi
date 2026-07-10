@@ -1,0 +1,61 @@
+# E53/T53.4 (issue #1013). Independent of 0020/0021/0022 (run-registry seam).
+# Conflict surface: lib/kazi/loop.ex (dispatch report path), lib/kazi/read_model/run_registry.ex.
+
+id = "session-id-capture-deflake"
+name = "T53.4: harness session-id capture is synchronous-or-drained with WARN logging on every silent drop point; the wiring test awaits the projection (issue #1013)"
+
+[metadata]
+epic = "E53"
+task = "T53.4"
+
+[scope]
+paths = ["lib/kazi/loop.ex", "lib/kazi/read_model/run_registry.ex", "lib/kazi/runtime.ex", "test/kazi/integration/"]
+
+[[predicate]]
+id = "session-id-deflake-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E53 task T53.4, issue #1013 -- READ THE FULL ISSUE THREAD FIRST: `gh issue view 1013 --repo kazi-org/kazi --comments`. The first theory in the comments was DISPROVEN by the second comment; do not re-derive the disproven fix.)
+
+WHY: test/kazi/integration/run_registry_wiring_test.exs:58 ("the run row captures --session-name and the harness envelope's session_id") reds roughly half of Linux CI runs -- including 3/3 consecutive runs on a DOCS-ONLY PR (2026-07-10) -- while passing locally every time. The cause is unidentified: the dispatch IS synchronous in the loop (`data.harness.run/3` blocks; `record_counters` folds session_id into loop state before re-observation), and no best-effort-write warnings appear in CI logs, so a silently swallowed drop point is suspected but unconfirmed. This task hardens the path with belt, suspenders, and INSTRUMENTATION so post-merge CI either goes quiet or names the actual drop point.
+
+BUILD THIS, three layers:
+(1) ORDERING GUARANTEE (belt): trace the path session_id takes from the harness envelope parse to the run-registry row (grep `harness_session_id` across lib/kazi/loop.ex, lib/kazi/read_model/run_registry.ex, lib/kazi/runtime.ex). Ensure the registry write carrying session_id happens-before (or is folded into) the run's terminal projection: either record it synchronously on the dispatch-completion path, or have the finalize/terminal projection drain any pending session-id state first. If reading the code shows this ordering ALREADY holds unconditionally, document WHY in a comment at the seam and say so honestly in the commit body -- do not add a redundant mechanism.
+(2) INSTRUMENTATION (the floor -- this must land regardless): every point on that path where a session_id can vanish SILENTLY gets a `Logger.warning` naming exactly what was dropped and why: the envelope parse yielding no session_id (log a prefix of the raw envelope line), a registry write swallowed as best-effort (log the error struct), a nil session at fold time. These WARNs are the diagnostic payload for the still-unexplained Linux-CI reds.
+(3) TEST HARDENING (suspenders): in test/kazi/integration/run_registry_wiring_test.exs, replace any immediate-read assertion on the row with an await/poll (the suite has an eventually-style helper -- grep test/support/ for it; add a small one if missing) so a legitimately-async projection cannot red the test; keep the assertion content identical (session name + envelope session_id captured).
+
+WRITE/EXTEND tests: (1) the hardened wiring test passes 30 consecutive runs locally -- the verification predicate below loops it, so make it genuinely stable, not retried; (2) a unit test pinning each WARN call site fires on its trigger (envelope without session_id -> warn; registry write error injected -> warn) via ExUnit's capture_log; (3) full suite green.
+
+DOCS: none needed (internal diagnosability); state [no-docs] in the commit body. DO comment on issue #1013 in the PR body text (the PR description should say the WARNs are the tracer for the next CI red).
+
+PROCESS: branch task/session-id-capture-deflake off main; small conventional commits; push with -u. This predicate passes when the wiring test survives 30 consecutive runs.
+"""
+cmd = "sh"
+args = ["-c", 'i=1; while [ $i -le 30 ]; do env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/integration/run_registry_wiring_test.exs || exit 1; i=$((i+1)); done']
+timeout_ms = 1800000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The NAMED task branch exists, is pushed, and is current with its remote (pinned to the branch, not HEAD)."
+cmd = "sh"
+args = ["-c", 'git rev-parse --verify refs/heads/task/session-id-capture-deflake >/dev/null 2>&1 && git rev-parse --verify refs/remotes/origin/task/session-id-capture-deflake >/dev/null 2>&1 && [ "$(git rev-parse task/session-id-capture-deflake)" = "$(git rev-parse origin/task/session-id-capture-deflake)" ] && [ -n "$(git log --oneline origin/main..task/session-id-capture-deflake)" ]']
+timeout_ms = 30000
