@@ -431,6 +431,9 @@ defmodule Kazi.Loop do
               # failing-set stop and the pre-existing code `error_stuck?` (M5)
               # stop — see `cause_for/2`.
               stuck_cause: nil,
+              # T53.2 (#1022): opt-in workspace-liveness precheck (see `init/1`).
+              # Appended last so the existing field order is untouched.
+              check_workspace_liveness: false,
               # --- T1.2 regression: dispatch log + flagged regressions --------
               # Append-only log of {iteration_index, %Action{}} for every agent
               # dispatch, where iteration_index is the observation index the loop
@@ -979,7 +982,14 @@ defmodule Kazi.Loop do
       # no non-progress the active tier stays at the base, so the dispatch path is
       # byte-identical to before until a stall is detected.
       escalation_config: escalation_config,
-      escalation_state: Escalation.init(Tier.resolve(adapter_opts), escalation_config)
+      escalation_state: Escalation.init(Tier.resolve(adapter_opts), escalation_config),
+      # T53.2 (#1022): opt-in workspace-liveness precheck, default false. Many
+      # callers (tests, fixture-path loops) pass a `:workspace` that names a
+      # target for context threading only and is never expected to exist on
+      # disk — checking existence there would be a false positive, not a
+      # detection. `Kazi.Runtime` turns this on for every REAL `kazi apply`,
+      # where the workspace is an actual checkout that can actually vanish.
+      check_workspace_liveness: Keyword.get(opts, :check_workspace_liveness, false)
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -1009,16 +1019,27 @@ defmodule Kazi.Loop do
   # iteration.
   @impl :gen_statem
   def handle_event(:internal, :observe, :observing, %Data{} = data) do
-    # T1.4 budget: the hard ceiling is checked ONCE at the start of every tick,
-    # BEFORE observing/dispatching more work. If a dimension is exceeded the loop
-    # makes a hard stop here — it does not dispatch another agent / integrate /
-    # deploy — terminating as :over_budget with the exceeded dimension as reason.
-    case budget_check(data) do
-      {:stop, reason} ->
-        terminate_over_budget(reason, data)
+    # T53.2 (#1022): checked BEFORE budget/observe — a vanished workspace is a
+    # distinct fatal cause, not just another failing observation. Grinding
+    # predicate iterations (or burning budget) against a dead path can never
+    # converge, so the loop stops immediately with a named remedy instead.
+    case workspace_missing_check(data) do
+      {:missing, remedy} ->
+        terminate_workspace_missing(remedy, data)
 
       :ok ->
-        observe_tick(data)
+        # T1.4 budget: the hard ceiling is checked ONCE at the start of every
+        # tick, BEFORE observing/dispatching more work. If a dimension is
+        # exceeded the loop makes a hard stop here — it does not dispatch
+        # another agent / integrate / deploy — terminating as :over_budget
+        # with the exceeded dimension as reason.
+        case budget_check(data) do
+          {:stop, reason} ->
+            terminate_over_budget(reason, data)
+
+          :ok ->
+            observe_tick(data)
+        end
     end
   end
 
@@ -2994,6 +3015,73 @@ defmodule Kazi.Loop do
     notify_escalation(data, failing)
     notify_stuck_stop(data)
     terminate_with(:stopped, data)
+  end
+
+  # T53.2 (#1022): does `data.workspace` still exist as a usable git working
+  # tree? `nil` (a workspaceless loop) is always `:ok` — nothing to probe. A
+  # missing directory, or `git rev-parse` failing with the not-a-repository /
+  # deleted-cwd exit-128 signature (the shape `.git/worktrees` admin data left
+  # behind looks like once its checkout is gone), both count as `:missing`
+  # with a one-line remedy naming the exact restore path from issue #1022.
+  @spec workspace_missing_check(Data.t()) :: :ok | {:missing, String.t()}
+  defp workspace_missing_check(%Data{check_workspace_liveness: false}), do: :ok
+  defp workspace_missing_check(%Data{workspace: nil}), do: :ok
+
+  defp workspace_missing_check(%Data{workspace: workspace}) do
+    cond do
+      not File.dir?(workspace) ->
+        {:missing, workspace_missing_remedy(workspace)}
+
+      git_worktree_gone?(workspace) ->
+        {:missing, workspace_missing_remedy(workspace)}
+
+      true ->
+        :ok
+    end
+  end
+
+  # `File.dir?/1` already caught the plain "directory is gone" case above; this
+  # catches the narrower #1022 signature — the workspace dir still resolves at
+  # the FS level (e.g. a race, or a `.git/worktrees` admin entry pointing at a
+  # path some OTHER process is mid-way through deleting) but git itself can no
+  # longer read its own cwd there. Deliberately NOT "not a git repository" —
+  # plenty of real, live workspaces (non-git fixtures/tests) are never git
+  # repos to begin with, so that alone is not evidence of a vanished worktree.
+  # Never a fetch, never a network call.
+  defp git_worktree_gone?(workspace) do
+    case System.cmd("git", ["rev-parse", "--is-inside-work-tree"],
+           cd: workspace,
+           stderr_to_stdout: true
+         ) do
+      {_out, 0} -> false
+      {out, 128} -> out =~ "unable to read current working directory"
+      {_out, _status} -> false
+    end
+  rescue
+    _ -> true
+  end
+
+  # The one-line remedy surfaced in the terminal result: the `.git/worktrees`
+  # admin-data restore path from issue #1022, not a re-dispatch (grinding more
+  # agent iterations against a dead path fixes nothing).
+  defp workspace_missing_remedy(workspace) do
+    "workspace #{workspace} is gone; restore it from the source repo's " <>
+      ".git/worktrees admin data (issue #1022) — do not re-dispatch against a dead path"
+  end
+
+  # T53.2 (#1022): a distinct fatal stop, reusing the T1.5 stuck machinery
+  # (same escalation/notify/terminate path) with an explicit :workspace_missing
+  # cause and its remedy carried in `stuck_reasons` — the same shape
+  # `Kazi.Loop.CauseClass.format/2` already renders for `:error_wedged`.
+  @spec terminate_workspace_missing(String.t(), Data.t()) ::
+          :gen_statem.event_handler_result(atom())
+  defp terminate_workspace_missing(remedy, %Data{} = data) do
+    terminate_stuck(
+      MapSet.new([:workspace]),
+      data,
+      %{workspace: remedy},
+      :workspace_missing
+    )
   end
 
   # Fire the human-escalation callback with the stuck context (the persistent

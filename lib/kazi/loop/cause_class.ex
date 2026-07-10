@@ -27,6 +27,14 @@ defmodule Kazi.Loop.CauseClass do
       `Kazi.Loop.handle_no_work/2`): the vector is unsatisfied SOLELY because
       every non-passing id is quarantined as flaky. The fix is rehabilitation
       or a human, not budget.
+    * `:workspace_missing` — T53.2 (#1022): the loop's target workspace
+      vanished between iterations (the dir is gone, or git reports the
+      not-a-repository/deleted-cwd exit-128 signature). This is a distinct
+      fatal cause from an ordinary failing-set stall: grinding predicate
+      iterations against a dead path can never converge, so the loop stops
+      immediately instead of burning the budget. `Kazi.Loop.ErrorPermanence`
+      terms: permanent — it will not clear on retry, only on a human
+      restoring or re-creating the workspace.
 
   Every other stop — a clean `:converged`, an ordinary T1.5 failing-set stuck,
   or the pre-existing code `error_stuck?` (M5) stuck — carries **no** cause
@@ -44,7 +52,7 @@ defmodule Kazi.Loop.CauseClass do
   alias Kazi.Loop.Budget
 
   @typedoc "The honest terminal cause — the RIGHT next move, not just the outcome."
-  @type class :: :budget_exhausted | :error_wedged | :quarantine_blocked
+  @type class :: :budget_exhausted | :error_wedged | :quarantine_blocked | :workspace_missing
 
   @typedoc """
   The cause detail: `ids` are the predicate ids implicated (sorted, `[]` when
@@ -160,6 +168,15 @@ defmodule Kazi.Loop.CauseClass do
       class: :quarantine_blocked,
       ids: sorted_ids(inputs.stuck_failing),
       reasons: nil,
+      exhausted: nil
+    }
+  end
+
+  def classify(%{outcome: :stopped, reason: :stuck, stuck_cause: :workspace_missing} = inputs) do
+    %{
+      class: :workspace_missing,
+      ids: sorted_ids(inputs.stuck_failing),
+      reasons: inputs.stuck_reasons,
       exhausted: nil
     }
   end
