@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.138.0](https://github.com/kazi-org/kazi/compare/v1.137.0...v1.138.0) (2026-07-10)
+
+
+### Features
+
+* **bus:** T51.2 kazi bus post|read|who|tell over daemon NATS (ADR-0067) ([032b1a0](https://github.com/kazi-org/kazi/commit/032b1a07bbb01e08be04e816a3e94dadf3eaca95))
+
 ## [1.137.0](https://github.com/kazi-org/kazi/compare/v1.136.1...v1.137.0) (2026-07-10)
 
 
