@@ -91,7 +91,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       # aliases were removed in v0.6.0, so the table (and help --json) omits them.
       expected =
         MapSet.new(
-          ~w(apply status init install-skill mcp dashboard economy plan list-proposed approve reject export lint context memory help schema version)
+          ~w(apply status init install-skill mcp dashboard daemon economy plan list-proposed approve reject export lint context memory help schema version)
         )
 
       assert reported == expected,
@@ -294,6 +294,11 @@ defmodule Kazi.CLIHelpSchemaTest do
         # it so we observe dispatch, not the missing-flag error (T48.10).
         "economy" ->
           ["economy", "--rediscovery", "dummy"]
+
+        # `daemon` requires a <subcommand> positional; probe with a real one
+        # (`status`, which never starts anything -- a pure parse, T51.1).
+        "daemon" ->
+          ["daemon", "status"]
 
         n ->
           [n]
