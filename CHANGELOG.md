@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.140.0](https://github.com/kazi-org/kazi/compare/v1.139.0...v1.140.0) (2026-07-10)
+
+
+### Features
+
+* **scheduler:** T53.2 worktree liveness guard ([#1022](https://github.com/kazi-org/kazi/issues/1022)) ([0056dfe](https://github.com/kazi-org/kazi/commit/0056dfed093d11051013aeca0f4a236594f1ce94))
+
 ## [1.139.0](https://github.com/kazi-org/kazi/compare/v1.138.0...v1.139.0) (2026-07-10)
 
 
