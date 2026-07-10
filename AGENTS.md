@@ -415,19 +415,18 @@ kazi memory reject <proposal-ref> [--json]                       # declined, aud
 provenance trailer, ADR-0063); review the diff and land it like any other doc
 change (ADR-0034) -- kazi never commits memory on its own authority.
 
-## The kazi daemon (ADR-0067)
+## The kazi daemon + session bus (ADR-0067)
 
 `kazi daemon start|stop|status [--json]` is the lifecycle for a long-lived,
-per-machine daemon that will host a session coordination bus (presence, facts,
-intents, directed messages) on the ADR-0004 JetStream substrate. This is
-T51.1's skeleton ONLY: process lifecycle plus a local Unix-socket control
-plane with a version handshake -- NO NATS, NO bus yet, and **convergence never
-depends on the daemon** (a goal converges identically with it down).
+per-machine daemon over a local Unix-socket control plane with a version
+handshake, and **convergence never depends on the daemon** (a goal converges
+identically with it down).
 
 ```sh
 kazi daemon start           # foreground; the operator backgrounds it, same as
                              # `kazi dashboard` -- prints "listening on <sock>"
-                             # then blocks until stopped
+                             # then blocks until stopped, and supervises a
+                             # nats-server for the session bus below
 kazi daemon status [--json] # connects, pings, prints the handshake (vsn,
                              # uptime, pid); a stale socket left by a dead
                              # daemon is detected and cleaned up, never
@@ -441,6 +440,15 @@ pidfile alongside it at `daemon.pid`. Nothing else in kazi starts this daemon
 or reaches into it -- it is opt-in operational infrastructure, not part of the
 `apply` loop.
 
+With the daemon up, `kazi bus post|read|who|tell` (and the matching
+`kazi_bus_post` / `kazi_bus_read` / `kazi_bus_who` / `kazi_bus_tell` MCP
+tools) let concurrent operator sessions and kazi runs coordinate -- presence,
+shared facts, release-window broadcasts, directed handoffs -- over a
+supervised NATS JetStream bus. Every message is advisory, provenance-stamped
+input (never a command channel); every surface reports a clean "no daemon"
+error when the daemon is down. Full concepts, subject taxonomy, and a
+turn-boundary hook recipe: `docs/session-bus.md`.
+
 ## Verifying a pooled task with kazi
 
 In an /apply --pool session, gate your task's MERGE on objective convergence
@@ -451,6 +459,7 @@ gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 
 ## See also
 
+- `docs/session-bus.md` -- the session bus: concepts, CLI/MCP surfaces, hook recipe (ADR-0067).
 - `docs/pool-verification-gate.md` -- the pre-merge verification gate (ADR-0026 L1).
 - `docs/orchestrator-recipe.md` -- the full recipe (source of truth).
 - `docs/schemas/run-result.md`, `docs/schemas/status.md` -- the committed schemas.
