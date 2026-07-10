@@ -140,6 +140,8 @@ defmodule Kazi.CLI do
     dry_run: :boolean,
     fleet: :boolean,
     fleet_concurrency: :integer,
+    pause_between_waves: :boolean,
+    resume: :string,
     check: :boolean,
     provider: :string,
     budget: :integer,
@@ -217,6 +219,10 @@ defmodule Kazi.CLI do
       "`apply` only (T50.4/T50.5, ADR-0065 decision 3): treat the positional argument as a fleet — a DIRECTORY of *.goal.toml files (non-recursive, sorted) or a manifest .toml file ([[member]] path = \"...\" entries) — instead of a single goal-file. Builds a fleet DAG (explicit [metadata] depends_on edges + inferred scope-overlap serialization) and EXECUTES it through the partition scheduler one level up: each member goal runs in its own kazi-owned task worktree off the shared --workspace base, dispatching the instant its deps settle (pipelined frontiers), landing converged work on the base per the serial landing, with a registry row per member and an honest-unknown economy rollup in the terminal object. With --explain: print the schedule and dispatch nothing.",
     fleet_concurrency:
       "`apply --fleet` only (T50.5): cap how many fleet member goals RUN at once (a counting-semaphore gate around the member runner; DAG readiness/frontier semantics are untouched). Default: unbounded within a frontier — every ready member runs concurrently, the same behavior as a needs-DAG goal's groups.",
+    pause_between_waves:
+      "`apply` only (T50.3, ADR-0065 decision 3, issue #936): the supervised-checkpoint mode. With --parallel on a needs-DAG/group goal, or with --fleet, stop STARTING new groups once the current frontier settles (in-flight groups finish, by pipelining), persist a resume checkpoint to the read-model, and exit 0 with a `paused` collective carrying a resume_token — continue later with --resume <token>. Rejected without --parallel/--fleet (a serial loop has no wave boundaries); on a flat goal-set with no frontiers it is a no-op, mirroring frontier_complete.",
+    resume:
+      "`apply` only (T50.3, ADR-0065 decision 3): continue a run previously paused by --pause-between-waves from its persisted checkpoint — settled groups keep their terminal statuses; execution continues from the next frontier to the collective verdict. Pass the SAME goal-file (or --fleet source) plus the resume_token the paused result carried: a changed goal-set REFUSES loudly ('goal file changed since pause; re-run instead') rather than resuming against different work, and an unknown token is a clear error, never a silent fresh run. Composes with --pause-between-waves to advance one frontier at a time.",
     check:
       "`apply` only (issue #805): observe-only mode — evaluate the predicate vector EXACTLY ONCE via the real provider path and exit; never dispatches a harness, integrates, or deploys. All-pass exits 0 (`status: \"pass\"`, NOT the vacuous_goal error a normal run would give); any failing predicate exits 1 (`status: \"fail\"`) carrying predicates[] with captured evidence for the failures. For merge gates (ADR-0026) and release qualification.",
     provider:
@@ -283,6 +289,8 @@ defmodule Kazi.CLI do
         :dry_run,
         :fleet,
         :fleet_concurrency,
+        :pause_between_waves,
+        :resume,
         :check,
         :context_store,
         :context_budget,
@@ -424,6 +432,10 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --parallel [N] [--json] # parallel scheduler
       kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
       kazi apply <goal-file> --workspace <path> --check [--json]        # observe the vector once, dispatch nothing
+      kazi apply <goal-file> --workspace <path> [--in-place] [--base <ref>]  # workspace = the BASE; --in-place edits it directly (ADR-0065)
+      kazi apply <goal-file> --workspace <path> --parallel --pause-between-waves  # pause at each wave boundary with a resume_token
+      kazi apply <goal-file> --workspace <path> --resume <token>        # continue a paused run from its checkpoint
+      kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files (ADR-0065)
       kazi status <ref> [--json]
       kazi economy [--goal <ref>] [--json]         # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
@@ -560,6 +572,23 @@ defmodule Kazi.CLI do
                              blast radius) degrades to the serial behavior. The
                              optional `N` records a concurrency hint (parallelism is
                              otherwise by partition count).
+      --pause-between-waves  `apply` only (T50.3, ADR-0065, issue #936): the
+                             supervised-checkpoint mode. With --parallel on a
+                             `needs`-DAG/group goal, or with --fleet, stop STARTING
+                             new groups once the current frontier settles (in-flight
+                             groups finish), persist a resume checkpoint to the
+                             read-model, and exit 0 with a `paused` collective
+                             carrying a resume_token. Rejected without
+                             --parallel/--fleet (a serial loop has no wave
+                             boundaries); a flat goal-set with no frontiers is a
+                             no-op.
+      --resume <token>       `apply` only (T50.3, ADR-0065): continue a run paused
+                             by --pause-between-waves from its checkpoint — settled
+                             groups keep their terminal statuses; execution
+                             continues from the next frontier. Pass the SAME
+                             goal-file (or --fleet source): a changed goal-set
+                             refuses loudly rather than resuming different work; an
+                             unknown token is a clear error, never a fresh run.
       --explain              `apply` only (T23.6, ADR-0028): PRINT the computed wave
       --dry-run              SCHEDULE and exit 0 WITHOUT EXECUTING. kazi computes
                              the topological `needs`-DAG frontiers (each frontier =
@@ -1228,6 +1257,8 @@ defmodule Kazi.CLI do
           explain: flags[:explain] || flags[:dry_run] || false,
           fleet: flags[:fleet] || false,
           fleet_concurrency: flags[:fleet_concurrency],
+          pause_between_waves: flags[:pause_between_waves] || false,
+          resume: flags[:resume],
           check: flags[:check] || false
         }
 
@@ -1548,6 +1579,9 @@ defmodule Kazi.CLI do
       # boundaries emit the same-shaped frontier_complete JSONL event the
       # --parallel needs-DAG path emits (same helper, same schema).
       |> maybe_put_frontier_stream(opts)
+      # T50.6: --pause-between-waves / --resume act on fleet frontiers the same
+      # way they act on a needs-DAG goal's waves — same helper, one level up.
+      |> maybe_put_pause_resume(opts)
 
     case Fleet.Execution.run(fleet, exec_opts) do
       {:ok, result} ->
@@ -1835,6 +1869,16 @@ defmodule Kazi.CLI do
       opts[:check] == true ->
         check_goal(goal, opts, runtime_opts)
 
+      # T50.6 (the ADR-0065/T50.3 CLI surface): --pause-between-waves / --resume
+      # are WAVE-BOUNDARY mechanisms — they exist only where frontiers exist
+      # (--parallel needs-DAG/group scheduling; the --fleet path never reaches
+      # run_goal and accepts them on its own). A serial loop has no boundary to
+      # pause at or resume from, so the combination is rejected loudly, like the
+      # other flag-interplay checks above.
+      (opts[:pause_between_waves] == true or is_binary(opts[:resume])) and
+          opts[:parallel] != true ->
+        refuse_pause_without_parallel(opts)
+
       # (issue #937 Gap A): an EXECUTING apply refuses a workspace that is a git
       # repo's PRIMARY worktree unless --allow-primary-workspace. The dispatched
       # agent's shell can reset/clean the whole checkout, and a primary checkout
@@ -1974,6 +2018,21 @@ defmodule Kazi.CLI do
   end
 
   defp base_ref_resolves?(_workspace, _base_ref), do: false
+
+  defp refuse_pause_without_parallel(opts) do
+    message =
+      "--pause-between-waves/--resume need wave boundaries to act on: pass " <>
+        "--parallel (a needs-DAG/group goal) or --fleet (goal-file frontiers). " <>
+        "A serial loop has no frontier to pause at (T50.3, ADR-0065 decision 3)."
+
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
 
   defp refuse_contradictory_base(opts) do
     message =
@@ -2383,6 +2442,7 @@ defmodule Kazi.CLI do
       )
       |> maybe_put_default_lease()
       |> maybe_put_frontier_stream(opts)
+      |> maybe_put_pause_resume(opts)
 
     case Kazi.Scheduler.run_goals([goal], scheduler_opts) do
       {:ok, result} ->
@@ -2393,6 +2453,27 @@ defmodule Kazi.CLI do
         report_run_error(goal, reason, json?)
         1
     end
+  end
+
+  # T50.6 (the ADR-0065/T50.3 CLI surface): thread --pause-between-waves /
+  # --resume into the DepScheduler opts. `put_new` so an injected seam (a
+  # boundary test driving :pause_between_waves/:resume_token via runtime_opts)
+  # keeps its value; only meaningful on the needs-DAG/group route — the flat
+  # parallel path has no frontiers, so the options are dropped there, mirroring
+  # :on_frontier_complete.
+  defp maybe_put_pause_resume(scheduler_opts, opts) do
+    scheduler_opts
+    |> then(fn acc ->
+      if opts[:pause_between_waves] == true,
+        do: Keyword.put_new(acc, :pause_between_waves, true),
+        else: acc
+    end)
+    |> then(fn acc ->
+      case opts[:resume] do
+        token when is_binary(token) -> Keyword.put_new(acc, :resume_token, token)
+        _absent -> acc
+      end
+    end)
   end
 
   # Engage the partition LEASE layer on the production CLI path so the operator
@@ -2490,8 +2571,11 @@ defmodule Kazi.CLI do
 
   # The collective run's exit code: 0 only when the whole goal-set collectively
   # converged, non-zero otherwise — the same convergence-mirrors-exit contract the
-  # serial run honors (concept §1, §5).
+  # serial run honors (concept §1, §5). A PAUSE is the requested outcome
+  # (--pause-between-waves, T50.3: "exit 0 with a resumable state token"), so it
+  # maps to 0, mirroring the fleet path's contract.
   defp collective_exit_code(%{collective: :converged}), do: 0
+  defp collective_exit_code(%{collective: :paused}), do: 0
   defp collective_exit_code(_result), do: 1
 
   # Render the loop's terminal result on the requested surface (T15.3): the
@@ -2673,6 +2757,13 @@ defmodule Kazi.CLI do
       "--allow-duplicate-run for a deliberate re-run alongside it. A dead run " <>
       "stops blocking on its own once its heartbeat goes stale (~90s)."
   end
+
+  # T50.6 (the ADR-0065/T50.3 CLI surface): the DepScheduler's resume refusals,
+  # rendered the same way the fleet path words them.
+  defp format_run_error({:resume_not_found, token}),
+    do: "resume token #{token} not found; re-run without it"
+
+  defp format_run_error({:goal_changed, message}), do: "cannot resume: #{message}"
 
   defp format_run_error(other), do: inspect(other)
 
@@ -5262,6 +5353,10 @@ defmodule Kazi.CLI do
   # The orchestrator's branch hint, derived purely from the terminal status.
   defp next_action("converged"), do: "done"
   defp next_action("over_budget"), do: "raise_budget"
+
+  defp next_action("paused"),
+    do: "paused at a frontier boundary; resume by re-running with --resume <resume_token>"
+
   defp next_action(_), do: "investigate"
 
   # The predicate vector as a list of `{id, verdict}` objects, sorted by id for a
@@ -5370,6 +5465,12 @@ defmodule Kazi.CLI do
     IO.puts("frontiers: #{length(schedule)}")
     print_schedule_frontiers(schedule)
     print_blocked_human(Map.get(result, :blocked, []))
+
+    # T50.3/T50.6: a paused run's checkpoint handle, mirroring the fleet report.
+    case Map.get(result, :resume_token) do
+      nil -> :ok
+      token -> IO.puts("resume_token: #{token}")
+    end
   end
 
   defp print_schedule_frontiers(schedule) do
@@ -5427,7 +5528,7 @@ defmodule Kazi.CLI do
     collective_str = to_string(result.collective)
     blocked = Map.get(result, :blocked, [])
 
-    %{
+    base = %{
       schema_version: @run_schema_version,
       goal_id: to_string(id),
       collective: collective_str,
@@ -5435,6 +5536,14 @@ defmodule Kazi.CLI do
       blocked: blocked_json(blocked),
       next_action: next_action(collective_str)
     }
+
+    # T50.3/T50.6: a run paused at a wave boundary (--pause-between-waves)
+    # carries its checkpoint handle — ADDITIVE (schema_version unchanged),
+    # mirroring the fleet result's resume_token.
+    case Map.get(result, :resume_token) do
+      nil -> base
+      token -> Map.put(base, :resume_token, token)
+    end
   end
 
   defp partitions_json(partitions) do
