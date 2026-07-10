@@ -847,3 +847,25 @@ migration runs under `Kazi.ReadModel.Guard` — a hard deadline (15s writes,
 `{:error, :read_model_unavailable}` so the run continues without
 persistence. Pinned by `test/kazi/read_model/guard_test.exs`. When adding a
 NEW read-model write to the run path, route it through the Guard.
+
+### L-0036 #otp #genserver #supervisor #trap_exit #terminate #landmine -- a non-trapping GenServer's `terminate/2` does NOT run on a `Supervisor.stop/2`-driven shutdown
+
+Building `Kazi.Daemon.Listener` (T51.1, ADR-0067): a plain (non-trapping)
+`GenServer` child, torn down via `Supervisor.stop(sup_pid, reason)`, does
+**not** invoke its own `terminate/2` — verified empirically (a socket
+file + pidfile the listener was supposed to clean up on shutdown were
+still on disk after the owning supervisor's `:DOWN` fired). This is
+counter to the common assumption that supervised children always get a
+graceful `terminate/2` on shutdown; that guarantee only holds if the
+child calls `Process.flag(:trap_exit, true)` in its own `init/1`. With
+trapping on, the exit signal from the child's `proc_lib` "parent" (the
+process that started it — here, the supervisor) is handled specially and
+`terminate/2` runs reliably, with no extra `handle_info({:EXIT, ...})`
+clause needed.
+
+INVARIANT: any GenServer whose `terminate/2` performs load-bearing
+cleanup (closing a socket/port, removing a pidfile, releasing a lock) on
+a supervisor-initiated shutdown MUST trap exits. Verify this kind of
+cleanup with a real `Supervisor.stop/2` in the test, not just a
+self-initiated `{:stop, :normal, state}` return — the latter always
+calls `terminate/2` regardless of trapping and would hide this gap.
