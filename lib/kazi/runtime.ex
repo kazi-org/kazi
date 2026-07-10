@@ -365,23 +365,32 @@ defmodule Kazi.Runtime do
           check_workspace_liveness: true
         )
 
-      with {:ok, loop} <- Loop.start_link(loop_opts) do
-        # T46.1 (ADR-0057): register the run once the loop process is actually
-        # up (never for a failed start_link, which would otherwise orphan a
-        # "running" row nothing ever finishes).
-        register_run(
-          persist?,
-          run_id,
-          workspace,
-          goal_ref,
-          harness_opts,
-          transcript_sink_path,
-          events_sink_path,
-          goal,
-          Keyword.get(opts, :session_name),
-          Keyword.get(opts, :proposal_ref)
-        )
+      # Issue #1013 (T53.4): register the run BEFORE starting the loop, not
+      # after. `:gen_statem.start_link/3` returns once `init/1` returns, but
+      # `init/1` schedules the FIRST dispatch as an internal `:next_event` —
+      # processed by the newly-started loop process concurrently with
+      # whatever the caller (this function) does next. Registering afterward
+      # raced that first dispatch: on a slow-registration / fast-stub CI run,
+      # `on_iteration`'s `record_harness_session/2` could fire and read a
+      # `runs` row that did not exist yet, silently dropping the harness
+      # session id for the rest of the run (see the instrumented drop point
+      # in `Kazi.ReadModel.RunRegistry.record_harness_session/2`). Registering
+      # first closes the race unconditionally: the row exists before the loop
+      # process can possibly observe anything.
+      register_run(
+        persist?,
+        run_id,
+        workspace,
+        goal_ref,
+        harness_opts,
+        transcript_sink_path,
+        events_sink_path,
+        goal,
+        Keyword.get(opts, :session_name),
+        Keyword.get(opts, :proposal_ref)
+      )
 
+      with {:ok, loop} <- Loop.start_link(loop_opts) do
         # T31: start the heartbeat ticker (a supervised periodic timer that advances
         # the heartbeat_at timestamp every ~30 seconds, independent of loop iterations).
         # This keeps healthy long-running dispatches from appearing stale in the starmap.
@@ -400,6 +409,15 @@ defmodule Kazi.Runtime do
         finish_run(persist?, run_id, result)
         harvest_memory(persist?, run_id, goal_ref, result)
         normalize_await(result)
+      else
+        {:error, reason} = error ->
+          # Registration now happens before `Loop.start_link/1` (see the
+          # comment above), so a failed start must still finish the row it
+          # already created — otherwise it would be orphaned at "running"
+          # forever, the exact failure mode T46.1's own registration-ordering
+          # comment (now moved) warned against.
+          finish_run(persist?, run_id, {:error, reason})
+          error
       end
     end
   end
