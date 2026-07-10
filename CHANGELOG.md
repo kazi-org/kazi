@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.136.1](https://github.com/kazi-org/kazi/compare/v1.136.0...v1.136.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **integrate:** treat already-landed workspaces as a no-op ([#1027](https://github.com/kazi-org/kazi/issues/1027)) ([cb6b776](https://github.com/kazi-org/kazi/commit/cb6b7764fa96926e9901459896116713811371d9))
+
 ## [1.136.0](https://github.com/kazi-org/kazi/compare/v1.135.0...v1.136.0) (2026-07-10)
 
 
