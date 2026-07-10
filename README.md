@@ -826,6 +826,11 @@ kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
         [--standing]                         #   run continuously (re-converge on drift)
         [--check]                            #   observe-only: evaluate the vector once, dispatch nothing (issue #805)
         [--explain]                          #   pure planning: print the computed wave schedule, dispatch nothing
+        [--in-place] [--base <ref>]          #   edit the workspace directly / pick the task-worktree base ref (ADR-0065)
+        [--parallel [N]]                     #   native parallel scheduler over the partitioned goal-set (ADR-0027)
+        [--pause-between-waves]              #   pause at each wave boundary with a resume_token (issue #936)
+        [--resume <token>]                   #   continue a paused run from its checkpoint
+kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files, one worktree per member (ADR-0065)
 kazi status <ref>                            # report a run's (or proposal's) current state
 kazi status                                  # list every currently LIVE run (pre-upgrade check, issue #971)
 kazi economy [--goal <ref>]                  # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
@@ -904,6 +909,13 @@ works today:
   not only repairs. From here on, kazi builds kazi.
 - **Coordination & surfaces** — NATS leases + presence, graph partitioning,
   natural-language authoring, and a LiveView dashboard.
+- **Safe concurrent work** ([ADR-0065](docs/adr/0065-safe-concurrent-work-serial-worktree-fleet.md)) —
+  a serial `kazi apply` never edits your checkout: it works in its own task
+  worktree off the workspace's HEAD and lands converged commits back on the base
+  by rebase-merge (`--in-place` opts out). `kazi apply --fleet <dir|manifest>`
+  runs a whole DAG of goal-files the same way — one worktree per member goal,
+  `depends_on`/scope-overlap edges ordering them, and
+  `--pause-between-waves`/`--resume` for supervised frontier-by-frontier runs.
 - **Context injection** — every stateless iteration starts *oriented* (a
   deterministic blast-radius pack + an optional, off-by-default retrieval adapter),
   without reintroducing conversation memory.

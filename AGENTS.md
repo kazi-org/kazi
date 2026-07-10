@@ -264,6 +264,22 @@ members run at once (default: unbounded within a frontier). Exit 0 only when
 the fleet collectively converged. See docs/orchestrator-recipe.md ("Fleets")
 and docs/schemas/collective-result.md ("The fleet shape").
 
+### Supervised checkpoints: `--pause-between-waves` / `--resume <token>`
+
+One mechanism, two levels (T50.3, ADR-0065 decision 3, issue #936):
+`--pause-between-waves` on `apply --parallel` (a `needs`-DAG/group goal) or
+`apply --fleet` stops STARTING new groups/members once the current frontier
+settles (in-flight work finishes -- pipelining is untouched), persists a
+checkpoint to the read-model, and exits `0` with a `paused` collective
+carrying a `resume_token`. Inspect the landed work, then continue with the
+SAME goal-file/fleet source plus `--resume <token>`: settled groups keep
+their terminal statuses and execution continues from the next frontier. A
+goal-set that changed since the pause is refused loudly ("goal file changed
+since pause; re-run instead"); an unknown token is a clear error, never a
+silent fresh run. Without `--parallel`/`--fleet` the flags are rejected (a
+serial loop has no wave boundary); a flat goal-set with no frontiers pauses
+nothing. See docs/orchestrator-recipe.md ("Supervised checkpoints").
+
 ### 4. parse and branch on `next_action`
 
 `apply --json` gives the terminal `status` plus a derived `next_action` hint, so

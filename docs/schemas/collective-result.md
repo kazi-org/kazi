@@ -60,11 +60,12 @@ Current version: **2** (bumped by ADR-0032 with the apply/plan verb rename).
 |------------------|------------------|---------|
 | `schema_version` | integer          | The contract version (shared with `run-result.md`). Bumped on a breaking change. |
 | `goal_id`        | string           | The goal-set's goal id — the run's handle. |
-| `collective`     | string (enum)    | The COLLECTIVE verdict — one of `converged`, `stuck`, `over_budget`. The orchestrator's primary branch. |
+| `collective`     | string (enum)    | The COLLECTIVE verdict — one of `converged`, `stuck`, `over_budget`, or (under `--pause-between-waves`, T50.3/ADR-0065) `paused`. The orchestrator's primary branch. |
 | `partitions`     | array of objects | **FLAT goals only.** One entry per partition, in the scheduler's input order. A single-partition goal-set yields exactly one entry (the serial degenerate). |
 | `schedule`       | array of objects | **DAG goals only (T23.6).** The TOPOLOGICAL frontiers the scheduler took — one entry per wave, in order, each naming the groups that ran in it and their convergence state. Present iff the goal declares `needs` edges (ADR-0028). |
 | `blocked`        | array of objects | **DAG goals only (T23.6).** The BLOCKED sub-DAG: one entry per group an unsatisfiable `needs` dependency poisoned, naming the blocking dep. `[]` when nothing is blocked. |
-| `next_action`    | string (enum)    | An orchestration **hint** derived from `collective` — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
+| `next_action`    | string (enum)    | An orchestration **hint** derived from `collective` — `done`, `investigate`, `raise_budget`, or the paused-run resume hint. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
+| `resume_token`   | string           | **Paused DAG/fleet runs only (T50.3, ADR-0065 decision 3, ADDITIVE).** The persisted checkpoint's handle: `collective` is `"paused"`, the exit code is `0`, and re-running with `--resume <token>` (same goal-set) continues from the next frontier. Absent on a run that did not pause. |
 
 A goal carries EITHER `partitions` (flat, no `needs`) OR `schedule` + `blocked`
 (a `needs`-DAG over its groups), never both. Both shapes share `schema_version`,
@@ -89,6 +90,7 @@ The pure fold the scheduler computes over the per-partition statuses
 | `converged`   | **Every** partition converged (collective success). Exit `0`. |
 | `over_budget` | **Any** partition hit a hard budget ceiling — surfaced first as the most actionable "we spent the budget" signal. Exit non-zero. |
 | `stuck`       | Otherwise — some partition did not converge (a stuck / stopped / crashed reconciler). Investigate. Exit non-zero. |
+| `paused`      | **DAG/fleet runs under `--pause-between-waves` only (T50.3, ADR-0065):** the run stopped at a frontier boundary as REQUESTED — settled groups keep their terminal statuses, the rest report `pending`, and `resume_token` carries the checkpoint handle. Exit `0` (a pause is the requested outcome, not a failure). |
 
 An empty goal-set converges vacuously (nothing failed); a single partition's
 verdict is exactly that partition's status (the serial degenerate case).
@@ -103,6 +105,7 @@ re-derives the branch from the per-partition vector:
 | `converged`   | `done`         |
 | `over_budget` | `raise_budget` |
 | `stuck`       | `investigate`  |
+| `paused`      | the resume hint — `paused at a frontier boundary; resume by re-running with --resume <resume_token>` (the fleet shape words it per fleet frontier) |
 
 This is the SAME hint vocabulary the serial `apply --json` result uses (ADR-0023),
 so an orchestrator branches on `next_action` identically across the serial and
@@ -218,6 +221,30 @@ so the report and the execution can never disagree on a member's frontier.
 goal ids as the group ids. Under `--json --stream`, fleet frontier boundaries emit
 the same `frontier_complete` JSONL event as a `needs`-DAG run — one mechanism,
 two levels.
+
+## Streaming (`--json --stream`): `frontier_complete` at wave boundaries (issue #936)
+
+Under `apply --parallel --json --stream` (a `needs`-DAG/group goal) and
+`apply --fleet --json --stream`, stdout is a **JSONL stream**: one
+`frontier_complete` event line at each wave boundary — the moment every
+group (or fleet member) of a topological frontier has settled, before a later
+frontier's work dispatches — terminated by the terminal collective object.
+The event shape (shared with the serial contract's stream section,
+`docs/schemas/run-result.md` "Streaming progress"):
+
+```json
+{ "schema_version": 2, "event": "frontier_complete", "frontier": 0, "groups": [ { "id": "a", "status": "converged" } ] }
+```
+
+Every event line carries `schema_version` 2 and an `event` key; the terminal
+object — this document's collective (or fleet) shape — has **no** `event` key
+and ends the stream: read lines until the object without an `event`, then
+branch on its `collective`. Per-ITERATION `"event": "iteration"` lines are the
+SERIAL stream's granularity (one loop, one goal — see run-result.md); the
+collective stream reports at the frontier granularity. A paused run
+(`--pause-between-waves`, ADR-0065 decision 3) ends its stream with the
+`"collective": "paused"` terminal object carrying the `resume_token`, after
+the final settled frontier's `frontier_complete` line.
 
 ## `apply --explain` / `--dry-run`: the schedule, dispatched nothing (T23.6)
 

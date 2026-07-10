@@ -330,7 +330,7 @@ kazi apply --fleet .kazi/goals/ --explain --json
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "mode": "fleet_explain",
   "dispatched": false,
   "nodes": [{"id": "a", "file": ".kazi/goals/0001-a.goal.toml"}, "..."],
@@ -339,7 +339,7 @@ kazi apply --fleet .kazi/goals/ --explain --json
     {"from": "d", "to": "e", "kind": "inferred_overlap", "overlap": [{"a": "lib/", "b": "lib/kazi/"}]}
   ],
   "frontiers": [["a", "b", "d"], ["c", "e"]],
-  "next_action": "schedule"
+  "next_action": "run without --explain to execute the fleet"
 }
 ```
 
@@ -380,8 +380,8 @@ Semantics per member:
   * **`frontier_complete` at fleet boundaries** -- under `--json --stream`,
     each fleet frontier boundary emits the SAME JSONL `frontier_complete`
     event the `--parallel` needs-DAG path emits (one mechanism, two levels).
-    The T50.3 pause/resume checkpoint seam (`pause_between_waves` /
-    `resume_token`) applies to fleet frontiers with the same semantics; a
+    The T50.3 supervised checkpoint (`--pause-between-waves` / `--resume`,
+    next section) applies to fleet frontiers with the same semantics: a
     paused fleet exits 0 with `"collective": "paused"` and a `resume_token`
     in the terminal object.
 
@@ -394,9 +394,63 @@ fabricated zeros; the rollup says how many members reported). See
 Exit code: `0` only when the collective converged (or paused with a resume
 token); anything else is `1`.
 
+### Supervised checkpoints (`--pause-between-waves` / `--resume`)
+
+A long multi-wave run -- a `needs`-DAG goal under `--parallel`, or a fleet --
+normally advances frontier to frontier unattended. The supervised-checkpoint
+mode (T50.3, ADR-0065 decision 3, the full ask of issue #936) lets an operator
+stop at each boundary, inspect what landed, and continue:
+
+```sh
+# 1. Run with the pause flag: the scheduler stops STARTING new groups once
+#    the current frontier settles (in-flight groups finish -- pipelining is
+#    untouched), persists a checkpoint to the read-model, and exits 0.
+kazi apply my.goal.toml --workspace ./svc --parallel --pause-between-waves --json
+```
+
+The terminal object is the usual collective shape with
+`"collective": "paused"`, the settled groups' terminal statuses (`pending` for
+what a resume will pick up), and the checkpoint handle:
+
+```json
+{
+  "schema_version": 2,
+  "goal_id": "my-goal",
+  "collective": "paused",
+  "schedule": [ "..." ],
+  "blocked": [],
+  "resume_token": "pause-…",
+  "next_action": "paused at a frontier boundary; resume by re-running with --resume <resume_token>"
+}
+```
+
+```sh
+# 2. Inspect at your leisure (the checkpoint survives process death -- the
+#    read-model is the bridge), then continue from the next frontier:
+kazi apply my.goal.toml --workspace ./svc --parallel --resume pause-… --json
+
+# Keep --pause-between-waves on the resume to advance ONE frontier at a time.
+# The same pair drives fleet frontiers:
+kazi apply --fleet .kazi/goals/ --workspace ./repo --pause-between-waves --json
+kazi apply --fleet .kazi/goals/ --workspace ./repo --resume pause-… --json
+```
+
+Guard rails, so a resume can never silently do the wrong thing:
+
+  * the resumed goal-set must be BYTE-IDENTICAL to the paused one -- the token
+    embeds the goal-set hash, and a mismatch refuses loudly (`"goal file
+    changed since pause; re-run instead"`), exit non-zero;
+  * an unknown/expired token is a clear error naming it, never a silent fresh
+    run;
+  * without `--parallel`/`--fleet` the flags are rejected (a serial loop has
+    no wave boundary to pause at); a flat goal-set with no frontiers pauses
+    nothing (the flag is a no-op, mirroring `frontier_complete`);
+  * a pause is the REQUESTED outcome: exit `0`, so an orchestrator loop treats
+    it as success-so-far and branches on `"collective": "paused"`.
+
 ## 3. The versioned result schemas (pin `schema_version`)
 
-Every `--json` object carries a `schema_version` (currently **1**). It is a
+Every `--json` object carries a `schema_version` (currently **2**). It is a
 COMPATIBILITY surface: an additive change (a new field) leaves it unchanged; a
 breaking change (a removed/renamed field, a changed type or meaning) bumps it.
 ALL `--json` surfaces share the one number, so an orchestrator pins or checks
@@ -409,7 +463,7 @@ against:
 ```sh
 result=$(kazi apply "$GOAL" --workspace "$WS" --harness opencode --json)
 ver=$(printf '%s' "$result" | jq -r .schema_version)
-[ "$ver" = "1" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
+[ "$ver" = "2" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
 next=$(printf '%s' "$result" | jq -r .next_action)
 ```
 
@@ -428,7 +482,7 @@ A minimal `run --json` result:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "goal_id": "cli-e2e",
   "status": "converged",
   "predicates": [
