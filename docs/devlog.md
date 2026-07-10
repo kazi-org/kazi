@@ -7,6 +7,40 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-10: T50.7 live fleet dogfood -- `--fleet` on released v1.138.0, 1 landed / 1 teardown-crashed / 1 cascade-blocked
+
+**Type:** finding  **Tags:** [fleet, ADR-0065, T50.7, dogfood, released-binary, #1053]
+
+First real `kazi apply --fleet` run: released v1.138.0, 3 real goals (E53's
+0021/0022/0023), one explicit `depends_on` edge (0021 -> 0022) plus inferred
+`[scope]` overlap edges on lib/kazi/loop.ex, 3 serialized frontiers --
+exactly the batch shape T50.7 prescribed.
+
+What worked: discovery/DAG/`--explain` (schedule matched prediction), member
+task worktrees off the base, pipelined frontier advancement, member 1
+(worktree-liveness-guard) converged AND landed via serial landing (PR #1050),
+dispatch through the claude harness per member, registry rows per member.
+
+What broke (issue #1053): member 2's TEARDOWN crashed in
+Kazi.Scheduler.Worktree.safe_cleanup/3 AFTER its work was complete and
+pushed -- the member was reported `crashed` with `error: null`, its dependent
+(member 3) cascade-blocked, no resume_token was carried, and the economy
+rollup captured only 1 of 3 members (totals: ~10.3M tokens, 2 iterations,
+~18.6 min for the reported member). Worse: the run also DELETED the
+operator-provided `--workspace` BASE worktree, violating the ADR-0065/T50.1
+never-mutate-the-base contract -- on a non-disposable checkout this would
+have been data loss.
+
+Recovery: member 2's pushed branch hand-verified (goal test + integrate
+suites 11 passed; full suite 3139 passed; format clean) and merged (#1052);
+member 3 re-run solo to convergence (PR #1055, its predicate = 30 consecutive
+green runs of the previously-flaky wiring test).
+
+Verdict: the fleet's scheduling/isolation/landing layers work end to end on
+a released binary; the teardown path is the reliability gap (tracked #1053 --
+cleanup outcome must be independent of member outcome, crash reasons must be
+carried, and base-vs-member path handling in cleanup needs a pin).
+
 ## 2026-07-07: E48 live proof -- economy feedback loop + honest budget stops on v1.104.0
 
 **Type:** finding  **Tags:** [economy, budget, over_budget, ADR-0058, live-verification]
