@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.140.2](https://github.com/kazi-org/kazi/compare/v1.140.1...v1.140.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **read_model:** warn on a dropped harness_session_id write (issue [#1013](https://github.com/kazi-org/kazi/issues/1013)) ([2999764](https://github.com/kazi-org/kazi/commit/2999764fd6173c643352de2faa2af2648b997721))
+* **runtime:** register run before starting the loop (issue [#1013](https://github.com/kazi-org/kazi/issues/1013)) ([406e8ef](https://github.com/kazi-org/kazi/commit/406e8ef5f59add0f75d58bcf6828951807d43573))
+
 ## [1.140.1](https://github.com/kazi-org/kazi/compare/v1.140.0...v1.140.1) (2026-07-10)
 
 
