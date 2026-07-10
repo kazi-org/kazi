@@ -492,6 +492,9 @@ defmodule Kazi.CLISelfConformanceTest do
         # view over the default aggregate view (ADR-0058 decisions 2 and 3).
         # Either dispatches; probe with --rediscovery to exercise both flags.
         "economy" -> ["economy", "--rediscovery", "dummy"]
+        # `daemon` requires a <subcommand>; probe with `status` -- a pure
+        # parse, never starts anything (T51.1).
+        "daemon" -> ["daemon", "status"]
         _ -> [name]
       end
 
