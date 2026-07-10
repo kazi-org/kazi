@@ -415,6 +415,32 @@ kazi memory reject <proposal-ref> [--json]                       # declined, aud
 provenance trailer, ADR-0063); review the diff and land it like any other doc
 change (ADR-0034) -- kazi never commits memory on its own authority.
 
+## The kazi daemon (ADR-0067)
+
+`kazi daemon start|stop|status [--json]` is the lifecycle for a long-lived,
+per-machine daemon that will host a session coordination bus (presence, facts,
+intents, directed messages) on the ADR-0004 JetStream substrate. This is
+T51.1's skeleton ONLY: process lifecycle plus a local Unix-socket control
+plane with a version handshake -- NO NATS, NO bus yet, and **convergence never
+depends on the daemon** (a goal converges identically with it down).
+
+```sh
+kazi daemon start           # foreground; the operator backgrounds it, same as
+                             # `kazi dashboard` -- prints "listening on <sock>"
+                             # then blocks until stopped
+kazi daemon status [--json] # connects, pings, prints the handshake (vsn,
+                             # uptime, pid); a stale socket left by a dead
+                             # daemon is detected and cleaned up, never
+                             # reported as "running"
+kazi daemon stop [--json]   # sends a clean shutdown; exits 1 with a clear
+                             # "no daemon running" line when already down
+```
+
+The socket lives at `~/.kazi/daemon/daemon.sock` (or `$KAZI_STATE_DIR`), a
+pidfile alongside it at `daemon.pid`. Nothing else in kazi starts this daemon
+or reaches into it -- it is opt-in operational infrastructure, not part of the
+`apply` loop.
+
 ## Verifying a pooled task with kazi
 
 In an /apply --pool session, gate your task's MERGE on objective convergence
@@ -432,3 +458,4 @@ gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 - `docs/adr/0024-kazi-self-teaching-to-harnesses.md` -- self-teaching surfaces.
 - `docs/adr/0031-kazi-skill-router-subsumes-loop-apply-qualify.md` -- the router on-ramp.
 - `docs/adr/0032-rename-cli-verbs-run-apply-propose-plan.md` -- the verb rename.
+- `docs/adr/0067-session-coordination-bus.md` -- the daemon + session bus decision.
