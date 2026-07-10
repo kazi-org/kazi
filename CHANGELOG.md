@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.135.0](https://github.com/kazi-org/kazi/compare/v1.134.0...v1.135.0) (2026-07-10)
+
+
+### Features
+
+* **cli:** kazi apply --fleet executes; --fleet-concurrency caps member parallelism (T50.5) ([a28eaf0](https://github.com/kazi-org/kazi/commit/a28eaf0afab4195a3d174506eac2a745e6e7b8e7))
+* **fleet:** execute the fleet DAG through DepScheduler one level up (T50.5) ([2abf7d1](https://github.com/kazi-org/kazi/commit/2abf7d156be1443f807733d6a898ebdca0aacb44))
+
 ## [1.134.0](https://github.com/kazi-org/kazi/compare/v1.133.0...v1.134.0) (2026-07-09)
 
 
