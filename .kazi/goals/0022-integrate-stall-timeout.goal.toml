@@ -1,0 +1,71 @@
+# E53/T53.3 (issue #1020). DEPENDS ON goal 0020 (same integrate seam) -- the
+# brief's precondition enforces the ordering when driven serially.
+# Conflict surface: lib/kazi/loop.ex (:integrate act handling), lib/kazi/actions/integrate.ex.
+
+id = "integrate-stall-timeout"
+name = "T53.3: the integrate step gets a bounded timeout + captured stacktrace -- a stall self-diagnoses instead of hanging at 0% CPU forever (issue #1020)"
+
+[metadata]
+epic = "E53"
+task = "T53.3"
+depends_on = ["integrate-idempotent-landing"]
+
+[scope]
+paths = ["lib/kazi/loop.ex", "lib/kazi/actions/integrate.ex", "test/kazi/loop/"]
+
+[[predicate]]
+id = "integrate-timeout-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E53 task T53.3, issue #1020 -- read it: `gh issue view 1020 --repo kazi-org/kazi`).
+
+PRECONDITION: goal 0020 (T53.1 integrate idempotence) should already be on main -- verify test/kazi/actions/integrate_idempotence_test.exs exists. If absent, STOP and report: this goal touches the same seam and must not race it.
+
+WHY: a real run stalled indefinitely at the integrate boundary -- alive, 0% CPU, no child processes, no sockets, no forward progress for 27 minutes until killed by hand (issue #1020). The cause is unidentified; what is certain is that an unbounded integrate step turns any such wedge into a silent forever-hang. Make the step bounded and self-diagnosing so the NEXT occurrence produces a diagnosis instead of a mystery.
+
+BUILD THIS: wrap the `:integrate` action execution -- lib/kazi/loop.ex ~1048, `handle_event(:internal, {:act, %Action{kind: :integrate} = action}, :acting, data)` -- in a bounded timeout. (1) New loop option `integrate_timeout_ms`, default 900_000 (15 min), threaded like the loop's other opts (see the opts fetches ~930-944) and settable from the goal-file/CLI only if an obvious existing plumbing exists -- otherwise the loop opt + default suffices (do not invent new CLI surface for this). (2) Run the action in a supervised/monitored Task (if it is not already); on timeout expiry: capture diagnostics BEFORE killing -- `Process.info(task_pid, [:current_stacktrace, :message_queue_len, :status])` -- record them into the run's evidence/sink (the same place other action failures put evidence), kill the task, and terminate the run with stuck cause `:integrate_timeout`. Wire the cause through the ADR-0058 permanence taxonomy as TRANSIENT (kill+relaunch is the known-good remedy; say so in the result's remedy line). (3) A normal, fast integrate is byte-for-byte unaffected.
+
+WRITE test/kazi/loop/integrate_timeout_test.exs (stub-harness loop fixture like the existing loop tests): (1) a stub :integrate action that sleeps past a SHORT test-configured timeout (e.g. 200ms) -> the run terminates (not hung) with cause `:integrate_timeout`, the evidence contains a stacktrace entry, and the remedy line names relaunch; (2) a fast stub integrate under the same config -> unchanged converged result; (3) the default timeout is 15 min when unset (assert the resolved opt).
+
+DOCS: add `:integrate_timeout` next to wherever T53.2 put `:workspace_missing` (or the ADR-0058 cause enumeration in docs/); if no doc enumerates causes, @moduledoc + [no-docs] note in the commit body.
+
+PROCESS: branch task/integrate-stall-timeout off main; small conventional commits; push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/loop/integrate_timeout_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "integrate-suites-still-green"
+provider = "custom_script"
+description = "GUARD: the integrate + idempotence suites stay green -- same seam."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/actions/integrate_test.exs test/kazi/actions/integrate_idempotence_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The NAMED task branch exists, is pushed, and is current with its remote (pinned to the branch, not HEAD)."
+cmd = "sh"
+args = ["-c", 'git rev-parse --verify refs/heads/task/integrate-stall-timeout >/dev/null 2>&1 && git rev-parse --verify refs/remotes/origin/task/integrate-stall-timeout >/dev/null 2>&1 && [ "$(git rev-parse task/integrate-stall-timeout)" = "$(git rev-parse origin/task/integrate-stall-timeout)" ] && [ -n "$(git log --oneline origin/main..task/integrate-stall-timeout)" ]']
+timeout_ms = 30000
