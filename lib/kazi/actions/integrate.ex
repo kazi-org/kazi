@@ -46,6 +46,30 @@ defmodule Kazi.Actions.Integrate do
   On failure `{:error, reason}` — e.g. `{:error, {:push_failed, output}}` — so the
   loop can decide its next action rather than crashing.
 
+  ## Idempotence (issue #1027)
+
+  `execute/2` treats the workspace as **already landed** — and is a strict
+  no-op — when ALL THREE hold before any branch work begins:
+
+    1. the working tree is clean (`git status --porcelain` is empty, staged
+       changes included);
+    2. the current branch has an upstream (`git rev-parse @{u}` resolves);
+    3. `git rev-parse HEAD` equals `git rev-parse @{u}`.
+
+  When all three hold, no branch is created, nothing is committed or pushed,
+  the integrator seam is never invoked, and the workspace is left exactly
+  where it was (HEAD does not move off an already-landed branch). The result
+  still carries `:branch`/`:commit`/`:base` (read from the current state) plus
+  `already_landed: true`, so a caller can tell the two paths apart. If ANY
+  condition fails — dirty tree, no upstream, ahead/behind — integrate proceeds
+  exactly as it always has (branch → commit → push → PR → merge).
+
+  This closes two real failure modes: a `landed` predicate pinned to
+  `HEAD == @{u}` looping forever because each iteration's integrate moved HEAD
+  to a fresh upstream-less branch, and — worse — a `landed` predicate checking
+  "whatever branch HEAD is on" silently passing against a substituted integrate
+  branch while the named task branch had zero commits.
+
   ## Integrate discipline (issue #819)
 
   A live firing of this action once committed ~1800 untracked-but-unignored
@@ -123,11 +147,26 @@ defmodule Kazi.Actions.Integrate do
   @impl Kazi.Action
   @spec execute(Action.t(), Action.context()) :: Action.result()
   def execute(%Action{kind: :integrate} = action, context) do
+    with {:ok, workspace} <- fetch_workspace(action, context) do
+      case already_landed(workspace) do
+        {:ok, branch, commit} ->
+          {:ok, base} = resolve_base(workspace, action.params)
+          {:ok, %{branch: branch, commit: commit, base: base, already_landed: true}}
+
+        :not_landed ->
+          do_integrate(workspace, action, context)
+      end
+    end
+  end
+
+  def execute(%Action{kind: kind}, _context), do: {:error, {:unsupported_kind, kind}}
+
+  # The original branch → commit → push → PR → merge path, unchanged.
+  defp do_integrate(workspace, action, context) do
     goal = context[:goal]
     passed = passed_predicates(context[:vector])
 
-    with {:ok, workspace} <- fetch_workspace(action, context),
-         {:ok, base} <- resolve_base(workspace, action.params),
+    with {:ok, base} <- resolve_base(workspace, action.params),
          branch = resolve_branch(action.params),
          message = resolve_message(action.params, branch, base, goal, passed),
          {:ok, _} <- create_branch(workspace, branch),
@@ -154,7 +193,22 @@ defmodule Kazi.Actions.Integrate do
     end
   end
 
-  def execute(%Action{kind: kind}, _context), do: {:error, {:unsupported_kind, kind}}
+  # Already-landed detection (issue #1027): clean tree, current branch has an
+  # upstream, and HEAD == @{u}. Returns `{:ok, branch, head_sha}` when all
+  # three hold, `:not_landed` otherwise (any git command failing — e.g. no
+  # upstream configured — falls through to :not_landed, never an error).
+  defp already_landed(workspace) do
+    with {:ok, status} <- git(workspace, ["status", "--porcelain"]),
+         true <- String.trim(status) == "",
+         {:ok, branch} <- git(workspace, ["rev-parse", "--abbrev-ref", "HEAD"]),
+         {:ok, head} <- git(workspace, ["rev-parse", "HEAD"]),
+         {:ok, upstream} <- git(workspace, ["rev-parse", "@{u}"]),
+         true <- String.trim(head) == String.trim(upstream) do
+      {:ok, String.trim(branch), String.trim(head)}
+    else
+      _ -> :not_landed
+    end
+  end
 
   # --- workspace / params resolution -------------------------------------------
 
