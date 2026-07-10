@@ -210,6 +210,8 @@ defmodule Kazi.Loop do
   # re-observes on this interval rather than busy-spinning. Injectable via
   # `:reobserve_interval_ms`.
   @default_reobserve_ms 1_000
+  # issue #1020: default ceiling for a single `:integrate` execute/2 call.
+  @default_integrate_timeout_ms 600_000
 
   @typedoc """
   The terminal outcome reported when the loop stops.
@@ -350,6 +352,13 @@ defmodule Kazi.Loop do
               # integrator / deploy_cmd) without the loop naming them.
               integrate_params: %{},
               deploy_params: %{},
+              # issue #1020: the wall-clock ceiling on a single `:integrate`
+              # execute/2 call. `handle_event/4` runs it in-process, and a real
+              # integrator can hang (observed: alive, 0% CPU, no children, no
+              # sockets, the gen_statem simply never comes back) -- with no
+              # timeout that wedges the whole loop forever. Appended last so
+              # the existing field order is untouched.
+              integrate_timeout_ms: nil,
               extra_action_context: %{},
               # progress facts not captured by the predicate vector
               landed?: false,
@@ -656,6 +665,12 @@ defmodule Kazi.Loop do
       default, unchanged).
     * `:live_kinds` — list of predicate kinds treated as *live* (only pass after
       deploy); default `#{inspect(@default_live_kinds)}`.
+    * `:integrate_timeout_ms` — the wall-clock ceiling on a single `:integrate`
+      execute/2 call (issue #1020). A hung integrator (e.g. a wedged `gh pr
+      checks --watch` or a stalled network push) no longer blocks the loop
+      forever; past this deadline the attempt is abandoned and treated as
+      `{:error, :integrate_timeout}`, so the loop records it and re-observes
+      normally. Default `#{@default_integrate_timeout_ms}` (10 minutes).
     * `:standing` — run as a STANDING (continuous/maintenance) reconciler (T3.4a,
       UC-016). When `true`, satisfying the whole vector does NOT terminate the
       loop: it records the converged observation, enters a steady observing
@@ -944,6 +959,8 @@ defmodule Kazi.Loop do
       # to every dispatch prompt (default false = byte-identical to today).
       debrief: Keyword.get(opts, :debrief, false),
       on_iteration: Keyword.get(opts, :on_iteration),
+      integrate_timeout_ms:
+        Keyword.get(opts, :integrate_timeout_ms, @default_integrate_timeout_ms),
       integrate_params: Map.new(Keyword.get(opts, :integrate_params, %{})),
       deploy_params: Map.new(Keyword.get(opts, :deploy_params, %{})),
       extra_action_context: Map.new(Keyword.get(opts, :extra_action_context, %{})),
@@ -1067,7 +1084,7 @@ defmodule Kazi.Loop do
 
   # --- ACT: integrate (land the converged code change) -------------------------
   def handle_event(:internal, {:act, %Action{kind: :integrate} = action}, :acting, data) do
-    result = data.integrate.execute(action, action_context(action, data))
+    result = run_integrate(data.integrate, action, action_context(action, data), data)
     # On success mark the change landed; on failure record only — re-observe and
     # let decide pick the next move (it will retry integrate while code is green).
     flags = if succeeded?(result), do: [landed?: true], else: []
@@ -3548,6 +3565,26 @@ defmodule Kazi.Loop do
   defp succeeded?(:ok), do: true
   defp succeeded?({:ok, _}), do: true
   defp succeeded?(_), do: false
+
+  # issue #1020: runs the injected `:integrate` action's execute/2 in a
+  # supervised Task bounded by `data.integrate_timeout_ms`, instead of calling
+  # it in-process. A real integrator (`gh pr checks --watch`, a wedged git
+  # push, ...) can hang indefinitely with no forward progress and no crash —
+  # calling it directly from `handle_event/4` would block the gen_statem
+  # (and the whole loop) forever, exactly the reported symptom. `Task.yield`
+  # bounds the wait; on timeout the task is shut down (`Task.shutdown/2`, not
+  # left to run wild) and the loop gets back an ordinary `{:error, ...}`
+  # result it already knows how to record and retry from — no crash, no
+  # process wedge.
+  @spec run_integrate(module(), Action.t(), Action.context(), Data.t()) :: Action.result()
+  defp run_integrate(integrate, action, context, %Data{integrate_timeout_ms: timeout_ms}) do
+    task = Task.async(fn -> integrate.execute(action, context) end)
+
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      nil -> {:error, :integrate_timeout}
+    end
+  end
 
   defp fetch!(opts, key) do
     case Keyword.fetch(opts, key) do
