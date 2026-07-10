@@ -1,0 +1,57 @@
+id = "upgrade-lifecycle-hardening"
+name = "issues #1019 + #1006: mixed-version concurrent kazi processes on one machine -- embedded module loading, bounded migration lock, version-stamped read-model"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1019"
+issue_also = "https://github.com/kazi-org/kazi/issues/1006"
+depends_on = ["ci-daemon-nats-green"]
+
+[[predicate]]
+id = "embedded-loading"
+provider = "custom_script"
+description = "TASK BRIEF part 1 of 3 (github issue #1006 remainder): a kazi run whose on-disk release payload disappears mid-run (manual cleanup, disk pressure -- the burrito-maintenance vector was already fixed in v1.131.2/ADR-0066) crashes the BEAM on the next lazy module load ({io_lib_pretty,nofile} -> kernel terminated). FIX (already designed in the issue comments -- do not re-derive): eliminate the lazy-load class. Set `mode: :embedded` in the mix.exs releases config for the kazi release (releases: [kazi: [..., mode: :embedded]]) so every module loads at boot. VERIFY burrito tolerates embedded mode: `MIX_ENV=prod mix release --overwrite` must still succeed (you do NOT need a full burrito wrap locally -- the plain release assemble step exercises the mode). If burrito's wrapper forces interactive mode and :embedded breaks the wrap, the FALLBACK (also pre-designed) is an explicit :code.ensure_modules_loaded/1 sweep at CLI boot (lib/kazi/cli.ex main entry, before dispatch) over all :kazi app modules plus the stdlib error-path modules (:io_lib_pretty, :io_lib_format, :logger_formatter and friends -- Application.spec(:kazi, :modules) gives the app list). Write test/kazi/embedded_loading_test.exs asserting that after CLI boot the critical stdlib error-path modules report :code.is_loaded/1 != false. This predicate passes when that test passes AND (mix.exs contains 'mode: :embedded' OR lib/kazi/cli.ex contains 'ensure_modules_loaded')."
+cmd = "sh"
+args = ["-c", '(grep -q "mode: :embedded" mix.exs || grep -q "ensure_modules_loaded" lib/kazi/cli.ex) && env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/embedded_loading_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "bounded-migration-lock"
+provider = "custom_script"
+description = "TASK BRIEF part 2 of 3 (github issue #1019): all kazi invocations share ~/.kazi/kazi.db; during release windows, concurrent processes on DIFFERENT kazi versions (observed: 3 versions, 5 file handles simultaneously) contend on the Ecto migration lock. Observed failure modes: (a) newer versions detect the deadlock and Kazi.ReadModel.Guard degrades to no-persistence (contained but blind); (b) older versions hang indefinitely at 0% CPU at startup. FIX: the migration path (find where the read-model runs Ecto migrations -- grep for migrate in lib/kazi/read_model/) must take the migration lock with a BOUNDED wait: a busy_timeout / lock acquisition timeout of a few seconds, after which it degrades Guard-style (continue without persistence, one warning line) instead of waiting forever. Reuse the existing Guard degradation path (lib/kazi/read_model/guard.ex, L-0035 behavior) -- do not invent a second degradation mechanism. Write test/kazi/read_model/migration_lock_test.exs: hold the migration lock from the test process (open a competing connection/transaction on a tmp db configured as the read-model target), call the migrate path, assert it returns (degraded) within a bounded time (< ~10s) rather than hanging -- assert on the returned degradation marker, not on log output."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/read_model/migration_lock_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "version-stamped-schema"
+provider = "custom_script"
+description = "TASK BRIEF part 3 of 3 (github issue #1019): an OLDER kazi binary must never contend with (or corrupt) a NEWER schema. FIX: version-stamp the read-model -- a schema_meta row (or PRAGMA user_version) recording the highest migration version applied. At startup, BEFORE attempting migrations: if the db's stamped version is NEWER than what this binary knows, refuse to write cleanly Guard-style (continue without persistence, one clear warning naming both versions: 'read-model schema v<db> is newer than this binary (v<bin>); running without persistence -- upgrade kazi'). Never attempt to migrate DOWN, never block. Write test/kazi/read_model/schema_version_guard_test.exs: stamp a tmp db with a future version number, boot the read-model against it, assert (a) it degrades to no-persistence with the version-mismatch reason (assert on the returned/exposed degradation reason), (b) the db file's stamped version is untouched afterward. PROCESS for all 3 parts: branch task/upgrade-lifecycle-hardening, one conventional commit per part, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/read_model/schema_version_guard_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

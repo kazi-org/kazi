@@ -1,0 +1,40 @@
+id = "fleet-teardown-hardening"
+name = "issue #1053: fleet member teardown crash must not fail landed work, must carry the crash reason, must never touch the base worktree"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1053"
+depends_on = ["ci-daemon-nats-green"]
+
+[[predicate]]
+id = "teardown-isolated"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #1053, observed on the first real --fleet dogfood, kazi 1.138.0, 3-member DAG): member 2 completed its work (task branch pushed with the fix commit) and THEN crashed during task-worktree TEARDOWN -- :enoent from :erlang.open_port spawning /usr/bin/git ('worktree remove --force <path>') in Kazi.Scheduler.Worktree.git/3 (lib/kazi/scheduler/worktree.ex:377) called from safe_cleanup/3 (:292), reached via Kazi.Actions.Integrate.already_landed/1 -> execute/2 (lib/kazi/actions/integrate.ex:201/:151). Consequences observed: member reported status=crashed with error=nil, its dependent went blocked, no resume_token on the collective, economy rollup counted 1 of 3 members. WORSE (see issue comment): the same run DELETED the operator-provided --workspace BASE worktree, violating ADR-0065/T50.1's base-is-never-mutated contract -- likely base-vs-member path confusion in the same teardown path. NOTE #1050 (E53/T53.2 worktree liveness guards) merged after that binary was cut and may partially overlap -- READ lib/kazi/scheduler/worktree.ex on current main FIRST and reproduce/write the failing tests before changing code.\nFOUR sub-fixes, each with its own test in test/kazi/fleet/ or test/kazi/scheduler/:\n(0) BASE PROTECTION (do first, it is the data-loss class): teardown/cleanup must refuse to operate on any path that is not a kazi-created member task worktree. Assert the base workspace path (and any path outside the run's own worktree table) is structurally unreachable by safe_cleanup / 'git worktree remove' -- e.g. cleanup takes only entries from the member's own WorktreeTable row, and a guard raises/logs-and-skips on a path mismatch. Test: fixture fleet run where cleanup is invoked; assert the base checkout dir still exists and is byte-identical.\n(1) TEARDOWN INDEPENDENCE: a cleanup failure AFTER the member's reconcile loop finished must not change the member's outcome -- catch/rescue around the teardown path; log a warning, mark the worktree row for later reaping, member status stays whatever the loop concluded (converged/landed). Test: stub Worktree.git/3 (or point the worktree path at a nonexistent dir) so 'worktree remove' raises :enoent AFTER a member converged; assert member status is converged/landed, not crashed.\n(2) CRASH REASON CARRIED: when a member genuinely crashes, the collective result's member object must carry a non-nil error (the exception message + stage, e.g. 'teardown: :enoent spawning git'). Test: force a crash, assert error != nil in the collective JSON.\n(3) DAG GATE DISTINGUISHES: dependents of a member whose work LANDED (its predicates hold / its branch integrated) but whose process crashed post-landing should still dispatch -- distinguish 'outcome unknown (crashed before landing)' (block dependents) from 'landed then crashed in teardown' (do not block). Test: 2-member fixture A->B; A converges+lands, then teardown crashes; assert B dispatches.\nPROCESS: branch task/fleet-teardown-hardening, one conventional commit per sub-fix, push with -u. This predicate passes when the fleet + scheduler test files (including your new tests) pass."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/fleet/ test/kazi/scheduler/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

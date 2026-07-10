@@ -1,0 +1,57 @@
+id = "bus-cli-contract"
+name = "issues #1060 + #1059: bus CLI contract -- per-verb help with enumerated kinds, default kind, stdout hygiene, non-destructive peek"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1060"
+issue_also = "https://github.com/kazi-org/kazi/issues/1059"
+depends_on = ["ci-daemon-nats-green"]
+
+[[predicate]]
+id = "post-kind-default-and-help"
+provider = "custom_script"
+description = "TASK BRIEF part 1 of 3 (github issue #1060): `kazi bus post \"some text\"` fails because positional <kind> is required, and the error neither lists valid kinds nor shows subcommand usage; `kazi bus <verb> --help` prints the full generic kazi usage block instead of per-verb usage. The valid kinds (reverse-engineered from the JetStream subject tree bus.machine.<kind>.<topic>) are at least: fact, announce; directed sends use msg. FIX: (a) `kazi bus post <text>` with no kind DEFAULTS to kind=fact (the issue's preferred option); an EXPLICIT unknown kind fails with a one-line usage error enumerating the valid kinds. (b) `kazi bus post|read|tell|who --help` emits per-verb usage (signature + flags + the enumerated kinds where relevant), not the generic block -- wire through the same command-table help generation kazi help --json uses (lib/kazi/cli.ex) so it cannot drift. Find the bus CLI dispatch (grep 'bus' lib/kazi/cli.ex and lib/kazi/bus/). Write/extend test/kazi/cli/bus_test.exs: post-without-kind succeeds as fact (stub/fake the NATS transport the way existing bus tests do -- read test/kazi/bus/ first and reuse its seams); unknown kind errors enumerating kinds; each bus verb's --help output contains its own signature and NOT the generic 'kazi apply' usage."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/cli/bus_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "stdout-hygiene"
+provider = "custom_script"
+description = "TASK BRIEF part 2 of 3 (github issue #1060 'Also'): `kazi bus read` intermixes housekeeping log lines (e.g. 'Skipped cleanup of older version (v1.138.0): still in use by a running process') with message payloads on stdout, breaking machine parsing. FIX: everything that is not message payload goes to stderr (or the Logger, configured to stderr for the CLI). The burrito wrapper's own maintenance lines may be outside Elixir's control -- scope this to what kazi's Elixir code prints: audit the bus read/post/tell/who paths for IO.puts/Logger calls that write non-payload content to stdout and move them to stderr. Extend test/kazi/cli/bus_test.exs: capture stdout and stderr separately on a bus read returning 2 stubbed messages while a housekeeping log line is emitted; assert stdout contains exactly the 2 payloads and the housekeeping line landed on stderr."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/cli/bus_test.exs test/kazi/bus/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "nondestructive-peek"
+provider = "custom_script"
+description = "TASK BRIEF part 3 of 3 (github issue #1059): `kazi bus read` consumes on delivery -- any read drains the queue, so monitoring loops (kazi bus read | grep -c ACK) destroy the messages they count; two inter-session acknowledgement bodies were lost this way. FIX (issue offers 3 options; implement (a), the smallest): a non-destructive read -- `kazi bus peek` (and/or `kazi bus read --peek`) that shows pending messages WITHOUT acking/consuming them, so a subsequent `kazi bus read` still delivers them. JetStream supports this shape natively (a pull consumer that does not ack, or fetching with ack-pending -- read lib/kazi/bus/ for how read currently consumes via Gnat and mirror the smallest non-acking variant; the KAZI_BUS stream retains messages). Also update the per-verb --help (part 1) to document peek. Extend test/kazi/cli/bus_test.exs (stubbed transport): peek returns the pending messages; a second peek returns the SAME messages; a subsequent read still consumes them; read-after-read returns empty. PROCESS for all 3 parts: branch task/bus-cli-contract, one conventional commit per part, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/cli/bus_test.exs test/kazi/bus/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
