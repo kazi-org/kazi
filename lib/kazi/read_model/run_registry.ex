@@ -18,6 +18,8 @@ defmodule Kazi.ReadModel.RunRegistry do
 
   import Ecto.Query
 
+  require Logger
+
   alias Kazi.ReadModel.Guard
   alias Kazi.ReadModel.Run
   alias Kazi.Repo
@@ -115,6 +117,16 @@ defmodule Kazi.ReadModel.RunRegistry do
   defp do_record_harness_session(run_id, session_id) do
     case Repo.get_by(Run, run_id: run_id) do
       nil ->
+        # Issue #1013 (T53.4): the ONE confirmed silent drop point on the
+        # session-id path — a `runs` row that does not exist yet (or has
+        # already been reaped) when the loop reports a session id. Named here
+        # so a future occurrence of the flake shows up in CI logs instead of
+        # vanishing without a trace.
+        Logger.warning(fn ->
+          "kazi.read_model run_registry dropped harness_session_id=#{session_id} " <>
+            "for run_id=#{run_id}: no matching run row"
+        end)
+
         {:error, :not_found}
 
       %Run{harness_session_id: ^session_id} = run ->

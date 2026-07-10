@@ -324,6 +324,20 @@ defmodule Kazi.ReadModel.RunRegistryTest do
       assert {:error, :not_found} =
                RunRegistry.record_harness_session("never-started", "sess-1")
     end
+
+    # Issue #1013 (T53.4): pins the WARN this call site now emits on the
+    # confirmed silent-drop case — a session id reported for a run row that
+    # does not (yet, or any longer) exist — so a future regression that
+    # removes the log call fails a test instead of just going quiet in CI.
+    test "record_harness_session/2 on an unregistered run logs a WARN naming the drop" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          RunRegistry.record_harness_session("never-started", "sess-1")
+        end)
+
+      assert log =~ "dropped harness_session_id=sess-1"
+      assert log =~ "run_id=never-started"
+    end
   end
 
   describe "harness pid identity (issue #857)" do
