@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.137.0](https://github.com/kazi-org/kazi/compare/v1.136.1...v1.137.0) (2026-07-10)
+
+
+### Features
+
+* **daemon:** T51.1 kazi daemon lifecycle skeleton (ADR-0067) ([e7fcaa6](https://github.com/kazi-org/kazi/commit/e7fcaa611c8a8fc2c6c2ccdce4f5efed26ca279f))
+
 ## [1.136.1](https://github.com/kazi-org/kazi/compare/v1.136.0...v1.136.1) (2026-07-10)
 
 
