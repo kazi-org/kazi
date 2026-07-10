@@ -25,8 +25,14 @@ defmodule Kazi.Scheduler.WorktreeTable do
 
   use Agent
 
-  @typedoc "What `reap/2` needs to finish a worktree's cleanup."
-  @type entry :: %{git_cmd: String.t(), repo: Path.t(), path: Path.t()}
+  @typedoc """
+  What `reap/2` needs to finish a worktree's cleanup. `run_id` (T53.2, #1022)
+  is the opaque identifier of the run that owns this worktree, or `nil` when
+  the caller did not thread one — `Kazi.Scheduler.Worktree.reap/3` uses it to
+  ask an injected liveness check whether that run is still live before
+  removing anything.
+  """
+  @type entry :: %{git_cmd: String.t(), repo: Path.t(), path: Path.t(), run_id: term()}
 
   @doc """
   Starts the table (an empty `partition => entry()` map).
@@ -74,6 +80,36 @@ defmodule Kazi.Scheduler.WorktreeTable do
       Agent.get_and_update(name, fn table ->
         {Map.get(table, partition), Map.delete(table, partition)}
       end)
+    end
+  end
+
+  @doc """
+  T53.2: the liveness-guarded reap. Pops (and returns) the entry recorded for
+  `partition` ONLY when `should_reap?.(entry)` returns true; otherwise the
+  entry is left in the table untouched, so a caller can distinguish "reaped"
+  from "skipped because its owning run is still live" without racing another
+  reader. Returns `:none` when nothing is recorded (same no-op-safe contract
+  as `reap/2`).
+  """
+  @spec reap_if(term(), (entry() -> boolean()), atom() | pid()) ::
+          {:reaped, entry()} | {:skipped, entry()} | :none
+  def reap_if(partition, should_reap?, name \\ __MODULE__) when is_function(should_reap?, 1) do
+    if alive?(name) do
+      Agent.get_and_update(name, fn table ->
+        case Map.get(table, partition) do
+          nil ->
+            {:none, table}
+
+          entry ->
+            if should_reap?.(entry) do
+              {{:reaped, entry}, Map.delete(table, partition)}
+            else
+              {{:skipped, entry}, table}
+            end
+        end
+      end)
+    else
+      :none
     end
   end
 

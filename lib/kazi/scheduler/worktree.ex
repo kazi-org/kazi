@@ -107,6 +107,12 @@ defmodule Kazi.Scheduler.Worktree do
       cleanup a brutal-killed partition's `after` never reached. Best-effort: a
       no-op when the table is not running, so this never couples the scheduler
       to anything else.
+    * `:run_id` — T53.2 (#1022): the opaque identifier of the run this
+      partition belongs to, threaded into the recorded `WorktreeTable` entry
+      so `reap/3`'s liveness check can tell whose worktree it would be
+      removing. Default `nil` (the pre-T53.2 shape — `reap/3`'s default
+      liveness check treats a `nil` run_id as "not live", so unset callers
+      behave exactly as before).
   """
   @spec wrap(worktree_reconciler(), keyword()) :: Kazi.Scheduler.reconciler()
   def wrap(inner, opts) when is_function(inner, 2) and is_list(opts) do
@@ -115,6 +121,7 @@ defmodule Kazi.Scheduler.Worktree do
     git_cmd = Keyword.get(opts, :git_cmd, "git")
     branch_prefix = Keyword.get(opts, :branch_prefix, "kazi-partition")
     worktree_table = Keyword.get(opts, :worktree_table, WorktreeTable)
+    run_id = Keyword.get(opts, :run_id)
     base_ref = Keyword.get(opts, :base_ref)
     effective_base = base_ref || "HEAD"
 
@@ -133,7 +140,7 @@ defmodule Kazi.Scheduler.Worktree do
           # M8 (deep-review-001): record BEFORE running the risky work, so a
           # process that gets brutal-killed mid-run (never reaching `after`)
           # still leaves a trace a surviving process can reap.
-          entry = %{git_cmd: git_cmd, repo: repo, path: path}
+          entry = %{git_cmd: git_cmd, repo: repo, path: path, run_id: run_id}
           WorktreeTable.record(partition, entry, worktree_table)
 
           try do
@@ -179,12 +186,35 @@ defmodule Kazi.Scheduler.Worktree do
   `:reconcile_timeout` firing, or an untrappable `Process.exit(pid, :kill)`)
   leaves an entry behind for this to find, so this is safe to call
   UNCONDITIONALLY from any process that just observed one of those two exits.
+
+  T53.2 (#1022): before removing anything, this checks the entry's `run_id`
+  against `:run_alive?` (an injected `(run_id -> boolean())`, default `fn _ ->
+  false end` — the pre-T53.2 shape, so an unset run_id behaves exactly as
+  before: reap proceeds). When the owning run IS live, the worktree is left in
+  place (and re-recorded in the table) and a warning is logged instead of
+  removing it — never rm a live run's worktree out from under it. It is
+  eligible for reap again on a later call (e.g. once that run has actually
+  terminated).
   """
-  @spec reap(term(), atom() | pid()) :: :ok
-  def reap(partition, worktree_table \\ WorktreeTable) do
-    case WorktreeTable.reap(partition, worktree_table) do
-      %{git_cmd: git_cmd, repo: repo, path: path} -> safe_cleanup(git_cmd, repo, path)
-      nil -> :ok
+  @spec reap(term(), atom() | pid(), keyword()) :: :ok
+  def reap(partition, worktree_table \\ WorktreeTable, opts \\ []) do
+    run_alive? = Keyword.get(opts, :run_alive?, fn _run_id -> false end)
+    should_reap? = fn entry -> not run_alive?.(Map.get(entry, :run_id)) end
+
+    case WorktreeTable.reap_if(partition, should_reap?, worktree_table) do
+      {:reaped, %{git_cmd: git_cmd, repo: repo, path: path}} ->
+        safe_cleanup(git_cmd, repo, path)
+
+      {:skipped, entry} ->
+        Logger.warning(fn ->
+          "kazi.scheduler.worktree SKIPPING reap of #{entry.path}: " <>
+            "owning run #{inspect(Map.get(entry, :run_id))} is still live"
+        end)
+
+        :ok
+
+      :none ->
+        :ok
     end
   end
 

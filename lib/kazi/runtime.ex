@@ -357,7 +357,12 @@ defmodule Kazi.Runtime do
           # T32.4 anti-gaming enforcement (ADR-0042): thread the resolved profile so
           # the loop composes clean-tree isolation + read-only flagging + the
           # skip→fail mapping onto the reconcile tick.
-          enforcement: enforcement
+          enforcement: enforcement,
+          # T53.2 (#1022): every REAL `kazi apply` targets an actual checkout
+          # that CAN vanish mid-run (a deleted worktree, a wiped tmp dir) — so
+          # the runtime always turns on the loop's workspace-liveness precheck,
+          # unlike the loop's own default (off, for fixture-path test loops).
+          check_workspace_liveness: true
         )
 
       with {:ok, loop} <- Loop.start_link(loop_opts) do
