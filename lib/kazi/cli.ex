@@ -336,6 +336,13 @@ defmodule Kazi.CLI do
       flags: [:port, :bind, :roadmap]
     },
     %{
+      name: "daemon",
+      summary:
+        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1): `daemon start|stop|status` over a local Unix-socket control plane with a version handshake. No session bus yet -- convergence never depends on the daemon.",
+      args: [%{name: "subcommand", required: true}],
+      flags: [:json]
+    },
+    %{
       name: "economy",
       summary:
         "Read-only run economics (ADR-0058): aggregate persisted run-end economics into p50/p95 percentiles by goal shape/model/harness, or --rediscovery <goal> for a ranked rediscovery-pressure candidate report.",
@@ -764,6 +771,9 @@ defmodule Kazi.CLI do
       {:dashboard, opts} ->
         execute_dashboard(opts, inject_opts)
 
+      {:daemon, subcommand, args, opts} ->
+        execute_daemon(subcommand, args, opts, inject_opts)
+
       {:propose, idea, opts} ->
         execute_propose(idea, opts, inject_opts)
 
@@ -813,6 +823,7 @@ defmodule Kazi.CLI do
           | {:install_skill, keyword()}
           | {:mcp, keyword()}
           | {:dashboard, keyword()}
+          | {:daemon, String.t(), [String.t()], keyword()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
@@ -1023,6 +1034,12 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T51.1 (ADR-0067 decision point 1): `kazi daemon start|stop|status` -- the
+  # long-lived per-machine daemon's lifecycle, over its Unix-socket control
+  # plane. Wired like `dashboard`/`memory` above: a required subcommand, no
+  # positional args beyond it, `--json` carried through.
+  defp parse_command(["daemon" | rest], flags), do: parse_daemon(rest, flags)
+
   # T3.5c authoring: `plan "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
   # carried through (where the harness drafts the goal).
@@ -1122,7 +1139,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `daemon`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
@@ -1196,6 +1213,25 @@ defmodule Kazi.CLI do
       json: flags[:json] || false
     ]
   end
+
+  # T51.1: `daemon start|stop|status [--json]` -- exactly the three verbs
+  # ADR-0067 decision point 1 lands; no positional args beyond the subcommand.
+  @daemon_subcommands ~w(start stop status)
+
+  defp parse_daemon([sub | rest], flags) when sub in @daemon_subcommands do
+    case rest do
+      [] -> {:daemon, sub, [], json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_daemon([sub | _], _flags),
+    do:
+      {:error,
+       "unknown daemon subcommand #{inspect(sub)} (expected `start`, `stop`, or `status`)"}
+
+  defp parse_daemon([], _flags),
+    do: {:error, "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`)"}
 
   defp approval_command(command, proposal_ref, [], flags),
     do: {command, proposal_ref, json: flags[:json] || false}
@@ -3405,6 +3441,135 @@ defmodule Kazi.CLI do
     serve_forever.()
 
     0
+  end
+
+  # =============================================================================
+  # daemon command (T51.1, ADR-0067 decision point 1): the long-lived
+  # per-machine daemon's lifecycle over its Unix-socket control plane.
+  # =============================================================================
+  #
+  # `start` runs the daemon supervision tree in the FOREGROUND -- the SAME
+  # convention as `kazi dashboard`: the operator backgrounds it (`&`, a
+  # process manager, ...); this process just blocks until the tree stops
+  # (either a clean `stop`-triggered shutdown or an external kill). `status`
+  # and `stop` are pure client calls over the socket -- they never start
+  # anything.
+  #
+  # Down/stale handling (the brief's point 4) is centralized in
+  # `daemon_probe_result/2` so `status` and `stop` report it identically.
+  defp execute_daemon("start", [], opts, inject_opts) do
+    sock_path = Kazi.Daemon.Supervisor.default_sock_path()
+    pid_path = Kazi.Daemon.Supervisor.default_pid_path()
+
+    case Kazi.Daemon.start(sock_path: sock_path, pid_path: pid_path) do
+      {:ok, sup_pid} ->
+        IO.puts("kazi daemon listening on #{sock_path} (vsn #{version()})")
+
+        wait_for_stop =
+          Keyword.get(inject_opts, :daemon_wait, fn pid ->
+            ref = Process.monitor(pid)
+
+            receive do
+              {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+            end
+          end)
+
+        wait_for_stop.(sup_pid)
+        0
+
+      {:error, {:already_running, vsn}} ->
+        daemon_error("daemon already running (vsn #{vsn})", opts)
+
+      {:error, reason} ->
+        daemon_error("could not start daemon: #{inspect(reason)}", opts)
+    end
+  end
+
+  defp execute_daemon("status", [], opts, _inject_opts) do
+    sock_path = Kazi.Daemon.Supervisor.default_sock_path()
+
+    case daemon_probe_result(sock_path) do
+      {:ok, resp} ->
+        emit(json?(opts), resp, fn ->
+          IO.puts(
+            "kazi daemon: running (vsn #{resp["vsn"]}, uptime #{resp["uptime_s"]}s, pid #{resp["pid"]})"
+          )
+        end)
+
+        0
+
+      {:error, message} ->
+        daemon_error(message, opts)
+    end
+  end
+
+  defp execute_daemon("stop", [], opts, _inject_opts) do
+    sock_path = Kazi.Daemon.Supervisor.default_sock_path()
+    pid_path = Kazi.Daemon.Supervisor.default_pid_path()
+
+    case Kazi.Daemon.Probe.probe(sock_path) do
+      :missing ->
+        daemon_error("no daemon running (no socket at #{sock_path})", opts)
+
+      :dead ->
+        daemon_clean_stale(sock_path, pid_path, opts)
+
+      :alive ->
+        case Kazi.Daemon.Probe.request(sock_path, %{"op" => "shutdown"}) do
+          {:ok, %{"ok" => true}} ->
+            emit(json?(opts), %{"ok" => true, "stopped" => true}, fn ->
+              IO.puts("kazi daemon stopped")
+            end)
+
+            0
+
+          {:ok, resp} ->
+            daemon_error("daemon refused shutdown: #{inspect(resp)}", opts)
+
+          {:error, reason} ->
+            daemon_error("failed to stop daemon: #{inspect(reason)}", opts)
+        end
+    end
+  end
+
+  defp execute_daemon(sub, _args, opts, _inject_opts),
+    do: daemon_error("unknown daemon subcommand #{inspect(sub)}", opts)
+
+  # Shared `status` probe: `:missing` / `:dead` render the point-4 down/stale
+  # messages; `:alive` pings and surfaces the raw handshake.
+  defp daemon_probe_result(sock_path) do
+    case Kazi.Daemon.Probe.probe(sock_path) do
+      :missing ->
+        {:error, "no daemon running (no socket at #{sock_path})"}
+
+      :dead ->
+        pid_path = Kazi.Daemon.Supervisor.default_pid_path()
+        File.rm(sock_path)
+        File.rm(pid_path)
+        {:error, "daemon was not running (stale socket at #{sock_path} cleaned up)"}
+
+      :alive ->
+        case Kazi.Daemon.Probe.ping(sock_path) do
+          {:ok, resp} -> {:ok, resp}
+          {:error, reason} -> {:error, "daemon did not answer the ping: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  defp daemon_clean_stale(sock_path, pid_path, opts) do
+    File.rm(sock_path)
+    File.rm(pid_path)
+    daemon_error("daemon was not running (stale socket at #{sock_path} cleaned up)", opts)
+  end
+
+  defp daemon_error(message, opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
   end
 
   @doc """
