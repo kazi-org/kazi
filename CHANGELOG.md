@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.139.0](https://github.com/kazi-org/kazi/compare/v1.138.0...v1.139.0) (2026-07-10)
+
+
+### Features
+
+* **mcp:** T51.3 kazi_bus_post|read|who|tell tools + session-bus docs (ADR-0067) ([fea9af9](https://github.com/kazi-org/kazi/commit/fea9af9185ccacf2d97059be20ab3ef6a35d1d9a))
+
 ## [1.138.0](https://github.com/kazi-org/kazi/compare/v1.137.0...v1.138.0) (2026-07-10)
 
 
