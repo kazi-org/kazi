@@ -303,6 +303,13 @@ defmodule Kazi.Scheduler do
       `needs`-DAG group scheduler (a no-op otherwise, since a flat goal-set has no
       frontiers to report). See `Kazi.Scheduler.DepScheduler`'s moduledoc
       "Frontier-complete events" for the callback shape.
+    * `:pause_between_waves`, `:resume_token` — the supervised-checkpoint mode
+      (T50.3, ADR-0065 decision 3, issue #936 full ask), forwarded to
+      `Kazi.Scheduler.DepScheduler.run/2` the same way `:on_frontier_complete`
+      is (and, like it, dropped on the flat path — no frontiers, nothing to
+      pause). Pausing returns a `:paused` collective carrying a `:resume_token`;
+      resuming restores the checkpoint's settled groups and continues. See
+      `Kazi.Scheduler.DepScheduler`'s "Options" docs for the exact semantics.
 
   Returns `run/2`'s result, but each `result.partitions` entry is keyed by the
   `Kazi.Scheduler.Partitioner` partition (not a bare term). With `:integrate`, the
@@ -374,7 +381,13 @@ defmodule Kazi.Scheduler do
 
     dep_opts =
       opts
-      |> Keyword.take([:supervisor, :reconcile_timeout, :on_frontier_complete])
+      |> Keyword.take([
+        :supervisor,
+        :reconcile_timeout,
+        :on_frontier_complete,
+        :pause_between_waves,
+        :resume_token
+      ])
       |> Keyword.put(:reconciler, group_reconciler)
 
     Kazi.Scheduler.DepScheduler.run(goal, dep_opts)
