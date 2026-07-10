@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.140.1](https://github.com/kazi-org/kazi/compare/v1.140.0...v1.140.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **loop:** bound :integrate execute/2 by a wall-clock timeout ([#1020](https://github.com/kazi-org/kazi/issues/1020)) ([59c7ffe](https://github.com/kazi-org/kazi/commit/59c7ffe9ec073551574ca25bddfd76de744d8d3f))
+
 ## [1.140.0](https://github.com/kazi-org/kazi/compare/v1.139.0...v1.140.0) (2026-07-10)
 
 
