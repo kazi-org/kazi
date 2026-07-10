@@ -16,6 +16,7 @@ defmodule Kazi.Integration.RunRegistryWiringTest do
   alias Kazi.Repo
 
   import ExUnit.CaptureIO
+  import Kazi.TestSupport.Eventually
 
   @moduletag :tmp_dir
 
@@ -80,9 +81,18 @@ defmodule Kazi.Integration.RunRegistryWiringTest do
     assert run.status == "converged"
     # The operator-assigned label from --session-name.
     assert run.session_name == "wiring-session"
-    # The claude-envelope session_id, parsed by the profile, threaded through
-    # the loop's iteration payload, and recorded by the runtime.
-    assert run.harness_session_id == "sess-wiring-fixture"
+
+    # Issue #1013 (T53.4): `CLI.run/2` returning does not guarantee every
+    # best-effort registry write it fired has landed yet, so poll rather than
+    # read once — the assertion content (session name + envelope session_id
+    # captured) is unchanged.
+    eventually(fn ->
+      run = Repo.get_by!(Run, goal_ref: "run-registry-wiring-fixture")
+
+      # The claude-envelope session_id, parsed by the profile, threaded through
+      # the loop's iteration payload, and recorded by the runtime.
+      assert run.harness_session_id == "sess-wiring-fixture"
+    end)
   end
 
   test "the run row falls back to CLAUDE_CODE_SESSION_ID when neither --session-name nor KAZI_SESSION_NAME is given",
