@@ -1,11 +1,14 @@
 defmodule Kazi.Daemon.LifecycleTest do
   @moduledoc """
   T51.1 (ADR-0067 decision point 1): the daemon skeleton's lifecycle contract
-  — process supervision + the Unix-socket control plane, with NO NATS/bus
-  wired yet (that's T51.2+). This test starts the supervision tree IN-TEST
-  (`Kazi.Daemon.start/1`), never the released binary, against tmp-scoped
-  socket/pidfile paths passed explicitly through `opts` — never the real
-  `~/.kazi/daemon/` a developer's machine might already be using.
+  — process supervision + the Unix-socket control plane. This test starts the
+  supervision tree IN-TEST (`Kazi.Daemon.start/1`), never the released
+  binary, against tmp-scoped socket/pidfile/JetStream-store paths and a
+  per-test nats port, all passed explicitly through `opts` — never the real
+  `~/.kazi/daemon/` a developer's machine might already be using, and never
+  the default nats port (T51.2, ADR-0067 decision point 2, wired
+  `Kazi.Daemon.start/1` to also supervise nats-server unconditionally, so
+  every daemon this test starts needs its own isolated bus store + port).
 
   `async: false`: real OS sockets and pidfiles are shared, mutable resources
   (not an Ecto sandbox transaction), so tests run serially to avoid flakiness
@@ -27,12 +30,19 @@ defmodule Kazi.Daemon.LifecycleTest do
 
   defp unique_name(label), do: :"#{label}_#{System.unique_integer([:positive])}"
 
+  # T51.2: an isolated JetStream store dir + a random-ish high port per test,
+  # so no test's supervised nats-server ever touches a developer's real
+  # `~/.kazi/daemon/jetstream` or races another test's nats-server for a port.
   defp daemon_opts(sock_path, pid_path) do
+    id = System.unique_integer([:positive])
+
     [
       sock_path: sock_path,
       pid_path: pid_path,
       name: unique_name(:daemon_sup),
-      listener_name: unique_name(:daemon_listener)
+      listener_name: unique_name(:daemon_listener),
+      store_dir: "/tmp/kazi_daemon_test_js_#{id}",
+      port: 20_000 + rem(id, 20_000)
     ]
   end
 

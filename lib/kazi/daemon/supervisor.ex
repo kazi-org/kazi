@@ -20,10 +20,21 @@ defmodule Kazi.Daemon.Supervisor do
     sock_path = Keyword.get(opts, :sock_path, default_sock_path())
     pid_path = Keyword.get(opts, :pid_path, default_pid_path())
     listener_name = Keyword.get(opts, :listener_name, Kazi.Daemon.Listener)
+    nats_name = default_nats_name(opts)
+
+    nats_opts =
+      opts
+      |> Keyword.take([:nats_bin, :port, :store_dir])
+      |> Keyword.put(:name, nats_name)
 
     children = [
+      {Kazi.Daemon.Nats, nats_opts},
       {Kazi.Daemon.Listener,
-       sock_path: sock_path, pid_path: pid_path, name: listener_name, sup_pid: self()}
+       sock_path: sock_path,
+       pid_path: pid_path,
+       name: listener_name,
+       sup_pid: self(),
+       nats_name: nats_name}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -42,6 +53,22 @@ defmodule Kazi.Daemon.Supervisor do
   @doc "The default pidfile: `<state dir>/daemon/daemon.pid`."
   @spec default_pid_path() :: Path.t()
   def default_pid_path, do: Path.join(daemon_dir(), "daemon.pid")
+
+  @doc """
+  The `Kazi.Daemon.Nats` process name `init/1` uses absent an explicit
+  `opts[:nats_name]`: derived from THIS supervisor's own `opts[:name]`
+  (fixed `Kazi.Daemon.Supervisor` in production -- one daemon per machine)
+  rather than a bare module-atom default, so two co-existing supervisor
+  instances (as `daemon_lifecycle_test.exs` deliberately runs, to prove
+  double-start refusal) never race for the same registered process name.
+  Exposed so `Kazi.Daemon.do_start/3` resolves the IDENTICAL name after
+  `Supervisor.start_link/1` returns (it cannot read the child's runtime
+  opts back out any other way).
+  """
+  @spec default_nats_name(keyword()) :: atom()
+  def default_nats_name(opts) do
+    Keyword.get(opts, :nats_name, Module.concat(Keyword.get(opts, :name, __MODULE__), Nats))
+  end
 
   defp daemon_dir do
     state_dir =

@@ -155,6 +155,11 @@ defmodule Kazi.CLI do
     rediscovery: :string,
     port: :integer,
     bind: :string,
+    nats_bin: :string,
+    nats_port: :integer,
+    topic: :string,
+    sev: :string,
+    scope: :string,
     roadmap: :string,
     goal: :string,
     help: :boolean,
@@ -247,6 +252,16 @@ defmodule Kazi.CLI do
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
       "`dashboard` only: interface to bind (default 127.0.0.1 -- loopback only). Set explicitly to bind a non-loopback address; overriding is loud (printed at boot), never silent.",
+    nats_bin:
+      "`daemon start` only (T51.2, ADR-0067 decision point 2): explicit path to the `nats-server` binary the daemon supervises for the session bus. Default: resolved from PATH. Neither found -- `daemon start` fails with one clear line naming the missing binary; the daemon never runs busless.",
+    nats_port:
+      "`daemon start` only (T51.2): TCP port the supervised nats-server binds. Default 4223 (deliberately non-standard -- never collides with an operator's own NATS on 4222). Discovered by bus clients through the daemon's control-socket ping, never guessed.",
+    topic:
+      "`bus post` only: an optional free-text topic tag on the posted message (default none).",
+    sev:
+      "`bus post` only: message severity, `info` (default) or `interrupt`. `bus read`'s digest prints `interrupt` messages verbatim; everything else is summarized.",
+    scope:
+      "`bus post`/`bus read`/`bus tell` only: `machine` (default) or `project` (the current repo's canonical toplevel path, slugged) -- which bus subject tree the call addresses.",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0057): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. The starmap loads it through `KaziWeb.Starmap.GoalSource` and renders its needs-DAG in wave-band frontiers, the SAME computation `kazi apply --explain` prints. Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, the starmap keeps its flat-list fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty starmap.",
     goal:
@@ -338,9 +353,16 @@ defmodule Kazi.CLI do
     %{
       name: "daemon",
       summary:
-        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1): `daemon start|stop|status` over a local Unix-socket control plane with a version handshake. No session bus yet -- convergence never depends on the daemon.",
+        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status` over a local Unix-socket control plane with a version handshake; `start` also supervises nats-server for the session bus. Convergence never depends on the daemon.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json]
+      flags: [:json, :nats_bin, :nats_port]
+    },
+    %{
+      name: "bus",
+      summary:
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|who|tell` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't.",
+      args: [%{name: "subcommand", required: true}],
+      flags: [:json, :topic, :sev, :scope]
     },
     %{
       name: "economy",
@@ -774,6 +796,9 @@ defmodule Kazi.CLI do
       {:daemon, subcommand, args, opts} ->
         execute_daemon(subcommand, args, opts, inject_opts)
 
+      {:bus, subcommand, args, opts} ->
+        execute_bus(subcommand, args, opts)
+
       {:propose, idea, opts} ->
         execute_propose(idea, opts, inject_opts)
 
@@ -824,6 +849,7 @@ defmodule Kazi.CLI do
           | {:mcp, keyword()}
           | {:dashboard, keyword()}
           | {:daemon, String.t(), [String.t()], keyword()}
+          | {:bus, String.t(), [String.t()], keyword()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
@@ -1039,6 +1065,7 @@ defmodule Kazi.CLI do
   # plane. Wired like `dashboard`/`memory` above: a required subcommand, no
   # positional args beyond it, `--json` carried through.
   defp parse_command(["daemon" | rest], flags), do: parse_daemon(rest, flags)
+  defp parse_command(["bus" | rest], flags), do: parse_bus(rest, flags)
 
   # T3.5c authoring: `plan "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
@@ -1139,7 +1166,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `daemon`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `daemon`, `bus`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
@@ -1220,8 +1247,12 @@ defmodule Kazi.CLI do
 
   defp parse_daemon([sub | rest], flags) when sub in @daemon_subcommands do
     case rest do
-      [] -> {:daemon, sub, [], json: flags[:json] || false}
-      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+      [] ->
+        {:daemon, sub, [],
+         json: flags[:json] || false, nats_bin: flags[:nats_bin], nats_port: flags[:nats_port]}
+
+      extra ->
+        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
 
@@ -1232,6 +1263,30 @@ defmodule Kazi.CLI do
 
   defp parse_daemon([], _flags),
     do: {:error, "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`)"}
+
+  # T51.2 (ADR-0067 decision point 4): `bus post|read|who|tell` -- `post`/`tell`
+  # take a required positional (kind+text, or session+text); `read`/`who` take
+  # none. Validated further in `execute_bus/4` (arg counts differ per verb).
+  @bus_subcommands ~w(post read who tell)
+
+  defp parse_bus([sub | rest], flags) when sub in @bus_subcommands,
+    do: {:bus, sub, rest, bus_flags(flags)}
+
+  defp parse_bus([sub | _], _flags),
+    do:
+      {:error, "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `who`, `tell`)"}
+
+  defp parse_bus([], _flags),
+    do: {:error, "the `bus` command requires a <subcommand> (`post`, `read`, `who`, `tell`)"}
+
+  defp bus_flags(flags) do
+    [
+      json: flags[:json] || false,
+      topic: flags[:topic],
+      sev: flags[:sev] || "info",
+      scope: flags[:scope] || "machine"
+    ]
+  end
 
   defp approval_command(command, proposal_ref, [], flags),
     do: {command, proposal_ref, json: flags[:json] || false}
@@ -2705,8 +2760,9 @@ defmodule Kazi.CLI do
   # A future harness-agnostic addition can extend step 3 with more orchestrator
   # session env vars as they're confirmed to exist; this only adds the one this
   # codebase's own operator environment was confirmed to set.
+  @doc "Public so `Kazi.Bus` (T51.2) reuses the SAME session-identity resolution chain, instead of reinventing it."
   @spec resolve_session_name(keyword()) :: String.t() | nil
-  defp resolve_session_name(opts) do
+  def resolve_session_name(opts) do
     opts[:session_name] ||
       System.get_env("KAZI_SESSION_NAME") ||
       System.get_env("CLAUDE_CODE_SESSION_ID") ||
@@ -3461,7 +3517,12 @@ defmodule Kazi.CLI do
     sock_path = Kazi.Daemon.Supervisor.default_sock_path()
     pid_path = Kazi.Daemon.Supervisor.default_pid_path()
 
-    case Kazi.Daemon.start(sock_path: sock_path, pid_path: pid_path) do
+    daemon_opts =
+      [sock_path: sock_path, pid_path: pid_path]
+      |> maybe_put(:nats_bin, opts[:nats_bin])
+      |> maybe_put(:port, opts[:nats_port])
+
+    case Kazi.Daemon.start(daemon_opts) do
       {:ok, sup_pid} ->
         IO.puts("kazi daemon listening on #{sock_path} (vsn #{version()})")
 
@@ -3479,6 +3540,12 @@ defmodule Kazi.CLI do
 
       {:error, {:already_running, vsn}} ->
         daemon_error("daemon already running (vsn #{vsn})", opts)
+
+      {:error, :nats_bin_not_found} ->
+        daemon_error(
+          "nats-server binary not found (searched PATH; pass --nats-bin <path>) -- install it from https://nats.io/download/",
+          opts
+        )
 
       {:error, reason} ->
         daemon_error("could not start daemon: #{inspect(reason)}", opts)
@@ -3571,6 +3638,91 @@ defmodule Kazi.CLI do
 
     1
   end
+
+  # =============================================================================
+  # bus command (T51.2, ADR-0067 decision point 4): the session bus verbs over
+  # the daemon-supervised NATS bus. Every verb is a thin `Kazi.Bus` wrapper;
+  # the shared no-daemon message and `--json` envelope live here.
+  # =============================================================================
+  defp execute_bus("post", [kind, text], opts) do
+    case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
+      :ok ->
+        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("posted") end)
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("post", _args, opts),
+    do: bus_error("`bus post` requires <kind> <text>", opts)
+
+  defp execute_bus("tell", [session, text], opts) do
+    case Kazi.Bus.tell(session, text, bus_call_opts(opts)) do
+      :ok ->
+        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("told #{session}") end)
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("tell", _args, opts),
+    do: bus_error("`bus tell` requires <session> <text>", opts)
+
+  defp execute_bus("read", [], opts) do
+    case Kazi.Bus.read(bus_call_opts(opts)) do
+      {:ok, messages} ->
+        emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
+          print_read_digest(messages)
+        end)
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("read", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
+  defp execute_bus("who", [], opts) do
+    case Kazi.Bus.who(bus_call_opts(opts)) do
+      {:ok, sessions} ->
+        emit(json?(opts), %{"ok" => true, "sessions" => sessions}, fn ->
+          Enum.each(sessions, fn s -> IO.puts("#{s["session"]} pid=#{s["pid"]} #{s["cwd"]}") end)
+        end)
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("who", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
+  defp bus_call_opts(opts) do
+    [scope: opts[:scope], topic: opts[:topic], sev: opts[:sev]]
+  end
+
+  defp print_read_digest(messages) do
+    %{verbatim: verbatim, digest: digest} = Kazi.Bus.Digest.summarize(messages)
+    Enum.each(verbatim, &IO.puts/1)
+    Enum.each(digest, &IO.puts/1)
+  end
+
+  defp bus_error(:no_daemon, opts),
+    do: daemon_error("no daemon running -- start one with `kazi daemon start`", opts)
+
+  defp bus_error({:text_too_large, cap}, opts),
+    do: daemon_error("message exceeds the #{cap}-byte bus cap", opts)
+
+  defp bus_error(reason, opts), do: daemon_error("bus error: #{inspect(reason)}", opts)
 
   @doc """
   Loads `path` (when given) through `Kazi.Goal.Loader` — the SAME loader
