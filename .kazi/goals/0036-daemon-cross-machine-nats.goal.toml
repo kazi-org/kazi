@@ -1,0 +1,47 @@
+id = "daemon-cross-machine-nats"
+name = "ADR-0067 cross-machine: kazi daemon can only supervise a LOCAL nats-server today -- implement the promised 'or connects to an external one via config'"
+
+[metadata]
+adr = "docs/adr/0067-session-coordination-bus.md"
+
+[[predicate]]
+id = "daemon-connects-external-nats"
+provider = "custom_script"
+description = "TASK BRIEF: ADR-0067 (Accepted) states the session bus is designed for cross-machine from day one -- \"One machine today, a cluster later, with no protocol change\" and \"Cross-machine coordination becomes a config change, not a redesign\" -- and describes `kazi daemon` as supervising a local nats-server \"(or connects to an external one via config)\". ROOT CAUSE, already researched -- do not re-derive: that parenthetical was NEVER implemented. Kazi.Daemon.Nats.init/1 (lib/kazi/daemon/nats.ex:81-106) unconditionally resolves a binary (resolve_bin/1, nats.ex:46-52) and Port.open/2-spawns a LOCAL `nats-server -js` process -- there is no branch that instead connects a Gnat client to a pre-existing REMOTE nats-server. Kazi.Daemon.start/1 (lib/kazi/daemon.ex:43-61) gates on `Kazi.Daemon.Nats.resolve_bin(opts)` BEFORE anything else, so even a caller who only wants to CONNECT (not spawn) is forced through binary resolution today. Two more hardcoded-localhost spots to fix: Kazi.Daemon.Nats.do_wait_ready/2 (nats.ex:65-79) connects Gnat to `host: \"127.0.0.1\"` unconditionally; Kazi.Daemon.start/1's do_start/3 (daemon.ex:64-94) calls `Kazi.Bus.Provision.run(host: \"127.0.0.1\", port: nats_port)` (daemon.ex:82) -- also hardcoded. FIX, all four required: (1) a new opt, e.g. `opts[:nats_host]` (a REMOTE host, not the existing `opts[:nats_bin]`/`opts[:port]` which stay local-spawn-only) that switches Kazi.Daemon.Nats.init/1 into CONNECT mode: skip resolve_bin/Port.open entirely, just hold `{host, port}` in the GenServer state for `port/1` to return and for the daemon's control-socket ping to report. (2) Kazi.Daemon.start/1's resolve_bin gate must be skipped when `opts[:nats_host]` is present -- connecting needs no local binary. (3) Thread the resolved host through do_wait_ready/2 and the Bus.Provision.run/1 call instead of the hardcoded \"127.0.0.1\" literal in BOTH files. (4) CLI: add `--nats-host <host>` to `kazi daemon start` alongside the existing `--nats-bin`/`--nats-port` (cli.ex:158-159 type decls, cli.ex:255-258 help text, cli.ex:358 flags list, cli.ex:1252 opts construction, cli.ex:3522-3523 maybe_put wiring -- follow the SAME pattern for the new flag). The MACHINE HOSTING the shared nats-server needs NO code change to accept remote connections (nats-server binds all interfaces by default; `Kazi.Daemon.Nats.init/1`'s args list, nats.ex:90, passes no `-a` bind-address restriction) -- confirm this by grep, do not assume. SECURITY (do not skip): the supervised nats-server is started today with NO auth (nats.ex:90 args are just `-js -p <port> -sd <store_dir>`) -- fine bound to loopback, NOT fine exposed on a LAN. Add an optional shared token: a `--nats-token <token>` / `KAZI_NATS_TOKEN` env var, passed as `--auth <token>` to the SPAWNING side's nats-server args (nats.ex:90) when set, and as Gnat connection opts (`auth_token:`) on the CONNECTING side (both do_wait_ready and wherever Kazi.Bus's own client connections resolve host/port -- grep `Gnat.start_link` repo-wide, there is more than one call site). Token is OPTIONAL (default nil, no auth, exactly today's behavior) so this does not break the existing single-machine default -- but the CLI help text and docs/session-bus.md MUST say plainly that cross-machine without a token is unauthenticated on the LAN. PROCESS: branch task/daemon-cross-machine-nats, small conventional commits (nats.ex connect-mode / daemon.ex host-threading / cli.ex flag / docs as separate commits), push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/daemon/ test/kazi/cli/daemon_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "docs-cross-machine-setup"
+provider = "custom_script"
+description = "TASK BRIEF part 2: docs/session-bus.md gets a new section (\"Cross-machine setup\") walking the two-role setup this brief enables: one machine runs `kazi daemon start` normally (spawns + hosts the shared nats-server, optionally `--nats-token <token>`); every OTHER machine runs `kazi daemon start --nats-host <hosting-machine-ip> --nats-port <its-port> [--nats-token <same-token>]` to CONNECT instead of spawning its own. State plainly that `kazi bus who`/`read`/`post`/`tell` then see the SAME presence/facts/events across every connected machine with no other config -- this is exactly the ADR-0067 promise (\"a config change, not a redesign\") being fulfilled. Also update ADR-0067 itself: its Consequences section already claims \"Cross-machine coordination becomes a config change\" in the future tense -- add a short note (do not rewrite the ADR's decision, ADRs are frozen per this repo's own CLAUDE.md; append, do not edit prior sections) marking this specific capability as now IMPLEMENTED, with a pointer to this brief's PR. Predicate passes when docs/session-bus.md contains a heading matching /[Cc]ross-machine/ AND mentions `--nats-host`."
+cmd = "sh"
+args = ["-c", 'grep -qi "cross-machine" docs/session-bus.md && grep -q -- "--nats-host" docs/session-bus.md']
+timeout_ms = 30000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

@@ -1,0 +1,39 @@
+id = "dashboard-json-api"
+name = "issue #1077: kazi dashboard has no JSON API -- only LiveView HTML, so external tools cannot poll it"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1077"
+
+[[predicate]]
+id = "api-runs-and-goals"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #1077): `kazi dashboard` (ADR-0057) is LAN-reachable (an operator confirmed running it on a second machine and hitting it from a browser over the local network) but is READ-ONLY exploitable only as a human-facing LiveView app -- lib/kazi_web/router.ex has exactly two kinds of route: /healthz (a plain plug, HTML+JSON accepts but no real body) and a pipeline of `live(...)` pages (/, /starmap, /goals, /leases, /dag, /goals/:id/history, /goals/:id/drillin, /runs/:run_id/transcript, /events) that need a session cookie + CSRF + websocket. There is NO /api/* route. An operator building a PERSONAL dashboard that aggregates kazi state (e.g. from several machines) has no way to fetch structured data over HTTP; today the only JSON surface is the CLI (`kazi status --json`, `kazi economy --json`), which requires shelling into each machine (ssh) rather than a simple fetch(). FIX: add a `/api/*` JSON scope to lib/kazi_web/router.ex reusing the SAME read projections the LiveView pages already read from (ADR-0011: pure read projection, never mutates a run/goal/lease) -- do not build a second data-access path. Minimum surface: `GET /api/runs` (mirrors the starmap's Kazi.ReadModel.RunRegistry.list/0 read -- the SAME data `kazi status --json` with no ref returns: run_id, goal_ref, status, heartbeat_age_s, harness, model), `GET /api/goals` (mirrors the goal board: goal id, status, predicate vector, iteration count). Plain JSON controllers (KaziWeb.API.RunsController/GoalsController or similar), NOT LiveView -- no session/CSRF/websocket needed for a stateless GET. Add both to the :health pipeline pattern (accepts html+json, no session) or a new :api pipeline that skips :browser's session/CSRF plugs entirely -- a personal dashboard doing a bare fetch() must not need a cookie dance. PROCESS: branch task/dashboard-json-api, small conventional commits, push with -u. Update docs/dashboard.md with the new /api/* surface (ADR-0034: docs land with the code)."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi_web/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
