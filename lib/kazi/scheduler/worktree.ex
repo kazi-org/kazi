@@ -150,8 +150,19 @@ defmodule Kazi.Scheduler.Worktree do
             # `--force` covers a dirty tree the run left behind. Guard-safe: this
             # process never cd'd into `path`, and `path` is under the managed
             # base dir, never the repo cwd.
-            safe_cleanup(git_cmd, repo, path)
-            WorktreeTable.forget(partition, worktree_table)
+            #
+            # issue #1053: this teardown must be INDEPENDENT of the reconciler's
+            # already-computed result above. An `after` block that raises
+            # REPLACES the `try` body's return value with that exception — so a
+            # member that just converged/landed would be reported as a process
+            # crash purely because `git worktree remove` itself raised (observed:
+            # `:enoent` from `:erlang.open_port` when the injected `git_cmd`
+            # resolves to nothing). `teardown/5` never lets that happen: it
+            # refuses to touch anything outside the managed base dir (base
+            # protection) and never raises (teardown independence) — a failure
+            # here is logged and the entry is LEFT in the table for a later
+            # reap, never silently dropped.
+            teardown(git_cmd, repo, path, base_dir, partition, worktree_table)
           end
 
         {:error, reason} ->
@@ -309,6 +320,59 @@ defmodule Kazi.Scheduler.Worktree do
     else
       _ -> :error
     end
+  end
+
+  # issue #1053, sub-fixes (0) + (1). The teardown seam wrap/2's `after` calls:
+  #
+  #   (0) BASE PROTECTION — refuse to touch anything that is not a path this
+  #       process itself created under the MANAGED base dir. A base-vs-member
+  #       path mix-up (or any other confusion) can never reach `git worktree
+  #       remove`/`rm_rf` against the operator's base checkout, because that
+  #       path is never under `base_dir`.
+  #   (1) TEARDOWN INDEPENDENCE — this function NEVER raises. Any exception
+  #       `safe_cleanup/3` lets through (e.g. `System.cmd` raising `:enoent`
+  #       when `git_cmd` does not resolve) is caught here, logged, and the
+  #       worktree is left recorded in the table for a later `reap/3` — the
+  #       member's already-decided outcome (returned by `inner` above) is
+  #       reported unchanged.
+  defp teardown(git_cmd, repo, path, base_dir, partition, worktree_table) do
+    if managed_path?(path, base_dir, repo) do
+      try do
+        safe_cleanup(git_cmd, repo, path)
+        WorktreeTable.forget(partition, worktree_table)
+      rescue
+        e ->
+          Logger.warning(fn ->
+            "kazi.scheduler.worktree teardown crashed for #{path}: " <>
+              "#{Exception.format(:error, e, __STACKTRACE__)}; leaving it recorded " <>
+              "for a later reap (issue #1053) rather than failing the member"
+          end)
+
+          :ok
+      end
+    else
+      Logger.error(fn ->
+        "kazi.scheduler.worktree REFUSING teardown of #{path}: not a member worktree " <>
+          "this process created under the managed base dir #{base_dir} (issue #1053 " <>
+          "base protection)"
+      end)
+
+      :ok
+    end
+  end
+
+  # `path` is a genuine, isolated member worktree: strictly under the managed
+  # `base_dir`, and never the `repo` itself (issue #1053 sub-fix (0), base
+  # protection). Exposed (like `safe_cleanup/3`) so the guard can be tested
+  # directly, independent of a real `git worktree remove` invocation.
+  @doc false
+  @spec managed_path?(Path.t(), Path.t(), Path.t()) :: boolean()
+  def managed_path?(path, base_dir, repo) do
+    abs_path = Path.expand(path) <> "/"
+    abs_base = Path.expand(base_dir) <> "/"
+    abs_repo = Path.expand(repo)
+
+    String.starts_with?(abs_path, abs_base) and Path.expand(path) != abs_repo
   end
 
   # Remove the worktree, guard-safe. Prefer `git worktree remove --force` (git's
