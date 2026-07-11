@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.141.0](https://github.com/kazi-org/kazi/compare/v1.140.3...v1.141.0) (2026-07-11)
+
+
+### Features
+
+* **bus:** default post kind to fact, add bus peek, per-verb --help (issue [#1059](https://github.com/kazi-org/kazi/issues/1059), [#1060](https://github.com/kazi-org/kazi/issues/1060)) ([c54ed44](https://github.com/kazi-org/kazi/commit/c54ed444363bbb61405d755958b68b17832707c5))
+* **dashboard:** add stateless JSON API for runs and goals (issue [#1077](https://github.com/kazi-org/kazi/issues/1077)) ([fa3b39b](https://github.com/kazi-org/kazi/commit/fa3b39b93642db751263d6282cbed5928c0d1c93))
+
+
+### Bug Fixes
+
+* **fleet:** carry crash reason + let a landed member's dependent dispatch (issue [#1053](https://github.com/kazi-org/kazi/issues/1053)) ([d32576e](https://github.com/kazi-org/kazi/commit/d32576e9282d2d9aa6b06ae554e07be017c7cd99))
+* **scheduler:** worktree teardown independence + base protection (issue [#1053](https://github.com/kazi-org/kazi/issues/1053)) ([b4b743d](https://github.com/kazi-org/kazi/commit/b4b743dcee743a55f8082b8f62b8a527c2052f49))
+
 ## [1.140.3](https://github.com/kazi-org/kazi/compare/v1.140.2...v1.140.3) (2026-07-11)
 
 
