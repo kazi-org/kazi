@@ -25,10 +25,24 @@ defmodule KaziWeb.Router do
     plug(:accepts, ["html", "json"])
   end
 
+  # JSON API for a personal dashboard doing a bare fetch() (issue #1077): no
+  # session/CSRF, matching :health's pattern rather than :browser's — a
+  # stateless GET must not need a cookie dance.
+  pipeline :api do
+    plug(:accepts, ["json"])
+  end
+
   scope "/", KaziWeb do
     pipe_through(:health)
 
     get("/healthz", HealthController, :index)
+  end
+
+  scope "/api", KaziWeb.API do
+    pipe_through(:api)
+
+    get("/runs", RunsController, :index)
+    get("/goals", GoalsController, :index)
   end
 
   scope "/", KaziWeb do

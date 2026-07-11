@@ -269,6 +269,29 @@ everywhere else. A connected mount polls (2s) and rereads every run's sink,
 so a newly appended event appears on the next tick with no restart. An empty
 fleet renders an honest empty state. See `KaziWeb.EventRiverLive`.
 
+## The JSON API (`/api/*`, issue #1077)
+
+Every dashboard view above is a session-cookie + CSRF LiveView page — fine
+for a human in a browser, unusable from a bare `fetch()`. `/api/*` is a
+stateless JSON scope mounted on its own `:api` pipeline (`accepts: ["json"]`,
+no session, no CSRF) reading the SAME projections the LiveView pages already
+read from (ADR-0011: pure read projection, never mutates a run/goal/lease) —
+an operator aggregating kazi state across machines can poll these with no
+cookie dance.
+
+* `GET /api/runs` — every registered run (`Kazi.ReadModel.RunRegistry.list/0`,
+  the same read `kazi status --json` with no ref uses): `run_id`, `goal_ref`,
+  `status`, `heartbeat_age_s`, `harness`, `model`.
+* `GET /api/goals` — every goal with a recorded iteration
+  (`Kazi.ReadModel.list_goals/0`, the same read `KaziWeb.GoalBoardLive`
+  renders): `id`, `status` (`"converged"` / `"in_progress"`),
+  `iteration_count`, and `predicates` (the `{id, verdict}` vector, sorted by
+  predicate id).
+
+Both respond `%{"runs" => [...]}` / `%{"goals" => [...]}`; an empty fleet or
+goal board returns an empty list, never an error. See
+`KaziWeb.API.RunsController` / `KaziWeb.API.GoalsController`.
+
 ## `kazi dashboard`
 
 ```
