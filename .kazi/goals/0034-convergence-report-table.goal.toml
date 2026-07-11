@@ -1,0 +1,47 @@
+id = "convergence-report-table"
+name = "issue #1070: apply/fleet human report has no cost/token breakdown table on convergence or budget exhaustion"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1070"
+
+[[predicate]]
+id = "kpis-carry-token-breakdown"
+provider = "custom_script"
+description = "TASK BRIEF part 1 of 2 (github issue #1070): kazi apply is a blackbox in interactive (non --json) use -- on convergence or budget exhaustion it prints no cost/token summary at all, even though the data is already computed. ROOT CAUSE, already researched -- do not re-derive: the raw per-run usage breakdown (input_tokens, output_tokens, cache_write_tokens, cached_input_tokens, cost_usd) IS already parsed by Kazi.Harness.Profiles.Claude.parse/1 (lib/kazi/harness/profiles/claude.ex:320-332) and threaded into run_economy/4 (lib/kazi/cli.ex:2378-2391) as meta.usage. But Kazi.Economy.KPIs.compute/1 (lib/kazi/economy/kpis.ex:126-153) FLATTENS usage into a single summed `tokens: non_neg_integer()` field -- the kpis() type (kpis.ex:97-114) has no fields for the per-category breakdown, so it's lost by the time it reaches the CLI reporter or fleet's per-member economy (fleet_members_json/1, cli.ex:1755-1767). FIX: extend the kpis() type + compute/1 + from_iterations/2 + from_run_result/2 (kpis.ex, all four) to carry input_tokens/output_tokens/cached_input_tokens/cache_write_tokens alongside the existing summed `tokens` (keep `tokens` for backward compat -- do not remove it, other callers/tests depend on it). Each new field is honest-unknown (nil) when the harness's usage map didn't report it -- never fabricate a zero. Related but distinct: brief 0033 (ADR-0069) touches the SAME kpis.ex file for a different purpose (cache-READ RATIO in the `kazi economy` HISTORY command, aggregating across many past runs). This brief is about a single run's TERMINAL report at the moment it converges/stops -- if 0033 has already landed when you start, rebase onto its kpis.ex changes rather than reverting them; the two additions are orthogonal (ratio vs breakdown) and should coexist as separate fields."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/economy/']
+timeout_ms = 180000
+
+[[predicate]]
+id = "human-report-renders-table"
+provider = "custom_script"
+description = "TASK BRIEF part 2 of 2 (github issue #1070): once predicate 1's breakdown fields exist on the kpis map, render a human-readable table on the terminal report -- BOTH call sites: (1) report/3 (lib/kazi/cli.ex:5328-5338, single-goal `kazi apply <goal> --workspace <path>` with no --json): currently prints only an outcome line + iterations + actions + predicate vector, no cost/tokens at all. Add a cost + token-breakdown line/block (input/output/cached/cache-write, plus total cost) using the SAME data run_economy/4 already computes -- do not re-fetch or re-derive economy data kazi's own loop already has. (2) report_fleet_human/3 -> print_fleet_economy_human/1 (cli.ex:1778-1801): currently prints ONE aggregate line across ALL members (`iterations=X tokens=Y elapsed_ms=Z`), no per-member breakdown. Replace/extend with a per-goal TABLE, one row per member: goal id, iterations, cost (honest-unknown as `~$X.XX` is NOT required -- print exact reported cost, or `unknown` when the member's economy has no cost_usd; do not approximate), predicates (`N/M pass`). Example shape from the issue (adapt to this repo's existing table-rendering conventions if one already exists in the codebase -- grep for existing box-drawing/table helpers before hand-rolling ASCII art):\n  Goal | Iterations | Cost | Predicates\n  issue-6 | 2 | $1.25 | 7/7 pass\nKeep the aggregate summary line too (do not remove members-reported/totals) -- the per-goal table is ADDITIVE. --json output is UNCHANGED by this whole brief -- the data already exists there (docs/schemas/run-result.md, docs/schemas/collective-result.md); this is purely the human-readable path. Update docs/economy.md (or the nearest doc covering `kazi apply` terminal output) with the new report shape per ADR-0034 (docs land with the code). PROCESS: branch task/convergence-report-table, small conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/cli_test.exs test/kazi/cli/ 2>&1 | tail -60']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
