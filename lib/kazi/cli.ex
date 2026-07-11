@@ -160,6 +160,7 @@ defmodule Kazi.CLI do
     topic: :string,
     sev: :string,
     scope: :string,
+    peek: :boolean,
     roadmap: :string,
     goal: :string,
     help: :boolean,
@@ -167,6 +168,13 @@ defmodule Kazi.CLI do
   ]
 
   @aliases [h: :help, v: :version]
+
+  # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
+  # defined here (above `parse/1`) so both the `--help` interception below and
+  # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
+  @bus_verbs ~w(post read peek who tell)
+  @bus_kinds ~w(fact announce note intent)
+  @default_bus_kind "fact"
 
   # One-line flag descriptions for the machine surface. Every flag a command lists
   # in `@commands` MUST have an entry here (the help-json test asserts this), so
@@ -262,6 +270,8 @@ defmodule Kazi.CLI do
       "`bus post` only: message severity, `info` (default) or `interrupt`. `bus read`'s digest prints `interrupt` messages verbatim; everything else is summarized.",
     scope:
       "`bus post`/`bus read`/`bus tell` only: `machine` (default) or `project` (the current repo's canonical toplevel path, slugged) -- which bus subject tree the call addresses.",
+    peek:
+      "`bus read` only (issue #1059): non-destructive -- NAKs instead of acking, so the pending messages are shown but NOT consumed; a subsequent `bus read`/`bus peek` still sees them. Equivalent to `bus peek`.",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0057): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. The starmap loads it through `KaziWeb.Starmap.GoalSource` and renders its needs-DAG in wave-band frontiers, the SAME computation `kazi apply --explain` prints. Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, the starmap keeps its flat-list fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty starmap.",
     goal:
@@ -360,9 +370,9 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|who|tell` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json, :topic, :sev, :scope]
+      flags: [:json, :topic, :sev, :scope, :peek]
     },
     %{
       name: "economy",
@@ -485,6 +495,15 @@ defmodule Kazi.CLI do
       kazi memory list-proposed [--status <state>] [--json]           # harvested memory proposals (ADR-0063)
       kazi memory approve <proposal-ref> [--json]                     # promote into its routed corpus file
       kazi memory reject <proposal-ref> [--json]                      # decline (kept for audit)
+      kazi daemon start [--nats-bin <path>] [--nats-port <n>]  # boot the session-bus daemon (foreground)
+      kazi daemon status [--json]                  # ping the running daemon
+      kazi daemon stop                             # clean shutdown
+      kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
+      kazi bus tell <session> <text> [--sev info|interrupt] [--scope machine|project] [--json]
+      kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
+      kazi bus peek [--json]                       # non-destructive read (issue #1059)
+      kazi bus who [--json]                        # list current presence
+      kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
 
@@ -759,6 +778,13 @@ defmodule Kazi.CLI do
         emit(json?(flags), help_json(), fn -> IO.puts(@usage) end)
         0
 
+      {:bus_help, verb} ->
+        # #1060: per-verb `bus <verb> --help` -- always human prose (a `--help`
+        # request has no accompanying `--json` intent here; `bus_help_text/1`
+        # is the single source both this and `docs/session-bus.md` describe).
+        IO.puts(bus_help_text(verb))
+        0
+
       {:schema, command, _flags} ->
         # T16.1 (ADR-0024 decision 2): emit the versioned result schema(s) for
         # `--json` output. `schema` is JSON-only — it has no human prose surface —
@@ -850,6 +876,7 @@ defmodule Kazi.CLI do
           | {:dashboard, keyword()}
           | {:daemon, String.t(), [String.t()], keyword()}
           | {:bus, String.t(), [String.t()], keyword()}
+          | {:bus_help, String.t()}
           | {:propose, String.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
@@ -905,6 +932,13 @@ defmodule Kazi.CLI do
       OptionParser.parse(normalize_parallel(argv), strict: @switches, aliases: @aliases)
 
     cond do
+      # #1060: `kazi bus <verb> --help` prints that VERB's own usage (signature +
+      # flags + enumerated kinds), not the generic block below -- intercepted
+      # here, ahead of the generic `flags[:help]` branch, since `--help` sets
+      # `flags[:help]` regardless of its position in argv.
+      flags[:help] && match?(["bus", verb | _] when verb in @bus_verbs, positionals) ->
+        {:bus_help, Enum.at(positionals, 1)}
+
       flags[:help] ->
         {:help, flags}
 
@@ -1264,28 +1298,106 @@ defmodule Kazi.CLI do
   defp parse_daemon([], _flags),
     do: {:error, "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`)"}
 
-  # T51.2 (ADR-0067 decision point 4): `bus post|read|who|tell` -- `post`/`tell`
-  # take a required positional (kind+text, or session+text); `read`/`who` take
-  # none. Validated further in `execute_bus/4` (arg counts differ per verb).
-  @bus_subcommands ~w(post read who tell)
-
-  defp parse_bus([sub | rest], flags) when sub in @bus_subcommands,
+  # T51.2 (ADR-0067 decision point 4)/#1060: `bus post|read|peek|who|tell` --
+  # `post`/`tell` take a required positional (kind+text, or session+text);
+  # `read`/`peek`/`who` take none. Validated further in `execute_bus/3` (arg
+  # counts differ per verb; `post`'s <kind> is validated/defaulted there too).
+  defp parse_bus([sub | rest], flags) when sub in @bus_verbs,
     do: {:bus, sub, rest, bus_flags(flags)}
 
   defp parse_bus([sub | _], _flags),
     do:
-      {:error, "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `who`, `tell`)"}
+      {:error,
+       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`)"}
 
   defp parse_bus([], _flags),
-    do: {:error, "the `bus` command requires a <subcommand> (`post`, `read`, `who`, `tell`)"}
+    do:
+      {:error,
+       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`)"}
 
   defp bus_flags(flags) do
     [
       json: flags[:json] || false,
       topic: flags[:topic],
       sev: flags[:sev] || "info",
-      scope: flags[:scope] || "machine"
+      scope: flags[:scope] || "machine",
+      peek: flags[:peek] || false
     ]
+  end
+
+  # #1060: the one-line usage error for an explicit, unrecognized `bus post` kind
+  # -- enumerates the valid kinds so the failure is self-documenting.
+  @spec unknown_bus_kind_error(String.t()) :: String.t()
+  defp unknown_bus_kind_error(kind),
+    do:
+      "unknown bus kind #{inspect(kind)} (expected one of: #{Enum.join(@bus_kinds, ", ")}; omit <kind> to default to #{@default_bus_kind})"
+
+  # #1060: per-verb `bus <verb> --help` usage text -- the single source both
+  # `run/2`'s `{:bus_help, verb}` branch and `docs/session-bus.md` describe.
+  @spec bus_help_text(String.t()) :: String.t()
+  defp bus_help_text("post") do
+    """
+    kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]
+
+    Publish `text` to the session bus. <kind> is OPTIONAL and defaults to
+    `#{@default_bus_kind}`; an explicit <kind> must be one of: #{Enum.join(@bus_kinds, ", ")}.
+    Directed sends use `bus tell` (kind `msg` is reserved). `text` over 1024
+    bytes is rejected client-side before any daemon connection is attempted.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("tell") do
+    """
+    kazi bus tell <session> <text> [--sev info|interrupt] [--scope machine|project] [--json]
+
+    Publish `text` directed at `session` -- only that session's `bus read`/`bus
+    peek` sees it. `text` over 1024 bytes is rejected client-side.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("read") do
+    """
+    kazi bus read [--peek] [--json]
+
+    Pull and ACK this session's durable consumer -- prints a digest (or, under
+    --json, the structured messages). `--peek` (issue #1059) makes the read
+    NON-DESTRUCTIVE: pending messages are shown but not consumed, so a
+    subsequent `bus read`/`bus peek` still sees them. Equivalent to `bus peek`.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("peek") do
+    """
+    kazi bus peek [--json]
+
+    Non-destructive read (issue #1059): shows this session's pending messages
+    WITHOUT consuming them -- a subsequent `bus peek`/`bus read` still sees
+    them. Equivalent to `bus read --peek`.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("who") do
+    """
+    kazi bus who [--json]
+
+    List current presence (session, pid, cwd, last-seen) from the short-TTL
+    KV bucket every bus call upserts into.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
   end
 
   defp approval_command(command, proposal_ref, [], flags),
@@ -3644,7 +3756,23 @@ defmodule Kazi.CLI do
   # the daemon-supervised NATS bus. Every verb is a thin `Kazi.Bus` wrapper;
   # the shared no-daemon message and `--json` envelope live here.
   # =============================================================================
-  defp execute_bus("post", [kind, text], opts) do
+  # #1060: `bus post <text>` (one positional) DEFAULTS <kind> to `fact` -- the
+  # issue's preferred fix over a required positional with no default.
+  defp execute_bus("post", [text], opts), do: do_bus_post(@default_bus_kind, text, opts)
+
+  defp execute_bus("post", [kind, text], opts) when kind in @bus_kinds,
+    do: do_bus_post(kind, text, opts)
+
+  # An EXPLICIT unknown kind is a one-line usage error enumerating the valid
+  # kinds (#1060) -- distinct from the generic bus-error path since this is a
+  # client-side usage mistake, never a daemon/transport error.
+  defp execute_bus("post", [kind, _text], opts) when kind not in @bus_kinds,
+    do: bus_error(unknown_bus_kind_error(kind), opts)
+
+  defp execute_bus("post", _args, opts),
+    do: bus_error("`bus post` requires <text> or <kind> <text>", opts)
+
+  defp do_bus_post(kind, text, opts) do
     case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
       :ok ->
         emit(json?(opts), %{"ok" => true}, fn -> IO.puts("posted") end)
@@ -3654,9 +3782,6 @@ defmodule Kazi.CLI do
         bus_error(reason, opts)
     end
   end
-
-  defp execute_bus("post", _args, opts),
-    do: bus_error("`bus post` requires <kind> <text>", opts)
 
   defp execute_bus("tell", [session, text], opts) do
     case Kazi.Bus.tell(session, text, bus_call_opts(opts)) do
@@ -3672,8 +3797,36 @@ defmodule Kazi.CLI do
   defp execute_bus("tell", _args, opts),
     do: bus_error("`bus tell` requires <session> <text>", opts)
 
+  # #1059: `bus read --peek` is non-destructive -- delegates to `Kazi.Bus.peek/1`
+  # exactly like `bus peek` (kept as two entry points, one shared implementation).
   defp execute_bus("read", [], opts) do
-    case Kazi.Bus.read(bus_call_opts(opts)) do
+    if opts[:peek] do
+      do_bus_peek(opts)
+    else
+      case Kazi.Bus.read(bus_call_opts(opts)) do
+        {:ok, messages} ->
+          emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
+            print_read_digest(messages)
+          end)
+
+          0
+
+        {:error, reason} ->
+          bus_error(reason, opts)
+      end
+    end
+  end
+
+  defp execute_bus("read", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
+  defp execute_bus("peek", [], opts), do: do_bus_peek(opts)
+
+  defp execute_bus("peek", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
+  defp do_bus_peek(opts) do
+    case Kazi.Bus.peek(bus_call_opts(opts)) do
       {:ok, messages} ->
         emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
           print_read_digest(messages)
@@ -3685,9 +3838,6 @@ defmodule Kazi.CLI do
         bus_error(reason, opts)
     end
   end
-
-  defp execute_bus("read", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
   defp execute_bus("who", [], opts) do
     case Kazi.Bus.who(bus_call_opts(opts)) do

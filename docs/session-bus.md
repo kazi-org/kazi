@@ -14,8 +14,10 @@ when the daemon isn't running, and **convergence never depends on the bus**
   `scope` is `machine` (the default — cross-project chatter: release windows,
   disk pressure) or `project` (the canonical repo toplevel, slugged — worktrees
   of the same repo share one project scope).
-- **Kind.** A short label you choose (`note`, `fact`, `intent`, ...); `msg` is
-  reserved for directed messages (`bus tell`).
+- **Kind.** One of `fact`, `announce`, `note`, `intent`; `msg` is reserved for
+  directed messages (`bus tell`). `bus post <text>` (no explicit `<kind>`)
+  defaults to `fact`; an explicit, unrecognized kind is a one-line usage error
+  enumerating the valid kinds (issue #1060).
 - **Presence.** Every bus call upserts the caller's session into a
   short-TTL KV bucket — `kazi bus who` lists who's currently active
   (session, pid, cwd, last-seen).
@@ -42,15 +44,23 @@ kazi daemon start [--nats-bin <path>] [--nats-port <n>]   # boot the daemon (for
 kazi daemon status [--json]                               # ping the running daemon
 kazi daemon stop                                          # clean shutdown
 
-kazi bus post <kind> <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project]
+kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project]  # <kind> defaults to `fact`
 kazi bus tell <session> <text> [--sev info|interrupt] [--scope machine|project]
-kazi bus read [--json]                                    # pull + ack this session's durable consumer, prints a digest
+kazi bus read [--peek] [--json]                           # pull + ack this session's durable consumer, prints a digest
+kazi bus peek [--json]                                     # non-destructive read (issue #1059): same as `bus read --peek`
 kazi bus who [--json]                                      # list current presence
+kazi bus <verb> --help                                     # per-verb usage (signature, flags, valid kinds)
 ```
 
 Every `bus` verb prints a one-line `no daemon running -- start one with
 \`kazi daemon start\`` error (exit 1) when the daemon socket is down, instead
 of raising.
+
+`kazi bus read` normally ACKs (consumes) every message it pulls, so a second
+`bus read` never re-delivers it. `--peek` (or the standalone `kazi bus peek`)
+is NON-DESTRUCTIVE: it NAKs instead of acking, so the pending messages are
+shown but stay pending — a subsequent `bus peek` sees the same messages again,
+and a subsequent `bus read` still consumes them normally (issue #1059).
 
 ## MCP tools
 
