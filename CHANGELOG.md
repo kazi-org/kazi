@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.143.0](https://github.com/kazi-org/kazi/compare/v1.142.0...v1.143.0) (2026-07-11)
+
+
+### Features
+
+* **bus:** watch, teams, document-sized messages, reconciled provisioning (issues [#1069](https://github.com/kazi-org/kazi/issues/1069), [#1091](https://github.com/kazi-org/kazi/issues/1091)) ([2986647](https://github.com/kazi-org/kazi/commit/298664759502be30194fc87cafd3d7cf0edd6f55))
+
 ## [1.142.0](https://github.com/kazi-org/kazi/compare/v1.141.0...v1.142.0) (2026-07-11)
 
 
