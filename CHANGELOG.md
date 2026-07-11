@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.140.3](https://github.com/kazi-org/kazi/compare/v1.140.2...v1.140.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **ci:** install nats-server on CI runners for daemon tests (issue [#1061](https://github.com/kazi-org/kazi/issues/1061)) ([4b5d256](https://github.com/kazi-org/kazi/commit/4b5d256bd8fadea907a4dad8b22d5c81a4dfa5d7))
+
 ## [1.140.2](https://github.com/kazi-org/kazi/compare/v1.140.1...v1.140.2) (2026-07-10)
 
 
