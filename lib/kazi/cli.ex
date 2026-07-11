@@ -157,6 +157,8 @@ defmodule Kazi.CLI do
     bind: :string,
     nats_bin: :string,
     nats_port: :integer,
+    nats_host: :string,
+    nats_token: :string,
     topic: :string,
     sev: :string,
     scope: :string,
@@ -264,6 +266,10 @@ defmodule Kazi.CLI do
       "`daemon start` only (T51.2, ADR-0067 decision point 2): explicit path to the `nats-server` binary the daemon supervises for the session bus. Default: resolved from PATH. Neither found -- `daemon start` fails with one clear line naming the missing binary; the daemon never runs busless.",
     nats_port:
       "`daemon start` only (T51.2): TCP port the supervised nats-server binds. Default 4223 (deliberately non-standard -- never collides with an operator's own NATS on 4222). Discovered by bus clients through the daemon's control-socket ping, never guessed.",
+    nats_host:
+      "`daemon start` only (T51.3, ADR-0067 cross-machine): connects to a REMOTE nats-server at this host instead of spawning a local one -- the promised 'or connects to an external one via config'. Needs no local nats-server binary. Combine with --nats-port for the remote's port and --nats-token if the shared bus requires one. See docs/session-bus.md (\"Cross-machine setup\").",
+    nats_token:
+      "`daemon start` only (T51.3): shared auth token for the session bus, e.g. `--nats-token <token>` or `KAZI_NATS_TOKEN`. Optional (default: no auth, today's behavior) -- the machine SPAWNING the bus passes it to nats-server's `-auth`; every machine CONNECTING (`--nats-host`) must pass the SAME token. Without one, a cross-machine bus is unauthenticated on the LAN.",
     topic:
       "`bus post` only: an optional free-text topic tag on the posted message (default none).",
     sev:
@@ -365,7 +371,7 @@ defmodule Kazi.CLI do
       summary:
         "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status` over a local Unix-socket control plane with a version handshake; `start` also supervises nats-server for the session bus. Convergence never depends on the daemon.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json, :nats_bin, :nats_port]
+      flags: [:json, :nats_bin, :nats_port, :nats_host, :nats_token]
     },
     %{
       name: "bus",
@@ -1283,7 +1289,11 @@ defmodule Kazi.CLI do
     case rest do
       [] ->
         {:daemon, sub, [],
-         json: flags[:json] || false, nats_bin: flags[:nats_bin], nats_port: flags[:nats_port]}
+         json: flags[:json] || false,
+         nats_bin: flags[:nats_bin],
+         nats_port: flags[:nats_port],
+         nats_host: flags[:nats_host],
+         nats_token: flags[:nats_token] || System.get_env("KAZI_NATS_TOKEN")}
 
       extra ->
         {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
@@ -3633,6 +3643,8 @@ defmodule Kazi.CLI do
       [sock_path: sock_path, pid_path: pid_path]
       |> maybe_put(:nats_bin, opts[:nats_bin])
       |> maybe_put(:port, opts[:nats_port])
+      |> maybe_put(:nats_host, opts[:nats_host])
+      |> maybe_put(:nats_token, opts[:nats_token])
 
     case Kazi.Daemon.start(daemon_opts) do
       {:ok, sup_pid} ->
