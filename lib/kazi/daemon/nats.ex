@@ -17,6 +17,17 @@ defmodule Kazi.Daemon.Nats do
   `wait_ready/2` briefly retries a `Gnat` connection so the caller (the
   supervisor's `init/1`, before `Kazi.Bus.Provision` runs) knows the server
   actually accepted TCP before reporting the daemon ready.
+
+  ADR-0067 cross-machine (T51.3): when `opts[:nats_host]` is set, `init/1`
+  skips binary resolution and `Port.open/2` entirely and CONNECTS to that
+  remote host/port instead of spawning a local `nats-server` -- `port/1`
+  still returns the (remote) port for the control-socket ping and
+  `Kazi.Bus.Provision`'s host/port threading. `terminate/2` is then a no-op
+  (there is no local OS process to kill). An optional shared
+  `opts[:nats_token]` is passed as `-auth <token>` to the spawned server
+  (spawn side) or as `auth_token:` on the `Gnat` connect opts (both spawn
+  side's `wait_ready/2` and connect side) -- see `docs/session-bus.md`
+  ("Cross-machine setup") for the security tradeoff of running without one.
   """
 
   use GenServer
@@ -26,7 +37,7 @@ defmodule Kazi.Daemon.Nats do
   @ready_retry_ms 100
   @ready_timeout_ms 5_000
 
-  defstruct [:port, :os_pid, :nats_port]
+  defstruct [:port, :os_pid, :nats_host, :nats_port]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -34,9 +45,13 @@ defmodule Kazi.Daemon.Nats do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "The TCP port the supervised nats-server is bound to (for `Kazi.Daemon.Control`'s ping response)."
+  @doc "The TCP port the supervised (or remote-connected) nats-server is bound to (for `Kazi.Daemon.Control`'s ping response)."
   @spec port(GenServer.server()) :: pos_integer()
   def port(server \\ __MODULE__), do: GenServer.call(server, :port)
+
+  @doc "The nats-server host: `127.0.0.1` when locally spawned, or the connect-mode `opts[:nats_host]`."
+  @spec host(GenServer.server()) :: String.t()
+  def host(server \\ __MODULE__), do: GenServer.call(server, :host)
 
   @doc """
   Resolves the `nats-server` binary: an explicit path first, then `PATH`.
@@ -52,18 +67,22 @@ defmodule Kazi.Daemon.Nats do
   end
 
   @doc """
-  Briefly retries a `Gnat` connection to `port` until it succeeds or
+  Briefly retries a `Gnat` connection to `host`:`port` until it succeeds or
   `timeout_ms` elapses -- used by the caller to confirm the server is ready
-  before running boot provisioning (`Kazi.Bus.Provision`).
+  before running boot provisioning (`Kazi.Bus.Provision`). `host` defaults to
+  `127.0.0.1` (the local-spawn case); the connect-mode caller passes the
+  remote `opts[:nats_host]` instead. `token` is passed as the `Gnat`
+  connection's `auth_token` when the shared bus is running with one.
   """
-  @spec wait_ready(pos_integer(), non_neg_integer()) :: :ok | {:error, :timeout}
-  def wait_ready(port, timeout_ms \\ @ready_timeout_ms) do
+  @spec wait_ready(pos_integer(), non_neg_integer(), String.t(), String.t() | nil) ::
+          :ok | {:error, :timeout}
+  def wait_ready(port, timeout_ms \\ @ready_timeout_ms, host \\ "127.0.0.1", token \\ nil) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_ready(port, deadline)
+    do_wait_ready(host, port, token, deadline)
   end
 
-  defp do_wait_ready(port, deadline) do
-    case Gnat.start_link(%{host: "127.0.0.1", port: port}) do
+  defp do_wait_ready(host, port, token, deadline) do
+    case Gnat.start_link(connect_opts(host, port, token)) do
       {:ok, conn} ->
         Gnat.stop(conn)
         :ok
@@ -73,21 +92,37 @@ defmodule Kazi.Daemon.Nats do
           {:error, :timeout}
         else
           Process.sleep(@ready_retry_ms)
-          do_wait_ready(port, deadline)
+          do_wait_ready(host, port, token, deadline)
         end
     end
   end
+
+  defp connect_opts(host, port, nil), do: %{host: host, port: port}
+  defp connect_opts(host, port, token), do: %{host: host, port: port, auth_token: token}
 
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
 
+    case Keyword.get(opts, :nats_host) do
+      nil -> init_spawn(opts)
+      host -> init_connect(host, opts)
+    end
+  end
+
+  defp init_connect(host, opts) do
+    nats_port = Keyword.get(opts, :port, @default_port)
+    {:ok, %__MODULE__{nats_host: host, nats_port: nats_port}}
+  end
+
+  defp init_spawn(opts) do
     with {:ok, bin} <- resolve_bin(opts) do
       nats_port = Keyword.get(opts, :port, @default_port)
       store_dir = Keyword.get(opts, :store_dir, default_store_dir())
       File.mkdir_p!(store_dir)
 
-      args = ["-js", "-p", to_string(nats_port), "-sd", store_dir]
+      token = Keyword.get(opts, :nats_token)
+      args = ["-js", "-p", to_string(nats_port), "-sd", store_dir] ++ auth_args(token)
 
       port =
         Port.open({:spawn_executable, bin}, [
@@ -99,14 +134,20 @@ defmodule Kazi.Daemon.Nats do
 
       {:os_pid, os_pid} = Port.info(port, :os_pid)
 
-      {:ok, %__MODULE__{port: port, os_pid: os_pid, nats_port: nats_port}}
+      {:ok, %__MODULE__{port: port, os_pid: os_pid, nats_host: "127.0.0.1", nats_port: nats_port}}
     else
       {:error, reason} -> {:stop, reason}
     end
   end
 
+  defp auth_args(nil), do: []
+  defp auth_args(token), do: ["-auth", token]
+
   @impl true
   def handle_call(:port, _from, state), do: {:reply, state.nats_port, state}
+
+  @impl true
+  def handle_call(:host, _from, state), do: {:reply, state.nats_host, state}
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
