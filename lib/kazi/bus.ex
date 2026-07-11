@@ -194,13 +194,29 @@ defmodule Kazi.Bus do
         sid
       end)
 
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    result = await_wake(conn, opts, deadline, session)
-    Enum.each(sids, fn sid -> Gnat.unsub(conn, sid) end)
-    result
+    # Close the park race: a message that landed between the caller's last
+    # drain and the subscriptions coming up would otherwise sit in the
+    # durables until the next wake. With the subs already live, this drain's
+    # pulls may have core-sub copies in the mailbox -- unsub + flush before
+    # returning them.
+    case drain(conn, opts, true) do
+      [] ->
+        deadline = System.monotonic_time(:millisecond) + timeout_ms
+        result = await_wake(conn, opts, deadline, sids)
+        # Defensive double-unsub: the wake path already unsubscribed +
+        # flushed before draining; the timeout path lands here with the
+        # subscriptions still live.
+        Enum.each(sids, fn sid -> Gnat.unsub(conn, sid) end)
+        result
+
+      messages ->
+        Enum.each(sids, fn sid -> Gnat.unsub(conn, sid) end)
+        flush_bus_msgs()
+        {:ok, messages}
+    end
   end
 
-  defp await_wake(conn, opts, deadline, session) do
+  defp await_wake(conn, opts, deadline, sids) do
     remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
@@ -209,20 +225,46 @@ defmodule Kazi.Bus do
       receive do
         {:msg, %{topic: "bus." <> _}} ->
           upsert_presence(conn, opts)
-          # The wake message itself arrives via the durables (the core-NATS
-          # sub is only a signal); an irrelevant wake (another session's
-          # directed msg on the scope subject) drains empty and we keep
-          # waiting.
+          # The wake message itself arrives via the durables -- the
+          # core-NATS subs are only a signal. Unsubscribe and FLUSH their
+          # remaining copies before draining: `collect/4`'s receive in the
+          # pull path would otherwise swallow a stray core-sub copy (no JS
+          # ack subject, so no stream_seq) alongside the pulled one and
+          # deliver the same message twice.
+          Enum.each(sids, fn sid -> Gnat.unsub(conn, sid) end)
+          flush_bus_msgs()
+
           case drain(conn, opts, true) do
-            [] -> await_wake(conn, opts, deadline, session)
+            [] -> resubscribe_and_wait(conn, opts, deadline)
             messages -> {:ok, messages}
           end
 
         {:msg, _other} ->
-          await_wake(conn, opts, deadline, session)
+          await_wake(conn, opts, deadline, sids)
       after
         remaining -> {:error, :watch_timeout}
       end
+    end
+  end
+
+  # An irrelevant wake (another session's message on the scope subject)
+  # drained empty after we tore the signal subscriptions down -- set them
+  # up again and keep waiting out the same deadline.
+  defp resubscribe_and_wait(conn, opts, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      {:error, :watch_timeout}
+    else
+      await_then_drain(conn, opts, remaining)
+    end
+  end
+
+  defp flush_bus_msgs do
+    receive do
+      {:msg, %{topic: "bus." <> _}} -> flush_bus_msgs()
+    after
+      0 -> :ok
     end
   end
 
