@@ -18,6 +18,12 @@ defmodule Kazi.Daemon.LifecycleTest do
 
   alias Kazi.Daemon
   alias Kazi.Daemon.Probe
+  alias Kazi.TestSupport.NatsPrereq
+
+  setup_all do
+    NatsPrereq.ensure!()
+    :ok
+  end
 
   # Short, /tmp-rooted paths -- AF_UNIX socket paths have a small OS-level
   # length cap (~104 bytes on macOS); a nested `System.tmp_dir!()` path (often
