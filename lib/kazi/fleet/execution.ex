@@ -169,7 +169,7 @@ defmodule Kazi.Fleet.Execution do
 
     reconciler = fn member_id ->
       node = Map.fetch!(nodes_by_id, member_id)
-      member = with_slot(slots, fn -> normalize_member(member_runner.(node)) end)
+      member = with_slot(slots, fn -> run_member_reconciler(member_runner, node) end)
       Agent.update(results, &Map.put(&1, member_id, member))
       member.status
     end
@@ -237,6 +237,25 @@ defmodule Kazi.Fleet.Execution do
 
   defp normalize_member(other) do
     %{status: :stuck, economy: nil, workspace: nil, integration: nil, error: {:bad_member, other}}
+  end
+
+  # issue #1053 sub-fix (2): a member runner that genuinely CRASHES (not the
+  # already-guarded worktree-teardown noise, a real exception in the member's
+  # own run) must still surface in the collective as `:crashed` with a non-nil
+  # `:error` naming the failure — never silently reported as an unexplained
+  # `nil` error, which left #1053's operator unable to tell "crashed" apart
+  # from "crashed, but why".
+  defp run_member_reconciler(member_runner, node) do
+    normalize_member(member_runner.(node))
+  rescue
+    e ->
+      %{
+        status: :crashed,
+        economy: nil,
+        workspace: nil,
+        integration: nil,
+        error: "member crashed: #{Exception.format(:error, e, __STACKTRACE__)}"
+      }
   end
 
   # ---------------------------------------------------------------------------
