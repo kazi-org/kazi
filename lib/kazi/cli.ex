@@ -5295,26 +5295,17 @@ defmodule Kazi.CLI do
     end
   end
 
-  # Boot migrations run under the read-model Guard's hard deadline ("kazi
-  # never hangs on its own telemetry", lore L-0035): with several concurrent
-  # kazi processes sharing ~/.kazi/kazi.db, an unbounded `Ecto.Migrator.run`
-  # can block on the locked DB for as long as the lock holder lives. On
-  # timeout the run degrades to no-persistence (the same path as a raised
-  # migration error) instead of hanging the whole process at boot.
-  @migrate_timeout_ms 60_000
+  # Boot migrations run under `Kazi.ReadModel.Migrate.run/2` -- a SHORT bound
+  # (issue #1019: several DIFFERENT kazi versions on one machine can contend
+  # on the migration lock during a release window), version-stamp checked
+  # BEFORE migrating so an older binary never migrates a schema newer than it
+  # knows. On timeout (or a newer-schema refusal) it degrades to
+  # no-persistence -- the same path as a raised migration error -- instead of
+  # hanging the whole process at boot (lore L-0035).
+  @migrate_timeout_ms 5_000
 
   defp run_migrations_bounded(repo) do
-    case Kazi.ReadModel.Guard.run(
-           "migrate",
-           fn ->
-             _ = Ecto.Migrator.run(repo, :up, all: true)
-             :ok
-           end,
-           @migrate_timeout_ms
-         ) do
-      :ok -> :ok
-      {:error, reason} -> {:error, reason}
-    end
+    Kazi.ReadModel.Migrate.run(repo, timeout_ms: @migrate_timeout_ms)
   end
 
   defp started?(repo) do
