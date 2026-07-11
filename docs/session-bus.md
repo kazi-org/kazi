@@ -46,12 +46,56 @@ kazi daemon status [--json]                               # ping the running dae
 kazi daemon stop                                          # clean shutdown
 
 kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project]  # <kind> defaults to `fact`
-kazi bus tell <session> <text> [--sev info|interrupt] [--scope machine|project]
-kazi bus read [--peek] [--json]                           # pull + ack this session's durable consumer, prints a digest
+kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
+kazi bus read [--peek] [--json]                           # pull + ack this session's durable consumers, prints a digest
 kazi bus peek [--json]                                     # non-destructive read (issue #1059): same as `bus read --peek`
-kazi bus who [--json]                                      # list current presence
+kazi bus watch [--timeout <seconds>] [--json]              # BLOCK until a message arrives (issue #1091); exit 3 on timeout
+kazi bus who [--team <t>] [--all] [--json]                 # list fresh presence; --all includes TTL-stale entries
+kazi bus join <team>                                       # named-team membership (issue #1069)
+kazi bus leave                                             # clear team membership
 kazi bus <verb> --help                                     # per-verb usage (signature, flags, valid kinds)
 ```
+
+Messages hold up to 64 KiB of text (rejected client-side above that,
+naming the cap) and the stream retains them for 30 days. Directed messages
+(`tell`) are delivered regardless of either side's `--scope` (issue #1065),
+and `tell @<team>` fans out to every member of a named team.
+
+### Waiting without polling (issue #1091)
+
+`kazi bus watch` is the no-poll-loop way to wait for traffic: it consumes
+and prints anything already pending immediately; otherwise it parks on the
+session's scope, directed, and team subjects and wakes on the first
+arrival. `--timeout <seconds>` (default 300) bounds the wait — expiry
+prints a one-line notice and exits 3, so scripted waiters can loop on the
+exit code:
+
+```bash
+while :; do
+  kazi bus watch --timeout 600 --json && handle_messages
+done
+```
+
+Watching also refreshes the session's presence, so a watcher never ages
+out of `bus who`.
+
+### Teams (issue #1069)
+
+`kazi bus join <team>` registers the session under a named team; presence
+carries the membership across every later bus call, `bus who --team
+<team>` lists the roster, and `bus tell @<team> <text>` reaches every
+member. Membership ages out with presence (the 10-minute TTL) when a
+session goes idle and vanishes on `bus leave` — a live roster rather than
+a static list. Sessions that keep a `bus watch` open stay fresh
+indefinitely.
+
+### Presence freshness
+
+`bus who` hides entries older than the presence TTL (10 minutes), so
+closed sessions age out instead of looking active; `--all` shows
+everything, age-annotated (`seen=NNNs ago`). New sessions appear on their
+first bus call — orchestrators should have members run `kazi bus join
+<team>` at session start so the roster is explicit rather than implicit.
 
 Every `bus` verb prints a one-line `no daemon running -- start one with
 \`kazi daemon start\`` error (exit 1) when the daemon socket is down, instead
@@ -135,3 +179,7 @@ printf '%s' "$digest" \
 If no daemon is running the command exits non-zero silently (`2>/dev/null`
 swallows the one-line error) — the hook is a no-op, matching the
 graceful-degradation guarantee above.
+
+For background waiters (not turn-boundary hooks), prefer `kazi bus watch`
+over a `read`-in-a-loop: it blocks server-side until traffic arrives
+instead of spawning the CLI on an interval (issue #1091).

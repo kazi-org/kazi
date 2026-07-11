@@ -81,7 +81,7 @@ defmodule Kazi.MCP.BusToolsTest do
 
   describe "tools/call — oversize text is rejected client-side" do
     test "kazi_bus_post reports text_too_large before touching any daemon" do
-      oversize = String.duplicate("x", 1025)
+      oversize = String.duplicate("x", 65_537)
       response = call("kazi_bus_post", %{"kind" => "note", "text" => oversize})
 
       assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response

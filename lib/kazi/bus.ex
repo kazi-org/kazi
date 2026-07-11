@@ -22,8 +22,9 @@ defmodule Kazi.Bus do
   alias Kazi.Bus.Provision
   alias Kazi.Daemon.{Probe, Supervisor}
 
-  @max_text_bytes 1024
+  @max_text_bytes 65_536
   @pull_timeout_ms 2_000
+  @default_watch_timeout_s 300
 
   @typedoc "A read/who error surfaced to the CLI verbatim."
   @type error :: :no_daemon | :text_too_large | term()
@@ -114,21 +115,115 @@ defmodule Kazi.Bus do
   defp consume(opts, ack: ack?) do
     with_conn(opts, fn conn ->
       upsert_presence(conn, opts)
-      scope = scope(opts)
-      session = session(opts)
-      stream = Provision.stream_name()
-
-      scope_consumer = consumer_name(session, scope)
-      ensure_consumer(conn, stream, scope_consumer, "bus.#{scope}.>")
-
-      tell_consumer = tell_consumer_name(session)
-      ensure_consumer(conn, stream, tell_consumer, "bus.*.msg.#{session}")
-
-      scoped = pull_all(conn, stream, scope_consumer, session, ack: ack?)
-      told = pull_all(conn, stream, tell_consumer, session, ack: ack?)
-
-      {:ok, dedup_by_stream_seq(scoped ++ told)}
+      {:ok, drain(conn, opts, ack?)}
     end)
+  end
+
+  # The shared pull path for read/peek/watch: presence is the CALLER's
+  # responsibility (watch refreshes it on each wake without re-draining).
+  defp drain(conn, opts, ack?) do
+    scope = scope(opts)
+    session = session(opts)
+    stream = Provision.stream_name()
+
+    scope_consumer = consumer_name(session, scope)
+    ensure_consumer(conn, stream, scope_consumer, "bus.#{scope}.>")
+
+    tell_consumer = tell_consumer_name(session)
+    ensure_consumer(conn, stream, tell_consumer, "bus.*.msg.#{session}")
+
+    scoped = pull_all(conn, stream, scope_consumer, session, ack: ack?)
+    told = pull_all(conn, stream, tell_consumer, session, ack: ack?)
+
+    # Team fan-in (#1069): a joined session also drains directed-at-team
+    # messages (`tell @<team>`) across all scopes, one durable per
+    # team+session so every member gets its own copy.
+    team_msgs =
+      case current_team(conn, opts) do
+        nil ->
+          []
+
+        team ->
+          team_consumer = team_consumer_name(team, session)
+          ensure_consumer(conn, stream, team_consumer, "bus.*.msg.@#{team}")
+          pull_all(conn, stream, team_consumer, "@" <> team, ack: ack?)
+      end
+
+    dedup_by_stream_seq(scoped ++ told ++ team_msgs)
+  end
+
+  @doc """
+  Blocks until at least one message is available for the caller, then
+  consumes and returns it/them -- the no-poll-loop alternative to `read/1`
+  (issue #1091). Drains first (anything already pending returns
+  immediately); otherwise holds ephemeral core-NATS subscriptions on the
+  caller's scope, directed, and team subjects as a wake signal, then drains
+  the durables again. `opts[:timeout]` is in SECONDS (default
+  #{@default_watch_timeout_s}); on expiry returns `{:error, :watch_timeout}`.
+  Presence is re-upserted on entry and on wake, so a watching session stays
+  fresh in `who`.
+  """
+  @spec watch(keyword()) :: {:ok, [map()]} | {:error, error()}
+  def watch(opts \\ []) do
+    timeout_ms = (opts[:timeout] || @default_watch_timeout_s) * 1_000
+
+    with_conn(opts, fn conn ->
+      upsert_presence(conn, opts)
+
+      case drain(conn, opts, true) do
+        [] -> await_then_drain(conn, opts, timeout_ms)
+        messages -> {:ok, messages}
+      end
+    end)
+  end
+
+  defp await_then_drain(conn, opts, timeout_ms) do
+    scope = scope(opts)
+    session = session(opts)
+
+    subjects =
+      ["bus.#{scope}.>", "bus.*.msg.#{session}"] ++
+        case current_team(conn, opts) do
+          nil -> []
+          team -> ["bus.*.msg.@#{team}"]
+        end
+
+    sids =
+      Enum.map(subjects, fn subject ->
+        {:ok, sid} = Gnat.sub(conn, self(), subject)
+        sid
+      end)
+
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    result = await_wake(conn, opts, deadline, session)
+    Enum.each(sids, fn sid -> Gnat.unsub(conn, sid) end)
+    result
+  end
+
+  defp await_wake(conn, opts, deadline, session) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      {:error, :watch_timeout}
+    else
+      receive do
+        {:msg, %{topic: "bus." <> _}} ->
+          upsert_presence(conn, opts)
+          # The wake message itself arrives via the durables (the core-NATS
+          # sub is only a signal); an irrelevant wake (another session's
+          # directed msg on the scope subject) drains empty and we keep
+          # waiting.
+          case drain(conn, opts, true) do
+            [] -> await_wake(conn, opts, deadline, session)
+            messages -> {:ok, messages}
+          end
+
+        {:msg, _other} ->
+          await_wake(conn, opts, deadline, session)
+      after
+        remaining -> {:error, :watch_timeout}
+      end
+    end
   end
 
   defp dedup_by_stream_seq(messages) do
@@ -153,12 +248,53 @@ defmodule Kazi.Bus do
 
       case KV.contents(conn, Provision.sessions_bucket()) do
         {:ok, contents} ->
-          {:ok, Enum.map(contents, fn {_key, value} -> Jason.decode!(value) end)}
+          entries =
+            contents
+            |> Enum.map(fn {_key, value} -> Jason.decode!(value) end)
+            |> Enum.map(&annotate_age/1)
+            |> filter_fresh(opts)
+            |> filter_team(opts)
+            |> Enum.sort_by(& &1["age_s"])
+
+          {:ok, entries}
 
         {:error, reason} ->
           {:error, reason}
       end
     end)
+  end
+
+  defp annotate_age(entry) do
+    age_s =
+      with ts when is_binary(ts) <- entry["ts"],
+           {:ok, dt, _offset} <- DateTime.from_iso8601(ts) do
+        DateTime.diff(DateTime.utc_now(), dt, :second)
+      else
+        _other -> nil
+      end
+
+    Map.put(entry, "age_s", age_s)
+  end
+
+  # Freshness (the "closed sessions look active" fix): the bucket TTL
+  # expires idle entries server-side, but stores provisioned by older
+  # daemons may carry a TTL-less bucket until their daemon restarts under
+  # the reconciling provision -- so `who` ALSO hides entries older than the
+  # TTL client-side unless `opts[:all]`.
+  defp filter_fresh(entries, opts) do
+    if opts[:all] do
+      entries
+    else
+      ttl_s = div(Provision.session_ttl_ns(), 1_000_000_000)
+      Enum.filter(entries, fn e -> is_integer(e["age_s"]) and e["age_s"] <= ttl_s end)
+    end
+  end
+
+  defp filter_team(entries, opts) do
+    case opts[:who_team] do
+      nil -> entries
+      team -> Enum.filter(entries, fn e -> e["team"] == team end)
+    end
   end
 
   @doc "The current call's resolved session id -- delegates to `Kazi.CLI.resolve_session_name/1`, falling back to an os-pid identity when nothing resolves."
@@ -229,13 +365,72 @@ defmodule Kazi.Bus do
     end
   end
 
+  @doc """
+  Registers the caller under a named team (#1069): presence gains a
+  `team` field that every later bus call preserves, `who/1` can filter on
+  it, and `tell "@<team>"` messages reach the session via `read`/`peek`/
+  `watch`. Idempotent; joining a different team moves the session.
+  """
+  @spec join(String.t(), keyword()) :: :ok | {:error, error()}
+  def join(team, opts \\ []) when is_binary(team) do
+    with_conn(opts, fn conn ->
+      upsert_presence(conn, Keyword.put(opts, :team, team))
+      :ok
+    end)
+  end
+
+  @doc "Clears the caller's team membership (#1069). Presence itself remains until its TTL lapses."
+  @spec leave(keyword()) :: :ok | {:error, error()}
+  def leave(opts \\ []) do
+    with_conn(opts, fn conn ->
+      upsert_presence(conn, Keyword.put(opts, :team, :none))
+      :ok
+    end)
+  end
+
+  # The caller's current team: an explicit opts[:team] wins (a join/leave in
+  # flight), else whatever the presence entry carries.
+  defp current_team(conn, opts) do
+    case opts[:team] do
+      :none -> nil
+      team when is_binary(team) -> team
+      nil -> stored_team(conn, opts)
+    end
+  end
+
+  defp stored_team(conn, opts) do
+    case KV.get_value(conn, Provision.sessions_bucket(), sanitize(session(opts))) do
+      value when is_binary(value) ->
+        case Jason.decode(value) do
+          {:ok, %{"team" => team}} when is_binary(team) -> team
+          _other -> nil
+        end
+
+      _missing ->
+        nil
+    end
+  end
+
   defp upsert_presence(conn, opts) do
+    # `team` refresh rule: an explicit :team option sets (binary) or clears
+    # (:none) membership; otherwise the previously stored team is PRESERVED
+    # -- without this, any read/post after a join silently dropped the
+    # membership on rewrite.
+    team =
+      case opts[:team] do
+        :none -> nil
+        team when is_binary(team) -> team
+        nil -> stored_team(conn, opts)
+      end
+
     entry = %{
       "session" => session(opts),
       "pid" => os_pid(),
       "cwd" => File.cwd!(),
       "ts" => DateTime.to_iso8601(DateTime.utc_now())
     }
+
+    entry = if team, do: Map.put(entry, "team", team), else: entry
 
     KV.put_value(conn, Provision.sessions_bucket(), sanitize(session(opts)), Jason.encode!(entry))
   end
@@ -332,6 +527,9 @@ defmodule Kazi.Bus do
   end
 
   defp tell_consumer_name(session), do: "kztell_" <> sanitize(session)
+
+  defp team_consumer_name(team, session),
+    do: "kzteam_" <> sanitize(team) <> "_" <> sanitize(session)
 
   defp visible_to?(%{kind: "msg", topic: topic}, session), do: topic == session
   defp visible_to?(_msg, _session), do: true

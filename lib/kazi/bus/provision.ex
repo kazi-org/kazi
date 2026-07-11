@@ -1,20 +1,31 @@
 defmodule Kazi.Bus.Provision do
   @moduledoc """
   T51.2 (ADR-0067 decision point 2): boot provisioning for the session bus's
-  JetStream backend -- the `KAZI_BUS` stream (subjects `bus.>`, 24h max_age,
-  1024-byte max message) and the `kazi_sessions` KV bucket (600s TTL). Called
-  ONCE from `Kazi.Daemon.start/1` after the supervised `nats-server` accepts a
-  `Gnat` connection; idempotent (already-exists is `:ok`), so a later daemon
-  restart against the same JetStream store is a no-op.
+  JetStream backend -- the `KAZI_BUS` stream (subjects `bus.>`, 30-day
+  max_age, 128 KiB max message) and the `kazi_sessions` KV bucket (600s
+  TTL). Called ONCE from `Kazi.Daemon.start/1` after the supervised
+  `nats-server` accepts a `Gnat` connection.
+
+  Provisioning RECONCILES, not just creates: an already-existing stream or
+  bucket gets a config update to the current desired settings. Create-only
+  provisioning pinned whatever config the store was first provisioned with
+  -- daemons carried forward a TTL-less sessions bucket (closed sessions
+  looked active in `bus who` forever) and the original 1024-byte/24h stream
+  limits regardless of upgrades.
   """
 
   alias Gnat.Jetstream.API.{KV, Stream}
 
   @stream_name "KAZI_BUS"
   @sessions_bucket "kazi_sessions"
-  @max_age_ns 24 * 60 * 60 * 1_000_000_000
-  @max_msg_size 1024
+  @max_age_ns 30 * 24 * 60 * 60 * 1_000_000_000
+  @max_msg_size 131_072
   @session_ttl_ns 600 * 1_000_000_000
+  @two_minutes_ns 2 * 60 * 1_000_000_000
+
+  @doc "The sessions bucket's entry TTL in nanoseconds -- `who` freshness derives from this."
+  @spec session_ttl_ns() :: pos_integer()
+  def session_ttl_ns, do: @session_ttl_ns
 
   @doc "The stream name bus clients publish/consume against."
   @spec stream_name() :: String.t()
@@ -67,18 +78,64 @@ defmodule Kazi.Bus.Provision do
     }
 
     case Stream.create(conn, stream) do
+      {:ok, _info} ->
+        :ok
+
+      {:error, %{"err_code" => 10_058}} ->
+        reconcile_stream(conn, stream)
+
+      {:error, %{"description" => "stream name already in use" <> _}} ->
+        reconcile_stream(conn, stream)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp reconcile_stream(conn, stream) do
+    case Stream.update(conn, stream) do
       {:ok, _info} -> :ok
-      {:error, %{"err_code" => 10_058}} -> :ok
-      {:error, %{"description" => "stream name already in use" <> _}} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
   defp ensure_sessions_bucket(conn) do
     case KV.create_bucket(conn, @sessions_bucket, ttl: @session_ttl_ns) do
+      {:ok, _info} ->
+        :ok
+
+      {:error, %{"err_code" => 10_058}} ->
+        reconcile_sessions_bucket(conn)
+
+      {:error, %{"description" => "stream name already in use" <> _}} ->
+        reconcile_sessions_bucket(conn)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # A KV bucket is a `KV_<name>` stream under the hood; updating its TTL is a
+  # stream-config update mirroring `KV.create_bucket/3`'s settings exactly
+  # (NATS rejects the stream as a KV store otherwise).
+  defp reconcile_sessions_bucket(conn) do
+    stream = %Stream{
+      name: "KV_" <> @sessions_bucket,
+      subjects: ["$KV." <> @sessions_bucket <> ".>"],
+      max_msgs_per_subject: 1,
+      discard: :new,
+      deny_delete: true,
+      allow_rollup_hdrs: true,
+      max_age: @session_ttl_ns,
+      max_bytes: -1,
+      max_msg_size: -1,
+      num_replicas: 1,
+      storage: :file,
+      duplicate_window: min(@session_ttl_ns, @two_minutes_ns)
+    }
+
+    case Stream.update(conn, stream) do
       {:ok, _info} -> :ok
-      {:error, %{"err_code" => 10_058}} -> :ok
-      {:error, %{"description" => "stream name already in use" <> _}} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end

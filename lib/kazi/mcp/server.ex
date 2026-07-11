@@ -218,7 +218,7 @@ defmodule Kazi.MCP.Server do
         "name" => "kazi_bus_post",
         "description" =>
           "Post a message to the session bus (ADR-0067), over a running `kazi daemon`. " <>
-            "Requires `kind` and `text` (capped at 1024 bytes client-side). Returns " <>
+            "Requires `kind` and `text` (capped at 64 KiB client-side). Returns " <>
             "{ok: true} on success, or a structured error (no_daemon when no daemon is " <>
             "running -- start one with `kazi daemon start`).",
         "inputSchema" => %{
@@ -226,7 +226,7 @@ defmodule Kazi.MCP.Server do
           "required" => ["kind", "text"],
           "properties" => %{
             "kind" => %{"type" => "string", "description" => "The message kind, e.g. \"note\"."},
-            "text" => %{"type" => "string", "description" => "The message body (max 1024 bytes)."},
+            "text" => %{"type" => "string", "description" => "The message body (max 64 KiB)."},
             "topic" => %{"type" => "string", "description" => "Optional subject topic."},
             "scope" => %{
               "type" => "string",
@@ -271,14 +271,14 @@ defmodule Kazi.MCP.Server do
         "name" => "kazi_bus_tell",
         "description" =>
           "Post a message directed at one named session (ADR-0067). Requires `session` and " <>
-            "`text` (capped at 1024 bytes client-side). Returns {ok: true}, or a structured " <>
+            "`text` (capped at 64 KiB client-side). Returns {ok: true}, or a structured " <>
             "error (no_daemon).",
         "inputSchema" => %{
           "type" => "object",
           "required" => ["session", "text"],
           "properties" => %{
             "session" => %{"type" => "string", "description" => "The target session id."},
-            "text" => %{"type" => "string", "description" => "The message body (max 1024 bytes)."},
+            "text" => %{"type" => "string", "description" => "The message body (max 64 KiB)."},
             "scope" => %{
               "type" => "string",
               "description" => "\"machine\" (default) or \"project\"."

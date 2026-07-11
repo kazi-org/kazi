@@ -163,6 +163,9 @@ defmodule Kazi.CLI do
     sev: :string,
     scope: :string,
     peek: :boolean,
+    team: :string,
+    all: :boolean,
+    timeout: :integer,
     roadmap: :string,
     goal: :string,
     help: :boolean,
@@ -174,7 +177,7 @@ defmodule Kazi.CLI do
   # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
   # defined here (above `parse/1`) so both the `--help` interception below and
   # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who tell)
+  @bus_verbs ~w(post read peek who tell watch join leave)
   @bus_kinds ~w(fact announce note intent)
   @default_bus_kind "fact"
 
@@ -278,6 +281,12 @@ defmodule Kazi.CLI do
       "`bus post`/`bus read`/`bus tell` only: `machine` (default) or `project` (the current repo's canonical toplevel path, slugged) -- which bus subject tree the call addresses.",
     peek:
       "`bus read` only (issue #1059): non-destructive -- NAKs instead of acking, so the pending messages are shown but NOT consumed; a subsequent `bus read`/`bus peek` still sees them. Equivalent to `bus peek`.",
+    team:
+      "`bus who` only (issue #1069): filter the presence roster to members of this named team (sessions register with `bus join <team>`).",
+    all:
+      "`bus who` only: include presence entries older than the 10-minute TTL (hidden by default so closed sessions age out of the roster instead of looking active).",
+    timeout:
+      "`bus watch` only (issue #1091): maximum seconds to block waiting for a message (default 300). On expiry `bus watch` prints a one-line notice and exits 3.",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0057): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. The starmap loads it through `KaziWeb.Starmap.GoalSource` and renders its needs-DAG in wave-band frontiers, the SAME computation `kazi apply --explain` prints. Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, the starmap keeps its flat-list fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty starmap.",
     goal:
@@ -376,9 +385,9 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a message arrives (issue #1091); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json, :topic, :sev, :scope, :peek]
+      flags: [:json, :topic, :sev, :scope, :peek, :team, :all, :timeout]
     },
     %{
       name: "economy",
@@ -505,10 +514,13 @@ defmodule Kazi.CLI do
       kazi daemon status [--json]                  # ping the running daemon
       kazi daemon stop                             # clean shutdown
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
-      kazi bus tell <session> <text> [--sev info|interrupt] [--scope machine|project] [--json]
+      kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
+      kazi bus watch [--timeout <seconds>] [--json]      # block until a message arrives (issue #1091)
+      kazi bus join <team> [--json]                      # named-team membership (issue #1069)
+      kazi bus leave [--json]
       kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
-      kazi bus who [--json]                        # list current presence
+      kazi bus who [--team <t>] [--all] [--json]   # list current presence (fresh only; --all includes stale)
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
@@ -1318,12 +1330,12 @@ defmodule Kazi.CLI do
   defp parse_bus([sub | _], _flags),
     do:
       {:error,
-       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`)"}
+       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`)"}
 
   defp parse_bus([], _flags),
     do:
       {:error,
-       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`)"}
+       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`)"}
 
   defp bus_flags(flags) do
     [
@@ -1331,7 +1343,10 @@ defmodule Kazi.CLI do
       topic: flags[:topic],
       sev: flags[:sev] || "info",
       scope: flags[:scope] || "machine",
-      peek: flags[:peek] || false
+      peek: flags[:peek] || false,
+      team: flags[:team],
+      all: flags[:all] || false,
+      timeout: flags[:timeout]
     ]
   end
 
@@ -1361,11 +1376,12 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("tell") do
     """
-    kazi bus tell <session> <text> [--sev info|interrupt] [--scope machine|project] [--json]
+    kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
 
     Publish `text` directed at `session` -- only that session's `bus read`/`bus
-    peek` sees it, regardless of either side's --scope (issue #1065). `text`
-    over 1024 bytes is rejected client-side.
+    peek`/`bus watch` sees it, regardless of either side's --scope (issue
+    #1065). With an @-prefixed team name, every member of that team receives
+    it (issue #1069). `text` over 64 KiB is rejected client-side.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -1401,10 +1417,58 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("who") do
     """
-    kazi bus who [--json]
+    kazi bus who [--team <name>] [--all] [--json]
 
-    List current presence (session, pid, cwd, last-seen) from the short-TTL
-    KV bucket every bus call upserts into.
+    List current presence (session, pid, team, last-seen age, cwd) from the
+    short-TTL KV bucket every bus call upserts into. Entries idle past the
+    TTL (10 minutes) are hidden -- closed sessions age out instead of
+    looking active; pass --all to include them. --team <name> filters to
+    that team's members (issue #1069).
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("watch") do
+    """
+    kazi bus watch [--timeout <seconds>] [--json]
+
+    Block until at least one message is available for this session, then
+    consume and print it -- the no-poll-loop alternative to running `bus
+    read` in a loop (issue #1091). Anything already pending returns
+    immediately; otherwise the call sleeps on the session's scope, directed,
+    and team subjects and wakes on the first arrival. Default timeout 300
+    seconds; on expiry prints a one-line notice and exits 3.
+
+    Watching also refreshes this session's presence, so a watcher never
+    ages out of `bus who`.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("join") do
+    """
+    kazi bus join <team> [--json]
+
+    Register this session under a named team (issue #1069): `bus who --team
+    <team>` lists members, and `bus tell @<team> <text>` reaches every
+    member's read/peek/watch. Membership survives across bus calls and ages
+    out with presence (rejoin after long idles); `bus leave` clears it.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("leave") do
+    """
+    kazi bus leave [--json]
+
+    Clear this session's team membership (issue #1069). Presence itself
+    remains until its TTL lapses.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -3853,10 +3917,16 @@ defmodule Kazi.CLI do
   end
 
   defp execute_bus("who", [], opts) do
-    case Kazi.Bus.who(bus_call_opts(opts)) do
+    who_opts = bus_call_opts(opts) ++ [who_team: opts[:team], all: opts[:all]]
+
+    case Kazi.Bus.who(who_opts) do
       {:ok, sessions} ->
         emit(json?(opts), %{"ok" => true, "sessions" => sessions}, fn ->
-          Enum.each(sessions, fn s -> IO.puts("#{s["session"]} pid=#{s["pid"]} #{s["cwd"]}") end)
+          Enum.each(sessions, fn s ->
+            team = if s["team"], do: " team=#{s["team"]}", else: ""
+            age = if s["age_s"], do: " seen=#{s["age_s"]}s ago", else: ""
+            IO.puts("#{s["session"]} pid=#{s["pid"]}#{team}#{age} #{s["cwd"]}")
+          end)
         end)
 
         0
@@ -3866,11 +3936,65 @@ defmodule Kazi.CLI do
     end
   end
 
+  # #1091: block until a message is available, then consume and print it.
+  defp execute_bus("watch", [], opts) do
+    case Kazi.Bus.watch(bus_call_opts(opts)) do
+      {:ok, messages} ->
+        emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
+          print_read_digest(messages)
+        end)
+
+        0
+
+      {:error, :watch_timeout} ->
+        emit(json?(opts), %{"ok" => false, "timeout" => true}, fn ->
+          IO.puts(:stderr, "bus watch timed out with no messages")
+        end)
+
+        3
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("watch", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
+  # #1069: named-team membership.
+  defp execute_bus("join", [team], opts) do
+    case Kazi.Bus.join(team, bus_call_opts(opts)) do
+      :ok ->
+        emit(json?(opts), %{"ok" => true, "team" => team}, fn -> IO.puts("joined #{team}") end)
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("join", _args, opts),
+    do: bus_error("`bus join` requires exactly one <team> argument", opts)
+
+  defp execute_bus("leave", [], opts) do
+    case Kazi.Bus.leave(bus_call_opts(opts)) do
+      :ok ->
+        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("left team") end)
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("leave", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
   defp execute_bus("who", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
   defp bus_call_opts(opts) do
-    [scope: opts[:scope], topic: opts[:topic], sev: opts[:sev]]
+    [scope: opts[:scope], topic: opts[:topic], sev: opts[:sev], timeout: opts[:timeout]]
   end
 
   defp print_read_digest(messages) do
