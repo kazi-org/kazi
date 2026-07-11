@@ -24,7 +24,7 @@ defmodule Kazi.Daemon.Supervisor do
 
     nats_opts =
       opts
-      |> Keyword.take([:nats_bin, :port, :store_dir])
+      |> Keyword.take([:nats_bin, :port, :store_dir, :nats_host, :nats_token])
       |> Keyword.put(:name, nats_name)
 
     children = [

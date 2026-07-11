@@ -25,15 +25,18 @@ defmodule Kazi.Bus.Provision do
   def sessions_bucket, do: @sessions_bucket
 
   @doc """
-  Connects to `opts[:host]`/`opts[:port]` and provisions the stream + bucket.
-  Returns `:ok` (already-exists included) or `{:error, reason}`.
+  Connects to `opts[:host]`/`opts[:port]` (optionally authenticating with
+  `opts[:auth_token]`, the ADR-0067 cross-machine shared token) and
+  provisions the stream + bucket. Returns `:ok` (already-exists included) or
+  `{:error, reason}`.
   """
   @spec run(keyword()) :: :ok | {:error, term()}
   def run(opts) do
     host = Keyword.get(opts, :host, "127.0.0.1")
     port = Keyword.fetch!(opts, :port)
+    conn_opts = connect_opts(host, port, Keyword.get(opts, :auth_token))
 
-    with {:ok, conn} <- Gnat.start_link(%{host: host, port: port}) do
+    with {:ok, conn} <- Gnat.start_link(conn_opts) do
       try do
         provision(conn)
       after
@@ -50,6 +53,9 @@ defmodule Kazi.Bus.Provision do
       :ok
     end
   end
+
+  defp connect_opts(host, port, nil), do: %{host: host, port: port}
+  defp connect_opts(host, port, token), do: %{host: host, port: port, auth_token: token}
 
   defp ensure_stream(conn) do
     stream = %Stream{
