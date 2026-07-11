@@ -159,3 +159,11 @@ needed it -- this needs it).
   leases, or session identities without a seam that fails silently, and kazi
   already owns parallel-work coordination (ADR-0027/0065). Session
   coordination is the same concern one level up.
+
+## Update: cross-machine connect-mode implemented
+
+The Consequences section above states cross-machine coordination "becomes a
+config change, not a redesign" — that connect-mode (`kazi daemon start
+--nats-host <host>`, alongside a `--nats-token` shared-auth option) is now
+implemented; see `docs/session-bus.md` ("Cross-machine setup") for the
+two-role setup and the PR that landed it.
