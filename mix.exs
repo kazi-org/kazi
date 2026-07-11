@@ -73,6 +73,12 @@ defmodule Kazi.MixProject do
       kazi: [
         include_executables_for: [:unix],
         applications: [kazi: :permanent],
+        # issue #1006: a kazi run whose on-disk release payload disappears
+        # mid-run (manual cleanup, disk pressure) previously crashed the BEAM
+        # on the next LAZY module load ({io_lib_pretty,nofile} -> kernel
+        # terminated). `mode: :embedded` loads every module at boot instead of
+        # on first use, eliminating that class of crash entirely.
+        mode: :embedded,
         steps: [:assemble, &Burrito.wrap/1],
         burrito: [
           targets: [
