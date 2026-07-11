@@ -13,6 +13,7 @@ defmodule Kazi.CLI.DaemonTest do
   import ExUnit.CaptureIO
 
   alias Kazi.Daemon
+  alias Kazi.TestSupport.NatsPrereq
 
   # ===========================================================================
   # Tier 1 -- the argv boundary
@@ -108,6 +109,8 @@ defmodule Kazi.CLI.DaemonTest do
 
   describe "kazi daemon status -- a live daemon" do
     setup do
+      NatsPrereq.ensure!()
+
       state_dir =
         Path.join(
           System.tmp_dir!(),
@@ -167,9 +170,13 @@ defmodule Kazi.CLI.DaemonTest do
       output = capture_io(fn -> assert Kazi.CLI.run(["daemon", "stop"], []) == 0 end)
       assert output =~ "stopped"
 
-      # A second stop now reports the down state, never a crash.
+      # A second stop now reports the down state, never a crash. Depending on
+      # whether the socket file lost its race with the listener's own cleanup,
+      # the CLI reports either "no daemon running (no socket at ...)" or
+      # "daemon was not running (stale socket ... cleaned up)" -- both are the
+      # down state, so accept either racy phrasing instead of pinning one.
       output2 = capture_io(:stderr, fn -> assert Kazi.CLI.run(["daemon", "stop"], []) == 1 end)
-      assert output2 =~ "no daemon running"
+      assert output2 =~ "no daemon running" or output2 =~ "was not running"
     end
   end
 
