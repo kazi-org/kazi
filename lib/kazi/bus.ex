@@ -55,7 +55,14 @@ defmodule Kazi.Bus do
     end
   end
 
-  @doc "Publishes `text` directed at `session` -- `bus.<scope>.msg.<session>`."
+  @doc """
+  Publishes `text` directed at `session` -- `bus.<scope>.msg.<session>`.
+
+  Delivery does NOT depend on the scopes matching: the recipient's
+  `read/1`/`peek/1` also drains a `bus.*.msg.<session>` consumer, so a
+  project-scoped tell reaches a machine-scoped reader and vice versa
+  (issue #1065).
+  """
   @spec tell(String.t(), String.t(), keyword()) :: :ok | {:error, error()}
   def tell(session, text, opts \\ []) when is_binary(session) and is_binary(text) do
     with :ok <- check_size(text) do
@@ -77,25 +84,15 @@ defmodule Kazi.Bus do
   end
 
   @doc """
-  Pulls all currently-available messages off the caller's durable consumer
-  (named after the sanitized session id, filtered to `opts[:scope]`), acks
-  them, and returns them structured. A second call with nothing new posted
-  returns `{:ok, []}` -- the durable cursor never re-delivers an acked
-  message.
+  Pulls all currently-available messages off the caller's durable consumers
+  -- the scope consumer (filtered to `opts[:scope]`) plus the session's
+  directed-message consumer (`bus.*.msg.<session>`, all scopes; issue
+  #1065) -- acks them, dedups the overlap, and returns them structured in
+  stream order. A second call with nothing new posted returns `{:ok, []}`
+  -- the durable cursors never re-deliver an acked message.
   """
   @spec read(keyword()) :: {:ok, [map()]} | {:error, error()}
-  def read(opts \\ []) do
-    with_conn(opts, fn conn ->
-      upsert_presence(conn, opts)
-      scope = scope(opts)
-      session = session(opts)
-      stream = Provision.stream_name()
-      consumer_name = consumer_name(session, scope)
-
-      ensure_consumer(conn, stream, consumer_name, scope)
-      {:ok, pull_all(conn, stream, consumer_name, session, ack: true)}
-    end)
-  end
+  def read(opts \\ []), do: consume(opts, ack: true)
 
   @doc """
   Issue #1059: a NON-DESTRUCTIVE `read` -- pulls the same durable consumer
@@ -105,17 +102,40 @@ defmodule Kazi.Bus do
   normally. Mirrors `read/1`'s shape exactly, only the ack behavior differs.
   """
   @spec peek(keyword()) :: {:ok, [map()]} | {:error, error()}
-  def peek(opts \\ []) do
+  def peek(opts \\ []), do: consume(opts, ack: false)
+
+  # Issue #1065: a `tell` published under a DIFFERENT scope than the reader's
+  # (`bus.<project-id>.msg.<session>` against a machine-scoped consumer) was
+  # stored in the stream but never delivered -- no error on either side. Every
+  # read/peek therefore drains TWO durables: the scope consumer (unchanged),
+  # plus a per-session consumer filtered to `bus.*.msg.<session>`, which sees
+  # directed messages across ALL scopes. A same-scope tell arrives on both
+  # consumers; `dedup_by_stream_seq/1` collapses it to one delivery.
+  defp consume(opts, ack: ack?) do
     with_conn(opts, fn conn ->
       upsert_presence(conn, opts)
       scope = scope(opts)
       session = session(opts)
       stream = Provision.stream_name()
-      consumer_name = consumer_name(session, scope)
 
-      ensure_consumer(conn, stream, consumer_name, scope)
-      {:ok, pull_all(conn, stream, consumer_name, session, ack: false)}
+      scope_consumer = consumer_name(session, scope)
+      ensure_consumer(conn, stream, scope_consumer, "bus.#{scope}.>")
+
+      tell_consumer = tell_consumer_name(session)
+      ensure_consumer(conn, stream, tell_consumer, "bus.*.msg.#{session}")
+
+      scoped = pull_all(conn, stream, scope_consumer, session, ack: ack?)
+      told = pull_all(conn, stream, tell_consumer, session, ack: ack?)
+
+      {:ok, dedup_by_stream_seq(scoped ++ told)}
     end)
+  end
+
+  defp dedup_by_stream_seq(messages) do
+    messages
+    |> Enum.uniq_by(fn m -> m.stream_seq || {m.scope, m.kind, m.topic, m.ts, m.text} end)
+    |> Enum.sort_by(fn m -> m.stream_seq || 0 end)
+    |> Enum.map(&Map.delete(&1, :stream_seq))
   end
 
   @doc false
@@ -220,11 +240,11 @@ defmodule Kazi.Bus do
     KV.put_value(conn, Provision.sessions_bucket(), sanitize(session(opts)), Jason.encode!(entry))
   end
 
-  defp ensure_consumer(conn, stream, consumer_name, scope) do
+  defp ensure_consumer(conn, stream, consumer_name, filter_subject) do
     consumer = %Consumer{
       stream_name: stream,
       durable_name: consumer_name,
-      filter_subject: "bus.#{scope}.>",
+      filter_subject: filter_subject,
       ack_policy: :explicit
     }
 
@@ -263,7 +283,7 @@ defmodule Kazi.Bus do
             else: Gnat.pub(conn, msg.reply_to, "-NAK")
         end
 
-        parsed = parse_message(topic, body, msg[:headers])
+        parsed = parse_message(topic, body, msg[:headers], msg[:reply_to])
 
         if visible_to?(parsed, session) do
           collect(conn, session, ack?, [parsed | acc])
@@ -275,7 +295,7 @@ defmodule Kazi.Bus do
     end
   end
 
-  defp parse_message(topic, body, headers) do
+  defp parse_message(topic, body, headers, reply_to) do
     ["bus", scope, kind | topic_parts] = String.split(topic, ".")
     header_map = for {k, v} <- headers || [], into: %{}, do: {k, v}
 
@@ -287,9 +307,31 @@ defmodule Kazi.Bus do
       session: header_map["session"],
       machine: header_map["machine"],
       ts: header_map["ts"],
-      sev: header_map["sev"] || "info"
+      sev: header_map["sev"] || "info",
+      # Internal (stripped before returning): the JetStream stream sequence
+      # from the ack subject, the dedup key across the two consumers.
+      stream_seq: stream_seq(reply_to)
     }
   end
+
+  # `$JS.ACK.<stream>.<consumer>.<delivered>.<sseq>.<cseq>.<ts>.<pending>`,
+  # or the v2 form with `<domain>.<account-hash>` prepended after "ACK".
+  defp stream_seq(nil), do: nil
+
+  defp stream_seq(reply_to) do
+    case String.split(reply_to, ".") do
+      ["$JS", "ACK", _stream, _consumer, _delivered, sseq, _cseq, _ts, _pending] ->
+        String.to_integer(sseq)
+
+      ["$JS", "ACK", _domain, _acchash, _stream, _consumer, _delivered, sseq | _rest] ->
+        String.to_integer(sseq)
+
+      _other ->
+        nil
+    end
+  end
+
+  defp tell_consumer_name(session), do: "kztell_" <> sanitize(session)
 
   defp visible_to?(%{kind: "msg", topic: topic}, session), do: topic == session
   defp visible_to?(_msg, _session), do: true

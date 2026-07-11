@@ -162,6 +162,31 @@ defmodule Kazi.Bus.MvpTest do
       refute Enum.any?(messages_b, fn m -> m.kind == "msg" and m.text == "for A only" end)
     end
 
+    # Issue #1065: a `tell` published under a different scope than the
+    # reader's used to be stored but never delivered -- silently.
+    test "a cross-scope tell still reaches the named session (issue #1065)", %{conn: conn} do
+      recipient = unique_session()
+
+      assert :ok = Bus.tell(recipient, "cross-scope #{recipient}", conn: conn, scope: "project")
+
+      assert {:ok, messages} = Bus.read(conn: conn, session: recipient, scope: "machine")
+
+      assert Enum.any?(messages, fn m ->
+               m.kind == "msg" and m.text == "cross-scope #{recipient}"
+             end)
+    end
+
+    test "a same-scope tell is delivered exactly once despite the second consumer (issue #1065)",
+         %{conn: conn} do
+      recipient = unique_session()
+      text = "exactly-once #{recipient}"
+
+      assert :ok = Bus.tell(recipient, text, conn: conn, scope: "machine")
+
+      assert {:ok, messages} = Bus.read(conn: conn, session: recipient, scope: "machine")
+      assert Enum.count(messages, fn m -> m.text == text end) == 1
+    end
+
     test "who reflects an upserted presence entry", %{conn: conn} do
       session = unique_session()
       opts = [conn: conn, session: session, scope: "machine"]

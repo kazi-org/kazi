@@ -1364,7 +1364,8 @@ defmodule Kazi.CLI do
     kazi bus tell <session> <text> [--sev info|interrupt] [--scope machine|project] [--json]
 
     Publish `text` directed at `session` -- only that session's `bus read`/`bus
-    peek` sees it. `text` over 1024 bytes is rejected client-side.
+    peek` sees it, regardless of either side's --scope (issue #1065). `text`
+    over 1024 bytes is rejected client-side.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
