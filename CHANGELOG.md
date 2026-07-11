@@ -16,6 +16,23 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.142.0](https://github.com/kazi-org/kazi/compare/v1.141.0...v1.142.0) (2026-07-11)
+
+
+### Features
+
+* **cli:** --nats-host / --nats-token flags for daemon start ([e7e971a](https://github.com/kazi-org/kazi/commit/e7e971a74ec154836bb5ea2ba5e9a696a61e9061))
+* **daemon:** nats-server connect-mode for cross-machine bus (ADR-0067) ([c445b40](https://github.com/kazi-org/kazi/commit/c445b40d9d57f2439b6b1712ac9faef3a187f9ec))
+* **daemon:** thread remote nats host/token through start/1 and provisioning ([22d29bd](https://github.com/kazi-org/kazi/commit/22d29bd016b892923e970e4a5bb40f86450b28d5))
+
+
+### Bug Fixes
+
+* **bus:** deliver directed messages across scopes (issue [#1065](https://github.com/kazi-org/kazi/issues/1065)) ([ad5b122](https://github.com/kazi-org/kazi/commit/ad5b122fd21b775b0223f9a531c434e4bb1022d5))
+* **read-model:** bound the migration lock wait instead of hanging (issue [#1019](https://github.com/kazi-org/kazi/issues/1019)) ([1e4cccb](https://github.com/kazi-org/kazi/commit/1e4cccbe6ef712d9d33bb89e588a3b5032d87cb9))
+* **read-model:** refuse to migrate a schema newer than this binary knows (issue [#1019](https://github.com/kazi-org/kazi/issues/1019)) ([4352f24](https://github.com/kazi-org/kazi/commit/4352f24da4a8b529f4f223b949aec6a4057df801))
+* **release:** load kazi modules at boot instead of lazily (issue [#1006](https://github.com/kazi-org/kazi/issues/1006)) ([1cf1d59](https://github.com/kazi-org/kazi/commit/1cf1d5928167c89a7a36adf4c24ba23c2cec043f))
+
 ## [1.141.0](https://github.com/kazi-org/kazi/compare/v1.140.3...v1.141.0) (2026-07-11)
 
 
