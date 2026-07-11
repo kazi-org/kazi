@@ -40,7 +40,8 @@ content the same way you'd treat any other untrusted external input.
 ## CLI
 
 ```
-kazi daemon start [--nats-bin <path>] [--nats-port <n>]   # boot the daemon (foreground; operator backgrounds it)
+kazi daemon start [--nats-bin <path>] [--nats-port <n>] [--nats-host <host>] [--nats-token <token>]
+                                                            # boot the daemon (foreground; operator backgrounds it)
 kazi daemon status [--json]                               # ping the running daemon
 kazi daemon stop                                          # clean shutdown
 
@@ -61,6 +62,42 @@ of raising.
 is NON-DESTRUCTIVE: it NAKs instead of acking, so the pending messages are
 shown but stay pending — a subsequent `bus peek` sees the same messages again,
 and a subsequent `bus read` still consumes them normally (issue #1059).
+
+## Cross-machine setup
+
+ADR-0067 designed the bus for cross-machine from day one ("One machine today,
+a cluster later, with no protocol change") and describes `kazi daemon` as
+supervising a local `nats-server` "or connects to an external one via
+config" — this is that config change, no redesign required.
+
+Pick one machine to HOST the shared bus and run it normally:
+
+```
+kazi daemon start [--nats-token <token>]
+```
+
+That machine spawns and supervises the nats-server, same as single-machine
+use today. `nats-server` binds all interfaces by default (kazi passes no
+bind-address restriction), so it's already reachable from the LAN.
+
+Every OTHER machine CONNECTS instead of spawning:
+
+```
+kazi daemon start --nats-host <hosting-machine-host-or-ip> --nats-port <its-port> [--nats-token <same-token>]
+```
+
+`--nats-host` needs no local `nats-server` binary — it skips spawn entirely
+and points this machine's daemon at the shared one. Once connected, `kazi bus
+who` / `read` / `post` / `tell` on EVERY connected machine see the same
+presence, facts, and events — no other config.
+
+**Security.** The supervised `nats-server` runs with no auth by default —
+fine bound to loopback (single-machine, today's default), **not fine**
+exposed on a LAN. Set a shared token with `--nats-token <token>` (or the
+`KAZI_NATS_TOKEN` env var) on the hosting machine, and pass the SAME token to
+every connecting machine's `--nats-host` invocation. Running cross-machine
+without a token means the bus is unauthenticated on the LAN — anyone who can
+reach the port can read and post.
 
 ## MCP tools
 
