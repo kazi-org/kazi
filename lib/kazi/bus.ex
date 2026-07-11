@@ -1,7 +1,7 @@
 defmodule Kazi.Bus do
   @moduledoc """
   T51.2 (ADR-0067 decision point 3): the session-bus client -- `post`, `read`,
-  `who`, `tell` over the daemon-supervised NATS JetStream bus
+  `peek`, `who`, `tell` over the daemon-supervised NATS JetStream bus
   (`Kazi.Bus.Provision`).
 
   Connects LAZILY per call: discovers the daemon's `nats_port` through
@@ -93,7 +93,28 @@ defmodule Kazi.Bus do
       consumer_name = consumer_name(session, scope)
 
       ensure_consumer(conn, stream, consumer_name, scope)
-      {:ok, pull_all(conn, stream, consumer_name, session)}
+      {:ok, pull_all(conn, stream, consumer_name, session, ack: true)}
+    end)
+  end
+
+  @doc """
+  Issue #1059: a NON-DESTRUCTIVE `read` -- pulls the same durable consumer
+  `read/1` uses, but NAKs every message it sees instead of acking it, so the
+  message is immediately redeliverable. A second `peek/1` sees the same
+  messages again; a subsequent `read/1` still consumes (and acks) them
+  normally. Mirrors `read/1`'s shape exactly, only the ack behavior differs.
+  """
+  @spec peek(keyword()) :: {:ok, [map()]} | {:error, error()}
+  def peek(opts \\ []) do
+    with_conn(opts, fn conn ->
+      upsert_presence(conn, opts)
+      scope = scope(opts)
+      session = session(opts)
+      stream = Provision.stream_name()
+      consumer_name = consumer_name(session, scope)
+
+      ensure_consumer(conn, stream, consumer_name, scope)
+      {:ok, pull_all(conn, stream, consumer_name, session, ack: false)}
     end)
   end
 
@@ -215,7 +236,7 @@ defmodule Kazi.Bus do
     end
   end
 
-  defp pull_all(conn, stream, consumer_name, session) do
+  defp pull_all(conn, stream, consumer_name, session, ack: ack?) do
     inbox = "_INBOX.#{Integer.to_string(System.unique_integer([:positive]))}"
     {:ok, sid} = Gnat.sub(conn, self(), inbox)
 
@@ -225,24 +246,29 @@ defmodule Kazi.Bus do
         no_wait: true
       )
 
-    messages = collect(conn, session, [])
+    messages = collect(conn, session, ack?, [])
     Gnat.unsub(conn, sid)
     messages
   end
 
-  defp collect(conn, session, acc) do
+  defp collect(conn, session, ack?, acc) do
     receive do
       {:msg, %{status: status}} when status in ["404", "408"] ->
         Enum.reverse(acc)
 
       {:msg, %{topic: topic, body: body} = msg} ->
-        if msg[:reply_to], do: Gnat.pub(conn, msg.reply_to, "")
+        if msg[:reply_to] do
+          if ack?,
+            do: Gnat.pub(conn, msg.reply_to, ""),
+            else: Gnat.pub(conn, msg.reply_to, "-NAK")
+        end
+
         parsed = parse_message(topic, body, msg[:headers])
 
         if visible_to?(parsed, session) do
-          collect(conn, session, [parsed | acc])
+          collect(conn, session, ack?, [parsed | acc])
         else
-          collect(conn, session, acc)
+          collect(conn, session, ack?, acc)
         end
     after
       @pull_timeout_ms -> Enum.reverse(acc)
