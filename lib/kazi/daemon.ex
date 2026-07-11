@@ -46,7 +46,7 @@ defmodule Kazi.Daemon do
 
     File.mkdir_p!(Path.dirname(sock_path))
 
-    with {:ok, _bin} <- Kazi.Daemon.Nats.resolve_bin(opts) do
+    with {:ok, _bin} <- resolve_bin_unless_connecting(opts) do
       case Probe.probe(sock_path) do
         :alive ->
           {:error, {:already_running, running_vsn(sock_path)}}
@@ -61,6 +61,17 @@ defmodule Kazi.Daemon do
     end
   end
 
+  # ADR-0067 cross-machine (T51.3): `opts[:nats_host]` means CONNECT, not
+  # spawn -- a remote `nats-server` needs no local binary, so the fail-fast
+  # gate is skipped entirely.
+  defp resolve_bin_unless_connecting(opts) do
+    if Keyword.get(opts, :nats_host) do
+      {:ok, :connect_mode}
+    else
+      Kazi.Daemon.Nats.resolve_bin(opts)
+    end
+  end
+
   defp do_start(opts, sock_path, pid_path) do
     nats_name = Supervisor.default_nats_name(opts)
 
@@ -69,6 +80,8 @@ defmodule Kazi.Daemon do
            |> Keyword.merge(sock_path: sock_path, pid_path: pid_path)
            |> Supervisor.start_link() do
       nats_port = Kazi.Daemon.Nats.port(nats_name)
+      nats_host = Kazi.Daemon.Nats.host(nats_name)
+      nats_token = Keyword.get(opts, :nats_token)
 
       # Best-effort and BOUNDED, run in an UNLINKED process: a transient
       # connect race against the just-spawned nats-server (or the daemon
@@ -78,8 +91,8 @@ defmodule Kazi.Daemon do
       # discovers the daemon fresh per call, never through this pid).
       {provisioner, ref} =
         spawn_monitor(fn ->
-          if Kazi.Daemon.Nats.wait_ready(nats_port) == :ok do
-            Kazi.Bus.Provision.run(host: "127.0.0.1", port: nats_port)
+          if Kazi.Daemon.Nats.wait_ready(nats_port, 5_000, nats_host, nats_token) == :ok do
+            Kazi.Bus.Provision.run(host: nats_host, port: nats_port, auth_token: nats_token)
           end
         end)
 
