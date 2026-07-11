@@ -298,7 +298,9 @@ defmodule Kazi.Bus.MvpTest do
       assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
 
       assert {:ok, messages} = Task.await(watcher, 20_000)
-      assert Enum.any?(messages, fn m -> m.kind == "msg" and m.text == text end)
+      # exactly once: the wake path must not double-deliver via the stray
+      # core-NATS signal copy (caught live on v1.143.0)
+      assert Enum.count(messages, fn m -> m.kind == "msg" and m.text == text end) == 1
     end
 
     test "watch times out with {:error, :watch_timeout} when nothing arrives", %{conn: conn} do
