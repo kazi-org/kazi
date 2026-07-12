@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.143.1](https://github.com/kazi-org/kazi/compare/v1.143.0...v1.143.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **bus:** watch delivered a woken message twice via the stray signal copy ([281a8c6](https://github.com/kazi-org/kazi/commit/281a8c676a3e7b9e328bf469fe87ad19dd3d12a8))
+
 ## [1.143.0](https://github.com/kazi-org/kazi/compare/v1.142.0...v1.143.0) (2026-07-11)
 
 
