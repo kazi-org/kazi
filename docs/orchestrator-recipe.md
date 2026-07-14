@@ -154,7 +154,22 @@ kazi approve <proposal-ref> --json
 ```
 
 `approve --json` emits `{schema_version, proposal_ref, status: "approved",
-goal_id}`. On success the goal is now runnable by `kazi apply`. (`kazi reject
+goal_id}`. On success the goal is now runnable by `kazi apply` -- pass the
+`proposal_ref` straight to `apply` (Step 3, ADR-0049): no goal-file needed.
+
+For a file-based or version-controlled workflow that WANTS a goal-file
+artifact, add `--write <path>`:
+
+```sh
+kazi approve <proposal-ref> --write goal.toml --json
+```
+
+This materializes the approved goal as a loadable goal-file at `<path>` (the
+full goal -- mode, standing, metadata, groups, predicates -- with NO
+live-predicate scaffold, since an approved goal is complete). Under `--json`
+the result gains a `path` key. `apply goal.toml` then runs the SAME goal
+`apply <proposal-ref>` would; pick whichever fits your workflow. Absent
+`--write`, approve is unchanged. (`kazi reject
 <proposal-ref> --json` declines a proposal, kept for audit -- rejection is a
 pure lifecycle transition and never requires the stored goal to still load, so
 even a proposal drafted against a since-changed predicate schema rejects
