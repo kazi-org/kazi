@@ -501,6 +501,8 @@ defmodule Kazi.CLI do
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
+        (authoring verbs -- plan / list-proposed / approve / reject -- need the
+         release binary or `mix`; the escript build lacks the SQLite NIF)
       kazi export <goal-file> --obsidian <dir> [--json]   # write an Obsidian vault
       kazi lint <goal-file> [--json]              # advisory near-duplicate group-name warnings
       kazi context index <label> <file> [--provider gist] [--json]   # index an artifact
@@ -5252,7 +5254,11 @@ defmodule Kazi.CLI do
     if ensure_read_model() do
       fun.()
     else
-      message = "the read-model is unavailable; authoring requires persistence"
+      message =
+        "the read-model is unavailable; authoring requires persistence. " <>
+          "The escript build cannot bundle the SQLite NIF, so `plan`/`approve`/" <>
+          "`reject`/`list-proposed` need the release binary (`kazi` from a GitHub " <>
+          "release / Homebrew) or a dev `mix run` entrypoint"
 
       if json?(opts) do
         emit_json_error(message)
