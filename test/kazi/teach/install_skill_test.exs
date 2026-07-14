@@ -126,10 +126,9 @@ defmodule Kazi.Teach.InstallSkillTest do
     # (ADR-0045), `memory` the recall/harvest verbs (ADR-0062/0063). `dashboard` is
     # the standalone fleet-mode web endpoint (T46.4, ADR-0057).
     real =
-      MapSet.new(
-        ~w(apply run plan propose status init install-skill list-proposed approve
-                         reject export lint help schema version mcp economy context memory dashboard)
-      )
+      MapSet.new(~w(apply run plan propose status init install-skill list-proposed approve
+                         reject export lint help schema version mcp economy context memory dashboard
+                         daemon bus))
 
     referenced =
       Regex.scan(~r/`kazi ([a-z][a-z-]*)/, content)

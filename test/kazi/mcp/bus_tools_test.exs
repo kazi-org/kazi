@@ -15,8 +15,19 @@ defmodule Kazi.MCP.BusToolsTest do
 
       assert "kazi_bus_post" in names
       assert "kazi_bus_read" in names
+      assert "kazi_bus_watch" in names
       assert "kazi_bus_who" in names
       assert "kazi_bus_tell" in names
+    end
+
+    test "kazi_bus_read declares the peek argument; kazi_bus_watch the timeout" do
+      by_name = Map.new(Server.tools(), &{&1["name"], &1})
+
+      assert %{"type" => "boolean"} =
+               by_name["kazi_bus_read"]["inputSchema"]["properties"]["peek"]
+
+      assert %{"type" => "number"} =
+               by_name["kazi_bus_watch"]["inputSchema"]["properties"]["timeout"]
     end
 
     test "post/tell declare their required arguments" do
@@ -59,6 +70,22 @@ defmodule Kazi.MCP.BusToolsTest do
 
     test "kazi_bus_read surfaces a structured no_daemon tool error", %{opts: opts} do
       response = call("kazi_bus_read", %{}, opts)
+
+      assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
+      assert content["reason"] == "no_daemon"
+    end
+
+    test "kazi_bus_read with peek: true surfaces a structured no_daemon tool error", %{
+      opts: opts
+    } do
+      response = call("kazi_bus_read", %{"peek" => true}, opts)
+
+      assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
+      assert content["reason"] == "no_daemon"
+    end
+
+    test "kazi_bus_watch surfaces a structured no_daemon tool error", %{opts: opts} do
+      response = call("kazi_bus_watch", %{"timeout" => 1}, opts)
 
       assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
       assert content["reason"] == "no_daemon"
