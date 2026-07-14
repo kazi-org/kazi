@@ -316,6 +316,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E53 -- Reliability hardening: the four open runtime bugs from the E50 execution sweep (P0/P1) -> plans/E53.md
 
+### E54 -- Reliability hardening II: the nine 2026-07-11/12 execution-sweep bugs -- partition branch lifecycle, dispatch budget-burn safety, --json locale, provider/bus DX (P0/P1) -> plans/E54.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
