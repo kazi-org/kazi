@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.146.0](https://github.com/kazi-org/kazi/compare/v1.145.0...v1.146.0) (2026-07-14)
+
+
+### Features
+
+* **adopt:** to_goal_file/1 renders a full goal map to a scaffold-free goal-file (T39.3, ADR-0049) ([873a6aa](https://github.com/kazi-org/kazi/commit/873a6aa6d178f07405dce081dcc57c66e68dfdd5))
+* **cli:** approve --write materializes the approved goal to a loadable goal-file (T39.3, ADR-0049) ([466e73e](https://github.com/kazi-org/kazi/commit/466e73eb7b83d1aa24d706985770c5d9203cd35f))
+
 ## [1.145.0](https://github.com/kazi-org/kazi/compare/v1.144.0...v1.145.0) (2026-07-14)
 
 
