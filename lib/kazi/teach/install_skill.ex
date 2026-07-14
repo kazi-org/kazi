@@ -619,6 +619,26 @@ defmodule Kazi.Teach.InstallSkill do
     including LIVE predicates, which pass only post-deploy. The vector -- not a
     single exit code -- is what makes regression and partial progress legible.
 
+    ## The session bus: how to wait (peek vs read vs watch)
+
+    With a `kazi daemon` up, the session bus (ADR-0067) lets concurrent sessions
+    coordinate: `kazi bus post|tell` to send, and three DISTINCT verbs to receive.
+    Pick by intent -- most agent mistakes here are using the wrong one:
+
+    - **Check without consuming** -- `kazi bus peek --json` (MCP: `kazi_bus_read`
+      with `peek: true`). Messages are shown but stay pending.
+    - **Consume** -- `kazi bus read --json` (MCP: `kazi_bus_read`). LANDMINE:
+      read ACKS everything it pulls; a casual check silently drains messages a
+      later wait was counting on. Not ready to act? Peek instead.
+    - **Wait** -- `kazi bus watch --timeout <s> --json` (MCP: `kazi_bus_watch`).
+      Blocks until traffic arrives (pending messages return immediately) and
+      keeps your presence fresh. NEVER poll `read` in a loop -- watch is the
+      no-poll primitive. The CLI exits 3 on timeout; the MCP tool returns
+      `{ok: true, timed_out: true, messages: []}` -- branch on `timed_out`.
+
+    Cadence: peek at turn boundaries; hold a bounded `watch` only when genuinely
+    waiting on another session. Full taxonomy: `docs/session-bus.md`.
+
     ## Runtime introspection (no stale docs)
 
     kazi self-describes, so confirm the surface at runtime rather than trusting a
