@@ -151,12 +151,15 @@ harness drives the bus natively, with no JSON-CLI shell-out:
 | Tool | Mirrors | Required args |
 |---|---|---|
 | `kazi_bus_post` | `kazi bus post` | `kind`, `text` |
-| `kazi_bus_read` | `kazi bus read` | — |
+| `kazi_bus_read` | `kazi bus read` (`peek: true` mirrors `kazi bus peek`) | — |
+| `kazi_bus_watch` | `kazi bus watch` | — |
 | `kazi_bus_who` | `kazi bus who` | — |
 | `kazi_bus_tell` | `kazi bus tell` | `session`, `text` |
 
 Each accepts the optional `topic` / `scope` / `sev` arguments the CLI verbs
-take. A tool call against a missing daemon returns an MCP tool-result error
+take. `kazi_bus_watch` takes an optional `timeout` (seconds); where the CLI
+exits 3 on expiry, the tool returns `{ok: true, timed_out: true, messages:
+[]}` — an expected outcome the agent branches on, never `isError`. A tool call against a missing daemon returns an MCP tool-result error
 (`isError: true`) with `reason: "no_daemon"`, exactly mirroring the CLI's
 no-daemon message — never a JSON-RPC protocol error.
 
