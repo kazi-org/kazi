@@ -14,6 +14,15 @@ before dispatching, so even a mid-run Ecto/Phoenix log line (the "Migrations
 already up" leak of issue #804) can never land ahead of the object. Parse
 stdout, ignore stderr -- no "grep for the `{` line" workaround is needed.
 
+**Pick a persistence-capable entrypoint for authoring (ADR-0049 / T39.5).**
+The authoring verbs (`plan`, `list-proposed`, `approve`, `reject`) persist
+proposals to the SQLite read-model, and the escript build cannot bundle the
+SQLite NIF -- on the escript they refuse with a clear error naming this
+limitation (exit 1; a JSON error envelope under `--json`). Drive authoring
+through the release binary (GitHub release / Homebrew `kazi`) or a dev
+`mix run` entrypoint. `apply`/`run` degrade to no-persistence and work
+everywhere.
+
 If you are a Claude Code user, the most ergonomic path is `kazi install-skill`
 (E16, ADR-0024) -- it writes this recipe as a skill so the agent already knows
 it. This doc is the source of truth that skill teaches, and the recipe any
