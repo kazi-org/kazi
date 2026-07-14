@@ -1,0 +1,40 @@
+id = "bus-watch-new-messages"
+name = "E54 T54.9 (#1097): bus watch blocks for strictly-NEW messages instead of firing on already-delivered backlog"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1097"
+epic = "E54"
+
+[[predicate]]
+id = "watch-new-messages"
+provider = "custom_script"
+description = "TASK BRIEF (github #1097). watch/1 (lib/kazi/bus.ex:167) does an initial `drain(conn, opts, true)` that pulls ALL pending durable messages -- including backlog a prior `peek` left un-acked (peek NAKs) -- so watch returns immediately (~3s) on already-seen messages instead of blocking. It degenerates into `peek`: every wake is a false positive, defeating the issue #1091 no-poll purpose (`run watch in background, be re-invoked the moment a teammate posts`). FIX: watch anchors to `now` (the JetStream stream's last_seq at entry, via Stream.info on Provision.stream_name()) by DEFAULT and delivers ONLY messages with stream_seq > anchor, leaving the backlog UN-consumed for a later read/peek; add `--since <seq|now|all>` so a caller can restore explicit backlog-draining (`--since all` = today's behavior). Capture the anchor AFTER the core-NATS wake subscriptions are live (the park-race close at bus.ex:198-215 already sequences this) so a message landing between last_seq capture and sub-up is not dropped. Timeout-vs-arrival is ALREADY distinguishable (CLI exits 3; MCP tool returns timed_out:true) -- keep it. Update docs/session-bus.md, `kazi bus watch --help` (cli.ex bus_help_text), and the kazi_bus_watch MCP tool description (lib/kazi/mcp/server.ex) for --since (ADR-0034). The watch acceptance test is :nats-tagged (real JetStream, NATS_URL) -- excluded by default, maintainer-run. PROCESS: branch task/bus-watch-new-messages, conventional commits, push -u. Full design: docs/plans/E54.md T54.9."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/bus/ test/kazi/mcp/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref (partition-safe: no hardcoded branch name)."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

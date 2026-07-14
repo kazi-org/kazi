@@ -1,0 +1,40 @@
+id = "partition-real-branch-checkout"
+name = "E54 T54.1 (#1079/#1080): the partition worktree checks out the goal's REAL target branch so a branch-name 'landed' predicate can pass"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1079"
+epic = "E54"
+
+[[predicate]]
+id = "real-branch-checkout"
+provider = "custom_script"
+description = "TASK BRIEF (github #1079 + #1080, ONE fix; direction chosen by operator: the SCHEDULER checks out the real branch, NOT a plan-lint rewrite). Today the parallel/native scheduler runs the loop on the synthetic branch `kazi-partition/p-<name>-N` created at lib/kazi/scheduler/worktree.ex:244 (`git worktree add -b <branch>`), never on a branch a goal-authored `landed` predicate names. So `test $(git rev-parse --abbrev-ref HEAD) = task/<goal-id>` can NEVER pass even when every other predicate converges (the run reports stuck/in_progress on 100%-done work). FIX: (1) add an ADDITIVE goal target-branch to Kazi.Goal (lib/kazi/goal.ex:124-164) -- a goal-file `[integration] branch` field, default derived `task/<sanitized goal-id>`; (2) thread it from the serial caller (lib/kazi/cli.ex:2388-2402) and the fleet caller (lib/kazi/fleet/execution.ex:281-290) into Worktree.wrap/2; (3) have worktree.ex create/5 check the worktree out onto that real branch (either `git worktree add -b <real-branch>` directly, or create-then-`git checkout -B <real-branch>` before the loop). BLOCKING LANDMINE -- migrate in LOCKSTEP: Kazi.Scheduler.SerialLanding recognizes the run-owned branch ONLY by the `kazi-partition/` prefix (lib/kazi/scheduler/serial_landing.ex:31, the @task_branch_prefix at :50-51, the String.starts_with? at :67); renaming the checkout will (a) make land/4 treat it as `:nothing_to_land` -- a SILENT DROP of converged work -- and (b) break test/kazi/scheduler/serial_integration_test.exs assertions at :130-131, :150, :156-160 that expect `integration.task_branch =~ 'kazi-partition/'`. Migrate the discriminator to the explicit kazi-assigned owned-branch name (land/4 already receives `goal`) and update those tests together. Do NOT regress the distinct-worktree-path invariant (test/kazi/scheduler/worktree_test.exs:100-125). PROCESS: branch task/partition-real-branch-checkout, conventional commits, push -u. Full design: docs/plans/E54.md T54.1."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/scheduler/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref (partition-safe: no hardcoded branch name)."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

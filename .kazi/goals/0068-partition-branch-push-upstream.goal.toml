@@ -1,0 +1,41 @@
+id = "partition-branch-push-upstream"
+name = "E54 T54.3 (#1075): push the partition branch with upstream so an in-loop 'landed' @{u} check resolves; surface the real git error in the stuck bundle"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1075"
+depends_on = ["partition-real-branch-checkout"]
+epic = "E54"
+
+[[predicate]]
+id = "push-upstream"
+provider = "custom_script"
+description = "TASK BRIEF (github #1075, recurrence-class of #1027). The partition branch is NEVER pushed during the loop -- the only push is at post-convergence landing, and it pushes a FRESH `kazi/integrate-<ts>` branch (lib/kazi/actions/integrate.ex:227-232, push at :384-393), not the partition branch. So a goal `landed` predicate gated on `@{u}` fails every iteration with `fatal: no upstream configured for branch 'kazi-partition/...'`, convergence (hence landing, hence push) never happens: a deadlock. The manual `git push -u origin <partition-branch>` works precisely because kazi never does it. FIX: when the base repo has an `origin`, push the run-owned branch with upstream ONCE at creation -- lib/kazi/scheduler/worktree.ex wrap/2 right after create succeeds (~:138-144), `git push -u origin <real-branch>`, reusing the bounded @network_attempts retry shape from integrate.ex:424-436 -- so an in-loop `@{u}` resolves. MUST NOT trip already_landed/1 (integrate.ex:200-211, gates on HEAD==@{u}) into a spurious no-op before the loop's real work. Also SURFACE the real error: capture git stderr into the predicate evidence, and fix lib/kazi/context/stuck_bundle.ex:157-166 fit_budget/2 which blanks the last predicate's failure text to `` when room collapses to 0 -- so `landed`'s empty `\"failure\":\"\"` becomes the actual git cause. NOTE deps: this builds on the real-branch checkout (T54.1 / goal partition-real-branch-checkout). PROCESS: branch task/partition-branch-push-upstream, conventional commits, push -u. Full design: docs/plans/E54.md T54.3."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/scheduler/ test/kazi/actions/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref (partition-safe: no hardcoded branch name)."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

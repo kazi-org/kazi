@@ -1,0 +1,40 @@
+id = "parent-monitor-and-orphans"
+name = "E54 T54.5 (#1073): reap a launcher-killed dispatch tree via a BEAM-side parent-liveness monitor; add `kazi orphans`"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1073"
+epic = "E54"
+
+[[predicate]]
+id = "parent-monitor-and-orphans"
+provider = "custom_script"
+description = "TASK BRIEF (github #1073, regression of #857). The burrito native launcher receives the terminal's SIGTERM; BOTH #857 mechanisms watch the BEAM, not the launcher -- so neither covers SIGTERM/SIGKILL to the top-level `kazi` launcher. (1) The OS watchdog's `parent_pid = System.pid()` (lib/kazi/harness/child_supervisor.ex:116) is the BEAM, which merely re-parents to init (ppid=1) and stays alive, so the `while kill -0 parent && kill -0 wrapper` loop (child_supervisor.ex:88-95) NEVER exits and never reaps. (2) The BEAM-side SIGTERM trap (lib/kazi/runtime/finalizer.ex:52-89) never fires because the launcher does not forward the signal. Result: `claude -p` runs to natural completion orphaned (~$5.13). FIX LAYER A (primary -- catches SIGTERM AND SIGKILL of the launcher): a supervised `Kazi.Runtime.ParentMonitor` GenServer started for the CLI entrypoint that records the launcher pid once (`ps -o ppid= -p <System.pid()>`, reuse the ChildSupervisor.alive?/1 shell seam at child_supervisor.ex:143), polls it ~1s, and after N consecutive DEAD reads runs Finalizer.record_termination/2 then System.halt(0) -- halting the BEAM closes the dispatch port so the EXISTING per-dispatch watchdog reaps `claude` from the correct trigger. Require N-consecutive-dead (not one) to avoid a transient `ps` misread aborting a healthy run; enable ONLY for the real CLI entrypoint (never test loops). LAYER B (defense-in-depth, FILE A SEPARATE ISSUE against the kazi-org/burrito fork per ADR-0066, do not attempt here): launcher forwards SIGTERM/SIGINT to the BEAM. ALSO add a read-only `kazi orphans [--reap] [--json]` verb -- the pid registry exists (run.harness_child_pid read_model/run.ex:53; RunRegistry.list/0 + stale?/2 run_registry.ex:215-274; the orphan predicate warn_on_orphans/4 runtime.ex:1155-1176). List every run whose harness_child_pid is still alive?/1; --reap sends TERM/KILL (the `env kill` shape at child_supervisor.ex:92-94). Wire the schema-table entry, a parse_command clause near the status clauses (cli.ex:1052-1063), a handler, and docs (T16.4 coherence guard + ADR-0034). PROCESS: branch task/parent-monitor-and-orphans, conventional commits, push -u. Full design: docs/plans/E54.md T54.5."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/harness/ test/kazi/runtime/ test/kazi/cli_orphans_test.exs']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref (partition-safe: no hardcoded branch name)."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
