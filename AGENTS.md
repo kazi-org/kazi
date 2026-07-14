@@ -440,14 +440,32 @@ pidfile alongside it at `daemon.pid`. Nothing else in kazi starts this daemon
 or reaches into it -- it is opt-in operational infrastructure, not part of the
 `apply` loop.
 
-With the daemon up, `kazi bus post|read|who|tell` (and the matching
-`kazi_bus_post` / `kazi_bus_read` / `kazi_bus_who` / `kazi_bus_tell` MCP
-tools) let concurrent operator sessions and kazi runs coordinate -- presence,
-shared facts, release-window broadcasts, directed handoffs -- over a
-supervised NATS JetStream bus. Every message is advisory, provenance-stamped
-input (never a command channel); every surface reports a clean "no daemon"
-error when the daemon is down. Full concepts, subject taxonomy, and a
-turn-boundary hook recipe: `docs/session-bus.md`.
+With the daemon up, `kazi bus post|read|peek|watch|who|tell` (and the matching
+`kazi_bus_post` / `kazi_bus_read` / `kazi_bus_watch` / `kazi_bus_who` /
+`kazi_bus_tell` MCP tools) let concurrent operator sessions and kazi runs
+coordinate -- presence, shared facts, release-window broadcasts, directed
+handoffs -- over a supervised NATS JetStream bus. Every message is advisory,
+provenance-stamped input (never a command channel); every surface reports a
+clean "no daemon" error when the daemon is down. Full concepts, subject
+taxonomy, and a turn-boundary hook recipe: `docs/session-bus.md`.
+
+**How to wait: peek vs read vs watch.** Three distinct verbs, three intents:
+
+- **Check without consuming** -- `kazi bus peek` (or `kazi_bus_read` with
+  `peek: true`). Messages are shown but stay pending for the next read.
+- **Consume** -- `kazi bus read` / `kazi_bus_read`. LANDMINE: read ACKS
+  everything it pulls. A casual "let me check the bus" read silently drains
+  messages a later wait was supposed to react to, and the bus then looks
+  quiet. If you are not ready to act on the messages, peek instead.
+- **Wait** -- `kazi bus watch --timeout <s>` / `kazi_bus_watch`. Blocks until
+  traffic arrives (pending messages return immediately), and refreshes your
+  presence while parked. NEVER poll `read` in a loop -- watch is the no-poll
+  primitive. The CLI exits 3 on timeout; the MCP tool returns
+  `{ok: true, timed_out: true, messages: []}` -- branch on `timed_out`.
+
+Cadence: check at turn boundaries (peek, or the hook recipe in
+`docs/session-bus.md`); block with a bounded `watch` only when you are
+genuinely waiting on another session.
 
 ## Verifying a pooled task with kazi
 
