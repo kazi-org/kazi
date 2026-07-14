@@ -296,4 +296,92 @@ defmodule Kazi.AdoptWriterTest do
              |> Enum.all?(&String.starts_with?(&1, "#"))
     end
   end
+
+  # T39.3 (ADR-0049): to_goal_file/1 materializes an ALREADY-AUTHORED goal — the
+  # full serialize_goal/1 map (mode/standing/metadata/group), NO live-scaffold.
+  describe "to_goal_file/1 (the approve --write materializer)" do
+    defp authored_map(overrides \\ %{}) do
+      Map.merge(
+        %{
+          "id" => "authored-goal",
+          "name" => "An authored goal",
+          "mode" => "repair",
+          "standing" => false,
+          "group" => [],
+          "metadata" => %{"source" => "authoring", "proposed" => true},
+          "predicate" => [
+            %{
+              "id" => "code",
+              "provider" => "test_runner",
+              "description" => "tests pass",
+              "cmd" => "sh",
+              "args" => ["-c", "true"]
+            }
+          ]
+        },
+        overrides
+      )
+    end
+
+    test "emits NO live-predicate scaffold (an approved goal is complete)" do
+      toml = Writer.to_goal_file(authored_map())
+
+      refute toml =~ "TODO"
+      refute toml =~ "live-probe"
+      # No commented predicate block at all.
+      refute toml =~ "# [[predicate]]"
+    end
+
+    test "round-trips: the emitted TOML loads to the same id and predicate set" do
+      toml = Writer.to_goal_file(authored_map())
+
+      assert {:ok, decoded} = Toml.decode(toml)
+      assert {:ok, %Goal{} = goal} = Loader.from_map(decoded)
+      assert goal.id == "authored-goal"
+      assert goal |> Goal.all_predicates() |> Enum.map(&to_string(&1.id)) == ["code"]
+    end
+
+    test "omits default mode/standing but carries create-mode and standing when set" do
+      repair = Writer.to_goal_file(authored_map())
+      refute repair =~ "mode ="
+      refute repair =~ "standing ="
+
+      special = Writer.to_goal_file(authored_map(%{"mode" => "create", "standing" => true}))
+      assert special =~ ~s(mode = "create")
+      assert special =~ "standing = true"
+    end
+
+    test "renders a [metadata] table that round-trips" do
+      toml = Writer.to_goal_file(authored_map())
+
+      assert toml =~ "[metadata]"
+      assert {:ok, decoded} = Toml.decode(toml)
+      assert decoded["metadata"]["source"] == "authoring"
+      assert decoded["metadata"]["proposed"] == true
+    end
+
+    test "renders [[group]] blocks that round-trip through the loader" do
+      groups = [%{"id" => "core", "name" => "Core"}, %{"id" => "extra", "name" => "Extra"}]
+
+      predicate = %{
+        "id" => "code",
+        "provider" => "test_runner",
+        "description" => "tests pass",
+        "group" => "core",
+        "cmd" => "sh",
+        "args" => ["-c", "true"]
+      }
+
+      toml =
+        Writer.to_goal_file(authored_map(%{"group" => groups, "predicate" => [predicate]}))
+
+      assert toml =~ "[[group]]"
+      assert {:ok, %Goal{} = goal} = toml |> Toml.decode!() |> Loader.from_map()
+      assert goal.groups |> Enum.map(& &1.id) |> Enum.sort() == ["core", "extra"]
+    end
+
+    test "is deterministic — same map renders byte-identically" do
+      assert Writer.to_goal_file(authored_map()) == Writer.to_goal_file(authored_map())
+    end
+  end
 end
