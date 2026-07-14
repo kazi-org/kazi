@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.144.0](https://github.com/kazi-org/kazi/compare/v1.143.1...v1.144.0) (2026-07-14)
+
+
+### Features
+
+* **cli:** escript authoring refusal names the supported entrypoints (T39.5, ADR-0049) ([e964d2b](https://github.com/kazi-org/kazi/commit/e964d2b211bcee7b126d13247a9c108e6dbd690f))
+
 ## [1.143.1](https://github.com/kazi-org/kazi/compare/v1.143.0...v1.143.1) (2026-07-12)
 
 
