@@ -168,6 +168,7 @@ defmodule Kazi.CLI do
     timeout: :integer,
     roadmap: :string,
     goal: :string,
+    write: :string,
     help: :boolean,
     version: :boolean
   ]
@@ -191,6 +192,8 @@ defmodule Kazi.CLI do
       "Deploy environment to target (e.g. staging / prod); selects the goal/deploy's per-env target.",
     standing:
       "Run as a STANDING (continuous/maintenance) reconciler instead of converging and stopping.",
+    write:
+      "`approve` only (T39.3, ADR-0049): materialize the approved goal as a loadable goal-file at <path>, so a file-based / version-controlled workflow can `apply <path>` and get the SAME goal `apply <ref>` runs. Under --json the result carries the written `path`. Absent, approve is unchanged.",
     debrief:
       "Opt into post-dispatch debrief capture (ADR-0058): append one capped debrief question to the dispatch prompt and persist the agent's structured answer as hypothesis rows. Overrides the goal-file's [economy] debrief field.",
     status:
@@ -413,7 +416,7 @@ defmodule Kazi.CLI do
       name: "approve",
       summary: "Transition a proposal proposed → approved (then runnable by `kazi apply`).",
       args: [%{name: "proposal-ref", required: true}],
-      flags: [:json]
+      flags: [:json, :write]
     },
     %{
       name: "reject",
@@ -682,6 +685,12 @@ defmodule Kazi.CLI do
                              (ADR-0026 L1) and release qualification — a cheap,
                              objective "does the vector hold" read. Under --json emits
                              a single JSON object; NON-INTERACTIVE.
+      --write <path>         `approve` only: materialize the approved goal as a
+                             loadable goal-file at <path> (T39.3, ADR-0049), so a
+                             file-based / version-controlled workflow can
+                             `apply <path>` and get the SAME goal `apply <ref>`
+                             runs. Under --json the result carries the written
+                             `path`. Absent, approve behaves exactly as before.
       --obsidian <dir>       `export` only: write an Obsidian vault to <dir> — one
                              note per group and per predicate, [[wikilinked]]
                              parent↔child, tagged with the verdict (intended/
@@ -1476,6 +1485,11 @@ defmodule Kazi.CLI do
     (exit 1) otherwise.
     """
   end
+
+  # T39.3 (ADR-0049): `approve --write <path>` materializes the approved goal to a
+  # loadable goal-file. Scoped to `approve` — `reject` never writes a goal-file.
+  defp approval_command(:approve, proposal_ref, [], flags),
+    do: {:approve, proposal_ref, json: flags[:json] || false, write: flags[:write]}
 
   defp approval_command(command, proposal_ref, [], flags),
     do: {command, proposal_ref, json: flags[:json] || false}
@@ -5183,17 +5197,94 @@ defmodule Kazi.CLI do
     with_read_model(opts, fn ->
       case Authoring.approve(proposal_ref) do
         {:ok, %Goal{} = goal} ->
-          emit(json?(opts), approval_json("approved", proposal_ref, goal.id), fn ->
-            IO.puts("APPROVED   proposal=#{proposal_ref} goal=#{goal.id}")
-            IO.puts("The goal is now runnable: kazi apply <goal-file> --workspace <path>")
-          end)
+          case maybe_materialize_goal_file(goal, opts[:write]) do
+            {:ok, extra} ->
+              emit(
+                json?(opts),
+                approval_json("approved", proposal_ref, goal.id, extra),
+                fn ->
+                  IO.puts("APPROVED   proposal=#{proposal_ref} goal=#{goal.id}")
 
-          0
+                  case extra[:path] do
+                    nil ->
+                      IO.puts(
+                        "The goal is now runnable: kazi apply <goal-file> --workspace <path>"
+                      )
+
+                    path ->
+                      IO.puts("WROTE      #{path}")
+                      IO.puts("The goal is now runnable: kazi apply #{path} --workspace <path>")
+                  end
+                end
+              )
+
+              0
+
+            {:error, message} ->
+              # The transition SUCCEEDED (the proposal is approved and persisted);
+              # only the optional file write failed. Report the write error on the
+              # requested surface, non-zero, without pretending approval failed.
+              if json?(opts) do
+                emit_json_error(message)
+              else
+                IO.puts(:stderr, "error: #{message}")
+              end
+
+              1
+          end
 
         {:error, reason} ->
           transition_error("approve", proposal_ref, reason, opts)
       end
     end)
+  end
+
+  # T39.3 (ADR-0049): `--write <path>` materializes the approved goal to a
+  # loadable goal-file. Absent, approval is unchanged (returns `{:ok, %{}}`, no
+  # extra JSON keys). Present, render the FULL goal map (no live-scaffold), write
+  # it, then RE-LOAD and compare to the approved goal — a written file that does
+  # not round-trip to the same goal is refused rather than silently shipped.
+  defp maybe_materialize_goal_file(_goal, nil), do: {:ok, %{}}
+  defp maybe_materialize_goal_file(_goal, ""), do: {:ok, %{}}
+
+  defp maybe_materialize_goal_file(%Goal{} = goal, path) when is_binary(path) do
+    toml = Adopt.Writer.to_goal_file(Authoring.serialize_goal(goal))
+
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(path, toml),
+         {:ok, %Goal{} = reloaded} <- Goal.Loader.load(path),
+         :ok <- verify_goal_roundtrip(goal, reloaded) do
+      {:ok, %{path: path}}
+    else
+      {:error, %{} = _changeset_or_map} ->
+        {:error, "could not materialize a loadable goal-file at #{path}"}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, "could not materialize a loadable goal-file at #{path}: #{reason}"}
+
+      {:error, reason} ->
+        {:error,
+         "could not write #{path}: " <>
+           if(is_atom(reason), do: :file.format_error(reason), else: inspect(reason))}
+    end
+  end
+
+  # The written file must load back to the SAME runnable goal (T39.3 acc): equal
+  # id, mode, standing, and predicate set. A mismatch means the writer dropped or
+  # mangled something — refuse the file rather than ship a goal that would
+  # `apply` differently than the approved proposal.
+  defp verify_goal_roundtrip(%Goal{} = original, %Goal{} = reloaded) do
+    same? =
+      original.id == reloaded.id and
+        original.mode == reloaded.mode and
+        original.standing == reloaded.standing and
+        predicate_ids(original) == predicate_ids(reloaded)
+
+    if same?, do: :ok, else: {:error, "the written goal-file did not round-trip to the same goal"}
+  end
+
+  defp predicate_ids(%Goal{} = goal) do
+    goal |> Goal.all_predicates() |> Enum.map(&to_string(&1.id)) |> Enum.sort()
   end
 
   # `reject <proposal-ref> [--json]`: transition proposed → rejected (declined,
