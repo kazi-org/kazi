@@ -89,6 +89,97 @@ defmodule Kazi.Adopt.Writer do
   end
 
   @doc """
+  Renders an ALREADY-AUTHORED goal map to a faithful, loadable goal-file string
+  (T39.3, ADR-0049): the `approve <ref> --write <path>` path materializes an
+  approved proposal's goal to disk so a file-based / version-controlled workflow
+  can `apply <path>` and get the SAME goal `apply <ref>` runs.
+
+  Unlike `to_toml/2` (the `init`/adopt starter), this renders the FULL
+  `Kazi.Authoring.serialize_goal/1` map — `mode`, `standing`, `[metadata]`, and
+  `[[group]]` blocks in addition to header/scope/harness/predicates — and emits
+  NO live-predicate scaffold and NO budget suggestion: an approved goal is
+  complete, not a starter, so a "TODO: fill in a live probe" comment would be
+  misleading. Because the loader round-trips through the same `from_map/1`,
+  `from_map(Toml.decode!(to_goal_file(m)))` equals `from_map(m)`.
+
+  Deterministic and total, like `to_toml/2`.
+  """
+  @spec to_goal_file(map()) :: String.t()
+  def to_goal_file(%{} = map) do
+    [
+      render_header(map),
+      render_mode(Map.get(map, "mode")),
+      render_standing(Map.get(map, "standing")),
+      render_scope(Map.get(map, "scope")),
+      render_harness(Map.get(map, "harness")),
+      render_metadata(Map.get(map, "metadata")),
+      render_groups(Map.get(map, "group", [])),
+      render_predicates(Map.get(map, "predicate", []))
+    ]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+    |> ensure_trailing_newline()
+  end
+
+  # `mode` is emitted only when non-default: the loader defaults an absent mode
+  # to "repair", so omitting it round-trips a repair goal byte-stably while a
+  # "create" goal carries its declaration.
+  defp render_mode(mode) when mode in [nil, "", "repair"], do: ""
+  defp render_mode(mode), do: kv("mode", to_string(mode))
+
+  # `standing` is emitted only when true (the loader defaults absent → false).
+  defp render_standing(true), do: kv("standing", true)
+  defp render_standing(_), do: ""
+
+  # An optional `[metadata]` table (string-keyed, verbatim per the loader). The
+  # authoring path's metadata is a flat map of scalars (source/proposed/
+  # rationale); keys are sorted for determinism. Empty/absent emits nothing.
+  defp render_metadata(metadata) when is_map(metadata) and map_size(metadata) > 0 do
+    lines =
+      metadata
+      |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+      |> Enum.map(fn {key, value} -> kv(to_string(key), value) end)
+      |> Enum.reject(&(&1 == ""))
+
+    case lines do
+      [] -> ""
+      kvs -> "[metadata]\n" <> Enum.join(kvs, "\n")
+    end
+  end
+
+  defp render_metadata(_other), do: ""
+
+  # The `[[group]]` taxonomy (T12.1/ADR-0020), one block per group in input
+  # order. Only the loader-recognised keys are emitted (id, name, parent,
+  # budget); `serialize_goal/1` drops nil parent/budget so a re-load is stable.
+  defp render_groups(groups) when is_list(groups) and groups != [] do
+    groups
+    |> Enum.map(&render_group/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  defp render_groups(_other), do: ""
+
+  defp render_group(%{} = group) do
+    lines =
+      [
+        optional_kv("id", Map.get(group, "id")),
+        optional_kv("name", Map.get(group, "name")),
+        optional_kv("parent", Map.get(group, "parent")),
+        optional_kv("budget", Map.get(group, "budget"))
+      ]
+      |> Enum.reject(&(&1 == ""))
+
+    case lines do
+      [] -> ""
+      kvs -> "[[group]]\n" <> Enum.join(kvs, "\n")
+    end
+  end
+
+  defp render_group(_other), do: ""
+
+  @doc """
   The commented live-predicate scaffold appended to every generated goal-file: a
   `# [[predicate]]` `http_probe` block with `TODO` placeholders for a human to
   fill in (URL, expected status, expected body). It is a COMMENT, so it does not
