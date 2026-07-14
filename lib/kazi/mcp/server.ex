@@ -240,11 +240,40 @@ defmodule Kazi.MCP.Server do
         "name" => "kazi_bus_read",
         "description" =>
           "Pull all currently-available messages off this session's durable bus consumer " <>
-            "(ADR-0067), acking them so a second read returns nothing new. Returns " <>
-            "{ok: true, messages: [...]}, or a structured error (no_daemon).",
+            "(ADR-0067), acking them so a second read returns nothing new. Pass " <>
+            "peek: true to LOOK without consuming (messages stay pending for the next " <>
+            "read). To WAIT for traffic, prefer kazi_bus_watch over calling this in a " <>
+            "loop. Returns {ok: true, messages: [...]}, or a structured error (no_daemon).",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
+            "peek" => %{
+              "type" => "boolean",
+              "description" => "true: show pending messages WITHOUT acking them (default false)."
+            },
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            }
+          }
+        }
+      },
+      %{
+        "name" => "kazi_bus_watch",
+        "description" =>
+          "BLOCK until at least one bus message arrives for this session, then consume " <>
+            "and return it (ADR-0067, issue #1091) -- the no-poll-loop way to wait; do " <>
+            "NOT call kazi_bus_read in a loop. Anything already pending returns " <>
+            "immediately. `timeout` is in SECONDS (keep it bounded); on expiry the " <>
+            "result is {ok: true, timed_out: true, messages: []} rather than an error, " <>
+            "so branch on timed_out. Watching also refreshes this session's presence.",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "timeout" => %{
+              "type" => "number",
+              "description" => "Seconds to wait before returning timed_out: true."
+            },
             "scope" => %{
               "type" => "string",
               "description" => "\"machine\" (default) or \"project\"."
@@ -443,7 +472,12 @@ defmodule Kazi.MCP.Server do
   end
 
   defp call_tool("kazi_bus_read", args, opts) do
-    case Bus.read(bus_opts(args, opts)) do
+    bus_opts = bus_opts(args, opts)
+
+    result =
+      if Map.get(args, "peek") == true, do: Bus.peek(bus_opts), else: Bus.read(bus_opts)
+
+    case result do
       {:ok, messages} ->
         {:ok,
          %{"schema_version" => Schema.schema_version(), "ok" => true, "messages" => messages}}
@@ -452,6 +486,35 @@ defmodule Kazi.MCP.Server do
         {:tool_error, bus_error(reason)}
     end
   end
+
+  # A watch expiring is an expected outcome the agent branches on, not a fault:
+  # timed_out: true with an empty message list, never isError.
+  defp call_tool("kazi_bus_watch", args, opts) do
+    watch_opts =
+      bus_opts(args, opts)
+      |> maybe_put_opt(:timeout, watch_timeout(Map.get(args, "timeout")))
+
+    case Bus.watch(watch_opts) do
+      {:ok, messages} ->
+        {:ok,
+         %{"schema_version" => Schema.schema_version(), "ok" => true, "messages" => messages}}
+
+      {:error, :watch_timeout} ->
+        {:ok,
+         %{
+           "schema_version" => Schema.schema_version(),
+           "ok" => true,
+           "timed_out" => true,
+           "messages" => []
+         }}
+
+      {:error, reason} ->
+        {:tool_error, bus_error(reason)}
+    end
+  end
+
+  defp watch_timeout(seconds) when is_number(seconds) and seconds > 0, do: trunc(seconds)
+  defp watch_timeout(_), do: nil
 
   defp call_tool("kazi_bus_who", args, opts) do
     case Bus.who(bus_opts(args, opts)) do
