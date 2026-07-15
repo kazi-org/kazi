@@ -37,6 +37,39 @@ DONE_TASK_RE = re.compile(r"^- \[x\] [TS][0-9]")
 DONE_DATE_RE = re.compile(r"\bDone:\s*(\d{4}-\d{2}-\d{2})")
 TASK_RE = re.compile(r"^- \[[ x~]\] [TS][0-9]")
 ARCHIVED_HEADER = "## Archived epics"
+# A task's optional behavior-spec pointer (ADR-0050): `spec: docs/specs/<slug>.feature`.
+# Same shape parse_plan.py recognises. When an epic archives, its referenced
+# specs move with it (T40.4).
+SPEC_RE = re.compile(r"(?<![-\w])spec:\s+([^\s<>]+\.(?:feature|md))")
+
+
+def spec_paths(epic_text):
+    """The docs/specs files an epic's tasks reference via `spec:`, each paired
+    with its sibling note (`foo.feature` <-> `foo.md`) so the pair archives
+    together (T40.4/ADR-0050). Order-preserving, de-duplicated."""
+    out = []
+    for m in SPEC_RE.finditer(epic_text):
+        ref = m.group(1)
+        stem, _, ext = ref.rpartition(".")
+        pair = f"{stem}.md" if ext == "feature" else f"{stem}.feature"
+        for p in (ref, pair):
+            if p not in out:
+                out.append(p)
+    return out
+
+
+def archive_spec_file(root, rel_path, dest_dir):
+    """Move one docs/specs file verbatim to docs/specs/archive/ (git mv to keep
+    history + reversibility; plain move fallback). A missing file (e.g. the
+    optional paired .md) is skipped. Returns True if it moved something."""
+    src = root / rel_path
+    if not src.exists():
+        return False
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    if subprocess.run(["git", "-C", str(root), "mv", str(src), str(dest)]).returncode != 0:
+        src.replace(dest)
+    return True
 
 
 def newest_release_date(root: Path) -> str | None:
@@ -121,13 +154,23 @@ def main():
         return
 
     archive_dir.mkdir(parents=True, exist_ok=True)
+    specs_archive_dir = root / "docs" / "specs" / "archive"
     archived_entries = []
     drop_idxs = set()
+    moved_specs = 0
     for i, heading, eid, rel, epic_file, _ in trimmable:
+        # T40.4 (ADR-0050 / ADR-0036 L1): read the epic body BEFORE the move so
+        # its `spec:` references still resolve, then relocate each referenced
+        # behavior spec (+ its paired note) to docs/specs/archive/ verbatim --
+        # the same lossless git mv the epic file itself gets.
+        specs = spec_paths(epic_file.read_text())
         dest = archive_dir / epic_file.name
         # git mv keeps history + is reversible; fall back to a plain move.
         if subprocess.run(["git", "-C", str(root), "mv", str(epic_file), str(dest)]).returncode != 0:
             epic_file.replace(dest)
+        for rel_spec in specs:
+            if archive_spec_file(root, rel_spec, specs_archive_dir):
+                moved_specs += 1
         drop_idxs.add(i)
         archived_entries.append(f"- {heading[4:]} (archived {release_date}) -> plans/archive/{epic_file.name}")
 
@@ -141,7 +184,8 @@ def main():
     insert_at = next((k for k in range(hdr + 1, len(out)) if H2_RE.match(out[k])), len(out))
     out[insert_at:insert_at] = archived_entries
     plan.write_text("\n".join(out).rstrip("\n") + "\n")
-    print(f"Archived {len(trimmable)} epic(s) to {archive_dir.relative_to(root)}.")
+    specs_note = f" (+{moved_specs} behavior spec file(s) to docs/specs/archive/)" if moved_specs else ""
+    print(f"Archived {len(trimmable)} epic(s) to {archive_dir.relative_to(root)}.{specs_note}")
 
 
 if __name__ == "__main__":
