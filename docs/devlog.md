@@ -7,6 +7,67 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-15: T40.7 dogfood -- `kazi spec import` on the released v1.149.0 binary caught a RELEASE-ONLY load bug every mix test missed
+
+**Type:** finding  **Tags:** [E40, T40.2, T40.7, ADR-0050, ADR-0040, dogfood, released-binary, loader, atom-safety]
+
+First real run of `kazi spec import` (E40/ADR-0050) against the **released
+v1.149.0 binary** (not `mix`), on the committed `docs/specs/example.feature`
+(4 Scenarios under one Feature).
+
+**What worked (the happy path).** `kazi spec import docs/specs/example.feature
+--into <out> --json` emitted a valid-looking goal-file: 4 `custom_script`
+acceptance predicates, one per Scenario, all grouped under a single normalized
+`[[group]]` (`import-a-behavior-spec-into-a-goal`), each carrying its
+`feature`/`scenario`/`steps` metadata and a stable `Feature+Scenario` derived id.
+`--json` returned the 4 upserted ids. Re-import was an upsert (count stayed 4,
+`merged: true`), not a duplicate.
+
+**Honest verdict on spec-derived vs. hand-authored predicates.** The generated
+predicates faithfully capture the *structure and intent* -- one predicate per
+scenario, grouped by feature, steps recorded for self-description, deterministic
+ids. What they are NOT is *runnable*: each is a SCAFFOLD (`verdict = exit_zero`
+with a placeholder `sh -c '... exit 1'`), RED until a human wires the real check.
+So a spec-derived predicate matches a hand-authored one on the WHAT (which
+behaviours must hold, at scenario granularity) but not on the HOW (the actual
+command). This is by design (ADR-0013: scaffold, never guess) and is exactly the
+gap the proposed runtime `provider="gherkin"` (#1107, Sire's ask) closes by
+ingesting cucumber-json into per-scenario verdicts.
+
+**The bug the dogfood caught (why you run the REAL binary).** `kazi lint <out>`
+and `kazi apply <out>` on the released binary BOTH FAILED to load the goal:
+`predicate "..." has unknown config key "scenario"`. Yet the same goal loads
+cleanly under `mix` (and every ExUnit test + CI passed). Root cause: the loader's
+atom-exhaustion guard (`safe_config_key/1` -> `String.to_existing_atom/1`,
+lib/kazi/goal/loader.ex) only accepts a config key whose atom already exists.
+The importer's `feature`/`scenario`/`steps` keys are consumed by NO provider, so
+`ensure_provider_loaded/1` never interns them. Under `mix` the fuller module set
+(and test code literally naming `config[:scenario]` etc.) interns the atoms,
+masking the defect; in the burrito RELEASE binary no such module is loaded when a
+goal loads, so the atoms don't exist and the load is rejected. Net: v1.149.0
+shipped a `spec import` that produces goals `kazi apply` cannot run -- invisible
+to the whole test suite.
+
+Before the E40 migration the importer emitted `test_runner` (`:tests`), whose
+provider references these keys, so the atoms existed; migrating to `custom_script`
+(which does not) silently removed that interning. A pure-`mix` regression test
+cannot reproduce it (mix always interns them).
+
+**Fix.** Declare the three doc-metadata keys in the always-loaded loader
+(`@gherkin_doc_keys [:feature, :scenario, :steps]`, used in `safe_config_key/1`),
+so the atoms exist whenever a goal loads regardless of which optional modules the
+release loaded. Bounded + fixed, so no atom-exhaustion regression (the
+`loader_atom_safety_test` 200-junk-key guard still holds). A coherence test in
+`gherkin_importer_test.exs` pins the importer's doc-key set so a new metadata key
+can't be added without also interning it. Final confirmation against a rebuilt
+release binary is pending the next release.
+
+**Landmine (reinforces the DoD):** a goal that loads under `mix` can still fail
+to load in the shipped binary when it carries config keys no loaded module
+interns. Dogfood importers/loaders against the **released binary**, and prefer
+provider-agnostic metadata be interned by the loader, not by whichever provider
+happens to consume it.
+
 ## 2026-07-10: T50.7 live fleet dogfood -- `--fleet` on released v1.138.0, 1 landed / 1 teardown-crashed / 1 cascade-blocked
 
 **Type:** finding  **Tags:** [fleet, ADR-0065, T50.7, dogfood, released-binary, #1053]
