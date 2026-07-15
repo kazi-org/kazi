@@ -190,4 +190,61 @@ defmodule Kazi.Scheduler.WorktreeTest do
       assert log =~ "REFUSING"
     end
   end
+
+  # issue #1081: a stuck/errored run's uncommitted collateral must be salvaged
+  # to a durable ref BEFORE the worktree is force-removed, so verified work is
+  # recoverable instead of destroyed.
+  describe "safe_cleanup/3 salvages uncommitted collateral (issue #1081)" do
+    # Manually add a partition worktree and return its path + branch.
+    defp add_worktree(repo, base, name) do
+      path = Path.join(base, name)
+      run!(repo, ["worktree", "add", "-q", "-b", "kazi-partition/#{name}", path])
+      path
+    end
+
+    test "a dirty worktree's tracked + untracked changes land in a salvage ref, then it is removed",
+         %{repo: repo, base: base} do
+      path = add_worktree(repo, base, "p-salv-1")
+
+      # A tracked modification AND a brand-new untracked file -- both must survive.
+      File.write!(Path.join(path, "README.md"), "edited by the agent\n")
+      File.write!(Path.join(path, "new_feature.ex"), "defmodule NewFeature do\nend\n")
+
+      assert Worktree.safe_cleanup("git", repo, path) == :ok
+
+      # The worktree is gone (removal still happened).
+      refute File.dir?(path)
+      assert only_repo_listed?(repo)
+
+      # A durable salvage ref exists and its commit carries BOTH changes.
+      ref = "refs/kazi/salvage/p-salv-1"
+      {rev, 0} = System.cmd("git", ["rev-parse", "--verify", "#{ref}^{commit}"], cd: repo)
+      assert String.trim(rev) != ""
+
+      {readme, 0} = System.cmd("git", ["show", "#{ref}:README.md"], cd: repo)
+      assert readme =~ "edited by the agent"
+
+      {feature, 0} = System.cmd("git", ["show", "#{ref}:new_feature.ex"], cd: repo)
+      assert feature =~ "defmodule NewFeature"
+
+      # The partition BRANCH was not advanced -- salvage is a dangling commit.
+      {branch_head, 0} =
+        System.cmd("git", ["rev-parse", "kazi-partition/p-salv-1"], cd: repo)
+
+      refute String.trim(branch_head) == String.trim(rev)
+    end
+
+    test "a clean worktree salvages nothing (no salvage ref) and is removed", %{
+      repo: repo,
+      base: base
+    } do
+      path = add_worktree(repo, base, "p-clean-1")
+
+      assert Worktree.safe_cleanup("git", repo, path) == :ok
+      refute File.dir?(path)
+
+      {out, _} = System.cmd("git", ["for-each-ref", "refs/kazi/salvage/"], cd: repo)
+      refute out =~ "p-clean-1"
+    end
+  end
 end
