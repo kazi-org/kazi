@@ -1319,7 +1319,7 @@ defmodule Kazi.Runtime do
 
   # Maps the loop's `t:Kazi.Loop.result/0` outcome to the registry's terminal
   # status vocabulary (`Kazi.ReadModel.RunRegistry.finish/2`'s doc, mirrored by
-  # `KaziWeb.StarmapLive`'s state resolution).
+  # `KaziWeb.MissionControlLive`'s state resolution).
   defp registry_status(:converged, _reason), do: "converged"
   defp registry_status(:over_budget, _reason), do: "over_budget"
   defp registry_status(:stopped, :stuck), do: "stuck"

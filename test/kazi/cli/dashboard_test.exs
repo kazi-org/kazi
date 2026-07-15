@@ -104,7 +104,7 @@ defmodule Kazi.CLI.DashboardTest do
         end)
 
       assert output =~ "kazi dashboard"
-      assert output =~ "starmap"
+      assert output =~ "mission control"
       assert output =~ "already"
     end
 

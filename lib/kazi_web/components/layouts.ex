@@ -1,18 +1,20 @@
 defmodule KaziWeb.Layouts do
   @moduledoc """
   Root layout for the operator dashboard (T3.6a), carrying the approved
-  starmap visual design tokens (ADR-0057, `docs/dashboard-design.md`).
+  Mission Control visual design tokens (ADR-0070, `docs/dashboard-design.md`).
 
   Kept inline and build-free on purpose: the skeleton has no esbuild/tailwind
   bundle. The LiveView client that upgrades the page to a live socket loads
   from the hex packages' own pre-built bundles (`KaziWeb.Endpoint`'s
-  `Plug.Static` mounts) — the starmap's slide-over panel (`phx-click`) and
-  live DOM patching need it. The server-rendered HTML still stands alone for
+  `Plug.Static` mounts) — live DOM patching (the poll-tick fleet refresh, the
+  drill-in scrubber) needs it. The server-rendered HTML still stands alone for
   the smoke test: with JS unavailable the pages render read-only, as before.
 
   The `:root` custom properties and the shared, reduced-motion-gated keyframes
-  live here (not per-LiveView) so every page --  starmap, drill-in, transcript
-  peek -- draws from the SAME token set and motion budget.
+  live here (not per-LiveView) so every page -- Mission Control, drill-in,
+  transcript peek -- draws from the SAME token set and motion budget. The token
+  NAMES are stable across the ADR-0057→0058 revision (`--rail` now tracks
+  `--panel`) so the secondary views recolor from the new palette untouched.
   """
   use KaziWeb, :html
 
@@ -28,15 +30,17 @@ defmodule KaziWeb.Layouts do
         <title>kazi · operator dashboard</title>
         <style>
           :root {
-            --bg:   #070B16;
-            --rail: #0A1120;
-            --line: #16233A;
-            --txt:  #BFD2EA;
-            --dim:  #46587A;
-            --cyn:  #56CCF2;
-            --grn:  #2EE6A8;
-            --red:  #FF5C6C;
-            --amb:  #FFB454;
+            --bg:     #0A0E14;
+            --panel:  #0E1520;
+            --panel2: #101826;
+            --rail:   #0E1520; /* alias of --panel: legacy token name the other pages still use */
+            --line:   #1B2634;
+            --txt:    #C9D6E4;
+            --dim:    #5D7189;
+            --cyn:    #53D6FF;
+            --grn:    #3DFFA0;
+            --red:    #FF5566;
+            --amb:    #FFB454;
           }
 
           body {
@@ -59,33 +63,22 @@ defmodule KaziWeb.Layouts do
           }
 
           @media (prefers-reduced-motion: no-preference) {
-            @keyframes starmap-sweep {
-              from { transform: rotate(0deg); }
-              to { transform: rotate(360deg); }
-            }
-            @keyframes starmap-ring-pulse {
-              from { transform: scale(1); opacity: .9; }
-              to { transform: scale(1.7); opacity: 0; }
-            }
-            @keyframes starmap-livedot-pulse {
+            /* Mission Control motion budget (ADR-0070): a pulsing LIVE dot, a
+               red alarm glow on stuck cards, and the event-river ticker scroll.
+               Applied per-view; defined here so the whole surface shares one
+               reduced-motion gate. */
+            @keyframes mc-pulse {
               0%, 100% { opacity: 1; }
               50% { opacity: .35; }
             }
-            @keyframes starmap-ticker-scroll {
+            @keyframes mc-alarm {
+              0%, 100% { box-shadow: 0 0 26px -12px rgba(255,85,102,.7); }
+              50% { box-shadow: 0 0 30px -8px rgba(255,85,102,.95); }
+            }
+            @keyframes mc-scroll {
               from { transform: translateX(0); }
               to { transform: translateX(-50%); }
             }
-            @keyframes starmap-selring-spin {
-              from { transform: rotate(0deg); }
-              to { transform: rotate(360deg); }
-            }
-
-            .sweep { animation: starmap-sweep 18s linear infinite; }
-            .ring { animation: starmap-ring-pulse 2.6s ease-out infinite; }
-            .ring.redr { animation-duration: 1.4s; }
-            .live-dot { animation: starmap-livedot-pulse 1.6s ease-in-out infinite; }
-            .ticker-track { animation: starmap-ticker-scroll 52s linear infinite; }
-            .selring { animation: starmap-selring-spin 9s linear infinite; }
           }
         </style>
       </head>

@@ -1,21 +1,21 @@
 defmodule KaziWeb.Starmap.GoalSource do
   @moduledoc """
-  The injectable read seam the starmap's wave-band goal-DAG layout renders
-  from (T46.5, ADR-0057, extending ADR-0056's roadmap-DAG concept).
+  The injectable read seam Mission Control's roadmap wave grouping renders
+  from (ADR-0070, preserving T47.2, extending ADR-0056's roadmap-DAG concept).
 
-  The starmap's home view is a fleet-wide projection of the run registry; the
-  wave-band layout ADDITIONALLY overlays that fleet onto a `needs`-DAG so
-  runs render as topological BANDS (reusing `Kazi.Goal.DepGraph.frontiers/1`,
-  the same computation `kazi apply --explain` prints) instead of a flat list.
-  That DAG is:
+  Mission Control's home view is a fleet-wide projection of the run registry;
+  roadmap grouping ADDITIONALLY overlays that fleet onto a `needs`-DAG so the
+  fleet cards group into topological WAVE SECTIONS (reusing
+  `Kazi.Goal.DepGraph.frontiers/1`, the same computation `kazi apply --explain`
+  prints) instead of a flat grid. That DAG is:
 
     * the **ADR-0056 roadmap DAG** — a goal whose declared groups are the
       roadmap's goal-level `needs` edges — when a roadmap ref has been
       configured (`kazi plan --project`'s eventual output; not yet a
       first-class read-model object), or
-    * **absent**, in which case the starmap falls back to "single-goal
-      groups": a flat list of the currently registered runs with no declared
-      ordering, exactly the walking-skeleton behavior T46.5's first slice
+    * **absent**, in which case Mission Control falls back to "single-goal
+      groups": a flat grid of the currently registered runs with no declared
+      ordering, exactly the walking-skeleton behavior the first fleet slice
       shipped.
 
   This module is the ADR-0011 §3 injection point (mirroring

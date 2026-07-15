@@ -3,8 +3,8 @@ defmodule KaziWeb.Router do
   Routes for the operator dashboard (ADR-0011, T3.6a).
 
   `/healthz` is a plain plug health probe (no session/LiveView) used by the
-  deploy/verify chain and the Playwright smoke test. `/` is the fleet starmap
-  (ADR-0057) — the landing page; the goal board, lease map, DAG, and history
+  deploy/verify chain and the Playwright smoke test. `/` is Mission Control
+  (ADR-0070) — the fleet home page; the goal board, lease map, DAG, and history
   views hang off their own routes.
   """
   use KaziWeb, :router
@@ -48,11 +48,12 @@ defmodule KaziWeb.Router do
   scope "/", KaziWeb do
     pipe_through(:browser)
 
-    # The fleet starmap is the landing page — every registered `kazi apply` run
-    # at a glance (ADR-0011 read projection of `Kazi.ReadModel.RunRegistry`,
-    # ADR-0057). `/starmap` stays as an alias for existing links and tests.
-    live("/", StarmapLive, :index)
-    live("/starmap", StarmapLive, :index)
+    # Mission Control is the landing page — every registered `kazi apply` run at
+    # a glance as an ops-center card grid (ADR-0011 read projection of
+    # `Kazi.ReadModel.RunRegistry`, ADR-0070, superseding the ADR-0057 starmap
+    # home view). `/starmap` stays as an alias for existing links.
+    live("/", MissionControlLive, :index)
+    live("/starmap", MissionControlLive, :index)
     # T3.6b: the goal board — goals + status + predicate vector + iteration count,
     # live-updating from Kazi.ReadModel (ADR-0011 read projection).
     live("/goals", GoalBoardLive, :index)

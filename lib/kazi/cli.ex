@@ -255,7 +255,7 @@ defmodule Kazi.CLI do
     context_budget:
       "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
     session_name:
-      "`apply`: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown in the starmap's SESSIONS rail so concurrent runs are tellable apart. `plan`: the same label, recorded on the proposal so a later `kazi approve`/`kazi apply` (possibly from a DIFFERENT session) can trace a run back to who planned it. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; all three absent leaves it unlabeled (unchanged behavior).",
+      "`apply`: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown on the mission control fleet dashboard so concurrent runs are tellable apart. `plan`: the same label, recorded on the proposal so a later `kazi approve`/`kazi apply` (possibly from a DIFFERENT session) can trace a run back to who planned it. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; all three absent leaves it unlabeled (unchanged behavior).",
     allow_primary_workspace:
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
@@ -291,7 +291,7 @@ defmodule Kazi.CLI do
     timeout:
       "`bus watch` only (issue #1091): maximum seconds to block waiting for a message (default 300). On expiry `bus watch` prints a one-line notice and exits 3.",
     roadmap:
-      "`dashboard` only (T47.2, ADR-0056/ADR-0057): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. The starmap loads it through `KaziWeb.Starmap.GoalSource` and renders its needs-DAG in wave-band frontiers, the SAME computation `kazi apply --explain` prints. Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, the starmap keeps its flat-list fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty starmap.",
+      "`dashboard` only (T47.2, ADR-0056/ADR-0070): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. Mission Control loads it through `KaziWeb.Starmap.GoalSource` and GROUPS the fleet grid into needs-DAG wave sections (`Kazi.Goal.DepGraph.frontiers/1`, the SAME computation `kazi apply --explain` prints). Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, mission control keeps its flat-grid fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty roadmap.",
     goal:
       "`economy` only: restrict the run-economics history aggregate to one goal_ref. Default: aggregate across every goal on this read-model (ADR-0058).",
     help: "Show this help and exit.",
@@ -374,7 +374,7 @@ defmodule Kazi.CLI do
     %{
       name: "dashboard",
       summary:
-        "Boot the standalone fleet-mode web endpoint (the starmap: every registered run, read-only, no goal loop) against the shared read-model.",
+        "Boot the standalone fleet-mode web endpoint (mission control: every registered run, read-only, no goal loop) against the shared read-model.",
       args: [],
       flags: [:port, :bind, :roadmap]
     },
@@ -1111,7 +1111,7 @@ defmodule Kazi.CLI do
   end
 
   # T46.4 (ADR-0057): `kazi dashboard` boots the standalone fleet-mode web
-  # endpoint (the starmap) with NO goal loop in the process — a read-only
+  # endpoint (mission control) with NO goal loop in the process — a read-only
   # projection over the shared read-model + run registry. `--port`/`--bind`
   # (and, as of T47.2, `--roadmap`) only take effect on a FRESH boot of the
   # endpoint (a dev/test process that already supervises it keeps its existing
@@ -2459,7 +2459,7 @@ defmodule Kazi.CLI do
       |> maybe_put(:allowed_tools, opts[:allowed_tools])
       # Session identity: --session-name, KAZI_SESSION_NAME, or an
       # auto-detected orchestrator session id (resolve_session_name/1) labels
-      # the run's fleet-registry row for the starmap's SESSIONS rail. Only set
+      # the run's fleet-registry row for the mission control fleet view. Only set
       # when one resolves, so the default path is unchanged when none do.
       |> maybe_put(:session_name, resolve_session_name(opts))
       |> maybe_put(:proposal_ref, opts[:proposal_ref])
@@ -2941,7 +2941,7 @@ defmodule Kazi.CLI do
 
   # Session identity resolution (T24-followup): --session-name is opt-in, and an
   # operator running many concurrent sessions across many projects frequently
-  # forgets to pass it, leaving the starmap/read-model unable to say which
+  # forgets to pass it, leaving the fleet dashboard/read-model unable to say which
   # session a run belongs to (most runs in a live fleet had no session_name at
   # all). Resolved in priority order so nothing here changes behavior for a
   # caller who already sets one explicitly:
@@ -3626,7 +3626,7 @@ defmodule Kazi.CLI do
   # `kazi dashboard` boots the operator web endpoint against the shared
   # read-model + run registry with NO goal loop in the process — a pure
   # read-only projection (ADR-0011 reaffirmed at fleet scope). Home view: the
-  # starmap (`KaziWeb.StarmapLive`).
+  # mission control (`KaziWeb.MissionControlLive`).
   #
   # In every entry point this process ALREADY supervises (dev, `mix test`,
   # `mix kazi.apply`), `KaziWeb.Endpoint` is already running as part of the app's
@@ -3641,12 +3641,12 @@ defmodule Kazi.CLI do
   # so `run/2` returns instead of hanging.
   #
   # `--roadmap <goal-file>` (T47.2, ADR-0056/ADR-0057): the first user-visible
-  # consumer of `KaziWeb.Starmap.GoalSource` — loads a REAL goal-file so the
-  # starmap renders ITS `needs`-DAG in wave bands instead of only a test
+  # consumer of `KaziWeb.Starmap.GoalSource` — loads a REAL goal-file so mission
+  # control groups ITS `needs`-DAG into wave sections instead of only a test
   # fixture's. Like `--port`/`--bind`, it's advisory-only when this process
   # already serves the endpoint (nothing to reconfigure); on a fresh boot a
   # bad/unloadable path is a LOUD boot error (non-zero exit, nothing started),
-  # never a silently-empty starmap.
+  # never a silently-empty roadmap.
   defp execute_dashboard(opts, inject_opts) do
     ensure_read_model()
 
@@ -3655,7 +3655,7 @@ defmodule Kazi.CLI do
         if opts[:roadmap] do
           IO.puts(
             :stderr,
-            "kazi dashboard: --roadmap ignored -- this process already serves the starmap " <>
+            "kazi dashboard: --roadmap ignored -- this process already serves mission control " <>
               "(--roadmap only takes effect on a fresh standalone boot, like --port/--bind)"
           )
         end
@@ -3686,13 +3686,13 @@ defmodule Kazi.CLI do
     case mode do
       :already_running ->
         IO.puts(
-          "kazi dashboard: this process already serves the starmap at http://#{bind}:#{port}/ " <>
+          "kazi dashboard: this process already serves mission control at http://#{bind}:#{port}/ " <>
             "(--port/--bind ignored -- they only apply to a fresh standalone boot)"
         )
 
       :booted ->
         IO.puts(
-          "kazi dashboard: starmap (fleet view, read-only) at http://#{bind}:#{port}/ -- Ctrl-C to stop"
+          "kazi dashboard: mission control (fleet view, read-only) at http://#{bind}:#{port}/ -- Ctrl-C to stop"
         )
     end
 
@@ -4034,7 +4034,7 @@ defmodule Kazi.CLI do
   `KaziWeb.Starmap.GoalSource.Static` (application env is the seam: visible
   from the LiveView's separate process, unlike the process dictionary).
   Absent `--roadmap` (`path` is `nil`), this is a no-op — the default
-  `GoalSource` (`None`) keeps the starmap's flat-list fallback pinned
+  `GoalSource` (`None`) keeps mission control's flat-grid fallback pinned
   unchanged.
 
   A public seam (T47.2), mirroring `standalone_dashboard_children/0`: exercises
@@ -6285,8 +6285,8 @@ defmodule Kazi.CLI do
 
   # The topological FRONTIERS of a goal's `needs`-DAG (T23.6): delegates to
   # `Kazi.Goal.DepGraph.frontiers/1`, the ONE place this layering is computed —
-  # the fleet starmap's wave-band layout (T46.5) reuses the same function, so
-  # `--explain` and the starmap can never disagree on a goal's schedule.
+  # mission control's roadmap wave grouping (ADR-0070) reuses the same function, so
+  # `--explain` and mission control can never disagree on a goal's schedule.
   @spec frontiers(Goal.t()) :: [[Group.id()]]
   defp frontiers(%Goal{} = goal), do: DepGraph.frontiers(goal)
 

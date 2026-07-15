@@ -1,19 +1,19 @@
-defmodule KaziWeb.StarmapRoadmapRefTest do
+defmodule KaziWeb.DashboardRoadmapRefTest do
   @moduledoc """
-  T47.2 (ADR-0056/ADR-0057): `kazi dashboard --roadmap <goal-file>` — the first
-  user-visible consumer of `KaziWeb.Starmap.GoalSource`.
+  `kazi dashboard --roadmap <goal-file>` (ADR-0056/ADR-0070, preserving T47.2) —
+  the user-visible consumer of `KaziWeb.Starmap.GoalSource`.
 
-  Before this task the wave-band layout (T46.5) only ever rendered a goal a
-  TEST seeded through the `GoalSource` injection seam; nothing wired a REAL
-  goal-file on disk into it. This file certifies the full contract from the
-  goal-file description:
+  The roadmap grouping only ever rendered a goal a TEST seeded through the
+  `GoalSource` injection seam until this contract wired a REAL goal-file on disk
+  into it. This file certifies the CLI-seam contract (the rendering itself is
+  `KaziWeb.MissionControlRoadmapTest`):
 
     1. **argv boundary** — `--roadmap <path>` parses at the `Kazi.CLI.parse/1`
        layer, same as any other flag; absent, it's `nil` (pinned behavior).
     2. **loads through GoalSource, matches --explain** — `configure_roadmap/1`
        (the public seam `execute_dashboard/2` calls on a fresh boot) loads the
        path via `Kazi.Goal.Loader` — the SAME loader `apply`/`--explain` use —
-       and the starmap's wave bands render that goal's `needs`-DAG frontiers
+       and Mission Control groups that goal's `needs`-DAG into wave sections
        exactly as `Kazi.Goal.DepGraph.frontiers/1` computes them.
     3. **advisory when already running** — like `--port`/`--bind`, a `kazi
        dashboard --roadmap` invoked against a process that already serves the
@@ -129,7 +129,7 @@ defmodule KaziWeb.StarmapRoadmapRefTest do
   describe "configure_roadmap/1 loads a real goal-file through GoalSource" do
     @describetag :tmp_dir
 
-    test "a chain goal-file's wave bands match --explain's frontier computation",
+    test "a chain goal-file's wave sections match --explain's frontier computation",
          %{conn: conn, tmp_dir: tmp_dir} do
       goal_file = write_chain_goal_file(tmp_dir)
 
@@ -141,13 +141,19 @@ defmodule KaziWeb.StarmapRoadmapRefTest do
 
       assert KaziWeb.Starmap.GoalSource.goal().id == goal.id
 
-      {:ok, _view, html} = live(conn, ~p"/starmap")
+      # Mission Control groups the fleet grid into one wave section per frontier
+      # (the rendering contract is covered in full by
+      # `KaziWeb.MissionControlRoadmapTest`; here we pin that the configured
+      # roadmap reaches the home view as three ordered waves).
+      {:ok, _view, html} = live(conn, ~p"/")
 
-      assert html =~ ~s(id="starmap-canvas")
-      assert html =~ ~s(data-frontiers="3")
-      assert html =~ ~s(data-node-id="a" data-frontier="0")
-      assert html =~ ~s(data-node-id="b" data-frontier="1")
-      assert html =~ ~s(data-node-id="c" data-frontier="2")
+      assert html =~ "ROADMAP · 3 GOALS · 3 WAVES"
+      assert html =~ ~s(data-frontier="0")
+      assert html =~ ~s(data-frontier="1")
+      assert html =~ ~s(data-frontier="2")
+      assert html =~ ~s(id="mc-card-a")
+      assert html =~ ~s(id="mc-card-b")
+      assert html =~ ~s(id="mc-card-c")
     end
   end
 
@@ -186,7 +192,7 @@ defmodule KaziWeb.StarmapRoadmapRefTest do
                      ) == 0
             end)
 
-          assert stdout =~ "already serves the starmap"
+          assert stdout =~ "already serves mission control"
         end)
 
       assert stderr =~ "--roadmap ignored"

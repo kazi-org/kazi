@@ -1,7 +1,7 @@
 defmodule KaziWeb.LiveClientTest do
   @moduledoc """
-  Pins the no-build LiveView client wiring (the starmap's slide-over panel is
-  the first `phx-click` surface, so the browser needs a connected socket):
+  Pins the no-build LiveView client wiring (Mission Control's live poll-tick
+  fleet refresh needs a connected socket):
   the hex packages' pre-built bundles serve from the endpoint's `Plug.Static`
   mounts, and the root layout carries the csrf-token meta plus the connect
   script. Without these, every dashboard page silently degrades to a

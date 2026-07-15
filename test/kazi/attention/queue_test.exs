@@ -5,9 +5,9 @@ defmodule Kazi.Attention.QueueTest do
   `Kazi.Attention.Queue.build/2` is tested in isolation here: `:history_fn`/
   `:regressions_fn` are injected fixtures (no DB, no run registry) so each
   signal — stuck, budget, flake suspicion, regression-recovered — and the
-  documented ranking can be pinned directly. The LiveView rail's rendering
-  over the REAL read-model is proven in
-  `KaziWeb.StarmapLiveTest`/`test/kazi_web/live/attention_queue_test.exs`.
+  documented ranking can be pinned directly. The rendering of these entries as
+  Mission Control alert cards over the REAL read-model is proven in
+  `KaziWeb.MissionControlLiveTest`.
   """
   use ExUnit.Case, async: true
 
