@@ -3939,9 +3939,10 @@ defmodule Kazi.CLI do
       {:ok, sessions} ->
         emit(json?(opts), %{"ok" => true, "sessions" => sessions}, fn ->
           Enum.each(sessions, fn s ->
+            machine = if s["machine"], do: " machine=#{s["machine"]}", else: ""
             team = if s["team"], do: " team=#{s["team"]}", else: ""
             age = if s["age_s"], do: " seen=#{s["age_s"]}s ago", else: ""
-            IO.puts("#{s["session"]} pid=#{s["pid"]}#{team}#{age} #{s["cwd"]}")
+            IO.puts("#{s["session"]}#{machine} pid=#{s["pid"]}#{team}#{age} #{s["cwd"]}")
           end)
         end)
 
