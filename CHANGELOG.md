@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.147.0](https://github.com/kazi-org/kazi/compare/v1.146.0...v1.147.0) (2026-07-15)
+
+
+### Features
+
+* **bus:** client dials the daemon-advertised nats host/token; presence carries machine ([#1101](https://github.com/kazi-org/kazi/issues/1101), [#1102](https://github.com/kazi-org/kazi/issues/1102)) ([3cb07c0](https://github.com/kazi-org/kazi/commit/3cb07c0728123e544bee9c9cb2519c724ec6f4f3))
+* **cli:** bus who shows the machine field ([#1102](https://github.com/kazi-org/kazi/issues/1102)) ([46c58b9](https://github.com/kazi-org/kazi/commit/46c58b935c27c0b1998961aeb1690fa54d7264fe))
+* **daemon:** ping handshake surfaces nats host + token for the bus client ([#1101](https://github.com/kazi-org/kazi/issues/1101)) ([28fa313](https://github.com/kazi-org/kazi/commit/28fa313116ce8f8bbcc43739fee8b2fd008c060e))
+
 ## [1.146.0](https://github.com/kazi-org/kazi/compare/v1.145.0...v1.146.0) (2026-07-14)
 
 
