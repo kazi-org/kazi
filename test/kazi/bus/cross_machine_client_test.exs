@@ -19,15 +19,15 @@ defmodule Kazi.Bus.CrossMachineClientTest do
 
   describe "discovered_connect_opts/2 (issue #1101 — the client half)" do
     test "dials the daemon-advertised remote host with the shared token" do
-      pong = %{"nats_host" => "10.0.0.5", "nats_token" => "s3cret"}
+      pong = %{"nats_host" => "remote-nats.test", "nats_token" => "s3cret"}
 
       assert Bus.discovered_connect_opts(pong, 4223) ==
-               %{host: "10.0.0.5", port: 4223, auth_token: "s3cret"}
+               %{host: "remote-nats.test", port: 4223, auth_token: "s3cret"}
     end
 
     test "omits auth_token when the bus is unauthenticated" do
-      pong = %{"nats_host" => "10.0.0.5"}
-      assert Bus.discovered_connect_opts(pong, 4223) == %{host: "10.0.0.5", port: 4223}
+      pong = %{"nats_host" => "remote-nats.test"}
+      assert Bus.discovered_connect_opts(pong, 4223) == %{host: "remote-nats.test", port: 4223}
     end
 
     test "falls back to 127.0.0.1 when an older daemon omits nats_host (back-compat)" do
@@ -59,24 +59,29 @@ defmodule Kazi.Bus.CrossMachineClientTest do
       name = :"nats_ping_#{System.unique_integer([:positive])}"
 
       {:ok, _pid} =
-        Nats.start_link(name: name, nats_host: "10.0.0.5", port: 4223, nats_token: "s3cret")
+        Nats.start_link(
+          name: name,
+          nats_host: "remote-nats.test",
+          port: 4223,
+          nats_token: "s3cret"
+        )
 
-      assert Nats.host(name) == "10.0.0.5"
+      assert Nats.host(name) == "remote-nats.test"
       assert Nats.token(name) == "s3cret"
       assert Nats.port(name) == 4223
 
       pong = Control.handle(%{"op" => "ping"}, nats_name: name)
-      assert pong["nats_host"] == "10.0.0.5"
+      assert pong["nats_host"] == "remote-nats.test"
       assert pong["nats_token"] == "s3cret"
       assert pong["nats_port"] == 4223
     end
 
     test "an unauthenticated bus OMITS nats_token from the ping (clean handshake)" do
       name = :"nats_ping_notoken_#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Nats.start_link(name: name, nats_host: "10.0.0.5", port: 4223)
+      {:ok, _pid} = Nats.start_link(name: name, nats_host: "remote-nats.test", port: 4223)
 
       pong = Control.handle(%{"op" => "ping"}, nats_name: name)
-      assert pong["nats_host"] == "10.0.0.5"
+      assert pong["nats_host"] == "remote-nats.test"
       refute Map.has_key?(pong, "nats_token")
     end
 
