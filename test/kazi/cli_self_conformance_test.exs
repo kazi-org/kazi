@@ -498,6 +498,9 @@ defmodule Kazi.CLISelfConformanceTest do
         # `bus` requires a <subcommand>; `read`/`who` take no positional args,
         # so this is a pure parse, never connects to anything (T51.2).
         "bus" -> ["bus", "read"]
+        # `spec` requires an `import` subcommand + a <feature-file> and --into
+        # <goal-file>; probe with a real shape so we observe dispatch (T40.2).
+        "spec" -> ["spec", "import", "dummy.feature", "--into", "dummy.goal.toml"]
         _ -> [name]
       end
 

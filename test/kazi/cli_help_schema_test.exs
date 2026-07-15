@@ -91,7 +91,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       # aliases were removed in v0.6.0, so the table (and help --json) omits them.
       expected =
         MapSet.new(
-          ~w(apply status init install-skill mcp dashboard daemon bus economy plan list-proposed approve reject export lint context memory help schema version)
+          ~w(apply status init install-skill mcp dashboard daemon bus economy plan list-proposed approve reject export lint spec context memory help schema version)
         )
 
       assert reported == expected,
@@ -304,6 +304,12 @@ defmodule Kazi.CLIHelpSchemaTest do
         # (`who`, which takes no further args, T51.2).
         "bus" ->
           ["bus", "who"]
+
+        # `spec` requires an `import` subcommand + a <feature-file> and --into
+        # <goal-file>; probe with a real shape so we observe dispatch, not the
+        # missing-subcommand/missing-flag error (T40.2).
+        "spec" ->
+          ["spec", "import", "dummy.feature", "--into", "dummy.goal.toml"]
 
         n ->
           [n]
