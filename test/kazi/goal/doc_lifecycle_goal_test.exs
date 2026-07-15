@@ -9,9 +9,10 @@ defmodule Kazi.Goal.DocLifecycleGoalTest do
 
     1. The goal-file (`priv/examples/doc_lifecycle.goal.toml`) loads through the
        real `Kazi.Goal.Loader` and is a standing goal with the expected predicate
-       composition: six `custom_script` freshness predicates (wrapping the T31.4
-       checker scripts, ADR-0040) and two `ratchet` predicates (envelope-v2,
-       ADR-0041) -- a doc-coverage gradient and a stale-task count.
+       composition: seven `custom_script` freshness predicates (wrapping the
+       T31.4 checker scripts + the T40.5 spec-refs check, ADR-0040) and two
+       `ratchet` predicates (envelope-v2, ADR-0041) -- a doc-coverage gradient
+       and a stale-task count.
 
     2. Every wrapper points at a REAL script/tool that exists on disk (zero-stub):
        each `custom_script` `cmd` and each `ratchet` `metric.cmd` resolves to a
@@ -43,14 +44,15 @@ defmodule Kazi.Goal.DocLifecycleGoalTest do
     assert goal.metadata["use_case"] == "UC-046"
   end
 
-  test "predicate composition: 6 custom_script freshness + 2 ratchet", %{goal: goal} do
+  test "predicate composition: 7 custom_script freshness + 2 ratchet", %{goal: goal} do
     by_kind = Enum.group_by(goal.predicates, & &1.kind)
 
     custom_script = Map.get(by_kind, :custom_script, [])
     ratchet = Map.get(by_kind, :ratchet, [])
 
-    assert length(custom_script) == 6,
-           "expected 6 custom_script freshness predicates wrapping the T31.4 checkers"
+    assert length(custom_script) == 7,
+           "expected 7 custom_script freshness predicates wrapping the checker scripts " <>
+             "(the T31.4 set + the T40.5 spec-refs-exist check)"
 
     assert length(ratchet) == 2,
            "expected 2 ratchet predicates (doc-coverage gradient + stale-task count)"
@@ -70,6 +72,7 @@ defmodule Kazi.Goal.DocLifecycleGoalTest do
              "plan-trimmed",
              "readme-site-coherence",
              "skill-cli-coherence",
+             "spec-refs-exist",
              "stale-tasks-ratchet"
            ]
   end
