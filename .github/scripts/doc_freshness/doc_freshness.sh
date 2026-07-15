@@ -12,6 +12,7 @@
 #   (b) check_b_no_dead_command_refs.sh no live doc names a removed/unknown command
 #   (c) check_c_adr_refs_exist.sh       every ADR a doc cites exists in docs/adr/
 #   (d) check_d_plan_trimmed.sh         no done+released task lingers in the plan
+#   (g) check_g_spec_refs_exist.sh      every spec: pointer in the WBS resolves
 #
 # SUBSUMED coherence checks (NOT reimplemented here -- referenced/invoked):
 #   (E) README <-> website canonical-string coherence (T9.9, ADR-0018):
@@ -55,6 +56,7 @@ run "(a) commands documented in README" "$HERE/check_a_commands_in_readme.sh"
 run "(b) no dead/unknown command references in live docs" "$HERE/check_b_no_dead_command_refs.sh"
 run "(c) referenced ADRs exist" "$HERE/check_c_adr_refs_exist.sh"
 run "(d) plan trimmed of done+released tasks" "$HERE/check_d_plan_trimmed.sh"
+run "(g) spec: pointers in the WBS resolve" "$HERE/check_g_spec_refs_exist.sh"
 
 # --- subsumed coherence checks (referenced, not reimplemented) --------------
 printf '\n=== (E) README <-> website coherence (T9.9) -- subsumed ===\n'
