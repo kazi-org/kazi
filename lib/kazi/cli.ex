@@ -73,6 +73,7 @@ defmodule Kazi.CLI do
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.ReadModel.ProposedMemory
   alias Kazi.ReadModel.RunRegistry
+  alias Kazi.Reconcile.GherkinImporter
   alias Kazi.Teach.InstallSkill
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -168,6 +169,7 @@ defmodule Kazi.CLI do
     timeout: :integer,
     roadmap: :string,
     goal: :string,
+    into: :string,
     write: :string,
     help: :boolean,
     version: :boolean
@@ -192,6 +194,8 @@ defmodule Kazi.CLI do
       "Deploy environment to target (e.g. staging / prod); selects the goal/deploy's per-env target.",
     standing:
       "Run as a STANDING (continuous/maintenance) reconciler instead of converging and stopping.",
+    into:
+      "`spec import` only (T40.2, ADR-0050): the target goal-file the imported Scenarios' `test_runner` predicates are UPSERTED into (required). When the file exists its groups/predicates are merged (same-id predicates replaced in place, not duplicated); when it does not, it is created from the import. Under --json the result carries the written `into` path and the upserted predicate ids.",
     write:
       "`approve` only (T39.3, ADR-0049): materialize the approved goal as a loadable goal-file at <path>, so a file-based / version-controlled workflow can `apply <path>` and get the SAME goal `apply <ref>` runs. Under --json the result carries the written `path`. Absent, approve is unchanged.",
     debrief:
@@ -437,6 +441,16 @@ defmodule Kazi.CLI do
         "Advisory: warn on near-duplicate group NAMES in a goal-file (exit 0 even with warnings).",
       args: [%{name: "goal-file", required: true}],
       flags: [:json]
+    },
+    %{
+      name: "spec",
+      summary:
+        "Behavior-spec tier (ADR-0050, T40.2): `spec import <feature-file>... --into <goal-file>` derives one `test_runner` acceptance predicate per Gherkin Scenario (grouped by Feature) and UPSERTS them into the goal-file — re-importing the same spec is an upsert, not a duplicate. `--json` emits the upserted predicate ids.",
+      args: [
+        %{name: "subcommand", required: true},
+        %{name: "feature-file", required: false}
+      ],
+      flags: [:into, :json]
     },
     %{
       name: "context",
@@ -872,6 +886,9 @@ defmodule Kazi.CLI do
       {:lint, goal_file, opts} ->
         execute_lint(goal_file, opts)
 
+      {:spec_import, paths, opts} ->
+        execute_spec_import(paths, opts)
+
       {:context, subcommand, args, opts} ->
         execute_context(subcommand, args, opts, inject_opts)
 
@@ -912,6 +929,7 @@ defmodule Kazi.CLI do
           | {:reject, String.t(), keyword()}
           | {:export, Path.t(), keyword()}
           | {:lint, Path.t(), keyword()}
+          | {:spec_import, [Path.t()], keyword()}
           | {:context, String.t(), [String.t()], keyword()}
           | {:memory, String.t(), [String.t()], keyword()}
           | {:economy, keyword()}
@@ -1196,6 +1214,13 @@ defmodule Kazi.CLI do
   defp parse_command(["lint"], _flags),
     do: {:error, "the `lint` command requires a <goal-file> argument"}
 
+  # T40.2 (ADR-0050): `spec import <feature-file>... --into <goal-file>` exposes
+  # `Kazi.Reconcile.GherkinImporter` as a CLI entrypoint — the sub-verb shape
+  # mirrors `context`/`memory`/`bus`. `--into` (the target goal-file) is required;
+  # one or more `.feature` positionals follow the `import` sub-verb. --json carries
+  # through so the upserted predicate ids emit as one object (ADR-0023).
+  defp parse_command(["spec" | rest], flags), do: parse_spec(rest, flags)
+
   # T35.7 (ADR-0045): `context index|search|stats` — a THIN wrapper over the
   # `Kazi.ContextStore` provider so users learn one CLI (the provider stays
   # independently usable). The subcommand is a required positional; the remaining
@@ -1295,6 +1320,30 @@ defmodule Kazi.CLI do
     do:
       {:error,
        "the `memory` command requires a <subcommand> (`recall`, `list-proposed`, `approve`, `reject`)"}
+
+  # T40.2 (ADR-0050): the `spec` parse body. Only `import` is implemented; it
+  # requires `--into <goal-file>` and one or more `.feature` positionals. An
+  # unknown sub-verb or a missing `--into`/feature file is a clear usage error.
+  defp parse_spec(["import" | paths], flags) do
+    into = flags[:into]
+
+    cond do
+      into in [nil, ""] ->
+        {:error, "the `spec import` command requires --into <goal-file>"}
+
+      paths == [] ->
+        {:error, "the `spec import` command requires at least one <feature-file>"}
+
+      true ->
+        {:spec_import, paths, into: into, json: flags[:json] || false}
+    end
+  end
+
+  defp parse_spec([sub | _], _flags),
+    do: {:error, "unknown spec subcommand #{inspect(sub)} (expected `import`)"}
+
+  defp parse_spec([], _flags),
+    do: {:error, "the `spec` command requires a <subcommand> (`import`)"}
 
   defp memory_flags(flags) do
     [
@@ -4356,6 +4405,182 @@ defmodule Kazi.CLI do
   defp lint_load_error(goal_file, reason, opts) do
     message = "could not load goal-file #{goal_file}: #{reason}"
 
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  # =============================================================================
+  # spec — the Gherkin behavior-spec importer (T40.2, ADR-0050)
+  # =============================================================================
+  #
+  # `spec import <feature-file>... --into <goal-file>` is CLI wiring over the
+  # already-shipped, already-tested `Kazi.Reconcile.GherkinImporter` (ADR-0021/
+  # T13.2): read the `.feature` files, derive one `test_runner` acceptance
+  # predicate per Scenario (grouped by Feature), and UPSERT those predicates +
+  # their groups into the target goal-file. No new grammar, no new provider —
+  # only wiring, so predicates are DERIVED from a reviewed behavior spec instead
+  # of hand-typed. Re-importing the same spec is an upsert (the importer derives
+  # stable ids from Feature + Scenario), never a duplicate.
+  defp execute_spec_import(paths, opts) do
+    with {:ok, sources} <- read_feature_files(paths),
+         {:ok, imported} <- import_features(sources, opts[:into]),
+         {:ok, base} <- load_or_init_target(opts[:into]),
+         merged = merge_goal_maps(base, imported),
+         {:ok, _goal} <- validate_goal_map(merged),
+         :ok <- write_goal_map(opts[:into], merged) do
+      upserted = predicate_ids_of(imported)
+      emit_spec_import(opts, opts[:into], upserted, base != nil)
+      0
+    else
+      {:error, message} -> spec_import_error(message, opts)
+    end
+  end
+
+  # Read every positional `.feature` file into its text. A missing/unreadable
+  # file is a clear error naming the path — the importer takes text, so the CLI
+  # owns the filesystem read (matching `GherkinImporter`'s pure-over-text contract).
+  defp read_feature_files(paths) do
+    Enum.reduce_while(paths, {:ok, []}, fn path, {:ok, acc} ->
+      case File.read(path) do
+        {:ok, text} ->
+          {:cont, {:ok, [text | acc]}}
+
+        {:error, reason} ->
+          {:halt, {:error, "could not read feature file #{path}: #{:file.format_error(reason)}"}}
+      end
+    end)
+    |> case do
+      {:ok, texts} -> {:ok, Enum.reverse(texts)}
+      other -> other
+    end
+  end
+
+  # Run the sources through the importer. The goal id defaults to the target
+  # goal-file's stem so a fresh import produces a legibly-named goal; when the
+  # target already exists its own id wins (the merge keeps the base header).
+  defp import_features(sources, into) do
+    GherkinImporter.import_map(sources, id: goal_id_from_path(into))
+  end
+
+  defp goal_id_from_path(path) do
+    path
+    |> Path.basename()
+    |> String.replace(~r/\.goal\.toml$|\.toml$/, "")
+    |> case do
+      "" -> "gherkin-import"
+      stem -> stem
+    end
+  end
+
+  # The base goal map the import merges into: the EXISTING goal-file's serialized
+  # map when it exists (so its id/mode/other predicates are preserved), or `nil`
+  # when the target is new (the imported map becomes the whole goal-file). A
+  # target that exists but does not load is a real error — refuse rather than
+  # clobber an unparseable file.
+  defp load_or_init_target(into) do
+    if File.exists?(into) do
+      case Goal.Loader.load(into) do
+        {:ok, %Goal{} = goal} -> {:ok, Authoring.serialize_goal(goal)}
+        {:error, reason} -> {:error, "could not load target goal-file #{into}: #{reason}"}
+      end
+    else
+      {:ok, nil}
+    end
+  end
+
+  # Merge the imported groups/predicates into the base map. A `nil` base (new
+  # target) means the import IS the goal. Otherwise UPSERT by id: an imported
+  # predicate/group replaces the same-id base entry in place, a new one is
+  # appended, and base-only entries are kept — so a hand-authored live predicate
+  # in the target survives a spec re-import.
+  defp merge_goal_maps(nil, imported), do: imported
+
+  defp merge_goal_maps(base, imported) do
+    base
+    |> Map.put("group", upsert_by_id(base["group"] || [], imported["group"] || []))
+    |> Map.put("predicate", upsert_by_id(base["predicate"] || [], imported["predicate"] || []))
+  end
+
+  # Upsert `incoming` onto `existing` keyed by the `"id"` field: same-id entries
+  # are replaced in their original position (stable order), genuinely-new entries
+  # are appended in incoming order. Deterministic and total.
+  defp upsert_by_id(existing, incoming) do
+    incoming_by_id = Map.new(incoming, &{&1["id"], &1})
+
+    {replaced, seen} =
+      Enum.map_reduce(existing, MapSet.new(), fn item, seen ->
+        id = item["id"]
+        {Map.get(incoming_by_id, id, item), MapSet.put(seen, id)}
+      end)
+
+    appended = Enum.reject(incoming, &MapSet.member?(seen, &1["id"]))
+    replaced ++ appended
+  end
+
+  # The merged map must load through the SAME validated loader `apply` uses — a
+  # merge that produced an invalid goal (e.g. a predicate referencing an
+  # undeclared group) is refused, not written.
+  defp validate_goal_map(map) do
+    case Goal.Loader.from_map(map) do
+      {:ok, %Goal{} = goal} ->
+        {:ok, goal}
+
+      {:error, %{} = _changeset} ->
+        {:error, "the imported predicates did not form a valid goal"}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, "the imported predicates did not form a valid goal: #{reason}"}
+    end
+  end
+
+  # Render the merged map to a goal-file (the same scaffold-free writer `approve
+  # --write` uses) and write it, creating parent directories.
+  defp write_goal_map(into, map) do
+    toml = Adopt.Writer.to_goal_file(map)
+
+    with :ok <- File.mkdir_p(Path.dirname(into)),
+         :ok <- File.write(into, toml) do
+      :ok
+    else
+      {:error, reason} ->
+        {:error, "could not write #{into}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  defp predicate_ids_of(%{"predicate" => predicates}) when is_list(predicates),
+    do: Enum.map(predicates, & &1["id"])
+
+  defp predicate_ids_of(_map), do: []
+
+  # Emit the import result on the requested surface: under --json a single object
+  # carrying the target path + the upserted predicate ids (ADR-0023); a human
+  # summary otherwise.
+  defp emit_spec_import(opts, into, upserted, merged?) do
+    emit(
+      json?(opts),
+      %{
+        ok: true,
+        into: into,
+        merged: merged?,
+        upserted: upserted,
+        count: length(upserted),
+        schema_version: @run_schema_version
+      },
+      fn ->
+        verb = if merged?, do: "upserted into", else: "wrote"
+        IO.puts("IMPORTED   #{length(upserted)} predicate(s) — #{verb} #{into}")
+        Enum.each(upserted, fn id -> IO.puts("  + #{id}") end)
+        IO.puts("The goal is now runnable: kazi apply #{into} --workspace <path>")
+      end
+    )
+  end
+
+  defp spec_import_error(message, opts) do
     if json?(opts) do
       emit_json_error(message)
     else
