@@ -233,7 +233,7 @@ defmodule Kazi.Loop.CauseClass do
   Formats a PERSISTED cause class + its read-model detail map into the single
   human-readable line rendered at both call sites that show a finished run's
   cause (T48.14): the starmap drill-in panel's `cause_line/1`
-  (`KaziWeb.StarmapLive`) and the fleet-wide attention queue
+  (`KaziWeb.MissionControlLive`) and the fleet-wide attention queue
   (`Kazi.Attention.Queue`). One formatter, two call sites, so the two surfaces
   can never drift on how a cause reads.
 

@@ -290,7 +290,7 @@ defmodule Kazi.Goal.DepGraph do
 
   This is the SAME computation `kazi apply --explain` prints (`Kazi.CLI`
   delegates its private `frontiers/1` here) and the fleet starmap's wave-band
-  layout (`KaziWeb.StarmapLive`) reuses — one function, two renderers, so a
+  grouping (`KaziWeb.MissionControlLive`) reuses — one function, two renderers, so a
   goal's schedule is never computed twice.
 
   Returns a list of frontiers, each a list of group ids in DECLARED order.

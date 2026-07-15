@@ -18,7 +18,7 @@ defmodule KaziWeb.EventRiverLive do
 
   A connected mount polls (`@poll_ms`) and rereads every run's sink, so an
   appended line is visible on the next tick with no restart — the same
-  poll-and-reread shape as `KaziWeb.StarmapLive` and
+  poll-and-reread shape as `KaziWeb.MissionControlLive` and
   `KaziWeb.TranscriptPeekLive`.
 
   Each entry deep-links to its run's transcript peek and its goal's drill-in,
@@ -33,7 +33,7 @@ defmodule KaziWeb.EventRiverLive do
   alias Kazi.ReadModel.RunRegistry
   alias Kazi.Sink.Events
 
-  # Poll interval for rereading every run's sink (matches StarmapLive's fleet
+  # Poll interval for rereading every run's sink (matches MissionControlLive's fleet
   # poll cadence). A LiveView test never waits this long -- it sends `:tick`
   # directly.
   @poll_ms 2_000
