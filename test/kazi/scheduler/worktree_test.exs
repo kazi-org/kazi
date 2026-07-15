@@ -191,6 +191,30 @@ defmodule Kazi.Scheduler.WorktreeTest do
     end
   end
 
+  # issue #1074: distinct goal keys that share a 16-char prefix must not collide
+  # on the same partition slug/branch.
+  describe "slug_for/1 collision-proofing (issue #1074)" do
+    test "distinct keys sharing a 16-char prefix get distinct, ref-safe slugs" do
+      s11 = Worktree.slug_for(%{key: "valyrium-issue-11-openrouter-reasoning-object"})
+      s12 = Worktree.slug_for(%{key: "valyrium-issue-12-cached-tokens-usage"})
+      s13 = Worktree.slug_for(%{key: "valyrium-issue-13-something-else"})
+
+      assert s11 != s12 and s12 != s13 and s11 != s13
+      # deterministic: the same key re-slugs identically (idempotent re-propose).
+      assert Worktree.slug_for(%{key: "valyrium-issue-11-openrouter-reasoning-object"}) == s11
+      # git-ref / filesystem safe.
+      for s <- [s11, s12, s13], do: assert(s =~ ~r/^p-[A-Za-z0-9_-]+$/)
+    end
+
+    test "a key with ref-forbidden characters is folded and still disambiguated" do
+      a = Worktree.slug_for(%{key: "radius:lib/a.ex"})
+      b = Worktree.slug_for(%{key: "radius:lib/b.ex"})
+      assert a != b
+      assert a =~ ~r/^p-[A-Za-z0-9_-]+$/
+      assert b =~ ~r/^p-[A-Za-z0-9_-]+$/
+    end
+  end
+
   # issue #1081: a stuck/errored run's uncommitted collateral must be salvaged
   # to a durable ref BEFORE the worktree is force-removed, so verified work is
   # recoverable instead of destroyed.
