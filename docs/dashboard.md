@@ -1,4 +1,4 @@
-# The fleet dashboard: run registry, starmap, `kazi dashboard` (ADR-0057)
+# The fleet dashboard: run registry, Mission Control, `kazi dashboard` (ADR-0057, ADR-0070)
 
 The operator often runs several concurrent `kazi apply` sessions on one
 machine. Without a fleet-wide surface, that's a black box: a one-shot CLI run
@@ -7,9 +7,12 @@ one. `kazi dashboard` closes that gap with three pieces that reuse what
 already exists rather than rebuild it — the shared per-user SQLite
 read-model, and the KaziWeb LiveView assets.
 
-See [ADR-0057](adr/0057-fleet-observability-dashboard.md) for the full
-decision and [docs/plans/E46.md](plans/E46.md) for the epic. This doc is the
-cross-cutting overview; it grows as the epic's later tasks land.
+See [ADR-0057](adr/0057-fleet-observability-dashboard.md) for the fleet
+substrate (registry, sinks, drill-in) and
+[ADR-0070](adr/0070-mission-control-dashboard.md) for the Mission Control home
+view that supersedes ADR-0057's starmap, plus
+[docs/plans/E46.md](plans/E46.md) for the epic. This doc is the cross-cutting
+overview; it grows as the epic's later tasks land.
 
 ## The run registry
 
@@ -27,115 +30,108 @@ never deleted; a dead run's last state is exactly the fleet dashboard's
 post-mortem record. See `Kazi.ReadModel.RunRegistry` (`start/1`,
 `heartbeat/1`, `finish/2`, `stale?/2`, `list_stale/1`).
 
-## The starmap (`/`, alias `/starmap`)
+## Mission Control (`/`, alias `/starmap`)
 
-The starmap is the landing page: the root route serves it directly, and
-`/starmap` remains an alias for existing links. It renders one node per
-registered run, resolved to a display state:
+Mission Control is the landing page: the root route serves it directly, and
+`/starmap` remains an alias for existing links. It is an ops-center **card
+grid** ([ADR-0070](adr/0070-mission-control-dashboard.md), superseding the
+ADR-0057 starmap home view) — a topbar fleet-count strip, a **NEEDS ATTENTION**
+row, a **FLEET** grid of one card per goal, and a bottom **EVENT RIVER**
+ticker. Each goal resolves to a display state:
 
 | State        | Meaning                                                          |
 | ------------ | ----------------------------------------------------------------- |
 | `landed`     | terminal status `"converged"` (ADR-0055: converged and landed)    |
-| `converging` | no terminal status, heartbeating normally                          |
+| `converging` | no terminal status, heartbeating normally (card label: RUNNING)    |
 | `stale`      | no terminal status, heartbeat older than the staleness threshold  |
 | `stuck`      | a terminal non-converging status (`stuck` / `over_budget` / `error`) |
 
-alongside fleet-wide counts per state and each node's run tags
-(`goal_ref`, `harness`/`model`). It is a pure read projection
+The topbar chips count the shown cards per state (`OVER-BUDGET` split out of
+`STUCK`, never double-counted). It is a pure read projection
 ([ADR-0011](adr/0011-slice3-operator-surfaces.md) reaffirmed at fleet scope):
-it never mutates a run, a goal, or a lease.
+it never mutates a run, a goal, or a lease. The interactions are the 2-second
+poll-tick refresh, navigation deep-links, and a **CURRENT/CLOSED scope toggle**
+— no slide-over panel, no per-node filters.
 
-With no roadmap configured this flat list already satisfies "single-goal
-groups" (ADR-0056): every run is its own node with no declared order between
-them.
+The scope toggle (`CURRENT · n` / `CLOSED · m` pills on the FLEET header) scopes
+the grid, chips, and attention alerts. CURRENT (the default) shows runs whose
+driving agent session is still alive; CLOSED shows dead history — converged,
+stuck, and crashed/stale runs whose session has ended, so a crash stays
+reviewable on the home screen rather than only on `/goals`. An empty CURRENT grid
+with closed history points at the CLOSED toggle rather than implying nothing ran.
 
-Converging, stuck, and claimed nodes carry session tags (`S1`, `S2`, ...)
-mirrored into the rail's **SESSIONS** section (a stuck session's chip renders
-red), so the rail always answers "who is driving what" — including a fleet
-whose only live work is stuck. Clicking a SESSIONS row filters the
-constellation to that session's goal (every other node and unrelated edge
-dims); clicking the same row again — or the session ending — clears the
-filter.
+With no roadmap configured the fleet is a flat grid, satisfying "single-goal
+groups" (ADR-0056): every run is its own card with no declared order between
+them, newest first (past the card cap, a `+N more` link points to `/goals`).
+Roadmap wave mode resolves state across all runs and ignores the scope.
 
-The FLEET tiles (RUNNING / LANDED / STUCK) filter the canvas the same way
-the SESSIONS rows do: click a tile to dim everything but that state, click
-it again to clear; the two filters are mutually exclusive. An active tile
-also lifts the matching column's 8-node cap — the operator asked for exactly
-those goals, so the column shows all of them and the canvas scrolls. Dense fleets no
-longer wrap nodes into sub-columns — each band is a single column and the
-canvas grows downward and scrolls, which keeps `needs` edges on straight
-sight-lines at any fleet size.
+**Fleet cards.** Each run-backed card (a link to `/goals/:ref/drillin`) shows
+the goal name and a state pill (RUNNING / CONVERGED / STUCK / STALE /
+OVER-BUDGET), a harness badge (`harness · model`), the workspace basename, and
+`ITER n`, plus three at-a-glance telemetry strips read from the SAME persisted
+per-iteration history the drill-in heatmap reads: a **predicate DNA** strip
+(the latest vector as squares — green pass / red fail-or-error / dark
+not-evaluated), an iteration **burn bar**, and a green **sparkline** of
+passing-predicate count over the history. Nothing is fabricated; a run with no
+iterations shows an empty strip and `ITER —`.
 
-Each SESSIONS row identifies its run by the **operator-assigned session
-name** when one was given (`kazi apply --session-name <label>`, the
-`KAZI_SESSION_NAME` environment variable, or — auto-detected with no
-operator action needed — `CLAUDE_CODE_SESSION_ID` when kazi runs as a
-subprocess of a Claude Code session), falling back to the harness name,
-with the workspace basename alongside as the tiebreaker for several
-sessions driving the same repo. When the claude harness reports its own
-`session_id` in the result envelope, kazi records it on the run row and the
-slide-over panel shows the ready-to-paste resume command
-(`claude -r <session-id>`), so any starmap node can be picked up
-interactively.
+**The burn bar reads iterations, not tokens.** kazi's run registry has no token
+*cap* — only `max_iterations` (ADR-0046: the harness reports tokens USED, not a
+ceiling). So the bar reads iteration progress (`iter n / max`, colored cyan <
+65% / amber 65–85% / red ≥ 85%), with harness-reported tokens shown as text
+alongside when present. No token fraction is invented.
 
-**Clicking any canvas node — or an attention entry — opens the slide-over
-drill-in panel** (docs/dashboard-design.md "Slide-over drill-in panel"): the
-goal's authored `name` and `description` (from the goal-file, captured on the
-run row at registration), its identity chips (workspace, harness · model,
-state), run timing (elapsed, heartbeat age for a live run), run economics
-when reported (dispatches, tokens, cost), the iteration/budget burn bar, a
-"NOW" line with the latest iteration's decided action (dispatch / integrate /
-deploy and its parameters), the predicate-vector DNA strip, a "FAILING" list
-giving each red predicate's last-observed reason, the convergence heatmap
-(predicates × iterations), and a transcript tail, plus a
-"FULL ANALYST VIEW →" link to `/goals/:id/drillin`. It reads the same
-projections the full-page drill-in and transcript-peek views read.
+The operator-assigned **session name** (`kazi apply --session-name <label>`,
+`KAZI_SESSION_NAME`, or the auto-detected `CLAUDE_CODE_SESSION_ID` when kazi
+runs under a Claude Code session) is captured on the run row and surfaces in
+the full drill-in view; when the claude harness reports its own `session_id`,
+the drill-in view shows the ready-to-paste resume command
+(`claude -r <session-id>`).
 
-Click interactions (and live DOM patching generally) ride the LiveView
-socket: the endpoint serves the pre-built `phoenix` / `phoenix_live_view`
-client bundles straight from the hex packages (no node, no bundler) and the
-root layout connects the socket. With JavaScript unavailable the pages
-still render as read-only snapshots, exactly the pre-panel behavior.
+Live DOM patching (the poll-tick refresh) rides the LiveView socket: the
+endpoint serves the pre-built `phoenix` / `phoenix_live_view` client bundles
+straight from the hex packages (no node, no bundler) and the root layout
+connects the socket. With JavaScript unavailable the page still renders as a
+read-only snapshot.
 
-On a phone (below 820px) the starmap re-flows into a bottom tab bar — MAP /
-NEEDS YOU (with a live attention-count badge) / SESSIONS / MORE — the rail's
-sections becoming thumb-reachable tab panes, the constellation panning at a
-readable scale, and the drill-in panel opening as a full-width bottom sheet.
-Desktop is untouched. See docs/dashboard-design.md "Mobile layout" for the
-normative spec.
+On a phone (below 820px) the card grid re-flows to a single column and the
+topbar wraps into the thumb zone — no bespoke mobile mode, just responsive
+grid reflow. See docs/dashboard-design.md "Mobile" for the normative spec.
 
-### Wave bands
+### Roadmap wave grouping
 
 When a roadmap ref IS configured (`KaziWeb.Starmap.GoalSource`, the ADR-0011
 §3 injection seam — production defaults to `GoalSource.None`, i.e. no
-roadmap), the starmap ADDITIONALLY lays that goal's `needs`-DAG out as
-topological wave bands, reusing `Kazi.Goal.DepGraph.frontiers/1` — the exact
-same computation `kazi apply --explain` prints, so the bands can never
-disagree with the schedule a real `kazi apply --parallel` run would take.
-Each band node's state extends the four run-registry states above with:
+roadmap), the FLEET grid GROUPS into topological **wave sections**, reusing
+`Kazi.Goal.DepGraph.frontiers/1` — the exact same computation `kazi apply
+--explain` prints, so the waves can never disagree with the schedule a real
+`kazi apply --parallel` run would take. The header reads `ROADMAP · N GOALS ·
+M WAVES` and each wave is a `WAVE k · <ACTIVE|LANDED|FRONTIER|HORIZON>`
+sub-header over its own card grid. A declared group nothing has dispatched yet
+renders as a lighter placeholder card:
 
 | State      | Meaning                                                                  |
 | ---------- | ------------------------------------------------------------------------- |
 | `claimed`  | every `needs` dep converged (the live frontier), but no run has started yet |
 | `pending`  | still waiting on an unconverged dep (a later wave), or poisoned by a stuck ancestor |
 
-The roadmap's declared `needs` edges also draw as connector lines between the
-placed nodes (highlighted cyan when either endpoint is converging or stuck),
-so the canvas shows the same dependency structure `--explain` prints. Without
-a roadmap there are no declared edges, so none are drawn — the flat fleet
-fallback declares no order and the starmap never fabricates one.
+Roadmap-mode wave state resolves from the LATEST run per group across the whole
+registry (the roadmap is the durable plan — a group converged by a since-closed
+session still reads landed). Without a roadmap the flat grid declares no order,
+so no waves are drawn — Mission Control never fabricates structure it doesn't
+have.
 
 `kazi dashboard --roadmap <goal-file>` (T47.2) wires a REAL goal-file into
 this seam: it loads `<goal-file>` through `Kazi.Goal.Loader` — the same loader
-`apply` uses — and points `GoalSource` at the loaded goal, so the starmap
-renders ITS `needs`-DAG in wave bands. Only takes effect on a fresh standalone
-boot; like `--port`/`--bind`, it is advisory (ignored, with a printed warning)
-when this process already serves the endpoint. Absent the flag, `GoalSource`
-stays `None` and the flat-list fallback is unchanged. A bad or unloadable path
-is a loud boot error (a non-zero exit, nothing started) — never a silently
-empty starmap. ADR-0056 §Decision 1 (a first-class roadmap read-model object,
-written by a future plan-side surface) is still future work; today `--roadmap`
-is the on-ramp, and `GoalSource` remains a seam a test can also point at any
+`apply` uses — and points `GoalSource` at the loaded goal, so the fleet grid
+groups by ITS `needs`-DAG. Only takes effect on a fresh standalone boot; like
+`--port`/`--bind`, it is advisory (ignored, with a printed warning) when this
+process already serves the endpoint. Absent the flag, `GoalSource` stays `None`
+and the flat-grid fallback is unchanged. A bad or unloadable path is a loud
+boot error (a non-zero exit, nothing started) — never a silently empty roadmap.
+ADR-0056 §Decision 1 (a first-class roadmap read-model object, written by a
+future plan-side surface) is still future work; today `--roadmap` is the
+on-ramp, and `GoalSource` remains a seam a test can also point at any
 `Kazi.Goal.t()` directly.
 
 ### The attention queue (T46.6, cause-ranked T48.14)
@@ -154,15 +150,14 @@ signals the per-goal detectors already compute:
 
 Entries are ranked by severity, ties broken by recency (the triggering
 iteration index, most recent first) then `goal_ref` -- a fully pinned order.
-Each entry deep-links to that goal's `/goals/:id/drillin`; a `cause` entry
-additionally renders its compact cause line (`Kazi.Loop.CauseClass.format/2`,
-e.g. `error_wedged (live_route: missing_url)`) -- the SAME formatter the
-slide-over drill-in panel's cause line uses, so the two surfaces never
-disagree on how a cause reads. An empty fleet (or a fleet with nothing to
-flag) renders no rail. On the mobile bottom-tab layout the cause line wraps
-onto its own row inside the entry and is truncated with an ellipsis rather
-than pushing the entry's height unbounded. See `Kazi.Attention.Queue` and
-`KaziWeb.StarmapLive`.
+In Mission Control these entries render as the **NEEDS ATTENTION** row of
+alert cards (severity badge + goal + a one-line detail + `PEEK →`), each a
+link to that goal's `/goals/:id/drillin`; a `cause` entry's detail is its
+compact cause line (`Kazi.Loop.CauseClass.format/2`, e.g. `error_wedged
+(live_route: missing_url)`) -- the SAME formatter the drill-in view uses, so
+the two surfaces never disagree on how a cause reads. An empty fleet (or a
+fleet with nothing to flag) renders no attention row. See
+`Kazi.Attention.Queue` and `KaziWeb.MissionControlLive`.
 
 ## The events sink (T46.2)
 
@@ -307,12 +302,12 @@ kazi.apply` / test entry points), the verb reports the endpoint's existing
 bind instead of rebinding it, and `--roadmap` is ignored (printed, never
 silent).
 
-`--roadmap <goal-file>` (T47.2) loads that goal-file and renders its
-`needs`-DAG as the starmap's wave bands (see "Wave bands" above) — the first
+`--roadmap <goal-file>` (T47.2) loads that goal-file and groups the fleet grid
+into its `needs`-DAG wave sections (see "Roadmap wave grouping" above) — the
 user-visible consumer of `KaziWeb.Starmap.GoalSource`. An unloadable path
 (missing file, malformed TOML, a schema violation) is a loud boot error: kazi
 prints the reason to stderr and exits non-zero without starting the endpoint,
-never a silently empty starmap.
+never a silently empty roadmap.
 
 A standalone boot serves **every** dashboard view (`/`, `/starmap`, `/goals`,
 `/leases`, `/dag`, `/goals/:id/history`, `/goals/:id/drillin`,

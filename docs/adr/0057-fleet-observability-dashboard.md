@@ -1,7 +1,9 @@
 # ADR 0057: Fleet observability — the run registry, per-run sinks, and `kazi dashboard`
 
 ## Status
-Accepted
+Accepted. Home-view decision (point 4, "the starmap") superseded by ADR-0070
+(Mission Control — the fleet home view as an ops-center card grid). The registry,
+sinks, attention queue, and drill-in decided here stand unchanged.
 
 ## Date
 2026-07-03
