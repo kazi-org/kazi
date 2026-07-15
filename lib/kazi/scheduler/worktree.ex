@@ -383,6 +383,11 @@ defmodule Kazi.Scheduler.Worktree do
   @doc false
   @spec safe_cleanup(String.t(), Path.t(), Path.t()) :: :ok
   def safe_cleanup(git_cmd, repo, path) do
+    # Preserve any uncommitted collateral BEFORE the destructive force-remove
+    # (issue #1081). Both terminal paths -- teardown/6 and reap/3 -- funnel here,
+    # so salvaging in one place fixes the leak/delete asymmetry symmetrically.
+    salvage_collateral(git_cmd, repo, path)
+
     case git(git_cmd, repo, ["worktree", "remove", "--force", path]) do
       {:ok, _out} ->
         :ok
@@ -398,6 +403,71 @@ defmodule Kazi.Scheduler.Worktree do
         _ = git(git_cmd, repo, ["worktree", "prune"])
         :ok
     end
+  end
+
+  # Prefix for the durable salvage refs (issue #1081). A ref under
+  # `refs/kazi/salvage/<worktree-name>` lives in the SHARED ref store, so it (and
+  # the commit it points at) survives the worktree's removal.
+  @salvage_ref_prefix "refs/kazi/salvage/"
+
+  # Before a worktree is force-removed, PRESERVE any uncommitted collateral
+  # (issue #1081): a stuck/errored run's edits are exactly what the operator needs
+  # to investigate (next_action: investigate), but `git worktree remove --force`
+  # discards them -- a clean-stuck run silently destroys work that every other
+  # predicate verified. Best-effort and TOTAL: it NEVER raises or blocks teardown
+  # (issue #1053 teardown-independence); on any failure it logs and lets cleanup
+  # proceed. Captures tracked AND untracked changes by staging everything, writing
+  # a DANGLING commit (the partition branch is left untouched), and pointing a
+  # `refs/kazi/salvage/<worktree>` ref at it. Recover with `git show <ref>` or
+  # `git checkout <ref>`. A clean worktree salvages nothing.
+  @spec salvage_collateral(String.t(), Path.t(), Path.t()) :: :ok | {:ok, String.t()}
+  defp salvage_collateral(git_cmd, repo, path) do
+    with {:ok, status} <- git(git_cmd, path, ["status", "--porcelain"]),
+         true <- String.trim(status) != "",
+         {:ok, _} <- git(git_cmd, path, ["add", "-A"]),
+         {:ok, tree} <- git(git_cmd, path, ["write-tree"]),
+         {:ok, parent} <- git(git_cmd, path, ["rev-parse", "HEAD"]),
+         msg = "kazi salvage: uncommitted collateral from #{Path.basename(path)} (issue #1081)",
+         {:ok, commit} <-
+           git(git_cmd, path, [
+             "commit-tree",
+             String.trim(tree),
+             "-p",
+             String.trim(parent),
+             "-m",
+             msg
+           ]),
+         ref = @salvage_ref_prefix <> Path.basename(path),
+         {:ok, _} <- git(git_cmd, repo, ["update-ref", ref, String.trim(commit)]) do
+      Logger.info(fn ->
+        "kazi.scheduler.worktree salvaged uncommitted collateral from #{path} to " <>
+          "#{ref} before removal (issue #1081); recover with `git show #{ref}`"
+      end)
+
+      {:ok, ref}
+    else
+      # A clean worktree (no porcelain output) -- nothing to salvage.
+      false ->
+        :ok
+
+      # Any git failure (path already gone, not a worktree, no HEAD): stay
+      # best-effort and let removal proceed rather than blocking teardown.
+      {:error, reason} ->
+        Logger.warning(fn ->
+          "kazi.scheduler.worktree could not salvage collateral from #{path}: " <>
+            "#{inspect(reason)}; proceeding with removal (issue #1081)"
+        end)
+
+        :ok
+    end
+  rescue
+    e ->
+      Logger.warning(fn ->
+        "kazi.scheduler.worktree salvage crashed for #{path}: " <>
+          Exception.format(:error, e, __STACKTRACE__)
+      end)
+
+      :ok
   end
 
   # The guard: only ever rm_rf a path that is provably NOT a cwd and NOT the repo
