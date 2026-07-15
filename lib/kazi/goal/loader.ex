@@ -1225,7 +1225,28 @@ defmodule Kazi.Goal.Loader do
     end)
   end
 
+  # Documentation-only metadata keys the Gherkin importer (ADR-0050) records on a
+  # predicate for self-description: `feature`, `scenario`, `steps`. NO provider
+  # consumes them, so `ensure_provider_loaded/1` does not intern their atoms --
+  # and in the RELEASE binary no other module that names them is loaded when a
+  # goal loads, so `String.to_existing_atom/1` below would reject a spec-imported
+  # `custom_script` goal as "unknown config key" (it loads fine under `mix`, where
+  # the fuller module set + test code interns them -- which is why every test and
+  # CI passed while `kazi apply` on the real binary failed; see docs/devlog.md
+  # 2026-07-15). Declaring them here interns the atoms whenever THIS module loads
+  # -- which is always, during any load -- and documents the bounded, fixed
+  # allowlist (no atom-exhaustion risk). If the importer grows a new metadata key,
+  # add it here too (pinned by a coherence test in gherkin_importer_test.exs).
+  @gherkin_doc_keys [:feature, :scenario, :steps]
+
   defp safe_config_key(key) when is_binary(key) do
+    case Enum.find(@gherkin_doc_keys, &(Atom.to_string(&1) == key)) do
+      nil -> existing_atom_key(key)
+      atom -> {:ok, atom}
+    end
+  end
+
+  defp existing_atom_key(key) do
     {:ok, String.to_existing_atom(key)}
   rescue
     ArgumentError -> :unknown
