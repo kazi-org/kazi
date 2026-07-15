@@ -512,8 +512,13 @@ defmodule Kazi.Scheduler.Worktree do
   # across runs, so two worktrees never collide on disk. The branch carries the
   # configured prefix so a partition's branch is recognizable in `git branch`.
   defp worktree_target(base_dir, branch_prefix, slug) do
-    nonce = :erlang.unique_integer([:positive, :monotonic])
-    name = slug <> "-" <> Integer.to_string(nonce)
+    # A CROSS-PROCESS-unique token (issue #1074): `:erlang.unique_integer` is
+    # unique only within one BEAM, so every fresh `kazi apply` OS process reset
+    # the counter and minted the same low nonce -- two unrelated runs then
+    # collided on `kazi-partition/p-<slug>-1`. Random bytes never collide across
+    # processes, so a leaked branch from a prior run can never block a new one.
+    nonce = :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
+    name = slug <> "-" <> nonce
     branch = branch_prefix <> "/" <> name
     {Path.join(base_dir, name), branch}
   end
@@ -524,16 +529,23 @@ defmodule Kazi.Scheduler.Worktree do
   # name (`radius:lib/a.ex` — `:` is forbidden in refs), so anything outside
   # [A-Za-z0-9_-] is folded to `-`; without this the `-b <branch>` in create/4
   # fails and the partition never runs.
-  defp slug_for(%{key: key}) when is_binary(key) and key != "" do
-    sanitized =
+  @doc false
+  @spec slug_for(map()) :: String.t()
+  def slug_for(%{key: key}) when is_binary(key) and key != "" do
+    legible =
       key
       |> String.slice(0, 16)
       |> String.replace(~r/[^A-Za-z0-9_-]/, "-")
 
-    "p-" <> sanitized
+    # A short hash of the FULL key disambiguates distinct keys that share a
+    # 16-char legible prefix (issue #1074: `valyrium-issue-11`, `-12`, `-13` all
+    # sliced to `valyrium-issue-1` and collided). Distinct keys -> distinct
+    # slugs; the same key -> the same slug (idempotent re-propose).
+    digest = :crypto.hash(:sha256, key) |> Base.encode16(case: :lower) |> binary_part(0, 8)
+    "p-" <> legible <> "-" <> digest
   end
 
-  defp slug_for(_partition), do: "p"
+  def slug_for(_partition), do: "p"
 
   # --- git --------------------------------------------------------------------
 
