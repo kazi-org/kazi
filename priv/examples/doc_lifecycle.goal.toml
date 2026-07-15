@@ -126,6 +126,17 @@ cmd = "bash"
 args = [".github/scripts/doc_freshness/check_c_adr_refs_exist.sh"]
 verdict = "exit_zero"
 
+# (g) every `spec:` behavior-spec pointer in the live WBS resolves to a file
+# (T40.5, ADR-0050) -- the sibling of (c) for the docs/specs/ tier: a task that
+# points at a deleted/renamed .feature fails loudly here, not silently at run.
+[[predicate]]
+id = "spec-refs-exist"
+provider = "custom_script"
+description = "every spec: pointer in the live WBS resolves to an existing docs/specs file"
+cmd = "bash"
+args = [".github/scripts/doc_freshness/check_g_spec_refs_exist.sh"]
+verdict = "exit_zero"
+
 # (E) subsumed: README <-> website canonical-string coherence (T9.9, ADR-0018).
 [[predicate]]
 id = "readme-site-coherence"
