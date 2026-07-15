@@ -194,7 +194,10 @@ defmodule Kazi.Bus.MvpTest do
       assert :ok = Bus.post("note", "presence ping", opts)
       assert {:ok, sessions} = Bus.who(opts)
 
-      assert Enum.any?(sessions, fn s -> s["session"] == session end)
+      assert entry = Enum.find(sessions, fn s -> s["session"] == session end)
+      # issue #1102: the entry is attributable to a machine, so a shared
+      # cross-machine roster can tell a local session from a remote one.
+      assert is_binary(entry["machine"]) and entry["machine"] != ""
     end
 
     test "oversize post is rejected client-side (never reaches NATS)", %{conn: conn} do
