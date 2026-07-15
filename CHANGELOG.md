@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.147.1](https://github.com/kazi-org/kazi/compare/v1.147.0...v1.147.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **scheduler:** collision-proof partition slug (full-key hash) + cross-process-unique nonce (T54.2, [#1074](https://github.com/kazi-org/kazi/issues/1074)) ([4dddc8b](https://github.com/kazi-org/kazi/commit/4dddc8bf3cc4771d60c47cc45076d3b39f4f8444))
+* **scheduler:** salvage uncommitted collateral to a durable ref before worktree removal (T54.4, [#1081](https://github.com/kazi-org/kazi/issues/1081)) ([cf3863b](https://github.com/kazi-org/kazi/commit/cf3863b45563505909e743fc684dfc212ab0ce89))
+
 ## [1.147.0](https://github.com/kazi-org/kazi/compare/v1.146.0...v1.147.0) (2026-07-15)
 
 
