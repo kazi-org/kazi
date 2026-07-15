@@ -178,7 +178,7 @@ be imported, never invented by kazi itself:
 
 - **Machine specs, deterministically** — `Kazi.Reconcile.OpenApiImporter` (one
   `http_probe` predicate per path/operation) and `Kazi.Reconcile.GherkinImporter`
-  (one `test_runner` predicate per `.feature` Scenario, §10c/ADR-0050). Pure,
+  (one `custom_script` scaffold predicate per `.feature` Scenario, §10c/ADR-0050). Pure,
   hermetic — the same input always yields the same goal, and re-import upserts.
 - **Prose, via the harness** — `Kazi.Reconcile.ProseImporter` drives the
   existing authoring/clarify path (§10, ADR-0011/0019) over an ADR or
@@ -611,10 +611,13 @@ for a task.
 written in the Gherkin subset `Kazi.Reconcile.GherkinImporter` already parses
 (Feature/Scenario/Given/When/Then, ADR-0021/T13.2), optionally paired with a short
 `<slug>.md` proposal note. A plan task may point at its spec via an optional
-`spec:` WBS field. A CLI verb (ADR-0050) upserts the spec's Scenarios as
-`[[predicate]]` entries in the goal -- **predicates are DERIVED from a reviewed
-spec, not hand-typed** -- and when the epic archives (10a, Layer 1), its
-referenced specs move to `docs/specs/archive/` with it.
+`spec:` WBS field. The CLI verb `kazi spec import <feature-file>... --into
+<goal-file>` (ADR-0050/T40.2) upserts the spec's Scenarios as `[[predicate]]`
+entries in the goal -- **predicates are DERIVED from a reviewed spec, not
+hand-typed** -- and when the epic archives (10a, Layer 1), its referenced specs
+move to `docs/specs/archive/` with it. Re-importing an edited spec is an upsert
+(each predicate's id is derived from Feature + Scenario), so a hand-added live
+predicate in the goal-file survives untouched. See `docs/specs/README.md`.
 
 Call this tier "behavior specs" in prose: kazi already overloads bare "spec" three
 other ways (Elixir `@spec`, "goal spec" as a synonym for `goal.toml` in this very
