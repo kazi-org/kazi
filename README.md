@@ -803,13 +803,17 @@ pins this output, so the example never drifts from what the tool produces.
   (`/goals/:id/drillin`: predicates x iterations, regression flips visually
   distinct). Read-only inspection, decoupled from the loop
   ([ADR-0011](docs/adr/0011-slice3-operator-surfaces.md)).
-- **`kazi dashboard` — the fleet starmap** — several concurrent `kazi apply`
+- **`kazi dashboard` — Mission Control** — several concurrent `kazi apply`
   runs on one machine are a black box by default; `kazi dashboard` boots a
-  standalone, read-only web endpoint over the shared run registry. The starmap
-  is the landing page (`/`, alias `/starmap`): every registered run at a
-  glance, state landed / converging / stale / stuck, run tags, fleet counts.
-  See [docs/dashboard.md](docs/dashboard.md)
-  ([ADR-0057](docs/adr/0057-fleet-observability-dashboard.md)).
+  standalone, read-only web endpoint over the shared run registry. Mission
+  Control is the landing page (`/`, alias `/starmap`): an ops-center card grid —
+  every registered run as a card with its state (running / converged / stale /
+  stuck / over-budget), inline predicate DNA, iteration burn, and a convergence
+  sparkline; a NEEDS ATTENTION row and a fleet-wide event river. With
+  `--roadmap`, the grid groups into topological wave sections. See
+  [docs/dashboard.md](docs/dashboard.md)
+  ([ADR-0070](docs/adr/0070-mission-control-dashboard.md), superseding the
+  ADR-0057 starmap home view).
 
 ---
 
@@ -842,7 +846,8 @@ kazi export <goal-file> --obsidian <dir>     # write an Obsidian vault of the go
 kazi lint <goal-file>                        # advisory near-duplicate group-name warnings
 kazi economy --rediscovery <goal>            # ranked rediscovery-pressure report (report-only)
 kazi mcp                                      # start the MCP server over stdio (ADR-0044)
-kazi dashboard [--port <n>] [--bind <ip>]    # the fleet starmap: every registered run, read-only (ADR-0057)
+kazi dashboard [--port <n>] [--bind <ip>]    # Mission Control: every registered run, read-only (ADR-0070)
+        [--roadmap <goal-file>]              #   group the fleet grid into the roadmap's needs-DAG wave sections (T47.2)
 kazi help [--json]                           # the command/flag surface (--json for machines)
 kazi version                                 # print the kazi version and exit
 ```

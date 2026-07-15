@@ -1,206 +1,176 @@
-# Dashboard visual design spec — the starmap look (ADR-0057)
+# Dashboard visual design spec — Mission Control (ADR-0070)
 
 The committed, textual distillation of the approved dashboard design. The
-dashboard's LiveViews are styled to THIS spec; a change of visual direction
-edits this file first. (The originating design mockups live outside the repo;
+dashboard's home LiveView (`KaziWeb.MissionControlLive`) is styled to THIS spec;
+a change of visual direction edits this file first. (The originating design
+mockup — a `Mission Control.dc.html` design canvas — lives outside the repo;
 this document is self-contained on purpose.)
+
+Mission Control supersedes the earlier **starmap** direction (ADR-0057): the
+home view is now an ops-center **card grid**, not a spatial SVG constellation.
+The registry / sinks / attention-queue / drill-in infrastructure ADR-0057 built
+is unchanged — only the home visual is replaced. The shared design tokens and
+motion keyframes live in `KaziWeb.Layouts` (the root layout), so every page —
+Mission Control, drill-in, transcript peek, event river — draws from ONE token
+set; the token NAMES are stable across the revision (`--rail` now aliases
+`--panel`) so the other pages recolor from the new palette untouched.
 
 ## Design tokens (CSS custom properties, exact)
 
 ```css
 :root {
-  --bg:   #070B16;  /* void background */
-  --rail: #0A1120;  /* left rail */
-  --line: #16233A;  /* hairlines / borders */
-  --txt:  #BFD2EA;  /* primary text */
-  --dim:  #46587A;  /* secondary text / labels */
-  --cyn:  #56CCF2;  /* converging / active / accent */
-  --grn:  #2EE6A8;  /* landed / live */
-  --red:  #FF5C6C;  /* stuck / errors */
-  --amb:  #FFB454;  /* stale / budget warnings */
+  --bg:     #0A0E14;  /* void background */
+  --panel:  #0E1520;  /* card / chip / rail surface */
+  --panel2: #101826;  /* inset (harness badge) */
+  --rail:   #0E1520;  /* legacy alias of --panel (other pages) */
+  --line:   #1B2634;  /* hairlines / borders */
+  --txt:    #C9D6E4;  /* primary text */
+  --dim:    #5D7189;  /* secondary text / labels */
+  --cyn:    #53D6FF;  /* running / active / accent */
+  --grn:    #3DFFA0;  /* converged / live / passing */
+  --amb:    #FFB454;  /* stale / budget warnings */
+  --red:    #FF5566;  /* stuck / errors / failing */
 }
 ```
 
-Typography: body 12px "JetBrains Mono" (mono everywhere); display headings
-"Space Grotesk" 700 (wordmark 16px letter-spacing .2em; panel title 21px).
-Section labels: 9px, letter-spacing .26–.28em, --dim, uppercase.
+Bright text (wordmark, card names, alert titles, clock) uses `#EAF3FC`.
+
+Typography: body 12px "JetBrains Mono" (mono everywhere); the wordmark is
+"Space Grotesk" 700 (18px, letter-spacing .22em). Section labels: 9–10px,
+letter-spacing .26–.30em, `--dim`, uppercase (`.section-label` in the layout).
 
 ## Layout shell
 
-- `.shell` flex, min-height 100vh.
-- Left rail: 280px fixed, bg --rail, right hairline --line; sections in order:
-  wordmark ("KAZI STARMAP", STARMAP in --cyn) + LIVE badge (green pulsing dot,
-  box-shadow glow); FLEET stat tiles (big 20px numbers: cyan RUNNING, green
-  LANDED, red STUCK; clicking a tile filters the canvas to that state --
-  everything else dims -- and clicking the active tile again clears it;
-  mutually exclusive with the SESSIONS filter); NEEDS YOU (attention queue:
-  glowing 7px dot red/amber/magenta +
-  one-line summary, bold goal name; a finished `error_wedged`/
-  `quarantine_blocked` cause entry (T48.14, magenta dot) ranks above every
-  other entry and wraps a second, truncated line with the compact cause
-  text -- "error_wedged (live_route: missing_url)"); SESSIONS (S1..Sn chips, cyan border —
-  red variant for a stuck session's chip; clicking a row filters the canvas
-  to that session's goal — everything else dims to ~.12 opacity — and
-  clicking the active row again clears the filter); a dashed-border hint
-  box; LEGEND pinned to bottom (six state dots, see zoo).
-- Canvas: flex-1, starfield via layered 1px radial-gradients; a slow conic
-  "radar sweep" overlay (18s rotate, cyan 5% alpha) behind the SVG.
-- SVG DAG (viewBox 1160 wide x 742 base height; a band taller than the base
-  GROWS the viewBox height at ~96px per node and the canvas scrolls
-  vertically inside its shell -- nodes never wrap into extra sub-columns, so
-  every band stays ONE column and `needs` edges keep straight sight-lines):
-  alternating vertical wave bands (band-a fill
-  rgba(86,204,242,0.028), band-b transparent), dashed band separators
-  (stroke rgba(22,35,58,0.8), dasharray 2 6), wave labels top-center per band
-  (10px, letter-spacing .32em, fill #3D4F6E): "WAVE N · <state>" in roadmap
-  mode; in the no-roadmap fallback the columns are state-derived and labeled
-  honestly with counts ("ATTENTION / ACTIVE / QUEUED / LANDED · N" — or
-  "· shown OF total" when a column is capped; never "WAVE").
-- Edges: 1.5px, #152840; edges on the active path: rgba(86,204,242,0.5).
-- Event river: fixed 38px bottom bar (rgba(10,17,32,.92), top hairline),
-  "EVENT RIVER" label + masked marquee ticker (52s linear scroll, duplicated
-  span for seamless loop), entries `[HH:MM:SS] goal · event`.
-- VIEWS nav: plain links to `/goals`, `/dag`, `/leases`, `/events`, pinned
-  above the LEGEND at the rail's bottom (dim text, cyan on hover).
+A single centered column (NOT a rail + canvas). `.shell` is a full-height flex
+column with a soft cyan radial glow at the top; `.inner` is `max-width: 1440px`,
+centered, `padding: 0 28px`. Three stacked regions plus a pinned footer:
 
+- **Topbar** (`.topbar`, bottom hairline): wordmark `KAZI` (bright) + `FLEET`
+  (cyan, weight 500) on the left; the **fleet-count chips** centered
+  (`RUNNING` cyan dot, `CONVERGED` green dot, `STUCK` red dot, `OVER-BUDGET`
+  amber dot — each a `.chip` with a glowing `.dot`); a `LIVE` badge (pulsing
+  green `.livedot`) + a `HH:MM:SS UTC` clock on the right. The counts sum to the
+  shown fleet cards (`OVER-BUDGET` is split out of `STUCK`, never double-counted).
+  The clock reflects the server time as of the last poll tick (a glance, not a
+  wall clock — no per-second client JS, keeping the page build-free and tests
+  hermetic).
 
-## Mobile layout (≤820px, bottom tab bar)
+- **NEEDS ATTENTION** (`#mc-attention`, rendered only when the queue is
+  non-empty): a `.section-label` + a 3-column grid (`.attnrow`) of **alert
+  cards**. Each alert (`.alert`, a link to that goal's drill-in) carries a
+  severity badge (`.asev`: `NEEDS YOU` / `STUCK` / `BUDGET` / `FLAKE` /
+  `REGRESS`), the goal name (`.atitle`), a truncated one-line detail
+  (`.adetail`), and a `PEEK →` affordance. Variants: `.al-bad` (red border +
+  glow) for a needs-a-human cause or a stuck predicate; `.al-warn` (amber) for
+  budget / flake / regression. Ranked and de-duplicated by
+  `Kazi.Attention.Queue` (one entry per goal+signal).
 
-Below 820px the rail cannot coexist with the canvas, so the shell becomes a
-full-height column and the rail's sections become tab panes — the phone
-use-case is triage ("is anything stuck, and can I grab its resume command"),
-so the tab bar sits in the thumb zone. Desktop above the breakpoint is
-untouched; everything here is CSS keyed off `data-mtab` on the shell plus a
-`set_mtab` LiveView event (a server assign, so poll-tick DOM patches preserve
-the active tab).
+- **FLEET** (`#mc-fleet`): a `.fleethead` row — a `FLEET · N LIVE|CLOSED` label
+  plus a **CURRENT/CLOSED scope toggle** (`#mc-scope`, `.scopebtn` pills showing
+  `CURRENT · n` / `CLOSED · m`) — then a 3-column `.grid` of **goal cards**, one
+  per goal (its latest run), newest first. CURRENT (default) shows live-session
+  runs; CLOSED shows dead history (converged / stuck / crashed-stale). An empty
+  CURRENT grid with closed history points at the CLOSED toggle rather than
+  implying nothing ran (`#mission-control-empty`). Overflow past the card cap
+  folds into a `+N more on the goal board →` link (`#mc-older`, → `/goals`). The
+  chips and NEEDS ATTENTION alerts honor the same scope; roadmap wave mode
+  ignores it (durable-plan state across all runs).
 
-- Tab bar: fixed bottom row of four buttons — MAP ✦ / NEEDS YOU ◉ /
-  SESSIONS ⌁ / MORE ☰ — 48px min height, active tab cyan with a 2px top
-  indicator. NEEDS YOU carries a red badge with the live attention-queue
-  count whenever the queue is non-empty: the "anything on fire" answer with
-  zero taps.
-- MAP: wordmark + LIVE badge, the FLEET tiles as a horizontally scrollable
-  strip (labels' section header hidden, tiles stay tappable filters at
-  44px+), then the canvas filling the remaining height. The constellation
-  keeps its desktop geometry and PANS: the SVG holds a min-width of 880px
-  inside a two-axis scroll container (scale never drops below readable), and
-  the canvas node label/sublabel/wave-label font sizes bump up (15/11/12px
-  viewBox units) to compensate for the smaller scale.
-- NEEDS YOU: the attention queue as the whole pane, roomier rows (.7rem
-  padding, 12px), no max-height clamp.
-- SESSIONS: the sessions rows as the whole pane, plus a "No active sessions."
-  empty state (hidden on desktop, where the section simply doesn't render).
-- MORE: the VIEWS nav as full-width tappable rows + the LEGEND.
-- The slide-over drill-in panel becomes a full-width bottom sheet: top 24%,
-  rounded top corners, cyan top hairline, covering ticker and tab bar (close
-  with ✕).
-- The event river stays as the thin strip above the tab bar on every pane.
+- **EVENT RIVER** (`.river` footer, top hairline): a `.section-label` + a
+  masked marquee ticker (`.ticker`, 48s linear scroll, span duplicated for a
+  seamless loop) of `[HH:MM:SS] goal · event` entries — the newest fleet-wide
+  events (`Kazi.Sink.Events`, the same source `/events` reads). Empty →
+  `#mission-control-river-empty`.
 
+## Fleet cards
 
-## Canvas composition (NORMATIVE — the part that makes it a starmap)
+Each run-backed card (`.card`, a link to `/goals/:ref/drillin`) stacks:
 
-The main content area is ONE full-height SVG constellation, not a list:
+- **Top** (`.cardtop`): the goal name (`.gname`, bright bold) + a state pill
+  (`.stpill`): `RUNNING` (`.st-run` cyan) / `CONVERGED` (`.st-ok` green) /
+  `STUCK` (`.st-bad` red) / `STALE` (`.st-warn` amber) / `OVER-BUDGET`
+  (`.st-bad`, its own label). Card frame mirrors state: `.c-run` quiet cyan,
+  `.c-ok` green glow, `.c-bad` red alarm glow (pulses), `.c-warn` amber.
+- **Meta** (`.gmeta2`): a harness badge (`.hbadge`, `harness · model`), the
+  workspace basename (`.ws`), and `ITER n`.
+- **Predicate DNA** (`.dnarow`): one 14px square per predicate in the LATEST
+  iteration's vector — `.dna.dg` green (pass), `.dna.dr` red (fail/error),
+  `.dna.dx` dark (not-evaluated). A large set folds a trailing `+N`.
+- **Bottom** (`.cardbot`): a **burn bar** (`.burn` / `.burnfill`, colored by
+  fraction: `.b-ok` cyan < 65%, `.b-warn` amber 65–85%, `.b-hot` red ≥ 85%)
+  with its label, plus a 72×20 green **sparkline** SVG of passing-predicate
+  count over the iteration history.
 
-- **Every registered run renders as an SVG `<circle>` node ON the canvas**
-  (r=13; pending r=10), carrying its `nd-*` state class, with its goal name
-  as a `<text>` label beneath (12px bold #D7E4F4) and a state sublabel under
-  that (8px, letter-spacing .22em, state-colored): "LANDED · vX.Y.Z",
-  "ITER n · k/m GREEN", "STUCK · ITER n", "STALE · NO HEARTBEAT nm".
-  There is NO chip/pill list of runs anywhere on the page — the circles ARE
-  the fleet view. Active (converging/stuck) nodes get the pulse `.ring`
-  circle behind them; session tags (`.stag`, S-number, upper right) go on
-  converging, stuck, AND claimed nodes (the mockup's S1 sits on a
-  CLAIMED · NEXT node — the session that picks it up next), and every tagged
-  node is listed in the rail's SESSIONS section.
-- **Session scope (CURRENT/CLOSED toggle)**: every run records the OS pid of
-  its driving agent session (`session_os_pid`, the nearest `claude`-like
-  ancestor at registration). The rail carries a two-button toggle under the
-  FLEET tiles — "CURRENT · N / CLOSED · M". CURRENT (the default) shows only
-  runs whose session process is still alive (probed per poll tick, one
-  batched `ps`); CLOSED shows the rest — dead history. Rows with no recorded
-  session pid (older binaries) count as CURRENT only while actively
-  converging. The canvas, fleet counts, and attention queue all honor the
-  scope; roadmap bands do not (groups are goals, not history rows).
-- **No page scroll (desktop)**: the shell is locked to the viewport
-  (height: 100vh, overflow hidden); the rail and the canvas each scroll
-  internally and the event river stays pinned to the bottom edge — never a
-  page scrollbar stacked on a canvas scrollbar. The ≤820px mobile layout
-  keeps its stacked page flow.
-- **Nodes are laid out in vertical band columns** spanning the full
-  canvas height: alternating band fills (band-a rgba(86,204,242,0.028) /
-  band-b transparent), dashed separators, and a top-center `.wlabel` per
-  band. With a roadmap goal-file, bands = its --explain frontiers ("WAVE N ·
-  <state>") and nodes = its groups (runs attach to their group's node).
-  Without one, columns are state-derived — ordered by operator attention,
-  left to right: ATTENTION (stuck/stale), ACTIVE (converging/claimed),
-  QUEUED (pending), LANDED — labeled "NAME · N", never "WAVE" (no
-  topological order exists without a roadmap). Each state column renders at
-  most 8 nodes, NEWEST heartbeat first (top of the column); overflow folds
-  into the label as "NAME · 8 OF M", so a long-lived fleet's landed pile
-  never stretches the canvas into a scroll. Within a band, nodes distribute
-  vertically with even spacing in a SINGLE column -- a dense roadmap band
-  stretches the canvas downward (scroll) rather than wrapping.
-- **`needs` edges** draw as 1.5px lines (#152840; rgba(86,204,242,0.5) when
-  either endpoint is active) between group nodes.
-- **The event river is a 38px bottom bar ON the starmap page** (rgba(10,17,32,.92),
-  top hairline): "EVENT RIVER" label + a masked, seamlessly-looping ticker of
-  the newest events ("[HH:MM:SS] goal · event"), duplicated span, 52s scroll
-  (reduced-motion-gated). The /events page remains the full feed.
-- Overflow rule: the canvas shows the most recent ~48 runs as nodes (newest
-  heartbeats first; the scroll layout carries the density, so the cap is a
-  DOM-size bound, not a layout one); a single dim `.wlabel`-style count
-  ("+N older") links to the full registry list on /goals. Fleet counts stay
-  in the rail tiles.
+The card's DNA / sparkline / burn / iter come from the SAME persisted
+per-iteration history the drill-in heatmap reads (`Kazi.ReadModel`); nothing is
+fabricated. A run with no recorded iterations shows an empty DNA strip and
+`ITER —`.
 
-## Node state zoo (SVG circles r=13; pending r=10)
+### The burn bar — an honest deviation from the mock
 
-| state      | class       | fill      | stroke                    | extra |
-|------------|-------------|-----------|---------------------------|-------|
-| landed     | .nd-landed  | --grn     | none                      | drop-shadow 0 0 8px rgba(46,230,168,.65) |
-| converging | .nd-conv    | #0A1526   | --cyn 2px                 | glow rgba(86,204,242,.55) + pulse ring |
-| stuck      | .nd-stuck   | #160D14   | --red 2px                 | glow rgba(255,92,108,.65) + FAST pulse ring |
-| claimed    | .nd-claimed | #0B1424   | --cyn 1.5px dash 4 4      | opacity .85 |
-| pending    | .nd-pending | #0D1626   | #223350 1.5px             | r=10, dim sublabel |
-| stale      | .nd-stale   | #141118   | --amb 1.5px dot 2 4       | glow rgba(255,180,84,.35) |
+The originating mock's burn bar reads `412k / 600k tokens`. kazi's run registry
+has no token *cap* — the only budget it authoritatively knows is
+`max_iterations` (per ADR-0046 the harness reports tokens USED, not a ceiling).
+So the bar reads **iteration** progress (`iter n / max`, same `b-ok/b-warn/b-hot`
+thresholds), and harness-reported tokens (`Run.budget_tokens`) ride alongside as
+text (`· 412k tok`) only when present. Nothing is fabricated: no cap is invented
+to fake a token fraction.
 
-Pulse ring `.ring`: r=14 cyan 1.5px, scale 1→1.7 fade-out 2.6s infinite;
-`.ring.redr` same at 1.4s (urgency). Selection ring `.selring`: #EAF6FF
-dasharray 3 5 slow-spin 9s. Node label 12px bold #D7E4F4 below node; sublabel
-8px letter-spacing .22em colored by state (g/c/r/a/d classes), e.g.
-"LANDED · v1.68.0", "ITER 4 · 5/8 GREEN", "STUCK · ITER 9",
-"CLAIMED · NEXT", "PENDING · NEEDS 3", "STALE · NO HEARTBEAT 4m".
-Session tag `.stag` next to converging/stuck/claimed nodes: S-number, 10px
-bold cyan (red when that session drives a stuck goal).
+## Roadmap wave grouping (preserving T47.2)
 
-## Slide-over drill-in panel (click node or attention entry)
+When `kazi dashboard --roadmap <goal-file>` configures a roadmap goal
+(`KaziWeb.Starmap.GoalSource` returns a `Kazi.Goal.t()`), the FLEET grid GROUPS
+into labeled **wave sections** — one per topological frontier from
+`Kazi.Goal.DepGraph.frontiers/1`, the SAME computation `kazi apply --explain`
+prints (one function, two renderers, so the dashboard and the schedule can never
+disagree). The header reads `ROADMAP · N GOALS · M WAVES`; each wave is a
+`WAVE k · <ACTIVE|LANDED|FRONTIER|HORIZON>` sub-header (`.wavehead`) over its own
+card grid.
 
-470px right slide-over, rgba(9,15,28,.97), cyan-tinted left hairline,
--24px 0 60px shadow. Contents top→bottom: goal name (Space Grotesk 21px) +
-chips (workspace, harness · model, state pill cyan/red); ITER n + budget
-line; burn bar (4px: cyan ok / amber warn ≥~70% / red hot ≥~85%); honest
-terminal CAUSE line (T48.4, ADR-0058 -- "cause: error_wedged (live_route:
-missing_url)", amber-bordered; only present when the finished run's
-`outcome_cause_class` was classified -- absent on a clean converge or an
-ordinary failing-set stuck stop);
-PREDICATE VECTOR as DNA strip (15px squares: green glow pass, red glow fail,
-#152134 not-evaluated); CONVERGENCE heatmap (predicate rows × iteration
-cells, 15x13px, green/red/void — regression flips visible); TRANSCRIPT TAIL
-(live or "post-mortem · run ended without terminal status"): message lines
-11px --txt, tool calls as bordered pills "▸ Bash mix test" + right-aligned
-meta ("0 failures · 14.2s"; red border/meta on failing tool); footer button
-"FULL ANALYST VIEW →" (cyan ghost button) linking to the drill-in page.
+A declared group with a registered run shows its live card; a group nothing has
+dispatched yet shows a lighter **placeholder** card (a plain tile, not a link,
+`data-run="false"`):
 
-## Motion (all inside @media (prefers-reduced-motion: no-preference))
+- `CLAIMED` (`.c-claimed` dashed cyan frame) — every `needs` dep converged, the
+  live frontier, eligible to dispatch now.
+- `PENDING` (`.c-pending` dim) — still waiting on an unconverged dep, or poisoned
+  behind a stuck ancestor (`DagSnapshot`'s `:blocked`, folded in).
 
-sweep rotate 18s linear; ring pulse 2.6s (red 1.4s); livedot opacity pulse
-1.6s; ticker translateX -50% 52s linear; selring spin 9s. No motion
-otherwise — static styles must read correctly with animations off.
+Roadmap-mode wave state resolves from the LATEST run per group across the whole
+registry (the roadmap is the durable plan — a group converged by a since-closed
+session still reads landed); flat mode scopes to CURRENT sessions. With no
+roadmap configured (the default) the fleet is a single flat grid — the fallback,
+not a separate mode.
+
+## Motion (reduced-motion gated)
+
+All animation sits under `@media (prefers-reduced-motion: no-preference)`;
+keyframes are defined once in `KaziWeb.Layouts`:
+
+- `mc-pulse` (1.6s) — the `LIVE` dot.
+- `mc-alarm` (2.2s) — the red glow on `.c-bad` (stuck) cards.
+- `mc-scroll` (48s) — the event-river ticker.
+
+No motion otherwise — static styles must read correctly with animations off.
+
+## Mobile (≤ 820px)
+
+No separate tab bar — a card grid is inherently responsive. Below 1080px the
+alert + fleet grids drop to 2 columns; below 820px to a single column, the
+topbar wraps, and the clock/LIVE badge move into the thumb zone. The event river
+stays pinned at the bottom. Desktop above the breakpoint is untouched.
 
 ## Mapping to existing views
 
-- StarmapLive: rail + canvas + river (river content from T47.1 events).
-- DrillinHeatmapLive: full-page version of the panel heatmap (same cells).
-- TranscriptPeekLive: full-page version of the transcript tail (same pills).
-- States map: landed→nd-landed, converging→nd-conv, stuck→nd-stuck,
-  claimed→nd-claimed, pending→nd-pending, stale→nd-stale (registry states
-  already exist; claimed/pending come from the wave-band DAG source).
+- `MissionControlLive`: the topbar + attention + fleet grid + river (river
+  content from the T47.1 events sink). Retains ADR-0057's read-only projection
+  contract (ADR-0011 §2): it renders state, never mutates a run/goal/lease. Its
+  only interactions are navigation links into the full-page views.
+- `DrillinHeatmapLive`: the full per-goal analyst view — convergence heatmap +
+  iteration scrubber + transcript peek. Every fleet card and alert deep-links
+  here (`/goals/:ref/drillin`); this is Mission Control's "drill in".
+- `TranscriptPeekLive` / `EventRiverLive` / `GoalBoardLive` / `LeaseMapLive` /
+  `DagLive`: the other full-page views, recolored from the shared token set.
+- States map: converged→landed, running→converging (or stale on a dead
+  heartbeat), stuck/over_budget/error→stuck; roadmap placeholders add
+  claimed/pending from the `DagSnapshot` frontier.
