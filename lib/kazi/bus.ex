@@ -379,8 +379,8 @@ defmodule Kazi.Bus do
     sock_path = opts[:sock_path] || Supervisor.default_sock_path()
 
     with :alive <- Probe.probe(sock_path),
-         {:ok, %{"nats_port" => port}} when is_integer(port) <- Probe.ping(sock_path),
-         {:ok, conn} <- Gnat.start_link(%{host: "127.0.0.1", port: port}) do
+         {:ok, %{"nats_port" => port} = pong} when is_integer(port) <- Probe.ping(sock_path),
+         {:ok, conn} <- Gnat.start_link(discovered_connect_opts(pong, port)) do
       try do
         run(conn, fun)
       after
@@ -388,6 +388,32 @@ defmodule Kazi.Bus do
       end
     else
       _other -> {:error, :no_daemon}
+    end
+  end
+
+  @doc """
+  The nats connect opts a bus CLIENT uses, from the daemon control handshake
+  (issue #1101). The client dials the daemon's CONFIGURED nats host -- the
+  connect-mode remote host, not a hardcoded `127.0.0.1` -- so a cross-machine
+  `--nats-host` bus works from the CLI with no SSH tunnel; and it presents the
+  shared `nats_token` (handshake value, else `KAZI_NATS_TOKEN`) so a
+  token-protected bus no longer rejects the client with an Authorization
+  Violation. Falls back to today's local, unauthenticated shape when the
+  handshake omits them (an older daemon). Public for unit testing.
+  """
+  @spec discovered_connect_opts(map(), pos_integer()) :: map()
+  def discovered_connect_opts(pong, port) do
+    host =
+      case pong["nats_host"] do
+        h when is_binary(h) and h != "" -> h
+        _ -> "127.0.0.1"
+      end
+
+    base = %{host: host, port: port}
+
+    case pong["nats_token"] || System.get_env("KAZI_NATS_TOKEN") do
+      t when is_binary(t) and t != "" -> Map.put(base, :auth_token, t)
+      _ -> base
     end
   end
 
@@ -467,6 +493,7 @@ defmodule Kazi.Bus do
 
     entry = %{
       "session" => session(opts),
+      "machine" => hostname(),
       "pid" => os_pid(),
       "cwd" => File.cwd!(),
       "ts" => DateTime.to_iso8601(DateTime.utc_now())
