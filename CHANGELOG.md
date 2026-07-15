@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.150.0](https://github.com/kazi-org/kazi/compare/v1.149.0...v1.150.0) (2026-07-15)
+
+
+### Features
+
+* **archive:** trim_plan moves spec:-referenced behavior specs to docs/specs/archive/ (T40.4, ADR-0050) ([052767a](https://github.com/kazi-org/kazi/commit/052767ab6491a61021784e65e506a82823491f93))
+* **doc-freshness:** (g) every spec: pointer in the live WBS resolves to a file (T40.5, ADR-0050) ([facf45c](https://github.com/kazi-org/kazi/commit/facf45cb473983bb4986fe441a70b6de5e5b54f0))
+* **doc-lifecycle:** wrap the spec-refs-exist checker as a custom_script predicate (T40.5) ([abba87b](https://github.com/kazi-org/kazi/commit/abba87b97f19d283933b5044b68da751eb1f2cf7))
+
+
+### Bug Fixes
+
+* **loader:** intern gherkin doc-metadata atoms so spec-imported goals load in the release binary ([#1112](https://github.com/kazi-org/kazi/issues/1112)) ([e3952d9](https://github.com/kazi-org/kazi/commit/e3952d9ecef9902488cb86aab8a9d817bde271fa))
+
 ## [1.149.0](https://github.com/kazi-org/kazi/compare/v1.148.0...v1.149.0) (2026-07-15)
 
 
