@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.149.0](https://github.com/kazi-org/kazi/compare/v1.148.0...v1.149.0) (2026-07-15)
+
+
+### Features
+
+* **cli:** kazi spec import derives predicates from a .feature into a goal-file (T40.2, ADR-0050) ([d9976b8](https://github.com/kazi-org/kazi/commit/d9976b8efd36feb51b8d6021896d31a958de2b11))
+
 ## [1.148.0](https://github.com/kazi-org/kazi/compare/v1.147.1...v1.148.0) (2026-07-15)
 
 
