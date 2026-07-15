@@ -100,6 +100,20 @@ requires a matching `docs/adr/<NNNN>-*.md` file for each. A dangling reference
 
 Asserts: no doc points at an ADR number that does not exist.
 
+### (g) Every `spec:` behavior-spec pointer in the WBS resolves
+
+`check_g_spec_refs_exist.sh` (T40.5, ADR-0050). The sibling of (c) for the
+`docs/specs/` behavior-spec tier: a plan task may point at its spec via an
+optional `spec: docs/specs/<slug>.feature` field (T40.3). This scans the live
+WBS — the master `docs/plan.md` plus each `docs/plans/*.md` epic file
+(non-recursive, so `docs/plans/archive/` is out of scope) — and requires every
+`spec:` value to resolve to an existing file. A pointer at a deleted or renamed
+spec is a FAIL with the `file:line` that cited it. A literal placeholder like
+`spec: docs/specs/<slug>.feature` in prose (angle brackets) is ignored — real
+paths never contain `<>`.
+
+Asserts: no WBS task points at a behavior spec that does not exist.
+
 ### (d) No done+released task lingers in the live plan
 
 `check_d_plan_trimmed.sh`. For every `- [x]` task in the live plan — the master
@@ -159,6 +173,7 @@ report a false FAIL when `mix` errors on missing deps rather than on coherence).
 | (b) | no live doc names a removed/unknown command | `check_b_no_dead_command_refs.sh` |
 | (c) | every ADR a doc cites exists | `check_c_adr_refs_exist.sh` |
 | (d) | no done+released task lingers in the plan | `check_d_plan_trimmed.sh` |
+| (g) | every `spec:` pointer in the WBS resolves | `check_g_spec_refs_exist.sh` |
 | (E) | README <-> website canonical strings (T9.9) | `site/scripts/check-coherence.mjs` (subsumed) |
 | (F) | skill / AGENTS.md <-> CLI (T16.4) | `test/kazi/teach_coherence_test.exs` (subsumed) |
 
@@ -237,6 +252,7 @@ kazi apply priv/examples/doc_lifecycle.goal.toml --workspace .
 | `commands-in-readme` | `custom_script` | `check_a_commands_in_readme.sh` | `exit_zero` |
 | `no-dead-command-refs` | `custom_script` | `check_b_no_dead_command_refs.sh` | `exit_zero` |
 | `adr-refs-exist` | `custom_script` | `check_c_adr_refs_exist.sh` | `exit_zero` |
+| `spec-refs-exist` | `custom_script` | `check_g_spec_refs_exist.sh` | `exit_zero` |
 | `readme-site-coherence` | `custom_script` | `site/scripts/check-coherence.mjs` (E) | `exit_zero` |
 | `skill-cli-coherence` | `custom_script` | `test/kazi/teach_coherence_test.exs` (F) | `exit_zero` |
 | `doc-coverage-ratchet` | `ratchet` (ADR-0041) | `metric_doc_coverage.sh` | `higher_better`, baseline `stored` |
