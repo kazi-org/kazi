@@ -37,7 +37,7 @@ defmodule Kazi.Daemon.Nats do
   @ready_retry_ms 100
   @ready_timeout_ms 5_000
 
-  defstruct [:port, :os_pid, :nats_host, :nats_port]
+  defstruct [:port, :os_pid, :nats_host, :nats_port, :nats_token]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -52,6 +52,14 @@ defmodule Kazi.Daemon.Nats do
   @doc "The nats-server host: `127.0.0.1` when locally spawned, or the connect-mode `opts[:nats_host]`."
   @spec host(GenServer.server()) :: String.t()
   def host(server \\ __MODULE__), do: GenServer.call(server, :host)
+
+  @doc """
+  The shared-bus auth token (`opts[:nats_token]`), or `nil` when the bus runs
+  unauthenticated. Surfaced through the daemon control handshake so a bus CLIENT
+  on the SAME machine can present it to a token-protected nats (issue #1101).
+  """
+  @spec token(GenServer.server()) :: String.t() | nil
+  def token(server \\ __MODULE__), do: GenServer.call(server, :token)
 
   @doc """
   Resolves the `nats-server` binary: an explicit path first, then `PATH`.
@@ -112,7 +120,13 @@ defmodule Kazi.Daemon.Nats do
 
   defp init_connect(host, opts) do
     nats_port = Keyword.get(opts, :port, @default_port)
-    {:ok, %__MODULE__{nats_host: host, nats_port: nats_port}}
+
+    {:ok,
+     %__MODULE__{
+       nats_host: host,
+       nats_port: nats_port,
+       nats_token: Keyword.get(opts, :nats_token)
+     }}
   end
 
   defp init_spawn(opts) do
@@ -134,7 +148,14 @@ defmodule Kazi.Daemon.Nats do
 
       {:os_pid, os_pid} = Port.info(port, :os_pid)
 
-      {:ok, %__MODULE__{port: port, os_pid: os_pid, nats_host: "127.0.0.1", nats_port: nats_port}}
+      {:ok,
+       %__MODULE__{
+         port: port,
+         os_pid: os_pid,
+         nats_host: "127.0.0.1",
+         nats_port: nats_port,
+         nats_token: token
+       }}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -148,6 +169,9 @@ defmodule Kazi.Daemon.Nats do
 
   @impl true
   def handle_call(:host, _from, state), do: {:reply, state.nats_host, state}
+
+  @impl true
+  def handle_call(:token, _from, state), do: {:reply, state.nats_token, state}
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
