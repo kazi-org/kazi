@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.148.0](https://github.com/kazi-org/kazi/compare/v1.147.1...v1.148.0) (2026-07-15)
+
+
+### Features
+
+* **dashboard:** Mission Control fleet home view, retiring the starmap ([2c40e41](https://github.com/kazi-org/kazi/commit/2c40e41dc1e058aa89c45f08fa67da19471c7415))
+
 ## [1.147.1](https://github.com/kazi-org/kazi/compare/v1.147.0...v1.147.1) (2026-07-15)
 
 
