@@ -28,21 +28,25 @@ defmodule Kazi.Reconcile.GherkinImporter do
       fragment on spelling, ADR-0020), the group `name` the verbatim Feature
       name. A Scenario under a Feature with a blank or missing name falls into a
       single default group (`"ungrouped"`),
-    * a `"predicate"` array — one `test_runner` acceptance predicate per
+    * a `"predicate"` array — one `custom_script` acceptance predicate per
       Scenario, each carrying the `feature` it belongs to, the `scenario` name,
       the `steps` it asserts, the group it belongs to (its `group` config key),
       and a human `description`.
 
-  ## Why `test_runner`
+  ## Why `custom_script` (scaffold, not a runnable check)
 
   A Cucumber Scenario IS a behavioural acceptance test: its Given/When/Then
-  steps are executed by a test runner (cucumber, behave, …) and pass or fail as
-  a unit. So a Scenario maps to the `test_runner` provider kind
-  (`Kazi.Providers.Tests`) — the predicate is "this scenario, run as a test,
-  passes". The OpenAPI sibling uses `http_probe` because an API operation is a
-  live HTTP surface; a gherkin Scenario is a test, hence `test_runner`. The
-  steps are recorded on the predicate so it is self-describing and the
-  surface-coverage meta-predicate (T13.5) can match it.
+  steps describe a unit that passes or fails. But the `.feature` says WHAT must
+  hold, never HOW to run it — so the derived predicate maps to the generic
+  command-runner (`custom_script`, `verdict = "exit_zero"`, ADR-0040, the
+  first-class successor to the deprecated `test_runner`) as a SCAFFOLD, not a
+  ready-to-run check. It carries a placeholder `cmd`/`args` that LOADS
+  (`custom_script` requires a non-empty `cmd`) but exits non-zero, so an imported
+  goal is honestly RED until a human or coding agent replaces the command with
+  the real check for that scenario (ADR-0013: kazi scaffolds, never guesses). The
+  scenario's steps are recorded on the predicate so whoever wires the runner
+  knows exactly what behaviour to assert (and the surface-coverage
+  meta-predicate, T13.5, can match it).
 
   ## Config shape per predicate
 
@@ -50,6 +54,9 @@ defmodule Kazi.Reconcile.GherkinImporter do
   `id`/`provider`/`description`/`acceptance`/`group`, and every other key
   collected verbatim into the provider's `config`):
 
+    * `"verdict"` — `"exit_zero"`: the scenario passes when its command exits 0,
+    * `"cmd"` / `"args"` — the placeholder scaffold command (exits non-zero) a
+      human replaces with the scenario's real check,
     * `"feature"` — the verbatim Feature name the Scenario belongs to,
     * `"scenario"` — the verbatim Scenario name,
     * `"steps"` — the ordered list of step lines (`"Given a user"`, …), recorded
@@ -102,6 +109,22 @@ defmodule Kazi.Reconcile.GherkinImporter do
   # Step keywords that open a step line. `*` is the gherkin "bullet" step.
   @step_keywords ~w(Given When Then And But *)
 
+  # A behavior spec states WHAT behavior must hold, not HOW to check it — so the
+  # derived predicate is a SCAFFOLD, not a runnable check (ADR-0013: kazi
+  # scaffolds, never guesses). It carries a placeholder `cmd`/`args` that LOADS
+  # (custom_script requires a non-empty cmd) but exits non-zero, so the goal is
+  # honestly RED until a human or coding agent replaces the command with the real
+  # check for this scenario. The scenario's Given/When/Then steps ride along on
+  # the predicate (its `steps` config) so whoever wires the runner knows exactly
+  # what behavior to assert.
+  @scaffold_verdict "exit_zero"
+  @scaffold_cmd "sh"
+  @scaffold_args [
+    "-c",
+    "echo 'kazi: behavior-spec scaffold — replace cmd/args with the real check " <>
+      "for this scenario (its Given/When/Then steps are recorded on this predicate).' >&2; exit 1"
+  ]
+
   @typedoc """
   Options for `import_map/2` and `import_goal/2`:
 
@@ -138,7 +161,7 @@ defmodule Kazi.Reconcile.GherkinImporter do
       "create"
       iex> [predicate] = map["predicate"]
       iex> {predicate["provider"], predicate["scenario"], predicate["group"]}
-      {"test_runner", "A new user signs up", "sign-up"}
+      {"custom_script", "A new user signs up", "sign-up"}
   """
   @spec import_map(String.t() | [String.t()], opts()) :: {:ok, map()} | {:error, String.t()}
   def import_map(source, opts \\ [])
@@ -310,8 +333,11 @@ defmodule Kazi.Reconcile.GherkinImporter do
 
     %{
       "id" => predicate_id(scenario),
-      "provider" => "test_runner",
+      "provider" => "custom_script",
+      "verdict" => @scaffold_verdict,
       "acceptance" => true,
+      "cmd" => @scaffold_cmd,
+      "args" => @scaffold_args,
       "feature" => feature_name_of(scenario),
       "scenario" => scenario.scenario,
       "steps" => scenario.steps,
