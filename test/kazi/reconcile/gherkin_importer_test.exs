@@ -1,8 +1,9 @@
 defmodule Kazi.Reconcile.GherkinImporterTest do
-  # T13.2: gherkin .feature -> grouped test_runner acceptance predicates
-  # (ADR-0021 §1, ADR-0020 groups). Hermetic — reads a committed fixture
-  # .feature under test/fixtures/reconcile and in-line strings; no network, no
-  # clock, no gherkin dependency.
+  # T13.2: gherkin .feature -> grouped custom_script acceptance predicates
+  # (ADR-0021 §1, ADR-0020 groups; migrated off the deprecated test_runner to
+  # custom_script/exit_zero scaffolds, ADR-0040/E40). Hermetic — reads a
+  # committed fixture .feature under test/fixtures/reconcile and in-line strings;
+  # no network, no clock, no gherkin dependency.
   use ExUnit.Case, async: true
 
   alias Kazi.Goal
@@ -13,8 +14,8 @@ defmodule Kazi.Reconcile.GherkinImporterTest do
 
   defp fixture_text, do: File.read!(@fixture)
 
-  describe "import_map/2 — scenarios become grouped test_runner predicates" do
-    test "one test_runner acceptance predicate per Scenario with feature+scenario+steps config" do
+  describe "import_map/2 — scenarios become grouped custom_script predicates" do
+    test "one custom_script acceptance predicate per Scenario with feature+scenario+steps config" do
       {:ok, map} = GherkinImporter.import_map(fixture_text())
 
       # 5 scenarios: 2 under Checkout, 2 across the two Sign Up features, 1 under
@@ -22,7 +23,13 @@ defmodule Kazi.Reconcile.GherkinImporterTest do
       assert length(map["predicate"]) == 5
 
       Enum.each(map["predicate"], fn p ->
-        assert p["provider"] == "test_runner"
+        assert p["provider"] == "custom_script"
+        # A SCAFFOLD (ADR-0040/E40): verdict=exit_zero with a placeholder cmd/args
+        # that loads but exits non-zero — honestly RED until a human wires the
+        # real check.
+        assert p["verdict"] == "exit_zero"
+        assert is_binary(p["cmd"]) and p["cmd"] != ""
+        assert is_list(p["args"])
         assert p["acceptance"] == true
         assert is_binary(p["feature"])
         assert is_binary(p["scenario"])
@@ -130,7 +137,7 @@ defmodule Kazi.Reconcile.GherkinImporterTest do
 
       assert goal.mode == :create
       assert length(goal.predicates) == 5
-      assert Enum.all?(goal.predicates, &(&1.kind == :tests))
+      assert Enum.all?(goal.predicates, &(&1.kind == :custom_script))
       assert Enum.all?(goal.predicates, & &1.acceptance?)
 
       # Groups round-trip with normalized ids.
