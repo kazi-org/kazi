@@ -161,6 +161,30 @@ defmodule Kazi.Reconcile.GherkinImporterTest do
     end
   end
 
+  describe "release-load safety: doc-metadata keys are interned by the loader" do
+    # A spec-imported custom_script goal carries feature/scenario/steps config keys
+    # that NO provider consumes. In the RELEASE binary those atoms are not
+    # otherwise interned when a goal loads, so the loader's atom-existence guard
+    # rejected them as "unknown config key" -- `kazi apply` failed on a real binary
+    # even though every mix-based test passed (mix interns them). Fixed by
+    # declaring them in Kazi.Goal.Loader (@gherkin_doc_keys). See docs/devlog.md
+    # 2026-07-15. This test pins the importer's doc-key set so a NEW metadata key
+    # can't be added without also interning it in the loader.
+    test "the importer emits exactly the doc-metadata keys the loader interns" do
+      {:ok, map} = GherkinImporter.import_map("Feature: F\n  Scenario: S\n    Then ok\n")
+      [pred] = map["predicate"]
+
+      reserved = ~w(id provider description guard acceptance held_out group)
+      runner = ~w(verdict cmd args)
+      doc_keys = (Map.keys(pred) -- reserved) -- runner
+
+      assert Enum.sort(doc_keys) == ~w(feature scenario steps),
+             "the importer's doc-metadata keys must match Kazi.Goal.Loader's " <>
+               "@gherkin_doc_keys -- a new key here needs interning there, or a " <>
+               "spec-imported goal fails to load in the release binary"
+    end
+  end
+
   describe "determinism and re-import (upsert)" do
     test "the same features yield a byte-identical goal map" do
       {:ok, a} = GherkinImporter.import_map(fixture_text())
