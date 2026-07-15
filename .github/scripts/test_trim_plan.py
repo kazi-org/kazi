@@ -30,9 +30,12 @@ MASTER = """\
 E1 = """\
 **Component:** infra
 
-- [x] T1.1 first thing.  Done: 2026-01-05  verifies: [UC-1]
+- [x] T1.1 first thing.  Done: 2026-01-05  verifies: [UC-1]  spec: docs/specs/e1-thing.feature
 - [x] T1.2 second thing.  Done: 2026-01-08  verifies: [UC-1]
 """
+E1_FEATURE = "Feature: E1 thing\n  Scenario: it works\n    Then ok\n"
+E1_NOTE = "# E1 thing — proposal note\n"
+OTHER_FEATURE = "Feature: Unreferenced\n  Scenario: untouched\n    Then ok\n"
 E2 = """\
 - [x] T2.1 done part.  Done: 2026-01-05
 - [ ] T2.2 still open.  Est: 1h
@@ -48,6 +51,12 @@ def setup(tmp):
     (tmp / "docs" / "plans" / "E1.md").write_text(E1)
     (tmp / "docs" / "plans" / "E2.md").write_text(E2)
     (tmp / "docs" / "plans" / "E3.md").write_text(E3)
+    # T40.4 fixtures: E1's task references a behavior spec (+ its paired note);
+    # an unreferenced spec must stay put.
+    (tmp / "docs" / "specs").mkdir(parents=True)
+    (tmp / "docs" / "specs" / "e1-thing.feature").write_text(E1_FEATURE)
+    (tmp / "docs" / "specs" / "e1-thing.md").write_text(E1_NOTE)
+    (tmp / "docs" / "specs" / "other.feature").write_text(OTHER_FEATURE)
 
 
 def run(tmp, *extra):
@@ -84,6 +93,16 @@ def main():
         check(archived.exists(), "E1 file moved into docs/plans/archive/")
         check(archived.read_text() == E1, "archived E1 is BYTE-IDENTICAL to the original (lossless)")
         check(not (tmp / "docs" / "plans" / "E1.md").exists(), "E1 removed from the live plans dir")
+
+        # T40.4: E1's referenced behavior spec + its paired note moved to
+        # docs/specs/archive/ verbatim; the unreferenced spec is untouched.
+        specs_archive = tmp / "docs" / "specs" / "archive"
+        check((specs_archive / "e1-thing.feature").exists(), "referenced .feature moved to docs/specs/archive/")
+        check((specs_archive / "e1-thing.feature").read_text() == E1_FEATURE, "archived .feature is byte-identical (lossless)")
+        check((specs_archive / "e1-thing.md").exists(), "the paired .md note moved with its .feature")
+        check(not (tmp / "docs" / "specs" / "e1-thing.feature").exists(), "referenced .feature removed from the live specs dir")
+        check((tmp / "docs" / "specs" / "other.feature").exists(), "an UNreferenced spec is left untouched")
+        check(not (specs_archive / "other.feature").exists(), "the unreferenced spec was NOT archived")
         check("### E1 -- Done epic (P1) -> plans/E1.md" not in plan, "E1's WBS pointer is gone")
         check("## Archived epics" in plan, "an Archived epics section exists")
         check("plans/archive/E1.md" in plan, "the Archived section points at the archived file")
