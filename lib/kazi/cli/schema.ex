@@ -15,7 +15,9 @@ defmodule Kazi.CLI.Schema do
   T27.4/T27.9 (ADR-0032): the schemas are keyed by the verbs `apply`/`plan` (was
   `run`/`propose`). The deprecated `run`/`propose` schema aliases were REMOVED in
   v0.6.0 (T27.9), so `kazi schema run` / `kazi schema propose` no longer resolve;
-  only `apply`/`plan`/`status` are valid schema keys.
+  `apply`/`plan`/`status`/`bus` are the valid schema keys (`bus` is the T55.1 /
+  ADR-0072 digest envelope shared by `bus read|peek|watch --json` and the
+  `kazi_bus_read`/`kazi_bus_watch` MCP tools).
   """
 
   # The contract version, shared with `Kazi.CLI`'s `@run_schema_version`. Kept in
@@ -247,6 +249,97 @@ defmodule Kazi.CLI.Schema do
         "clarify" => []
       }
     },
+    "bus" => %{
+      schema_version: @schema_version,
+      command: "bus",
+      title: "kazi bus read|peek|watch --json result (the digest envelope)",
+      description:
+        "The versioned JSON object `kazi bus read|peek|watch --json` emits (T55.1, " <>
+          "ADR-0072) -- and the shape the `kazi_bus_read`/`kazi_bus_watch` MCP tools " <>
+          "return. The DIGEST is the default machine shape: verbatim lines only for " <>
+          "directed (kind msg) and sev interrupt messages, one-line stubs for bodies " <>
+          "over the 1024-byte render threshold (ALL kinds, including directed/interrupt), " <>
+          "exact count lines per {kind, topic} for everything else, bounded to 40 lines " <>
+          "regardless of backlog size. `--full` (CLI) / `full: true` (MCP) is the " <>
+          "documented escape: it replaces `digest` with `messages`, every pending " <>
+          "message unabridged. Every message and digest line carries the message's " <>
+          "JetStream stream sequence as its public `id`.",
+      fields: [
+        %{name: "schema_version", type: "integer", description: "The contract version."},
+        %{name: "ok", type: "boolean", description: "true on a successful read."},
+        %{
+          name: "digest",
+          type: "object",
+          description:
+            "Default shape (absent under --full): {total: integer (exact message count), " <>
+              "lines: array<object>} with at most 40 lines. Each line has a `type`: " <>
+              "\"verbatim\" ({type, id, kind, topic, sev, session, machine, ts, bytes, " <>
+              "text} -- directed/interrupt bodies within the 1024-byte threshold), " <>
+              "\"stub\" (same fields WITHOUT text -- any body over the threshold; the " <>
+              "body stays in the stream, addressable by id), \"count\" ({type, kind, " <>
+              "topic, count, first_id, last_id} -- everything else, exact counts, " <>
+              "most-frequent first), or \"overflow\" (at most one, always last: {type, " <>
+              "count, first_id, last_id} folding the tail past the 40-line bound, " <>
+              "exact counts preserved)."
+        },
+        %{
+          name: "messages",
+          type: "array<object>",
+          description:
+            "--full / full: true only (replaces `digest`): every pending message " <>
+              "unabridged -- {id, scope, kind, topic, text, session, machine, ts, sev}. " <>
+              "`id` is the message's JetStream stream sequence."
+        },
+        %{
+          name: "timed_out",
+          type: "boolean",
+          description:
+            "kazi_bus_watch (MCP) only: true when the watch expired with no traffic -- " <>
+              "an expected outcome to branch on, never an error. The CLI signals the " <>
+              "same via exit code 3."
+        }
+      ],
+      example: %{
+        "schema_version" => @schema_version,
+        "ok" => true,
+        "digest" => %{
+          "total" => 202,
+          "lines" => [
+            %{
+              "type" => "verbatim",
+              "id" => 412,
+              "kind" => "msg",
+              "topic" => "session-a",
+              "sev" => "info",
+              "session" => "session-b",
+              "machine" => "host1",
+              "ts" => "2026-07-16T12:00:00Z",
+              "bytes" => 14,
+              "text" => "review is done"
+            },
+            %{
+              "type" => "stub",
+              "id" => 413,
+              "kind" => "note",
+              "topic" => "design",
+              "sev" => "info",
+              "session" => "session-c",
+              "machine" => "host1",
+              "ts" => "2026-07-16T12:01:00Z",
+              "bytes" => 61_440
+            },
+            %{
+              "type" => "count",
+              "kind" => "fact",
+              "topic" => "ci",
+              "count" => 200,
+              "first_id" => 210,
+              "last_id" => 411
+            }
+          ]
+        }
+      }
+    },
     "status" => %{
       schema_version: @schema_version,
       command: "status",
@@ -323,7 +416,7 @@ defmodule Kazi.CLI.Schema do
   # The verbs with a documented result schema, in emit order. `all/0` keys by
   # these. The deprecated `run`/`propose` schema aliases were removed in v0.6.0
   # (T27.9), so these are the only valid schema keys.
-  @ordered_commands ["apply", "plan", "status"]
+  @ordered_commands ["apply", "plan", "status", "bus"]
 
   @doc "The shared `--json` contract version."
   @spec schema_version() :: pos_integer()
