@@ -225,6 +225,18 @@ defmodule Kazi.CLIHelpSchemaTest do
       assert MapSet.subset?(MapSet.new(~w(kind ref status predicates)), field_names)
     end
 
+    test "schema bus returns the digest envelope schema (T55.1, ADR-0072); parses" do
+      out = capture_io(fn -> assert Kazi.CLI.run(["schema", "bus"]) == 0 end)
+
+      assert {:ok, schema} = Jason.decode(String.trim(out))
+      assert schema["schema_version"] == 2
+      assert schema["command"] == "bus"
+      field_names = schema["fields"] |> Enum.map(& &1["name"]) |> MapSet.new()
+      assert MapSet.subset?(MapSet.new(~w(ok digest messages)), field_names)
+      # The digest is the introspectable default; the example carries the bound shape.
+      assert schema["example"]["digest"]["total"] == 202
+    end
+
     test "schema (no command) returns all schemas keyed by the primary command" do
       out = capture_io(fn -> assert Kazi.CLI.run(["schema"]) == 0 end)
 
