@@ -415,6 +415,12 @@ Execution model: work the plan with `/apply --pool` (atomic git-ref claims at
 `refs/claims/*` via the global `~/.claude/skills/claim/scripts/claim.sh`). The WBS
 above is the single checkable source of truth; toggle `[ ]` to `[x]` as tasks land.
 
+Narrative view: [`docs/roadmap.md`](roadmap.md) is the human-readable arc
+(came-from / are / going) over this WBS — NON-authoritative, hand-maintained
+under the contract at its bottom (update it in the same PR that opens/closes an
+epic, accepts a direction-changing ADR, or completes a wave of the current
+theme). E45's plan-as-generated-view is its eventual replacement.
+
 Releases are AUTOMATIC: merging Conventional Commits to `main` lets release-please
 open a release PR; merging that PR cuts a `vX.Y.Z` tag -> the Burrito build + tap
 auto-bump run hands-off (validated through v0.3.0). Type every commit correctly --
