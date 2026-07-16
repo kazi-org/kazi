@@ -91,6 +91,10 @@ defmodule Kazi.Bus do
   #1065) -- acks them, dedups the overlap, and returns them structured in
   stream order. A second call with nothing new posted returns `{:ok, []}`
   -- the durable cursors never re-deliver an acked message.
+
+  Every returned message carries its JetStream stream sequence as the
+  public `:id` (T55.1, ADR-0072 decision 3) -- the stable identifier a
+  digest line or stub names.
   """
   @spec read(keyword()) :: {:ok, [map()]} | {:error, error()}
   def read(opts \\ []), do: consume(opts, ack: true)
@@ -268,11 +272,15 @@ defmodule Kazi.Bus do
     end
   end
 
+  # T55.1 (ADR-0072 decision 3): after deduplication the stream sequence is
+  # the message's PUBLIC id -- carried on every returned message (and thus on
+  # every digest line and stub), so anything a digest names stays
+  # dereferenceable. It was previously stripped here as internal-only.
   defp dedup_by_stream_seq(messages) do
     messages
     |> Enum.uniq_by(fn m -> m.stream_seq || {m.scope, m.kind, m.topic, m.ts, m.text} end)
     |> Enum.sort_by(fn m -> m.stream_seq || 0 end)
-    |> Enum.map(&Map.delete(&1, :stream_seq))
+    |> Enum.map(fn m -> m |> Map.put(:id, m.stream_seq) |> Map.delete(:stream_seq) end)
   end
 
   @doc false
@@ -572,8 +580,9 @@ defmodule Kazi.Bus do
       machine: header_map["machine"],
       ts: header_map["ts"],
       sev: header_map["sev"] || "info",
-      # Internal (stripped before returning): the JetStream stream sequence
-      # from the ack subject, the dedup key across the two consumers.
+      # The JetStream stream sequence from the ack subject: the dedup key
+      # across the two consumers, and -- once dedup renames it to `:id`
+      # (T55.1, ADR-0072) -- the message's public identifier.
       stream_seq: stream_seq(reply_to)
     }
   end
