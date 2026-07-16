@@ -51,6 +51,7 @@ defmodule Kazi.MCP.Server do
 
   alias Kazi.Authoring
   alias Kazi.Bus
+  alias Kazi.Bus.Digest
   alias Kazi.CLI.Schema
   alias Kazi.Goal
   alias Kazi.Goal.Loader
@@ -243,13 +244,25 @@ defmodule Kazi.MCP.Server do
             "(ADR-0067), acking them so a second read returns nothing new. Pass " <>
             "peek: true to LOOK without consuming (messages stay pending for the next " <>
             "read). To WAIT for traffic, prefer kazi_bus_watch over calling this in a " <>
-            "loop. Returns {ok: true, messages: [...]}, or a structured error (no_daemon).",
+            "loop. Returns the bounded DIGEST by default (ADR-0072): {ok: true, " <>
+            "schema_version, digest: {total, lines}} with at most 40 lines -- verbatim " <>
+            "only for directed/interrupt messages, one-line stubs for bodies over the " <>
+            "1024-byte render threshold (the body stays addressable by its stream-seq " <>
+            "id), exact count lines for the rest. Pass full: true (the documented " <>
+            "debugging escape) for {ok: true, messages: [...]} unabridged. Shape: " <>
+            "`kazi schema bus`. Errors are structured (no_daemon).",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
             "peek" => %{
               "type" => "boolean",
               "description" => "true: show pending messages WITHOUT acking them (default false)."
+            },
+            "full" => %{
+              "type" => "boolean",
+              "description" =>
+                "true: return every message unabridged (messages: [...]) instead of " <>
+                  "the default bounded digest (ADR-0072). Default false."
             },
             "scope" => %{
               "type" => "string",
@@ -264,15 +277,24 @@ defmodule Kazi.MCP.Server do
           "BLOCK until at least one bus message arrives for this session, then consume " <>
             "and return it (ADR-0067, issue #1091) -- the no-poll-loop way to wait; do " <>
             "NOT call kazi_bus_read in a loop. Anything already pending returns " <>
-            "immediately. `timeout` is in SECONDS (keep it bounded); on expiry the " <>
-            "result is {ok: true, timed_out: true, messages: []} rather than an error, " <>
-            "so branch on timed_out. Watching also refreshes this session's presence.",
+            "immediately. The result renders through the same bounded DIGEST envelope " <>
+            "as kazi_bus_read (ADR-0072; full: true for unabridged messages). `timeout` " <>
+            "is in SECONDS (keep it bounded); on expiry the result is {ok: true, " <>
+            "timed_out: true, digest: {total: 0, lines: []}} (messages: [] under " <>
+            "full: true) rather than an error, so branch on timed_out. Watching also " <>
+            "refreshes this session's presence.",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
             "timeout" => %{
               "type" => "number",
               "description" => "Seconds to wait before returning timed_out: true."
+            },
+            "full" => %{
+              "type" => "boolean",
+              "description" =>
+                "true: return every message unabridged (messages: [...]) instead of " <>
+                  "the default bounded digest (ADR-0072). Default false."
             },
             "scope" => %{
               "type" => "string",
@@ -478,17 +500,14 @@ defmodule Kazi.MCP.Server do
       if Map.get(args, "peek") == true, do: Bus.peek(bus_opts), else: Bus.read(bus_opts)
 
     case result do
-      {:ok, messages} ->
-        {:ok,
-         %{"schema_version" => Schema.schema_version(), "ok" => true, "messages" => messages}}
-
-      {:error, reason} ->
-        {:tool_error, bus_error(reason)}
+      {:ok, messages} -> {:ok, bus_read_result(messages, args)}
+      {:error, reason} -> {:tool_error, bus_error(reason)}
     end
   end
 
   # A watch expiring is an expected outcome the agent branches on, not a fault:
-  # timed_out: true with an empty message list, never isError.
+  # timed_out: true with an empty digest (or empty messages under full: true),
+  # never isError.
   defp call_tool("kazi_bus_watch", args, opts) do
     watch_opts =
       bus_opts(args, opts)
@@ -496,20 +515,27 @@ defmodule Kazi.MCP.Server do
 
     case Bus.watch(watch_opts) do
       {:ok, messages} ->
-        {:ok,
-         %{"schema_version" => Schema.schema_version(), "ok" => true, "messages" => messages}}
+        {:ok, bus_read_result(messages, args)}
 
       {:error, :watch_timeout} ->
-        {:ok,
-         %{
-           "schema_version" => Schema.schema_version(),
-           "ok" => true,
-           "timed_out" => true,
-           "messages" => []
-         }}
+        {:ok, Map.put(bus_read_result([], args), "timed_out", true)}
 
       {:error, reason} ->
         {:tool_error, bus_error(reason)}
+    end
+  end
+
+  # T55.1 (ADR-0072 d1/d6): the shared result shape for kazi_bus_read /
+  # kazi_bus_watch -- the bounded digest by default, every message unabridged
+  # under full: true. Mirrors the CLI's `bus_read_payload/2` exactly (same
+  # versioned contract, `kazi schema bus`).
+  defp bus_read_result(messages, args) do
+    base = %{"schema_version" => Schema.schema_version(), "ok" => true}
+
+    if Map.get(args, "full") == true do
+      Map.put(base, "messages", messages)
+    else
+      Map.put(base, "digest", Digest.render(messages))
     end
   end
 
