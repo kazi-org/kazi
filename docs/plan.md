@@ -265,6 +265,16 @@ Open work:
   repeated demonstration failure terminates as `:stuck` cause
   `capability_unreachable`; standing goals replay pins as live capability
   monitors -- the DoD "verified live" step as a predicate, ADR-0064) -- E49.
+- **UC-068** (concurrent sessions across machines work as a TEAM without a human
+  relaying between them: delivery is installed harness mechanics -- an opt-in
+  turn-boundary hook that costs nothing when the bus is quiet -- rather than a
+  documented recipe no session ever runs; a digest bounded at RENDER keeps
+  awareness affordable on the `--json`/MCP paths agents actually use, with
+  documents addressable via `bus get` instead of flooding a routine check; and a
+  cursor-free board projects roster + claim ownership + current facts, so a
+  starting session sees who is here and what is already claimed BEFORE it picks
+  up work -- retiring the machine-local markdown blackboards two teams rebuilt
+  by hand, ADR-0071/0072/0073) -- E55.
 
 ## Checkable Work Breakdown
 
@@ -317,6 +327,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E53 -- Reliability hardening: the four open runtime bugs from the E50 execution sweep (P0/P1) -> plans/E53.md
 
 ### E54 -- Reliability hardening II: the nine 2026-07-11/12 execution-sweep bugs -- partition branch lifecycle, dispatch budget-burn safety, --json locale, provider/bus DX (P0/P1) -> plans/E54.md
+
+### E55 -- Teamwork is first-class: installed delivery, a bounded digest, and a board (P1, ADR-0071/0072/0073) -> plans/E55.md
 
 ## Risk Register
 
@@ -414,6 +426,42 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-16 -- Change Summary (bus observation pass: E55 planned off ADR-0071/0072/0073; E51 Wave B superseded)
+- **Observation pass on the live bus.** The E51 bus is working: a `kazi daemon`
+  up 16h carrying a dozen sessions across two machines and three projects, with
+  cross-machine presence/facts/directed messages round-tripping on the released
+  binary. Adoption failed anyway; three structural causes found, none of them
+  agent discipline.
+- **Delivery was never built.** ADR-0067 point 6 shipped the turn-boundary hook
+  as a documented recipe; its observed install rate is zero (no hook on either
+  machine). The operator is the delivery mechanism -- every session that reads
+  the bus does so because a human told it to, again. Two enhancement passes on
+  the skill's bus section changed no behaviour.
+- **The digest protects the wrong reader.** `Kazi.Bus.Digest` is reached only
+  from the TTY branch of `emit/3` (`cli.ex:3951/3974/4010`), so `--json` and the
+  MCP tools -- every agent path, including the documented hook recipe -- return
+  the full transcript. Measured: one `bus peek --json` returns the whole backlog
+  verbatim including two ~10-20 KB filler messages. **R-E51-4 materialized with
+  all three mitigations failed** (1 KB cap raised 64x for a real need, T51.4
+  unstarted, T51.6 blocked behind it); recorded in E51's register.
+- **Teams need state, not a stream.** Two project teams independently abandoned
+  the bus for machine-local markdown blackboards and never returned -- rebuilding
+  ADR-0067's explicitly rejected alternative, and losing cross-machine to do it.
+  `fact`'s last-value retention was already a board with no verb to render it.
+  Duplicate work traced to lock VISIBILITY: `refs/claims/*` are invisible to the
+  bus, so a lead hand-maintains ownership in prose.
+- ADR-0071 (delivery is installed, not documented -- supersedes 0067 point 6),
+  ADR-0072 (the digest bounds context at render, keeping the document-carrying
+  limits -- supersedes 0067 point 5's producer cap), ADR-0073 (the board:
+  current-state projection + claim visibility + stable identity -- extends 0067,
+  readmits its rejected blackboard's interaction model) written and **Proposed**.
+- **E55 added** (10 tasks, plans/E55.md; UC-068): Wave A delivery + the bound,
+  Wave B board + identity, Wave C server-side + claims + payload, Wave D the
+  cross-machine dogfood. Use Case Summary: UC-068 added.
+- E51 Wave B superseded into E55: T51.4 (its brief predates the `--json`
+  bypass finding) and T51.6 (T55.10 is a superset) move to `[~]`. T51.5 stays
+  open, now cross-referencing T55.3 so dashboard presence is not built twice.
 
 ### 2026-07-10 -- Change Summary (E50 execution swept done; E51/E52/E53 planned off ADR-0067/0068 + the bug triage)
 - E50 executed: T50.1-T50.6 + T50.8 marked done (goals 0013-0019 driven via
