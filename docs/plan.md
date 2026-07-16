@@ -476,6 +476,11 @@ never swept into your commit.
   single-invocation apply was observed with no intermediate observable state).
   Bus HA deferred explicitly (E55 not-in-scope note): history survives daemon
   restarts (file storage, verified), and convergence never depends on the bus.
+- Operator question answered and recorded: harness-native agent teams vs the
+  bus are complementary (teams = intra-session orchestration; bus =
+  inter-session coordination plane); T55.13's doc gains a "when to use teams
+  instead" paragraph, and E55's not-in-scope note carries the watch item (ride
+  the native mechanism if teams ever spans sessions/machines).
 
 ### 2026-07-10 -- Change Summary (E50 execution swept done; E51/E52/E53 planned off ADR-0067/0068 + the bug triage)
 - E50 executed: T50.1-T50.6 + T50.8 marked done (goals 0013-0019 driven via
