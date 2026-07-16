@@ -75,8 +75,8 @@ defmodule Kazi.Logging.DashboardLogRotation do
   The default `dashboard.log` path: `KAZI_STATE_DIR` > `<user-home>/.kazi`,
   mirroring `Kazi.CrashDump.dir/0`. Resolved at RUNTIME (called from `init/1`
   on every boot), never a compile-time module attribute -- a `@default_log_path
-  Path.join([System.user_home!() ...])` attribute would freeze
-  `System.user_home!()` to whatever machine BUILT the release. For a Burrito
+  Path.join([System.user_home() ...])` attribute would freeze
+  `System.user_home()` to whatever machine BUILT the release. For a Burrito
   binary that's the CI runner, not the operator's machine, so every fresh
   `kazi dashboard` boot tried to mkdir a path like `/Users/runner/.kazi` and
   crashed the whole VM with `:eacces` (live-verified 2026-07-08). Public so a
@@ -87,7 +87,7 @@ defmodule Kazi.Logging.DashboardLogRotation do
   def default_log_path do
     state_dir =
       System.get_env("KAZI_STATE_DIR") ||
-        Path.join([System.user_home!() || File.cwd!(), ".kazi"])
+        Path.join([System.user_home() || File.cwd!(), ".kazi"])
 
     Path.join(state_dir, "dashboard.log")
   end

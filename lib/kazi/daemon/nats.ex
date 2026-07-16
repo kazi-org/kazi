@@ -225,7 +225,7 @@ defmodule Kazi.Daemon.Nats do
   defp default_store_dir do
     state_dir =
       System.get_env("KAZI_STATE_DIR") ||
-        Path.join([System.user_home!() || File.cwd!(), ".kazi"])
+        Path.join([System.user_home() || File.cwd!(), ".kazi"])
 
     Path.join([state_dir, "daemon", "jetstream"])
   end

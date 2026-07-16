@@ -19,7 +19,7 @@ defmodule Kazi.ReadModel.RunReaper do
 
   Returns `{:ok, reaped_runs}` with the list of runs that were abandoned.
   """
-  @spec reap() :: {:ok, [Run.t()]} | {:error, term()}
+  @spec reap() :: {:ok, [Run.t()]}
   def reap do
     stale_runs = RunRegistry.list_stale()
 

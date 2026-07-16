@@ -513,9 +513,6 @@ defmodule Kazi.MCP.Server do
     end
   end
 
-  defp watch_timeout(seconds) when is_number(seconds) and seconds > 0, do: trunc(seconds)
-  defp watch_timeout(_), do: nil
-
   defp call_tool("kazi_bus_who", args, opts) do
     case Bus.who(bus_opts(args, opts)) do
       {:ok, sessions} ->
@@ -540,6 +537,9 @@ defmodule Kazi.MCP.Server do
   defp call_tool(name, _args, _opts) do
     {:error, @method_not_found, "unknown tool: #{inspect(name)}"}
   end
+
+  defp watch_timeout(seconds) when is_number(seconds) and seconds > 0, do: trunc(seconds)
+  defp watch_timeout(_), do: nil
 
   # The bus tools' `opts` -- scope/topic/sev from the tool arguments, plus any
   # test-only seams (`:conn`, `:sock_path`) a caller injected via `opts` (mirrors

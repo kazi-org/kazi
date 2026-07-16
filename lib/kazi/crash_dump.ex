@@ -21,7 +21,7 @@ defmodule Kazi.CrashDump do
 
   defp state_dir do
     System.get_env("KAZI_STATE_DIR") ||
-      Path.join([System.user_home!() || File.cwd!(), ".kazi"])
+      Path.join([System.user_home() || File.cwd!(), ".kazi"])
   end
 
   @doc "The full erl_crash.dump path this run writes to if it crashes."

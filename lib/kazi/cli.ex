@@ -5567,7 +5567,7 @@ defmodule Kazi.CLI do
   # same --json contract every other load/availability error does (deep review
   # L2): a JSON error envelope on stdout under --json (escript builds without the
   # NIF hit this path), the human stderr line otherwise.
-  defp with_read_model(opts \\ [], fun) do
+  defp with_read_model(opts, fun) do
     if ensure_read_model() do
       fun.()
     else
@@ -5777,7 +5777,7 @@ defmodule Kazi.CLI do
   # and pipes the goal id into the next step. `extra` carries an optional
   # `%{loadable: false}` (#945) when `reject` succeeded on a proposal whose
   # stored goal no longer loads — an audit note, not an error.
-  defp approval_json(status, proposal_ref, goal_id, extra \\ %{}) do
+  defp approval_json(status, proposal_ref, goal_id, extra) do
     %{
       schema_version: @run_schema_version,
       proposal_ref: proposal_ref,
