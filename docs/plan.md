@@ -455,7 +455,7 @@ never swept into your commit.
   ADR-0072 (the digest bounds context at render, keeping the document-carrying
   limits -- supersedes 0067 point 5's producer cap), ADR-0073 (the board:
   current-state projection + claim visibility + stable identity -- extends 0067,
-  readmits its rejected blackboard's interaction model) written and **Proposed**.
+  readmits its rejected blackboard's interaction model) written; **Accepted** (operator approved 2026-07-16).
 - **E55 added** (10 tasks, plans/E55.md; UC-068): Wave A delivery + the bound,
   Wave B board + identity, Wave C server-side + claims + payload, Wave D the
   cross-machine dogfood. Use Case Summary: UC-068 added.

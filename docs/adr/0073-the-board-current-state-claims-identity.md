@@ -1,7 +1,7 @@
 # ADR 0073: Teams need a board — a current-state projection with claim visibility and stable identity
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-07-16
