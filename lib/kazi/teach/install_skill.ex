@@ -634,7 +634,17 @@ defmodule Kazi.Teach.InstallSkill do
       Blocks until traffic arrives (pending messages return immediately) and
       keeps your presence fresh. NEVER poll `read` in a loop -- watch is the
       no-poll primitive. The CLI exits 3 on timeout; the MCP tool returns
-      `{ok: true, timed_out: true, messages: []}` -- branch on `timed_out`.
+      `{ok: true, timed_out: true, digest: {total: 0, lines: []}}` -- branch
+      on `timed_out`.
+
+    All three return the bounded DIGEST by default under `--json`/MCP
+    (ADR-0072): `{ok, schema_version, digest: {total, lines}}`, at most 40
+    lines -- verbatim only for directed/interrupt, one-line stubs for bodies
+    over 1 KiB (the body stays in the stream, addressable by the stub's `id`,
+    a JetStream stream sequence), exact count lines for the rest. So checking
+    the bus costs bounded context no matter how deep the backlog. `--full`
+    (MCP: `full: true`) is the debugging escape returning `messages` verbatim.
+    Shape: `kazi schema bus`.
 
     Cadence: peek at turn boundaries; hold a bounded `watch` only when genuinely
     waiting on another session. Full taxonomy: `docs/session-bus.md`.

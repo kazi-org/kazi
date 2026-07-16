@@ -49,6 +49,81 @@ defmodule Kazi.CLI.BusTest do
   end
 
   # ===========================================================================
+  # Untagged: T55.1 (ADR-0072) -- the digest is the default --json shape;
+  # --full is the documented escape. Pinned through the payload seam so no
+  # daemon is needed.
+  # ===========================================================================
+
+  describe "parse/1 -- bus read|peek|watch --full (ADR-0072)" do
+    test "`bus read --full` threads the full flag through" do
+      assert {:bus, "read", [], opts} = Kazi.CLI.parse(["bus", "read", "--full"])
+      assert opts[:full] == true
+    end
+
+    test "`bus peek` / `bus watch` accept --full; default is false" do
+      assert {:bus, "peek", [], opts} = Kazi.CLI.parse(["bus", "peek", "--full"])
+      assert opts[:full] == true
+
+      assert {:bus, "watch", [], opts} = Kazi.CLI.parse(["bus", "watch"])
+      assert opts[:full] == false
+    end
+  end
+
+  describe "bus_read_payload/2 -- the --json envelope (ADR-0072 d1/d6)" do
+    defp synthetic_message(id, kind, text) do
+      %{
+        id: id,
+        kind: kind,
+        topic: "ci",
+        text: text,
+        sev: "info",
+        session: "s",
+        machine: "m",
+        ts: "2026-07-16T00:00:00Z",
+        scope: "machine"
+      }
+    end
+
+    test "the digest is the default: bounded lines, exact counts, schema_version" do
+      messages =
+        for id <- 1..200 do
+          synthetic_message(id, Enum.at(["fact", "note", "announce"], rem(id, 3)), "m#{id}")
+        end
+
+      payload = Kazi.CLI.bus_read_payload(messages, full: false)
+
+      assert payload["ok"] == true
+      assert payload["schema_version"] == Kazi.CLI.Schema.schema_version()
+      refute Map.has_key?(payload, "messages")
+
+      %{"total" => 200, "lines" => lines} = payload["digest"]
+      assert length(lines) <= Kazi.Bus.Digest.max_lines()
+      assert Enum.sum(Enum.map(lines, & &1["count"])) == 200
+    end
+
+    test "--full returns every message unabridged (today's shape, plus the version pin)" do
+      messages = [synthetic_message(1, "note", "hello")]
+
+      payload = Kazi.CLI.bus_read_payload(messages, full: true)
+
+      assert payload["ok"] == true
+      assert payload["schema_version"] == Kazi.CLI.Schema.schema_version()
+      assert payload["messages"] == messages
+      refute Map.has_key?(payload, "digest")
+    end
+  end
+
+  describe "kazi bus read --help -- documents the digest default and --full" do
+    test "read/peek/watch help name --full and the digest" do
+      for verb <- ["read", "peek", "watch"] do
+        output = capture_io(fn -> assert Kazi.CLI.run(["bus", verb, "--help"], []) == 0 end)
+        assert output =~ "--full", "`bus #{verb} --help` must document --full"
+        assert output =~ "digest", "`bus #{verb} --help` must describe the digest"
+      end
+    end
+  end
+
+  # ===========================================================================
   # Untagged: `bus <verb> --help` -- per-verb usage, not the generic block
   # ===========================================================================
 

@@ -164,6 +164,7 @@ defmodule Kazi.CLI do
     sev: :string,
     scope: :string,
     peek: :boolean,
+    full: :boolean,
     team: :string,
     all: :boolean,
     timeout: :integer,
@@ -288,6 +289,8 @@ defmodule Kazi.CLI do
       "`bus post`/`bus read`/`bus tell` only: `machine` (default) or `project` (the current repo's canonical toplevel path, slugged) -- which bus subject tree the call addresses.",
     peek:
       "`bus read` only (issue #1059): non-destructive -- NAKs instead of acking, so the pending messages are shown but NOT consumed; a subsequent `bus read`/`bus peek` still sees them. Equivalent to `bus peek`.",
+    full:
+      "`bus read`/`bus peek`/`bus watch` only (T55.1, ADR-0072): under --json return EVERY pending message unabridged instead of the default bounded digest -- the documented debugging escape. Without it, --json returns the digest envelope (`kazi schema bus`): verbatim lines only for directed (kind msg) and sev interrupt messages, one-line stubs for bodies over the 1024-byte render threshold, exact count lines per {kind, topic} for everything else, at most 40 lines regardless of backlog size.",
     team:
       "`bus who` only (issue #1069): filter the presence roster to members of this named team (sessions register with `bus join <team>`).",
     all:
@@ -392,9 +395,9 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a message arrives (issue #1091); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a message arrives (issue #1091); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json, :topic, :sev, :scope, :peek, :team, :all, :timeout]
+      flags: [:json, :topic, :sev, :scope, :peek, :full, :team, :all, :timeout]
     },
     %{
       name: "economy",
@@ -1404,6 +1407,7 @@ defmodule Kazi.CLI do
       sev: flags[:sev] || "info",
       scope: flags[:scope] || "machine",
       peek: flags[:peek] || false,
+      full: flags[:full] || false,
       team: flags[:team],
       all: flags[:all] || false,
       timeout: flags[:timeout]
@@ -1450,12 +1454,22 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("read") do
     """
-    kazi bus read [--peek] [--json]
+    kazi bus read [--peek] [--full] [--json]
 
-    Pull and ACK this session's durable consumer -- prints a digest (or, under
-    --json, the structured messages). `--peek` (issue #1059) makes the read
-    NON-DESTRUCTIVE: pending messages are shown but not consumed, so a
-    subsequent `bus read`/`bus peek` still sees them. Equivalent to `bus peek`.
+    Pull and ACK this session's durable consumer -- prints a digest. Under
+    --json the SAME digest is the default (T55.1, ADR-0072), as a versioned
+    envelope (schema_version; shape via `kazi schema bus`): verbatim lines
+    only for directed (kind `msg`) and `sev: interrupt` messages, one-line
+    stubs for bodies over the 1024-byte render threshold (ALL kinds --
+    the body stays in the stream, addressable by its `id`), exact count
+    lines per {kind, topic} for everything else, bounded to 40 lines
+    regardless of backlog size. Every message and digest line carries the
+    message's JetStream stream sequence as its public `id`. `--full` is
+    the documented escape: every pending message unabridged.
+
+    `--peek` (issue #1059) makes the read NON-DESTRUCTIVE: pending messages
+    are shown but not consumed, so a subsequent `bus read`/`bus peek` still
+    sees them. Equivalent to `bus peek`.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -1464,11 +1478,13 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("peek") do
     """
-    kazi bus peek [--json]
+    kazi bus peek [--full] [--json]
 
     Non-destructive read (issue #1059): shows this session's pending messages
     WITHOUT consuming them -- a subsequent `bus peek`/`bus read` still sees
-    them. Equivalent to `bus read --peek`.
+    them. Equivalent to `bus read --peek`. Under --json it returns the same
+    bounded digest envelope as `bus read` (T55.1, ADR-0072; shape via
+    `kazi schema bus`); `--full` returns every message unabridged.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -1492,14 +1508,16 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("watch") do
     """
-    kazi bus watch [--timeout <seconds>] [--json]
+    kazi bus watch [--timeout <seconds>] [--full] [--json]
 
     Block until at least one message is available for this session, then
     consume and print it -- the no-poll-loop alternative to running `bus
     read` in a loop (issue #1091). Anything already pending returns
     immediately; otherwise the call sleeps on the session's scope, directed,
     and team subjects and wakes on the first arrival. Default timeout 300
-    seconds; on expiry prints a one-line notice and exits 3.
+    seconds; on expiry prints a one-line notice and exits 3. Under --json
+    the result renders through the same bounded digest envelope as `bus
+    read` (T55.1, ADR-0072); `--full` returns the messages unabridged.
 
     Watching also refreshes this session's presence, so a watcher never
     ages out of `bus who`.
@@ -3947,7 +3965,7 @@ defmodule Kazi.CLI do
     else
       case Kazi.Bus.read(bus_call_opts(opts)) do
         {:ok, messages} ->
-          emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
+          emit(json?(opts), bus_read_payload(messages, opts), fn ->
             print_read_digest(messages)
           end)
 
@@ -3970,7 +3988,7 @@ defmodule Kazi.CLI do
   defp do_bus_peek(opts) do
     case Kazi.Bus.peek(bus_call_opts(opts)) do
       {:ok, messages} ->
-        emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
+        emit(json?(opts), bus_read_payload(messages, opts), fn ->
           print_read_digest(messages)
         end)
 
@@ -4006,7 +4024,7 @@ defmodule Kazi.CLI do
   defp execute_bus("watch", [], opts) do
     case Kazi.Bus.watch(bus_call_opts(opts)) do
       {:ok, messages} ->
-        emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
+        emit(json?(opts), bus_read_payload(messages, opts), fn ->
           print_read_digest(messages)
         end)
 
@@ -4067,6 +4085,23 @@ defmodule Kazi.CLI do
     %{verbatim: verbatim, digest: digest} = Kazi.Bus.Digest.summarize(messages)
     Enum.each(verbatim, &IO.puts/1)
     Enum.each(digest, &IO.puts/1)
+  end
+
+  @doc false
+  # T55.1 (ADR-0072 d1/d6): the machine-readable result for `bus read|peek|
+  # watch --json`. The bounded DIGEST is the default; `--full` is the
+  # documented escape returning every pending message unabridged. Both shapes
+  # join the ADR-0023 versioned contract (`kazi schema bus`). Public so tests
+  # pin the envelope without a live daemon.
+  @spec bus_read_payload([map()], keyword()) :: map()
+  def bus_read_payload(messages, opts) do
+    base = %{"ok" => true, "schema_version" => @run_schema_version}
+
+    if opts[:full] do
+      Map.put(base, "messages", messages)
+    else
+      Map.put(base, "digest", Kazi.Bus.Digest.render(messages))
+    end
   end
 
   defp bus_error(:no_daemon, opts),

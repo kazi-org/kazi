@@ -30,6 +30,18 @@ defmodule Kazi.MCP.BusToolsTest do
                by_name["kazi_bus_watch"]["inputSchema"]["properties"]["timeout"]
     end
 
+    test "kazi_bus_read and kazi_bus_watch declare the full escape and teach the digest (ADR-0072)" do
+      by_name = Map.new(Server.tools(), &{&1["name"], &1})
+
+      for tool <- ["kazi_bus_read", "kazi_bus_watch"] do
+        assert %{"type" => "boolean"} = by_name[tool]["inputSchema"]["properties"]["full"],
+               "#{tool} must declare a boolean `full` argument"
+
+        assert by_name[tool]["description"] =~ "digest",
+               "#{tool}'s description must teach the digest default"
+      end
+    end
+
     test "post/tell declare their required arguments" do
       by_name = Map.new(Server.tools(), &{&1["name"], &1})
 
