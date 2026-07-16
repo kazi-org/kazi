@@ -462,6 +462,20 @@ never swept into your commit.
 - E51 Wave B superseded into E55: T51.4 (its brief predates the `--json`
   bypass finding) and T51.6 (T55.10 is a superset) move to `[~]`. T51.5 stays
   open, now cross-referencing T55.3 so dashboard presence is not built twice.
+- Same-day field feedback folded in (a supervisor session, 24h of real
+  five-session two-machine fleet ops; 3 bugs + 5 ranked asks): **E55 grows to
+  13 tasks** -- T55.11 presence liveness (idle-alive vs dead via a local-daemon
+  pid+start-time sweep, ghost-row reaping, `who` filters, TTL exposed), T55.12
+  `tell` delivery visibility (message ids, `bus status <id>` pending|consumed,
+  inbox depth in `who --all`, error on dead recipients -- the supervisor's
+  top-ranked pain), T55.13 the documented wake contract (worker parks a
+  background `bus watch`; the harness re-invokes on completion; gated on
+  T54.9). **T54.10 added to E54** (the ADR-0066 burrito maintenance line
+  pollutes stdout on every call and breaks ADR-0023 `--json` purity).
+  **T51.5 extended** with per-iteration progress facts (a 9-hour
+  single-invocation apply was observed with no intermediate observable state).
+  Bus HA deferred explicitly (E55 not-in-scope note): history survives daemon
+  restarts (file storage, verified), and convergence never depends on the bus.
 
 ### 2026-07-10 -- Change Summary (E50 execution swept done; E51/E52/E53 planned off ADR-0067/0068 + the bug triage)
 - E50 executed: T50.1-T50.6 + T50.8 marked done (goals 0013-0019 driven via
