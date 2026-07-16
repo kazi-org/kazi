@@ -3914,17 +3914,6 @@ defmodule Kazi.CLI do
   defp execute_bus("post", _args, opts),
     do: bus_error("`bus post` requires <text> or <kind> <text>", opts)
 
-  defp do_bus_post(kind, text, opts) do
-    case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
-      :ok ->
-        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("posted") end)
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
   defp execute_bus("tell", [session, text], opts) do
     case Kazi.Bus.tell(session, text, bus_call_opts(opts)) do
       :ok ->
@@ -3967,20 +3956,6 @@ defmodule Kazi.CLI do
   defp execute_bus("peek", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
-  defp do_bus_peek(opts) do
-    case Kazi.Bus.peek(bus_call_opts(opts)) do
-      {:ok, messages} ->
-        emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
-          print_read_digest(messages)
-        end)
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
   defp execute_bus("who", [], opts) do
     who_opts = bus_call_opts(opts) ++ [who_team: opts[:team], all: opts[:all]]
 
@@ -4001,6 +3976,9 @@ defmodule Kazi.CLI do
         bus_error(reason, opts)
     end
   end
+
+  defp execute_bus("who", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
   # #1091: block until a message is available, then consume and print it.
   defp execute_bus("watch", [], opts) do
@@ -4056,8 +4034,30 @@ defmodule Kazi.CLI do
   defp execute_bus("leave", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
-  defp execute_bus("who", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+  defp do_bus_post(kind, text, opts) do
+    case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
+      :ok ->
+        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("posted") end)
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp do_bus_peek(opts) do
+    case Kazi.Bus.peek(bus_call_opts(opts)) do
+      {:ok, messages} ->
+        emit(json?(opts), %{"ok" => true, "messages" => messages}, fn ->
+          print_read_digest(messages)
+        end)
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
 
   defp bus_call_opts(opts) do
     [scope: opts[:scope], topic: opts[:topic], sev: opts[:sev], timeout: opts[:timeout]]
