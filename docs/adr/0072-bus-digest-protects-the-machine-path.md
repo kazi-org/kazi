@@ -1,7 +1,7 @@
 # ADR 0072: The bus digest protects the machine path — context cost is bounded at render, not at post
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-07-16
