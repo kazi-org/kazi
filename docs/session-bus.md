@@ -25,9 +25,17 @@ when the daemon isn't running, and **convergence never depends on the bus**
   `bus.<scope>.msg.<session>`; only that session's `bus read` durable consumer
   sees it (durable = a persistent read cursor: a second read never re-delivers
   an already-acked message).
-- **The 1 KB cap.** `text` over 1024 bytes is rejected client-side, before any
-  daemon connection is attempted — the cap forces one-line discipline at the
-  producer so a `bus read` digest stays cheap to consume.
+- **The render bound (ADR-0072).** Messages hold up to 64 KiB of text
+  (rejected client-side above that, naming the cap), but context cost is
+  bounded at RENDER, not at post: every machine-readable read (`--json`,
+  the MCP tools) returns a digest of at most 40 lines, and a body over the
+  1024-byte render threshold never renders verbatim — it collapses to a
+  one-line stub. The bus may carry documents; reading one is a deliberate
+  choice, never an ambush inside a routine check.
+- **Message ids.** Every message `read`/`peek`/`watch` returns carries its
+  JetStream stream sequence as the public `id` — stable, and carried on
+  every digest line and stub, so anything a digest names stays
+  dereferenceable.
 
 ## The advisory contract (ADR-0067 point 7)
 
@@ -47,9 +55,9 @@ kazi daemon stop                                          # clean shutdown
 
 kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project]  # <kind> defaults to `fact`
 kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
-kazi bus read [--peek] [--json]                           # pull + ack this session's durable consumers, prints a digest
-kazi bus peek [--json]                                     # non-destructive read (issue #1059): same as `bus read --peek`
-kazi bus watch [--timeout <seconds>] [--json]              # BLOCK until a message arrives (issue #1091); exit 3 on timeout
+kazi bus read [--peek] [--full] [--json]                   # pull + ack this session's durable consumers, prints a digest
+kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
+kazi bus watch [--timeout <seconds>] [--full] [--json]     # BLOCK until a message arrives (issue #1091); exit 3 on timeout
 kazi bus who [--team <t>] [--all] [--json]                 # list fresh presence; --all includes TTL-stale entries
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
@@ -107,6 +115,33 @@ is NON-DESTRUCTIVE: it NAKs instead of acking, so the pending messages are
 shown but stay pending — a subsequent `bus peek` sees the same messages again,
 and a subsequent `bus read` still consumes them normally (issue #1059).
 
+### The digest is the default on every machine path (ADR-0072)
+
+Under `--json`, `bus read`/`bus peek`/`bus watch` return the DIGEST by
+default — the same summary the TTY prints, as a versioned envelope
+(`schema_version`, introspectable via `kazi schema bus`; contract:
+`docs/schemas/bus-digest.md`):
+
+- **Verbatim** lines only for directed messages (`kind: msg`) and
+  `sev: interrupt` — each carries `id`, kind, topic, sev, provenance
+  (session/machine/ts), byte size, and the full `text`.
+- **Stub** lines for ANY body over the 1024-byte render threshold —
+  including directed/interrupt: the same fields WITHOUT `text`. The body
+  stays in the stream (the 64 KiB cap and 30-day retention are unchanged),
+  addressable by its `id`.
+- **Count** lines for everything else: one exact-count line per
+  `{kind, topic}` pair with the group's `first_id`/`last_id`,
+  most-frequent first.
+- The whole digest is bounded to **40 lines** regardless of backlog size;
+  a tail past the bound folds into one exact-count `overflow` line.
+  `digest.total` is always the exact number of messages pulled.
+
+`--full` is the documented escape for debugging: it replaces `digest` with
+`messages` — every pending message unabridged, each carrying its `id`.
+Sessions that previously parsed `.messages[]` from `bus read --json`
+should either consume the digest (the point: a thousand-message backlog
+costs the same context as forty lines) or pass `--full` for the old shape.
+
 ## Cross-machine setup
 
 ADR-0067 designed the bus for cross-machine from day one ("One machine today,
@@ -157,9 +192,13 @@ harness drives the bus natively, with no JSON-CLI shell-out:
 | `kazi_bus_tell` | `kazi bus tell` | `session`, `text` |
 
 Each accepts the optional `topic` / `scope` / `sev` arguments the CLI verbs
-take. `kazi_bus_watch` takes an optional `timeout` (seconds); where the CLI
-exits 3 on expiry, the tool returns `{ok: true, timed_out: true, messages:
-[]}` — an expected outcome the agent branches on, never `isError`. A tool call against a missing daemon returns an MCP tool-result error
+take. `kazi_bus_read` and `kazi_bus_watch` return the ADR-0072 digest
+envelope by default (see above); `full: true` mirrors the CLI's `--full`
+and returns `messages` unabridged. `kazi_bus_watch` takes an optional
+`timeout` (seconds); where the CLI exits 3 on expiry, the tool returns
+`{ok: true, timed_out: true, digest: {total: 0, lines: []}}` (`messages:
+[]` under `full: true`) — an expected outcome the agent branches on, never
+`isError`. A tool call against a missing daemon returns an MCP tool-result error
 (`isError: true`) with `reason: "no_daemon"`, exactly mirroring the CLI's
 no-daemon message — never a JSON-RPC protocol error.
 
@@ -176,7 +215,7 @@ folds the digest into the next turn's context — for Claude Code, a
 # .claude/hooks/bus-read.sh — surface the session bus digest each turn.
 digest=$(kazi bus read --json 2>/dev/null)
 printf '%s' "$digest" \
-  | jq -r 'if .ok then (.messages | length | tostring) + " bus message(s) since last read" else empty end'
+  | jq -r 'if .ok then (.digest.total | tostring) + " bus message(s) since last read" else empty end'
 ```
 
 If no daemon is running the command exits non-zero silently (`2>/dev/null`
