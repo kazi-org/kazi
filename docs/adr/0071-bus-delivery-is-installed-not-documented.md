@@ -82,16 +82,41 @@ what it can do; it just never taught it to listen.
    | Hook | Fires | Does |
    |---|---|---|
    | session start | new session | registers presence + team for the project scope, injects the current board (ADR-0073) |
-   | turn boundary (stop) | the session finishes a turn | injects the digest (ADR-0072) if there is traffic; silent if not |
+   | turn boundary | the next turn begins | injects the digest (ADR-0072) if there is traffic; silent if not |
 
    The turn-boundary hook is why this ends the token complaint: **it costs
    nothing when the bus is quiet**, and it needs no session to sit blocked or
    polling. Delivery becomes harness mechanics rather than agent virtue.
 
+   **The binding rule: a profile binds ONLY to events whose stdout reaches the
+   session's context.** For Claude Code those are `SessionStart` and
+   `UserPromptSubmit`; a `Stop`-style event's output never reaches the next
+   turn, so binding the digest there would be delivery to nowhere — the recipe
+   in ADR-0067's docs suggested exactly that ("a `UserPromptSubmit` or `Stop`
+   hook"), and half of that suggestion silently does not deliver. The rule is
+   stated here so a future profile cannot repeat the mistake by picking a
+   plausible-sounding event.
+
+   **The installed command is `kazi bus hook <event>`** — a kazi subcommand,
+   not a script file. The settings block stays one line per event, the payload
+   logic lives in the binary where it is unit-testable and upgrades with
+   `kazi` itself (no stale script drifting from the binary that installed it),
+   and a hard internal wall-clock bound applies: the hook answers within its
+   budget or exits 0 silently, because a slow daemon must never tax every turn
+   of every session.
+
 3. **Merge, never clobber.** The installer writes a marked, idempotent block
    into the harness settings, preserving every key it does not own.
    Re-running is a no-op; `--uninstall` removes exactly what was added. An
    operator's existing hooks survive untouched.
+
+   **The default install target is the operator's user-level settings**, not a
+   project file: the hook no-ops instantly wherever no daemon is running, so
+   user-level costs nothing outside bus-active projects and covers every
+   project with one install. `--project` writes the project's *local*
+   (uncommitted) settings file instead. The installer NEVER writes a committed
+   project file — in a public repo that would publish the operator's internal
+   workflow, which the ADR-0034 leak gate exists to prevent.
 
 4. **A hook is a no-op without a daemon.** With the daemon down the hook exits
    silently and the session proceeds identically — ADR-0067 point 1's
@@ -116,6 +141,10 @@ what it can do; it just never taught it to listen.
   available to the bus, and it is small.
 - Token cost of awareness drops to zero-when-quiet. The only cost is a digest
   when there is genuinely something to say — which ADR-0072 bounds.
+- Every turn now pays the hook's wall-clock, which is why the internal
+  timeout in point 2 is part of the decision and not an implementation detail:
+  the failure mode "a hung daemon adds seconds to every turn of every session
+  on the machine" is worse than any missed digest.
 - kazi now has a **write surface in the harness's config**. That is a real new
   responsibility: the installer must be conservative, idempotent, reversible,
   and must never assume it is the only writer. This is the main risk the epic

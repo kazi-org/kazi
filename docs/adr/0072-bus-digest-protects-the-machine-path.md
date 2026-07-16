@@ -79,7 +79,12 @@ stores.**
    and every `kazi_bus_*` MCP tool — exactly as it already is on the TTY.
    `--full` (CLI) / `full: true` (MCP) is the explicit, documented escape for
    debugging. The asymmetry between the human and machine paths is the bug; the
-   machine path is the one that needed it.
+   machine path is the one that needed it. The digest JSON joins the ADR-0023
+   versioned result contract — it carries a `schema_version` and its shape is
+   introspectable via `kazi schema` — which the bare `{ok, messages}` envelope
+   the bus verbs emit today never did; the shape change this ADR makes is the
+   right moment to bring them under the contract every other agent-facing kazi
+   surface already honours.
 
 2. **Stored size is decoupled from context cost.** The bus MAY carry documents
    — the 64 KiB text cap, 128 KiB stream limit, and 30-day retention stand,
@@ -91,7 +96,11 @@ stores.**
 3. **`kazi bus get <id>` is the deliberate pull.** Full text is addressable and
    fetched on purpose, by a session that has decided it is worth the context.
    Reading a document becomes a choice with a visible cost, rather than an
-   ambush inside a routine check.
+   ambush inside a routine check. The id is the message's JetStream stream
+   sequence — already tracked internally for cross-consumer deduplication and
+   today stripped from every message before it is returned; it becomes the
+   public identifier, carried on every digest line and stub, so an id printed
+   in a digest is always dereferenceable.
 
 4. **Discipline moves from the producer to the render.** This is the actual
    supersede. Point 5 asked producers to be terse and enforced it with a cap;

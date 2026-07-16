@@ -109,13 +109,27 @@ identity — projects onto it, and both the CLI and the dashboard render it.**
    ADR-0071 session-start hook injects, and it is what replaces the hand-rolled
    markdown blackboards — with the cross-machine property those files gave up.
 
-2. **Claims stay authoritative where they are, and become audible.** Leases and
-   `/claim` git-refs remain the mutual-exclusion mechanism (ADR-0006); the bus
-   does not arbitrate, does not grant, and cannot deny. Taking or releasing a
-   claim **auto-posts a fact**, and the board projects ownership from it. The
-   bus points at the lock mechanism, which is exactly what ADR-0067's non-goal
-   reserves for it. A stale claim fact is corrected by the lock, never the
-   reverse: the board is a projection, and the refs are the truth.
+2. **Claims stay authoritative where they are, and the board reads them at
+   source.** Leases and `/claim` git-refs remain the mutual-exclusion
+   mechanism (ADR-0006); the bus does not arbitrate, does not grant, and
+   cannot deny. The board's ownership section is a **direct projection of
+   `refs/claims/*`** read from the shared remote: the claim primitive already
+   pushes every claim to origin, and the claim commit already carries owner,
+   host, and timestamp in its message — the refs are already cross-machine and
+   already self-describing. Reading them at source means there is **no copy to
+   drift, no staleness class, and no daemon anywhere in the claim path**; when
+   the remote is unreachable the board says so in one honest line rather than
+   rendering possibly-stale ownership.
+
+   This is also the only design kazi can actually ship: the claim primitive
+   lives in the operator's global tooling, **outside this repository's
+   delivery**. A design whose correctness requires editing that tooling — for
+   example, "taking a claim auto-posts a fact" — repeats ADR-0067 point 6's
+   failure exactly: correctness delegated to a recipe kazi cannot install. An
+   optional, documented one-liner (a best-effort `bus post` a claim wrapper
+   MAY add) exists so that turn-boundary **digests** can announce "claimed T"
+   as an event — but the board never renders ownership from it, and nothing is
+   less correct where it is absent.
 
 3. **Stable, addressable identity.** `kazi bus name <nickname>` assigns a
    durable name for the session, carried on presence and rendered by `who`,
@@ -147,10 +161,12 @@ identity — projects onto it, and both the CLI and the dashboard render it.**
   stop paying for a machine-local fallback.
 - `fact`'s last-value retention finally does the job point 3 provisioned it for.
   No new primitive, no new stream, no new storage decision.
-- Claim broadcasting couples `/claim` (a skill-level shell primitive) to the
-  bus. The coupling must be one-way and best-effort: a claim MUST still succeed
-  with the daemon down, or the bus would become load-bearing for coordination
-  that ADR-0067 point 1 forbids it to gate.
+- Claims and the bus stay fully decoupled: a claim succeeds, is visible, and
+  expires by exactly the mechanism it does today, daemon or no daemon. The
+  cost moves to the board instead — its ownership section needs the repo
+  remote, so rendering it takes a network round-trip and must degrade to an
+  honest "claims unavailable" line offline. That trade is deliberate: a
+  slightly slower board beats a second copy of ownership truth.
 - The dashboard gains a real dependency on the daemon for its presence rail —
   behind a fallback, so a native run is unaffected.
 - Identity becomes something an operator can rely on when addressing sessions,
@@ -181,6 +197,14 @@ identity — projects onto it, and both the CLI and the dashboard render it.**
 - **Move claims onto the bus** (bus as the lock service). Rejected by ADR-0067's
   non-goal and by ADR-0006. It would also make the daemon load-bearing for
   claiming, breaking point 1. Broadcasting a lock is not owning it.
+- **Auto-posted claim facts as the board's ownership source** (the shape this
+  ADR's first draft proposed). Three strikes: it creates a second copy of
+  ownership truth that can drift from the refs and needs its own staleness
+  reconciliation; it makes claim visibility depend on the daemon being up at
+  claim time; and above all it is unshippable — the posting would have to live
+  in claim tooling outside kazi's delivery, which is ADR-0067 point 6's
+  documentation-as-mechanism failure wearing a new coat. Reading the refs at
+  source has none of these and was available all along.
 - **A `bus history` / full-log verb instead of a projection.** Gives a session
   the raw stream and asks it to derive current state itself — every reader
   re-implements the projection, pays for the whole log, and derives it
