@@ -94,7 +94,12 @@ defmodule Kazi.CLI.BusTest do
     end
   end
 
-  describe "bus_read_payload/2 -- the --json envelope (ADR-0072 d1/d6)" do
+  # T55.7 moved assembly into the daemon, so the envelope builder now stamps a
+  # REPLY (`local_bus_reply/2` shapes the same one the daemon returns) rather
+  # than aggregating messages itself. The properties pinned here are unchanged;
+  # only who did the counting moved. The daemon-assembled path is
+  # `Kazi.Bus.DaemonDigestTest`.
+  describe "bus_read_payload/1 -- the --json envelope (ADR-0072 d1/d6)" do
     defp synthetic_message(id, kind, text) do
       %{
         id: id,
@@ -115,7 +120,7 @@ defmodule Kazi.CLI.BusTest do
           synthetic_message(id, Enum.at(["fact", "note", "announce"], rem(id, 3)), "m#{id}")
         end
 
-      payload = Kazi.CLI.bus_read_payload(messages, full: false)
+      payload = Kazi.CLI.bus_read_payload(Kazi.CLI.local_bus_reply(messages, full: false))
 
       assert payload["ok"] == true
       assert payload["schema_version"] == Kazi.CLI.Schema.schema_version()
@@ -129,7 +134,7 @@ defmodule Kazi.CLI.BusTest do
     test "--full returns every message unabridged (today's shape, plus the version pin)" do
       messages = [synthetic_message(1, "note", "hello")]
 
-      payload = Kazi.CLI.bus_read_payload(messages, full: true)
+      payload = Kazi.CLI.bus_read_payload(Kazi.CLI.local_bus_reply(messages, full: true))
 
       assert payload["ok"] == true
       assert payload["schema_version"] == Kazi.CLI.Schema.schema_version()
