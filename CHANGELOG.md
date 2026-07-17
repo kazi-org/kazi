@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.175.0](https://github.com/kazi-org/kazi/compare/v1.174.0...v1.175.0) (2026-07-17)
+
+
+### Features
+
+* **browser:** viewport matrix + the component(story-URL) recipe (T43.5, ADR-0053) ([ddf2c24](https://github.com/kazi-org/kazi/commit/ddf2c24a1dec86d7078f43f97d0dbe37e931d530))
+
 ## [1.174.0](https://github.com/kazi-org/kazi/compare/v1.173.0...v1.174.0) (2026-07-17)
 
 
