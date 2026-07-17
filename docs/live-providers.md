@@ -83,6 +83,7 @@ for the rest of the run.
 | `url` | `contains` \| `exact` | the current URL matches |
 | `console_clean` | `network` (optional, bool) | the journey produced no `console.error` |
 | `download` | `filename_pattern` + `trigger_selector`, `timeout_ms` (optional) | the journey produced a download whose filename matches |
+| `a11y` | `severity` (optional), `max_violations` (optional) | axe-core finds `<= max_violations` violations at/above `severity` |
 
 ### `download` — the file-effect check
 
@@ -162,6 +163,37 @@ on — the loader rejects a non-boolean at load instead.
 Captured errors are a `:fail` (the page ran and misbehaved — real work for a fixer
 agent). A runner that cannot produce a verdict at all (Playwright missing, launch
 or navigation failure) is an `:error`, never a `:fail`.
+
+### `a11y` — accessibility violations (axe-core)
+
+`a11y` runs [axe-core](https://github.com/dequelabs/axe-core) against the current
+view and asserts **at most `max_violations`** (default `0`) violations at or above
+a `severity` (`minor` | `moderate` | `serious` | `critical`, default `serious`).
+It catches the accessibility regressions a `visible`/`text` assertion never sees —
+a missing label, insufficient contrast, a broken ARIA role.
+
+```toml
+[[predicate.assertions]]
+type = "a11y"
+severity = "serious"   # gate on serious + critical (the default)
+max_violations = 0     # zero tolerated (the default)
+```
+
+The violation **count** is surfaced as the envelope-v2 `score` with
+`direction = "lower_better"` (ADR-0041), so the controller reads "5 violations →
+2 violations" as progress even before the gate is met — the ratchet-friendly
+gradient. Evidence (`found`) lists each violation's rule `id`, `impact`, and the
+offending `nodes` (CSS target selectors), so a fixer agent can locate every one.
+
+axe-core is a **runner-side optional dependency** (installed alongside the runner,
+`npm i axe-core`, not an Elixir/mix dep). When it is **absent** the assertion is
+**unavailable** and the whole run is an `:error` ("a11y unavailable") — never a
+`:fail`. A missing evidence tool is infra, exactly like a missing Playwright: kazi
+must not dispatch a fixer agent against "your UI is inaccessible" when the truth is
+"the checker was not installed."
+
+`severity` must be one of the four axe-core impact levels and `max_violations` a
+non-negative integer; the loader rejects anything else at goal-load.
 
 ---
 
