@@ -299,7 +299,16 @@ defmodule Kazi.Bus.MvpTest do
       opts = [conn: conn, session: session, scope: "machine"]
 
       assert :ok = Bus.post("note", text, opts)
-      assert {:ok, messages} = Bus.read(opts)
+
+      # Bus pulls in batches of 100, so drain until dry: on a busy shared
+      # scope the document can sit beyond the first pull (T55.1 lore).
+      messages =
+        Stream.repeatedly(fn -> Bus.read(opts) end)
+        |> Enum.reduce_while([], fn
+          {:ok, []}, acc -> {:halt, acc}
+          {:ok, batch}, acc -> {:cont, acc ++ batch}
+        end)
+
       assert Enum.any?(messages, fn m -> m.text == text end)
     end
 
@@ -328,6 +337,26 @@ defmodule Kazi.Bus.MvpTest do
       assert :ok = Bus.name(nickname, opts)
 
       assert :ok = Bus.tell(nickname, "via nickname #{session}", conn: conn, scope: "machine")
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
       assert :ok = Bus.tell(session, "via session id #{session}", conn: conn, scope: "machine")
 
       assert {:ok, messages} = Bus.read(opts)
@@ -468,6 +497,9 @@ defmodule Kazi.Bus.MvpTest do
       text = "backlog #{session}"
       opts = [conn: conn, session: session, scope: "machine"]
 
+      # T55.5: establish the recipient's presence (tell resolves the roster).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
       assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
       assert {:ok, peeked} = Bus.peek(opts)
       assert Enum.any?(peeked, fn m -> m.text == text end)
@@ -488,6 +520,10 @@ defmodule Kazi.Bus.MvpTest do
       new_text = "wake up #{session}"
       parent = self()
 
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
       # a peeked (un-acked) backlog is pending on the durables
       assert :ok = Bus.tell(session, backlog_text, conn: conn, scope: "machine")
       {:ok, _peeked} = Bus.peek(conn: conn, session: session, scope: "machine")
@@ -506,6 +542,9 @@ defmodule Kazi.Bus.MvpTest do
       assert_receive :watching, 5_000
       # let the watcher anchor + park, then wake it
       Process.sleep(300)
+      # T55.5: establish the recipient's presence (tell resolves the roster).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
       assert :ok = Bus.tell(session, new_text, conn: conn, scope: "machine")
 
       assert {:ok, messages} = Task.await(watcher, 20_000)
@@ -526,6 +565,9 @@ defmodule Kazi.Bus.MvpTest do
          %{conn: conn} do
       session = unique_session()
       text = "numeric anchor #{session}"
+
+      # T55.5: establish the recipient's presence (tell resolves the roster).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
 
       assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
 
