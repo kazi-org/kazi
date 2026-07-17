@@ -1,0 +1,53 @@
+id = "landing-dogfood"
+name = "E44 dogfood: a goal lands itself end to end (implement tiny-calc, land via PR)"
+description = """
+The E44 [integration] capstone (T44.14, ADR-0055). Run against a self-contained
+`tiny-calc` fixture repo whose `calc.add`/`calc.mul` are stubs that raise
+NotImplementedError. The harness implements them; kazi's landing machinery does
+the rest: converged code does NOT satisfy the goal until the `landed` predicate
+(synthesized from `[integration] mode`, T44.2) also passes, and Integrate (T44.3)
+opens a PR whose body carries the predicate vector.
+
+Usage (against a fixture clone with `check_add.py`/`check_mul.py`):
+  kazi apply priv/examples/landing.goal.toml --workspace <fixture> --harness claude
+"""
+
+# T44.1 (ADR-0055): declare HOW converged work lands. mode = "pr" means the
+# converged change is committed on a non-base branch, pushed, and an OPEN PR is
+# raised against `base` -- and the synthesized `landed` predicate blocks
+# convergence until all of that is true.
+[integration]
+mode = "pr"
+branch_prefix = "kazi/"
+base = "main"
+commit_style = "conventional"
+
+# T8.6/ADR-0016 + landmine (docs/lore): a headless claude dispatch into kazi's
+# ephemeral worktree has no human to accept the trust dialog, so the default
+# `auto` mode denies every tool call while the harness still exits 0 -- a silent
+# billable no-op. The agent must COMMIT its own scoped work (the T44.4 process
+# contract), which needs Bash/git, so `acceptEdits` (edits but no Bash) cannot
+# converge here: `bypassPermissions` is required.
+[harness]
+id = "claude"
+permission_mode = "bypassPermissions"
+
+# Bound the dogfood's cost -- the fixture is trivial, a few iterations suffice.
+[budget]
+max_iterations = 12
+
+[[predicate]]
+id = "adds"
+provider = "custom_script"
+description = "calc.add is implemented: add(2,3) == 5"
+cmd = "python3"
+args = ["check_add.py"]
+timeout_ms = 30000
+
+[[predicate]]
+id = "muls"
+provider = "custom_script"
+description = "calc.mul is implemented: mul(2,3) == 6"
+cmd = "python3"
+args = ["check_mul.py"]
+timeout_ms = 30000
