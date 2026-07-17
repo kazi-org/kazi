@@ -119,6 +119,21 @@ gemini_cli_live_excluded = [:gemini_cli_live]
 # fork pin is bumped, and a release built from the new pin is installed locally.
 release_binary_live_excluded = [:release_binary_live]
 
+# The real-browser console-capture test (tagged `:browser_live`, T43.1/ADR-0053)
+# drives the REAL `priv/browser/playwright_runner.js` against a REAL Chromium over
+# a local journey — the only way to prove the runner actually CAPTURES console
+# errors (every other browser test injects the stub runner, which proves the
+# provider's mapping but not the capture). NON-hermetic and EXCLUDED by default so
+# the standard `mix test` and CI stay hermetic (no Playwright, no browser
+# download). Opt in explicitly, after `npm i playwright && npx playwright install
+# chromium`:
+#
+#     mix test --only browser_live test/kazi/providers/browser_console_clean_live_test.exs
+#
+# The test itself probes for node + playwright first and SKIPS HONESTLY (never
+# fails, never fake-passes) when either is unavailable.
+browser_live_excluded = [:browser_live]
+
 ExUnit.start(
   exclude:
     nats_excluded ++
@@ -126,5 +141,6 @@ ExUnit.start(
       opencode_live_excluded ++
       codex_live_excluded ++
       antigravity_live_excluded ++
-      claw_live_excluded ++ gemini_cli_live_excluded ++ release_binary_live_excluded
+      claw_live_excluded ++
+      gemini_cli_live_excluded ++ release_binary_live_excluded ++ browser_live_excluded
 )
