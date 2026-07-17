@@ -366,6 +366,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E62 -- Gherkin runtime predicate provider + parallel-landing follow-ups (P1, ADR-0071) -> plans/E62.md
 
+### E63 -- Dashboard UX: truthful attention, balanced widgets, legible goal views, operator questions (P1) -> plans/E63.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -468,6 +470,14 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-17 -- Change Summary (E63 planned: dashboard UX from operator feedback)
+- New epic E63 (plans/E63.md, executable) from David's live review of the
+  v1.212.0 dashboard: T63.1 truthful NEEDS ATTENTION (heartbeat-gated, ties to
+  #1155/T60.2 as defense-in-depth), T63.2 widget-balance design explorations
+  (human-gated selection), T63.3 drillin/history legibility proposals, T63.4
+  operator-questions IA (no fabricated ETAs, ADR-0046), T63.5 plan-task for the
+  post-selection implementation wave. Reconciles with E60 T60.3/T60.4.
 
 ### 2026-07-17 -- Change Summary (full open-issue triage: 8 issues closed, 7 new epics planned)
 - **Triage.** Read all 32 open kazi-org/kazi issues in full (body + comments).
