@@ -59,10 +59,17 @@ was written.
 
 ## Consequences
 
-- Two artifacts now describe a goal-level DAG. The boundary is: **roadmap =
-  declare/inspect/validate; fleet = execute.** A future slice may let `kazi apply`
-  take a roadmap directly (lowering it to a fleet); until then they stay separate
-  surfaces and this ADR is the map between them.
+- Two artifacts describe a goal-level DAG. The boundary is: **roadmap =
+  declare/inspect/validate; fleet = execute.** T45.4 closes the loop: `kazi apply
+  <roadmap>` now runs a roadmap directly by LOWERING it to a fleet
+  (`Kazi.Goal.Roadmap.to_fleet/1`) and driving the existing `Kazi.Fleet.Execution`
+  engine — the roadmap's declared `needs` ARE the fleet edges, and the fleet
+  executor runs each node's already-loaded goal (so inline goal-sets run without a
+  file). The two surfaces stay distinct at the FRONT end (a roadmap's declarative,
+  centralized, inline-capable format vs a fleet's path-list + decentralized
+  `depends_on`), but share ONE execution engine, so behavior can never diverge. A
+  single-goal roadmap degrades to plain `kazi apply` (a one-node DAG has nothing to
+  schedule). This ADR remains the map between the two front ends.
 - The roadmap's cycle error names the FULL cycle chain (every goal id on it),
   which is strictly more informative than the fleet's two-endpoint message; the
   fleet message is unchanged (out of scope for T45.1).
