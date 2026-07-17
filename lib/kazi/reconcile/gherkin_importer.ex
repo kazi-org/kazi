@@ -329,6 +329,32 @@ defmodule Kazi.Reconcile.GherkinImporter do
     end
   end
 
+  @typedoc """
+  One parsed Scenario in document order: its `feature`/`scenario` names, the
+  verbatim `steps` lines, and the recognized `tags` (feature tags inherited
+  first, the Scenario's own tags last).
+  """
+  @type scenario :: %{
+          feature: String.t() | nil,
+          scenario: String.t(),
+          steps: [String.t()],
+          tags: [String.t()]
+        }
+
+  @doc """
+  Parses `.feature` text (or a list of texts) into the document-ordered list of
+  `t:scenario/0` maps — the same structural view the importer builds predicates
+  from, exposed for reuse (e.g. the manifest-coverage meta-predicate,
+  `Kazi.Reconcile.SpecCoverage`). Reuses the shipped line-based parser; no new
+  Gherkin grammar.
+  """
+  @spec scenarios(String.t() | [String.t()]) :: [scenario()]
+  def scenarios(source) when is_binary(source), do: parse(source)
+
+  def scenarios(sources) when is_list(sources) do
+    Enum.flat_map(sources, fn text when is_binary(text) -> parse(text) end)
+  end
+
   # ── Parsing ────────────────────────────────────────────────────────────────
 
   # Parse every source in document order, tagging each Scenario with the on-disk
