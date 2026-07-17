@@ -103,11 +103,28 @@ claw_live_excluded = [:claw_live]
 # (never fail, never fake-pass) when either is unavailable.
 gemini_cli_live_excluded = [:gemini_cli_live]
 
+# The release-binary stdout-purity test (tagged `:release_binary_live`, T54.10)
+# runs the REAL released `kazi` binary (`KAZI_RELEASE_BIN` or `$PATH`) and stages
+# a fake in-use older payload inside its burrito install prefix: the wrapper's
+# maintenance pass runs BEFORE the BEAM boots, so only the release binary can be
+# tested for it (no in-app guard can help). NON-hermetic and EXCLUDED by default
+# so the standard `mix test` and CI stay hermetic (no installed release needed).
+# Opt in explicitly:
+#
+#     mix test --only release_binary_live test/kazi/cli/release_binary_stdout_purity_test.exs
+#
+# The test itself probes the binary first and SKIPS HONESTLY (never fails, never
+# fake-passes) when no burrito-built binary is available. Its once-per-boot
+# assertion goes green only once kazi-org/burrito PR #1 is merged, the mix.exs
+# fork pin is bumped, and a release built from the new pin is installed locally.
+release_binary_live_excluded = [:release_binary_live]
+
 ExUnit.start(
   exclude:
     nats_excluded ++
       graphify_excluded ++
       opencode_live_excluded ++
       codex_live_excluded ++
-      antigravity_live_excluded ++ claw_live_excluded ++ gemini_cli_live_excluded
+      antigravity_live_excluded ++
+      claw_live_excluded ++ gemini_cli_live_excluded ++ release_binary_live_excluded
 )
