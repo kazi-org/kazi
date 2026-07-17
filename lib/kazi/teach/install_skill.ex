@@ -652,6 +652,15 @@ defmodule Kazi.Teach.InstallSkill do
     (MCP: `full: true`) is the debugging escape returning `messages` verbatim.
     Shape: `kazi schema bus`.
 
+    - **Fetch a stubbed body** -- `kazi bus get <id>` (MCP: `kazi_bus_get`).
+      When the digest collapses a large body into a stub, this dereferences
+      that stub's `id` back to the full body -- the deliberate pull you spend
+      context on ON PURPOSE (ADR-0072 d3). It is a direct stream fetch by id:
+      NO consumer, so it consumes NOTHING and never advances a read cursor (a
+      later `read` still delivers that message). Prints a bounded preview by
+      default; `--full` (MCP: `full: true`) returns the whole body. An unknown
+      or aged-out id is a clean one-line error.
+
     Cadence: peek at turn boundaries; hold a bounded `watch` only when genuinely
     waiting on another session. Full taxonomy: `docs/session-bus.md`.
 

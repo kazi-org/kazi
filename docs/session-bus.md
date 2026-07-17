@@ -58,6 +58,7 @@ kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope mach
 kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
                                                            # prints the message id (T55.12)
 kazi bus status <id> [--json]                              # what became of a tell: pending|consumed (T55.12)
+kazi bus get <id> [--full] [--json]                        # fetch a message's full body by id; consumes nothing (T55.6, ADR-0072 d3)
 kazi bus read [--peek] [--full] [--json]                   # pull + ack this session's durable consumers, prints a digest
 kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
 kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
@@ -381,6 +382,39 @@ over the same live set render identically. Claim ownership is a *separate*
 projection (a later task reads `refs/claims/*` at source, ADR-0073 point 2);
 `board` today renders facts and roster.
 
+### Fetching a stubbed body: `bus get <id>` (T55.6, ADR-0072 d3)
+
+The digest keeps routine reads cheap by collapsing a large body into a
+one-line **stub** — but that stub carries the body's `id`, so the body is
+never a dead end. `kazi bus get <id>` is the deliberate pull that
+dereferences that id back to the full body: the escape a session takes ON
+PURPOSE once it has decided a stubbed document is worth spending the context
+on.
+
+```
+$ kazi bus read                          # a 60 KiB design doc shows as a stub
+1 note/design                            #   (id 812, 61440B, no body)
+$ kazi bus get 812 --full                # deliberately fetch the whole body
+812 note/design 61440B session=architect machine=host-3
+<the full 60 KiB body, byte-identical to what was posted>
+```
+
+It is implemented as a **direct JetStream stream GET by sequence** — NO
+consumer is involved, so `get` **consumes nothing** and never advances any
+read cursor. This is the sharp contrast with `bus read`, which acks and
+consumes: a `get` can be spent freely and a later `bus read` still delivers
+that same message normally. (Nor does it disturb another session's inbox —
+`get` is a pure read of the shared stream.)
+
+By default `get` prints an `id kind/topic bytes` header and a **bounded
+preview** of the body (the same 1024-byte threshold that stubbed it); `--full`
+prints the whole body. Under `--json` the result is a versioned envelope
+`{ok, schema_version, message: {id, scope, kind, topic, sev, session,
+machine, ts, bytes, text, truncated}}` — `truncated` is `true` when the
+default preview cut the body, and `--full` returns the whole `text` with
+`truncated: false`. An id that is not in the stream (never posted, or aged
+out of the 30-day retention) is a clean one-line error, never a crash.
+
 ## Cross-machine setup
 
 ADR-0067 designed the bus for cross-machine from day one ("One machine today,
@@ -431,6 +465,7 @@ harness drives the bus natively, with no JSON-CLI shell-out:
 | `kazi_bus_board` | `kazi bus board` | — |
 | `kazi_bus_tell` | `kazi bus tell` | `session`, `text` |
 | `kazi_bus_status` | `kazi bus status` | `id` |
+| `kazi_bus_get` | `kazi bus get` | `id` |
 | `kazi_bus_name` | `kazi bus name` | `name` |
 
 Each accepts the optional `topic` / `scope` / `sev` arguments the CLI verbs
@@ -441,7 +476,12 @@ receipt — `{ok: true, id, recipient, liveness}` — where `id` is what
 `"no-presence"` is the structured form of the CLI's warning. `kazi_bus_status`
 returns `{ok: true, id, state, recipient, sent_at, recipients}` with `state`
 `"pending"` or `"consumed"`; `unknown_message` and `not_directed` are its
-structured errors. `kazi_bus_who`'s rows carry `inbox` (un-read directed
+structured errors. `kazi_bus_get` dereferences a stub's `id` back to the full
+body (T55.6) and returns `{ok: true, message: {id, scope, kind, topic, sev,
+session, machine, ts, bytes, text, truncated}}` — a bounded preview by default
+(`truncated: true` when cut), the whole body under `full: true` — consuming
+nothing, so a later `kazi_bus_read` still delivers that message; `unknown_message`
+is its structured error. `kazi_bus_who`'s rows carry `inbox` (un-read directed
 depth). `kazi_bus_read` and
 `kazi_bus_watch` return the ADR-0072 digest envelope by default (see
 above); `full: true` mirrors the CLI's `--full` and returns `messages`
