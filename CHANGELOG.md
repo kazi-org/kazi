@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.199.0](https://github.com/kazi-org/kazi/compare/v1.198.1...v1.199.0) (2026-07-17)
+
+
+### Features
+
+* **browser:** form_validation + attr/count/enabled/field_value assertions (T43.4) ([d70583a](https://github.com/kazi-org/kazi/commit/d70583a6edb444ab38b638b143f0ba23b589f190))
+* **loader:** admit + key-validate the T43.4 browser assertions ([ffba797](https://github.com/kazi-org/kazi/commit/ffba797ee47a71382c2cced6d9b8b2af5f5708bd))
+
 ## [1.198.1](https://github.com/kazi-org/kazi/compare/v1.198.0...v1.198.1) (2026-07-17)
 
 
