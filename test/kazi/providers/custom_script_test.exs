@@ -22,6 +22,16 @@ defmodule Kazi.Providers.CustomScriptTest do
   # A command that prints `out` to stdout and exits `code`.
   defp emit(out, code), do: %{cmd: "sh", args: ["-c", "printf '%s' '#{out}'; exit #{code}"]}
 
+  # A shell script at `rel_path` inside the workspace, executable unless `mode`
+  # says otherwise. Returns its absolute path.
+  defp write_script(ws, rel_path, body, mode \\ 0o755) do
+    path = Path.join(ws, rel_path)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "#!/bin/sh\n#{body}\n")
+    File.chmod!(path, mode)
+    path
+  end
+
   test "implements the PredicateProvider behaviour" do
     behaviours = CustomScript.module_info(:attributes)[:behaviour] || []
     assert Kazi.PredicateProvider in behaviours
@@ -179,6 +189,71 @@ defmodule Kazi.Providers.CustomScriptTest do
       result = CustomScript.evaluate(Predicate.new(:probe, :http_probe), %{})
       assert result.status == :error
       assert match?({:unsupported_kind, :http_probe}, result.evidence.reason)
+    end
+  end
+
+  # Issue #1096: `System.cmd/3` resolves a relative `cmd` against PATH, NOT the
+  # `:cd` option, so a checker committed in the workspace raised :enoent even
+  # though it sat right next to the code under test. A relative `cmd` that names a
+  # path now resolves against the workspace; a bare name still resolves on PATH.
+  describe "a workspace-relative cmd (#1096)" do
+    test "a relative executable resolves against the workspace and runs", %{workspace: ws} do
+      path = write_script(ws, "scripts/chk.sh", "exit 0")
+
+      result = evaluate(%{cmd: "scripts/chk.sh"}, ws)
+
+      assert result.status == :pass
+      # The moduledoc promises evidence carries the RESOLVED cmd.
+      assert result.evidence.cmd == path
+    end
+
+    test "a ./-prefixed relative executable resolves too", %{workspace: ws} do
+      path = write_script(ws, "scripts/dot.sh", "exit 0")
+
+      result = evaluate(%{cmd: "./scripts/dot.sh"}, ws)
+
+      assert result.status == :pass
+      assert result.evidence.cmd == path
+    end
+
+    test "a resolved relative script's non-zero exit is :fail, not :error", %{workspace: ws} do
+      write_script(ws, "scripts/red.sh", "exit 3")
+
+      result = evaluate(%{cmd: "scripts/red.sh"}, ws)
+
+      assert result.status == :fail
+      assert result.evidence.exit == 3
+    end
+
+    test "a missing relative script is :error carrying a cmd_unrunnable reason", %{workspace: ws} do
+      result = evaluate(%{cmd: "scripts/missing.sh"}, ws)
+
+      assert result.status == :error
+      assert {:cmd_unrunnable, message} = result.evidence.reason
+      assert message =~ "enoent"
+      # Nothing resolved, so the evidence echoes what the author declared.
+      assert result.evidence.cmd == "scripts/missing.sh"
+    end
+
+    test "a non-executable relative file is :error, never a silent pass", %{workspace: ws} do
+      write_script(ws, "scripts/noexec.sh", "exit 0", 0o644)
+
+      result = evaluate(%{cmd: "scripts/noexec.sh"}, ws)
+
+      assert result.status == :error
+      assert match?({:cmd_unrunnable, _}, result.evidence.reason)
+    end
+
+    test "a bare cmd stays a PATH lookup and is not joined to the workspace", %{workspace: ws} do
+      # A decoy `true` in the workspace exiting 9 must NOT shadow the real one on
+      # PATH: a bare name has no path separator, so shell semantics keep it on
+      # PATH (`semgrep` must never resolve to ./semgrep).
+      write_script(ws, "true", "exit 9")
+
+      result = evaluate(%{cmd: "true"}, ws)
+
+      assert result.status == :pass
+      assert result.evidence.cmd == "true"
     end
   end
 
