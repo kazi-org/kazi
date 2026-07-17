@@ -389,6 +389,121 @@ const ASSERTIONS = {
 
     return { ok: found.length <= maxViolations, expected: maxViolations, found, count: found.length };
   },
+
+  // Visual regression: screenshot a `selector` (or the whole page when absent)
+  // and perceptual-diff it against a COMMITTED baseline within `threshold` — the
+  // max fraction of pixels allowed to differ (default 0.01 = 1%, T43.3 / UC-056).
+  //
+  // Baselines live under the WORKSPACE at `.kazi/visual-baselines/<name>.png`
+  // (committed alongside the code they pin); the diff image on a failure is
+  // written to `.kazi/visual-diffs/<name>.png`. The runner runs with cwd = the
+  // workspace, so both resolve there.
+  //
+  // The CRITICAL invariant: a MISSING baseline SEEDS itself (writes the current
+  // screenshot as the new baseline) and returns a FATAL "baseline seeded" —
+  // promoted to a run `status: "error"`, NEVER a pass. A first run must never
+  // silently pass just because there was nothing to compare against.
+  //
+  // The pixel-diff needs `pixelmatch` + `pngjs` (runner-side optional deps, like
+  // axe-core); absent, the assertion is FATAL "visual diff unavailable" — :error,
+  // never a false pass.
+  visual: async ({ page, assertion }) => {
+    const name = assertion.name;
+    if (typeof name !== "string" || name === "") {
+      return { fatal: true, error: "visual assertion requires a name", ok: false, found: null };
+    }
+
+    // Dynamic import so BOTH the CommonJS (pixelmatch <=5) and the ESM-only
+    // (pixelmatch >=6) builds load from a CJS runner — `import()` returns the
+    // module namespace for either. pngjs is CJS; its `PNG` export survives the
+    // interop as a named or default property.
+    let pixelmatch, PNG;
+    try {
+      const pm = await import("pixelmatch");
+      pixelmatch = pm.default || pm;
+      const pj = await import("pngjs");
+      PNG = pj.PNG || (pj.default && pj.default.PNG);
+    } catch (e) {
+      return { fatal: true, error: "visual diff unavailable", ok: false, found: null };
+    }
+
+    if (typeof pixelmatch !== "function" || !PNG) {
+      return { fatal: true, error: "visual diff unavailable", ok: false, found: null };
+    }
+
+    const fs = require("fs");
+    const path = require("path");
+    const baselineDir = path.join(".kazi", "visual-baselines");
+    const diffDir = path.join(".kazi", "visual-diffs");
+    const baselinePath = path.join(baselineDir, `${name}.png`);
+    const diffPath = path.join(diffDir, `${name}.png`);
+    const threshold = assertion.threshold ?? 0.01;
+
+    const target = assertion.selector ? page.locator(assertion.selector) : page;
+    const actualBuf = await target.screenshot(assertion.selector ? {} : { fullPage: true });
+
+    // Missing baseline: SEED and error — the invariant. Never a false pass.
+    if (!fs.existsSync(baselinePath)) {
+      fs.mkdirSync(baselineDir, { recursive: true });
+      fs.writeFileSync(baselinePath, actualBuf);
+      return {
+        fatal: true,
+        error: "baseline seeded",
+        ok: false,
+        expected: baselinePath,
+        found: { baseline: baselinePath, seeded: true },
+      };
+    }
+
+    const actual = PNG.sync.read(actualBuf);
+    const baseline = PNG.sync.read(fs.readFileSync(baselinePath));
+
+    // A dimension change is a real visual diff (the UI resized), not an error —
+    // write the current shot as the diff artifact and fail with the sizes.
+    if (actual.width !== baseline.width || actual.height !== baseline.height) {
+      fs.mkdirSync(diffDir, { recursive: true });
+      fs.writeFileSync(diffPath, actualBuf);
+      return {
+        ok: false,
+        expected: { width: baseline.width, height: baseline.height, threshold },
+        found: {
+          width: actual.width,
+          height: actual.height,
+          diff_path: diffPath,
+          reason: "dimension mismatch",
+        },
+      };
+    }
+
+    const { width, height } = baseline;
+    const diff = new PNG({ width, height });
+    // pixelmatch's own `threshold` (0.1) is per-pixel colour sensitivity, NOT our
+    // fraction gate — ours compares the RATIO of differing pixels below.
+    const diffPixels = pixelmatch(baseline.data, actual.data, diff.data, width, height, {
+      threshold: 0.1,
+    });
+    const ratio = diffPixels / (width * height);
+    const ok = ratio <= threshold;
+
+    let diffOut = null;
+    if (!ok) {
+      fs.mkdirSync(diffDir, { recursive: true });
+      fs.writeFileSync(diffPath, PNG.sync.write(diff));
+      diffOut = diffPath;
+    }
+
+    return {
+      ok,
+      expected: { threshold },
+      found: {
+        diff_ratio: ratio,
+        diff_pixels: diffPixels,
+        total_pixels: width * height,
+        diff_path: diffOut,
+        baseline: baselinePath,
+      },
+    };
+  },
 };
 
 // --- Viewports (T43.5, ADR-0053) -------------------------------------------
@@ -515,18 +630,20 @@ async function main() {
       await page.close().catch(() => {});
     }
 
-    // An UNAVAILABLE assertion (e.g. a11y with axe-core not installed on the
-    // runner side) means we could not evaluate that check at all — promote the
-    // whole run to "error" so the provider maps it to :error (infra), never a UI
-    // :fail. The evidence still carries the per-assertion records.
-    const unavailable = assertions.find((a) => a.unavailable);
-    if (unavailable) {
+    // A FATAL assertion means we could not (or must not) return a UI verdict for
+    // it — promote the whole run to "error" so the provider maps it to :error,
+    // never a UI :fail. Two cases today: an UNAVAILABLE check (a11y with axe-core
+    // missing) and a SEEDED visual baseline (`fatal` + "baseline seeded" — a
+    // first run must never silently pass with nothing to compare against, T43.3).
+    // The evidence still carries the per-assertion records.
+    const fatal = assertions.find((a) => a.fatal || a.unavailable);
+    if (fatal) {
       emit({
         status: "error",
         url: payload.url,
         assertions,
         screenshot,
-        error: unavailable.error || "assertion unavailable",
+        error: fatal.error || "assertion could not be evaluated",
       });
     } else {
       const allOk = assertions.every((a) => a.ok);
