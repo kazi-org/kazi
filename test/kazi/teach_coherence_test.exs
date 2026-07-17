@@ -159,6 +159,16 @@ defmodule Kazi.TeachCoherenceTest do
       assert_coherent(Kazi.Teach.InstallSkill.skill_md(), cli_surface(), "SKILL.md")
     end
 
+    test "the rendered AUTHORING.md references only real commands and flags" do
+      # ADR-0074: the skill ships as three files; every rendered document is
+      # held to the same drift guard as the SKILL.md router.
+      assert_coherent(Kazi.Teach.InstallSkill.authoring_md(), cli_surface(), "AUTHORING.md")
+    end
+
+    test "the rendered RECIPES.md references only real commands and flags" do
+      assert_coherent(Kazi.Teach.InstallSkill.recipes_md(), cli_surface(), "RECIPES.md")
+    end
+
     test "the root AGENTS.md references only real commands and flags" do
       # Read AGENTS.md off disk (ADR-0024 decision 3: it ships in the repo root).
       # `File.read!/1` resolves against the project root (the test runner's cwd),

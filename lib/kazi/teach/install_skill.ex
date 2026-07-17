@@ -1,57 +1,77 @@
 defmodule Kazi.Teach.InstallSkill do
   @moduledoc """
-  Writes the kazi Claude Code SKILL.md, opt-in (T16.2, UC-031, ADR-0024
-  decision 1; restructured as a ROUTER in T26.1, ADR-0031).
+  Writes the kazi Claude Code skill, opt-in (T16.2, UC-031, ADR-0024 decision 1;
+  restructured as a ROUTER in T26.1, ADR-0031; split into a SELF-CONTAINED
+  multi-file skill with a LOCAL.md extension point in ADR-0074).
 
   `kazi install-skill` teaches an orchestrating Claude Code agent how to drive
-  kazi as a tool. The SKILL.md is a ROUTER: it recognizes four human-facing
-  sub-skill verbs and routes each to the matching real `kazi` CLI command --
+  kazi as a tool. It writes THREE files into the skill directory:
 
-      plan   -> kazi plan    (author/refine the goal's acceptance predicates)
-      apply  -> kazi apply   (converge the goal -- the reconcile loop)
-      status -> kazi status  (read the convergence state from the read-model)
-      adopt  -> kazi init     (reverse-engineer a starter goal-file from a repo)
+      SKILL.md     -- the ROUTER: four sub-skill verbs, each mapped to the
+                      matching real `kazi` CLI command --
+                        plan   -> kazi plan    (author the acceptance predicates)
+                        apply  -> kazi apply   (converge -- the reconcile loop)
+                        status -> kazi status  (read convergence state)
+                        adopt  -> kazi init    (bootstrap a goal-file from a repo)
+      AUTHORING.md -- predicate authoring quality: the task brief, one
+                      requirement per predicate, capability-vs-guard
+                      classification and the red-at-t0 rule (#1128), negative
+                      space, provider inference.
+      RECIPES.md   -- operational recipes: the bounded escalation ladder,
+                      streaming/parallel/standing/explain, the check-only gate
+                      variant, status/dashboard, adopt, the session bus, and
+                      schema_version pinning.
 
-  ADR-0031 introduced the router with a skill-verb -> CLI-verb MAP; ADR-0032 then
-  renamed the CLI verbs themselves (`run` -> `apply`, `propose` -> `plan`), so the
-  map is now an IDENTITY for plan/apply and a thin alias for adopt -> init. The old
-  CLI verbs `run`/`propose` were REMOVED in v0.6.0 (T27.9); `apply`/`plan` are the
-  only verbs, and the router teaches them.
+  The skill is SELF-CONTAINED (ADR-0074): it references only real kazi
+  commands/flags and its own two reference files -- never an operator's private
+  skills. Site-specific wiring (e.g. which local orchestration skill owns
+  plan-driven work) belongs in `LOCAL.md` in the same directory: the SKILL.md
+  tells the agent to read it when present, and this module NEVER writes or
+  overwrites `LOCAL.md`, so operator content survives every re-install.
 
   The body still teaches the underlying recipe -- caller-drafts `kazi plan --json`
   -> review -> `kazi approve --json` -> `kazi apply --harness claude --model
-  <cheap-claude-id> --json [--stream]` -> parse the result -> branch on `next_action`
-  -- plus the two-tier economics (a FRONTIER model authors the predicates, a CHEAP
-  Claude model runs the loop via in-family tiering, kazi keeps it honest via objective
-  termination). In-family Claude tiering is the DEFAULT (ADR-0033/0035); local/BYOM
-  via opencode is the secondary privacy add-on.
+  <cheap-claude-id> --json [--stream]` -> parse the result -> branch on
+  `next_action` -- plus the two-tier economics (a FRONTIER model authors the
+  predicates, a CHEAP Claude model runs the loop via in-family tiering, kazi
+  keeps it honest via objective termination). In-family Claude tiering is the
+  DEFAULT (ADR-0033/0035); local/BYOM via opencode is the secondary privacy
+  add-on.
 
-  A NON-KAZI repo degrades cleanly: the router tells the agent to fall back to the
-  generic `/plan` + `/apply` skills when `kazi` is not on PATH, so the global skill
-  never hardcodes a kazi-only assumption (ADR-0031 consequences).
+  A NON-KAZI repo degrades cleanly: the router tells the agent to fall back to
+  its own planning/execution workflow when `kazi` is not on PATH -- it names no
+  specific fallback skill, because kazi cannot assume any exist (ADR-0074).
 
   This is CONSENT-FIRST: it writes only when the operator runs the command. A
   normal `kazi` run never touches `~/.claude`, and `brew install` only PRINTS a
   hint to run `install-skill` (the tap formula's `caveats`, a separate repo) --
-  it does not auto-write. This honors the operator's own "global skills, don't
-  auto-create" discipline (ADR-0024 alternatives-rejected).
+  it does not auto-write.
 
   `write/1`'s target directory is INJECTABLE (`:dir`): production defaults to
   `~/.claude/skills/kazi`, but tests pass a tmp dir so they never touch the real
-  `~/.claude`. The SKILL.md body references ONLY real kazi commands/flags, so the
-  T16.4 coherence guard can assert it never drifts from the actual CLI surface.
+  `~/.claude`. Every rendered document references ONLY real kazi commands/flags,
+  so the T16.4 coherence guard can assert none of them drift from the actual
+  CLI surface.
   """
 
-  # The default skill directory under the user's Claude config. The SKILL.md is
-  # written at `<dir>/SKILL.md`. Tests override `:dir` with a tmp dir.
+  # The default skill directory under the user's Claude config. Documents are
+  # written at `<dir>/<name>`. Tests override `:dir` with a tmp dir.
   @default_dir Path.join(["~", ".claude", "skills", "kazi"])
 
   # The skill's frontmatter name -- matches the directory (`skills/kazi`), the
   # Claude Code convention.
   @skill_name "kazi"
 
+  # The operator-owned extension file. NEVER written by this module (ADR-0074):
+  # its absence from docs/0 is the guarantee re-installs preserve it.
+  @local_file "LOCAL.md"
+
   @doc """
-  Renders the kazi SKILL.md and writes it to `<dir>/SKILL.md`.
+  Renders the kazi skill documents and writes them to `<dir>/`.
+
+  Writes every document in `docs/0` (SKILL.md, AUTHORING.md, RECIPES.md). It
+  NEVER writes `LOCAL.md` -- that file is operator-owned site wiring and
+  survives re-installs untouched (ADR-0074).
 
   Opts:
 
@@ -59,19 +79,49 @@ defmodule Kazi.Teach.InstallSkill do
       tilde-expanded). Tests pass a tmp dir so the real `~/.claude` is never
       touched.
 
-  Returns `{:ok, path}` with the written `SKILL.md` path, or `{:error, reason}`
-  if the directory could not be created or the file could not be written.
+  Returns `{:ok, path}` with the written `SKILL.md` path (the skill's entry
+  point), or `{:error, reason}` if the directory could not be created or a
+  file could not be written.
   """
   @spec write(keyword()) :: {:ok, Path.t()} | {:error, term()}
   def write(opts \\ []) do
     dir = opts |> Keyword.get(:dir, @default_dir) |> Path.expand()
-    path = Path.join(dir, "SKILL.md")
 
     with :ok <- File.mkdir_p(dir),
-         :ok <- File.write(path, skill_md()) do
-      {:ok, path}
+         :ok <- write_docs(dir) do
+      {:ok, Path.join(dir, "SKILL.md")}
     end
   end
+
+  defp write_docs(dir) do
+    Enum.reduce_while(docs(), :ok, fn {name, content}, :ok ->
+      case File.write(Path.join(dir, name), content) do
+        :ok -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  @doc """
+  The documents this installer writes, as `{filename, content}` pairs, in write
+  order. `LOCAL.md` is deliberately absent -- it is operator-owned. Exposed so
+  the CLI can report every file it wrote and tests can assert the full set.
+  """
+  @spec docs() :: [{String.t(), String.t()}]
+  def docs do
+    [
+      {"SKILL.md", skill_md()},
+      {"AUTHORING.md", authoring_md()},
+      {"RECIPES.md", recipes_md()}
+    ]
+  end
+
+  @doc """
+  The operator-owned extension filename (`LOCAL.md`). Exposed so tests can pin
+  the never-overwritten contract against the same constant the docs teach.
+  """
+  @spec local_file() :: String.t()
+  def local_file, do: @local_file
 
   @doc """
   The default install directory (`~/.claude/skills/kazi`, tilde-expanded). Exposed
@@ -104,6 +154,22 @@ defmodule Kazi.Teach.InstallSkill do
     predicates are objectively true, the loop is stuck, or it is over budget. kazi
     is NOT a harness -- it drives one.
 
+    This skill ships as three files. Read the other two at their point of use:
+
+    - kazi/AUTHORING.md -- predicate authoring quality (the task brief,
+      capability-vs-guard and the red-at-t0 rule, one requirement per predicate,
+      provider inference). Read it BEFORE drafting any predicates.
+    - kazi/RECIPES.md -- operational recipes (the escalation ladder, streaming,
+      parallel/standing, the check-only gate variant, the session bus).
+
+    ## Site-specific routing: LOCAL.md
+
+    If a `LOCAL.md` exists in this skill directory, READ IT FIRST. It carries the
+    operator's own wiring -- e.g. which local orchestration skill owns plan-driven
+    work, house conventions, model policy overrides -- and it takes precedence
+    over the generic routing below. `kazi install-skill` never writes or
+    overwrites `LOCAL.md`, so it is the safe place for anything site-specific.
+
     ## How to drive kazi: MCP first, JSON-CLI fallback
 
     PREFER the MCP server. If you speak MCP (Claude Code, Codex, Cursor), wire kazi
@@ -128,11 +194,10 @@ defmodule Kazi.Teach.InstallSkill do
     ## The invocation phrase
 
     When the user says "have kazi drive this until done" (the canonical
-    invocation phrase, the Context7 "use context7" pattern), that IS the request
-    to drive kazi: author the acceptance predicates for the task with the `plan`
-    verb, then converge them with the `apply` verb until they are objectively
-    true. This phrase is one of the skill's triggers, so it routes here whenever
-    the kazi skill is installed; treat it as "set the bar, then reconcile to it".
+    invocation phrase), that IS the request to drive kazi: author the acceptance
+    predicates for the task with the `plan` verb, then converge them with the
+    `apply` verb until they are objectively true. Treat it as "set the bar, then
+    reconcile to it".
 
     This skill is a ROUTER. The user (or you) names a sub-skill verb; you route it
     to the matching real `kazi` CLI command and drive it over `--json`:
@@ -140,49 +205,44 @@ defmodule Kazi.Teach.InstallSkill do
     | sub-skill verb | routes to     | what it does                                            |
     |----------------|---------------|---------------------------------------------------------|
     | `plan`         | `kazi plan`   | author/refine the goal's acceptance predicates (authoring path). |
-    | `apply`        | `kazi apply`  | converge the goal -- the reconcile loop (subsumes loop + apply + qualify for code goals; see Step 3). |
+    | `apply`        | `kazi apply`  | converge the goal -- the reconcile loop.                |
     | `status`       | `kazi status` | read convergence/proposal state from the read-model (a pure read). |
     | `adopt`        | `kazi init`   | reverse-engineer a starter goal-file from an existing repo.        |
 
-    The verb you TYPE, the skill, and the CLI now read the same: `plan` and `apply`
+    The verb you TYPE, the skill, and the CLI read the same: `plan` and `apply`
     are the CLI verbs (ADR-0032). `adopt` is the one human alias -- it routes to
-    `kazi init`. The legacy CLI verbs `run`/`propose` were REMOVED in v0.6.0 (T27.9):
-    use `apply`/`plan`. The full recipe that `plan` and `apply` sit inside (author
-    -> approve -> converge) is below.
+    `kazi init`. The legacy CLI verbs `run`/`propose` were REMOVED in v0.6.0
+    (T27.9): use `apply`/`plan`.
 
     Confirm the live surface before you drive: `kazi help --json` emits the
     command/flag table and `kazi schema [<command>]` emits the versioned result
     schemas. They are generated from kazi's own command table, so they never drift.
     Prefer them over this document when in doubt.
 
-    ### Where /plan and /tidy sit (the code on-ramp)
+    ## Where kazi sits in your workflow
 
-    For a CODE goal the on-ramp is exactly these four verbs -- `plan` / `apply` /
-    `status` / `adopt`. Do NOT route a code goal through a separate `/loop` or
-    `/qualify` pass: `kazi apply` IS the reconcile loop, and "launch-ready" is the
-    OBJECTIVE predicate vector (including any live prod probe), not a heuristic to
-    infer afterward (ADR-0031). Two general skills stay OUTSIDE kazi and keep their
-    own roles:
+    kazi is the EXECUTION layer for engineering goals: it makes "done" objective
+    and grinds until it holds. The INTENT layer -- deciding what to build,
+    strategy, work breakdown -- stays with you (or your own planning workflow).
+    When a work plan already carries machine-checkable acceptance criteria,
+    DERIVE the predicates from those criteria instead of inventing new ones
+    (caller-drafts, Step 1 below); when none exist, draft the predicates from the
+    goal directly.
 
-    - `/plan` is the INTENT layer ABOVE kazi -- it authors the strategy (ADRs, use
-      cases, the WBS) and each task's `acc:` line. Those `acc:` lines feed the
-      `plan` verb: derive the predicates from them (the `/plan` -> goal-set bridge
-      in Step 1). `/plan` decides WHAT to build; kazi makes it objective and runs it.
-    - `/tidy` is HYGIENE, orthogonal to convergence -- git/worktree/scratch sweeping.
-      It is not part of the converge loop; run it when you want repo hygiene, not to
-      reach "done".
-
-    (`/loop` and `/qualify` remain available as GENERAL skills for non-code work;
-    the kazi code on-ramp simply does not route to them.)
+    For a CODE goal the on-ramp is exactly these four verbs. `kazi apply` IS the
+    reconcile loop, and "launch-ready" is the OBJECTIVE predicate vector
+    (including any live prod probe), not a heuristic to infer afterward
+    (ADR-0031) -- so you do not need a separate outer convergence loop or a
+    separate qualification pass around it.
 
     ### Not a kazi repo? Degrade cleanly
 
-    The router assumes `kazi` is on PATH. If it is not (a repo that has not adopted
-    kazi, or a non-engineering task), do NOT fabricate a `kazi` invocation. Fall back
-    to the generic skills: use `/plan` to author the intent and `/apply` to execute
-    it. Run `adopt` (`kazi init <repo-dir>`) first only when the user wants to bring
-    kazi into the repo. kazi claims engineering/code goals; content, GTM, and ops work
-    stays on `/plan` + `/apply`.
+    The router assumes `kazi` is on PATH. If it is not (a repo that has not
+    adopted kazi, or a non-engineering task), do NOT fabricate a `kazi`
+    invocation. Fall back to your own planning/execution workflow. Run `adopt`
+    (`kazi init <repo-dir>`) first only when the user wants to bring kazi into
+    the repo. kazi claims engineering/code goals; content, GTM, and ops work
+    stays outside it.
 
     ## The two-tier economics (why drive kazi at all)
 
@@ -199,437 +259,380 @@ defmodule Kazi.Teach.InstallSkill do
     ```
 
     Spend expensive reasoning ONCE on the part that needs judgment: what "done"
-    means -- the acceptance predicates. Spend cheap compute on the iterative grind of
-    editing until those predicates pass. kazi's objective termination makes the split
-    safe: the cheap implementer cannot declare victory on plausible-but-wrong work,
-    because truth lives in the controller (the predicate vector), not in the model
-    doing the keystrokes. You set the bar; the cheap model reaches for it; kazi holds
-    the bar still. You own the per-phase model policy -- kazi bakes in none of it; it
-    just exposes `--harness` / `--model` per call.
+    means -- the acceptance predicates. Spend cheap compute on the iterative grind
+    of editing until those predicates pass. kazi's objective termination makes the
+    split safe: the cheap implementer cannot declare victory on
+    plausible-but-wrong work, because truth lives in the controller (the predicate
+    vector), not in the model doing the keystrokes.
 
-    **The DEFAULT recipe is in-family Claude tiering (ADR-0033/0035, amended
-    2026-07-08 on fleet data).** You are a FRONTIER Claude model (e.g.
-    `claude-opus-4-8`) and you already AUTHOR the predicates in this very session;
-    run the grind on the DEFAULT grind tier via `kazi apply --harness claude --model
-    claude-sonnet-5`. The default tier is `claude-sonnet-5` (step up to
-    `claude-opus-4-8` for harder slices). This needs only a Claude API key -- no
-    local model, no special hardware -- so the economics apply to anyone running
-    Claude Code. The rationale is EMPIRICAL and re-derivable from your own fleet:
-    `kazi economy --json` aggregates cost, wall-clock, and outcome percentiles per
-    model and goal shape from the local run registry -- consult it periodically
+    The DEFAULT recipe is in-family Claude tiering (ADR-0033/0035, amended
+    2026-07-08 on fleet data): you author the predicates in this very session;
+    run the grind on the DEFAULT grind tier via
+    `kazi apply --harness claude --model claude-sonnet-5 --json [--stream]`.
+    The default tier is `claude-sonnet-5` (step up to `claude-opus-4-8` for
+    harder slices). Haiku is an explicit OPT-DOWN for a slice you already KNOW
+    is trivial (a one-line fix, a lint pass), never the default -- cheap-tier
+    grinding produced the vacuous-convergence failure mode (#924). Local/BYOM is
+    the SECONDARY privacy add-on: `kazi apply --harness opencode --model
+    <local-model>` keeps the grind on your hardware. When in doubt about a
+    tiering call, consult `kazi economy --json` -- measured cost/outcome
+    percentiles per model and goal shape from YOUR OWN fleet's run registry --
     rather than trusting any frozen figure (the dated finding that flipped this
-    default lives in ADR-0035's amendment; kazi issue #924 records the
-    vacuous-convergence failure mode cheap-tier grinding produced). Haiku is an
-    explicit OPT-DOWN, not the default: pass `--model claude-haiku-4-5` yourself
-    only for a slice you already know is trivial (a one-line fix, a lint/format
-    pass, a doc typo).
-
-    **Local / BYOM is the SECONDARY privacy add-on.** If your code must never leave
-    your hardware, run the grind on a local model instead --
-    `kazi apply --harness opencode --model <local-model>` (e.g. a local Qwen/Llama via
-    opencode). Same two-tier shape, no cloud; explicitly secondary to the in-family
-    default above.
+    default lives in ADR-0035's dated amendment).
 
     ## The loop the verbs sit inside: plan -> approve -> apply
 
     ### Step 1 -- author the goal-set (`plan` verb -> `kazi plan --json`)
 
-    `plan` is the single sanctioned authoring path. It AUTHORS or REFINES a
-    GOAL-SET -- the acceptance `predicates`, plus the optional `[[groups]]` that
-    partition a larger goal and the `needs` edges that order the groups into
-    dependency waves -- and persists it as a reviewable PROPOSAL. The proposal
-    HOLDS for human approval: `plan` itself runs NOTHING and dispatches NO harness,
-    so nothing touches the workspace before you approve (Step 2). It also runs a
-    deterministic clarify FLOOR over the draft -- it flags a missing
-    live-verification target and an unscoped goal -- so an under-specified goal is
-    surfaced in the proposal, never silently accepted.
+    `plan` AUTHORS or REFINES a goal-set -- the acceptance `predicates`, plus the
+    optional `[[groups]]` that partition a larger goal and the `needs` edges that
+    order the groups into dependency waves -- and persists it as a reviewable
+    PROPOSAL that HOLDS for approval: `plan` runs NOTHING and dispatches NO
+    harness. A deterministic clarify FLOOR flags a missing live-verification
+    target and an unscoped goal, so an under-specified goal is surfaced, never
+    silently accepted.
 
-    As the orchestrator you use CALLER-DRAFTS mode (ADR-0023): you (the strong
-    model) already reasoned about the goal, so YOU supply the candidate predicates
-    and kazi spawns NO second/inner model to re-derive them -- it only validates
-    them, applies the floor, and persists. Supply the payload inline with
-    `--predicates`, or on stdin under `--json`:
+    As the orchestrator use CALLER-DRAFTS mode (ADR-0023): you already reasoned
+    about the goal, so YOU supply the candidate predicates and kazi spawns NO
+    second model -- it only validates, applies the floor, and persists:
 
     ```sh
     kazi plan --json --predicates '{
       "name": "ship a /healthz endpoint",
       "predicates": [
-        {"id": "code", "provider": "test_runner", "description": "the route exists and tests pass"},
-        {"id": "live", "provider": "http_probe",  "description": "GET /healthz returns 200 in prod"}
+        {"id": "cap-healthz-route", "provider": "custom_script", "description": "..."},
+        {"id": "cap-healthz-live",  "provider": "http_probe",  "description": "GET /healthz returns 200 in prod"}
       ],
       "rationale": "a health probe for the deploy target"
     }'
-
-    # or pipe it on stdin (under --json):
-    echo "$PAYLOAD" | kazi plan --json
     ```
 
-    The payload is a `{"name", "predicates": [...], "rationale"}` object (a bare
-    JSON array of predicate entries is also accepted and wrapped for you). A
-    positional idea is OPTIONAL in caller-drafts mode -- the predicates carry the
-    intent.
+    **Before drafting, read kazi/AUTHORING.md and follow it** -- predicate
+    quality is the single biggest determinant of convergence honesty and cost.
+    It covers the task brief the grind model needs, one requirement per
+    predicate, capability-vs-guard classification and the red-at-t0 rule,
+    negative-space companions, and provider inference (never the deprecated
+    `test_runner`).
 
-    WHERE the predicates come from: if a `/plan` strategy doc already exists for
-    this work, DERIVE the predicates from it rather than inventing them. Each task
-    in a `/plan` WBS carries an `acc:` line -- its machine-checkable acceptance
-    criterion -- and those `acc:` lines ARE the predicate set: read them off the
-    strategy doc, map each to a `{"id", "provider", "description"}` predicate, and
-    draft those (the `/plan` -> goal-set bridge). When NO strategy doc exists, draft
-    the predicates from the idea directly. Either way it stays caller-drafts: you
-    supply the result and kazi spawns no model.
-
-    **Author for the grind tier -- maximum implementable detail is the DEFAULT,
-    not something the operator has to ask for.** The predicate `description`
-    fields are effectively the ONLY brief the grind model receives: kazi's
-    dispatch prompt is the goal name + the failing predicates + evidence -- the
-    grind model never sees your session or the strategy doc. A thin description
-    makes a mid-tier model flail or converge vacuously; a dense one converges in
-    a dispatch or two. Every payload you author carries:
-
-    - A TASK BRIEF in the first acceptance predicate's description: one
-      sentence of WHY, the exact files/modules to touch (read the repo first if
-      you do not know them), the pieces known to be missing, what NOT to change,
-      and issue/ADR numbers with "read these first". Write it like a ticket a
-      new hire could execute without asking anything.
-    - A PROCESS contract in the same brief (branch `task/<goal-id>`, small
-      conventional commits, push with `-u`) plus a `landed` predicate (clean
-      tree AND `HEAD == @{u}`), so convergence means PUSHED work.
-    - ONE requirement per predicate (or per named assertion). Never fold N
-      requirements into a single "the new test file passes" check: the grind
-      model authors that test, and a self-authored test can satisfy one of N
-      requirements and still go green -- the compound brief silently
-      under-delivers. Enumerate every requirement.
-    - Negative-space companions for any text-presence check (a bare `grep -q`
-      is satisfiable by string-stuffing or an unrelated pre-existing match --
-      the clarify floor warns on this).
-    - Guard predicates for what must not break (full suite, formatter),
-      hermetically wrapped when the checker boots the app
-      (`sh -c 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" ... '`).
-
-    If you catch yourself writing a one-line description, expand it: tokens
-    spent on the brief are repaid by the dispatches the grind tier does not
-    burn.
-
-    For a human or a thin non-model script that has only a prose idea, kazi-drafts
-    mode spawns a harness to draft the predicates instead:
-
-    ```sh
-    kazi plan "a /healthz endpoint that returns 200" --json --yes
-    ```
-
-    Under `--json` kazi is NON-INTERACTIVE: it never prompts or blocks on stdin. If
-    the idea is underspecified, kazi-drafts emits a JSON error and exits non-zero
-    rather than hanging -- pass `--yes` to draft best-effort, supply predicates
-    (caller-drafts), or sharpen the idea.
-
-    `plan --json` emits a single JSON object: `goal_id`, `proposal_ref` (the
-    approve/reject handle), `status`, `predicates`, `rationale`, and a `clarify`
-    array (the floor's open gaps, each `{id, prompt, recommended}`). All carry
-    `schema_version`. Useful plan flags: `--workspace <path>`, `--strict` (refuse
-    an underspecified idea non-interactively), `--adr` (also write an ADR-lite doc).
+    For a human or a thin script that has only a prose idea, kazi-drafts mode
+    spawns a harness to draft the predicates instead:
+    `kazi plan "a /healthz endpoint that returns 200" --json --yes`. Under
+    `--json` kazi is NON-INTERACTIVE: an underspecified idea is a JSON error and
+    a non-zero exit, never a hang (`--strict` refuses instead of best-effort;
+    `--adr` also writes an ADR-lite doc; `--workspace <path>` scopes the repo).
 
     ### Step 2 -- review and approve (`kazi approve --json`)
 
-    Read the proposed `predicates` and the `clarify` gaps. If a gap matters (e.g.
-    no live-verification predicate), re-run `kazi plan` with it closed. Before
-    approving, run `kazi lint <goal-file>` -- a read-only advisory check that warns
-    on near-duplicate group NAMES (a cheap authoring-mistake net; exit 0 even with
-    warnings, so it never blocks the approve). When satisfied, approve the
-    `proposal_ref` from Step 1:
-
-    ```sh
-    kazi approve <proposal-ref> --json
-    ```
-
-    `approve --json` emits `{schema_version, proposal_ref, status: "approved",
-    goal_id}`; the goal is now runnable. (`kazi reject <proposal-ref> --json`
-    declines a proposal, kept for audit.) Browse the queue with
+    Read the proposed `predicates` and the `clarify` gaps
+    (`{id, prompt, recommended}` entries). If a gap matters (e.g. no
+    live-verification predicate), re-run `kazi plan` with it closed. Run
+    `kazi lint <goal-file>` -- read-only, advisory, exit 0 even with warnings --
+    then approve: `kazi approve <proposal-ref> --json`. (`kazi reject
+    <proposal-ref> --json` declines, kept for audit.) Browse the queue with
     `kazi list-proposed --json` (optionally `--status proposed|approved|rejected`).
 
-    ### Step 3 -- converge (`apply` verb -> `kazi apply --harness claude --model claude-sonnet-5 --json [--stream]`)
+    ### Step 3 -- observe t0, then converge (`apply` verb)
 
-    Apply the approved goal with the DEFAULT grind tier (the two-tier split). This
-    is the `apply` verb -- the reconcile loop. `kazi apply` drives the goal to a
-    TERMINAL VERDICT on the current release and takes either the APPROVED
-    `prop-...` proposal-ref from Step 2 (loaded straight from the read-model -- no
-    goal-file reconstruction, ADR-0049) or a goal-file path. The DEFAULT is
-    in-family Claude tiering: you authored on a frontier model, so grind on
-    `claude-sonnet-5`:
+    First observe the t0 predicate vector (the check-only gate variant in
+    kazi/RECIPES.md, or `kazi apply --explain` for the schedule alone). A
+    CAPABILITY predicate that already passes at t0 is SUSPECT -- fix it before
+    burning a converge (kazi/AUTHORING.md, red-at-t0). Then:
 
     ```sh
     kazi apply <proposal-ref> --workspace <path> --harness claude --model claude-sonnet-5 --json
     ```
 
-    `apply --json` emits ONE terminal result object on termination. The exit code
-    mirrors convergence: `0` only on `converged`, non-zero otherwise. For a LONG
-    convergence add `--stream` for a JSONL progress stream -- one
-    `{"event": "iteration", ...}` line per loop iteration, terminated by the final
-    run-result object (the one line with NO `event` field). Read lines until you see
-    the object without an `event`; that is the terminal result you branch on:
+    `apply` takes the APPROVED `prop-...` ref from Step 2 (loaded straight from
+    the read-model, ADR-0049) or a goal-file path, and drives the goal to a
+    TERMINAL VERDICT. The exit code mirrors convergence: 0 only on `converged`.
 
-    ```sh
-    kazi apply <goal-file> --workspace <path> --harness claude --model claude-sonnet-5 --json --stream
-    ```
+    Respect kazi's two safety refusals -- do NOT reflexively override them. It
+    refuses (a) a `--workspace` that is a git repo's PRIMARY worktree root (the
+    dispatched agent's shell can reset/clean the whole checkout) -- run against a
+    dedicated task worktree (`git worktree add <path> <branch>`), and pass
+    `--allow-primary-workspace` only for a throwaway checkout you accept losing;
+    and (b) a goal the run registry already shows LIVE (fresh heartbeat) --
+    `--allow-duplicate-run` only for a deliberate re-run. When a refusal
+    surfaces, fix the CONDITION, not the flag.
 
-    OPT-DOWN (a slice you already know is trivial -- a one-line fix, a lint/format
-    pass): pin `--model claude-haiku-4-5` yourself. This is a deliberate
-    opt-down, never the default rung (see the fleet-data note above).
-
-    SECONDARY (privacy / no-cloud): to keep the grind on local hardware, swap the
-    harness/model for a local model via opencode -- same loop, no cloud:
-
-    ```sh
-    kazi apply <goal-file> --workspace <path> --harness opencode --model <local-model> --json
-    ```
-
-    **Parallel + standing (the native scheduler, ADR-0027).** For a goal-set that
-    partitions by blast radius, add `--parallel` (optionally `--parallel N` for a
-    concurrency hint): kazi drives the NATIVE SCHEDULER -- one supervised reconciler
-    per partition, in `needs`-ordered waves -- to a COLLECTIVE verdict, which
-    `--json` emits as one collective result object you branch on the same way (its
-    `next_action` hint). A single-partition goal-set degrades to the serial loop.
-    Add `--standing` to run as a CONTINUOUS reconciler that holds the predicates true
-    and re-converges on drift, instead of converging once and stopping:
-
-    ```sh
-    kazi apply <goal-file> --workspace <path> --parallel --harness claude --model claude-sonnet-5 --json
-    kazi apply <goal-file> --workspace <path> --standing --harness claude --model claude-sonnet-5 --json
-    ```
-
-    **The `--explain` read-only gate.** `kazi apply --explain` (alias `--dry-run`)
-    PRINTS the computed wave schedule -- the topological `needs`-DAG frontiers and
-    the blast-radius parallelism within each -- and EXITS 0 WITHOUT DISPATCHING
-    anything: no harness, no lease, no worktree is touched. Under `--json` the
-    schedule is emitted as JSON. Use it as the read-only pre-flight to see what a run
-    WOULD do (and to catch over-constraint -- too many `needs` edges serializing
-    everything) before committing to a real converge.
-
-    **What `apply` subsumes for CODE goals (proven, one open caveat).** For code
-    goals `kazi apply` (with `--parallel`) replaces the manual outer loop the
-    operator hand-assembles -- the /loop + /apply --pool parallel pool -- AND the
-    separate /qualify pass: the native scheduler is the parallel wave executor, and
-    "launch-ready" is not a heuristic to infer -- the OBJECTIVE predicate vector
-    (including a live prod probe) IS the launch gate, so qualification is a facet
-    of `apply`, not a separate verb. ADR-0031 decision 6 gated that claim on proof,
-    and the proof LANDED: the E21/E23 live dogfoods (T21.12, T23.9) passed
-    2026-06-26 on the released binary (v1.64.2) -- wave execution, blast-radius
-    parallelism, and pipelined frontier gating are proven. ONE OPEN CAVEAT (kazi
-    issue #936): the scheduler runs all `needs`-DAG frontiers back-to-back with no
-    supervised checkpoint between waves, so a wave whose predicates pass vacuously
-    can cascade into dependent waves unreviewed. Until a checkpoint mode lands,
-    arrange pause points yourself when waves build on each other: split the DAG
-    into one goal-file per wave, or watch the `frontier_complete` events on the
-    `--stream` output and stop at a boundary you want to inspect.
-
-    **Two safety refusals `apply` makes by default -- do NOT reflexively override
-    them.** An executing `apply` refuses (a) a `--workspace` that is a git repo's
-    PRIMARY worktree root (the dispatched agent's shell can reset/clean the whole
-    checkout, destroying untracked state that is not this goal's to touch) -- run
-    against a dedicated task worktree (`git worktree add <path> <branch>`) instead,
-    and pass `--allow-primary-workspace` only for a throwaway checkout you accept
-    losing; and (b) a goal the run registry already shows as LIVE (status running,
-    heartbeat fresher than ~90s) -- a second concurrent apply of one goal burns a
-    second budget and races the first's edits, so wait or stop the first, and pass
-    `--allow-duplicate-run` only for a deliberate re-run alongside it (a dead run's
-    row stops blocking on its own once its heartbeat goes stale). When one of these
-    refusals surfaces, the correct first move is to fix the CONDITION, not to add
-    the flag: the flag exists for the rare deliberate exception, and adding it on
-    reflex defeats the exact protection it names. `--check`/`--explain` stay
-    available without either flag.
+    For a LONG convergence add `--stream` (JSONL progress); for a partitioned
+    goal-set add `--parallel`; for a continuous hold-true reconciler add
+    `--standing`; `--explain` (alias `--dry-run`) prints the wave schedule and
+    exits without dispatching. ONE OPEN CAVEAT on `--parallel` (#936): the
+    scheduler runs the needs-DAG frontiers back-to-back with no supervised
+    checkpoint between waves, so a wave whose predicates pass vacuously can
+    cascade into dependent waves unreviewed -- arrange pause points yourself
+    when waves build on each other. Details for all four flags and the
+    workaround: kazi/RECIPES.md.
 
     ### Step 4 -- parse the result and branch on `next_action`
 
-    `apply --json` gives you both the terminal `status` and a single derived
-    `next_action` hint, so you never re-derive the branch from the predicate vector:
+    `apply --json` emits ONE terminal result object (pin `schema_version`,
+    currently 2 -- see kazi/RECIPES.md):
 
     | `status`      | `next_action`  | exit | What you do |
     |---------------|----------------|------|-------------|
     | `converged`   | `done`         | 0    | Finished. Ship / report. |
-    | `stuck`       | `investigate`  | != 0 | Inspect the predicate vector; the same set failed N times. |
-    | `over_budget` | `raise_budget` | != 0 | Raise the budget and re-run, or escalate. |
-    | `error`       | `investigate`  | != 0 | Pre-loop failure (vacuous goal, unknown harness); read `error`, fix. |
+    | `stuck`       | `investigate`  | != 0 | Same slice failed N times -> escalate the ladder. |
+    | `over_budget` | `raise_budget` | != 0 | Raise the budget and re-run, or step up. |
+    | `error`       | `investigate`  | != 0 | Pre-loop misconfig (vacuous goal, unknown harness): read `error`, FIX THE GOAL -- never escalate the model. |
 
-    `next_action` is an orchestration HINT, not a kazi action -- you own the policy.
-    When a goal keeps landing back on `stuck`/`over_budget` (the same slice, several
-    invocations), don't just re-read the predicate vector by eye -- run `kazi
-    economy --rediscovery <goal>` for the concrete next step: it folds the goal's
-    per-iteration `tools` counters into a ranked, report-only rediscovery-pressure
-    list naming which predicate/step is burning the repeat attempts.
+    `next_action` is an orchestration HINT -- you own the policy.
 
-    ### Escalate-on-stuck: the bounded model ladder (the DEFAULT adaptive recipe)
-
-    Static default-tiering (above) always grinds on `claude-sonnet-5`. The ADAPTIVE
-    refinement (ADR-0035, amended 2026-07-08) starts on the DEFAULT tier and steps
-    UP only when kazi reports the SAME slice is not progressing -- so you pay
-    frontier rates only for the slices that actually need them. The escalation
-    policy lives ENTIRELY here in the skill: kazi reports per-invocation state, YOU
-    (the skill) own the ladder and the counter. kazi-core has NO model-selection
-    logic (ADR-0035 decision 1).
-
-    **The ladder (capped at the frontier).** Two rungs, default tier first; it STOPS
-    at the top -- it never escalates past the frontier:
+    **Escalation ladder (bounded).** On `stuck`/`over_budget` for the SAME
+    slice/goal_id, re-dispatch one rung up. Two rungs, default tier first:
 
     ```
     claude-sonnet-5  ->  claude-opus-4-8   (STOP; do not escalate past Opus)
     ```
 
-    **Opt down for a KNOWN-trivial slice.** `claude-haiku-4-5` is NOT a rung on this
-    ladder -- it is an explicit opt-down you choose yourself for a slice you already
-    know is trivial (a one-line fix, a lint/format pass, a doc typo), by pinning
-    `--model claude-haiku-4-5`. An unqualified slice should never start there:
-    check `kazi economy --json` (per-model, per-goal-shape cost/outcome percentiles
-    from YOUR fleet's run registry) whenever you doubt the tiering call -- the
-    measured stuck/over-budget gap that demoted Haiku is recorded in ADR-0035's
-    dated amendment, and re-deriving it live beats trusting prose.
+    `claude-haiku-4-5` is NOT a rung on this ladder -- it is an explicit
+    OPT-DOWN you pin yourself for a known-trivial slice. The rung counter is
+    YOUR state, keyed by `goal_id`; a fresh slice resets to the default rung.
+    Full trigger mapping and a copy-paste POSIX recipe: kazi/RECIPES.md. When a
+    goal keeps landing on stuck, `kazi economy --rediscovery <goal>` names
+    which predicate is burning the repeat attempts.
 
-    **The trigger (which `--json` fields).** After each `kazi apply --harness claude
-    --model <rung> --json` on a slice, read the terminal result object and branch on
-    these fields (the T30.3 mapping, `docs/tiering-signals.md`):
+    ## status / adopt / waiting
 
-    - `goal_id` -- the SLICE id, stable across the successive invocations you make on
-      one slice. KEY your rung counter by `goal_id` (this counter is the SKILL's own
-      state -- never a kazi field; ADR-0035).
-    - `status` -- `converged` -> slice done (reset). `stuck` or `over_budget` -> this
-      rung did NOT converge -> escalate. `error` -> a misconfig (vacuous goal,
-      unknown harness); read `error` and FIX the goal, do NOT escalate the model.
-    - `next_action` -- the derived hint: `done` (stop), `investigate` (stuck ->
-      escalate), `raise_budget` (over_budget -> raise budget AND/OR step up).
-    - `predicates[]` -- confirm it is the SAME slice still failing (the same
-      unmet-predicate set), so you escalate against the same bar, not a new slice.
-    - `reason` / `budget_spent.exceeded` -- on `over_budget`, name the budget
-      dimension so you can choose "raise budget on the same model" vs "step up".
+    - `kazi status <ref> --json` reads convergence or proposal state (a pure
+      read; run goal-id first, else proposal-ref). `kazi dashboard` renders the
+      same read-model for a human watching a fleet.
+    - `adopt` = `kazi init <repo-dir>`: bootstrap a starter goal-set once per
+      repo by deterministic stack detection, then refine via `plan`
+      (kazi/RECIPES.md). For notes outside kazi's own surfaces,
+      `kazi export <goal-file> --obsidian <dir>` snapshots a goal's group tree
+      + verdicts to an Obsidian vault.
+    - Waiting on another session with a `kazi daemon` up: `kazi bus` -- peek
+      checks without consuming, read ACKS what it pulls (landmine), watch is
+      the no-poll blocking wait. Taxonomy: kazi/RECIPES.md.
 
-    **The trigger, in one line:** on a result for the slice's `goal_id` whose
-    `status` is `stuck` or `over_budget` (equivalently `next_action` is `investigate`
-    or `raise_budget`) -- i.e. NOT `converged` and NOT `error` -- with the same
-    failing `predicates[]` still unmet, increment the per-`goal_id` rung counter and
-    re-dispatch the SAME slice with the next `--model` UP the ladder.
+    ## Feedback
 
-    **Reset on a fresh slice.** A NEW slice means a NEW `goal_id`. Start it fresh on
-    the default rung (`claude-sonnet-5`), unless you are opting a known-trivial
-    slice down to Haiku yourself; the rung counter is per-`goal_id`, so a fresh
-    slice has no carried-over rung.
+    Friction while driving kazi -- a bug, a gap, a workaround you needed -- is
+    signal: file it at https://github.com/kazi-org/kazi/issues (search for an
+    existing issue first).
+    """
+  end
 
-    **Bounded by kazi.** Escalation rides ON TOP of kazi's own budget/stuck
-    termination -- it never overrides a terminal verdict. Each rung is one
-    `kazi apply`, which kazi itself bounds (it returns `stuck`/`over_budget` rather
-    than looping forever), and the ladder is capped at `claude-opus-4-8`. So the
-    escalation loop cannot run unboundedly: at worst it makes two bounded rungs and
-    stops at the frontier.
+  @doc """
+  The AUTHORING.md document as a string -- predicate authoring quality. Exposed
+  so the T16.4 coherence guard can scan it like the SKILL.md.
+  """
+  @spec authoring_md() :: String.t()
+  def authoring_md do
+    """
+    # kazi/AUTHORING.md -- predicate authoring quality
 
-    **Disable -> degenerates to static tiering.** Turn escalation OFF by pinning the
-    `--model` to one rung and never stepping it up; the recipe collapses to the
-    static default-tiering above (always `claude-sonnet-5`, or always whatever
-    single rung you pin -- including a deliberate `claude-haiku-4-5` opt-down). The
-    ladder is the ADD-ON, not a requirement.
+    Reference for anything that drafts kazi predicates: this skill's `plan`
+    verb, or an orchestrating workflow deriving predicates from a work plan's
+    acceptance criteria. Predicate quality determines convergence honesty and
+    cost.
 
-    Copy-paste recipe (the ladder, the trigger, the reset, the cap -- POSIX sh):
+    ## Author for the grind tier
+
+    The predicate `description` fields are effectively the ONLY brief the grind
+    model receives: kazi's dispatch prompt is the goal name + failing predicates
+    + evidence. The grind model never sees your session or your strategy doc. A
+    thin description makes a mid-tier model flail or converge vacuously; a dense
+    one converges in a dispatch or two. Every payload carries:
+
+    - **A TASK BRIEF in the first predicate's description**: one sentence of
+      WHY, the exact files/modules to touch (read the repo first if you do not
+      know them), the pieces known to be missing, what NOT to change, and
+      issue/ADR numbers with "read these first". Write it like a ticket a new
+      hire could execute without asking anything.
+    - **A PROCESS contract in the same brief** (branch `task/<goal-id>`, small
+      conventional commits, push with `-u`) plus a `landed` predicate (clean
+      tree AND `HEAD == @{u}`), so convergence means PUSHED work.
+    - **ONE requirement per predicate** (or per named assertion). Never fold N
+      requirements into a single "the new test file passes" check: the grind
+      model authors that test, and a self-authored test can satisfy one of N
+      requirements and still go green. Enumerate every requirement.
+    - **Negative-space companions** for any text-presence check: a bare
+      `grep -q` is satisfiable by string-stuffing or an unrelated pre-existing
+      match (the clarify floor warns on this; #924 is the failure mode).
+    - **Guard predicates** for what must not break (full suite, formatter),
+      hermetically wrapped when the checker boots the app
+      (`sh -c 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" ...'`).
+
+    If you catch yourself writing a one-line description, expand it: tokens
+    spent on the brief are repaid by the dispatches the grind tier does not
+    burn.
+
+    ## Capability vs guard, and the red-at-t0 rule
+
+    Classify every predicate when you author it:
+
+    - **capability** -- proves NEW behavior this goal is supposed to create (the
+      endpoint exists, the test passes, the flag works). A capability predicate
+      MUST be observed RED at t0 (before any grind dispatch). If it already
+      passes, one of these is true: the work is already done (drop the goal),
+      the predicate is vacuous (a grep matching pre-existing text, an
+      always-true script), or it tests the wrong thing. Fix or reclassify --
+      never converge on it and call that progress.
+    - **guard** -- protects EXISTING behavior (full suite green, formatter
+      clean, no regression). Guards are expected green at t0; that is their job.
+
+    Tag the classification in the predicate id (e.g. `"id": "cap-healthz"` /
+    `"id": "guard-suite"`) until kazi grows a first-class `kind` field (#1128).
+    Consequence for check-only gates: a `vacuous_goal` verdict (all predicates
+    pass at t0) is a GREEN result ONLY when every predicate is guard-shaped; if
+    any capability predicate is in the set, vacuous means the goal never
+    measured the new work -- treat it as a verification FAILURE, not a pass.
+
+    ## Provider inference (drafting from acceptance-criterion lines)
+
+    When a work plan carries machine-checkable acceptance-criterion lines, emit
+    one predicate per line --
+    `{"id": "<task-id>", "provider": "<provider>", "description": "<criterion + brief>"}`:
+
+    - `http_probe` when the text names an HTTP verb + path, or mentions "prod",
+      "deployed", "live", or a URL.
+    - `custom_script` for everything else (test assertions, build/lint
+      conditions, CLI behavior). Do NOT emit `test_runner`: deprecated
+      (ADR-0040, removal in v2.0.0); every load prints a deprecation warning.
+
+    A task without a machine-checkable criterion contributes no predicate; its
+    free-text acceptance criteria are simply not kazi-covered.
+
+    ## Runtime introspection
+
+    Confirm the payload shape against the live CLI before drafting:
+    `kazi help --json`, `kazi schema plan`. If this document and the schema
+    disagree, the schema wins.
+    """
+  end
+
+  @doc """
+  The RECIPES.md document as a string -- operational recipes. Exposed so the
+  T16.4 coherence guard can scan it like the SKILL.md.
+  """
+  @spec recipes_md() :: String.t()
+  def recipes_md do
+    """
+    # kazi/RECIPES.md -- operational recipes for driving kazi
+
+    Reference file for the kazi skill. Everything here maps onto real CLI
+    verbs; confirm the live surface with `kazi help --json` /
+    `kazi schema [<command>]` when in doubt -- they are generated from kazi's
+    own command table and never drift.
+
+    ## The escalation ladder (bounded, skill-side state)
+
+    Static tiering always grinds on `claude-sonnet-5`. The adaptive refinement
+    (ADR-0035) steps UP only when the SAME slice is not progressing, so
+    frontier rates are paid only where needed. kazi-core has NO model-selection
+    logic; YOU own the ladder and the per-`goal_id` rung counter.
+
+    Ladder: `claude-sonnet-5 -> claude-opus-4-8` (STOP; never past the
+    frontier). `claude-haiku-4-5` is not a rung -- it is a deliberate opt-down
+    you pin yourself for a known-trivial slice.
+
+    Trigger fields on each terminal result:
+
+    - `goal_id` -- the slice id; key your rung counter by it. New goal_id =
+      fresh slice = reset to the default rung.
+    - `status` -- `converged` done; `stuck`/`over_budget` -> this rung did not
+      converge -> escalate; `error` -> misconfig, FIX the goal, never escalate.
+    - `predicates[]` -- confirm the SAME unmet set is still failing, so you
+      escalate against the same bar.
+    - `reason` / `budget_spent.exceeded` -- on over_budget, choose "raise
+      budget same model" vs "step up" by which dimension blew.
+
+    Copy-paste recipe (POSIX sh):
 
     ```sh
-    # The capped ladder (default tier -> frontier). Escalation STOPS at the last entry.
     ladder="claude-sonnet-5 claude-opus-4-8"
-
-    goal_file="$1"   # the approved slice's goal-file (a fresh slice starts at rung 1)
-    rung=1           # SKILL state: the per-goal_id rung index (1-based), reset per slice
-
+    goal_file="$1"; rung=1
     while :; do
       model=$(printf '%s\\n' $ladder | sed -n "${rung}p")
       result=$(kazi apply "$goal_file" --workspace "$WS" \\
                  --harness claude --model "$model" --json)
-
       ver=$(printf '%s' "$result" | jq -r .schema_version)
       [ "$ver" = "2" ] || { echo "unexpected schema_version: $ver" >&2; exit 1; }
-
-      status=$(printf '%s' "$result" | jq -r .status)
-      case "$status" in
-        converged)
-          echo "slice converged on $model"; break ;;          # RESET happens for the NEXT slice (fresh goal_id, rung=1)
-        error)
-          printf '%s' "$result" | jq -r .error >&2; exit 1 ;;  # misconfig: FIX the goal, do NOT escalate
+      case "$(printf '%s' "$result" | jq -r .status)" in
+        converged) echo "converged on $model"; break ;;
+        error)     printf '%s' "$result" | jq -r .error >&2; exit 1 ;;
         stuck|over_budget)
-          # same slice did not converge -> step UP the ladder, CAPPED at the frontier
           last=$(printf '%s\\n' $ladder | wc -w)
-          if [ "$rung" -ge "$last" ]; then
-            echo "exhausted the ladder at the frontier ($model); not converged" >&2; exit 1
-          fi
-          rung=$((rung + 1)) ;;                                # SKILL-side counter; never a kazi field
+          [ "$rung" -ge "$last" ] && { echo "ladder exhausted at $model" >&2; exit 1; }
+          rung=$((rung + 1)) ;;
       esac
     done
     ```
 
-    Add `--stream` to react WITHIN a rung (escalate before a rung fully terminates):
-    watch the streamed per-iteration `predicates[]` -- the same failing set across
-    every observation is no-progress this rung. This is strictly additive; the
-    terminal `status` already suffices for the ladder (see `docs/tiering-signals.md`).
+    Escalation rides ON TOP of kazi's own budget/stuck termination -- each rung
+    is one bounded `kazi apply`, capped at the frontier, so the loop cannot run
+    unboundedly. Add `--stream` to react within a rung: the same failing
+    `predicates[]` across every streamed observation is no-progress.
 
-    ### The `status` verb -- report convergence (`kazi status <ref> --json`)
+    ## Streaming, parallel, standing, explain
 
-    `status` REPORTS a goal's convergence state from the read-model -- it never runs
-    or mutates anything, it just reads the persisted projection. `kazi status <ref>
-    --json` resolves `<ref>` as a run's goal id first (`kind: "run"`, with the latest
-    iteration's predicate vector), else as a `proposal_ref` (`kind: "proposal"`, the
-    lifecycle state). An unknown ref is a JSON error with a non-zero exit. Use it to
-    poll a long convergence between steps, or to answer "where did this goal land?"
-    after the fact.
+    - `--stream`: JSONL progress -- one `{"event": "iteration", ...}` line per
+      loop, terminated by the final result object (the line with NO `event`
+      field); that is what you branch on. Watch `frontier_complete` events to
+      pause at wave boundaries.
+    - `--parallel [N]`: for a goal-set partitioned by `[[groups]]` + `needs`
+      edges, kazi drives one supervised reconciler per partition in
+      needs-ordered waves to a COLLECTIVE verdict (one result object, same
+      `next_action` branching). Single-partition degrades to serial. CAVEAT
+      (#936): frontiers run back-to-back with no supervised checkpoint between
+      waves -- a vacuously-passing wave can cascade unreviewed. Until a
+      checkpoint mode lands, split the DAG into one goal-file per wave or stop
+      at `frontier_complete` boundaries you want to inspect.
+    - `--standing`: a continuous reconciler that holds predicates true and
+      re-converges on drift, instead of converging once and stopping.
+    - `--explain` (alias `--dry-run`): prints the computed wave schedule (the
+      needs-DAG frontiers and blast-radius parallelism) and exits 0 WITHOUT
+      dispatching -- no harness, no lease, no worktree. The read-only
+      preflight; also catches over-constraint (too many needs edges
+      serializing everything).
 
-    For a human watching multiple goals at once, the SAME read-model is rendered by
-    `kazi dashboard [--port N] [--bind addr] [--roadmap <goal-file>]`: it boots the
-    standalone fleet-mode web endpoint (the starmap -- every registered run,
-    read-only, no goal loop) against the shared read-model, on `http://127.0.0.1:4050/`
-    by default. It is a READ of the same projection -- it drives nothing -- a
-    plausible replacement for repeatedly polling `status` by hand across multiple
-    sessions/goals.
+    ## Check-only gate variant (observe without dispatching)
 
-    ### The `adopt` verb -- bring kazi into a repo (`kazi init <repo-dir>`)
+    kazi has no observe-only verb (#805 context). To read the predicate vector
+    without letting a red vector dispatch kazi's harness: copy the goal-file to
+    a scratch location (never edit the original), set
+    `[budget] max_iterations = 1` and `[harness] id = "claude"` /
+    `command = "/usr/bin/true"` (drop model/permission_mode lines), strip any
+    `landed` predicate, then `kazi apply <gate-variant> --json --workspace
+    <root>`. A red vector terminates after one observation with zero tokens and
+    zero edits. `--json` stdout may carry a stray log line before the JSON --
+    extract with `grep -a '^{' <out> | tail -1`. Verdict mapping for a gate:
+    `converged` green; `error` + `reason: "vacuous_goal"` = all predicates pass
+    at t0 (green ONLY for guard-shaped sets -- kazi/AUTHORING.md red-at-t0
+    rule); `stuck`/`over_budget` red (the failing `predicates[]` name why); any
+    other `error` = authoring/infra problem, not evidence about the code.
 
-    `adopt` reverse-engineers a STARTER goal-set from an existing repo by
-    deterministic stack detection, so a repo that has not declared predicates gets a
-    runnable first draft to refine. Route it to `kazi init`:
+    ## status and the dashboard
 
-    ```sh
-    kazi init <repo-dir> --out goal.toml
-    ```
+    `kazi status <ref> --json` resolves a run's goal id first (`kind: "run"`,
+    latest predicate vector), else a proposal ref (`kind: "proposal"`,
+    lifecycle state); unknown ref = JSON error, non-zero exit. For a human
+    watching many goals, `kazi dashboard` renders the same read-model on a
+    local port -- a read, it drives nothing; use it instead of polling status
+    by hand across sessions.
 
-    `init` writes a starter goal-file (default `<repo>/kazi.goal.toml`, or `--out
-    <file>`). The detection is deterministic; pass `--enrich` to additionally let a
-    harness propose live predicates from discovered endpoints (off by default).
-    Then review the drafted goal-set, refine it via the `plan` verb, approve, and
-    `apply`. Use `adopt` once per repo to bootstrap; it is the on-ramp, not a step in
-    the per-goal loop.
+    ## adopt (kazi init)
 
-    For anyone who keeps notes in Obsidian, `kazi export <goal-file> --obsidian
-    <dir>` is a complete, ready integration: it exports a goal's group tree +
-    verdicts to an Obsidian vault (notes + Mermaid rollup) for a snapshot of where
-    a goal stands, outside kazi's own dashboard/status surfaces.
+    `kazi init <repo-dir> --out goal.toml` reverse-engineers a starter goal-set
+    by deterministic stack detection; `--enrich` additionally lets a harness
+    propose live predicates from discovered endpoints (off by default).
+    Bootstrap once per repo, then refine via `plan`. For Obsidian users,
+    `kazi export <goal-file> --obsidian <dir>` exports a goal's group tree +
+    verdicts to a vault.
 
-    ## Pin `schema_version`
+    ## The session bus: peek vs read vs watch
 
-    Every `--json` object carries a `schema_version` (currently **2**, bumped by
-    ADR-0032 when the verbs unified). Read it off the first object you parse and
-    refuse (or branch) if it is not the version you were written against:
+    With a `kazi daemon` up (ADR-0067), concurrent sessions coordinate over the
+    bus. Pick the receive verb by intent:
 
-    ```sh
-    result=$(kazi apply "$GOAL" --workspace "$WS" --harness claude --model claude-sonnet-5 --json)
-    ver=$(printf '%s' "$result" | jq -r .schema_version)
-    [ "$ver" = "2" ] || { echo "unexpected kazi schema_version: $ver" >&2; exit 1; }
-    next=$(printf '%s' "$result" | jq -r .next_action)
-    ```
-
-    A predicate is `pass` only when it genuinely held against the real world,
-    including LIVE predicates, which pass only post-deploy. The vector -- not a
-    single exit code -- is what makes regression and partial progress legible.
-
-    ## The session bus: how to wait (peek vs read vs watch)
-
-    With a `kazi daemon` up, the session bus (ADR-0067) lets concurrent sessions
-    coordinate: `kazi bus post|tell` to send, and three DISTINCT verbs to receive.
-    Pick by intent -- most agent mistakes here are using the wrong one:
-
-    - **Check without consuming** -- `kazi bus peek --json` (MCP: `kazi_bus_read`
-      with `peek: true`). Messages are shown but stay pending.
-    - **Consume** -- `kazi bus read --json` (MCP: `kazi_bus_read`). LANDMINE:
-      read ACKS everything it pulls; a casual check silently drains messages a
-      later wait was counting on. Not ready to act? Peek instead.
+    - **Check without consuming** -- `kazi bus peek --json` (MCP:
+      `kazi_bus_read` with `peek: true`). Messages stay pending.
+    - **Consume** -- `kazi bus read --json`. LANDMINE: read ACKS everything it
+      pulls; a casual check silently drains messages a later wait was counting
+      on. Not ready to act? Peek.
     - **Wait** -- `kazi bus watch --timeout <s> --json` (MCP: `kazi_bus_watch`).
       Blocks until traffic arrives (pending messages return immediately) and
       keeps your presence fresh. NEVER poll `read` in a loop -- watch is the
@@ -669,20 +672,14 @@ defmodule Kazi.Teach.InstallSkill do
     `bus who` instead of retrying blindly. Do NOT broadcast "I am <name>" as a
     free-text fact -- assign the name properly and the roster carries it.
 
-    ## Runtime introspection (no stale docs)
+    ## schema_version pinning
 
-    kazi self-describes, so confirm the surface at runtime rather than trusting a
-    copy of this recipe:
-
-    ```sh
-    kazi help --json   | jq '.schema_version, (.commands[].name)'
-    kazi schema apply  | jq '.schema_version, .fields[].name'
-    ```
-
-    `kazi help --json` lists every command with its `summary`, positional `args`,
-    and `flags` (each `{name, type, description, aliases}`). `kazi schema [<command>]`
-    emits the versioned result schema(s) as data. Both are generated from kazi's own
-    command table, so they can never drift from what the parser accepts.
+    Every `--json` object carries `schema_version` (currently 2, ADR-0032).
+    Read it off the first object you parse and refuse (or branch) if it is not
+    the version you were written against. A predicate is `pass` only when it
+    genuinely held against the real world -- LIVE predicates pass only
+    post-deploy. The vector, not a single exit code, is what makes regression
+    and partial progress legible.
     """
   end
 end

@@ -3781,10 +3781,18 @@ defmodule Kazi.CLI do
 
     case InstallSkill.write(write_opts) do
       {:ok, path} ->
-        IO.puts("WROTE  #{path}")
+        dir = Path.dirname(path)
+        for {name, _content} <- InstallSkill.docs(), do: IO.puts("WROTE  #{Path.join(dir, name)}")
+
         IO.puts("\nThe kazi skill is installed. In Claude Code, it teaches the recipe:")
         IO.puts("  plan --json → approve --json → apply --harness <cheap> --json [--stream]")
         IO.puts("then branch on the result's next_action.")
+
+        IO.puts(
+          "\nSite-specific wiring goes in #{Path.join(dir, InstallSkill.local_file())} -- " <>
+            "install-skill never touches it (ADR-0074)."
+        )
+
         0
 
       {:error, reason} ->
