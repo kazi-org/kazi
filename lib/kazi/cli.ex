@@ -177,6 +177,7 @@ defmodule Kazi.CLI do
     roadmap: :string,
     goal: :string,
     into: :string,
+    lower: :string,
     write: :string,
     help: :boolean,
     version: :boolean
@@ -203,6 +204,8 @@ defmodule Kazi.CLI do
       "Run as a STANDING (continuous/maintenance) reconciler instead of converging and stopping.",
     into:
       "`spec import` only (T40.2, ADR-0050): the target goal-file the imported Scenarios' `test_runner` predicates are UPSERTED into (required). When the file exists its groups/predicates are merged (same-id predicates replaced in place, not duplicated); when it does not, it is created from the import. Under --json the result carries the written `into` path and the upserted predicate ids.",
+    lower:
+      "`spec import` only (T49.11, ADR-0054 d3): the lowering mode for TAGGED Scenarios — `test_runner` (default; byte-identical to today) or `scenario` (a Scenario tagged @interface:web lowers to a `scenario` predicate on the browser surface, @interface:cli to the cli surface, wiring the runtime scenario provider / demonstrate-then-pin ADR-0064). Untagged Scenarios and other-interface tags stay `test_runner` regardless.",
     write:
       "`approve` only (T39.3, ADR-0049): materialize the approved goal as a loadable goal-file at <path>, so a file-based / version-controlled workflow can `apply <path>` and get the SAME goal `apply <ref>` runs. Under --json the result carries the written `path`. Absent, approve is unchanged.",
     debrief:
@@ -495,12 +498,12 @@ defmodule Kazi.CLI do
     %{
       name: "spec",
       summary:
-        "Behavior-spec tier (ADR-0050, T40.2): `spec import <feature-file>... --into <goal-file>` derives one `test_runner` acceptance predicate per Gherkin Scenario (grouped by Feature) and UPSERTS them into the goal-file — re-importing the same spec is an upsert, not a duplicate. `--json` emits the upserted predicate ids.",
+        "Behavior-spec tier (ADR-0050, T40.2): `spec import <feature-file>... --into <goal-file>` derives one `test_runner` acceptance predicate per Gherkin Scenario (grouped by Feature) and UPSERTS them into the goal-file — re-importing the same spec is an upsert, not a duplicate. `--lower scenario` (T49.11, ADR-0054 d3) lowers @interface:web/@interface:cli-tagged Scenarios to runtime `scenario` predicates instead. `--json` emits the upserted predicate ids.",
       args: [
         %{name: "subcommand", required: true},
         %{name: "feature-file", required: false}
       ],
-      flags: [:into, :json]
+      flags: [:into, :lower, :json]
     },
     %{
       name: "context",
@@ -1424,7 +1427,13 @@ defmodule Kazi.CLI do
         {:error, "the `spec import` command requires at least one <feature-file>"}
 
       true ->
-        {:spec_import, paths, into: into, json: flags[:json] || false}
+        case parse_lower(flags[:lower]) do
+          {:ok, lower} ->
+            {:spec_import, paths, into: into, lower: lower, json: flags[:json] || false}
+
+          {:error, message} ->
+            {:error, message}
+        end
     end
   end
 
@@ -1433,6 +1442,17 @@ defmodule Kazi.CLI do
 
   defp parse_spec([], _flags),
     do: {:error, "the `spec` command requires a <subcommand> (`import`)"}
+
+  # The `--lower` flag value → the importer's `:lower` mode atom. Absent defaults
+  # to `:test_runner` (byte-identical to a pre-lowering import). Only the two
+  # documented modes are accepted; an unknown value is a clear usage error rather
+  # than a silent fall-through to the default (T49.11, ADR-0054 d3).
+  defp parse_lower(nil), do: {:ok, :test_runner}
+  defp parse_lower("test_runner"), do: {:ok, :test_runner}
+  defp parse_lower("scenario"), do: {:ok, :scenario}
+
+  defp parse_lower(other),
+    do: {:error, "unknown --lower mode #{inspect(other)} (expected `test_runner` or `scenario`)"}
 
   defp memory_flags(flags) do
     [
@@ -5554,7 +5574,7 @@ defmodule Kazi.CLI do
   # stable ids from Feature + Scenario), never a duplicate.
   defp execute_spec_import(paths, opts) do
     with {:ok, sources} <- read_feature_files(paths),
-         {:ok, imported} <- import_features(sources, opts[:into]),
+         {:ok, imported} <- import_features(sources, paths, opts),
          {:ok, base} <- load_or_init_target(opts[:into]),
          merged = merge_goal_maps(base, imported),
          {:ok, _goal} <- validate_goal_map(merged),
@@ -5589,8 +5609,12 @@ defmodule Kazi.CLI do
   # Run the sources through the importer. The goal id defaults to the target
   # goal-file's stem so a fresh import produces a legibly-named goal; when the
   # target already exists its own id wins (the merge keeps the base header).
-  defp import_features(sources, into) do
-    GherkinImporter.import_map(sources, id: goal_id_from_path(into))
+  defp import_features(sources, paths, opts) do
+    GherkinImporter.import_map(sources,
+      id: goal_id_from_path(opts[:into]),
+      lower: opts[:lower] || :test_runner,
+      spec_paths: paths
+    )
   end
 
   defp goal_id_from_path(path) do
