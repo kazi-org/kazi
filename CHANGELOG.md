@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.159.1](https://github.com/kazi-org/kazi/compare/v1.159.0...v1.159.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **cli:** --check surfaces the reason for an errored predicate ([#1096](https://github.com/kazi-org/kazi/issues/1096)) ([d2888a6](https://github.com/kazi-org/kazi/commit/d2888a681e2070ac066f9edca3a165205362bff3))
+* **providers:** custom_script resolves a workspace-relative cmd ([#1096](https://github.com/kazi-org/kazi/issues/1096)) ([1ee83a8](https://github.com/kazi-org/kazi/commit/1ee83a812b03e79c763eb40a9e0d63e59da0eaa8))
+
 ## [1.159.0](https://github.com/kazi-org/kazi/compare/v1.158.0...v1.159.0) (2026-07-17)
 
 
