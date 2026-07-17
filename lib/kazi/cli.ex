@@ -187,7 +187,7 @@ defmodule Kazi.CLI do
   # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
   # defined here (above `parse/1`) so both the `--help` interception below and
   # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who tell watch join leave name hook)
+  @bus_verbs ~w(post read peek who tell status watch join leave name hook)
   @bus_kinds ~w(fact announce note intent)
   @default_bus_kind "fact"
 
@@ -418,7 +418,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|status|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -1527,10 +1527,50 @@ defmodule Kazi.CLI do
     `bus peek`/`bus watch` sees it, regardless of either side's --scope (issue
     #1065). The recipient resolves in order (T55.5, ADR-0073): an @-prefixed
     team name (every member receives it, issue #1069), an exact session id on
-    the roster, then a nickname assigned with `bus name`. A recipient matching
-    none of those is a one-line error naming the live roster -- a tell can
-    never silently queue to a session that isn't there. `text` over 64 KiB is
+    the roster, then a nickname assigned with `bus name`. `text` over 64 KiB is
     rejected client-side.
+
+    Prints the message's id (T55.12) -- `bus status <id>` answers what became
+    of it. Success here means STORED AND QUEUED, not seen: the bus is
+    advisory, and a live recipient is always free to ignore a message.
+
+    Unaddressable and unlikely-to-be-read recipients differ (T55.12):
+
+      * no presence row AND no durable inbox -- a one-line ERROR naming the
+        live roster; nothing is sent.
+      * a row whose liveness is `dead-reaping` (T55.11), or no row but a
+        durable inbox left over from before it aged out -- a WARNING on
+        stderr, and the message is queued anyway. The verdict comes from the
+        recipient's machine sweep, and the operator may know better (a session
+        restarting under the same name); refusing here would trade a silent
+        send for a silent refusal. Confirm with `bus status <id>`.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("status") do
+    """
+    kazi bus status <id> [--json]
+
+    Answer what became of the directed message `<id>` (the id `bus tell`
+    prints) -- read from the RECIPIENT's durable consumer ack state (T55.12):
+
+      * `pending` -- stored and queued, but not acked: the recipient has not
+        read yet, or only peeked (a peek never consumes).
+      * `consumed` -- the recipient's `bus read` acked it. Delivered AND
+        drained, which is as far as the bus can honestly see; whether the
+        session acted on it is not something an ack can know.
+
+    For a `tell @<team>` fan-out, `recipients` breaks the verdict out per
+    member and the top-line state is `consumed` only once EVERY live member
+    acked. Consumes nothing -- checking a message's status never disturbs the
+    recipient's cursor, so it is safe to poll.
+
+    An id that is not in the stream (never posted, or aged out of the 30-day
+    retention) is a one-line error, as is an id naming a broadcast `bus post`
+    -- delivery status needs one recipient whose ack state can answer for it.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -1580,8 +1620,18 @@ defmodule Kazi.CLI do
     """
     kazi bus who [--team <name>] [--project <dir>] [--machine <host>] [--all] [--json]
 
-    List current presence (session, machine, pid, liveness, team, last-seen
-    age, cwd) from the short-TTL KV bucket every bus call upserts into.
+    List current presence (session, machine, pid, liveness, team, inbox depth,
+    last-seen age, cwd) from the short-TTL KV bucket every bus call upserts
+    into.
+
+    Inbox depth (T55.12): `inbox=N` counts the DIRECTED messages queued and
+    un-read for that session (its own tells plus its team's fan-out) -- shown
+    only when non-zero on the TTY, always present under --json. A depth that
+    climbs against a live session means tells are landing but nobody is
+    draining them; against a `dead-reaping` one, it is the backlog a
+    replacement session will never see. Broadcast (`bus post`) traffic is not
+    counted -- inbox answers "how many messages addressed to this session are
+    waiting".
 
     Liveness (T55.11): `active` -- the session itself made a bus call
     recently; `idle` -- its process is verified alive on its machine but
@@ -4161,10 +4211,29 @@ defmodule Kazi.CLI do
   defp execute_bus("post", _args, opts),
     do: bus_error("`bus post` requires <text> or <kind> <text>", opts)
 
+  # T55.12: a tell answers with the message's public id -- `told <recipient>`
+  # alone meant QUEUED, and left the sender no way to ask what became of it.
+  # A recipient the roster calls dead (or that has no presence row at all)
+  # WARNS on stderr and still sends: the send is real either way, and the
+  # operator may know better than the last sweep did.
   defp execute_bus("tell", [session, text], opts) do
     case Kazi.Bus.tell(session, text, bus_call_opts(opts)) do
-      :ok ->
-        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("told #{session}") end)
+      {:ok, receipt} ->
+        emit(
+          json?(opts),
+          %{
+            "ok" => true,
+            "schema_version" => @run_schema_version,
+            "id" => receipt.id,
+            "recipient" => receipt.recipient,
+            "liveness" => receipt.liveness
+          },
+          fn ->
+            warn_on_liveness(receipt)
+            IO.puts("told #{receipt.recipient} (id #{receipt.id})")
+          end
+        )
+
         0
 
       {:error, reason} ->
@@ -4174,6 +4243,21 @@ defmodule Kazi.CLI do
 
   defp execute_bus("tell", _args, opts),
     do: bus_error("`bus tell` requires <session> <text>", opts)
+
+  # T55.12: `bus status <id>` -- what became of a tell, from the recipient's
+  # own ack state.
+  defp execute_bus("status", [id], opts) do
+    case Integer.parse(id) do
+      {seq, ""} when seq > 0 ->
+        do_bus_status(seq, opts)
+
+      _other ->
+        bus_error("`bus status` requires a message id (a positive integer)", opts)
+    end
+  end
+
+  defp execute_bus("status", _args, opts),
+    do: bus_error("`bus status` requires <id>", opts)
 
   # #1059: `bus read --peek` is non-destructive -- delegates to `Kazi.Bus.peek/1`
   # exactly like `bus peek` (kept as two entry points, one shared implementation).
@@ -4232,8 +4316,13 @@ defmodule Kazi.CLI do
               liveness = if s["liveness"], do: " liveness=#{s["liveness"]}", else: ""
               team = if s["team"], do: " team=#{s["team"]}", else: ""
               age = if s["age_s"], do: " seen=#{s["age_s"]}s ago", else: ""
+              # T55.12: only render a depth that says something -- an empty
+              # inbox is the norm and would be noise on every row.
+              inbox = if s["inbox"] && s["inbox"] > 0, do: " inbox=#{s["inbox"]}", else: ""
 
-              IO.puts("#{label}#{machine} pid=#{s["pid"]}#{liveness}#{team}#{age} #{s["cwd"]}")
+              IO.puts(
+                "#{label}#{machine} pid=#{s["pid"]}#{liveness}#{team}#{inbox}#{age} #{s["cwd"]}"
+              )
             end)
           end
         )
@@ -4339,6 +4428,58 @@ defmodule Kazi.CLI do
   defp execute_bus("who", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
+  # T55.12: the two liveness verdicts worth interrupting a send for. Both still
+  # queue, so the wording says what happened AND what to check -- never
+  # "failed", which would be a different lie from the one this task removes.
+  defp warn_on_liveness(%{liveness: "dead-reaping", recipient: recipient}) do
+    IO.puts(
+      :stderr,
+      "warning: #{recipient} looks dead (liveness=dead-reaping) -- queued anyway; " <>
+        "check `kazi bus who --all` and `kazi bus status <id>`"
+    )
+  end
+
+  defp warn_on_liveness(%{liveness: "no-presence", recipient: recipient}) do
+    IO.puts(
+      :stderr,
+      "warning: #{recipient} has no presence row -- queued to its durable inbox; " <>
+        "check `kazi bus who --all` and `kazi bus status <id>`"
+    )
+  end
+
+  defp warn_on_liveness(_receipt), do: :ok
+
+  defp do_bus_status(seq, opts) do
+    case Kazi.Bus.status(seq, bus_call_opts(opts)) do
+      {:ok, status} ->
+        emit(
+          json?(opts),
+          Map.merge(status, %{"ok" => true, "schema_version" => @run_schema_version}),
+          fn -> print_bus_status(status) end
+        )
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp print_bus_status(status) do
+    sent = if status["sent_at"], do: " sent=#{status["sent_at"]}", else: ""
+    IO.puts("#{status["id"]} #{status["state"]} recipient=#{status["recipient"]}#{sent}")
+
+    # The per-recipient breakdown is the whole point for a team fan-out; for a
+    # single recipient the line above already said it, so don't repeat it.
+    case status["recipients"] do
+      [_single] ->
+        :ok
+
+      recipients ->
+        Enum.each(recipients, fn r -> IO.puts("  #{r["session"]} #{r["state"]}") end)
+    end
+  end
+
   defp do_bus_post(kind, text, opts) do
     case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
       :ok ->
@@ -4435,6 +4576,36 @@ defmodule Kazi.CLI do
 
   defp bus_error({:invalid_nickname, nickname, why}, opts),
     do: daemon_error("invalid nickname #{inspect(nickname)} -- #{why}", opts)
+
+  # T55.12: `bus status` on an id the stream cannot produce. Both causes are
+  # named because they call for opposite reactions -- a typo is the sender's to
+  # fix, an aged-out id means the answer is simply gone.
+  defp bus_error({:unknown_message, id}, opts),
+    do:
+      daemon_error(
+        "no message with id #{id} -- it was never posted, or it aged out of the 30-day retention",
+        opts
+      )
+
+  defp bus_error({:not_directed, id, kind}, opts),
+    do:
+      daemon_error(
+        "message #{id} is a broadcast (kind #{kind}), not a directed tell -- " <>
+          "delivery status needs one recipient whose ack state can answer for it",
+        opts
+      )
+
+  # T55.12: a tell whose publish the stream never acked. The old fire-and-forget
+  # publish could not see this at all -- it reported success regardless.
+  defp bus_error({:publish_rejected, detail}, opts),
+    do: daemon_error("the bus stream rejected the message: #{inspect(detail)}", opts)
+
+  defp bus_error({:publish_failed, reason}, opts),
+    do:
+      daemon_error(
+        "the message was not acknowledged by the bus stream (#{inspect(reason)}) -- it may not have been stored",
+        opts
+      )
 
   defp bus_error(reason, opts), do: daemon_error("bus error: #{inspect(reason)}", opts)
 
