@@ -42,6 +42,14 @@ defmodule Kazi.Authoring.Clarify do
       only be computed AFTER a draft exists (predicates are the harness's
       choice, not the idea's), so it never participates in the pre-draft
       `--strict` refusal and never blocks drafting or persisting.
+    * `landing` -- T44.12 (ADR-0055): when the draft carries CODE predicates but
+      no `integration` block. "Landing is part of convergence": without one the
+      goal converges and stops, leaving the change on a branch nobody asked for.
+      Suppressed by an `integration` block of ANY mode -- including `"none"`,
+      which is a deliberate converge-and-stop answer rather than an omission --
+      and never asked for a goal with nothing to land (docs-only, live-probe
+      only). Like `naked-grep-predicate` it is draft-derived, so it never
+      participates in the pre-draft `--strict` refusal.
 
   ## Folding answers (`fold_answers/2`)
 
@@ -76,7 +84,8 @@ defmodule Kazi.Authoring.Clarify do
       live_target_question(idea, draft),
       scope_question(idea),
       http_status_question(idea),
-      naked_grep_question(draft)
+      naked_grep_question(draft),
+      landing_question(draft)
     ]
     |> Enum.reject(&is_nil/1)
   end
@@ -314,6 +323,96 @@ defmodule Kazi.Authoring.Clarify do
       )
     end
   end
+
+  # T44.12 (ADR-0055): a CODE goal with no `[integration]` block converges and then
+  # stops, leaving the work on a branch nobody asked for. "Landing is part of
+  # convergence" — so an absent landing mode is a gap surfaced in the proposal's
+  # `clarify` array, exactly like a missing live-verification target, never
+  # silently accepted.
+  #
+  # Only asked when the draft has CODE predicates: a docs-only or live-probe-only
+  # goal has nothing to land, and asking would be noise. Suppressed the moment the
+  # draft carries an `integration` block — including `mode: "none"`, which is a
+  # deliberate converge-and-stop answer, not an omission.
+  #
+  # Like `naked-grep-predicate`, this can only be computed AFTER a draft exists
+  # (landing is a property of the drafted predicates, not the idea's prose), so it
+  # never participates in the pre-draft `--strict` refusal.
+  #
+  # NOTE: these attributes must be declared BEFORE the function that reads them —
+  # Elixir evaluates module attributes in source order, so a use above the
+  # definition silently reads nil.
+  #
+  # The Wave B gate predicates an engineering goal should carry (T44.6/7/8). Named
+  # as a SUGGESTION in the question text, not auto-injected: they are separate
+  # providers a human opts into, and this floor never writes predicates.
+  @gate_providers ~w(no_stubs oss_hygiene docs_updated)
+
+  # Providers whose predicates represent CODE work — the kind that produces a diff
+  # to land. A goal made only of live probes or docs checks has nothing to land.
+  @code_providers ~w(test_runner custom_script static coverage mutation property cve)
+
+  defp landing_question(draft) do
+    if draft_has_integration?(draft) or not draft_has_code_predicate?(draft) do
+      nil
+    else
+      Question.new(
+        "landing",
+        "How should this goal's converged work LAND? Without an [integration] block it " <>
+          "converges and stops, leaving the change on a branch. Engineering goals should " <>
+          "also gate on " <> Enum.join(@gate_providers, ", ") <> ".",
+        options: [
+          Option.new("Open a PR for review", "pr"),
+          Option.new("Commit to the run's branch only", "commit"),
+          Option.new("Push the branch, no PR", "branch"),
+          Option.new("Merge it", "merge"),
+          Option.new("Nothing -- converge and stop", "none")
+        ],
+        recommended: "pr"
+      )
+    end
+  end
+
+  defp draft_has_code_predicate?(nil), do: false
+
+  defp draft_has_code_predicate?(%Kazi.Goal{} = goal) do
+    goal
+    |> Kazi.Goal.all_predicates()
+    |> Enum.any?(fn predicate -> to_string(predicate.kind) in @code_providers end)
+  end
+
+  defp draft_has_code_predicate?(%{} = map) do
+    case Map.get(map, "predicates") do
+      list when is_list(list) ->
+        Enum.any?(list, fn
+          %{"provider" => provider} -> provider in @code_providers
+          _ -> false
+        end)
+
+      _ ->
+        false
+    end
+  end
+
+  defp draft_has_code_predicate?(_), do: false
+
+  # An `integration` block of ANY mode answers the question — including "none",
+  # which is a deliberate converge-and-stop choice. `Kazi.Goal`'s default is
+  # `mode: :none` for a goal-file with no block at all, so a Goal struct cannot
+  # distinguish "declared none" from "never asked"; only a caller-drafts map can,
+  # and that is exactly where the floor runs (T11/ADR-0023).
+  defp draft_has_integration?(nil), do: false
+
+  defp draft_has_integration?(%Kazi.Goal{}), do: true
+
+  defp draft_has_integration?(%{} = map) do
+    case Map.get(map, "integration") do
+      %{} = block -> map_size(block) > 0
+      _ -> false
+    end
+  end
+
+  defp draft_has_integration?(_), do: false
 
   # Always ask for the scope boundary unless the idea states one explicitly.
   defp scope_question(idea) do
