@@ -19,7 +19,20 @@ defmodule Kazi.Goal.IntegrationLint do
   """
 
   @typedoc "An unknown-integration-mode warning, naming the offending `mode` value."
-  @type warning :: %{mode: term()}
+  @type mode_warning :: %{mode: term()}
+
+  @typedoc """
+  T44.5: an explicit `[harness] allowed_tools` that would DENY the git operations
+  the declared landing mode performs. Names the mode and the missing operations,
+  so the author sees exactly which grant is absent.
+  """
+  @type permission_warning :: %{
+          integration_mode: String.t(),
+          missing_tools: [String.t()],
+          allowed_tools: [String.t()]
+        }
+
+  @type warning :: mode_warning() | permission_warning()
 
   @doc """
   Lints a decoded goal-file TOML map's `[integration]` block for an unknown
@@ -41,16 +54,89 @@ defmodule Kazi.Goal.IntegrationLint do
   """
   @spec warnings(map()) :: [warning()]
   def warnings(data) when is_map(data) do
-    case Map.get(data, "integration") do
-      integration when is_map(integration) ->
-        mode_warning(Map.get(integration, "mode"))
-
-      _ ->
-        []
-    end
+    mode_warnings(data) ++ permission_warnings(data)
   end
 
   def warnings(_), do: []
+
+  defp mode_warnings(data) do
+    case Map.get(data, "integration") do
+      integration when is_map(integration) -> mode_warning(Map.get(integration, "mode"))
+      _ -> []
+    end
+  end
+
+  # T44.5 (ADR-0055): an EXPLICIT `[harness] allowed_tools` that cannot perform
+  # the declared landing mode's git work.
+  #
+  # This is the #769 failure shape with a different trigger: the agent converges
+  # the code predicates, then every `git commit` is refused, the harness exits 0,
+  # and the run reports a stall no evidence explains. kazi INJECTS the right
+  # defaults when no allow-list is given (Kazi.Runtime), but an explicit list is
+  # the author's decision — so it is never silently widened behind their back.
+  # They get told instead.
+  #
+  # Advisory only, and deliberately so: a house allow-list may name the same
+  # operations in a form this cannot parse, and a false hard-failure on a goal
+  # that would run fine is worse than a warning that is occasionally redundant.
+  defp permission_warnings(data) do
+    integration = map_at(data, "integration")
+    harness = map_at(data, "harness")
+    mode = Map.get(integration, "mode", "none")
+    allowed = Map.get(harness, "allowed_tools")
+
+    with true <- is_binary(mode) and mode != "none",
+         true <- claude?(harness),
+         tools when is_list(tools) and tools != [] <- allowed,
+         [_ | _] = missing <- missing_operations(mode, tools) do
+      [%{integration_mode: mode, missing_tools: missing, allowed_tools: tools}]
+    else
+      _ -> []
+    end
+  end
+
+  # The git operations each landing mode performs, as the operator would write
+  # them. Mirrors `Kazi.Runtime.landing_tools/1`'s intent in the vocabulary a
+  # human reads (`git commit`, not `Bash(git commit:*)`), because this string is
+  # what the warning shows them.
+  @mode_operations %{
+    "commit" => ["git add", "git commit"],
+    "branch" => ["git add", "git commit", "git push"],
+    "pr" => ["git add", "git commit", "git push", "gh pr"],
+    "merge" => ["git add", "git commit", "git push", "gh pr"]
+  }
+
+  # An operation counts as granted when ANY allow-list entry mentions it — a
+  # substring test, not an exact match, because Claude's allow-list syntax wraps
+  # the command (`Bash(git commit:*)`). A blanket `Bash` grant covers everything.
+  defp missing_operations(mode, tools) do
+    joined = Enum.map_join(tools, " ", &to_string/1)
+
+    if String.contains?(joined, "Bash(*)") or "Bash" in Enum.map(tools, &to_string/1) do
+      []
+    else
+      @mode_operations
+      |> Map.get(mode, [])
+      |> Enum.reject(&String.contains?(joined, &1))
+    end
+  end
+
+  # Absent `[harness]` resolves to the default profile, which IS claude — so a
+  # missing block must read as claude here, or the warning silently never fires
+  # on the most common goal-file shape.
+  defp claude?(harness) do
+    case Map.get(harness, "id") do
+      nil -> true
+      id -> to_string(id) == "claude"
+    end
+  end
+
+  defp map_at(data, key) do
+    case Map.get(data, key) do
+      m when is_map(m) -> m
+      _ -> %{}
+    end
+  end
 
   # No mode declared -> the loader defaults it to "none"; nothing to warn about.
   defp mode_warning(nil), do: []
