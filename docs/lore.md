@@ -157,6 +157,29 @@ The `:antigravity_live` smoke is the catch if a future release regresses the
 workaround (a dropped stdout -> no `:result` -> no convergence, reported honestly);
 Antigravity may need version pinning. (T14.3, 2026-06-23.)
 
+### L-0045 #harness #gemini #non-tty #stdout #auth #landmine -- gemini's non-TTY stdout is UNVERIFIED (fully-conformant `-o json` on theory); a credential-less `gemini -p` BLOCKS on interactive auth instead of erroring
+The `:gemini_cli` profile (`Kazi.Harness.Profiles.GeminiCli`, T37.1) is wired as a
+FULLY-CONFORMANT `-o json` profile (the Codex template, NOT Antigravity's
+`prompt_via: :file` workaround), on the THEORY that gemini's first-class
+`-o/--output-format json` is non-TTY-safe -- i.e. it does NOT drop stdout under a
+pipe the way `antigravity -p` does (#76, see [[L-0007]]). That theory is NOT yet
+live-verified: T37.2 built the `:gemini_cli_live` smoke (a convergence test plus a
+dedicated non-TTY stdout conformance test that runs the production argv under
+`System.cmd/3`'s pipe and asserts a non-empty, parseable `:result`), but it could
+NOT be run here because no `GEMINI_API_KEY`/`GOOGLE_API_KEY` was available -- an
+HONEST SKIP (the opencode-smoke precedent), not a verified pass. LANDMINE found
+while building it: with NO creds, `gemini -p "<prompt>" -o json` does NOT
+fast-fail -- it HANGS a non-interactive subprocess on interactive auth, emitting
+nothing (probed at v0.32.1, exit only on kill). So a credential-less environment
+cannot verify the success-path non-TTY stdout AT ALL; the smoke's `gemini_auth`
+preflight therefore REQUIRES an explicit key and skips honestly otherwise (never
+faking a green off an empty/hung stdout). VERSION NOTE: the profile's argv/parse
+were researched against `gemini` v0.38.2; the binary on this machine was v0.32.1
+-- the pinned version at which a maintainer confirms non-TTY safety (or catches a
+regression and drops to `prompt_via: :file`) MUST be recorded here when the live
+smoke is actually run with creds. Until then: gemini non-TTY conformance is
+ASSUMED, not proven. (T37.2, 2026-07-17.)
+
 ### L-0029 #harness #childsupervisor #processgroup #shell #landmine -- a `kill <pid>` on a background watchdog leaves its OWN `sleep` grandchild running, delaying `System.cmd/3` by a whole poll interval
 `Kazi.Harness.ChildSupervisor.wrap/3` (issue #857) wraps every harness dispatch
 in a small `sh` script: a background watchdog subshell polls whether the
