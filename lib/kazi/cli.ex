@@ -154,6 +154,7 @@ defmodule Kazi.CLI do
     session_name: :string,
     allow_primary_workspace: :boolean,
     allow_duplicate_run: :boolean,
+    no_preflight: :boolean,
     in_place: :boolean,
     base: :string,
     rediscovery: :string,
@@ -275,6 +276,8 @@ defmodule Kazi.CLI do
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
       "`apply` only: start this run even when the run registry already shows a LIVE run (status running, fresh heartbeat) for the same goal id. Without this flag, an executing apply refuses the duplicate -- a second concurrent apply of one goal burns a second budget and races the first's edits. Zombie rows never block (a dead run's heartbeat goes stale within ~90s); pass this flag only for a deliberate re-run alongside a live one.",
+    no_preflight:
+      "`apply` only (T44.9): SKIP the base-dispatchability preflight run before the first dispatch. By default an executing apply first verifies the base can receive the work -- command-backed predicates' tools are installed, and (per the goal's [integration] mode) `gh auth status` succeeds for pr/merge and `git push --dry-run` succeeds for branch/pr/merge -- plus that no stale worktree from a dead run of this goal is lying around; any failure REFUSES dispatch with a named, actionable error instead of burning a budget that can never land. Pass this flag to bypass ALL those checks (e.g. an offline run, or a base you know is fine). Read-only modes (--check, --explain) never run preflight.",
     in_place:
       "`apply` only (T50.1, ADR-0065 decision 1): edit --workspace directly instead of kazi's default of creating a kazi-owned task worktree off its HEAD and editing there. Without this flag, --workspace is the base the run integrates ONTO, not the edit site itself -- the dispatched agent's shell, and every predicate, runs inside a worktree kazi creates and removes on every terminal state (converged / stuck / over_budget / error / crash). Pass this flag to reproduce pre-T50.1 direct-edit behavior byte-identically (e.g. a throwaway clone where isolation buys nothing). A non-git workspace always runs in place -- worktree isolation needs a git repo.",
     base:
@@ -363,6 +366,7 @@ defmodule Kazi.CLI do
         :session_name,
         :allow_primary_workspace,
         :allow_duplicate_run,
+        :no_preflight,
         :in_place,
         :base
       ]
@@ -1909,6 +1913,7 @@ defmodule Kazi.CLI do
           session_name: flags[:session_name],
           allow_primary_workspace: flags[:allow_primary_workspace] || false,
           allow_duplicate_run: flags[:allow_duplicate_run] || false,
+          no_preflight: flags[:no_preflight] || false,
           in_place: flags[:in_place] || false,
           base: flags[:base],
           json: flags[:json] || false,
@@ -2582,13 +2587,50 @@ defmodule Kazi.CLI do
         refuse_primary_workspace(goal, opts)
 
       opts[:parallel] == true ->
-        warn_unwritable_permission_mode(goal, opts)
-        run_goal_parallel(goal, opts, persist?, runtime_opts)
+        with_preflight(goal, opts, persist?, fn ->
+          warn_unwritable_permission_mode(goal, opts)
+          run_goal_parallel(goal, opts, persist?, runtime_opts)
+        end)
 
       true ->
-        warn_unwritable_permission_mode(goal, opts)
-        run_goal_serial(goal, opts, persist?, runtime_opts)
+        with_preflight(goal, opts, persist?, fn ->
+          warn_unwritable_permission_mode(goal, opts)
+          run_goal_serial(goal, opts, persist?, runtime_opts)
+        end)
     end
+  end
+
+  # T44.9 (UC-058): before the FIRST dispatch, verify the base can actually
+  # receive the run's work and REFUSE with a named reason if not — so a run never
+  # burns a budget only to strand converged work on a broken push path. Gated
+  # here, after the read-only --explain/--check short-circuits (which dispatch
+  # nothing and so need no preflight) and around BOTH execution branches, so
+  # serial and --parallel are guarded alike.
+  #
+  # Only REAL, persisted runs are preflighted: a `persist? == false` run is an
+  # ephemeral / read-model-unavailable best-effort dispatch (and every stubbed
+  # test drive), not a tracked run whose landing we must protect — gating on
+  # persist? keeps preflight off those without a per-caller opt-out. `--no-preflight`
+  # bypasses it explicitly.
+  defp with_preflight(%Goal{} = goal, opts, persist?, dispatch) when is_function(dispatch, 0) do
+    if opts[:no_preflight] == true or persist? == false do
+      dispatch.()
+    else
+      case Kazi.Apply.Preflight.check(goal, opts) do
+        :ok -> dispatch.()
+        {:refuse, %{message: message}} -> refuse_preflight(message, opts)
+      end
+    end
+  end
+
+  defp refuse_preflight(message, opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
   end
 
   # T54.6 (#1072, regression of #769) fix (a): warn BEFORE dispatching when the
