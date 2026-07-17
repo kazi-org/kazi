@@ -43,9 +43,40 @@ or the target surface has no registered provider (`:surface_unavailable`).
 On a `:pinned` classification the pin's `trace` is merged **over** the predicate's
 passthrough config and handed to the surface provider, which replays it. The
 provider returns the delegate's status/score/direction **verbatim**, with its
-evidence **extended** by `%{scenario:, spec:, surface:, pin_state: :pinned}`. A red
-replay is a `:fail` carrying the delegate's own evidence (e.g. the failing
-assertion) plus those scenario fields.
+evidence **extended** by `%{scenario:, spec:, surface:, pin_state: :pinned,
+inputs: <generated>}`. A red replay is a `:fail` carrying the delegate's own
+evidence (e.g. the failing assertion) plus those scenario fields.
+
+## Input generators and `{{placeholder}}` substitution
+
+A pin's `inputs` map names each `{{placeholder}}` its trace interpolates and the
+generator kind that fills it. Before every replay the provider substitutes a
+**freshly generated value** for each placeholder — anywhere it appears, in a step
+or an assertion — so replays are collision-free (no "name already taken" on the
+second run) and a fixer cannot hardcode a happy path against known test data
+(ADR-0064 decision 2). The generated values are recorded in evidence under
+`inputs:` so a failing replay is reproducible.
+
+```json
+"inputs": { "pat_name": "unique_slug" },
+"trace": {
+  "steps": [{ "action": "type", "selector": "#name", "text": "{{pat_name}}" }],
+  "assertions": [{ "type": "text", "selector": "#token-name", "equals": "{{pat_name}}" }]
+}
+```
+
+Generator kinds:
+
+| kind | produces |
+|------|----------|
+| `unique_slug` | the placeholder name, a hyphen, and 8 hex chars (`pat_name-1a2b3c4d`). |
+| `random_email` | `<12 hex>@example.com` (the RFC 2606 reserved domain). |
+| `random_string:<n>` | `n` lowercase-alphanumeric chars (`n` a positive integer). |
+
+A placeholder whose declared generator kind is unknown (or a `random_string:`
+with a non-positive / non-integer length) is a pin defect: the replay fails loudly
+as `{:invalid, [{:unknown_generator, <name>}]}` rather than driving a literal
+`{{name}}` into the surface.
 
 ## Config keys
 
