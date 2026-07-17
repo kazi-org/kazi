@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.179.0](https://github.com/kazi-org/kazi/compare/v1.178.0...v1.179.0) (2026-07-17)
+
+
+### Features
+
+* **runtime:** align harness permissions with the declared landing mode (T44.5, ADR-0055) ([6668db3](https://github.com/kazi-org/kazi/commit/6668db3ed15fdbfdd294a052f0ad073b3891fb8a))
+
 ## [1.178.0](https://github.com/kazi-org/kazi/compare/v1.177.0...v1.178.0) (2026-07-17)
 
 
