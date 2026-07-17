@@ -878,7 +878,9 @@ defmodule Kazi.CLI do
   """
   @spec main([String.t()]) :: no_return()
   def main(argv) do
-    Kazi.SwapDiagnosis.guard(fn -> run(argv) end)
+    Kazi.StartupWatchdog.with_watchdog(fn ->
+      Kazi.SwapDiagnosis.guard(fn -> run(argv) end)
+    end)
     |> System.halt()
   end
 
