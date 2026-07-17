@@ -68,6 +68,7 @@ defmodule Kazi.CLI do
   alias Kazi.Goal.DepGraph
   alias Kazi.Goal.Group
   alias Kazi.Goal.GroupLint
+  alias Kazi.Harness.ChildSupervisor
   alias Kazi.Memory.SemanticIndex
   alias Kazi.Partition
   alias Kazi.ReadModel.ProposedGoal
@@ -179,6 +180,7 @@ defmodule Kazi.CLI do
     into: :string,
     lower: :string,
     write: :string,
+    reap: :boolean,
     help: :boolean,
     version: :boolean
   ]
@@ -378,6 +380,13 @@ defmodule Kazi.CLI do
       flags: [:json]
     },
     %{
+      name: "orphans",
+      summary:
+        "List runs whose recorded harness child process is STILL alive -- a dispatch that outlived its controller (issue #1073/#857). Read-only by default; `--reap` sends TERM then KILL to each orphaned process group.",
+      args: [],
+      flags: [:reap, :json]
+    },
+    %{
       name: "init",
       summary:
         "Adopt a repo by stack detection and write a starter goal-file (incl. a learned [budget] suggestion when local history has one, ADR-0058).",
@@ -561,6 +570,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --resume <token>        # continue a paused run from its checkpoint
       kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files (ADR-0065)
       kazi status <ref> [--json]
+      kazi orphans [--reap] [--json]               # list runs whose harness child is still alive (#1073); --reap kills them
       kazi economy [--goal <ref>] [--json]         # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
@@ -920,6 +930,9 @@ defmodule Kazi.CLI do
       {:status, ref, opts} ->
         execute_status(ref, opts)
 
+      {:orphans, opts} ->
+        execute_orphans(opts)
+
       {:init, source, opts} ->
         execute_init(source, opts, inject_opts)
 
@@ -989,6 +1002,7 @@ defmodule Kazi.CLI do
           | {:version, keyword()}
           | {:run, Path.t(), keyword()}
           | {:status, String.t() | nil, keyword()}
+          | {:orphans, keyword()}
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
           | {:install_hooks, keyword()}
@@ -1154,6 +1168,16 @@ defmodule Kazi.CLI do
   # burrito-built binary.
   defp parse_command(["status"], flags),
     do: {:status, nil, json: flags[:json] || false}
+
+  # Issue #1073/#857: `kazi orphans` lists runs whose recorded harness child pid
+  # is STILL alive -- a dispatch that outlived its controller. Read-only by
+  # default; `--reap` TERM/KILLs each orphaned process group.
+  defp parse_command(["orphans" | rest], flags) do
+    case rest do
+      [] -> {:orphans, reap: flags[:reap] || false, json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
 
   # T5.5 adopt: `kazi init <repo-dir>` reverse-engineers a starter goal-file by
   # deterministic stack detection (ADR-0013). --out is the output file; --enrich
@@ -3577,6 +3601,70 @@ defmodule Kazi.CLI do
         true ->
           status_not_found(ref, opts)
       end
+    end)
+  end
+
+  # Issue #1073/#857: `kazi orphans` finds every registered run whose recorded
+  # `harness_child_pid` is STILL alive -- a harness dispatch that outlived its
+  # controller (e.g. the launcher was killed before Layer A shipped, or a run
+  # that predates this deploy). Read-only by default; `--reap` TERM/KILLs each
+  # orphaned process group via the same signal shape the #857 watchdog uses.
+  defp execute_orphans(opts) do
+    reap? = opts[:reap] == true
+
+    with_read_model(opts, fn ->
+      results =
+        RunRegistry.list()
+        |> Enum.filter(&orphan_run?/1)
+        |> Enum.map(fn run ->
+          outcome = if reap?, do: ChildSupervisor.reap(run.harness_child_pid), else: :alive
+          {run, outcome}
+        end)
+
+      emit(json?(opts), orphans_json(results, reap?), fn -> print_orphans(results, reap?) end)
+
+      0
+    end)
+  end
+
+  defp orphan_run?(run) do
+    is_binary(run.harness_child_pid) and ChildSupervisor.alive?(run.harness_child_pid)
+  end
+
+  defp orphans_json(results, reap?) do
+    %{
+      schema_version: @run_schema_version,
+      kind: "orphans",
+      reaped: reap?,
+      count: length(results),
+      orphans: Enum.map(results, fn {run, outcome} -> orphan_json(run, outcome) end)
+    }
+  end
+
+  defp orphan_json(run, outcome) do
+    %{
+      run_id: run.run_id,
+      goal_ref: run.goal_ref,
+      harness_child_pid: run.harness_child_pid,
+      status: run.status,
+      reap_outcome: to_string(outcome)
+    }
+  end
+
+  defp print_orphans([], _reap?) do
+    IO.puts("no orphaned harness processes")
+  end
+
+  defp print_orphans(results, reap?) do
+    verb = if reap?, do: "reaped", else: "found"
+    IO.puts("#{verb} #{length(results)} orphaned harness process(es):\n")
+
+    Enum.each(results, fn {run, outcome} ->
+      suffix = if reap?, do: "\treap=#{outcome}", else: ""
+
+      IO.puts(
+        "  #{run.goal_ref}\trun_id=#{run.run_id}\tharness_pid=#{run.harness_child_pid}" <> suffix
+      )
     end)
   end
 
