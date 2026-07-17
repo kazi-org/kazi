@@ -35,7 +35,8 @@ to tell you why (`stuck`, or out of budget) instead of pretending it's finished.
 
 ```sh
 brew install kazi-org/tap/kazi
-kazi install-skill        # teaches Claude Code the kazi skill (writes ~/.claude/skills/kazi)
+kazi install-skill        # teaches Claude Code the kazi skill (writes ~/.claude/skills/kazi:
+                          # SKILL.md + AUTHORING.md + RECIPES.md; your own LOCAL.md is never touched)
 ```
 
 Then drive it from Claude Code with the kazi skill — author the checks, then converge:
@@ -176,6 +177,14 @@ plain-English phrase **have kazi drive this until done** — only route to kazi 
 installed it. From there Claude authors the acceptance predicates with `kazi plan` and runs
 `kazi apply` until they are *objectively* true. You do not operate kazi directly; your
 agent does.
+
+The skill ships as three files (ADR-0074): `SKILL.md` (the router), `AUTHORING.md`
+(predicate authoring quality — dense briefs, capability-vs-guard, the red-at-t0 rule), and
+`RECIPES.md` (escalation ladder, streaming, the check-only gate variant, the session bus).
+It is fully self-contained — it never assumes any other skill exists. To wire kazi into
+your own local workflow (routing conventions, model policy), put them in
+`~/.claude/skills/kazi/LOCAL.md`: the skill reads it first when present, and
+`install-skill` never overwrites it.
 
 ---
 

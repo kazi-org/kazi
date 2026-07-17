@@ -32,10 +32,10 @@ version and the source of truth.
 For a CODE goal the on-ramp is two verbs: `kazi plan` authors the acceptance
 predicates and `kazi apply` converges them (ADR-0031/0032). `kazi apply` IS the
 reconcile loop -- you do NOT wrap it in a separate loop/qualify pass for code
-work. The strategy layer above kazi is `/plan` (ADRs, use cases, the WBS, the
-intent); kazi turns that intent into objective predicates and executes them.
-`/tidy` stays orthogonal hygiene (git/worktree/scratch sweeping), not part of the
-converge loop.
+work. The strategy layer above kazi is your own planning workflow (ADRs, use
+cases, the work breakdown, the intent); kazi turns that intent into objective
+predicates and executes them. Repo hygiene (git/worktree/scratch sweeping) stays
+orthogonal, not part of the converge loop.
 
 When the user says "have kazi drive this until done" (the canonical invocation
 phrase), that is the request to drive kazi: author the predicates with `kazi
@@ -109,8 +109,9 @@ A payload `"goal_id"` names the drafted goal verbatim and a payload `"idea"` is
 persisted as the proposal's idea (T39.1, ADR-0049); absent, kazi derives them
 from `"id"`/`"name"` or generates defaults.
 
-If a `/plan` strategy doc already exists for this work, DERIVE the predicates from
-its `acc:` lines rather than inventing them -- those lines ARE the predicate set.
+If a strategy/work-plan doc already exists for this work, DERIVE the predicates
+from its machine-checkable acceptance-criterion lines rather than inventing them
+-- those lines ARE the predicate set.
 
 Author for the grind tier -- maximum implementable detail is the DEFAULT, not
 something the operator has to ask for. The predicate `description` fields are
@@ -480,8 +481,9 @@ Cadence: check at turn boundaries (peek, or install delivery once with
 
 ## Verifying a pooled task with kazi
 
-In an /apply --pool session, gate your task's MERGE on objective convergence
-(ADR-0026 L1): bridge the task's acc line to predicates, plan/approve, then
+In a work-pool orchestration session, gate your task's MERGE on objective
+convergence (ADR-0026 L1): bridge the task's acceptance line to predicates,
+plan/approve, then
 `kazi apply --json` -- rebase-merge ONLY when `status` is `converged`; on
 `stuck` / `over_budget` / `error`, escalate and do NOT merge. Full copy-pasteable
 gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
