@@ -16,6 +16,25 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.153.0](https://github.com/kazi-org/kazi/compare/v1.152.0...v1.153.0) (2026-07-17)
+
+
+### Features
+
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (aux) ([bf30130](https://github.com/kazi-org/kazi/commit/bf30130b782ef175ba834d9c95fa0242cd69d145))
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (docs) ([f610108](https://github.com/kazi-org/kazi/commit/f6101082be36cba25ca4a7c5e9c4c314d6999e1f))
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (lib) ([b05c531](https://github.com/kazi-org/kazi/commit/b05c53145bbaab56b6b83aefddce495426dbf296))
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (test) ([06707e1](https://github.com/kazi-org/kazi/commit/06707e1a74cc990d5edcdc23185894dc4046207d))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (aux) ([b3369b1](https://github.com/kazi-org/kazi/commit/b3369b1e2d2021e787ebdf2e13ded3bc0c42ef50))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (docs) ([b0586ce](https://github.com/kazi-org/kazi/commit/b0586cef75fd83e9ff3f221d33b052382cc83a4a))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (lib) ([6e31dba](https://github.com/kazi-org/kazi/commit/6e31dba867f40dee10ece332d6b9aa3f518e99f6))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (test) ([cbde3a5](https://github.com/kazi-org/kazi/commit/cbde3a52694f1064ab925412e91cd92b547dacb6))
+
+
+### Bug Fixes
+
+* **dist:** T54.10 burrito stdout purity -- release-binary regression pin (test) ([467a503](https://github.com/kazi-org/kazi/commit/467a50339a57306eb846fa5e576bc3cf69c309a3))
+
 ## [1.152.0](https://github.com/kazi-org/kazi/compare/v1.151.0...v1.152.0) (2026-07-17)
 
 
