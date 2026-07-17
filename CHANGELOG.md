@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.186.0](https://github.com/kazi-org/kazi/compare/v1.185.0...v1.186.0) (2026-07-17)
+
+
+### Features
+
+* **clarify:** flag a code goal with no landing mode, and suggest the gates (T44.12, ADR-0055) ([f785725](https://github.com/kazi-org/kazi/commit/f7857256afe24c4923588542e5de88876e8551fd))
+
 ## [1.185.0](https://github.com/kazi-org/kazi/compare/v1.184.0...v1.185.0) (2026-07-17)
 
 
