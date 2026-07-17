@@ -116,4 +116,64 @@ defmodule Kazi.Goal.IntegrationLoaderTest do
     assert {:error, reason} = load(%{"integration" => "oops"})
     assert reason =~ "[integration]"
   end
+
+  # ===========================================================================
+  # T44.2 (ADR-0055): the loader synthesizes a `landed` predicate when the goal
+  # declares a landing mode, and NONE when it does not.
+  # ===========================================================================
+
+  describe "landed-predicate synthesis (T44.2)" do
+    test "mode = \"none\" (and an absent block) synthesizes NO landed predicate" do
+      # Regression pin: default behavior must be byte-identical to pre-T44.2.
+      {:ok, absent} = Loader.from_map(base_data())
+      {:ok, explicit_none} = load(%{"integration" => %{"mode" => "none"}})
+
+      refute Enum.any?(absent.predicates, &(&1.kind == :landed))
+      refute Enum.any?(explicit_none.predicates, &(&1.kind == :landed))
+      # The whole struct is unchanged — no predicate appended, nothing reordered.
+      assert explicit_none == absent
+    end
+
+    test "each landing mode appends exactly one visible, non-guard landed predicate" do
+      for {str, atom} <- [
+            {"commit", :commit},
+            {"branch", :branch},
+            {"pr", :pr},
+            {"merge", :merge}
+          ] do
+        {:ok, goal} = load(%{"integration" => %{"mode" => str}})
+        landed = Enum.filter(goal.predicates, &(&1.kind == :landed))
+
+        assert [%Kazi.Predicate{} = p] = landed
+        assert p.id == :landed
+        assert p.config.mode == atom
+        # Visible + non-guard is the working-tree-evaluation invariant (L-0024):
+        # a guard/held-out landed would grade from a frozen clean ref and pass off
+        # a stranded fix.
+        refute p.guard?
+        refute p.held_out?
+      end
+    end
+
+    test "the synthesized landed predicate carries the derived target branch" do
+      {:ok, derived} = load(%{"id" => "widgets", "integration" => %{"mode" => "commit"}})
+      p = Enum.find(derived.predicates, &(&1.kind == :landed))
+      assert p.config.branch == "task/widgets"
+
+      {:ok, authored} =
+        load(%{"integration" => %{"mode" => "commit", "branch" => "release/x"}})
+
+      p2 = Enum.find(authored.predicates, &(&1.kind == :landed))
+      assert p2.config.branch == "release/x"
+    end
+
+    test "the authored predicates are preserved; landed is appended, not substituted" do
+      {:ok, goal} = load(%{"integration" => %{"mode" => "commit"}})
+      kinds = Enum.map(goal.predicates, & &1.kind)
+      # The authored `test_runner` predicate (base_data/1) is still present.
+      assert :tests in kinds
+      assert :landed in kinds
+      assert List.last(goal.predicates).kind == :landed
+    end
+  end
 end
