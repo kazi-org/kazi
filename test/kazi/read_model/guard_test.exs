@@ -1,6 +1,6 @@
 defmodule Kazi.ReadModel.GuardTest do
   # Pins the "kazi never hangs on its own telemetry" invariant (lore
-  # L-0035): every read-model touch on the run path is bounded — a wedged
+  # L-0049): every read-model touch on the run path is bounded — a wedged
   # write degrades to {:error, :read_model_unavailable} within the deadline
   # instead of blocking the reconcile loop indefinitely.
   use ExUnit.Case, async: true
