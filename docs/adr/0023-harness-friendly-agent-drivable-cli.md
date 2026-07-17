@@ -50,7 +50,13 @@ kazi should satisfy the bar it imposes.
    unconditional: the default `:logger` handler is configured to write to stderr
    (`config/config.exs`), not stdout, so an OTP/Ecto log line (e.g. the migrator's
    "Migrations already up") can never land ahead of the JSON object and break a
-   `jq`-based parse (issue #804).
+   `jq`-based parse (issue #804). The `--json` bytes are also **locale-independent**:
+   every `--json` write encodes ASCII-safe (`Jason.encode!(payload, escape:
+   :unicode_safe)`, one `Kazi.CLI.encode_json!/1` helper), so a non-ASCII codepoint
+   (an em-dash, an accented name) is emitted as a `\uXXXX` escape rather than a raw
+   UTF-8 byte a non-UTF-8 `:standard_io` device (`env -i`, a `latin1` locale) would
+   transcode into an invalid literal `\x{2014}` — the fix is at the encoder, never
+   the process-global `:io.setopts` (issue #1076, T54.7).
 
 2. **A stable, versioned machine-readable result contract.**
    - `kazi run --json` emits on termination a JSON object: terminal `status`
