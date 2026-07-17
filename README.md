@@ -837,6 +837,7 @@ kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
 kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files, one worktree per member (ADR-0065)
 kazi status <ref>                            # report a run's (or proposal's) current state
 kazi status                                  # list every currently LIVE run (pre-upgrade check, issue #971)
+kazi install-hooks [--local] [--uninstall] # opt-in: register session-bus delivery hooks (SessionStart + UserPromptSubmit -> `kazi bus hook <event>`, ADR-0071); --uninstall reverts exactly
 kazi economy [--goal <ref>]                  # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
 kazi context index <label> <file>            # context store: index a heavy artifact
 kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provider gist)

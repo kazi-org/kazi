@@ -447,7 +447,18 @@ coordinate -- presence, shared facts, release-window broadcasts, directed
 handoffs -- over a supervised NATS JetStream bus. Every message is advisory,
 provenance-stamped input (never a command channel); every surface reports a
 clean "no daemon" error when the daemon is down. Full concepts, subject
-taxonomy, and a turn-boundary hook recipe: `docs/session-bus.md`.
+taxonomy, and the delivery installer: `docs/session-bus.md`.
+
+**Delivery is installed, not documented (ADR-0071).** `kazi install-hooks`
+(opt-in, the sibling of `kazi install-skill`) registers two hooks in the
+Claude Code settings -- SessionStart and UserPromptSubmit run `kazi bus hook
+<event>` -- so bus traffic reaches a session at its turn boundaries without
+anyone polling or being reminded. It merges (never clobbers: an operator's
+own hooks/keys survive byte-identically), re-running is a no-op, and
+`--uninstall` removes exactly what was added; `--local` targets the repo's
+LOCAL (uncommitted) settings file instead of the user-level default. `kazi
+bus hook <event>` itself ALWAYS exits 0 silently -- with no daemon it is an
+instant no-op, so an installed hook can never break or slow a session.
 
 **How to wait: peek vs read vs watch.** Three distinct verbs, three intents:
 
@@ -463,9 +474,9 @@ taxonomy, and a turn-boundary hook recipe: `docs/session-bus.md`.
   primitive. The CLI exits 3 on timeout; the MCP tool returns
   `{ok: true, timed_out: true, messages: []}` -- branch on `timed_out`.
 
-Cadence: check at turn boundaries (peek, or the hook recipe in
-`docs/session-bus.md`); block with a bounded `watch` only when you are
-genuinely waiting on another session.
+Cadence: check at turn boundaries (peek, or install delivery once with
+`kazi install-hooks` -- see `docs/session-bus.md`); block with a bounded
+`watch` only when you are genuinely waiting on another session.
 
 ## Verifying a pooled task with kazi
 
@@ -477,7 +488,7 @@ gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 
 ## See also
 
-- `docs/session-bus.md` -- the session bus: concepts, CLI/MCP surfaces, hook recipe (ADR-0067).
+- `docs/session-bus.md` -- the session bus: concepts, CLI/MCP surfaces, the delivery installer (ADR-0067/0071).
 - `docs/pool-verification-gate.md` -- the pre-merge verification gate (ADR-0026 L1).
 - `docs/orchestrator-recipe.md` -- the full recipe (source of truth).
 - `docs/schemas/run-result.md`, `docs/schemas/status.md` -- the committed schemas.

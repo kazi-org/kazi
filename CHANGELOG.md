@@ -16,43 +16,6 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
-## [1.152.0](https://github.com/kazi-org/kazi/compare/v1.151.0...v1.152.0) (2026-07-17)
-
-
-### Features
-
-* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (docs) ([5599e08](https://github.com/kazi-org/kazi/commit/5599e08287a37611be937ece27ebbcf346b97e85))
-* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (lib) ([b29561c](https://github.com/kazi-org/kazi/commit/b29561c4bcaa2d654df45cda7ed5061a3cf2363c))
-* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (test) ([80e6eb9](https://github.com/kazi-org/kazi/commit/80e6eb9e64ca5bf0724a8ee81e7656391071d80f))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (aux) ([0e91e03](https://github.com/kazi-org/kazi/commit/0e91e03df2601df4cb66f30f64b5b63fad80309c))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (docs) ([ede3758](https://github.com/kazi-org/kazi/commit/ede3758575517e8b9f480f70a83842f05661b745))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (lib) ([7b62d8e](https://github.com/kazi-org/kazi/commit/7b62d8e2e32e2fb16e56b7d82e12578b0a759a04))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (test) ([974cfe4](https://github.com/kazi-org/kazi/commit/974cfe4856efb665b6c740c0bd7ef97e725561a2))
-
-
-### Bug Fixes
-
-* **bus:** T54.9 watch anchors to now -- strictly-new messages, --since escape ([#1097](https://github.com/kazi-org/kazi/issues/1097)) ([2362815](https://github.com/kazi-org/kazi/commit/2362815b0698340bbd60492a8a58c4bae2751e74))
-
-## [1.151.0](https://github.com/kazi-org/kazi/compare/v1.150.0...v1.151.0) (2026-07-17)
-
-
-### Features
-
-* **bus:** bounded machine digest -- Digest.render/1 with the 1 KiB stub rule and 40-line bound (ADR-0072 d1/d2/d6) ([2eba2a6](https://github.com/kazi-org/kazi/commit/2eba2a61d8909b3384c1f5639bdc933adf9ef248))
-* **bus:** digest is the default on --json and MCP; --full/full:true is the escape (ADR-0072 d1) ([90e0d27](https://github.com/kazi-org/kazi/commit/90e0d27fa0bbe1abb00a3ebe2e2ca5d3913a7914))
-* **bus:** expose the JetStream stream sequence as the public message id (ADR-0072 d3) ([c9b3e57](https://github.com/kazi-org/kazi/commit/c9b3e5799d29bbdd3b1d136fb452f55252e1a8d4))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (aux) ([0e91e03](https://github.com/kazi-org/kazi/commit/0e91e03df2601df4cb66f30f64b5b63fad80309c))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (docs) ([ede3758](https://github.com/kazi-org/kazi/commit/ede3758575517e8b9f480f70a83842f05661b745))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (lib) ([7b62d8e](https://github.com/kazi-org/kazi/commit/7b62d8e2e32e2fb16e56b7d82e12578b0a759a04))
-* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (test) ([974cfe4](https://github.com/kazi-org/kazi/commit/974cfe4856efb665b6c740c0bd7ef97e725561a2))
-* **cli:** bus digest envelope joins the versioned schema surface (kazi schema bus, ADR-0023/ADR-0072) ([ce45fb3](https://github.com/kazi-org/kazi/commit/ce45fb32ae94d98d677b34e1580561c813ead750))
-
-
-### Bug Fixes
-
-* **bus:** T54.9 watch anchors to now -- strictly-new messages, --since escape ([#1097](https://github.com/kazi-org/kazi/issues/1097)) ([2362815](https://github.com/kazi-org/kazi/commit/2362815b0698340bbd60492a8a58c4bae2751e74))
-
 ## [1.150.0](https://github.com/kazi-org/kazi/compare/v1.149.0...v1.150.0) (2026-07-15)
 
 
