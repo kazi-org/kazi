@@ -51,7 +51,14 @@ defmodule Kazi.Providers.Browser do
     * `:assertions`  — optional. A list of checks the runner evaluates, e.g.
       `[%{type: "visible", selector: "h1"}, %{type: "text", selector: "h1",
       contains: "Welcome"}]`. With none given, a page that loads passes (the
-      probe only proves the page renders). Handed verbatim to the runner.
+      probe only proves the page renders). Handed verbatim to the runner. The
+      runner owns the vocabulary (`visible`/`hidden`/`text`/`url`/`console_clean`/
+      `a11y`). An `a11y` assertion runs axe-core against the view and asserts
+      `<= max_violations` (default `0`) at or above `severity` (default
+      `"serious"`); when it is present the result carries the violation COUNT as
+      the envelope-v2 `score` (`direction: :lower_better`, ADR-0041). axe-core is
+      a runner-side optional dependency — if it is absent the run is `:error`
+      ("a11y unavailable"), never `:fail`.
     * `:timeout_ms`  — optional. Per-operation timeout passed to the runner
       (default `30_000`).
     * `:samples`     — optional. Number of CONSECUTIVE passing runs required
@@ -340,13 +347,41 @@ defmodule Kazi.Providers.Browser do
 
   defp maybe_put_error(evidence, _), do: evidence
 
-  defp build("pass", evidence), do: PredicateResult.pass(evidence)
-  defp build("fail", evidence), do: PredicateResult.fail(evidence)
+  defp build("pass", evidence), do: PredicateResult.new(:pass, evidence, a11y_opts(evidence))
+  defp build("fail", evidence), do: PredicateResult.new(:fail, evidence, a11y_opts(evidence))
   # An "error" verdict from the runner is the runner reporting it could not
-  # evaluate (e.g. navigation timeout) — infra, not failing UI work.
+  # evaluate (e.g. navigation timeout, or an a11y assertion whose axe-core is not
+  # installed on the runner side) — infra, not failing UI work.
   defp build("error", evidence),
     do:
       PredicateResult.error(
         Map.put(evidence, :reason, {:runner_reported_error, evidence[:error]})
       )
+
+  # T43.2 (UC-056, ADR-0041): when the journey carried an `a11y` assertion, surface
+  # its violation COUNT as the envelope-v2 score, `direction: :lower_better` — the
+  # ratchet-friendly gradient the controller reads as "fewer violations is closer".
+  # Absent an a11y assertion, no score is added, so a browser predicate without one
+  # is byte-identical to the pre-T43.2 boolean result.
+  defp a11y_opts(evidence) do
+    case a11y_violation_count(Map.get(evidence, :assertions)) do
+      nil -> []
+      count -> [score: count * 1.0, direction: :lower_better]
+    end
+  end
+
+  defp a11y_violation_count(assertions) when is_list(assertions) do
+    Enum.find_value(assertions, fn
+      %{"type" => "a11y"} = a -> violation_count(a)
+      _ -> nil
+    end)
+  end
+
+  defp a11y_violation_count(_), do: nil
+
+  # Prefer the runner's explicit `count`; fall back to the length of the `found`
+  # violation list so an older runner payload without `count` still scores.
+  defp violation_count(%{"count" => count}) when is_integer(count), do: count
+  defp violation_count(%{"found" => found}) when is_list(found), do: length(found)
+  defp violation_count(_), do: 0
 end
