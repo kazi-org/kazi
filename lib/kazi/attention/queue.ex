@@ -69,7 +69,10 @@ defmodule Kazi.Attention.Queue do
   # is deliberately excluded: it is a genuine budget stop the operator can
   # reasonably resolve by raising the ceiling, so it keeps today's behavior
   # (no new entry; the existing `:budget` signal already covers it).
-  @needs_human_causes ~w(error_wedged quarantine_blocked)
+  # `"capability_unreachable"` (T49.8, ADR-0064 d4) joins the list: a scenario the
+  # demonstrator cannot realize needs a human — the capability is broken or the
+  # surface unavailable, not something another dispatch or a bigger budget fixes.
+  @needs_human_causes ~w(error_wedged quarantine_blocked capability_unreachable)
 
   @typedoc "The signal type a queue entry was raised for."
   @type signal :: :cause | :stuck | :budget | :flake_suspicion | :regression_recovered
