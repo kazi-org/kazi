@@ -1,16 +1,38 @@
 defmodule Kazi.CLIBusHookTest do
   @moduledoc """
-  T55.2 (UC-068, ADR-0071 decision 2): the `kazi bus hook <event>` skeleton --
-  the harness hook entry point `install-hooks` registers.
+  T55.2 (UC-068, ADR-0071 decision 2) + T55.9: the `kazi bus hook <event>` CLI
+  contract -- the harness hook entry point `install-hooks` registers.
 
-  The skeleton's contract IS the hook contract (not a stub): ALWAYS exit 0,
-  print NOTHING, return immediately -- it never connects to the daemon, so a
-  missing daemon can neither error nor hang a session's turn. T55.9 fills the
-  payload behind the same contract.
+  The contract holds no matter what the payload does (T55.9 fills it): ALWAYS
+  exit 0, and with NO daemon running print NOTHING and return immediately, so a
+  missing daemon can neither error nor hang a session's turn. These tests pin
+  the no-daemon path via a tmp-scoped `KAZI_STATE_DIR` (like `bus_test.exs`) so
+  a developer's real daemon can never make them flap; the live payload against a
+  real daemon is `Kazi.Bus.HookPayloadTest`.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
+
+  # A tmp state dir points the default control socket at a path with no daemon,
+  # so `bus hook` takes its silent no-daemon path regardless of the environment.
+  setup do
+    state_dir =
+      Path.join(System.tmp_dir!(), "kazi-hook-cli-#{System.unique_integer([:positive])}")
+
+    previous = System.get_env("KAZI_STATE_DIR")
+    System.put_env("KAZI_STATE_DIR", state_dir)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env("KAZI_STATE_DIR", previous),
+        else: System.delete_env("KAZI_STATE_DIR")
+
+      File.rm_rf(state_dir)
+    end)
+
+    :ok
+  end
 
   describe "parse/1 — bus hook" do
     test "`bus hook <event>` parses as a bus verb" do
