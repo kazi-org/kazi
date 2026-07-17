@@ -53,6 +53,9 @@ defmodule Kazi.Loop.ContextStoreTest do
     goal =
       Goal.new("loop-test",
         predicates: [Predicate.new(:code, :tests)],
+        # T44.4: disable the (orthogonal) process contract so this test pins the
+        # CONTEXT-STORE evidence-compression prompt behavior in isolation.
+        conventions: %{process_contract: false, extra_rules: []},
         metadata: %{collector: self(), evidence: evidence}
       )
 
