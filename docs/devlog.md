@@ -3953,3 +3953,70 @@ Consolidated the full `assertions[].type` vocabulary (13 types: `visible`,
 per type, matching `kazi schema browser` and the loader's
 `browser_assertion_types/0` allow-list exactly. Linked from `docs/live-providers.md`
 and the `docs/README.md` index.
+
+## 2026-07-17 — T59.2: #1019 migration-lock fix holds under a live mixed-version window
+
+Live-verified that #1019's two fixes — `1e4cccb` (bound the migration-lock wait
+instead of hanging) and `4352f24` (refuse to migrate a schema NEWER than the
+running binary knows) — hold when multiple released kazi binaries on DIFFERENT
+versions concurrently touch one shared read-model db, the scenario the issue was
+filed for. Both fixes are on `origin/main` (first released in v1.142.0).
+
+### Method (real released binaries, isolated state)
+
+Downloaded two prebuilt release binaries spanning a real schema gap (no repo
+compile): **v1.195.0** (has the fixes; migration set ends at `20260709210000`)
+and **v1.212.0** (latest; adds `20260717120000` roadmap_ref + `20260717170000`
+discovery). Checksums verified against each release's `.sha256`.
+
+**Isolation correction (operationally important):** `KAZI_STATE_DIR` does NOT
+isolate the read-model db. `config/runtime.exs:21` resolves the db path as
+`Path.join([System.user_home() || File.cwd!(), ".kazi", "kazi.db"])` — keyed off
+HOME, not `KAZI_STATE_DIR` (which only covers `crash_dump.ex`, the `runs/` dir,
+and the daemon). A first attempt with `KAZI_STATE_DIR` set still logged
+"Migrations already up" against the REAL `~/.kazi/kazi.db`. Caught it before any
+older-binary write; those touches were read-only/observe-only (`status`,
+`apply --check`) and no migration ran, so the shared db was unharmed
+(`PRAGMA integrity_check` = ok, 27 migrations intact afterward). Re-ran fully
+isolated via `HOME=<scratch>` (plus a per-version `KAZI_INSTALL_DIR`), which
+correctly created a throwaway db under the scratch HOME.
+
+### Results — both fixes hold, no recurrence
+
+- **`4352f24` refuse-newer-schema (sequential):** with the scratch db migrated to
+  `20260717170000` by v1.212.0, running v1.195.0 against it degraded CLEANLY:
+  `read-model schema v20260717170000 is newer than this binary (v20260709210000);
+  running without persistence -- upgrade kazi` / `{:newer_schema, …}`, exit 0 in
+  4s, valid JSON output. No migration-lock contention, no hang.
+- **`4352f24` under CONCURRENT contention:** 3× v1.212.0 + 3× v1.195.0 hammering
+  the one shared scratch db simultaneously all exited in **2s** — every v1.212.0
+  persisted OK, every v1.195.0 refused-newer-schema cleanly and continued without
+  persistence. The original bug was a 20+min 0%-CPU hang; it did not recur.
+- **`1e4cccb` bounded migrate wait:** under box load ~30–40 even a single fresh
+  isolated db occasionally hit `read-model migrate unavailable ({:timeout, 5000});
+  continuing without persistence` — i.e. the bounded 5s wait degrading cleanly to
+  no-persistence (L-0035 Guard) rather than the unbounded 0%-CPU hang. Retried and
+  migrations completed once the momentary lock cleared.
+
+Conclusion: neither the migration-lock deadlock nor the 0%-CPU startup hang
+recurs across a real mixed-version window with the fixes present. #1019's remedy
+is confirmed live; closing #1019 with this evidence.
+
+### Secondary findings (routed, not silently dropped)
+
+1. **Burrito wrapper prints housekeeping to STDOUT.** Every invocation of the
+   downloaded binaries printed `[i] New install path is: …` (and, on a real
+   upgrade, `[l] Skipped cleanup of older version …`) to STDOUT, before the BEAM
+   starts — the `kazi-org/burrito` zig wrapper (`maintenance.zig`
+   `do_clean_old_versions` / `erlang_launcher.zig`). This is the same
+   stdout-pollution class as T58.3 gap 3 but a DIFFERENT code path (pre-BEAM
+   wrapper, not the Elixir logger), so `bus read`'s logger→stderr fix does not
+   cover it. It pollutes stdout for any machine-parsed command (`kazi version
+   --json`, etc). → scoped as a new E58 task (see the T58.3 stdout-hygiene theme).
+2. **Concurrent same-version cold-start install race.** Three concurrent FIRST
+   invocations of one version sharing one `KAZI_INSTALL_DIR` failed with
+   `error: FileNotFound` from the burrito wrapper (partial extraction visible to a
+   racing sibling). Pre-warming each version's install dir once removed it. This
+   is the burrito payload-liveness family (#1006/#1018), tangential to #1019's
+   db-migration mechanism — noting it here; not a new task unless it recurs
+   without the shared-install-dir artifact.
