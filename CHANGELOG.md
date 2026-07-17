@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.194.0](https://github.com/kazi-org/kazi/compare/v1.193.0...v1.194.0) (2026-07-17)
+
+
+### Features
+
+* **goal:** register the docs_updated provider (runtime, loader, schema) ([1cbf51c](https://github.com/kazi-org/kazi/commit/1cbf51cb6e7aa41ca02311b2a6dc7ff808b5bb21))
+* **providers:** docs_updated surface-change gate provider ([204fc71](https://github.com/kazi-org/kazi/commit/204fc71d703feabb3dcef11ab04757e9440d87f5))
+
 ## [1.193.0](https://github.com/kazi-org/kazi/compare/v1.192.0...v1.193.0) (2026-07-17)
 
 
