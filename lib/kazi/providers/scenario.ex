@@ -114,6 +114,11 @@ defmodule Kazi.Providers.Scenario do
         :pinned ->
           pinned(parsed, predicate, config, scenario, surface, pin_path, context)
 
+        {:stale, _} = stale ->
+          # T49.8: `repin = "manual"` parks a stale pin as `:stale_manual` — never
+          # auto-demonstrated, deliberately operator/attention-queue work.
+          fail_state(stale_or_manual(stale, config), scenario, pin_path)
+
         state ->
           fail_state(state, scenario, pin_path)
       end
@@ -179,8 +184,15 @@ defmodule Kazi.Providers.Scenario do
   end
 
   defp reasons_for(:unpinned), do: []
+  defp reasons_for(:stale_manual), do: [:stale_manual]
   defp reasons_for({:stale, _} = stale), do: [stale]
   defp reasons_for({:invalid, reasons}), do: reasons
+
+  # `repin = "manual"` re-tags any stale state as `:stale_manual` (T49.8) so the
+  # loop never auto-dispatches a demonstrator for it — it is operator work.
+  defp stale_or_manual(stale, config) do
+    if Map.get(config, :repin, "auto") == "manual", do: :stale_manual, else: stale
+  end
 
   defp pinned(pin, predicate, config, scenario, surface, pin_path, context) do
     case resolve_delegate(surface) do
@@ -220,8 +232,57 @@ defmodule Kazi.Providers.Scenario do
           inputs: generated
         }
 
-        %{result | evidence: Map.merge(result.evidence, extension)}
+        result = %{result | evidence: Map.merge(result.evidence, extension)}
+        reclassify_replay(result, pin, config, scenario, pin_path, context)
     end
+  end
+
+  # T49.8: a RED replay of a `:pinned` scenario is re-classified as
+  # `{:stale, :code_drift}` (demonstrator work) ONLY when `HEAD` has moved since
+  # the pin was minted — the code changed, so a red replay is plausibly the pin
+  # gone stale rather than a regression. At the minted commit (or with no minted
+  # commit / unreadable HEAD) a red replay stays a plain `:pinned` `:fail` — a real
+  # regression, which is FIXER work. `repin = "manual"` parks drift as
+  # `:stale_manual` (never auto-demonstrated).
+  defp reclassify_replay(%{status: :fail} = result, pin, config, scenario, pin_path, context) do
+    if code_drifted?(pin, context) do
+      state = stale_or_manual({:stale, :code_drift}, config)
+
+      PredicateResult.fail(%{
+        pin_state: state,
+        pin_path: pin_path,
+        scenario_steps: Map.get(scenario, :steps, []),
+        reasons: reasons_for(state),
+        replay_evidence: Map.take(result.evidence, [:assertions, :url, :runs])
+      })
+    else
+      result
+    end
+  end
+
+  defp reclassify_replay(result, _pin, _config, _scenario, _pin_path, _context), do: result
+
+  defp code_drifted?(%Pin{minted: minted}, context) when is_map(minted) do
+    case {Map.get(minted, "commit"), head_commit(context)} do
+      {minted_commit, head} when is_binary(minted_commit) and is_binary(head) ->
+        minted_commit != head
+
+      _ ->
+        false
+    end
+  end
+
+  defp code_drifted?(_pin, _context), do: false
+
+  defp head_commit(context) do
+    workspace = context[:workspace] || File.cwd!()
+
+    case System.cmd("git", ["rev-parse", "HEAD"], cd: workspace, stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   # The randomness seam: a test injects a fixed rand fun via context for
