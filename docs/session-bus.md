@@ -551,16 +551,31 @@ reaches the next turn, so binding there is delivery to nowhere):
 
 | Claude Code event | Runs | Delivers |
 |---|---|---|
-| `SessionStart` | `kazi bus hook session-start` | presence + the project board at session start |
-| `UserPromptSubmit` | `kazi bus hook turn` | the traffic digest at each turn boundary — silent when the bus is quiet |
+| `SessionStart` | `kazi bus hook session-start` | registers presence, joins the project-scope team, and injects the current board (`bus board`) to orient the new session |
+| `UserPromptSubmit` | `kazi bus hook turn` | injects the bounded digest (`bus read`) when there is traffic since the session's last turn, and is COMPLETELY SILENT (zero bytes) when the bus is quiet |
 
 The registered command is a kazi subcommand, not a script file, so the
-payload logic upgrades with the binary. Its contract: **always exit 0,
-never block** — with no daemon running (or an unknown event) `kazi bus
-hook` prints nothing and returns immediately, so a hook can never break or
-tax a session (the graceful-degradation guarantee above extends to
-delivery). The delivered payload lands in a later release; the
-registration surface and contract are stable now.
+payload logic upgrades with the binary. What each event injects (T55.9):
+
+- **`session-start`** registers presence, joins the team named for the
+  project (the git toplevel slug), and injects the current board — the
+  last-value fact per topic plus the live roster, bounded by the ADR-0072
+  digest rules.
+- **`turn`** injects the digest of what arrived since the session last
+  looked. It uses `read` (which ACKS what it shows), so the durable cursor
+  IS the "last checked" marker: a turn with new traffic renders the bounded
+  digest, and the next quiet turn drains nothing and prints **zero bytes**.
+  That silent-when-quiet property is what makes ambient awareness free — it
+  is why the hook ends the token-cost complaint.
+
+Its contract: **always exit 0, never block.** With no daemon running (or an
+unknown event) `kazi bus hook` prints nothing and returns immediately. And a
+hard ~2s wall-clock bound applies even to a HUNG daemon (one that accepted
+the connection but never answers): the payload is computed in a bounded task
+and only written if it returns within budget, so a slow or stalled daemon
+can never tax or break a turn (the graceful-degradation guarantee above
+extends to delivery). A hung daemon adding seconds to every turn of every
+session on the machine is worse than any missed digest.
 
 The installer merges, never clobbers: an operator's own hooks and keys
 survive byte-identically, re-running is a no-op, and `--uninstall` right
