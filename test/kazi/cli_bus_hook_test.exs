@@ -34,6 +34,15 @@ defmodule Kazi.CLIBusHookTest do
     :ok
   end
 
+  # The command's OWN stderr lines, identified by the CLI's `error:` convention —
+  # so a foreign `[warning] …` / `kazi: … deprecated` line captured off the shared
+  # :standard_error device by a concurrent test is excluded (T59.5, #1025/#1186).
+  defp own_stderr_lines(err) do
+    err
+    |> String.split("\n", trim: true)
+    |> Enum.filter(&String.starts_with?(&1, "error:"))
+  end
+
   describe "parse/1 — bus hook" do
     test "`bus hook <event>` parses as a bus verb" do
       assert {:bus, "hook", ["turn"], _opts} = Kazi.CLI.parse(["bus", "hook", "turn"])
@@ -55,7 +64,15 @@ defmodule Kazi.CLIBusHookTest do
         end)
 
       assert out == ""
-      assert err == ""
+      # Isolation (T59.5, #1025/#1186): assert on THIS command's own stderr, not
+      # the whole global :standard_error device. `with_io(:stderr, …)` swaps that
+      # device process-WIDE, so any concurrent async test logging during the window
+      # (a Logger `[warning] …` line, a `kazi: provider … deprecated` notice) lands
+      # in `err` and reddened `err == ""` under full-suite load. The bus-hook
+      # command's ONLY stderr shape is the CLI's `error:` convention (it is silent
+      # otherwise), so asserting it emitted no `error:` line proves its silence and
+      # is immune to foreign noise the shared device picks up.
+      assert own_stderr_lines(err) == []
     end
 
     test "`bus hook turn` exits 0 and prints nothing" do
@@ -65,7 +82,15 @@ defmodule Kazi.CLIBusHookTest do
         end)
 
       assert out == ""
-      assert err == ""
+      # Isolation (T59.5, #1025/#1186): assert on THIS command's own stderr, not
+      # the whole global :standard_error device. `with_io(:stderr, …)` swaps that
+      # device process-WIDE, so any concurrent async test logging during the window
+      # (a Logger `[warning] …` line, a `kazi: provider … deprecated` notice) lands
+      # in `err` and reddened `err == ""` under full-suite load. The bus-hook
+      # command's ONLY stderr shape is the CLI's `error:` convention (it is silent
+      # otherwise), so asserting it emitted no `error:` line proves its silence and
+      # is immune to foreign noise the shared device picks up.
+      assert own_stderr_lines(err) == []
     end
 
     test "an unknown event is STILL a silent exit 0 (a hook must never break a session)" do
@@ -75,7 +100,15 @@ defmodule Kazi.CLIBusHookTest do
         end)
 
       assert out == ""
-      assert err == ""
+      # Isolation (T59.5, #1025/#1186): assert on THIS command's own stderr, not
+      # the whole global :standard_error device. `with_io(:stderr, …)` swaps that
+      # device process-WIDE, so any concurrent async test logging during the window
+      # (a Logger `[warning] …` line, a `kazi: provider … deprecated` notice) lands
+      # in `err` and reddened `err == ""` under full-suite load. The bus-hook
+      # command's ONLY stderr shape is the CLI's `error:` convention (it is silent
+      # otherwise), so asserting it emitted no `error:` line proves its silence and
+      # is immune to foreign noise the shared device picks up.
+      assert own_stderr_lines(err) == []
     end
 
     test "a missing event is a silent exit 0 too" do
@@ -85,7 +118,15 @@ defmodule Kazi.CLIBusHookTest do
         end)
 
       assert out == ""
-      assert err == ""
+      # Isolation (T59.5, #1025/#1186): assert on THIS command's own stderr, not
+      # the whole global :standard_error device. `with_io(:stderr, …)` swaps that
+      # device process-WIDE, so any concurrent async test logging during the window
+      # (a Logger `[warning] …` line, a `kazi: provider … deprecated` notice) lands
+      # in `err` and reddened `err == ""` under full-suite load. The bus-hook
+      # command's ONLY stderr shape is the CLI's `error:` convention (it is silent
+      # otherwise), so asserting it emitted no `error:` line proves its silence and
+      # is immune to foreign noise the shared device picks up.
+      assert own_stderr_lines(err) == []
     end
 
     test "returns fast -- no daemon connect, no hanging (bounded wall-clock)" do

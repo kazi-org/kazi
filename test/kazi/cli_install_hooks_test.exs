@@ -130,10 +130,21 @@ defmodule Kazi.CLIInstallHooksTest do
         end)
 
       assert out == ""
-      assert err =~ "not valid JSON"
-      assert err =~ "nothing was written"
-      # ONE clear line on stderr.
-      assert err |> String.trim() |> String.split("\n") |> length() == 1
+      # Isolation (T59.5, #1025/#1186): assert on THIS command's own stderr lines,
+      # identified by the CLI's `error:` convention, not on the raw line count of
+      # the whole global :standard_error device. `with_io(:stderr, …)` swaps that
+      # device process-WIDE, so a concurrent async test's `[warning] …` /
+      # `kazi: … deprecated` line landed in `err` and made the `length == 1`
+      # count read 4 under full-suite load. Filtering to the command's `error:`
+      # line proves it emits exactly ONE clear error, immune to foreign noise.
+      own =
+        err
+        |> String.split("\n", trim: true)
+        |> Enum.filter(&String.starts_with?(&1, "error:"))
+
+      assert [line] = own
+      assert line =~ "not valid JSON"
+      assert line =~ "nothing was written"
       assert File.read!(path) == "{ not json"
     end
 
