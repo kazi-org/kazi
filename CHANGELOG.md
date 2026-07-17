@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.182.0](https://github.com/kazi-org/kazi/compare/v1.181.0...v1.182.0) (2026-07-17)
+
+
+### Features
+
+* **dashboard:** starmap SESSIONS rail renders live bus presence (T51.5, ADR-0073) ([08d521b](https://github.com/kazi-org/kazi/commit/08d521b4b2a89589185937a6daace08a9c873fcb))
+* **runtime:** mirror apply run lifecycle onto the bus, best-effort (T51.5, ADR-0067 point 1) ([b79a36f](https://github.com/kazi-org/kazi/commit/b79a36ffc34237624fc67ee7ada732a6ce580885))
+
 ## [1.181.0](https://github.com/kazi-org/kazi/compare/v1.180.0...v1.181.0) (2026-07-17)
 
 
