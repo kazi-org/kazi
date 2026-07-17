@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.209.0](https://github.com/kazi-org/kazi/compare/v1.208.0...v1.209.0) (2026-07-17)
+
+
+### Features
+
+* **examples:** live-site browser goal-file — console_clean + a11y vs kazi.sire.run (T43.6) ([e41913d](https://github.com/kazi-org/kazi/commit/e41913dacc57ae913b2ed6d1e6395dac0f29ad15))
+
 ## [1.208.0](https://github.com/kazi-org/kazi/compare/v1.207.0...v1.208.0) (2026-07-17)
 
 
