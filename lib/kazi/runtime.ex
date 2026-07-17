@@ -54,6 +54,7 @@ defmodule Kazi.Runtime do
   alias Kazi.Harness.ChildSupervisor
   alias Kazi.ReadModel.{HeartbeatTicker, Iteration, RunRegistry}
   alias Kazi.Runtime.BusMirror
+  alias Kazi.Runtime.ParentMonitor
   alias Kazi.Sink.Events, as: EventsSink
 
   require Logger
@@ -443,6 +444,14 @@ defmodule Kazi.Runtime do
         # `finalize/4` on the normal terminal path.
         signal_trap = Kazi.Runtime.Finalizer.install_signal_trap(run_id, persist?)
 
+        # Issue #1073 (regression of #857): the SIGTERM trap above and the
+        # ChildSupervisor watchdog both watch the BEAM, so neither reaps a
+        # dispatch tree when the burrito LAUNCHER is killed (closing a terminal).
+        # ParentMonitor watches the launcher itself and halts on its death,
+        # letting the existing watchdog reap `claude`. Gated to the real
+        # standalone binary so a test loop never arms a self-halt (R-E54-3).
+        parent_monitor = start_parent_monitor(persist?, run_id)
+
         result = Loop.await(loop, await_timeout)
         Loop.stop(loop)
 
@@ -452,6 +461,7 @@ defmodule Kazi.Runtime do
         BusMirror.terminal(goal_ref, run_id, Keyword.get(opts, :session_name), result)
 
         Kazi.Runtime.Finalizer.finalize(result, run_id, persist?, signal_trap)
+        stop_parent_monitor(parent_monitor)
         finish_run(persist?, run_id, result)
         harvest_memory(persist?, run_id, goal_ref, result)
         normalize_await(result)
@@ -1234,6 +1244,49 @@ defmodule Kazi.Runtime do
 
         nil
     end
+  end
+
+  # Issue #1073: arm the launcher-liveness monitor ONLY for a persisted run under
+  # the real standalone binary. `persist?` alone is not enough -- integration
+  # tests run persisted; `burrito_standalone?/0` is the gate that keeps a
+  # self-halting monitor out of every `mix test`/escript loop (R-E54-3).
+  defp start_parent_monitor(persist?, run_id) do
+    if persist? and burrito_standalone?() do
+      case ParentMonitor.start_link(run_id: run_id) do
+        {:ok, pid} ->
+          pid
+
+        {:error, reason} ->
+          Logger.warning(fn ->
+            "kazi.runtime failed to start parent monitor for run #{run_id}: " <> inspect(reason)
+          end)
+
+          nil
+      end
+    else
+      nil
+    end
+  end
+
+  defp stop_parent_monitor(nil), do: :ok
+
+  defp stop_parent_monitor(pid) when is_pid(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  # True only when this VM is the entry process of a burrito-wrapped binary --
+  # the one place the launcher can be killed independently of the BEAM. Guarded
+  # with `Code.ensure_loaded?` so a build without burrito stays a no-op rather
+  # than raising (mirrors `Kazi.Application.burrito_standalone?/0`).
+  defp burrito_standalone? do
+    Code.ensure_loaded?(Burrito.Util) and
+      function_exported?(Burrito.Util, :running_standalone?, 0) and
+      Burrito.Util.running_standalone?()
   end
 
   # =============================================================================
