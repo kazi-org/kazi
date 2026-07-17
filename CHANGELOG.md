@@ -16,6 +16,23 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.196.0](https://github.com/kazi-org/kazi/compare/v1.195.1...v1.196.0) (2026-07-17)
+
+
+### Features
+
+* **authoring:** propose_roadmap/2 -- N linked proposals under one roadmap ref ([e7b9d41](https://github.com/kazi-org/kazi/commit/e7b9d4120fe3089d4c8301b869076306c0baa043))
+* **clarify:** roadmap-scope floor (unordered pile + frontier integration) ([e2b7001](https://github.com/kazi-org/kazi/commit/e2b7001ec23e11fda11cefd3f71fb6f54b25f575))
+* **cli:** plan --project roadmap authoring + status roadmap read ([56593d3](https://github.com/kazi-org/kazi/commit/56593d3d914b7281073e611cd41992e8870543c2))
+* **read-model:** add roadmap_ref to proposed_goals (T45.2) ([ffe8103](https://github.com/kazi-org/kazi/commit/ffe81037172feff3170d6a06fbf42145ee2e217d))
+* **read-model:** cast roadmap_ref on the proposed-goal changeset ([b4d607d](https://github.com/kazi-org/kazi/commit/b4d607d30e4ed5e6160318f307a12ea17288a56e))
+* **read-model:** list_proposed_goals_by_roadmap/1 ([15534a1](https://github.com/kazi-org/kazi/commit/15534a1e2d31e42f81f1a756effec06305bb6f28))
+
+
+### Bug Fixes
+
+* **cli:** carry the --project roadmap payload as the (existing string) flag, not a colliding boolean ([4525649](https://github.com/kazi-org/kazi/commit/45256494d9fda5f3cf02d92b920c3db20874ec53))
+
 ## [1.195.1](https://github.com/kazi-org/kazi/compare/v1.195.0...v1.195.1) (2026-07-17)
 
 
