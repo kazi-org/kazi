@@ -56,11 +56,13 @@ kazi daemon stop                                          # clean shutdown
 
 kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project]  # <kind> defaults to `fact`
 kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
+                                                           # prints the message id (T55.12)
+kazi bus status <id> [--json]                              # what became of a tell: pending|consumed (T55.12)
 kazi bus read [--peek] [--full] [--json]                   # pull + ack this session's durable consumers, prints a digest
 kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
 kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
 kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
-                                                           # roster with liveness (active|idle); --all includes stale rows
+                                                           # roster with liveness (active|idle) + inbox depth; --all includes stale rows
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
 kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
@@ -106,6 +108,91 @@ done
 Watching also refreshes the session's presence, so a watcher never ages
 out of `bus who`.
 
+### Did it land? Delivery visibility (T55.12)
+
+`bus tell` succeeding means the message is **stored and queued** — never that
+it was seen. That distinction used to be invisible: `tell` answered `told
+<session>` whether the recipient was reading, idle, or long dead, and a fleet
+supervisor could not separate delivered-and-ignored from parked-in-a-queue-
+nobody-drains from lost-because-the-session-was-replaced. Hours went into
+coordinating against session ids whose queues swallowed every message.
+
+Three signals close that gap.
+
+**1. A tell prints the message's id.**
+
+```
+$ kazi bus tell worker-a "rebase onto main first"
+told worker-a (id 4127)
+```
+
+The id is the JetStream stream sequence — the same public id every digest line
+carries (ADR-0072), and what `bus status` dereferences. Under `--json` the
+receipt is `{ok, schema_version, id, recipient, liveness}`; `recipient` is the
+RESOLVED target, so a nickname shows the session id it landed on.
+
+**2. `bus status <id>` answers what became of it**, from the recipient's own
+durable-consumer ack state:
+
+```
+$ kazi bus status 4127
+4127 pending recipient=worker-a sent=2026-07-16T21:14:02Z
+```
+
+- **`pending`** — stored and queued, but not acked: the recipient has not read
+  yet, or only peeked (a peek NAKs and never advances the cursor).
+- **`consumed`** — the recipient's `bus read` acked it. That means delivered
+  AND drained, which is as far as the bus can honestly see. Whether the session
+  then acted on it is not something an ack can know — and under the advisory
+  contract above, it was never obliged to.
+
+For a `tell @<team>` fan-out, `recipients` breaks the verdict out per member
+and the top-line state is `consumed` only once EVERY live member acked, so one
+member draining cannot make a team message look universally seen. `status`
+consumes nothing — it reads consumer info and fetches the message directly by
+sequence — so it is safe to poll and never disturbs anyone's cursor.
+
+**3. `bus who` shows each session's un-read inbox depth.**
+
+```
+$ kazi bus who --all
+worker-a (s-a1b2c3) machine=box-1 pid=4410 liveness=active inbox=7 seen=12s ago /repo
+```
+
+`inbox=N` counts the DIRECTED messages queued and un-read for that session (its
+own tells plus its team's fan-out); broadcast `bus post` traffic is not
+counted, because the question it answers is "how many messages addressed to
+this session are waiting". The TTY hides it at zero; `--json` always carries
+it. A depth climbing against a live session means tells are landing but nobody
+is draining them; against a `dead-reaping` one, it is the backlog a
+replacement session will never see.
+
+**Unaddressable vs unlikely-to-be-read.** These are different failures and get
+different answers:
+
+- **No presence row AND no durable inbox** — a one-line ERROR naming the live
+  roster. Nothing is sent. This is the typo case.
+- **A row whose liveness is `dead-reaping`** (T55.11), or **no row but a
+  durable inbox** left from before it aged out — a WARNING on stderr, and the
+  message is queued anyway:
+
+  ```
+  $ kazi bus tell worker-b "status?"
+  warning: worker-b looks dead (liveness=dead-reaping) -- queued anyway; check `kazi bus who --all` and `kazi bus status <id>`
+  told worker-b (id 4128)
+  ```
+
+Liveness is deliberately **advisory at send time, not a veto**. The verdict
+comes from the recipient machine's sweep, and an operator may legitimately know
+better — a session restarting under the same name is `dead-reaping` for a
+moment. Refusing would only trade a silent send for a silent refusal. The
+warning plus `bus status` lets the sender find out which it was.
+
+A session with a durable inbox but no presence row is a real case worth
+sending to: it read the bus at least once, so its cursor exists, and it will
+drain the queue if it comes back. An inbox can only exist for a session that
+was really there — a typo has neither.
+
 ### Naming sessions (T55.5, ADR-0073)
 
 Raw session ids are UUIDs (or derived fallback ids) nobody can remember, so
@@ -126,10 +213,13 @@ different live session's id.
 2. an exact session id present on the roster;
 3. a nickname, looked up against LIVE presence.
 
-A recipient matching none of those is a ONE-LINE error naming the live
-roster — never a silent queue-to-nowhere (field feedback: a fleet
-supervisor spent hours directing messages at a replaced session id with no
-signal anything was wrong).
+A recipient matching none of those falls back to its durable inbox (T55.12)
+— a session whose presence aged out but whose cursor still exists will drain
+the queue when it returns — and only a recipient with neither is a ONE-LINE
+error naming the live roster. Never a silent queue-to-nowhere (field feedback:
+a fleet supervisor spent hours directing messages at a replaced session id with
+no signal anything was wrong). See [Did it land?](#did-it-land-delivery-visibility-t5512)
+for what the send itself does and does not promise.
 
 **The portable launch recipe.** The session-name resolution chain
 (ADR-0067 point 2, extended by T55.5) is `--session-name` >
@@ -291,11 +381,19 @@ harness drives the bus natively, with no JSON-CLI shell-out:
 | `kazi_bus_watch` | `kazi bus watch` | — |
 | `kazi_bus_who` | `kazi bus who` | — |
 | `kazi_bus_tell` | `kazi bus tell` | `session`, `text` |
+| `kazi_bus_status` | `kazi bus status` | `id` |
 | `kazi_bus_name` | `kazi bus name` | `name` |
 
 Each accepts the optional `topic` / `scope` / `sev` arguments the CLI verbs
 take. `kazi_bus_tell`'s `session` accepts a session id, a nickname, or
-`@<team>`, exactly like the CLI verb (T55.5). `kazi_bus_read` and
+`@<team>`, exactly like the CLI verb (T55.5), and it returns the T55.12
+receipt — `{ok: true, id, recipient, liveness}` — where `id` is what
+`kazi_bus_status` dereferences and a `liveness` of `"dead-reaping"` /
+`"no-presence"` is the structured form of the CLI's warning. `kazi_bus_status`
+returns `{ok: true, id, state, recipient, sent_at, recipients}` with `state`
+`"pending"` or `"consumed"`; `unknown_message` and `not_directed` are its
+structured errors. `kazi_bus_who`'s rows carry `inbox` (un-read directed
+depth). `kazi_bus_read` and
 `kazi_bus_watch` return the ADR-0072 digest envelope by default (see
 above); `full: true` mirrors the CLI's `--full` and returns `messages`
 unabridged. `kazi_bus_watch` takes an optional `timeout` (seconds) and
