@@ -672,6 +672,30 @@ defmodule Kazi.Teach.InstallSkill do
     `bus who` instead of retrying blindly. Do NOT broadcast "I am <name>" as a
     free-text fact -- assign the name properly and the roster carries it.
 
+    ### A tell that succeeded is QUEUED, not seen (T55.12)
+
+    `bus tell` prints the message's id (MCP: `kazi_bus_tell` returns `id`), and
+    success means STORED AND QUEUED -- never that anyone read it. Do not assume
+    a directed message landed in someone's context just because the send
+    worked. Three ways to find out what actually happened:
+
+    - `kazi bus status <id>` (MCP: `kazi_bus_status`) -- `pending` (queued, not
+      acked: they have not read, or only peeked) or `consumed` (their `read`
+      acked it: delivered AND drained). Consumes nothing, so it is safe to
+      poll. For `tell @<team>`, `consumed` only once EVERY live member acked.
+    - `kazi bus who` -- each row's `inbox=N` is that session's un-read directed
+      depth. Climbing against a live session means your tells are landing but
+      nobody is draining them.
+    - The tell's own WARNING: a recipient whose `liveness` is `dead-reaping`,
+      or that has no presence row (only a durable inbox), still gets the
+      message queued -- but it may never be drained. Check `bus status` rather
+      than assuming.
+
+    `consumed` is as far as the bus can honestly see: whether the session ACTED
+    on the message is not knowable from an ack, and the advisory contract means
+    it was never obliged to. If you need an answer, ask for one and wait for a
+    reply -- do not treat delivery as agreement.
+
     ## schema_version pinning
 
     Every `--json` object carries `schema_version` (currently 2, ADR-0032).
