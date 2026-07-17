@@ -134,6 +134,56 @@ defmodule Kazi.Providers.ScenarioTest do
     assert result.evidence.spec == spec
     assert result.evidence.surface == "browser"
     assert result.evidence.pin_state == :pinned
+    # No placeholders in this trace -> no generated inputs.
+    assert result.evidence.inputs == %{}
+  end
+
+  test "pinned + placeholders -> replay substitutes fresh values recorded in evidence",
+       %{workspace: ws, spec_path: spec} do
+    verdict =
+      Jason.encode!(%{
+        status: "pass",
+        url: @trace_url,
+        assertions: [],
+        screenshot: nil,
+        error: nil
+      })
+
+    trace =
+      browser_trace(%{
+        "steps" => [%{"action" => "type", "selector" => "#name", "text" => "{{pat_name}}"}],
+        "assertions" => [%{"type" => "text", "selector" => "#name", "equals" => "{{pat_name}}"}]
+      })
+
+    pin_path =
+      write_pin!(ws, pin_json(%{"trace" => trace, "inputs" => %{"pat_name" => "unique_slug"}}))
+
+    result =
+      evaluate(spec, pin_path, %{cmd: @stub, args: [], env: [{"STUB_JSON", verdict}]}, %{
+        workspace: ws,
+        rand_fun: fn n -> :binary.copy(<<0>>, n) end
+      })
+
+    assert %PredicateResult{status: :pass} = result
+    # The generated value is recorded in evidence so a replay is reproducible.
+    assert result.evidence.inputs == %{"pat_name" => "pat_name-00000000"}
+  end
+
+  test "pinned + an unknown generator kind -> :fail invalid, never a silent literal",
+       %{workspace: ws, spec_path: spec} do
+    trace = browser_trace(%{"steps" => [%{"action" => "type", "text" => "{{pat_name}}"}]})
+
+    pin_path =
+      write_pin!(
+        ws,
+        pin_json(%{"trace" => trace, "inputs" => %{"pat_name" => "bogus_generator"}})
+      )
+
+    result = evaluate(spec, pin_path, %{cmd: @stub, args: []}, %{workspace: ws})
+
+    assert %PredicateResult{status: :fail} = result
+    assert {:invalid, reasons} = result.evidence.pin_state
+    assert {:unknown_generator, "pat_name"} in reasons
   end
 
   test "pinned + red stub -> :fail with the delegate's evidence PLUS the scenario fields",
