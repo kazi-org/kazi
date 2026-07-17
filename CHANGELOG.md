@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.158.0](https://github.com/kazi-org/kazi/compare/v1.157.0...v1.158.0) (2026-07-17)
+
+
+### Features
+
+* **reconcile:** GherkinImporter reads [@tags](https://github.com/tags) -- role/priority/interface (ADR-0054) ([57bb401](https://github.com/kazi-org/kazi/commit/57bb401c47dd893e9af510e586be48810138a1c4))
+
+
+### Bug Fixes
+
+* **goal:** intern the tag metadata atoms so a tagged spec loads in the release ([e99945d](https://github.com/kazi-org/kazi/commit/e99945d8bab9834dd853e7bde3921a5289c476d9))
+
 ## [1.157.0](https://github.com/kazi-org/kazi/compare/v1.156.0...v1.157.0) (2026-07-17)
 
 
