@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.204.0](https://github.com/kazi-org/kazi/compare/v1.203.0...v1.204.0) (2026-07-17)
+
+
+### Features
+
+* **cli:** kazi apply over a roadmap runs goals in needs order (T45.4, ADR-0075) ([a835585](https://github.com/kazi-org/kazi/commit/a8355851ae06532e7009dd98f837597fad8511ed))
+* **goal:** Roadmap.to_fleet projects the goal DAG onto Kazi.Fleet (T45.4, ADR-0075) ([6998999](https://github.com/kazi-org/kazi/commit/6998999b1576446bccb1af1fc0d01b867e8b16a8))
+
 ## [1.203.0](https://github.com/kazi-org/kazi/compare/v1.202.0...v1.203.0) (2026-07-17)
 
 
