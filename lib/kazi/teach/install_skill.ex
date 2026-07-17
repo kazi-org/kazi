@@ -393,6 +393,39 @@ defmodule Kazi.Teach.InstallSkill do
     goal keeps landing on stuck, `kazi economy --rediscovery <goal>` names
     which predicate is burning the repeat attempts.
 
+    Alternatively, let kazi own the ladder: declare an `[escalation]` block in
+    the goal-file (ADR-0056) and the loop re-dispatches the SAME goal at the
+    next model in the declared list on `stuck`/`over_budget`, all inside one
+    `kazi apply` -- no rung counter of your own. Drive the ladder by hand
+    (above) when you want to inspect between rungs; use the block when you do
+    not. Details + the TOML shape: kazi/RECIPES.md.
+
+    ## Roadmap scope: a project is a goal DAG (ADR-0056)
+
+    `plan`/`apply` author and converge ONE goal; a project is an ordered SET of
+    goals with dependencies. The SAME verbs lift one level, so you drive the whole
+    engineering surface -- roadmap planning, discovery, the plan document -- from
+    the binary alone, with NO external plan/apply layer assumed.
+
+    - **Author a roadmap** -- `kazi plan --project '<goals-json>'` carries a
+      multi-goal payload (a JSON object with a `"goals"` array; each goal a
+      per-goal predicate payload plus optional `needs` edges). kazi persists N
+      linked proposals under ONE roadmap ref and emits the roadmap ref + per-goal
+      proposal refs. Caller-drafts, exactly like `--predicates` one level down.
+    - **Discovery on-ramp** -- `kazi plan --discover` (opt-in) attaches best-effort
+      discovery evidence (stack detection, `.feature` use-cases, a public-surface
+      codebase scan) to a kazi-drafts proposal, visible via
+      `kazi status <proposal-ref> --json`. Caller-drafts (`--predicates`/`--project`)
+      bypass it; any step failing degrades to a plain draft with a warning.
+    - **Converge a roadmap** -- `kazi apply <roadmap-file>` runs the whole goals in
+      topological `needs` frontiers (the same engine `--fleet` uses), each goal in
+      its own task worktree with its own `[integration]` landing, to a
+      roadmap-level collective verdict. `--explain` prints the schedule and exits.
+    - **Render the plan** -- `kazi plan render <roadmap-file> [--out <path>]` emits
+      the human-readable plan (WBS, waves, progress) as GENERATED markdown from the
+      read-model. It is OUTPUT, never input -- regenerate, never hand-edit, so the
+      document cannot drift. Details: kazi/RECIPES.md.
+
     ## Landing: `[integration]`, `[conventions]`, and the process contract
 
     Convergence is not the end: a goal whose code predicates pass but whose fix is
@@ -614,6 +647,65 @@ defmodule Kazi.Teach.InstallSkill do
     is one bounded `kazi apply`, capped at the frontier, so the loop cannot run
     unboundedly. Add `--stream` to react within a rung: the same failing
     `predicates[]` across every streamed observation is no-progress.
+
+    ### The `[escalation]` block: let kazi own the ladder (ADR-0056)
+
+    The skill-side loop above keeps the rung counter in YOUR state. The
+    declarative alternative (T45.7, ADR-0056 decision 5) moves the ladder into
+    the goal-file as DATA, and the loop walks it internally within one
+    `kazi apply`:
+
+    ```toml
+    [escalation]
+    ladder = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"]
+    max_rungs = 3
+    ```
+
+    On a `stuck`/`over_budget` terminal verdict against the SAME failing
+    predicate set, the loop re-dispatches the SAME goal at the NEXT model in the
+    `ladder` instead of terminating, bounded by the ladder length (and the
+    optional `max_rungs` cap). Rung 0 PINS the initial dispatch model, so the
+    dispatched sequence IS the declared list; each rung is one bounded converge
+    with a FRESH stuck-window and budget. kazi-core holds NO selection policy --
+    it reads the list and a cursor, nothing more. An ABSENT block (or an empty
+    `ladder`) is byte-identical to the single-model loop. Choose: the block when
+    you want kazi to own escalation inside one run; the hand-driven loop above
+    when you want to inspect between rungs.
+
+    ## Roadmap scope: author, converge, render a goal DAG (ADR-0056)
+
+    One goal is a goal-file; a PROJECT is a set of goals with `needs` edges. The
+    same verbs lift one level, so the whole engineering surface -- roadmap
+    planning, discovery, the plan document -- drives from the binary alone.
+
+    - **Author** -- `kazi plan --project '<goals-json>'` carries a multi-goal
+      payload (a JSON object with a `"goals"` array; each goal a per-goal
+      predicate payload plus optional `needs` edges to other goal ids). kazi
+      persists N linked proposals under ONE roadmap ref; `--json` emits the
+      roadmap ref + per-goal proposal refs. It is caller-drafts, exactly like
+      `--predicates` at the single-goal level.
+    - **Discover first (opt-in)** -- `kazi plan --discover` attaches best-effort
+      discovery evidence (deterministic stack detection, `.feature` use-cases, a
+      public-surface codebase scan) to a kazi-drafts proposal, read back via
+      `kazi status <proposal-ref> --json`. Caller-drafts
+      (`--predicates`/`--project`) bypass it; any step failing degrades to a
+      plain draft with a warning, never a hard error.
+    - **Converge** -- `kazi apply <roadmap-file>` (a `[[goals]]` DAG `.toml`)
+      runs the whole goals in topological `needs` frontiers via the same
+      fleet-execution engine `--fleet` uses (a roadmap projects onto a fleet).
+      Each goal runs its OWN apply loop in its OWN task worktree with its own
+      `[integration]` landing; converged work lands on the base before dependents
+      dispatch. The result is a roadmap-level collective (same
+      `collective`/`schedule`/`blocked` shape as a needs-DAG). `--explain` prints
+      the roadmap schedule and exits; a single-goal roadmap degrades to a plain
+      `kazi apply` on that goal; `--in-place` is rejected (every goal needs its
+      own worktree).
+    - **Render** -- `kazi plan render <roadmap-file> [--out <path>]` emits the
+      human-readable plan (WBS with checkboxes, waves, progress) as GENERATED
+      markdown from the roadmap DAG + read-model verdicts. It is OUTPUT, never
+      input: to stdout, or written to `--out <path>`. A hand-edit to the rendered
+      file is lost work by design -- regenerate, never hand-edit, so the plan
+      cannot drift from the truth it renders.
 
     ## Streaming, parallel, standing, explain
 
