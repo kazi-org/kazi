@@ -344,12 +344,92 @@ next `--model` UP the ladder.
 The full copy-paste sh recipe (ladder + trigger + reset + cap) is in the installed
 kazi SKILL.md ("Escalate-on-stuck") -- kept in lockstep with this section.
 
+### The `[escalation]` block: the ladder as goal-file DATA (ADR-0056)
+
+You do NOT have to own the rung counter yourself. Declare the ladder as DATA in
+the goal-file and kazi walks it internally (T45.7, ADR-0056 decision 5): on a
+`stuck` or `over_budget` terminal verdict against the SAME failing predicate set,
+the loop re-dispatches the SAME goal at the NEXT model in the ladder instead of
+terminating, bounded by the ladder length (and an optional `max_rungs` cap).
+
+```toml
+[escalation]
+ladder = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"]
+max_rungs = 3
+```
+
+Rung 0 PINS the initial dispatch model, so the dispatched sequence is exactly the
+declared ladder. Each rung is one bounded converge with a FRESH stuck-window and
+budget (not the exhausted tail of the prior rung). kazi-core still holds NO
+model-selection policy -- it only reads the declared list and a cursor; the ladder
+is configuration, not inference. An ABSENT `[escalation]` block (or an empty
+`ladder`) is byte-identical to today's single-model loop -- no escalation. This is
+the native equivalent of the skill-side ladder above: use the block when you want
+kazi to own the escalation inside one `kazi apply`; drive the ladder yourself
+(re-dispatching per rung) when you want to inspect between rungs. Pinning a single
+`--model` and omitting the block degenerates to static tiering, unchanged.
+
 ### Polling -- `kazi status <ref> --json`
 
 `kazi status <ref> --json` is a PURE read of the read-model (no loop runs). The
 `<ref>` resolves as a run's goal id first (`kind: "run"` -- latest predicate
 vector), else a `proposal_ref` (`kind: "proposal"` -- lifecycle state). An unknown
 ref is a JSON error with a non-zero exit.
+
+## Roadmap scope: a project is a goal DAG (ADR-0056)
+
+One `kazi plan` authors ONE goal; a project is an ordered SET of goals with
+dependencies between them. The same four verbs lift one level: you author a
+ROADMAP (a goal DAG), converge it, and render it -- no external plan/apply layer
+is assumed or required. kazi drives the whole engineering surface from the binary
+alone.
+
+**Author a roadmap -- `kazi plan --project '<goals-json>'`.** The caller-drafts
+project path (T45.2, ADR-0056 decision 1) carries a multi-goal payload the way
+`--predicates` carries a single goal: a JSON object with a `"goals"` array, each
+goal a per-goal predicate payload plus optional `needs` edges to other goals'
+ids. kazi persists it as N linked proposals sharing ONE roadmap ref; each goal
+runs the per-goal clarify floor (byte-identical to a single-goal plan) and the
+roadmap runs the roadmap-scope floor. `--json` emits the roadmap ref + per-goal
+proposal refs.
+
+```sh
+kazi plan --project '{
+  "goals": [
+    {"id": "foundation", "predicates": [ ... ]},
+    {"id": "api", "needs": ["foundation"], "predicates": [ ... ]},
+    {"id": "ui",  "needs": ["api"],        "predicates": [ ... ]}
+  ]
+}' --json
+```
+
+**Discovery on-ramp -- `kazi plan --discover`.** An OPT-IN understand-before-authoring
+pass (T45.6, ADR-0056 decision 4): kazi attaches best-effort discovery evidence
+(deterministic stack detection, `.feature` use-cases, a public-surface codebase
+scan) to the drafted proposal, visible via `kazi status <proposal-ref> --json`.
+It is kazi-drafts territory -- caller-drafts (`--predicates`/`--project`) bypass
+it entirely, since a frontier session that already reasoned about the goal needs
+no second model. Any discovery step failing degrades to a plain draft with a
+warning, never a hard error.
+
+**Converge a roadmap -- `kazi apply <roadmap-file>`.** Point `apply` at a roadmap
+`.toml` (a `[[goals]]` DAG, T45.4/ADR-0075) and it runs the WHOLE GOALS in
+topological `needs` frontiers via the same fleet-execution engine `--fleet` uses
+(a roadmap projects onto a fleet). Each goal runs its OWN kazi apply loop in its
+OWN task worktree, inheriting its own `[integration]` landing; converged work
+lands on the base before dependents dispatch. The result is a roadmap-level
+collective verdict (same `collective`/`schedule`/`blocked` shape as a needs-DAG
+result). `--explain` prints the roadmap schedule and exits without dispatching; a
+single-goal roadmap degrades to a plain `kazi apply` on that goal. `--in-place` is
+rejected (every goal needs its own worktree).
+
+**Render the plan document -- `kazi plan render <roadmap-file> [--out <path>]`.**
+The read-model holds the facts; `plan render` (T45.5, ADR-0056 decision 3) emits
+the human-readable plan (the WBS with checkboxes, waves, progress) as GENERATED
+markdown from the roadmap DAG + its read-model verdicts. It is OUTPUT, never input
+-- to stdout by default, or written to `--out <path>`. A hand-edit to the rendered
+file is lost work by design: regenerate, never hand-edit, so the document cannot
+drift from the truth it renders.
 
 ## Landing: `[integration]`, `[conventions]`, and the process contract
 
@@ -598,4 +678,5 @@ gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 - `docs/adr/0024-kazi-self-teaching-to-harnesses.md` -- self-teaching surfaces.
 - `docs/adr/0031-kazi-skill-router-subsumes-loop-apply-qualify.md` -- the router on-ramp.
 - `docs/adr/0032-rename-cli-verbs-run-apply-propose-plan.md` -- the verb rename.
+- `docs/adr/0056-one-system-kazi-subsumes-plan-apply-skills.md` -- roadmap planning, discovery, escalation-as-data, `plan render`.
 - `docs/adr/0067-session-coordination-bus.md` -- the daemon + session bus decision.
