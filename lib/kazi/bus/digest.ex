@@ -9,12 +9,10 @@ defmodule Kazi.Bus.Digest do
 
   Three surfaces:
 
-    * `summarize/1` -- the human TTY digest (unchanged since T51.2): directed
-      messages (`kind == "msg"`, i.e. `bus tell`) and `sev == "interrupt"`
-      posts render VERBATIM, one line each -- an operator must never miss a
-      directed or urgent message inside a summary. Everything else collapses
-      into one `<count> <kind>/<topic>` digest line per distinct
-      `{kind, topic}` pair.
+    * `line/1` -- ONE message as one line, verbatim or stub (T55.4): the
+      ADR-0072 d2 stub rule as a reusable per-message unit, so the
+      oversize-becomes-stub decision lives in one place. `render/1` and the
+      board (`Kazi.Bus.Board`) both go through it.
 
     * `render/1` -- the MACHINE digest (ADR-0072 d1/d2/d6): the bounded,
       structured shape `--json` and the `kazi_bus_*` MCP tools return by
@@ -29,8 +27,15 @@ defmodule Kazi.Bus.Digest do
       anything a digest names stays dereferenceable.
 
     * `to_tty_lines/1` -- the inverse of the render: an already-assembled
-      digest (the daemon's reply) formatted for a human. The client renders;
-      it never re-aggregates (T55.7).
+      digest (the daemon's reply) formatted for a human, one string per line.
+      The client renders; it never re-aggregates (T55.7). It carries T51.2's
+      TTY rules forward unchanged -- directed messages (`kind == "msg"`, i.e.
+      `bus tell`) and `sev == "interrupt"` posts render VERBATIM, one line
+      each, because an operator must never miss a directed or urgent message
+      inside a summary; everything else is a `<count> <kind>/<topic>` line --
+      and adds the `stub`/`overflow` lines the bounded digest introduced.
+      (It replaced `summarize/1`, which aggregated messages a second time on
+      the client after T55.7 made the daemon the only aggregator.)
   """
 
   # ADR-0072 decision 2: the render threshold. A message body over this many
@@ -116,30 +121,6 @@ defmodule Kazi.Bus.Digest do
       do: bin,
       else: valid_utf8_prefix(binary_part(bin, 0, byte_size(bin) - 1))
   end
-
-  @doc """
-  Splits `messages` into verbatim lines (directed `msg` or `sev: "interrupt"`)
-  and digest lines (`<count> <kind>/<topic>`, grouped, most-frequent first).
-  Returns `%{verbatim: [String.t()], digest: [String.t()]}`; both empty for `[]`.
-  """
-  @spec summarize([message()]) :: %{verbatim: [String.t()], digest: [String.t()]}
-  def summarize(messages) when is_list(messages) do
-    {verbatim_msgs, digest_msgs} = Enum.split_with(messages, &verbatim?/1)
-
-    verbatim =
-      Enum.map(verbatim_msgs, fn msg -> "[#{msg.kind}] #{msg.text}" end)
-
-    digest =
-      digest_msgs
-      |> Enum.group_by(fn msg -> {msg.kind, msg.topic} end)
-      |> Enum.map(fn {{kind, topic}, group} -> {length(group), kind, topic} end)
-      |> Enum.sort_by(fn {count, _kind, _topic} -> -count end)
-      |> Enum.map(fn {count, kind, topic} -> "#{count} #{kind}/#{topic || "_"}" end)
-
-    %{verbatim: verbatim, digest: digest}
-  end
-
-  @doc """
   The bounded machine digest (ADR-0072 d1/d2/d6): what every `--json` /
   MCP bus read returns by default.
 
@@ -165,10 +146,7 @@ defmodule Kazi.Bus.Digest do
     {line_msgs, grouped_msgs} =
       Enum.split_with(messages, fn msg -> oversize?(msg) or verbatim?(msg) end)
 
-    head_lines =
-      Enum.map(line_msgs, fn msg ->
-        if oversize?(msg), do: stub_line(msg), else: verbatim_line(msg)
-      end)
+    head_lines = Enum.map(line_msgs, &line/1)
 
     count_lines =
       grouped_msgs
@@ -184,9 +162,7 @@ defmodule Kazi.Bus.Digest do
   typically decoded from the daemon's `read` reply) into the human TTY lines.
 
   T55.7 (ADR-0072 d5): the client renders what the daemon aggregated; it never
-  re-aggregates. For a backlog of small, non-directed messages this is
-  byte-identical to `summarize/1`'s output -- the two agree on the format,
-  they differ only in who did the counting -- but it additionally renders the
+  re-aggregates. It carries T51.2's TTY format forward unchanged and adds the
   `stub` and `overflow` lines that only the bounded machine digest carries.
   """
   @spec to_tty_lines(%{required(String.t()) => term()}) :: [String.t()]
