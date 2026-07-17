@@ -89,11 +89,18 @@ defmodule Kazi.ReadModel.Migrate do
     end
   end
 
-  # The highest migration timestamp this binary ships (the numeric prefix of
-  # every `priv/repo/migrations/<timestamp>_*.exs` file). Absent any
-  # migration file (a fixture dir in a test), 0 — never newer than any
-  # legitimately-stamped db.
-  defp binary_version(migrations_path) do
+  @doc """
+  The highest migration timestamp this binary ships (the numeric prefix of
+  every `priv/repo/migrations/<timestamp>_*.exs` file). Absent any migration
+  file (a fixture dir in a test), 0 — never newer than any legitimately-stamped
+  db.
+
+  Public (T52.2, ADR-0068): the write path compares THIS against a daemon's
+  reported `schema_vsn` via `Kazi.ReadModel.SchemaSkew.classify/2` to decide the
+  version-skew branch.
+  """
+  @spec binary_version(Path.t()) :: integer()
+  def binary_version(migrations_path \\ Ecto.Migrator.migrations_path(Kazi.Repo)) do
     migrations_path
     |> File.ls()
     |> case do
@@ -115,10 +122,16 @@ defmodule Kazi.ReadModel.Migrate do
   # the pragma's ~2.1 billion ceiling. A real table has no such limit.
   @meta_table "kazi_schema_meta"
 
-  # Absent the table entirely (a freshly-created, pre-migration db), there is
-  # no stamp -- treated as "unstamped", never as a real version, so a brand
-  # new db always migrates.
-  defp db_stamped_version(repo) do
+  @doc """
+  The schema version stamped in the db's `kazi_schema_meta` row, or `nil` when
+  the db is unstamped (a freshly-created, pre-migration db) — never a real
+  version, so a brand new db always migrates.
+
+  Public (T52.2, ADR-0068): the daemon reads this to answer the control-socket
+  `ping`'s `schema_vsn` field (the single writer reports the schema it holds).
+  """
+  @spec db_stamped_version(module()) :: integer() | nil
+  def db_stamped_version(repo) do
     Ecto.Adapters.SQL.query!(
       repo,
       "CREATE TABLE IF NOT EXISTS #{@meta_table} (version INTEGER NOT NULL)",
