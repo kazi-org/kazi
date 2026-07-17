@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.151.1](https://github.com/kazi-org/kazi/compare/v1.151.0...v1.151.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **bus:** T54.9 watch anchors to now -- strictly-new messages, --since escape ([#1097](https://github.com/kazi-org/kazi/issues/1097)) ([2362815](https://github.com/kazi-org/kazi/commit/2362815b0698340bbd60492a8a58c4bae2751e74))
+
 ## [1.151.0](https://github.com/kazi-org/kazi/compare/v1.150.0...v1.151.0) (2026-07-17)
 
 
