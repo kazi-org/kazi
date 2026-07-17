@@ -401,7 +401,7 @@ session start, and the replacement for the hand-rolled markdown blackboards
 teams used to keep (which could not see a second machine — the board can).
 
 ```
-kazi bus board [--scope machine|project] [--json]
+kazi bus board [--scope machine|project] [--attention] [--json]
 ```
 
 The board is **cursor-free and idempotent**: unlike `read`, it CONSUMES NOTHING
@@ -429,7 +429,11 @@ the tail folding into one `overflow` line. Under `--json` (contract:
     "claims_available": true,
     "total_facts": 1,
     "total_sessions": 1,
-    "total_claims": 1
+    "total_claims": 1,
+    "attention": [
+      {"session": "worker-1", "machine": "host", "summary": "needs a decision", "since": "2026-07-17T00:00:00Z", "age_s": 300}
+    ],
+    "total_attention": 1
   }
 }
 ```
@@ -438,6 +442,52 @@ The roster is the same presence path `bus who` reads, projected to stable
 identity fields only (session, name, team, machine, liveness) and ordered by
 session id — deliberately NOT the age/heartbeat fields, so back-to-back boards
 over the same live set render identically.
+
+#### NEEDS OPERATOR: operator-attention fan-in (T60.3, ADR-0071, issue #1156)
+
+Each harness session pings its own channel when it blocks on a human (a
+permission prompt, a question) — a notification that scrolls away and cannot
+be aggregated across a fleet. `bus board`'s `attention` section rides the SAME
+E55 fact/board machinery to fan every session's block-on-human into one
+fleet-wide view: *"who is blocked on me, where, for how long"*, oldest-waiting
+first.
+
+The mechanism is three small pieces, all on top of the `session-start`/`turn`
+hooks T55.9 already installs:
+
+1. **`kazi bus hook notification`** (Claude Code's `Notification` event, fired
+   when the harness blocks on a human): posts a last-value `fact` on the
+   session's own `attention-<session>` topic:
+   `waiting-on-operator: <one-line summary> (since <ts>)`. The summary is read
+   best-effort from the Notification hook's JSON stdin (`{"message": "..."}`);
+   an empty, missing, or malformed stdin degrades to a generic
+   `waiting-on-operator (since <ts>)` rather than failing the post. This hook
+   only posts OUTWARD — its own stdout is always discarded — so ADR-0071's
+   binding rule (only events whose stdout reaches context may inject) does not
+   constrain it; it is exempt by construction, not by exception.
+2. **The `turn` hook clears it**: on the session's very next `UserPromptSubmit`,
+   the existing `turn` hook (T55.9) ALSO posts `"none"` on the same
+   `attention-<session>` topic, alongside its unchanged digest injection.
+   Facts are last-value-per-topic, so clearing every turn is cheap and
+   idempotent — the moment a blocked session's next prompt runs, it drops out
+   of the NEEDS OPERATOR section automatically, with no extra signal.
+3. **The board renders it**: `Board.render/2` filters the collapsed per-topic
+   facts to every `attention-*` topic whose current value starts with
+   `waiting-on-operator` (a `"none"` clear excludes the session), parses each
+   into `{session, machine, summary, since, age_s}`, and sorts oldest-waiting
+   first. `kazi bus board --attention` trims the HUMAN render to ONLY this
+   section (`--json` is unaffected — the full board, `attention` included, is
+   always returned):
+
+   ```
+   $ kazi bus board --attention
+   NEEDS OPERATOR (1):
+     worker-1@host  needs a decision (waiting 5m)
+   ```
+
+Requires `kazi install-hooks` (below) to be installed — the `Notification`
+hook is the third registration it writes, alongside `SessionStart` and
+`UserPromptSubmit`.
 
 #### Claim ownership: read at source (T55.8, ADR-0073 point 2)
 
@@ -643,18 +693,21 @@ kazi install-hooks --local        # this repo's LOCAL .claude/settings.local.jso
 kazi install-hooks --uninstall    # remove exactly what was added
 ```
 
-It registers two hooks in the Claude Code settings, matched to the two
-moments that matter — and bound ONLY to events whose stdout reaches the
+It registers three hooks in the Claude Code settings. Two are matched to the
+two moments that matter — and bound ONLY to events whose stdout reaches the
 session's context (the ADR-0076 binding rule; a `Stop` hook's output never
-reaches the next turn, so binding there is delivery to nowhere):
+reaches the next turn, so binding there is delivery to nowhere). The third
+(T60.3, issue #1156) is exempt from that rule by construction, not by
+exception: it only posts OUTWARD, so there is no stdout to bind:
 
 | Claude Code event | Runs | Delivers |
 |---|---|---|
 | `SessionStart` | `kazi bus hook session-start` | registers presence, joins the project-scope team, and injects the current board (`bus board`) to orient the new session |
-| `UserPromptSubmit` | `kazi bus hook turn` | injects the bounded digest (`bus read`) when there is traffic since the session's last turn, and is COMPLETELY SILENT (zero bytes) when the bus is quiet |
+| `UserPromptSubmit` | `kazi bus hook turn` | injects the bounded digest (`bus read`) when there is traffic since the session's last turn (COMPLETELY SILENT, zero bytes, when the bus is quiet), and clears this session's `attention-<session>` fact every turn |
+| `Notification` | `kazi bus hook notification` | posts a `waiting-on-operator` fact on this session's `attention-<session>` topic when the harness blocks on a human; injects NOTHING (stdout is always discarded) |
 
 The registered command is a kazi subcommand, not a script file, so the
-payload logic upgrades with the binary. What each event injects (T55.9):
+payload logic upgrades with the binary. What each event does (T55.9/T60.3):
 
 - **`session-start`** registers presence, joins the team named for the
   project (the git toplevel slug), and injects the current board — the
@@ -665,7 +718,12 @@ payload logic upgrades with the binary. What each event injects (T55.9):
   IS the "last checked" marker: a turn with new traffic renders the bounded
   digest, and the next quiet turn drains nothing and prints **zero bytes**.
   That silent-when-quiet property is what makes ambient awareness free — it
-  is why the hook ends the token-cost complaint.
+  is why the hook ends the token-cost complaint. It also posts the CLEAR fact
+  (`"none"`) on the session's attention topic every turn — cheap and
+  idempotent, and what makes a resumed session drop out of `bus board`'s
+  NEEDS OPERATOR section automatically.
+- **`notification`** posts the `waiting-on-operator` fact (see "NEEDS
+  OPERATOR" above) and ALWAYS returns silent — it never injects, by design.
 
 Its contract: **always exit 0, never block.** With no daemon running (or an
 unknown event) `kazi bus hook` prints nothing and returns immediately. And a
@@ -681,6 +739,10 @@ That bound is **per-event**, and the asymmetry is deliberate (issue #1295):
   the machine — the per-turn hot path — so a hung/slow daemon must never add
   more than ~2s there. A hung daemon adding seconds to every turn is worse
   than any missed digest.
+- **`notification` (T60.3) shares the same tight 2s bound as `turn`.** It runs
+  on the harness's blocked-on-human path -- not a per-turn hot path, but still
+  a moment a human is actively waiting on, so it gets no extra tolerance
+  either.
 - **`session-start` gets a larger 15s bound.** It is a ONE-SHOT at session
   boot, and its board renders the FULL current-state projection, whose
   client-side fact drain scales with the fact-topic space: under a real busy
