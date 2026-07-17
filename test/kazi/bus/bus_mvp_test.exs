@@ -237,7 +237,7 @@ defmodule Kazi.Bus.MvpTest do
       # must have presence (any bus call establishes it).
       assert {:ok, _} = Bus.who(opts_a)
 
-      assert :ok = Bus.tell(session_a, "for A only", conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell(session_a, "for A only", conn: conn, scope: "machine")
 
       assert {:ok, messages_a} = Bus.read(opts_a)
       assert Enum.any?(messages_a, fn m -> m.kind == "msg" and m.text == "for A only" end)
@@ -252,7 +252,8 @@ defmodule Kazi.Bus.MvpTest do
       recipient = unique_session()
       assert {:ok, _} = Bus.who(conn: conn, session: recipient)
 
-      assert :ok = Bus.tell(recipient, "cross-scope #{recipient}", conn: conn, scope: "project")
+      assert {:ok, _receipt} =
+               Bus.tell(recipient, "cross-scope #{recipient}", conn: conn, scope: "project")
 
       assert {:ok, messages} = Bus.read(conn: conn, session: recipient, scope: "machine")
 
@@ -267,7 +268,7 @@ defmodule Kazi.Bus.MvpTest do
       text = "exactly-once #{recipient}"
       assert {:ok, _} = Bus.who(conn: conn, session: recipient)
 
-      assert :ok = Bus.tell(recipient, text, conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell(recipient, text, conn: conn, scope: "machine")
 
       assert {:ok, messages} = Bus.read(conn: conn, session: recipient, scope: "machine")
       assert Enum.count(messages, fn m -> m.text == text end) == 1
@@ -336,10 +337,8 @@ defmodule Kazi.Bus.MvpTest do
 
       assert :ok = Bus.name(nickname, opts)
 
-      assert :ok = Bus.tell(nickname, "via nickname #{session}", conn: conn, scope: "machine")
-      # T55.5: tell resolves recipients against the roster -- establish
-      # the recipient's presence first (any bus call does).
-      assert {:ok, _} = Bus.who(conn: conn, session: session)
+      assert {:ok, _receipt} =
+               Bus.tell(nickname, "via nickname #{session}", conn: conn, scope: "machine")
 
       # T55.5: tell resolves recipients against the roster -- establish
       # the recipient's presence first (any bus call does).
@@ -357,7 +356,12 @@ defmodule Kazi.Bus.MvpTest do
       # the recipient's presence first (any bus call does).
       assert {:ok, _} = Bus.who(conn: conn, session: session)
 
-      assert :ok = Bus.tell(session, "via session id #{session}", conn: conn, scope: "machine")
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
+      assert {:ok, _receipt} =
+               Bus.tell(session, "via session id #{session}", conn: conn, scope: "machine")
 
       assert {:ok, messages} = Bus.read(opts)
       texts = messages |> Enum.filter(&(&1.kind == "msg")) |> Enum.map(& &1.text)
@@ -394,7 +398,8 @@ defmodule Kazi.Bus.MvpTest do
       refute Enum.any?(sessions, fn s -> s["session"] == old_session and s["name"] == nickname end)
 
       # the nickname now routes to the NEW session only
-      assert :ok = Bus.tell(nickname, "for the new holder", conn: conn, scope: "machine")
+      assert {:ok, _receipt} =
+               Bus.tell(nickname, "for the new holder", conn: conn, scope: "machine")
 
       assert {:ok, new_messages} = Bus.read(conn: conn, session: new_session, scope: "machine")
       assert Enum.any?(new_messages, fn m -> m.text == "for the new holder" end)
@@ -460,7 +465,7 @@ defmodule Kazi.Bus.MvpTest do
       assert :ok = Bus.join(team, conn: conn, session: member_a)
       assert :ok = Bus.join(team, conn: conn, session: member_b)
 
-      assert :ok = Bus.tell("@" <> team, text, conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell("@" <> team, text, conn: conn, scope: "machine")
 
       for member <- [member_a, member_b] do
         assert {:ok, messages} = Bus.read(conn: conn, session: member, scope: "machine")
@@ -482,7 +487,7 @@ defmodule Kazi.Bus.MvpTest do
       text = "already pending #{session}"
       assert {:ok, _} = Bus.who(conn: conn, session: session)
 
-      assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell(session, text, conn: conn, scope: "machine")
 
       assert {:ok, messages} =
                Bus.watch(conn: conn, session: session, scope: "machine", timeout: 5, since: :all)
@@ -500,7 +505,7 @@ defmodule Kazi.Bus.MvpTest do
       # T55.5: establish the recipient's presence (tell resolves the roster).
       assert {:ok, _} = Bus.who(conn: conn, session: session)
 
-      assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell(session, text, conn: conn, scope: "machine")
       assert {:ok, peeked} = Bus.peek(opts)
       assert Enum.any?(peeked, fn m -> m.text == text end)
 
@@ -525,7 +530,7 @@ defmodule Kazi.Bus.MvpTest do
       assert {:ok, _} = Bus.who(conn: conn, session: session)
 
       # a peeked (un-acked) backlog is pending on the durables
-      assert :ok = Bus.tell(session, backlog_text, conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell(session, backlog_text, conn: conn, scope: "machine")
       {:ok, _peeked} = Bus.peek(conn: conn, session: session, scope: "machine")
 
       watcher =
@@ -545,7 +550,7 @@ defmodule Kazi.Bus.MvpTest do
       # T55.5: establish the recipient's presence (tell resolves the roster).
       assert {:ok, _} = Bus.who(conn: conn, session: session)
 
-      assert :ok = Bus.tell(session, new_text, conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell(session, new_text, conn: conn, scope: "machine")
 
       assert {:ok, messages} = Task.await(watcher, 20_000)
       # exactly once: the wake path must not double-deliver via the stray
@@ -569,7 +574,7 @@ defmodule Kazi.Bus.MvpTest do
       # T55.5: establish the recipient's presence (tell resolves the roster).
       assert {:ok, _} = Bus.who(conn: conn, session: session)
 
-      assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
+      assert {:ok, _receipt} = Bus.tell(session, text, conn: conn, scope: "machine")
 
       # anchor 0 predates everything -- the pending message is strictly newer
       assert {:ok, messages} =
