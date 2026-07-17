@@ -114,7 +114,10 @@ defmodule Kazi.Runtime do
     # T49.3 (ADR-0064): replay a pinned Gherkin Scenario by DELEGATING to a
     # surface provider. Only a `:pinned` classification replays; the pass is the
     # delegate's green replay, never a demonstration claim.
-    scenario: Kazi.Providers.Scenario
+    scenario: Kazi.Providers.Scenario,
+    # T44.7 (E29/ADR-0034, UC-058): the internal-leak guard as a predicate — scan
+    # the diff's added lines for private IPs / home paths / configurable codenames.
+    oss_hygiene: Kazi.Providers.OssHygiene
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
