@@ -351,6 +351,72 @@ kazi SKILL.md ("Escalate-on-stuck") -- kept in lockstep with this section.
 vector), else a `proposal_ref` (`kind: "proposal"` -- lifecycle state). An unknown
 ref is a JSON error with a non-zero exit.
 
+## Landing: `[integration]`, `[conventions]`, and the process contract
+
+Convergence is not the end: a goal whose code predicates pass but whose fix is
+still uncommitted is not done. kazi treats landing as part of the objective bar
+(ADR-0055) and owns the universal working rules so goal-files stay declarative.
+Full how-to: `docs/landing.md`.
+
+**`[integration]` -- how converged work LANDS.** Add a block declaring `mode`
+(default `none`; one of `none | commit | branch | pr | merge`):
+
+```toml
+[integration]
+mode = "commit"
+```
+
+When `mode != none`, kazi SYNTHESIZES a `landed` predicate and appends it to the
+vector -- an ordinary predicate evaluated against the LIVE working tree that
+asserts a clean tree plus the mode-appropriate git/GitHub state (committed on a
+non-base branch / pushed / open PR / rebase-merged). So "code-green with the fix
+uncommitted" stays UNSATISFIED and the loop keeps going. The `:integrate` action
+then verifies-then-ships (the inner agent owns its commits; a dirty tree is a
+distinct error, never a silent bulk commit). Under `--parallel`, each group lands
+on its own branch and the collective result carries per-group `landed:
+{branch, pr, merge_commit}`; `mode = "merge"` over a `needs`-DAG merges in
+topological order with `git cherry` silent-revert verification.
+
+**`[conventions]` -- the controller-owned process contract.** kazi appends a small,
+versioned block of UNIVERSAL working rules to every dispatch prompt (small
+conventional commits scoped to one directory; commit as you go; no stubs; grep
+`docs/lore.md` before debugging; migration-number safety under parallelism;
+network-retry; prefer graph tools). It is byte-identical across a goal's iterations
+(a cacheable head) and harness-agnostic. Toggle/extend it:
+
+```toml
+[conventions]
+process_contract = true                       # default; false disables the section
+extra_rules = ["Run mix format before committing."]
+```
+
+`extra_rules` are appended verbatim after the universals; repo-specific style
+otherwise lives in the repo's own `CLAUDE.md`/`AGENTS.md`, not the goal-file.
+
+**Tier-0 pattern (older binaries).** If your goal-file targets a kazi binary that
+PREDATES the `[integration]` block, hand-write the equivalent `landed` predicate as
+a `custom_script` -- "clean tree AND HEAD ahead of `origin/main`", the manual
+equivalent of `mode = "commit"`. Keep the commits small and scoped to one directory
+(matching the process contract). Copy-pasteable, and it loads as-is:
+
+```toml
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "clean tree AND HEAD ahead of origin/main -- manual equivalent of [integration] mode = commit"
+cmd = "sh"
+args = ["-c", "git status -s | grep -q . && exit 1; git diff origin/main HEAD | grep -q . || exit 1; exit 0"]
+verdict = "exit_zero"
+```
+
+**The routing decision (ADR-0055).** Do NOT paste prose discipline blocks into a
+goal-file -- each concern has one home: objectively-checkable rules become
+PREDICATES (the `landed` predicate, the validation ladder, zero-stub); universal
+how-to-work guidance is carried by the PROCESS CONTRACT (you never restate it per
+goal); and mechanics (worktree isolation, branch creation, merge ordering, PR
+opening) are CONTROLLER behavior. A goal-file stays a short declarative statement
+of done.
+
 ## Pin `schema_version`
 
 Every `--json` object carries `schema_version` (currently **2**, bumped by
@@ -523,6 +589,7 @@ gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 
 ## See also
 
+- `docs/landing.md` -- landing: `[integration]`/`[conventions]`, the process contract, the Tier-0 `landed` pattern, and the ADR-0055 routing decision.
 - `docs/session-bus.md` -- the session bus: concepts, CLI/MCP surfaces, the delivery installer (ADR-0067/0071).
 - `docs/pool-verification-gate.md` -- the pre-merge verification gate (ADR-0026 L1).
 - `docs/orchestrator-recipe.md` -- the full recipe (source of truth).
