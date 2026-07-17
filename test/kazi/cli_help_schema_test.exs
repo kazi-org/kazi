@@ -251,6 +251,23 @@ defmodule Kazi.CLIHelpSchemaTest do
       assert payload["schemas"]["apply"]["schema_version"] == 2
     end
 
+    test "schema integration returns the [integration] block schema (T44.1, ADR-0055)" do
+      out = capture_io(fn -> assert Kazi.CLI.run(["schema", "integration"]) == 0 end)
+
+      assert {:ok, schema} = Jason.decode(String.trim(out))
+      assert schema["kind"] == "integration"
+      key_names = schema["keys"] |> Enum.map(& &1["name"]) |> MapSet.new()
+
+      assert MapSet.subset?(
+               MapSet.new(~w(mode branch_prefix base commit_style)),
+               key_names
+             )
+
+      # The mode key documents the five accepted values.
+      mode_key = Enum.find(schema["keys"], &(&1["name"] == "mode"))
+      for m <- ~w(commit branch pr merge none), do: assert(mode_key["description"] =~ m)
+    end
+
     test "an unknown command is a JSON error on stdout with a non-zero exit" do
       out = capture_io(fn -> assert Kazi.CLI.run(["schema", "does-not-exist"]) == 1 end)
 
