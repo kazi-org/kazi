@@ -655,6 +655,26 @@ defmodule Kazi.MCP.Server do
   # An id is a stream sequence: a positive integer. JSON-RPC clients routinely
   # send it as a string, so accept that spelling rather than erroring on a
   # value that is unambiguous.
+  # T55.5 (ADR-0073 decision point 3): the `kazi bus name` twin.
+  defp call_tool("kazi_bus_name", args, opts) do
+    with {:ok, nickname} <- fetch_string_or(args, "name", "kazi_bus_name requires `name`") do
+      case Bus.name(nickname, bus_opts(args, opts)) do
+        :ok ->
+          {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true, "name" => nickname}}
+
+        {:error, reason} ->
+          {:tool_error, bus_error(reason)}
+      end
+    end
+  end
+
+  defp call_tool(name, _args, _opts) do
+    {:error, @method_not_found, "unknown tool: #{inspect(name)}"}
+  end
+
+  # T55.12: an id is a stream sequence -- a positive integer. JSON-RPC clients
+  # routinely send it as a string, so accept that spelling rather than erroring
+  # on a value that is unambiguous.
   defp fetch_message_id(args) do
     case Map.get(args, "id") do
       id when is_integer(id) and id > 0 ->
@@ -672,23 +692,6 @@ defmodule Kazi.MCP.Server do
       _other ->
         {:error, @invalid_params, "kazi_bus_status requires `id` (a positive integer)"}
     end
-  end
-
-  # T55.5 (ADR-0073 decision point 3): the `kazi bus name` twin.
-  defp call_tool("kazi_bus_name", args, opts) do
-    with {:ok, nickname} <- fetch_string_or(args, "name", "kazi_bus_name requires `name`") do
-      case Bus.name(nickname, bus_opts(args, opts)) do
-        :ok ->
-          {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true, "name" => nickname}}
-
-        {:error, reason} ->
-          {:tool_error, bus_error(reason)}
-      end
-    end
-  end
-
-  defp call_tool(name, _args, _opts) do
-    {:error, @method_not_found, "unknown tool: #{inspect(name)}"}
   end
 
   # The bus tools' `opts` -- scope/topic/sev from the tool arguments, plus any
