@@ -7,6 +7,43 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17 — T60.2 finding: ghost `running` rows (#1155) — the T48.15 reaper can only abandon dead-pid runs, so no-os_pid and recycled-pid ghosts live forever
+
+**Type:** investigation + fix
+**Tags:** read-model, run-registry, reaper, sqlite, T60.2, #1155
+
+**Symptom.** Runs permanently stuck at `status='running'` (26 ghost rows on one
+machine, 9-day-stale heartbeat, zero live kazi processes; 1 on another). An
+`abandoned` terminal status already exists and finalizes *some* rows (15/3 on the
+two machines), so a finalizer path exists but misses these.
+
+**Root cause.** `Kazi.ReadModel.RunReaper.reap/0` reaped a stale `running` row to
+`abandoned` only when the row (a) had recorded an `os_pid` AND (b) that OS process
+no longer existed (`kill -0` fails). Two ghost shapes slip through this filter
+forever:
+
+1. **No `os_pid`.** The reaper's `has_os_pid?` guard drops any row that never
+   recorded a pid — a run that crashed before `RunRegistry.record_harness_pid/2`,
+   or a row predating the field. This is the dominant cause of the observed
+   ghosts: there is no process to probe, so the reaper skipped them entirely.
+2. **Recycled `os_pid`.** A recorded pid the OS later reassigned to an unrelated,
+   now-live process reads as "alive" via `kill -0`, so `process_alive?` returns
+   true and the row is never reaped — a false-positive no liveness probe can catch.
+
+The reaper was a *liveness* reaper only; it had no *time* backstop, so any row
+whose liveness could not be truthfully probed sat at `running` indefinitely.
+
+**Fix (T60.2).** `reap/1` now abandons a stale `running` row on any of three
+signals: dead recorded pid (unchanged fast path); **no recorded pid** (liveness
+unverifiable → abandon once stale); or **heartbeat older than
+`abandon_after_seconds`** (default 24h) regardless of the pid probe (guards
+against recycling). The 24h backstop sits far above any legitimate heartbeat gap,
+so a genuinely-live run (fresh heartbeat, or a live pid within the window) is
+never touched. The `RunReaperTicker` (5-min interval) already drives it. Pinned
+by `test/kazi/read_model/run_reap_test.exs` (no-pid ghost, recycled-pid backstop,
+fresh-heartbeat never-reaped, and a fixture-shape sweep leaving zero stale
+`running` rows).
+
 ## 2026-07-17 — T59.4 finding: #1025 and #1186 are NOT one root cause — five distinct contended resources; T59.5 must be five fixes, not a blanket timeout bump
 
 **Type:** investigation
