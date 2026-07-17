@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>kazi operator IA composite mock — T63.4</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #101a2e; --ink: #dbe4f3; --dim: #7d8db3;
+    --grn: #2ee6a8; --red: #ff5c6c; --amb: #ffb454; --line: #1c2a45;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", sans-serif; padding: 2rem; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .annot {
+    background: #1a2542; border: 1px dashed var(--amb); color: var(--amb);
+    font-size: 12px; padding: .35rem .6rem; border-radius: 4px; margin: .4rem 0 1rem;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  .purpose { color: var(--dim); font-size: .95rem; margin: 0 0 1rem; }
+  .mode-toggle {
+    display: inline-flex; border: 1px solid var(--line); border-radius: 999px;
+    overflow: hidden; margin-bottom: 1.5rem; font-size: .8rem;
+  }
+  .mode-toggle span { padding: .35rem .9rem; color: var(--dim); }
+  .mode-toggle .active { background: var(--panel); color: var(--ink); }
+  section { margin-bottom: 2rem; }
+  section > h2 { font-size: 1rem; color: var(--ink); border-bottom: 1px solid var(--line); padding-bottom: .4rem; margin-bottom: .8rem; }
+  section > .q { color: var(--dim); font-size: .8rem; margin: -.6rem 0 .8rem; }
+
+  /* Q1 fleet grid */
+  .fleet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: .7rem; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .7rem .85rem; font-size: .82rem;
+  }
+  .card .goal { font-family: ui-monospace, monospace; font-size: .74rem; color: var(--dim); margin-bottom: .3rem; word-break: break-all; }
+  .card .state { font-weight: 600; }
+  .state-converging { color: var(--amb); }
+  .state-stuck { color: var(--red); }
+  .state-landed { color: var(--grn); }
+  .card .meta { color: var(--dim); font-size: .74rem; margin-top: .3rem; }
+  .remote-badge {
+    display: inline-block; font-size: .65rem; padding: .05rem .35rem; border-radius: 3px;
+    background: rgba(125,141,179,.15); color: var(--dim); margin-left: .3rem;
+  }
+
+  /* Q2/Q3 attention */
+  .attn-sub { font-size: .8rem; color: var(--dim); margin: 1rem 0 .5rem; text-transform: uppercase; letter-spacing: .04em; }
+  .attn-list { list-style: none; margin: 0; padding: 0; }
+  .attn-row {
+    display: flex; align-items: center; gap: .7rem; background: var(--panel);
+    border: 1px solid var(--line); border-left: 3px solid var(--red);
+    border-radius: 6px; padding: .55rem .8rem; margin-bottom: .4rem; font-size: .82rem;
+  }
+  .attn-row.sev-3 { border-left-color: var(--amb); }
+  .attn-row .goal { font-family: ui-monospace, monospace; color: var(--ink); font-size: .78rem; flex: 1; }
+  .attn-row .blocker { color: var(--dim); font-size: .78rem; }
+  .attn-row .sig { font-size: .68rem; text-transform: uppercase; padding: .1rem .4rem; border-radius: 3px; background: rgba(255,92,108,.15); color: var(--red); }
+  .attn-row.sev-3 .sig { background: rgba(255,180,84,.15); color: var(--amb); }
+
+  /* Q4 rate displays */
+  .rate-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; }
+  .rate-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; }
+  .rate-card .label { font-size: .74rem; color: var(--dim); margin-bottom: .3rem; }
+  .rate-card .value { font-size: 1.3rem; font-weight: 700; }
+  .rate-card .note { font-size: .72rem; color: var(--dim); margin-top: .3rem; font-style: italic; }
+  .bar { height: 6px; border-radius: 3px; background: #16233f; margin-top: .5rem; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--grn); }
+
+  .gap-panel { margin-top: 2.5rem; border-top: 2px solid var(--line); padding-top: 1rem; }
+  .gap-panel h2 { font-size: .95rem; color: var(--amb); }
+  code { background: #16233f; padding: .1rem .3rem; border-radius: 3px; font-size: .82em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="annot">
+    MOCK — T63.4 (no production code changed). This is the DEFAULT "operator"
+    mode: fleet grid + attention (run-level and session-level, two labeled
+    sub-sections) + rate displays. A "debug" toggle (not built here) would
+    reveal the DAG/event-river/lease-map surfaces unchanged elsewhere.
+  </div>
+
+  <h1>kazi · operator view</h1>
+  <p class="purpose">Answers: what's my fleet doing, where can I help, what's blocking them, how far along are they.</p>
+
+  <div class="mode-toggle"><span class="active">operator</span><span>debug</span></div>
+
+  <section>
+    <h2>Q1 — What is my fleet working on?</h2>
+    <p class="q">Source: <code>Kazi.ReadModel.RunRegistry</code> via <code>assign_fleet/1</code> (mission_control_live.ex), extended by T60.1's cross-machine bus facts (merged, PR #1380).</p>
+    <div class="fleet-grid">
+      <div class="card">
+        <div class="goal">runtime-gherkin-provider-adr-0071-loader</div>
+        <div class="state state-converging">converging</div>
+        <div class="meta">iteration 1 · 3/8 predicates</div>
+      </div>
+      <div class="card">
+        <div class="goal">wt-1290-serial-apply-routing</div>
+        <div class="state state-landed">landed</div>
+        <div class="meta">iteration 5 · 5/5 predicates</div>
+      </div>
+      <div class="card">
+        <div class="goal">t59-5-atom-counter-flake</div>
+        <div class="state state-stuck">stuck<span class="remote-badge">remote · mini</span></div>
+        <div class="meta">iteration 8 · budget 91%</div>
+      </div>
+    </div>
+    <div class="annot">The "remote" badge on the third card is T60.1's clause-3 follow-up (flagged on the board, unclaimed) — a run posted from a different machine renders distinctly instead of being invisible to this session.</div>
+  </section>
+
+  <section>
+    <h2>Q2 / Q3 — Where can I help, and what's blocking them?</h2>
+    <p class="q">Source: <code>Kazi.Attention.Queue.build/2</code> (run-level, gated fresh by T63.1) + T60.3's session-level "waiting on human" bus facts (open, E60) — two sections, not merged into one feed (different identities/lifecycles).</p>
+
+    <div class="attn-sub">Runs needing attention</div>
+    <ul class="attn-list">
+      <li class="attn-row">
+        <span class="sig">cause</span>
+        <span class="goal">t59-5-atom-counter-flake</span>
+        <span class="blocker">error_wedged — config error, an agent can't self-fix this</span>
+      </li>
+      <li class="attn-row sev-3">
+        <span class="sig">budget</span>
+        <span class="goal">e52a-write-router-seam</span>
+        <span class="blocker">91% of 20-iteration budget consumed</span>
+      </li>
+    </ul>
+    <div class="annot">Each row shows <code>entry.signal</code> + <code>entry.detail</code> verbatim (the blocker's actual name — "error_wedged", not just a "stuck" badge) instead of collapsing to a status word. This is presentational only; the data already exists in <code>queue.ex</code>'s entry shape.</div>
+
+    <div class="attn-sub">Sessions waiting on a human</div>
+    <ul class="attn-list">
+      <li class="attn-row sev-3">
+        <span class="sig">human</span>
+        <span class="goal">kazi-b · apply-T59-5</span>
+        <span class="blocker">permission prompt — writing outside declared workspace</span>
+      </li>
+    </ul>
+    <div class="annot">NOT YET REAL — this section renders T60.3's proposed fact kind (issue #1156), which does not exist yet. Shown here to demonstrate the composed layout T63.5 should build toward once T60.3 ships.</div>
+  </section>
+
+  <section>
+    <h2>Q4 — How much longer until projects complete?</h2>
+    <p class="q">Rate/progress only — ADR-0046 honest-unknown. No projected dates anywhere on this page.</p>
+    <div class="rate-grid">
+      <div class="rate-card">
+        <div class="label">predicates passing</div>
+        <div class="value">3 / 8</div>
+        <div class="bar"><div style="width:37%"></div></div>
+        <div class="note">runtime-gherkin-provider-adr-0071-loader, iteration 1 — kazi status --json</div>
+      </div>
+      <div class="rate-card">
+        <div class="label">red→green flips, last 4 iterations</div>
+        <div class="value">2</div>
+        <div class="note">Iteration.regressions diff over list_iterations/1 — a RATE, not an ETA</div>
+      </div>
+      <div class="rate-card">
+        <div class="label">budget consumed</div>
+        <div class="value">62%</div>
+        <div class="bar"><div style="width:62%;background:var(--amb)"></div></div>
+        <div class="note">observed iterations / max_iterations — same source as the attention queue's :budget signal</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="gap-panel">
+    <h2>Element → source map (every element above)</h2>
+    <table style="border-collapse:collapse;width:100%;font-size:.8rem">
+      <tr><th style="text-align:left;border:1px solid var(--line);padding:.3rem">Element</th><th style="text-align:left;border:1px solid var(--line);padding:.3rem">Source / gap</th></tr>
+      <tr><td style="border:1px solid var(--line);padding:.3rem">Fleet grid cards</td><td style="border:1px solid var(--line);padding:.3rem"><code>Kazi.ReadModel.RunRegistry</code> — exists</td></tr>
+      <tr><td style="border:1px solid var(--line);padding:.3rem">"remote" badge</td><td style="border:1px solid var(--line);padding:.3rem">T60.1 clause 3 — flagged, unclaimed (see proposal.md)</td></tr>
+      <tr><td style="border:1px solid var(--line);padding:.3rem">Run-attention rows</td><td style="border:1px solid var(--line);padding:.3rem"><code>Kazi.Attention.Queue.build/2</code> — exists, needs T63.1's freshness gate</td></tr>
+      <tr><td style="border:1px solid var(--line);padding:.3rem">Session-blocked rows</td><td style="border:1px solid var(--line);padding:.3rem">T60.3 — GAP, not yet built (E60, open)</td></tr>
+      <tr><td style="border:1px solid var(--line);padding:.3rem">Predicates passing</td><td style="border:1px solid var(--line);padding:.3rem"><code>kazi status --json</code> / <code>Kazi.ReadModel</code> — exists</td></tr>
+      <tr><td style="border:1px solid var(--line);padding:.3rem">Red→green flips</td><td style="border:1px solid var(--line);padding:.3rem"><code>Iteration.regressions</code> across <code>list_iterations/1</code> — exists, client-side diff</td></tr>
+      <tr><td style="border:1px solid var(--line);padding:.3rem">Budget consumed</td><td style="border:1px solid var(--line);padding:.3rem"><code>Run.max_iterations</code> vs. observed count — exists</td></tr>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>
