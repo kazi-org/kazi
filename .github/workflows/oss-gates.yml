@@ -143,6 +143,12 @@ jobs:
       - name: Test the knowledge-extraction tool (T31.3 fixtures)
         run: python3 .github/scripts/test_extract_knowledge.py
 
+      - name: Test the lore-id tool (T56.3 fixtures)
+        run: python3 .github/scripts/test_lore_ids.py
+
+      - name: No duplicate lore ids (T56.3, blocking)
+        run: python3 .github/scripts/lore_ids.py --check docs/lore.md
+
   site-commands:
     name: site command accuracy (T29.4, blocking)
     runs-on: ubuntu-latest
