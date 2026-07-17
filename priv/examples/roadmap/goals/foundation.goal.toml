@@ -1,0 +1,9 @@
+# A roadmap member goal-file (T45.1). Barest valid goal: an id plus one predicate.
+id = "foundation"
+name = "Foundation compiles"
+
+[[predicate]]
+id = "compiles"
+provider = "custom_script"
+description = "the project compiles"
+cmd = "true"
