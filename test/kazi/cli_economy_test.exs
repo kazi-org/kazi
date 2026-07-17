@@ -150,6 +150,62 @@ defmodule Kazi.CLIEconomyTest do
     end
   end
 
+  describe "economy --json — dispatch_by_role (T49.9)" do
+    test "reports the per-role split on a seeded db" do
+      goal_ref = "cli-econ-roles"
+      base = DateTime.utc_now()
+
+      run = seed_run(%{goal_ref: goal_ref, predicate_count: 2, dispatch_count: 2})
+
+      run
+      |> Kazi.ReadModel.Run.changeset(%{
+        "started_at" => DateTime.add(base, -60, :second),
+        "finished_at" => base
+      })
+      |> Kazi.Repo.update!()
+
+      # One dispatch per role, inside the run's window (iterations carry no run id;
+      # they correlate by goal_ref + the run's [started_at, finished_at]).
+      for {index, kind} <- [{0, :dispatch_agent}, {1, :dispatch_demonstrator}] do
+        {:ok, _} =
+          Kazi.ReadModel.record_iteration(%{
+            goal_ref: goal_ref,
+            iteration_index: index,
+            action: %Kazi.Action{kind: kind, params: %{}},
+            observed_at: DateTime.add(base, -30, :second)
+          })
+      end
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["economy", "--goal", goal_ref, "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert [group] = payload["groups"]
+
+      # The total is unchanged and still both-roles; the split names who spent it.
+      assert group["dispatch_count"]["p50"] == 2
+      assert group["dispatch_by_role"]["dispatch_agent"]["p50"] == 1
+      assert group["dispatch_by_role"]["dispatch_demonstrator"]["p50"] == 1
+    end
+
+    test "a run with no demonstrator reports an honest 0 for it" do
+      goal_ref = "cli-econ-fixer-only"
+      seed_run(%{goal_ref: goal_ref, predicate_count: 2, dispatch_count: 0})
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["economy", "--goal", goal_ref, "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert [group] = payload["groups"]
+      assert group["dispatch_by_role"]["dispatch_agent"]["p50"] == 0
+      assert group["dispatch_by_role"]["dispatch_demonstrator"]["p50"] == 0
+    end
+  end
+
   describe "economy (human) — unchanged default surface" do
     test "reports groups in human prose" do
       goal_ref = "cli-econ-human"

@@ -7997,6 +7997,9 @@ defmodule Kazi.CLI do
       tokens: group.tokens,
       cost_usd: group.cost_usd,
       dispatch_count: group.dispatch_count,
+      # T49.9: `dispatch_count` above stays the both-roles total; this names who
+      # spent it (fixer vs demonstrator). Keys are the iteration `action_kind`s.
+      dispatch_by_role: group.dispatch_by_role,
       wall_clock_s: group.wall_clock_s
     }
   end
@@ -8019,9 +8022,23 @@ defmodule Kazi.CLI do
       IO.puts("    tokens p50/p95:         #{fmt_pair(group.tokens)}")
       IO.puts("    cost_usd p50/p95:       #{fmt_pair(group.cost_usd)}")
       IO.puts("    dispatch_count p50/p95: #{fmt_pair(group.dispatch_count)}")
+
+      Enum.each(group.dispatch_by_role, fn {kind, pair} ->
+        IO.puts("      #{fmt_role(kind)} p50/p95:#{fmt_role_pad(kind)}#{fmt_pair(pair)}")
+      end)
+
       IO.puts("    wall_clock_s p50/p95:   #{fmt_pair(group.wall_clock_s)}")
     end)
   end
+
+  # `dispatch_agent` -> "fixer", `dispatch_demonstrator` -> "demonstrator" (T49.9):
+  # the human surface names the ROLE, not the internal action kind the JSON keys on.
+  defp fmt_role(:dispatch_agent), do: "fixer"
+  defp fmt_role(:dispatch_demonstrator), do: "demonstrator"
+  defp fmt_role(kind), do: to_string(kind)
+
+  defp fmt_role_pad(:dispatch_agent), do: "        "
+  defp fmt_role_pad(_kind), do: " "
 
   defp fmt_pair(%{p50: p50, p95: p95}), do: "#{fmt_metric(p50)}/#{fmt_metric(p95)}"
 
