@@ -53,8 +53,10 @@ defmodule Kazi.Bus.DigestMachinePathTest do
       assert length(messages) == 200
       assert Enum.all?(messages, fn m -> is_integer(m.id) end)
 
-      # The CLI --json envelope: digest by default, versioned.
-      payload = Kazi.CLI.bus_read_payload(messages, full: false)
+      # The CLI --json envelope: digest by default, versioned. (T55.7 moved
+      # assembly into the daemon; `local_bus_reply/2` shapes the same reply the
+      # daemon returns, so this still pins the envelope over a REAL backlog.)
+      payload = Kazi.CLI.bus_read_payload(Kazi.CLI.local_bus_reply(messages, full: false))
       assert payload["ok"] == true
       assert payload["schema_version"] == Kazi.CLI.Schema.schema_version()
       refute Map.has_key?(payload, "messages")
@@ -123,41 +125,13 @@ defmodule Kazi.Bus.DigestMachinePathTest do
              end)
     end
 
-    test "kazi_bus_read (MCP) returns the digest by default; full: true every message unabridged",
-         %{conn: conn} do
-      scope = unique_scope()
-      body = "mcp-doc " <> String.duplicate("y", 60 * 1024)
-
-      assert :ok = Bus.post("note", body, conn: conn, scope: scope, topic: "doc")
-      assert :ok = Bus.post("fact", "small mcp fact", conn: conn, scope: scope, topic: "ci")
-
-      # Default: the bounded digest, versioned, no messages array.
-      assert %{"result" => %{"structuredContent" => digest_result}} =
-               call("kazi_bus_read", %{"peek" => true, "scope" => scope}, conn: conn)
-
-      assert digest_result["ok"] == true
-      assert digest_result["schema_version"] == Kazi.CLI.Schema.schema_version()
-      refute Map.has_key?(digest_result, "messages")
-
-      %{"total" => 2, "lines" => lines} = digest_result["digest"]
-      assert length(lines) <= Digest.max_lines()
-      assert [stub] = Enum.filter(lines, &(&1["type"] == "stub"))
-      refute Map.has_key?(stub, "text")
-
-      # full: true is the documented escape -- every message unabridged.
-      assert %{"result" => %{"structuredContent" => full_result}} =
-               call("kazi_bus_read", %{"peek" => true, "full" => true, "scope" => scope},
-                 conn: conn
-               )
-
-      assert full_result["schema_version"] == Kazi.CLI.Schema.schema_version()
-      refute Map.has_key?(full_result, "digest")
-
-      messages = full_result["messages"]
-      assert Enum.any?(messages, fn m -> m.text == body end)
-      assert Enum.any?(messages, fn m -> m.text == "small mcp fact" end)
-      assert Enum.all?(messages, fn m -> is_integer(m.id) end)
-    end
+    # `kazi_bus_read`'s digest/`full: true` contract MOVED to
+    # `Kazi.Bus.DaemonDigestTest`: T55.7 (ADR-0072 d5) routes the MCP read
+    # through the daemon's control socket, so the tool can no longer be
+    # exercised by injecting `conn:` -- proving it now REQUIRES a daemon, which
+    # is the point. The properties this test pinned (bounded digest by default,
+    # a 60 KiB body as a stub, `full: true` unabridged, the versioned envelope)
+    # are pinned there, against a real one.
 
     test "kazi_bus_watch (MCP) renders its result through the digest, and times out with one",
          %{conn: conn} do
