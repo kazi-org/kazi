@@ -317,6 +317,10 @@ defmodule Kazi.Goal.Loader do
     "http_probe" => :http_probe,
     "prod_log" => :prod_log,
     "browser" => :browser,
+    # T43.7 (UC-055): the `:cli` provider. Its assertions are validated below so a
+    # predicate with NO assertions (which could never pass or fail meaningfully)
+    # fails loudly at load time, not silently at dispatch.
+    "cli" => :cli,
     # T32.10 (ADR-0043): live RED/SLO metrics. Its pass_when/quantile/burn_rate
     # keys are validated below (validate_provider_config/3) so a mis-declared gate
     # fails loudly at load time, not silently at dispatch.
@@ -1492,7 +1496,140 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T43.7 (UC-055): a `:cli` predicate needs a `cmd` and a NON-EMPTY `assertions`
+  # list — a cli predicate with no assertions can neither pass nor fail
+  # meaningfully (every dispatch would trivially "pass" against nothing), the same
+  # empty-gate class ADR-0058 fixed for a missing `url`. Each assertion's target +
+  # matcher is checked so a typo (an unknown target, a json_path with no path, an
+  # uncompilable regex) is a load error naming the bad key, not a dispatch-time
+  # surprise. Kept in lockstep with Kazi.Providers.Cli.
+  defp validate_provider_config(:cli, config, id) do
+    with :ok <- validate_cli_cmd(config, id) do
+      validate_cli_assertions(config, id)
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  # --- cli assertion vocabulary (T43.7, UC-055) ------------------------------
+
+  # Kept in lockstep with Kazi.Providers.Cli.targets/0 and matchers/0.
+  @cli_targets ~w(exit_code stdout stderr)
+  @cli_matchers ~w(equals contains regex json_path)
+
+  defp validate_cli_cmd(config, id) do
+    case Map.get(config, :cmd) do
+      cmd when is_binary(cmd) and cmd != "" -> :ok
+      _ -> {:error, "cli predicate #{inspect(id)} requires a non-empty string \"cmd\""}
+    end
+  end
+
+  defp validate_cli_assertions(config, id) do
+    case Map.get(config, :assertions) do
+      [_ | _] = assertions ->
+        Enum.reduce_while(assertions, :ok, fn assertion, :ok ->
+          case validate_cli_assertion(assertion, id) do
+            :ok -> {:cont, :ok}
+            {:error, _} = error -> {:halt, error}
+          end
+        end)
+
+      list when is_list(list) ->
+        {:error,
+         "cli predicate #{inspect(id)} \"assertions\" must be a NON-EMPTY list " <>
+           "(a cli predicate with no assertions can never pass or fail meaningfully)"}
+
+      _ ->
+        {:error,
+         "cli predicate #{inspect(id)} requires a non-empty \"assertions\" list of tables"}
+    end
+  end
+
+  defp validate_cli_assertion(assertion, id) when is_map(assertion) do
+    case assertion_key(assertion, "target") do
+      "exit_code" ->
+        validate_cli_exit_code(assertion, id)
+
+      target when target in ["stdout", "stderr"] ->
+        validate_cli_stream_assertion(target, assertion, id)
+
+      nil ->
+        {:error, "cli predicate #{inspect(id)} has an assertion with no \"target\""}
+
+      other ->
+        {:error,
+         "cli predicate #{inspect(id)} has an assertion with unknown target #{inspect(other)} " <>
+           "(valid: #{Enum.join(@cli_targets, ", ")})"}
+    end
+  end
+
+  defp validate_cli_assertion(other, id) do
+    {:error,
+     "cli predicate #{inspect(id)} \"assertions\" must be a list of tables " <>
+       "(got element #{inspect(other)})"}
+  end
+
+  defp validate_cli_exit_code(assertion, id) do
+    case assertion_key(assertion, "expected") do
+      n when is_integer(n) ->
+        :ok
+
+      other ->
+        {:error,
+         "cli predicate #{inspect(id)} exit_code assertion \"expected\" must be an integer " <>
+           "(got #{inspect(other)})"}
+    end
+  end
+
+  defp validate_cli_stream_assertion(target, assertion, id) do
+    case assertion_key(assertion, "match") || "equals" do
+      "json_path" ->
+        validate_cli_json_path(target, assertion, id)
+
+      "regex" ->
+        validate_cli_regex(target, assertion, id)
+
+      match when match in @cli_matchers ->
+        :ok
+
+      other ->
+        {:error,
+         "cli predicate #{inspect(id)} #{target} assertion has unknown match #{inspect(other)} " <>
+           "(valid: #{Enum.join(@cli_matchers, ", ")})"}
+    end
+  end
+
+  defp validate_cli_json_path(target, assertion, id) do
+    case assertion_key(assertion, "path") do
+      path when is_binary(path) and path != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "cli predicate #{inspect(id)} #{target} json_path assertion requires a non-empty " <>
+           "string \"path\""}
+    end
+  end
+
+  defp validate_cli_regex(target, assertion, id) do
+    case assertion_key(assertion, "expected") do
+      pattern when is_binary(pattern) ->
+        case Regex.compile(pattern) do
+          {:ok, _regex} ->
+            :ok
+
+          {:error, reason} ->
+            {:error,
+             "cli predicate #{inspect(id)} #{target} regex assertion \"expected\" does not " <>
+               "compile: #{inspect(reason)}"}
+        end
+
+      other ->
+        {:error,
+         "cli predicate #{inspect(id)} #{target} regex assertion \"expected\" must be a " <>
+           "string pattern (got #{inspect(other)})"}
+    end
+  end
 
   defp require_live_url(config, id, provider) do
     case Map.get(config, :url) do
