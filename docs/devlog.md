@@ -7,6 +7,58 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17: T43.9 -- CLI release smoke dogfooded over the real built binary
+
+**Type:** dogfood
+**Tags:** [cli-provider, release, dogfood, stderr, adr-0014, uc-055]
+
+**What ran.** Authored `priv/examples/cli_release_smoke.goal.toml`, a STANDING
+`:cli` goal over kazi's OWN shipped binary (plus its trivially-green apply target
+`priv/examples/cli_release_smoke.fixture.toml`), then ran it against a real built
+binary -- NOT `mix test`, NOT `mix run`.
+
+**Binary flavor exercised: plain `mix release` (ERTS + the bundled exqlite NIF --
+the FULL read-model), invoked through its `eval` entry (`Kazi.Release.cli/1`).**
+Burrito packaging was NOT feasible here: `MIX_ENV=prod mix release` assembled the
+release cleanly, but the `Burrito.wrap` step aborted on a Zig version mismatch
+(Burrito 1.5.0 pins `0.15.2`; the host had `0.16.0`). The plain release is the
+faithful flavor for these probes anyway -- it carries the same read-model the
+escript degrades, so it exercises the exact `Kazi.Repo`-start path the Homebrew
+not-started crash lived in. A thin `kazi` wrapper mapped `kazi <args>` onto
+`bin/kazi eval 'Kazi.Release.cli([...])'` so `cmd = "kazi"` ran the binary as a
+user does.
+
+**Positive verdict (clean binary converges the goal green).** `kazi version` ->
+exit 0, `kazi 1.206.0` on stdout, EMPTY stderr; `kazi status` -> exit 0, prints
+its summary; `kazi apply <fixture> --check` -> exit 0, `status: pass`. Running the
+whole goal via the release binary (`apply --check --json`) returned `status:
+"pass"`, all three predicates green.
+
+**Negative control (broken binary reds the RIGHT predicate).** A wrapper that
+leaks one spurious `warning:` line to stderr on every call (mimicking the OTP-28
+regression class) flipped ONLY `version-boots-clean` to fail -- on its `stderr
+equals ""` assertion, `found` carrying the leaked line -- exit 1, while
+`status`/`apply` stayed green. Objective verdicts both directions.
+
+**Finding: `stderr equals ""` is the wrong gate for a read-model command.** kazi
+splits its streams deliberately (config/config.exs + `Kazi.CLI.run/1`): stdout is
+the result, stderr is diagnostics. So `kazi status` and `kazi apply` write a
+legitimate Ecto `[info] Migrations already up` line to stderr on EVERY boot -- a
+blanket clean-stderr gate would red them against a perfectly healthy binary. The
+gate belongs on the PURE `version` probe, which boots the same app (so it still
+catches the OTP-28 boot-warning class) but touches no read-model; `status`/`apply`
+are gated on exit 0 + a positive stdout signal, which is what reds a
+`:noproc`/`Kazi.Repo`-not-started crash (a crash exits non-zero before printing).
+
+**Nesting artifact (not a user bug).** When the release LAUNCHER evaluates a goal
+whose `cmd = "kazi"` is a bare `$PATH` lookup, the launcher prepends its own
+`bin/`+`erts/` dirs to `$PATH`, so `System.find_executable("kazi")` resolves to
+`bin/kazi` (which only knows `start`/`eval`/`version`) and shadows the intended
+CLI. A real user's `kazi` is the Burrito binary that takes `kazi version`
+directly, so this only bites the release-evaluates-itself nesting; the full-goal
+run used an absolute `cmd` (the provider bypasses `$PATH` for a path-shaped cmd)
+to sidestep it.
+
 ## 2026-07-17: T55.7 -- the third bus surface silently stayed on the client-side path
 
 **Type:** finding

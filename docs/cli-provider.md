@@ -209,6 +209,29 @@ the real `kazi` binary answers `kazi version` (exit 0, `"kazi"` on stdout) and
 kazi apply priv/examples/cli_provider.toml --workspace . --check
 ```
 
+## Release smoke: a standing goal over the shipped binary
+
+[`priv/examples/cli_release_smoke.goal.toml`](../priv/examples/cli_release_smoke.goal.toml)
+(T43.9) is a STANDING `:cli` goal that dogfoods kazi's OWN release binary — the
+four boot-crash classes that shipped GREEN through `mix test` (a read-model
+`:noproc`, an OTP-28 stderr warning, the L-0022 `RELEASE_*` env leak, the
+Homebrew `Kazi.Repo`-not-started crash) each red a predicate here. It runs the
+binary the way a user does (`cmd = "kazi"`, a `$PATH` lookup — install the
+release binary first): `kazi version` exits 0 with `stderr equals ""` (the
+assertion that catches the OTP-28 warning class), `kazi status` exits 0 and
+prints its summary, and `kazi apply <trivial-fixture> --check` drives the full
+apply command path to a pass. Only the pure `version` probe gates on clean
+stderr: kazi splits its streams deliberately (stdout = result, stderr =
+diagnostics), so a read-model command legitimately logs an Ecto `Migrations
+already up` line to stderr — `status`/`apply` are gated on exit 0 plus a stdout
+signal instead. The apply predicate targets
+[`priv/examples/cli_release_smoke.fixture.toml`](../priv/examples/cli_release_smoke.fixture.toml),
+a trivially-green fixture with no workspace/git/network dependency.
+
+```
+kazi apply priv/examples/cli_release_smoke.goal.toml --workspace . --check
+```
+
 ## See also
 
 - `Kazi.Providers.Cli` — the provider.
