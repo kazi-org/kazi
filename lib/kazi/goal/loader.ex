@@ -247,6 +247,16 @@ defmodule Kazi.Goal.Loader do
   drafts emit before the real deployment target is known, see
   `Kazi.Pool.AccBridge`) does NOT satisfy this check.
 
+  A `browser` predicate's `assertions` are additionally checked against the
+  runner's assertion vocabulary (T43.1, ADR-0053): each entry must be a table
+  with a known `type` (`visible`, `hidden`, `text`, `url`, `console_clean`), and
+  `console_clean`'s optional `network` flag must be a boolean. kazi passes
+  `assertions` VERBATIM to the runner, so an unknown type would otherwise come
+  back as a permanent `ok: false` -- a :fail indistinguishable from a genuinely
+  broken UI (the ADR-0058 failure shape again: a config error the loop can only
+  find by burning budget). The list is kept in lockstep with the `ASSERTIONS`
+  dispatch table in `priv/browser/playwright_runner.js`.
+
   A `custom_script` predicate carries extra keys (`verdict`, `path`, `pass_when`,
   `pass_codes`/`fail_codes`, `error_codes`, `evidence_format`, `timeout_ms`) that
   are VALIDATED at load time (an unknown verdict, a `json` verdict missing
@@ -1387,8 +1397,11 @@ defmodule Kazi.Goal.Loader do
   defp validate_provider_config(:http_probe, config, id),
     do: require_live_url(config, id, "http_probe")
 
-  defp validate_provider_config(:browser, config, id),
-    do: require_live_url(config, id, "browser")
+  defp validate_provider_config(:browser, config, id) do
+    with :ok <- require_live_url(config, id, "browser") do
+      validate_browser_assertions(config, id)
+    end
+  end
 
   defp validate_provider_config(_kind, _config, _id), do: :ok
 
@@ -1402,6 +1415,97 @@ defmodule Kazi.Goal.Loader do
          "#{provider} predicate #{inspect(id)} is missing required key \"url\" " <>
            "(a live predicate needs a url to probe)"}
     end
+  end
+
+  # --- browser assertion vocabulary (T43.1, ADR-0053 §1) ---------------------
+
+  # Kept in lockstep with the ASSERTIONS dispatch table in
+  # priv/browser/playwright_runner.js. The RUNNER owns the vocabulary -- kazi
+  # passes `assertions` verbatim (the ADR-0040 dividend) -- but an unknown type
+  # reaches the runner only to come back `ok: false`, i.e. a permanent :fail the
+  # author reads as "my UI is broken" rather than "I typo'd the type". That is the
+  # L-0018 class (a drafting harness GUESSES predicate config) and the same
+  # failure shape ADR-0058 fixed for a missing `url`: a config error the loop can
+  # only discover by burning its budget. Checking the vocabulary at LOAD names the
+  # bad type and the valid set instead. A new runner type must be added here too.
+  @browser_assertion_types ~w(visible hidden text url console_clean)
+
+  defp validate_browser_assertions(config, id) do
+    case Map.get(config, :assertions) do
+      nil ->
+        :ok
+
+      assertions when is_list(assertions) ->
+        Enum.reduce_while(assertions, :ok, fn assertion, :ok ->
+          case validate_browser_assertion(assertion, id) do
+            :ok -> {:cont, :ok}
+            {:error, _} = error -> {:halt, error}
+          end
+        end)
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} \"assertions\" must be a list of tables " <>
+           "(got #{inspect(other)})"}
+    end
+  end
+
+  defp validate_browser_assertion(assertion, id) when is_map(assertion) do
+    case assertion_key(assertion, "type") do
+      type when type in @browser_assertion_types ->
+        validate_browser_assertion_keys(type, assertion, id)
+
+      nil ->
+        {:error, "browser predicate #{inspect(id)} has an assertion with no \"type\""}
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} has an assertion with unknown type " <>
+           "#{inspect(other)} (valid: #{Enum.join(@browser_assertion_types, ", ")})"}
+    end
+  end
+
+  defp validate_browser_assertion(other, id) do
+    {:error,
+     "browser predicate #{inspect(id)} \"assertions\" must be a list of tables " <>
+       "(got element #{inspect(other)})"}
+  end
+
+  # `console_clean`'s opt-in `network` flag must be a real boolean: the runner is
+  # JavaScript, where the string "false" is TRUTHY -- so `network = "false"` would
+  # silently turn 4xx/5xx checking ON, the exact inverse of what was authored.
+  defp validate_browser_assertion_keys("console_clean", assertion, id) do
+    case assertion_key(assertion, "network") do
+      network when is_boolean(network) or is_nil(network) ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} console_clean assertion \"network\" must be a " <>
+           "boolean (got #{inspect(other)})"}
+    end
+  end
+
+  defp validate_browser_assertion_keys(_type, _assertion, _id), do: :ok
+
+  # An assertion table arrives string-keyed from TOML (the loader only atomizes
+  # top-level predicate keys) or atom-keyed from an inline/authored map. Unlike
+  # `fetch_either/2` this distinguishes a present `false` from an absent key --
+  # `console_clean`'s `network` is a boolean, and `||` would read `false` as
+  # missing.
+  defp assertion_key(assertion, key) do
+    with :error <- Map.fetch(assertion, key),
+         :error <- atom_key_fetch(assertion, key) do
+      nil
+    else
+      {:ok, value} -> value
+    end
+  end
+
+  defp atom_key_fetch(assertion, key) do
+    Map.fetch(assertion, String.to_existing_atom(key))
+  rescue
+    ArgumentError -> :error
   end
 
   # --- static (T32.7, ADR-0043) ----------------------------------------------
