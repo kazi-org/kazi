@@ -121,7 +121,11 @@ defmodule Kazi.Runtime do
     scenario: Kazi.Providers.Scenario,
     # T44.7 (E29/ADR-0034, UC-058): the internal-leak guard as a predicate — scan
     # the diff's added lines for private IPs / home paths / configurable codenames.
-    oss_hygiene: Kazi.Providers.OssHygiene
+    oss_hygiene: Kazi.Providers.OssHygiene,
+    # T45.3 (UC-059): "the phase <phase-ref> has been planned" — a deterministic,
+    # read-model-only check (exists + floor-passed + approved). Makes planning a
+    # convergeable goal.
+    plan_expanded: Kazi.Providers.PlanExpanded
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
