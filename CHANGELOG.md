@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.205.0](https://github.com/kazi-org/kazi/compare/v1.204.0...v1.205.0) (2026-07-17)
+
+
+### Features
+
+* **browser:** visual baseline-diff assertion in the playwright runner (T43.3) ([6bb616a](https://github.com/kazi-org/kazi/commit/6bb616ad7f35561cd7c5cb10af6f9604e6ffc383))
+* **loader:** admit + validate the visual browser assertion (T43.3) ([919588e](https://github.com/kazi-org/kazi/commit/919588e60930a616d78cbccf34198658844d810e))
+
 ## [1.204.0](https://github.com/kazi-org/kazi/compare/v1.203.0...v1.204.0) (2026-07-17)
 
 
