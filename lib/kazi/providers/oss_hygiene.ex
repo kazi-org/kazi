@@ -39,7 +39,7 @@ defmodule Kazi.Providers.OssHygiene do
   @default_base "origin/main"
   @allow_marker "leak-guard:allow"
 
-  # Private IPv4 (RFC-1918): 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12.
+  # Private IPv4 (RFC-1918): the 192.168, 10, and 172.16-31 private ranges.
   @private_ip ~r/(^|[^0-9.])(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})([^0-9]|$)/
 
   # Absolute home paths with a real user token (not a placeholder).
