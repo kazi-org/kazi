@@ -1046,13 +1046,34 @@ defmodule Kazi.Predicate.Schema do
         type: "array<table>",
         required: true,
         description:
-          "A NON-EMPTY list of checks (an empty list is a load error). Each needs a \"target\": " <>
-            "\"exit_code\" (\"expected\" = the integer the exit code must equal); or \"stdout\" / " <>
-            "\"stderr\" with a \"match\" over that stream — \"equals\" (whole-stream equality), " <>
-            "\"contains\" (substring), \"regex\" (the stream matches \"expected\"), or " <>
-            "\"json_path\" (parse the stream as JSON, extract \"path\", compare to \"expected\"). " <>
-            "\"expected\" carries the operand; \"json_path\" also needs \"path\" (a $/.key/[i] " <>
-            "subset). A violated assertion is :fail with expected-vs-found evidence."
+          "A NON-EMPTY list of checks (required UNLESS \"script\" is set; an empty list is a " <>
+            "load error). Each needs a \"target\": \"exit_code\" (\"expected\" = the integer the " <>
+            "exit code must equal); or \"stdout\" / \"stderr\" with a \"match\" over that stream — " <>
+            "\"equals\" (whole-stream equality), \"contains\" (substring), \"regex\" (the stream " <>
+            "matches \"expected\"), \"json_path\" (parse the stream as JSON, extract \"path\", " <>
+            "compare to \"expected\"), or \"golden\" (the whole stream must equal the committed " <>
+            "file at \"golden\"; a mismatch is :fail with a unified \"diff\"). \"expected\" carries " <>
+            "the operand; \"json_path\" also needs \"path\" (a $/.key/[i] subset); \"golden\" needs " <>
+            "the \"golden\" file path. A violated assertion is :fail with expected-vs-found evidence."
+      },
+      %{
+        name: "script",
+        type: "array<table>",
+        required: false,
+        description:
+          "An ORDERED list of sub-invocations of the SAME cmd (T43.8). Each step is a table with " <>
+            "its own \"args\" + non-empty \"assertions\". Runs in order, passes only when EVERY " <>
+            "step passes, and STOPS at + NAMES the first failing step. Use INSTEAD OF a top-level " <>
+            "assertions list. Score = passing steps (higher_better)."
+      },
+      %{
+        name: "samples",
+        type: "integer",
+        required: false,
+        description:
+          "Require N CONSECUTIVE passing runs before the predicate is green (flake detection; " <>
+            "mirrors the browser provider). Default 1. A single non-pass breaks the streak; an " <>
+            ":error run is infra, never a broken streak."
       }
     ],
     example: %{
