@@ -45,13 +45,26 @@ defmodule Kazi.Bus.Board do
         "facts" => [line],       # last value per topic, stubbed + bounded
         "roster" => [entry],     # stable identity per live session
         "total_facts" => n,      # distinct fact topics before bounding
-        "total_sessions" => m
+        "total_sessions" => m,
+        "attention" => [entry],  # T60.3: sessions waiting on a human, oldest first
+        "total_attention" => k
       }
 
   `facts` are collapsed to the LATEST value per topic (highest `id` wins) before
   rendering, so posting three facts on one topic yields ONE current line -- the
   last, never three. `total_facts` counts distinct topics, so an `overflow`
   fact line never hides how many topics the board actually holds.
+
+  ## Attention (T60.3, issue #1156)
+
+  `"attention"` is computed from the SAME collapsed per-topic facts, filtered
+  to every topic starting with `"attention-"` whose current text starts with
+  `"waiting-on-operator"` (a `"none"` clear -- `Kazi.Bus.Hook.turn/1` posts one
+  every turn -- excludes the session, which is the auto-clear-on-unblock: the
+  moment a session's next turn runs, it drops out of this section for free).
+  Each entry is `%{"session", "machine", "summary", "since", "age_s"}`, sorted
+  oldest-waiting-first (ordering degrades gracefully -- a fact whose `since`
+  timestamp does not parse sorts last rather than raising).
   """
   @spec render([fact()], [roster_entry()]) :: %{required(String.t()) => term()}
   def render(facts, roster) when is_list(facts) and is_list(roster) do
@@ -62,11 +75,15 @@ defmodule Kazi.Bus.Board do
       |> Enum.map(&Digest.line/1)
       |> bound()
 
+    attention = render_attention(topics)
+
     %{
       "facts" => fact_lines,
       "roster" => render_roster(roster),
       "total_facts" => length(topics),
-      "total_sessions" => length(roster)
+      "total_sessions" => length(roster),
+      "attention" => attention,
+      "total_attention" => length(attention)
     }
   end
 
@@ -96,6 +113,69 @@ defmodule Kazi.Bus.Board do
       kept ++ [%{"type" => "overflow", "count" => length(dropped)}]
     end
   end
+
+  @attention_prefix "attention-"
+  @waiting_prefix "waiting-on-operator"
+
+  # T60.3: the raw (unstubbed, atom-keyed) collapsed facts are the input --
+  # the attention text is always short, so it never hits the digest's
+  # stub/overflow bound, but reading it BEFORE `Digest.line/1` means this
+  # never depends on that render happening not to have stubbed it anyway.
+  defp render_attention(topics) do
+    topics
+    |> Enum.filter(&attention_fact?/1)
+    |> Enum.map(&attention_entry/1)
+    |> Enum.sort_by(& &1["age_s"], &age_desc/2)
+  end
+
+  defp attention_fact?(%{topic: @attention_prefix <> _, text: @waiting_prefix <> _}), do: true
+  defp attention_fact?(_fact), do: false
+
+  defp attention_entry(%{topic: @attention_prefix <> session, text: text} = fact) do
+    {summary, since} = parse_waiting(text)
+
+    %{
+      "session" => session,
+      "machine" => fact[:machine],
+      "summary" => summary,
+      "since" => since,
+      "age_s" => age_s(since)
+    }
+  end
+
+  # `"waiting-on-operator: <summary> (since <ts>)"` -- the normal, summarized
+  # form the `notification` hook posts when it read a message off stdin.
+  defp parse_waiting(@waiting_prefix <> ": " <> rest) do
+    case Regex.run(~r/^(.*) \(since (.+)\)$/s, rest) do
+      [_, summary, since] -> {summary, since}
+      nil -> {rest, nil}
+    end
+  end
+
+  # `"waiting-on-operator (since <ts>)"` -- the degraded form (no stdin
+  # summary available): no colon, so no summary text to split out.
+  defp parse_waiting(@waiting_prefix <> " (since " <> rest) do
+    {@waiting_prefix, String.trim_trailing(rest, ")")}
+  end
+
+  defp parse_waiting(_text), do: {@waiting_prefix, nil}
+
+  defp age_s(nil), do: nil
+
+  defp age_s(since) do
+    case DateTime.from_iso8601(since) do
+      {:ok, dt, _offset} -> DateTime.diff(DateTime.utc_now(), dt)
+      {:error, _reason} -> nil
+    end
+  end
+
+  # Oldest-waiting-first: the LARGER age sorts first. A fact whose `since`
+  # never parsed (`age_s` is `nil`) sorts last rather than raising or crowding
+  # out entries whose age is actually known.
+  defp age_desc(nil, nil), do: true
+  defp age_desc(nil, _b), do: false
+  defp age_desc(_a, nil), do: true
+  defp age_desc(a, b), do: a >= b
 
   # The roster projection: stable identity fields only, ordered by session id.
   # `age_s`/`seen_s` are deliberately dropped -- they tick every second and

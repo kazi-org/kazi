@@ -3,8 +3,8 @@ defmodule Kazi.Bus.Hook do
   T55.9 (ADR-0071 decisions 2/4/5): the payload behind `kazi bus hook <event>`
   -- what an installed Claude Code hook actually injects into a session.
 
-  Two events, matched to the two moments whose stdout reaches the session's
-  context (the ADR-0071 binding rule):
+  Two events are matched to the two moments whose stdout reaches the session's
+  context (the ADR-0071 binding rule), plus a third that only posts OUTWARD:
 
     * `session-start` (Claude Code `SessionStart`): registers presence, joins
       the project-scope team, and injects the current board (`Kazi.Bus.Board`).
@@ -15,7 +15,15 @@ defmodule Kazi.Bus.Hook do
       last checked, and stays COMPLETELY SILENT (zero bytes) otherwise. `read`
       acks what it pulls, so the durable cursor IS the "last checked" marker --
       a quiet turn drains nothing and prints nothing, which is what makes
-      ambient bus-awareness free when the bus is quiet.
+      ambient bus-awareness free when the bus is quiet. It also clears this
+      session's attention fact every turn (T60.3, see `notification/1`).
+    * `notification` (Claude Code `Notification`, T60.3/issue #1156): fires
+      when the harness blocks on a human. ADR-0071's binding rule constrains
+      INJECTION hooks (only stdout that reaches context may carry weight); it
+      does NOT apply here, because this hook only POSTS a `waiting-on-operator`
+      fact outward -- its own stdout is always discarded, so it is exempt from
+      the binding rule by construction, not by exception. See
+      `docs/session-bus.md` ("Operator attention").
 
   Three properties hold for BOTH events, because a hook runs on every turn of
   every session and a hook that errors, blocks, or chatters taxes them all:
@@ -117,6 +125,10 @@ defmodule Kazi.Bus.Hook do
   """
   @spec timeout_ms(String.t()) :: pos_integer()
   def timeout_ms("session-start"), do: @session_start_timeout_ms
+  # `notification` (T60.3) posts outward only and never injects, but it still
+  # runs on the harness's blocked-on-human path, so it gets the SAME tight
+  # bound as `turn` rather than the one-shot boot's larger one.
+  def timeout_ms("notification"), do: @turn_timeout_ms
   def timeout_ms(_event), do: @turn_timeout_ms
 
   # Any raise/throw/exit inside the payload collapses to silence: a hook never
@@ -137,20 +149,124 @@ defmodule Kazi.Bus.Hook do
   @spec payload(String.t(), keyword()) :: payload()
   def payload("session-start", opts), do: session_start(opts)
   def payload("turn", opts), do: turn(opts)
+  def payload("notification", opts), do: notification(opts)
   def payload(_unknown, _opts), do: :silent
 
   @doc """
   The `turn` payload: the bounded digest of traffic seen since the session last
   checked, or `:silent` when the bus is quiet (or the daemon is down). `read`
   acks what it pulls, so a second quiet turn drains nothing and emits nothing.
+
+  T60.3: also posts the CLEAR fact (`"none"`) on this session's attention
+  topic (`attention_topic/1`) -- best-effort, rescue-wrapped, and NEVER
+  altering the digest injection result below. Clearing on every turn is
+  intended and cheap: facts are last-value-per-topic, so a repeated clear is
+  idempotent, and the NEXT `bus board` a session/operator reads simply drops
+  this session out of the NEEDS OPERATOR section the moment a turn happens --
+  an automatic clear-on-unblock with no extra signal required.
   """
   @spec turn(keyword()) :: payload()
   def turn(opts) do
+    clear_attention(opts)
+
     case Bus.read_digest(opts) do
       {:ok, %{"digest" => %{"total" => 0}}} -> :silent
       {:ok, %{"digest" => digest}} -> {:emit, block(turn_lines(digest))}
       {:error, _reason} -> :silent
     end
+  end
+
+  @doc """
+  The `notification` payload (T60.3, issue #1156): posts a last-value
+  `waiting-on-operator` fact on this session's attention topic and ALWAYS
+  returns `:silent` -- this hook only posts OUTWARD (to the bus), it never
+  injects anything into the session's own context, so its stdout is
+  discarded regardless of the post's outcome.
+
+  The summary is read best-effort from STDIN as JSON (Claude Code's
+  `Notification` hook passes `{"message": "..."}`); an empty, missing, or
+  malformed stdin degrades to a generic message rather than failing the post.
+  `opts[:summary]` is a test seam that overrides stdin entirely (mirroring
+  the existing `:payload_fun`/`:now_fn` idiom).
+  """
+  @spec notification(keyword()) :: payload()
+  def notification(opts) do
+    ts = now_iso(opts)
+    session = Bus.session(opts)
+    text = notification_text(opts, ts)
+
+    Bus.post("fact", text, Keyword.merge(opts, topic: attention_topic(session)))
+
+    :silent
+  rescue
+    _ -> :silent
+  catch
+    _kind, _reason -> :silent
+  end
+
+  @doc """
+  The bus topic a session's attention fact (waiting/clear) is posted on:
+  `"attention-" <> <session, sanitized>`. Sanitizing replaces any character
+  outside `[A-Za-z0-9._-]` with `-` -- no additional dots are introduced, so
+  the topic stays ONE subject token (`bus.<scope>.fact.<topic>` splits on
+  `.`, and a session id can otherwise carry arbitrary characters).
+  """
+  @spec attention_topic(String.t()) :: String.t()
+  def attention_topic(session) when is_binary(session) do
+    "attention-" <> String.replace(session, ~r/[^A-Za-z0-9._-]/, "-")
+  end
+
+  # Best-effort clear: posted every turn regardless of whether this session
+  # was ever waiting (idempotent last-value fact), rescue-wrapped so a post
+  # failure can never surface past this hook or block the digest below.
+  defp clear_attention(opts) do
+    session = Bus.session(opts)
+    Bus.post("fact", "none", Keyword.merge(opts, topic: attention_topic(session)))
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  # `opts[:summary]` (test seam) wins outright; otherwise best-effort JSON off
+  # stdin, degrading to a generic message with no colon-delimited summary.
+  defp notification_text(opts, ts) do
+    case Keyword.get(opts, :summary) do
+      summary when is_binary(summary) and summary != "" ->
+        "waiting-on-operator: #{summary} (since #{ts})"
+
+      _absent ->
+        case stdin_summary() do
+          {:ok, summary} -> "waiting-on-operator: #{summary} (since #{ts})"
+          :error -> "waiting-on-operator (since #{ts})"
+        end
+    end
+  end
+
+  # Claude Code's Notification hook passes `{"message": "..."}` on stdin.
+  # Anything else -- no stdin, empty stdin, invalid JSON, a missing/blank
+  # "message" -- degrades to `:error` rather than raising.
+  defp stdin_summary do
+    case IO.read(:stdio, :eof) do
+      data when is_binary(data) and data != "" ->
+        case Jason.decode(data) do
+          {:ok, %{"message" => msg}} when is_binary(msg) and msg != "" -> {:ok, msg}
+          _other -> :error
+        end
+
+      _eof_or_error ->
+        :error
+    end
+  rescue
+    _ -> :error
+  catch
+    _kind, _reason -> :error
+  end
+
+  defp now_iso(opts) do
+    now_fn = Keyword.get(opts, :now_fn, &DateTime.utc_now/0)
+    now_fn.() |> DateTime.to_iso8601()
   end
 
   @doc """

@@ -177,6 +177,7 @@ defmodule Kazi.CLI do
     machine: :string,
     timeout: :integer,
     since: :string,
+    attention: :boolean,
     roadmap: :string,
     goal: :string,
     into: :string,
@@ -327,6 +328,8 @@ defmodule Kazi.CLI do
       "`bus watch` only (issue #1091): maximum seconds to block waiting for a message (default 300). On expiry `bus watch` prints a one-line notice and exits 3.",
     since:
       "`bus watch` only (T54.9, issue #1097): what counts as a NEW message -- `now` (default) anchors to the stream's current last sequence so only messages posted AFTER the watch starts are delivered (pending backlog is left for `bus read`/`bus peek`); `all` restores the pre-T54.9 drain-first behavior (anything already pending returns immediately); a numeric stream sequence anchors there precisely.",
+    attention:
+      "`bus board` only (T60.3, issue #1156): render ONLY the NEEDS OPERATOR section of the human board -- the fleet-wide list of sessions with a live `waiting-on-operator` fact, oldest first. --json is unaffected: the full board (including `attention`) is always returned; this only trims the human render.",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0070): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. Mission Control loads it through `KaziWeb.Starmap.GoalSource` and GROUPS the fleet grid into needs-DAG wave sections (`Kazi.Goal.DepGraph.frontiers/1`, the SAME computation `kazi apply --explain` prints). Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, mission control keeps its flat-grid fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty roadmap.",
     goal:
@@ -413,7 +416,7 @@ defmodule Kazi.CLI do
     %{
       name: "install-hooks",
       summary:
-        "Register the session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071): SessionStart + UserPromptSubmit run `kazi bus hook <event>`. Merge-never-clobber and idempotent -- an operator's own hooks/keys survive byte-identically; `--uninstall` removes exactly what was added. Default target is the user-level ~/.claude/settings.json; `--local` targets the repo's LOCAL (uncommitted) .claude/settings.local.json.",
+        "Register the session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071/T60.3): SessionStart + UserPromptSubmit + Notification run `kazi bus hook <event>`. Merge-never-clobber and idempotent -- an operator's own hooks/keys survive byte-identically; `--uninstall` removes exactly what was added. Default target is the user-level ~/.claude/settings.json; `--local` targets the repo's LOCAL (uncommitted) .claude/settings.local.json.",
       args: [],
       flags: [:dir, :local, :uninstall]
     },
@@ -455,7 +458,8 @@ defmodule Kazi.CLI do
         :machine,
         :timeout,
         :since,
-        :session_name
+        :session_name,
+        :attention
       ]
     },
     %{
@@ -620,7 +624,7 @@ defmodule Kazi.CLI do
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
       kazi bus board [--scope machine|project] [--json]   # current state: facts + roster + claim ownership (T55.4/T55.8)
-      kazi bus hook <event>                        # harness hook entry point (session-start | turn) -- ALWAYS exits 0 silently
+      kazi bus hook <event>                        # harness hook entry point (session-start | turn | notification) -- ALWAYS exits 0 silently
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s), a provider schema (custom_script), or an artifact schema (roadmap)
@@ -1591,7 +1595,11 @@ defmodule Kazi.CLI do
       since: flags[:since],
       # T55.5: an explicit --session-name heads the sender-identity resolution
       # chain (ADR-0067 point 2) for every bus verb.
-      session_name: flags[:session_name]
+      session_name: flags[:session_name],
+      # T60.3: `bus board` only -- trims the HUMAN render to the NEEDS
+      # OPERATOR section; --json is unaffected (bus_flags is shared across
+      # every verb, so this is simply ignored by every other verb).
+      attention: flags[:attention] || false
     ]
   end
 
@@ -1799,7 +1807,7 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("board") do
     """
-    kazi bus board [--scope machine|project] [--json]
+    kazi bus board [--scope machine|project] [--attention] [--json]
 
     Render the CURRENT STATE of the bus (ADR-0073): the last-value `fact` per
     topic, the live roster (names, teams, liveness), and claim ownership in one
@@ -1828,6 +1836,17 @@ defmodule Kazi.CLI do
     --scope machine (default) or project selects which bus subject tree to
     project. The facts and roster need a running `kazi daemon` -- `bus board`
     prints a one-line no-daemon error (exit 1) otherwise.
+
+    NEEDS OPERATOR (T60.3, issue #1156): the same fact section also surfaces a
+    fleet-wide attention view -- any session whose `Notification` hook fired
+    (a harness blocked on a human) has a `waiting-on-operator: <summary>
+    (since <ts>)` fact on its own `attention-<session>` topic, and the SAME
+    session's `turn` hook clears it (posts `"none"`) on its very next prompt,
+    so a resumed session drops out again automatically. Under --json this is
+    always present as `board.attention` (oldest-waiting first) and
+    `board.total_attention`, alongside the unchanged `facts`/`roster`. --attention
+    trims the HUMAN render to ONLY this section (--json is unaffected -- the
+    full board is always returned).
     """
   end
 
@@ -1926,12 +1945,17 @@ defmodule Kazi.CLI do
     """
     kazi bus hook <event>
 
-    The harness hook entry point `kazi install-hooks` registers (ADR-0071).
-    Events: `session-start` (Claude Code's SessionStart -- registers presence,
-    joins the project-scope team, and injects the current board) and `turn`
-    (Claude Code's UserPromptSubmit -- injects the bounded digest of traffic
-    since the session's last turn, and is COMPLETELY SILENT when the bus is
-    quiet).
+    The harness hook entry point `kazi install-hooks` registers (ADR-0071,
+    T60.3). Events: `session-start` (Claude Code's SessionStart -- registers
+    presence, joins the project-scope team, and injects the current board),
+    `turn` (Claude Code's UserPromptSubmit -- injects the bounded digest of
+    traffic since the session's last turn, COMPLETELY SILENT when the bus is
+    quiet, and clears this session's attention fact every turn), and
+    `notification` (Claude Code's Notification, T60.3/issue #1156 -- posts a
+    `waiting-on-operator` fact on this session's attention topic when the
+    harness blocks on a human; NEVER injects anything, so it is exempt from
+    the binding rule below by construction -- see `bus board --attention` and
+    docs/session-bus.md).
 
     Contract: ALWAYS exits 0 and never blocks a session. With no daemon
     running, or an unknown/missing <event>, it prints nothing and returns
@@ -4495,9 +4519,9 @@ defmodule Kazi.CLI do
         {:ok, %{status: :installed, path: path}} ->
           IO.puts("WROTE  #{path}")
           IO.puts("")
-          IO.puts("Session-bus delivery is installed (ADR-0071): SessionStart and")
-          IO.puts("UserPromptSubmit now run `kazi bus hook <event>` -- a silent no-op")
-          IO.puts("unless a `kazi daemon` is up. Re-running is a no-op;")
+          IO.puts("Session-bus delivery is installed (ADR-0071/T60.3): SessionStart,")
+          IO.puts("UserPromptSubmit, and Notification now run `kazi bus hook <event>` --")
+          IO.puts("a silent no-op unless a `kazi daemon` is up. Re-running is a no-op;")
           IO.puts("`kazi install-hooks --uninstall` removes exactly what was added.")
           0
 
@@ -4939,7 +4963,7 @@ defmodule Kazi.CLI do
   defp execute_bus("board", [], opts) do
     case Kazi.Bus.board(bus_call_opts(opts) ++ [claims: true]) do
       {:ok, board} ->
-        emit(json?(opts), bus_board_payload(board), fn -> print_board(board) end)
+        emit(json?(opts), bus_board_payload(board), fn -> print_board(board, opts) end)
         0
 
       {:error, reason} ->
@@ -5216,27 +5240,55 @@ defmodule Kazi.CLI do
     %{"ok" => true, "schema_version" => @run_schema_version, "board" => board}
   end
 
-  # The human board: facts first (topic = current value, or a stub/overflow
-  # notice), then the roster (addressable identity + liveness). Empty sections
-  # say so rather than rendering a blank block.
-  defp print_board(board) do
-    IO.puts("facts (#{board["total_facts"]} topics):")
+  # The human board: NEEDS OPERATOR first (T60.3 -- the scarcest-attention
+  # section is the whole point, so it goes before facts/roster/claims), then
+  # facts (topic = current value, or a stub/overflow notice), then the roster
+  # (addressable identity + liveness). Empty sections say so rather than
+  # rendering a blank block. `--attention` trims the render to ONLY the
+  # NEEDS OPERATOR section (the full board is still what --json returns).
+  defp print_board(board, opts) do
+    print_board_attention(board)
 
-    if board["facts"] == [] do
-      IO.puts("  (none)")
-    else
-      Enum.each(board["facts"], &IO.puts("  " <> board_fact_line(&1)))
+    unless opts[:attention] do
+      IO.puts("facts (#{board["total_facts"]} topics):")
+
+      if board["facts"] == [] do
+        IO.puts("  (none)")
+      else
+        Enum.each(board["facts"], &IO.puts("  " <> board_fact_line(&1)))
+      end
+
+      IO.puts("roster (#{board["total_sessions"]} sessions):")
+
+      if board["roster"] == [] do
+        IO.puts("  (none)")
+      else
+        Enum.each(board["roster"], &IO.puts("  " <> board_roster_line(&1)))
+      end
+
+      print_board_claims(board)
     end
+  end
 
-    IO.puts("roster (#{board["total_sessions"]} sessions):")
+  # T60.3 (issue #1156): one glance answers "who is blocked on me, where, for
+  # how long" across the whole fleet -- every session with a live
+  # `waiting-on-operator` fact, oldest-waiting first.
+  defp print_board_attention(board) do
+    IO.puts("NEEDS OPERATOR (#{board["total_attention"] || 0}):")
 
-    if board["roster"] == [] do
-      IO.puts("  (none)")
-    else
-      Enum.each(board["roster"], &IO.puts("  " <> board_roster_line(&1)))
+    case board["attention"] || [] do
+      [] ->
+        IO.puts("  (none)")
+
+      entries ->
+        Enum.each(entries, &IO.puts("  " <> board_attention_line(&1)))
     end
+  end
 
-    print_board_claims(board)
+  defp board_attention_line(entry) do
+    machine = if entry["machine"], do: "@#{entry["machine"]}", else: ""
+    age = if entry["age_s"], do: " (waiting #{board_age(entry["age_s"])})", else: ""
+    "#{entry["session"]}#{machine}  #{entry["summary"]}#{age}"
   end
 
   # ADR-0073 point 2: ownership read live from `refs/claims/*`. When the remote
