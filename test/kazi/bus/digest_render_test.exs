@@ -157,4 +157,54 @@ defmodule Kazi.Bus.DigestRenderTest do
       assert Enum.map(lines, & &1["id"]) == [2, 3, nil]
     end
   end
+
+  describe "get_view/2 -- the bus get preview bound (ADR-0072 d3, T55.6)" do
+    defp fetched(text),
+      do: %{
+        "id" => 7,
+        "kind" => "note",
+        "topic" => "doc",
+        "bytes" => byte_size(text),
+        "text" => text
+      }
+
+    test "a body within the threshold is returned whole, truncated false, even without full" do
+      small = String.duplicate("a", 100)
+      view = Digest.get_view(fetched(small), false)
+
+      assert view["text"] == small
+      assert view["truncated"] == false
+    end
+
+    test "a body over the threshold is cut to a preview with truncated true by default" do
+      big = String.duplicate("b", 5_000)
+      view = Digest.get_view(fetched(big), false)
+
+      assert view["truncated"] == true
+      assert byte_size(view["text"]) <= Digest.render_threshold_bytes()
+      assert String.starts_with?(big, view["text"])
+      # `bytes` still reports the FULL size, so a caller knows what it did not get.
+      assert view["bytes"] == byte_size(big)
+    end
+
+    test "full: true returns the whole body unabridged, truncated false" do
+      big = String.duplicate("c", 5_000)
+      view = Digest.get_view(fetched(big), true)
+
+      assert view["text"] == big
+      assert view["truncated"] == false
+    end
+
+    test "a preview never splits a multi-byte codepoint into invalid UTF-8" do
+      # A 2-byte codepoint straddling the 1024-byte boundary would be cut mid-char
+      # by a naive byte slice; the preview must stay valid UTF-8 (or JSON encoding
+      # of the view would fail).
+      big = String.duplicate("é", 1_000)
+      view = Digest.get_view(fetched(big), false)
+
+      assert view["truncated"] == true
+      assert String.valid?(view["text"])
+      assert {:ok, _json} = Jason.encode(view)
+    end
+  end
 end

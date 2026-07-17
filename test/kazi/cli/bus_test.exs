@@ -37,6 +37,15 @@ defmodule Kazi.CLI.BusTest do
       assert {:bus, "peek", [], _opts} = Kazi.CLI.parse(["bus", "peek"])
     end
 
+    test "`bus get <id>` parses as its own verb with the id positional (T55.6)" do
+      assert {:bus, "get", ["42"], _opts} = Kazi.CLI.parse(["bus", "get", "42"])
+    end
+
+    test "`bus get <id> --full` threads the full flag through (T55.6)" do
+      assert {:bus, "get", ["42"], opts} = Kazi.CLI.parse(["bus", "get", "42", "--full"])
+      assert opts[:full] == true
+    end
+
     test "`bus read --peek` threads the peek flag through" do
       assert {:bus, "read", [], opts} = Kazi.CLI.parse(["bus", "read", "--peek"])
       assert opts[:peek] == true
@@ -197,6 +206,15 @@ defmodule Kazi.CLI.BusTest do
       assert output =~ "nickname"
       refute output =~ "kazi apply <goal-file>"
     end
+
+    test "`bus get --help` documents the id pull, --full, and consume-nothing (T55.6)" do
+      output = capture_io(fn -> assert Kazi.CLI.run(["bus", "get", "--help"], []) == 0 end)
+
+      assert output =~ "kazi bus get"
+      assert output =~ "--full"
+      assert output =~ "consumes NOTHING"
+      refute output =~ "kazi apply <goal-file>"
+    end
   end
 
   # ===========================================================================
@@ -267,6 +285,35 @@ defmodule Kazi.CLI.BusTest do
         end)
 
       assert output =~ "no daemon running"
+    end
+
+    test "`bus get <id>` reaches the no-daemon path (T55.6)" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "get", "42"], []) == 1
+        end)
+
+      assert output =~ "no daemon running"
+    end
+
+    test "`bus get` with a non-numeric id is a one-line usage error, not a daemon error (T55.6)" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "get", "not-a-number"], []) == 1
+        end)
+
+      assert output =~ "message id"
+      refute output =~ "no daemon running"
+    end
+
+    test "`bus get` with no id is a one-line usage error, not a daemon error (T55.6)" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "get"], []) == 1
+        end)
+
+      assert output =~ "requires <id>"
+      refute output =~ "no daemon running"
     end
 
     test "`bus name` with no nickname is a one-line usage error, not a daemon error" do
