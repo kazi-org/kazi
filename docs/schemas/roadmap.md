@@ -68,3 +68,25 @@ reporting its node / edge / wave counts. A broken roadmap is a **load error**
 
 The same validation runs whether the roadmap is loaded programmatically
 (`Kazi.Goal.Roadmap.load/1`) or through `kazi lint`.
+
+## Outline goals: planning as a convergeable goal (T45.3)
+
+A roadmap node can be an **outline phase** — a goal that carries a
+`plan_expanded` predicate plus a dispatchable planning work-item. The predicate is
+a DETERMINISTIC, **read-model-only** check (no harness needed to evaluate it) that
+a referenced goal-set `<phase-ref>` — a roadmap ref (`kazi plan --project`) or a
+single proposal ref — has been planned:
+
+1. **exists** — the goal-set is present in the read-model;
+2. **floor** — every goal passes the deterministic clarify floor with no open gaps;
+3. **approved** — every member proposal is `approved`.
+
+While the phase is unplanned the predicate is `:fail` (naming which condition), so
+the loop routes work at authoring the phase's goal-set via `kazi plan`, informed
+by the CONVERGED FRONTIER's evidence — the prior phase's actual results feed what
+the harness is asked to plan next. Because the outline goal sits behind a `needs`
+edge on the frontier it depends on, its planning work-item is scheduled only in a
+LATER topological wave (`Kazi.Goal.Roadmap.frontiers/1`) — it cannot be dispatched
+until that frontier converges. A STANDING roadmap apply thus triggers the
+phase-N+1 planning pass automatically once phase N converges. See `kazi schema
+plan_expanded`.
