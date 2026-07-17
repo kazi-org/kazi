@@ -930,11 +930,69 @@ Standing defenses in THIS repo (both must stay):
     deliberate HUMAN override is `ALLOW_PUSH_TO_MAIN=1`; an agent is never
     given it.
 
+L-0043 is the sequel: on 2026-07-17 BOTH of the defenses below were found
+DOWN on the operator's machine, and an agent rewound `origin/main`.
+
 INVARIANTS when driving kazi natively against this repo: `--workspace` is a
 task-specific worktree, never the primary checkout (the operator's own
 memory-slice runs on 2026-07-08 violated this and got lucky); scope any
 clean-tree/`landed` predicate to the goal's own paths, never repo-wide; after
 any agent run, `git reflog` before trusting the working tree. (2026-07-08.)
+
+### L-0043 #agents #git #cwd #force-push #data-loss #landmine -- an agent's shell cwd silently resets to the SHARED checkout (which has `main` checked out), so a bare `git push --force` rewinds origin/main and a `git reset --hard` wipes a sibling's staged work
+
+L-0034's two standing defenses were both DOWN on 2026-07-17 and nothing said
+so. An agent working in an isolated worktree ran `git push --force` (no
+refspec) and `git reset --hard origin/main`, and BOTH landed on the shared
+checkout instead: `origin/main` was rewound ~14 commits, and a concurrent
+session's staged `docs/plan.md` + `docs/plans/E56..E60.md` were wiped.
+
+**Why the cwd is the trap.** An agent's Bash cwd is not sticky the way a
+human's terminal is: it can reset to the repo root between tool calls, and
+the repo root IS the shared checkout with `main` checked out. So a `cd
+<worktree>` in an earlier call does not protect a later one, and a git
+command with no explicit target silently retargets `main`. Nothing in the
+output says which checkout you were in -- `git push --force` prints
+`main -> main` only AFTER it has already rewritten the remote.
+
+**Why neither defense fired (check BOTH; each is per-machine and silent):**
+
+  * `core.hooksPath` was UNSET, so `.githooks/pre-push` -- which exists, and
+    whose entire job is `refs/heads/main -> exit 1` -- never ran. `mix setup`
+    wires it (`mix.exs`), so a checkout where setup was never run, or where
+    config was reset, has NO push protection while still CONTAINING the hook
+    file. The hook's presence proves nothing; only `git config --get
+    core.hooksPath` does.
+  * `../kazi-main` did not exist, so `main` was checked out in the primary
+    shared checkout -- the exact arrangement the pin exists to prevent. The
+    pin also has the side effect of making the shared checkout's HEAD not
+    be `main`, which defuses the bare-push trap entirely.
+
+**Rules that actually hold** (a `cd` does not): use `git -C <abs-worktree>`
+on EVERY git command, and an EXPLICIT refspec on every push
+(`git push --force-with-lease origin <branch>:<branch>`). Never run
+`reset --hard`/`clean` in the shared checkout at all -- a sibling's
+uncommitted work is routinely staged there (L-0014).
+
+**Recovery, both directions, if it happens anyway:**
+
+  * A rewound branch: the objects survive on the server. `git fetch origin
+    <sha>` may refuse an unreachable sha, but the API does not --
+    `gh api repos/<org>/<repo>/commits/<sha>` confirms it exists and
+    `gh api -X PATCH repos/<org>/<repo>/git/refs/heads/main -f sha=<full>
+    -F force=true` restores the ref without needing the object locally.
+    Then verify every recently-merged PR's merge commit is an ancestor of
+    main again, and that release TAGS are still reachable.
+  * Wiped STAGED work: `git reset --hard` destroys the index, not the
+    objects. `git fsck --unreachable | grep blob` plus `git cat-file -p
+    <blob>` recovers the exact staged content. Wiped UNSTAGED edits are
+    gone and are also INVISIBLE -- you cannot enumerate what you destroyed,
+    so never claim a full recovery.
+
+(T55.7 finding, 2026-07-17. Both incidents were fully recovered and
+independently verified; the point of this entry is that the agent was
+following a documented rule set and the machine was silently missing the two
+controls that would have made it impossible.)
 
 ### L-0035 #sqlite #read-model #concurrency #busy-timeout #landmine -- the shared read-model DB wedges under concurrent kazi processes without a generous busy_timeout
 
