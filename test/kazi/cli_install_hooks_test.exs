@@ -70,7 +70,7 @@ defmodule Kazi.CLIInstallHooksTest do
 
       decoded = path |> File.read!() |> Jason.decode!()
       events = decoded["hooks"] |> Map.keys() |> Enum.sort()
-      assert events == ["SessionStart", "UserPromptSubmit"]
+      assert events == ["Notification", "SessionStart", "UserPromptSubmit"]
     end
 
     test "re-running is a no-op (idempotent)", %{dir: dir, path: path} do

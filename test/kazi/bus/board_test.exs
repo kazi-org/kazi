@@ -98,8 +98,83 @@ defmodule Kazi.Bus.BoardTest do
                "facts" => [],
                "roster" => [],
                "total_facts" => 0,
-               "total_sessions" => 0
+               "total_sessions" => 0,
+               "attention" => [],
+               "total_attention" => 0
              }
+    end
+  end
+
+  describe "render/2 attention projection (T60.3, issue #1156)" do
+    test "a waiting-on-operator fact surfaces in attention with session/summary parsed" do
+      facts = [
+        fact(
+          "attention-worker-1",
+          "waiting-on-operator: needs approval (since 2026-07-17T00:00:00Z)",
+          1,
+          %{machine: "hostA"}
+        )
+      ]
+
+      board = Board.render(facts, [])
+
+      assert board["total_attention"] == 1
+      assert [entry] = board["attention"]
+      assert entry["session"] == "worker-1"
+      assert entry["machine"] == "hostA"
+      assert entry["summary"] == "needs approval"
+      assert entry["since"] == "2026-07-17T00:00:00Z"
+      assert is_integer(entry["age_s"])
+    end
+
+    test "a generic (no-summary) waiting fact still surfaces" do
+      facts = [fact("attention-worker-2", "waiting-on-operator (since 2026-07-17T00:00:00Z)", 1)]
+
+      board = Board.render(facts, [])
+
+      assert [entry] = board["attention"]
+      assert entry["session"] == "worker-2"
+      assert entry["summary"] == "waiting-on-operator"
+    end
+
+    test "a \"none\" clear fact on an attention topic is EXCLUDED" do
+      facts = [fact("attention-worker-3", "none", 1)]
+
+      board = Board.render(facts, [])
+
+      assert board["attention"] == []
+      assert board["total_attention"] == 0
+    end
+
+    test "non-attention facts never appear in attention, even alongside real waiting facts" do
+      facts = [
+        fact("ci", "main is green", 1),
+        fact(
+          "attention-worker-4",
+          "waiting-on-operator: blocked (since 2026-07-17T00:00:00Z)",
+          2
+        )
+      ]
+
+      board = Board.render(facts, [])
+
+      assert board["total_attention"] == 1
+      assert [%{"session" => "worker-4"}] = board["attention"]
+    end
+
+    test "ordering is oldest-waiting-first" do
+      now = DateTime.utc_now()
+      older = DateTime.add(now, -600, :second) |> DateTime.to_iso8601()
+      newer = DateTime.add(now, -10, :second) |> DateTime.to_iso8601()
+
+      facts = [
+        fact("attention-fresh", "waiting-on-operator: x (since #{newer})", 1),
+        fact("attention-stale", "waiting-on-operator: y (since #{older})", 2)
+      ]
+
+      board = Board.render(facts, [])
+
+      assert Enum.map(board["attention"], & &1["session"]) == ["stale", "fresh"]
     end
   end
 

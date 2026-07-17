@@ -61,6 +61,16 @@ defmodule Kazi.CLI.BusTest do
       assert opts[:since] == "all"
     end
 
+    test "`bus board --attention` threads the attention flag through (T60.3)" do
+      assert {:bus, "board", [], opts} = Kazi.CLI.parse(["bus", "board", "--attention"])
+      assert opts[:attention] == true
+    end
+
+    test "`bus board` without --attention defaults attention to false (T60.3)" do
+      assert {:bus, "board", [], opts} = Kazi.CLI.parse(["bus", "board"])
+      assert opts[:attention] == false
+    end
+
     test "`bus name <nickname>` parses as its own verb (T55.5)" do
       assert {:bus, "name", ["worker-a"], _opts} = Kazi.CLI.parse(["bus", "name", "worker-a"])
     end
@@ -220,6 +230,15 @@ defmodule Kazi.CLI.BusTest do
       assert output =~ "consumes NOTHING"
       refute output =~ "kazi apply <goal-file>"
     end
+
+    test "`bus board --help` documents --attention and NEEDS OPERATOR (T60.3)" do
+      output = capture_io(fn -> assert Kazi.CLI.run(["bus", "board", "--help"], []) == 0 end)
+
+      assert output =~ "kazi bus board"
+      assert output =~ "--attention"
+      assert output =~ "NEEDS OPERATOR"
+      refute output =~ "kazi apply <goal-file>"
+    end
   end
 
   # ===========================================================================
@@ -272,6 +291,15 @@ defmodule Kazi.CLI.BusTest do
       assert output =~ "fact"
       assert output =~ "announce"
       refute output =~ "no daemon running"
+    end
+
+    test "`bus board --attention` reaches the no-daemon path like any other board call (T60.3)" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "board", "--attention"], []) == 1
+        end)
+
+      assert output =~ "no daemon running"
     end
 
     test "watch with an invalid --since fails fast with a usage error (T54.9)" do
