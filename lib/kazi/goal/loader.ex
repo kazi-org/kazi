@@ -1237,7 +1237,10 @@ defmodule Kazi.Goal.Loader do
   # -- which is always, during any load -- and documents the bounded, fixed
   # allowlist (no atom-exhaustion risk). If the importer grows a new metadata key,
   # add it here too (pinned by a coherence test in gherkin_importer_test.exs).
-  @gherkin_doc_keys [:feature, :scenario, :steps]
+  # `role`, `priority` and `interface` join them for a TAGGED behavior spec
+  # (T41.1, ADR-0054): the same self-describing, provider-unconsumed metadata,
+  # derived from `@role:`/`@priority:`/`@interface:` tags.
+  @gherkin_doc_keys [:feature, :scenario, :steps, :role, :priority, :interface]
 
   defp safe_config_key(key) when is_binary(key) do
     case Enum.find(@gherkin_doc_keys, &(Atom.to_string(&1) == key)) do
