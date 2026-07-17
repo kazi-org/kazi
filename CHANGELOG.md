@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.195.0](https://github.com/kazi-org/kazi/compare/v1.194.0...v1.195.0) (2026-07-17)
+
+
+### Features
+
+* **cli:** surface dispatch_by_role on kazi economy --json and the human report (T49.9) ([9d01404](https://github.com/kazi-org/kazi/commit/9d01404c0bc42db87cfcbefd4c4aa212038e897b))
+* **economy:** split dispatch counts by role in the history aggregate (T49.9) ([79b4a10](https://github.com/kazi-org/kazi/commit/79b4a10d853e941be92ba2394a1536d0e957d697))
+
 ## [1.194.0](https://github.com/kazi-org/kazi/compare/v1.193.0...v1.194.0) (2026-07-17)
 
 
