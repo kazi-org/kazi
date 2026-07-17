@@ -1,0 +1,67 @@
+# Example kazi goal-file: a LIVE dogfood of the browser UI-assertion pack on
+# kazi's own deployed site (T43.6, UC-056).
+#
+# This is an OBSERVATIONAL, READ-ONLY goal: it drives a real Chromium at the
+# ALREADY-DEPLOYED https://kazi.sire.run and asserts on what it renders. It does
+# NOT deploy, modify, or publish anything — it only observes and returns an
+# objective verdict per predicate. "Done" is what a real browser sees, not an
+# agent's claim the site is healthy.
+#
+#     kazi apply priv/examples/live_site_ui.toml --workspace .
+#
+# The two predicates exercise the pack end to end on a real surface:
+#   1. console-clean — the landing page loads with ZERO console.error and no
+#      failed 4xx/5xx subresource (`console_clean`, network = true, T43.1).
+#   2. a11y — axe-core finds no CRITICAL accessibility violation (`a11y`,
+#      severity = "critical", max_violations = 0, T43.2). The violation count is
+#      surfaced as the envelope-v2 score (lower_better) so the controller reads a
+#      dropping count as progress.
+#
+# Real use requires the Playwright runtime AND axe-core installed once at the
+# repo root (the runner-side deps the shipped runner imports):
+#
+#     npm i playwright axe-core && npx playwright install chromium
+#
+# Without them the run is an :error ("a11y unavailable" / Playwright missing),
+# never a false :pass — a missing checker is infra, not failing UI work. See
+# docs/browser-assertions.md for the full `assertions[].type` reference and
+# `kazi schema browser` for the machine schema.
+
+id = "kazi-site-live-ui"
+name = "kazi.sire.run renders clean and has no critical a11y violations"
+
+[metadata]
+slice = "2"
+surface = "https://kazi.sire.run"
+
+[budget]
+max_iterations = 5
+
+# CONSOLE-CLEAN: the landing page loads with no console.error and no failed
+# network response. Higher signal than "the page loaded" — a page that renders
+# while throwing in the console is broken and no visible/text check sees it.
+[[predicate]]
+id = "site-console-clean"
+provider = "browser"
+description = "the landing page produces zero console.error and no failed 4xx/5xx response"
+url = "https://kazi.sire.run"
+timeout_ms = 30000
+
+[[predicate.assertions]]
+type = "console_clean"
+network = true
+
+# A11Y: axe-core against the landing page, gating on CRITICAL violations only
+# (a defensible production bar for a marketing surface — zero critical a11y
+# defects). Raise the bar to severity = "serious" once the site clears it.
+[[predicate]]
+id = "site-a11y-critical-clean"
+provider = "browser"
+description = "axe-core finds no critical accessibility violation on the landing page"
+url = "https://kazi.sire.run"
+timeout_ms = 30000
+
+[[predicate.assertions]]
+type = "a11y"
+severity = "critical"
+max_violations = 0
