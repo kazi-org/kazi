@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.196.1](https://github.com/kazi-org/kazi/compare/v1.196.0...v1.196.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **bus:** per-event hook timeout -- session-start 15s, turn stays 2s ([9a5d1ea](https://github.com/kazi-org/kazi/commit/9a5d1ea53bba9ee18d217d37072873b57217c025))
+
 ## [1.196.0](https://github.com/kazi-org/kazi/compare/v1.195.1...v1.196.0) (2026-07-17)
 
 
