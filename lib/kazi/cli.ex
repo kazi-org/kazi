@@ -168,6 +168,7 @@ defmodule Kazi.CLI do
     team: :string,
     all: :boolean,
     timeout: :integer,
+    since: :string,
     roadmap: :string,
     goal: :string,
     into: :string,
@@ -297,6 +298,8 @@ defmodule Kazi.CLI do
       "`bus who` only: include presence entries older than the 10-minute TTL (hidden by default so closed sessions age out of the roster instead of looking active).",
     timeout:
       "`bus watch` only (issue #1091): maximum seconds to block waiting for a message (default 300). On expiry `bus watch` prints a one-line notice and exits 3.",
+    since:
+      "`bus watch` only (T54.9, issue #1097): what counts as a NEW message -- `now` (default) anchors to the stream's current last sequence so only messages posted AFTER the watch starts are delivered (pending backlog is left for `bus read`/`bus peek`); `all` restores the pre-T54.9 drain-first behavior (anything already pending returns immediately); a numeric stream sequence anchors there precisely.",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0070): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. Mission Control loads it through `KaziWeb.Starmap.GoalSource` and GROUPS the fleet grid into needs-DAG wave sections (`Kazi.Goal.DepGraph.frontiers/1`, the SAME computation `kazi apply --explain` prints). Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, mission control keeps its flat-grid fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty roadmap.",
     goal:
@@ -395,9 +398,9 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a message arrives (issue #1091); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json, :topic, :sev, :scope, :peek, :full, :team, :all, :timeout]
+      flags: [:json, :topic, :sev, :scope, :peek, :full, :team, :all, :timeout, :since]
     },
     %{
       name: "economy",
@@ -537,7 +540,7 @@ defmodule Kazi.CLI do
       kazi daemon stop                             # clean shutdown
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
       kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
-      kazi bus watch [--timeout <seconds>] [--json]      # block until a message arrives (issue #1091)
+      kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--json]  # block until a NEW message arrives (#1091/#1097)
       kazi bus join <team> [--json]                      # named-team membership (issue #1069)
       kazi bus leave [--json]
       kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
@@ -1410,7 +1413,8 @@ defmodule Kazi.CLI do
       full: flags[:full] || false,
       team: flags[:team],
       all: flags[:all] || false,
-      timeout: flags[:timeout]
+      timeout: flags[:timeout],
+      since: flags[:since]
     ]
   end
 
@@ -1508,16 +1512,26 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("watch") do
     """
-    kazi bus watch [--timeout <seconds>] [--full] [--json]
+    kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]
 
-    Block until at least one message is available for this session, then
-    consume and print it -- the no-poll-loop alternative to running `bus
-    read` in a loop (issue #1091). Anything already pending returns
-    immediately; otherwise the call sleeps on the session's scope, directed,
+    Block until a NEW message arrives for this session, then consume and
+    print it -- the no-poll-loop alternative to running `bus read` in a
+    loop (issue #1091). The call sleeps on the session's scope, directed,
     and team subjects and wakes on the first arrival. Default timeout 300
-    seconds; on expiry prints a one-line notice and exits 3. Under --json
-    the result renders through the same bounded digest envelope as `bus
-    read` (T55.1, ADR-0072); `--full` returns the messages unabridged.
+    seconds; on expiry prints a one-line notice and exits 3, so scripts
+    can always tell a timeout from an arrival. Under --json the result
+    renders through the same bounded digest envelope as `bus read`
+    (T55.1, ADR-0072); `--full` returns the messages unabridged.
+
+    --since anchors what counts as new (T54.9, issue #1097):
+      now   (default) only messages posted AFTER the watch starts; any
+            backlog already pending (e.g. shown by an earlier `bus peek`)
+            never satisfies the watch and stays consumable by
+            `bus read`/`bus peek`.
+      all   the drain-first behavior: anything already pending, backlog
+            included, returns immediately.
+      <seq> a numeric stream sequence to anchor at precisely -- pending
+            messages with a greater sequence return immediately.
 
     Watching also refreshes this session's presence, so a watcher never
     ages out of `bus who`.
@@ -4020,25 +4034,33 @@ defmodule Kazi.CLI do
     end
   end
 
-  # #1091: block until a message is available, then consume and print it.
+  # #1091: block until a NEW message arrives, then consume and print it.
+  # T54.9/#1097: --since <seq|now|all> anchors what counts as new (default
+  # `now` -- pending backlog never satisfies the watch).
   defp execute_bus("watch", [], opts) do
-    case Kazi.Bus.watch(bus_call_opts(opts)) do
-      {:ok, messages} ->
-        emit(json?(opts), bus_read_payload(messages, opts), fn ->
-          print_read_digest(messages)
-        end)
+    case parse_watch_since(opts[:since]) do
+      {:error, message} ->
+        bus_error(message, opts)
 
-        0
+      {:ok, since} ->
+        case Kazi.Bus.watch(bus_call_opts(opts) ++ [since: since]) do
+          {:ok, messages} ->
+            emit(json?(opts), bus_read_payload(messages, opts), fn ->
+              print_read_digest(messages)
+            end)
 
-      {:error, :watch_timeout} ->
-        emit(json?(opts), %{"ok" => false, "timeout" => true}, fn ->
-          IO.puts(:stderr, "bus watch timed out with no messages")
-        end)
+            0
 
-        3
+          {:error, :watch_timeout} ->
+            emit(json?(opts), %{"ok" => false, "timeout" => true}, fn ->
+              IO.puts(:stderr, "bus watch timed out with no messages")
+            end)
 
-      {:error, reason} ->
-        bus_error(reason, opts)
+            3
+
+          {:error, reason} ->
+            bus_error(reason, opts)
+        end
     end
   end
 
@@ -4079,6 +4101,24 @@ defmodule Kazi.CLI do
 
   defp bus_call_opts(opts) do
     [scope: opts[:scope], topic: opts[:topic], sev: opts[:sev], timeout: opts[:timeout]]
+  end
+
+  # T54.9/#1097: `bus watch --since <seq|now|all>` -> Kazi.Bus.watch/1's
+  # :since option. An unrecognized value is a fail-fast usage error, never a
+  # silent fallback to the default anchor.
+  defp parse_watch_since(nil), do: {:ok, :now}
+  defp parse_watch_since("now"), do: {:ok, :now}
+  defp parse_watch_since("all"), do: {:ok, :all}
+
+  defp parse_watch_since(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {seq, ""} when seq >= 0 ->
+        {:ok, seq}
+
+      _other ->
+        {:error,
+         "invalid --since #{inspect(value)} (expected `now`, `all`, or a numeric stream sequence)"}
+    end
   end
 
   defp print_read_digest(messages) do

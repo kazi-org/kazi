@@ -19,11 +19,13 @@ defmodule Kazi.Bus do
   """
 
   alias Gnat.Jetstream.API.{Consumer, KV}
+  alias Gnat.Jetstream.API.Stream, as: JetStream
   alias Kazi.Bus.Provision
   alias Kazi.Daemon.{Probe, Supervisor}
 
   @max_text_bytes 65_536
   @pull_timeout_ms 2_000
+  @pull_batch 100
   @default_watch_timeout_s 300
 
   @typedoc "A read/who error surfaced to the CLI verbatim."
@@ -119,13 +121,16 @@ defmodule Kazi.Bus do
   defp consume(opts, ack: ack?) do
     with_conn(opts, fn conn ->
       upsert_presence(conn, opts)
-      {:ok, drain(conn, opts, ack?)}
+      {:ok, drain(conn, opts, {:ack, ack?})}
     end)
   end
 
   # The shared pull path for read/peek/watch: presence is the CALLER's
   # responsibility (watch refreshes it on each wake without re-draining).
-  defp drain(conn, opts, ack?) do
+  # `mode` is `{:ack, boolean}` (read acks / peek NAKs everything, one batch)
+  # or `{:since, anchor}` (T54.9/#1097: consume ONLY messages with
+  # `stream_seq > anchor`, NAK the backlog so read/peek still see it).
+  defp drain(conn, opts, mode) do
     scope = scope(opts)
     session = session(opts)
     stream = Provision.stream_name()
@@ -136,8 +141,8 @@ defmodule Kazi.Bus do
     tell_consumer = tell_consumer_name(session)
     ensure_consumer(conn, stream, tell_consumer, "bus.*.msg.#{session}")
 
-    scoped = pull_all(conn, stream, scope_consumer, session, ack: ack?)
-    told = pull_all(conn, stream, tell_consumer, session, ack: ack?)
+    scoped = pull(conn, stream, scope_consumer, session, mode)
+    told = pull(conn, stream, tell_consumer, session, mode)
 
     # Team fan-in (#1069): a joined session also drains directed-at-team
     # messages (`tell @<team>`) across all scopes, one durable per
@@ -150,22 +155,43 @@ defmodule Kazi.Bus do
         team ->
           team_consumer = team_consumer_name(team, session)
           ensure_consumer(conn, stream, team_consumer, "bus.*.msg.@#{team}")
-          pull_all(conn, stream, team_consumer, "@" <> team, ack: ack?)
+          pull(conn, stream, team_consumer, "@" <> team, mode)
       end
 
     dedup_by_stream_seq(scoped ++ told ++ team_msgs)
   end
 
+  defp pull(conn, stream, consumer_name, session, {:ack, ack?}),
+    do: pull_all(conn, stream, consumer_name, session, ack: ack?)
+
+  defp pull(conn, stream, consumer_name, session, {:since, anchor}),
+    do: pull_new(conn, stream, consumer_name, session, anchor)
+
   @doc """
-  Blocks until at least one message is available for the caller, then
-  consumes and returns it/them -- the no-poll-loop alternative to `read/1`
-  (issue #1091). Drains first (anything already pending returns
-  immediately); otherwise holds ephemeral core-NATS subscriptions on the
-  caller's scope, directed, and team subjects as a wake signal, then drains
-  the durables again. `opts[:timeout]` is in SECONDS (default
-  #{@default_watch_timeout_s}); on expiry returns `{:error, :watch_timeout}`.
-  Presence is re-upserted on entry and on wake, so a watching session stays
-  fresh in `who`.
+  Blocks until a NEW message arrives for the caller, then consumes and
+  returns it/them -- the no-poll-loop alternative to `read/1` (issue #1091).
+
+  `opts[:since]` anchors what counts as new (T54.9, issue #1097):
+
+    * `:now` (the DEFAULT) -- capture the stream's `last_seq` at entry and
+      deliver only messages with a stream sequence STRICTLY greater; any
+      backlog already pending on the durables (e.g. left un-acked by a prior
+      `peek/1`) is NAKed back, staying consumable by `read/1`/`peek/1`, and
+      never wakes the watch.
+    * an integer sequence -- anchor there precisely: pending messages past
+      that sequence return immediately, everything at or before it is
+      treated as backlog.
+    * `:all` -- the pre-T54.9 behavior: drain first, so anything already
+      pending (backlog included) returns immediately.
+
+  While parked it holds ephemeral core-NATS subscriptions on the caller's
+  scope, directed, and team subjects as a wake signal, then drains the
+  durables again. The `:now` anchor is captured AFTER those subscriptions
+  are live (risk R-E54-6), so a message landing in between cannot be lost.
+  `opts[:timeout]` is in SECONDS (default #{@default_watch_timeout_s}); on
+  expiry returns `{:error, :watch_timeout}` -- always distinguishable from
+  an arrival. Presence is re-upserted on entry and on wake, so a watching
+  session stays fresh in `who`.
   """
   @spec watch(keyword()) :: {:ok, [map()]} | {:error, error()}
   def watch(opts \\ []) do
@@ -174,14 +200,24 @@ defmodule Kazi.Bus do
     with_conn(opts, fn conn ->
       upsert_presence(conn, opts)
 
-      case drain(conn, opts, true) do
-        [] -> await_then_drain(conn, opts, timeout_ms)
-        messages -> {:ok, messages}
+      case opts[:since] || :now do
+        :all ->
+          case drain(conn, opts, {:ack, true}) do
+            [] -> await_then_drain(conn, opts, {:ack, true}, timeout_ms)
+            messages -> {:ok, messages}
+          end
+
+        since ->
+          # R-E54-6 ordering: `await_then_drain/4` brings the wake
+          # subscriptions up BEFORE `resolve_anchor/2` reads `last_seq`, so
+          # a message landing in between is either counted into the anchor
+          # (backlog) or already signalled in the mailbox -- never dropped.
+          await_then_drain(conn, opts, {:anchor, since}, timeout_ms)
       end
     end)
   end
 
-  defp await_then_drain(conn, opts, timeout_ms) do
+  defp await_then_drain(conn, opts, mode, timeout_ms) do
     scope = scope(opts)
     session = session(opts)
 
@@ -198,15 +234,24 @@ defmodule Kazi.Bus do
         sid
       end)
 
+    # The `:now` anchor resolves HERE, after the subscriptions above are
+    # live (R-E54-6). `{:anchor, seq}` re-entries pass the resolved integer
+    # through unchanged.
+    mode =
+      case mode do
+        {:anchor, since} -> {:since, resolve_anchor(conn, since)}
+        other -> other
+      end
+
     # Close the park race: a message that landed between the caller's last
     # drain and the subscriptions coming up would otherwise sit in the
     # durables until the next wake. With the subs already live, this drain's
     # pulls may have core-sub copies in the mailbox -- unsub + flush before
     # returning them.
-    case drain(conn, opts, true) do
+    case drain(conn, opts, mode) do
       [] ->
         deadline = System.monotonic_time(:millisecond) + timeout_ms
-        result = await_wake(conn, opts, deadline, sids)
+        result = await_wake(conn, opts, mode, deadline, sids)
         # Defensive double-unsub: the wake path already unsubscribed +
         # flushed before draining; the timeout path lands here with the
         # subscriptions still live.
@@ -220,7 +265,7 @@ defmodule Kazi.Bus do
     end
   end
 
-  defp await_wake(conn, opts, deadline, sids) do
+  defp await_wake(conn, opts, mode, deadline, sids) do
     remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
@@ -238,13 +283,13 @@ defmodule Kazi.Bus do
           Enum.each(sids, fn sid -> Gnat.unsub(conn, sid) end)
           flush_bus_msgs()
 
-          case drain(conn, opts, true) do
-            [] -> resubscribe_and_wait(conn, opts, deadline)
+          case drain(conn, opts, mode) do
+            [] -> resubscribe_and_wait(conn, opts, mode, deadline)
             messages -> {:ok, messages}
           end
 
         {:msg, _other} ->
-          await_wake(conn, opts, deadline, sids)
+          await_wake(conn, opts, mode, deadline, sids)
       after
         remaining -> {:error, :watch_timeout}
       end
@@ -253,14 +298,27 @@ defmodule Kazi.Bus do
 
   # An irrelevant wake (another session's message on the scope subject)
   # drained empty after we tore the signal subscriptions down -- set them
-  # up again and keep waiting out the same deadline.
-  defp resubscribe_and_wait(conn, opts, deadline) do
+  # up again and keep waiting out the same deadline. An anchored mode keeps
+  # its already-resolved anchor; it is never re-captured mid-watch.
+  defp resubscribe_and_wait(conn, opts, mode, deadline) do
     remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
       {:error, :watch_timeout}
     else
-      await_then_drain(conn, opts, remaining)
+      await_then_drain(conn, opts, mode, remaining)
+    end
+  end
+
+  # T54.9 anchor resolution: `:now` is the JetStream stream's current
+  # `last_seq`; an explicit integer passes through (also the re-entry path
+  # after an irrelevant wake, so the anchor stays fixed for the whole watch).
+  defp resolve_anchor(_conn, seq) when is_integer(seq) and seq >= 0, do: seq
+
+  defp resolve_anchor(conn, :now) do
+    case JetStream.info(conn, Provision.stream_name()) do
+      {:ok, %{state: %{last_seq: seq}}} -> seq
+      {:error, reason} -> raise_bus_error(reason)
     end
   end
 
@@ -534,13 +592,84 @@ defmodule Kazi.Bus do
 
     :ok =
       Consumer.request_next_message(conn, stream, consumer_name, inbox, nil,
-        batch: 100,
+        batch: @pull_batch,
         no_wait: true
       )
 
     messages = collect(conn, session, ack?, [])
     Gnat.unsub(conn, sid)
     messages
+  end
+
+  # T54.9 (#1097): the anchored pull behind `watch/1`'s default. Pulls the
+  # consumer's ENTIRE pending set (looping full batches) WITHOUT acking,
+  # then acks only messages past `anchor` (they are consumed and returned)
+  # and NAKs the rest back to pending -- `peek/1`'s mechanism -- so backlog
+  # a prior peek left un-acked stays consumable by `read`/`peek` and never
+  # satisfies a watch.
+  defp pull_new(conn, stream, consumer_name, session, anchor) do
+    inbox = "_INBOX.#{Integer.to_string(System.unique_integer([:positive]))}"
+    {:ok, sid} = Gnat.sub(conn, self(), inbox)
+    pulled = pull_pending(conn, stream, consumer_name, inbox, [])
+    Gnat.unsub(conn, sid)
+
+    {new, backlog} =
+      Enum.split_with(pulled, fn m -> is_integer(m.stream_seq) and m.stream_seq > anchor end)
+
+    Enum.each(backlog, fn m -> Gnat.pub(conn, m.reply_to, "-NAK") end)
+    Enum.each(new, fn m -> Gnat.pub(conn, m.reply_to, "") end)
+
+    new
+    |> Enum.filter(&visible_to?(&1, session))
+    |> Enum.map(&Map.delete(&1, :reply_to))
+  end
+
+  # Deferred-ack batch loop: unacked deliveries are in flight (not
+  # redelivered until ack_wait), so successive full batches walk the whole
+  # pending set even when it exceeds one batch -- a NAK-as-we-go loop would
+  # re-pull the same first batch forever.
+  defp pull_pending(conn, stream, consumer_name, inbox, acc) do
+    :ok =
+      Consumer.request_next_message(conn, stream, consumer_name, inbox, nil,
+        batch: @pull_batch,
+        no_wait: true
+      )
+
+    {round, exhausted?} = collect_unacked([], 0)
+    acc = acc ++ round
+
+    if exhausted? or length(round) < @pull_batch do
+      acc
+    else
+      pull_pending(conn, stream, consumer_name, inbox, acc)
+    end
+  end
+
+  # Like `collect/4` but WITHOUT acking, and SELECTIVE: only JS pull
+  # deliveries (they carry a `$JS.ACK...` reply subject) are received.
+  # Stray core-NATS wake copies (no reply_to) stay in the mailbox for
+  # `await_wake/5` -- receiving them here would eat the wake signal for a
+  # message whose durable copy this pull round already missed.
+  defp collect_unacked(acc, count) do
+    receive do
+      {:msg, %{status: status}} when status in ["404", "408"] ->
+        {Enum.reverse(acc), true}
+
+      {:msg, %{topic: topic, body: body, reply_to: reply_to} = msg}
+      when is_binary(reply_to) ->
+        parsed =
+          topic
+          |> parse_message(body, msg[:headers], reply_to)
+          |> Map.put(:reply_to, reply_to)
+
+        if count + 1 == @pull_batch do
+          {Enum.reverse([parsed | acc]), false}
+        else
+          collect_unacked([parsed | acc], count + 1)
+        end
+    after
+      @pull_timeout_ms -> {Enum.reverse(acc), true}
+    end
   end
 
   defp collect(conn, session, ack?, acc) do

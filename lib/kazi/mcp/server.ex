@@ -274,10 +274,14 @@ defmodule Kazi.MCP.Server do
       %{
         "name" => "kazi_bus_watch",
         "description" =>
-          "BLOCK until at least one bus message arrives for this session, then consume " <>
-            "and return it (ADR-0067, issue #1091) -- the no-poll-loop way to wait; do " <>
-            "NOT call kazi_bus_read in a loop. Anything already pending returns " <>
-            "immediately. The result renders through the same bounded DIGEST envelope " <>
+          "BLOCK until a NEW bus message arrives for this session, then consume and " <>
+            "return it (ADR-0067, issues #1091/#1097) -- the no-poll-loop way to wait; " <>
+            "do NOT call kazi_bus_read in a loop. By default (since: \"now\") only " <>
+            "messages posted AFTER the watch starts are delivered -- backlog already " <>
+            "pending (e.g. shown by an earlier peek) never satisfies the watch and " <>
+            "stays consumable by kazi_bus_read. Pass since: \"all\" to return anything " <>
+            "already pending immediately, or a numeric stream sequence to anchor " <>
+            "precisely. The result renders through the same bounded DIGEST envelope " <>
             "as kazi_bus_read (ADR-0072; full: true for unabridged messages). `timeout` " <>
             "is in SECONDS (keep it bounded); on expiry the result is {ok: true, " <>
             "timed_out: true, digest: {total: 0, lines: []}} (messages: [] under " <>
@@ -295,6 +299,13 @@ defmodule Kazi.MCP.Server do
               "description" =>
                 "true: return every message unabridged (messages: [...]) instead of " <>
                   "the default bounded digest (ADR-0072). Default false."
+            },
+            "since" => %{
+              "type" => "string",
+              "description" =>
+                "What counts as new: \"now\" (default -- strictly after the watch " <>
+                  "starts), \"all\" (drain anything pending immediately), or a " <>
+                  "numeric stream sequence to anchor at precisely."
             },
             "scope" => %{
               "type" => "string",
@@ -512,6 +523,7 @@ defmodule Kazi.MCP.Server do
     watch_opts =
       bus_opts(args, opts)
       |> maybe_put_opt(:timeout, watch_timeout(Map.get(args, "timeout")))
+      |> maybe_put_opt(:since, watch_since(Map.get(args, "since")))
 
     case Bus.watch(watch_opts) do
       {:ok, messages} ->
@@ -541,6 +553,22 @@ defmodule Kazi.MCP.Server do
 
   defp watch_timeout(seconds) when is_number(seconds) and seconds > 0, do: trunc(seconds)
   defp watch_timeout(_), do: nil
+
+  # T54.9/#1097: the watch anchor. Mirrors the CLI's --since <seq|now|all>;
+  # anything unrecognized falls back to the default (:now via Bus.watch),
+  # matching watch_timeout's lenient shape.
+  defp watch_since("now"), do: :now
+  defp watch_since("all"), do: :all
+  defp watch_since(seq) when is_number(seq) and seq >= 0, do: trunc(seq)
+
+  defp watch_since(seq) when is_binary(seq) do
+    case Integer.parse(seq) do
+      {n, ""} when n >= 0 -> n
+      _other -> nil
+    end
+  end
+
+  defp watch_since(_), do: nil
 
   defp call_tool("kazi_bus_who", args, opts) do
     case Bus.who(bus_opts(args, opts)) do
