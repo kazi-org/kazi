@@ -16,6 +16,17 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.165.0](https://github.com/kazi-org/kazi/compare/v1.164.1...v1.165.0) (2026-07-17)
+
+
+### Features
+
+* **examples:** cli provider goal-file over the kazi binary ([a32e082](https://github.com/kazi-org/kazi/commit/a32e08263f7083136c15c92bb7eb0b5fb1161af9))
+* **loader:** map cli provider and validate its assertions ([aa52930](https://github.com/kazi-org/kazi/commit/aa529301fa031caf5ab1237fd078d8c6889ffff4))
+* **providers:** add :cli golden-invocation provider (UC-055) ([7620e1d](https://github.com/kazi-org/kazi/commit/7620e1d167b902738f94bf8ad97f43d8802e1f79))
+* **runtime:** register :cli provider in the dispatch map ([31c9b81](https://github.com/kazi-org/kazi/commit/31c9b811570b9fb730617b4d024fce85bff2930d))
+* **schema:** kazi schema cli config descriptor ([f054ca0](https://github.com/kazi-org/kazi/commit/f054ca00f3a1391b41bfd9b5bae6d2e09e9a0cb5))
+
 ## [1.164.1](https://github.com/kazi-org/kazi/compare/v1.164.0...v1.164.1) (2026-07-17)
 
 
