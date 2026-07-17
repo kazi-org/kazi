@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.208.0](https://github.com/kazi-org/kazi/compare/v1.207.0...v1.208.0) (2026-07-17)
+
+
+### Features
+
+* **plan:** kazi plan render — roadmap DAG as a generated markdown plan (T45.5) ([bbfd58a](https://github.com/kazi-org/kazi/commit/bbfd58a4ef878ea3b2078b31c83dc59c36ac3839))
+
 ## [1.207.0](https://github.com/kazi-org/kazi/compare/v1.206.0...v1.207.0) (2026-07-17)
 
 
