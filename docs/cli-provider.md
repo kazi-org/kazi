@@ -26,7 +26,9 @@ kazi schema cli
 | `args` | array of strings | no | Arguments passed to `cmd`. Default `[]`. |
 | `env` | table / pairs | no | Extra environment as `{NAME = "value"}` or `{name, value}` pairs. |
 | `timeout_ms` | integer | no | Kill the command after this many ms → `:error`. |
-| `assertions` | array of tables | **yes** | A **non-empty** list of checks. An empty list is a **load error** — a `cli` predicate with no assertions can never pass or fail meaningfully. |
+| `assertions` | array of tables | **yes\*** | A **non-empty** list of checks. An empty list is a **load error** — a `cli` predicate with no assertions can never pass or fail meaningfully. \*Required **unless** `script` is set. |
+| `script` | array of tables | no | An **ordered** list of sub-invocations of the same `cmd`, each with its own `args` + `assertions`. Use instead of a top-level `assertions` list. See [Script](#script--ordered-sub-invocations). |
+| `samples` | integer | no | Require **N consecutive** passing runs before the predicate is green (flake detection). Default `1`. See [Samples](#samples--flake-detection). |
 
 ## Assertions
 
@@ -52,6 +54,7 @@ expected = 0
 | `contains` | the stream **contains** `expected` as a substring |
 | `regex` | the stream **matches** the `expected` pattern (validated at load) |
 | `json_path` | the stream parses as JSON, the value at `path` is extracted, and it **equals** `expected` |
+| `golden` | the **whole stream** equals a committed golden file at `golden`; a mismatch is a `:fail` carrying a unified `diff` |
 
 ```toml
 # the binary names itself on stdout
@@ -81,6 +84,84 @@ expected = 2
 The predicate **passes** only when **every** assertion holds. The envelope-v2
 `score` is the count of assertions that passed (`direction: higher_better`), so the
 controller reads "2 of 3 → 3 of 3" as progress.
+
+### `golden` — snapshot the output against a committed file
+
+`golden` compares the **whole stream** to a file committed in the workspace, so it
+catches **flag / usage / help-text drift** — the same discipline that keeps `kazi
+help --json` accurate. Point `golden` at the file; a mismatch is a `:fail` whose
+evidence carries a line-oriented unified `diff` (the golden lines removed, the actual
+output added), so a fixer sees exactly what changed. A missing or unreadable golden
+file is a `:fail` naming the path (the binary ran fine — the gate just cannot
+compare, which is drift to fix by committing the golden), never an `:error`.
+
+```toml
+[[predicate.assertions]]
+target = "stdout"
+match = "golden"
+golden = "test/golden/kazi_help.txt"
+```
+
+Capture the golden the first time by running the command and saving its stdout to
+that path, then commit it; from then on any change to the output trips the diff.
+
+## Script — ordered sub-invocations
+
+A `script` runs several invocations of the **same** `cmd` **in order**, each with its
+own `args` and `assertions` — the "does `version` → `status` → `apply <fixture>` all
+work back to back" check that a single invocation cannot express. The predicate
+**passes only when every step passes**; it **stops at the first failing step** (a
+later step usually depends on an earlier one's effect) and the evidence names that
+step (`failed_step`, with its index, args, and assertion failures). The `score` is
+the count of passing steps (`direction: higher_better`), so "2 of 3 steps → 3 of 3"
+reads as progress. Use `script` **instead of** a top-level `assertions` list.
+
+```toml
+[[predicate]]
+id = "kazi-core-flow"
+provider = "cli"
+description = "version, then status, then a --check apply all succeed"
+cmd = "kazi"
+
+[[predicate.script]]
+args = ["version"]
+[[predicate.script.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.script]]
+args = ["status", "--json"]
+[[predicate.script.assertions]]
+target = "exit_code"
+expected = 0
+[[predicate.script.assertions]]
+target = "stdout"
+match = "json_path"
+path = "$.schema_version"
+expected = 2
+```
+
+## Samples — flake detection
+
+`samples = N` requires **N consecutive passing runs** before the predicate is
+considered stably green — the same consecutive-pass shape the `browser` provider uses
+for synthetic journeys. A single non-pass **breaks the streak** (the run stops early
+and the predicate is `:fail`, carrying `passing_count` vs `samples_required`); an
+`:error` run is infra (`:error`), never a broken streak. `samples` wraps the whole
+evaluation, so it applies to a `script` as readily as to a single invocation.
+
+```toml
+[[predicate]]
+id = "kazi-version-stable"
+provider = "cli"
+cmd = "kazi"
+args = ["version"]
+samples = 3
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+```
 
 ## `:error` vs `:fail`
 
