@@ -920,6 +920,58 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @scenario %{
+    kind: "scenario",
+    title: "scenario predicate config",
+    description:
+      "Replay a pinned Gherkin Scenario by DELEGATING to a surface provider (T49.3, ADR-0064). " <>
+        "Binds one Scenario in a .feature spec to a committed pin; passes only when the pin " <>
+        "validates AND replays green through the surface provider. An unpinned/stale/invalid " <>
+        "pin is failing work (:fail), never an error. Keys beyond those below pass through " <>
+        "unchanged to the delegate (so its url/cmd/samples config works as authored directly).",
+    keys: [
+      %{
+        name: "spec",
+        type: "string",
+        required: true,
+        description: "Path to the .feature file holding the Scenario."
+      },
+      %{
+        name: "scenario",
+        type: "string",
+        required: true,
+        description: "The Scenario name to bind and replay."
+      },
+      %{
+        name: "surface",
+        type: "string",
+        required: false,
+        description:
+          "Which surface provider replays the pin's trace: \"browser\" (default) or \"cli\"."
+      },
+      %{
+        name: "pin",
+        type: "string",
+        required: false,
+        description:
+          "Path to the pin artifact. Defaults to docs/specs/pins/<derived-id>.pin.json."
+      },
+      %{
+        name: "repin",
+        type: "string",
+        required: false,
+        description: "Re-mint policy: \"auto\" (default) or \"manual\" (consumed by minting)."
+      }
+    ],
+    example: %{
+      "id" => "pat-create-download",
+      "provider" => "scenario",
+      "spec" => "docs/specs/pat.feature",
+      "scenario" => "User can create and download a PAT",
+      "surface" => "browser"
+    }
+  }
+
   @schemas %{
     "cli" => @cli,
     "custom_script" => @custom_script,
@@ -932,7 +984,8 @@ defmodule Kazi.Predicate.Schema do
     "property" => @property,
     "mutation" => @mutation,
     "cve" => @cve,
-    "integration" => @integration
+    "integration" => @integration,
+    "scenario" => @scenario
   }
 
   @doc "The provider kinds with a documented config schema, sorted."
