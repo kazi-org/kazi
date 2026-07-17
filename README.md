@@ -956,6 +956,16 @@ kazi status                                  # list every currently LIVE run (pr
 kazi portfolio [--full]                      # sitrep "where are we / how is it going?": headline % across done/in-progress/blocked/todo/planned, bounded per-bucket summaries (blocked entries name their blocker), honest predicates-green rate — never a projected date (ADR-0046); --full restores the complete ledger (E64, #1427)
 kazi orphans [--reap]                         # list runs whose harness child process is still alive (#1073/#857); --reap sends TERM then KILL to each
 kazi install-hooks [--local] [--uninstall] # opt-in: register session-bus delivery hooks (SessionStart + UserPromptSubmit -> `kazi bus hook <event>`, ADR-0076); --uninstall reverts exactly
+kazi daemon start|status|stop                # the per-machine session-bus daemon (ADR-0067); `start` also supervises nats-server
+kazi bus post [<kind>] <text>                # broadcast to the local/team bus; <kind> defaults to `fact` (ADR-0067)
+kazi bus tell <session>|<nickname>|@<team> <text>  # direct message; prints a message id (T55.12)
+kazi bus status <id>                         #   pending|consumed delivery state for a `bus tell` (T55.12)
+kazi bus watch [--timeout <n>] [--since <seq|now|all>]  # block until a NEW message arrives (#1091/#1097)
+kazi bus who [--all] [--team <t>] [--project <dir>] [--machine <host>]  # roster with liveness + inbox depth
+kazi bus read [--peek] | kazi bus peek       #   consume / non-destructively view your inbox (digest by default, ADR-0072)
+kazi bus join <team> | kazi bus leave        #   named-team membership (issue #1069)
+kazi bus name <nickname>                     #   durable, addressable session name (T55.5)
+kazi bus <verb> --help                       #   full per-verb reference; see also docs/session-bus.md
 kazi economy [--goal <ref>]                  # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
 kazi context index <label> <file>            # context store: index a heavy artifact
 kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provider gist)
@@ -979,9 +989,13 @@ kazi version                                 # print the kazi version and exit
 > server and drives its self-describing `kazi_plan` / `kazi_approve` / `kazi_apply` /
 > `kazi_status` / `kazi_list_proposed` tools — no JSON-CLI shell-out. The same server
 > also exposes the session-bus verbs (ADR-0067) as `kazi_bus_post` / `kazi_bus_read` /
-> `kazi_bus_who` / `kazi_bus_tell`, mirroring `kazi bus post|read|who|tell` — each
+> `kazi_bus_watch` / `kazi_bus_who` / `kazi_bus_tell` / `kazi_bus_status` /
+> `kazi_bus_name`, mirroring `kazi bus post|read|watch|who|tell|status|name` — each
 > requires a running `kazi daemon` and reports a structured `no_daemon` tool error
-> otherwise. The canonical client config references the installed binary verb
+> otherwise. `kazi_bus_tell` returns the T55.12 delivery receipt (`id`, `liveness`)
+> that `kazi_bus_status` dereferences to `pending`/`consumed`; see docs/session-bus.md
+> ("MCP tools") for the full arg/response shape of each. The canonical client config
+> references the installed binary verb
 > (`kazi init --with-mcp` writes exactly this `.mcp.json`):
 >
 > ```json
