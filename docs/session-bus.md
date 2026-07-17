@@ -19,8 +19,9 @@ when the daemon isn't running, and **convergence never depends on the bus**
   defaults to `fact`; an explicit, unrecognized kind is a one-line usage error
   enumerating the valid kinds (issue #1060).
 - **Presence.** Every bus call upserts the caller's session into a
-  short-TTL KV bucket — `kazi bus who` lists who's currently active
-  (session, pid, cwd, last-seen).
+  short-TTL KV bucket — `kazi bus who` lists the roster (session, machine,
+  pid, liveness, cwd, last-seen). Rows record the caller's pid AND its
+  process start time, so liveness checks are pid-reuse-proof (T55.11).
 - **Directed messages.** `kazi bus tell <session> <text>` publishes to
   `bus.<scope>.msg.<session>`; only that session's `bus read` durable consumer
   sees it (durable = a persistent read cursor: a second read never re-delivers
@@ -58,7 +59,8 @@ kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scop
 kazi bus read [--peek] [--full] [--json]                   # pull + ack this session's durable consumers, prints a digest
 kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
 kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
-kazi bus who [--team <t>] [--all] [--json]                 # list fresh presence; --all includes TTL-stale entries
+kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
+                                                           # roster with liveness (active|idle); --all includes stale rows
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
 kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
@@ -160,13 +162,48 @@ session goes idle and vanishes on `bus leave` — a live roster rather than
 a static list. Sessions that keep a `bus watch` open stay fresh
 indefinitely.
 
-### Presence freshness
+### Presence liveness and freshness (T55.11)
 
-`bus who` hides entries older than the presence TTL (10 minutes), so
-closed sessions age out instead of looking active; `--all` shows
-everything, age-annotated (`seen=NNNs ago`). New sessions appear on their
-first bus call — orchestrators should have members run `kazi bus join
-<team>` at session start so the roster is explicit rather than implicit.
+The presence TTL is **600 seconds (10 minutes)** — the `kazi_sessions`
+bucket's server-side entry TTL. `who --json` carries it as `ttl_s`, and each
+session's `seen_s` (seconds since its last heartbeat), so the cutoff is
+data, not folklore.
+
+"Idle a few minutes" (needs a nudge) and "process gone" (needs a restart)
+are OPPOSITE situations, so the roster distinguishes them with a `liveness`
+column:
+
+- **`active`** — the session itself made a bus call recently.
+- **`idle`** — the session's process is verified alive on its machine, but
+  it has been quiet. The daemon runs a periodic presence sweep (every ~60s)
+  that re-heartbeats such rows on the session's behalf, so a
+  genuinely-alive session NEVER ages out of `who`, no matter how long it
+  idles.
+- **`dead-reaping`** — the row's pid is verifiably gone, or the pid was
+  reused by a different process (rows record pid + process start time, so
+  reuse cannot resurrect a dead session). The sweep deletes such rows on
+  its next pass — this also retires legacy `os-<pid>` ghost rows.
+
+The sweep judges ONLY rows recorded by its own machine — a daemon
+(including a connect-mode one on a shared cross-machine bus) never guesses
+about pids it cannot see; every machine's rows are swept by that machine's
+own daemon. The sweep runs inside the daemon process, so it takes effect
+once the daemon is restarted onto a build that includes it; `who`'s
+liveness rendering and filters work against any daemon.
+
+`bus who` hides entries older than the presence TTL unless their process is
+verified alive locally (those render `idle` — never hidden, never dead);
+`--all` shows everything, age-annotated (`seen=NNNs ago`). Filters replace
+the grep pipeline every fleet script started with:
+
+```
+kazi bus who --project <dir>      # sessions whose cwd is <dir> or under it
+kazi bus who --machine <host>     # sessions on that machine (exact hostname)
+```
+
+New sessions appear on their first bus call — orchestrators should have
+members run `kazi bus join <team>` at session start so the roster is
+explicit rather than implicit.
 
 Every `bus` verb prints a one-line `no daemon running -- start one with
 \`kazi daemon start\`` error (exit 1) when the daemon socket is down, instead
@@ -256,22 +293,17 @@ harness drives the bus natively, with no JSON-CLI shell-out:
 | `kazi_bus_name` | `kazi bus name` | `name` |
 
 Each accepts the optional `topic` / `scope` / `sev` arguments the CLI verbs
-<<<<<<< HEAD
-take. `kazi_bus_read` and `kazi_bus_watch` return the ADR-0072 digest
-envelope by default (see above); `full: true` mirrors the CLI's `--full`
-and returns `messages` unabridged. `kazi_bus_watch` takes an optional
-`timeout` (seconds) and `since` (`"now"` default / `"all"` / a numeric
-stream sequence — the CLI's `--since` anchor, issue #1097); where the CLI
-exits 3 on expiry, the tool returns `{ok: true, timed_out: true, digest:
-{total: 0, lines: []}}` (`messages: []` under `full: true`) — an expected
-outcome the agent branches on, never
-`isError`. A tool call against a missing daemon returns an MCP tool-result error
-=======
 take. `kazi_bus_tell`'s `session` accepts a session id, a nickname, or
-`@<team>`, exactly like the CLI verb (T55.5). `kazi_bus_watch` takes an optional `timeout` (seconds); where the CLI
-exits 3 on expiry, the tool returns `{ok: true, timed_out: true, messages:
-[]}` — an expected outcome the agent branches on, never `isError`. A tool call against a missing daemon returns an MCP tool-result error
->>>>>>> origin/task/T55.5
+`@<team>`, exactly like the CLI verb (T55.5). `kazi_bus_read` and
+`kazi_bus_watch` return the ADR-0072 digest envelope by default (see
+above); `full: true` mirrors the CLI's `--full` and returns `messages`
+unabridged. `kazi_bus_watch` takes an optional `timeout` (seconds) and
+`since` (`"now"` default / `"all"` / a numeric stream sequence — the
+CLI's `--since` anchor, issue #1097); where the CLI exits 3 on expiry,
+the tool returns `{ok: true, timed_out: true, digest: {total: 0, lines:
+[]}}` (`messages: []` under `full: true`) — an expected outcome the agent
+branches on, never
+`isError`. A tool call against a missing daemon returns an MCP tool-result error
 (`isError: true`) with `reason: "no_daemon"`, exactly mirroring the CLI's
 no-daemon message — never a JSON-RPC protocol error.
 
