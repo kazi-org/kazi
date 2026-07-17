@@ -4231,3 +4231,18 @@ Shipped/closed: A2, A3, B, D, A-dup. Partially fixed with a named remaining piec
 A4 (→T59.8), E (→T59.10), F (→T59.9). Fully open: A1 (→T59.6), G (→T59.7). Out of
 scope with a stated reason: C. Five new checkable tasks appended to Workstream A
 (T59.6–T59.10). No gap silently omitted.
+
+## 2026-07-17 — T58.4 scoped: burrito wrapper housekeeping pollutes STDOUT
+
+Split out of T59.2's secondary finding into its own E58 task. T58.3 fixed
+`bus read`'s stdout hygiene at the Elixir-logger layer, but a separate, EARLIER
+path still writes to stdout: the `kazi-org/burrito` zig wrapper prints `[i] New
+install path is: <dir>` (first-invocation extraction) and `[l] Skipped cleanup of
+older version (vX.Y.Z): still in use by a running process` (old-version cleanup)
+to STDOUT before the BEAM starts. Live-observed on the v1.195.0/v1.212.0 release
+binaries during the T59.2 mixed-version repro — every invocation emitted the `[i]`
+line to stdout (captured via separate stdout/stderr redirection with a scratch
+`KAZI_INSTALL_DIR`). No Elixir logger change can reach pre-BEAM zig output, so the
+fix is in the burrito fork (emit to stderr / gate behind verbosity) + a `mix.lock`
+pin bump. Tracked as T58.4 (docs/plans/E58.md, Workstream B). Not the same bug as
+T58.3 (different layer) or #1255 (that hang is fixed; this is output-stream only).
