@@ -4,14 +4,18 @@ defmodule Kazi.Teach.InstallHooks do
   opt-in (T55.2, UC-068, ADR-0071 decisions 1/3/6) -- the sibling of
   `Kazi.Teach.InstallSkill` under the same consent contract.
 
-  `kazi install-hooks` writes TWO hook registrations, matched to the two
-  moments delivery matters (ADR-0071 decision 2's binding rule: bind ONLY to
-  events whose stdout reaches the session's context -- for Claude Code those
-  are `SessionStart` and `UserPromptSubmit`; a `Stop` hook's output never
-  reaches the next turn, so binding there would be delivery to nowhere):
+  `kazi install-hooks` writes THREE hook registrations. Two are matched to the
+  two moments delivery matters (ADR-0071 decision 2's binding rule: bind ONLY
+  to events whose stdout reaches the session's context -- for Claude Code
+  those are `SessionStart` and `UserPromptSubmit`; a `Stop` hook's output
+  never reaches the next turn, so binding there would be delivery to
+  nowhere). The third (T60.3, issue #1156) is exempt from that rule by
+  construction rather than by exception: it only POSTS outward, so its own
+  stdout is discarded and there is nothing for the binding rule to bind:
 
       SessionStart     -> `kazi bus hook session-start`
       UserPromptSubmit -> `kazi bus hook turn`
+      Notification     -> `kazi bus hook notification`
 
   The registered command is a kazi SUBCOMMAND, not a script file: the payload
   logic lives in the binary (unit-testable, upgrades with `kazi` itself), and
@@ -66,11 +70,14 @@ defmodule Kazi.Teach.InstallHooks do
   # the command's arguments without orphaning installed entries.
   @command_prefix "kazi bus hook "
 
-  # The two registrations (ADR-0071 decision 2). Event order here is also the
-  # order they are written into a fresh settings file.
+  # The three registrations (ADR-0071 decision 2; Notification added T60.3).
+  # Event order here is also the order they are written into a fresh settings
+  # file. Every install/uninstall code path below walks this list, so adding
+  # Notification here is the ONLY change needed to cover it end to end.
   @hooks [
     {"SessionStart", "kazi bus hook session-start"},
-    {"UserPromptSubmit", "kazi bus hook turn"}
+    {"UserPromptSubmit", "kazi bus hook turn"},
+    {"Notification", "kazi bus hook notification"}
   ]
 
   @typedoc "The result detail both verbs report back to the CLI."
