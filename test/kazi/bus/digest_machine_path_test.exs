@@ -97,6 +97,10 @@ defmodule Kazi.Bus.DigestMachinePathTest do
       scope = unique_scope()
       opts = [conn: conn, session: session, scope: scope]
 
+      # T55.5: tell resolves recipients against the roster -- establish
+      # the recipient's presence first (any bus call does).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
       assert :ok = Bus.tell(session, "directed #{session}", conn: conn, scope: scope)
       assert :ok = Bus.post("note", "urgent #{session}", opts ++ [topic: "ci", sev: "interrupt"])
       assert :ok = Bus.post("fact", "routine #{session}", opts ++ [topic: "ci"])
@@ -161,8 +165,15 @@ defmodule Kazi.Bus.DigestMachinePathTest do
 
       assert :ok = Bus.post("note", "wake the watcher", conn: conn, scope: scope, topic: "ci")
 
+      # T54.9: watch anchors to NOW by default, so a pre-posted message is
+      # backlog and would not satisfy it -- this test is about the DIGEST
+      # rendering, so opt into the drain-first escape explicitly.
       assert %{"result" => %{"structuredContent" => result}} =
-               call("kazi_bus_watch", %{"timeout" => 5, "scope" => scope}, conn: conn)
+               call(
+                 "kazi_bus_watch",
+                 %{"timeout" => 5, "scope" => scope, "since" => "all"},
+                 conn: conn
+               )
 
       assert result["ok"] == true
       assert result["schema_version"] == Kazi.CLI.Schema.schema_version()
