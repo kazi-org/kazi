@@ -121,6 +121,44 @@ defmodule Kazi.TeachCoherenceTest do
     |> Enum.uniq()
   end
 
+  # T42.3 (ADR-0052): the PROSE of the doc — everything OUTSIDE a code context.
+  # The inverse of `code_contexts/1`: fenced blocks and inline spans are blanked,
+  # leaving the narrative a reader actually acts on.
+  #
+  # Why prose only: a slash-command reference is written in narrative ("fall back
+  # to /plan"), whereas the legitimate slashes in these docs live in EXAMPLES —
+  # the worked example's `/healthz` HTTP endpoint appears 3x in each doc, inside a
+  # JSON block and a shell invocation. Scanning the whole doc would flag
+  # `/healthz`, and a guard that cries wolf gets deleted.
+  defp prose(doc) do
+    doc
+    |> String.replace(@fenced, " ")
+    |> String.replace(@inline, " ")
+  end
+
+  # T42.3: a SLASH-COMMAND token in prose — a personal-skill reference like
+  # `/plan` or `/foo`.
+  #
+  # The lookbehind is the whole design. `/` must NOT be preceded by a word char,
+  # another `/`, or `:` — which excludes, with no allowlist to maintain:
+  #   * paths          — `docs/plans/E42.md`, `git/worktree/scratch`
+  #   * URLs           — `https://github.com/...`
+  #   * prose slashes  — `and/or`, `input/output`, `loop/qualify`
+  # and keeps exactly what a slash command looks like: a `/word` opening a token.
+  #
+  # Known gap (found while doing T42.1, recorded rather than silently tolerated):
+  # this does NOT catch `loop/qualify`. The `/` there is a separator, so the form
+  # still NAMES external skills and still violates ADR-0052, but no regex can tell
+  # it from `and/or` without guessing. That one is caught by review, not CI.
+  @slash_token ~r{(?<![\w/:])/([a-z][a-z-]*)}
+
+  defp referenced_slash_tokens(doc) do
+    @slash_token
+    |> Regex.scan(prose(doc))
+    |> Enum.map(fn [_full, tok] -> tok end)
+    |> Enum.uniq()
+  end
+
   # ===========================================================================
   # The guard core — assert every referenced command/flag is real.
   # ===========================================================================
@@ -148,6 +186,32 @@ defmodule Kazi.TeachCoherenceTest do
            "#{label} references flag(s) not in the real CLI switches " <>
              "(kazi help --json): #{inspect(bad_flags)}. " <>
              "Real flags: #{surface.flags |> MapSet.to_list() |> Enum.sort() |> inspect()}"
+
+    # T42.3 (ADR-0052 decision 1): ANY `/<word>` token in PROSE is a slash-command
+    # reference — the operator's personal skill library assumed universal. A reader
+    # without `/plan` installed cannot act on "fall back to /plan".
+    #
+    # DEVIATION from T42.3 as written, deliberate and flagged for review: the task
+    # says to fail only on a token "that does not match a real kazi CLI verb". That
+    # allowlist would PERMIT `/plan` — and `/plan` was the primary offender this
+    # epic exists for (10 occurrences in install_skill.ex at E42's premise, beside
+    # /tidy, /loop, /qualify). Implemented literally, the guard would miss the exact
+    # regression it was written to catch.
+    #
+    # The allowlist rests on a false premise: kazi's CLI is invoked as `kazi plan`,
+    # NEVER as `/plan`. The real form always sits in a code context, which `prose/1`
+    # already strips. So no `/<word>` surviving into prose is ever a legitimate kazi
+    # reference, and the sharper, correct rule is: none belong there.
+    bad_slash = referenced_slash_tokens(doc)
+
+    assert bad_slash == [],
+           "#{label} references slash-command token(s) in prose: " <>
+             "#{inspect(Enum.map(bad_slash, &"/#{&1}"))}. " <>
+             "These name an external tool's skill as though it were universal " <>
+             "(ADR-0052 decision 1) — a reader without it installed cannot act on the " <>
+             "sentence. Describe the CONTRACT instead (e.g. \"your own planning " <>
+             "workflow\"), or use the real CLI form (`kazi plan`, in backticks). " <>
+             "kazi is never invoked as `/verb`, so no slash token belongs in prose."
   end
 
   # ===========================================================================
@@ -283,6 +347,77 @@ defmodule Kazi.TeachCoherenceTest do
       # If these raised, the fake-command tests above would be meaningless.
       assert_coherent(Kazi.Teach.InstallSkill.skill_md(), surface, "SKILL.md")
       assert_coherent(File.read!("AGENTS.md"), surface, "AGENTS.md")
+    end
+
+    # T42.3 (ADR-0052): the regression this guard exists for. `/plan`, `/tidy`,
+    # `/loop` and `/qualify` were REAL text in these docs — E42's whole premise —
+    # naming the operator's personal skill library as though every reader had it.
+    for tok <- ~w(foo plan tidy loop qualify) do
+      test "an invented `/#{tok}` skill reference in prose is rejected" do
+        tampered =
+          Kazi.Teach.InstallSkill.skill_md() <>
+            "\n\nDrift injected by the test: if kazi is unavailable, fall back to /#{unquote(tok)}.\n"
+
+        assert_raise ExUnit.AssertionError, ~r{/#{unquote(tok)}}, fn ->
+          assert_coherent(tampered, cli_surface(), "tampered SKILL.md")
+        end
+      end
+    end
+
+    test "an invented `/foo` in AGENTS.md prose is rejected" do
+      tampered = File.read!("AGENTS.md") <> "\n\nWhen stuck, run /foo to sort it out.\n"
+
+      assert_raise ExUnit.AssertionError, ~r{/foo}, fn ->
+        assert_coherent(tampered, cli_surface(), "tampered AGENTS.md")
+      end
+    end
+
+    # The false-positive guard. A guard that cries wolf gets deleted, so pin the
+    # shapes that legitimately carry slashes and MUST stay silent: the worked
+    # example's `/healthz` endpoint (already in both docs 3x), paths, URLs, and
+    # prose separators.
+    test "legitimate slashes in code contexts, paths and URLs do NOT trip the guard" do
+      benign =
+        Kazi.Teach.InstallSkill.skill_md() <>
+          """
+
+          A live probe example: `GET /healthz` returns 200, see docs/plans/E42.md
+          and https://github.com/kazi-org/kazi for the write-up. Hygiene covers
+          git/worktree/scratch sweeping, and the input/output split is unchanged.
+
+          ```sh
+          curl -sf http://localhost:4000/healthz
+          ```
+          """
+
+      assert_coherent(benign, cli_surface(), "benign SKILL.md")
+    end
+
+    # The subtle one, and why this guard does NOT allowlist real kazi verbs.
+    # `plan` IS a real verb, so T42.3's literal "fail only on tokens that are not
+    # real kazi verbs" would PERMIT `/plan` — the primary offender. kazi is invoked
+    # as `kazi plan`, never `/plan`, and the real form lives in a code context that
+    # `prose/1` strips, so a `/plan` in prose is a personal-skill reference always.
+    test "a slash token is rejected even when the word IS a real kazi verb" do
+      surface = cli_surface()
+      real = surface.commands |> MapSet.to_list() |> Enum.sort() |> List.first()
+
+      tampered =
+        Kazi.Teach.InstallSkill.skill_md() <>
+          "\n\nWhen kazi is unavailable, fall back to /#{real}.\n"
+
+      assert_raise ExUnit.AssertionError, ~r{/#{real}}, fn ->
+        assert_coherent(tampered, surface, "SKILL.md with a real-verb slash token")
+      end
+    end
+
+    # ...while the REAL CLI form stays legal, because it lives in a code context.
+    test "the real `kazi <verb>` form in backticks is NOT flagged" do
+      fine =
+        Kazi.Teach.InstallSkill.skill_md() <>
+          "\n\nAuthor the predicates with `kazi plan`, then converge with `kazi apply`.\n"
+
+      assert_coherent(fine, cli_surface(), "SKILL.md with real CLI forms")
     end
   end
 end
