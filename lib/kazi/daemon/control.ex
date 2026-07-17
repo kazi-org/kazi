@@ -35,6 +35,7 @@ defmodule Kazi.Daemon.Control do
       "nats_host" => nats_host(nats_name)
     }
     |> maybe_put("nats_token", nats_token(nats_name))
+    |> maybe_put("schema_vsn", schema_vsn(opts))
   end
 
   # T55.7 (ADR-0072 d5): assembly is the DAEMON's job -- the reply is already
@@ -55,6 +56,20 @@ defmodule Kazi.Daemon.Control do
       nil -> "dev"
       vsn -> to_string(vsn)
     end
+  end
+
+  # T52.2 (ADR-0068 decision 3): the daemon is the single writer, so its stamped
+  # `kazi_schema_meta` version is the authoritative `schema_vsn` for the skew
+  # handshake. Read defensively -- a `ping` must always answer, so a repo that is
+  # unavailable or unstamped omits the field (additive; an old client ignores it)
+  # rather than crashing the control connection. `:repo` is injectable for tests.
+  defp schema_vsn(opts) do
+    repo = Keyword.get(opts, :repo, Kazi.Repo)
+    Kazi.ReadModel.Migrate.db_stamped_version(repo)
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
   end
 
   defp os_pid do
