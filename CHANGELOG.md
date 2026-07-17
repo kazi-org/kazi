@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.184.0](https://github.com/kazi-org/kazi/compare/v1.183.0...v1.184.0) (2026-07-17)
+
+
+### Features
+
+* **loop:** route pin-blocked scenarios to the demonstrator (:dispatch_demonstrator) ([8a0cf43](https://github.com/kazi-org/kazi/commit/8a0cf4302e2740578d34cc5fb121129fd5d82fe9))
+* **scenario:** demonstrator dispatch -- versioned prompt + born-reproducible acceptance gate ([24f2da8](https://github.com/kazi-org/kazi/commit/24f2da8e1f6ff1616154a8b5ce1b2af1b839214e))
+
 ## [1.183.0](https://github.com/kazi-org/kazi/compare/v1.182.0...v1.183.0) (2026-07-17)
 
 
