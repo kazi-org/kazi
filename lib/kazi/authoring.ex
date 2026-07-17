@@ -885,10 +885,23 @@ defmodule Kazi.Authoring do
 
   defp build_predicates(_), do: {:error, {:invalid_proposal, "proposal has no predicates"}}
 
-  # One acceptance predicate from a proposal entry. Requires an id and a known
-  # provider; an entry missing either, or naming an unknown provider, is dropped
-  # (the surviving predicates still define the goal). `config` carries through
-  # verbatim as an atom-keyed map for the evaluating provider.
+  # One predicate from a proposal entry. Requires an id and a known provider; an
+  # entry missing either, or naming an unknown provider, is dropped (the surviving
+  # predicates still define the goal). `config` carries through verbatim as an
+  # atom-keyed map for the evaluating provider.
+  #
+  # Caller-drafts (ADR-0023) supply predicates the caller already authored, so a
+  # caller's `guard: true` must survive (#1356): reading only the provider and
+  # forcing `acceptance?: true` silently flattened `guard: true` to `false`, and
+  # guards gate merge/ship (data-loss-shaped, not cosmetic). Honor the caller's
+  # `guard` flag verbatim.
+  #
+  # `acceptance` defaults to true (a caller-drafts predicate is a creation
+  # acceptance criterion) but is SUPPRESSED to false whenever `guard?` is set: a
+  # predicate may not be both a guard and an acceptance criterion (guards are
+  # invariants, not goals to reach — ADR-0002, and the loader rejects the
+  # combination via Kazi.Goal.Loader.reject_guard_acceptance/3, so a both-true
+  # predicate would fail to persist). Guard is the load-bearing flag, so it wins.
   defp build_predicate(%{"id" => id, "provider" => provider} = raw)
        when is_binary(id) and id != "" and is_binary(provider) do
     case provider_kind(provider) do
@@ -896,15 +909,24 @@ defmodule Kazi.Authoring do
         nil
 
       kind ->
+        guard? = boolean_flag(Map.get(raw, "guard"), false)
+
         Predicate.new(id, kind,
           description: optional_string(Map.get(raw, "description")),
-          acceptance?: true,
+          guard?: guard?,
+          acceptance?: boolean_flag(Map.get(raw, "acceptance"), true) and not guard?,
           config: predicate_config(predicate_config_source(raw))
         )
     end
   end
 
   defp build_predicate(_raw), do: nil
+
+  # A caller-supplied predicate flag (`guard`/`acceptance`). Only a real boolean
+  # overrides the default; a missing key (or any non-boolean) falls back to the
+  # default, so a malformed value never silently flips the flag.
+  defp boolean_flag(value, _default) when is_boolean(value), do: value
+  defp boolean_flag(_value, default), do: default
 
   # The provider config for a proposal entry. The documented authoring shape nests
   # it under a `"config"` key; a goal-file-shaped predicate (T26.8) instead spreads
