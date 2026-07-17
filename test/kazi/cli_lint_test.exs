@@ -210,4 +210,88 @@ defmodule Kazi.CLILintTest do
       assert payload["error"] =~ "could not load goal-file"
     end
   end
+
+  # ===========================================================================
+  # Tier 2 — [integration] unknown-mode advisory (T44.1, ADR-0055)
+  # ===========================================================================
+
+  # A goal-file whose [integration] mode is not a known value. The loader REJECTS
+  # this (a hard error), so `kazi lint` inspects the raw block to WARN advisorily.
+  defp bad_integration_mode_file(dir) do
+    path = Path.join(dir, "bad_mode.toml")
+
+    File.write!(path, """
+    id = "bad-integration-mode"
+
+    [integration]
+    mode = "rebase"
+
+    [[predicate]]
+    id = "p1"
+    provider = "test_runner"
+    """)
+
+    path
+  end
+
+  # A goal-file with a VALID [integration] mode — lint stays silent about it.
+  defp valid_integration_mode_file(dir) do
+    path = Path.join(dir, "good_mode.toml")
+
+    File.write!(path, """
+    id = "good-integration-mode"
+
+    [integration]
+    mode = "pr"
+    base = "main"
+
+    [[predicate]]
+    id = "p1"
+    provider = "test_runner"
+    """)
+
+    path
+  end
+
+  describe "run/2 — an unknown [integration] mode warns (advisory, exit 0)" do
+    test "human surface names the bad mode value and exits 0", %{dir: dir} do
+      goal_file = bad_integration_mode_file(dir)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["lint", goal_file]) == 0
+        end)
+
+      assert out =~ "warning:"
+      assert out =~ "[integration] mode"
+      assert out =~ "rebase"
+    end
+
+    test "--json lists the integration warning and exits 0", %{dir: dir} do
+      goal_file = bad_integration_mode_file(dir)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["lint", goal_file, "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["schema_version"] == 2
+      assert payload["goal_id"] == "bad-integration-mode"
+      assert [%{"mode" => "rebase"}] = payload["integration_warnings"]
+      refute out =~ "LINT"
+    end
+
+    test "a valid [integration] mode emits no integration warning", %{dir: dir} do
+      goal_file = valid_integration_mode_file(dir)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["lint", goal_file, "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["integration_warnings"] == []
+    end
+  end
 end
