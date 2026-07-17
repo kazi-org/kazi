@@ -53,6 +53,7 @@ defmodule Kazi.Runtime do
 
   alias Kazi.Harness.ChildSupervisor
   alias Kazi.ReadModel.{HeartbeatTicker, Iteration, RunRegistry}
+  alias Kazi.Runtime.BusMirror
   alias Kazi.Sink.Events, as: EventsSink
 
   require Logger
@@ -414,6 +415,10 @@ defmodule Kazi.Runtime do
         Keyword.get(opts, :proposal_ref)
       )
 
+      # T51.5 (ADR-0067 point 1): mirror the run START onto the bus, best-effort.
+      # Fire-and-forget by construction -- never blocks or alters the run.
+      BusMirror.started(goal_ref, run_id, Keyword.get(opts, :session_name))
+
       with {:ok, loop} <- Loop.start_link(loop_opts) do
         # T31: start the heartbeat ticker (a supervised periodic timer that advances
         # the heartbeat_at timestamp every ~30 seconds, independent of loop iterations).
@@ -429,6 +434,12 @@ defmodule Kazi.Runtime do
 
         result = Loop.await(loop, await_timeout)
         Loop.stop(loop)
+
+        # T51.5 (ADR-0067 point 1): mirror the TERMINAL verdict onto the bus,
+        # best-effort. Bounded-synchronous so the verdict lands before a one-shot
+        # `kazi apply` process exits; swallows a downed daemon.
+        BusMirror.terminal(goal_ref, run_id, Keyword.get(opts, :session_name), result)
+
         Kazi.Runtime.Finalizer.finalize(result, run_id, persist?, signal_trap)
         finish_run(persist?, run_id, result)
         harvest_memory(persist?, run_id, goal_ref, result)
@@ -877,33 +888,29 @@ defmodule Kazi.Runtime do
   defp build_on_iteration(goal, opts, run_id, persist?, events_sink_path) do
     stream = Keyword.get(opts, :stream)
     goal_ref = Keyword.get(opts, :goal_ref, goal.id)
+    session_name = Keyword.get(opts, :session_name)
 
-    cond do
-      is_function(stream, 1) and persist? ->
-        fn payload ->
-          run_stream_observer(stream, payload)
-          RunRegistry.heartbeat(run_id)
-          record_harness_session(run_id, payload)
-          record_harness_pid(run_id, payload)
-          persist_iteration(goal_ref, payload, events_sink_path)
-          persist_debrief(run_id, goal_ref, payload)
-        end
+    # The iteration side-effects, composed in a fixed order: the streaming
+    # observer first, then the read-model projection, then the T51.5 bus mirror
+    # LAST so a mirror post can never precede or perturb persistence. The mirror
+    # is always present (detached + fully swallowed, ADR-0067 point 1), so even a
+    # non-persisted fixture loop projects live progress onto the bus.
+    effects =
+      [
+        is_function(stream, 1) && fn payload -> run_stream_observer(stream, payload) end,
+        persist? &&
+          fn payload ->
+            RunRegistry.heartbeat(run_id)
+            record_harness_session(run_id, payload)
+            record_harness_pid(run_id, payload)
+            persist_iteration(goal_ref, payload, events_sink_path)
+            persist_debrief(run_id, goal_ref, payload)
+          end,
+        fn payload -> BusMirror.iteration(run_id, session_name, payload) end
+      ]
+      |> Enum.filter(&is_function(&1, 1))
 
-      is_function(stream, 1) ->
-        fn payload -> run_stream_observer(stream, payload) end
-
-      persist? ->
-        fn payload ->
-          RunRegistry.heartbeat(run_id)
-          record_harness_session(run_id, payload)
-          record_harness_pid(run_id, payload)
-          persist_iteration(goal_ref, payload, events_sink_path)
-          persist_debrief(run_id, goal_ref, payload)
-        end
-
-      true ->
-        nil
-    end
+    fn payload -> Enum.each(effects, & &1.(payload)) end
   end
 
   # Project the inner harness's session id (claude's envelope `session_id`,
