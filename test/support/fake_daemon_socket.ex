@@ -17,9 +17,12 @@ defmodule Kazi.TestSupport.FakeDaemonSocket do
   read for one line and answered with `reply` as one JSON line, then closed.
   Registers an `ExUnit.Callbacks.on_exit/1` cleanup when called inside a test.
   """
-  @spec start!(map()) :: Path.t()
-  def start!(reply \\ %{"ok" => true}) do
-    path = Path.join(System.tmp_dir!(), "kazi-t553-#{System.unique_integer([:positive])}.sock")
+  @spec start!(map(), Path.t() | nil) :: Path.t()
+  def start!(reply \\ %{"ok" => true}, path \\ nil) do
+    path =
+      path || Path.join(System.tmp_dir!(), "kazi-t553-#{System.unique_integer([:positive])}.sock")
+
+    File.mkdir_p!(Path.dirname(path))
     File.rm(path)
 
     {:ok, listen} =
