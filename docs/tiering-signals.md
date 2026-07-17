@@ -1,5 +1,44 @@
 # `--json` signals -> skill-side escalation trigger (T30.3, ADR-0035)
 
+> **Update (T45.7, ADR-0056 decision 5): the ladder can now live IN kazi-core as
+> goal-file DATA.** ADR-0056 decision 5 *supersedes ADR-0035's decision 1 in part*:
+> the escalation-ladder LOCATION moves from "skill-side only" into a declarable
+> `[escalation]` goal-file block — see **"The `[escalation]` block"** below. The
+> core PRINCIPLE is unchanged: kazi-core still holds NO selection policy; it walks
+> exactly the model list the goal-file declares. The skill-side, count-driven
+> ladder documented in the rest of this note remains valid (an orchestrator can
+> still drive rungs across separate `kazi apply` invocations); the `[escalation]`
+> block is the in-loop alternative that walks the ladder WITHIN one run.
+
+## The `[escalation]` block — the ladder as goal-file DATA (T45.7, ADR-0056 d5)
+
+Declare the ladder in the goal-file and kazi walks it inside the single run: on a
+`stuck` OR `over_budget` verdict on the same failing predicate set (the T30.3
+signal below), the loop RE-DISPATCHES the SAME goal at the next model in the ladder
+instead of terminating — bounded by the ladder length (and an optional `max_rungs`
+cap), at which point the terminal verdict stands. `converged` at any rung stops the
+ladder immediately.
+
+```toml
+[escalation]
+# rung 0 is the initial dispatch model; the loop steps forward on stuck/over_budget.
+ladder = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"]
+max_rungs = 3   # optional; default = the ladder length
+```
+
+- **No `[escalation]` block** (or an empty `ladder`) is TODAY'S single-model
+  behavior, byte-identical — no re-dispatch. A present block whose `ladder` key is
+  omitted defaults to the three rungs above.
+- A declared ladder is **authoritative**: rung 0 pins the initial dispatch model
+  (overriding a caller `--model`), so the dispatched model sequence is exactly the
+  ladder. Pin a single `--model` and omit the block to keep static tiering.
+- **Each rung is one bounded converge**: the loop measures the stuck window AND the
+  budget PER RUNG, so a fresh model gets a fresh window/budget rather than the
+  exhausted tail of the prior rung.
+- kazi-core holds **NO selection policy**: it walks exactly the declared list. It
+  never decides which models are good or in what order beyond the goal-file.
+- Introspect the config with `kazi schema escalation`.
+
 This note maps the fields kazi's `--json` surface already emits to the
 **escalation trigger** the skill's adaptive-tiering state machine (ADR-0035,
 E30/T30.2) reads to decide *"stuck again on the same slice -> step the model up
