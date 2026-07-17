@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.173.0](https://github.com/kazi-org/kazi/compare/v1.172.0...v1.173.0) (2026-07-17)
+
+
+### Features
+
+* **actions:** integrate verifies-then-ships for [integration] goals ([099435e](https://github.com/kazi-org/kazi/commit/099435e2de7975d97727ede65854b666eaf697c0))
+
 ## [1.172.0](https://github.com/kazi-org/kazi/compare/v1.171.1...v1.172.0) (2026-07-17)
 
 
