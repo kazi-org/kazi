@@ -37,9 +37,16 @@ defmodule Kazi.Bus.DaemonDigestTest do
   # default comfortably on an idle machine and not at all on a busy one.
   @moduletag timeout: 300_000
 
+  # DELIBERATELY NOT `:nats`-tagged, unlike the sibling bus suites. That tag
+  # means "needs an external NATS_URL server", which CI does not provide and
+  # therefore excludes -- and T55.7's acceptance is exactly the kind of thing
+  # that must not rot unexercised. These tests start their OWN daemon (and its
+  # supervised nats-server) and never read NATS_URL, so they run everywhere
+  # `nats-server` is on PATH -- the `Kazi.Daemon.LifecycleTest` pattern, which
+  # is the real precedent for a daemon-booting test. `NatsPrereq.ensure!/0`
+  # turns a missing binary into one actionable line rather than an opaque
+  # MatchError.
   describe "server-side assembly against a real daemon" do
-    @describetag :nats
-
     setup do
       NatsPrereq.ensure!()
       daemon = start_daemon()
