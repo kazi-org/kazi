@@ -95,6 +95,18 @@ defmodule Kazi.Scheduler.Worktree do
       test can pin it.
     * `:branch_prefix` — prefix for the per-worktree branch name (default
       `"kazi-partition"`). Each worktree gets a unique branch off the base ref.
+      Used only when `:owned_branch` is unset (the parallel-partition path, where
+      one goal fans out into many distinct partition branches).
+    * `:owned_branch` — T54.1 (#1079/#1080): the goal's REAL target branch to
+      check the worktree out onto (e.g. `"task/<id>"`, `Kazi.Goal.integration_branch/1`),
+      instead of the synthetic `<branch_prefix>/<slug>-<nonce>` one. Set by the
+      single-worktree callers (serial `kazi apply`, each fleet member) so a
+      goal-authored `landed` predicate naming that branch can converge and
+      `Kazi.Scheduler.SerialLanding` recognizes the run-owned branch by explicit
+      identity. Default `nil` = the prefix behavior above. The worktree DIR on
+      disk stays nonce-unique regardless, so the distinct-worktree-path invariant
+      holds. Created with `git worktree add -B` (create-or-reset off the base
+      ref), so a run that owns a stable branch is idempotent across re-runs.
     * `:base_ref` — the git ref each worktree is created FROM (T50.8, ADR-0065
       decision 5). Default: the repo's `HEAD`, checked for staleness against its
       locally-known upstream (a stale default base warns loudly on stderr, once,
@@ -120,6 +132,7 @@ defmodule Kazi.Scheduler.Worktree do
     base_dir = Keyword.get(opts, :base_dir, default_base_dir())
     git_cmd = Keyword.get(opts, :git_cmd, "git")
     branch_prefix = Keyword.get(opts, :branch_prefix, "kazi-partition")
+    owned_branch = Keyword.get(opts, :owned_branch)
     worktree_table = Keyword.get(opts, :worktree_table, WorktreeTable)
     run_id = Keyword.get(opts, :run_id)
     base_ref = Keyword.get(opts, :base_ref)
@@ -133,7 +146,7 @@ defmodule Kazi.Scheduler.Worktree do
 
     fn partition ->
       slug = slug_for(partition)
-      {path, branch} = worktree_target(base_dir, branch_prefix, slug)
+      {path, branch} = worktree_target(base_dir, branch_prefix, slug, owned_branch)
 
       case create(git_cmd, repo, path, branch, effective_base) do
         :ok ->
@@ -231,17 +244,21 @@ defmodule Kazi.Scheduler.Worktree do
 
   # --- worktree lifecycle -----------------------------------------------------
 
-  # Create a worktree at `path` on a fresh branch off `base_ref` (T50.8: the
+  # Create a worktree at `path` on the branch `branch` off `base_ref` (T50.8: the
   # base is a parameter, HEAD only by default). The ref is validated FIRST —
   # an unresolvable base fails with an error NAMING it, before any worktree
   # exists — then the base dir is created; the worktree dir itself must NOT
-  # pre-exist (git refuses).
+  # pre-exist (git refuses). `-B` creates the branch, resetting it to `base_ref`
+  # if it already exists (T54.1): the nonce-unique partition branch never
+  # pre-exists so `-B` is identical to `-b` there, while a stable owned branch
+  # (`task/<id>`) is idempotent across re-runs — a run that owns its branch
+  # starts fresh from the base rather than failing on a leftover from a prior run.
   defp create(git_cmd, repo, path, branch, base_ref) do
     case verify_base_ref(git_cmd, repo, base_ref) do
       :ok ->
         File.mkdir_p!(Path.dirname(path))
 
-        case git(git_cmd, repo, ["worktree", "add", "-b", branch, path, base_ref]) do
+        case git(git_cmd, repo, ["worktree", "add", "-B", branch, path, base_ref]) do
           {:ok, _out} -> :ok
           {:error, _} = error -> error
         end
@@ -509,9 +526,12 @@ defmodule Kazi.Scheduler.Worktree do
 
   # A distinct (path, branch) target under the managed base dir. The slug keeps it
   # legible; a per-call nonce makes it unique even for the same partition key
-  # across runs, so two worktrees never collide on disk. The branch carries the
-  # configured prefix so a partition's branch is recognizable in `git branch`.
-  defp worktree_target(base_dir, branch_prefix, slug) do
+  # across runs, so two worktrees never collide on disk. The branch is the
+  # caller's `owned_branch` (T54.1: the goal's REAL target branch) when set, else
+  # it carries the configured prefix so a partition's branch is recognizable in
+  # `git branch`. The DIR always stays nonce-unique either way, so a stable owned
+  # branch never breaks the distinct-worktree-path invariant.
+  defp worktree_target(base_dir, branch_prefix, slug, owned_branch) do
     # A CROSS-PROCESS-unique token (issue #1074): `:erlang.unique_integer` is
     # unique only within one BEAM, so every fresh `kazi apply` OS process reset
     # the counter and minted the same low nonce -- two unrelated runs then
@@ -519,7 +539,7 @@ defmodule Kazi.Scheduler.Worktree do
     # processes, so a leaked branch from a prior run can never block a new one.
     nonce = :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
     name = slug <> "-" <> nonce
-    branch = branch_prefix <> "/" <> name
+    branch = owned_branch || branch_prefix <> "/" <> name
     {Path.join(base_dir, name), branch}
   end
 

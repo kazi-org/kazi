@@ -124,6 +124,38 @@ defmodule Kazi.Scheduler.WorktreeTest do
       assert Enum.all?(paths, &(not File.dir?(&1)))
       assert only_repo_listed?(ctx.repo)
     end
+
+    test "T54.1: :owned_branch checks the worktree out onto exactly that branch", ctx do
+      test_pid = self()
+
+      inner = fn _partition, path ->
+        {branch, 0} =
+          System.cmd("git", ["rev-parse", "--abbrev-ref", "HEAD"], cd: path)
+
+        send(test_pid, {:branch, String.trim(branch), path})
+        :converged
+      end
+
+      reconciler =
+        Worktree.wrap(inner, repo: ctx.repo, base_dir: ctx.base, owned_branch: "task/widgets")
+
+      assert reconciler.(partition("k1")) == :converged
+      assert_received {:branch, "task/widgets", _path}
+    end
+
+    test "T54.1: a stable :owned_branch is idempotent across re-runs (-B create-or-reset)", ctx do
+      inner = fn _partition, _path -> :converged end
+
+      reconciler =
+        Worktree.wrap(inner, repo: ctx.repo, base_dir: ctx.base, owned_branch: "task/rerun")
+
+      # A prior run created and cleaned up its worktree, leaving the branch behind.
+      assert reconciler.(partition("k1")) == :converged
+      # A second run reuses the same owned branch name — `-b` would fail here;
+      # `-B` resets it off the base and succeeds.
+      assert reconciler.(partition("k1")) == :converged
+      assert only_repo_listed?(ctx.repo)
+    end
   end
 
   describe "cleanup on crash (terminal incl. crash)" do
