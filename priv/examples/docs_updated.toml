@@ -1,0 +1,19 @@
+# The `docs_updated` gate (T44.8): productizes ADR-0034 "docs land with the code".
+#
+# It scans the committed range base..HEAD: when a user-facing SURFACE changed (a
+# CLI command/flag, a predicate provider, a public behaviour, or the MCP surface)
+# the same diff must EITHER touch docs (docs/, README.md, AGENTS.md) OR carry an
+# explicit [no-docs] <reason> marker in a commit message. Missing both fails,
+# naming the surface files. A diff that touches no surface passes vacuously.
+#
+#     kazi apply priv/examples/docs_updated.toml --workspace .
+#
+# See docs/docs-updated-predicate.md and `kazi schema docs_updated`.
+
+id = "docs-updated-gate"
+name = "Docs land with the code"
+
+[[predicate]]
+id = "docs-updated"
+provider = "docs_updated"
+description = "a user-facing surface change ships with a docs update or a justified [no-docs] marker"
