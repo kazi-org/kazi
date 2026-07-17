@@ -414,6 +414,9 @@ defmodule Kazi.Goal.Loader do
     # T44.6: `no_stubs` is a deterministic diff scanner — fail when the diff-vs-base
     # introduces a stub/placeholder/hardcoded-return marker into a non-test file.
     "no_stubs" => :no_stubs,
+    # T44.8 (ADR-0034): the "docs land with code" gate — fail on a user-facing
+    # surface change with no matching docs change / `[no-docs]` marker.
+    "docs_updated" => :docs_updated,
     # T49.3 (ADR-0064): replay a pinned Gherkin Scenario by delegating to a
     # surface provider. Its spec/scenario/surface/repin keys are validated below
     # so a missing binding or an unknown surface fails at load, not at dispatch.
