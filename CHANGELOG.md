@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.207.0](https://github.com/kazi-org/kazi/compare/v1.206.0...v1.207.0) (2026-07-17)
+
+
+### Features
+
+* **examples:** cli_release_smoke -- a :cli standing goal over the shipped binary (T43.9) ([5d9991c](https://github.com/kazi-org/kazi/commit/5d9991cec07d905679b608e55855a1e7f3d05e18))
+
 ## [1.206.0](https://github.com/kazi-org/kazi/compare/v1.205.0...v1.206.0) (2026-07-17)
 
 
