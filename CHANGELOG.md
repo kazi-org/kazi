@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.216.1](https://github.com/kazi-org/kazi/compare/v1.216.0...v1.216.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **plan:** preserve caller-supplied guard flag alongside acceptance (T57.2, [#1356](https://github.com/kazi-org/kazi/issues/1356)) ([22299b8](https://github.com/kazi-org/kazi/commit/22299b8d75f6abb825eced8d2a90c6f0b8676ea4))
+
 ## [1.216.0](https://github.com/kazi-org/kazi/compare/v1.215.0...v1.216.0) (2026-07-17)
 
 
