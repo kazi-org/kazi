@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.155.0](https://github.com/kazi-org/kazi/compare/v1.154.0...v1.155.0) (2026-07-17)
+
+
+### Features
+
+* **teach:** ship a self-contained three-file skill with a LOCAL.md extension point ([5436307](https://github.com/kazi-org/kazi/commit/54363078b02a56eb471c97b5da1af68112efd412))
+
 ## [1.154.0](https://github.com/kazi-org/kazi/compare/v1.153.0...v1.154.0) (2026-07-17)
 
 
