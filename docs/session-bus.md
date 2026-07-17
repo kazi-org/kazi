@@ -64,6 +64,7 @@ kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
 kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
+kazi bus hook <event>                                      # harness hook entry point (ADR-0071) -- ALWAYS exits 0 silently
 kazi bus <verb> --help                                     # per-verb usage (signature, flags, valid kinds)
 ```
 
@@ -307,26 +308,50 @@ branches on, never
 (`isError: true`) with `reason: "no_daemon"`, exactly mirroring the CLI's
 no-daemon message — never a JSON-RPC protocol error.
 
-## Turn-boundary hook recipe
+## Installing delivery (ADR-0071)
 
-Delivery into a session is the harness's own hook mechanism, not something
-kazi reaches into (ADR-0001/0008 keep kazi driving harnesses, not embedding in
-them). Wire a turn-boundary hook that shells out to `kazi bus read --json` and
-folds the digest into the next turn's context — for Claude Code, a
-`UserPromptSubmit` or `Stop` hook is a natural fit:
+Delivery into a session ships as an **installer, not a recipe**: the
+DIY-hook recipe this section used to carry had an observed install rate of
+zero, so [ADR-0071](adr/0071-bus-delivery-is-installed-not-documented.md)
+supersedes it. One opt-in command registers everything:
 
-```bash
-#!/usr/bin/env bash
-# .claude/hooks/bus-read.sh — surface the session bus digest each turn.
-digest=$(kazi bus read --json 2>/dev/null)
-printf '%s' "$digest" \
-  | jq -r 'if .ok then (.digest.total | tostring) + " bus message(s) since last read" else empty end'
+```
+kazi install-hooks                # user-level ~/.claude/settings.json (default)
+kazi install-hooks --local        # this repo's LOCAL .claude/settings.local.json
+kazi install-hooks --uninstall    # remove exactly what was added
 ```
 
-If no daemon is running the command exits non-zero silently (`2>/dev/null`
-swallows the one-line error) — the hook is a no-op, matching the
-graceful-degradation guarantee above.
+It registers two hooks in the Claude Code settings, matched to the two
+moments that matter — and bound ONLY to events whose stdout reaches the
+session's context (the ADR-0071 binding rule; a `Stop` hook's output never
+reaches the next turn, so binding there is delivery to nowhere):
 
-For background waiters (not turn-boundary hooks), prefer `kazi bus watch`
+| Claude Code event | Runs | Delivers |
+|---|---|---|
+| `SessionStart` | `kazi bus hook session-start` | presence + the project board at session start |
+| `UserPromptSubmit` | `kazi bus hook turn` | the traffic digest at each turn boundary — silent when the bus is quiet |
+
+The registered command is a kazi subcommand, not a script file, so the
+payload logic upgrades with the binary. Its contract: **always exit 0,
+never block** — with no daemon running (or an unknown event) `kazi bus
+hook` prints nothing and returns immediately, so a hook can never break or
+tax a session (the graceful-degradation guarantee above extends to
+delivery). The delivered payload lands in a later release; the
+registration surface and contract are stable now.
+
+The installer merges, never clobbers: an operator's own hooks and keys
+survive byte-identically, re-running is a no-op, and `--uninstall` right
+after a fresh install restores the pre-install bytes exactly. A malformed
+settings file fails with one clear line and writes nothing. The default
+target is user-level because the hook no-ops instantly wherever no daemon
+runs — one install covers every project; `--local` writes the repo's
+*local* (uncommitted) settings file, and the installer never writes a
+committed project file (ADR-0034).
+
+Injected bus content remains advisory, provenance-stamped input (the
+contract above) — injection is exactly the moment that matters, since a
+hook folds agent-authored text into another agent's context.
+
+For background waiters (not turn-boundary delivery), prefer `kazi bus watch`
 over a `read`-in-a-loop: it blocks server-side until traffic arrives
 instead of spawning the CLI on an interval (issue #1091).
