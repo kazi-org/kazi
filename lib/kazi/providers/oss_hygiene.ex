@@ -22,7 +22,7 @@ defmodule Kazi.Providers.OssHygiene do
 
   Legitimate cases pass: RFC-5737 example IPs (`192.0.2.*`, `198.51.100.*`,
   `203.0.113.*`), loopback/unspecified (`127.0.0.1`, `0.0.0.0`), documentation
-  placeholder home paths (`/Users/<name>`, `/home/USER`, …), and any line carrying
+  placeholder home paths (`/Users/<name>`, `/home/<user>`, …), and any line carrying
   the inline `leak-guard:allow` marker.
 
   ## Config
