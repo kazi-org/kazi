@@ -168,11 +168,12 @@ defmodule Kazi.Teach.InstallSkillTest do
     # `mcp` is the installed MCP-server verb (T33.1, ADR-0044). `economy` is the
     # run-economics report (ADR-0058), `context` the context-store verbs
     # (ADR-0045), `memory` the recall/harvest verbs (ADR-0062/0063). `dashboard` is
-    # the standalone fleet-mode web endpoint (T46.4, ADR-0057).
+    # the standalone fleet-mode web endpoint (T46.4, ADR-0057). `install-hooks` is
+    # the opt-in session-bus delivery installer (T55.2, ADR-0071).
     real =
-      MapSet.new(~w(apply run plan propose status init install-skill list-proposed approve
-                         reject export lint help schema version mcp economy context memory dashboard
-                         daemon bus))
+      MapSet.new(~w(apply run plan propose status init install-skill install-hooks list-proposed
+                         approve reject export lint help schema version mcp economy context memory
+                         dashboard daemon bus))
 
     # ADR-0074: every rendered document is held to the same guard.
     for {name, content} <- InstallSkill.docs() do
