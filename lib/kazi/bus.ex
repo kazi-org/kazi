@@ -56,9 +56,25 @@ defmodule Kazi.Bus do
   @pull_timeout_ms 2_000
   @pull_batch 100
   @default_watch_timeout_s 300
+  @puback_timeout_ms 5_000
 
   @typedoc "A read/who error surfaced to the CLI verbatim."
   @type error :: :no_daemon | :text_too_large | term()
+
+  @typedoc """
+  T55.12: what `tell/3` answers instead of a bare `:ok` -- `:ok` meant QUEUED,
+  never SEEN, and a supervisor could not tell the two apart.
+
+    * `:id` -- the message's JetStream stream sequence (the same public id
+      T55.1 puts on every digest line), which `status/2` dereferences.
+    * `:recipient` -- the RESOLVED target (a nickname resolves to its session
+      id), so the sender sees who actually got addressed.
+    * `:liveness` -- the recipient's roster liveness at send time (T55.11), or
+      `"no-presence"` when the tell landed on a durable inbox whose presence
+      row is gone. `"dead-reaping"`/`"no-presence"` are the warning-worthy
+      values; the CLI prints a warning and still sends.
+  """
+  @type receipt :: %{id: pos_integer(), recipient: String.t(), liveness: String.t()}
 
   @doc """
   Publishes `text` (kind `kind`, optional `opts[:topic]`) to `bus.<scope>.<kind>.<topic|_>`,
@@ -103,13 +119,33 @@ defmodule Kazi.Bus do
   `read/1`/`peek/1` also drains a `bus.*.msg.<session>` consumer, so a
   project-scoped tell reaches a machine-scoped reader and vice versa
   (issue #1065).
+
+  ## Delivery visibility (T55.12)
+
+  Answers `{:ok, receipt}` -- see `t:receipt/0`. A bare `:ok` meant QUEUED,
+  never SEEN: the field pain this closes is a supervisor who could not
+  distinguish delivered-and-ignored from parked-in-a-queue-nobody-drains
+  from lost-because-the-session-was-replaced, and coordinated for hours
+  against dead session ids whose queues swallowed every message.
+
+  Two mechanisms make the receipt honest:
+
+    * The message is published with a reply subject, so JetStream's PubAck
+      returns the stream sequence -- the `:id` `status/2` dereferences. A
+      tell that never got a PubAck is an ERROR, not a cheerful `:ok`.
+    * The recipient's durable inbox is ensured to EXIST at send time (per
+      live member for a team fan-out), so the queued message is immediately
+      countable as inbox depth by `who/1` rather than invisible until the
+      recipient happens to read. It is the same durable, created with the
+      same parameters `read/1` would use -- idempotent, and never a cursor
+      the recipient would not otherwise have.
   """
-  @spec tell(String.t(), String.t(), keyword()) :: :ok | {:error, error()}
+  @spec tell(String.t(), String.t(), keyword()) :: {:ok, receipt()} | {:error, error()}
   def tell(recipient, text, opts \\ []) when is_binary(recipient) and is_binary(text) do
     with :ok <- check_size(text) do
       with_conn(opts, fn conn ->
         upsert_presence(conn, opts)
-        target = resolve_recipient!(conn, recipient)
+        {target, liveness} = resolve_recipient!(conn, recipient)
         scope = scope(opts)
         subject = Enum.join(["bus", scope, "msg", target], ".")
 
@@ -120,18 +156,90 @@ defmodule Kazi.Bus do
           {"sev", opts[:sev] || "info"}
         ]
 
-        Gnat.pub(conn, subject, text, headers: headers)
+        ensure_inbox(conn, target)
+        id = publish_for_seq!(conn, subject, text, headers)
+
+        {:ok, %{id: id, recipient: target, liveness: liveness}}
       end)
     end
   end
 
-  # T55.5 recipient resolution. `@<team>` passes through verbatim (the team
-  # consumers subscribe to `bus.*.msg.@<team>`). Otherwise the roster (the
-  # sessions KV bucket) is the authority: an exact session-id match (any row,
-  # fresh or stale) wins, then a nickname match against LIVE rows (freshest
-  # first, in case a re-bind raced). No match raises `:unknown_recipient`
-  # with the live roster, so the error names who IS addressable.
-  defp resolve_recipient!(_conn, "@" <> _rest = team), do: team
+  # T55.12: publish and WAIT for JetStream's PubAck, whose `seq` is the
+  # message's public id. `Gnat.pub/4` is fire-and-forget -- it cannot report a
+  # sequence, and it cannot report a rejected publish either, which is exactly
+  # how a tell could answer `:ok` for a message the stream never stored.
+  defp publish_for_seq!(conn, subject, text, headers) do
+    case Gnat.request(conn, subject, text,
+           headers: headers,
+           receive_timeout: @puback_timeout_ms
+         ) do
+      {:ok, %{body: body}} ->
+        case Jason.decode(body) do
+          {:ok, %{"seq" => seq}} when is_integer(seq) -> seq
+          {:ok, %{"error" => error}} -> raise_bus_error({:publish_rejected, error})
+          _other -> raise_bus_error({:publish_rejected, body})
+        end
+
+      {:error, reason} ->
+        raise_bus_error({:publish_failed, reason})
+    end
+  end
+
+  # The durable inbox a tell's target reads from: the per-session directed
+  # consumer, or -- for an `@<team>` fan-out -- one per live member, matching
+  # `drain/3`'s team durable exactly. Created with the SAME parameters
+  # `ensure_consumer/4` uses from the read path, so this only ever
+  # pre-creates a cursor the recipient's first read would have created
+  # anyway (deliver_policy :all, so nothing is skipped).
+  defp ensure_inbox(conn, "@" <> team) do
+    stream = Provision.stream_name()
+
+    for member <- team_members(conn, team) do
+      ensure_consumer(conn, stream, team_consumer_name(team, member), "bus.*.msg.@#{team}")
+    end
+  end
+
+  defp ensure_inbox(conn, target) do
+    ensure_consumer(
+      conn,
+      Provision.stream_name(),
+      tell_consumer_name(target),
+      "bus.*.msg.#{target}"
+    )
+  end
+
+  # The live roster's members of `team` -- the sessions a fan-out actually
+  # reaches. A team is a live membership list, not a static one (#1069), so a
+  # member whose presence has aged out is not counted. Reads the roster
+  # WITHOUT upserting: a sender must never leave a presence row of its own
+  # behind while resolving someone else's team (that is the ghost-row class
+  # T55.11 retired).
+  defp team_members(conn, team) do
+    case roster(conn, []) do
+      {:ok, entries} -> for e <- entries, e["team"] == team, do: e["session"]
+      {:error, _reason} -> []
+    end
+  end
+
+  # T55.5 recipient resolution, T55.12 liveness + durable-inbox fallback.
+  # `@<team>` passes through verbatim (the team consumers subscribe to
+  # `bus.*.msg.@<team>`). Otherwise the roster (the sessions KV bucket) is the
+  # authority: an exact session-id match (any row, fresh or stale) wins, then
+  # a nickname match against LIVE rows (freshest first, in case a re-bind
+  # raced).
+  #
+  # Returns `{target, liveness}`: liveness rides back to the caller so `tell`
+  # can WARN on a recipient that resolved against a `dead-reaping` row.
+  # T55.12 deliberately keeps liveness ADVISORY rather than letting it refuse:
+  # a row is `dead-reaping` per the LOCAL sweep's verdict, and the operator
+  # may legitimately know better (a session mid-restart under the same name).
+  # Refusing would trade a silent-send failure for a silent-refusal failure.
+  #
+  # No roster match falls back to the durable inbox: a session whose presence
+  # aged out but whose cursor still exists WILL drain the queue when it
+  # returns, so that tell must land. Only a recipient with neither raises
+  # `:unknown_recipient` with the live roster, naming who IS addressable.
+  defp resolve_recipient!(_conn, "@" <> _rest = team), do: {team, "team"}
 
   defp resolve_recipient!(conn, recipient) do
     entries =
@@ -153,22 +261,34 @@ defmodule Kazi.Bus do
     annotated = Enum.map(entries, &annotate_age/1)
     started = Liveness.started_map(local_pids(annotated, local))
 
-    live =
-      annotated
-      |> Enum.map(fn entry -> {entry, local_verdict(entry, local, started)} end)
-      |> filter_fresh([])
-      |> Enum.map(fn {entry, _verdict} -> entry end)
+    pairs = Enum.map(annotated, fn entry -> {entry, local_verdict(entry, local, started)} end)
+
+    live = pairs |> filter_fresh([]) |> Enum.map(fn {entry, _verdict} -> entry end)
+
+    exact = Enum.find(pairs, fn {e, _v} -> e["session"] == recipient end)
 
     named =
-      live
-      |> Enum.filter(fn e -> e["name"] == recipient end)
-      |> Enum.min_by(fn e -> e["age_s"] end, fn -> nil end)
+      pairs
+      |> Enum.filter(fn {e, _v} -> e in live and e["name"] == recipient end)
+      |> Enum.min_by(fn {e, _v} -> e["age_s"] end, fn -> nil end)
 
     cond do
-      Enum.any?(entries, fn e -> e["session"] == recipient end) -> recipient
-      named -> named["session"]
+      exact -> {recipient, rendered_liveness(exact)}
+      named -> {elem(named, 0)["session"], rendered_liveness(named)}
+      has_inbox?(conn, recipient) -> {recipient, "no-presence"}
       true -> raise_bus_error({:unknown_recipient, recipient, roster_labels(live)})
     end
+  end
+
+  # T55.12: does `recipient` own a durable inbox cursor? True only for a
+  # session that has read the bus at least once, or that a previous tell
+  # addressed (which itself required a presence row) -- so this can never
+  # green-light a typo, only a session whose row aged out from under it.
+  defp has_inbox?(conn, recipient) do
+    match?(
+      {:ok, _info},
+      Consumer.info(conn, Provision.stream_name(), tell_consumer_name(recipient))
+    )
   end
 
   # The live roster as one label per session -- `nickname (session-id)` when
@@ -538,6 +658,12 @@ defmodule Kazi.Bus do
       by a different process, per `Kazi.Bus.Liveness`); the sweep removes it
       on its next pass.
 
+  Each row also carries `inbox` (T55.12): how many DIRECTED messages are
+  queued and un-read for that session -- its own `tell` inbox plus its team
+  fan-out inbox, read from the durable consumers' `num_pending`. A depth that
+  climbs while liveness says the session is alive is the roster telling an
+  operator their tells are landing but nobody is draining them.
+
   Filters: `opts[:who_team]` (team membership), `opts[:who_machine]` (exact
   hostname), `opts[:who_project]` (cwd equals the dir or lives under it);
   `opts[:all]` includes TTL-stale rows.
@@ -547,32 +673,209 @@ defmodule Kazi.Bus do
     with_conn(opts, fn conn ->
       upsert_presence(conn, opts)
 
-      case KV.contents(conn, Provision.sessions_bucket()) do
-        {:ok, contents} ->
-          local = hostname()
-
-          entries =
-            contents
-            |> Enum.map(fn {_key, value} -> Jason.decode!(value) end)
-            |> Enum.map(&annotate_age/1)
-            |> then(fn annotated ->
-              started = Liveness.started_map(local_pids(annotated, local))
-              Enum.map(annotated, fn entry -> {entry, local_verdict(entry, local, started)} end)
-            end)
-            |> filter_fresh(opts)
-            |> Enum.map(&annotate_liveness/1)
-            |> filter_team(opts)
-            |> filter_machine(opts)
-            |> filter_project(opts)
-            |> Enum.sort_by(& &1["age_s"])
-
-          {:ok, entries}
-
-        {:error, reason} ->
-          {:error, reason}
+      case roster(conn, opts) do
+        {:ok, entries} -> {:ok, Enum.map(entries, &annotate_inbox(conn, &1))}
+        {:error, reason} -> {:error, reason}
       end
     end)
   end
+
+  # The annotated + filtered roster WITHOUT the caller's presence upsert or
+  # inbox depth -- the shared read behind `who/1` (which adds both) and the
+  # internal resolution paths (`team_members/2`, `status/2`), which must never
+  # heartbeat a row of their own just to look someone else up.
+  defp roster(conn, opts) do
+    case KV.contents(conn, Provision.sessions_bucket()) do
+      {:ok, contents} ->
+        local = hostname()
+
+        entries =
+          contents
+          |> Enum.map(fn {_key, value} -> Jason.decode!(value) end)
+          |> Enum.map(&annotate_age/1)
+          |> then(fn annotated ->
+            started = Liveness.started_map(local_pids(annotated, local))
+            Enum.map(annotated, fn entry -> {entry, local_verdict(entry, local, started)} end)
+          end)
+          |> filter_fresh(opts)
+          |> Enum.map(&annotate_liveness/1)
+          |> filter_team(opts)
+          |> filter_machine(opts)
+          |> filter_project(opts)
+          |> Enum.sort_by(& &1["age_s"])
+
+        {:ok, entries}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # T55.12: the row's un-read DIRECTED depth -- its `tell` inbox plus, when it
+  # belongs to a team, that team's fan-out inbox. Broadcast (`post`) traffic on
+  # the scope consumer is deliberately NOT counted: "inbox" answers "how many
+  # messages addressed to this session are waiting", which is what a tell's
+  # sender needs to know. A session with no durable yet has genuinely nothing
+  # queued -- every tell ensures its target's inbox exists -- so a missing
+  # consumer is an honest 0, not an unknown.
+  defp annotate_inbox(conn, entry) do
+    stream = Provision.stream_name()
+    session = entry["session"]
+
+    consumers =
+      [tell_consumer_name(session)] ++
+        case entry["team"] do
+          team when is_binary(team) -> [team_consumer_name(team, session)]
+          _none -> []
+        end
+
+    depth = consumers |> Enum.map(&num_pending(conn, stream, &1)) |> Enum.sum()
+
+    Map.put(entry, "inbox", depth)
+  end
+
+  defp num_pending(conn, stream, consumer_name) do
+    case Consumer.info(conn, stream, consumer_name) do
+      {:ok, %{num_pending: pending}} when is_integer(pending) -> pending
+      _no_consumer -> 0
+    end
+  end
+
+  @doc """
+  T55.12: the delivery state of the message with public id `id` (the stream
+  sequence `tell/3`'s receipt carries) -- the answer to "was it actually
+  seen?", read from the RECIPIENT's durable consumer ack state:
+
+    * `"pending"` -- the message is stored and queued, but the recipient has
+      not acked it. Either it has not read yet, or it only peeked (a peek NAKs
+      and never advances the cursor).
+    * `"consumed"` -- the recipient's `read/1` acked it. That means DELIVERED
+      AND DRAINED, which is as far as the bus can honestly see: whether the
+      session then acted on it is not something an ack can know, and the
+      advisory contract (ADR-0067 point 7) means it was never obliged to.
+
+  The verdict is the consumer's ack floor (the sequence below which everything
+  is acked) compared against `id`, so it survives the message itself having
+  aged out of the consumer's view.
+
+  `recipients` breaks the state out per session, which is what a `tell @<team>`
+  fan-out needs: the aggregate `state` is `"consumed"` only once EVERY live
+  member acked, so one member draining cannot make a team message look
+  universally seen.
+
+  Consumes nothing: it reads consumer info and fetches the message directly by
+  sequence, so a `status` check never disturbs the recipient's cursor.
+  Errors `{:unknown_message, id}` for an id that is not in the stream (never
+  posted, or aged out past the 30-day retention) and `{:not_directed, id,
+  kind}` for a broadcast -- a `post` has no one recipient whose ack state
+  could answer the question.
+  """
+  @spec status(pos_integer(), keyword()) :: {:ok, map()} | {:error, error()}
+  def status(id, opts \\ []) when is_integer(id) do
+    with_conn(opts, fn conn ->
+      stream = Provision.stream_name()
+
+      case JetStream.get_message(conn, stream, %{seq: id}) do
+        {:ok, message} ->
+          {:ok, build_status(conn, stream, id, message)}
+
+        {:error, _reason} ->
+          {:error, {:unknown_message, id}}
+      end
+    end)
+  end
+
+  defp build_status(conn, stream, id, message) do
+    case String.split(message.subject, ".") do
+      ["bus", _scope, "msg", target] ->
+        recipients = status_recipients(conn, stream, id, target)
+
+        %{
+          "id" => id,
+          "recipient" => target,
+          "state" => aggregate_state(recipients),
+          "sent_at" => sent_at(message),
+          "recipients" => recipients
+        }
+
+      ["bus", _scope, kind | _topic] ->
+        raise_bus_error({:not_directed, id, kind})
+
+      _other ->
+        raise_bus_error({:unknown_message, id})
+    end
+  end
+
+  # One entry per session whose ack state bears on this message: the single
+  # target, or every live member of a team fan-out. A team with no live member
+  # left yields `[]` -- and `aggregate_state/1` calls that pending, because
+  # nobody has drained it (claiming "consumed" for a message no one received
+  # is the exact lie this task exists to kill).
+  defp status_recipients(conn, stream, id, "@" <> team) do
+    for member <- team_members(conn, team) do
+      %{
+        "session" => member,
+        "state" => consumer_state(conn, stream, team_consumer_name(team, member), id)
+      }
+    end
+  end
+
+  defp status_recipients(conn, stream, id, target) do
+    [
+      %{
+        "session" => target,
+        "state" => consumer_state(conn, stream, tell_consumer_name(target), id)
+      }
+    ]
+  end
+
+  defp aggregate_state([]), do: "pending"
+
+  defp aggregate_state(recipients) do
+    if Enum.all?(recipients, &(&1["state"] == "consumed")), do: "consumed", else: "pending"
+  end
+
+  # The ack floor is the stream sequence below which the consumer has acked
+  # everything, so `ack_floor >= id` means this message is acked. A consumer
+  # that does not exist has acked nothing -- pending, which is the honest
+  # answer for a session that has never drained its inbox.
+  defp consumer_state(conn, stream, consumer_name, id) do
+    case Consumer.info(conn, stream, consumer_name) do
+      {:ok, %{ack_floor: %{stream_seq: floor}}} when is_integer(floor) and floor >= id ->
+        "consumed"
+
+      _pending ->
+        "pending"
+    end
+  end
+
+  # The message's send time: its `ts` header (the sender's own stamp, matching
+  # every other bus surface), falling back to the stream's store time.
+  defp sent_at(message) do
+    headers = parse_headers(message.hdrs)
+
+    case headers["ts"] do
+      ts when is_binary(ts) -> ts
+      _absent -> if message.time, do: DateTime.to_iso8601(message.time), else: nil
+    end
+  end
+
+  # `Stream.get_message/4` returns headers as the raw NATS/HTTP-style block
+  # (`NATS/1.0\r\nkey: value\r\n...`), unlike the pull path's parsed list.
+  defp parse_headers(nil), do: %{}
+
+  defp parse_headers(hdrs) when is_binary(hdrs) do
+    hdrs
+    |> String.split(["\r\n", "\n"], trim: true)
+    |> Enum.reduce(%{}, fn line, acc ->
+      case String.split(line, ":", parts: 2) do
+        [key, value] -> Map.put(acc, String.trim(key), String.trim(value))
+        _no_colon -> acc
+      end
+    end)
+  end
+
+  defp parse_headers(_other), do: %{}
 
   @doc "The presence TTL in seconds (the `kazi_sessions` bucket's server-side entry TTL) -- `who`'s freshness cutoff and the `who --json` `ttl_s` field derive from it."
   @spec session_ttl_s() :: pos_integer()
@@ -640,6 +943,10 @@ defmodule Kazi.Bus do
 
     Map.put(entry, "liveness", liveness)
   end
+
+  # T55.12: the liveness label `tell` reports on its receipt -- the SAME
+  # rendering `who` shows, so a warning and the roster can never disagree.
+  defp rendered_liveness(pair), do: annotate_liveness(pair)["liveness"]
 
   defp filter_team(entries, opts) do
     case opts[:who_team] do
