@@ -85,6 +85,25 @@ defmodule Kazi.Attention.QueueTest do
       assert entry.predicate_id == "flappy"
     end
 
+    test "a capability_unreachable cause raises a :cause entry (T49.8 -- needs a human)" do
+      r =
+        run(%{
+          outcome_cause_class: "capability_unreachable",
+          outcome_cause_detail: %{
+            "ids" => ["cap"],
+            "reasons" => %{"cap" => ["replay_red"]},
+            "exhausted" => nil
+          }
+        })
+
+      [entry] = build([r], %{})
+
+      assert entry.signal == :cause
+      assert entry.severity == 5
+      assert entry.predicate_id == "cap"
+      assert entry.detail.cause_class == "capability_unreachable"
+    end
+
     test "a budget_exhausted cause raises NO :cause entry (the operator can raise the budget)" do
       r =
         run(%{
