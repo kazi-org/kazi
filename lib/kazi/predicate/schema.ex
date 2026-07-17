@@ -1102,6 +1102,32 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @plan_expanded %{
+    kind: "plan_expanded",
+    title: "plan_expanded predicate config",
+    description:
+      "The read-model-only \"phase has been planned\" gate (T45.3, UC-059): passes iff the " <>
+        "goal-set at `phase` EXISTS in the read-model, passes the deterministic clarify floor " <>
+        "with no open gaps, and every member is APPROVED. Needs NO harness to evaluate. A :fail " <>
+        "names which condition (exists/floor/approved) failed. Makes planning a convergeable " <>
+        "goal: an outline phase carries this predicate plus a dispatchable planning work-item.",
+    keys: [
+      %{
+        name: "phase",
+        type: "string",
+        required: true,
+        description:
+          "The phase ref this predicate gates: a roadmap ref (kazi plan --project) or a " <>
+            "single proposal ref."
+      }
+    ],
+    example: %{
+      "id" => "phase-1-planned",
+      "provider" => "plan_expanded",
+      "phase" => "road-abc123def456"
+    }
+  }
+
   @schemas %{
     "cli" => @cli,
     "custom_script" => @custom_script,
@@ -1118,7 +1144,8 @@ defmodule Kazi.Predicate.Schema do
     "docs_updated" => @docs_updated,
     "integration" => @integration,
     "scenario" => @scenario,
-    "oss_hygiene" => @oss_hygiene
+    "oss_hygiene" => @oss_hygiene,
+    "plan_expanded" => @plan_expanded
   }
 
   @doc "The provider kinds with a documented config schema, sorted."
