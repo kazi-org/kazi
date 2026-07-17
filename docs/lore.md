@@ -860,6 +860,23 @@ still-alive ancestor is asserted as the recorded pid (T55.13's own finding).
 Live proof: a one-shot writer with OS pid 5811 (gone at read time) left a row
 recording the alive anchor pid instead, rendering `active`, not `dead-reaping`.
 
+### L-0042 #daemon #socket #packet-line #truncation #landmine -- `packet: :line` truncates an over-long line SILENTLY; set `buffer` on BOTH ends
+A `:gen_tcp` socket in `packet: :line` mode drops everything past its
+`buffer` (default **9216 bytes**) and reports `{:ok, short_binary}` — no
+`:emsgsize`, no error, nothing to branch on. Measured while moving digest
+assembly into the daemon (T55.7): a 61,461-byte reply arrived as 9,216 bytes,
+and the only symptom was a `Jason.DecodeError` far from the cause — which, if
+flattened into a generic fallback, reads as "no daemon" and sends the operator
+to debug a daemon that is running perfectly. The control socket now sets an
+explicit `buffer` on the listener AND the client
+(`Kazi.Daemon.Probe.socket_buffer/0`); the two MUST agree, since whichever end
+receives does the truncating. Corollary: never send an UNBOUNDED payload over
+this socket. `bus read --full` is unbounded by definition (64 KiB × N
+messages), so it reads NATS directly and the daemon refuses `full` outright
+rather than silently answering with a digest. A bounded digest (40 lines ×
+~1 KiB) already exceeds the default buffer, so this was live, not theoretical.
+(T55.7 finding, 2026-07-17.)
+
 ## Test flakiness (known-flaky, not a real regression)
 
 ### L-0033 #test #flaky #ci #known-issue -- three tests are timing-flaky under full-suite concurrency; a solo re-run greens all three
