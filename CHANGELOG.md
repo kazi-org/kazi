@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.201.0](https://github.com/kazi-org/kazi/compare/v1.200.0...v1.201.0) (2026-07-17)
+
+
+### Features
+
+* **cli:** kazi orphans lists and reaps launcher-orphaned dispatches (T54.5, [#1073](https://github.com/kazi-org/kazi/issues/1073)) ([654a4fb](https://github.com/kazi-org/kazi/commit/654a4fb787b43165fd629fcf52ed7084c23009f9))
+* **harness:** ChildSupervisor.reap/1 for orphan cleanup (T54.5) ([af14fa2](https://github.com/kazi-org/kazi/commit/af14fa211425e68c538408e9e86d6634a1d8d9d1))
+* **runtime:** ParentMonitor reaps a launcher-killed dispatch tree (T54.5, [#1073](https://github.com/kazi-org/kazi/issues/1073)) ([f952ff1](https://github.com/kazi-org/kazi/commit/f952ff1dcd07e70fdc7a49e61d3efac77a79ffb6))
+
+
+### Bug Fixes
+
+* **cli:** document --reap and pin orphans in the help-schema surface (T54.5) ([91bd05e](https://github.com/kazi-org/kazi/commit/91bd05e959fc82810796b1a8b108b1f9172fe46d))
+
 ## [1.200.0](https://github.com/kazi-org/kazi/compare/v1.199.0...v1.200.0) (2026-07-17)
 
 
