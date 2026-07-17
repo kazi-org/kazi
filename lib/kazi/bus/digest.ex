@@ -1,10 +1,13 @@
 defmodule Kazi.Bus.Digest do
   @moduledoc """
   T51.2 (ADR-0067 decision point 4) / T55.1 (ADR-0072): `kazi bus read`'s
-  rendering rules, kept in ONE pure module so a later task (T55.7, server-side
-  aggregation) can move them without touching `Kazi.Bus` or the CLI.
+  rendering rules, kept in ONE pure module. T55.7 (ADR-0072 d5) made the
+  DAEMON the only caller of `render/1` on a live read path -- assembly happens
+  server-side, in `Kazi.Daemon.BusRead`, before the bytes reach any client --
+  so the CLI, the MCP tools, and the hook share one bound instead of three.
+  This module stays pure: it is the rule, not the transport.
 
-  Two surfaces:
+  Three surfaces:
 
     * `summarize/1` -- the human TTY digest (unchanged since T51.2): directed
       messages (`kind == "msg"`, i.e. `bus tell`) and `sev == "interrupt"`
@@ -24,6 +27,10 @@ defmodule Kazi.Bus.Digest do
       bound folds into one exact-count `overflow` line). Every line carries
       the message's JetStream stream sequence as its public `id`, so
       anything a digest names stays dereferenceable.
+
+    * `to_tty_lines/1` -- the inverse of the render: an already-assembled
+      digest (the daemon's reply) formatted for a human. The client renders;
+      it never re-aggregates (T55.7).
   """
 
   # ADR-0072 decision 2: the render threshold. A message body over this many
@@ -172,6 +179,41 @@ defmodule Kazi.Bus.Digest do
     %{"total" => length(messages), "lines" => bound(head_lines ++ count_lines)}
   end
 
+  @doc """
+  Renders an ALREADY-ASSEMBLED digest (`render/1`'s shape, string-keyed --
+  typically decoded from the daemon's `read` reply) into the human TTY lines.
+
+  T55.7 (ADR-0072 d5): the client renders what the daemon aggregated; it never
+  re-aggregates. For a backlog of small, non-directed messages this is
+  byte-identical to `summarize/1`'s output -- the two agree on the format,
+  they differ only in who did the counting -- but it additionally renders the
+  `stub` and `overflow` lines that only the bounded machine digest carries.
+  """
+  @spec to_tty_lines(%{required(String.t()) => term()}) :: [String.t()]
+  def to_tty_lines(%{"lines" => lines}) when is_list(lines) do
+    Enum.map(lines, &tty_line/1)
+  end
+
+  def to_tty_lines(_digest), do: []
+
+  defp tty_line(%{"type" => "verbatim"} = line), do: "[#{line["kind"]}] #{line["text"]}"
+
+  defp tty_line(%{"type" => "stub"} = line) do
+    "[#{line["kind"]}] <#{line["bytes"]} bytes, id #{line["id"]} -- `kazi bus get #{line["id"]}`>"
+  end
+
+  defp tty_line(%{"type" => "count"} = line) do
+    base = "#{line["count"]} #{line["kind"]}/#{line["topic"] || "_"}"
+
+    case line["last"] do
+      last when is_binary(last) -> base <> " -- " <> last
+      _none -> base
+    end
+  end
+
+  defp tty_line(%{"type" => "overflow"} = line),
+    do: "... #{line["count"]} more (ids #{line["first_id"]}..#{line["last_id"]})"
+
   defp bound(lines) when length(lines) <= @max_lines, do: lines
 
   defp bound(lines) do
@@ -213,7 +255,26 @@ defmodule Kazi.Bus.Digest do
       "first_id" => List.first(ids),
       "last_id" => List.last(ids)
     }
+    |> maybe_put_last(kind, group)
   end
+
+  # ADR-0072 d5: "aggregates last-value facts per topic". A `fact` is a
+  # statement of current state, so N facts on one topic collapse to the LAST
+  # one's value -- a reader needs what is true now, not that three things were
+  # said. Other kinds carry no last-value (an event is not a state), and an
+  # oversized last value is omitted rather than inlined: `last_id` still names
+  # it for `bus get` (d2's stub rule holds everywhere).
+  defp maybe_put_last(line, "fact", group) do
+    case List.last(group) do
+      %{text: text} when byte_size(text) <= @render_threshold_bytes ->
+        Map.put(line, "last", text)
+
+      _oversize_or_missing ->
+        line
+    end
+  end
+
+  defp maybe_put_last(line, _kind, _group), do: line
 
   # The exact-count fold for a digest whose LINE set would itself exceed the
   # bound: `count` is the number of MESSAGES the dropped lines represented

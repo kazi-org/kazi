@@ -62,6 +62,13 @@ defmodule Kazi.Bus do
   # (e.g. a crash mid-board), so the server reaps the orphan quickly.
   @board_consumer_ttl_ns 30 * 1_000_000_000
 
+  # T55.7: the control-socket budget for a daemon-assembled `read`. Generous
+  # next to `Kazi.Daemon.Probe`'s 2s default because the daemon may walk a deep
+  # backlog (several 100-message batches, L-0040) before it has a digest to
+  # send. This is the CLI's patience; the ADR-0071 hook's much tighter
+  # wall-clock bound is its own (T55.9), passed as `opts[:timeout]`.
+  @read_timeout_ms 15_000
+
   @typedoc "A read/who error surfaced to the CLI verbatim."
   @type error :: :no_daemon | :text_too_large | term()
 
@@ -413,6 +420,121 @@ defmodule Kazi.Bus do
   """
   @spec peek(keyword()) :: {:ok, [map()]} | {:error, error()}
   def peek(opts \\ []), do: consume(opts, ack: false)
+
+  @doc """
+  T55.7 (ADR-0072 d5): the DAEMON-ASSEMBLED read -- the one entry point the
+  CLI, the `kazi_bus_*` MCP tools, and the ADR-0071 hook all share, so the
+  render bound is written once instead of three times.
+
+  Sends `read` over the daemon's control socket and returns what the daemon
+  assembled. The client never pulls a consumer and never aggregates: by the
+  time this returns, the bytes are already bounded (ADR-0067 point 5, "only a
+  server can aggregate before the tokens are spent").
+
+  Returns `{:ok, %{"digest" => digest}}` -- `Kazi.Bus.Digest`'s bounded shape,
+  ready for `Digest.to_tty_lines/1` or a `--json` envelope. `opts[:peek]` is
+  the non-destructive pull; `opts[:since]` is the cursor-anchored replay.
+
+  `opts[:full]` returns `{:ok, %{"messages" => messages}}` instead, and is the
+  one mode that does NOT go through the daemon: it is the documented escape
+  (ADR-0072 d1), so there is no digest to assemble, and its size is bounded by
+  nothing -- the control socket's line framing must never carry it (see
+  `Kazi.Daemon.Probe.socket_buffer/0`). It pulls the same durable consumers
+  directly, exactly as it did before assembly moved.
+
+  With no daemon -- the socket missing, stale, or unanswering -- returns
+  `{:error, :no_daemon}` exactly as every other bus verb does, on BOTH paths.
+  ADR-0067 point 1: bus surfaces degrade to a clean one-line error and
+  convergence never depends on the bus.
+  """
+  @spec read_digest(keyword()) :: {:ok, map()} | {:error, error()}
+  def read_digest(opts \\ []) do
+    if opts[:full], do: read_full(opts), else: read_assembled(opts)
+  end
+
+  defp read_assembled(opts) do
+    sock_path = opts[:sock_path] || Supervisor.default_sock_path()
+
+    with :alive <- Probe.probe(sock_path),
+         {:ok, reply} <- Probe.request(sock_path, read_request(opts), read_timeout_ms(opts)),
+         %{"ok" => true} <- reply do
+      {:ok, reply}
+    else
+      # An `ok: false` reply is the DAEMON refusing the read (a bus that is
+      # provisioned but unreachable, say) -- distinct from "no daemon", and
+      # surfaced rather than flattened, so the operator sees which it was.
+      %{"ok" => false} = reply ->
+        {:error, {:bus_read_failed, reply["error"] || "unknown"}}
+
+      # The socket answered but the bytes were not a reply we understand. NOT
+      # `:no_daemon` -- there plainly is one -- and saying so would send an
+      # operator to debug the wrong thing entirely.
+      {:error, %Jason.DecodeError{}} ->
+        {:error, {:bus_read_failed, "malformed reply from daemon"}}
+
+      _no_daemon ->
+        {:error, :no_daemon}
+    end
+  end
+
+  # The `--full` escape: the raw set, straight off the durable consumers.
+  defp read_full(opts) do
+    result =
+      cond do
+        is_integer(opts[:since]) -> read_since(opts[:since], opts)
+        opts[:peek] -> peek(opts)
+        true -> read(opts)
+      end
+
+    case result do
+      {:ok, messages} -> {:ok, %{"messages" => messages}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Identity resolves HERE, on the client, and travels EXPLICITLY: the daemon
+  # has no KAZI_SESSION_NAME and its cwd is not the caller's repo, so a daemon
+  # left to resolve either would drain the wrong session's inbox.
+  defp read_request(opts) do
+    %{"op" => "read", "session" => session(opts), "scope" => scope(opts)}
+    |> put_unless_nil("peek", opts[:peek])
+    |> put_unless_nil("since", opts[:since])
+  end
+
+  defp put_unless_nil(map, _key, nil), do: map
+  defp put_unless_nil(map, _key, false), do: map
+  defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
+
+  # A digest reply is small by construction, but `full` can carry the whole
+  # backlog, and a deep drain is several round trips inside the daemon --
+  # neither fits Probe's 2s default. `opts[:timeout]` is in SECONDS, matching
+  # every other bus verb.
+  defp read_timeout_ms(opts) do
+    case opts[:timeout] do
+      seconds when is_integer(seconds) and seconds > 0 -> seconds * 1_000
+      _default -> @read_timeout_ms
+    end
+  end
+
+  @doc """
+  T55.7 (T51.4's debugging escape, ADR-0072 d5): `read/1` anchored at a
+  cursor -- consumes and returns ONLY messages whose stream sequence is
+  strictly greater than `anchor`, NAKing everything at or before it back to
+  pending (so a `--since` probe never eats the backlog a plain `read/1` was
+  counting on).
+
+  Shares `watch/1`'s `{:since, anchor}` mechanism but NEVER parks: an anchor
+  already at the newest sequence returns `{:ok, []}` immediately. That is the
+  difference that makes it a read rather than a wait -- `watch --since` asks
+  "tell me when", `read --since` asks "what have I missed".
+  """
+  @spec read_since(non_neg_integer(), keyword()) :: {:ok, [map()]} | {:error, error()}
+  def read_since(anchor, opts \\ []) when is_integer(anchor) and anchor >= 0 do
+    with_conn(opts, fn conn ->
+      upsert_presence(conn, opts)
+      {:ok, drain(conn, opts, {:since, anchor})}
+    end)
+  end
 
   # Issue #1065: a `tell` published under a DIFFERENT scope than the reader's
   # (`bus.<project-id>.msg.<session>` against a machine-scoped consumer) was
