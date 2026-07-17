@@ -14,6 +14,35 @@ defmodule Kazi.Bus do
   `Gnat` pid and skip daemon discovery entirely -- the connection is then the
   caller's to close.
 
+  ## Session identity (T55.5, ADR-0073 decision point 3)
+
+  Every call carries a session id, resolved by `session/1` through the
+  EXISTING ADR-0067 point 2 chain (`Kazi.CLI.resolve_session_name/1`):
+  an explicit `opts[:session]` (test seam), then `--session-name` /
+  `opts[:session_name]`, then `KAZI_SESSION_NAME`, then a harness-provided
+  session env var (`CLAUDE_CODE_SESSION_ID`). Only when ALL of those are
+  absent does `stable_fallback_id/0` apply -- never the former `os-<pid>`,
+  which changed on every CLI invocation and fragmented one session into
+  unaddressable ghost presence rows.
+
+  **Stable-fallback mechanism.** The id anchors on the nearest STABLE
+  ancestor process: starting from this process's parent, the walk skips
+  transient non-interactive shells (a `sh`/`bash`/`zsh`/... invoked with
+  `-c`, the wrapper a harness spawns per command and throws away) and stops
+  at the first ancestor that isn't one -- the harness process itself, or
+  the operator's interactive shell. The id is `s-` plus 12 hex chars of
+  `sha256(hostname|anchor-pid|anchor-start-time)`: two CLI invocations
+  spawned from the same session context walk to the same anchor and get the
+  SAME id, while two genuinely different sessions anchor on different
+  processes -- and a recycled pid has a different start time, so pid reuse
+  cannot collide either. If `ps` is unusable the last resort is
+  `s-pid-<os-pid>` (honest, but only stable within one OS process).
+
+  On top of the id, `name/2` (`kazi bus name <nickname>`) assigns a durable
+  human name carried on presence; `tell/3` resolves a recipient as `@<team>`,
+  exact session id, then nickname -- an unknown recipient is an error naming
+  the live roster, never a silent queue-to-nowhere.
+
   ADR-0067 guardrail: nothing outside `kazi daemon`/`kazi bus` may call this
   module -- convergence never depends on the bus.
   """
@@ -59,7 +88,16 @@ defmodule Kazi.Bus do
   end
 
   @doc """
-  Publishes `text` directed at `session` -- `bus.<scope>.msg.<session>`.
+  Publishes `text` directed at `recipient` -- `bus.<scope>.msg.<session>`.
+
+  T55.5 (ADR-0073 decision point 3): `recipient` resolves, in order, as an
+  `@<team>` fan-out (verbatim, unchanged from #1069), an exact session id
+  present in the roster, then a NICKNAME (`name/2`) looked up against live
+  presence. A recipient matching none of those is
+  `{:error, {:unknown_recipient, recipient, roster}}` -- naming the live
+  roster -- never a silent queue-to-nowhere (the field pain this closes:
+  hours of messages directed at a replaced session id nobody could see
+  were going unread).
 
   Delivery does NOT depend on the scopes matching: the recipient's
   `read/1`/`peek/1` also drains a `bus.*.msg.<session>` consumer, so a
@@ -67,12 +105,13 @@ defmodule Kazi.Bus do
   (issue #1065).
   """
   @spec tell(String.t(), String.t(), keyword()) :: :ok | {:error, error()}
-  def tell(session, text, opts \\ []) when is_binary(session) and is_binary(text) do
+  def tell(recipient, text, opts \\ []) when is_binary(recipient) and is_binary(text) do
     with :ok <- check_size(text) do
       with_conn(opts, fn conn ->
         upsert_presence(conn, opts)
+        target = resolve_recipient!(conn, recipient)
         scope = scope(opts)
-        subject = Enum.join(["bus", scope, "msg", session], ".")
+        subject = Enum.join(["bus", scope, "msg", target], ".")
 
         headers = [
           {"session", session(opts)},
@@ -83,6 +122,129 @@ defmodule Kazi.Bus do
 
         Gnat.pub(conn, subject, text, headers: headers)
       end)
+    end
+  end
+
+  # T55.5 recipient resolution. `@<team>` passes through verbatim (the team
+  # consumers subscribe to `bus.*.msg.@<team>`). Otherwise the roster (the
+  # sessions KV bucket) is the authority: an exact session-id match (any row,
+  # fresh or stale) wins, then a nickname match against LIVE rows (freshest
+  # first, in case a re-bind raced). No match raises `:unknown_recipient`
+  # with the live roster, so the error names who IS addressable.
+  defp resolve_recipient!(_conn, "@" <> _rest = team), do: team
+
+  defp resolve_recipient!(conn, recipient) do
+    entries =
+      case KV.contents(conn, Provision.sessions_bucket()) do
+        {:ok, contents} ->
+          for {_key, value} <- contents, {:ok, entry} <- [Jason.decode(value)], do: entry
+
+        {:error, reason} ->
+          raise_bus_error(reason)
+      end
+
+    live = entries |> Enum.map(&annotate_age/1) |> filter_fresh([])
+
+    named =
+      live
+      |> Enum.filter(fn e -> e["name"] == recipient end)
+      |> Enum.min_by(fn e -> e["age_s"] end, fn -> nil end)
+
+    cond do
+      Enum.any?(entries, fn e -> e["session"] == recipient end) -> recipient
+      named -> named["session"]
+      true -> raise_bus_error({:unknown_recipient, recipient, roster_labels(live)})
+    end
+  end
+
+  # The live roster as one label per session -- `nickname (session-id)` when
+  # named, the bare id otherwise -- for the one-line unknown-recipient error.
+  defp roster_labels(live) do
+    live
+    |> Enum.sort_by(fn e -> e["age_s"] end)
+    |> Enum.map(fn e ->
+      case e["name"] do
+        name when is_binary(name) -> "#{name} (#{e["session"]})"
+        _unnamed -> e["session"]
+      end
+    end)
+  end
+
+  @doc """
+  T55.5 (ADR-0073 decision point 3): assigns `nickname` as the calling
+  session's durable name -- carried on presence (every later bus call
+  preserves it), rendered by `who/1`, and resolvable by `tell/3`.
+
+  Re-asserting a name RE-BINDS it to the current session: any other presence
+  row holding the same name loses it, so a relaunched worker that runs
+  `bus name <role>` again becomes addressable under that role immediately
+  (and the old row can no longer soak up its messages).
+
+  A nickname that is empty, whitespace-containing, `@`-prefixed (reserved
+  for teams), or equal to a DIFFERENT live session's id is rejected
+  client-side as `{:error, {:invalid_nickname, nickname, why}}`.
+  """
+  @spec name(String.t(), keyword()) :: :ok | {:error, error()}
+  def name(nickname, opts \\ []) when is_binary(nickname) do
+    with :ok <- validate_nickname(nickname) do
+      with_conn(opts, fn conn ->
+        rebind_name!(conn, nickname, session(opts))
+        upsert_presence(conn, Keyword.put(opts, :name, nickname))
+        :ok
+      end)
+    end
+  end
+
+  defp validate_nickname(nickname) do
+    cond do
+      nickname == "" ->
+        {:error, {:invalid_nickname, nickname, "a nickname must be non-empty"}}
+
+      String.starts_with?(nickname, "@") ->
+        {:error, {:invalid_nickname, nickname, "`@` prefixes team names (`bus join`)"}}
+
+      nickname =~ ~r/\s/ ->
+        {:error, {:invalid_nickname, nickname, "a nickname cannot contain whitespace"}}
+
+      true ->
+        :ok
+    end
+  end
+
+  # Rebinding pass: rejects a nickname that shadows ANOTHER session's id
+  # (`tell` resolves exact ids first, so such a name could never be reached),
+  # then strips the name from every other row holding it -- re-asserting a
+  # name moves it to the caller.
+  defp rebind_name!(conn, nickname, self_id) do
+    case KV.contents(conn, Provision.sessions_bucket()) do
+      {:ok, contents} ->
+        decoded =
+          for {key, value} <- contents, {:ok, entry} <- [Jason.decode(value)], do: {key, entry}
+
+        if Enum.any?(decoded, fn {_k, e} ->
+             e["session"] == nickname and e["session"] != self_id
+           end) do
+          raise_bus_error(
+            {:invalid_nickname, nickname,
+             "it is another live session's id -- pick a different name"}
+          )
+        end
+
+        for {key, entry} <- decoded,
+            entry["name"] == nickname,
+            entry["session"] != self_id do
+          KV.put_value(
+            conn,
+            Provision.sessions_bucket(),
+            key,
+            Jason.encode!(Map.delete(entry, "name"))
+          )
+        end
+
+        :ok
+
+      {:error, _reason} ->
+        :ok
     end
   end
 
@@ -405,11 +567,153 @@ defmodule Kazi.Bus do
     end
   end
 
-  @doc "The current call's resolved session id -- delegates to `Kazi.CLI.resolve_session_name/1`, falling back to an os-pid identity when nothing resolves."
+  @doc """
+  The current call's resolved session id: `opts[:session]` (explicit
+  injection, chiefly tests), else the ADR-0067 point 2 resolution chain via
+  `Kazi.CLI.resolve_session_name/1` (`--session-name` / `opts[:session_name]`
+  > `KAZI_SESSION_NAME` > `CLAUDE_CODE_SESSION_ID`), else
+  `stable_fallback_id/0` (T55.5) -- never the former per-process `os-<pid>`,
+  which fragmented a nameless session into a new ghost presence row on every
+  CLI invocation.
+  """
   @spec session(keyword()) :: String.t()
   def session(opts) do
-    opts[:session] || Kazi.CLI.resolve_session_name(session_name: opts[:session]) ||
-      Kazi.CLI.resolve_session_name([]) || "os-#{os_pid()}"
+    opts[:session] ||
+      Kazi.CLI.resolve_session_name(session_name: opts[:session_name]) ||
+      stable_fallback_id()
+  end
+
+  # ---------------------------------------------------------------------------
+  # Stable fallback identity (T55.5, ADR-0073 decision point 3). See the
+  # moduledoc's "Session identity" section for the mechanism rationale.
+  # ---------------------------------------------------------------------------
+
+  @transient_shells ~w(sh bash zsh dash ksh fish ash csh tcsh)
+  @fallback_walk_limit 10
+
+  @doc """
+  The session id used when the whole name-resolution chain comes up empty:
+  `s-` + 12 hex chars of `sha256(hostname|anchor-pid|anchor-start-time)`,
+  where the ANCHOR is the nearest stable ancestor process -- the walk starts
+  at this process's parent and skips transient `-c` shells (the throwaway
+  wrapper a harness spawns per command), stopping at the first ancestor that
+  isn't one (the harness itself, or the operator's interactive shell).
+
+  Two CLI invocations from the same session context therefore hash the same
+  anchor and get the SAME id (no ghost presence rows), while two genuinely
+  different sessions anchor on different processes -- and because the
+  anchor's START TIME is hashed in, a recycled pid cannot collide either.
+  Memoized per OS process (`:persistent_term`): the ancestry of a running
+  process never changes, so one `ps` walk per process is enough.
+
+  Last resort (no usable `ps` on PATH): `s-pid-<os-pid>`, which is only
+  stable within a single OS process -- honest degradation, documented here.
+  """
+  @spec stable_fallback_id() :: String.t()
+  def stable_fallback_id do
+    case :persistent_term.get({__MODULE__, :fallback_id}, nil) do
+      nil ->
+        id = compute_fallback_id()
+        :persistent_term.put({__MODULE__, :fallback_id}, id)
+        id
+
+      id ->
+        id
+    end
+  end
+
+  defp compute_fallback_id do
+    case ps_int(os_pid(), "ppid=") do
+      {:ok, ppid} -> fallback_id_from(ppid)
+      :error -> "s-pid-#{os_pid()}"
+    end
+  end
+
+  @doc false
+  # Exposed for tests: the fallback id anchored by walking UP from
+  # `candidate_pid` -- in real use the calling process's parent. Two distinct
+  # transient shells spawned by the same stable process must yield the same
+  # id; two distinct stable processes must not.
+  @spec fallback_id_from(pos_integer()) :: String.t()
+  def fallback_id_from(candidate_pid) do
+    case walk_to_anchor(candidate_pid, @fallback_walk_limit) do
+      {pid, start} -> derive_fallback_id(hostname(), pid, start)
+      :error -> "s-pid-#{os_pid()}"
+    end
+  end
+
+  @doc false
+  # The pure derivation, exposed for tests: deterministic in its inputs; any
+  # differing input (host, pid, or start time) yields a different id.
+  @spec derive_fallback_id(String.t(), pos_integer(), String.t()) :: String.t()
+  def derive_fallback_id(host, anchor_pid, anchor_start) do
+    hash = :crypto.hash(:sha256, "#{host}|#{anchor_pid}|#{anchor_start}")
+    "s-" <> (hash |> Base.encode16(case: :lower) |> binary_part(0, 12))
+  end
+
+  defp walk_to_anchor(pid, hops) when is_integer(pid) and pid > 1 do
+    case ps_field(pid, "command=") do
+      {:ok, cmd} ->
+        if hops > 0 and transient_shell?(cmd) do
+          case ps_int(pid, "ppid=") do
+            {:ok, ppid} when ppid > 1 -> walk_to_anchor(ppid, hops - 1)
+            _other -> anchor(pid)
+          end
+        else
+          anchor(pid)
+        end
+
+      :error ->
+        :error
+    end
+  end
+
+  defp walk_to_anchor(_pid, _hops), do: :error
+
+  defp anchor(pid) do
+    case ps_field(pid, "lstart=") do
+      {:ok, start} -> {pid, start}
+      :error -> {pid, "unknown-start"}
+    end
+  end
+
+  # A transient shell is `sh`/`bash`/`zsh`/... running with `-c` (possibly
+  # combined, e.g. `-lc`) -- the per-command wrapper a harness spawns and
+  # discards. An interactive shell (`-zsh`, `bash` with no `-c`) is NOT
+  # transient: it IS the session anchor for an operator typing commands.
+  defp transient_shell?(cmd) do
+    case String.split(String.trim(cmd), ~r/\s+/, parts: 2) do
+      [exe, args] ->
+        Path.basename(exe) in @transient_shells and args =~ ~r/(^|\s)-[A-Za-z]*c(\s|$)/
+
+      _no_args ->
+        false
+    end
+  end
+
+  defp ps_int(pid, field) do
+    with {:ok, out} <- ps_field(pid, field),
+         {int, _rest} <- Integer.parse(out) do
+      {:ok, int}
+    else
+      _other -> :error
+    end
+  end
+
+  defp ps_field(pid, field) do
+    case System.cmd("ps", ["-o", field, "-p", to_string(pid)], stderr_to_stdout: true) do
+      {out, 0} ->
+        case String.trim(out) do
+          "" -> :error
+          value -> {:ok, value}
+        end
+
+      _other ->
+        :error
+    end
+  rescue
+    # `ps` missing from PATH entirely (System.cmd raises :enoent).
+    ErlangError -> :error
   end
 
   @doc "`machine` (default) or the current repo's canonical toplevel path, slugged."
@@ -533,19 +837,30 @@ defmodule Kazi.Bus do
   end
 
   defp stored_team(conn, opts) do
+    case stored_entry(conn, opts)["team"] do
+      team when is_binary(team) -> team
+      _other -> nil
+    end
+  end
+
+  # The caller's currently-stored presence entry, `%{}` when absent/corrupt --
+  # the single fetch both the team and name (T55.5) preservation rules read.
+  defp stored_entry(conn, opts) do
     case KV.get_value(conn, Provision.sessions_bucket(), sanitize(session(opts))) do
       value when is_binary(value) ->
         case Jason.decode(value) do
-          {:ok, %{"team" => team}} when is_binary(team) -> team
-          _other -> nil
+          {:ok, entry} when is_map(entry) -> entry
+          _other -> %{}
         end
 
       _missing ->
-        nil
+        %{}
     end
   end
 
   defp upsert_presence(conn, opts) do
+    stored = stored_entry(conn, opts)
+
     # `team` refresh rule: an explicit :team option sets (binary) or clears
     # (:none) membership; otherwise the previously stored team is PRESERVED
     # -- without this, any read/post after a join silently dropped the
@@ -554,7 +869,16 @@ defmodule Kazi.Bus do
       case opts[:team] do
         :none -> nil
         team when is_binary(team) -> team
-        nil -> stored_team(conn, opts)
+        nil -> stored["team"]
+      end
+
+    # `name` refresh rule (T55.5): `name/2` sets it via :name; every other
+    # bus call preserves the stored one, so a nickname survives across calls
+    # exactly like team membership does.
+    name =
+      case opts[:name] do
+        name when is_binary(name) -> name
+        nil -> stored["name"]
       end
 
     entry = %{
@@ -566,6 +890,7 @@ defmodule Kazi.Bus do
     }
 
     entry = if team, do: Map.put(entry, "team", team), else: entry
+    entry = if is_binary(name), do: Map.put(entry, "name", name), else: entry
 
     KV.put_value(conn, Provision.sessions_bucket(), sanitize(session(opts)), Jason.encode!(entry))
   end
