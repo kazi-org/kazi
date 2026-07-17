@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.171.1](https://github.com/kazi-org/kazi/compare/v1.171.0...v1.171.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **context:** stuck bundle never blanks the last predicate's failure ([c2960aa](https://github.com/kazi-org/kazi/commit/c2960aa5ff61af7d1c8fe553ea0f62621f9dcccd)), closes [#1075](https://github.com/kazi-org/kazi/issues/1075)
+* **scheduler:** push run-owned partition branch with upstream at creation ([00a90df](https://github.com/kazi-org/kazi/commit/00a90dfb0668b9ceb99a3be0d6a4b45ea88ab28e)), closes [#1075](https://github.com/kazi-org/kazi/issues/1075)
+
 ## [1.171.0](https://github.com/kazi-org/kazi/compare/v1.170.0...v1.171.0) (2026-07-17)
 
 
