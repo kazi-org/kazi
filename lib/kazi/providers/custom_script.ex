@@ -20,6 +20,12 @@ defmodule Kazi.Providers.CustomScript do
     * `:cmd`  — the executable (string). Required. Like `Kazi.Providers.TestRunner`,
       this is ONE executable, not a command line (`cmd: "semgrep"`, not
       `cmd: "semgrep scan"`); use `:args` for the rest (docs/lore.md L-0012).
+      Resolved with shell semantics: a `:cmd` that NAMES A PATH (contains a `/`)
+      resolves against the workspace, so a checker committed in the tree it grades
+      (`cmd: "scripts/chk.sh"`) just works; a bare name (`cmd: "semgrep"`) is
+      looked up on `PATH`. A path that does not resolve to an executable file is
+      left as written, so a typo surfaces as an `:error` naming what was tried,
+      never a silent pass.
     * `:args` — argument list (list of strings). Optional, defaults to `[]`.
     * `:env`  — extra environment, a `{name, value}` list or a `{name => value}`
       map. Optional.
@@ -175,6 +181,7 @@ defmodule Kazi.Providers.CustomScript do
   # broken evidence pipeline is never read as a pass; otherwise the verdict
   # decides. A missing binary / bad cwd is mapped to :error, never :fail.
   defp run(cmd, args, workspace, config, verdict) do
+    cmd = resolve_cmd(cmd, workspace)
     opts = [cd: workspace, stderr_to_stdout: merge_stderr?(config)] ++ env_opt(config)
 
     case CommandRunner.run(cmd, args, opts, Map.get(config, :timeout_ms)) do
@@ -202,6 +209,36 @@ defmodule Kazi.Providers.CustomScript do
           args: args,
           workspace: workspace
         })
+    end
+  end
+
+  # Resolve a workspace-relative `cmd` against the workspace (#1096).
+  #
+  # `System.cmd/3` resolves a relative `cmd` via PATH, NOT the `:cd` option, so a
+  # checker committed in the tree it grades (`cmd = "scripts/chk.sh"`) raised
+  # :enoent even though it sat right next to the code under test. Join it to the
+  # workspace ONLY when it NAMES A PATH (contains a separator) and resolves there
+  # to an executable file. A bare name (`semgrep`) stays a PATH lookup — shell
+  # semantics, so a stray ./semgrep in the workspace never shadows the real tool.
+  # Anything that does not resolve is left VERBATIM: the exec then fails as it
+  # always did and surfaces as :error with a reason, rather than being silently
+  # rewritten into a different missing path.
+  defp resolve_cmd(cmd, workspace) do
+    candidate = Path.expand(cmd, workspace)
+
+    if Path.type(cmd) == :relative and path_shaped?(cmd) and executable_file?(candidate) do
+      candidate
+    else
+      cmd
+    end
+  end
+
+  defp path_shaped?(cmd), do: String.contains?(cmd, "/")
+
+  defp executable_file?(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :regular, mode: mode}} -> Bitwise.band(mode, 0o111) != 0
+      _ -> false
     end
   end
 
