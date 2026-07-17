@@ -325,7 +325,17 @@ defmodule Kazi.CLIHarnessTest do
     assert allowed_tools_values(argv) == ["Write"]
   end
 
-  test "no --permission-mode/--allowed-tools and no goal-file fields leave the argv with neither flag (issue #769)",
+  # (issue #769) This case previously asserted the OPPOSITE — that an unset
+  # permission mode leaves the argv with no `--permission-mode`, "byte-for-byte
+  # unchanged". That default is the BUG: a headless `claude -p` against a
+  # workspace that has not been through Claude Code's interactive trust dialog has
+  # every Write/Bash denied, yet still exits 0 with `is_error: false`. kazi then
+  # sees a clean dispatch, observes no file change, re-dispatches, and grinds to
+  # `:stuck` having spent real budget for zero edits. kazi dispatches into an
+  # EPHEMERAL partition worktree whose path is new every run, so the trust dialog
+  # can never be pre-accepted for it. The default must therefore be permissive
+  # enough to act; `--allowed-tools` stays unset (no least-privilege list implied).
+  test "no --permission-mode and no goal-file field DEFAULTS to auto (issue #769)",
        %{work: work} do
     goal = write_goal(work)
 
@@ -340,8 +350,53 @@ defmodule Kazi.CLIHarnessTest do
     assert code == 0
 
     argv = argv_lines(work)
-    refute "--permission-mode" in argv
+    assert "--permission-mode" in argv
+    assert permission_mode_value(argv) == "auto"
+
+    # Unrelated lever: a default mode must not imply a tool allow-list.
     refute "--allowed-tools" in argv
+  end
+
+  # The default is folded in `Runtime` (harness-agnostic code), so it MUST NOT leak
+  # to a harness that has no such flag. `Kazi.Harness.build_adapter_opts/2` drops
+  # every key absent from the resolved profile's `supported_opts`, and opencode's
+  # are `[:command, :model, :workspace]` — this pins that contract, since a leaked
+  # `--permission-mode auto` would make opencode's argv invalid.
+  test "the permission-mode default does NOT leak to a non-claude harness (issue #769)",
+       %{work: work} do
+    goal = write_goal(work)
+
+    {code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(
+          ["apply", goal, "--workspace", work, "--harness", "opencode", "--model", "local/q"],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    assert code == 0
+
+    argv = argv_lines(work)
+    refute "--permission-mode" in argv
+    refute "auto" in argv
+  end
+
+  # `auto` rather than `acceptEdits` because acceptEdits grants file edits but NOT
+  # Bash: an agent under it can edit and then cannot `git commit`, so any goal with
+  # a `landed`/`committed` predicate could never converge.
+  test "the default permission mode is auto, not acceptEdits (issue #769)", %{work: work} do
+    goal = write_goal(work)
+
+    {_code, _io} =
+      with_io(fn ->
+        Kazi.CLI.run(["apply", goal, "--workspace", work],
+          adapter_opts: [command: @stub],
+          persist?: false
+        )
+      end)
+
+    refute permission_mode_value(argv_lines(work)) == "acceptEdits"
   end
 
   # The token immediately after `--permission-mode` in the recorded argv.

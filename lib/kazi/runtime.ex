@@ -105,6 +105,16 @@ defmodule Kazi.Runtime do
   @integrate Kazi.Actions.Integrate
   @deploy Kazi.Actions.Deploy
 
+  # (issue #769) The Claude-only `--permission-mode` default. `"auto"` because a
+  # headless dispatch into kazi's ephemeral partition worktree has no human to
+  # accept Claude Code's trust dialog, so an unset mode denies EVERY tool call
+  # while still exiting 0 — a silent, billable no-op. `"auto"` covers Bash as well
+  # as edits, so a goal whose predicates require git (a `landed`/`committed`
+  # check) can actually converge; `"acceptEdits"` grants edits but NOT Bash, and
+  # such a goal can never pass under it. The blast radius is the throwaway
+  # worktree: `apply` refuses a repo's primary worktree root by default.
+  @default_permission_mode "auto"
+
   @typedoc "Result handed back to the caller — the loop's terminal result."
   @type result :: Loop.result()
 
@@ -679,19 +689,28 @@ defmodule Kazi.Runtime do
 
   defp goal_harness_effort(%Goal{}), do: nil
 
-  # (issue #769): the Claude-only `--permission-mode` lever, parsed/folded exactly
-  # like `:effort` above (T36.6) — CLI `--permission-mode` opt > the goal-file
-  # `[harness] permission_mode`; absent both, nothing is added so argv is
-  # byte-for-byte unchanged. A headless dispatch against a workspace that has not
-  # been through Claude Code's interactive trust dialog needs this or every tool
-  # call is silently denied.
+  # (issue #769): the Claude-only `--permission-mode` lever, folded exactly like
+  # `:effort` above (T36.6) — CLI `--permission-mode` opt > the goal-file
+  # `[harness] permission_mode` > `@default_permission_mode`. It survives
+  # `Kazi.Harness.build_adapter_opts`'s `Keyword.take` because the claude profile
+  # advertises `:permission_mode` in supported_opts; a non-Claude harness drops it
+  # at that take, so defaulting here cannot leak `--permission-mode` to opencode.
+  #
+  # Why this DEFAULTS rather than omitting: a headless `claude -p` against a
+  # workspace that has not been through Claude Code's interactive trust dialog has
+  # EVERY tool call denied — and the CLI still exits 0 with `is_error: false`, so
+  # kazi saw a clean dispatch, observed no file changes, re-dispatched, and burned
+  # the budget to `stuck` with the cause nowhere in its output. Omitting the flag
+  # kept argv "byte-for-byte unchanged" at the cost of making the DEFAULT path the
+  # broken one. kazi dispatches into an EPHEMERAL partition worktree whose path is
+  # new every run, so the trust dialog can never be pre-accepted for it.
   defp maybe_put_permission_mode(adapter_opts, %Goal{} = goal, opts) do
     case Keyword.get(opts, :permission_mode) || goal_harness_permission_mode(goal) do
       mode when is_binary(mode) and mode != "" ->
         Keyword.put(adapter_opts, :permission_mode, mode)
 
       _ ->
-        adapter_opts
+        Keyword.put(adapter_opts, :permission_mode, @default_permission_mode)
     end
   end
 

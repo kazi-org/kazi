@@ -616,6 +616,18 @@ defmodule Kazi.Loop do
               # terminal result so the CLI/read-model can say so. Appended last
               # so the existing field order is untouched.
               usage_fidelity: nil,
+              # --- issue #769: permission-denial honesty ------------------------
+              # The tool calls the harness ATTEMPTED and had denied, accumulated
+              # across the run (deduped by tool name, newest dispatch wins). A
+              # headless `claude -p` against a workspace that has not been through
+              # Claude Code's interactive trust dialog has every Write/Bash denied
+              # and STILL exits 0 with `is_error: false`, so the loop sees a clean
+              # dispatch, observes no file change, re-dispatches, and burns the
+              # budget to `:stuck` with the cause nowhere in its output. The
+              # profile already parses `:permission_denials` off the envelope
+              # (`Profiles.Claude`); this is where the loop RETAINS it so
+              # `build_stuck_bundle/1` can surface it. Empty list = none seen.
+              permission_denials: [],
               # --- T48.11 (ADR-0058 §3): opt-in post-dispatch debrief -----------
               # `debrief` opts the loop into appending the capped debrief question
               # to every dispatch prompt (default false = byte-identical to
@@ -1979,6 +1991,12 @@ defmodule Kazi.Loop do
     # trips rather than assuming the run is simply cheap.
     data = maybe_flag_unreported_usage(data, result)
 
+    # (issue #769): if THIS dispatch had tool calls denied, the agent could not
+    # act — warn loudly and retain the denials so the stuck bundle names the
+    # cause. Without this the run is a silent, billable no-op: the harness exits
+    # 0, nothing changes on disk, and the loop grinds to `:stuck` with no signal.
+    data = maybe_flag_permission_denials(data, result)
+
     # T34.3 (ADR-0046 §2): record this dispatch's per-iteration `context` + `tools`
     # counters on the loop state so the NEXT observation's iteration event carries
     # them. `context` is computed from the prompt sections just built (orientation/
@@ -2959,7 +2977,13 @@ defmodule Kazi.Loop do
       %{
         failing: failing,
         changed_files: data.working_set_digest.files,
-        snippets: stuck_snippets(data, failing_ids, budget)
+        snippets: stuck_snippets(data, failing_ids, budget),
+        # (issue #769) `changed_files: []` PLUS a populated `permission_denials` is
+        # the signature of a fully-denied dispatch — the operator's answer to "it
+        # spent money and changed nothing, why?". Threaded through `assemble` (not
+        # Map.put after it) so `bytes` counts it and `render/1` carries it into the
+        # escalation prompt.
+        permission_denials: data.permission_denials
       },
       budget: budget
     )
@@ -3337,6 +3361,60 @@ defmodule Kazi.Loop do
       %Data{data | usage_fidelity: :unreported}
     end
   end
+
+  # (issue #769): retain the NAMES of this dispatch's denied tool calls on the run
+  # state and warn loudly the first time any are seen. The claude profile parses
+  # `:permission_denials` off the result envelope; kazi previously dropped them,
+  # which is what made a fully-denied dispatch indistinguishable from "the agent
+  # chose to change nothing" — an exit-0 dispatch, no file change, budget spent.
+  #
+  # NAMES ONLY, deliberately. A denial entry carries `tool_input`, which for a
+  # denied `Write` is the ENTIRE file content the agent meant to write: putting it
+  # in the bundle would blow the byte budget and risk leaking secrets into a
+  # surfaced/logged artifact. "Write was denied" is the whole diagnostic signal;
+  # the payload adds risk and nothing else. Deduped so a 15-iteration run does not
+  # carry 15 copies of the same denied `Write`.
+  @spec maybe_flag_permission_denials(Data.t(), Kazi.HarnessAdapter.result()) :: Data.t()
+  defp maybe_flag_permission_denials(%Data{} = data, result) do
+    case denied_tool_names(result) do
+      [] ->
+        data
+
+      names ->
+        if data.permission_denials == [] do
+          Logger.warning(fn ->
+            "kazi.loop goal=#{goal_id(data.goal)} a harness dispatch had tool call(s) DENIED " <>
+              "(#{Enum.join(names, ", ")}) — the agent cannot act, so this run will change " <>
+              "nothing and grind to :stuck while spending budget (issue #769). The harness " <>
+              "still exited 0. Set `[harness] permission_mode` (e.g. \"auto\") in the " <>
+              "goal-file, or pass --permission-mode."
+          end)
+        end
+
+        %Data{data | permission_denials: Enum.uniq(data.permission_denials ++ names)}
+    end
+  end
+
+  # The denied tool names on a harness result, if the profile reported any.
+  @spec denied_tool_names(Kazi.HarnessAdapter.result()) :: [String.t()]
+  defp denied_tool_names({:ok, %{} = result}) do
+    case Map.get(result, :permission_denials) do
+      denials when is_list(denials) ->
+        denials
+        |> Enum.map(&denial_tool_name/1)
+        |> Enum.filter(&is_binary/1)
+        |> Enum.uniq()
+
+      _ ->
+        []
+    end
+  end
+
+  defp denied_tool_names(_result), do: []
+
+  defp denial_tool_name(%{tool_name: name}) when is_binary(name), do: name
+  defp denial_tool_name(%{"tool_name" => name}) when is_binary(name), do: name
+  defp denial_tool_name(_denial), do: nil
 
   # Whether a harness result carries ANY usage signal the budget/economy code
   # can count: the rolled-up token estimate (`cost.tokens`, T1.4), the per-field

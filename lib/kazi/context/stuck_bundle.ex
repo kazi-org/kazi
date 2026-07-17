@@ -30,6 +30,10 @@ defmodule Kazi.Context.StuckBundle do
   # Cap on the number of changed-file paths listed.
   @max_changed_files 50
 
+  # (issue #769) Denied tool NAMES are a tiny, bounded set in practice (Write, Edit,
+  # Bash, …); this is a sanity cap so a pathological harness cannot flood the bundle.
+  @max_permission_denials 20
+
   @typedoc "The assembled bundle — a JSON-safe map (string keys)."
   @type t :: %{
           required(String.t()) => term()
@@ -39,6 +43,8 @@ defmodule Kazi.Context.StuckBundle do
   @type input :: %{
           optional(:failing) => [{term(), map()}],
           optional(:changed_files) => [String.t()],
+          # (issue #769) Denied tool NAMES only — never a denial's `tool_input`.
+          optional(:permission_denials) => [String.t()],
           optional(:snippets) => [Snippet.t()]
         }
 
@@ -84,9 +90,21 @@ defmodule Kazi.Context.StuckBundle do
         "changed_files" => changed,
         "snippets" => snippets
       }
+      |> put_permission_denials(input)
       |> fit_budget(budget)
 
     Map.put(bundle, "bytes", byte_size(render(bundle)))
+  end
+
+  # (issue #769) The names of tool calls the harness had DENIED. Present only when
+  # there were any, so an unaffected bundle's shape is byte-for-byte unchanged.
+  # Names only — a denial's `tool_input` holds the whole file a denied `Write`
+  # meant to write, which would blow the budget and risk leaking secrets here.
+  defp put_permission_denials(bundle, input) do
+    case input |> Map.get(:permission_denials, []) |> Enum.filter(&is_binary/1) |> Enum.uniq() do
+      [] -> bundle
+      names -> Map.put(bundle, "permission_denials", Enum.take(names, @max_permission_denials))
+    end
   end
 
   @doc """
@@ -98,6 +116,12 @@ defmodule Kazi.Context.StuckBundle do
     [
       section("Failing predicates", failing_lines(bundle["failing_predicates"])),
       section("Last changed files", file_lines(bundle["changed_files"])),
+      # (issue #769) Rendered so the ESCALATION prompt says why nothing changed —
+      # a higher rung handed "no changed files" with no cause would just re-fail.
+      section(
+        "Denied tool calls (agent could not act)",
+        denial_lines(bundle["permission_denials"])
+      ),
       section("Relevant indexed evidence", snippet_lines(bundle["snippets"]))
     ]
     |> Enum.reject(&(&1 == ""))
@@ -190,6 +214,17 @@ defmodule Kazi.Context.StuckBundle do
 
   defp file_lines([]), do: ""
   defp file_lines(files), do: Enum.map_join(files, "\n", &("- " <> &1))
+
+  # (issue #769) Absent key (the overwhelmingly common case: nothing was denied) and
+  # an empty list both render to no section at all.
+  defp denial_lines(nil), do: ""
+  defp denial_lines([]), do: ""
+
+  defp denial_lines(names) do
+    Enum.map_join(names, "\n", &("- " <> &1 <> " (denied)")) <>
+      "\n\nThe harness exited 0 but every listed tool call was refused, so no edit " <>
+      "could land. Set `[harness] permission_mode` in the goal-file."
+  end
 
   defp snippet_lines([]), do: ""
 
