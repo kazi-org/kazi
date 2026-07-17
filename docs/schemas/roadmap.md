@@ -129,3 +129,32 @@ The terminal object mirrors the fleet/DAG collective shape
 
 The exit code is `0` on a converged (or paused) collective, non-zero otherwise —
 the same fold as `--fleet`.
+
+## Rendering a roadmap (`kazi plan render <roadmap>`, T45.5)
+
+`kazi plan render <roadmap-file>` renders the roadmap as a **generated,
+human-readable plan document**: a wave-sectioned WBS with a checkbox per goal, a
+progress count, and a prominent **GENERATED — DO NOT HAND-EDIT** banner. It writes
+to stdout by default, or to a file with `--out <path>`.
+
+```sh
+kazi plan render priv/examples/roadmap/pipeline.roadmap.toml            # to stdout
+kazi plan render priv/examples/roadmap/pipeline.roadmap.toml --out PLAN.md
+```
+
+The document is a **projection of live state**, computed fresh every render — there
+is no cache:
+
+- **Waves** are the roadmap's topological `needs` frontiers — the SAME layering
+  `kazi apply <roadmap> --explain` prints (`Kazi.Goal.Roadmap.frontiers/1`), so the
+  rendered plan can never disagree with the schedule the executor runs.
+- **Checkboxes** come from the **read-model verdicts**: a goal whose latest
+  iteration converged renders `[x]` (`converged`); a goal with a run that has not
+  converged renders `[ ]` (`pending`); with no read-model (the escript build) or no
+  recorded run, `[ ]` (`unknown`). Re-rendering after a verdict changes reflects
+  the new state — flip one goal to converged and only that goal's line (and the
+  progress count) changes.
+
+> **The rendered file is GENERATED.** Hand-edits to a written `--out` file are
+> **lost on the next render** — the banner says so loudly. Edit the roadmap-file
+> (the source of truth) and re-run `kazi plan render`, never the rendered view.
