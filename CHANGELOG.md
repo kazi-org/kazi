@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.212.2](https://github.com/kazi-org/kazi/compare/v1.212.1...v1.212.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **dashboard:** T63.1 -- gate attention queue on heartbeat freshness ([#1155](https://github.com/kazi-org/kazi/issues/1155)) ([b6be56b](https://github.com/kazi-org/kazi/commit/b6be56b31268e24db70eee6fd01cf3a26eb16269))
+
 ## [1.212.1](https://github.com/kazi-org/kazi/compare/v1.212.0...v1.212.1) (2026-07-17)
 
 
