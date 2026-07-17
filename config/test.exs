@@ -33,6 +33,13 @@ config :logger, level: :warning
 # pids starting with "dead" are closed sessions, everything else is live.
 config :kazi, :session_liveness_source, Kazi.TestSupport.SessionLivenessStub
 
+# Dashboard source selection is deterministic in tests (T55.3, ADR-0073 §4):
+# point the daemon-probe seam at a never-existing socket so the default lease-map
+# source is Native regardless of whether a real kazi daemon happens to run on the
+# developer machine. A test exercising the daemon-up branch overrides this with
+# its own listening socket.
+config :kazi, :lease_map_daemon_sock, Path.expand("../tmp/no-daemon/daemon.sock", __DIR__)
+
 # Crash-dump dir override (issue #856): keep `mix test` from ever pointing
 # `ERL_CRASH_DUMP` at a real `~/.kazi/crash`, mirroring the tmp/-scoped DB path
 # above. See `Kazi.CrashDump`.
