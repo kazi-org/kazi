@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.155.1](https://github.com/kazi-org/kazi/compare/v1.155.0...v1.155.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **harness:** default permission_mode to auto + surface denied tool calls ([#769](https://github.com/kazi-org/kazi/issues/769)) ([540fada](https://github.com/kazi-org/kazi/commit/540fada6e3dc155dea0f98571ff2731e1f0c1eba))
+
 ## [1.155.0](https://github.com/kazi-org/kazi/compare/v1.154.0...v1.155.0) (2026-07-17)
 
 
