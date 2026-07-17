@@ -91,6 +91,15 @@ defmodule Kazi.Daemon do
       # discovers the daemon fresh per call, never through this pid).
       {provisioner, ref} =
         spawn_monitor(fn ->
+          # Trap exits: every readiness probe is a LINKED `Gnat.start_link`,
+          # and a probe that fails (nats not accepting yet) can deliver its
+          # non-normal exit signal to this non-trapping provisioner before
+          # the start-failure ack unlinks -- killing the provisioner
+          # mid-retry, so the daemon reported "started" with NO provisioned
+          # stream/bucket and every bus verb 404ed ("stream not found").
+          # Observed live under repeated in-beam daemon boots (T55.11).
+          Process.flag(:trap_exit, true)
+
           if Kazi.Daemon.Nats.wait_ready(nats_port, 5_000, nats_host, nats_token) == :ok do
             Kazi.Bus.Provision.run(host: nats_host, port: nats_port, auth_token: nats_token)
           end

@@ -167,6 +167,8 @@ defmodule Kazi.CLI do
     full: :boolean,
     team: :string,
     all: :boolean,
+    project: :string,
+    machine: :string,
     timeout: :integer,
     since: :string,
     roadmap: :string,
@@ -295,7 +297,11 @@ defmodule Kazi.CLI do
     team:
       "`bus who` only (issue #1069): filter the presence roster to members of this named team (sessions register with `bus join <team>`).",
     all:
-      "`bus who` only: include presence entries older than the 10-minute TTL (hidden by default so closed sessions age out of the roster instead of looking active).",
+      "`bus who` only: include presence entries older than the 10-minute TTL (hidden by default so closed sessions age out of the roster instead of looking active; a TTL-stale entry whose process is verified alive locally is always shown, as `idle` -- T55.11).",
+    project:
+      "`bus who` only (T55.11): filter the roster to sessions whose cwd is this directory or lives under it (expanded to an absolute path) -- replaces the `who | grep <path>` pipeline.",
+    machine:
+      "`bus who` only (T55.11): filter the roster to sessions recorded by this machine (exact hostname match).",
     timeout:
       "`bus watch` only (issue #1091): maximum seconds to block waiting for a message (default 300). On expiry `bus watch` prints a one-line notice and exits 3.",
     since:
@@ -409,6 +415,8 @@ defmodule Kazi.CLI do
         :full,
         :team,
         :all,
+        :project,
+        :machine,
         :timeout,
         :since,
         :session_name
@@ -558,7 +566,7 @@ defmodule Kazi.CLI do
       kazi bus name <nickname> [--json]                  # durable, addressable session name (T55.5)
       kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
-      kazi bus who [--team <t>] [--all] [--json]   # list current presence (fresh only; --all includes stale)
+      kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
@@ -1426,6 +1434,8 @@ defmodule Kazi.CLI do
       full: flags[:full] || false,
       team: flags[:team],
       all: flags[:all] || false,
+      project: flags[:project],
+      machine: flags[:machine],
       timeout: flags[:timeout],
       since: flags[:since],
       # T55.5: an explicit --session-name heads the sender-identity resolution
@@ -1517,13 +1527,26 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("who") do
     """
-    kazi bus who [--team <name>] [--all] [--json]
+    kazi bus who [--team <name>] [--project <dir>] [--machine <host>] [--all] [--json]
 
-    List current presence (session, pid, team, last-seen age, cwd) from the
-    short-TTL KV bucket every bus call upserts into. Entries idle past the
-    TTL (10 minutes) are hidden -- closed sessions age out instead of
-    looking active; pass --all to include them. --team <name> filters to
-    that team's members (issue #1069).
+    List current presence (session, machine, pid, liveness, team, last-seen
+    age, cwd) from the short-TTL KV bucket every bus call upserts into.
+
+    Liveness (T55.11): `active` -- the session itself made a bus call
+    recently; `idle` -- its process is verified alive on its machine but
+    quiet (the daemon's presence sweep re-heartbeats such rows, so an alive
+    session never ages out of the roster); `dead-reaping` -- its pid is
+    verifiably gone or was reused by a different process (rows record pid +
+    process start time), and the sweep removes the row on its next pass.
+
+    Entries idle past the presence TTL (#{Kazi.Bus.session_ttl_s()} seconds)
+    with no verifiably-alive process are hidden -- closed sessions age out
+    instead of looking active; pass --all to include them. Under --json the
+    result carries `ttl_s` and each session's `seen_s`.
+
+    --team <name> filters to that team's members (issue #1069);
+    --project <dir> filters to sessions whose cwd is <dir> or under it;
+    --machine <host> filters to sessions on that machine.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -4057,23 +4080,39 @@ defmodule Kazi.CLI do
   end
 
   defp execute_bus("who", [], opts) do
-    who_opts = bus_call_opts(opts) ++ [who_team: opts[:team], all: opts[:all]]
+    # T55.11: --project/--machine filter server-side over the fetched roster;
+    # --json carries `ttl_s` (and per-session `seen_s`) so the freshness
+    # cutoff is data, not folklore.
+    who_opts =
+      bus_call_opts(opts) ++
+        [
+          who_team: opts[:team],
+          all: opts[:all],
+          who_project: opts[:project],
+          who_machine: opts[:machine]
+        ]
 
     case Kazi.Bus.who(who_opts) do
       {:ok, sessions} ->
-        emit(json?(opts), %{"ok" => true, "sessions" => sessions}, fn ->
-          Enum.each(sessions, fn s ->
-            # T55.5: a named session renders name-first -- the addressable
-            # label a `bus tell` accepts -- with the raw id in parentheses.
-            label =
-              if s["name"], do: "#{s["name"]} (#{s["session"]})", else: s["session"]
+        emit(
+          json?(opts),
+          %{"ok" => true, "ttl_s" => Kazi.Bus.session_ttl_s(), "sessions" => sessions},
+          fn ->
+            Enum.each(sessions, fn s ->
+              # T55.5: a named session renders name-first -- the addressable
+              # label a `bus tell` accepts -- with the raw id in parentheses.
+              label =
+                if s["name"], do: "#{s["name"]} (#{s["session"]})", else: s["session"]
 
-            machine = if s["machine"], do: " machine=#{s["machine"]}", else: ""
-            team = if s["team"], do: " team=#{s["team"]}", else: ""
-            age = if s["age_s"], do: " seen=#{s["age_s"]}s ago", else: ""
-            IO.puts("#{label}#{machine} pid=#{s["pid"]}#{team}#{age} #{s["cwd"]}")
-          end)
-        end)
+              machine = if s["machine"], do: " machine=#{s["machine"]}", else: ""
+              liveness = if s["liveness"], do: " liveness=#{s["liveness"]}", else: ""
+              team = if s["team"], do: " team=#{s["team"]}", else: ""
+              age = if s["age_s"], do: " seen=#{s["age_s"]}s ago", else: ""
+
+              IO.puts("#{label}#{machine} pid=#{s["pid"]}#{liveness}#{team}#{age} #{s["cwd"]}")
+            end)
+          end
+        )
 
         0
 

@@ -27,8 +27,24 @@ defmodule Kazi.Daemon.Supervisor do
       |> Keyword.take([:nats_bin, :port, :store_dir, :nats_host, :nats_token])
       |> Keyword.put(:name, nats_name)
 
+    # T55.11: the presence sweep (idle-vs-dead liveness for `bus who`). Named
+    # per-supervisor for the same reason as `default_nats_name/1` -- lifecycle
+    # tests run two co-existing trees. `:sweep_interval_ms`/`:sweep_idle_after_s`
+    # are test seams; production uses the sweep's own defaults.
+    sweep_opts =
+      [
+        name: Keyword.get(opts, :sweep_name, default_sweep_name(opts)),
+        nats_name: nats_name
+      ] ++
+        Enum.flat_map(opts, fn
+          {:sweep_interval_ms, v} -> [interval_ms: v]
+          {:sweep_idle_after_s, v} -> [idle_after_s: v]
+          _other -> []
+        end)
+
     children = [
       {Kazi.Daemon.Nats, nats_opts},
+      {Kazi.Daemon.PresenceSweep, sweep_opts},
       {Kazi.Daemon.Listener,
        sock_path: sock_path,
        pid_path: pid_path,
@@ -68,6 +84,17 @@ defmodule Kazi.Daemon.Supervisor do
   @spec default_nats_name(keyword()) :: atom()
   def default_nats_name(opts) do
     Keyword.get(opts, :nats_name, Module.concat(Keyword.get(opts, :name, __MODULE__), Nats))
+  end
+
+  @doc """
+  The `Kazi.Daemon.PresenceSweep` process name `init/1` uses absent an
+  explicit `opts[:sweep_name]` -- derived from this supervisor's own
+  `opts[:name]` exactly like `default_nats_name/1`, so two co-existing
+  supervisor instances never race for one registered sweep name.
+  """
+  @spec default_sweep_name(keyword()) :: atom()
+  def default_sweep_name(opts) do
+    Module.concat(Keyword.get(opts, :name, __MODULE__), PresenceSweep)
   end
 
   defp daemon_dir do
