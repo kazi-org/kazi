@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.176.0](https://github.com/kazi-org/kazi/compare/v1.175.0...v1.176.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** board claim ownership read live from refs/claims/* (T55.8, ADR-0073 d2) ([7cbdcda](https://github.com/kazi-org/kazi/commit/7cbdcda5de5ffe9d4cc620294257581ee55f775e))
+
 ## [1.175.0](https://github.com/kazi-org/kazi/compare/v1.174.0...v1.175.0) (2026-07-17)
 
 
