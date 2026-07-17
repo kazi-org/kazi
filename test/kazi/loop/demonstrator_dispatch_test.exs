@@ -36,6 +36,36 @@ defmodule Kazi.Loop.DemonstratorDispatchTest do
     def run(_prompt, _workspace, _opts), do: {:ok, %{output: "noop", cost: %{tokens: 1}}}
   end
 
+  # T49.9: a role-aware stub. The demonstrator prompt is fixed + controller-owned
+  # (`Kazi.Scenario.Demonstrator.prompt/1`), so branching on it is how one harness
+  # serves BOTH roles in a single run: mint the pin for the demonstrator, write the
+  # fixer's marker otherwise.
+  defmodule BothRolesHarness do
+    @behaviour Kazi.HarnessAdapter
+    @impl true
+    def run(prompt, _workspace, opts) do
+      if String.contains?(prompt, "Demonstrate a capability and pin it") do
+        File.write!(Keyword.fetch!(opts, :pin_path), Keyword.fetch!(opts, :pin_json))
+        {:ok, %{output: "minted", cost: %{tokens: 2}}}
+      else
+        File.write!(Keyword.fetch!(opts, :fix_marker), "fixed")
+        {:ok, %{output: "fixed", cost: %{tokens: 2}}}
+      end
+    end
+  end
+
+  # Fails until the FIXER writes the marker. Gating on the fixer's side effect (not
+  # an evaluation counter) is what makes the dispatch total deterministic: whichever
+  # role the loop picks first, each role must run exactly once to converge.
+  defmodule MarkerGatedProvider do
+    @behaviour Kazi.PredicateProvider
+    @impl true
+    def evaluate(%Predicate{config: %{marker: marker}}, _context) do
+      status = if File.exists?(marker), do: :pass, else: :fail
+      Kazi.PredicateResult.new(status, %{output: "needs a fix in lib/widget.ex"})
+    end
+  end
+
   defmodule RecordingIntegrate do
     @behaviour Kazi.Action
     @impl true
@@ -109,10 +139,10 @@ defmodule Kazi.Loop.DemonstratorDispatchTest do
     Goal.new("demo-loop", predicates: [predicate], metadata: %{collector: self()})
   end
 
-  defp start_loop(goal, harness, adapter_opts) do
+  defp start_loop(goal, harness, adapter_opts, providers \\ %{scenario: Kazi.Providers.Scenario}) do
     Kazi.Loop.start_link(
       goal: goal,
-      providers: %{scenario: Kazi.Providers.Scenario},
+      providers: providers,
       harness: harness,
       integrate: RecordingIntegrate,
       deploy: RecordingDeploy,
@@ -153,5 +183,52 @@ defmodule Kazi.Loop.DemonstratorDispatchTest do
     assert :dispatch_demonstrator in result.actions
     refute :dispatch_agent in result.actions
     refute File.exists?(pin)
+  end
+
+  test "a run with one fixer and one demonstrator dispatch counts BOTH toward dispatch_count",
+       %{spec: spec, pin: pin, ws: ws} do
+    marker = Path.join(ws, "fixed.marker")
+
+    scenario =
+      Predicate.new("visitor-sees-greeting", :scenario,
+        config: %{
+          spec: spec,
+          scenario: @scenario_name,
+          pin: pin,
+          surface: "browser",
+          cmd: @stub,
+          args: [],
+          env: [{"STUB_JSON", green_verdict()}]
+        }
+      )
+
+    code = Predicate.new("widget-works", :marker_gated, config: %{marker: marker})
+
+    goal =
+      Goal.new("demo-loop-both-roles",
+        predicates: [scenario, code],
+        metadata: %{collector: self()}
+      )
+
+    {:ok, loop} =
+      start_loop(
+        goal,
+        BothRolesHarness,
+        [collector: self(), pin_path: pin, pin_json: valid_pin_json(spec), fix_marker: marker],
+        %{scenario: Kazi.Providers.Scenario, marker_gated: MarkerGatedProvider}
+      )
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 10_000)
+    assert result.outcome == :converged
+
+    # Both roles ran, and they are DISTINCT action kinds — that distinction is what
+    # `action_kind` persists per iteration row, and what the economy split reads.
+    assert :dispatch_agent in result.actions
+    assert :dispatch_demonstrator in result.actions
+
+    # `result.dispatches` is verbatim what `Kazi.Runtime` writes to the read model as
+    # `runs.dispatch_count`, so this pins the acc's "dispatch_count 2": the
+    # demonstrator is NOT free — it counts against the dispatch budget like the fixer.
+    assert result.dispatches == 2
   end
 end
