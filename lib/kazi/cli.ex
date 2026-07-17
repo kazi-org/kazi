@@ -2213,7 +2213,7 @@ defmodule Kazi.CLI do
   # `schema` surface as result and provider schemas. Any other command falls through
   # to the predicate-provider config schemas.
   defp execute_artifact_schema("roadmap") do
-    IO.puts(Jason.encode!(Kazi.Goal.Roadmap.schema()))
+    IO.puts(encode_json!(Kazi.Goal.Roadmap.schema()))
     0
   end
 
