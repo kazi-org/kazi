@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.191.0](https://github.com/kazi-org/kazi/compare/v1.190.0...v1.191.0) (2026-07-17)
+
+
+### Features
+
+* **examples:** landing.goal.toml -- [integration] mode=pr dogfood goal (T44.14) ([2cfd028](https://github.com/kazi-org/kazi/commit/2cfd0287d9634f83b8af256debb3f542b1b77a7a))
+
 ## [1.190.0](https://github.com/kazi-org/kazi/compare/v1.189.0...v1.190.0) (2026-07-17)
 
 
