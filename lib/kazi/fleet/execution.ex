@@ -285,7 +285,9 @@ defmodule Kazi.Fleet.Execution do
           run_member(node, worktree_path, base_workspace, runtime_opts, persist?)
         end,
         repo: base_workspace,
-        branch_prefix: SerialLanding.task_branch_prefix(),
+        # T54.1 (#1079/#1080): check the member's worktree out onto its goal's
+        # REAL target branch (SerialLanding.land/4 recognizes it by identity).
+        owned_branch: Goal.integration_branch(node.goal),
         base_ref: base_ref
       )
 

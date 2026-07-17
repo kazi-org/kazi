@@ -61,6 +61,48 @@ defmodule Kazi.SerialIntegrationTest do
     assert integration["refs"]["local"] == true
   end
 
+  test "T54.1: the loop runs on the goal's REAL target branch task/<id>, not a synthetic one",
+       %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    branch_file = record_file()
+    goal_file = write_goal_file(tmp_dir, work, "test -f fixed.txt")
+
+    {out, code} =
+      run_apply(goal_file, work, branch_recording_harness(tmp_dir, branch_file), [])
+
+    assert code == 0
+    # The regression: before T54.1 this was `kazi-partition/p-...`, so a
+    # `landed` predicate asserting `task/<id>` could NEVER pass.
+    assert String.trim(File.read!(branch_file)) == "task/serial-integration-fixture",
+           "the loop must execute on the goal's real target branch"
+
+    # And it still lands (the SerialLanding discriminator recognizes it by identity).
+    assert %{"integration" => integration} = Jason.decode!(out)
+    assert integration["landed"] == true
+    assert integration["task_branch"] == "task/serial-integration-fixture"
+  end
+
+  test "T54.1: an authored [integration] branch overrides the derived default",
+       %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    branch_file = record_file()
+
+    goal_file =
+      write_goal_file(tmp_dir, work, "test -f fixed.txt",
+        integration_branch: "task/custom-landing"
+      )
+
+    {out, code} =
+      run_apply(goal_file, work, branch_recording_harness(tmp_dir, branch_file), [])
+
+    assert code == 0
+    assert String.trim(File.read!(branch_file)) == "task/custom-landing"
+
+    assert %{"integration" => integration} = Jason.decode!(out)
+    assert integration["landed"] == true
+    assert integration["task_branch"] == "task/custom-landing"
+  end
+
   test "a run with no commits ahead lands nothing and stays byte-identical (no integration object)",
        %{tmp_dir: tmp_dir} do
     work = git_repo(tmp_dir)
@@ -128,7 +170,7 @@ defmodule Kazi.SerialIntegrationTest do
 
     assert %{"integration" => integration} = Jason.decode!(out)
     assert integration["landed"] == false
-    assert integration["task_branch"] =~ "kazi-partition/"
+    assert integration["task_branch"] == "task/serial-integration-fixture"
     assert integration["reason"] =~ "conflict"
   end
 
@@ -147,7 +189,7 @@ defmodule Kazi.SerialIntegrationTest do
     assert %{"status" => "converged", "integration" => integration} = Jason.decode!(out)
     assert integration["landed"] == false
     task_branch = integration["task_branch"]
-    assert task_branch =~ "kazi-partition/"
+    assert task_branch == "task/serial-integration-fixture"
 
     assert linked_worktrees(work) == [], "the worktree is still cleaned up on landing failure"
 
@@ -210,9 +252,16 @@ defmodule Kazi.SerialIntegrationTest do
   end
 
   # A predicate that FAILS at t0 so the goal is never vacuous (the same fixture
-  # shape T50.1's tests pinned).
-  defp write_goal_file(tmp_dir, workspace, predicate_cmd) do
+  # shape T50.1's tests pinned). An optional `:integration_branch` authors an
+  # `[integration] branch` block (T54.1) to override the derived `task/<id>`.
+  defp write_goal_file(tmp_dir, workspace, predicate_cmd, opts \\ []) do
     path = Path.join(tmp_dir, "si-#{System.unique_integer([:positive])}.goal.toml")
+
+    integration_block =
+      case Keyword.get(opts, :integration_branch) do
+        nil -> ""
+        branch -> "\n[integration]\nbranch = #{inspect(branch)}\n"
+      end
 
     File.write!(path, """
     id = "serial-integration-fixture"
@@ -223,7 +272,7 @@ defmodule Kazi.SerialIntegrationTest do
 
     [budget]
     max_iterations = 3
-
+    #{integration_block}
     [[predicate]]
     id = "code"
     provider = "custom_script"
@@ -239,6 +288,25 @@ defmodule Kazi.SerialIntegrationTest do
   # worktree (T39.7 threading), whose git config is shared with the base repo.
   defp committing_harness(tmp_dir) do
     write_stub(tmp_dir, "committing", """
+    echo "the converged fix" > fixed.txt
+    git add fixed.txt
+    git commit -q -m "task commit: converged fix"
+    exit 0
+    """)
+  end
+
+  # Records the branch the loop is ACTUALLY running on (T54.1) to an absolute
+  # file the test reads, then commits the fix so the run also lands.
+  # A short ABSOLUTE path for the harness to record the in-loop branch to. It
+  # MUST be absolute: the harness runs with cwd = the worktree, so a relative
+  # path would resolve under the (ephemeral) worktree, not where the test reads.
+  defp record_file do
+    Path.join(System.tmp_dir!(), "kazi-t54-branch-#{System.unique_integer([:positive])}.txt")
+  end
+
+  defp branch_recording_harness(tmp_dir, branch_file) do
+    write_stub(tmp_dir, "branch-recording", """
+    git rev-parse --abbrev-ref HEAD > #{branch_file}
     echo "the converged fix" > fixed.txt
     git add fixed.txt
     git commit -q -m "task commit: converged fix"

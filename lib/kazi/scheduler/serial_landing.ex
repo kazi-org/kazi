@@ -21,15 +21,6 @@ defmodule Kazi.Scheduler.SerialLanding do
 
   alias Kazi.Goal
 
-  # The branch prefix of the kazi-owned task worktree (the same value
-  # Kazi.Scheduler.Worktree defaults to, made explicit here because the landing
-  # step keys off it). The landing ONLY lands this branch: a run whose worktree
-  # checkout moved OFF it owns its own landing — most importantly the run's own
-  # :integrate ACTION (ADR-0055: a goal with live predicates lands itself on the
-  # remote from a `kazi/integrate-*` branch mid-run), and likewise an agent that
-  # created its own branch (which survives worktree removal).
-  @task_branch_prefix "kazi-partition"
-
   @typedoc """
   The landing verdict:
 
@@ -43,28 +34,27 @@ defmodule Kazi.Scheduler.SerialLanding do
   @type verdict :: :nothing_to_land | {:landed, map()} | {:unlanded, map()}
 
   @doc """
-  The branch prefix `Kazi.Scheduler.Worktree.wrap/2` callers must pin
-  (`branch_prefix:`) for `land/4` to recognize the worktree's checkout as the
-  kazi-owned task branch — pinned in one place so the two stay in lockstep.
-  """
-  @spec task_branch_prefix() :: String.t()
-  def task_branch_prefix, do: @task_branch_prefix
-
-  @doc """
   Lands only COMMITTED work ON THE KAZI-OWNED TASK BRANCH: the worktree's
-  commits ahead of the base HEAD, while the worktree is still checked out on
-  its `task_branch_prefix/0` branch. A checkout that moved off it owns its own
-  landing (see the prefix's comment). An uncommitted working tree is the goal's
-  own `landed`-predicate problem (the T50.1 contract keeps the base
-  byte-identical for such runs); a worktree at the base tip has nothing to
-  land. A detached base checkout has no branch to rebase-merge onto — surfaced
-  honestly rather than guessing a target.
+  commits ahead of the base HEAD, while the worktree is still checked out on the
+  goal's OWNED branch (`Kazi.Goal.integration_branch/1` — the same real branch
+  `Kazi.Scheduler.Worktree.wrap/2`'s `:owned_branch` checks the worktree out
+  onto). T54.1 (#1079/#1080): the run-owned branch is recognized by EXPLICIT
+  IDENTITY (this exact branch name), not by a `kazi-partition/` naming
+  convention — a run whose worktree checkout moved OFF it owns its own landing
+  (most importantly the run's own :integrate ACTION, ADR-0055, or an agent that
+  created its own branch), so it is NOT double-integrated. An uncommitted
+  working tree is the goal's own `landed`-predicate problem (the T50.1 contract
+  keeps the base byte-identical for such runs); a worktree at the base tip has
+  nothing to land. A detached base checkout has no branch to rebase-merge onto —
+  surfaced honestly rather than guessing a target.
   """
   @spec land(Goal.t(), keyword(), Path.t(), Path.t()) :: verdict()
   def land(%Goal{} = goal, runtime_opts, base_workspace, worktree) do
+    owned_branch = Goal.integration_branch(goal)
+
     with {:ok, base_sha} <- git(base_workspace, ["rev-parse", "HEAD"]),
          {:ok, task_branch} <- git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]),
-         true <- String.starts_with?(task_branch, @task_branch_prefix <> "/"),
+         true <- task_branch == owned_branch,
          {:ok, ahead} <- git(worktree, ["rev-list", "--count", base_sha <> "..HEAD"]),
          true <- ahead != "0" do
       case git(base_workspace, ["rev-parse", "--abbrev-ref", "HEAD"]) do

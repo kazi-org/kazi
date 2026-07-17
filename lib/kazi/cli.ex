@@ -2760,9 +2760,10 @@ defmodule Kazi.CLI do
           run_goal_serial_at(goal, opts, persist?, runtime_opts, base_workspace, worktree_path)
         end,
         repo: base_workspace,
-        # T50.2: the landing step (Kazi.Scheduler.SerialLanding.land/4)
-        # recognizes the kazi-owned task branch by this prefix.
-        branch_prefix: Kazi.Scheduler.SerialLanding.task_branch_prefix(),
+        # T54.1 (#1079/#1080): check the worktree out onto the goal's REAL target
+        # branch, so a goal-authored `landed` predicate naming it can converge and
+        # SerialLanding.land/4 recognizes the run-owned branch by explicit identity.
+        owned_branch: Kazi.Goal.integration_branch(goal),
         # T50.8 (ADR-0065 decision 5): --base selects the worktree's base ref;
         # nil (flag absent) keeps the HEAD default WITH the stale-base warning,
         # an explicit ref states intent and silences it.
