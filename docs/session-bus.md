@@ -486,16 +486,22 @@ use. kazi ships no claim wrapper; it only documents the convention.
 
 A `kazi apply` run MIRRORS its lifecycle onto the bus as best-effort `fact`s,
 so a session watching the bus sees a long run's live state instead of only a
-growing JSONL sink it cannot watch. Three posts, all on ONE topic per run —
-`run:<short-run-id>` — so the board's last-value-per-topic retention collapses
-them to ONE current line per run:
+growing JSONL sink it cannot watch — across machines too, since E55 made the bus
+cross-machine, so `kazi bus board` on machine A fans in a run in flight on machine
+B (T60.1, #1154). All posts share ONE topic per run — `run:<short-run-id>` — so
+the board's last-value-per-topic retention collapses them to ONE current line per
+run:
 
 - **started** when the run begins — `started <goal-ref>`;
 - **iter N: p/t passing** once per iteration — the iteration index and the
   predicate pass/total, with a `(k regressed)` suffix when predicates went
   green→red that observation;
-- **`<verdict>` \<goal-ref\> (p/t passing, N iters)** at termination — the
-  honest verdict (`converged` / `stuck` / `over_budget` / `stopped` / `error`).
+- **`<verdict>` \<goal-ref\> (p/t passing, N iters)** at a normal termination —
+  the honest verdict (`converged` / `stuck` / `over_budget` / `stopped` / `error`);
+- **terminated \<goal-ref\> (\<reason\>)** at an ABNORMAL termination (T60.1) — a
+  trapped OS signal (SIGTERM/SIGINT) or a reaped linked-process crash, so a killed
+  run's final state is its honest last word instead of a mirrored line that simply
+  stops. The reason is bounded so an unwieldy exit term never blows the fact size.
 
 The sender identity rides the fact header (the run's `--session-name`), so a
 supervisor sees WHICH session's run it is. Because the posts share one topic,
