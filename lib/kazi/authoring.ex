@@ -185,6 +185,131 @@ defmodule Kazi.Authoring do
     end
   end
 
+  @doc """
+  Drafts a MULTI-GOAL roadmap payload (T45.2, UC-059): N caller-drafts goals plus
+  inter-goal `needs`, persisted as a SET of LINKED proposals sharing one roadmap
+  ref.
+
+  `payload` is `%{"goals" => [entry, ...]}` (string-keyed). Each entry is a
+  caller-drafts proposal map carrying an `"id"` (the node id + goal id + `needs`
+  handle), an optional `"needs"` list of predecessor ids, and an optional
+  `"integration"` block. Every goal runs the per-goal clarify floor UNCHANGED (via
+  `propose/2`); the roadmap as a whole additionally runs the roadmap-scope floor
+  (`Kazi.Authoring.Clarify.roadmap_gaps/1`).
+
+  Returns `{:ok, %{roadmap_ref:, proposals: [Draft.t()], clarify: [Question.t()]}}`,
+  or `{:error, reason}` for a malformed payload, a duplicate/unresolvable id, a
+  cycle, or a per-goal draft error.
+  """
+  @spec propose_roadmap(map(), opts()) :: {:ok, map()} | {:error, term()}
+  def propose_roadmap(payload, opts \\ []) when is_map(payload) and is_list(opts) do
+    with {:ok, entries} <- roadmap_entries(payload),
+         :ok <- validate_roadmap_ids(entries),
+         roadmap_ref = roadmap_ref(entries),
+         {:ok, drafts} <- persist_members(entries, roadmap_ref, opts),
+         {:ok, roadmap} <- build_member_roadmap(entries, drafts) do
+      {:ok,
+       %{roadmap_ref: roadmap_ref, proposals: drafts, clarify: Clarify.roadmap_gaps(roadmap)}}
+    end
+  end
+
+  # Extract the `[[goals]]` entries as `%{id, needs, integration, proposal}`. Each
+  # proposal is the entry map itself (parse_proposal ignores the `needs` key).
+  defp roadmap_entries(%{"goals" => goals}) when is_list(goals) and goals != [] do
+    entries =
+      Enum.map(goals, fn entry ->
+        %{
+          id: optional_string(Map.get(entry, "id")),
+          needs: Map.get(entry, "needs", []),
+          integration: Map.get(entry, "integration"),
+          proposal: entry
+        }
+      end)
+
+    if Enum.all?(entries, &(is_binary(&1.id) and is_list(&1.needs))) do
+      {:ok, entries}
+    else
+      {:error, {:invalid_roadmap, "each goal needs a string \"id\" and a list \"needs\""}}
+    end
+  end
+
+  defp roadmap_entries(_payload),
+    do: {:error, {:invalid_roadmap, "a project payload needs a non-empty \"goals\" array"}}
+
+  # Duplicate ids and unresolvable `needs` are cheap structural errors — caught
+  # before anything is persisted. (Acyclicity is validated by the roadmap artifact
+  # in build_member_roadmap/2.)
+  defp validate_roadmap_ids(entries) do
+    ids = MapSet.new(entries, & &1.id)
+
+    cond do
+      MapSet.size(ids) != length(entries) ->
+        {:error, {:invalid_roadmap, "duplicate goal id"}}
+
+      bad = Enum.find_value(entries, fn e -> Enum.find(e.needs, &(&1 not in ids)) end) ->
+        {:error, {:invalid_roadmap, "unresolvable needs id #{inspect(bad)}"}}
+
+      true ->
+        :ok
+    end
+  end
+
+  # A deterministic roadmap ref over the sorted member ids.
+  defp roadmap_ref(entries) do
+    digest =
+      entries
+      |> Enum.map(& &1.id)
+      |> Enum.sort()
+      |> Enum.join(",")
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 12)
+
+    "road-" <> digest
+  end
+
+  # Persist each member through the normal caller-drafts `propose/2` path (so the
+  # per-goal floor + gate are byte-identical to a single-goal plan), threading the
+  # shared roadmap ref into each row.
+  defp persist_members(entries, roadmap_ref, opts) do
+    member_opts = Keyword.put(opts, :roadmap_ref, roadmap_ref)
+
+    Enum.reduce_while(entries, {:ok, []}, fn entry, {:ok, acc} ->
+      idea = optional_string(Map.get(entry.proposal, "name")) || entry.id
+
+      case propose(idea, Keyword.put(member_opts, :proposal, entry.proposal)) do
+        {:ok, draft} -> {:cont, {:ok, [draft | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, drafts} -> {:ok, Enum.reverse(drafts)}
+      {:error, _} = err -> err
+    end
+  end
+
+  # Build the roadmap ARTIFACT (T45.1) from the persisted members, re-attaching each
+  # entry's raw `integration` block to the serialized goal so the loader parses it
+  # (serialize_goal/1 drops integration). Validates acyclicity and yields the DAG
+  # the roadmap-scope clarify reads (frontier detection + per-node integration).
+  defp build_member_roadmap(entries, drafts) do
+    by_id = Map.new(drafts, fn d -> {to_string(d.goal.id), d} end)
+
+    goals =
+      Enum.map(entries, fn entry ->
+        goal_map = serialize_goal(by_id[entry.id].goal)
+
+        goal_map =
+          if entry.integration,
+            do: Map.put(goal_map, "integration", entry.integration),
+            else: goal_map
+
+        %{"id" => entry.id, "needs" => entry.needs, "goal" => goal_map}
+      end)
+
+    Kazi.Goal.Roadmap.from_map(%{"goals" => goals})
+  end
+
   # The proposal source: caller-drafts vs kazi-drafts (ADR-0023 decision 4). A
   # caller-supplied `:proposal` (the orchestrator already reasoned) is used
   # DIRECTLY — no harness/model is spawned; kazi adds the floor + the gate, not a
@@ -801,13 +926,17 @@ defmodule Kazi.Authoring do
         # session provenance (part 2): the authoring session's label, so a
         # later `approve`/`apply` (possibly from a DIFFERENT session) can
         # trace this proposal back to who planned it.
-        session_name: Keyword.get(opts, :session_name)
+        session_name: Keyword.get(opts, :session_name),
+        # T45.2 (UC-059): the shared roadmap ref, set when this proposal is a
+        # member of a `kazi plan --project` roadmap; nil for a single-goal plan.
+        roadmap_ref: Keyword.get(opts, :roadmap_ref)
       }
 
       %ProposedGoal{}
       |> ProposedGoal.changeset(attrs)
       |> Repo.insert(
-        on_conflict: {:replace, [:idea, :goal_id, :status, :goal, :session_name, :updated_at]},
+        on_conflict:
+          {:replace, [:idea, :goal_id, :status, :goal, :session_name, :roadmap_ref, :updated_at]},
         conflict_target: :proposal_ref
       )
       |> case do
