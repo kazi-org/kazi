@@ -49,7 +49,7 @@ defmodule Kazi.Bus do
 
   alias Gnat.Jetstream.API.{Consumer, KV}
   alias Gnat.Jetstream.API.Stream, as: JetStream
-  alias Kazi.Bus.Provision
+  alias Kazi.Bus.{Liveness, Provision}
   alias Kazi.Daemon.{Probe, Supervisor}
 
   @max_text_bytes 65_536
@@ -510,7 +510,24 @@ defmodule Kazi.Bus do
   @spec consumer_name_for(String.t(), String.t()) :: String.t()
   def consumer_name_for(session, scope), do: consumer_name(session, scope)
 
-  @doc "Lists upserted presence entries from the `kazi_sessions` KV bucket."
+  @doc """
+  Lists upserted presence entries from the `kazi_sessions` KV bucket, each
+  annotated with `seen_s`/`age_s` (seconds since the row's last heartbeat)
+  and `liveness` (T55.11):
+
+    * `"active"` -- the session itself refreshed the row recently.
+    * `"idle"` -- the process is alive but quiet; the daemon's presence sweep
+      (`Kazi.Daemon.PresenceSweep`) re-heartbeats such rows so they never age
+      out, and a TTL-stale row whose pid is verified alive LOCALLY is likewise
+      kept and rendered idle (never hidden, never dead).
+    * `"dead-reaping"` -- a LOCAL row whose pid is verifiably gone (or reused
+      by a different process, per `Kazi.Bus.Liveness`); the sweep removes it
+      on its next pass.
+
+  Filters: `opts[:who_team]` (team membership), `opts[:who_machine]` (exact
+  hostname), `opts[:who_project]` (cwd equals the dir or lives under it);
+  `opts[:all]` includes TTL-stale rows.
+  """
   @spec who(keyword()) :: {:ok, [map()]} | {:error, error()}
   def who(opts \\ []) do
     with_conn(opts, fn conn ->
@@ -518,12 +535,18 @@ defmodule Kazi.Bus do
 
       case KV.contents(conn, Provision.sessions_bucket()) do
         {:ok, contents} ->
+          local = hostname()
+
           entries =
             contents
             |> Enum.map(fn {_key, value} -> Jason.decode!(value) end)
             |> Enum.map(&annotate_age/1)
+            |> Enum.map(fn entry -> {entry, local_verdict(entry, local)} end)
             |> filter_fresh(opts)
+            |> Enum.map(&annotate_liveness/1)
             |> filter_team(opts)
+            |> filter_machine(opts)
+            |> filter_project(opts)
             |> Enum.sort_by(& &1["age_s"])
 
           {:ok, entries}
@@ -534,6 +557,10 @@ defmodule Kazi.Bus do
     end)
   end
 
+  @doc "The presence TTL in seconds (the `kazi_sessions` bucket's server-side entry TTL) -- `who`'s freshness cutoff and the `who --json` `ttl_s` field derive from it."
+  @spec session_ttl_s() :: pos_integer()
+  def session_ttl_s, do: div(Provision.session_ttl_ns(), 1_000_000_000)
+
   defp annotate_age(entry) do
     age_s =
       with ts when is_binary(ts) <- entry["ts"],
@@ -543,27 +570,86 @@ defmodule Kazi.Bus do
         _other -> nil
       end
 
-    Map.put(entry, "age_s", age_s)
+    # `seen_s` is the documented spelling (T55.11); `age_s` is kept as an
+    # alias so existing consumers of the JSON shape do not break.
+    entry
+    |> Map.put("age_s", age_s)
+    |> Map.put("seen_s", age_s)
+  end
+
+  # A pid can only be judged on the machine that recorded it; every other
+  # machine's rows are `:remote` -- never guessed about (T55.11).
+  defp local_verdict(entry, local) do
+    if entry["machine"] == local, do: Liveness.verdict(entry), else: :remote
   end
 
   # Freshness (the "closed sessions look active" fix): the bucket TTL
   # expires idle entries server-side, but stores provisioned by older
   # daemons may carry a TTL-less bucket until their daemon restarts under
   # the reconciling provision -- so `who` ALSO hides entries older than the
-  # TTL client-side unless `opts[:all]`.
-  defp filter_fresh(entries, opts) do
+  # TTL client-side unless `opts[:all]`. T55.11 exception: a TTL-stale row
+  # whose pid is verified ALIVE locally is never hidden -- alive-but-idle
+  # and dead are opposite situations, and hiding conflated them.
+  defp filter_fresh(pairs, opts) do
     if opts[:all] do
-      entries
+      pairs
     else
-      ttl_s = div(Provision.session_ttl_ns(), 1_000_000_000)
-      Enum.filter(entries, fn e -> is_integer(e["age_s"]) and e["age_s"] <= ttl_s end)
+      ttl_s = session_ttl_s()
+
+      Enum.filter(pairs, fn {entry, verdict} ->
+        (is_integer(entry["age_s"]) and entry["age_s"] <= ttl_s) or verdict == :alive
+      end)
     end
+  end
+
+  # The rendered liveness: a locally-verified-dead pid wins (the row is
+  # awaiting the sweep's reap); a TTL-stale-but-shown row is at best idle;
+  # otherwise the stored value stands (the session's own upsert writes
+  # `active`, the daemon sweep's re-heartbeat writes `idle`).
+  defp annotate_liveness({entry, verdict}) do
+    stale? = not (is_integer(entry["age_s"]) and entry["age_s"] <= session_ttl_s())
+
+    liveness =
+      cond do
+        verdict == :dead -> "dead-reaping"
+        stale? -> "idle"
+        true -> entry["liveness"] || "active"
+      end
+
+    Map.put(entry, "liveness", liveness)
   end
 
   defp filter_team(entries, opts) do
     case opts[:who_team] do
       nil -> entries
       team -> Enum.filter(entries, fn e -> e["team"] == team end)
+    end
+  end
+
+  # T55.11: `who --machine <host>` -- exact hostname match.
+  defp filter_machine(entries, opts) do
+    case opts[:who_machine] do
+      nil -> entries
+      machine -> Enum.filter(entries, fn e -> e["machine"] == machine end)
+    end
+  end
+
+  # T55.11: `who --project <dir>` -- sessions whose cwd IS the dir or lives
+  # under it (worktrees checked out inside the dir count).
+  defp filter_project(entries, opts) do
+    case opts[:who_project] do
+      nil ->
+        entries
+
+      dir ->
+        dir = Path.expand(dir)
+
+        Enum.filter(entries, fn e ->
+          case e["cwd"] do
+            cwd when is_binary(cwd) -> cwd == dir or String.starts_with?(cwd, dir <> "/")
+            _other -> false
+          end
+        end)
     end
   end
 
@@ -881,10 +967,16 @@ defmodule Kazi.Bus do
         nil -> stored["name"]
       end
 
+    # T55.11: pid AND process start time -- a pid alone is reusable, so the
+    # daemon's presence sweep matches both before claiming the session is
+    # alive (or reaping it). `liveness` is "active" on the session's OWN
+    # writes; the sweep's re-heartbeats rewrite it to "idle".
     entry = %{
       "session" => session(opts),
       "machine" => hostname(),
       "pid" => os_pid(),
+      "started_at" => Liveness.proc_started_at(os_pid()),
+      "liveness" => "active",
       "cwd" => File.cwd!(),
       "ts" => DateTime.to_iso8601(DateTime.utc_now())
     }
