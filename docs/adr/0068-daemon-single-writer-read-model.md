@@ -19,7 +19,7 @@ release window (issue #1019). The failure modes:
 - **Migration-lock deadlocks**: a newer binary migrating while older binaries
   hold connections, and vice versa.
 - **Startup hangs** on versions predating Guard coverage of the affected path.
-- **Blind runs**: `Kazi.ReadModel.Guard` (the L-0035 never-hang discipline)
+- **Blind runs**: `Kazi.ReadModel.Guard` (the L-0049 never-hang discipline)
   correctly contains the failure and the run continues *without persistence*
   -- no registry row, no duplicate-run guard (the #941 incident class), no
   economics (ADR-0058). Contained, but invisible to the starmap and to every

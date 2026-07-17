@@ -6,6 +6,13 @@ memory vs. Claude Code memory vs. docs/lore.md / docs/devlog.md"): entries
 here are recalled at dispatch time (ADR-0062) and new ones can be proposed
 here by harvest (ADR-0063).
 
+Id allocation (T56.3, #1220): do NOT pick the next L-NNNN from your local
+tree -- parallel pool tasks and merged-but-unpulled work make local numbering
+stale, the same hazard the /apply teammate contract guards for migrations.
+Run `python3 .github/scripts/lore_ids.py --next` (fetches origin/main and
+allocates above the remote AND local max). CI blocks a PR that introduces a
+duplicate id (`lore_ids.py --check`, oss-gates).
+
 ## Deploy / Cloud Run
 
 ### L-0001 #deploy #gcp #cloudrun #iam -- `run deploy --source` needs artifactregistry.admin on first deploy
@@ -345,7 +352,7 @@ and let clean-runner CI arbitrate. (2026-07-16 E55 wave A.)
 
 ## Enforcement / anti-gaming
 
-### L-0015 #enforcement #loop #worktree #invariant -- the checker-isolation seam is `run_provider/3`; scope clean-tree to graders only
+### L-0046 #enforcement #loop #worktree #invariant -- the checker-isolation seam is `run_provider/3`; scope clean-tree to graders only
 The ONLY place `Kazi.Loop` invokes a predicate provider is `run_provider/3`
 (`lib/kazi/loop.ex`), reached from `observe/2` -> `evaluate/4`; the checker cwd is
 `context.workspace` built by `provider_context/2` from `data.workspace` (the agent's
@@ -426,7 +433,7 @@ a harness to emit a kazi goal-file, embed the AUTHORITATIVE config schema, do no
 it guess — and source that schema from `Kazi.Predicate.Schema`, the same place the CLI
 reads. (2026-06-25, T26.8.)
 
-### L-0019 #scheduler #cli #burrito #release #parallel #landmine -- the released binary's `--parallel` crashes `:noproc`; `PartitionSupervisor` is never started in the standalone path
+### L-0047 #scheduler #cli #burrito #release #parallel #landmine -- the released binary's `--parallel` crashes `:noproc`; `PartitionSupervisor` is never started in the standalone path
 `kazi apply <goal> --parallel` on a RELEASED (Burrito standalone) binary crashes
 immediately and deterministically with `{:noproc, {GenServer, :call,
 [Kazi.Scheduler.PartitionSupervisor, {:start_child, ...DepScheduler.start_group...}]}}`.
@@ -538,7 +545,7 @@ the same "kazi can't SEE the green" failure class as the opencode `--workspace`
 landmine: the inner harness makes the correct edit, but the grader can never read it
 as passing, so the goal never converges (it loops to `max_iterations`). `mix format
 --check-formatted` SURVIVES the leak (it does not boot the app), which makes the
-failure look model-specific rather than env-specific. Sibling of L-0019's "Burrito
+failure look model-specific rather than env-specific. Sibling of L-0047's "Burrito
 bypasses the app tree" class -- here the leak is OUTWARD into children, not a missing
 supervisor inward. Workaround for a goal-file author: wrap the predicate so it starts
 from a clean environment, e.g. `env -i HOME="$HOME" PATH="$PATH" LANG="$LANG"
@@ -579,7 +586,7 @@ carry-forward, mirroring `working_set_digest`) -- today it is on the raw harness
 dispatch result, not yet distilled into the loop's terminal/streamed output.
 
 ### L-0024 #enforcement #isolation #held-out #worktree #landmine -- clean-tree isolation grading the WHOLE cwd from frozen `ref` makes a held-out predicate structurally unable to converge
-Deep-review 001 H1: L-0015 scoped clean-tree isolation to the tamper-prone graders
+Deep-review 001 H1: L-0046 scoped clean-tree isolation to the tamper-prone graders
 (guard + held-out predicates) correctly, but the ORIGINAL realization then swapped
 the checker's ENTIRE cwd to a worktree at frozen `clean_ref` -- so a held-out
 `:custom_script`/`:tests` acceptance predicate graded committed `HEAD`, never the
@@ -750,7 +757,7 @@ on a dashboard page must be verified in a REAL browser (agent-browser),
 not only via `Phoenix.LiveViewTest` -- the test harness cannot see a missing
 client. Regression: `test/kazi_web/live_client_test.exs`. (2026-07-06.)
 
-### L-0029 #harness #shell #portability #dash #landmine -- "works on macOS sh" means bash: dash ignores `set -m`, its builtin `kill` cannot group-kill, and bash prints job notices into merged output
+### L-0048 #harness #shell #portability #dash #landmine -- "works on macOS sh" means bash: dash ignores `set -m`, its builtin `kill` cannot group-kill, and bash prints job notices into merged output
 
 The #857 child-supervision wrapper converged green on macOS (2,556 tests) and
 hard-failed CI on Ubuntu, three distinct ways. (1) Non-interactive dash
@@ -883,7 +890,7 @@ still-alive ancestor is asserted as the recorded pid (T55.13's own finding).
 Live proof: a one-shot writer with OS pid 5811 (gone at read time) left a row
 recording the alive anchor pid instead, rendering `active`, not `dead-reaping`.
 
-### L-0042 #daemon #socket #packet-line #truncation #landmine -- `packet: :line` truncates an over-long line SILENTLY; set `buffer` on BOTH ends
+### L-0052 #daemon #socket #packet-line #truncation #landmine -- `packet: :line` truncates an over-long line SILENTLY; set `buffer` on BOTH ends
 A `:gen_tcp` socket in `packet: :line` mode drops everything past its
 `buffer` (default **9216 bytes**) and reports `{:ok, short_binary}` — no
 `:emsgsize`, no error, nothing to branch on. Measured while moving digest
@@ -1017,7 +1024,7 @@ independently verified; the point of this entry is that the agent was
 following a documented rule set and the machine was silently missing the two
 controls that would have made it impossible.)
 
-### L-0035 #sqlite #read-model #concurrency #busy-timeout #landmine -- the shared read-model DB wedges under concurrent kazi processes without a generous busy_timeout
+### L-0049 #sqlite #read-model #concurrency #busy-timeout #landmine -- the shared read-model DB wedges under concurrent kazi processes without a generous busy_timeout
 
 `~/.kazi/kazi.db` is one SQLite file shared by EVERY kazi process on the
 machine (CLI applies, the dashboard). WAL allows one writer at a time;
@@ -1037,7 +1044,7 @@ migration runs under `Kazi.ReadModel.Guard` — a hard deadline (15s writes,
 persistence. Pinned by `test/kazi/read_model/guard_test.exs`. When adding a
 NEW read-model write to the run path, route it through the Guard.
 
-### L-0036 #otp #genserver #supervisor #trap_exit #terminate #landmine -- a non-trapping GenServer's `terminate/2` does NOT run on a `Supervisor.stop/2`-driven shutdown
+### L-0050 #otp #genserver #supervisor #trap_exit #terminate #landmine -- a non-trapping GenServer's `terminate/2` does NOT run on a `Supervisor.stop/2`-driven shutdown
 
 Building `Kazi.Daemon.Listener` (T51.1, ADR-0067): a plain (non-trapping)
 `GenServer` child, torn down via `Supervisor.stop(sup_pid, reason)`, does
@@ -1061,7 +1068,7 @@ calls `terminate/2` regardless of trapping and would hide this gap.
 
 ## Self-teaching docs / retrieval
 
-### L-0041 #teach #retrieval #docs #audience-of-one #landmine -- shipped self-teaching artifacts assumed the operator's PERSONAL skill library as a universal baseline; a retrieval backend shelled out to a Claude Code skill as if it were an installable CLI
+### L-0051 #teach #retrieval #docs #audience-of-one #landmine -- shipped self-teaching artifacts assumed the operator's PERSONAL skill library as a universal baseline; a retrieval backend shelled out to a Claude Code skill as if it were an installable CLI
 kazi's public, git-committed teaching artifacts (`AGENTS.md`,
 `lib/kazi/teach/install_skill.ex`'s generated `SKILL.md`) told EVERY reader to
 "fall back to `/plan`/`/apply`" and treated `/tidy`/`/loop`/`/qualify` as
