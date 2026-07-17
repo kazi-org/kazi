@@ -1,0 +1,57 @@
+# Example kazi goal-file: assert a SHIPPED binary actually runs (T43.7, UC-055).
+#
+# `mix test` proves the code compiles; it does NOT prove the PACKAGED binary boots
+# and answers on a real $PATH. The `cli` provider (Kazi.Providers.Cli) closes that
+# gap: it runs a declared command and gates on the observable surface a user sees —
+# the exit code and the stdout/stderr streams. A binary that cannot launch is an
+# :error (infra, not failing work); a violated assertion is a :fail carrying
+# expected-vs-found evidence.
+#
+#     kazi apply priv/examples/cli_provider.toml --workspace . --check
+#
+# See Kazi.Providers.Cli and `kazi schema cli`.
+
+id = "cli-kazi-binary-runs"
+name = "CLI: the kazi binary runs as a user invokes it"
+
+[budget]
+max_iterations = 10
+
+# `kazi version` exits 0 and prints a line naming the tool. This is the exact
+# golden invocation that WOULD HAVE red-flagged the CLI-path boot crashes that
+# passed `mix test` (a :noproc on the read-model, the RELEASE_* env leak).
+[[predicate]]
+id = "kazi-version-runs"
+provider = "cli"
+description = "kazi version exits 0 and names the tool on stdout"
+cmd = "kazi"
+args = ["version"]
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.assertions]]
+target = "stdout"
+match = "contains"
+expected = "kazi"
+
+# `kazi version --json` emits a stable machine envelope; gate on the parsed
+# schema_version via a json_path matcher (parse stdout as JSON, extract the path,
+# compare to the expected value) — not the exit code, not a brittle substring.
+[[predicate]]
+id = "kazi-version-json-envelope"
+provider = "cli"
+description = "kazi version --json returns the versioned result envelope"
+cmd = "kazi"
+args = ["version", "--json"]
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.assertions]]
+target = "stdout"
+match = "json_path"
+path = "$.schema_version"
+expected = 2
