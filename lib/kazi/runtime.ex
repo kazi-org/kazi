@@ -1045,7 +1045,7 @@ defmodule Kazi.Runtime do
   defp sinks_dir(opts) do
     Keyword.get(opts, :sinks_dir) ||
       Application.get_env(:kazi, :sinks_dir) ||
-      Path.join([System.user_home!() || File.cwd!(), ".kazi", "runs"])
+      Path.join([System.user_home() || File.cwd!(), ".kazi", "runs"])
   end
 
   # =============================================================================

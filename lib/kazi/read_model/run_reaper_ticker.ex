@@ -41,9 +41,6 @@ defmodule Kazi.ReadModel.RunReaperTicker do
 
       {:ok, reaped} ->
         Logger.info("kazi.run_reaper_ticker reaped #{length(reaped)} zombie run(s)")
-
-      {:error, reason} ->
-        Logger.warning(fn -> "kazi.run_reaper_ticker reap failed: #{inspect(reason)}" end)
     end
   end
 

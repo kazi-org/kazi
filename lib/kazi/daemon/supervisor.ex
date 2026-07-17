@@ -100,7 +100,7 @@ defmodule Kazi.Daemon.Supervisor do
   defp daemon_dir do
     state_dir =
       System.get_env("KAZI_STATE_DIR") ||
-        Path.join([System.user_home!() || File.cwd!(), ".kazi"])
+        Path.join([System.user_home() || File.cwd!(), ".kazi"])
 
     Path.join(state_dir, "daemon")
   end
