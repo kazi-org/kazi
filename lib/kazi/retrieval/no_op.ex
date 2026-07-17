@@ -7,8 +7,8 @@ defmodule Kazi.Retrieval.NoOp do
   configured, `Kazi.Harness.ClaudeAdapter.build_prompt/3` appends no retrieval
   section and its output is byte-identical to the pre-retrieval path. The
   deterministic orientation pack (ADR-0010) and thin evidence (ADR-0009) remain the
-  whole prompt. A real similarity backend (graphify embeddings) lands in T4.9b
-  behind this same seam; until a goal opts in, the no-op is what runs.
+  whole prompt. A caller may supply a real similarity backend behind this same
+  seam; until a goal opts in, the no-op is what runs.
   """
 
   @behaviour Kazi.Retrieval

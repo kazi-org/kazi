@@ -10,8 +10,8 @@ defmodule Kazi.AntigravityLiveTest do
   Antigravity counterpart of `Kazi.CodexLiveTest` / `Kazi.OpencodeLiveTest`.
 
   It is tagged `:antigravity_live` and EXCLUDED by default (see
-  `test/test_helper.exs`, alongside `:codex_live`/`:opencode_live`/`:nats`/
-  `:graphify`) so the standard `mix test` and CI stay hermetic (no network, no
+  `test/test_helper.exs`, alongside `:codex_live`/`:opencode_live`/`:nats`)
+  so the standard `mix test` and CI stay hermetic (no network, no
   creds). Opt in explicitly:
 
       mix test --only antigravity_live test/kazi/antigravity_live_test.exs

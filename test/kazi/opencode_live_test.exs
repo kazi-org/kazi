@@ -8,7 +8,7 @@ defmodule Kazi.OpencodeLiveTest do
   the end of the chain the hermetic stub tests can only approximate.
 
   It is tagged `:opencode_live` and EXCLUDED by default (see `test/test_helper.exs`,
-  alongside `:nats`/`:graphify`) so the standard `mix test` and CI stay hermetic.
+  alongside `:nats`) so the standard `mix test` and CI stay hermetic.
   Opt in explicitly:
 
       mix test --only opencode_live test/kazi/opencode_live_test.exs
