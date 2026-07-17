@@ -7,6 +7,42 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17: T55.7 -- the third bus surface silently stayed on the client-side path
+
+**Type:** finding
+**Tags:** [bus, daemon, digest, hook, adr-0072, aggregation-boundary]
+
+**Problem:** T55.7 moves bus digest assembly into the daemon so the CLI, the
+`kazi_bus_*` MCP tools, and the ADR-0071 hook all render ONE bounded digest the
+daemon computed, instead of three client-side re-aggregations (ADR-0067 point 5,
+"only a server can aggregate before the tokens are spent"). The first landing of
+the task wired the CLI and the MCP tools to `Kazi.Bus.read_digest/1` (the
+control-socket call) but left the hook -- shipped separately as T55.9 --
+calling `Kazi.Bus.read/1` and then `Kazi.Bus.Digest.render/1` CLIENT-side. So
+two of three surfaces went through the daemon and the third quietly did not:
+the exact drift the task exists to remove survived in the one call site that
+merged on its own timeline.
+
+**Why it hid:** the acceptance test's "CLI, MCP, and hook produce identical
+digests" case used a HOOK stand-in -- a helper that re-called `read_digest`
+directly with a comment saying it "pins what T55.9 will inject." A stand-in for
+the caller can only ever prove the entry point works; it cannot prove the real
+caller was wired to it. The test was green while the shipped hook bypassed the
+daemon entirely.
+
+**Fix:** `Kazi.Bus.Hook.turn/1` now calls `read_digest/1` and renders the
+digest the daemon assembled (no client-side `Digest.render`). The identical-
+digest test drives the REAL `Kazi.Bus.Hook.turn/1`, and a new negative control
+posts a 150-message backlog (deeper than `Bus.read`'s single batch of 100,
+L-0040) and asserts the hook reports 150 -- impossible if it were still reading
+one client-side batch. The obsolete `turn`-via-bare-`conn:` cases in
+`hook_payload_test.exs` were removed; that path no longer exists.
+
+**Lesson:** when one architectural move touches N call sites that merge
+independently, a test that stands in for any call site can mask a site left on
+the old path. Prove the boundary by driving the real caller, and add a negative
+control that only the new path can satisfy.
+
 ## 2026-07-17: E42 regression proof -- the self-teaching docs no longer assume the operator's personal skills (T42.7)
 
 **Type:** finding
