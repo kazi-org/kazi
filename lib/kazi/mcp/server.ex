@@ -330,6 +330,29 @@ defmodule Kazi.MCP.Server do
         }
       },
       %{
+        "name" => "kazi_bus_board",
+        "description" =>
+          "Render the CURRENT STATE of the bus (T55.4, ADR-0073): the last-value fact " <>
+            "per topic plus the live roster (names, teams, liveness). Unlike " <>
+            "kazi_bus_read this CONSUMES NOTHING and keeps no cursor -- it is idempotent, " <>
+            "so a session may call it every turn (e.g. at session start) without draining " <>
+            "a message a later kazi_bus_read is counting on. A stream answers \"what " <>
+            "changed since I last looked\"; the board answers \"what is true right now\". " <>
+            "Returns {ok: true, board: {facts, roster, total_facts, total_sessions}}. Each " <>
+            "fact line is the topic's latest value (posting three facts on one topic shows " <>
+            "ONE line); an oversize body renders as a stub and the fact section is bounded " <>
+            "to at most 40 lines (ADR-0072). Or a structured error (no_daemon).",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            }
+          }
+        }
+      },
+      %{
         "name" => "kazi_bus_tell",
         "description" =>
           "Post a message directed at one session (ADR-0067). Requires `session` and " <>
@@ -610,6 +633,19 @@ defmodule Kazi.MCP.Server do
       {:ok, sessions} ->
         {:ok,
          %{"schema_version" => Schema.schema_version(), "ok" => true, "sessions" => sessions}}
+
+      {:error, reason} ->
+        {:tool_error, bus_error(reason)}
+    end
+  end
+
+  # T55.4 (ADR-0073): the current-state projection twin. Cursor-free and
+  # idempotent -- the agent may call it every turn without consuming anything a
+  # kazi_bus_read is counting on.
+  defp call_tool("kazi_bus_board", args, opts) do
+    case Bus.board(bus_opts(args, opts)) do
+      {:ok, board} ->
+        {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true, "board" => board}}
 
       {:error, reason} ->
         {:tool_error, bus_error(reason)}
