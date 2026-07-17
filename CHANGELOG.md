@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.187.0](https://github.com/kazi-org/kazi/compare/v1.186.1...v1.187.0) (2026-07-17)
+
+
+### Features
+
+* **teach:** the generated SKILL.md teaches the landing story ([91cc26d](https://github.com/kazi-org/kazi/commit/91cc26d2693b4414a6fab89db01ed8ff0517a254))
+
 ## [1.186.1](https://github.com/kazi-org/kazi/compare/v1.186.0...v1.186.1) (2026-07-17)
 
 
