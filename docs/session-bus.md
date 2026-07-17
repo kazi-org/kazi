@@ -405,8 +405,11 @@ the tail folding into one `overflow` line. Under `--json` (contract:
   "board": {
     "facts": [{"type": "verbatim", "topic": "ci", "text": "main is green", "id": 42, "...": "..."}],
     "roster": [{"session": "s-abc", "name": "reviewer", "team": "wave1", "machine": "host", "liveness": "active"}],
+    "claims": [{"task": "T55.8", "owner": "dev@example.com", "host": "build-box", "age_s": 90}],
+    "claims_available": true,
     "total_facts": 1,
-    "total_sessions": 1
+    "total_sessions": 1,
+    "total_claims": 1
   }
 }
 ```
@@ -414,9 +417,50 @@ the tail folding into one `overflow` line. Under `--json` (contract:
 The roster is the same presence path `bus who` reads, projected to stable
 identity fields only (session, name, team, machine, liveness) and ordered by
 session id — deliberately NOT the age/heartbeat fields, so back-to-back boards
-over the same live set render identically. Claim ownership is a *separate*
-projection (a later task reads `refs/claims/*` at source, ADR-0073 point 2);
-`board` today renders facts and roster.
+over the same live set render identically.
+
+#### Claim ownership: read at source (T55.8, ADR-0073 point 2)
+
+The `claims` section is a **direct projection of `refs/claims/*` on the shared
+remote** — the same atomic git-ref locks `/claim` takes. Claims are *already*
+cross-machine (the claim primitive pushes every claim to `origin`) and *already*
+self-describing (the claim commit's subject is `claim <task> by
+<identity>@<host> <stamp>`), so the board reads them straight at source: one
+short-timeout `git fetch` of the claim refs, projected to `{task, owner, host,
+age_s}` per claim. There is **no copy to drift, no staleness class, and no
+daemon anywhere in the claim path** — claiming and *seeing* claims both work
+with the daemon down, by construction.
+
+When the remote is unreachable inside the timeout the section degrades to a
+single honest line rather than a possibly-stale table:
+
+```
+claims: unavailable (remote unreachable)
+```
+
+and `--json` carries `"claims_available": false` with an empty `"claims"`. A
+stale local ref cache is **never** presented as live truth.
+
+The board only ever *shows* claims — it never grants, arbitrates, or expires
+them (ADR-0067 non-goal, reaffirmed). One caveat on `owner`: a claim commit is
+minted as the repo's configured git identity, so N pool sessions on one machine
+all claim as the SAME `owner` string (docs/lore.md L-0037) — the field is honest
+about what it is (git identity + host) but cannot yet tell sibling pool sessions
+apart.
+
+**Optional digest one-liner (a convention, not a mechanism).** A claim *wrapper*
+script MAY, on its own, best-effort post a fact when it takes a claim, so that a
+turn-boundary **digest** can announce the event:
+
+```
+kazi bus post fact "claimed T55.8" --topic claims
+```
+
+This is purely optional and lives in the operator's own claim tooling (outside
+kazi's delivery, ADR-0067 point 6). The board **never** renders ownership from
+such posts — its `claims` section reads `refs/claims/*` at source and nothing
+else — so claim visibility is fully correct whether or not the convention is in
+use. kazi ships no claim wrapper; it only documents the convention.
 
 ### Fetching a stubbed body: `bus get <id>` (T55.6, ADR-0072 d3)
 
