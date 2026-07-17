@@ -134,7 +134,7 @@ to sidestep it.
 **Tags:** [bus, daemon, digest, hook, adr-0072, aggregation-boundary]
 
 **Problem:** T55.7 moves bus digest assembly into the daemon so the CLI, the
-`kazi_bus_*` MCP tools, and the ADR-0071 hook all render ONE bounded digest the
+`kazi_bus_*` MCP tools, and the ADR-0076 hook all render ONE bounded digest the
 daemon computed, instead of three client-side re-aggregations (ADR-0067 point 5,
 "only a server can aggregate before the tokens are spent"). The first landing of
 the task wired the CLI and the MCP tools to `Kazi.Bus.read_digest/1` (the
@@ -278,7 +278,7 @@ while `idle` remains hard to reach for a session that merely *has* a live
 harness but no live kazi process. Not in T55.13's scope (docs+teach, no new
 surface); flagged for whoever owns presence liveness (T55.11).
 
-**Conclusion:** the contract is real and teachable exactly as ADR-0071 framed
+**Conclusion:** the contract is real and teachable exactly as ADR-0076 framed
 delivery -- the harness's own mechanics, not agent virtue. It needs two things
 from a harness (run a background task; re-invoke the session on its
 completion), needs T54.9's `--since now` anchor to be a sleep rather than a

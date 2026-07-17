@@ -598,7 +598,7 @@ provenance-stamped input (never a command channel); every surface reports a
 clean "no daemon" error when the daemon is down. Full concepts, subject
 taxonomy, and the delivery installer: `docs/session-bus.md`.
 
-**Delivery is installed, not documented (ADR-0071).** `kazi install-hooks`
+**Delivery is installed, not documented (ADR-0076).** `kazi install-hooks`
 (opt-in, the sibling of `kazi install-skill`) registers two hooks in the
 Claude Code settings -- SessionStart and UserPromptSubmit run `kazi bus hook
 <event>` -- so bus traffic reaches a session at its turn boundaries without
@@ -647,7 +647,7 @@ woken. Two halves, by the target's state:
   fires instantly on backlog and degenerates into a poll.
 
 kazi never wakes a session by reaching into it (no prompt injection, no driving
-a TTY) -- that is permanently outside its boundary (ADR-0001/ADR-0071
+a TTY) -- that is permanently outside its boundary (ADR-0001/ADR-0076
 non-goals). The harness's background-task mechanic is the supported wake.
 
 **Use harness-native agent teams instead** when the sessions are ones your own
