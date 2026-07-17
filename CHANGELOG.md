@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.156.0](https://github.com/kazi-org/kazi/compare/v1.155.2...v1.156.0) (2026-07-17)
+
+
+### Features
+
+* **scenario:** extract one Scenario from a .feature and hash its normalized text (ADR-0064) ([f1873dd](https://github.com/kazi-org/kazi/commit/f1873dd0c0f1a0217b0e91f3224e96383ae73034))
+
 ## [1.155.2](https://github.com/kazi-org/kazi/compare/v1.155.1...v1.155.2) (2026-07-17)
 
 
