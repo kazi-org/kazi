@@ -31,9 +31,11 @@ version and the source of truth.
 
 For a CODE goal the on-ramp is two verbs: `kazi plan` authors the acceptance
 predicates and `kazi apply` converges them (ADR-0031/0032). `kazi apply` IS the
-reconcile loop -- you do NOT wrap it in a separate loop/qualify pass for code
-work. The strategy layer above kazi is your own planning workflow (ADRs, use
-cases, the work breakdown, the intent); kazi turns that intent into objective
+reconcile loop -- you do NOT wrap it in a separate outer driving pass, and you do
+not add a separate launch-readiness pass afterwards: "ready" is the objective
+predicate vector (including any live production probe), not a verdict inferred
+after the fact. The strategy layer above kazi is your own planning workflow (ADRs,
+use cases, the work breakdown, the intent); kazi turns that intent into objective
 predicates and executes them. Repo hygiene (git/worktree/scratch sweeping) stays
 orthogonal, not part of the converge loop.
 
