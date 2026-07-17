@@ -579,10 +579,18 @@ defmodule Kazi.Scheduler do
         {:ok, result}
 
       integrate_opts when is_list(integrate_opts) ->
-        converged =
-          for {partition, :converged} <- result.partitions, do: partition
+        # T44.10 (ADR-0055): each converged partition lands on its OWN group-derived
+        # branch, `<branch_prefix>/<partition-slug>`, distinct per group and reusing
+        # the SAME slug derivation the worktree layer uses (`Worktree.slug_for/1`), so
+        # the collective can attribute each group's landed refs to a distinct branch.
+        branch_prefix = Keyword.get(integrate_opts, :branch_prefix, "kazi-partition")
 
-        {:ok, integration} = Kazi.Scheduler.Integration.integrate(converged, integrate_opts)
+        entries =
+          for {partition, :converged} <- result.partitions do
+            {partition, nil, partition_landing_branch(partition, branch_prefix)}
+          end
+
+        {:ok, integration} = Kazi.Scheduler.Integration.integrate(entries, integrate_opts)
 
         # The collective is green ONLY when reconcile converged everywhere AND the
         # merged whole is green. A reconcile-stuck partition keeps the collective
@@ -596,6 +604,14 @@ defmodule Kazi.Scheduler do
 
         {:ok, Map.merge(result, %{collective: collective, integration: integration})}
     end
+  end
+
+  # T44.10: the group-derived landing branch for a converged partition —
+  # `<branch_prefix>/<slug>` reusing `Worktree.slug_for/1` (the SAME deterministic,
+  # per-key slug the worktree layer names partition branches with), so it is stable
+  # and distinct per group.
+  defp partition_landing_branch(partition, branch_prefix) do
+    branch_prefix <> "/" <> Kazi.Scheduler.Worktree.slug_for(partition)
   end
 
   # Compose the per-partition reconciler chain: lease (outer) → worktree (inner) →

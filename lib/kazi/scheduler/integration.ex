@@ -77,6 +77,9 @@ defmodule Kazi.Scheduler.Integration do
     * `:key` — the partition's stable lease key (its identity in the safe order);
     * `:worktree` — the path to the partition's converged worktree (where its
       branch lives), or `nil` when the run did not isolate worktrees;
+    * `:branch` — the per-group branch this partition lands on (T44.10),
+      `<branch_prefix>/<group-slug>`, distinct per group so the integrator opens
+      ITS PR on that branch; `nil` when the caller did not derive one;
     * `:base` — the shared base branch every partition rebase-merges onto;
     * `:already_merged` — the keys of partitions ALREADY merged onto the base this
       run (so a conflict-detecting integrator/stub knows the current base state).
@@ -85,6 +88,7 @@ defmodule Kazi.Scheduler.Integration do
           partition: Kazi.Scheduler.partition(),
           key: String.t() | nil,
           worktree: Path.t() | nil,
+          branch: String.t() | nil,
           base: String.t(),
           already_merged: [String.t() | nil]
         }
@@ -120,10 +124,13 @@ defmodule Kazi.Scheduler.Integration do
   re-dispatching any that conflict cross-partition, and reports whether the merged
   WHOLE is green.
 
-  `entries` is the list of converged partitions to integrate. Each entry is either
-  a bare partition (a `Kazi.Scheduler.Partitioner` struct or any term the
-  `:order_fun` / `:key_fun` understand) or a `{partition, worktree_path}` tuple
-  carrying the partition's converged worktree (as produced by the worktree seam).
+  `entries` is the list of converged partitions to integrate. Each entry is a bare
+  partition (a `Kazi.Scheduler.Partitioner` struct or any term the `:order_fun` /
+  `:key_fun` understand), a `{partition, worktree_path}` tuple carrying the
+  partition's converged worktree, or a `{partition, worktree_path, branch}` tuple
+  (T44.10) also naming the per-group branch this partition lands on (so each
+  group's PR targets a distinct group-derived branch, and the surfaced refs carry
+  that branch even from a stub integrator).
 
   Only `:converged` partitions should be passed — a partition that did not
   converge has nothing to integrate; the caller (the scheduler) filters first and
@@ -149,7 +156,11 @@ defmodule Kazi.Scheduler.Integration do
   partition merged within its budget; any residual conflict ⇒ `:stuck`.
   """
   @spec integrate(
-          [Kazi.Scheduler.partition() | {Kazi.Scheduler.partition(), Path.t()}],
+          [
+            Kazi.Scheduler.partition()
+            | {Kazi.Scheduler.partition(), Path.t()}
+            | {Kazi.Scheduler.partition(), Path.t() | nil, String.t() | nil}
+          ],
           keyword()
         ) ::
           {:ok, result()}
@@ -197,7 +208,7 @@ defmodule Kazi.Scheduler.Integration do
     case attempt_merge(entry, ctx, acc.merged_keys, 1) do
       {:merged, refs, attempts} ->
         acc
-        |> Map.update!(:integrated, &[{entry.partition, refs} | &1])
+        |> Map.update!(:integrated, &[{entry.partition, with_branch(refs, entry)} | &1])
         |> Map.update!(:merged_keys, &[entry.key | &1])
         |> record_redispatch(entry.partition, attempts)
 
@@ -220,6 +231,7 @@ defmodule Kazi.Scheduler.Integration do
       partition: entry.partition,
       key: entry.key,
       worktree: entry.worktree,
+      branch: Map.get(entry, :branch),
       base: ctx.base,
       already_merged: merged_keys
     }
@@ -293,6 +305,17 @@ defmodule Kazi.Scheduler.Integration do
       {:error, {:redispatch_raised, Exception.message(e)}}
   end
 
+  # T44.10: guarantee the surfaced refs carry a `:branch` so the collective can
+  # attribute this group's landing to a distinct branch even when the integrator
+  # returned refs without one (e.g. a stub that only echoes a pr number). A branch
+  # the integrator DID return wins (it is the branch actually merged).
+  defp with_branch(refs, entry) do
+    case Map.get(entry, :branch) do
+      branch when is_binary(branch) and branch != "" -> Map.put_new(refs, :branch, branch)
+      _ -> refs
+    end
+  end
+
   defp record_redispatch(acc, _partition, attempts) when attempts <= 1, do: acc
 
   defp record_redispatch(acc, partition, attempts) do
@@ -304,14 +327,22 @@ defmodule Kazi.Scheduler.Integration do
   defp collective(%{conflicts: []}), do: :converged
   defp collective(_), do: :stuck
 
-  # Normalize an entry to `%{partition, key, worktree}`. Accepts a bare partition
-  # or a `{partition, worktree_path}` tuple.
+  # Normalize an entry to `%{partition, key, worktree, branch}`. Accepts a bare
+  # partition, a `{partition, worktree_path}` tuple, or a `{partition,
+  # worktree_path, branch}` tuple (T44.10: the per-group branch this partition
+  # lands on, so the integrator opens ITS PR on a distinct group-derived branch
+  # and the collective can attribute the landed refs back to the group).
+  defp normalize_entry({partition, worktree, branch})
+       when (is_binary(worktree) or is_nil(worktree)) and (is_binary(branch) or is_nil(branch)) do
+    %{partition: partition, key: entry_key(partition), worktree: worktree, branch: branch}
+  end
+
   defp normalize_entry({partition, worktree}) when is_binary(worktree) do
-    %{partition: partition, key: entry_key(partition), worktree: worktree}
+    %{partition: partition, key: entry_key(partition), worktree: worktree, branch: nil}
   end
 
   defp normalize_entry(partition) do
-    %{partition: partition, key: entry_key(partition), worktree: nil}
+    %{partition: partition, key: entry_key(partition), worktree: nil, branch: nil}
   end
 
   defp entry_key(%{key: key}) when is_binary(key), do: key
@@ -348,11 +379,12 @@ defmodule Kazi.Scheduler.Integration do
     """
     @spec integrate(Kazi.Scheduler.Integration.integration_request(), keyword()) ::
             {:ok, map()} | {:error, term()}
-    def integrate(%{worktree: worktree, base: base}, opts) when is_binary(worktree) do
+    def integrate(%{worktree: worktree, base: base} = request, opts) when is_binary(worktree) do
       action =
         Action.new(:integrate,
           params:
             %{base: base, workspace: worktree}
+            |> maybe_put_branch(Map.get(request, :branch))
             |> Map.merge(Keyword.get(opts, :integrate_params, %{}))
         )
 
@@ -367,6 +399,14 @@ defmodule Kazi.Scheduler.Integration do
     def integrate(%{worktree: nil}, _opts) do
       {:error, :no_worktree}
     end
+
+    # T44.10: land on the group's own branch when the caller derived one, so each
+    # group's PR targets its distinct branch. Absent, the Integrate action falls
+    # back to the worktree's current branch (verifies-then-ships, T44.3).
+    defp maybe_put_branch(params, branch) when is_binary(branch) and branch != "",
+      do: Map.put(params, :branch, branch)
+
+    defp maybe_put_branch(params, _branch), do: params
 
     # Heuristic: map a push/merge failure that mentions a conflict into the
     # conflict signal the collective re-dispatches on. Anything else stays a hard
