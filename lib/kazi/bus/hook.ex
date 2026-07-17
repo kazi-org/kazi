@@ -8,12 +8,14 @@ defmodule Kazi.Bus.Hook do
 
     * `session-start` (Claude Code `SessionStart`): registers presence, joins
       the project-scope team, and injects the current board (`Kazi.Bus.Board`).
-    * `turn` (Claude Code `UserPromptSubmit`): injects the bounded digest
-      (`Kazi.Bus.Digest`) when there is traffic since the session last checked,
-      and stays COMPLETELY SILENT (zero bytes) otherwise. `read` acks what it
-      pulls, so the durable cursor IS the "last checked" marker -- a quiet turn
-      drains nothing and prints nothing, which is what makes ambient
-      bus-awareness free when the bus is quiet.
+    * `turn` (Claude Code `UserPromptSubmit`): injects the DAEMON-assembled
+      bounded digest (`Kazi.Bus.read_digest/1`, T55.7/ADR-0072 d5 -- the SAME
+      entry point the CLI and the `kazi_bus_*` MCP tools call, so the bound is
+      written once, not three times) when there is traffic since the session
+      last checked, and stays COMPLETELY SILENT (zero bytes) otherwise. `read`
+      acks what it pulls, so the durable cursor IS the "last checked" marker --
+      a quiet turn drains nothing and prints nothing, which is what makes
+      ambient bus-awareness free when the bus is quiet.
 
   Three properties hold for BOTH events, because a hook runs on every turn of
   every session and a hook that errors, blocks, or chatters taxes them all:
@@ -31,7 +33,6 @@ defmodule Kazi.Bus.Hook do
   """
 
   alias Kazi.Bus
-  alias Kazi.Bus.Digest
 
   @timeout_ms 2_000
 
@@ -102,9 +103,9 @@ defmodule Kazi.Bus.Hook do
   """
   @spec turn(keyword()) :: payload()
   def turn(opts) do
-    case Bus.read(opts) do
-      {:ok, []} -> :silent
-      {:ok, messages} -> {:emit, block(turn_lines(messages))}
+    case Bus.read_digest(opts) do
+      {:ok, %{"digest" => %{"total" => 0}}} -> :silent
+      {:ok, %{"digest" => digest}} -> {:emit, block(turn_lines(digest))}
       {:error, _reason} -> :silent
     end
   end
@@ -134,11 +135,11 @@ defmodule Kazi.Bus.Hook do
     |> Kernel.<>("\n")
   end
 
-  # The turn body: the T55.1 bounded machine digest (`Digest.render/1`) rendered
-  # to human lines -- at most `Digest.max_lines/0` lines, oversize bodies as
-  # stubs, the tail folded into one overflow line. NOT reimplemented here.
-  defp turn_lines(messages) do
-    %{"total" => total, "lines" => lines} = Digest.render(messages)
+  # The turn body: the DAEMON-assembled digest (T55.7, ADR-0072 d5) rendered to
+  # human lines. The bound was enforced server-side before the bytes crossed the
+  # socket -- the hook re-aggregates NOTHING, it only renders the same digest the
+  # CLI and the MCP tools render, which is what keeps the three surfaces identical.
+  defp turn_lines(%{"total" => total, "lines" => lines}) do
     ["#{total} new bus message(s) since your last turn:" | Enum.map(lines, &digest_line/1)]
   end
 
