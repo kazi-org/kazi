@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.163.0](https://github.com/kazi-org/kazi/compare/v1.162.0...v1.163.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** board projection module, reusing the digest stub rule ([4a17871](https://github.com/kazi-org/kazi/commit/4a178716135f6420c3ac581245278e69b3d9b090))
+* **bus:** Kazi.Bus.board/1 reads last-value fact per topic, cursor-free ([a0de0fa](https://github.com/kazi-org/kazi/commit/a0de0fa7c868f77109d6293625c442b6141dc5f4))
+* **cli:** kazi bus board verb renders current bus state ([ef549f6](https://github.com/kazi-org/kazi/commit/ef549f66c5fb9041d90891f6ec7d0a7010f04453))
+* **mcp:** kazi_bus_board tool mirrors the bus board verb ([9b907d1](https://github.com/kazi-org/kazi/commit/9b907d18cb99be699856405125457f1eedc50e9b))
+
 ## [1.162.0](https://github.com/kazi-org/kazi/compare/v1.161.0...v1.162.0) (2026-07-17)
 
 
