@@ -78,6 +78,9 @@ its config at runtime via `kazi schema <kind>`.
   declared command and assert on the exit code + stdout/stderr (T43.7, UC-055).
 - **[`scenario`](scenario-predicate.md)** — replay a pinned Gherkin Scenario by
   delegating to a surface provider; passes only on a green replay (ADR-0064).
+- **[`oss_hygiene`](oss-hygiene-predicate.md)** — the internal-leak guard as a
+  predicate: scan the diff's added lines for private IPs / home paths /
+  configurable codenames (E29/ADR-0034, T44.7).
 - **[Live providers](live-providers.md)** — `http_probe` sustained health,
   `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
 - **[The context store (Gist provider)](context-store.md)** — budget-fitted
