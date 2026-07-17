@@ -49,7 +49,7 @@ defmodule Kazi.Bus do
 
   alias Gnat.Jetstream.API.{Consumer, KV}
   alias Gnat.Jetstream.API.Stream, as: JetStream
-  alias Kazi.Bus.{Board, Liveness, Provision}
+  alias Kazi.Bus.{Board, Claims, Liveness, Provision}
   alias Kazi.Daemon.{Probe, Supervisor}
 
   @max_text_bytes 65_536
@@ -833,10 +833,43 @@ defmodule Kazi.Bus do
       upsert_presence(conn, opts)
 
       case roster(conn, opts) do
-        {:ok, entries} -> {:ok, Board.render(read_facts(conn, opts), entries)}
-        {:error, reason} -> {:error, reason}
+        {:ok, entries} ->
+          {:ok, attach_claims(Board.render(read_facts(conn, opts), entries), opts)}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end)
+  end
+
+  # ADR-0073 point 2: the ownership section is a DIRECT projection of
+  # `refs/claims/*` read at source (`Kazi.Bus.Claims`) -- never routed through
+  # the bus, never touched by the daemon. It is read only when a caller asks for
+  # it (`opts[:claims]`): the CLI and MCP surfaces do; the pure-projection and
+  # NATS-path tests do not, so they never shell out to git. An unreachable
+  # remote degrades to `"claims_available" => false` -- one honest line at the
+  # renderer, never a stale table.
+  defp attach_claims(board, opts) do
+    case Keyword.get(opts, :claims, false) do
+      false -> board
+      nil -> board
+      true -> merge_claims(board, Claims.read([]))
+      claim_opts when is_list(claim_opts) -> merge_claims(board, Claims.read(claim_opts))
+    end
+  end
+
+  defp merge_claims(board, {:ok, claims}) do
+    board
+    |> Map.put("claims", claims)
+    |> Map.put("claims_available", true)
+    |> Map.put("total_claims", length(claims))
+  end
+
+  defp merge_claims(board, {:error, _reason}) do
+    board
+    |> Map.put("claims", [])
+    |> Map.put("claims_available", false)
+    |> Map.put("total_claims", 0)
   end
 
   # ADR-0073 point 1: the board's fact section is the CURRENT value of every

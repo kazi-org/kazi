@@ -669,16 +669,22 @@ defmodule Kazi.Teach.InstallSkill do
     `read`/`peek`/`watch` answer "what CHANGED since I last looked" -- a delta of
     pending messages, and no state. `kazi bus board --json` (MCP:
     `kazi_bus_board`) answers "what is true right now": the last-value `fact` per
-    topic and the live roster (names, teams, liveness), projected in one shot.
+    topic, the live roster (names, teams, liveness), and claim ownership,
+    projected in one shot.
 
     It CONSUMES NOTHING and keeps no cursor, so unlike `read` it is idempotent --
     call it every turn (it is what a session-start hook injects) without draining
     a message a later `read`/`watch` was counting on. Posting three facts on one
     topic shows ONE line (the latest); it is bounded by the same ADR-0072 rules
-    as the digest (oversize bodies become stubs, at most 40 fact lines). Returns
-    `{ok, schema_version, board: {facts, roster, total_facts, total_sessions}}`.
-    Use it to orient at session start -- who is here, what facts are current --
-    instead of hand-rolling a markdown blackboard.
+    as the digest (oversize bodies become stubs, at most 40 fact lines). The
+    `claims` section (T55.8) is a live projection of `refs/claims/*` read at
+    source -- `{task, owner, host, age_s}` per claim, with NO daemon in that path
+    -- so you see who owns what BEFORE picking up work; an unreachable claim
+    remote degrades to `claims_available:false` rather than a stale table.
+    Returns `{ok, schema_version, board: {facts, roster, claims,
+    claims_available, total_facts, total_sessions, total_claims}}`. Use it to
+    orient at session start -- who is here, what facts are current, what is
+    already claimed -- instead of hand-rolling a markdown blackboard.
 
     ### The wake contract: how an IDLE session gets woken
 
