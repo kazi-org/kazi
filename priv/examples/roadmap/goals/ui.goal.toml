@@ -1,0 +1,9 @@
+# A roadmap member goal-file (T45.1).
+id = "ui"
+name = "UI acceptance passes"
+
+[[predicate]]
+id = "ui-accept"
+provider = "custom_script"
+description = "the UI acceptance suite passes"
+cmd = "true"

@@ -1,0 +1,26 @@
+# Example kazi roadmap artifact (T45.1, UC-059, ADR-0075): a declarative
+# goal-to-goal DAG. Three goals in a chain -- api needs foundation, ui needs api.
+#
+# Validate it with:
+#
+#     kazi lint priv/examples/roadmap/pipeline.roadmap.toml
+#
+# Inspect the artifact's shape with:
+#
+#     kazi schema roadmap
+#
+# See docs/schemas/roadmap.md and ADR-0075.
+
+[[goals]]
+id = "foundation"
+path = "goals/foundation.goal.toml"
+
+[[goals]]
+id = "api"
+path = "goals/api.goal.toml"
+needs = ["foundation"]
+
+[[goals]]
+id = "ui"
+path = "goals/ui.goal.toml"
+needs = ["api"]
