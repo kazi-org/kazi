@@ -1026,6 +1026,39 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @oss_hygiene %{
+    kind: "oss_hygiene",
+    title: "oss_hygiene predicate config",
+    description:
+      "The E29/ADR-0034 internal-leak guard as a predicate (T44.7): scan the ADDED lines of the " <>
+        "diff between a base ref and HEAD for private IPs (192.168.*/10.*/172.16-31.*), absolute " <>
+        "home paths (/Users/<name>, /home/<name>), and a configurable codename list. A hit is " <>
+        ":fail naming the exact file:line; a scrubbed diff is :pass. RFC-5737 example IPs, " <>
+        "loopback, placeholder home paths, and any line with a \"leak-guard:allow\" marker pass.",
+    keys: [
+      %{
+        name: "codenames",
+        type: "array<string>",
+        required: false,
+        description:
+          "Internal codenames to flag, matched case-insensitively as whole-ish tokens. Keep the " <>
+            "real names in the goal-file, never hardcoded in kazi. Default []."
+      },
+      %{
+        name: "base_ref",
+        type: "string",
+        required: false,
+        description: "The ref the diff is taken against (default \"origin/main\")."
+      }
+    ],
+    example: %{
+      "id" => "no-internal-leaks",
+      "provider" => "oss_hygiene",
+      "base_ref" => "origin/main",
+      "codenames" => ["examplecorp-internal", "project-nimbus"]
+    }
+  }
+
   @schemas %{
     "cli" => @cli,
     "custom_script" => @custom_script,
@@ -1040,7 +1073,8 @@ defmodule Kazi.Predicate.Schema do
     "cve" => @cve,
     "no_stubs" => @no_stubs,
     "integration" => @integration,
-    "scenario" => @scenario
+    "scenario" => @scenario,
+    "oss_hygiene" => @oss_hygiene
   }
 
   @doc "The provider kinds with a documented config schema, sorted."
