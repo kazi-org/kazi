@@ -407,7 +407,34 @@ defmodule Kazi.Bus.DaemonDigestTest do
     start_supervised!(%{id: :"t55_7_daemon_#{id}", start: {Daemon, :start, [opts]}})
     on_exit(fn -> File.rm_rf("/tmp/kazi_t55_7_js_#{id}") end)
 
+    # `start_supervised!` returns once the SUPERVISOR is up, but the daemon's
+    # nats-server is an external OS process that is not accepting connections
+    # yet -- so an immediate `Gnat.start_link` races it and dies `:econnrefused`
+    # (observed in CI: this test failed on exactly that, one run in two). Wait
+    # for the port to actually answer before handing it to a caller.
+    await_port!(port)
+
     %{sock_path: sock_path, port: port}
+  end
+
+  # Poll until the nats-server accepts a TCP connection, or fail loudly with a
+  # real reason rather than an opaque `:econnrefused` from a later call.
+  defp await_port!(port, attempts \\ 100)
+
+  defp await_port!(port, 0) do
+    raise "nats-server on port #{port} never accepted a connection"
+  end
+
+  defp await_port!(port, attempts) do
+    case :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 100) do
+      {:ok, sock} ->
+        :gen_tcp.close(sock)
+        :ok
+
+      {:error, _} ->
+        Process.sleep(50)
+        await_port!(port, attempts - 1)
+    end
   end
 
   defp post_backlog(ctx, count) do
