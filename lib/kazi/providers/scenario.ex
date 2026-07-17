@@ -64,6 +64,42 @@ defmodule Kazi.Providers.Scenario do
   # force-loads this module (safe_config_key/1 relies on that).
   @scenario_keys [:spec, :scenario, :surface, :pin, :repin]
 
+  # T49.12: the delegate config keys a scenario predicate passes through, named
+  # here as literal atoms PURELY so they are interned when this module loads.
+  #
+  # Why this is needed even though `resolve_delegate/1` already force-loads the
+  # delegate: that happens inside `evaluate/2`, at RUNTIME. The goal LOADER runs
+  # much earlier and admits a config key only if its atom already exists
+  # (`String.to_existing_atom/1`, its atom-exhaustion guard), interning keys by
+  # force-loading the predicate's OWN provider — `:scenario` — and nothing else.
+  # So a goal-file saying `provider = "scenario"` + `samples = 3` was rejected as
+  # "unknown config key \"samples\"" before evaluate ever ran, even though the
+  # passthrough itself works and the docs promise it. `mix` hid this: it loads
+  # Kazi.Providers.Browser (which names :samples), so the atom happened to exist.
+  # Purge Browser and the loader rejects it — the same trap as the Gherkin
+  # doc-keys (loader's @gherkin_doc_keys, devlog 2026-07-15).
+  #
+  # A bounded, fixed list — no atom-exhaustion risk. It only needs the keys a
+  # delegate accepts that no OTHER always-loaded module already names; listing a
+  # few extra is harmless. If a surface provider grows a config key, add it here
+  # (pinned by a loader test).
+  @delegate_passthrough_keys [
+    :url,
+    :base_url,
+    :samples,
+    :steps,
+    :assertions,
+    :viewport,
+    :screenshot,
+    :timeout_ms,
+    :cmd,
+    :args,
+    :env
+  ]
+
+  @doc false
+  def delegate_passthrough_keys, do: @delegate_passthrough_keys
+
   @impl true
   def evaluate(%Predicate{kind: :scenario, config: config} = predicate, context) do
     surface = config[:surface] || @default_surface
