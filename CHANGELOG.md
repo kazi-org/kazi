@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.162.0](https://github.com/kazi-org/kazi/compare/v1.161.0...v1.162.0) (2026-07-17)
+
+
+### Features
+
+* **cli:** kazi schema integration + lint unknown-mode warning ([fc3bbb0](https://github.com/kazi-org/kazi/commit/fc3bbb00727909537cc1375a07ea085b94edf5c2))
+* **goal:** advisory [integration] mode lint ([f592c04](https://github.com/kazi-org/kazi/commit/f592c046488437572291195e64f2bfb676143a7f))
+* **goal:** parse and expose the [integration] landing block ([82ae090](https://github.com/kazi-org/kazi/commit/82ae0900045ce4c2e41813e0c0b0bf5ef0477113))
+
 ## [1.161.0](https://github.com/kazi-org/kazi/compare/v1.160.0...v1.161.0) (2026-07-17)
 
 
