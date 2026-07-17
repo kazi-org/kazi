@@ -2199,7 +2199,7 @@ defmodule Kazi.Goal.Loader do
   # failure shape ADR-0058 fixed for a missing `url`: a config error the loop can
   # only discover by burning its budget. Checking the vocabulary at LOAD names the
   # bad type and the valid set instead. A new runner type must be added here too.
-  @browser_assertion_types ~w(visible hidden text url console_clean download attr count enabled field_value form_validation a11y)
+  @browser_assertion_types ~w(visible hidden text url console_clean download attr count enabled field_value form_validation a11y visual)
 
   # Kept in lockstep with the axe-core impact levels the runner ranks (T43.2).
   @a11y_severities ~w(minor moderate serious critical)
@@ -2353,7 +2353,45 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # `visual` (T43.3, UC-056): a non-empty `name` is REQUIRED — it is the baseline
+  # file's identity (`.kazi/visual-baselines/<name>.png`), so a nameless visual
+  # assertion could not find or seed a baseline. `threshold` (when given) must be a
+  # number in [0, 1] (the allowed differing-pixel fraction). Checked at LOAD so a
+  # mis-declared visual gate fails loudly, not by burning the loop's budget.
+  defp validate_browser_assertion_keys("visual", assertion, id) do
+    with :ok <- validate_visual_name(assertion, id) do
+      validate_visual_threshold(assertion, id)
+    end
+  end
+
   defp validate_browser_assertion_keys(_type, _assertion, _id), do: :ok
+
+  defp validate_visual_name(assertion, id) do
+    case assertion_key(assertion, "name") do
+      name when is_binary(name) and name != "" ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} visual assertion requires a non-empty string " <>
+           "\"name\" (the baseline id) (got #{inspect(other)})"}
+    end
+  end
+
+  defp validate_visual_threshold(assertion, id) do
+    case assertion_key(assertion, "threshold") do
+      nil ->
+        :ok
+
+      t when is_number(t) and t >= 0 and t <= 1 ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} visual assertion \"threshold\" must be a number in " <>
+           "[0, 1] (the allowed differing-pixel fraction) (got #{inspect(other)})"}
+    end
+  end
 
   defp validate_a11y_severity(assertion, id) do
     case assertion_key(assertion, "severity") do
