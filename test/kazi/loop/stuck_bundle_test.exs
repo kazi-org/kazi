@@ -206,6 +206,87 @@ defmodule Kazi.Loop.StuckBundleTest do
     refute Map.has_key?(result, :permission_denied_tools)
   end
 
+  # T54.6 (#1072) fix (b): the headline behaviour. A refused dispatch must stop
+  # after the FIRST iteration -- grinding on cannot converge, because nothing about
+  # iteration 2 makes the agent permitted. `stuck_iterations: 5` here would take
+  # five dispatches to stop the ordinary way; fail-fast must beat it.
+  test "a denied dispatch FAILS FAST after the first iteration, not the stuck window" do
+    goal =
+      Goal.new("denied-fail-fast",
+        predicates: [Predicate.new(:code, :tests)],
+        metadata: %{evidence: "boom"}
+      )
+
+    {:ok, loop} =
+      Kazi.Loop.start_link(
+        goal: goal,
+        providers: %{tests: StuckProvider},
+        harness: DenyingHarness,
+        integrate: NoopAction,
+        deploy: NoopAction,
+        adapter_opts: [],
+        reobserve_interval_ms: 5,
+        flake_max_retries: 0,
+        # deliberately WIDE: the ordinary stuck path would need 5 observations.
+        stuck_iterations: 5
+      )
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert result.reason == :stuck
+
+    # The honest cause: refused, not "genuine difficulty" -- the mislabel this
+    # class exists to kill. The remedy is a flag, not a human or a bigger budget.
+    assert result.cause.class == :permission_denied
+
+    # Fail-fast: stopped well inside the 5-observation stuck window.
+    assert result.iterations <= 2,
+           "expected a fail-fast stop, burned #{result.iterations} iterations"
+
+    assert result.permission_denied_tool_calls == 2
+  end
+
+  # The guard against over-eager killing: a dispatch that LANDED edits despite some
+  # unrelated denial is making progress and must NOT be failed fast.
+  test "a denied dispatch that still changed files does NOT fail fast" do
+    defmodule TouchingDenyingHarness do
+      @behaviour Kazi.HarnessAdapter
+      @impl true
+      def run(_prompt, _ws, _opts) do
+        {:ok,
+         %{
+           output: "partially blocked",
+           cost: %{tokens: 1},
+           touched: ["lib/a.ex"],
+           permission_denials: [%{tool_name: "WebFetch", tool_use_id: "t1", tool_input: %{}}]
+         }}
+      end
+    end
+
+    goal =
+      Goal.new("denied-but-progressing",
+        predicates: [Predicate.new(:code, :tests)],
+        metadata: %{evidence: "boom"}
+      )
+
+    {:ok, loop} =
+      Kazi.Loop.start_link(
+        goal: goal,
+        providers: %{tests: StuckProvider},
+        harness: TouchingDenyingHarness,
+        integrate: NoopAction,
+        deploy: NoopAction,
+        adapter_opts: [],
+        reobserve_interval_ms: 5,
+        flake_max_retries: 0,
+        stuck_iterations: 2
+      )
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    # Ran the ordinary stuck window rather than being killed on iteration 1, and
+    # is NOT tagged as a permission wedge.
+    refute result.cause && result.cause.class == :permission_denied
+  end
+
   # An unaffected bundle's shape must be byte-for-byte unchanged: the key is absent,
   # not an empty list, so existing consumers see nothing new.
   test "a stuck run with no denials OMITS the permission_denials key" do
