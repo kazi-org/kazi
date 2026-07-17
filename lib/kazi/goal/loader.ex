@@ -160,9 +160,18 @@ defmodule Kazi.Goal.Loader do
   | `base`         | string    | `nil`    | `integration.base` — the base branch a `pr`/`merge` targets. Stored verbatim; absent → detected from origin at landing time. |
   | `commit_style` | string    | `nil`    | `integration.commit_style` — informational commit-style hint (e.g. `"conventional"`). Stored verbatim. |
 
-  This is loader-only: it parses, validates, and exposes the block. The
-  synthesized `landed` predicate (T44.2) and the landing actions (T44.3) that
-  CONSUME it are separate tasks. `kazi schema integration` documents this shape.
+  When `mode != "none"`, the loader APPENDS a synthesized `landed` predicate to
+  the goal's predicate vector (T44.2, ADR-0055 decision 2) — an ordinary, visible
+  predicate (`Kazi.Providers.Landed`) evaluated against the LIVE working tree that
+  asserts a clean tree PLUS the mode-appropriate git/GitHub state (committed on a
+  non-base branch / pushed / open PR against base / rebase-merged). So "code-green
+  with the fix still uncommitted" stays an UNSATISFIED vector: the loop keeps
+  going until the work is genuinely landed, with the failing `landed` evidence
+  (the dirty file list, the unpushed branch) driving the next dispatch. `mode =
+  "none"` (or an absent `[integration]` block) synthesizes NOTHING, so the vector
+  is byte-identical to the pre-T44.2 behavior. See `Kazi.Goal.landed_predicate/1`.
+  The landing ACTIONS (T44.3) that perform the commit/push/PR are a separate task.
+  `kazi schema integration` documents this shape.
 
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
@@ -457,28 +466,46 @@ defmodule Kazi.Goal.Loader do
 
       {predicates, guards} = Enum.split_with(all, &(not &1.guard?))
 
-      {:ok,
-       Goal.new(id,
-         name: Map.get(data, "name"),
-         description: Map.get(data, "description"),
-         mode: mode,
-         predicates: predicates,
-         guards: guards,
-         budget: budget,
-         scope: scope,
-         standing: standing,
-         harness: harness,
-         groups: groups,
-         enforcement: enforcement,
-         debrief: debrief,
-         memory_corpus: memory_corpus,
-         integration: integration,
-         metadata: Map.get(data, "metadata", %{})
-       )}
+      goal =
+        Goal.new(id,
+          name: Map.get(data, "name"),
+          description: Map.get(data, "description"),
+          mode: mode,
+          predicates: predicates,
+          guards: guards,
+          budget: budget,
+          scope: scope,
+          standing: standing,
+          harness: harness,
+          groups: groups,
+          enforcement: enforcement,
+          debrief: debrief,
+          memory_corpus: memory_corpus,
+          integration: integration,
+          metadata: Map.get(data, "metadata", %{})
+        )
+
+      # T44.2 (ADR-0055): when the goal declares a landing `mode` (not `:none`),
+      # append the SYNTHESIZED `landed` predicate to the vector — an ordinary,
+      # visible predicate that keeps the loop running until converged work is
+      # actually committed/pushed/PR-open/merged. `mode = :none` (or an absent
+      # `[integration]` block) synthesizes nothing, so the vector is byte-identical
+      # to the pre-T44.2 behavior.
+      {:ok, append_landed(goal)}
     end
   end
 
   def from_map(_other), do: {:error, "goal-file must decode to a table (got a non-map value)"}
+
+  # Appends the synthesized `landed` predicate (or leaves the goal untouched when
+  # the mode is `:none`). Additive — it only extends `predicates`, never touches
+  # guards or the rest of the struct.
+  defp append_landed(%Goal{} = goal) do
+    case Goal.landed_predicate(goal) do
+      nil -> goal
+      %Predicate{} = landed -> %Goal{goal | predicates: goal.predicates ++ [landed]}
+    end
+  end
 
   defp read_file(path) do
     case File.read(path) do
