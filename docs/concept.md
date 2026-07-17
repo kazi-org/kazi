@@ -625,6 +625,20 @@ section, and ADR-0021's external-machine-spec import sense). `docs/specs/` is
 optional per task, not mandatory -- it exists for behavior worth reviewing before
 code, not every WBS line.
 
+**Two scopes, one tier (T41.2, ADR-0054).** The same `docs/specs/` tier serves a
+second scope, and it is deliberately NOT a new tier: `docs/specs/product/<domain>.feature`
+is the durable **use-case catalog** -- one `Feature:` per product capability, one
+`Scenario:` per use case, tagged with the T41.1 vocabulary (`@role:`, `@priority:`,
+`@interface:`). Same Gherkin subset, same `GherkinImporter`, same `kazi spec
+import` verb, no new flag and no new schema; only the path and the reading differ.
+A **task spec** (above) is scaffolding for work in flight and archives with its
+epic; a **product spec** answers "what can this product do, for whom, and how is
+it exercised?" and outlives any one task. The tag vocabulary is what makes the
+catalog queryable -- declare a domain's role/priority/interface once on the
+`Feature:`, let each `Scenario:` inherit and override only where it differs.
+Worked example: `docs/specs/product/convergence.feature`. See
+`docs/specs/README.md` ("Two scopes").
+
 ---
 
 ## 11. What kazi is NOT

@@ -116,6 +116,42 @@ check): a one-line WBS task plus a hand-written predicate is less ceremony and
 just as clear. The tier is optional — a plan task references its spec via an
 optional `spec:` field (T40.3) only when it has one.
 
+## Two scopes: task specs and product specs (T41.2, ADR-0054)
+
+The same tier, the same Gherkin subset, the same importer and the same
+`kazi spec import` verb serve **two scopes**. This is a naming convention, **not a
+second schema** — nothing below changes how a `.feature` parses:
+
+| Scope | Path | One `Feature:` is | One `Scenario:` is | Lifecycle |
+|---|---|---|---|---|
+| **Task** (ADR-0050) | `docs/specs/<slug>.feature` | one task's capability | one behavior of it | archives with its epic (10a Layer 1) |
+| **Product** (ADR-0054) | `docs/specs/product/<domain>.feature` | one product capability / domain | one **use case** | lives as long as the capability does |
+
+A **task spec** is scaffolding for work in flight: it answers "what behavior is
+this task building?", is referenced by a WBS `spec:` field, and moves to
+`docs/specs/archive/` when its epic archives (T40.4). A **product spec** is the
+durable **use-case catalog**: it answers "what can this product do, for whom, and
+how is it exercised?" and outlives any one task. `docs/specs/product/` is a
+convention, not a mechanism — a documented equivalent path works identically,
+because the importer only ever sees the file you hand it.
+
+Product specs are where the [tag vocabulary](#tags) earns its keep. Declare the
+domain's `@role:`/`@priority:`/`@interface:` once on the `Feature:` — every
+Scenario inherits them — and let a Scenario override only where it genuinely
+differs. Derive the catalog's predicates with the SAME verb, no new flag:
+
+```sh
+kazi spec import docs/specs/product/convergence.feature --into product.goal.toml
+```
+
+The worked example is [`product/convergence.feature`](product/convergence.feature):
+one Feature (`Goal convergence`), six Scenarios, `@role:operator @priority:P0
+@interface:cli` declared once at Feature level, and one Scenario marked
+`@priority:P1` to show the override. It imports to six `custom_script` scaffold
+predicates in a single `goal-convergence` group, each carrying its `role`,
+`priority` and `interface` metadata — and each honestly RED until a human wires
+the real check, exactly like a task spec's.
+
 ## Workflow
 
 ```
