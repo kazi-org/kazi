@@ -16,6 +16,19 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.166.0](https://github.com/kazi-org/kazi/compare/v1.165.0...v1.166.0) (2026-07-17)
+
+
+### Features
+
+* **goal:** add [integration] branch field and integration_branch/1 resolver ([70f7003](https://github.com/kazi-org/kazi/commit/70f700392a7c045b3eff96e47cd6bdb16a507e94))
+
+
+### Bug Fixes
+
+* **scheduler:** recognize run-owned branch by identity, not kazi-partition prefix ([7b39ccf](https://github.com/kazi-org/kazi/commit/7b39ccffec210fc662c29ff6d4cc627dd5833d28))
+* **scheduler:** worktree checks out the goal's real branch via :owned_branch ([896f22f](https://github.com/kazi-org/kazi/commit/896f22f356c2948f6777a72cab1342331fc4147c))
+
 ## [1.165.0](https://github.com/kazi-org/kazi/compare/v1.164.1...v1.165.0) (2026-07-17)
 
 
