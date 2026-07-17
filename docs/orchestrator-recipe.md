@@ -121,6 +121,32 @@ holds an **approved** proposal is refused (loudly, as a JSON error) unless you
 pass `--replace`; this protects an approved goal's audit trail from being
 silently reset by an unrelated draft.
 
+**caller-drafts a whole roadmap (`--project`)** -- to author a MULTI-GOAL project
+in one call, pass `--project`. The payload is a `{"goals": [...]}` object where
+each entry is a caller-drafts goal (with an `"id"`) plus an optional `"needs"`
+list of predecessor ids and an optional `"integration"` block (T45.2, UC-059):
+
+```sh
+kazi plan --project --json --predicates '{
+  "goals": [
+    {"id": "foundation", "predicates": [ ... ]},
+    {"id": "api", "needs": ["foundation"], "predicates": [ ... ], "integration": {"mode": "pr"}},
+    {"id": "ui",  "needs": ["api"],        "predicates": [ ... ], "integration": {"mode": "merge"}}
+  ]
+}'
+```
+
+The goals persist as a SET of LINKED proposals sharing one **roadmap ref**
+(`road-…`); the `--json` result is `{"kind": "roadmap", "roadmap_ref",
+"proposals": [{proposal_ref, goal_id, clarify}], "clarify": [...]}`. Read the whole
+roadmap back with `kazi status <roadmap-ref> --json` (it lists the member
+proposals). The DAG is validated as a [roadmap artifact](roadmap.md) (unique ids,
+resolvable `needs`, acyclic). Each goal runs the ordinary per-goal clarify floor,
+and the roadmap as a whole runs a **roadmap-scope** floor: a needs-less pile of
+goals (they probably want separate `plan` calls) and any **frontier** goal — one
+no other goal `needs` — that declares no `[integration]` mode (ADR-0055) each raise
+a `clarify` entry.
+
 **kazi-drafts** -- for a human at the CLI or a thin non-model script that hands
 kazi only a prose idea; kazi spawns a harness to draft the predicates:
 
