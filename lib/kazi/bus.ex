@@ -49,7 +49,7 @@ defmodule Kazi.Bus do
 
   alias Gnat.Jetstream.API.{Consumer, KV}
   alias Gnat.Jetstream.API.Stream, as: JetStream
-  alias Kazi.Bus.{Liveness, Provision}
+  alias Kazi.Bus.{Board, Liveness, Provision}
   alias Kazi.Daemon.{Probe, Supervisor}
 
   @max_text_bytes 65_536
@@ -57,6 +57,10 @@ defmodule Kazi.Bus do
   @pull_batch 100
   @default_watch_timeout_s 300
   @puback_timeout_ms 5_000
+  # The board's ephemeral fact consumer is deleted the moment its read
+  # finishes; this threshold only bounds cleanup if that delete is ever missed
+  # (e.g. a crash mid-board), so the server reaps the orphan quickly.
+  @board_consumer_ttl_ns 30 * 1_000_000_000
 
   @typedoc "A read/who error surfaced to the CLI verbatim."
   @type error :: :no_daemon | :text_too_large | term()
@@ -681,6 +685,116 @@ defmodule Kazi.Bus do
         {:error, reason} -> {:error, reason}
       end
     end)
+  end
+
+  @doc """
+  T55.4 (ADR-0073 decision point 1): the current-state projection -- the
+  last-value `fact` per topic plus the live roster, rendered through
+  `Kazi.Bus.Board` into a bounded, JSON-ready map (`kazi schema` shape unchanged
+  from a read digest's bounds).
+
+  CURSOR-FREE and idempotent: unlike `read/1`, the board CONSUMES NOTHING. The
+  facts come off a throwaway ephemeral consumer with `deliver_policy:
+  :last_per_subject` -- entirely separate from the durable read cursors -- so a
+  session may board every turn without draining a message a `read` was counting
+  on (the `read` ack landmine, ADR-0073). The roster is the same `roster/1`
+  `who/1` reads. Presence is re-upserted on entry, so a session that boards
+  stays fresh in every other session's board.
+
+  Bounded by ADR-0072's digest rules: an oversize fact body renders as a stub,
+  and the fact section is at most `Kazi.Bus.Digest.max_lines/0` lines regardless
+  of how many topics exist.
+  """
+  @spec board(keyword()) :: {:ok, map()} | {:error, error()}
+  def board(opts \\ []) do
+    with_conn(opts, fn conn ->
+      upsert_presence(conn, opts)
+
+      case roster(conn, opts) do
+        {:ok, entries} -> {:ok, Board.render(read_facts(conn, opts), entries)}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
+  end
+
+  # ADR-0073 point 1: the board's fact section is the CURRENT value of every
+  # fact topic, read without consuming anything. An ephemeral consumer with
+  # `deliver_policy: :last_per_subject` delivers exactly the latest message on
+  # each `bus.<scope>.fact.<topic>` subject; being ephemeral (deleted right
+  # after) and on its OWN cursor, it never disturbs the durable `read`/`peek`
+  # consumers. It is created with explicit ack (JetStream rejects a pull
+  # consumer with any other ack policy) and unlimited max_ack_pending so a board
+  # spanning more than the batch size of topics still drains in full.
+  defp read_facts(conn, opts) do
+    scope = scope(opts)
+    stream = Provision.stream_name()
+
+    consumer = %Consumer{
+      stream_name: stream,
+      filter_subject: "bus.#{scope}.fact.>",
+      deliver_policy: :last_per_subject,
+      ack_policy: :explicit,
+      replay_policy: :instant,
+      inactive_threshold: @board_consumer_ttl_ns,
+      max_ack_pending: -1
+    }
+
+    case Consumer.create(conn, consumer) do
+      {:ok, info} ->
+        try do
+          pull_facts(conn, stream, info.name, [])
+        after
+          Consumer.delete(conn, stream, info.name)
+        end
+
+      {:error, reason} ->
+        raise_bus_error(reason)
+    end
+  end
+
+  # Walks the ephemeral last-per-subject consumer to exhaustion in full batches
+  # (a board with more topics than one batch needs several), acking as it goes
+  # so nothing redelivers within the walk -- harmless to durable cursors since
+  # this consumer is its own. `dedup_by_stream_seq/1` renames each message's
+  # stream sequence to the public `:id` the board's stub/verbatim lines carry.
+  defp pull_facts(conn, stream, consumer_name, acc) do
+    inbox = "_INBOX.#{Integer.to_string(System.unique_integer([:positive]))}"
+    {:ok, sid} = Gnat.sub(conn, self(), inbox)
+
+    :ok =
+      Consumer.request_next_message(conn, stream, consumer_name, inbox, nil,
+        batch: @pull_batch,
+        no_wait: true
+      )
+
+    {round, exhausted?} = collect_facts(conn, [], 0)
+    Gnat.unsub(conn, sid)
+    acc = [round | acc]
+
+    if exhausted? or length(round) < @pull_batch do
+      acc |> Enum.reverse() |> List.flatten() |> dedup_by_stream_seq()
+    else
+      pull_facts(conn, stream, consumer_name, acc)
+    end
+  end
+
+  defp collect_facts(conn, acc, count) do
+    receive do
+      {:msg, %{status: status}} when status in ["404", "408", "409"] ->
+        {Enum.reverse(acc), true}
+
+      {:msg, %{topic: topic, body: body} = msg} ->
+        if msg[:reply_to], do: Gnat.pub(conn, msg.reply_to, "")
+        parsed = parse_message(topic, body, msg[:headers], msg[:reply_to])
+
+        if count + 1 == @pull_batch do
+          {Enum.reverse([parsed | acc]), false}
+        else
+          collect_facts(conn, [parsed | acc], count + 1)
+        end
+    after
+      @pull_timeout_ms -> {Enum.reverse(acc), true}
+    end
   end
 
   # The annotated + filtered roster WITHOUT the caller's presence upsert or
