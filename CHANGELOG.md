@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.154.0](https://github.com/kazi-org/kazi/compare/v1.153.0...v1.154.0) (2026-07-17)
+
+
+### Features
+
+* **reconcile:** GherkinExpander enumerates runtime sub-predicates, one per Examples row for outlines (ADR-0071) ([991c541](https://github.com/kazi-org/kazi/commit/991c54172da624102ef5d331c97d1442168edbf6))
+
 ## [1.153.0](https://github.com/kazi-org/kazi/compare/v1.152.0...v1.153.0) (2026-07-17)
 
 
