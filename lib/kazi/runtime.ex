@@ -98,6 +98,10 @@ defmodule Kazi.Runtime do
     # reachability (fail on a transitively-called vuln, call stack as proof);
     # trivy/grype/npm-audit are manifest-only, ratcheted vs a baseline.
     cve: Kazi.Providers.Cve,
+    # T44.6 (ADR-0043 shape): `:no_stubs` is a deterministic diff scanner — fail
+    # when the diff-vs-base introduces a stub/placeholder/hardcoded-return marker
+    # into a NON-TEST file. Productizes the zero-stub policy as a real predicate.
+    no_stubs: Kazi.Providers.NoStubs,
     # issue #860: the scope `deny`-path guard, synthesized by
     # `Kazi.Scope.guard_predicates/1` — independent of the `[enforcement]` profile.
     scope_guard: Kazi.Providers.ScopeGuard,

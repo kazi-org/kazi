@@ -411,6 +411,9 @@ defmodule Kazi.Goal.Loader do
     "property" => :property,
     "mutation" => :mutation,
     "cve" => :cve,
+    # T44.6: `no_stubs` is a deterministic diff scanner — fail when the diff-vs-base
+    # introduces a stub/placeholder/hardcoded-return marker into a non-test file.
+    "no_stubs" => :no_stubs,
     # T49.3 (ADR-0064): replay a pinned Gherkin Scenario by delegating to a
     # surface provider. Its spec/scenario/surface/repin keys are validated below
     # so a missing binding or an unknown surface fails at load, not at dispatch.

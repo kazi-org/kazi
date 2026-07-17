@@ -808,6 +808,47 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @no_stubs %{
+    kind: "no_stubs",
+    title: "no_stubs predicate config",
+    description:
+      "A deterministic diff scanner (T44.6): FAIL when the goal's diff-vs-base introduces a " <>
+        "stub/placeholder/hardcoded-return marker (stub, mock, fake, dummy, placeholder, todo, " <>
+        "fixme, notimplemented) on an ADDED line in a NON-TEST file. Productizes the zero-stub " <>
+        "policy as a real predicate. Only added lines and only production files count (test " <>
+        "files are exempt); a clean diff passes, a hit fails with file:line evidence.",
+    keys: [
+      %{
+        name: "patterns",
+        type: "array<string>",
+        required: false,
+        description:
+          "The stub markers to scan for (case-insensitive). Default: stub, mock, fake, dummy, " <>
+            "placeholder, todo, fixme, notimplemented."
+      },
+      %{
+        name: "base",
+        type: "string",
+        required: false,
+        description:
+          "The base ref to diff against. Default: the merge-base with origin/main, else the " <>
+            "repo root commit, else the empty tree."
+      },
+      %{
+        name: "exclude",
+        type: "array<string>",
+        required: false,
+        description:
+          "Extra path PREFIXES to exempt beyond the built-in test-file rule (a path under a " <>
+            "test/ directory or a _test.ex(s) file is always exempt). Default: none."
+      }
+    ],
+    example: %{
+      "id" => "no-stubs",
+      "provider" => "no_stubs"
+    }
+  }
+
   @integration %{
     kind: "integration",
     title: "[integration] goal-file block",
@@ -997,6 +1038,7 @@ defmodule Kazi.Predicate.Schema do
     "property" => @property,
     "mutation" => @mutation,
     "cve" => @cve,
+    "no_stubs" => @no_stubs,
     "integration" => @integration,
     "scenario" => @scenario
   }
