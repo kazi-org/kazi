@@ -58,6 +58,21 @@ defmodule Kazi.Bus.Digest do
   def max_lines, do: @max_lines
 
   @doc """
+  Renders ONE message as a single line: verbatim (its full `text`, plus
+  id/kind/topic/provenance) when its body fits `render_threshold_bytes/0`, or a
+  `"stub"` (the same provenance WITHOUT `text`) when it is over the threshold.
+
+  This is the ADR-0072 decision 2 stub rule as a reusable per-message unit --
+  the board (`Kazi.Bus.Board`) renders each topic's current-value fact through
+  it so the oversize-becomes-stub decision lives in ONE place, never
+  reimplemented against the raw threshold.
+  """
+  @spec line(message()) :: line()
+  def line(msg) do
+    if oversize?(msg), do: stub_line(msg), else: verbatim_line(msg)
+  end
+
+  @doc """
   Splits `messages` into verbatim lines (directed `msg` or `sev: "interrupt"`)
   and digest lines (`<count> <kind>/<topic>`, grouped, most-frequent first).
   Returns `%{verbatim: [String.t()], digest: [String.t()]}`; both empty for `[]`.
