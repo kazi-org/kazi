@@ -77,7 +77,7 @@ defmodule Kazi.Reconcile.Coverage do
   """
 
   alias Kazi.Predicate
-  alias Kazi.Reconcile.SurfaceElement
+  alias Kazi.Reconcile.{SurfaceElement, SurfaceMatch}
 
   defmodule Result do
     @moduledoc """
@@ -137,36 +137,26 @@ defmodule Kazi.Reconcile.Coverage do
   def check(surface, predicates, opts \\ [])
       when is_list(surface) and is_list(predicates) and is_list(opts) do
     allow_patterns = Keyword.get(opts, :allow_list, [])
-    owner_tokens = predicates |> Enum.flat_map(&owner_tokens/1) |> trim_tokens()
+
+    owner_tokens =
+      predicates |> Enum.flat_map(&owner_tokens/1) |> SurfaceMatch.trim_tokens()
 
     {allowed, rest} =
       surface
       |> Enum.uniq()
-      |> Enum.split_with(&allowed?(&1, allow_patterns))
+      |> Enum.split_with(&SurfaceMatch.allowed?(&1, allow_patterns))
 
-    {owned, unowned} = Enum.split_with(rest, &owned?(&1, owner_tokens))
+    {owned, unowned} = Enum.split_with(rest, &SurfaceMatch.covered?(&1, owner_tokens))
 
     %Result{
       status: if(unowned == [], do: :pass, else: :fail),
-      owned: sort(owned),
-      allowed: sort(allowed),
-      unowned: sort(unowned)
+      owned: SurfaceMatch.sort(owned),
+      allowed: SurfaceMatch.sort(allowed),
+      unowned: SurfaceMatch.sort(unowned)
     }
   end
 
-  defp sort(elements), do: Enum.sort_by(elements, &SurfaceElement.sort_key/1)
-
   # --- ownership -----------------------------------------------------------
-
-  defp owned?(%SurfaceElement{identifier: id}, owner_tokens) do
-    Enum.any?(owner_tokens, &token_matches?(&1, id))
-  end
-
-  # Two non-blank strings match when equal or one contains the other.
-  defp token_matches?(token, identifier) do
-    token == identifier or String.contains?(identifier, token) or
-      String.contains?(token, identifier)
-  end
 
   # All owner tokens a predicate contributes: provider-specific tokens plus the
   # universal id/description/config-strings catch-all.
@@ -244,30 +234,4 @@ defmodule Kazi.Reconcile.Coverage do
     do: method |> String.trim() |> String.upcase()
 
   defp method_token(_), do: "GET"
-
-  # Drop nil/blank tokens once, up front, so the hot match loop never re-checks.
-  defp trim_tokens(tokens) do
-    tokens
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
-  # --- allow-list ----------------------------------------------------------
-
-  defp allowed?(%SurfaceElement{identifier: id}, patterns) do
-    Enum.any?(patterns, &pattern_matches?(&1, id))
-  end
-
-  # A pattern is an exact identifier, or a `prefix*` wildcard.
-  defp pattern_matches?(pattern, id) when is_binary(pattern) do
-    case String.split(pattern, "*", parts: 2) do
-      [^pattern] -> pattern == id
-      [prefix, ""] -> String.starts_with?(id, prefix)
-      [prefix, suffix] -> String.starts_with?(id, prefix) and String.ends_with?(id, suffix)
-    end
-  end
-
-  defp pattern_matches?(_, _), do: false
 end
