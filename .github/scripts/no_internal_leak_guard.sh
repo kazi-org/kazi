@@ -51,6 +51,9 @@ EXCLUDE_PATHS=(
   '^\.github/scripts/docs_with_code_guard\.sh$'
   '^docs/oss-gates\.md$'
   '^\.github/workflows/oss-gates\.yml$'
+  # T44.7: the oss_hygiene provider's test fixtures legitimately contain example
+  # private IPs / home paths to exercise the ported scanner.
+  '^test/kazi/providers/oss_hygiene_test\.exs$'
 )
 
 # Inline allow marker: any line containing this token is exempt (for the rare
