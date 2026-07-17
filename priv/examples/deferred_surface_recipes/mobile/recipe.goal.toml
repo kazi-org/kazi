@@ -1,0 +1,32 @@
+# Deferred-surface recipe (T43.10, ADR-0053 §3): Mobile — a Maestro YAML flow run
+# against an emulator/simulator. First-class promotion of a `:mobile` provider is
+# DEFERRED (ADR-0053 §3) precisely because it drags in a device-farm / emulator
+# dependency kazi does not own — the same integration cost ADR-0043 §3 deferred for
+# canary/chaos. Per ADR-0007's walking-skeleton discipline, it ships as a
+# `custom_script` recipe until a concrete goal proves it common enough.
+#
+# `maestro test <flow>` launches the app on the connected device, replays the flow,
+# and exits 0 only when every step/assertion holds — so the `exit_zero` verdict is
+# exactly right (the tool's exit code already means pass/fail).
+#
+# Evidence tier: DEMONSTRATION (fail directly, ADR-0043 §2). A failed step is a
+# concrete, reproduced UI interaction (Maestro also captures a screenshot), not a
+# rolled-up score.
+#
+# Requires a running Android emulator / iOS simulator with the app installed.
+# Point args at login_flow.broken.yaml to see it FAIL; login_flow.yaml passes.
+#
+#     kazi apply recipe.goal.toml --workspace .
+#
+# See ../README.md and docs/custom-script-recipes.md.
+
+id = "recipe-mobile-maestro"
+name = "Mobile: Maestro login flow passes on device"
+
+[[predicate]]
+id = "mobile-login-flow"
+provider = "custom_script"
+description = "maestro test replays the login flow on the device and every step holds"
+cmd = "maestro"
+args = ["test", "login_flow.yaml"]
+verdict = "exit_zero"
