@@ -46,6 +46,11 @@ defmodule Kazi.CLI.BusTest do
       assert {:bus, "read", [], opts} = Kazi.CLI.parse(["bus", "read"])
       assert opts[:peek] == false
     end
+
+    test "`bus watch --since <value>` threads the since flag through (T54.9)" do
+      assert {:bus, "watch", [], opts} = Kazi.CLI.parse(["bus", "watch", "--since", "all"])
+      assert opts[:since] == "all"
+    end
   end
 
   # ===========================================================================
@@ -165,6 +170,15 @@ defmodule Kazi.CLI.BusTest do
       assert output =~ "kazi bus who"
       refute output =~ "kazi apply <goal-file>"
     end
+
+    test "`bus watch --help` documents --since and the exit-3 timeout contract (T54.9)" do
+      output = capture_io(fn -> assert Kazi.CLI.run(["bus", "watch", "--help"], []) == 0 end)
+
+      assert output =~ "kazi bus watch"
+      assert output =~ "--since"
+      assert output =~ "exits 3"
+      refute output =~ "kazi apply <goal-file>"
+    end
   end
 
   # ===========================================================================
@@ -216,6 +230,16 @@ defmodule Kazi.CLI.BusTest do
       assert output =~ "unknown bus kind"
       assert output =~ "fact"
       assert output =~ "announce"
+      refute output =~ "no daemon running"
+    end
+
+    test "watch with an invalid --since fails fast with a usage error (T54.9)" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "watch", "--since", "yesterday"], []) == 1
+        end)
+
+      assert output =~ "--since"
       refute output =~ "no daemon running"
     end
   end

@@ -42,6 +42,15 @@ defmodule Kazi.MCP.BusToolsTest do
       end
     end
 
+    test "kazi_bus_watch declares the since anchor argument (T54.9, #1097)" do
+      by_name = Map.new(Server.tools(), &{&1["name"], &1})
+
+      assert %{"type" => "string"} =
+               by_name["kazi_bus_watch"]["inputSchema"]["properties"]["since"]
+
+      assert by_name["kazi_bus_watch"]["description"] =~ "since"
+    end
+
     test "post/tell declare their required arguments" do
       by_name = Map.new(Server.tools(), &{&1["name"], &1})
 

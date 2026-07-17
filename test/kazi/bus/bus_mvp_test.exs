@@ -261,28 +261,52 @@ defmodule Kazi.Bus.MvpTest do
       refute Enum.any?(outsider_messages, fn m -> m.text == text end)
     end
 
-    # ---- watch (#1091) -------------------------------------------------
+    # ---- watch (#1091, anchored to now per T54.9/#1097) ------------------
 
-    test "watch returns immediately when a message is already pending", %{conn: conn} do
+    test "watch with since: :all returns immediately when a message is already pending", %{
+      conn: conn
+    } do
       session = unique_session()
       text = "already pending #{session}"
 
       assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
 
       assert {:ok, messages} =
-               Bus.watch(conn: conn, session: session, scope: "machine", timeout: 5)
+               Bus.watch(conn: conn, session: session, scope: "machine", timeout: 5, since: :all)
 
       assert Enum.any?(messages, fn m -> m.kind == "msg" and m.text == text end)
     end
 
-    test "watch blocks until a message arrives, then consumes it", %{conn: conn} do
+    # T54.9/#1097: the bug was watch degenerating into peek -- a backlog a
+    # prior peek left un-acked made every watch fire immediately.
+    test "watch blocks to timeout over a peeked backlog instead of returning it", %{conn: conn} do
       session = unique_session()
-      text = "wake up #{session}"
+      text = "backlog #{session}"
+      opts = [conn: conn, session: session, scope: "machine"]
+
+      assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
+      assert {:ok, peeked} = Bus.peek(opts)
+      assert Enum.any?(peeked, fn m -> m.text == text end)
+
+      # default since: :now -- the un-acked backlog must NOT satisfy the watch
+      assert {:error, :watch_timeout} = Bus.watch(opts ++ [timeout: 1])
+
+      # ... and the backlog stays consumable by a subsequent read
+      assert {:ok, read_back} = Bus.read(opts)
+      assert Enum.any?(read_back, fn m -> m.text == text end)
+    end
+
+    test "watch wakes on a mid-watch post and returns ONLY that message, not the backlog", %{
+      conn: conn
+    } do
+      session = unique_session()
+      backlog_text = "old news #{session}"
+      new_text = "wake up #{session}"
       parent = self()
 
-      # consume the fresh durable's stream-history replay so the watcher
-      # actually parks instead of returning backlog immediately
-      {:ok, _drained} = Bus.read(conn: conn, session: session, scope: "machine")
+      # a peeked (un-acked) backlog is pending on the durables
+      assert :ok = Bus.tell(session, backlog_text, conn: conn, scope: "machine")
+      {:ok, _peeked} = Bus.peek(conn: conn, session: session, scope: "machine")
 
       watcher =
         Task.async(fn ->
@@ -296,20 +320,40 @@ defmodule Kazi.Bus.MvpTest do
         end)
 
       assert_receive :watching, 5_000
-      # drain any replayed backlog delivered on watch entry, then wake it
+      # let the watcher anchor + park, then wake it
       Process.sleep(300)
-      assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
+      assert :ok = Bus.tell(session, new_text, conn: conn, scope: "machine")
 
       assert {:ok, messages} = Task.await(watcher, 20_000)
       # exactly once: the wake path must not double-deliver via the stray
       # core-NATS signal copy (caught live on v1.143.0)
-      assert Enum.count(messages, fn m -> m.kind == "msg" and m.text == text end) == 1
+      assert Enum.count(messages, fn m -> m.kind == "msg" and m.text == new_text end) == 1
+      # strictly-new only: the pre-anchor backlog is not delivered ...
+      refute Enum.any?(messages, fn m -> m.text == backlog_text end)
+
+      # ... and stays consumable by a subsequent read, which does NOT re-see
+      # the watch-consumed message
+      assert {:ok, read_back} = Bus.read(conn: conn, session: session, scope: "machine")
+      assert Enum.any?(read_back, fn m -> m.text == backlog_text end)
+      refute Enum.any?(read_back, fn m -> m.text == new_text end)
+    end
+
+    test "watch with a numeric since anchors precisely: pending past the seq returns immediately",
+         %{conn: conn} do
+      session = unique_session()
+      text = "numeric anchor #{session}"
+
+      assert :ok = Bus.tell(session, text, conn: conn, scope: "machine")
+
+      # anchor 0 predates everything -- the pending message is strictly newer
+      assert {:ok, messages} =
+               Bus.watch(conn: conn, session: session, scope: "machine", timeout: 5, since: 0)
+
+      assert Enum.any?(messages, fn m -> m.kind == "msg" and m.text == text end)
     end
 
     test "watch times out with {:error, :watch_timeout} when nothing arrives", %{conn: conn} do
       session = unique_session()
-      # consume any replayed backlog first so watch actually parks
-      {:ok, _drained} = Bus.read(conn: conn, session: session, scope: "machine")
 
       assert {:error, :watch_timeout} =
                Bus.watch(conn: conn, session: session, scope: "machine", timeout: 1)
