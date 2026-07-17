@@ -53,7 +53,11 @@ centered, `padding: 0 28px`. Three stacked regions plus a pinned footer:
   shown fleet cards (`OVER-BUDGET` is split out of `STUCK`, never double-counted).
   The clock reflects the server time as of the last poll tick (a glance, not a
   wall clock — no per-second client JS, keeping the page build-free and tests
-  hermetic).
+  hermetic). Each chip is a **toggle button**: clicking it filters the flat
+  FLEET grid to that state (`.chip.on` highlights the active filter); clicking
+  the same chip again clears the filter. Chip counts are computed after the
+  repo/time filters but before the state filter, so the numbers always describe
+  the set the chips slice.
 
 - **NEEDS ATTENTION** (`#mc-attention`, rendered only when the queue is
   non-empty): a `.section-label` + a 3-column grid (`.attnrow`) of **alert
@@ -74,7 +78,12 @@ centered, `padding: 0 28px`. Three stacked regions plus a pinned footer:
   implying nothing ran (`#mission-control-empty`). Overflow past the card cap
   folds into a `+N more on the goal board →` link (`#mc-older`, → `/goals`). The
   chips and NEEDS ATTENTION alerts honor the same scope; roadmap wave mode
-  ignores it (durable-plan state across all runs).
+  ignores it (durable-plan state across all runs). Below the fleethead, a
+  **filter row** (`#mc-filters`, flat mode only): a repo dropdown (project =
+  `org/repo`, default `ALL REPOS`) and a time-window dropdown (`ALL TIME` /
+  `LAST 1h · 6h · 24h · 7d · 30d`, filtering by last-active). Filters that hide
+  every run render `#mission-control-filtered-empty` (an honest "clear the
+  filters" message) rather than the no-runs empty state.
 
 - **EVENT RIVER** (`.river` footer, top hairline): a `.section-label` + a
   masked marquee ticker (`.ticker`, 48s linear scroll, span duplicated for a
@@ -91,8 +100,13 @@ Each run-backed card (`.card`, a link to `/goals/:ref/drillin`) stacks:
   `STUCK` (`.st-bad` red) / `STALE` (`.st-warn` amber) / `OVER-BUDGET`
   (`.st-bad`, its own label). Card frame mirrors state: `.c-run` quiet cyan,
   `.c-ok` green glow, `.c-bad` red alarm glow (pulses), `.c-warn` amber.
-- **Meta** (`.gmeta2`): a harness badge (`.hbadge`, `harness · model`), the
-  workspace basename (`.ws`), and `ITER n`.
+- **Meta** (`.gmeta2`): a **project badge** (`.projbadge`, cyan — `org/repo`
+  resolved from the workspace's git `origin` remote, falling back to the last
+  two workspace path segments when the worktree is gone or has no remote), a
+  harness badge (`.hbadge`, `harness · model`), the workspace basename (`.ws`),
+  and `ITER n`.
+- **Age row** (`.agerow`): `AGE 3d` (since `started_at`) and `ACTIVE 5m ago`
+  (since the last heartbeat), so stale vs current reads at a glance.
 - **Predicate DNA** (`.dnarow`): one 14px square per predicate in the LATEST
   iteration's vector — `.dna.dg` green (pass), `.dna.dr` red (fail/error),
   `.dna.dx` dark (not-evaluated). A large set folds a trailing `+N`.
