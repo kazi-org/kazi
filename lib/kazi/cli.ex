@@ -229,7 +229,7 @@ defmodule Kazi.CLI do
     effort:
       "Reasoning effort level the claude harness should use, e.g. low / medium / high (forwards claude --effort). Claude-only; overrides the goal-file's [harness] effort.",
     permission_mode:
-      "`apply` only: permission mode the claude harness should run with, e.g. acceptEdits / bypassPermissions / plan (forwards claude --permission-mode). Needed for a headless dispatch against a workspace that has not been through Claude Code's interactive trust dialog, or every tool call is silently denied. Claude-only; overrides the goal-file's [harness] permission_mode.",
+      "`apply` only: permission mode the claude harness should run with, e.g. auto / acceptEdits / bypassPermissions / plan (forwards claude --permission-mode). Defaults to auto: a headless dispatch against a workspace that has not been through Claude Code's interactive trust dialog has every tool call silently denied while still exiting 0, and kazi's ephemeral partition worktree is a new path every run so the dialog can never be pre-accepted. Note acceptEdits allows edits but NOT Bash, so a goal whose predicates need git cannot converge under it. Claude-only; overrides the goal-file's [harness] permission_mode.",
     allowed_tools:
       "`apply` only: comma/space-separated tool allow-list the claude harness may use, e.g. \"Write,Bash,Edit\" (forwards claude --allowed-tools). Claude-only; overrides the goal-file's [harness] allowed_tools.",
     yes: "`plan` only: skip the interactive clarify questions and draft best-effort.",

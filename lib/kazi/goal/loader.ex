@@ -79,7 +79,7 @@ defmodule Kazi.Goal.Loader do
   | `model`          | string           | `harness.model` — optional provider/model override |
   | `command`        | string           | `harness.command` — optional binary override |
   | `effort`         | string           | `harness.effort` — optional Claude-only reasoning-effort level (`--effort <level>`, T36.6); overridden by the CLI `--effort` flag |
-  | `permission_mode`| string           | `harness.permission_mode` — optional Claude-only permission mode (`--permission-mode <mode>`, issue #769); overridden by the CLI `--permission-mode` flag |
+  | `permission_mode`| string           | `harness.permission_mode` — optional Claude-only permission mode (`--permission-mode <mode>`, issue #769); overridden by the CLI `--permission-mode` flag. **Defaults to `"auto"`** when unset: a headless dispatch into kazi's ephemeral partition worktree has no human to accept Claude Code's trust dialog, so an unset mode denies every tool call while the harness still exits 0 — a silent, billable no-op. Set `"bypassPermissions"` to widen, or `"plan"`/`"acceptEdits"` to narrow (note `acceptEdits` grants edits but NOT Bash, so a goal whose predicates need git cannot converge under it) |
   | `allowed_tools`  | array of strings | `harness.allowed_tools` — optional Claude-only tool allow-list (`--allowed-tools <t> …`, issue #769); overridden by the CLI `--allowed-tools` flag |
 
   `id` is required when a `[harness]` table is present. The loaded `id` threads
