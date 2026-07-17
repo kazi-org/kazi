@@ -180,10 +180,25 @@ defmodule Kazi.Authoring do
          {:ok, goal} <- parse_proposal(proposal, goal_id),
          :ok <- validate_loadable(goal),
          opts = Keyword.put_new(opts, :proposal_ref, proposal_ref),
+         opts = Keyword.put(opts, :discovery, maybe_discover(opts)),
          {:ok, draft} <- persist(idea, goal, opts) do
       {:ok, draft}
     end
   end
+
+  # T45.6 (UC-059): the `--discover` on-ramp is OPT-IN and BYPASSED by
+  # caller-drafts (a supplied `:proposal`), so it runs only for a kazi-drafts
+  # `plan --discover`. `:discover_fun` is a test seam defaulting to the real
+  # best-effort discovery pass, which never raises (findings degrade to warnings).
+  defp maybe_discover(opts) do
+    cond do
+      opts[:proposal] != nil -> nil
+      !opts[:discover] -> nil
+      true -> discover_fun(opts).(Keyword.get(opts, :workspace, "."), opts)
+    end
+  end
+
+  defp discover_fun(opts), do: opts[:discover_fun] || (&Kazi.Authoring.Discover.run/2)
 
   @doc """
   Drafts a MULTI-GOAL roadmap payload (T45.2, UC-059): N caller-drafts goals plus
@@ -929,14 +944,18 @@ defmodule Kazi.Authoring do
         session_name: Keyword.get(opts, :session_name),
         # T45.2 (UC-059): the shared roadmap ref, set when this proposal is a
         # member of a `kazi plan --project` roadmap; nil for a single-goal plan.
-        roadmap_ref: Keyword.get(opts, :roadmap_ref)
+        roadmap_ref: Keyword.get(opts, :roadmap_ref),
+        # T45.6 (UC-059): best-effort `--discover` findings attached as reviewer
+        # evidence; nil when discovery was not requested or was bypassed.
+        discovery: Keyword.get(opts, :discovery)
       }
 
       %ProposedGoal{}
       |> ProposedGoal.changeset(attrs)
       |> Repo.insert(
         on_conflict:
-          {:replace, [:idea, :goal_id, :status, :goal, :session_name, :roadmap_ref, :updated_at]},
+          {:replace,
+           [:idea, :goal_id, :status, :goal, :session_name, :roadmap_ref, :discovery, :updated_at]},
         conflict_target: :proposal_ref
       )
       |> case do

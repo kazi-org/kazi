@@ -135,6 +135,7 @@ defmodule Kazi.CLI do
     adr: :boolean,
     predicates: :string,
     replace: :boolean,
+    discover: :boolean,
     obsidian: :string,
     json: :boolean,
     stream: :boolean,
@@ -243,6 +244,8 @@ defmodule Kazi.CLI do
       "`plan` only (caller-drafts): a proposal payload the caller already authored; kazi spawns no model. A payload \"goal_id\"/\"idea\" names the goal and its idea verbatim (T39.1, ADR-0049); absent, they are derived from \"id\"/\"name\" or generated.",
     replace:
       "`plan` only: allow re-proposing onto a proposal_ref that already holds an APPROVED proposal (default: refused, to protect against silently discarding an approved goal's audit trail).",
+    discover:
+      "`plan` only (kazi-drafts, T45.6/UC-059): opt-in; attaches best-effort discovery evidence (stack detection, `.feature` use-cases, a public-surface codebase scan) to the drafted proposal, visible via `kazi status <proposal-ref> --json`. Caller-drafts (--predicates/--project) bypass it entirely; any discovery step failing degrades to a plain draft with a warning, never a hard error.",
     obsidian:
       "`export` only: the target directory for the Obsidian vault (group/predicate notes + Mermaid).",
     json:
@@ -459,6 +462,7 @@ defmodule Kazi.CLI do
         :json,
         :predicates,
         :replace,
+        :discover,
         :session_name,
         :project
       ]
@@ -704,6 +708,14 @@ defmodule Kazi.CLI do
                              that already holds an APPROVED proposal (#787/#793).
                              Default: refused, so a new draft never silently
                              discards an approved goal's audit trail.
+      --discover             `plan` only (kazi-drafts, T45.6/UC-059): opt-in;
+                             attaches best-effort discovery evidence (stack
+                             detection, `.feature` use-cases, a public-surface
+                             codebase scan) to the drafted proposal, visible via
+                             `kazi status <proposal-ref> --json`. Caller-drafts
+                             (--predicates/--project) bypass it entirely; any
+                             discovery step failing degrades to a plain draft with
+                             a warning, never a hard error.
       --json                 Emit a single JSON object to stdout instead of human
                              prose (the machine surface, ADR-0023). Implies
                              NON-INTERACTIVE: kazi never prompts/blocks on stdin
@@ -1979,6 +1991,7 @@ defmodule Kazi.CLI do
       json: flags[:json] || false,
       predicates: flags[:predicates],
       replace: flags[:replace] || false,
+      discover: flags[:discover] || false,
       session_name: flags[:session_name],
       project: flags[:project]
     ]
@@ -3713,7 +3726,7 @@ defmodule Kazi.CLI do
   # The `status --json` result object for a PROPOSAL (T15.5): its lifecycle state,
   # idea, and goal id. `kind: "proposal"` distinguishes it from a run status.
   defp proposal_status_json(proposal) do
-    %{
+    base = %{
       schema_version: @run_schema_version,
       kind: "proposal",
       ref: proposal.proposal_ref,
@@ -3721,6 +3734,12 @@ defmodule Kazi.CLI do
       goal_id: proposal.goal_id,
       idea: proposal.idea
     }
+
+    # T45.6 (UC-059): surface `--discover` evidence only when present, so the
+    # status shape is byte-identical to today's when discovery was not attached.
+    if is_nil(proposal.discovery),
+      do: base,
+      else: Map.put(base, :discovery, proposal.discovery)
   end
 
   # T45.2 (UC-059): a roadmap ref resolves to its member proposals.
@@ -6299,6 +6318,10 @@ defmodule Kazi.CLI do
       |> Keyword.take([:harness, :adapter_opts])
       |> Keyword.put(:workspace, opts[:workspace] || ".")
       |> Keyword.put(:replace, opts[:replace] || false)
+      # T45.6 (UC-059): thread the opt-in `--discover` into the kazi-drafts path
+      # only; caller-drafts (`caller_drafts/4`, `caller_drafts_project/3`) never
+      # pass it, so a supplied proposal bypasses discovery.
+      |> Keyword.put(:discover, opts[:discover] || false)
       |> Keyword.put(:session_name, resolve_session_name(opts))
 
     ask = propose_ask(opts, inject_opts)
