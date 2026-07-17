@@ -54,7 +54,7 @@ defmodule Kazi.Providers.Scenario do
 
   alias Kazi.{Predicate, PredicateResult}
   alias Kazi.Goal.Group
-  alias Kazi.Scenario.{Pin, Source}
+  alias Kazi.Scenario.{Inputs, Pin, Source}
 
   @default_surface "browser"
   @pin_dir "docs/specs/pins"
@@ -149,7 +149,7 @@ defmodule Kazi.Providers.Scenario do
   defp pinned(pin, predicate, config, scenario, surface, pin_path, context) do
     case resolve_delegate(surface) do
       {:ok, surface_atom, module} ->
-        replay(module, surface_atom, pin, predicate, config, scenario, surface, context)
+        replay(module, surface_atom, pin, predicate, config, scenario, surface, pin_path, context)
 
       :error ->
         PredicateResult.error(%{
@@ -160,20 +160,37 @@ defmodule Kazi.Providers.Scenario do
     end
   end
 
-  defp replay(module, surface_atom, pin, predicate, config, scenario, surface, context) do
-    delegate_config = build_delegate_config(config, pin.trace)
-    delegate = Predicate.new(predicate.id, surface_atom, config: delegate_config)
-    result = module.evaluate(delegate, context)
+  # Fresh input generation (T49.4) happens HERE, before delegation: every
+  # `{{placeholder}}` in the trace is substituted with a value generated fresh for
+  # this replay so replays stay collision-free and un-hardcodeable (ADR-0064 d2).
+  # An unresolvable generator is a pin defect — an :invalid FAIL, never a silent
+  # literal driven into the surface. The generated values land in evidence so a
+  # failing replay is reproducible.
+  defp replay(module, surface_atom, pin, predicate, config, scenario, surface, pin_path, context) do
+    case Inputs.substitute(pin.trace, pin.inputs, rand_fun(context)) do
+      {:error, {:unknown_generator, name}} ->
+        fail_state({:invalid, [{:unknown_generator, name}]}, scenario, pin_path)
 
-    extension = %{
-      scenario: scenario.scenario,
-      spec: config[:spec],
-      surface: surface,
-      pin_state: :pinned
-    }
+      {trace, generated} ->
+        delegate_config = build_delegate_config(config, trace)
+        delegate = Predicate.new(predicate.id, surface_atom, config: delegate_config)
+        result = module.evaluate(delegate, context)
 
-    %{result | evidence: Map.merge(result.evidence, extension)}
+        extension = %{
+          scenario: scenario.scenario,
+          spec: config[:spec],
+          surface: surface,
+          pin_state: :pinned,
+          inputs: generated
+        }
+
+        %{result | evidence: Map.merge(result.evidence, extension)}
+    end
   end
+
+  # The randomness seam: a test injects a fixed rand fun via context for
+  # determinism; production falls back to Inputs' strong-random default.
+  defp rand_fun(context), do: context[:rand_fun] || (&:crypto.strong_rand_bytes/1)
 
   # The pin's trace (string-keyed, the surface provider's vocabulary) merged OVER
   # the passthrough config, so a pinned scenario replays through the delegate with
