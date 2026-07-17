@@ -54,7 +54,30 @@ defmodule Kazi.Scheduler.FrontierCompleteEventTest do
     goal = two_frontier_goal()
     reconciler = gated_reconciler(test_pid)
 
-    stream = fn event -> send(test_pid, {:stream_event, event}) end
+    # Isolation (T59.5, #1025/#1186): an explicit ORDERING BARRIER, replacing the
+    # old instantaneous `refute_received {:dispatched, "c", _}`. That refute checked
+    # the mailbox at one instant for a message sent by a DIFFERENT process (c's
+    # worker) than the frontier event (the scheduler), so cross-process delivery
+    # order — which Erlang does not guarantee — reddened it under load. The
+    # scheduler fires `on_frontier_complete` SYNCHRONOUSLY, before it starts the
+    # next cycle's ready groups (`DepScheduler.dispatch_ready/1`:
+    # maybe_emit_frontier_events BEFORE start_group). So a callback that BLOCKS
+    # parks the scheduler at the frontier-0 boundary: c PROVABLY cannot have
+    # dispatched while we hold the barrier, making the ordering assertion
+    # deterministic instead of racy. This strengthens the check; it does not weaken it.
+    # The callback carries its OWN pid (the scheduler process, wherever `run`
+    # placed the loop) so the test replies to exactly that process to lift the
+    # barrier -- not `task.pid`, which is not where the callback runs.
+    stream = fn event ->
+      send(test_pid, {:stream_event, event, self()})
+      # Hold ONLY the frontier-0 boundary (the one whose "before c dispatches"
+      # ordering this test pins); later frontiers stream through non-blocking.
+      if event.frontier == 0 do
+        receive do
+          :release_frontier -> :ok
+        end
+      end
+    end
 
     task =
       Task.async(fn ->
@@ -68,19 +91,22 @@ defmodule Kazi.Scheduler.FrontierCompleteEventTest do
     assert_receive {:dispatched, "a", a_pid}
     assert_receive {:dispatched, "b", b_pid}
     refute_receive {:dispatched, "c", _}, 30
-    refute_receive {:stream_event, _}, 30
+    refute_receive {:stream_event, _, _}, 30
 
     # Converge ONLY a: frontier 0 is not yet fully settled, so no event yet and c
     # (needs BOTH a and b) still does not dispatch.
     send(a_pid, {:release, "a", :converged})
-    refute_receive {:stream_event, _}, 30
+    refute_receive {:stream_event, _, _}, 30
     refute_receive {:dispatched, "c", _}, 30
 
-    # Converge b: frontier 0 is NOW fully settled — the frontier_complete(0) event
-    # must be observed BEFORE c (frontier 1) dispatches.
+    # Converge b: frontier 0 is NOW fully settled — the scheduler fires
+    # frontier_complete(0) and BLOCKS in the callback (see barrier note above),
+    # so c cannot have dispatched yet.
     send(b_pid, {:release, "b", :converged})
 
-    assert_receive {:stream_event, event0}
+    assert_receive {:stream_event, event0, cb_pid}
+    # Deterministic now: the scheduler is parked in the (blocked) callback, so no
+    # frontier-1 group can have started — c has provably not dispatched.
     refute_received {:dispatched, "c", _}
 
     assert event0.event == "frontier_complete"
@@ -91,10 +117,13 @@ defmodule Kazi.Scheduler.FrontierCompleteEventTest do
              %{id: "b", status: :converged}
            ]
 
+    # Release the barrier -> the scheduler leaves the callback and dispatches c.
+    send(cb_pid, :release_frontier)
+
     assert_receive {:dispatched, "c", c_pid}
     send(c_pid, {:release, "c", :converged})
 
-    assert_receive {:stream_event, event1}
+    assert_receive {:stream_event, event1, _}
     assert event1.event == "frontier_complete"
     assert event1.frontier == 1
     assert event1.groups == [%{id: "c", status: :converged}]
