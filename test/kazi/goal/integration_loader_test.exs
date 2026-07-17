@@ -60,6 +60,7 @@ defmodule Kazi.Goal.IntegrationLoaderTest do
              load(%{
                "integration" => %{
                  "mode" => "pr",
+                 "branch" => "task/ship-it",
                  "branch_prefix" => "kazi/",
                  "base" => "main",
                  "commit_style" => "conventional"
@@ -68,10 +69,26 @@ defmodule Kazi.Goal.IntegrationLoaderTest do
 
     assert integration == %{
              mode: :pr,
+             branch: "task/ship-it",
              branch_prefix: "kazi/",
              base: "main",
              commit_style: "conventional"
            }
+  end
+
+  test "an authored branch is stored verbatim; absent it stays nil (derived later)" do
+    assert {:ok, %Goal{integration: %{branch: "release/x"}}} =
+             load(%{"integration" => %{"mode" => "branch", "branch" => "release/x"}})
+
+    assert {:ok, %Goal{integration: %{branch: nil}}} =
+             load(%{"integration" => %{"mode" => "branch"}})
+  end
+
+  test "a non-string branch is a load error naming the field" do
+    assert {:error, reason} =
+             load(%{"integration" => %{"mode" => "branch", "branch" => 7}})
+
+    assert reason =~ "integration.branch"
   end
 
   test "an unknown mode is a load error naming the field and the value" do
