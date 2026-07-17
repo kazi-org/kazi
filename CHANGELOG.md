@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.210.0](https://github.com/kazi-org/kazi/compare/v1.209.0...v1.210.0) (2026-07-17)
+
+
+### Features
+
+* **teach:** SKILL.md/RECIPES.md carry the full ADR-0056 surface (T45.8) ([6624f31](https://github.com/kazi-org/kazi/commit/6624f315bfa9ebf46b3ddfc093f12ed4d3289d03))
+
 ## [1.209.0](https://github.com/kazi-org/kazi/compare/v1.208.0...v1.209.0) (2026-07-17)
 
 
