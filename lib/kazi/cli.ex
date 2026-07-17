@@ -5289,12 +5289,27 @@ defmodule Kazi.CLI do
   defp report_integration_warnings_human([]), do: :ok
 
   defp report_integration_warnings_human(integration_warnings) do
-    Enum.each(integration_warnings, fn %{mode: mode} ->
-      IO.puts(
-        "  warning: [integration] mode #{inspect(mode)} is not a known mode " <>
-          "(known: #{Kazi.Goal.IntegrationLint.known_modes()})"
-      )
-    end)
+    Enum.each(integration_warnings, &report_integration_warning_human/1)
+  end
+
+  defp report_integration_warning_human(%{mode: mode}) do
+    IO.puts(
+      "  warning: [integration] mode #{inspect(mode)} is not a known mode " <>
+        "(known: #{Kazi.Goal.IntegrationLint.known_modes()})"
+    )
+  end
+
+  # T44.5: an explicit allow-list that cannot do the landing mode's git work. The
+  # message names the MISSING operations, because "permissions are wrong" is not
+  # actionable — "this list cannot run git commit" is.
+  defp report_integration_warning_human(%{integration_mode: mode, missing_tools: missing}) do
+    IO.puts(
+      "  warning: [harness] allowed_tools cannot perform [integration] mode #{inspect(mode)} — " <>
+        "missing #{Enum.map_join(missing, ", ", &inspect/1)}. The agent will converge the code " <>
+        "and then be REFUSED at landing (the harness still exits 0, so the run stalls with no " <>
+        "visible cause — issue #769). Add them, or drop allowed_tools and let kazi inject the " <>
+        "mode's defaults."
+    )
   end
 
   # The human report: a clean line when there is nothing to flag, else one line per
@@ -5347,6 +5362,15 @@ defmodule Kazi.CLI do
   end
 
   defp integration_warning_json(%{mode: mode}), do: %{mode: mode}
+
+  # T44.5: the permission-alignment warning. Distinct keys from the mode warning
+  # above, so a consumer branches on shape rather than guessing.
+  defp integration_warning_json(%{
+         integration_mode: mode,
+         missing_tools: missing,
+         allowed_tools: allowed
+       }),
+       do: %{integration_mode: mode, missing_tools: missing, allowed_tools: allowed}
 
   defp lint_warning_json(%{group_ids: {id_a, id_b}, names: {name_a, name_b}, similarity: sim}) do
     %{

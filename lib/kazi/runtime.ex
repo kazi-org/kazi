@@ -748,9 +748,55 @@ defmodule Kazi.Runtime do
         Keyword.put(adapter_opts, :allowed_tools, tools)
 
       _ ->
-        adapter_opts
+        # T44.5 (ADR-0055): NOTHING explicit was set. If the goal declares a
+        # landing mode, the agent must be allowed the git operations that mode
+        # needs — otherwise the run converges its code predicates and then cannot
+        # land, which is the #769 failure shape all over again (the harness is
+        # refused, exits 0, and the goal reports a stall nobody can read).
+        #
+        # Only when an allow-list would otherwise be ABSENT: an explicit list is
+        # the author's decision and is never widened behind their back (T44.5's
+        # lint warns instead, so they hear about it rather than having it
+        # silently overridden).
+        maybe_inject_landing_tools(adapter_opts, goal, opts)
     end
   end
+
+  # T44.5: the git/gh operations each landing mode actually performs. Derived
+  # from what the mode DOES, not a blanket grant: `:commit` never pushes, so it
+  # is not given push; only pr/merge touch `gh`.
+  @landing_tools %{
+    commit: ["Bash(git add:*)", "Bash(git commit:*)"],
+    branch: ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)"],
+    pr: ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)", "Bash(gh pr:*)"],
+    merge: ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)", "Bash(gh pr:*)"]
+  }
+
+  @doc false
+  def landing_tools(mode), do: Map.get(@landing_tools, mode, [])
+
+  # `mode: :none` injects NOTHING — a converge-and-stop goal is byte-identical to
+  # before this change (pinned by a regression test). Non-claude harnesses are
+  # untouched too: `allowed_tools` is Claude-only, and `build_adapter_opts`'s
+  # Keyword.take would drop it anyway, but not injecting keeps their argv exactly
+  # as it was.
+  #
+  # The harness is read off the RESOLVED profile already merged into
+  # `adapter_opts` (`harness_id_string/1`) rather than re-deriving it from
+  # flag+goal — that is the same profile the adapter actually dispatches through,
+  # so this can never disagree with what really ran.
+  defp maybe_inject_landing_tools(adapter_opts, %Goal{} = goal, _opts) do
+    with "claude" <- harness_id_string(adapter_opts),
+         mode when mode != :none <- goal_integration_mode(goal),
+         [_ | _] = tools <- landing_tools(mode) do
+      Keyword.put(adapter_opts, :allowed_tools, tools)
+    else
+      _ -> adapter_opts
+    end
+  end
+
+  defp goal_integration_mode(%Goal{integration: %{mode: mode}}) when is_atom(mode), do: mode
+  defp goal_integration_mode(%Goal{}), do: :none
 
   defp goal_harness_allowed_tools(%Goal{harness: harness}) when is_map(harness),
     do: Map.get(harness, :allowed_tools)
