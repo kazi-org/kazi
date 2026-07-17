@@ -68,6 +68,12 @@ defmodule Kazi.Scheduler.Worktree do
 
   alias Kazi.Scheduler.WorktreeTable
 
+  # Network-touching git ops (the create-time upstream push) get a bounded retry
+  # with constant backoff — the same shape `Kazi.Actions.Integrate` uses for its
+  # landing push, mirrored here rather than reinvented (issue #1075).
+  @network_attempts 3
+  @network_backoff_ms 500
+
   @typedoc """
   The inner reconciler the worktree seam wraps: it receives the partition AND the
   path to the partition's freshly-created worktree, and returns a partition
@@ -155,6 +161,8 @@ defmodule Kazi.Scheduler.Worktree do
           # still leaves a trace a surviving process can reap.
           entry = %{git_cmd: git_cmd, repo: repo, path: path, run_id: run_id}
           WorktreeTable.record(partition, entry, worktree_table)
+
+          push_owned_branch_upstream(git_cmd, repo, branch)
 
           try do
             inner.(partition, path)
@@ -566,6 +574,64 @@ defmodule Kazi.Scheduler.Worktree do
   end
 
   def slug_for(_partition), do: "p"
+
+  # --- create-time upstream push (issue #1075) --------------------------------
+
+  # Push the run-owned branch WITH upstream ONCE, right after the worktree is
+  # created, so an in-loop `landed` predicate gated on `@{u}` RESOLVES instead of
+  # hard-failing `no upstream configured for branch '<owned-branch>'` on every
+  # iteration. Without this the loop deadlocks: the only push is at
+  # post-convergence landing, but convergence requires the `@{u}`-gated `landed`
+  # predicate to pass, which requires an upstream the loop never sets — so
+  # landing (hence the push) never happens.
+  #
+  # Gated on an `origin` remote actually existing (a local-only fixture repo has
+  # none — nothing to push to, and the create-time push must stay a no-op there,
+  # e.g. the T21.4 worktree suite). Best-effort and TOTAL: the bounded network
+  # retry is reused from the landing push; on failure the real git stderr
+  # (captured via `stderr_to_stdout`) is logged and the run proceeds — an
+  # unreachable remote must not block isolating the partition.
+  defp push_owned_branch_upstream(git_cmd, repo, branch) do
+    if origin_configured?(git_cmd, repo) do
+      case push_with_retry(
+             git_cmd,
+             repo,
+             ["push", "--set-upstream", "origin", branch],
+             @network_attempts
+           ) do
+        {:ok, _out} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(fn ->
+            "kazi.scheduler.worktree could not push owned branch #{branch} with upstream " <>
+              "(issue #1075): #{inspect(reason)}; an in-loop @{u} check may fail until landing"
+          end)
+
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp origin_configured?(git_cmd, repo) do
+    match?({:ok, _}, git(git_cmd, repo, ["remote", "get-url", "origin"]))
+  end
+
+  defp push_with_retry(git_cmd, repo, args, attempts) when attempts >= 1 do
+    case git(git_cmd, repo, args) do
+      {:ok, _} = ok ->
+        ok
+
+      {:error, _} = err when attempts == 1 ->
+        err
+
+      {:error, _} ->
+        Process.sleep(@network_backoff_ms)
+        push_with_retry(git_cmd, repo, args, attempts - 1)
+    end
+  end
 
   # --- git --------------------------------------------------------------------
 
