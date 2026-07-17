@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.214.0](https://github.com/kazi-org/kazi/compare/v1.213.0...v1.214.0) (2026-07-17)
+
+
+### Features
+
+* **sink:** wire run-sink retention via a supervised RetentionTicker (T60.6, [#1155](https://github.com/kazi-org/kazi/issues/1155)) ([2de5104](https://github.com/kazi-org/kazi/commit/2de510455ceabaefadd9398e5b892ac08801be69))
+
 ## [1.213.0](https://github.com/kazi-org/kazi/compare/v1.212.2...v1.213.0) (2026-07-17)
 
 
