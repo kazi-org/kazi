@@ -3540,3 +3540,85 @@ injection silently no-ops. The individual pieces (board, claims, presence,
 idle/dead, run-mirror, tell/status-pending) are real and observable; the
 end-to-end no-reminder promise is not yet met under real load. Reported as
 observed, not as hoped.
+
+## 2026-07-17 — T20.11 dogfood: kazi as the L1 merge gate — it works when driven with `--check`, but the documented recipe is wrong
+
+Dogfood of the `/apply --verify-with-kazi` L1 gate (ADR-0026 L1, `apply/PHASES.md`
+Step S2b): before merging a pooled task's PR, run the task's kazi goal and block
+the merge unless the predicates objectively hold. Observed on the released
+kazi **v1.193.0**. Both halves proven — and a real bug in the gate's documented
+invocation surfaced.
+
+### The gate mechanism works (observed both ways)
+
+On a controlled fixture goal (one fast `custom_script` predicate: a marker file
+must exist), driven with the observe-only mode:
+
+- **PASS** (marker present): `kazi apply gate.goal.toml --check --json` →
+  `status = "pass"`, `predicates=[{marker-present, pass}]`. The gate would ALLOW
+  the merge.
+- **BLOCK** (marker absent): same command → `status = "fail"`,
+  `predicates=[{marker-present, fail, evidence:{exit:1}}]`. The gate would BLOCK
+  the merge and surface the failing predicate's evidence.
+
+### It blocks real broken code, on a real shipped goal
+
+Corroborated against a real self-referential goal shipped by this pool wave —
+`.kazi/goals/0072-json-locale-ascii-safe.goal.toml` (the T54.7 `--json` locale
+fix). Reverting the one-line T54.7 fix (`escape: :unicode_safe` → plain
+`Jason.encode!`) in a throwaway checkout and running the gate:
+
+```
+kazi apply .kazi/goals/0072-json-locale-ascii-safe.goal.toml --check --json
+→ status = fail
+   json-ascii-safe  -> fail (exit 1)   # the real T54.7 acceptance test
+   full-suite-green -> fail (exit 1)
+   format-clean     -> fail (exit 1)
+   landed           -> fail (exit 1)
+```
+
+The gate correctly reported `fail` with the real acceptance predicate
+(`json-ascii-safe`) catching the reverted fix — it would have BLOCKED a merge of
+that broken state. The fix was restored immediately after; nothing broken was
+committed or pushed anywhere.
+
+Honest scoping: I proved the clean converged PASS on the fixture, not on 0072,
+because 0072 carries a synthesized `landed` predicate (clean tree + pushed
+upstream + HEAD==upstream) that always reports `fail` in a local, unpushed
+checkout — so a real shipped goal cannot show an all-green converged verdict
+locally regardless of code quality. That is a property of the goal's predicate
+set, not the gate. The per-predicate teeth (`json-ascii-safe` flipping to `fail`
+on broken code) is the real-code evidence.
+
+### Finding: the S2b gate recipe is wrong (filed #1306)
+
+Step S2b documents the gate as `kazi apply <goal-file> --json` (a FULL apply, no
+`--check`) and says to proceed on `status == "converged"`. Both parts are wrong:
+
+- A full `kazi apply` on already-passing predicates returns
+  `status = "error", reason = "vacuous_goal"` (the t0 guard), **not**
+  `converged` — so the documented gate would FALSE-BLOCK every correctly
+  converged task. (And on failing code a full apply would DISPATCH a harness to
+  fix it — not gate behavior at all.)
+- The correct observe-only mode is `--check` (issue #805), whose status
+  vocabulary is `pass`/`fail`, never `converged` — so gating on `"converged"`
+  never matches the real output.
+
+The gate is sound when driven as `kazi apply <goal> --check --json` and gated on
+`status == "pass"`; the doc just names the wrong flag and the wrong status
+token. Filed as **#1306** with the fix.
+
+### L3 scope note
+
+ADR-0026's ladder puts blast-radius **leasing across sessions** at **L3** (NATS
+required); this task is the **L1** verification-gate dogfood (git-refs only). The
+acc note's "after L3, extend to a leasing dogfood" is therefore out of scope
+here — L3 is a later maturity level, not yet the subject of this task.
+
+### Verdict
+
+Did the kazi gate block a non-converged task, and cleanly pass a converged one?
+**Both — yes, when invoked correctly (`--check`, gate on `pass`).** The gate's
+value holds up under real observation. The one caveat is that the shipped
+operator recipe (S2b) does not invoke it correctly and would misfire; #1306
+tracks the doc fix.
