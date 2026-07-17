@@ -88,6 +88,48 @@ specific trap:
   a visual-regression runner (BackstopJS / reg-cli / Playwright screenshots) matches
   every approved reference (`exit_zero`).
 
+### Deferred interactive surfaces — mobile / TUI / API contract / Lighthouse
+
+Four surfaces a user directly *operates* stay `custom_script` recipes rather than
+first-class providers (ADR-0053 §3). Each ships as a self-contained, **fixture-bearing**
+worked example under
+[`priv/examples/deferred_surface_recipes/`](../priv/examples/deferred_surface_recipes/),
+with a deliberately failing variant so you can watch it report `:fail`:
+
+- [`mobile/recipe.goal.toml`](../priv/examples/deferred_surface_recipes/mobile/recipe.goal.toml)
+  — **Maestro** replays a mobile flow on an emulator/simulator; `maestro test`
+  exits non-zero on a failed step (`exit_zero`, *demonstration*). Fixtures:
+  `login_flow.yaml` (pass), `login_flow.broken.yaml` (fail).
+- [`tui/recipe.goal.toml`](../priv/examples/deferred_surface_recipes/tui/recipe.goal.toml)
+  — an **expect** pty script drives an interactive terminal program and asserts on
+  its output (`exit_zero`, *demonstration*). Fixtures: `tui_app.sh` + `check_tui.exp`
+  (pass), `tui_app.broken.sh` (fail).
+- [`api_contract/recipe.oasdiff.goal.toml`](../priv/examples/deferred_surface_recipes/api_contract/recipe.oasdiff.goal.toml)
+  — **oasdiff** `breaking --fail-on ERR` finds no breaking OpenAPI change
+  (`exit_code`, `pass_codes = [0]`, `fail_codes = [1]`, *demonstration*). Fixtures:
+  `openapi.base.yaml` + `openapi.revision.yaml` (breaking → fail),
+  `openapi.compatible.yaml` (pass). Its live complement,
+  [`recipe.schemathesis.goal.toml`](../priv/examples/deferred_surface_recipes/api_contract/recipe.schemathesis.goal.toml),
+  fuzzes a running server against the spec (`exit_zero`, infra codes → `:error`).
+- [`lighthouse/recipe.goal.toml`](../priv/examples/deferred_surface_recipes/lighthouse/recipe.goal.toml)
+  — **Lighthouse** performance score meets a **budget**; because Lighthouse exits 0
+  regardless of score, the verdict is `json` over `$.categories.performance.score`
+  (`pass_when = ">= 0.9"`), not the exit code. Fixtures: `report.lowscore.json`
+  (0.42 → fail), `report.goodscore.json` (0.95 → pass). The ratchet-against-baseline
+  counterpart is [`recipe_a11y_lighthouse.toml`](../priv/examples/recipe_a11y_lighthouse.toml).
+
+**First-class promotion is DEFERRED (ADR-0053 §3, ADR-0007).** None of these four
+earns a dedicated predicate provider yet. Per ADR-0053 §3 and the walking-skeleton
+discipline of ADR-0007, kazi does not build a provider speculatively — a surface is
+promoted only when a concrete goal proves it common enough (the earns-first-class
+test of ADR-0043). ADR-0053 §3 calls out mobile specifically: a first-class
+`:mobile` provider would drag in a device-farm / emulator dependency kazi does not
+own, the same integration cost ADR-0043 §3 deferred for canary/chaos. Until a goal
+earns it, they stay config, so the catalog grows without growing kazi's release
+surface (the ADR-0040 dividend). ADR-0053 DID promote the `:cli` provider and the
+`:browser` UI-assertion pack, which each passed the earns-first-class test; these
+four did not — **for now**.
+
 ## See also
 
 - [`docs/custom-script-provider.md`](custom-script-provider.md) — the generic
@@ -98,3 +140,6 @@ specific trap:
   first-class vs as config, the two evidence tiers (decision 4), and the order.
 - ADR-0040 (`docs/adr/0040-generic-predicate-protocol-custom-script.md`) — the
   generic protocol that makes a new checker config, not a release.
+- ADR-0053 (`docs/adr/0053-higher-level-interactive-surface-predicates.md`) — §3
+  keeps mobile / TUI / API-contract / Lighthouse as recipes (promotion deferred),
+  and ADR-0007 the walking-skeleton discipline behind that call.
