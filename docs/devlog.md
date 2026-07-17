@@ -7,6 +7,65 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17: E42 regression proof -- the self-teaching docs no longer assume the operator's personal skills (T42.7)
+
+**Type:** finding
+**Tags:** [teach, docs, skill, adr-0052, regression-proof]
+
+**Problem:** E42's premise (ADR-0052) was that kazi's two self-teaching artifacts
+-- `AGENTS.md` and the skill `kazi install-skill` generates -- named the
+OPERATOR'S PERSONAL skill library as though it were universal. A reader without
+`/plan` installed cannot act on "fall back to `/plan`". This is the proof the
+regression is closed, measured on the REAL artifacts rather than the source.
+
+**Pre-fix, measured from git history (not memory):**
+
+`lib/kazi/teach/install_skill.ex` at `5436307~1` -- **18** bare-slash tokens:
+
+| token | count |
+|---|---|
+| `/plan` | 10 |
+| `/loop` | 3 |
+| `/qualify` | 3 |
+| `/tidy` | 2 |
+
+`AGENTS.md` before T42.1 carried **0** bare-slash tokens -- and that is the
+interesting part. Its violation was `loop/qualify` ("you do NOT wrap it in a
+separate loop/qualify pass"), which NAMES two personal skills while slipping any
+bare-slash grep, because the `/` there is a separator rather than a command
+prefix. A checker scoped to bare slashes alone would have reported AGENTS.md
+clean throughout.
+
+**Post-fix, measured on the artifacts a reader actually gets:**
+
+Fresh-run of the RELEASED binary, `kazi install-skill`, which writes three files
+(ADR-0074) to `~/.claude/skills/kazi/` -- SKILL.md, AUTHORING.md, RECIPES.md:
+
+```
+/plan: 0   /tidy: 0   /loop: 0   /qualify: 0     (installed skill, all 3 files)
+/plan: 0   /tidy: 0   /loop: 0   /qualify: 0     (AGENTS.md on origin/main)
+```
+
+**Three things worth carrying forward:**
+
+1. **Grep the installed artifact, not the cwd.** The first attempt ran
+   `install-skill` inside a temp dir and grepped THAT -- zero hits, because
+   install-skill writes to `~/.claude/skills/kazi/` and the temp dir was empty.
+   A zero from an empty directory proves nothing. The real check greps where the
+   binary actually wrote.
+2. **The installed copy goes stale independently.** The skill loaded at the start
+   of this session still contained "Where `/plan` and `/tidy` sit" long after the
+   source was fixed -- `install-skill` is what refreshes it. Source-clean does not
+   mean reader-clean.
+3. **`loop/qualify` is the shape a regex cannot catch.** T42.3's guard flags
+   `/<word>` tokens in prose and deliberately does NOT flag `loop/qualify`, since
+   nothing distinguishes it from `and/or` without guessing. That form stays a
+   review catch -- which is how it survived to be found by hand in T42.1.
+
+**Verdict:** the regression is closed on both surfaces. The residual risk is not
+bare-slash tokens (CI now guards those, T42.3) but separator-slash namings, which
+only review catches.
+
 ## 2026-07-17: the wake contract works on the released binary -- a parked watch woke an idle worker with the message in hand (T55.13)
 
 **Type:** finding
