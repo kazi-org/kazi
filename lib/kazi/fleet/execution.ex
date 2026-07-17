@@ -96,7 +96,8 @@ defmodule Kazi.Fleet.Execution do
           economy: Kazi.Scheduler.Budget.spent() | nil,
           workspace: Path.t() | nil,
           integration: map() | nil,
-          error: term() | nil
+          error: term() | nil,
+          report: map() | nil
         }
 
   @typedoc """
@@ -232,11 +233,18 @@ defmodule Kazi.Fleet.Execution do
   # Normalize whatever a (possibly injected) runner returned into a full member
   # record, so the collective fold and the rollup are total.
   defp normalize_member(%{status: _} = member) do
-    Map.merge(%{economy: nil, workspace: nil, integration: nil, error: nil}, member)
+    Map.merge(%{economy: nil, workspace: nil, integration: nil, error: nil, report: nil}, member)
   end
 
   defp normalize_member(other) do
-    %{status: :stuck, economy: nil, workspace: nil, integration: nil, error: {:bad_member, other}}
+    %{
+      status: :stuck,
+      economy: nil,
+      workspace: nil,
+      integration: nil,
+      error: {:bad_member, other},
+      report: nil
+    }
   end
 
   # issue #1053 sub-fix (2): a member runner that genuinely CRASHES (not the
@@ -254,7 +262,8 @@ defmodule Kazi.Fleet.Execution do
         economy: nil,
         workspace: nil,
         integration: nil,
-        error: "member crashed: #{Exception.format(:error, e, __STACKTRACE__)}"
+        error: "member crashed: #{Exception.format(:error, e, __STACKTRACE__)}",
+        report: nil
       }
   end
 
@@ -326,6 +335,7 @@ defmodule Kazi.Fleet.Execution do
         normalize_member(%{
           status: status_for(outcome, result),
           economy: member_economy(result, elapsed_ms),
+          report: member_report(result),
           workspace: workspace
         })
 
@@ -352,6 +362,7 @@ defmodule Kazi.Fleet.Execution do
     base = %{
       status: :converged,
       economy: member_economy(result, elapsed_ms),
+      report: member_report(result),
       workspace: workspace
     }
 
@@ -387,6 +398,31 @@ defmodule Kazi.Fleet.Execution do
   end
 
   defp member_economy(_result, _elapsed_ms), do: nil
+
+  # T60.5 (#1070): the per-member data the HUMAN economy table needs — the full
+  # usage envelope (cost + per-category token breakdown) and the predicate
+  # pass/total — kept separate from `:economy` (the rollup's flat spend) and NOT
+  # serialized by `fleet_members_json/1`, so the fleet `--json` stays byte-stable.
+  defp member_report(result) when is_map(result) do
+    vector = Map.get(result, :vector)
+
+    %{
+      iterations: Map.get(result, :iterations),
+      usage: Map.get(result, :usage, %{}) || %{},
+      passing: vector_passing(vector),
+      total: vector_total(vector)
+    }
+  end
+
+  defp member_report(_result), do: nil
+
+  defp vector_passing(%Kazi.PredicateVector{results: results}),
+    do: Enum.count(results, fn {_id, r} -> Kazi.PredicateResult.passed?(r) end)
+
+  defp vector_passing(_vector), do: nil
+
+  defp vector_total(%Kazi.PredicateVector{results: results}), do: map_size(results)
+  defp vector_total(_vector), do: nil
 
   # `workspace` is only isolatable when it is itself a repo/worktree ROOT
   # (`--show-toplevel` resolves back to it) — the same rule the serial path
