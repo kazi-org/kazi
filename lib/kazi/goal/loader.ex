@@ -204,6 +204,29 @@ defmodule Kazi.Goal.Loader do
   proceeding past it. `mode = "pr"` opens the groups' PRs in the same order but
   merges nothing. `kazi schema integration` documents this shape.
 
+  ### `[conventions]` table (optional, → `Goal.conventions`, T44.4/ADR-0055 4b)
+
+  Controls the controller-owned PROCESS CONTRACT — a small, versioned block of
+  UNIVERSAL working rules kazi appends to every dispatch prompt (after the T19.1
+  orientation prefix, before the work item). It is rendered from this config ALONE
+  (never per-iteration state), so it is byte-identical across a goal's iterations —
+  a cacheable head at near-zero marginal token cost — and harness-agnostic (an
+  opencode/codex/gemini agent that never sees a `CLAUDE.md` still gets the rules).
+  Absent → `Goal.default_conventions/0` (contract ON, no extra rules).
+
+  | Key                | TOML type        | Default | Maps to / effect |
+  |--------------------|------------------|---------|------------------|
+  | `process_contract` | boolean          | `true`  | `conventions.process_contract` — `false` DISABLES the section; the dispatch prompt then reverts BYTE-IDENTICALLY to the pre-E44 body. A non-boolean is a load error. |
+  | `extra_rules`      | array of strings | `[]`    | `conventions.extra_rules` — repo-specific lines appended VERBATIM after the universal rules (the sanctioned way to extend the contract). A non-string-list is a load error. |
+
+  The universal rules (versioned WITH kazi, updated by release not per goal) are:
+  small conventional commits scoped to one directory; commit as you go on the goal
+  branch; zero-stub; grep `docs/lore.md` before debugging; migration-number safety
+  under parallelism; network-retry expectations; prefer graph tools when a code
+  graph is present. Repo-specific style stays in the repo's own
+  `CLAUDE.md`/`AGENTS.md` — the contract carries only universals to avoid
+  double-carrying (`Kazi.Harness.ProcessContract`).
+
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
   Declares the goal's *group taxonomy* — the vocabulary by which a large goal
@@ -487,6 +510,9 @@ defmodule Kazi.Goal.Loader do
          {:ok, memory_corpus} <- build_memory(Map.get(data, "memory")),
          # T44.1 (ADR-0055): optional `[integration]` table (how work lands).
          {:ok, integration} <- build_integration(Map.get(data, "integration")),
+         # T44.4 (ADR-0055 decision 4b): optional `[conventions]` table (the
+         # process-contract toggle + repo-specific extra rules).
+         {:ok, conventions} <- build_conventions(Map.get(data, "conventions")),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
@@ -524,6 +550,7 @@ defmodule Kazi.Goal.Loader do
           debrief: debrief,
           memory_corpus: memory_corpus,
           integration: integration,
+          conventions: conventions,
           metadata: Map.get(data, "metadata", %{})
         )
 
@@ -890,6 +917,43 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_integration(_), do: {:error, "[integration] must be a table"}
+
+  # T44.4 (ADR-0055 decision 4b): the optional `[conventions]` table — the
+  # controller-owned process-contract toggle + repo-specific `extra_rules`. Absent
+  # resolves to `Goal.default_conventions/0` (process contract ON, no extra rules).
+  # A non-boolean `process_contract` or a non-string-list `extra_rules` fails loudly
+  # at load, not silently at dispatch.
+  defp build_conventions(nil), do: {:ok, Goal.default_conventions()}
+
+  defp build_conventions(conventions) when is_map(conventions) do
+    with {:ok, process_contract} <- fetch_process_contract(conventions),
+         {:ok, extra_rules} <- fetch_extra_rules(conventions) do
+      {:ok, %{process_contract: process_contract, extra_rules: extra_rules}}
+    end
+  end
+
+  defp build_conventions(_), do: {:error, "[conventions] must be a table"}
+
+  defp fetch_process_contract(conventions) do
+    case Map.get(conventions, "process_contract", true) do
+      value when is_boolean(value) -> {:ok, value}
+      _ -> {:error, "[conventions] \"process_contract\" must be a boolean"}
+    end
+  end
+
+  defp fetch_extra_rules(conventions) do
+    case Map.get(conventions, "extra_rules", []) do
+      rules when is_list(rules) ->
+        if Enum.all?(rules, &is_binary/1) do
+          {:ok, rules}
+        else
+          {:error, "[conventions] \"extra_rules\" must be a list of strings"}
+        end
+
+      _ ->
+        {:error, "[conventions] \"extra_rules\" must be a list of strings"}
+    end
+  end
 
   # `mode` (default "none") -> its atom. An unknown value names `[integration]
   # mode` and the offending value, so a typo fails at load, not silently at

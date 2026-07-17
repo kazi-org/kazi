@@ -125,6 +125,16 @@ defmodule Kazi.Goal do
           commit_style: String.t() | nil
         }
 
+  @typedoc """
+  The goal's `[conventions]` block (T44.4, ADR-0055 decision 4b): whether the
+  controller-owned process contract is appended to the dispatch prompt, and any
+  repo-specific `extra_rules` appended verbatim after the universal ones.
+  """
+  @type conventions :: %{
+          process_contract: boolean(),
+          extra_rules: [String.t()]
+        }
+
   # T44.1 (ADR-0055): the default `[integration]` block — mode :none, no landing.
   # An ABSENT block and an explicit `mode = "none"` both resolve to THIS exact
   # map, so a :none goal is byte-identical to a goal-file with no block at all.
@@ -138,6 +148,17 @@ defmodule Kazi.Goal do
     branch_prefix: nil,
     base: nil,
     commit_style: nil
+  }
+
+  # T44.4 (ADR-0055 decision 4b): the default `[conventions]` block. The
+  # controller-owned PROCESS CONTRACT is ON by default (appended to every dispatch
+  # prompt, the "every dispatch" of the ADR); `process_contract = false` disables
+  # it (the prompt reverts byte-identically to the pre-E44 body). `extra_rules`
+  # appends repo-specific lines verbatim after the universal ones. An ABSENT block
+  # resolves to THIS exact map.
+  @default_conventions %{
+    process_contract: true,
+    extra_rules: []
   }
 
   @type t :: %__MODULE__{
@@ -156,6 +177,7 @@ defmodule Kazi.Goal do
           debrief: boolean(),
           memory_corpus: [String.t()] | nil,
           integration: integration(),
+          conventions: conventions(),
           metadata: map()
         }
 
@@ -205,6 +227,11 @@ defmodule Kazi.Goal do
             # SAME value an absent block resolves to. Appended additively so the
             # existing field order is untouched.
             integration: @default_integration,
+            # T44.4 (ADR-0055 decision 4b): the declared `[conventions]` block —
+            # the controller-owned process-contract toggle + repo-specific extra
+            # rules. Default = process contract ON, no extra rules. Appended
+            # additively so the existing field order is untouched.
+            conventions: @default_conventions,
             metadata: %{}
 
   @doc """
@@ -267,6 +294,7 @@ defmodule Kazi.Goal do
       memory_corpus: Keyword.get(opts, :memory_corpus),
       # T44.1 (ADR-0055): the declared `[integration]` landing block.
       integration: Keyword.get(opts, :integration, @default_integration),
+      conventions: Keyword.get(opts, :conventions, @default_conventions),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
@@ -289,6 +317,22 @@ defmodule Kazi.Goal do
   """
   @spec default_integration() :: integration()
   def default_integration, do: @default_integration
+
+  @doc """
+  The default `[conventions]` block (T44.4, ADR-0055 decision 4b): the process
+  contract ON, no repo-specific extra rules. An ABSENT `[conventions]` block
+  resolves to this EXACT map, the single source of truth the loader shares.
+
+  ## Examples
+
+      iex> Kazi.Goal.default_conventions()
+      %{process_contract: true, extra_rules: []}
+
+      iex> Kazi.Goal.new("g").conventions
+      %{process_contract: true, extra_rules: []}
+  """
+  @spec default_conventions() :: conventions()
+  def default_conventions, do: @default_conventions
 
   @doc """
   The goal's REAL target branch (T54.1, #1079/#1080): the branch the run's
