@@ -121,6 +121,8 @@ defmodule Kazi.Bus.Digest do
       do: bin,
       else: valid_utf8_prefix(binary_part(bin, 0, byte_size(bin) - 1))
   end
+
+  @doc """
   The bounded machine digest (ADR-0072 d1/d2/d6): what every `--json` /
   MCP bus read returns by default.
 
