@@ -56,6 +56,10 @@ defmodule Kazi.Daemon.Listener do
       packet: :line,
       active: false,
       backlog: 16,
+      # The SAME line budget the client connects with -- `packet: :line`
+      # truncates an over-long line silently on whichever end is receiving
+      # (T55.7; see Kazi.Daemon.Probe.socket_buffer/0).
+      buffer: Kazi.Daemon.Probe.socket_buffer(),
       ifaddr: {:local, sock_path}
     ]
 
