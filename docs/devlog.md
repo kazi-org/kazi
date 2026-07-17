@@ -4081,3 +4081,122 @@ is confirmed live; closing #1019 with this evidence.
    is the burrito payload-liveness family (#1006/#1018), tangential to #1019's
    db-migration mechanism — noting it here; not a new task unless it recurs
    without the shared-install-dir artifact.
+
+## 2026-07-17 — T59.1: #937 full gap inventory (serial-apply isolation / multi-process safety)
+
+Read #937 in full — the issue body plus all 6 comments (2026-07-08 → 2026-07-10
+triage ledger) — to scope the REMAINING concurrency-safety gaps, not just Gap A.
+#937 was filed after three prior incidents (#786, #924, #936) plus a fourth,
+previously-unfiled gap that caused a real data-loss incident (a serial `apply`
+pointed at a live checkout whose internal "clean landing" then deleted every
+untracked file outside the goal's `[scope]`). The comment thread adds facets the
+body did not name, so scoping from the body alone would have missed the two
+live incidents documented later in the thread.
+
+### Distinct gaps named across the body + all 6 comments, with current status
+
+**Gap A — serial `apply` has none of E21's `--parallel` isolation.** The umbrella
+gap; decomposes into four sub-facets tracked separately below (A1–A4) because they
+shipped/remain independently.
+
+- **A1 — worktree indirection for serial `apply` (kazi owns the working dir).** The
+  proposal's core ask: treat a serial goal as the 1-partition degenerate case so
+  `--workspace` means "the branch/base to integrate onto" and kazi materializes and
+  cleans the actual working directory. **Status: OPEN.** Only the primary-worktree
+  *refusal* shipped (see A2). Evidence: `lib/kazi/runtime.ex:150` refuses a primary
+  worktree but does not create a linked worktree for a serial run; there is no serial
+  worktree materialization path analogous to the parallel `Kazi.Scheduler.Worktree.wrap/2`.
+  The destructive-clean itself IS structurally gone — `lib/kazi/scheduler/serial_landing.ex:17`
+  documents that landing never runs `git reset`/`git clean` against the base checkout —
+  so the data-loss vector is closed, but the "kazi owns an isolated working dir for
+  serial" ask is not. → **appended as T59.6.**
+- **A2 — refuse a primary (non-linked) worktree as `--workspace`.** **Status: FIXED.**
+  #940/#942 MERGED, v1.115.0 — `apply` refuses a repo's primary worktree root by
+  default; `--allow-primary-workspace` overrides (`runtime.ex:150`).
+- **A3 — never implement "clean landing" as a tree-wide `git reset`/`git clean`.**
+  **Status: FIXED.** `serial_landing.ex` never resets/cleans the base checkout;
+  landing is rebase-merge of the run-owned branch, recognized by branch IDENTITY
+  (T54.1, #1079/#1080), not by tree-clean.
+- **A4 — dispatch/landing commit step must stage only authored paths, never a blind
+  `git add -A`** (the comment-5 incident where one group's commit swept a sibling
+  group's uncommitted WIP — silent commit-boundary corruption). **Status:
+  PARTIALLY FIXED.** `lib/kazi/actions/integrate.ex` `stage_all/2` (issue #819): a
+  goal that declares `[scope] paths` gets scoped staging (`git add -u` for tracked
+  mods + `git add -- <paths>`, never sweeping untracked files elsewhere). BUT a goal
+  with NO declared `[scope] paths` still falls back to whole-workspace `git add -A`
+  (`integrate.ex:512`, "backward compatible default"), so an unscoped goal sharing a
+  tree can still absorb a sibling's WIP. → remaining piece **appended as T59.8.**
+
+**Gap B — no supervised checkpoint between `needs`-DAG waves under `--parallel`
+(#936).** **Status: FIXED.** #936 CLOSED — `--pause-between-waves`/`--resume` with a
+persisted checkpoint (ADR-0065).
+
+**Gap C — predicates converge on vacuous/superficial (grep) matches (#924).**
+**Status: PARTIALLY FIXED / OUT OF SCOPE for E59.** The raise-the-floor mechanism —
+ADR-0064 scenario predicates (epic E49) — has shipped; #924 itself is still OPEN.
+Explicitly OUT OF SCOPE for this epic (with reason): it is a predicate-quality lane,
+not a multi-process-safety one, already tracked in #924 + E49 and independently
+valuable regardless of A/B/D. Named here so it is not silently dropped; no E59 task
+appended for it by design.
+
+**Gap D — native fleet mode for several goal-files as one coordinated DAG (#1005).**
+**Status: FIXED.** #1005 CLOSED — `kazi apply --fleet <dir|manifest>` with cross-goal
+`depends_on` DAG, per-member task worktrees, serial landing (T50.4/T50.5). The
+first-dogfood teardown defect (#1053) is also CLOSED.
+
+**Gap E — landing/acceptance predicates scoped to "the whole working tree is clean"
+are unsafe under ANY multi-goal-same-workspace scheduling** (comment 2, 2026-07-09:
+a `*-landed` predicate = `git status --porcelain` empty gave false negatives while a
+sibling goal committed in the same tree; NON-destructive, but still corrupts the
+predicate verdict). **Status: PARTIALLY FIXED.** T54.1 (#1079/#1080) made serial
+landing recognize run-owned work by branch IDENTITY rather than a tree-clean check,
+which removes the false-negative for the *landed* gate specifically. The general
+hazard — a goal AUTHOR writing a `git status --porcelain`-empty *acceptance*
+predicate that is structurally unsafe in a shared tree — remains unguarded; the
+authoring clarify floor does not warn on it. → **appended as T59.10** (an authoring
+guard/doc, low surface), and further mitigated by the isolation tasks T59.6/T59.7.
+
+**Gap F — `--parallel` did not materialize one linked worktree per partition**
+(comment 3, 2026-07-09, v1.127.0: `git worktree list` showed ONE worktree — the
+`--workspace` path — with 9–10 `claude -p` agents all sharing that cwd; recommended:
+verify `--parallel` always creates a per-group worktree AND surface isolation in
+`--explain`/`--check`). **Status: LIKELY FIXED, surfacing UNVERIFIED.** The
+worktree-per-partition machinery is present now — `Kazi.Scheduler.Worktree.wrap/2` +
+`leased_reconciler.ex` + the `worktree_table.ex` survival registry (T21.4) + T54.1
+real-branch checkout — so partitions get their own worktrees. What is NOT confirmed
+is (a) that a `[[group]]`-only goal of the exact 1.127 incident shape actually
+materializes N worktrees end-to-end, and (b) the thread's specific ask that
+`--explain`/`--check` SURFACE the per-partition isolation so a caller can confirm it
+before a long grind. → **appended as T59.9** (verification + surfacing).
+
+**Gap A-dup (a facet noted in comment 1) — a second concurrent `apply` of a goal a
+LIVE run already holds.** **Status: FIXED.** #942 MERGED / #944 CLOSED —
+`guard_no_live_duplicate/2` (`runtime.ex:302`) refuses a second apply while a
+fresh-heartbeat registry row for the SAME goal_ref is live; `--allow-duplicate-run`
+overrides; zombie rows age out via staleness.
+
+**Gap G — refuse a run whose `--workspace` is already in use by a DIFFERENT live
+run** (comments 2 & 4: N goals dispatched against the SAME non-primary worktree by
+hand; each goal's landed gate became "has every OTHER goal also finished," and worse,
+cross-goal commit bleed). Distinct from Gap A-dup, which only covers the SAME goal on
+the same workspace. **Status: OPEN.** The only cross-process guard is
+`guard_no_live_duplicate/2`, keyed by goal_ref, not by workspace path; there is no
+guard that refuses when the passed `--workspace` is already leased by a *different*
+live goal. → **appended as T59.7.**
+
+### Secondary observation (not a concurrency gap; routed, not dropped)
+
+Comment 5 also noted a `Logger - error: {removed_failing_filter,logger_translator}`
+/ repeated `DEFAULT FORMATTER CRASHED` burst around a mid-run Homebrew auto-upgrade
+(1.127→1.129), flagged as "possibly a second, separate bug." This is the same
+upgrade-path / burrito-old-version-cleanup family as #1255, which E59 already tracks
+as **T59.3**. Noting it here so it is not lost, but NOT creating a new task —
+T59.3's reproduction attempt should watch for this formatter-crash burst as a
+correlated symptom.
+
+### Scoping outcome
+
+Shipped/closed: A2, A3, B, D, A-dup. Partially fixed with a named remaining piece:
+A4 (→T59.8), E (→T59.10), F (→T59.9). Fully open: A1 (→T59.6), G (→T59.7). Out of
+scope with a stated reason: C. Five new checkable tasks appended to Workstream A
+(T59.6–T59.10). No gap silently omitted.
