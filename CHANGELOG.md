@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.216.0](https://github.com/kazi-org/kazi/compare/v1.215.0...v1.216.0) (2026-07-17)
+
+
+### Features
+
+* **dashboard:** T60.1 clause 3 -- render cross-machine runs on the fleet grid ([#1154](https://github.com/kazi-org/kazi/issues/1154)) ([f074fbc](https://github.com/kazi-org/kazi/commit/f074fbc1b3feb6a5a9a18ede29f08bf3191b0322))
+
 ## [1.215.0](https://github.com/kazi-org/kazi/compare/v1.214.0...v1.215.0) (2026-07-17)
 
 
