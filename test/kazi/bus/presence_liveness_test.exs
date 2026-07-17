@@ -65,6 +65,63 @@ defmodule Kazi.Bus.PresenceLivenessTest do
   end
 
   # ===========================================================================
+  # Untagged: the stable-anchor pid (T55.14, issue #1164)
+  #
+  # The regression: presence recorded the EPHEMERAL CLI invocation's own pid
+  # (`os_pid/0`), which exits milliseconds after writing the row -- so the
+  # daemon sweep always found it gone and reaped every live session as
+  # `dead-reaping`, and `idle` was unreachable. The fix records the STABLE
+  # session anchor's pid (the nearest live ancestor), reusing the SAME walk
+  # that backs the session id.
+  #
+  # These build a REAL process tree with a still-alive, NON-transient harness
+  # (`sh <script>`) and a transient `-c` shell child standing in for the
+  # short-lived CLI's parent. NOT a parked `bus watch`: a parked watch's own
+  # pid already outlives the CLI call, so it proves nothing (sibling T55.13).
+  # ===========================================================================
+
+  describe "anchor identity resolves the stable ancestor, not the ephemeral writer" do
+    test "a short-lived writer anchors on its still-alive ancestor -- verdicts alive, not dead" do
+      {harness_pid, cshell_pid} = spawn_anchor_tree()
+
+      # What a one-shot CLI whose parent is `cshell_pid` would record: the walk
+      # skips the transient `-c` shell and lands on the alive harness.
+      assert {anchor_pid, anchor_started_at} = Bus.anchor_identity_from(cshell_pid)
+      assert anchor_pid == harness_pid
+      assert is_binary(anchor_started_at)
+
+      recorded = %{"pid" => anchor_pid, "started_at" => anchor_started_at}
+      assert Liveness.verdict(recorded) == :alive
+
+      # The transient wrapper (and the CLI under it) exits. The OLD behavior
+      # recorded the writer's OWN identity, which now verdicts DEAD (the bug);
+      # the fix's recorded anchor still verdicts ALIVE.
+      cshell_started_at = Liveness.proc_started_at(cshell_pid)
+      kill(cshell_pid)
+      wait_until_gone(cshell_pid, 50)
+
+      assert Liveness.verdict(%{"pid" => cshell_pid, "started_at" => cshell_started_at}) == :dead
+      assert Liveness.verdict(recorded) == :alive
+    end
+
+    test "when the anchor itself is gone, the recorded identity verdicts dead (true-dead still reaps)" do
+      {harness_pid, cshell_pid} = spawn_anchor_tree()
+
+      assert {anchor_pid, anchor_started_at} = Bus.anchor_identity_from(cshell_pid)
+      recorded = %{"pid" => anchor_pid, "started_at" => anchor_started_at}
+      assert Liveness.verdict(recorded) == :alive
+
+      # Kill the whole tree: a session whose anchor is genuinely gone must NOT
+      # be kept alive by the fix.
+      kill(cshell_pid)
+      kill(harness_pid)
+      wait_until_gone(harness_pid, 50)
+
+      assert Liveness.verdict(recorded) == :dead
+    end
+  end
+
+  # ===========================================================================
   # :nats-tagged (excluded by default; NATS_URL required)
   # ===========================================================================
 
@@ -79,13 +136,20 @@ defmodule Kazi.Bus.PresenceLivenessTest do
       %{conn: conn}
     end
 
-    test "presence upserts record pid AND process start time, liveness active", %{conn: conn} do
+    test "presence upserts record the STABLE anchor pid + start time, liveness active", %{
+      conn: conn
+    } do
       session = unique_session()
       assert {:ok, entries} = Bus.who(conn: conn, session: session)
 
       assert own = Enum.find(entries, &(&1["session"] == session))
-      assert own["pid"] == own_os_pid()
-      assert own["started_at"] == Liveness.proc_started_at(own_os_pid())
+      # T55.14 (#1164): the recorded pid is the stable session anchor's (a live
+      # ancestor of this process), NOT this process's own -- and it matches
+      # `anchor_identity/0` exactly, so it verdicts :alive, never :dead.
+      assert {anchor_pid, anchor_started_at} = Bus.anchor_identity()
+      assert own["pid"] == anchor_pid
+      assert own["started_at"] == anchor_started_at
+      assert Liveness.verdict(own) == :alive
       assert own["liveness"] == "active"
       assert is_integer(own["seen_s"])
     end
@@ -178,6 +242,58 @@ defmodule Kazi.Bus.PresenceLivenessTest do
   # ===========================================================================
 
   defp own_os_pid, do: :os.getpid() |> to_string() |> String.to_integer()
+
+  # A real 2-level tree: a still-alive, NON-transient `sh <script>` harness
+  # (the walk's stopping anchor) whose child is a transient `sh -c '...'` shell
+  # (the throwaway wrapper a harness spawns per CLI command). The compound
+  # command keeps `sh -c` from exec-optimizing into `sleep`, so the child stays
+  # a genuine transient shell the walk must skip. Returns `{harness_pid,
+  # cshell_pid}`; both are torn down on exit.
+  defp spawn_anchor_tree do
+    sh = System.find_executable("sh") || "/bin/sh"
+    id = System.unique_integer([:positive])
+    pidfile = Path.join(System.tmp_dir!(), "kazi_anchor_pids_#{id}")
+    scriptfile = Path.join(System.tmp_dir!(), "kazi_anchor_#{id}.sh")
+
+    # Run as `sh <scriptfile>` (NOT `sh -c`) so the harness itself is a
+    # NON-transient shell the walk stops at. `$$` is the harness pid, `$1` the
+    # pidfile; `$!` the transient `-c` child. The `; :` keeps `sh -c` from
+    # exec-collapsing into `sleep`.
+    File.write!(
+      scriptfile,
+      ~s|sh -c 'sleep 300; :' &\nprintf '%s %s\\n' "$$" "$!" > "$1"\nsleep 300\n|
+    )
+
+    port =
+      Port.open({:spawn_executable, sh}, [:binary, :exit_status, args: [scriptfile, pidfile]])
+
+    {harness_pid, cshell_pid} =
+      Enum.reduce_while(1..100, nil, fn _, _ ->
+        with {:ok, contents} <- File.read(pidfile),
+             [h, c] <- contents |> String.trim() |> String.split(" ", trim: true) do
+          {:halt, {String.to_integer(h), String.to_integer(c)}}
+        else
+          _ ->
+            Process.sleep(20)
+            {:cont, nil}
+        end
+      end) || flunk("anchor tree never reported its pids")
+
+    on_exit(fn ->
+      kill(cshell_pid)
+      kill(harness_pid)
+      if Port.info(port), do: Port.close(port)
+      File.rm(pidfile)
+      File.rm(scriptfile)
+    end)
+
+    {harness_pid, cshell_pid}
+  end
+
+  defp kill(os_pid) do
+    System.cmd("kill", ["-9", to_string(os_pid)], stderr_to_stdout: true)
+    :ok
+  end
 
   # A REAL pid that verifiably no longer exists: spawn a short-lived OS
   # process, wait for it to exit, and confirm ps no longer sees it.
