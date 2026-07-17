@@ -4,8 +4,29 @@ defmodule Kazi.Actions.Integrate do
 
   This is the `:integrate` reconcile action (concept §5, `Kazi.Action`): once the
   loop has produced a converged change in the workspace's working tree (or on a
-  branch), Integrate **ships it** — branch → commit → push → open PR →
-  rebase-merge to the default branch.
+  branch), Integrate **ships it** — push → open PR → rebase-merge to the default
+  branch.
+
+  ## Two paths: verifies-then-ships vs legacy bulk-commit (T44.3, ADR-0055)
+
+  How Integrate treats the working tree depends on whether the goal declares an
+  `[integration]` landing block:
+
+    * **`[integration]` goals (mode `commit`/`branch`/`pr`/`merge`) — verifies,
+      never commits.** The INNER AGENT owns its commits during the loop (the T44.2
+      `landed` predicate is what gates that: clean tree + committed state). Integrate
+      does NOT run `git add -A` or `git commit`. It **verifies** the branch is a
+      clean, committed, non-base branch (reusing the T44.2 `landed` provider at the
+      commit level), then pushes, opens the PR with an auto-generated verification
+      report (the converged predicate vector + each predicate's evidence) as the
+      body, and rebase-merges. A **dirty tree** at integrate time is a distinct
+      `{:error, {:dirty_tree, paths}}` — NEVER a silent bulk commit — so the loop
+      re-observes, the `landed` predicate fails on the dirty tree, and the agent is
+      re-dispatched to commit its work.
+
+    * **Legacy goals (no `[integration]` block, mode `:none`) — unchanged.** Keep
+      the historical branch → scoped stage (`git add`) → commit → push → PR →
+      rebase-merge path exactly as before, until the next major version.
 
   ## House rule: rebase-and-merge
 
@@ -95,8 +116,10 @@ defmodule Kazi.Actions.Integrate do
   @behaviour Kazi.Action
 
   alias Kazi.Action
+  alias Kazi.Predicate
   alias Kazi.PredicateResult
   alias Kazi.PredicateVector
+  alias Kazi.Providers.Landed
   alias Kazi.Scope
 
   @typedoc """
@@ -154,12 +177,98 @@ defmodule Kazi.Actions.Integrate do
           {:ok, %{branch: branch, commit: commit, base: base, already_landed: true}}
 
         :not_landed ->
-          do_integrate(workspace, action, context)
+          if verifies_then_ships?(context) do
+            verify_then_ship(workspace, action, context)
+          else
+            do_integrate(workspace, action, context)
+          end
       end
     end
   end
 
   def execute(%Action{kind: kind}, _context), do: {:error, {:unsupported_kind, kind}}
+
+  # T44.3 (ADR-0055): a goal that declares an `[integration] mode` (commit | branch
+  # | pr | merge) opts into the verifies-then-ships contract — the INNER AGENT owns
+  # its commits (the T44.2 `landed` predicate gates that), so Integrate NEVER
+  # bulk-commits; it verifies a clean, committed branch, then pushes/PRs/merges. A
+  # goal with no `[integration]` block (mode `:none`, or no goal threaded) keeps the
+  # legacy branch → `git add -A` → commit → push → PR → merge path unchanged.
+  defp verifies_then_ships?(context) do
+    case context[:goal] do
+      %{integration: %{mode: mode}} when mode in [:commit, :branch, :pr, :merge] -> true
+      _ -> false
+    end
+  end
+
+  # T44.3 (ADR-0055): verify-then-ship for `[integration]` goals. No `git add -A`,
+  # no commit — the agent already committed its own work. A DIRTY tree here is a
+  # distinct `{:error, {:dirty_tree, paths}}`, NEVER a silent bulk commit: the loop
+  # re-observes and the (already-synthesized T44.2) `landed` predicate fails on the
+  # dirty tree, re-dispatching the agent to commit rather than papering over it.
+  defp verify_then_ship(workspace, action, context) do
+    goal = context[:goal]
+    vector = context[:vector]
+    passed = passed_predicates(vector)
+
+    with {:ok, base} <- resolve_base(workspace, action.params),
+         {:ok, branch} <- verify_clean_committed(workspace, base),
+         {:ok, commit} <- head_sha(workspace),
+         {:ok, _} <- push(workspace, branch),
+         {:ok, remote} <-
+           run_integrator(
+             context,
+             %{
+               workspace: workspace,
+               branch: branch,
+               base: base,
+               title: resolve_title(action.params, default_subject(goal, passed)),
+               body: verification_report(action.params, goal, vector, branch, base)
+             },
+             wait_for_checks: resolve_wait_for_checks(action.params)
+           ) do
+      {:ok,
+       remote
+       |> Map.put_new(:branch, branch)
+       |> Map.put_new(:commit, commit)
+       |> Map.put_new(:base, base)}
+    end
+  end
+
+  # Reuse the T44.2 `landed` provider (commit-level: clean tree + committed on a
+  # non-base branch) as the ship precondition rather than duplicating the
+  # clean-tree check. A `:pass` yields the branch to push; a dirty tree is the
+  # distinct `:dirty_tree` error; any other not-ready state (no commit, still on
+  # base) is a `:not_ready` error. The mode is pinned to `:commit` here on purpose —
+  # the pr/merge state is what Integrate is ABOUT to create, so verifying against
+  # the full mode would be circular.
+  defp verify_clean_committed(workspace, base) do
+    branch = current_branch(workspace)
+
+    predicate =
+      Predicate.new(:landed, :landed, config: %{mode: :commit, branch: branch, base: base})
+
+    case Landed.evaluate(predicate, %{workspace: workspace}) do
+      %PredicateResult{status: :pass} ->
+        {:ok, branch}
+
+      %PredicateResult{status: :fail, evidence: %{reason: :dirty_tree, dirty_paths: paths}} ->
+        {:error, {:dirty_tree, paths}}
+
+      %PredicateResult{status: :fail, evidence: evidence} ->
+        {:error, {:not_ready, evidence}}
+
+      %PredicateResult{evidence: evidence} ->
+        {:error, {:verify_failed, evidence}}
+    end
+  end
+
+  defp current_branch(workspace) do
+    case git(workspace, ["rev-parse", "--abbrev-ref", "HEAD"]) do
+      {:ok, out} -> String.trim(out)
+      {:error, _} -> nil
+    end
+  end
 
   # The original branch → commit → push → PR → merge path, unchanged.
   defp do_integrate(workspace, action, context) do
@@ -255,6 +364,66 @@ defmodule Kazi.Actions.Integrate do
           "Converged predicates: #{predicate_list(passed)}\n\n" <>
           "Branch `#{branch}` → `#{base}` (rebase-merge)."
     end
+  end
+
+  # T44.3 (ADR-0055): the verifies-then-ships PR body — an auto-generated
+  # verification report carrying the converged predicate vector + each predicate's
+  # evidence, so the PR itself shows WHY kazi considers the goal met. An explicit
+  # `params[:body]` overrides it verbatim.
+  defp verification_report(params, goal, vector, branch, base) do
+    case params[:body] do
+      b when is_binary(b) and b != "" ->
+        b
+
+      _ ->
+        """
+        ## kazi verification report
+
+        Goal `#{goal_ref(goal)}` (#{goal_name(goal)}) converged; landing verified — clean tree, committed on `#{branch}`.
+
+        Branch `#{branch}` → `#{base}` — **rebase-merge** (never squash, never a merge commit).
+
+        ### Predicate vector
+
+        #{render_vector(vector)}
+        """
+    end
+  end
+
+  # Render the whole converged vector as a checklist, id-sorted for determinism,
+  # each predicate's evidence inlined (the "iteration evidence" the PR body carries).
+  defp render_vector(%PredicateVector{results: results}) when map_size(results) > 0 do
+    results
+    |> Enum.sort_by(fn {id, _} -> to_string(id) end)
+    |> Enum.map_join("\n", fn {id, %PredicateResult{status: status} = result} ->
+      "- #{status_mark(status)} `#{id}` — #{status}#{evidence_suffix(result)}"
+    end)
+  end
+
+  defp render_vector(_), do: "_(no predicate vector recorded)_"
+
+  defp status_mark(:pass), do: "[x]"
+  defp status_mark(_), do: "[ ]"
+
+  defp evidence_suffix(%PredicateResult{evidence: evidence}) when map_size(evidence) > 0 do
+    summary =
+      evidence
+      |> Enum.sort_by(fn {k, _} -> to_string(k) end)
+      |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{evidence_value(v)}" end)
+
+    " (#{summary})"
+  end
+
+  defp evidence_suffix(_), do: ""
+
+  # Compact, single-line evidence values — a long list/string is truncated so the
+  # PR body stays readable.
+  defp evidence_value(v) when is_binary(v), do: truncate(v)
+  defp evidence_value(v) when is_list(v), do: truncate(Enum.map_join(v, ", ", &to_string/1))
+  defp evidence_value(v), do: truncate(inspect(v))
+
+  defp truncate(str) do
+    if String.length(str) > 120, do: String.slice(str, 0, 117) <> "...", else: str
   end
 
   # Whether to block on required CI checks before merging (issue #819). Default
