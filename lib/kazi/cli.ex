@@ -2485,10 +2485,45 @@ defmodule Kazi.CLI do
     print_schedule_frontiers(schedule_view(synthetic, result.members))
     print_blocked_human(Map.get(result, :blocked, []))
     print_fleet_economy_human(result.economy)
+    print_fleet_economy_table(result)
 
     if result.resume_token do
       IO.puts("resume_token: #{result.resume_token}")
     end
+  end
+
+  # T60.5 (#1070): one economy row per member — the SAME table single-goal apply
+  # prints. Sourced from each member's per-run `:report` (usage + predicate
+  # counts threaded by the fleet runner), NOT from the serialized `:economy`, so
+  # `--json` stays byte-unchanged.
+  defp print_fleet_economy_table(result) do
+    rows =
+      Enum.map(result.members, fn {id, _status} ->
+        report = result.member_results |> Map.get(id, %{}) |> Map.get(:report)
+        fleet_economy_row(id, report)
+      end)
+
+    IO.puts("\nper-goal economy:")
+    IO.puts(Kazi.CLI.EconomyTable.render(rows))
+  end
+
+  @doc false
+  def fleet_economy_row(id, nil), do: %{goal: to_string(id)}
+
+  def fleet_economy_row(id, report) do
+    usage = Map.get(report, :usage, %{}) || %{}
+
+    %{
+      goal: to_string(id),
+      iterations: Map.get(report, :iterations),
+      cost_usd: usage_get(usage, :cost_usd),
+      passing: Map.get(report, :passing),
+      total: Map.get(report, :total),
+      input_tokens: usage_get(usage, :input_tokens),
+      output_tokens: usage_get(usage, :output_tokens),
+      cached_input_tokens: usage_get(usage, :cached_input_tokens),
+      cache_write_tokens: usage_get(usage, :cache_write_tokens)
+    }
   end
 
   defp print_fleet_economy_human(%{totals: nil} = economy) do
@@ -2672,6 +2707,7 @@ defmodule Kazi.CLI do
     print_schedule_frontiers(schedule_view(synthetic, result.members))
     print_blocked_human(Map.get(result, :blocked, []))
     print_fleet_economy_human(result.economy)
+    print_fleet_economy_table(result)
 
     if result.resume_token do
       IO.puts("resume_token: #{result.resume_token}")
@@ -7571,7 +7607,48 @@ defmodule Kazi.CLI do
     maybe_report_release(result)
     IO.puts("\npredicate vector:")
     IO.puts(format_vector(result.vector))
+    # T60.5 (#1070): the cost/token/iteration breakdown — a one-row version of the
+    # SAME table the fleet path prints, so single-goal is never a special case.
+    IO.puts("\neconomy:")
+    IO.puts(Kazi.CLI.EconomyTable.render([economy_row(goal.id, result)]))
   end
+
+  @doc false
+  # T60.5: build one goal's economy row from a run result. `usage`
+  # (input/output/cached/cache-write/cost) and the predicate vector are already
+  # on the result — this is the HUMAN render only; `--json` is untouched. Public
+  # for test.
+  def economy_row(goal_id, result) do
+    usage = Map.get(result, :usage, %{}) || %{}
+    vector = Map.get(result, :vector)
+
+    %{
+      goal: to_string(goal_id),
+      iterations: Map.get(result, :iterations),
+      cost_usd: usage_get(usage, :cost_usd),
+      passing: vector_passing(vector),
+      total: vector_total(vector),
+      input_tokens: usage_get(usage, :input_tokens),
+      output_tokens: usage_get(usage, :output_tokens),
+      cached_input_tokens: usage_get(usage, :cached_input_tokens),
+      cache_write_tokens: usage_get(usage, :cache_write_tokens)
+    }
+  end
+
+  defp usage_get(usage, key) when is_map(usage) do
+    case Map.fetch(usage, key) do
+      {:ok, value} -> value
+      :error -> Map.get(usage, Atom.to_string(key))
+    end
+  end
+
+  defp vector_passing(%Kazi.PredicateVector{results: results}),
+    do: Enum.count(results, fn {_id, r} -> Kazi.PredicateResult.passed?(r) end)
+
+  defp vector_passing(_vector), do: nil
+
+  defp vector_total(%Kazi.PredicateVector{results: results}), do: map_size(results)
+  defp vector_total(_vector), do: nil
 
   # Print the release ref line only when a deploy produced one this run.
   defp maybe_report_release(%{release_ref: ref}) when is_binary(ref),
