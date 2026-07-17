@@ -119,6 +119,9 @@ defmodule KaziWeb.MissionControlLive do
      socket
      |> assign(:page_title, "kazi · mission control")
      |> assign(:session_scope, :current)
+     |> assign(:state_filter, nil)
+     |> assign(:repo_filter, nil)
+     |> assign(:time_window, nil)
      |> assign_fleet()
      |> assign_presence()}
   end
@@ -148,6 +151,32 @@ defmodule KaziWeb.MissionControlLive do
     {:noreply, socket |> assign(:session_scope, scope) |> assign_fleet()}
   end
 
+  # Topbar chip click: filter the flat grid to that state; clicking the same
+  # chip again clears the filter back to the full fleet.
+  @impl true
+  def handle_event("toggle_state_filter", %{"state" => raw}, socket) do
+    clicked = parse_state_filter(raw)
+    next = if socket.assigns.state_filter == clicked, do: nil, else: clicked
+    {:noreply, socket |> assign(:state_filter, next) |> assign_fleet()}
+  end
+
+  # Repo dropdown (project = "org/repo", default all) + time-window dropdown
+  # (last N duration by last-active, default all time).
+  @impl true
+  def handle_event("set_filters", params, socket) do
+    repo =
+      case params["repo"] do
+        r when is_binary(r) and r != "" -> r
+        _all -> nil
+      end
+
+    {:noreply,
+     socket
+     |> assign(:repo_filter, repo)
+     |> assign(:time_window, parse_time_window(params["window"]))
+     |> assign_fleet()}
+  end
+
   # ---------------------------------------------------------------------------
   # Projection: the whole view is derived from the registry + the per-goal
   # read-model history on each poll tick. No handle_event — Mission Control is a
@@ -163,6 +192,7 @@ defmodule KaziWeb.MissionControlLive do
 
     socket
     |> assign(:scope_counts, %{current: length(current), closed: length(closed)})
+    |> assign(:repos, all_runs |> Enum.map(&project_label/1) |> Enum.uniq() |> Enum.sort())
     |> assign_grid(all_runs, scoped)
     |> assign(:clock, utc_clock())
     |> assign(:alerts, alerts(scoped))
@@ -209,6 +239,7 @@ defmodule KaziWeb.MissionControlLive do
         |> assign(:cards, [])
         |> assign(:older_count, 0)
         |> assign(:instance_count, length(cards))
+        |> assign(:filters_hide_runs?, false)
         |> assign(:counts, fleet_counts(run_cards))
 
       _none ->
@@ -218,18 +249,88 @@ defmodule KaziWeb.MissionControlLive do
           |> Enum.map(fn {_ref, runs} -> Enum.max_by(runs, & &1.heartbeat_at, DateTime) end)
           |> Enum.sort_by(& &1.heartbeat_at, {:desc, DateTime})
 
-        {shown, older} = Enum.split(deduped, @card_cap)
+        filtered =
+          deduped
+          |> filter_repo(socket.assigns.repo_filter)
+          |> filter_window(socket.assigns.time_window)
+
+        {shown, older} = Enum.split(filtered, @card_cap)
         cards = Enum.map(shown, &card_from_run/1)
+        visible = state_filtered(cards, socket.assigns.state_filter)
 
         socket
         |> assign(:roadmap?, false)
         |> assign(:waves, [])
-        |> assign(:cards, cards)
+        |> assign(:cards, visible)
         |> assign(:older_count, length(older))
-        |> assign(:instance_count, length(deduped))
+        |> assign(:instance_count, length(filtered))
+        |> assign(:filters_hide_runs?, deduped != [] and visible == [])
         |> assign(:counts, fleet_counts(cards))
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Filters (flat mode): state (topbar chip toggle), repo ("org/repo" dropdown),
+  # and time window (last-active within the last N seconds). Chip counts are
+  # computed AFTER the repo/time filters but BEFORE the state filter, so the
+  # numbers on the chips always describe the set the chips slice.
+  # ---------------------------------------------------------------------------
+
+  defp parse_state_filter("running"), do: :running
+  defp parse_state_filter("converged"), do: :converged
+  defp parse_state_filter("stuck"), do: :stuck
+  defp parse_state_filter("over_budget"), do: :over_budget
+  defp parse_state_filter(_other), do: nil
+
+  @time_windows [
+    {"1h", 3_600},
+    {"6h", 6 * 3_600},
+    {"24h", 24 * 3_600},
+    {"7d", 7 * 86_400},
+    {"30d", 30 * 86_400}
+  ]
+
+  defp parse_time_window(raw) do
+    case List.keyfind(@time_windows, raw, 0) do
+      {_label, seconds} -> seconds
+      nil -> nil
+    end
+  end
+
+  defp time_window_label(nil), do: nil
+
+  defp time_window_label(seconds) do
+    case List.keyfind(@time_windows, seconds, 1) do
+      {label, _seconds} -> label
+      nil -> nil
+    end
+  end
+
+  defp filter_repo(runs, nil), do: runs
+  defp filter_repo(runs, repo), do: Enum.filter(runs, &(project_label(&1) == repo))
+
+  defp filter_window(runs, nil), do: runs
+
+  defp filter_window(runs, seconds) do
+    cutoff = DateTime.add(DateTime.utc_now(), -seconds, :second)
+
+    Enum.filter(runs, fn run ->
+      last = run.heartbeat_at || run.started_at
+      is_struct(last, DateTime) and DateTime.compare(last, cutoff) != :lt
+    end)
+  end
+
+  defp state_filtered(cards, nil), do: cards
+
+  defp state_filtered(cards, filter), do: Enum.filter(cards, &card_matches_state?(&1, filter))
+
+  # The same slicing the chip counts use: OVER-BUDGET is split out of STUCK.
+  defp card_matches_state?(card, :running), do: card.state == :converging
+  defp card_matches_state?(card, :converged), do: card.state == :landed
+  defp card_matches_state?(card, :over_budget), do: card.over_budget?
+
+  defp card_matches_state?(card, :stuck),
+    do: card.state in [:stuck, :stale] and not card.over_budget?
 
   # Injectable liveness seam (ADR-0011 §3): production probes `ps` via
   # `Kazi.SessionLiveness`; tests configure the deterministic stub so no test
@@ -352,6 +453,9 @@ defmodule KaziWeb.MissionControlLive do
       pill_cls: "stpill " <> pill_variant(state),
       harness: harness_label(run),
       ws: workspace_base(run),
+      project: project_label(run),
+      age: rel_time(run.started_at),
+      last_active: rel_time(run.heartbeat_at),
       iter: iter_label(iterations),
       preds: dna_squares(iterations),
       dna_overflow: dna_overflow(iterations),
@@ -378,6 +482,9 @@ defmodule KaziWeb.MissionControlLive do
       pill_cls: "stpill " <> pill_variant(state),
       harness: nil,
       ws: nil,
+      project: nil,
+      age: nil,
+      last_active: nil,
       iter: "—",
       preds: [],
       dna_overflow: 0,
@@ -432,6 +539,61 @@ defmodule KaziWeb.MissionControlLive do
 
   defp workspace_base(%Run{workspace: ws}) when is_binary(ws) and ws != "", do: Path.basename(ws)
   defp workspace_base(_run), do: nil
+
+  # Project = "org/repo" resolved from the workspace's git `origin` remote,
+  # cached per workspace in the LiveView process (the poll tick re-derives the
+  # whole projection every 2s; the remote never changes mid-run). A workspace
+  # that is gone or has no remote (ephemeral worktree already reaped, plain
+  # directory) falls back to the last two path segments — still a stable,
+  # honest grouping key for the repo dropdown.
+  defp project_label(%Run{workspace: ws}) when is_binary(ws) and ws != "" do
+    case Process.get({:mc_project, ws}) do
+      nil ->
+        label = derive_project(ws)
+        Process.put({:mc_project, ws}, label)
+        label
+
+      cached ->
+        cached
+    end
+  end
+
+  defp project_label(_run), do: "unknown"
+
+  defp derive_project(ws) do
+    with true <- File.dir?(ws),
+         {url, 0} <-
+           System.cmd("git", ["-C", ws, "remote", "get-url", "origin"], stderr_to_stdout: true),
+         {:ok, label} <- parse_remote(String.trim(url)) do
+      label
+    else
+      _fallback -> ws |> Path.split() |> Enum.take(-2) |> Path.join()
+    end
+  rescue
+    _e -> ws |> Path.split() |> Enum.take(-2) |> Path.join()
+  end
+
+  # "git@github.com:org/repo.git" | "https://github.com/org/repo(.git)" -> "org/repo"
+  defp parse_remote(url) do
+    case Regex.run(~r{[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$}, url) do
+      [_, org, repo] -> {:ok, "#{org}/#{repo}"}
+      _no_match -> :error
+    end
+  end
+
+  # Compact relative time for the card's AGE / ACTIVE line: "42s", "5m", "3h", "2d".
+  defp rel_time(nil), do: nil
+
+  defp rel_time(%DateTime{} = dt) do
+    s = max(DateTime.diff(DateTime.utc_now(), dt), 0)
+
+    cond do
+      s < 60 -> "#{s}s"
+      s < 3_600 -> "#{div(s, 60)}m"
+      s < 86_400 -> "#{div(s, 3_600)}h"
+      true -> "#{div(s, 86_400)}d"
+    end
+  end
 
   defp iter_label([]), do: "—"
   defp iter_label(iterations), do: "#{List.last(iterations).iteration_index}"
@@ -667,19 +829,24 @@ defmodule KaziWeb.MissionControlLive do
         <header class="topbar">
           <div class="wordmark display-heading">KAZI<span class="wm2">FLEET</span></div>
 
-          <div id="mc-fleet-chips" class="chips">
-            <div class="chip" data-count="running">
-              <span class="dot dg"></span>{@counts.running} RUNNING
-            </div>
-            <div class="chip" data-count="converged">
-              <span class="dot dgg"></span>{@counts.converged} CONVERGED
-            </div>
-            <div class="chip" data-count="stuck">
-              <span class="dot dr"></span>{@counts.stuck} STUCK
-            </div>
-            <div class="chip" data-count="over_budget">
-              <span class="dot da"></span>{@counts.over_budget} OVER-BUDGET
-            </div>
+          <div id="mc-fleet-chips" class="chips" data-state-filter={@state_filter}>
+            <button
+              :for={
+                {key, dot, count, label} <- [
+                  {:running, "dg", @counts.running, "RUNNING"},
+                  {:converged, "dgg", @counts.converged, "CONVERGED"},
+                  {:stuck, "dr", @counts.stuck, "STUCK"},
+                  {:over_budget, "da", @counts.over_budget, "OVER-BUDGET"}
+                ]
+              }
+              type="button"
+              class={"chip" <> if(@state_filter == key, do: " on", else: "")}
+              data-count={key}
+              phx-click="toggle_state_filter"
+              phx-value-state={key}
+            >
+              <span class={"dot " <> dot}></span>{count} {label}
+            </button>
           </div>
 
           <div class="clockwrap">
@@ -736,7 +903,43 @@ defmodule KaziWeb.MissionControlLive do
             </div>
           </div>
 
-          <p :if={not @roadmap? and @cards == []} id="mission-control-empty" class="empty-state">
+          <form
+            :if={not @roadmap?}
+            id="mc-filters"
+            class="filterrow"
+            phx-change="set_filters"
+          >
+            <select name="repo" class="filtersel" data-filter="repo">
+              <option value="" selected={is_nil(@repo_filter)}>ALL REPOS</option>
+              <option :for={repo <- @repos} value={repo} selected={@repo_filter == repo}>
+                {repo}
+              </option>
+            </select>
+            <select name="window" class="filtersel" data-filter="window">
+              <option value="" selected={is_nil(@time_window)}>ALL TIME</option>
+              <option
+                :for={label <- ["1h", "6h", "24h", "7d", "30d"]}
+                value={label}
+                selected={time_window_label(@time_window) == label}
+              >
+                LAST {label}
+              </option>
+            </select>
+          </form>
+
+          <p
+            :if={not @roadmap? and @cards == [] and @filters_hide_runs?}
+            id="mission-control-filtered-empty"
+            class="empty-state"
+          >
+            No runs match the current filters — clear the chip / repo / time filters to see the fleet.
+          </p>
+
+          <p
+            :if={not @roadmap? and @cards == [] and not @filters_hide_runs?}
+            id="mission-control-empty"
+            class="empty-state"
+          >
             {empty_message(@session_scope, @scope_counts)}
           </p>
 
@@ -804,7 +1007,9 @@ defmodule KaziWeb.MissionControlLive do
         .wordmark { font-size: 18px; letter-spacing: .22em; color: #EAF3FC; }
         .wordmark .wm2 { color: var(--cyn); margin-left: 8px; font-weight: 500; }
         .chips { display: flex; gap: 10px; flex-wrap: wrap; }
-        .chip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; border-radius: 3px; font-size: 11px; letter-spacing: .08em; color: var(--txt); }
+        .chip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; border-radius: 3px; font-size: 11px; letter-spacing: .08em; color: var(--txt); font: inherit; font-size: 11px; cursor: pointer; }
+        .chip:hover { border-color: var(--dim); }
+        .chip.on { color: var(--cyn); border-color: rgba(83,214,255,.55); background: rgba(83,214,255,.08); }
         .dot { width: 7px; height: 7px; border-radius: 50%; }
         .dot.dg { background: var(--cyn); box-shadow: 0 0 8px var(--cyn); }
         .dot.dgg { background: var(--grn); box-shadow: 0 0 8px var(--grn); }
@@ -821,6 +1026,9 @@ defmodule KaziWeb.MissionControlLive do
         .scopebtn { background: transparent; border: 1px solid var(--line); color: var(--dim); font: inherit; font-size: 9px; letter-spacing: .18em; padding: 5px 10px; border-radius: 3px; cursor: pointer; }
         .scopebtn:hover { color: var(--txt); border-color: var(--dim); }
         .scopebtn.on { color: var(--cyn); border-color: rgba(83,214,255,.55); background: rgba(83,214,255,.08); }
+        .filterrow { display: flex; gap: 8px; margin: 10px 0 4px; }
+        .filtersel { background: var(--panel); border: 1px solid var(--line); color: var(--txt); font: inherit; font-size: 10px; letter-spacing: .12em; padding: 5px 8px; border-radius: 3px; cursor: pointer; }
+        .filtersel:hover { border-color: var(--dim); }
         .wave { margin-bottom: 8px; }
         .wavehead { color: var(--cyn); opacity: .8; letter-spacing: .3em; margin: 14px 0 10px; }
 
@@ -860,6 +1068,8 @@ defmodule KaziWeb.MissionControlLive do
         .csub { color: var(--dim); font-size: 11px; }
         .ws { color: var(--dim); font-size: 11px; }
         .hbadge { font-size: 10px; color: var(--txt); border: 1px solid var(--line); background: var(--panel2); padding: 3px 8px; border-radius: 2px; }
+        .projbadge { font-size: 10px; color: var(--cyn); border: 1px solid rgba(83,214,255,.35); background: var(--panel2); padding: 3px 8px; border-radius: 2px; overflow-wrap: anywhere; }
+        .agerow { display: flex; gap: 14px; font-size: 10px; color: var(--dim); letter-spacing: .08em; }
         .iter { font-size: 10px; color: var(--dim); letter-spacing: .08em; }
         .dnarow { display: flex; gap: 4px; padding: 2px 0; flex-wrap: wrap; align-items: center; }
         .dna { width: 14px; height: 14px; border-radius: 2px; background: #1A2433; }
@@ -935,9 +1145,19 @@ defmodule KaziWeb.MissionControlLive do
       </div>
 
       <div class="gmeta2">
+        <span :if={@card.project} class="projbadge" data-project={@card.project}>
+          {@card.project}
+        </span>
         <span class="hbadge">{@card.harness}</span>
         <span :if={@card.ws} class="ws">{@card.ws}</span>
         <span class="iter">ITER {@card.iter}</span>
+      </div>
+
+      <div :if={@card.age || @card.last_active} class="agerow">
+        <span :if={@card.age} class="age" data-age={@card.age}>AGE {@card.age}</span>
+        <span :if={@card.last_active} class="lastactive" data-last-active={@card.last_active}>
+          ACTIVE {@card.last_active} ago
+        </span>
       </div>
 
       <div class="dnarow">
