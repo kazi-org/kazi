@@ -375,12 +375,14 @@ defmodule Kazi.Authoring.Clarify do
 
   defp draft_has_code_predicate?(nil), do: false
 
-  defp draft_has_code_predicate?(%Kazi.Goal{} = goal) do
-    goal
-    |> Kazi.Goal.all_predicates()
-    |> Enum.any?(fn predicate -> to_string(predicate.kind) in @code_providers end)
-  end
-
+  # No `%Kazi.Goal{}` clause here — deliberately (issue #1277). `landing_question/1`
+  # reaches this ONLY as `not draft_has_code_predicate?(draft)`, and only AFTER
+  # `draft_has_integration?(draft)` was false. Since `draft_has_integration?` matches
+  # ANY `%Kazi.Goal{}` and returns `true` unconditionally, a Goal draft always
+  # short-circuits the `or` before this function is called — so a Goal clause here is
+  # provably dead code (Elixir 1.20.2+'s cross-call reachability analysis flags it).
+  # A `Kazi.Goal` is still an accepted `:draft`; its "has integration?" answer is what
+  # suppresses the landing question, so it never needs a code-predicate check here.
   defp draft_has_code_predicate?(%{} = map) do
     case Map.get(map, "predicates") do
       list when is_list(list) ->
