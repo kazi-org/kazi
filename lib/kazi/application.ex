@@ -61,7 +61,13 @@ defmodule Kazi.Application do
       # heartbeat) so the fleet dashboard doesn't accumulate them forever.
       # `RunReaper.reap/0` itself was already correct and tested; nothing
       # called it until this ticker was added.
-      Kazi.ReadModel.RunReaperTicker
+      Kazi.ReadModel.RunReaperTicker,
+      # T60.6 (#1155): periodically sweep aged/oversized per-run SINK directories
+      # so `<sinks_dir>/<run_id>/` dirs don't accumulate without bound.
+      # `Kazi.Sink.Events.sweep/2` was likewise already correct and tested;
+      # nothing called it until this ticker was added (dirs grew to tens of
+      # thousands on live machines).
+      Kazi.Sink.RetentionTicker
     ]
 
     children =
