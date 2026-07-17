@@ -1061,6 +1061,36 @@ defmodule Kazi.Bus do
   end
 
   @doc false
+  # T55.14 (#1164): the pid + start time the presence row records -- the STABLE
+  # session anchor, computed with the SAME ancestor walk that backs the session
+  # id (`walk_to_anchor/2`), starting from this process's parent. Never the
+  # ephemeral CLI invocation's own pid, which exits before the daemon sweep
+  # can see it. Falls back to this process's own identity only when `ps` can't
+  # resolve an ancestor (last-resort honest degradation).
+  @spec anchor_identity() :: {pos_integer(), String.t() | nil}
+  def anchor_identity do
+    case ps_int(os_pid(), "ppid=") do
+      {:ok, ppid} -> anchor_identity_from(ppid)
+      :error -> {os_pid(), Liveness.proc_started_at(os_pid())}
+    end
+  end
+
+  @doc false
+  # Exposed for tests: the anchor identity walked UP from `candidate_pid` -- in
+  # real use this process's parent. Mirrors `fallback_id_from/1` (the session-id
+  # side) but returns the pid + start-time PAIR the presence row stores instead
+  # of the hashed id, reusing the identical `walk_to_anchor/2`. A short-lived
+  # writer therefore records its still-alive ancestor, not its own about-to-exit
+  # pid.
+  @spec anchor_identity_from(pos_integer()) :: {pos_integer(), String.t() | nil}
+  def anchor_identity_from(candidate_pid) do
+    case walk_to_anchor(candidate_pid, @fallback_walk_limit) do
+      {pid, start} -> {pid, start}
+      :error -> {os_pid(), Liveness.proc_started_at(os_pid())}
+    end
+  end
+
+  @doc false
   # The pure derivation, exposed for tests: deterministic in its inputs; any
   # differing input (host, pid, or start time) yields a different id.
   @spec derive_fallback_id(String.t(), pos_integer(), String.t()) :: String.t()
@@ -1303,11 +1333,21 @@ defmodule Kazi.Bus do
     # daemon's presence sweep matches both before claiming the session is
     # alive (or reaping it). `liveness` is "active" on the session's OWN
     # writes; the sweep's re-heartbeats rewrite it to "idle".
+    #
+    # T55.14 (#1164): the recorded pid is the STABLE session anchor's, NOT this
+    # ephemeral CLI invocation's own (`os_pid/0`). A one-shot `bus post`/`who`/
+    # `tell` exits milliseconds after writing its row, so recording its own pid
+    # meant the sweep always found it gone and reaped every live session as
+    # `dead-reaping` (`idle` was unreachable). `anchor_identity/0` reuses the
+    # SAME nearest-stable-ancestor walk that backs the session id, so the pid
+    # is a long-lived ancestor still present when the sweep runs.
+    {anchor_pid, anchor_started_at} = anchor_identity()
+
     entry = %{
       "session" => session(opts),
       "machine" => hostname(),
-      "pid" => os_pid(),
-      "started_at" => Liveness.proc_started_at(os_pid()),
+      "pid" => anchor_pid,
+      "started_at" => anchor_started_at,
       "liveness" => "active",
       "cwd" => File.cwd!(),
       "ts" => DateTime.to_iso8601(DateTime.utc_now())
