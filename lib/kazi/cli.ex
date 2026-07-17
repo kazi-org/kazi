@@ -207,6 +207,8 @@ defmodule Kazi.CLI do
       "`spec import` only (T40.2, ADR-0050): the target goal-file the imported Scenarios' `test_runner` predicates are UPSERTED into (required). When the file exists its groups/predicates are merged (same-id predicates replaced in place, not duplicated); when it does not, it is created from the import. Under --json the result carries the written `into` path and the upserted predicate ids.",
     write:
       "`approve` only (T39.3, ADR-0049): materialize the approved goal as a loadable goal-file at <path>, so a file-based / version-controlled workflow can `apply <path>` and get the SAME goal `apply <ref>` runs. Under --json the result carries the written `path`. Absent, approve is unchanged.",
+    reap:
+      "`orphans` only (T54.5, issue #1073): actually KILL each orphaned harness process group (TERM then KILL) instead of only listing it. Read-only without it.",
     debrief:
       "Opt into post-dispatch debrief capture (ADR-0058): append one capped debrief question to the dispatch prompt and persist the agent's structured answer as hypothesis rows. Overrides the goal-file's [economy] debrief field.",
     status:
