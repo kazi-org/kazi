@@ -297,6 +297,29 @@ shared dir, commit immediately after each file (smallest possible uncommitted
 window); never hold uncommitted work across tool calls. This is the textual companion
 to the PreToolUse worktree hook + the CLAUDE.md Worktree Guardrail.
 
+### L-0037 #claims #pool #identity -- claim refs are unattributable: every pool session claims as the same identity string
+`claim.sh` mints claim commits as the repo's configured git user, so N pool
+sessions on one machine all claim as ONE identity -- when a shared-file lock
+(`R-<slug>`) went stale mid-wave, the coordinator could not tell WHICH session
+held it and had to broadcast release requests to every candidate (2026-07-16
+E55 wave A; one 45-minute stale hold serialized four tasks). Rule: treat any
+R-lock older than ~15 min as suspect; coordinator MAY break it (worktree
+isolation + the merge protocol absorb a parallel edit as a visible conflict,
+never lost work). Fix direction: claim.sh should embed the SESSION name
+(`kazi bus who` identity) in the claim message, and prefer fine-grained locks
+over mega-locks like R-cli-ex.
+
+### L-0038 #pool #worktree #tests -- fixed test ports and shared scratchpads collide across concurrent pool sessions
+Concurrent worktree suites on one machine race on every fixed resource:
+`TEST_HTTP_PORT` defaults (4002) held by a live apply run, "dedicated" ports
+claimed twice by different sessions, and the session-shared scratchpad
+overwriting one teammate's staged file with another's. Rule: derive per-run
+ports (unique_integer/ephemeral), never share a literal port in two prompts,
+and treat any cross-session file handoff as unsafe unless it carries the task
+id in its name. Also: a full suite under load-average >30 flakes in the
+documented assert_receive classes -- rerun-once before believing a failure,
+and let clean-runner CI arbitrate. (2026-07-16 E55 wave A.)
+
 ## Enforcement / anti-gaming
 
 ### L-0015 #enforcement #loop #worktree #invariant -- the checker-isolation seam is `run_provider/3`; scope clean-tree to graders only
@@ -778,6 +801,20 @@ one -- but re-run that grep after any new module ships a compile-time-looking
 default. Regression: PR#931 (2026-07-08),
 `test/kazi/logging/dashboard_log_rotation_test.exs` (first-ever coverage for
 this module).
+
+### L-0039 #daemon #macos #socket -- macOS caps Unix-socket paths at ~104 bytes; deep KAZI_STATE_DIR fails as :einval
+`kazi daemon start` under a deep state dir fails with
+`Kazi.Daemon.Listener :einval` and no hint: the control socket path exceeds
+the macOS `sun_path` limit (~104 bytes). Two independent wave-A teammates hit
+it and both worked around with `/tmp/<short>` state dirs. Fix direction: the
+daemon should detect the over-long path and say so in one line.
+
+### L-0040 #bus #read #batch -- Bus pulls in batches of 100; one read does not drain a deep backlog
+`Kazi.Bus` pulls durable consumers with `batch: 100, no_wait`: a backlog
+deeper than 100 needs multiple `read` calls (or the drain-until-empty loop in
+digest_machine_path_test) before an assertion like "my message round-tripped"
+holds. Tests that post into a busy shared scope and read ONCE are
+order-sensitive time bombs. (T55.1 finding, 2026-07-16.)
 
 ## Test flakiness (known-flaky, not a real regression)
 
