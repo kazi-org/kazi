@@ -18,7 +18,7 @@ import Config
 if config_env() == :prod do
   db_path =
     System.get_env("KAZI_DB") ||
-      Path.join([System.user_home!() || File.cwd!(), ".kazi", "kazi.db"])
+      Path.join([System.user_home() || File.cwd!(), ".kazi", "kazi.db"])
 
   File.mkdir_p!(Path.dirname(db_path))
 

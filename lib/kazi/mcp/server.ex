@@ -572,35 +572,6 @@ defmodule Kazi.MCP.Server do
   # kazi_bus_watch -- the bounded digest by default, every message unabridged
   # under full: true. Mirrors the CLI's `bus_read_payload/2` exactly (same
   # versioned contract, `kazi schema bus`).
-  defp bus_read_result(messages, args) do
-    base = %{"schema_version" => Schema.schema_version(), "ok" => true}
-
-    if Map.get(args, "full") == true do
-      Map.put(base, "messages", messages)
-    else
-      Map.put(base, "digest", Digest.render(messages))
-    end
-  end
-
-  defp watch_timeout(seconds) when is_number(seconds) and seconds > 0, do: trunc(seconds)
-  defp watch_timeout(_), do: nil
-
-  # T54.9/#1097: the watch anchor. Mirrors the CLI's --since <seq|now|all>;
-  # anything unrecognized falls back to the default (:now via Bus.watch),
-  # matching watch_timeout's lenient shape.
-  defp watch_since("now"), do: :now
-  defp watch_since("all"), do: :all
-  defp watch_since(seq) when is_number(seq) and seq >= 0, do: trunc(seq)
-
-  defp watch_since(seq) when is_binary(seq) do
-    case Integer.parse(seq) do
-      {n, ""} when n >= 0 -> n
-      _other -> nil
-    end
-  end
-
-  defp watch_since(_), do: nil
-
   defp call_tool("kazi_bus_who", args, opts) do
     case Bus.who(bus_opts(args, opts)) do
       {:ok, sessions} ->
@@ -642,6 +613,36 @@ defmodule Kazi.MCP.Server do
   # The bus tools' `opts` -- scope/topic/sev from the tool arguments, plus any
   # test-only seams (`:conn`, `:sock_path`) a caller injected via `opts` (mirrors
   # the `:harness`/`:adapter_opts` seams `kazi_plan`/`kazi_apply` take).
+
+  defp bus_read_result(messages, args) do
+    base = %{"schema_version" => Schema.schema_version(), "ok" => true}
+
+    if Map.get(args, "full") == true do
+      Map.put(base, "messages", messages)
+    else
+      Map.put(base, "digest", Digest.render(messages))
+    end
+  end
+
+  defp watch_timeout(seconds) when is_number(seconds) and seconds > 0, do: trunc(seconds)
+  defp watch_timeout(_), do: nil
+
+  # T54.9/#1097: the watch anchor. Mirrors the CLI's --since <seq|now|all>;
+  # anything unrecognized falls back to the default (:now via Bus.watch),
+  # matching watch_timeout's lenient shape.
+  defp watch_since("now"), do: :now
+  defp watch_since("all"), do: :all
+  defp watch_since(seq) when is_number(seq) and seq >= 0, do: trunc(seq)
+
+  defp watch_since(seq) when is_binary(seq) do
+    case Integer.parse(seq) do
+      {n, ""} when n >= 0 -> n
+      _other -> nil
+    end
+  end
+
+  defp watch_since(_), do: nil
+
   defp bus_opts(args, opts) do
     opts
     |> Keyword.take([:conn, :sock_path])

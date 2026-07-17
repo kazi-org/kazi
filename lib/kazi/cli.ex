@@ -4161,17 +4161,6 @@ defmodule Kazi.CLI do
   defp execute_bus("post", _args, opts),
     do: bus_error("`bus post` requires <text> or <kind> <text>", opts)
 
-  defp do_bus_post(kind, text, opts) do
-    case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
-      :ok ->
-        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("posted") end)
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
   defp execute_bus("tell", [session, text], opts) do
     case Kazi.Bus.tell(session, text, bus_call_opts(opts)) do
       :ok ->
@@ -4213,20 +4202,6 @@ defmodule Kazi.CLI do
 
   defp execute_bus("peek", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  defp do_bus_peek(opts) do
-    case Kazi.Bus.peek(bus_call_opts(opts)) do
-      {:ok, messages} ->
-        emit(json?(opts), bus_read_payload(messages, opts), fn ->
-          print_read_digest(messages)
-        end)
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
 
   defp execute_bus("who", [], opts) do
     # T55.11: --project/--machine filter server-side over the fetched roster;
@@ -4363,6 +4338,31 @@ defmodule Kazi.CLI do
 
   defp execute_bus("who", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
+  defp do_bus_post(kind, text, opts) do
+    case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
+      :ok ->
+        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("posted") end)
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp do_bus_peek(opts) do
+    case Kazi.Bus.peek(bus_call_opts(opts)) do
+      {:ok, messages} ->
+        emit(json?(opts), bus_read_payload(messages, opts), fn ->
+          print_read_digest(messages)
+        end)
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
 
   defp bus_call_opts(opts) do
     [
@@ -5928,7 +5928,7 @@ defmodule Kazi.CLI do
   # same --json contract every other load/availability error does (deep review
   # L2): a JSON error envelope on stdout under --json (escript builds without the
   # NIF hit this path), the human stderr line otherwise.
-  defp with_read_model(opts \\ [], fun) do
+  defp with_read_model(opts, fun) do
     if ensure_read_model() do
       fun.()
     else
@@ -6138,7 +6138,7 @@ defmodule Kazi.CLI do
   # and pipes the goal id into the next step. `extra` carries an optional
   # `%{loadable: false}` (#945) when `reject` succeeded on a proposal whose
   # stored goal no longer loads — an audit note, not an error.
-  defp approval_json(status, proposal_ref, goal_id, extra \\ %{}) do
+  defp approval_json(status, proposal_ref, goal_id, extra) do
     %{
       schema_version: @run_schema_version,
       proposal_ref: proposal_ref,
