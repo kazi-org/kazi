@@ -2458,12 +2458,76 @@ defmodule Kazi.CLI do
         refuse_primary_workspace(goal, opts)
 
       opts[:parallel] == true ->
+        warn_unwritable_permission_mode(goal, opts)
         run_goal_parallel(goal, opts, persist?, runtime_opts)
 
       true ->
+        warn_unwritable_permission_mode(goal, opts)
         run_goal_serial(goal, opts, persist?, runtime_opts)
     end
   end
+
+  # T54.6 (#1072, regression of #769) fix (a): warn BEFORE dispatching when the
+  # claude harness will run under a permission mode that cannot write. Such a run
+  # burns budget and changes nothing, and the harness still exits 0 — the exact
+  # silent failure of lore L-0023.
+  #
+  # REFRAMED from the task's original condition ("harness=claude AND NO
+  # --permission-mode"): that condition is now unreachable. `Runtime` defaults the
+  # mode to "auto" (#769), so a mode is ALWAYS set and the original trigger could
+  # never fire — it would have shipped as dead code. The residual risk is no longer
+  # "unset" but "explicitly set to something that cannot act", so that is what this
+  # warns on:
+  #
+  #   * `plan`      — read-only by design; every Write is refused.
+  #   * `default`   — defers to the interactive trust dialog, which a headless
+  #                   `-p` dispatch has no human to accept.
+  #   * `acceptEdits` — grants edits but NOT Bash, so a goal whose predicates need
+  #                   git (a `landed`/`committed` check) can never converge.
+  #
+  # Placed on both execution branches and NOT on --check/--explain, which are
+  # read-only and dispatch nothing (the task's exemption).
+  # The profile an `apply` with no `--harness` and no goal-file `[harness] id`
+  # resolves to (Kazi.Harness.Registry's default).
+  @default_harness_id "claude"
+
+  @unwritable_permission_modes %{
+    "plan" => "it is read-only by design — every Write is refused",
+    "default" =>
+      "it defers to Claude Code's interactive trust dialog, which a headless dispatch has no human to accept",
+    "acceptEdits" =>
+      "it grants edits but NOT Bash, so a goal whose predicates need git (a `landed`/`committed` check) can never converge"
+  }
+  defp warn_unwritable_permission_mode(%Goal{} = goal, opts) do
+    with "claude" <- to_string(harness_id(goal, opts)),
+         mode when is_binary(mode) <- effective_permission_mode(goal, opts),
+         {:ok, why} <- Map.fetch(@unwritable_permission_modes, mode) do
+      # stderr, so a `--json` stdout stream stays machine-parseable (the
+      # `warn_on_liveness` precedent).
+      IO.puts(
+        :stderr,
+        "warning: permission_mode=#{mode} cannot make the changes this goal needs -- #{why}. " <>
+          "The harness will still exit 0 while changing nothing, and the run will burn budget " <>
+          "to `stuck` (issue #1072). Use --permission-mode auto (the default) or bypassPermissions."
+      )
+    end
+
+    :ok
+  end
+
+  defp effective_permission_mode(%Goal{harness: harness}, opts) when is_map(harness),
+    do: opts[:permission_mode] || Map.get(harness, :permission_mode)
+
+  defp effective_permission_mode(%Goal{}, opts), do: opts[:permission_mode]
+
+  # The harness this run will resolve to. `nil` from BOTH the flag and the
+  # goal-file means the DEFAULT profile, which is claude — so nil must read as
+  # "claude" here, or the warning above silently never fires on the single most
+  # common invocation (`kazi apply <goal>` with no --harness).
+  defp harness_id(%Goal{harness: harness}, opts) when is_map(harness),
+    do: opts[:harness] || Map.get(harness, :id) || @default_harness_id
+
+  defp harness_id(%Goal{}, opts), do: opts[:harness] || @default_harness_id
 
   # Whether the resolved workspace IS a git repo's primary (non-linked)
   # worktree root AND the caller did not opt in with

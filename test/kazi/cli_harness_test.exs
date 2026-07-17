@@ -399,6 +399,109 @@ defmodule Kazi.CLIHarnessTest do
     refute permission_mode_value(argv_lines(work)) == "acceptEdits"
   end
 
+  # T54.6 (#1072) fix (a): a PRE-DISPATCH stderr warning when the claude harness
+  # will run under a permission mode that cannot act. Such a run burns budget and
+  # changes nothing while the harness still exits 0 (lore L-0023).
+  #
+  # REFRAMED from T54.6's literal condition ("claude AND NO --permission-mode"):
+  # #769 made `Runtime` default the mode to "auto", so "no mode" is now
+  # unreachable and that trigger would be dead code. The live risk is a mode
+  # EXPLICITLY set to something that cannot act.
+  for {mode, signature} <- [
+        # read-only by design
+        {"plan", "read-only"},
+        # defers to the trust dialog a headless run cannot accept
+        {"default", "trust dialog"},
+        # edits but no Bash -> a git-dependent `landed` predicate can never pass
+        {"acceptEdits", "NOT Bash"}
+      ] do
+    test "pre-dispatch warning fires for claude + permission_mode=#{mode} (issue #1072)", %{
+      work: work
+    } do
+      goal = write_goal(work)
+
+      stderr =
+        capture_io(:stderr, fn ->
+          with_io(fn ->
+            Kazi.CLI.run(
+              ["apply", goal, "--workspace", work, "--permission-mode", unquote(mode)],
+              adapter_opts: [command: @stub],
+              persist?: false
+            )
+          end)
+        end)
+
+      assert stderr =~ "permission_mode=#{unquote(mode)}"
+      assert stderr =~ unquote(signature)
+      assert stderr =~ "#1072"
+    end
+  end
+
+  test "NO pre-dispatch warning under the default (auto) mode (issue #1072)", %{work: work} do
+    goal = write_goal(work)
+
+    stderr =
+      capture_io(:stderr, fn ->
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal, "--workspace", work],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+      end)
+
+    refute stderr =~ "permission_mode="
+  end
+
+  # The mode is Claude-only; a non-claude harness has no such concept and must not
+  # be warned about one.
+  test "NO pre-dispatch warning for a non-claude harness (issue #1072)", %{work: work} do
+    goal = write_goal(work)
+
+    stderr =
+      capture_io(:stderr, fn ->
+        with_io(fn ->
+          Kazi.CLI.run(
+            [
+              "apply",
+              goal,
+              "--workspace",
+              work,
+              "--harness",
+              "opencode",
+              "--permission-mode",
+              "plan"
+            ],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+      end)
+
+    refute stderr =~ "permission_mode=plan"
+  end
+
+  # T54.6 exempts the read-only verbs: they dispatch nothing, so there is nothing
+  # to warn about.
+  test "NO pre-dispatch warning on --check (read-only, dispatches nothing) (issue #1072)", %{
+    work: work
+  } do
+    goal = write_goal(work)
+
+    stderr =
+      capture_io(:stderr, fn ->
+        with_io(fn ->
+          Kazi.CLI.run(
+            ["apply", goal, "--workspace", work, "--check", "--permission-mode", "plan"],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+      end)
+
+    refute stderr =~ "permission_mode=plan"
+  end
+
   # The token immediately after `--permission-mode` in the recorded argv.
   defp permission_mode_value(argv) do
     idx = Enum.find_index(argv, &(&1 == "--permission-mode"))
