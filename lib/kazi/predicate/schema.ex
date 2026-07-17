@@ -364,7 +364,17 @@ defmodule Kazi.Predicate.Schema do
         name: "assertions",
         type: "array<table>",
         required: false,
-        description: "Checks the runner evaluates (e.g. visible/text)."
+        description:
+          "Checks the runner evaluates. Each table needs a \"type\"; an unknown type is a " <>
+            "load error. Types: " <>
+            "\"visible\" (selector) — the element is visible; " <>
+            "\"hidden\" (selector) — the element is absent/hidden; " <>
+            "\"text\" (selector + contains | exact) — the element's text matches; " <>
+            "\"url\" (contains | exact) — the current URL matches; " <>
+            "\"console_clean\" (optional network = true) — the journey produced ZERO " <>
+            "console.error, and with network = true no failed 4xx/5xx response either " <>
+            "(T43.1, ADR-0053). Errors are captured across the WHOLE journey (initial load " <>
+            "+ every step), and `found` lists the offenders as evidence."
       },
       %{
         name: "samples",
@@ -403,7 +413,10 @@ defmodule Kazi.Predicate.Schema do
       "id" => "checkout-journey",
       "provider" => "browser",
       "url" => "https://app.example.com",
-      "assertions" => [%{"type" => "visible", "selector" => "h1"}],
+      "assertions" => [
+        %{"type" => "visible", "selector" => "h1"},
+        %{"type" => "console_clean", "network" => true}
+      ],
       "samples" => 3
     }
   }
