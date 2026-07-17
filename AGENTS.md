@@ -469,15 +469,46 @@ instant no-op, so an installed hook can never break or slow a session.
   everything it pulls. A casual "let me check the bus" read silently drains
   messages a later wait was supposed to react to, and the bus then looks
   quiet. If you are not ready to act on the messages, peek instead.
-- **Wait** -- `kazi bus watch --timeout <s>` / `kazi_bus_watch`. Blocks until
-  traffic arrives (pending messages return immediately), and refreshes your
-  presence while parked. NEVER poll `read` in a loop -- watch is the no-poll
-  primitive. The CLI exits 3 on timeout; the MCP tool returns
-  `{ok: true, timed_out: true, messages: []}` -- branch on `timed_out`.
+- **Wait** -- `kazi bus watch --timeout <s>` / `kazi_bus_watch`. Blocks until a
+  NEW message arrives, and refreshes your presence while parked. `--since`
+  anchors what counts as new: `now` (the default) delivers only messages posted
+  AFTER the watch starts, leaving pending backlog for `read`/`peek`; `all` is
+  the drain-first behavior (T54.9). NEVER poll `read` in a loop -- watch is the
+  no-poll primitive. The CLI exits 3 on timeout; the MCP tool returns
+  `{ok: true, timed_out: true, digest: {total: 0, lines: []}}` -- branch on
+  `timed_out`.
 
 Cadence: check at turn boundaries (peek, or install delivery once with
 `kazi install-hooks` -- see `docs/session-bus.md`); block with a bounded
 `watch` only when you are genuinely waiting on another session.
+
+**The wake contract: how an IDLE session gets woken.** Delivery lands at turn
+boundaries, and an idle session has no next turn -- so a `tell` to an idle
+session just sits `pending` (visible via `bus status <id>`) and nobody is
+woken. Two halves, by the target's state:
+
+- **Target is ACTIVE** -- `kazi bus tell <session> <text> --sev interrupt`. It
+  has a boundary coming, and the digest renders directed/interrupt messages
+  verbatim (ADR-0072).
+- **You are IDLE** -- park `kazi bus watch --timeout <s> --json` as a
+  BACKGROUND TASK of your harness, so its completion re-invokes you. **Arrival
+  (exit 0) is the wake, with the message already in hand** -- the task's output
+  IS the digest, so no follow-up read. **Timeout (exit 3) is a non-event --
+  re-park.** You sleep in between, costing no tokens, and stay `active` on
+  `bus who`. This needs the `--since now` default: with `--since all` a park
+  fires instantly on backlog and degenerates into a poll.
+
+kazi never wakes a session by reaching into it (no prompt injection, no driving
+a TTY) -- that is permanently outside its boundary (ADR-0001/ADR-0071
+non-goals). The harness's background-task mechanic is the supported wake.
+
+**Use harness-native agent teams instead** when the sessions are ones your own
+session SPAWNED (one lead, one machine, one session lifetime): teams already
+deliver messages, keep a roster, and track a dependency-aware task list, so the
+bus adds nothing there. The bus is for the sessions nobody spawned --
+independently-started peers, cross-machine, restart-surviving,
+harness-agnostic, tied to kazi's objective state. **Teams orchestrate the
+workers one session spawns; the bus coordinates the sessions nobody spawned.**
 
 ## Verifying a pooled task with kazi
 
