@@ -64,7 +64,8 @@ kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scop
                                                            # prints the message id (T55.12)
 kazi bus status <id> [--json]                              # what became of a tell: pending|consumed (T55.12)
 kazi bus get <id> [--full] [--json]                        # fetch a message's full body by id; consumes nothing (T55.6, ADR-0072 d3)
-kazi bus read [--peek] [--full] [--json]                   # pull + ack this session's durable consumers, prints a digest
+kazi bus read [--peek] [--full] [--since <cursor>] [--json] # pull + ack this session's durable consumers, prints a digest the DAEMON assembled (T55.7)
+                                                           # --since <cursor>: replay only past a stream sequence (numeric only -- NOT watch's now|all)
 kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
 kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
 kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
@@ -332,7 +333,9 @@ default — the same summary the TTY prints, as a versioned envelope
   addressable by its `id`.
 - **Count** lines for everything else: one exact-count line per
   `{kind, topic}` pair with the group's `first_id`/`last_id`,
-  most-frequent first.
+  most-frequent first. A `fact` count line also carries `last` — the
+  CURRENT value for that topic, since a fact states what is true now
+  rather than that three things were said.
 - The whole digest is bounded to **40 lines** regardless of backlog size;
   a tail past the bound folds into one exact-count `overflow` line.
   `digest.total` is always the exact number of messages pulled.
@@ -342,6 +345,31 @@ default — the same summary the TTY prints, as a versioned envelope
 Sessions that previously parsed `.messages[]` from `bus read --json`
 should either consume the digest (the point: a thousand-message backlog
 costs the same context as forty lines) or pass `--full` for the old shape.
+
+#### The DAEMON assembles it (T55.7, ADR-0072 d5)
+
+`bus read`/`bus peek` send `read` over the daemon's control socket. The
+daemon pulls the consumer, aggregates, and enforces the bound BEFORE the
+bytes reach a client; the client only renders. This is ADR-0067 point 5's
+own argument — *"only a server can aggregate before the tokens are spent"* —
+and it is why the CLI, the `kazi_bus_*` MCP tools, and the installed hook
+return identical digests: the bound is written once, not three times.
+
+Two consequences worth knowing:
+
+- **A deep backlog costs one read.** `Kazi.Bus` pulls in batches of 100, so
+  a client-side read of a 200-message backlog saw half of it. The daemon
+  walks the whole pending set and aggregates it into ONE digest.
+- **`--full` is the one mode the daemon does NOT assemble.** There is no
+  digest to assemble, and its size is bounded by nothing, so it reads the
+  consumer directly. The control socket must never carry an unbounded
+  payload: `packet: :line` truncates an over-long line silently
+  (`docs/lore.md`), so the daemon refuses `full` outright rather than
+  quietly answering with a digest instead.
+
+With the daemon down, every one of these surfaces still reports the clean
+one-line no-daemon error and exits 1 — moving assembly server-side did not
+make the bus a dependency of anything (ADR-0067 point 1).
 
 ### The board: current state, not a delta (T55.4, ADR-0073)
 
@@ -643,7 +671,21 @@ backlog, re-park, and wake again at full tick rate: the pattern degenerates
 into precisely the poll loop it exists to replace.
 
 So: take the default for a wake. Use `--since all` only for a deliberate
-drain-first read, never for a park.
+drain-first watch, never for a park.
+
+`--since` on `bus read` is a DIFFERENT flag with different accepted values
+(T55.7). The two are deliberately not interchangeable, and the shared name is
+the trap:
+
+| | `bus watch --since` | `bus read --since` |
+|---|---|---|
+| accepts | `now` (default), `all`, or a sequence | a sequence ONLY |
+| asks | "tell me WHEN something new arrives" | "what have I MISSED since this point?" |
+| blocks | yes — it is a park | no — it returns immediately |
+
+`bus read --since all` is therefore an error, not a drain: a read is not a
+park, so "wake me on new" has no meaning for it, and a plain `bus read`
+already drains everything pending.
 
 ### Out of boundary: kazi does not type into your session
 
