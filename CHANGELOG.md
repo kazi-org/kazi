@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.212.1](https://github.com/kazi-org/kazi/compare/v1.212.0...v1.212.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **read-model:** reap ghost runs with no os_pid or recycled pid to abandoned (T60.2, [#1155](https://github.com/kazi-org/kazi/issues/1155)) ([8080331](https://github.com/kazi-org/kazi/commit/8080331fd633cc75f6aa6b0bc2e8da3d9ab4a6d6))
+
 ## [1.212.0](https://github.com/kazi-org/kazi/compare/v1.211.0...v1.212.0) (2026-07-17)
 
 
