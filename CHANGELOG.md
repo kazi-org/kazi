@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.206.0](https://github.com/kazi-org/kazi/compare/v1.205.0...v1.206.0) (2026-07-17)
+
+
+### Features
+
+* **apply:** preflight before first dispatch (--no-preflight to skip) ([1c33efc](https://github.com/kazi-org/kazi/commit/1c33efc0eaa20674b93a83bd3a2195bd6c2803db))
+
 ## [1.205.0](https://github.com/kazi-org/kazi/compare/v1.204.0...v1.205.0) (2026-07-17)
 
 
