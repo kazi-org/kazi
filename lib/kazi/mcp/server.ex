@@ -244,13 +244,16 @@ defmodule Kazi.MCP.Server do
             "(ADR-0067), acking them so a second read returns nothing new. Pass " <>
             "peek: true to LOOK without consuming (messages stay pending for the next " <>
             "read). To WAIT for traffic, prefer kazi_bus_watch over calling this in a " <>
-            "loop. Returns the bounded DIGEST by default (ADR-0072): {ok: true, " <>
-            "schema_version, digest: {total, lines}} with at most 40 lines -- verbatim " <>
-            "only for directed/interrupt messages, one-line stubs for bodies over the " <>
-            "1024-byte render threshold (the body stays addressable by its stream-seq " <>
-            "id), exact count lines for the rest. Pass full: true (the documented " <>
-            "debugging escape) for {ok: true, messages: [...]} unabridged. Shape: " <>
-            "`kazi schema bus`. Errors are structured (no_daemon).",
+            "loop. The DAEMON assembles the reply (ADR-0072 d5), so this tool, the CLI, " <>
+            "and the installed hook return identical digests and a deep backlog costs " <>
+            "no more than a shallow one. Returns the bounded DIGEST by default: {ok: " <>
+            "true, schema_version, digest: {total, lines}} with at most 40 lines -- " <>
+            "verbatim only for directed/interrupt messages, one-line stubs for bodies " <>
+            "over the 1024-byte render threshold (the body stays addressable by its " <>
+            "stream-seq id), exact count lines for the rest (a `fact` count line also " <>
+            "carries `last`, the current value for that topic). Pass full: true (the " <>
+            "documented debugging escape) for {ok: true, messages: [...]} unabridged. " <>
+            "Shape: `kazi schema bus`. Errors are structured (no_daemon).",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
@@ -263,6 +266,13 @@ defmodule Kazi.MCP.Server do
               "description" =>
                 "true: return every message unabridged (messages: [...]) instead of " <>
                   "the default bounded digest (ADR-0072). Default false."
+            },
+            "since" => %{
+              "type" => "number",
+              "description" =>
+                "Replay from a point (debugging escape): consume only messages whose " <>
+                  "id is past this stream sequence, leaving everything at or before it " <>
+                  "pending for a later read."
             },
             "scope" => %{
               "type" => "string",
@@ -627,14 +637,18 @@ defmodule Kazi.MCP.Server do
     end
   end
 
+  # T55.7 (ADR-0072 d5): the daemon assembles. This tool makes the SAME
+  # `Kazi.Bus.read_digest/1` call the CLI and the ADR-0071 hook make, so the
+  # three surfaces cannot drift -- the bound lives in one place, not three.
   defp call_tool("kazi_bus_read", args, opts) do
-    bus_opts = bus_opts(args, opts)
+    read_opts =
+      bus_opts(args, opts)
+      |> maybe_put_opt(:peek, Map.get(args, "peek") == true || nil)
+      |> maybe_put_opt(:full, Map.get(args, "full") == true || nil)
+      |> maybe_put_opt(:since, read_since(Map.get(args, "since")))
 
-    result =
-      if Map.get(args, "peek") == true, do: Bus.peek(bus_opts), else: Bus.read(bus_opts)
-
-    case result do
-      {:ok, messages} -> {:ok, bus_read_result(messages, args)}
+    case Bus.read_digest(read_opts) do
+      {:ok, reply} -> {:ok, bus_reply_result(reply)}
       {:error, reason} -> {:tool_error, bus_error(reason)}
     end
   end
@@ -785,6 +799,9 @@ defmodule Kazi.MCP.Server do
   # test-only seams (`:conn`, `:sock_path`) a caller injected via `opts` (mirrors
   # the `:harness`/`:adapter_opts` seams `kazi_plan`/`kazi_apply` take).
 
+  # `kazi_bus_watch` renders LOCALLY: a watch is a park, not a read -- the
+  # messages that woke it are already in hand (and E55 must not touch
+  # `watch/1`; T54.9 owns it).
   defp bus_read_result(messages, args) do
     base = %{"schema_version" => Schema.schema_version(), "ok" => true}
 
@@ -794,6 +811,19 @@ defmodule Kazi.MCP.Server do
       Map.put(base, "digest", Digest.render(messages))
     end
   end
+
+  # T55.7: `kazi_bus_read`'s result is the daemon's own reply -- digest or
+  # messages, decided server-side -- with the ADR-0023 envelope stamped on.
+  defp bus_reply_result(reply) do
+    %{"schema_version" => Schema.schema_version(), "ok" => true}
+    |> Map.merge(Map.take(reply, ["digest", "messages"]))
+  end
+
+  # T55.7: `kazi_bus_read`'s `since` cursor (T51.4's escape). Integer-only --
+  # `now`/`all` are watch anchors and mean nothing to a read; anything else
+  # falls back to a plain read, matching watch_since/1's lenient shape.
+  defp read_since(seq) when is_number(seq) and seq >= 0, do: trunc(seq)
+  defp read_since(_other), do: nil
 
   defp watch_timeout(seconds) when is_number(seconds) and seconds > 0, do: trunc(seconds)
   defp watch_timeout(_), do: nil
@@ -816,7 +846,11 @@ defmodule Kazi.MCP.Server do
 
   defp bus_opts(args, opts) do
     opts
-    |> Keyword.take([:conn, :sock_path])
+    # `:session` joins the `:conn`/`:sock_path` seams (T55.7): a test proving
+    # the CLI and MCP digests are identical has to pin BOTH surfaces to one
+    # session, since consumers are named per session. In production all three
+    # surfaces resolve the same identity from the same environment.
+    |> Keyword.take([:conn, :sock_path, :session])
     |> maybe_put_opt(:scope, Map.get(args, "scope"))
     |> maybe_put_opt(:topic, Map.get(args, "topic"))
     |> maybe_put_opt(:sev, Map.get(args, "sev"))
