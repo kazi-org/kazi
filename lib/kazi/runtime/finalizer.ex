@@ -142,6 +142,15 @@ defmodule Kazi.Runtime.Finalizer do
   @spec record_termination(binary(), term()) :: :ok
   def record_termination(run_id, reason) do
     case RunRegistry.record_termination(run_id, reason) do
+      {:ok, %{status: "terminated"} = run} ->
+        # T60.1 (#1154): mirror the abnormal-termination transition onto the bus
+        # so the fleet sees the run's honest final state instead of a run whose
+        # mirrored line simply stopped. Best-effort, like every BusMirror post —
+        # only when THIS call is what marked the run terminated (an already-
+        # finished run returns its prior status and is not re-labelled).
+        Kazi.Runtime.BusMirror.terminated(run.goal_ref, run_id, nil, reason)
+        :ok
+
       {:ok, _} ->
         :ok
 
