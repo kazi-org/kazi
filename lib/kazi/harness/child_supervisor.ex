@@ -40,6 +40,10 @@ defmodule Kazi.Harness.ChildSupervisor do
   # Default watchdog poll interval: responsive without meaningfully polling.
   @default_poll_ms 1_000
 
+  # Grace between the group TERM and the group KILL in `reap/1` -- matches the
+  # wrapper watchdog's own `sleep 1` between its escalating signals.
+  @reap_grace_ms 1_000
+
   # PORTABILITY (the Linux-CI hang): `set -m` gives every background job its
   # own process group under bash (macOS /bin/sh), but NON-INTERACTIVE dash
   # (Ubuntu /bin/sh) quietly ignores it — background jobs stay in the
@@ -150,6 +154,54 @@ defmodule Kazi.Harness.ChildSupervisor do
   end
 
   def alive?(_pid), do: false
+
+  @doc """
+  Reaps the process group led by `pid` (an integer or its string form) --
+  a graceful `TERM` to the whole group, then, after a short grace, a `KILL`.
+  Used by `kazi orphans --reap` to kill a launcher-orphaned dispatch tree whose
+  recorded `harness_child_pid` is still `alive?/1`.
+
+  Mirrors the wrapper watchdog's kill shape (issue #857): the group kill goes
+  through the EXTERNAL `env kill` (dash's builtin rejects negative-pid group
+  syntax), with a single-pid fallback for a shell where no group was created.
+  Best-effort and never raises: a pid that is already gone is a no-op.
+
+  Returns `:ok` when the pid was live and a signal was sent, `:not_alive` when
+  it was already dead (nothing to reap).
+  """
+  @spec reap(String.t() | integer()) :: :ok | :not_alive
+  def reap(pid) when is_integer(pid), do: reap(Integer.to_string(pid))
+
+  def reap(pid) when is_binary(pid) and pid != "" do
+    if alive?(pid) do
+      group_or_pid("TERM", pid)
+      Process.sleep(@reap_grace_ms)
+      group_or_pid("KILL", pid)
+      :ok
+    else
+      :not_alive
+    end
+  rescue
+    _ -> :not_alive
+  end
+
+  def reap(_pid), do: :not_alive
+
+  # `env kill -SIG -- -PID` signals the whole process group (the child is its
+  # group leader, per the wrapper); the `|| kill -SIG PID` fallback covers a
+  # shell where no group was created (dash's inert `set -m`).
+  defp group_or_pid(signal, pid) do
+    case System.cmd("env", ["kill", "-" <> signal, "--", "-" <> pid], stderr_to_stdout: true) do
+      {_out, 0} ->
+        :ok
+
+      _ ->
+        _ = System.cmd("kill", ["-" <> signal, pid], stderr_to_stdout: true)
+        :ok
+    end
+  rescue
+    _ -> :ok
+  end
 
   # `sleep` on both GNU coreutils and BSD/macOS accepts fractional seconds, so a
   # sub-second `poll_ms` (as tests use, to keep the watchdog loop fast) renders
