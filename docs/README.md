@@ -71,6 +71,8 @@ its config at runtime via `kazi schema <kind>`.
   a threshold (never 100%), surviving mutants as evidence (ADR-0043).
 - **[`cve`](cve-predicate.md)** — dependency vulnerability scanning: `govulncheck`
   reachability (call stack as proof) + manifest scanners ratcheted (ADR-0043).
+- **[`cli`](cli-provider.md)** — a golden invocation of a shipped binary: run a
+  declared command and assert on the exit code + stdout/stderr (T43.7, UC-055).
 - **[Live providers](live-providers.md)** — `http_probe` sustained health,
   `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
 - **[The context store (Gist provider)](context-store.md)** — budget-fitted
