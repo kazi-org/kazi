@@ -83,6 +83,8 @@ defmodule KaziWeb.MissionControlLive do
   alias Kazi.SessionLiveness
   alias Kazi.Sink.Events
   alias KaziWeb.Starmap.GoalSource
+  alias KaziWeb.CoordinationSource
+  alias KaziWeb.CoordinationSource.Snapshot
 
   # Poll interval for picking up registry changes ("a verdict change is
   # reflected on refresh without restart"). A LiveView test never waits this
@@ -104,19 +106,34 @@ defmodule KaziWeb.MissionControlLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Process.send_after(self(), :tick, @poll_ms)
+    if connected?(socket) do
+      Process.send_after(self(), :tick, @poll_ms)
+      # T51.5 (ADR-0073 §4): subscribe to the coordination source's topic so a
+      # fresh bus roster pushes into the SESSIONS rail live. Both production
+      # sources share one topic and an explicit override never changes, so the
+      # mount-time subscription stays valid across a daemon starting/stopping.
+      Phoenix.PubSub.subscribe(Kazi.PubSub, CoordinationSource.select().topic())
+    end
 
     {:ok,
      socket
      |> assign(:page_title, "kazi · mission control")
      |> assign(:session_scope, :current)
-     |> assign_fleet()}
+     |> assign_fleet()
+     |> assign_presence()}
   end
 
   @impl true
   def handle_info(:tick, socket) do
     if connected?(socket), do: Process.send_after(self(), :tick, @poll_ms)
-    {:noreply, assign_fleet(socket)}
+    {:noreply, socket |> assign_fleet() |> assign_presence()}
+  end
+
+  # T51.5: a fresh coordination snapshot pushed on the source topic (e.g. a
+  # session appearing on or aging off the bus) re-renders the SESSIONS rail live.
+  @impl true
+  def handle_info({:coordination_updated, %Snapshot{} = snapshot}, socket) do
+    {:noreply, assign(socket, :presence, snapshot.present)}
   end
 
   # CURRENT/CLOSED scope toggle: CURRENT (the default) shows runs whose driving
@@ -150,6 +167,29 @@ defmodule KaziWeb.MissionControlLive do
     |> assign(:clock, utc_clock())
     |> assign(:alerts, alerts(scoped))
     |> assign(:river_entries, river_entries(all_runs))
+  end
+
+  # T51.5 (ADR-0073 §4): the SESSIONS rail's live bus presence, read from the
+  # SAME injectable `KaziWeb.CoordinationSource` the `/leases` map uses --
+  # Transport when a daemon is reachable (the live bus roster: session, machine,
+  # last-seen), Native otherwise (empty, never a crash -- L-0021). Re-selected
+  # each tick so a daemon starting or stopping flips the rail live. A source that
+  # cannot answer degrades to an empty rail, never a 500.
+  defp assign_presence(socket) do
+    source = CoordinationSource.select()
+
+    present =
+      try do
+        source.snapshot().present
+      rescue
+        _ -> []
+      catch
+        _, _ -> []
+      end
+
+    socket
+    |> assign(:coord_source, source)
+    |> assign(:presence, present)
   end
 
   # Roadmap configured -> wave-grouped cards (resolved across ALL runs, since the
@@ -716,6 +756,29 @@ defmodule KaziWeb.MissionControlLive do
           </.link>
         </section>
       </div>
+
+      <section id="mc-sessions" data-source={inspect(@coord_source)}>
+        <div class="seclabel section-label">SESSIONS</div>
+        <ul :if={@presence != []} id="mc-sessions-list" class="sessions">
+          <li
+            :for={entry <- @presence}
+            id={"presence-#{entry.instance}"}
+            data-instance={entry.instance}
+            class="session-row"
+          >
+            <span class="instance">{entry.instance}</span>
+            <span :if={entry[:machine]} class="machine" data-machine={entry[:machine]}>
+              {entry[:machine]}
+            </span>
+            <span :if={entry[:last_seen]} class="last-seen" data-last-seen={entry[:last_seen]}>
+              {entry[:last_seen]}
+            </span>
+          </li>
+        </ul>
+        <p :if={@presence == []} id="mc-sessions-empty" class="empty-state">
+          No sessions present.
+        </p>
+      </section>
 
       <footer class="river">
         <div class="riverin">
