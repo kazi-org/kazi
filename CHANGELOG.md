@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.203.0](https://github.com/kazi-org/kazi/compare/v1.202.0...v1.203.0) (2026-07-17)
+
+
+### Features
+
+* **loader:** validate the prod_log correlate table at load (T41.5) ([6a3aae9](https://github.com/kazi-org/kazi/commit/6a3aae91e9d3f2580e4bea00decda2d933c4240d))
+* **prod_log:** opt-in correlate trust-check on a passing predicate (T41.5) ([61ea9bd](https://github.com/kazi-org/kazi/commit/61ea9bd104feb7546549f656aa89ec70ad0ee8d0))
+
 ## [1.202.0](https://github.com/kazi-org/kazi/compare/v1.201.0...v1.202.0) (2026-07-17)
 
 
