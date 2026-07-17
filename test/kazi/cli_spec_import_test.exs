@@ -147,6 +147,88 @@ defmodule Kazi.CLISpecImportTest do
     end
   end
 
+  describe "spec import — --lower scenario round-trips end to end (T49.11, ADR-0054 d3)" do
+    @tagged_feature """
+    @role:shopper
+    Feature: Storefront
+      @interface:web @priority:P0
+      Scenario: A shopper checks out a basket
+        Given a basket with two items
+        Then the order is confirmed
+
+      @interface:cli @priority:P2
+      Scenario: An operator lists releases
+        Given a configured workspace
+        Then the releases are printed
+
+      Scenario: A shopper browses the catalogue
+        Given a catalogue with items
+        Then the items are listed
+    """
+
+    test "a tagged Scenario lowers to a scenario predicate bound to the on-disk spec", %{dir: dir} do
+      feature = Path.join(dir, "storefront.feature")
+      File.write!(feature, @tagged_feature)
+      into = Path.join(dir, "storefront.goal.toml")
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run([
+                   "spec",
+                   "import",
+                   feature,
+                   "--into",
+                   into,
+                   "--lower",
+                   "scenario",
+                   "--json"
+                 ]) == 0
+        end)
+
+      assert {:ok, %{"ok" => true}} = Jason.decode(String.trim(out))
+
+      assert {:ok, %Goal{} = goal} = Goal.Loader.load(into)
+      by_id = Map.new(Goal.all_predicates(goal), &{to_string(&1.id), &1})
+
+      web = by_id["storefront__a-shopper-checks-out-a-basket"]
+      assert web.kind == :scenario
+      assert web.config[:surface] == "browser"
+      # The scenario provider re-reads the ON-DISK spec at evaluation time.
+      assert web.config[:spec] == feature
+
+      assert by_id["storefront__an-operator-lists-releases"].config[:surface] == "cli"
+
+      # The untagged Scenario stays a test_runner scaffold, never forced.
+      assert by_id["storefront__a-shopper-browses-the-catalogue"].kind == :custom_script
+    end
+
+    test "WITHOUT --lower the same tagged spec imports as test_runner scaffolds", %{dir: dir} do
+      feature = Path.join(dir, "storefront_default.feature")
+      File.write!(feature, @tagged_feature)
+      into = Path.join(dir, "storefront_default.goal.toml")
+
+      capture_io(fn ->
+        assert Kazi.CLI.run(["spec", "import", feature, "--into", into]) == 0
+      end)
+
+      assert {:ok, %Goal{} = goal} = Goal.Loader.load(into)
+      assert Enum.all?(Goal.all_predicates(goal), &(&1.kind == :custom_script))
+    end
+
+    test "an unknown --lower mode is a clear usage error, exit 2", %{dir: dir, feature: feature} do
+      into = Path.join(dir, "bad-lower.goal.toml")
+
+      stderr =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["spec", "import", feature, "--into", into, "--lower", "bogus"]) ==
+                   2
+        end)
+
+      assert stderr =~ "--lower"
+      refute File.exists?(into)
+    end
+  end
+
   describe "spec import — usage errors" do
     test "missing --into is a clear error, exit 1", %{feature: feature} do
       stderr =
