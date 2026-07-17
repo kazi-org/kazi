@@ -1208,6 +1208,51 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @spec_coverage %{
+    kind: "spec_coverage",
+    title: "spec_coverage predicate config",
+    description:
+      "Manifest-coverage (T41.3, ADR-0050/ADR-0054): passes iff every scanned surface element " <>
+        "(exported function, Mix task, CLI command) is referenced by >=1 Scenario across the " <>
+        "product's `.feature` behavior specs, or is allow-listed. An element no Scenario names " <>
+        "is undocumented surface; a :fail NAMES each uncovered element. A repo with no matching " <>
+        "`.feature` files fails with the whole surface uncovered (the starting state a discovery " <>
+        "goal drives down). score = uncovered count (lower_better). Read-only; never edits.",
+    keys: [
+      %{
+        name: "features",
+        type: "string | array<string>",
+        required: false,
+        description:
+          "Workspace-relative glob(s) selecting the product's `.feature` specs. Default " <>
+            "\"docs/specs/**/*.feature\". A glob matching nothing means zero Scenarios (whole " <>
+            "surface uncovered), not an error."
+      },
+      %{
+        name: "allow_list",
+        type: "array<string>",
+        required: false,
+        description:
+          "Patterns (plain strings or \"prefix*\" wildcards) for intentional un-documented " <>
+            "surface (internal/debug entry points). Default []."
+      },
+      %{
+        name: "source_dirs",
+        type: "array<string>",
+        required: false,
+        description:
+          "Source directories the surface scan walks. Default the scanner's own default " <>
+            "(the repo's standard source dirs)."
+      }
+    ],
+    example: %{
+      "id" => "surface-is-documented",
+      "provider" => "spec_coverage",
+      "features" => "docs/specs/**/*.feature",
+      "allow_list" => ["Kazi.Internal.*"]
+    }
+  }
+
   @schemas %{
     "cli" => @cli,
     "custom_script" => @custom_script,
@@ -1226,7 +1271,8 @@ defmodule Kazi.Predicate.Schema do
     "escalation" => @escalation,
     "scenario" => @scenario,
     "oss_hygiene" => @oss_hygiene,
-    "plan_expanded" => @plan_expanded
+    "plan_expanded" => @plan_expanded,
+    "spec_coverage" => @spec_coverage
   }
 
   @doc "The provider kinds with a documented config schema, sorted."

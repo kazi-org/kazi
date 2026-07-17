@@ -126,7 +126,11 @@ defmodule Kazi.Runtime do
     # T45.3 (UC-059): "the phase <phase-ref> has been planned" — a deterministic,
     # read-model-only check (exists + floor-passed + approved). Makes planning a
     # convergeable goal.
-    plan_expanded: Kazi.Providers.PlanExpanded
+    plan_expanded: Kazi.Providers.PlanExpanded,
+    # T41.3/T41.4: manifest-coverage — every scanned surface element is referenced
+    # by >=1 Scenario across the product's `.feature` specs. The goal-file-runnable
+    # form of `Kazi.Reconcile.SpecCoverage`.
+    spec_coverage: Kazi.Providers.SpecCoverage
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The

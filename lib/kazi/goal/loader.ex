@@ -429,7 +429,10 @@ defmodule Kazi.Goal.Loader do
     "oss_hygiene" => :oss_hygiene,
     # T45.3 (UC-059): the read-model-only "phase has been planned" gate. Its
     # `phase` ref is validated below so a mis-declared gate fails at load.
-    "plan_expanded" => :plan_expanded
+    "plan_expanded" => :plan_expanded,
+    # T41.3/T41.4: manifest-coverage — every scanned surface element is referenced
+    # by >=1 Scenario across the product's `.feature` specs.
+    "spec_coverage" => :spec_coverage
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
