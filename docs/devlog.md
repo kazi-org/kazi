@@ -7,6 +7,67 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17: the wake contract works on the released binary -- a parked watch woke an idle worker with the message in hand (T55.13)
+
+**Type:** finding
+**Tags:** [bus, teamwork, wake, watch, harness]
+
+**Problem:** Field feedback from a supervisor running a 24/7 fleet named idle
+wakes the #1 structural gap: bus messages land at turn boundaries, so an IDLE
+session never sees them. With no documented contract, the fleet resorted to
+OS-level keystroke injection into session TTYs -- fragile, platform-specific,
+and permanently outside kazi's boundary (ADR-0001). T55.13 asserts the
+in-boundary contract already exists and needs teaching, not building. This is
+the demonstration that it actually holds on the RELEASED binary (v1.159.0),
+not just in source.
+
+**What was observed (two sessions, released binary, daemon up):**
+
+1. A "worker" session parked `kazi bus watch --timeout 240 --json` as a
+   BACKGROUND TASK of its own harness (Claude Code), then went on doing other
+   work.
+2. A separate "supervisor" session ran `kazi bus tell <worker> "..." --sev
+   interrupt`. Receipt: `{"id":905,"liveness":"active",...}` -- **`active`, not
+   `dead-reaping`**: the parked watch process is what keeps the worker's
+   presence row fresh, so a parked worker is visibly alive to its supervisor.
+3. The harness re-invoked the worker session on the background task's
+   completion. **Exit 0, and the finished task's output WAS the message** --
+   the ADR-0072 digest, rendering the directed/interrupt message verbatim. The
+   worker woke already holding what woke it: no follow-up `bus read`, no second
+   call to discover the reason.
+4. `kazi bus status 905` from the sending side then read `consumed`. The whole
+   round trip is visible to the supervisor.
+
+A separate run confirmed the other exit: `kazi bus watch --timeout 3` against a
+quiet bus printed one line and **exited 3** -- the re-park signal, always
+distinguishable from an arrival. Both halves of "arrival wakes, timeout
+re-parks" therefore hold on the shipped binary.
+
+**Wake latency was sub-second after publication; the CLI's own boot dominated.**
+The tell's publish timestamp and the worker's wake were ~1s apart, while the
+`kazi bus tell` invocation itself took ~18s wall-clock to publish on a heavily
+oversubscribed box (load ~460 on 4 cores). The wake path is not the cost; the
+released binary's cold start under load is.
+
+**Finding worth flagging (adjacent, NOT fixed here -- presence pid identity):**
+a presence row records the CALLING PROCESS's own pid (`bus.ex:1309`,
+`"pid" => os_pid()`). For a session whose last bus call was a one-shot CLI
+invocation, that pid is gone by the next liveness check, so it verdicts
+`dead-reaping` -- observed live: a "supervisor" that had only ever run
+short-lived `kazi bus` commands was reported `dead-reaping` while its harness
+session was demonstrably alive. A session holding a long-lived kazi process (a
+parked watch) is unaffected, which is why the worker read `active` throughout.
+So the wake contract incidentally makes presence honest for parked workers,
+while `idle` remains hard to reach for a session that merely *has* a live
+harness but no live kazi process. Not in T55.13's scope (docs+teach, no new
+surface); flagged for whoever owns presence liveness (T55.11).
+
+**Conclusion:** the contract is real and teachable exactly as ADR-0071 framed
+delivery -- the harness's own mechanics, not agent virtue. It needs two things
+from a harness (run a background task; re-invoke the session on its
+completion), needs T54.9's `--since now` anchor to be a sleep rather than a
+poll, and needs no new kazi surface at all.
+
 ## 2026-07-17: E55 wave A -- 7 tasks, 4 gate-confirmed cross-task bugs, shipped v1.153.0
 
 **Type:** finding
