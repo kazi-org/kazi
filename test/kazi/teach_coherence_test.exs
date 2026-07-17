@@ -314,6 +314,59 @@ defmodule Kazi.TeachCoherenceTest do
   end
 
   # ===========================================================================
+  # T45.8 (ADR-0056): the self-teaching artifacts must carry the FULL engineering
+  # surface — roadmap planning, discovery, landing, escalation, render, status —
+  # so any harness gets the whole workflow from the binary alone (ADR-0052: no
+  # personal-skill assumptions). The coherence guards above already prove every
+  # referenced command/flag is REAL; this spot-check proves each ADR-0056 surface
+  # is actually PRESENT (a real-but-undocumented surface would pass the drift
+  # guards vacuously). Both artifacts — the root AGENTS.md and the generated skill
+  # (SKILL.md + AUTHORING.md + RECIPES.md, ADR-0074) — must teach every one.
+  # ===========================================================================
+
+  # The spot-checked ADR-0056 surfaces: {human label, verbatim token that MUST
+  # appear in each artifact}. Tokens are chosen to be unambiguous CLI/goal-file
+  # surfaces (a flag, a `plan render` invocation, a goal-file block, a status
+  # read) rather than prose, so "present" means the reader can actually act on it.
+  @adr0056_surfaces [
+    {"roadmap planning (--project)", "--project"},
+    {"discovery on-ramp (--discover)", "--discover"},
+    {"plan render (generated plan document)", "plan render"},
+    {"landing block (ADR-0055)", "[integration]"},
+    {"escalation block (goal-file DATA)", "[escalation]"},
+    {"status read", "kazi status"}
+  ]
+
+  describe "the artifacts carry the full ADR-0056 engineering surface (T45.8)" do
+    test "the root AGENTS.md documents every ADR-0056 surface" do
+      agents_md = File.read!("AGENTS.md")
+
+      for {label, token} <- @adr0056_surfaces do
+        assert String.contains?(agents_md, token),
+               "AGENTS.md does not document the ADR-0056 surface #{inspect(label)} " <>
+                 "(expected the token #{inspect(token)}). The self-teaching artifact " <>
+                 "must teach the WHOLE workflow from the binary alone (ADR-0056 decision 7)."
+      end
+    end
+
+    test "the generated skill documents every ADR-0056 surface" do
+      # The skill ships as three files (ADR-0074); a surface may live in the
+      # router (SKILL.md) or a reference file (RECIPES.md), so scan the union.
+      skill =
+        Kazi.Teach.InstallSkill.skill_md() <>
+          Kazi.Teach.InstallSkill.authoring_md() <>
+          Kazi.Teach.InstallSkill.recipes_md()
+
+      for {label, token} <- @adr0056_surfaces do
+        assert String.contains?(skill, token),
+               "the generated skill does not document the ADR-0056 surface #{inspect(label)} " <>
+                 "(expected the token #{inspect(token)}). `kazi install-skill` must teach the " <>
+                 "WHOLE workflow from the binary alone (ADR-0056 decision 7)."
+      end
+    end
+  end
+
+  # ===========================================================================
   # The guard is LOAD-BEARING — a fake command / flag must FAIL.
   #
   # We splice a deliberately-bogus reference into a test-local COPY of each doc
