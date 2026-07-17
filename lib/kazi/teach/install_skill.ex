@@ -393,6 +393,54 @@ defmodule Kazi.Teach.InstallSkill do
     goal keeps landing on stuck, `kazi economy --rediscovery <goal>` names
     which predicate is burning the repeat attempts.
 
+    ## Landing: `[integration]`, `[conventions]`, and the process contract
+
+    Convergence is not the end: a goal whose code predicates pass but whose fix is
+    still uncommitted is not done. kazi treats landing as part of the objective bar
+    (ADR-0055) and owns the universal working rules so goal-files stay declarative.
+    Full how-to: docs/landing.md.
+
+    - **`[integration]` -- how work LANDS.** A block declaring `mode` (default
+      `none`; one of `none | commit | branch | pr | merge`). When `mode != none`,
+      kazi SYNTHESIZES a `landed` predicate evaluated against the LIVE working tree
+      (clean tree plus the mode-appropriate committed / pushed / PR-open /
+      rebase-merged state), so "code-green but uncommitted" stays UNSATISFIED. The
+      `:integrate` action then verifies-then-ships (the inner agent owns its
+      commits; a dirty tree is a distinct error, never a silent bulk commit). Under
+      `--parallel`, each group lands on its own branch; `mode = "merge"` over a
+      `needs`-DAG merges in topological order with `git cherry` silent-revert
+      verification.
+    - **`[conventions]` -- the process contract.** kazi appends a small, versioned
+      block of UNIVERSAL working rules to every dispatch prompt (small conventional
+      commits scoped to one directory; commit as you go; no stubs; grep
+      docs/lore.md before debugging; migration-number safety under parallelism;
+      network-retry; prefer graph tools). It is byte-identical across a goal's
+      iterations (a cacheable head) and harness-agnostic. `process_contract = false`
+      disables it; `extra_rules = [...]` appends repo-specific lines verbatim.
+    - **Tier-0 pattern (older binaries).** If your goal-file targets a kazi binary
+      that PREDATES the `[integration]` block, hand-write the equivalent `landed`
+      predicate as a `custom_script` -- "clean tree AND HEAD ahead of origin/main",
+      the manual equivalent of `mode = "commit"`. Keep the commits small and scoped
+      to one directory (matching the process contract). Copy-pasteable:
+
+      ```toml
+      [[predicate]]
+      id = "landed"
+      provider = "custom_script"
+      description = "clean tree AND HEAD ahead of origin/main -- manual equivalent of [integration] mode = commit"
+      cmd = "sh"
+      args = ["-c", "git status -s | grep -q . && exit 1; git diff origin/main HEAD | grep -q . || exit 1; exit 0"]
+      verdict = "exit_zero"
+      ```
+
+    - **The routing decision (ADR-0055).** Do NOT paste prose discipline blocks into
+      a goal-file -- each concern has one home: objectively-checkable rules become
+      PREDICATES (the `landed` predicate, the validation ladder, zero-stub);
+      universal how-to-work guidance is carried by the PROCESS CONTRACT (never
+      restated per goal); mechanics (worktree isolation, branch creation, merge
+      ordering, PR opening) are CONTROLLER behavior. A goal-file stays a short
+      declarative statement of done.
+
     ## status / adopt / waiting
 
     - `kazi status <ref> --json` reads convergence or proposal state (a pure
