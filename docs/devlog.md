@@ -105,6 +105,37 @@ by `test/kazi/read_model/run_reap_test.exs` (no-pid ghost, recycled-pid backstop
 fresh-heartbeat never-reaped, and a fixture-shape sweep leaving zero stale
 `running` rows).
 
+## 2026-07-17 — T60.6 finding: run-sink retention was NEVER WIRED (not wired-but-broken)
+
+**Verdict: never-wired.** #1155's secondary finding (run-sink dirs far past any
+plausible cap — 9,731 dirs on one machine, 35,570 dirs / 224 MB on another)
+traces to the retention pass simply never being invoked, not to a broken or
+too-generous cap.
+
+**Evidence.** `Kazi.Sink.Events.sweep/2` — the age/size retention pass that drops
+a run's entire `<sinks_dir>/<run_id>/` directory once aged past
+`default_max_age_seconds` (7 days) or sized past `default_max_bytes` (200 MB),
+while never touching a caller-supplied live run — is fully implemented and
+unit-tested (`test/kazi/sink/events_sink_test.exs`). But a tree-wide grep for
+callers found ZERO: every use of `Kazi.Sink.Events` in `lib/` is `.append/3`
+(the write path, `runtime.ex:1036/1346`) or `.read/1` (event river, mission
+control). Nothing ever called `.sweep/2`. So no sink directory was ever
+reclaimed — exactly the unbounded growth #1155 measured.
+
+**Same class as T48.15.** This is a carbon copy of the zombie-run-row bug:
+`RunReaper.reap/0` shipped correct and tested but nothing called it until
+`RunReaperTicker` was added to the supervision tree. `RunReaperTicker`'s own
+moduledoc names the pattern. The sink retention had the identical gap.
+
+**Fix.** New `Kazi.Sink.RetentionTicker` (sibling of `RunReaperTicker`), added to
+`Kazi.Application`'s children: a supervised periodic GenServer (1 h default) that
+calls `Events.sweep/2` with `live_run_ids` from `RunRegistry.list_live/0`.
+Best-effort — a registry-read failure SKIPS the sweep (never risks deleting a
+live run's dir), and any sweep error is logged, never raised into a run. The cap
+VALUES were deliberately left untouched (the mechanism was the defect, not the
+threshold); tuning them, if ever needed, is a separate change once the sweep is
+observed reclaiming real sinks on a live machine.
+
 ## 2026-07-17 — T59.4 finding: #1025 and #1186 are NOT one root cause — five distinct contended resources; T59.5 must be five fixes, not a blanket timeout bump
 
 **Type:** investigation
