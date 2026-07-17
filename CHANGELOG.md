@@ -16,6 +16,21 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.168.0](https://github.com/kazi-org/kazi/compare/v1.167.0...v1.168.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** read_digest/1 -- the one daemon-assembled read every surface shares ([8a8f860](https://github.com/kazi-org/kazi/commit/8a8f860ecc74badefeda44ba33fd7a053f4fa0a7))
+* **cli:** render the daemon's digest; document `bus read --since <cursor>` ([d330a6c](https://github.com/kazi-org/kazi/commit/d330a6c3ff2236cf9094ffa69e74f2d0726f373e))
+* **daemon:** assemble the bus digest server-side (T55.7, ADR-0072 d5) ([8c4b0ef](https://github.com/kazi-org/kazi/commit/8c4b0eff4f9869b117e14958220ce4d5972748ff))
+* **mcp:** kazi_bus_read reads through the daemon's assembly (T55.7) ([62d363b](https://github.com/kazi-org/kazi/commit/62d363b25ca3553d91448281d7f6fa7dcf06c805))
+
+
+### Bug Fixes
+
+* **digest:** restore the [@doc](https://github.com/doc) opening dropped in the T55.6 rebase resolution ([3d0158f](https://github.com/kazi-org/kazi/commit/3d0158f5f3f309acc3f9cae3552a87f6993f220d))
+
 ## [1.167.0](https://github.com/kazi-org/kazi/compare/v1.166.0...v1.167.0) (2026-07-17)
 
 
