@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.159.0](https://github.com/kazi-org/kazi/compare/v1.158.0...v1.159.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** tell answers a receipt -- id, resolved recipient, liveness (T55.12) ([5f866b7](https://github.com/kazi-org/kazi/commit/5f866b7f9545005c13fdca05a4bcb5845f38efad))
+* **cli:** bus status &lt;id&gt;, tell prints its id, who shows inbox depth (T55.12) ([71f8651](https://github.com/kazi-org/kazi/commit/71f8651dc22375476e16e0282a8f07f01eca8d70))
+* **mcp:** kazi_bus_tell returns the receipt; new kazi_bus_status twin (T55.12) ([c80fb98](https://github.com/kazi-org/kazi/commit/c80fb98e24b6ad0647b02117e17cfe85740c255f))
+
+
+### Bug Fixes
+
+* **mcp:** group fetch_message_id outside the call_tool clauses (T55.12) ([df51c55](https://github.com/kazi-org/kazi/commit/df51c5571396172933ccca953309289fbcb8e7b4))
+
 ## [1.158.0](https://github.com/kazi-org/kazi/compare/v1.157.0...v1.158.0) (2026-07-17)
 
 
