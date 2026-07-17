@@ -51,6 +51,17 @@ defmodule Kazi.CLI.BusTest do
       assert {:bus, "watch", [], opts} = Kazi.CLI.parse(["bus", "watch", "--since", "all"])
       assert opts[:since] == "all"
     end
+
+    test "`bus name <nickname>` parses as its own verb (T55.5)" do
+      assert {:bus, "name", ["worker-a"], _opts} = Kazi.CLI.parse(["bus", "name", "worker-a"])
+    end
+
+    test "`bus tell --session-name <n>` threads the sender identity through (T55.5)" do
+      assert {:bus, "tell", ["worker-a", "hi"], opts} =
+               Kazi.CLI.parse(["bus", "tell", "worker-a", "hi", "--session-name", "supervisor"])
+
+      assert opts[:session_name] == "supervisor"
+    end
   end
 
   # ===========================================================================
@@ -177,6 +188,13 @@ defmodule Kazi.CLI.BusTest do
       assert output =~ "kazi bus watch"
       assert output =~ "--since"
       assert output =~ "exits 3"
+    end
+
+    test "`bus name --help` prints name's own signature, not the generic usage (T55.5)" do
+      output = capture_io(fn -> assert Kazi.CLI.run(["bus", "name", "--help"], []) == 0 end)
+
+      assert output =~ "kazi bus name"
+      assert output =~ "nickname"
       refute output =~ "kazi apply <goal-file>"
     end
   end
@@ -240,6 +258,34 @@ defmodule Kazi.CLI.BusTest do
         end)
 
       assert output =~ "--since"
+    end
+
+    test "`bus name <nickname>` reaches the no-daemon path (T55.5)" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "name", "worker-a"], []) == 1
+        end)
+
+      assert output =~ "no daemon running"
+    end
+
+    test "`bus name` with no nickname is a one-line usage error, not a daemon error" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "name"], []) == 1
+        end)
+
+      assert output =~ "nickname"
+      refute output =~ "no daemon running"
+    end
+
+    test "an invalid nickname is rejected client-side with a one-line error" do
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["bus", "name", "@not-a-team"], []) == 1
+        end)
+
+      assert output =~ "invalid nickname"
       refute output =~ "no daemon running"
     end
   end

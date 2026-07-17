@@ -77,6 +77,7 @@ defmodule Kazi.MCP.ServerTest do
       assert names == [
                "kazi_apply",
                "kazi_approve",
+               "kazi_bus_name",
                "kazi_bus_post",
                "kazi_bus_read",
                "kazi_bus_tell",

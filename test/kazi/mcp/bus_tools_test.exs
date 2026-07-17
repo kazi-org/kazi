@@ -18,6 +18,7 @@ defmodule Kazi.MCP.BusToolsTest do
       assert "kazi_bus_watch" in names
       assert "kazi_bus_who" in names
       assert "kazi_bus_tell" in names
+      assert "kazi_bus_name" in names
     end
 
     test "kazi_bus_read declares the peek argument; kazi_bus_watch the timeout" do
@@ -51,11 +52,18 @@ defmodule Kazi.MCP.BusToolsTest do
       assert by_name["kazi_bus_watch"]["description"] =~ "since"
     end
 
-    test "post/tell declare their required arguments" do
+    test "post/tell/name declare their required arguments" do
       by_name = Map.new(Server.tools(), &{&1["name"], &1})
 
       assert by_name["kazi_bus_post"]["inputSchema"]["required"] == ["kind", "text"]
       assert by_name["kazi_bus_tell"]["inputSchema"]["required"] == ["session", "text"]
+      assert by_name["kazi_bus_name"]["inputSchema"]["required"] == ["name"]
+    end
+
+    test "kazi_bus_tell self-describes nickname resolution (T55.5)" do
+      by_name = Map.new(Server.tools(), &{&1["name"], &1})
+
+      assert by_name["kazi_bus_tell"]["description"] =~ "nickname"
     end
   end
 
@@ -68,6 +76,12 @@ defmodule Kazi.MCP.BusToolsTest do
 
     test "kazi_bus_tell without session/text is an invalid-params error" do
       response = call("kazi_bus_tell", %{"session" => "someone"})
+
+      assert %{"error" => %{"code" => -32_602}} = response
+    end
+
+    test "kazi_bus_name without name is an invalid-params error (T55.5)" do
+      response = call("kazi_bus_name", %{})
 
       assert %{"error" => %{"code" => -32_602}} = response
     end
@@ -124,6 +138,20 @@ defmodule Kazi.MCP.BusToolsTest do
 
       assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
       assert content["reason"] == "no_daemon"
+    end
+
+    test "kazi_bus_name surfaces a structured no_daemon tool error (T55.5)", %{opts: opts} do
+      response = call("kazi_bus_name", %{"name" => "worker-a"}, opts)
+
+      assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
+      assert content["reason"] == "no_daemon"
+    end
+
+    test "kazi_bus_name rejects an invalid nickname client-side (T55.5)", %{opts: opts} do
+      response = call("kazi_bus_name", %{"name" => "@not-a-team"}, opts)
+
+      assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
+      assert content["reason"] == "invalid_nickname"
     end
   end
 
