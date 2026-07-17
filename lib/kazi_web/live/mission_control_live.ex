@@ -857,6 +857,9 @@ defmodule KaziWeb.MissionControlLive do
 
         <section :if={@alerts != []} id="mc-attention">
           <div class="seclabel section-label">NEEDS ATTENTION</div>
+          <div id="mc-attention-affordance" class="attnaffordance">
+            stuck, over-budget, or awaiting operator — live runs only
+          </div>
           <div class="attnrow">
             <.link
               :for={a <- @alerts}
@@ -1021,6 +1024,7 @@ defmodule KaziWeb.MissionControlLive do
         .clock { font-size: 14px; color: #EAF3FC; font-weight: 500; letter-spacing: .1em; min-width: 116px; text-align: right; }
 
         .seclabel { margin: 20px 0 10px; }
+        .attnaffordance { color: var(--dim); font-size: 10px; letter-spacing: .04em; margin: -6px 0 8px; }
         .fleethead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
         .scopetoggle { display: flex; gap: 6px; }
         .scopebtn { background: transparent; border: 1px solid var(--line); color: var(--dim); font: inherit; font-size: 9px; letter-spacing: .18em; padding: 5px 10px; border-radius: 3px; cursor: pointer; }

@@ -239,6 +239,17 @@ defmodule Kazi.ReadModel.RunRegistry do
   end
 
   @doc """
+  The default staleness window (seconds) `stale?/2` and friends use when no
+  explicit `stale_after_seconds` is given. Exposed (T63.1, #1155) so other
+  freshness gates — the fleet-wide attention queue in particular — reuse this
+  SAME number instead of inventing a second threshold that could silently
+  drift out of sync with the duplicate-run guard's own trusted window
+  (`Kazi.Runtime`'s `status == "running" and not stale?(run)` check).
+  """
+  @spec default_stale_after_seconds() :: non_neg_integer()
+  def default_stale_after_seconds, do: @stale_after_seconds
+
+  @doc """
   True when `run` has no terminal status and its heartbeat is older than
   `stale_after_seconds` (default #{@stale_after_seconds}s). A terminal run is
   never stale — it converged/stopped on purpose.
