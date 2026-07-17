@@ -1969,13 +1969,24 @@ defmodule Kazi.CLI do
   @spec json?(keyword()) :: boolean()
   defp json?(flags), do: flags[:json] == true
 
-  # The render seam: under `--json` print exactly `Jason.encode!(payload)` and a
+  # T54.7 (#1076): the ONE JSON encoder for every `--json` write. `escape:
+  # :unicode_safe` emits `\uXXXX` for every non-ASCII codepoint, so the output
+  # is PURE ASCII and byte-identical regardless of the caller's locale. Plain
+  # `Jason.encode!/1` is correct (raw UTF-8), but `IO.puts` on a latin1
+  # `:standard_io` device (a non-UTF-8 locale, e.g. `env -i`) transcodes each
+  # non-ASCII codepoint to the literal 7-char string `\x{2014}` -- invalid JSON.
+  # Escaping to ASCII at the ENCODER sidesteps the IO device entirely (never
+  # mutating the process-global `:io.setopts`, which would fight `env -i`).
+  @spec encode_json!(term()) :: String.t()
+  defp encode_json!(payload), do: Jason.encode!(payload, escape: :unicode_safe)
+
+  # The render seam: under `--json` print exactly `encode_json!(payload)` and a
   # newline (a single JSON object, no human prose interleaved on stdout);
   # otherwise run `human_fun`, the command's existing human rendering. Returns
   # `:ok`; the caller owns the exit code.
   @spec emit(boolean(), map(), (-> any())) :: :ok
   defp emit(true, payload, _human_fun) when is_map(payload) do
-    IO.puts(Jason.encode!(payload))
+    IO.puts(encode_json!(payload))
   end
 
   defp emit(false, _payload, human_fun) when is_function(human_fun, 0) do
@@ -1990,7 +2001,7 @@ defmodule Kazi.CLI do
   # surface; the non-zero exit code is what it branches on.
   @spec emit_json_error(String.t()) :: :ok
   defp emit_json_error(message) when is_binary(message) do
-    IO.puts(Jason.encode!(%{error: message, schema_version: @run_schema_version}))
+    IO.puts(encode_json!(%{error: message, schema_version: @run_schema_version}))
   end
 
   defp format_invalid(invalid) do
@@ -2078,14 +2089,14 @@ defmodule Kazi.CLI do
   # orchestrator branches on the exit code, never on prose. JSON-only by design.
   @spec execute_schema(String.t() | nil) :: exit_code()
   defp execute_schema(nil) do
-    IO.puts(Jason.encode!(Kazi.CLI.Schema.all()))
+    IO.puts(encode_json!(Kazi.CLI.Schema.all()))
     0
   end
 
   defp execute_schema(command) do
     case Kazi.CLI.Schema.fetch(command) do
       {:ok, schema} ->
-        IO.puts(Jason.encode!(schema))
+        IO.puts(encode_json!(schema))
         0
 
       :error ->
@@ -2104,7 +2115,7 @@ defmodule Kazi.CLI do
   defp execute_provider_schema(command) do
     case Kazi.Predicate.Schema.fetch(command) do
       {:ok, schema} ->
-        IO.puts(Jason.encode!(schema))
+        IO.puts(encode_json!(schema))
         0
 
       :error ->
@@ -3253,7 +3264,7 @@ defmodule Kazi.CLI do
         Enum.map(payload.groups, fn %{id: id, status: status} -> %{id: id, status: status} end)
     }
 
-    IO.puts(Jason.encode!(event))
+    IO.puts(encode_json!(event))
   end
 
   # The per-goal loop opts the default scheduler reconciler forwards to
@@ -3319,7 +3330,7 @@ defmodule Kazi.CLI do
     message = format_run_error(reason)
 
     if json? do
-      IO.puts(Jason.encode!(run_error_json(goal, reason, message)))
+      IO.puts(encode_json!(run_error_json(goal, reason, message)))
     else
       IO.puts(:stderr, "error: run failed: #{message}")
     end
@@ -3432,7 +3443,7 @@ defmodule Kazi.CLI do
       # stream — an empty `tools` is omitted so absent ≠ zero (ADR-0046 §6).
       |> put_stream_tools(Map.get(payload, :tools))
 
-    IO.puts(Jason.encode!(event))
+    IO.puts(encode_json!(event))
   end
 
   # T34.3: include the `tools` counters only when non-empty (the harness reported
