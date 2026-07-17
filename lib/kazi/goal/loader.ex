@@ -417,7 +417,11 @@ defmodule Kazi.Goal.Loader do
     # T49.3 (ADR-0064): replay a pinned Gherkin Scenario by delegating to a
     # surface provider. Its spec/scenario/surface/repin keys are validated below
     # so a missing binding or an unknown surface fails at load, not at dispatch.
-    "scenario" => :scenario
+    "scenario" => :scenario,
+    # T44.7 (E29/ADR-0034): the internal-leak guard as a predicate. Its
+    # codenames/base_ref keys are validated below so a mis-typed config fails at
+    # load, not at dispatch.
+    "oss_hygiene" => :oss_hygiene
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -1763,6 +1767,15 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T44.7 (E29/ADR-0034): an oss_hygiene predicate's optional `codenames` must be a
+  # list of strings and `base_ref` a string — checked here so a mis-typed config
+  # fails at load, not at dispatch.
+  defp validate_provider_config(:oss_hygiene, config, id) do
+    with :ok <- validate_string_list(config, :codenames, id, "oss_hygiene") do
+      validate_optional_string(config, :base_ref, id, "oss_hygiene")
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
 
   # --- cli assertion vocabulary (T43.7, UC-055) ------------------------------
@@ -1894,6 +1907,43 @@ defmodule Kazi.Goal.Loader do
         {:error,
          "#{provider} predicate #{inspect(id)} is missing required key #{inspect(Atom.to_string(key))} " <>
            "(a non-empty string)"}
+    end
+  end
+
+  # An OPTIONAL string key: absent is fine, present must be a string (T44.7).
+  defp validate_optional_string(config, key, id, provider) do
+    case Map.get(config, key) do
+      nil ->
+        :ok
+
+      value when is_binary(value) ->
+        :ok
+
+      other ->
+        {:error,
+         "#{provider} predicate #{inspect(id)} #{inspect(Atom.to_string(key))} must be a string " <>
+           "(got #{inspect(other)})"}
+    end
+  end
+
+  # An OPTIONAL list-of-strings key: absent is fine, present must be a list whose
+  # every element is a string (T44.7).
+  defp validate_string_list(config, key, id, provider) do
+    case Map.get(config, key) do
+      nil ->
+        :ok
+
+      list when is_list(list) ->
+        if Enum.all?(list, &is_binary/1),
+          do: :ok,
+          else:
+            {:error,
+             "#{provider} predicate #{inspect(id)} #{inspect(Atom.to_string(key))} must be an array of strings"}
+
+      other ->
+        {:error,
+         "#{provider} predicate #{inspect(id)} #{inspect(Atom.to_string(key))} must be an array of strings " <>
+           "(got #{inspect(other)})"}
     end
   end
 
