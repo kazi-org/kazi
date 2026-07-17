@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.157.0](https://github.com/kazi-org/kazi/compare/v1.156.0...v1.157.0) (2026-07-17)
+
+
+### Features
+
+* **scenario:** pin schema + validator -- the deterministic half of a scenario predicate (ADR-0064) ([46af2d0](https://github.com/kazi-org/kazi/commit/46af2d07d9a824d2f8bf94f6241c7256e3975c22))
+
 ## [1.156.0](https://github.com/kazi-org/kazi/compare/v1.155.2...v1.156.0) (2026-07-17)
 
 
