@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.161.0](https://github.com/kazi-org/kazi/compare/v1.160.0...v1.161.0) (2026-07-17)
+
+
+### Features
+
+* **cli:** warn pre-dispatch when the permission mode cannot act (T54.6, [#1072](https://github.com/kazi-org/kazi/issues/1072)) ([32092be](https://github.com/kazi-org/kazi/commit/32092be68551543bdeb0c6ef5f4fa1b35d1a3eca))
+* **loop:** fail fast when the harness was refused, not merely unsuccessful (T54.6, [#1072](https://github.com/kazi-org/kazi/issues/1072)) ([7a8a22c](https://github.com/kazi-org/kazi/commit/7a8a22cc7aa933848dc5ad2e3961c6cd36565871))
+* **loop:** surface permission_denied_tool_calls on the terminal result (T54.6, [#1072](https://github.com/kazi-org/kazi/issues/1072)) ([310a5ad](https://github.com/kazi-org/kazi/commit/310a5add140c235ba7c8ebc824e6c0377f42dabe))
+
 ## [1.160.0](https://github.com/kazi-org/kazi/compare/v1.159.1...v1.160.0) (2026-07-17)
 
 
