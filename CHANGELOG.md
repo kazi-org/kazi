@@ -16,6 +16,17 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.188.0](https://github.com/kazi-org/kazi/compare/v1.187.0...v1.188.0) (2026-07-17)
+
+
+### Features
+
+* **attention:** rank capability_unreachable as needs-a-human ([76cd989](https://github.com/kazi-org/kazi/commit/76cd98942268d298b82fd37e660b681f981f6b96))
+* **loop:** capability_unreachable cause class ([6a7ea5f](https://github.com/kazi-org/kazi/commit/6a7ea5ff1fcabdcfbc8a8c88c541e0d48344f810))
+* **loop:** route code_drift to the demonstrator; terminate capability_unreachable after two failed demos ([44f90a7](https://github.com/kazi-org/kazi/commit/44f90a7a95085955ca48550d73a8f3810b200703))
+* **scenario:** re-classify a red replay as code_drift on HEAD drift; park stale under repin=manual ([2a286fb](https://github.com/kazi-org/kazi/commit/2a286fb6e44d91d5cc97a630e91be91a24f63fcf))
+* **scenario:** stamp minted commit on acceptance + record repin_diff ([a31ff12](https://github.com/kazi-org/kazi/commit/a31ff12646a77594da79a663e37eecb5dcac27e8))
+
 ## [1.187.0](https://github.com/kazi-org/kazi/compare/v1.186.1...v1.187.0) (2026-07-17)
 
 
