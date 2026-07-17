@@ -57,7 +57,7 @@ kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope mach
 kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
 kazi bus read [--peek] [--full] [--json]                   # pull + ack this session's durable consumers, prints a digest
 kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
-kazi bus watch [--timeout <seconds>] [--full] [--json]     # BLOCK until a message arrives (issue #1091); exit 3 on timeout
+kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
 kazi bus who [--team <t>] [--all] [--json]                 # list fresh presence; --all includes TTL-stale entries
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
@@ -69,14 +69,29 @@ naming the cap) and the stream retains them for 30 days. Directed messages
 (`tell`) are delivered regardless of either side's `--scope` (issue #1065),
 and `tell @<team>` fans out to every member of a named team.
 
-### Waiting without polling (issue #1091)
+### Waiting without polling (issues #1091, #1097)
 
-`kazi bus watch` is the no-poll-loop way to wait for traffic: it consumes
-and prints anything already pending immediately; otherwise it parks on the
-session's scope, directed, and team subjects and wakes on the first
-arrival. `--timeout <seconds>` (default 300) bounds the wait — expiry
-prints a one-line notice and exits 3, so scripted waiters can loop on the
-exit code:
+`kazi bus watch` is the no-poll-loop way to wait for traffic: it parks on
+the session's scope, directed, and team subjects and wakes on the first
+NEW arrival, consuming and printing it. "New" is anchored by `--since`
+(T54.9, issue #1097):
+
+- `now` (the default) — only messages posted AFTER the watch starts are
+  delivered. Backlog already pending on the session's cursor (for example
+  messages an earlier `bus peek` looked at without consuming) never
+  satisfies the watch and stays consumable by `bus read`/`bus peek` — so
+  every wake is a real event, and a watch parked as a background wake
+  mechanism cannot fire on messages you have already seen.
+- `all` — the drain-first behavior: anything already pending, backlog
+  included, returns immediately.
+- a numeric stream sequence — anchor there precisely; pending messages
+  with a greater sequence return immediately.
+
+The anchor is captured only after the wake subscriptions are live, so a
+message landing in the gap is never lost. `--timeout <seconds>` (default
+300) bounds the wait — expiry prints a one-line notice and exits 3, always
+distinguishable from an arrival (exit 0), so scripted waiters can loop on
+the exit code:
 
 ```bash
 while :; do
@@ -195,9 +210,11 @@ Each accepts the optional `topic` / `scope` / `sev` arguments the CLI verbs
 take. `kazi_bus_read` and `kazi_bus_watch` return the ADR-0072 digest
 envelope by default (see above); `full: true` mirrors the CLI's `--full`
 and returns `messages` unabridged. `kazi_bus_watch` takes an optional
-`timeout` (seconds); where the CLI exits 3 on expiry, the tool returns
-`{ok: true, timed_out: true, digest: {total: 0, lines: []}}` (`messages:
-[]` under `full: true`) — an expected outcome the agent branches on, never
+`timeout` (seconds) and `since` (`"now"` default / `"all"` / a numeric
+stream sequence — the CLI's `--since` anchor, issue #1097); where the CLI
+exits 3 on expiry, the tool returns `{ok: true, timed_out: true, digest:
+{total: 0, lines: []}}` (`messages: []` under `full: true`) — an expected
+outcome the agent branches on, never
 `isError`. A tool call against a missing daemon returns an MCP tool-result error
 (`isError: true`) with `reason: "no_daemon"`, exactly mirroring the CLI's
 no-daemon message — never a JSON-RPC protocol error.
