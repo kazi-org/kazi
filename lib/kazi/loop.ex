@@ -1073,7 +1073,12 @@ defmodule Kazi.Loop do
   end
 
   # --- ACT: dispatch the coding agent against failing-predicate evidence -------
-  def handle_event(:internal, {:act, %Action{kind: :dispatch_agent} = action}, :acting, data) do
+  # Both the fixer (`:dispatch_agent`) and the demonstrator (`:dispatch_demonstrator`,
+  # T49.7) route through the SAME lease + dispatch machinery; only the work differs
+  # (the demonstrator mints a pin under a role-scoped write lease, see
+  # `dispatch_demonstrator/2`).
+  def handle_event(:internal, {:act, %Action{kind: kind} = action}, :acting, data)
+      when kind in [:dispatch_agent, :dispatch_demonstrator] do
     # T3.1d resource lease (ADR-0006; UC-013): before doing ANY work on the goal,
     # hold the lease on its resource key. `hold_lease/1` acquires it (or renews the
     # one we already hold) on the injected clock. If a DIFFERENT instance holds the
@@ -1090,7 +1095,7 @@ defmodule Kazi.Loop do
         reobserve(data, data.reobserve_interval_ms)
 
       {:ok, data} ->
-        dispatch_agent(action, data)
+        dispatch(action, data)
     end
   end
 
@@ -1909,10 +1914,54 @@ defmodule Kazi.Loop do
     evidence =
       Map.new(failing, fn id -> {id, PredicateVector.get(vector, id).evidence} end)
 
-    Action.new(:dispatch_agent,
-      params: %{failing: failing, evidence: evidence},
-      metadata: %{goal_id: goal.id}
-    )
+    # T49.7 (ADR-0064 d3/d4): when a failing `scenario` predicate is blocked by its
+    # PIN (`:unpinned` / `{:stale, :spec_changed}`) and its `repin` policy allows,
+    # dispatch a DEMONSTRATOR to mint the pin instead of a fixer to patch code. The
+    # routing rides entirely on the failing-predicate evidence already collected
+    # here — `decide/2` gains NO special case (ADR-0055). One scenario per dispatch
+    # (the pin is a per-Scenario artifact); any remaining failures are handled on
+    # later iterations through this same machinery.
+    case demonstrator_target(failing, evidence, goal) do
+      {id, predicate} ->
+        Action.new(:dispatch_demonstrator,
+          params: %{failing: [id], evidence: Map.take(evidence, [id]), predicate: predicate},
+          metadata: %{goal_id: goal.id}
+        )
+
+      nil ->
+        Action.new(:dispatch_agent,
+          params: %{failing: failing, evidence: evidence},
+          metadata: %{goal_id: goal.id}
+        )
+    end
+  end
+
+  # The first failing `scenario` predicate whose pin is the blocker and whose repin
+  # policy permits automatic re-demonstration, or nil. Read off the same failing +
+  # evidence the fixer dispatch uses, so no new decision branch is introduced.
+  @spec demonstrator_target([Predicate.id()], map(), Goal.t()) ::
+          {Predicate.id(), Predicate.t()} | nil
+  defp demonstrator_target(failing, evidence, %Goal{} = goal) do
+    preds = predicate_by_id(goal)
+
+    Enum.find_value(failing, fn id ->
+      predicate = Map.get(preds, id)
+
+      if (predicate && predicate.kind == :scenario) and
+           demonstrable?(Map.get(evidence, id)) and repin_allows?(predicate) do
+        {id, predicate}
+      end
+    end)
+  end
+
+  defp demonstrable?(%{pin_state: :unpinned}), do: true
+  defp demonstrable?(%{pin_state: {:stale, :spec_changed}}), do: true
+  defp demonstrable?(_), do: false
+
+  defp repin_allows?(%Predicate{config: config}), do: Map.get(config, :repin, "auto") != "manual"
+
+  defp predicate_by_id(%Goal{} = goal) do
+    goal |> Goal.all_predicates() |> Map.new(fn predicate -> {predicate.id, predicate} end)
   end
 
   # =============================================================================
@@ -1930,6 +1979,13 @@ defmodule Kazi.Loop do
   # pre-lease dispatch body — prepare the workspace, drive the harness, fold the
   # token estimate / working-set digest, invalidate land/deploy, log the dispatch,
   # and re-observe on the poll interval.
+  # Route a leased dispatch to its role handler: the demonstrator (T49.7) or the
+  # fixer. Both share this dispatch machinery; only the work differs.
+  defp dispatch(%Action{kind: :dispatch_demonstrator} = action, data),
+    do: dispatch_demonstrator(action, data)
+
+  defp dispatch(%Action{} = action, data), do: dispatch_agent(action, data)
+
   @spec dispatch_agent(Action.t(), Data.t()) :: :gen_statem.event_handler_result(atom())
   defp dispatch_agent(%Action{} = action, data) do
     # T34.3 (ADR-0046 §2): build the prompt SECTIONS once (orientation prefix,
@@ -2040,6 +2096,84 @@ defmodule Kazi.Loop do
     else
       reobserve(data, data.reobserve_interval_ms)
     end
+  end
+
+  # T49.7 (ADR-0064 d3): dispatch the DEMONSTRATOR for one pin-blocked scenario
+  # predicate. Reuses the same dispatch helpers as the fixer — workspace prep, the
+  # harness seam, token/dispatch accounting, action recording, re-observe — but the
+  # work is `Kazi.Scenario.Demonstrator.demonstrate/3` (mint the pin, then the
+  # born-reproducible acceptance gate: keep the pin ONLY if it validates AND replays
+  # green, else discard). The write lease is role-scoped (T49.6): the demonstrator
+  # may write ONLY its pin, so its read-only set is the fixer's leased paths minus
+  # the pin it is minting.
+  @spec dispatch_demonstrator(Action.t(), Data.t()) :: :gen_statem.event_handler_result(atom())
+  defp dispatch_demonstrator(%Action{params: %{predicate: predicate}} = action, %Data{} = data) do
+    prepare_workspace(data)
+    before = demonstrator_snapshot(data)
+
+    {_outcome, info} =
+      Kazi.Scenario.Demonstrator.demonstrate(predicate, %{workspace: data.workspace},
+        harness: data.harness,
+        adapter_opts: dispatch_adapter_opts(data)
+      )
+
+    # A write outside the pin is a flagged, role-scoped gaming event (ADR-0064 d3).
+    data = flag_demonstrator_writes(data, before)
+
+    # The demonstration is an ordinary harness dispatch: it counts against the token
+    # + dispatch budgets like any other (the economy envelope tags the spend).
+    data = accumulate_tokens(data, info[:harness])
+    data = accumulate_dispatches(data)
+
+    # The code (well, the pin) changed under us: any prior land/deploy is stale.
+    data = record_action(data, action, landed?: false, deployed?: false)
+    data = log_dispatch(data, action)
+    reobserve(data, data.reobserve_interval_ms)
+  end
+
+  # The demonstrator's read-only snapshot: the role-scoped set it must NOT write —
+  # the fixer's leased paths (specs + all pins) minus the pin it is allowed to mint.
+  @spec demonstrator_snapshot(Data.t()) :: %{optional(String.t()) => term()}
+  defp demonstrator_snapshot(%Data{enforcement: %Enforcement{enabled: true} = enf, workspace: ws}) do
+    Enforcement.digest_paths(ws, demonstrator_read_only_paths(enf))
+  end
+
+  defp demonstrator_snapshot(%Data{}), do: %{}
+
+  @spec flag_demonstrator_writes(Data.t(), %{optional(String.t()) => term()}) :: Data.t()
+  defp flag_demonstrator_writes(
+         %Data{enforcement: %Enforcement{enabled: true} = enf, workspace: ws} = data,
+         before
+       ) do
+    case Enforcement.detect_writes(ws, demonstrator_read_only_paths(enf), before) do
+      [] ->
+        data
+
+      events ->
+        stamped =
+          Enum.map(events, fn event ->
+            event
+            |> Map.put(:type, :disallowed_write)
+            |> Map.put(:iteration, max(data.iterations - 1, 0))
+          end)
+
+        Enum.each(stamped, fn event ->
+          Logger.warning(fn ->
+            "kazi.loop goal=#{data.goal.id} ENFORCEMENT demonstrator flagged disallowed " <>
+              "write to #{event.path} (iteration #{event.iteration})"
+          end)
+        end)
+
+        %Data{data | gaming_events: data.gaming_events ++ stamped}
+    end
+  end
+
+  defp flag_demonstrator_writes(%Data{} = data, _before), do: data
+
+  defp demonstrator_read_only_paths(%Enforcement{} = enf) do
+    read_only = Map.get(Enforcement.for_role(enf, :fixer), :read_only_paths, enf.read_only_paths)
+    allowed = Map.get(Enforcement.for_role(enf, :demonstrator), :allowed_write_paths, [])
+    read_only -- allowed
   end
 
   # T54.6 (#1072) fix (b): the fingerprint of a dispatch that was never allowed to
