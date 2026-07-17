@@ -166,6 +166,28 @@ defmodule Kazi.Loop.CauseClassTest do
     end
   end
 
+  describe "capability_unreachable -- the T49.8 stalled-demonstration path" do
+    test "names the scenario ids and carries the demonstration reasons" do
+      result =
+        CauseClass.classify(
+          inputs(%{
+            outcome: :stopped,
+            reason: :stuck,
+            stuck_cause: :capability_unreachable,
+            stuck_failing: [:cap],
+            stuck_reasons: %{cap: [:replay_red]}
+          })
+        )
+
+      assert result == %{
+               class: :capability_unreachable,
+               ids: [:cap],
+               reasons: %{cap: [:replay_red]},
+               exhausted: nil
+             }
+    end
+  end
+
   describe "no cause class -- plain converged/stuck-on-failing-work runs" do
     test "a converged outcome classifies nil" do
       refute CauseClass.classify(inputs(%{outcome: :converged}))
