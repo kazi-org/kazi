@@ -433,7 +433,7 @@ defmodule Kazi.CLI do
     %{
       name: "daemon",
       summary:
-        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status` over a local Unix-socket control plane with a version handshake; `start` also supervises nats-server for the session bus. Convergence never depends on the daemon.",
+        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status` over a local Unix-socket control plane with a version handshake (`status --json` reports `schema_vsn`, the daemon's stamped read-model schema version, for the ADR-0068 skew handshake); `start` also supervises nats-server for the session bus. Convergence never depends on the daemon.",
       args: [%{name: "subcommand", required: true}],
       flags: [:json, :nats_bin, :nats_port, :nats_host, :nats_token]
     },
@@ -608,7 +608,7 @@ defmodule Kazi.CLI do
       kazi memory approve <proposal-ref> [--json]                     # promote into its routed corpus file
       kazi memory reject <proposal-ref> [--json]                      # decline (kept for audit)
       kazi daemon start [--nats-bin <path>] [--nats-port <n>]  # boot the session-bus daemon (foreground)
-      kazi daemon status [--json]                  # ping the running daemon
+      kazi daemon status [--json]                  # ping the running daemon (--json includes schema_vsn, the daemon's read-model schema version)
       kazi daemon stop                             # clean shutdown
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
       kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
@@ -4694,7 +4694,7 @@ defmodule Kazi.CLI do
       {:ok, resp} ->
         emit(json?(opts), resp, fn ->
           IO.puts(
-            "kazi daemon: running (vsn #{resp["vsn"]}, uptime #{resp["uptime_s"]}s, pid #{resp["pid"]})"
+            "kazi daemon: running (vsn #{resp["vsn"]}, uptime #{resp["uptime_s"]}s, pid #{resp["pid"]}#{schema_vsn_suffix(resp)})"
           )
         end)
 
@@ -4736,6 +4736,11 @@ defmodule Kazi.CLI do
 
   defp execute_daemon(sub, _args, opts, _inject_opts),
     do: daemon_error("unknown daemon subcommand #{inspect(sub)}", opts)
+
+  # T52.2: the daemon's stamped read-model `schema_vsn` (ADR-0068), shown when a
+  # daemon reports it and omitted for an older daemon that predates the field.
+  defp schema_vsn_suffix(%{"schema_vsn" => v}) when is_integer(v), do: ", schema_vsn #{v}"
+  defp schema_vsn_suffix(_resp), do: ""
 
   # Shared `status` probe: `:missing` / `:dead` render the point-4 down/stale
   # messages; `:alive` pings and surfaces the raw handshake.
