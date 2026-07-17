@@ -70,4 +70,23 @@ defmodule Kazi.CLI.JsonLocaleTest do
 
     assert latin1 == unicode
   end
+
+  # Regression guard (#1076): every `--json` write in cli.ex MUST route through
+  # the ASCII-safe `encode_json!/1`, never `IO.puts(Jason.encode!(...))` raw.
+  # A later feature (the roadmap schema surface, T45.1) reintroduced one raw
+  # site that the suite-level test above could not see because that payload
+  # happens to be all-ASCII; this source invariant catches the whole class.
+  test "no --json write site bypasses the ASCII-safe encoder" do
+    source = File.read!("lib/kazi/cli.ex")
+
+    offenders =
+      source
+      |> String.split("\n")
+      |> Enum.with_index(1)
+      |> Enum.filter(fn {line, _} -> String.contains?(line, "IO.puts(Jason.encode!(") end)
+
+    assert offenders == [],
+           "raw IO.puts(Jason.encode!(...)) bypasses encode_json! at: " <>
+             Enum.map_join(offenders, ", ", fn {_, n} -> "cli.ex:#{n}" end)
+  end
 end
