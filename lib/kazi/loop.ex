@@ -1315,6 +1315,18 @@ defmodule Kazi.Loop do
           iterations: data.iterations + 1
       }
 
+    # #1290: reconcile the `landed?` progress flag with the `:landed` predicate's
+    # freshly observed status, BEFORE `decide/2` reads it. Landing is
+    # controller-owned (the `Integrate` action, clause 3), so clause 3
+    # (`not data.landed?` -> `:integrate`) must fire whenever landing has not held
+    # — including a REGRESSION after a prior successful integrate (the branch was
+    # force-pushed away, commits stripped). Without this the flag stays a pure
+    # action-history value, decoupled from the predicate, and a regressed landed
+    # predicate can never re-route to integrate. A goal with no `:landed` predicate
+    # (`[integration] mode = none`, e.g. every fleet member) is untouched: the flag
+    # keeps its action-history meaning.
+    data = reconcile_landed(data)
+
     # T1.2 regression: after observe (using the just-updated history), run the
     # pure detector over the full per-iteration history + dispatch log and record
     # any green→red flags (with their attributed dispatch) into state. Additive:
@@ -1937,16 +1949,57 @@ defmodule Kazi.Loop do
     reobserve(data, data.reobserve_interval_ms)
   end
 
-  # True iff at least one *code* predicate (non-live kind) is failing. Live
-  # predicates only pass after deploy, so they must not trigger a code dispatch.
+  # True iff at least one AGENT-DISPATCHABLE code predicate is failing — a failure
+  # the inner harness can fix by editing code, so it triggers a dispatch. A live
+  # predicate (only green post-deploy) is not one; neither is the controller-owned
+  # `:landed` predicate (see `agent_dispatchable?/2`), so a failing `:landed`
+  # routes past clause 2 to clause 3's `:integrate`, never to agent re-dispatch
+  # (#1290).
   @spec code_failing?(PredicateVector.t(), Data.t()) :: boolean()
   defp code_failing?(vector, %Data{goal: goal, live_kinds: live_kinds}) do
     kinds = predicate_kinds(goal)
 
     vector
     |> PredicateVector.failing()
-    |> Enum.any?(fn id -> not MapSet.member?(live_kinds, Map.get(kinds, id)) end)
+    |> Enum.any?(fn id -> agent_dispatchable?(Map.get(kinds, id), live_kinds) end)
   end
+
+  # A failing predicate of this kind is fixable by the inner AGENT editing code, so
+  # it belongs on the dispatch work-list. Two kinds are NOT: a LIVE predicate (only
+  # passes once the change is deployed and re-observed, so it must not trigger a
+  # code dispatch) and the controller-owned `:landed` predicate — landing is kazi's
+  # OWN `Integrate` action (`decide/2` clause 3), never an agent task. Excluding
+  # `:landed` here is what stops clause 2 (`code_failing?`) from shadowing clause 3
+  # (`not data.landed?` -> `:integrate`) on a failing landed predicate (#1290,
+  # ADR-0055: rides the existing live-kind exclusion, adds no `decide/2` branch).
+  @spec agent_dispatchable?(Predicate.provider_kind() | nil, MapSet.t()) :: boolean()
+  defp agent_dispatchable?(kind, live_kinds) do
+    kind != :landed and not MapSet.member?(live_kinds, kind)
+  end
+
+  # #1290: derive `data.landed?` from the `:landed` predicate's observed result so
+  # `decide/2` clause 3 tracks whether landing currently holds, not just whether an
+  # `Integrate` action once succeeded. Only a goal that opts into `[integration]
+  # mode` carries a `:landed`-kind predicate; a goal without one is returned
+  # unchanged, preserving the flag's action-history meaning for the common
+  # (`mode = none`) case. A `:landed` predicate that was observed but has no result
+  # yet is treated as not-landed (fail-safe toward re-integrating, never toward a
+  # false-positive converge).
+  @spec reconcile_landed(Data.t()) :: Data.t()
+  defp reconcile_landed(%Data{goal: goal, vector: %PredicateVector{} = vector} = data) do
+    kinds = predicate_kinds(goal)
+
+    case Enum.find(kinds, fn {_id, kind} -> kind == :landed end) do
+      {id, _kind} ->
+        result = PredicateVector.get(vector, id)
+        %Data{data | landed?: not is_nil(result) and PredicateResult.passed?(result)}
+
+      nil ->
+        data
+    end
+  end
+
+  defp reconcile_landed(%Data{} = data), do: data
 
   # Build the :dispatch_agent action, carrying the failing code predicates and
   # their evidence as params (this is what seeds the harness prompt, concept §5).
@@ -1964,7 +2017,7 @@ defmodule Kazi.Loop do
     failing =
       vector
       |> PredicateVector.failing()
-      |> Enum.reject(fn id -> MapSet.member?(live_kinds, Map.get(kinds, id)) end)
+      |> Enum.filter(fn id -> agent_dispatchable?(Map.get(kinds, id), live_kinds) end)
       |> Enum.reject(fn id -> MapSet.member?(held_out, id) end)
 
     evidence =
