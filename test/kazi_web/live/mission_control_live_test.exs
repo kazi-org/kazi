@@ -253,4 +253,83 @@ defmodule KaziWeb.MissionControlLiveTest do
     assert html =~ "No live runs right now"
     assert html =~ "1 closed"
   end
+
+  describe "filters and card provenance" do
+    test "a card shows its project, age, and last-active", %{conn: conn} do
+      run = seed(%{goal_ref: "prov", workspace: "/tmp/ws/kazi-repo"})
+      age_heartbeat(run, 300)
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      # Workspace has no git remote, so the project falls back to the last two
+      # path segments — still the grouping key the repo dropdown uses.
+      assert html =~ ~s(data-project="ws/kazi-repo")
+      assert html =~ ~r/AGE \d+[smhd]/
+      assert html =~ "ACTIVE 5m ago"
+    end
+
+    test "clicking a fleet chip filters to that state; clicking again clears", %{conn: conn} do
+      seed(%{goal_ref: "live-one"})
+      done = seed(%{goal_ref: "done-one"})
+      {:ok, _} = RunRegistry.finish(done.run_id, "converged")
+
+      {:ok, view, html} = live(conn, ~p"/")
+      assert html =~ ~s(id="mc-card-live-one")
+      assert html =~ ~s(id="mc-card-done-one")
+
+      html = view |> element(~s(button[data-count="converged"])) |> render_click()
+      assert html =~ ~s(id="mc-card-done-one")
+      refute html =~ ~s(id="mc-card-live-one")
+
+      html = view |> element(~s(button[data-count="converged"])) |> render_click()
+      assert html =~ ~s(id="mc-card-live-one")
+      assert html =~ ~s(id="mc-card-done-one")
+    end
+
+    test "the repo dropdown filters cards to one project", %{conn: conn} do
+      seed(%{goal_ref: "in-a", workspace: "/tmp/org-a/repo-a"})
+      seed(%{goal_ref: "in-b", workspace: "/tmp/org-b/repo-b"})
+
+      {:ok, view, html} = live(conn, ~p"/")
+      assert html =~ ~s(id="mc-card-in-a")
+      assert html =~ ~s(id="mc-card-in-b")
+
+      html =
+        view
+        |> element("#mc-filters")
+        |> render_change(%{"repo" => "org-a/repo-a", "window" => ""})
+
+      assert html =~ ~s(id="mc-card-in-a")
+      refute html =~ ~s(id="mc-card-in-b")
+
+      html =
+        view |> element("#mc-filters") |> render_change(%{"repo" => "", "window" => ""})
+
+      assert html =~ ~s(id="mc-card-in-b")
+    end
+
+    test "the time window filters out runs last active before the cutoff", %{conn: conn} do
+      seed(%{goal_ref: "fresh-run"})
+      seed(%{goal_ref: "old-run"}) |> age_heartbeat(2 * 3_600)
+
+      {:ok, view, html} = live(conn, ~p"/")
+      assert html =~ ~s(id="mc-card-old-run")
+
+      html =
+        view |> element("#mc-filters") |> render_change(%{"repo" => "", "window" => "1h"})
+
+      assert html =~ ~s(id="mc-card-fresh-run")
+      refute html =~ ~s(id="mc-card-old-run")
+    end
+
+    test "a state filter that hides everything renders the filtered empty state", %{conn: conn} do
+      seed(%{goal_ref: "only-running"})
+
+      {:ok, view, _html} = live(conn, ~p"/")
+      html = view |> element(~s(button[data-count="converged"])) |> render_click()
+
+      assert html =~ ~s(id="mission-control-filtered-empty")
+      refute html =~ ~s(id="mc-card-only-running")
+    end
+  end
 end
