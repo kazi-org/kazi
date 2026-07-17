@@ -19,6 +19,21 @@ defmodule Kazi.MCP.BusToolsTest do
       assert "kazi_bus_who" in names
       assert "kazi_bus_tell" in names
       assert "kazi_bus_name" in names
+      assert "kazi_bus_get" in names
+    end
+
+    test "kazi_bus_get declares a required id, a full escape, and teaches consume-nothing (T55.6)" do
+      by_name = Map.new(Server.tools(), &{&1["name"], &1})
+
+      assert by_name["kazi_bus_get"]["inputSchema"]["required"] == ["id"]
+
+      assert %{"type" => "integer"} =
+               by_name["kazi_bus_get"]["inputSchema"]["properties"]["id"]
+
+      assert %{"type" => "boolean"} =
+               by_name["kazi_bus_get"]["inputSchema"]["properties"]["full"]
+
+      assert by_name["kazi_bus_get"]["description"] =~ "consumes nothing"
     end
 
     test "kazi_bus_read declares the peek argument; kazi_bus_watch the timeout" do
@@ -85,6 +100,18 @@ defmodule Kazi.MCP.BusToolsTest do
 
       assert %{"error" => %{"code" => -32_602}} = response
     end
+
+    test "kazi_bus_get without id is an invalid-params error (T55.6)" do
+      response = call("kazi_bus_get", %{})
+
+      assert %{"error" => %{"code" => -32_602}} = response
+    end
+
+    test "kazi_bus_get with a non-numeric id is an invalid-params error (T55.6)" do
+      response = call("kazi_bus_get", %{"id" => "not-a-number"})
+
+      assert %{"error" => %{"code" => -32_602}} = response
+    end
   end
 
   describe "tools/call — no daemon running" do
@@ -142,6 +169,13 @@ defmodule Kazi.MCP.BusToolsTest do
 
     test "kazi_bus_name surfaces a structured no_daemon tool error (T55.5)", %{opts: opts} do
       response = call("kazi_bus_name", %{"name" => "worker-a"}, opts)
+
+      assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
+      assert content["reason"] == "no_daemon"
+    end
+
+    test "kazi_bus_get surfaces a structured no_daemon tool error (T55.6)", %{opts: opts} do
+      response = call("kazi_bus_get", %{"id" => 1}, opts)
 
       assert %{"result" => %{"isError" => true, "structuredContent" => content}} = response
       assert content["reason"] == "no_daemon"
