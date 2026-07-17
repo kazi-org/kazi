@@ -916,3 +916,35 @@ a supervisor-initiated shutdown MUST trap exits. Verify this kind of
 cleanup with a real `Supervisor.stop/2` in the test, not just a
 self-initiated `{:stop, :normal, state}` return — the latter always
 calls `terminate/2` regardless of trapping and would hide this gap.
+
+## Self-teaching docs / retrieval
+
+### L-0041 #teach #retrieval #docs #audience-of-one #landmine -- shipped self-teaching artifacts assumed the operator's PERSONAL skill library as a universal baseline; a retrieval backend shelled out to a Claude Code skill as if it were an installable CLI
+kazi's public, git-committed teaching artifacts (`AGENTS.md`,
+`lib/kazi/teach/install_skill.ex`'s generated `SKILL.md`) told EVERY reader to
+"fall back to `/plan`/`/apply`" and treated `/tidy`/`/loop`/`/qualify` as
+"general skills" that "remain available" -- but those bare `/word` tokens name
+the operator's own personal global Claude Code skills, not anything kazi ships
+or that Claude Code provides by convention. Most kazi users have none of them,
+so the guidance is broken for the majority. Separately, `Kazi.Retrieval.Graphify`
+hardcoded `System.cmd("graphify", ...)`, treating the `/graphify` Claude Code
+skill as an installable CLI binary -- but that skill has NO such executable
+(each subcommand is an inline `$PYTHON -c "..."` snippet the agent runs while
+following the skill's Markdown), so there is nothing named `graphify` on any
+PATH to shell out to, for anyone. Both are the same failure: an "audience of
+one" surface baked into a public artifact.
+RULE: before writing self-teaching prose OR a shell-out, grep the diff for bare
+`/<word>` tokens and for `System.cmd`/`System.shell` targets, and confirm each
+names a real, shipped, installable capability (a documented `kazi` CLI verb, or
+a presence-checked external binary with a working fallback), not a personal tool
+you happen to have. Describe the CONTRACT ("an upstream planning process
+produced acceptance criteria"), never a specific external skill name.
+Cross-refs: ADR-0015 first named and rejected this "audience of one" class --
+it withdrew the `capabilities.json` registry adapter because a bespoke input
+only one internal product produces is a liability on a public open-source
+surface; ADR-0052 is this SAME failure recurring in a different location, and
+its decision is what this entry guards: rewrite the two artifacts to describe
+the contract, add a coherence guard that fails on any `/<word>` that is not a
+kazi CLI verb, and retire the non-functional `Kazi.Retrieval.Graphify` (the
+pluggable `Kazi.Retrieval` seam + `NoOp` default stays; only the fake "real"
+backend goes). (T42.5, verifies UC-054.)
