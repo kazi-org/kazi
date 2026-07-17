@@ -15,6 +15,7 @@ defmodule Kazi.Authoring.ClarifyLandingTest do
   use ExUnit.Case, async: true
 
   alias Kazi.Authoring.Clarify
+  alias Kazi.{Goal, Predicate}
 
   # A caller-drafts proposal map (ADR-0023): string-keyed, the shape `kazi plan
   # --predicates` accepts and the floor actually runs against.
@@ -85,6 +86,19 @@ defmodule Kazi.Authoring.ClarifyLandingTest do
       # so it cannot participate in the pre-draft --strict refusal.
       refute landing(draft([]))
       refute Clarify.gaps("build a feature") |> find_landing()
+    end
+
+    # Issue #1277: a real `%Kazi.Goal{}` draft (the shape `kazi plan --json`'s
+    # `clarify` array runs over — `Kazi.CLI.clarify_json/1` passes `draft.goal`)
+    # ALWAYS suppresses the landing question, because a Goal struct cannot
+    # distinguish "declared none" from "never asked" (its default is mode :none), so
+    # `draft_has_integration?/1` treats ANY Goal as already-answered. This is what
+    # makes a code-predicate check on a `%Kazi.Goal{}` unreachable dead code — the
+    # `or` short-circuits before it. Pinning it here so the removed clause stays gone.
+    test "a real %Kazi.Goal{} draft (with code predicates) suppresses it" do
+      goal = Goal.new("g", predicates: [Predicate.new(:code, :tests)])
+
+      refute Clarify.gaps("build a feature", draft: goal) |> find_landing()
     end
   end
 
