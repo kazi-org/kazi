@@ -4940,25 +4940,84 @@ defmodule Kazi.CLI do
   # `emit/3` seam as the other commands); human prose otherwise.
 
   defp execute_lint(goal_file, opts) do
+    # T44.1 (ADR-0055): the `[integration]` advisory net runs on the RAW decoded
+    # TOML, independent of whether the goal LOADS — an unknown `mode` is a hard
+    # loader error, so `kazi lint` inspects the raw block to still WARN (naming
+    # the bad value) rather than only surfacing the load failure.
+    {raw, integration_warnings} = lint_integration_warnings(goal_file)
+
     case Goal.Loader.load(goal_file) do
       {:ok, goal} ->
-        report_lint(goal, GroupLint.warnings(goal), opts)
+        report_lint(goal, GroupLint.warnings(goal), integration_warnings, opts)
         # ADVISORY: exit 0 whether or not warnings were emitted — the second net
         # never fails a goal that loads (ADR-0020 §Decision 3).
         0
 
       {:error, reason} ->
-        # A genuine load failure (not a lint finding) is a real error: a JSON
-        # envelope under --json, a human stderr line otherwise. Exit non-zero.
-        lint_load_error(goal_file, reason, opts)
+        if integration_warnings == [] do
+          # A genuine load failure (not a lint finding) is a real error: a JSON
+          # envelope under --json, a human stderr line otherwise. Exit non-zero.
+          lint_load_error(goal_file, reason, opts)
+        else
+          # The goal does not LOAD because of the very unknown `[integration]`
+          # mode we warn about. `kazi lint` is advisory: surface the warning
+          # (naming the bad value) and exit 0, rather than the hard load error.
+          report_integration_lint(goal_file, raw, integration_warnings, opts)
+          0
+        end
+    end
+  end
+
+  # The raw decoded goal-file TOML plus its `[integration]` advisory warnings
+  # (`Kazi.Goal.IntegrationLint`). A file/TOML read failure yields no raw map and
+  # no warnings — the load below reports that failure through the normal path.
+  defp lint_integration_warnings(goal_file) do
+    with {:ok, contents} <- File.read(goal_file),
+         {:ok, raw} <- Toml.decode(contents) do
+      {raw, Kazi.Goal.IntegrationLint.warnings(raw)}
+    else
+      _ -> {nil, []}
     end
   end
 
   # Render the lint result on the requested surface: under --json a single object
-  # carrying the warning LIST (empty when clean); the human report otherwise. BOTH
-  # share the same `GroupLint.warnings/1`; only the OUTPUT shape differs.
-  defp report_lint(%Goal{} = goal, warnings, opts) do
-    emit(json?(opts), lint_json(goal, warnings), fn -> report_lint_human(goal, warnings) end)
+  # carrying the warning LISTs (empty when clean); the human report otherwise.
+  defp report_lint(%Goal{} = goal, warnings, integration_warnings, opts) do
+    emit(json?(opts), lint_json(goal, warnings, integration_warnings), fn ->
+      report_lint_human(goal, warnings)
+      report_integration_warnings_human(integration_warnings)
+    end)
+  end
+
+  # The advisory-only path taken when the goal does NOT load solely because of an
+  # unknown `[integration]` mode: no `Goal` struct exists, so the report is built
+  # from the raw map's `id` (falling back to the goal-file path).
+  defp report_integration_lint(goal_file, raw, integration_warnings, opts) do
+    goal_id = raw |> Map.get("id") |> lint_goal_id(goal_file)
+
+    emit(json?(opts), integration_lint_json(goal_id, integration_warnings), fn ->
+      IO.puts("LINT  goal=#{goal_id} — the goal does not load; #{lint_advisory_note()}")
+      report_integration_warnings_human(integration_warnings)
+    end)
+  end
+
+  defp lint_goal_id(id, _goal_file) when is_binary(id) and id != "", do: id
+  defp lint_goal_id(_id, goal_file), do: Path.basename(goal_file)
+
+  defp lint_advisory_note,
+    do: "ADVISORY warning(s) below. Fix them, or the goal will not run."
+
+  # The human lines for `[integration]` warnings: one per unknown mode, naming the
+  # bad value and the known set. Empty list -> nothing printed.
+  defp report_integration_warnings_human([]), do: :ok
+
+  defp report_integration_warnings_human(integration_warnings) do
+    Enum.each(integration_warnings, fn %{mode: mode} ->
+      IO.puts(
+        "  warning: [integration] mode #{inspect(mode)} is not a known mode " <>
+          "(known: #{Kazi.Goal.IntegrationLint.known_modes()})"
+      )
+    end)
   end
 
   # The human report: a clean line when there is nothing to flag, else one line per
@@ -4984,17 +5043,33 @@ defmodule Kazi.CLI do
     )
   end
 
-  # The `lint --json` result: the warning LIST (each naming both groups + the
-  # similarity), the count, and `schema_version`. An empty list = no near-duplicate
-  # (advisory clean); the exit code is 0 regardless (ADR-0020 §Decision 3).
-  defp lint_json(%Goal{} = goal, warnings) do
+  # The `lint --json` result: the near-duplicate group-name warning LIST (each
+  # naming both groups + the similarity), the count, the additive
+  # `integration_warnings` list (T44.1), and `schema_version`. Empty lists = no
+  # findings (advisory clean); the exit code is 0 regardless (ADR-0020 §Decision 3).
+  defp lint_json(%Goal{} = goal, warnings, integration_warnings) do
     %{
       schema_version: @run_schema_version,
       goal_id: to_string(goal.id),
       count: length(warnings),
-      warnings: Enum.map(warnings, &lint_warning_json/1)
+      warnings: Enum.map(warnings, &lint_warning_json/1),
+      integration_warnings: Enum.map(integration_warnings, &integration_warning_json/1)
     }
   end
+
+  # The `lint --json` result for the load-failed-on-bad-mode advisory path: no
+  # group warnings (the goal never loaded), just the `[integration]` findings.
+  defp integration_lint_json(goal_id, integration_warnings) do
+    %{
+      schema_version: @run_schema_version,
+      goal_id: to_string(goal_id),
+      count: 0,
+      warnings: [],
+      integration_warnings: Enum.map(integration_warnings, &integration_warning_json/1)
+    }
+  end
+
+  defp integration_warning_json(%{mode: mode}), do: %{mode: mode}
 
   defp lint_warning_json(%{group_ids: {id_a, id_b}, names: {name_a, name_b}, similarity: sim}) do
     %{
