@@ -267,3 +267,61 @@ token being created and shown — never because an agent said it built the featu
 See [ADR-0064](adr/0064-scenario-predicates-demonstrate-then-pin.md) for the
 demonstrate-then-pin decision, the demonstrator role, and the
 structural-faithfulness floor.
+
+## The two roles
+
+A scenario predicate is written by one role and consumed by another. They are
+deliberately separate, because the whole point is that the party who *builds* the
+capability is not the party who *decides it works*.
+
+| role | does | when |
+|---|---|---|
+| **Demonstrator** | Performs the capability once against a real surface and mints the pin — the recorded trace of what actually happened. Answers *"here is the thing working."* | Once, at `:unpinned` (and again on `:stale`, when the Scenario text changed) |
+| **Replayer** | Drives the committed pin's trace and reports whether the capability still holds. Never authors the trace, never edits the pin. Answers *"does it still work?"* | Every evaluation, forever |
+
+The split is the honesty guarantee. A fixer agent is a **replayer**: it can make
+the capability work, but it cannot rewrite what "working" means, because the pin
+is committed and the replay is the pass (see *Only `:pinned` replays*). An agent
+that could mint its own pin could demonstrate a capability that was never asked
+for and call the goal green.
+
+## Standing capability monitors
+
+The definition of done ends at *"deployed and verified live"*. A **monitor** makes
+that step a predicate rather than a ritual: it replays a committed pin against a
+**deployed** URL, so green means a real browser just performed the capability in
+production.
+
+There is no monitor machinery. A monitor is the ordinary scenario predicate with
+three properties composed:
+
+| property | effect |
+|---|---|
+| the goal is `standing = true` | it never finishes — it holds the predicates true and re-converges on drift |
+| `url` names a **deployed** host | the replay drives production, not localhost |
+| `samples = N` | N **consecutive** passes required, so a flaky surface cannot show green on one lucky run |
+
+```toml
+standing = true          # MUST precede the first [table] header — see below
+
+[[predicate]]
+id = "signup-still-works"
+provider = "scenario"
+spec = "docs/specs/product/onboarding.feature"
+scenario = "A new user signs up and lands on the dashboard"
+url = "https://app.example.com"
+samples = 3
+```
+
+Worked example: [`priv/examples/capability_monitor.goal.toml`](../priv/examples/capability_monitor.goal.toml).
+
+`samples` is the **monitor's** knob, not part of the pin: the pin records what the
+capability *is*; `samples` is how hard *this* monitor probes it. It passes through
+to the delegate unchanged, which requires N consecutive passes and reports
+envelope-v2 `score` = passing runs, `direction: higher_better`.
+
+**A TOML footgun worth naming.** `standing = true` must sit **above the first
+`[table]` header**. In TOML a bare key written after a header belongs to *that*
+table, so `standing = true` placed below `[metadata]` silently becomes
+`metadata.standing` — the goal loads as an ordinary converge-and-stop one, with no
+error and no warning. It reads as declared and behaves as not.

@@ -70,4 +70,61 @@ defmodule Kazi.Goal.LoaderAtomSafetyTest do
     # unknown keys.
     assert after_count - before_count < 50
   end
+
+  # T49.12: the OTHER side of the same guard. Rejecting unknown keys is only
+  # correct if every LEGITIMATE key is interned — otherwise a real, documented
+  # config key is rejected as "unknown" and a valid goal-file will not load.
+  #
+  # A `scenario` predicate passes its non-scenario keys through to the delegate
+  # surface (T49.3), so `samples = 3` is legitimate and documented. But the loader
+  # interns keys by force-loading the predicate's OWN provider (`:scenario`) and
+  # nothing else — and `Kazi.Providers.Scenario` named `:samples` only in a
+  # comment, so a monitor goal-file failed to load with:
+  #
+  #     predicate "signup-still-works" has unknown config key "samples"
+  #
+  # `mix` HID it: it loads Kazi.Providers.Browser (which names :samples), so the
+  # atom happened to exist. This is the same trap as the Gherkin doc-keys
+  # (@gherkin_doc_keys, devlog 2026-07-15) — "every test and CI passed while
+  # `kazi apply` on the real binary failed".
+  describe "release-load safety: a scenario predicate's delegate keys are interned" do
+    test "Kazi.Providers.Scenario interns the delegate passthrough keys by itself" do
+      # The condition the RELEASE binary actually creates: only the predicate's own
+      # provider has been force-loaded. Purge the delegate so a passing result
+      # cannot come from Browser having interned the atoms.
+      :code.purge(Kazi.Providers.Browser)
+      :code.delete(Kazi.Providers.Browser)
+      {:module, _} = Code.ensure_loaded(Kazi.Providers.Scenario)
+
+      for key <- Kazi.Providers.Scenario.delegate_passthrough_keys() do
+        name = Atom.to_string(key)
+
+        assert String.to_existing_atom(name) == key,
+               "#{name} is not interned by Kazi.Providers.Scenario alone — a scenario " <>
+                 "goal-file using it will fail to load in the release binary with " <>
+                 "\"unknown config key\", even though mix passes"
+      end
+    after
+      Code.ensure_loaded(Kazi.Providers.Browser)
+    end
+
+    test "a scenario predicate carrying samples LOADS" do
+      goal = %{
+        "id" => "monitor",
+        "name" => "monitor",
+        "predicate" => [
+          %{
+            "id" => "cap",
+            "provider" => "scenario",
+            "spec" => "docs/specs/product/x.feature",
+            "scenario" => "S",
+            "url" => "https://app.example.com",
+            "samples" => 3
+          }
+        ]
+      }
+
+      assert {:ok, _} = Loader.from_map(goal)
+    end
+  end
 end
