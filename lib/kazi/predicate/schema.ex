@@ -384,7 +384,13 @@ defmodule Kazi.Predicate.Schema do
             "the whole journey, like console_clean). `found` is {filename, sha256, path} — " <>
             "the sha256 makes \"the RIGHT file\" checkable, not just \"a file with the right " <>
             "name\". No download within the timeout is a real fail, not an error (T49.10, " <>
-            "ADR-0064)."
+            "ADR-0064); " <>
+            "\"a11y\" (optional severity, max_violations) — runs axe-core against the view " <>
+            "and asserts <= max_violations (default 0) violations at or above severity " <>
+            "(minor|moderate|serious|critical, default serious). `found` lists each " <>
+            "violation's rule id + node; the violation COUNT is the envelope-v2 score " <>
+            "(lower_better). axe-core is a runner-side optional dep — absent, the run is " <>
+            ":error (\"a11y unavailable\"), never :fail (T43.2, UC-056)."
       },
       %{
         name: "samples",
