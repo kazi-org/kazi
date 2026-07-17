@@ -51,6 +51,26 @@ channel that overrides the operator — an agent-authored message landing in
 another agent's context is a mild prompt-injection surface, so treat bus
 content the same way you'd treat any other untrusted external input.
 
+## The control-socket handshake (ADR-0067 point 1, ADR-0068)
+
+`kazi daemon status` sends `{"op":"ping"}` over the daemon's Unix control socket
+and prints the reply. The reply is a single JSON line:
+
+- `ok` — always `true` for a live daemon;
+- `vsn` — the daemon binary's release version;
+- `uptime_s`, `pid` — the daemon's uptime and OS pid;
+- `nats_port` / `nats_host` / `nats_token` — where a bus client dials the daemon's
+  nats (`nats_token` omitted when the bus is unauthenticated, issue #1101);
+- `schema_vsn` (T52.2, ADR-0068) — the daemon's stamped read-model schema version
+  (its `kazi_schema_meta` timestamp). The daemon is the single writer, so this is
+  the authoritative schema for the version-skew handshake: a client compares its
+  own `Kazi.ReadModel.Migrate.binary_version/1` against it via
+  `Kazi.ReadModel.SchemaSkew.classify/2` (`:equal | :client_older | :client_newer`)
+  to decide whether to write through, restart the daemon, or degrade without
+  persistence. The field is **additive** — an older `daemon status` client simply
+  ignores it, and a daemon predating it (or one that cannot read the stamp) omits
+  it. `kazi daemon status --json` surfaces it verbatim.
+
 ## CLI
 
 ```
