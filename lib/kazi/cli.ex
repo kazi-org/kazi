@@ -7325,10 +7325,15 @@ defmodule Kazi.CLI do
     IO.puts("COLLECTIVE #{result.collective |> to_string() |> String.upcase()}  goal=#{id}")
     IO.puts("partitions: #{length(partitions)}")
 
+    landed = landed_index(result)
+
     partitions
     |> Enum.with_index()
     |> Enum.each(fn {{partition, status}, index} ->
-      IO.puts("  [#{index}] #{partition_id(partition, index)}: #{status}")
+      IO.puts(
+        "  [#{index}] #{partition_id(partition, index)}: #{status}" <>
+          landed_human(Map.get(landed, partition_key(partition)))
+      )
     end)
   end
 
@@ -7345,6 +7350,23 @@ defmodule Kazi.CLI do
       nil -> :ok
       token -> IO.puts("resume_token: #{token}")
     end
+  end
+
+  # T44.10: the per-group landed refs appended to a partition's human status line,
+  # e.g. " landed=kazi-partition/p-… pr=42". Empty when the group did not land.
+  defp landed_human(nil), do: ""
+
+  defp landed_human(refs) when is_map(refs) do
+    parts =
+      [
+        {"landed", Map.get(refs, :branch)},
+        {"pr", Map.get(refs, :pr)},
+        {"merge", Map.get(refs, :merge_commit)}
+      ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Enum.map_join(" ", fn {k, v} -> "#{k}=#{v}" end)
+
+    if parts == "", do: "", else: "  " <> parts
   end
 
   defp print_schedule_frontiers(schedule) do
@@ -7393,7 +7415,7 @@ defmodule Kazi.CLI do
       schema_version: @run_schema_version,
       goal_id: to_string(id),
       collective: collective_str,
-      partitions: partitions_json(partitions),
+      partitions: partitions_json(partitions, landed_index(result)),
       next_action: next_action(collective_str)
     }
   end
@@ -7420,17 +7442,63 @@ defmodule Kazi.CLI do
     end
   end
 
-  defp partitions_json(partitions) do
+  defp partitions_json(partitions, landed_index) do
     partitions
     |> Enum.with_index()
     |> Enum.map(fn {{partition, status}, index} ->
-      %{
+      base = %{
         partition_id: partition_id(partition, index),
         goal_ids: partition_goal_ids(partition),
         status: to_string(status)
       }
+
+      # T44.10 (ADR-0055): a converged partition that LANDED carries its per-group
+      # landed refs (`{branch, pr, merge_commit}`) — ADDITIVE, so a run with no
+      # `[integration]` landing (mode :none) omits the field entirely and the
+      # object is byte-identical to the pre-T44.10 partition entry.
+      case Map.get(landed_index, partition_key(partition)) do
+        nil -> base
+        refs -> Map.put(base, :landed, landed_json(refs))
+      end
     end)
   end
+
+  # Index the collective integration's per-partition landed refs by the partition's
+  # stable key, so `partitions_json` can attribute each group's landing to its
+  # partition entry. Absent integration (mode :none / no landing) → an empty index,
+  # so nothing is attached.
+  defp landed_index(result) do
+    case Map.get(result, :integration) do
+      %{integrated: integrated} when is_list(integrated) ->
+        for {partition, refs} <- integrated,
+            key = partition_key(partition),
+            is_binary(key),
+            into: %{},
+            do: {key, refs}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp partition_key(%Kazi.Scheduler.Partitioner{key: key}), do: key
+  defp partition_key(%{key: key}) when is_binary(key), do: key
+  defp partition_key(_partition), do: nil
+
+  # The per-group landed refs surfaced in the collective JSON: only the keys the
+  # integrator actually returned (`branch`/`pr`/`merge_commit`), stringified.
+  defp landed_json(refs) when is_map(refs) do
+    %{}
+    |> maybe_put_ref(:branch, Map.get(refs, :branch))
+    |> maybe_put_ref(:pr, Map.get(refs, :pr))
+    |> maybe_put_ref(:merge_commit, Map.get(refs, :merge_commit))
+  end
+
+  defp maybe_put_ref(map, _key, nil), do: map
+  defp maybe_put_ref(map, key, value), do: Map.put(map, key, ref_value(value))
+
+  defp ref_value(v) when is_binary(v) or is_integer(v), do: v
+  defp ref_value(v), do: to_string(v)
 
   # A partition's stable id for the result: the `Kazi.Scheduler.Partitioner` lease
   # `:key` (overlapping partitions share it, disjoint differ). A bare/unkeyed
