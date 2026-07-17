@@ -1,0 +1,18 @@
+# Maestro flow (https://maestro.mobile.dev) — a passing mobile login journey.
+# `maestro test login_flow.yaml` launches the app on the connected emulator /
+# simulator, replays these steps, and exits 0 only if every assertion holds.
+#
+# Adapt `appId` and the selectors to your app. The demo assertions below target a
+# conventional email/password login that lands on a "Dashboard" screen.
+appId: com.example.demo
+---
+- launchApp
+- assertVisible: "Sign in"
+- tapOn:
+    id: "email"
+- inputText: "demo@example.com"
+- tapOn:
+    id: "password"
+- inputText: "correct horse battery staple"
+- tapOn: "Sign in"
+- assertVisible: "Dashboard"

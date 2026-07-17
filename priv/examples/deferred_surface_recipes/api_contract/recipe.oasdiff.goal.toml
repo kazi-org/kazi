@@ -1,0 +1,34 @@
+# Deferred-surface recipe (T43.10, ADR-0053 §3): API contract — no breaking
+# OpenAPI change. First-class promotion of an `:api_flow`/`:openapi` provider is
+# DEFERRED until a concrete goal earns it (ADR-0053 §3, ADR-0007); this ships the
+# check as a `custom_script` recipe so it is reachable without a kazi release.
+#
+# `oasdiff breaking <base> <revision> --fail-on ERR` diffs two OpenAPI specs and,
+# with `--fail-on ERR`, exits 1 when it finds a breaking change at or above the
+# ERR level, 0 otherwise. The `exit_code` verdict makes that contract explicit:
+# 0 passes, 1 fails, and ANY OTHER code is a fail — a gate never passes an
+# undeclared code (an unexpected exit usually means oasdiff itself misbehaved).
+#
+# Evidence tier: DEMONSTRATION (fail directly, ADR-0043 §2). A breaking diff is a
+# concrete, rule-identified incompatibility between two committed specs — safe to
+# fail the loop on directly, not a probabilistic signal that must be ratcheted.
+#
+# Point `args` at openapi.revision.yaml to see it FAIL (limit became required,
+# /widgets/{id} removed); point it at openapi.compatible.yaml to see it PASS.
+#
+#     kazi apply recipe.oasdiff.goal.toml --workspace .
+#
+# See ../README.md and docs/custom-script-recipes.md.
+
+id = "recipe-api-contract-oasdiff"
+name = "API contract: no breaking OpenAPI change (oasdiff)"
+
+[[predicate]]
+id = "no-breaking-openapi"
+provider = "custom_script"
+description = "oasdiff reports no breaking change (ERR level) between base and revision"
+cmd = "oasdiff"
+args = ["breaking", "openapi.base.yaml", "openapi.revision.yaml", "--fail-on", "ERR"]
+verdict = "exit_code"
+pass_codes = [0]
+fail_codes = [1]

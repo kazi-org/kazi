@@ -1,0 +1,18 @@
+# DELIBERATELY BROKEN Maestro flow: the final assertion targets a screen the app
+# never shows after login. `maestro test login_flow.broken.yaml` runs every step,
+# fails the `assertVisible`, and exits non-zero — so the recipe reports :fail. This
+# is the mobile analog of "a broken flow fails the check".
+appId: com.example.demo
+---
+- launchApp
+- assertVisible: "Sign in"
+- tapOn:
+    id: "email"
+- inputText: "demo@example.com"
+- tapOn:
+    id: "password"
+- inputText: "correct horse battery staple"
+- tapOn: "Sign in"
+# BROKEN: the real app lands on "Dashboard"; this asserts a screen that never
+# appears, so Maestro times out waiting for it and exits non-zero.
+- assertVisible: "This Screen Does Not Exist"

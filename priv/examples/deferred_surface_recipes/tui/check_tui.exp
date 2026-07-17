@@ -1,0 +1,43 @@
+#!/usr/bin/env expect
+# expect/pty-driven check of the calc TUI (T43.10, ADR-0053 §3). Drives a REAL
+# pseudo-terminal: spawns the app, waits for its prompt, types a command, and
+# asserts on the exact output. A mismatch or a hang trips the `timeout` guard and
+# exits non-zero, so the recipe's verdict comes from the tool's real behaviour,
+# never a hardcoded pass.
+#
+# The app under test is argv[0], so the SAME assertions run against the passing
+# app (tui_app.sh) or the broken one (tui_app.broken.sh):
+#     expect check_tui.exp tui_app.sh          ;# -> exit 0 (pass)
+#     expect check_tui.exp tui_app.broken.sh   ;# -> exit 1 (fail)
+
+set timeout 10
+set app [lindex $argv 0]
+if {$app eq ""} { set app "tui_app.sh" }
+
+spawn bash $app
+
+expect {
+  "calc TUI ready" {}
+  timeout { puts "FAIL: no ready banner"; exit 1 }
+}
+
+expect {
+  "> " {}
+  timeout { puts "FAIL: no prompt"; exit 1 }
+}
+
+send "add 2 3\r"
+expect {
+  "= 5" {}
+  "= "  { puts "FAIL: wrong add result"; exit 1 }
+  timeout { puts "FAIL: add produced no result"; exit 1 }
+}
+
+send "quit\r"
+expect {
+  "bye" {}
+  timeout { puts "FAIL: did not quit cleanly"; exit 1 }
+}
+
+expect eof
+exit 0
