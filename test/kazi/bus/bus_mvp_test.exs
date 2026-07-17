@@ -4,7 +4,9 @@ defmodule Kazi.Bus.MvpTest do
 
   UNTAGGED tests (always run, no NATS needed): the no-daemon error path,
   the 1024-byte client-side cap, project-id derivation, and
-  `Kazi.Bus.Digest.summarize/1`'s pure rendering rule.
+  `Kazi.Bus.Digest.to_tty_lines/1`'s pure rendering rule (T55.7 replaced
+  `summarize/1` with it when assembly moved into the daemon; the rules are
+  unchanged).
 
   `:nats`-TAGGED tests mirror `test/kazi/coordination/lease/nats_test.exs`:
   excluded by default, run only when `NATS_URL` is set. Each test provisions
@@ -146,12 +148,18 @@ defmodule Kazi.Bus.MvpTest do
   end
 
   # ===========================================================================
-  # Untagged: Digest.summarize/1
+  # Untagged: the TTY digest rules (T51.2)
   # ===========================================================================
 
-  describe "Digest.summarize/1" do
+  # T55.7 replaced `summarize/1` with `to_tty_lines/1`: assembly moved into the
+  # daemon, so the client renders an already-assembled digest instead of
+  # aggregating messages a second time. The RULES pinned here are T51.2's,
+  # unchanged -- only the entry point moved.
+  describe "Digest.to_tty_lines/1" do
+    defp tty_lines(messages), do: messages |> Digest.render() |> Digest.to_tty_lines()
+
     test "empty input yields empty output" do
-      assert Digest.summarize([]) == %{verbatim: [], digest: []}
+      assert tty_lines([]) == []
     end
 
     test "directed (msg) and interrupt-severity messages render verbatim" do
@@ -160,9 +168,7 @@ defmodule Kazi.Bus.MvpTest do
         %{kind: "note", topic: "ci", text: "build red", sev: "interrupt"}
       ]
 
-      result = Digest.summarize(messages)
-      assert length(result.verbatim) == 2
-      assert result.digest == []
+      assert tty_lines(messages) == ["[msg] ping alice", "[note] build red"]
     end
 
     test "everything else collapses into count digest lines, most-frequent first" do
@@ -170,9 +176,11 @@ defmodule Kazi.Bus.MvpTest do
         List.duplicate(%{kind: "note", topic: "ci", text: "x", sev: "info"}, 3) ++
           List.duplicate(%{kind: "note", topic: "deploy", text: "y", sev: "info"}, 1)
 
-      result = Digest.summarize(messages)
-      assert result.verbatim == []
-      assert result.digest == ["3 note/ci", "1 note/deploy"]
+      assert tty_lines(messages) == ["3 note/ci", "1 note/deploy"]
+    end
+
+    test "a topic-less group renders the `_` placeholder" do
+      assert tty_lines([%{kind: "note", topic: nil, text: "x", sev: "info"}]) == ["1 note/_"]
     end
   end
 
