@@ -36,6 +36,44 @@ defmodule Kazi.Bus.MvpTest do
   end
 
   # ===========================================================================
+  # Untagged: run/3's hard deadline (issue #1255)
+  # ===========================================================================
+
+  describe "run/3 bounded execution (issue #1255)" do
+    test "a call that never returns degrades to :bus_unavailable within the bound instead of hanging forever" do
+      # Reproduces the SHAPE of Gnat.Jetstream.Pager.receive_messages/2's bare
+      # `receive do ... end` (no `after` clause): when the expected reply never
+      # arrives, unwrapped code blocks forever. Confirmed live on this exact
+      # mechanism (issue #1255): a `kazi bus who` process hung for 3+ hours
+      # with idle schedulers and no socket activity -- the roster read
+      # (`who`/`board`) drives that unguarded receive via `KV.contents/2`.
+      never_replies = fn _conn ->
+        receive do
+        end
+      end
+
+      {elapsed_us, result} = :timer.tc(fn -> Bus.run(:unused, never_replies, 300) end)
+
+      assert result == {:error, :bus_unavailable}
+
+      # A generous ceiling, not a precise one: this file's own CI runs under
+      # heavy concurrent pool load (see e.g. PR history), where scheduling a
+      # 300ms timer's reaction can lag well past 300ms. The bound under test
+      # is "does not hang forever", not "reacts within N ms".
+      assert elapsed_us < 15_000_000,
+             "run/3 must degrade within a bounded time, not hang -- took #{elapsed_us}us"
+    end
+
+    test "a call that replies in time still returns its own value" do
+      assert {:ok, :fast} = Bus.run(:unused, fn _conn -> {:ok, :fast} end, 200)
+    end
+
+    test "a call that throws {:bus_error, reason} still degrades to {:error, reason} (unchanged from before this fix)" do
+      assert {:error, :boom} = Bus.run(:unused, fn _conn -> throw({:bus_error, :boom}) end, 200)
+    end
+  end
+
+  # ===========================================================================
   # Untagged: nickname validation (client-side, before any connection)
   # ===========================================================================
 

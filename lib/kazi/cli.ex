@@ -4901,6 +4901,18 @@ defmodule Kazi.CLI do
   defp bus_error(:no_daemon, opts),
     do: daemon_error("no daemon running -- start one with `kazi daemon start`", opts)
 
+  # This fix: a `with_conn`-routed call (who/board/tell/...) hit its hard
+  # deadline (`Kazi.Bus.run/3`) instead of hanging -- distinct from
+  # `:no_daemon` because a daemon IS there, it (or the NATS round-trip) is
+  # just wedged or slow past the bound.
+  defp bus_error(:bus_unavailable, opts),
+    do:
+      daemon_error(
+        "bus call timed out -- the daemon or its NATS connection may be wedged; " <>
+          "try `kazi daemon status` (a stuck daemon may need a restart)",
+        opts
+      )
+
   # T55.7: the daemon answered, and refused. Distinct from `:no_daemon` --
   # "the bus is unreachable from the daemon" is a different fault from "there
   # is no daemon", and an operator who cannot tell them apart debugs the wrong

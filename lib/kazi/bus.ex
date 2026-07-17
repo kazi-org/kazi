@@ -47,6 +47,8 @@ defmodule Kazi.Bus do
   module -- convergence never depends on the bus.
   """
 
+  require Logger
+
   alias Gnat.Jetstream.API.{Consumer, KV}
   alias Gnat.Jetstream.API.Stream, as: JetStream
   alias Kazi.Bus.{Board, Claims, Liveness, Provision}
@@ -57,6 +59,23 @@ defmodule Kazi.Bus do
   @pull_batch 100
   @default_watch_timeout_s 300
   @puback_timeout_ms 5_000
+
+  # Bus/JetStream calls must never hang the operator's command (lore L-0035,
+  # mirrors Kazi.ReadModel.Guard and Kazi.Bus.Hook's own payload bound).
+  # `Gnat.Jetstream.Pager.receive_messages/2` -- which `KV.contents/2`'s
+  # roster read (every `who`/`board` call pages through it) drives -- has a
+  # bare `receive do ... end` with NO `after` clause. If the expected NATS
+  # reply never arrives (a dropped message, a consumer race, a wedged
+  # connection), the calling process blocks FOREVER with no escape. `run/3`
+  # closes that gap: every `with_conn`-routed call executes in a monitored
+  # task with a hard deadline; on timeout the task is killed and the call
+  # degrades to `{:error, :bus_unavailable}` -- the same tolerated shape as
+  # `:no_daemon` -- instead of hanging past the bound. `watch/1` (designed to
+  # block for minutes waiting on new messages) passes its own timeout plus a
+  # grace window; every other call gets this short default.
+  @default_call_timeout_ms 15_000
+  @watch_call_grace_ms 15_000
+
   # The board's ephemeral fact consumer is deleted the moment its read
   # finishes; this threshold only bounds cleanup if that delete is ever missed
   # (e.g. a crash mid-board), so the server reaps the orphan quickly.
@@ -621,6 +640,10 @@ defmodule Kazi.Bus do
   @spec watch(keyword()) :: {:ok, [map()]} | {:error, error()}
   def watch(opts \\ []) do
     timeout_ms = (opts[:timeout] || @default_watch_timeout_s) * 1_000
+
+    # `watch` is the one bus call designed to block for a long time; its
+    # outer bound must cover its own wait, not `run/3`'s short default.
+    opts = Keyword.put_new(opts, :call_timeout_ms, timeout_ms + @watch_call_grace_ms)
 
     with_conn(opts, fn conn ->
       upsert_presence(conn, opts)
@@ -1506,20 +1529,22 @@ defmodule Kazi.Bus do
   # `fun` against it, closing only a connection we opened ourselves.
   # ---------------------------------------------------------------------------
   defp with_conn(opts, fun) do
+    timeout_ms = opts[:call_timeout_ms] || @default_call_timeout_ms
+
     case opts[:conn] do
-      nil -> with_discovered_conn(opts, fun)
-      conn -> run(conn, fun)
+      nil -> with_discovered_conn(opts, fun, timeout_ms)
+      conn -> run(conn, fun, timeout_ms)
     end
   end
 
-  defp with_discovered_conn(opts, fun) do
+  defp with_discovered_conn(opts, fun, timeout_ms) do
     sock_path = opts[:sock_path] || Supervisor.default_sock_path()
 
     with :alive <- Probe.probe(sock_path),
          {:ok, %{"nats_port" => port} = pong} when is_integer(port) <- Probe.ping(sock_path),
          {:ok, conn} <- Gnat.start_link(discovered_connect_opts(pong, port)) do
       try do
-        run(conn, fun)
+        run(conn, fun, timeout_ms)
       after
         if Process.alive?(conn), do: Gnat.stop(conn)
       end
@@ -1554,10 +1579,49 @@ defmodule Kazi.Bus do
     end
   end
 
-  defp run(conn, fun) do
-    fun.(conn)
-  catch
-    {:bus_error, reason} -> {:error, reason}
+  @doc false
+  # Test seam (mirrors `Kazi.ReadModel.Guard.run/3`): the bounded-call
+  # regression test calls this directly with a short timeout; production
+  # always arrives here through `with_conn/2`.
+  #
+  # Runs `fun.(conn)` in a monitored task with a hard deadline of
+  # `timeout_ms`. On timeout (or a crash) the task is killed and this
+  # degrades to `{:error, :bus_unavailable}` instead of blocking past the
+  # bound -- see the moduledoc-adjacent comment above `@default_call_timeout_ms`
+  # for why this exists.
+  @spec run(Gnat.t(), (Gnat.t() -> term()), timeout()) :: term()
+  def run(conn, fun, timeout_ms \\ @default_call_timeout_ms) do
+    task =
+      Task.async(fn ->
+        try do
+          {__MODULE__, :ok, fun.(conn)}
+        catch
+          {:bus_error, reason} -> {__MODULE__, :error, reason}
+        end
+      end)
+
+    result =
+      case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+        {:ok, {__MODULE__, :ok, value}} -> value
+        {:ok, {__MODULE__, :error, reason}} -> {:error, reason}
+        {:exit, reason} -> unavailable(reason)
+        nil -> unavailable({:timeout, timeout_ms})
+      end
+
+    # `Task.async/1` links the task; flush its `{:EXIT, ...}` here so a
+    # trapping caller's mailbox never sees it (mirrors Guard.run/3).
+    receive do
+      {:EXIT, pid, _reason} when pid == task.pid -> :ok
+    after
+      0 -> :ok
+    end
+
+    result
+  end
+
+  defp unavailable(reason) do
+    Logger.warning(fn -> "bus call unavailable (#{inspect(reason)}); degrading" end)
+    {:error, :bus_unavailable}
   end
 
   defp raise_bus_error(reason), do: throw({:bus_error, reason})
