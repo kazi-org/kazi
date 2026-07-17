@@ -135,8 +135,6 @@ defmodule Kazi.CLI do
     adr: :boolean,
     predicates: :string,
     replace: :boolean,
-    # T45.2 (UC-059): `plan --project` reads the payload as a multi-goal roadmap.
-    project: :boolean,
     obsidian: :string,
     json: :boolean,
     stream: :boolean,
@@ -1962,7 +1960,7 @@ defmodule Kazi.CLI do
       predicates: flags[:predicates],
       replace: flags[:replace] || false,
       session_name: flags[:session_name],
-      project: flags[:project] || false
+      project: flags[:project]
     ]
   end
 
@@ -6186,25 +6184,16 @@ defmodule Kazi.CLI do
   # --json; human prose otherwise.
   defp execute_propose(idea, opts, inject_opts) do
     with_read_model(opts, fn ->
-      case caller_proposal(opts, inject_opts) do
-        {:ok, payload} ->
-          # T45.2 (UC-059): `--project` reads the SAME payload channel
-          # (--predicates / stdin) but as a MULTI-GOAL roadmap.
-          if opts[:project],
-            do: caller_drafts_project(payload, opts, inject_opts),
-            else: caller_drafts(idea, payload, opts, inject_opts)
-
-        :none ->
-          if opts[:project],
-            do:
-              propose_input_error(
-                "--project needs a goals payload (--predicates or piped stdin)",
-                opts
-              ),
-            else: kazi_drafts(idea, opts, inject_opts)
-
-        {:error, message} ->
-          propose_input_error(message, opts)
+      # T45.2 (UC-059): `plan --project '<goals-json>'` carries a MULTI-GOAL roadmap
+      # payload directly (mirroring how `--predicates` carries a single goal).
+      if is_binary(opts[:project]) and opts[:project] != "" do
+        caller_drafts_project(opts[:project], opts, inject_opts)
+      else
+        case caller_proposal(opts, inject_opts) do
+          {:ok, payload} -> caller_drafts(idea, payload, opts, inject_opts)
+          :none -> kazi_drafts(idea, opts, inject_opts)
+          {:error, message} -> propose_input_error(message, opts)
+        end
       end
     end)
   end

@@ -44,7 +44,7 @@ defmodule Kazi.CLIProjectTest do
 
     out =
       capture_io(fn ->
-        assert Kazi.CLI.run(["plan", "--project", "--predicates", payload, "--json"]) == 0
+        assert Kazi.CLI.run(["plan", "--project", payload, "--json"]) == 0
       end)
 
     assert {:ok, result} = Jason.decode(String.trim(out))
@@ -76,7 +76,7 @@ defmodule Kazi.CLIProjectTest do
 
     out =
       capture_io(fn ->
-        assert Kazi.CLI.run(["plan", "--project", "--predicates", payload, "--json"]) == 0
+        assert Kazi.CLI.run(["plan", "--project", payload, "--json"]) == 0
       end)
 
     assert {:ok, result} = Jason.decode(String.trim(out))

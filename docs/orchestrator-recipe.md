@@ -122,12 +122,13 @@ pass `--replace`; this protects an approved goal's audit trail from being
 silently reset by an unrelated draft.
 
 **caller-drafts a whole roadmap (`--project`)** -- to author a MULTI-GOAL project
-in one call, pass `--project`. The payload is a `{"goals": [...]}` object where
-each entry is a caller-drafts goal (with an `"id"`) plus an optional `"needs"`
-list of predecessor ids and an optional `"integration"` block (T45.2, UC-059):
+in one call, pass the payload to `--project`. It is a `{"goals": [...]}` object
+where each entry is a caller-drafts goal (with an `"id"`) plus an optional
+`"needs"` list of predecessor ids and an optional `"integration"` block (T45.2,
+UC-059):
 
 ```sh
-kazi plan --project --json --predicates '{
+kazi plan --project --json '{
   "goals": [
     {"id": "foundation", "predicates": [ ... ]},
     {"id": "api", "needs": ["foundation"], "predicates": [ ... ], "integration": {"mode": "pr"}},
