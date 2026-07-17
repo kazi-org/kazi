@@ -646,6 +646,7 @@ OUTCOME: :converged   (tests pass · live /livez = "ok")
 | `ratchet`      | a metric may not regress vs a baseline (coverage, perf, size) | `metric`, `baseline`, `direction`, `allowed_regression` |
 | `static`       | static analysis / type-check / lint (Dialyzer-led, SARIF-general) | `cmd`, `args`, `format`, `baseline`, `allowed_regression` |
 | `no_stubs`     | the diff-vs-base adds no stub/placeholder marker to a production (non-test) file | `patterns`, `base`, `exclude` |
+| `docs_updated` | a user-facing surface change ships with a docs update or a `[no-docs]` marker | `base`, `surface_patterns`, `doc_patterns` |
 
 `http_probe` and `browser` are the **live** predicates: `url` is VALIDATED at
 goal-load time (`Kazi.Goal.Loader`, T48.1, ADR-0058) — a missing or blank `url`

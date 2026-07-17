@@ -74,6 +74,9 @@ its config at runtime via `kazi schema <kind>`.
 - **[`no_stubs`](no-stubs-predicate.md)** — the zero-stub gate: fail when the
   diff-vs-base adds a stub/placeholder marker to a production (non-test) file, with
   file:line evidence (T44.6).
+- **[`docs_updated`](docs-updated-predicate.md)** — the docs-land-with-code gate:
+  fail when a user-facing surface change ships without a docs update or a
+  `[no-docs]` marker (T44.8, ADR-0034).
 - **[`cli`](cli-provider.md)** — a golden invocation of a shipped binary: run a
   declared command and assert on the exit code + stdout/stderr (T43.7, UC-055).
 - **[`scenario`](scenario-predicate.md)** — replay a pinned Gherkin Scenario by
