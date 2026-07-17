@@ -232,6 +232,32 @@ defmodule Kazi.Providers.Scenario do
     end
   end
 
+  @doc """
+  The effective pin path for a scenario predicate's `config`: the explicit
+  `config[:pin]` when set, else the derived `docs/specs/pins/<derived-id>.pin.json`
+  (reading the spec to recover the Feature for the derived id).
+
+  Returns `nil` when the pin is not configured AND the default cannot be derived
+  (the spec is unreadable or the named Scenario is absent) — the same inputs the
+  provider would `:error` on at evaluation. Total and crash-safe, so a caller
+  (the loader's role-default derivation, T49.6) never fails on a malformed goal.
+  """
+  @spec pin_path(map()) :: String.t() | nil
+  def pin_path(config) when is_map(config) do
+    config[:pin] || derived_pin_path(config)
+  end
+
+  defp derived_pin_path(config) do
+    with spec when is_binary(spec) <- config[:spec],
+         name when is_binary(name) <- config[:scenario],
+         {:ok, text} <- File.read(spec),
+         {:ok, scenario} <- Source.extract(text, name) do
+      default_pin_path(scenario)
+    else
+      _ -> nil
+    end
+  end
+
   defp default_pin_path(scenario) do
     Path.join(@pin_dir, derived_id(scenario) <> ".pin.json")
   end
