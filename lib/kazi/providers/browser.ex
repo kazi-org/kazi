@@ -45,6 +45,14 @@ defmodule Kazi.Providers.Browser do
   Read from `Kazi.Predicate.config`:
 
     * `:url`         — required. The page to open (string).
+    * `:viewport`    — optional. Run the WHOLE journey at each width: `"mobile"`
+      (390x844), `"tablet"` (820x1180), `"desktop"` (1440x900), or
+      `%{width: w, height: h}`; a LIST runs each in turn (T43.5, ADR-0053). Every
+      assertion is replayed per viewport and its record carries the width, so any
+      viewport failing fails the predicate and the evidence names which. The
+      journey reruns (not just the assertions) because layout drives behaviour —
+      a nav that collapses to a burger on mobile makes a desktop click step miss.
+      Absent = one journey at the browser default, byte-identical to before.
     * `:steps`       — optional. A list of interaction steps the runner replays
       before asserting, e.g. `[%{action: "click", selector: "#start"}]`. Handed
       verbatim to the runner; defaults to `[]`.
@@ -241,7 +249,19 @@ defmodule Kazi.Providers.Browser do
       steps: Map.get(config, :steps, []),
       assertions: Map.get(config, :assertions, []),
       timeout_ms: Map.get(config, :timeout_ms, @default_timeout_ms),
-      screenshot: Map.get(config, :screenshot)
+      screenshot: Map.get(config, :screenshot),
+      # T43.5: passed VERBATIM like steps/assertions — the runner owns the
+      # viewport vocabulary (named classes vs {width, height}), not kazi.
+      #
+      # This literal `:viewport` is also what makes the key LOADABLE. The goal
+      # loader admits a config key only if its atom already exists
+      # (`String.to_existing_atom/1`, its atom-exhaustion guard), and it interns
+      # provider keys by force-loading the provider module — so a key no provider
+      # module names is rejected as "unknown config key" in the RELEASE binary
+      # even though `mix` (which loads test code that mentions it) accepts it.
+      # That exact trap already bit the Gherkin doc-keys: see the loader's
+      # `@gherkin_doc_keys` note and docs/devlog.md 2026-07-15.
+      viewport: Map.get(config, :viewport)
     }
 
     case Jason.encode(payload) do
