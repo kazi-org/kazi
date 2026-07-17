@@ -50,25 +50,25 @@ defmodule Kazi.Runtime.BusMirrorTest do
       assert opts[:session_name] == "sess-1"
     end
 
-    test "iteration reports index and pass/total" do
-      BusMirror.iteration("abcdef1234567890", "sess-1", %{
+    test "iteration reports index, pass/total, and the goal ref (T60.1)" do
+      BusMirror.iteration("my-goal", "abcdef1234567890", "sess-1", %{
         iteration: 3,
         vector: vector(5, 3),
         regressions: []
       })
 
-      assert_receive {:posted, "fact", "iter 3: 5/8 passing", opts}
+      assert_receive {:posted, "fact", "iter 3: 5/8 passing my-goal", opts}
       assert opts[:topic] == "run:abcdef12"
     end
 
     test "iteration appends a regression count when predicates went green->red" do
-      BusMirror.iteration("run00000", "s", %{
+      BusMirror.iteration("g", "run00000", "s", %{
         iteration: 4,
         vector: vector(2, 2),
         regressions: [:p1, :p2]
       })
 
-      assert_receive {:posted, "fact", "iter 4: 2/4 passing (2 regressed)", _opts}
+      assert_receive {:posted, "fact", "iter 4: 2/4 passing (2 regressed) g", _opts}
     end
 
     test "terminal maps each outcome to an honest verdict" do
@@ -125,7 +125,7 @@ defmodule Kazi.Runtime.BusMirrorTest do
   describe "fire-and-forget contract" do
     test "a malformed iteration payload is a silent no-op, never a post" do
       with_poster(capture())
-      assert BusMirror.iteration("run00000", "s", %{not: :an_iteration}) == :ok
+      assert BusMirror.iteration("g", "run00000", "s", %{not: :an_iteration}) == :ok
       refute_receive {:posted, _, _, _}
     end
 
@@ -144,7 +144,7 @@ defmodule Kazi.Runtime.BusMirrorTest do
 
       assert BusMirror.started("g", "run00000", "sess") == :ok
 
-      assert BusMirror.iteration("run00000", "sess", %{
+      assert BusMirror.iteration("g", "run00000", "sess", %{
                iteration: 0,
                vector: vector(1, 0),
                regressions: []
