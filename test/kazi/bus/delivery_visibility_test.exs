@@ -101,10 +101,19 @@ defmodule Kazi.Bus.DeliveryVisibilityTest do
     test "a peek does NOT flip status to consumed -- peek NAKs, it never consumes", %{conn: conn} do
       recipient = live_session(conn)
 
-      assert {:ok, receipt} =
-               Bus.tell(recipient, "peek me", conn: conn, session: unique_session())
+      # A scope of this test's own: `peek` NAKs everything it pulls, and a
+      # scope consumer starts at deliver_policy :all -- so peeking the shared
+      # `machine` scope would pull every message this suite ever posted and
+      # NAK it straight back into redelivery. The tell still arrives either
+      # way: a recipient's directed consumer matches `bus.*.msg.<session>`
+      # across ALL scopes (issue #1065), which is the point being tested.
+      scope = "t5512-peek-#{System.unique_integer([:positive])}"
 
-      assert {:ok, _messages} = Bus.peek(conn: conn, session: recipient, scope: "machine")
+      assert {:ok, receipt} =
+               Bus.tell(recipient, "peek me", conn: conn, session: unique_session(), scope: scope)
+
+      assert {:ok, messages} = Bus.peek(conn: conn, session: recipient, scope: scope)
+      assert Enum.find(messages, &(&1.text == "peek me"))
 
       assert {:ok, status} = Bus.status(receipt.id, conn: conn, session: unique_session())
       assert status["state"] == "pending"
@@ -369,7 +378,7 @@ defmodule Kazi.Bus.DeliveryVisibilityTest do
     DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.to_iso8601()
   end
 
-  defp put_row(conn, session, ts, overrides \\ []) do
+  defp put_row(conn, session, ts, overrides) do
     pid = Keyword.get(overrides, :pid, own_os_pid())
 
     entry =
