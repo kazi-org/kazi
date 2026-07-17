@@ -65,6 +65,10 @@ defmodule Kazi.Runtime do
     http_probe: Kazi.Providers.HttpProbe,
     prod_log: Kazi.Providers.ProdLog,
     browser: Kazi.Providers.Browser,
+    # T43.7 (UC-055): the `:cli` provider — a golden invocation of a shipped
+    # binary. Runs a declared command and gates on the exit code + stdout/stderr
+    # matchers, the observable surface `mix test` never exercises.
+    cli: Kazi.Providers.Cli,
     # T32.10 (ADR-0043): the live RED/SLO metrics provider (PromQL windowed
     # quantile + burn-rate gate). Degrades to :unknown when no endpoint is set.
     metrics: Kazi.Providers.Metrics,
