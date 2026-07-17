@@ -81,6 +81,33 @@ Only a genuinely un-runnable condition is `:error`: the spec file is missing
 (`:spec_not_found`), the named Scenario is absent from it (`:scenario_not_found`),
 or the target surface has no registered provider (`:surface_unavailable`).
 
+## Demonstrator dispatch (ADR-0064 d3)
+
+When the blocker is the PIN — `:unpinned` or `{:stale, :spec_changed}` — the loop
+does not dispatch a **fixer** (which patches code); it dispatches a
+**demonstrator**. This is a distinct loop action, `:dispatch_demonstrator`, routed
+purely on the failing-predicate evidence (its `pin_state`) through the same
+dispatch machinery as the fixer — no new decision branch. Its job: operate the
+running surface, accomplish the Scenario literally, and write the pin that encodes
+how. `repin = "manual"` opts a predicate out of automatic demonstration.
+
+The demonstrator is **write-disjoint from the fixer** (T49.6 role-scoped
+enforcement): it may write ONLY the pin path; code, specs, and the goal-file are
+read-only to it. So it cannot patch the app to make its own demonstration pass — if
+the capability is broken, the demonstration fails honestly and becomes grounded
+evidence for the next fixer dispatch. The fixer, conversely, has pins and specs in
+its read-only set — it cannot forge the grader.
+
+**Born reproducible — the acceptance gate.** A freshly minted pin is accepted only
+if, in the same dispatch, it both **validates** (the T49.1 contract) and **replays
+green** through the surface provider — exactly what evaluating the predicate
+checks. If either fails, the write is **discarded** (the pin file deleted) and the
+demonstration is recorded as `%{demonstration: :rejected, reasons: [...]}`. So the
+agentic, nondeterministic authoring is quarantined at demonstration time and
+evaluation stays deterministic; a demonstration that cannot be reproduced never
+lands. A harness error or crash is best-effort — no pin is kept and the loop
+survives.
+
 ## Only `:pinned` replays, and the replay is the pass
 
 On a `:pinned` classification the pin's `trace` is merged **over** the predicate's
