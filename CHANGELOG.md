@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.189.0](https://github.com/kazi-org/kazi/compare/v1.188.0...v1.189.0) (2026-07-17)
+
+
+### Features
+
+* **goal:** register the no_stubs provider (runtime, loader, schema) ([769952b](https://github.com/kazi-org/kazi/commit/769952ba72673dee13bd3291a28b2800913704a8))
+* **providers:** no_stubs diff-scanner gate provider ([59624db](https://github.com/kazi-org/kazi/commit/59624db606b1ca8b36488db8220209542203eecd))
+
 ## [1.188.0](https://github.com/kazi-org/kazi/compare/v1.187.0...v1.188.0) (2026-07-17)
 
 
