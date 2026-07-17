@@ -3457,3 +3457,86 @@ in its body — produced by kazi's Integrate (the report above), though in the
 loop-driven converged run the PR was agent-authored; reported honestly rather
 than overclaimed. `mode = "merge"` was not exercised. Fixture repo and its PRs
 were deleted after capture.
+
+## 2026-07-17 — T55.10 LIVE dogfood: the E55 "team that nobody reminds", observed — and the no-reminder bar FAILS under load
+
+The epic-closing observational dogfood for the whole E55 session-bus arc, run
+against real live sessions on the shared NATS bus. Honest verdict up front: the
+individual E55 surfaces mostly work, but the headline promise — a starting
+session reaches the board WITHOUT a human prompt — is **FALSE in the real
+environment today**, because the board is too slow for the hook that injects it.
+
+### Environment (the staleness landmine, live)
+
+- Installed CLI was **1.160.0** (stale; predates the entire E55 arc — it cannot
+  even run `bus board`). Latest release is **v1.193.0** (cut today, includes
+  E55). Per the CLAUDE.md landmine, I installed the v1.193.0 release binary
+  directly (sha256-verified) over the stale one; `kazi version` → 1.193.0.
+- The running SHARED daemon still reports **vsn 1.160.0** (uptime ~3.5 h,
+  predates today's releases). I did **not** restart it: it serves live
+  cross-machine sessions and a restart is high-blast-radius. So daemon-side E55
+  code (T55.7 digest assembly, liveness verdicts) runs on stale code in the
+  actual environment. This is itself the landmine live: the epic shipped to a
+  release that the running daemon does not have.
+- **Cross-machine: confirmed.** `kazi bus who --all` shows sessions on two
+  machines (a laptop and a mini) sharing one bus.
+
+### What works (observed live)
+
+- **Idle vs dead (T55.11/T55.14).** `who --all` renders 13 sessions as `idle` or
+  `active` with real recent heartbeats and **zero `dead-reaping`**, across both
+  machines. The exact field pain that was diagnosed earlier today (a live session
+  rendering `dead-reaping`) is gone in the live roster.
+- **Claim visibility (T55.8).** `bus board`'s claims section shows 8 live pool
+  claims with owner + age, including sibling agents' active claims. A starting
+  session that reads the board CAN see what is already claimed. Caveat, observed
+  live (docs/lore L-0037): every claim's owner renders as the SAME git identity
+  (`t@example.com@<host>`), so the board shows WHAT is claimed but not WHICH
+  session — it cannot attribute or fully de-dupe among sibling pool sessions.
+- **Run-lifecycle mirroring (T51.5).** Live `run:*` progress facts on the board
+  (e.g. `run:330915d9: iter 1: 0/2 passing`) — a supervisor sees a run's state
+  without watching its JSONL.
+- **Directed-message fate, half of it (T55.12).** A real `bus tell` returned a
+  message id; `bus status <id>` reported **`pending`** with recipient + sent
+  time. The `pending → consumed` transition was NOT cleanly reproduced in a
+  self-directed test (a follow-up `bus read` did not consume it — likely a
+  session-identity-resolution nuance across repeated CLI invocations, or the
+  deep-inbox batching of L-0040). Pending-fate verified; consumed-transition not.
+
+### Digest token cost (measured, #1)
+
+One live sample of my session's inbox: `bus read --json` (bounded digest) =
+**73 bytes**; `bus read --json --full` (every pending message, the pre-E55
+raw-transcript equivalent) = **33,452 bytes** — a ~458× / ~99.8% reduction (~18
+vs ~8,360 tokens at 4 B/token). Caveat: the two sequential reads share ack state,
+so this is the mechanism's ceiling, not a perfectly-controlled A/B; the bound is
+structural (ADR-0072, ≤40 lines regardless of backlog), and the 33 KB full read
+is the raw volume the digest replaces.
+
+### The no-reminder bar: FALSE (the capstone finding)
+
+The `SessionStart` hook IS installed (`~/.claude/settings.json`:
+`kazi bus hook session-start`) and DOES register presence on real starts (live
+sessions show presence, so it runs). But invoking it — bare and with a real
+`SessionStart` JSON on stdin — emits **nothing** (exit 0, empty stdout), so a
+starting session gets **no board**.
+
+Root cause, measured: `Kazi.Bus.Hook.run/2` hard-bounds the hook to **2 s**
+(`@timeout_ms 2_000`, `lib/kazi/bus/hook.ex:37`), and `session_start/1` calls
+`Bus.board`, but `kazi bus board` takes **9.70 s** under the real 127+-topic
+machine-scope backlog (`/usr/bin/time -p kazi bus board` → `real 9.70`). 9.7 s ≫
+2 s ⇒ the board call is always `Task.shutdown`'d ⇒ `:silent` ⇒ no injection. The
+ADR-0072 40-line bound caps the board's OUTPUT, not its client-side DRAIN time,
+and the machine scope had accumulated 127+ `run:*` mirror-fact topics (T51.5) to
+drain. So under exactly the busy-team load the feature targets, the "team that
+nobody reminds" silently reminds no one. Filed as **#1295** with the measurement
+and suggested fixes (paged/deadlined board drain or server-assembled board;
+raise the session-start hook budget; bound the `run:*` topic space).
+
+**Verdict:** "the operator did not have to tell a session to check the bus" —
+**FALSE as it stands in this environment.** The mechanism is wired and fires,
+but the board it depends on is ~5× too slow for the hook's own timeout, so the
+injection silently no-ops. The individual pieces (board, claims, presence,
+idle/dead, run-mirror, tell/status-pending) are real and observable; the
+end-to-end no-reminder promise is not yet met under real load. Reported as
+observed, not as hoped.
