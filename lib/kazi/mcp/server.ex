@@ -348,10 +348,15 @@ defmodule Kazi.MCP.Server do
             "so a session may call it every turn (e.g. at session start) without draining " <>
             "a message a later kazi_bus_read is counting on. A stream answers \"what " <>
             "changed since I last looked\"; the board answers \"what is true right now\". " <>
-            "Returns {ok: true, board: {facts, roster, total_facts, total_sessions}}. Each " <>
-            "fact line is the topic's latest value (posting three facts on one topic shows " <>
-            "ONE line); an oversize body renders as a stub and the fact section is bounded " <>
-            "to at most 40 lines (ADR-0072). Or a structured error (no_daemon).",
+            "Returns {ok: true, board: {facts, roster, claims, claims_available, " <>
+            "total_facts, total_sessions, total_claims}}. Each fact line is the topic's " <>
+            "latest value (posting three facts on one topic shows ONE line); an oversize " <>
+            "body renders as a stub and the fact section is bounded to at most 40 lines " <>
+            "(ADR-0072). The claims section (T55.8, ADR-0073 point 2) is a live projection " <>
+            "of refs/claims/* read at source -- each entry is {task, owner, host, age_s} -- " <>
+            "with NO daemon in that path; when the claim remote is unreachable it degrades " <>
+            "to claims_available:false rather than a possibly-stale table. Or a structured " <>
+            "error (no_daemon).",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
@@ -693,7 +698,7 @@ defmodule Kazi.MCP.Server do
   # idempotent -- the agent may call it every turn without consuming anything a
   # kazi_bus_read is counting on.
   defp call_tool("kazi_bus_board", args, opts) do
-    case Bus.board(bus_opts(args, opts)) do
+    case Bus.board(bus_opts(args, opts) ++ [claims: true]) do
       {:ok, board} ->
         {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true, "board" => board}}
 

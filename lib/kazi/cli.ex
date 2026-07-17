@@ -418,7 +418,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -582,7 +582,7 @@ defmodule Kazi.CLI do
       kazi bus read [--peek] [--since <cursor>] [--json]   # --peek: show pending messages WITHOUT consuming them; --since <seq>: replay from a point
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
-      kazi bus board [--scope machine|project] [--json]   # current state: last-value fact per topic + live roster (T55.4)
+      kazi bus board [--scope machine|project] [--json]   # current state: facts + roster + claim ownership (T55.4/T55.8)
       kazi bus hook <event>                        # harness hook entry point (session-start | turn) -- ALWAYS exits 0 silently
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
@@ -1703,9 +1703,9 @@ defmodule Kazi.CLI do
     kazi bus board [--scope machine|project] [--json]
 
     Render the CURRENT STATE of the bus (ADR-0073): the last-value `fact` per
-    topic and the live roster (names, teams, liveness) in one shot. Where
-    `read`/`peek`/`watch` answer "what CHANGED since I last looked" -- a delta
-    of pending messages -- the board answers "what is true right now".
+    topic, the live roster (names, teams, liveness), and claim ownership in one
+    shot. Where `read`/`peek`/`watch` answer "what CHANGED since I last looked"
+    -- a delta of pending messages -- the board answers "what is true right now".
 
     CURSOR-FREE and idempotent: unlike `read`, the board CONSUMES NOTHING and
     keeps no cursor, so a session may call it every turn (it is what a
@@ -1716,13 +1716,19 @@ defmodule Kazi.CLI do
     Bounded by the same digest rules as `read` (ADR-0072): an oversize fact body
     renders as a one-line stub carrying its id (the body stays addressable in the
     stream), and the fact section is at most 40 lines regardless of topic count,
-    the tail folding into one overflow line. Under --json:
-    `{ok, schema_version, board: {facts, roster, total_facts, total_sessions}}`
-    (shape: `kazi schema bus`).
+    the tail folding into one overflow line. Under --json: `{ok, schema_version,
+    board: {facts, roster, claims, claims_available, total_facts,
+    total_sessions, total_claims}}` (shape: `kazi schema bus`).
+
+    The `claims` section (T55.8, ADR-0073 point 2) is a live projection of
+    `refs/claims/*` read at source -- `{task, owner, host, age_s}` per claim,
+    with NO daemon in that path. When the claim remote is unreachable it degrades
+    to one honest line ("claims: unavailable (remote unreachable)",
+    `claims_available:false` under --json) rather than a possibly-stale table.
 
     --scope machine (default) or project selects which bus subject tree to
-    project. Requires a running `kazi daemon` -- prints a one-line no-daemon
-    error (exit 1) otherwise.
+    project. The facts and roster need a running `kazi daemon` -- `bus board`
+    prints a one-line no-daemon error (exit 1) otherwise.
     """
   end
 
@@ -4495,7 +4501,7 @@ defmodule Kazi.CLI do
   # nothing, so a session may board every turn without draining what a read was
   # counting on.
   defp execute_bus("board", [], opts) do
-    case Kazi.Bus.board(bus_call_opts(opts)) do
+    case Kazi.Bus.board(bus_call_opts(opts) ++ [claims: true]) do
       {:ok, board} ->
         emit(json?(opts), bus_board_payload(board), fn -> print_board(board) end)
         0
@@ -4793,7 +4799,43 @@ defmodule Kazi.CLI do
     else
       Enum.each(board["roster"], &IO.puts("  " <> board_roster_line(&1)))
     end
+
+    print_board_claims(board)
   end
+
+  # ADR-0073 point 2: ownership read live from `refs/claims/*`. When the remote
+  # is unreachable the section is ONE honest line -- never a possibly-stale
+  # table. `claims_available`/`claims` are absent only when the caller did not
+  # ask for claims (not on the `bus board` path), so the section is skipped.
+  defp print_board_claims(%{"claims_available" => false}),
+    do: IO.puts("claims: unavailable (remote unreachable)")
+
+  defp print_board_claims(%{"claims_available" => true} = board) do
+    IO.puts("claims (#{board["total_claims"]} held):")
+
+    if board["claims"] == [] do
+      IO.puts("  (none)")
+    else
+      Enum.each(board["claims"], &IO.puts("  " <> board_claim_line(&1)))
+    end
+  end
+
+  defp print_board_claims(_board), do: :ok
+
+  defp board_claim_line(claim) do
+    owner = claim["owner"] || "unknown"
+    host = if claim["host"], do: "@#{claim["host"]}", else: ""
+    age = if claim["age_s"], do: " (#{board_age(claim["age_s"])})", else: ""
+    "#{claim["task"]}: #{owner}#{host}#{age}"
+  end
+
+  # Compact age for the claims section -- the one board field that is live by
+  # design (ADR-0073 point 2), so it ticks and the section is not idempotent,
+  # unlike the pure fact/roster projection.
+  defp board_age(s) when s < 60, do: "#{s}s"
+  defp board_age(s) when s < 3600, do: "#{div(s, 60)}m"
+  defp board_age(s) when s < 86_400, do: "#{div(s, 3600)}h"
+  defp board_age(s), do: "#{div(s, 86_400)}d"
 
   defp board_fact_line(%{"type" => "overflow", "count" => count}),
     do: "... #{count} more topics"
