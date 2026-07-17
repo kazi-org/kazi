@@ -191,8 +191,18 @@ defmodule Kazi.Goal.Loader do
   Under `--parallel` (T44.10) the same landing runs PER GROUP: each converged
   partition lands on its OWN group-derived branch (`<branch_prefix>/<slug>`,
   distinct per group) and the collective result carries a per-partition `landed:
-  {branch, pr, merge_commit}` (see `docs/schemas/collective-result.md`). `kazi
-  schema integration` documents this shape.
+  {branch, pr, merge_commit}` (see `docs/schemas/collective-result.md`).
+
+  For `mode = "merge"` over a `needs`-DAG of groups (T44.11,
+  `Kazi.Scheduler.OrderedMerge`), the group branches rebase-merge in the
+  TOPOLOGICAL order the scheduler already computes (`Kazi.Goal.DepGraph.frontiers/1`
+  — a group merges only after every `needs` ancestor merged), and after EACH merge
+  `git cherry` verifies every previously-merged group's patch still survives on the
+  base. A `+` line (a group's commit with no patch-equivalent left on the base)
+  means a later merge SILENTLY dropped its work — the landing HALTS with an error
+  naming both the lost group and the group whose merge caused the loss, never
+  proceeding past it. `mode = "pr"` opens the groups' PRs in the same order but
+  merges nothing. `kazi schema integration` documents this shape.
 
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
