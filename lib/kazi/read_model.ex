@@ -379,6 +379,18 @@ defmodule Kazi.ReadModel do
   end
 
   @doc """
+  Lists the proposed goals sharing `roadmap_ref` (T45.2, UC-059), in stable id
+  order — the member proposals a single `kazi plan --project` payload drafted.
+  `[]` for an unknown ref.
+  """
+  @spec list_proposed_goals_by_roadmap(String.t()) :: [ProposedGoal.t()]
+  def list_proposed_goals_by_roadmap(roadmap_ref) when is_binary(roadmap_ref) do
+    Repo.all(
+      from(p in ProposedGoal, where: p.roadmap_ref == ^roadmap_ref, order_by: [asc: p.goal_id])
+    )
+  end
+
+  @doc """
   Persists an approval-workflow transition (T3.5b) on the proposed-goal row
   identified by `proposal_ref`: a new `status` and the (possibly refreshed)
   serialized `goal` payload.
