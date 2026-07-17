@@ -504,6 +504,16 @@ kazi.run`, the release `eval` path, the Burrito binary) reports one clear line
 binary` — instead of a harness stack trace plus Logger formatter-crash spam
 (`Kazi.SwapDiagnosis`).
 
+If a CLI invocation ever hangs at startup (issue #1255), a diagnostic watchdog
+(`Kazi.StartupWatchdog`) fires after a deadline and prints to STDERR *where* the
+process is stuck — its current stacktrace, run-queue lengths, and open ports/fds
+— so a hang is diagnosable in seconds instead of a from-scratch native-stack
+investigation. It defaults to dump-and-CONTINUE (a slow-but-healthy startup is
+never turned into a failure). Tune with `KAZI_STARTUP_WATCHDOG_MS` (deadline in
+ms, default `30000`; `0` disables) and opt into a hard exit on timeout with
+`KAZI_STARTUP_WATCHDOG_HALT=1` (exit code `124`). The Burrito extraction step runs
+before the BEAM, so its time is not counted against the deadline.
+
 > **macOS 26 + Zig note.** Burrito 1.5.0 pins Zig **0.15.2**, which cannot link
 > native binaries against the macOS 26 SDK (Xcode 26); Zig 0.16 links it but is
 > API-incompatible with Burrito's `build.zig`. On a macOS 26 host the wrap step

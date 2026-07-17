@@ -4246,3 +4246,67 @@ line to stdout (captured via separate stdout/stderr redirection with a scratch
 fix is in the burrito fork (emit to stderr / gate behind verbosity) + a `mix.lock`
 pin bump. Tracked as T58.4 (docs/plans/E58.md, Workstream B). Not the same bug as
 T58.3 (different layer) or #1255 (that hang is fixed; this is output-stream only).
+
+## 2026-07-17 — T59.3: #1255 `kazi version` hang — documented non-repro + startup watchdog
+
+Per T59.3's acc ("EITHER a reproduced hang is root-caused and fixed, OR a
+documented real reproduction attempt + a startup-hang watchdog/diagnostic ships"),
+the outcome is the second branch: an honest non-reproduction of the original
+`kazi version`-after-upgrade hang, plus a diagnostic watchdog so the NEXT specimen
+is diagnosable in seconds instead of hours.
+
+### Reproduction attempt (real, documented — matches the author's non-repro)
+
+Downloaded the exact versions named in #1255's specimens (v1.154.0, v1.167.0,
+v1.172.0, prebuilt release binaries, checksums verified), isolated via a scratch
+`HOME` (NOT `KAZI_STATE_DIR` — that does not isolate the read-model db; see the
+T59.2 entry) plus a per-version `KAZI_INSTALL_DIR`, never the shared brew install.
+Three variants, none hung:
+
+1. **Steady-state `kazi version`** (already-extracted binary): 1.7–6.4s over 5
+   runs, exit 0. Consistent with the issue author's code read — the `version` path
+   is Burrito-standalone and touches nothing that can block.
+2. **First-invocation extraction**: 4–22s depending on box load — CPU-ACTIVE unzip
+   (phoenix/live_view/erts payload), NOT the issue's idle-scheduler signature. A
+   user on a heavily loaded box could *perceive* the 20s extraction as a hang; it
+   is not the bug.
+3. **The `.burrito_live` cleanup-skip path — the issue's own screenshot signature**:
+   held v1.167.0 live via a real pid marker in its
+   `.burrito/kazi_erts-<erts>_1.167.0/.burrito_live/<pid>` dir, then ran a fresh
+   v1.172.0 upgrade invocation. It printed the exact issue line —
+   `[l] Skipped cleanup of older version (v1.167.0): still in use by a running
+   process` — and completed in **1.1s, exit 0**. No hang. (`.burrito_live/` is a
+   directory of empty pid-named files; a STALE pid lets cleanup delete the old
+   version, a LIVE pid makes it skip — reproduced cleanly.)
+
+The original idle-scheduler `version` hang remains unexplained/unreproducible, as
+the author found. The confirmed bus-path mechanism (`Gnat.Jetstream.Pager` no-`after`
+`receive`) was already fixed in #1266/v1.186.1.
+
+### Shipped: `Kazi.StartupWatchdog` (the diagnostic fallback)
+
+`lib/kazi/startup_watchdog.ex` wraps the CLI dispatch at all three entry points
+(`Kazi.CLI.main/1`, `Kazi.Release.cli/1`, `Kazi.Release.burrito_main/0`) in a
+SEPARATE monitoring process with a deadline. It works precisely because the
+observed hangs left schedulers IDLE — a distinct process is still scheduled and its
+`after` timer fires. On timeout it dumps to STDERR where the main process is stuck:
+its `:current_stacktrace` (turns "hung for 7 hours" into "blocked in
+`Gnat.Jetstream.Pager.receive_messages/2`"), status/mailbox depth, run-queue
+lengths (all-zero = the idle-scheduler signature), and open ports/fds (the `lsof`
+the investigator ran by hand). Burrito's pre-BEAM extraction runs BEFORE this code,
+so its time is not counted against the deadline.
+
+Behaviour follows the codebase's degrade-visibly posture (`Kazi.SwapDiagnosis`, the
+L-0035 read-model Guard): **dump-and-CONTINUE by default** so a legitimately slow
+startup is never turned into a failure; opt into a hard `System.halt(124)` with
+`KAZI_STARTUP_WATCHDOG_HALT=1`. Deadline via `KAZI_STARTUP_WATCHDOG_MS` (default
+30000; `0` disables). Tested at the function level
+(`test/kazi/startup_watchdog_test.exs`) — a blocking fun trips the dump and names
+the block; a fast fun returns its value with no dump; `deadline_ms: 0` is a
+pass-through — no full release build needed for the test.
+
+### Secondary (routed to T58.4)
+
+Confirmed the stream split for the burrito-stdout gap: the `[l] Skipped cleanup`
+lines go to STDERR (already correct); only the `[i] New install path is:` line
+goes to STDOUT. So T58.4's precise fix target is the `[i]` install-path line.
