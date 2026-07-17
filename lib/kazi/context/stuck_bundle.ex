@@ -27,6 +27,10 @@ defmodule Kazi.Context.StuckBundle do
   @default_budget 12_000
   # Per-predicate failure text cap, so one noisy predicate cannot crowd out the rest.
   @per_failure_bytes 1_500
+  # When fitting the LAST failing predicate to budget, shed the expendable
+  # changed-files list until the failure text has at least this much room, rather
+  # than blanking the failure to make room for file paths (issue #1075).
+  @min_failure_room 200
   # Cap on the number of changed-file paths listed.
   @max_changed_files 50
 
@@ -178,17 +182,39 @@ defmodule Kazi.Context.StuckBundle do
           )
 
         true ->
-          # One failing predicate still too big: hard-cap its failure text to the
-          # room left after the render's fixed overhead (headers + changed files),
-          # so the rendered bundle fits the budget in a single step.
-          [f | rest] = bundle["failing_predicates"]
-
-          overhead =
-            byte_size(render(%{bundle | "failing_predicates" => [%{f | "failure" => ""} | rest]}))
-
-          room = max(0, budget - overhead)
-          %{bundle | "failing_predicates" => [%{f | "failure" => cap(f["failure"], room)} | rest]}
+          fit_last_failure(bundle, budget)
       end
+    end
+  end
+
+  # The single remaining failing predicate is still over budget. Its failure text
+  # is the irreducible signal — the actual error the higher rung needs to make
+  # progress — so it is SHRUNK, never blanked (issue #1075). The prior code
+  # computed room as `budget - overhead` where `overhead` counted the (expendable)
+  # changed-files list as fixed; when that list alone filled the budget, room
+  # collapsed to 0 and `cap(failure, 0)` erased the failure to `""` — surfacing an
+  # empty `"failure"` in the stuck report while keeping a file list nobody needed.
+  # Fix: when the overhead crowds the failure below a usable floor, shed a
+  # changed-file path (the expendable part) and retry, so the failure keeps its
+  # room; only when nothing expendable remains does the failure absorb the
+  # shortfall, and even then it keeps at least one byte (`max(room, 1)`) rather
+  # than blanking.
+  defp fit_last_failure(bundle, budget) do
+    [f | rest] = bundle["failing_predicates"]
+
+    overhead =
+      byte_size(render(%{bundle | "failing_predicates" => [%{f | "failure" => ""} | rest]}))
+
+    room = budget - overhead
+
+    if room < @min_failure_room and bundle["changed_files"] != [] do
+      fit_last_failure(
+        Map.put(bundle, "changed_files", drop_last(bundle["changed_files"])),
+        budget
+      )
+    else
+      kept = cap(f["failure"], max(room, 1))
+      %{bundle | "failing_predicates" => [%{f | "failure" => kept} | rest]}
     end
   end
 
