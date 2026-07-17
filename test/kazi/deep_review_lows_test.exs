@@ -105,7 +105,7 @@ defmodule Kazi.DeepReviewLowsTest do
       refute source =~ "with_read_model(fn ->",
              "a with_read_model call site regressed to the opts-less form"
 
-      assert source |> String.split("with_read_model(opts, fn ->") |> length() == 12
+      assert source |> String.split("with_read_model(opts, fn ->") |> length() == 13
     end
   end
 
