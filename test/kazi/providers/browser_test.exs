@@ -237,6 +237,107 @@ defmodule Kazi.Providers.BrowserTest do
     assert result.evidence.workspace == File.cwd!()
   end
 
+  # --- download assertion (T49.10, ADR-0064 d7, UC-066) ----------------------
+  #
+  # Same division of labour as console_clean: the assertion vocabulary lives in
+  # the runner (kazi passes `assertions` verbatim, the ADR-0040 dividend), so what
+  # the PROVIDER owes is the mapping — a matching download passes, a missing or
+  # wrong-named one is real failing UI work (:fail) carrying the expected-vs-found
+  # evidence, and a runner that could not produce a verdict is :error.
+
+  describe "download assertion" do
+    test "a matching download (ok: true) -> :pass, with the file's identity as evidence", %{
+      workspace: ws
+    } do
+      found = %{
+        filename: "invoice-2026-07.csv",
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        path: "/tmp/pw-dl/invoice-2026-07.csv"
+      }
+
+      verdict =
+        Jason.encode!(%{
+          status: "pass",
+          url: "https://app.test/reports",
+          assertions: [
+            %{type: "download", ok: true, expected: "^invoice-\\d{4}-\\d{2}\\.csv$", found: found}
+          ],
+          screenshot: nil,
+          error: nil
+        })
+
+      result =
+        evaluate(ws, verdict, %{
+          assertions: [%{type: "download", filename_pattern: "^invoice-\\d{4}-\\d{2}\\.csv$"}]
+        })
+
+      assert %PredicateResult{status: :pass} = result
+      assert [assertion] = result.evidence.assertions
+      assert assertion["type"] == "download"
+      assert assertion["ok"]
+      # The sha256 is what makes "the RIGHT file" checkable, not merely "a file
+      # with the right name" — so it must survive into the evidence.
+      assert assertion["found"]["filename"] == "invoice-2026-07.csv"
+      assert assertion["found"]["sha256"] =~ ~r/^[a-f0-9]+$/
+    end
+
+    test "no download within the timeout (ok: false) -> :fail, not :error", %{workspace: ws} do
+      verdict =
+        Jason.encode!(%{
+          status: "fail",
+          url: "https://app.test/reports",
+          assertions: [
+            %{type: "download", ok: false, expected: "^invoice-.*\\.csv$", found: nil}
+          ],
+          screenshot: nil,
+          error: nil
+        })
+
+      result =
+        evaluate(ws, verdict, %{
+          assertions: [%{type: "download", filename_pattern: "^invoice-.*\\.csv$"}]
+        })
+
+      # The page ran and simply did not deliver the file: failing WORK, which
+      # should dispatch a fixer agent — never :error, which would blame infra.
+      assert %PredicateResult{status: :fail} = result
+      assert [assertion] = result.evidence.assertions
+      refute assertion["ok"]
+      assert assertion["expected"] == "^invoice-.*\\.csv$"
+      assert assertion["found"] == nil
+    end
+
+    test "a wrong-named download -> :fail carrying expected VS found", %{workspace: ws} do
+      verdict =
+        Jason.encode!(%{
+          status: "fail",
+          url: "https://app.test/reports",
+          assertions: [
+            %{
+              type: "download",
+              ok: false,
+              expected: "^invoice-\\d{4}-\\d{2}\\.csv$",
+              found: %{filename: "error-page.html", sha256: "abc123", path: "/tmp/x.html"}
+            }
+          ],
+          screenshot: nil,
+          error: nil
+        })
+
+      result =
+        evaluate(ws, verdict, %{
+          assertions: [%{type: "download", filename_pattern: "^invoice-\\d{4}-\\d{2}\\.csv$"}]
+        })
+
+      assert %PredicateResult{status: :fail} = result
+      assert [assertion] = result.evidence.assertions
+      # Both halves must be present: a fixer agent needs to see what it asked for
+      # AND what it got. "false" alone is not actionable.
+      assert assertion["expected"] == "^invoice-\\d{4}-\\d{2}\\.csv$"
+      assert assertion["found"]["filename"] == "error-page.html"
+    end
+  end
+
   # --- console_clean assertion (T43.1, ADR-0053 §1, UC-056) ------------------
   #
   # The assertion vocabulary lives in the runner (kazi passes `assertions`

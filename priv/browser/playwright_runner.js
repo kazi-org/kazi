@@ -73,7 +73,16 @@ async function applyStep(page, step, timeout) {
 // decides at assert time which buckets it reads.
 
 function captureJourney(page) {
-  const captured = { consoleErrors: [], networkFailures: [] };
+  const captured = { consoleErrors: [], networkFailures: [], downloads: [] };
+
+  // T49.10 (ADR-0064 d7): downloads are captured for the SAME reason console
+  // errors are — assertions run AFTER every step, so a download triggered by
+  // step 3 has already finished by assert time. A bare `waitForEvent('download')`
+  // at assert time would wait for a SECOND download that never comes and report
+  // a false `ok:false`. The Download objects are stashed cheaply here; the
+  // expensive part (resolving the saved path, hashing it) is deferred to the
+  // `download` assertion, which only runs if a goal asked for one.
+  page.on("download", (download) => captured.downloads.push(download));
 
   page.on("console", (msg) => {
     if (msg.type() !== "error") return;
@@ -153,6 +162,81 @@ const ASSERTIONS = {
     );
     return { ok: found.length === 0, expected: 0, found };
   },
+
+  // T49.10 (ADR-0064 d7): the file-effect assertion — the journey actually
+  // produced a download whose filename matches `filename_pattern`. `found` is
+  // `{filename, sha256, path}` so a fixer agent gets the file's identity, not
+  // just a boolean; the sha256 is what makes "the RIGHT file" checkable rather
+  // than "a file with the right name".
+  //
+  // Two ways a download arrives, and both must work:
+  //
+  //   * `trigger_selector` given — arm the wait BEFORE the click, via
+  //     Promise.all. Clicking first and then waiting races the event: a fast
+  //     download fires before the listener attaches and is missed forever.
+  //   * no `trigger_selector` — an earlier STEP triggered it, so it is already
+  //     in `captured.downloads` (see captureJourney). Only if none was captured
+  //     do we wait, for one still in flight.
+  //
+  // No download within the timeout is a real `:fail` (the UI did not do the
+  // work), never an `:error` — the page ran, it just did not deliver the file.
+  download: async ({ page, assertion, timeout, captured }) => {
+    const timeoutMs = assertion.timeout_ms ?? timeout;
+    const expected = assertion.filename_pattern;
+
+    let download = null;
+    try {
+      if (assertion.trigger_selector) {
+        // Arm the listener BEFORE the click — this ordering is the whole point.
+        const [d] = await Promise.all([
+          page.waitForEvent("download", { timeout: timeoutMs }),
+          page.click(assertion.trigger_selector, { timeout: timeoutMs }),
+        ]);
+        download = d;
+      } else {
+        download =
+          captured.downloads.shift() ??
+          (await page.waitForEvent("download", { timeout: timeoutMs }));
+      }
+    } catch (e) {
+      // Timeout (or a missing trigger selector): the journey produced no
+      // download. Real failing work.
+      return { ok: false, expected, found: null };
+    }
+
+    const filename = download.suggestedFilename();
+    let path = null;
+    let sha256 = null;
+    try {
+      path = await download.path();
+      if (path) {
+        const crypto = require("crypto");
+        const fs = require("fs");
+        sha256 = crypto.createHash("sha256").update(fs.readFileSync(path)).digest("hex");
+      }
+    } catch (e) {
+      // The file could not be read back (a failed/cancelled download). Report
+      // what we know rather than throwing: the filename still identifies it.
+      path = null;
+    }
+
+    // The pattern is a regex source string, matched against the suggested
+    // filename. An invalid pattern is the goal author's error, and is reported
+    // as a failing assertion naming the bad pattern — not an :error, and never
+    // a silent pass.
+    let ok;
+    try {
+      ok = new RegExp(expected).test(filename);
+    } catch (e) {
+      return {
+        ok: false,
+        expected: `valid filename_pattern regex, got ${JSON.stringify(expected)}`,
+        found: { filename, sha256, path },
+      };
+    }
+
+    return { ok, expected, found: { filename, sha256, path } };
+  },
 };
 
 async function evalAssertion(page, assertion, timeout, captured) {
@@ -190,7 +274,11 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
+    // `acceptDownloads` is Playwright's default, but the `download` assertion
+    // (T49.10) depends on it entirely — a context that refuses downloads makes
+    // that assertion fail for a reason no evidence would explain. Stated
+    // explicitly so the dependency is visible and version-proof.
+    const page = await browser.newPage({ acceptDownloads: true });
     // Listeners BEFORE the first navigation: `console_clean` asserts over the
     // whole journey, so the initial load's errors must be in the record too.
     const captured = captureJourney(page);

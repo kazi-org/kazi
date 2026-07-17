@@ -82,6 +82,40 @@ for the rest of the run.
 | `text` | `selector` + `contains` \| `exact` | the element's text matches |
 | `url` | `contains` \| `exact` | the current URL matches |
 | `console_clean` | `network` (optional, bool) | the journey produced no `console.error` |
+| `download` | `filename_pattern` + `trigger_selector`, `timeout_ms` (optional) | the journey produced a download whose filename matches |
+
+### `download` — the file-effect check
+
+`download` asserts the journey actually **produced a file**, not merely that a
+button looked clickable. `filename_pattern` is a regex matched against the
+download's suggested filename:
+
+```toml
+[[predicate]]
+id = "invoice-export"
+provider = "browser"
+url = "https://app.example.com/reports"
+assertions = [
+  { type = "download", trigger_selector = "#export-csv", filename_pattern = "^invoice-\\d{4}-\\d{2}\\.csv$" },
+]
+```
+
+`found` is `{filename, sha256, path}`. The **sha256** is the point: it makes *"the
+right file"* checkable rather than just *"a file with the right name"* — pin it in
+a follow-up check once you know the expected digest.
+
+Two ways a download arrives, both supported:
+
+- **With `trigger_selector`** — the runner arms the download listener *before*
+  clicking it. (Clicking first and then waiting races the event: a fast download
+  fires before the listener attaches.)
+- **Without one** — a download triggered by an earlier `steps` entry counts.
+  Downloads are captured across the whole journey, exactly like `console_clean`'s
+  errors, because assertions run *after* every step: a bare wait at assert time
+  would sit there expecting a *second* download and report a false negative.
+
+No download inside `timeout_ms` (default: the predicate's timeout) is a real
+**fail**, never an error — the page ran, it just did not deliver the file.
 
 ### `console_clean` — the site-smoke check
 
