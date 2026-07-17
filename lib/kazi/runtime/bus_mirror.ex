@@ -2,7 +2,8 @@ defmodule Kazi.Runtime.BusMirror do
   @moduledoc """
   T51.5 (ADR-0067 point 1): mirrors an `apply` run's lifecycle onto the session
   bus as best-effort `fact`s -- a run START, each iteration's predicate PROGRESS,
-  and the TERMINAL verdict -- so a session supervising the bus sees a long run's
+  the TERMINAL verdict, and (T60.1, #1154) the abnormal TERMINATED transition --
+  so a session supervising the bus sees a long run's
   live state instead of only a growing JSONL sink it cannot watch. Field feedback
   (2026-07-16): a 9-hour single-invocation `apply` ran with no intermediate
   observable state at all; the bus is the channel a supervisor already reads.
@@ -85,6 +86,26 @@ defmodule Kazi.Runtime.BusMirror do
   end
 
   def terminal(_goal_ref, _run_id, _session_name, _other), do: :ok
+
+  @doc """
+  Post the `terminated` fact for an ABNORMAL external termination — a trapped OS
+  signal (SIGTERM/SIGINT) or a trapped linked-process crash reaped by
+  `Kazi.Runtime.Finalizer` (T60.1, #1154). Without it the fleet sees a run's
+  last mirrored line stop mid-flight with no final state; with it the run's
+  abnormal exit is its honest last word. Same best-effort `run:<short-run-id>`
+  contract as the other lifecycle posts — the reason is bounded so an unwieldy
+  exit term can never blow the fact size budget.
+  """
+  @spec terminated(String.t(), String.t(), String.t() | nil, term()) :: :ok
+  def terminated(goal_ref, run_id, session_name, reason) do
+    emit("terminated #{goal_ref} (#{reason_text(reason)})", run_id, session_name, :wait)
+  end
+
+  defp reason_text(reason) when is_binary(reason), do: bound(reason)
+  defp reason_text(reason) when is_atom(reason), do: bound(to_string(reason))
+  defp reason_text(reason), do: reason |> inspect() |> bound()
+
+  defp bound(text), do: String.slice(text, 0, 80)
 
   defp counts(%{results: results}) do
     total = map_size(results)

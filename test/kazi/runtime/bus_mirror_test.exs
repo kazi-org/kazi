@@ -103,6 +103,23 @@ defmodule Kazi.Runtime.BusMirrorTest do
       BusMirror.terminal("g", "run00000", "s", {:error, :await_timeout})
       assert_receive {:posted, "fact", "error g", _}
     end
+
+    test "terminated carries the goal ref and bounded reason on the per-run topic" do
+      BusMirror.terminated("my-goal", "abcdef1234567890", "sess-1", :killed)
+
+      assert_receive {:posted, "fact", "terminated my-goal (killed)", opts}
+      assert opts[:topic] == "run:abcdef12"
+      assert opts[:session_name] == "sess-1"
+    end
+
+    test "terminated bounds a large reason term so it can never blow the size budget" do
+      BusMirror.terminated("g", "run00000", "s", String.duplicate("x", 500))
+
+      assert_receive {:posted, "fact", text, _}
+      assert String.starts_with?(text, "terminated g (")
+      # 80-char reason bound + the "terminated g (" prefix + ")" suffix.
+      assert String.length(text) <= 100
+    end
   end
 
   describe "fire-and-forget contract" do
@@ -112,11 +129,12 @@ defmodule Kazi.Runtime.BusMirrorTest do
       refute_receive {:posted, _, _, _}
     end
 
-    test "started/terminal swallow a poster that raises and still return :ok" do
+    test "started/terminal/terminated swallow a poster that raises and still return :ok" do
       with_poster(fn _k, _t, _o -> raise "boom" end)
 
       assert BusMirror.started("g", "run00000", "s") == :ok
       assert BusMirror.terminal("g", "run00000", "s", {:ok, %{outcome: :converged}}) == :ok
+      assert BusMirror.terminated("g", "run00000", "s", :killed) == :ok
     end
 
     test "against the REAL Kazi.Bus.post with NO daemon, every post returns :ok and never raises" do
@@ -138,6 +156,8 @@ defmodule Kazi.Runtime.BusMirrorTest do
                "sess",
                {:ok, %{outcome: :converged, vector: vector(1, 0), iterations: 1}}
              ) == :ok
+
+      assert BusMirror.terminated("g", "run00000", "sess", :killed) == :ok
     end
   end
 end
