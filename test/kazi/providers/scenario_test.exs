@@ -99,6 +99,46 @@ defmodule Kazi.Providers.ScenarioTest do
     assert Kazi.PredicateProvider in behaviours
   end
 
+  # T49.12 (ADR-0064 d6): the standing capability-monitor path. A monitor declares
+  # `samples: N` in the PREDICATE's config — not in the pin's trace — because the
+  # pin records what the capability IS, while `samples` is how hard THIS monitor
+  # probes it. The existing test above covers samples-in-trace; this covers the
+  # config passthrough a monitor goal-file actually uses, which the task asked to
+  # verify rather than assume.
+  test "samples in the predicate CONFIG passes through to the delegate (monitor shape)", %{
+    workspace: ws,
+    spec_path: spec
+  } do
+    verdict =
+      Jason.encode!(%{
+        status: "pass",
+        url: @trace_url,
+        assertions: [%{type: "visible", selector: "#token-value", ok: true}],
+        screenshot: nil,
+        error: nil
+      })
+
+    seq = Path.join(ws, "seq.jsonl")
+    File.write!(seq, verdict <> "\n" <> verdict <> "\n")
+
+    # The trace carries NO samples — only the config does.
+    pin_path = write_pin!(ws, pin_json(%{"trace" => browser_trace(%{})}))
+
+    result =
+      evaluate(
+        spec,
+        pin_path,
+        %{samples: 2, cmd: @stub, args: [], env: [{"STUB_SEQ_FILE", seq}]},
+        %{workspace: ws}
+      )
+
+    assert %PredicateResult{status: :pass} = result
+    # score = the count of CONSECUTIVE passing runs: proof the delegate really
+    # sampled twice, so `samples` survived Map.drop(@scenario_keys).
+    assert result.score == 2.0
+    assert result.direction == :higher_better
+  end
+
   # --- Pinned: replay through the delegate --------------------------------------
 
   test "pinned + green stub -> :pass carrying the delegate's score", %{
