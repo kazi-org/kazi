@@ -332,20 +332,51 @@ defmodule Kazi.MCP.Server do
       %{
         "name" => "kazi_bus_tell",
         "description" =>
-          "Post a message directed at one named session (ADR-0067). Requires `session` and " <>
-            "`text` (capped at 64 KiB client-side). Returns {ok: true}, or a structured " <>
-            "error (no_daemon).",
+          "Post a message directed at one session (ADR-0067). Requires `session` and " <>
+            "`text` (capped at 64 KiB client-side). `session` resolves in order (T55.5): " <>
+            "an @-prefixed team name, an exact session id on the roster, then a nickname " <>
+            "assigned with kazi_bus_name -- an unknown recipient is a structured error " <>
+            "naming the live roster (reason unknown_recipient), never a silent send. " <>
+            "Returns {ok: true}, or a structured error (no_daemon).",
         "inputSchema" => %{
           "type" => "object",
           "required" => ["session", "text"],
           "properties" => %{
-            "session" => %{"type" => "string", "description" => "The target session id."},
+            "session" => %{
+              "type" => "string",
+              "description" => "The target: a session id, a nickname, or \"@<team>\"."
+            },
             "text" => %{"type" => "string", "description" => "The message body (max 64 KiB)."},
             "scope" => %{
               "type" => "string",
               "description" => "\"machine\" (default) or \"project\"."
             },
             "sev" => %{"type" => "string", "description" => "Severity, default \"info\"."}
+          }
+        }
+      },
+      %{
+        "name" => "kazi_bus_name",
+        "description" =>
+          "Assign a durable, addressable name to THIS session (T55.5, ADR-0073): carried " <>
+            "on presence across every later bus call, rendered by kazi_bus_who, and " <>
+            "accepted by kazi_bus_tell. Re-asserting a name re-binds it to the current " <>
+            "session. Returns {ok: true, name: <name>}, or a structured error (no_daemon; " <>
+            "invalid_nickname for an empty/whitespace/@-prefixed name or one equal to a " <>
+            "different live session's id).",
+        "inputSchema" => %{
+          "type" => "object",
+          "required" => ["name"],
+          "properties" => %{
+            "name" => %{
+              "type" => "string",
+              "description" =>
+                "The nickname: non-empty, no whitespace, no leading @ (reserved for teams)."
+            },
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            }
           }
         }
       }
@@ -591,6 +622,19 @@ defmodule Kazi.MCP.Server do
     end
   end
 
+  # T55.5 (ADR-0073 decision point 3): the `kazi bus name` twin.
+  defp call_tool("kazi_bus_name", args, opts) do
+    with {:ok, nickname} <- fetch_string_or(args, "name", "kazi_bus_name requires `name`") do
+      case Bus.name(nickname, bus_opts(args, opts)) do
+        :ok ->
+          {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true, "name" => nickname}}
+
+        {:error, reason} ->
+          {:tool_error, bus_error(reason)}
+      end
+    end
+  end
+
   defp call_tool(name, _args, _opts) do
     {:error, @method_not_found, "unknown tool: #{inspect(name)}"}
   end
@@ -621,6 +665,33 @@ defmodule Kazi.MCP.Server do
       "status" => "error",
       "error" => "message exceeds the #{cap}-byte bus cap",
       "reason" => "text_too_large"
+    }
+  end
+
+  # T55.5: an unaddressable recipient names the live roster in ONE line --
+  # never a silent queue-to-nowhere -- mirroring the CLI's error exactly.
+  defp bus_error({:unknown_recipient, recipient, roster}) do
+    live =
+      case roster do
+        [] -> "no live sessions on the bus"
+        labels -> "live sessions: #{Enum.join(labels, ", ")}"
+      end
+
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" => "unknown recipient #{inspect(recipient)} -- #{live}",
+      "reason" => "unknown_recipient",
+      "roster" => roster
+    }
+  end
+
+  defp bus_error({:invalid_nickname, nickname, why}) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" => "invalid nickname #{inspect(nickname)} -- #{why}",
+      "reason" => "invalid_nickname"
     }
   end
 

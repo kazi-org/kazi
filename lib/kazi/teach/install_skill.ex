@@ -649,6 +649,26 @@ defmodule Kazi.Teach.InstallSkill do
     Cadence: peek at turn boundaries; hold a bounded `watch` only when genuinely
     waiting on another session. Full taxonomy: `docs/session-bus.md`.
 
+    ### Being addressable: names, not UUIDs (T55.5)
+
+    Directed messages need a recipient the sender can actually know. Give every
+    session a role name -- preferably at LAUNCH, so nothing else is needed:
+
+    ```sh
+    KAZI_SESSION_NAME=<role> <harness>   # every kazi call inside identifies as <role>
+    ```
+
+    A session launched without one self-names at any time with `kazi bus name
+    <nickname>` (MCP: `kazi_bus_name`); the name is carried on presence, shown
+    by `kazi bus who`, and accepted by `kazi bus tell <nickname>`. Re-asserting
+    a name re-binds it, so a relaunched worker that runs `bus name <role>`
+    again is immediately addressable under the old role. `bus tell` resolves
+    `@<team>`, then an exact session id, then a nickname -- an unknown
+    recipient FAILS with a one-line error naming the live roster (never a
+    silent send to a session that isn't there), so trust the error and re-check
+    `bus who` instead of retrying blindly. Do NOT broadcast "I am <name>" as a
+    free-text fact -- assign the name properly and the roster carries it.
+
     ## Runtime introspection (no stale docs)
 
     kazi self-describes, so confirm the surface at runtime rather than trusting a

@@ -182,7 +182,7 @@ defmodule Kazi.CLI do
   # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
   # defined here (above `parse/1`) so both the `--help` interception below and
   # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who tell watch join leave)
+  @bus_verbs ~w(post read peek who tell watch join leave name)
   @bus_kinds ~w(fact announce note intent)
   @default_bus_kind "fact"
 
@@ -261,7 +261,7 @@ defmodule Kazi.CLI do
     context_budget:
       "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
     session_name:
-      "`apply`: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown on the mission control fleet dashboard so concurrent runs are tellable apart. `plan`: the same label, recorded on the proposal so a later `kazi approve`/`kazi apply` (possibly from a DIFFERENT session) can trace a run back to who planned it. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; all three absent leaves it unlabeled (unchanged behavior).",
+      "`apply`: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown on the mission control fleet dashboard so concurrent runs are tellable apart. `plan`: the same label, recorded on the proposal so a later `kazi approve`/`kazi apply` (possibly from a DIFFERENT session) can trace a run back to who planned it. `bus` (T55.5): the sender identity every bus verb carries on presence and message headers. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; for `bus`, all three absent falls back to a stable derived id (see docs/session-bus.md), elsewhere it leaves the run unlabeled (unchanged behavior).",
     allow_primary_workspace:
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
@@ -398,9 +398,21 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave|name` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json, :topic, :sev, :scope, :peek, :full, :team, :all, :timeout, :since]
+      flags: [
+        :json,
+        :topic,
+        :sev,
+        :scope,
+        :peek,
+        :full,
+        :team,
+        :all,
+        :timeout,
+        :since,
+        :session_name
+      ]
     },
     %{
       name: "economy",
@@ -539,10 +551,11 @@ defmodule Kazi.CLI do
       kazi daemon status [--json]                  # ping the running daemon
       kazi daemon stop                             # clean shutdown
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
-      kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
+      kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
       kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--json]  # block until a NEW message arrives (#1091/#1097)
       kazi bus join <team> [--json]                      # named-team membership (issue #1069)
       kazi bus leave [--json]
+      kazi bus name <nickname> [--json]                  # durable, addressable session name (T55.5)
       kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--all] [--json]   # list current presence (fresh only; --all includes stale)
@@ -1396,12 +1409,12 @@ defmodule Kazi.CLI do
   defp parse_bus([sub | _], _flags),
     do:
       {:error,
-       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`)"}
+       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`)"}
 
   defp parse_bus([], _flags),
     do:
       {:error,
-       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`)"}
+       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`)"}
 
   defp bus_flags(flags) do
     [
@@ -1414,7 +1427,10 @@ defmodule Kazi.CLI do
       team: flags[:team],
       all: flags[:all] || false,
       timeout: flags[:timeout],
-      since: flags[:since]
+      since: flags[:since],
+      # T55.5: an explicit --session-name heads the sender-identity resolution
+      # chain (ADR-0067 point 2) for every bus verb.
+      session_name: flags[:session_name]
     ]
   end
 
@@ -1444,12 +1460,16 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("tell") do
     """
-    kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
+    kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
 
-    Publish `text` directed at `session` -- only that session's `bus read`/`bus
-    peek`/`bus watch` sees it, regardless of either side's --scope (issue
-    #1065). With an @-prefixed team name, every member of that team receives
-    it (issue #1069). `text` over 64 KiB is rejected client-side.
+    Publish `text` directed at a recipient -- only that session's `bus read`/
+    `bus peek`/`bus watch` sees it, regardless of either side's --scope (issue
+    #1065). The recipient resolves in order (T55.5, ADR-0073): an @-prefixed
+    team name (every member receives it, issue #1069), an exact session id on
+    the roster, then a nickname assigned with `bus name`. A recipient matching
+    none of those is a one-line error naming the live roster -- a tell can
+    never silently queue to a session that isn't there. `text` over 64 KiB is
+    rejected client-side.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -1561,6 +1581,29 @@ defmodule Kazi.CLI do
 
     Clear this session's team membership (issue #1069). Presence itself
     remains until its TTL lapses.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("name") do
+    """
+    kazi bus name <nickname> [--json]
+
+    Assign a durable, addressable name to this session (T55.5, ADR-0073):
+    carried on presence across every later bus call, rendered by `bus who`,
+    and accepted by `bus tell <nickname>`. Re-asserting a name RE-BINDS it
+    to the current session, so a relaunched worker that runs `bus name
+    <role>` again becomes addressable under that role immediately.
+
+    A nickname cannot be empty, contain whitespace, start with `@` (reserved
+    for teams), or equal a different live session's id.
+
+    Prefer setting the name at launch when you can: the resolution chain is
+    `--session-name` > `KAZI_SESSION_NAME` > a harness-provided session env
+    var > a stable fallback id, so `KAZI_SESSION_NAME=<role> <harness>`
+    names every kazi invocation in the session with no per-session setup.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -4020,10 +4063,15 @@ defmodule Kazi.CLI do
       {:ok, sessions} ->
         emit(json?(opts), %{"ok" => true, "sessions" => sessions}, fn ->
           Enum.each(sessions, fn s ->
+            # T55.5: a named session renders name-first -- the addressable
+            # label a `bus tell` accepts -- with the raw id in parentheses.
+            label =
+              if s["name"], do: "#{s["name"]} (#{s["session"]})", else: s["session"]
+
             machine = if s["machine"], do: " machine=#{s["machine"]}", else: ""
             team = if s["team"], do: " team=#{s["team"]}", else: ""
             age = if s["age_s"], do: " seen=#{s["age_s"]}s ago", else: ""
-            IO.puts("#{s["session"]}#{machine} pid=#{s["pid"]}#{team}#{age} #{s["cwd"]}")
+            IO.puts("#{label}#{machine} pid=#{s["pid"]}#{team}#{age} #{s["cwd"]}")
           end)
         end)
 
@@ -4096,11 +4144,35 @@ defmodule Kazi.CLI do
   defp execute_bus("leave", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
+  # T55.5 (ADR-0073 decision point 3): assign a durable, addressable name.
+  defp execute_bus("name", [nickname], opts) do
+    case Kazi.Bus.name(nickname, bus_call_opts(opts)) do
+      :ok ->
+        emit(json?(opts), %{"ok" => true, "name" => nickname}, fn ->
+          IO.puts("named #{nickname}")
+        end)
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("name", _args, opts),
+    do: bus_error("`bus name` requires exactly one <nickname> argument", opts)
+
   defp execute_bus("who", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
   defp bus_call_opts(opts) do
-    [scope: opts[:scope], topic: opts[:topic], sev: opts[:sev], timeout: opts[:timeout]]
+    [
+      scope: opts[:scope],
+      topic: opts[:topic],
+      sev: opts[:sev],
+      timeout: opts[:timeout],
+      session_name: opts[:session_name]
+    ]
   end
 
   # T54.9/#1097: `bus watch --since <seq|now|all>` -> Kazi.Bus.watch/1's
@@ -4149,6 +4221,21 @@ defmodule Kazi.CLI do
 
   defp bus_error({:text_too_large, cap}, opts),
     do: daemon_error("message exceeds the #{cap}-byte bus cap", opts)
+
+  # T55.5: an unaddressable recipient is a ONE-LINE error naming the live
+  # roster -- never a silent queue-to-nowhere.
+  defp bus_error({:unknown_recipient, recipient, roster}, opts) do
+    live =
+      case roster do
+        [] -> "no live sessions on the bus"
+        labels -> "live sessions: #{Enum.join(labels, ", ")}"
+      end
+
+    daemon_error("unknown recipient #{inspect(recipient)} -- #{live}", opts)
+  end
+
+  defp bus_error({:invalid_nickname, nickname, why}, opts),
+    do: daemon_error("invalid nickname #{inspect(nickname)} -- #{why}", opts)
 
   defp bus_error(reason, opts), do: daemon_error("bus error: #{inspect(reason)}", opts)
 
