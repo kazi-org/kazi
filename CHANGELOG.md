@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.211.0](https://github.com/kazi-org/kazi/compare/v1.210.0...v1.211.0) (2026-07-17)
+
+
+### Features
+
+* **loader:** register spec_coverage — provider table, loader kind, schema ([259fbe2](https://github.com/kazi-org/kazi/commit/259fbe225d356125689a6dc5010bdc3c03c2bd34))
+* **providers:** spec_coverage — the manifest-coverage check as a runnable predicate ([dab3fef](https://github.com/kazi-org/kazi/commit/dab3feffe3dc841017e2045fa3719cafeb521524))
+
 ## [1.210.0](https://github.com/kazi-org/kazi/compare/v1.209.0...v1.210.0) (2026-07-17)
 
 
