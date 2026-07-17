@@ -2905,6 +2905,24 @@ defmodule Kazi.Loop do
       cause: cause_for(state, data)
     }
     |> maybe_attach_stuck_bundle(data)
+    |> maybe_attach_permission_denials(data)
+  end
+
+  # T54.6 (#1072, regression of #769): surface the denied tool calls on the TERMINAL
+  # result, beside `changed_files` in the bundle. `permission_denied_tool_calls` is
+  # the distilled count and `permission_denied_tools` the names — the operator's
+  # answer to "it spent money and changed nothing, why?".
+  #
+  # ABSENT when nothing was denied, so a normal dispatch's terminal result stays
+  # byte-identical to today (the task's acceptance criterion). Names only — never a
+  # denial's `tool_input`, which holds the whole file a denied Write meant to write.
+  @spec maybe_attach_permission_denials(map(), Data.t()) :: map()
+  defp maybe_attach_permission_denials(result, %Data{permission_denials: []}), do: result
+
+  defp maybe_attach_permission_denials(result, %Data{permission_denials: names}) do
+    result
+    |> Map.put(:permission_denied_tool_calls, length(names))
+    |> Map.put(:permission_denied_tools, names)
   end
 
   # T48.4 (ADR-0058 decision 4, UC-064): the single seam that feeds

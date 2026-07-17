@@ -145,6 +145,67 @@ defmodule Kazi.Loop.StuckBundleTest do
     assert rendered =~ "permission_mode"
   end
 
+  # T54.6 (#1072) fix (c): the TERMINAL result — not just the bundle — carries the
+  # distilled diagnosis, so an orchestrator branching on `--json` sees the cause
+  # without parsing the bundle.
+  test "a denied run's TERMINAL result exposes permission_denied_tool_calls" do
+    goal =
+      Goal.new("denied-result-test",
+        predicates: [Predicate.new(:code, :tests)],
+        metadata: %{evidence: "boom"}
+      )
+
+    {:ok, loop} =
+      Kazi.Loop.start_link(
+        goal: goal,
+        providers: %{tests: StuckProvider},
+        harness: DenyingHarness,
+        integrate: NoopAction,
+        deploy: NoopAction,
+        adapter_opts: [],
+        reobserve_interval_ms: 5,
+        flake_max_retries: 0,
+        stuck_iterations: 2
+      )
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+
+    # Distilled count + names, deduped (the harness denies Write twice).
+    assert result.permission_denied_tool_calls == 2
+    assert "Write" in result.permission_denied_tools
+    assert "Bash" in result.permission_denied_tools
+
+    # Never the payload.
+    refute inspect(result.permission_denied_tools) =~ "SECRET"
+  end
+
+  # The acceptance criterion: a normal dispatch's terminal result is byte-identical
+  # to today — the fields are ABSENT, not zero/empty, so nothing downstream shifts.
+  test "a normal run's terminal result is byte-identical (no denial fields)" do
+    goal =
+      Goal.new("normal-result-test",
+        predicates: [Predicate.new(:code, :tests)],
+        metadata: %{evidence: "boom"}
+      )
+
+    {:ok, loop} =
+      Kazi.Loop.start_link(
+        goal: goal,
+        providers: %{tests: StuckProvider},
+        harness: RecordingHarness,
+        integrate: NoopAction,
+        deploy: NoopAction,
+        adapter_opts: [],
+        reobserve_interval_ms: 5,
+        flake_max_retries: 0,
+        stuck_iterations: 2
+      )
+
+    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    refute Map.has_key?(result, :permission_denied_tool_calls)
+    refute Map.has_key?(result, :permission_denied_tools)
+  end
+
   # An unaffected bundle's shape must be byte-for-byte unchanged: the key is absent,
   # not an empty list, so existing consumers see nothing new.
   test "a stuck run with no denials OMITS the permission_denials key" do
