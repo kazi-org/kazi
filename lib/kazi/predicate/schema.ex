@@ -376,7 +376,15 @@ defmodule Kazi.Predicate.Schema do
             "\"console_clean\" (optional network = true) — the journey produced ZERO " <>
             "console.error, and with network = true no failed 4xx/5xx response either " <>
             "(T43.1, ADR-0053). Errors are captured across the WHOLE journey (initial load " <>
-            "+ every step), and `found` lists the offenders as evidence."
+            "+ every step), and `found` lists the offenders as evidence; " <>
+            "\"download\" (filename_pattern + optional trigger_selector, timeout_ms) — the " <>
+            "journey produced a download whose suggested filename matches the " <>
+            "filename_pattern regex. With trigger_selector the runner clicks it and waits; " <>
+            "without one, a download triggered by an earlier step counts (captured across " <>
+            "the whole journey, like console_clean). `found` is {filename, sha256, path} — " <>
+            "the sha256 makes \"the RIGHT file\" checkable, not just \"a file with the right " <>
+            "name\". No download within the timeout is a real fail, not an error (T49.10, " <>
+            "ADR-0064)."
       },
       %{
         name: "samples",
