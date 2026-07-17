@@ -1067,3 +1067,26 @@ the contract, add a coherence guard that fails on any `/<word>` that is not a
 kazi CLI verb, and retire the non-functional `Kazi.Retrieval.Graphify` (the
 pluggable `Kazi.Retrieval` seam + `NoOp` default stays; only the fake "real"
 backend goes). (T42.5, verifies UC-054.)
+
+### L-0044 #stuck-bundle #budget #escalation #landmine -- a size-budget trim pass silently BLANKED the most important field (the failing predicate's real error) to make room for expendable file paths
+`Kazi.Context.StuckBundle.fit_budget/2` shrinks a stuck bundle to its byte
+budget by dropping the most expendable content first (snippets, then extra
+failing predicates). Its last-resort branch -- ONE failing predicate still over
+budget -- computed the failure's room as `budget - overhead`, where `overhead`
+was the rendered bundle with the failure blanked to `""` but the FULL
+changed-files list still present. When that file list alone met/exceeded the
+budget, `room` collapsed to 0 and `cap(failure, 0)` erased the failure to `""` --
+so the escalation report surfaced `"failure": ""` (no cause) while faithfully
+listing 50 file paths the higher rung did not need. The irreducible signal (the
+actual error) was treated as MORE expendable than a file-path list, exactly
+inverting the module's own stated priority ("the failing evidence + changed
+files are the irreducible signal"). Symptom seen in the field: an unpushed-branch
+`landed` failure whose real git cause (`no upstream configured for branch ...`)
+was invisible in the stuck bundle.
+RULE: when a projection has a hard size budget AND a clearly-most-important
+field, shed the EXPENDABLE parts to protect that field's floor -- never let a
+budget pass zero out the payload it exists to carry. `fit_budget` now sheds
+changed-file paths until the failure has a usable floor (`@min_failure_room`),
+and caps the failure to `max(room, 1)` so it is shrunk, never blanked. Test the
+degenerate case (budget so small only the frame fits), not just the happy path.
+(T54.3, #1075, verifies UC-036.)
