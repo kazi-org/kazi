@@ -2029,7 +2029,38 @@ defmodule Kazi.Loop do
     # seeded it (data.iterations - 1, the last completed observation), so the
     # detector can attribute a later green→red edge to it.
     data = log_dispatch(data, action)
-    reobserve(data, data.reobserve_interval_ms)
+
+    # T54.6 (#1072) fix (b): the agent was REFUSED, not merely unsuccessful —
+    # stop now rather than buy the identical no-op N more times.
+    if permission_denial_wedged?(data) do
+      # `terminate_stuck/4` takes a StuckDetector.failing_set() — a MapSet, not the
+      # list `PredicateVector.failing/1` returns.
+      failing = MapSet.new(PredicateVector.failing(data.vector))
+      terminate_stuck(failing, data, nil, :permission_denied)
+    else
+      reobserve(data, data.reobserve_interval_ms)
+    end
+  end
+
+  # T54.6 (#1072) fix (b): the fingerprint of a dispatch that was never allowed to
+  # act — it changed NOTHING, it COST something, and its tool calls were DENIED.
+  # Mirrors the `:workspace_missing` fail-fast (T53.2): grinding further can never
+  # converge, because nothing about the next iteration makes the agent permitted.
+  # Waiting for the ordinary stuck window instead buys the identical no-op N times
+  # (the real run this is drawn from spent $1.09 over two invocations for zero
+  # changed files, lore L-0023).
+  #
+  # All three conjuncts matter:
+  #   * denials present — the authoritative signal (the profile parses them).
+  #   * no changed files — a dispatch that DID land edits despite some unrelated
+  #     denial is making progress; do not kill it.
+  #   * cost > 0 — proves the harness really ran, so this is a refusal rather than
+  #     a stubbed/no-op dispatch in a test.
+  @spec permission_denial_wedged?(Data.t()) :: boolean()
+  defp permission_denial_wedged?(%Data{permission_denials: []}), do: false
+
+  defp permission_denial_wedged?(%Data{} = data) do
+    data.working_set_digest.files == [] and run_cost(data) > 0
   end
 
   # T36.2 (ADR-0047 §1): the adapter opts for THIS dispatch — the loop's standing

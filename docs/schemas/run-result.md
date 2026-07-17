@@ -69,10 +69,19 @@ ADR-0058 (T48.4) adds the OPTIONAL `cause` object naming the honest terminal
 cause alongside `status`/`reason` — `over_budget` is not always genuine budget
 exhaustion, and `stuck` is not always an ordinary failing-set stall. **Additive**
 — present only when the loop classified one (`budget_exhausted` / `error_wedged`
-/ `quarantine_blocked`), absent on a clean converge or a stop that is exactly
-what it says it is — so `schema_version` stays **2**. See
+/ `quarantine_blocked` / `workspace_missing` / `permission_denied`), absent on a
+clean converge or a stop that is exactly what it says it is — so
+`schema_version` stays **2**. See
 [`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058)
 below.
+
+T54.6 (#1072) adds the OPTIONAL, top-level `permission_denied_tool_calls` (count)
+and `permission_denied_tools` (the tool names) — the diagnosis for a run whose
+harness had its tool calls refused and so changed nothing while still exiting 0.
+**Additive** — both are ABSENT unless something was actually denied, so a normal
+run's result is byte-identical and `schema_version` stays **2**. Names only: a
+denial's `tool_input` (which holds the entire file a refused `Write` meant to
+write) is never surfaced. Pairs with `cause.class = "permission_denied"`.
 
 ADR-0065 (T50.2) adds the OPTIONAL `integration` object reporting how a
 worktree-isolated serial run's converged commits landed on the base.
@@ -403,12 +412,12 @@ RIGHT next move instead of leaving `status`/`reason` as the only signal.
 
 | Field       | Type                | Meaning |
 |-------------|---------------------|---------|
-| `class`     | string (enum)       | One of `budget_exhausted`, `error_wedged`, `quarantine_blocked` (see below). |
+| `class`     | string (enum)       | One of `budget_exhausted`, `error_wedged`, `quarantine_blocked`, `workspace_missing`, `permission_denied` (see below). |
 | `ids`       | array of strings (optional) | The implicated predicate ids, sorted. Present only when non-empty. |
 | `reasons`   | object (optional)   | `{ id: reason }` — the implicated ids' last-observed error reasons, as strings. Present only for `error_wedged`. |
 | `exhausted` | string (optional)   | The exceeded budget dimension (`max_iterations` / `wall_clock` / `token_budget` / `max_dispatches`, T48.6). Present only for `budget_exhausted`. |
 
-The three classes:
+The classes:
 
 - **`budget_exhausted`** — a genuine `over_budget` stop: the terminal
   re-observation still shows real work `fail`ing (or nothing at all
@@ -422,6 +431,22 @@ The three classes:
 - **`quarantine_blocked`** — the #820 quarantine-only stuck stop: the vector
   is unsatisfied solely because every non-passing id is quarantined as
   flaky (T1.3). The fix is rehabilitation or a human, not budget.
+- **`workspace_missing`** — T53.2 (#1022): the loop's target workspace
+  vanished between iterations (the directory is gone, or git reports the
+  not-a-repository / deleted-cwd exit-128 signature). The loop stops
+  immediately rather than grind against a dead path. The fix is restoring or
+  re-creating the workspace.
+- **`permission_denied`** — T54.6 (#1072, regression of #769): the harness had
+  its tool calls REFUSED, so the agent never acted. A headless `claude -p`
+  against a workspace that has not been through Claude Code's interactive
+  trust dialog has every Write/Bash denied and **still exits 0** with
+  `is_error: false` — so the run looks like an ordinary `stuck` ("genuine
+  difficulty") when really nobody let the agent type. The loop now stops after
+  the FIRST such dispatch instead of buying the identical no-op again. The
+  fix is a flag — `--permission-mode` (or `[harness] permission_mode`) — never
+  a human and never a bigger budget. The companion top-level fields
+  `permission_denied_tool_calls` / `permission_denied_tools` name what was
+  refused. See `docs/lore.md` L-0023.
 
 Every other stop — a clean `converged`, an ordinary failing-set `stuck`, or
 the pre-existing code `error_stuck?` (M5) `stuck` — carries **no** `cause`

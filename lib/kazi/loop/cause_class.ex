@@ -27,6 +27,18 @@ defmodule Kazi.Loop.CauseClass do
       `Kazi.Loop.handle_no_work/2`): the vector is unsatisfied SOLELY because
       every non-passing id is quarantined as flaky. The fix is rehabilitation
       or a human, not budget.
+    * `:permission_denied` — T54.6 (#1072, regression of #769): the harness had
+      its tool calls REFUSED, so the agent never acted at all. The production
+      mislabel this class exists for: a headless `claude -p` against a workspace
+      that has not been through Claude Code's interactive trust dialog has every
+      Write/Bash denied and STILL exits 0 with `is_error: false`, so the loop saw
+      clean dispatches, observed no file change, and reported an ordinary
+      `:stuck` — "genuine difficulty, escalate to a human" — for what was really
+      "nobody let the agent type" (docs/lore.md L-0023; a real run burned $1.09
+      across two invocations for zero changed files). The fix is a flag
+      (`--permission-mode` / `[harness] permission_mode`), never a human and never
+      a bigger budget. `Kazi.Loop.ErrorPermanence` terms: permanent — it will not
+      clear on retry, only on the mode changing.
     * `:workspace_missing` — T53.2 (#1022): the loop's target workspace
       vanished between iterations (the dir is gone, or git reports the
       not-a-repository/deleted-cwd exit-128 signature). This is a distinct
@@ -52,7 +64,12 @@ defmodule Kazi.Loop.CauseClass do
   alias Kazi.Loop.Budget
 
   @typedoc "The honest terminal cause — the RIGHT next move, not just the outcome."
-  @type class :: :budget_exhausted | :error_wedged | :quarantine_blocked | :workspace_missing
+  @type class ::
+          :budget_exhausted
+          | :error_wedged
+          | :quarantine_blocked
+          | :workspace_missing
+          | :permission_denied
 
   @typedoc """
   The cause detail: `ids` are the predicate ids implicated (sorted, `[]` when
@@ -159,6 +176,18 @@ defmodule Kazi.Loop.CauseClass do
       class: :error_wedged,
       ids: sorted_ids(inputs.stuck_failing),
       reasons: inputs.stuck_reasons,
+      exhausted: nil
+    }
+  end
+
+  # T54.6 (#1072): the harness never acted — its tool calls were refused. Named
+  # apart from an ordinary failing-set `:stuck` because the right move is a flag,
+  # not a human and not a bigger budget.
+  def classify(%{outcome: :stopped, reason: :stuck, stuck_cause: :permission_denied} = inputs) do
+    %{
+      class: :permission_denied,
+      ids: sorted_ids(inputs.stuck_failing),
+      reasons: nil,
       exhausted: nil
     }
   end
