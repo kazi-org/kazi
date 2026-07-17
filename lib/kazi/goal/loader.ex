@@ -1795,8 +1795,9 @@ defmodule Kazi.Goal.Loader do
   # uncompilable regex) is a load error naming the bad key, not a dispatch-time
   # surprise. Kept in lockstep with Kazi.Providers.Cli.
   defp validate_provider_config(:cli, config, id) do
-    with :ok <- validate_cli_cmd(config, id) do
-      validate_cli_assertions(config, id)
+    with :ok <- validate_cli_cmd(config, id),
+         :ok <- validate_cli_samples(config, id) do
+      validate_cli_script_or_assertions(config, id)
     end
   end
 
@@ -1907,12 +1908,79 @@ defmodule Kazi.Goal.Loader do
 
   # Kept in lockstep with Kazi.Providers.Cli.targets/0 and matchers/0.
   @cli_targets ~w(exit_code stdout stderr)
-  @cli_matchers ~w(equals contains regex json_path)
+  @cli_matchers ~w(equals contains regex json_path golden)
 
   defp validate_cli_cmd(config, id) do
     case Map.get(config, :cmd) do
       cmd when is_binary(cmd) and cmd != "" -> :ok
       _ -> {:error, "cli predicate #{inspect(id)} requires a non-empty string \"cmd\""}
+    end
+  end
+
+  # T43.8: a cli predicate is gated EITHER by a top-level `assertions` list (one
+  # invocation) OR by a `script` of ordered sub-invocations — never neither (the
+  # empty-gate class ADR-0058 fixed: a predicate with neither can never pass or fail
+  # meaningfully).
+  defp validate_cli_script_or_assertions(config, id) do
+    case Map.get(config, :script) do
+      nil -> validate_cli_assertions(config, id)
+      _ -> validate_cli_script(config, id)
+    end
+  end
+
+  defp validate_cli_script(config, id) do
+    case Map.get(config, :script) do
+      [_ | _] = steps ->
+        steps
+        |> Enum.with_index(1)
+        |> Enum.reduce_while(:ok, fn {step, index}, :ok ->
+          case validate_cli_step(step, index, id) do
+            :ok -> {:cont, :ok}
+            {:error, _} = error -> {:halt, error}
+          end
+        end)
+
+      _ ->
+        {:error,
+         "cli predicate #{inspect(id)} \"script\" must be a NON-EMPTY list of step tables"}
+    end
+  end
+
+  # A script step supplies its OWN non-empty assertions (validated with the same
+  # per-assertion vocabulary); its optional `args` inherit the same list-of-strings
+  # shape the predicate's top-level args use.
+  defp validate_cli_step(step, index, id) when is_map(step) do
+    case assertion_key(step, "assertions") do
+      [_ | _] = assertions ->
+        Enum.reduce_while(assertions, :ok, fn assertion, :ok ->
+          case validate_cli_assertion(assertion, id) do
+            :ok -> {:cont, :ok}
+            {:error, _} = error -> {:halt, error}
+          end
+        end)
+
+      _ ->
+        {:error,
+         "cli predicate #{inspect(id)} script step #{index} needs a NON-EMPTY \"assertions\" list"}
+    end
+  end
+
+  defp validate_cli_step(other, index, id) do
+    {:error,
+     "cli predicate #{inspect(id)} script step #{index} must be a table (got #{inspect(other)})"}
+  end
+
+  defp validate_cli_samples(config, id) do
+    case Map.get(config, :samples) do
+      nil ->
+        :ok
+
+      n when is_integer(n) and n >= 1 ->
+        :ok
+
+      other ->
+        {:error,
+         "cli predicate #{inspect(id)} \"samples\" must be a positive integer (got #{inspect(other)})"}
     end
   end
 
@@ -1981,6 +2049,9 @@ defmodule Kazi.Goal.Loader do
       "regex" ->
         validate_cli_regex(target, assertion, id)
 
+      "golden" ->
+        validate_cli_golden(target, assertion, id)
+
       match when match in @cli_matchers ->
         :ok
 
@@ -2000,6 +2071,18 @@ defmodule Kazi.Goal.Loader do
         {:error,
          "cli predicate #{inspect(id)} #{target} json_path assertion requires a non-empty " <>
            "string \"path\""}
+    end
+  end
+
+  defp validate_cli_golden(target, assertion, id) do
+    case assertion_key(assertion, "golden") do
+      path when is_binary(path) and path != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "cli predicate #{inspect(id)} #{target} golden assertion requires a non-empty " <>
+           "string \"golden\" (the committed golden-file path)"}
     end
   end
 
