@@ -16,6 +16,19 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.213.0](https://github.com/kazi-org/kazi/compare/v1.212.2...v1.213.0) (2026-07-17)
+
+
+### Features
+
+* **runtime:** BusMirror.terminated for abnormal-exit fleet visibility (T60.1, [#1154](https://github.com/kazi-org/kazi/issues/1154)) ([988def2](https://github.com/kazi-org/kazi/commit/988def2415697060b626f5713a93b665131cfd04))
+* **runtime:** mirror the terminated transition from Finalizer (T60.1) ([6cb30bb](https://github.com/kazi-org/kazi/commit/6cb30bb2791916ffcf3246956d0d0369ffeb493c))
+
+
+### Bug Fixes
+
+* **loop:** route a failing landed predicate to Integrate, not agent dispatch ([#1290](https://github.com/kazi-org/kazi/issues/1290)) ([764fcd1](https://github.com/kazi-org/kazi/commit/764fcd1ef3982ac42efacd41e72e83d1fbb35140))
+
 ## [1.212.2](https://github.com/kazi-org/kazi/compare/v1.212.1...v1.212.2) (2026-07-17)
 
 
