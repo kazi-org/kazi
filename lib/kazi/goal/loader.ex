@@ -424,7 +424,10 @@ defmodule Kazi.Goal.Loader do
     # T44.7 (E29/ADR-0034): the internal-leak guard as a predicate. Its
     # codenames/base_ref keys are validated below so a mis-typed config fails at
     # load, not at dispatch.
-    "oss_hygiene" => :oss_hygiene
+    "oss_hygiene" => :oss_hygiene,
+    # T45.3 (UC-059): the read-model-only "phase has been planned" gate. Its
+    # `phase` ref is validated below so a mis-declared gate fails at load.
+    "plan_expanded" => :plan_expanded
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -1777,6 +1780,13 @@ defmodule Kazi.Goal.Loader do
     with :ok <- validate_string_list(config, :codenames, id, "oss_hygiene") do
       validate_optional_string(config, :base_ref, id, "oss_hygiene")
     end
+  end
+
+  # T45.3 (UC-059): a plan_expanded predicate REQUIRES a `phase` ref (the goal-set
+  # it gates) — a non-empty string, checked here so a mis-declared outline goal
+  # fails at load, not at dispatch.
+  defp validate_provider_config(:plan_expanded, config, id) do
+    require_string(config, :phase, id, "plan_expanded")
   end
 
   defp validate_provider_config(_kind, _config, _id), do: :ok
