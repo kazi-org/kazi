@@ -16,6 +16,32 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.152.0](https://github.com/kazi-org/kazi/compare/v1.151.0...v1.152.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (docs) ([5599e08](https://github.com/kazi-org/kazi/commit/5599e08287a37611be937ece27ebbcf346b97e85))
+* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (lib) ([b29561c](https://github.com/kazi-org/kazi/commit/b29561c4bcaa2d654df45cda7ed5061a3cf2363c))
+* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (test) ([80e6eb9](https://github.com/kazi-org/kazi/commit/80e6eb9e64ca5bf0724a8ee81e7656391071d80f))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (aux) ([0e91e03](https://github.com/kazi-org/kazi/commit/0e91e03df2601df4cb66f30f64b5b63fad80309c))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (docs) ([ede3758](https://github.com/kazi-org/kazi/commit/ede3758575517e8b9f480f70a83842f05661b745))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (lib) ([7b62d8e](https://github.com/kazi-org/kazi/commit/7b62d8e2e32e2fb16e56b7d82e12578b0a759a04))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (test) ([974cfe4](https://github.com/kazi-org/kazi/commit/974cfe4856efb665b6c740c0bd7ef97e725561a2))
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (aux) ([bf30130](https://github.com/kazi-org/kazi/commit/bf30130b782ef175ba834d9c95fa0242cd69d145))
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (docs) ([f610108](https://github.com/kazi-org/kazi/commit/f6101082be36cba25ca4a7c5e9c4c314d6999e1f))
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (lib) ([b05c531](https://github.com/kazi-org/kazi/commit/b05c53145bbaab56b6b83aefddce495426dbf296))
+* **dashboard:** T55.3 live roster via transport source when a daemon is up (ADR-0073 d4) (test) ([06707e1](https://github.com/kazi-org/kazi/commit/06707e1a74cc990d5edcdc23185894dc4046207d))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (aux) ([b3369b1](https://github.com/kazi-org/kazi/commit/b3369b1e2d2021e787ebdf2e13ded3bc0c42ef50))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (docs) ([b0586ce](https://github.com/kazi-org/kazi/commit/b0586cef75fd83e9ff3f221d33b052382cc83a4a))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (lib) ([6e31dba](https://github.com/kazi-org/kazi/commit/6e31dba867f40dee10ece332d6b9aa3f518e99f6))
+* **teach:** T55.2 kazi install-hooks + bus hook skeleton, with wave-gate fixes (ADR-0071) (test) ([cbde3a5](https://github.com/kazi-org/kazi/commit/cbde3a52694f1064ab925412e91cd92b547dacb6))
+
+
+### Bug Fixes
+
+* **bus:** T54.9 watch anchors to now -- strictly-new messages, --since escape ([#1097](https://github.com/kazi-org/kazi/issues/1097)) ([2362815](https://github.com/kazi-org/kazi/commit/2362815b0698340bbd60492a8a58c4bae2751e74))
+
 ## [1.151.0](https://github.com/kazi-org/kazi/compare/v1.150.0...v1.151.0) (2026-07-17)
 
 
