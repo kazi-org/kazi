@@ -36,12 +36,56 @@ defmodule KaziWeb.CoordinationSource do
   @doc "The `Kazi.PubSub` topic this source broadcasts `{:coordination_updated, snapshot}` on."
   @callback topic() :: String.t()
 
+  @doc """
+  The source the dashboard renders from (T55.3, ADR-0073 §4).
+
+  An explicit `:lease_map_source` application-env override always wins — the
+  existing ADR-0011 §3 injection seam, unchanged. Absent an override the choice
+  follows the daemon: when a kazi daemon's control socket probes `:alive` (the
+  same `Kazi.Daemon.Probe` detection `kazi daemon status` uses), the default is
+  the transport-backed source, so bus presence — which lives in the daemon's KV
+  and is structurally invisible to the native source — renders live. When no
+  daemon is reachable the default falls back to `Native` and a native run
+  renders exactly as before.
+  """
+  @spec select() :: module()
+  def select do
+    case Application.get_env(:kazi, :lease_map_source) do
+      nil -> default_source()
+      source -> source
+    end
+  end
+
+  @doc """
+  The daemon control socket the dashboard probes to pick its default source.
+
+  Defaults to `Kazi.Daemon.Supervisor.default_sock_path/0` (the exact path the
+  CLI's daemon verbs probe); overridable via the `:lease_map_daemon_sock`
+  application env so tests choose the daemon-present/absent branch
+  deterministically (`config/test.exs` points it at a never-existing path).
+  """
+  @spec daemon_sock_path() :: Path.t()
+  def daemon_sock_path do
+    Application.get_env(:kazi, :lease_map_daemon_sock) ||
+      Kazi.Daemon.Supervisor.default_sock_path()
+  end
+
+  # Probe-driven default: Transport when a daemon listens, Native otherwise.
+  # `:dead` (stale socket file) and `:missing` both mean no daemon.
+  defp default_source do
+    case Kazi.Daemon.Probe.probe(daemon_sock_path()) do
+      :alive -> KaziWeb.CoordinationSource.Transport
+      _down -> KaziWeb.CoordinationSource.Native
+    end
+  end
+
   defmodule Snapshot do
     @moduledoc """
     The render-ready presence/lease projection at a moment.
 
-      * `:present` — live instances, each `%{instance, announced_at_ms}`, sorted by
-        instance id;
+      * `:present` — live instances, each `%{instance, announced_at_ms}` plus the
+        optional roster detail (`machine`, `last_seen`) a bus-backed source adds,
+        sorted by instance id;
       * `:intents` — live work-intents, each `%{instance, resource, announced_at_ms}`,
         sorted by `{instance, resource}`;
       * `:leases` — active leases, each `%{key, holder, expires_at_ms}`, sorted by
@@ -51,8 +95,19 @@ defmodule KaziWeb.CoordinationSource do
     `Kazi.Coordination.Lease` structs down to the fields the view shows.
     """
 
-    @typedoc "A live presence entry: an instance and when it last beat."
-    @type presence_entry :: %{instance: String.t(), announced_at_ms: non_neg_integer()}
+    @typedoc """
+    A live presence entry: an instance and when it last beat. Roster-bearing
+    sources (the bus roster behind the transport source, ADR-0073 §4) also carry
+    `:machine` (the host the session runs on) and `:last_seen` (a render-ready
+    freshness label, e.g. `"12s ago"`); sources without roster detail omit both
+    and the view renders the bare instance row as before.
+    """
+    @type presence_entry :: %{
+            required(:instance) => String.t(),
+            required(:announced_at_ms) => non_neg_integer(),
+            optional(:machine) => String.t(),
+            optional(:last_seen) => String.t()
+          }
 
     @typedoc "A live work-intent: an instance, the resource it intends, and when it announced."
     @type intent_entry :: %{

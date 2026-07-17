@@ -10,30 +10,41 @@ defmodule KaziWeb.LeaseMapLive do
   source's topic for live pushes — it NEVER calls into `Kazi.Loop` or
   `Kazi.Harness.*`, and it never touches NATS directly (ADR-0011 §2).
 
-  The source is injectable (ADR-0011 §3): it defaults to
-  `KaziWeb.CoordinationSource.Native` (the NATS-free source that reads the live
-  per-run leases from `Kazi.Coordination.LeaseTable`), so `/leases` renders out of
-  the box on a single-node native run. When NATS is wired (multi-node, Slice 3+),
-  set `:lease_map_source` to `KaziWeb.CoordinationSource.Transport` to aggregate
-  over the transport; a LiveView/Playwright test points it at a fixture source with
-  no NATS. A fresh snapshot pushed on the source topic — e.g. one with a released
-  lease dropped — re-renders the map live.
+  The source is injectable (ADR-0011 §3) and chosen by
+  `KaziWeb.CoordinationSource.select/0` (T55.3, ADR-0073 §4): an explicit
+  `:lease_map_source` config override always wins (a LiveView/Playwright test
+  points it at a fixture source with no NATS); otherwise the view defaults to
+  `KaziWeb.CoordinationSource.Transport` when a kazi daemon is reachable — so
+  the presence rail renders the LIVE bus roster (session, machine, last-seen) —
+  and falls back to `KaziWeb.CoordinationSource.Native` (the NATS-free source
+  that reads the live per-run leases from `Kazi.Coordination.LeaseTable`) when
+  no daemon runs, rendering exactly as a single-node native run always has.
+  The selected source is observable in the markup (`data-source` on the main
+  element). A fresh snapshot pushed on the source topic — e.g. one with a
+  released lease dropped — re-renders the map live, and a connected view also
+  re-reads its source on a slow poll so roster churn (a session appearing on or
+  aging off the bus) shows up without a manual reload.
 
   When nothing is present and no leases are held the view renders a clear empty
   state.
   """
   use KaziWeb, :live_view
 
+  alias KaziWeb.CoordinationSource
   alias KaziWeb.CoordinationSource.Snapshot
 
   @impl true
   def mount(_params, _session, socket) do
-    source = source()
+    source = CoordinationSource.select()
 
     # Live updates: subscribe to the source's topic on the connected mount only
     # (the static render has no socket to push to). A broadcast carries the fresh
-    # snapshot, which we render directly.
-    if connected?(socket), do: Phoenix.PubSub.subscribe(Kazi.PubSub, source.topic())
+    # snapshot, which we render directly. The refresh tick re-reads the source on
+    # a slow poll — the bus roster has no push channel into this node.
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(Kazi.PubSub, source.topic())
+      Process.send_after(self(), :refresh, refresh_ms())
+    end
 
     {:ok,
      socket
@@ -49,18 +60,29 @@ defmodule KaziWeb.LeaseMapLive do
     {:noreply, assign(socket, :snapshot, snapshot)}
   end
 
-  # The injectable coordination seam (ADR-0011 §3): override in test config to feed
-  # the map a fixture source; defaults to the NATS-free native source so the
-  # dashboard renders on a single-node run (set :lease_map_source to the Transport
-  # source when NATS is wired).
-  defp source do
-    Application.get_env(:kazi, :lease_map_source, KaziWeb.CoordinationSource.Native)
+  @impl true
+  def handle_info(:refresh, socket) do
+    # Re-SELECT the source each tick so a daemon that starts (or stops) after
+    # mount flips the default live. Both selectable production sources share one
+    # topic string, and an explicit :lease_map_source override never changes, so
+    # the mount-time subscription stays valid across a flip.
+    source = CoordinationSource.select()
+    Process.send_after(self(), :refresh, refresh_ms())
+
+    {:noreply,
+     socket
+     |> assign(:source, source)
+     |> assign(:snapshot, source.snapshot())}
   end
+
+  # The roster poll interval. Overridable via :lease_map_refresh_ms so a test can
+  # observe a refresh without waiting out the production cadence.
+  defp refresh_ms, do: Application.get_env(:kazi, :lease_map_refresh_ms, 15_000)
 
   @impl true
   def render(assigns) do
     ~H"""
-    <main id="lease-map">
+    <main id="lease-map" data-source={inspect(@source)}>
       <h1>kazi lease map</h1>
       <p>Read-only projection of coordination presence + leases (ADR-0011). Live-updating.</p>
 
@@ -74,6 +96,12 @@ defmodule KaziWeb.LeaseMapLive do
             class="presence-entry"
           >
             <span class="instance">{entry.instance}</span>
+            <span :if={entry[:machine]} class="machine" data-machine={entry[:machine]}>
+              {entry[:machine]}
+            </span>
+            <span :if={entry[:last_seen]} class="last-seen" data-last-seen={entry[:last_seen]}>
+              {entry[:last_seen]}
+            </span>
             <span
               :if={intent_for(@snapshot, entry.instance)}
               class="intent"
