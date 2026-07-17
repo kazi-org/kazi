@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.178.0](https://github.com/kazi-org/kazi/compare/v1.177.0...v1.178.0) (2026-07-17)
+
+
+### Features
+
+* **cli:** surface per-group landed refs in the collective result ([be4647e](https://github.com/kazi-org/kazi/commit/be4647e4846c5603340a95aac50fe45570c00407))
+* **scheduler:** land each converged partition on its own group-derived branch ([96dca3c](https://github.com/kazi-org/kazi/commit/96dca3c7367a4e20c38abc7a0d1208bfd71685dc))
+
 ## [1.177.0](https://github.com/kazi-org/kazi/compare/v1.176.0...v1.177.0) (2026-07-17)
 
 
