@@ -73,6 +73,12 @@ defmodule Kazi.Enforcement do
       predicates (guarantee 4). Each is a map with `:id`, `:metric`, `:direction`,
       and optional `:baseline` (default `"stored"`) / `:allowed_regression`
       (default `0`).
+    * `roles` — per-role path policy (ADR-0064 d3/d7): `%{fixer: %{read_only_paths:
+      [...]}, demonstrator: %{allowed_write_paths: [...]}}`. The one mechanism
+      extension ADR-0064 grants — the write-disjoint fixer/demonstrator surfaces.
+      Empty (`%{}`) means "no role scoping" (byte-identical to a goal with no
+      scenario predicate). See `for_role/2`, `detect_role_writes/5`, and
+      `with_role_defaults/2`.
   """
   @type guard_config :: %{
           required(:id) => Predicate.id(),
@@ -82,13 +88,21 @@ defmodule Kazi.Enforcement do
           optional(:allowed_regression) => number()
         }
 
+  @type role :: :fixer | :demonstrator
+
+  @type role_policy :: %{
+          optional(:read_only_paths) => [String.t()],
+          optional(:allowed_write_paths) => [String.t()]
+        }
+
   @type t :: %__MODULE__{
           enabled: boolean(),
           clean_tree: boolean(),
           clean_ref: String.t(),
           read_only_paths: [String.t()],
           fail_on_skip: boolean(),
-          guards: [guard_config()]
+          guards: [guard_config()],
+          roles: %{optional(role()) => role_policy()}
         }
 
   defstruct enabled: false,
@@ -96,7 +110,8 @@ defmodule Kazi.Enforcement do
             clean_ref: "HEAD",
             read_only_paths: [],
             fail_on_skip: true,
-            guards: []
+            guards: [],
+            roles: %{}
 
   @doc """
   Builds an enforcement profile from a keyword/map config. Every field is optional
@@ -302,6 +317,115 @@ defmodule Kazi.Enforcement do
   end
 
   def detect_writes(_workspace, _paths, _before), do: []
+
+  # ===========================================================================
+  # Role-scoped enforcement (ADR-0064 d3/d7) — the write-disjoint fixer /
+  # demonstrator surfaces. This is the ONE mechanism extension ADR-0064 grants:
+  # `read_only_paths` made role-scoped, plus its inversion for the demonstrator.
+  # ===========================================================================
+
+  @doc """
+  Resolves the path policy for `role` from the profile's `roles` map.
+
+  Returns the role's policy map (`%{read_only_paths: [...]}` for `:fixer`,
+  `%{allowed_write_paths: [...]}` for `:demonstrator`), or `%{}` when the role has
+  no policy. The resolver for the role-scoped write detection.
+
+  ## Examples
+
+      iex> p = Kazi.Enforcement.new(roles: %{fixer: %{read_only_paths: ["a"]}})
+      iex> Kazi.Enforcement.for_role(p, :fixer)
+      %{read_only_paths: ["a"]}
+      iex> Kazi.Enforcement.for_role(p, :demonstrator)
+      %{}
+  """
+  @spec for_role(t(), role()) :: role_policy()
+  def for_role(%__MODULE__{roles: roles}, role) when is_map(roles), do: Map.get(roles, role, %{})
+
+  @doc """
+  Detects role-scoped write violations over the SAME digest diff as
+  `detect_writes/3`.
+
+    * `:fixer` — writes to the role's `read_only_paths` are `:read_only_write`
+      violations. Unchanged ADR-0042 §2 lease semantics, now nameable; `before` is
+      the `digest_paths/2` snapshot of those paths and `changed_paths` is ignored.
+    * `:demonstrator` — INVERTED: a write to any `changed_paths` entry that is NOT
+      under the role's `allowed_write_paths` is a `:disallowed_write` violation
+      (everything is read-only EXCEPT the pin the demonstrator mints). `before` is
+      the snapshot of `changed_paths`; the same diff mechanism, the opposite
+      direction.
+
+  Falls back to the profile's top-level `read_only_paths` for a `:fixer` with no
+  role policy, and to no allowed paths for a `:demonstrator` with none (so every
+  write is disallowed).
+  """
+  @spec detect_role_writes(t(), role(), String.t() | nil, %{optional(String.t()) => term()}, [
+          String.t()
+        ]) :: [map()]
+  def detect_role_writes(profile, role, workspace, before, changed_paths \\ [])
+
+  def detect_role_writes(%__MODULE__{} = profile, :fixer, workspace, before, _changed_paths) do
+    detect_writes(workspace, fixer_read_only_paths(profile), before)
+  end
+
+  def detect_role_writes(%__MODULE__{} = profile, :demonstrator, workspace, before, changed_paths)
+      when is_list(changed_paths) do
+    allowed = demonstrator_allowed_write_paths(profile)
+
+    workspace
+    |> detect_writes(changed_paths, before)
+    |> Enum.reject(fn %{path: path} -> under_any?(path, allowed) end)
+    |> Enum.map(fn violation -> %{violation | type: :disallowed_write} end)
+  end
+
+  @doc """
+  Derives the per-role path policy from a goal's scenario predicates (ADR-0064
+  d3/d7) when no `roles` were authored.
+
+  `scenario_paths` is `%{specs: [...], pins: [...]}`. An explicit non-empty `roles`
+  wins untouched (the author owns it). With no scenario paths the profile is
+  returned unchanged, so a goal with no scenario predicate is byte-identical.
+  Otherwise the fixer's `read_only_paths` gains every spec + pin (the pin is a
+  grader artifact) and the demonstrator may write ONLY the pins.
+  """
+  @spec with_role_defaults(t(), %{specs: [String.t()], pins: [String.t()]}) :: t()
+  def with_role_defaults(%__MODULE__{roles: roles} = profile, _paths) when roles != %{},
+    do: profile
+
+  def with_role_defaults(%__MODULE__{} = profile, %{specs: specs, pins: pins})
+      when is_list(specs) and is_list(pins) do
+    if specs == [] and pins == [] do
+      profile
+    else
+      %{
+        profile
+        | roles: %{
+            fixer: %{read_only_paths: Enum.uniq(profile.read_only_paths ++ specs ++ pins)},
+            demonstrator: %{allowed_write_paths: Enum.uniq(pins)}
+          }
+      }
+    end
+  end
+
+  defp fixer_read_only_paths(%__MODULE__{} = profile) do
+    case for_role(profile, :fixer) do
+      %{read_only_paths: paths} when is_list(paths) -> paths
+      _ -> profile.read_only_paths
+    end
+  end
+
+  defp demonstrator_allowed_write_paths(%__MODULE__{} = profile) do
+    case for_role(profile, :demonstrator) do
+      %{allowed_write_paths: paths} when is_list(paths) -> paths
+      _ -> []
+    end
+  end
+
+  defp under_any?(path, prefixes) do
+    Enum.any?(prefixes, fn prefix ->
+      path == prefix or String.starts_with?(path, prefix <> "/")
+    end)
+  end
 
   # Hash a path's contents: a file by its bytes, a directory by the sorted
   # {relative-path, file-hash} tree (so a new/deleted file under it changes the
