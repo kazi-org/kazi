@@ -275,6 +275,47 @@ const ASSERTIONS = {
   },
 };
 
+// --- Viewports (T43.5, ADR-0053) -------------------------------------------
+//
+// `viewport` runs the WHOLE journey at each named width — not just the
+// assertions. Layout drives behaviour: a nav collapses to a burger on mobile, so
+// a `click` step that works at 1440px misses at 390px. Asserting at a different
+// width than you navigated at would prove nothing.
+//
+// The named sizes are conventional device classes, stated once here so a goal
+// says `viewport = ["mobile", "desktop"]` rather than carrying pixel counts.
+// `{width, height}` stays available for anything specific.
+const NAMED_VIEWPORTS = {
+  mobile: { width: 390, height: 844 },
+  tablet: { width: 820, height: 1180 },
+  desktop: { width: 1440, height: 900 },
+};
+
+// Normalize `viewport` to a list of `{label, size}`. ABSENT yields `[null]` —
+// one journey with no setViewportSize call, byte-identical to pre-T43.5
+// behaviour, which is what keeps every existing goal-file unaffected.
+function resolveViewports(viewport) {
+  if (viewport == null) return [null];
+  const list = Array.isArray(viewport) ? viewport : [viewport];
+  if (list.length === 0) return [null];
+
+  return list.map((v) => {
+    if (typeof v === "string") {
+      const size = NAMED_VIEWPORTS[v];
+      if (!size) {
+        throw new Error(
+          `unknown viewport ${JSON.stringify(v)} (known: ${Object.keys(NAMED_VIEWPORTS).join(", ")}, or {width, height})`
+        );
+      }
+      return { label: v, size };
+    }
+    if (v && typeof v.width === "number" && typeof v.height === "number") {
+      return { label: `${v.width}x${v.height}`, size: { width: v.width, height: v.height } };
+    }
+    throw new Error(`bad viewport ${JSON.stringify(v)} (want a name or {width, height})`);
+  });
+}
+
 async function evalAssertion(page, assertion, timeout, captured) {
   const base = { type: assertion.type, selector: assertion.selector };
   const handler = ASSERTIONS[assertion.type];
@@ -310,29 +351,52 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-    // `acceptDownloads` is Playwright's default, but the `download` assertion
-    // (T49.10) depends on it entirely — a context that refuses downloads makes
-    // that assertion fail for a reason no evidence would explain. Stated
-    // explicitly so the dependency is visible and version-proof.
-    const page = await browser.newPage({ acceptDownloads: true });
-    // Listeners BEFORE the first navigation: `console_clean` asserts over the
-    // whole journey, so the initial load's errors must be in the record too.
-    const captured = captureJourney(page);
-    await page.goto(payload.url, { timeout, waitUntil: "load" });
 
-    for (const step of payload.steps || []) {
-      await applyStep(page, step, timeout);
-    }
-
+    // T43.5: one journey per viewport, each on a FRESH page. A fresh page per
+    // width is deliberate — `console_clean` asserts over "the journey", and
+    // replaying steps on a reused page would fold the desktop pass's errors into
+    // the mobile one's record.
+    const viewports = resolveViewports(payload.viewport);
     const assertions = [];
-    for (const assertion of payload.assertions || []) {
-      assertions.push(await evalAssertion(page, assertion, timeout, captured));
-    }
-
     let screenshot = null;
-    if (payload.screenshot) {
-      await page.screenshot({ path: payload.screenshot, fullPage: true });
-      screenshot = payload.screenshot;
+
+    for (const vp of viewports) {
+      // `acceptDownloads` is Playwright's default, but the `download` assertion
+      // (T49.10) depends on it entirely — a context that refuses downloads makes
+      // that assertion fail for a reason no evidence would explain. Stated
+      // explicitly so the dependency is visible and version-proof.
+      const page = await browser.newPage({ acceptDownloads: true });
+      if (vp) await page.setViewportSize(vp.size);
+
+      // Listeners BEFORE the first navigation: `console_clean` asserts over the
+      // whole journey, so the initial load's errors must be in the record too.
+      const captured = captureJourney(page);
+      await page.goto(payload.url, { timeout, waitUntil: "load" });
+
+      for (const step of payload.steps || []) {
+        await applyStep(page, step, timeout);
+      }
+
+      for (const assertion of payload.assertions || []) {
+        const record = await evalAssertion(page, assertion, timeout, captured);
+        // The viewport label rides on the record so a failing check NAMES the
+        // width it failed at — "text failed" is not actionable when the same
+        // assertion passed at 1440px and failed at 390px.
+        assertions.push(vp ? { ...record, viewport: vp.label } : record);
+      }
+
+      if (payload.screenshot) {
+        // Multi-viewport runs would clobber one path, so suffix per width. A
+        // single (or absent) viewport keeps the exact path the caller asked for.
+        const path =
+          viewports.length > 1 && vp
+            ? payload.screenshot.replace(/(\.[a-z]+)?$/i, `-${vp.label}$1`)
+            : payload.screenshot;
+        await page.screenshot({ path, fullPage: true });
+        screenshot = screenshot ? `${screenshot},${path}` : path;
+      }
+
+      await page.close().catch(() => {});
     }
 
     // An UNAVAILABLE assertion (e.g. a11y with axe-core not installed on the

@@ -357,6 +357,19 @@ defmodule Kazi.Predicate.Schema do
     keys: [
       %{name: "url", type: "string", required: true, description: "The page to open."},
       %{
+        name: "viewport",
+        type: "string | table | array",
+        required: false,
+        description:
+          "Run the WHOLE journey at each width — \"mobile\" (390x844), \"tablet\" (820x1180), " <>
+            "\"desktop\" (1440x900), or {width, height}; a list runs each in turn (T43.5, " <>
+            "ADR-0053). Every assertion is replayed per viewport and its record names the " <>
+            "width, so ANY viewport failing fails the predicate and the evidence says which. " <>
+            "The whole journey (not just the assertions) reruns because layout drives " <>
+            "behaviour: a nav that collapses to a burger on mobile makes a desktop click step " <>
+            "miss. Absent = one journey at the browser default, unchanged."
+      },
+      %{
         name: "steps",
         type: "array<table>",
         required: false,

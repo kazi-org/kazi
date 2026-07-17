@@ -1,0 +1,93 @@
+# Example kazi goal-file: a COMPONENT check + a RESPONSIVE check (T43.5, ADR-0053).
+#
+# Two things this demonstrates, neither of which needed a new provider:
+#
+# 1. A "component test" is just a `browser` predicate pointed at a story URL.
+#    Storybook / Ladle / Histoire each serve one component per URL, so the
+#    existing provider already checks components — there is nothing to build.
+#    kazi does not ship a component-testing feature; it ships a URL and
+#    assertions (ADR-0040: the vocabulary lives in the runner, not the
+#    controller).
+#
+# 2. `viewport` runs the WHOLE journey at each width. Layout drives behaviour —
+#    a nav collapses to a burger at 390px, so a click that works on desktop
+#    misses on mobile. Asserting at a width you did not navigate at proves
+#    nothing, so the steps replay per viewport too.
+#
+#     kazi apply priv/examples/component_responsive.toml --workspace path/to/app
+#
+# Real use requires the Playwright runtime installed once, and a story server
+# running (`npm run storybook`, typically :6006):
+#
+#     npm i playwright && npx playwright install chromium
+#
+# The urls below are PLACEHOLDERS — kazi scaffolds, it never guesses (ADR-0013).
+# Point them at your own story server before running.
+
+id = "component-responsive"
+name = "The Button component renders at every width, and the header is responsive"
+
+[metadata]
+use_case = "UC-056"
+adr = "0053"
+
+[budget]
+max_iterations = 10
+
+[scope]
+workspace = "."
+
+# --- 1. A COMPONENT check: a story URL is just a page ------------------------
+#
+# One Feature of the component per predicate. The story renders in isolation, so
+# a failure here is the component's, not the page's.
+[[predicate]]
+id = "button-story-renders"
+provider = "browser"
+url = "http://localhost:6006/iframe.html?id=components-button--primary"
+# Checked at all three widths: a component that overflows its container at 390px
+# is broken even though it renders fine at 1440px.
+viewport = ["mobile", "tablet", "desktop"]
+assertions = [
+  { type = "visible", selector = "button" },
+  { type = "text", selector = "button", contains = "Primary" },
+  # The story must render without throwing — higher signal than "it appeared".
+  { type = "console_clean" },
+]
+
+# --- 2. A RESPONSIVE check: the same journey, different widths ---------------
+#
+# The burger only exists on mobile; the full nav only on desktop. Same URL, same
+# assertions vocabulary — the viewport is what differs, and each record names the
+# width it came from, so a failure says WHICH size broke.
+[[predicate]]
+id = "header-collapses-on-mobile"
+provider = "browser"
+url = "http://localhost:6006/iframe.html?id=components-header--default"
+viewport = "mobile"
+assertions = [
+  { type = "visible", selector = "[data-testid='nav-burger']" },
+  { type = "hidden", selector = "[data-testid='nav-links']" },
+]
+
+[[predicate]]
+id = "header-expands-on-desktop"
+provider = "browser"
+url = "http://localhost:6006/iframe.html?id=components-header--default"
+viewport = "desktop"
+assertions = [
+  { type = "hidden", selector = "[data-testid='nav-burger']" },
+  { type = "visible", selector = "[data-testid='nav-links']" },
+]
+
+# --- 3. An explicit size, when a named class is not the point ----------------
+#
+# `{width, height}` for a specific breakpoint the design actually names.
+[[predicate]]
+id = "header-at-the-breakpoint"
+provider = "browser"
+url = "http://localhost:6006/iframe.html?id=components-header--default"
+viewport = { width = 768, height = 1024 }
+assertions = [
+  { type = "visible", selector = "[data-testid='nav-burger']" },
+]

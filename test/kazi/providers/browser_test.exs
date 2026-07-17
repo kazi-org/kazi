@@ -245,6 +245,93 @@ defmodule Kazi.Providers.BrowserTest do
   # wrong-named one is real failing UI work (:fail) carrying the expected-vs-found
   # evidence, and a runner that could not produce a verdict is :error.
 
+  # --- viewport matrix (T43.5, ADR-0053, UC-056) -----------------------------
+  #
+  # The runner replays the whole journey per width and tags each assertion record
+  # with the viewport it came from. What the PROVIDER owes is the conjunction: a
+  # multi-viewport record passes only when EVERY viewport passed, and a failure
+  # names the width — "text failed" is useless when the same assertion passed at
+  # 1440px and failed at 390px.
+
+  describe "viewport matrix" do
+    test "all viewports passing -> :pass", %{workspace: ws} do
+      verdict =
+        Jason.encode!(%{
+          status: "pass",
+          url: "https://app.test/story",
+          assertions: [
+            %{type: "visible", selector: "button", ok: true, viewport: "mobile"},
+            %{type: "visible", selector: "button", ok: true, viewport: "desktop"}
+          ],
+          screenshot: nil,
+          error: nil
+        })
+
+      result =
+        evaluate(ws, verdict, %{
+          viewport: ["mobile", "desktop"],
+          assertions: [%{type: "visible", selector: "button"}]
+        })
+
+      assert %PredicateResult{status: :pass} = result
+      assert length(result.evidence.assertions) == 2
+    end
+
+    test "ANY viewport failing -> :fail, and the evidence names the width", %{workspace: ws} do
+      verdict =
+        Jason.encode!(%{
+          status: "fail",
+          url: "https://app.test/story",
+          assertions: [
+            %{type: "visible", selector: "button", ok: true, viewport: "desktop"},
+            %{
+              type: "visible",
+              selector: "button",
+              ok: false,
+              viewport: "mobile",
+              expected: "visible",
+              found: "not visible"
+            }
+          ],
+          screenshot: nil,
+          error: nil
+        })
+
+      result =
+        evaluate(ws, verdict, %{
+          viewport: ["mobile", "desktop"],
+          assertions: [%{type: "visible", selector: "button"}]
+        })
+
+      # Passing at desktop does NOT rescue the run: the conjunction is over every
+      # viewport, so a component broken only on mobile is broken.
+      assert %PredicateResult{status: :fail} = result
+
+      failing = Enum.find(result.evidence.assertions, &(&1["ok"] == false))
+      # The width is the actionable part — without it a fixer agent cannot
+      # reproduce the failure.
+      assert failing["viewport"] == "mobile"
+      assert failing["found"] == "not visible"
+    end
+
+    test "no viewport -> records carry no width, unchanged from before", %{workspace: ws} do
+      verdict =
+        Jason.encode!(%{
+          status: "pass",
+          url: "https://app.test/story",
+          assertions: [%{type: "visible", selector: "button", ok: true}],
+          screenshot: nil,
+          error: nil
+        })
+
+      result = evaluate(ws, verdict, %{assertions: [%{type: "visible", selector: "button"}]})
+
+      assert %PredicateResult{status: :pass} = result
+      assert [assertion] = result.evidence.assertions
+      refute Map.has_key?(assertion, "viewport")
+    end
+  end
+
   describe "download assertion" do
     test "a matching download (ok: true) -> :pass, with the file's identity as evidence", %{
       workspace: ws
