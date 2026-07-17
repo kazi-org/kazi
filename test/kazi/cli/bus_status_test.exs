@@ -208,7 +208,10 @@ defmodule Kazi.CLI.BusStatusTest do
 
       output =
         capture_io(:stderr, fn ->
-          assert Kazi.CLI.run(["bus", "tell", "nobody-here", "lost", "--session-name", "sender"], []) ==
+          assert Kazi.CLI.run(
+                   ["bus", "tell", "nobody-here", "lost", "--session-name", "sender"],
+                   []
+                 ) ==
                    1
         end)
 
@@ -299,7 +302,8 @@ defmodule Kazi.CLI.BusStatusTest do
 
     defp who_json do
       capture_io(fn ->
-        assert Kazi.CLI.run(["bus", "who", "--json", "--all", "--session-name", "sender"], []) == 0
+        assert Kazi.CLI.run(["bus", "who", "--json", "--all", "--session-name", "sender"], []) ==
+                 0
       end)
       |> Jason.decode!()
       |> Map.fetch!("sessions")
