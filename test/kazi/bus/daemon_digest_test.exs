@@ -24,6 +24,7 @@ defmodule Kazi.Bus.DaemonDigestTest do
   alias Gnat.Jetstream.API.Stream, as: JStream
   alias Kazi.Bus
   alias Kazi.Bus.Digest
+  alias Kazi.Bus.Hook
   alias Kazi.Bus.Provision
   alias Kazi.Daemon
   alias Kazi.MCP.Server
@@ -107,12 +108,70 @@ defmodule Kazi.Bus.DaemonDigestTest do
       # empty bus and the comparison would be vacuous.
       cli = cli_peek_digest(ctx)
       mcp = mcp_peek_digest(ctx)
-      hook = hook_peek_digest(ctx)
 
+      # CLI and MCP both hand back the daemon's digest map verbatim -- identical
+      # to the byte.
       assert cli == mcp
-      assert mcp == hook
       assert cli["total"] == 10
       assert length(cli["lines"]) <= Digest.max_lines()
+
+      # The hook is the THIRD surface, and the one this task most had to prove:
+      # it renders through the SAME daemon-assembled digest, not a fourth
+      # client-side aggregation. Driving the REAL `Kazi.Bus.Hook.turn/1` (not a
+      # stand-in that re-calls read_digest) shows its block is a pure function of
+      # the digest CLI/MCP got -- the same total, one rendered line per digest
+      # line.
+      assert {:emit, block} = Hook.turn(hook_opts(ctx, peek: true))
+      assert block =~ "#{cli["total"]} new bus message(s) since your last turn:"
+      assert digest_line_count(block) == length(cli["lines"])
+    end
+
+    test "the hook injects the daemon-assembled digest, not a client-side re-aggregation", ctx do
+      # A backlog DEEPER than `Kazi.Bus.read/1`'s single batch of 100 (L-0040).
+      # A hook that re-aggregated client-side -- the shape T55.7 exists to
+      # remove -- would call `Bus.read`, see only the first 100, and under-count.
+      # The daemon drains the whole pending set, so the REAL hook must report the
+      # full total. This is the negative control the byte-identical peek test
+      # cannot show at a 10-message backlog.
+      post_backlog(ctx, 150)
+      await_stream_messages(ctx.conn, 150)
+
+      assert {:emit, block} = Hook.turn(hook_opts(ctx))
+      assert block =~ "150 new bus message(s) since your last turn:"
+    end
+
+    test "the hook frames the daemon digest as untrusted and renders its verbatim lines", ctx do
+      :ok =
+        Bus.post("note", "URGENT: rollback started",
+          conn: ctx.conn,
+          scope: ctx.scope,
+          topic: "ci",
+          sev: "interrupt"
+        )
+
+      :ok = Bus.post("fact", "build green", conn: ctx.conn, scope: ctx.scope, topic: "build")
+      await_stream_messages(ctx.conn, 2)
+
+      assert {:emit, block} = Hook.turn(hook_opts(ctx))
+
+      # ADR-0067 point 7: every injected block frames the bus as untrusted,
+      # advisory external input -- moving assembly server-side did not drop it.
+      assert block =~ Hook.banner()
+      assert block =~ Hook.advisory()
+      assert block =~ Hook.footer()
+
+      # The interrupt renders VERBATIM with a provenance stamp -- the daemon's
+      # verbatim-only-for-directed-or-interrupt rule, rendered from the digest
+      # the daemon assembled, not re-derived on the client.
+      assert block =~ "URGENT: rollback started"
+      assert block =~ "from "
+    end
+
+    test "a quiet bus keeps the hook silent (zero bytes)", ctx do
+      # Nothing posted under this scope since setup: the daemon returns
+      # total: 0 and the hook emits NOTHING. This is what makes ambient
+      # bus-awareness free on a quiet turn (ADR-0071).
+      assert Hook.turn(hook_opts(ctx)) == :silent
     end
 
     test "--since <cursor> replays from a point", ctx do
@@ -469,20 +528,19 @@ defmodule Kazi.Bus.DaemonDigestTest do
     result
   end
 
-  # The ADR-0071 hook's source. `kazi bus hook <event>` is a silent skeleton
-  # until T55.9 fills in the payload, so this pins what T55.9 will inject:
-  # the hook reads through the SAME entry point, which is what stops it from
-  # re-implementing the bound a third time.
-  defp hook_peek_digest(ctx) do
-    assert {:ok, %{"digest" => digest}} =
-             Bus.read_digest(
-               sock_path: ctx.sock_path,
-               session: ctx.session,
-               scope: ctx.scope,
-               peek: true
-             )
+  # The ADR-0071 hook's opts: the same client identity every surface resolves,
+  # threaded into `Kazi.Bus.Hook`. Driving the real hook (rather than re-calling
+  # read_digest as a stand-in) is what proves the shipped T55.9 payload reaches
+  # the daemon-assembled digest, not a third client-side aggregation.
+  defp hook_opts(ctx, extra \\ []) do
+    [sock_path: ctx.sock_path, session: ctx.session, scope: ctx.scope] ++ extra
+  end
 
-    digest
+  # The hook prefixes every rendered digest line with two spaces (its header
+  # and the advisory framing do not), so this counts exactly the digest lines
+  # the hook rendered out of the daemon's digest.
+  defp digest_line_count(block) do
+    block |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "  "))
   end
 
   # The id of a posted message, once it has actually landed. A `full` peek is

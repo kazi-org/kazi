@@ -8,9 +8,14 @@ defmodule Kazi.Bus.HookPayloadTest do
   daemon (a socket that accepts the connection but never answers).
 
   `:nats`-TAGGED tests (excluded by default; `NATS_URL` required) exercise the
-  real payload against a live JetStream server with a conn injected directly:
-  the bounded/provenance-stamped digest on traffic, ZERO BYTES on a quiet bus,
-  and the session-start board + team membership visible in a real `who`.
+  `session-start` payload against a live JetStream server with a conn injected
+  directly: the board + team membership visible in a real `who`.
+
+  The `turn` payload is NOT tested here: T55.7 (ADR-0072 d5) routed it through
+  the daemon's control socket (`Kazi.Bus.read_digest/1`), so a bare `conn:` no
+  longer reaches it -- its traffic/quiet/verbatim/bounded coverage lives in
+  `Kazi.Bus.DaemonDigestTest`, which boots a real daemon, the only place the
+  daemon-assembled digest can be exercised.
   """
   use ExUnit.Case, async: false
 
@@ -106,58 +111,6 @@ defmodule Kazi.Bus.HookPayloadTest do
       %{conn: conn}
     end
 
-    test "a bus WITH traffic injects a bounded, provenance-stamped digest", %{conn: conn} do
-      session = unique_session()
-      opts = [conn: conn, session: session, scope: "machine"]
-
-      # Presence, then a directed tell to self -- a `msg` renders verbatim, so
-      # its text AND provenance land in the digest.
-      assert {:ok, _} = Bus.who(opts)
-      drain(opts)
-      text = "directed #{session}"
-      assert {:ok, _} = Bus.tell(session, text, conn: conn, scope: "machine")
-
-      assert {:emit, block} = Hook.turn(opts)
-
-      assert block =~ Hook.banner()
-      assert block =~ Hook.advisory()
-      assert block =~ Hook.footer()
-      assert block =~ text
-      # provenance stamp: the originating session id is on the verbatim line.
-      assert block =~ session
-    end
-
-    test "the injected digest is bounded to the T55.1 line cap", %{conn: conn} do
-      session = unique_session()
-      opts = [conn: conn, session: session, scope: "machine"]
-
-      assert {:ok, _} = Bus.who(opts)
-      drain(opts)
-
-      for i <- 1..(Kazi.Bus.Digest.max_lines() + 20) do
-        assert :ok = Bus.post("note", "n#{i}", Keyword.put(opts, :topic, "t#{i}"))
-      end
-
-      assert {:emit, block} = Hook.turn(opts)
-      body = block |> String.split("\n") |> Enum.filter(&String.starts_with?(&1, "  "))
-      # header line + at most max_lines rendered digest lines.
-      assert length(body) <= Kazi.Bus.Digest.max_lines()
-    end
-
-    test "a QUIET bus injects ZERO BYTES", %{conn: conn} do
-      session = unique_session()
-      opts = [conn: conn, session: session, scope: "machine"]
-
-      assert {:ok, _} = Bus.who(opts)
-      drain(opts)
-
-      # No new traffic since the drain: payload is :silent and run writes 0 bytes.
-      assert Hook.turn(opts) == :silent
-
-      out = capture_io(fn -> assert Hook.run("turn", opts) == 0 end)
-      assert byte_size(out) == 0
-    end
-
     test "session-start injects the board and the session appears in `who` with its team",
          %{conn: conn} do
       session = unique_session()
@@ -216,17 +169,6 @@ defmodule Kazi.Bus.HookPayloadTest do
   end
 
   defp unique_session, do: "hook-#{System.unique_integer([:positive])}"
-
-  # Drains the caller's durable cursor to empty (L-0040: `read` pulls in batches,
-  # and a fresh consumer replays broadcast history) so a following `turn` sees
-  # only what is posted AFTER.
-  defp drain(opts) do
-    case Bus.read(opts) do
-      {:ok, []} -> :ok
-      {:ok, _} -> drain(opts)
-      {:error, _} -> :ok
-    end
-  end
 
   defp parse_nats_url("nats://" <> hostport), do: parse_nats_url(hostport)
 
