@@ -478,8 +478,8 @@ defmodule Kazi.CLI do
     %{
       name: "lint",
       summary:
-        "Advisory: warn on near-duplicate group NAMES in a goal-file (exit 0 even with warnings).",
-      args: [%{name: "goal-file", required: true}],
+        "Advisory group-name check on a goal-file (exit 0 even with warnings); or validate a roadmap artifact's DAG (cycles, unresolvable refs — non-zero on a broken roadmap).",
+      args: [%{name: "goal-file|roadmap", required: true}],
       flags: [:json]
     },
     %{
@@ -521,7 +521,7 @@ defmodule Kazi.CLI do
     %{
       name: "schema",
       summary:
-        "Emit the versioned --json result schema(s), or a predicate-provider config schema (e.g. custom_script).",
+        "Emit the versioned --json result schema(s), a predicate-provider config schema (e.g. custom_script), or an artifact schema (e.g. roadmap).",
       args: [%{name: "command", required: false}],
       flags: [:json]
     },
@@ -562,7 +562,7 @@ defmodule Kazi.CLI do
         (authoring verbs -- plan / list-proposed / approve / reject -- need the
          release binary or `mix`; the escript build lacks the SQLite NIF)
       kazi export <goal-file> --obsidian <dir> [--json]   # write an Obsidian vault
-      kazi lint <goal-file> [--json]              # advisory near-duplicate group-name warnings
+      kazi lint <goal-file|roadmap> [--json]      # advisory group-name warnings; or validate a roadmap DAG (cycles, refs)
       kazi context index <label> <file> [--provider gist] [--json]   # index an artifact
       kazi context search "<query>" [--budget N] [--provider gist] [--json]
       kazi context stats [--provider gist] [--json]                  # byte accounting
@@ -586,7 +586,7 @@ defmodule Kazi.CLI do
       kazi bus hook <event>                        # harness hook entry point (session-start | turn) -- ALWAYS exits 0 silently
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
-      kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
+      kazi schema [<command>]                      # --json result schema(s), a provider schema (custom_script), or an artifact schema (roadmap)
 
   ARGUMENTS:
       <goal-file>            Path to a TOML goal-file (see Kazi.Goal.Loader).
@@ -2103,10 +2103,21 @@ defmodule Kazi.CLI do
         # T32.1 (ADR-0040): fall back to the predicate-provider config schemas
         # (`kazi schema custom_script`) before reporting an unknown command, so the
         # one `schema` surface self-describes both `--json` results AND provider
-        # config keys.
-        execute_provider_schema(command)
+        # config keys. T45.1: the roadmap ARTIFACT shape (`kazi schema roadmap`)
+        # is on the same surface.
+        execute_artifact_schema(command)
     end
   end
+
+  # T45.1 (ADR-0075): the roadmap artifact's input shape, on the same self-describing
+  # `schema` surface as result and provider schemas. Any other command falls through
+  # to the predicate-provider config schemas.
+  defp execute_artifact_schema("roadmap") do
+    IO.puts(Jason.encode!(Kazi.Goal.Roadmap.schema()))
+    0
+  end
+
+  defp execute_artifact_schema(command), do: execute_provider_schema(command)
 
   # T32.1 (ADR-0040): emit a predicate-provider kind's config-key schema, or a
   # JSON error (preserving the "no result schema" marker the unknown-command tests
@@ -2122,7 +2133,8 @@ defmodule Kazi.CLI do
         emit_json_error(
           "no result schema for #{inspect(command)} " <>
             "(result schemas: #{Enum.join(Kazi.CLI.Schema.commands(), ", ")}; " <>
-            "provider schemas: #{Enum.join(Kazi.Predicate.Schema.kinds(), ", ")})"
+            "provider schemas: #{Enum.join(Kazi.Predicate.Schema.kinds(), ", ")}; " <>
+            "artifact schemas: roadmap)"
         )
 
         1
@@ -5240,6 +5252,18 @@ defmodule Kazi.CLI do
   # `emit/3` seam as the other commands); human prose otherwise.
 
   defp execute_lint(goal_file, opts) do
+    # T45.1 (ADR-0075): `lint` covers the roadmap artifact too. A file whose
+    # top-level shape is a [[goals]] array is a roadmap — lint it for cycles and
+    # unresolvable refs; everything else is a goal-file (the T44.1 [integration]
+    # net + the group-name net below).
+    if roadmap_file?(goal_file) do
+      execute_roadmap_lint(goal_file, opts)
+    else
+      execute_goal_lint(goal_file, opts)
+    end
+  end
+
+  defp execute_goal_lint(goal_file, opts) do
     # T44.1 (ADR-0055): the `[integration]` advisory net runs on the RAW decoded
     # TOML, independent of whether the goal LOADS — an unknown `mode` is a hard
     # loader error, so `kazi lint` inspects the raw block to still WARN (naming
@@ -5278,6 +5302,61 @@ defmodule Kazi.CLI do
     else
       _ -> {nil, []}
     end
+  end
+
+  # A roadmap file decodes to a table with a top-level [[goals]] array of tables.
+  # A read/decode failure falls through to the goal-file path, which reports the
+  # real load error — this peek only ROUTES, it never fails.
+  defp roadmap_file?(file) do
+    with {:ok, contents} <- File.read(file),
+         {:ok, %{"goals" => [%{} | _]}} <- Toml.decode(contents) do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  # T45.1 (ADR-0075): lint a roadmap through the real loader. A cycle or an
+  # unresolvable ref is a load ERROR (non-zero, naming the ref); a roadmap that
+  # loads is a valid DAG (exit 0), reporting its node/edge/frontier counts.
+  defp execute_roadmap_lint(file, opts) do
+    case Kazi.Goal.Roadmap.load(file) do
+      {:ok, roadmap} ->
+        report_roadmap_lint(file, roadmap, opts)
+        0
+
+      {:error, reason} ->
+        message = "roadmap #{file} is invalid: #{reason}"
+
+        if json?(opts) do
+          emit_json_error(message)
+        else
+          IO.puts(:stderr, "error: #{message}")
+        end
+
+        1
+    end
+  end
+
+  defp report_roadmap_lint(file, %Kazi.Goal.Roadmap{} = roadmap, opts) do
+    frontiers = Kazi.Goal.Roadmap.frontiers(roadmap)
+
+    json = %{
+      schema_version: @run_schema_version,
+      kind: "roadmap",
+      goal_count: length(roadmap.nodes),
+      edge_count: length(roadmap.edges),
+      frontier_count: length(frontiers),
+      goals: Enum.map(roadmap.nodes, & &1.id)
+    }
+
+    emit(json?(opts), json, fn ->
+      IO.puts(
+        "LINT  roadmap=#{file} — valid DAG " <>
+          "(#{length(roadmap.nodes)} goal(s), #{length(roadmap.edges)} edge(s), " <>
+          "#{length(frontiers)} wave(s))."
+      )
+    end)
   end
 
   # Render the lint result on the requested surface: under --json a single object
