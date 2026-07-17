@@ -70,6 +70,7 @@ defmodule Kazi.Loop.CauseClass do
           | :quarantine_blocked
           | :workspace_missing
           | :permission_denied
+          | :capability_unreachable
 
   @typedoc """
   The cause detail: `ids` are the predicate ids implicated (sorted, `[]` when
@@ -111,7 +112,13 @@ defmodule Kazi.Loop.CauseClass do
           outcome: atom(),
           reason: atom() | nil,
           vector: PredicateVector.t() | nil,
-          stuck_cause: :error_wedged | :quarantine_blocked | nil,
+          stuck_cause:
+            :error_wedged
+            | :quarantine_blocked
+            | :permission_denied
+            | :workspace_missing
+            | :capability_unreachable
+            | nil,
           stuck_failing: [Kazi.Predicate.id()] | nil,
           stuck_reasons: %{Kazi.Predicate.id() => term()} | nil
         }
@@ -204,6 +211,22 @@ defmodule Kazi.Loop.CauseClass do
   def classify(%{outcome: :stopped, reason: :stuck, stuck_cause: :workspace_missing} = inputs) do
     %{
       class: :workspace_missing,
+      ids: sorted_ids(inputs.stuck_failing),
+      reasons: inputs.stuck_reasons,
+      exhausted: nil
+    }
+  end
+
+  # T49.8 (ADR-0064 d4): two consecutive demonstrations failed with no intervening
+  # code change — the scenario's capability is unreachable through demonstration
+  # alone. Named apart from an ordinary failing-set `:stuck` because the right move
+  # is a human (the capability is broken or the surface unavailable), not a bigger
+  # budget and not another demonstration.
+  def classify(
+        %{outcome: :stopped, reason: :stuck, stuck_cause: :capability_unreachable} = inputs
+      ) do
+    %{
+      class: :capability_unreachable,
       ids: sorted_ids(inputs.stuck_failing),
       reasons: inputs.stuck_reasons,
       exhausted: nil
