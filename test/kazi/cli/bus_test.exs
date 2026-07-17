@@ -396,8 +396,10 @@ defmodule Kazi.CLI.BusTest do
             "Skipped cleanup of older version (v1.138.0): still in use by a running process"
           )
 
-          %{verbatim: verbatim, digest: digest} = Kazi.Bus.Digest.summarize(messages)
-          Enum.each(verbatim ++ digest, &IO.puts/1)
+          messages
+          |> Kazi.Bus.Digest.render()
+          |> Kazi.Bus.Digest.to_tty_lines()
+          |> Enum.each(&IO.puts/1)
         end)
 
       assert stdout == "[note] payload two\n1 note/ci\n"
