@@ -7,6 +7,67 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17 — T58.1: root-caused the bus read/write version-skew asymmetry (#1227) — writes bypass the daemon's op dispatch entirely, reads don't
+
+**Type:** investigation
+**Tags:** bus, daemon, control-socket, version-skew, T58.1, #1227
+
+**Symptom.** A long-running bus daemon (started under an older kazi) kept
+accepting `bus join`/`who`/`tell` from a newer CLI (1.172.0) — `who` showed
+the session with a nonzero inbox count, senders got a successful `told
+<name>` ack — but `bus read`/`bus read --peek` from that same newer CLI
+failed with `error: daemon could not read the bus: unknown_op`. Net effect: a
+silent dead-letter queue where senders believe delivery succeeded but the
+recipient can never read any of it.
+
+**Root cause.** The asymmetry is structural, not incidental:
+
+- `join`/`who`/`tell` never touch the daemon's Elixir op-dispatch code at
+  all. They connect directly to NATS and publish/subscribe
+  (`lib/kazi/bus.ex` `tell/3` calls `with_conn` → `Gnat.pub`/`Gnat.request`
+  straight to a `bus.<scope>.msg.<target>` subject). The daemon process is
+  only a NATS *host* for these ops — its own code version is irrelevant to
+  whether they succeed.
+- `read` is different: `Kazi.Bus.read_digest/1` → `read_assembled/1` sends
+  `%{"op" => "read", ...}` over the daemon's **control socket**
+  (`Probe.request/3`), which is dispatched by
+  `Kazi.Daemon.Control.handle/2` (`lib/kazi/daemon/control.ex`). That
+  module's moduledoc confirms `read` is a T55.7/ADR-0072-d5 addition —
+  added *after* the NATS-direct write paths were already stable. An older
+  running daemon binary has no `handle(%{"op" => "read"}, ...)` clause
+  compiled in, so it falls through to the catch-all
+  `handle(_other, _opts), do: %{"ok" => false, "error" => "unknown_op"}`
+  (`control.ex:51`) — a clean, well-formed reply, not a crash, which is why
+  it reads as a normal (if confusing) error rather than an obvious
+  version-mismatch signal.
+
+So: writes are op-dispatch-version-blind by construction (they never call
+into daemon code that could be stale); reads require the daemon's control
+protocol to have kept pace. Any control-socket op added after `ping` is added
+to this same class of latent skew — `read` is just the first one anyone hit.
+
+**Fix direction for T58.2.** CLI-side proactive skew detection at connect
+time, not a daemon-side reject-loud change: `Kazi.Daemon.Control.handle(%{"op"
+=> "ping"}, ...)` already returns `"vsn"` (`control.ex:29-37`), and
+`Kazi.Bus.read_assembled/1` already calls `Probe.probe/1` (an aliveness
+check) before issuing the `read` request — the natural seam is to compare
+that `vsn` against the CLI's own compiled version at connect (or immediately
+before the first control-socket op past `ping`) and surface a clear "daemon
+is running an older version, restart it" error *before* attempting `read`,
+rather than let the daemon's generic `unknown_op` stand in for "you're
+skewed." A daemon-side reject-loud change is not the right shape here: the
+daemon literally cannot know it's missing an op it was never compiled with,
+so the detection has to happen where both versions are visible — the CLI,
+which already has `vsn()` and just received the daemon's via `ping`.
+
+**Coordinate with E52.** T52.2 is already adding a `schema_vsn` field to the
+same `ping` reply for the read-model write-seam skew check
+(`SchemaSkew.classify/2`). T58.2 should EXTEND that handshake with a
+bus-protocol version check alongside `schema_vsn` rather than invent a
+second, parallel version-negotiation mechanism on the same daemon reply —
+two independent skew checks with different semantics on one `ping` op is
+itself a future #1227-class bug.
+
 ## 2026-07-17 — T60.2 finding: ghost `running` rows (#1155) — the T48.15 reaper can only abandon dead-pid runs, so no-os_pid and recycled-pid ghosts live forever
 
 **Type:** investigation + fix
