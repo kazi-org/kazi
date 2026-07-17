@@ -148,7 +148,7 @@ defmodule Kazi.MixProject do
       # upstream (ADR-0066, issue #1018): stock burrito 1.5 deletes older
       # versions' install dirs on every launch with no liveness check, killing
       # still-running kazi processes mid-run during release windows.
-      {:burrito, github: "kazi-org/burrito", ref: "084e1e3372561209ab3f7d6de26f0d8814ebb4de"}
+      {:burrito, github: "kazi-org/burrito", ref: "c12565737c64ad3e9468019dd5578c288682d2b6"}
     ]
   end
 

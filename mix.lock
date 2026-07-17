@@ -1,5 +1,5 @@
 %{
-  "burrito": {:git, "https://github.com/kazi-org/burrito.git", "084e1e3372561209ab3f7d6de26f0d8814ebb4de", [ref: "084e1e3372561209ab3f7d6de26f0d8814ebb4de"]},
+  "burrito": {:git, "https://github.com/kazi-org/burrito.git", "c12565737c64ad3e9468019dd5578c288682d2b6", [ref: "c12565737c64ad3e9468019dd5578c288682d2b6"]},
   "cc_precompiler": {:hex, :cc_precompiler, "0.1.11", "8c844d0b9fb98a3edea067f94f616b3f6b29b959b6b3bf25fee94ffe34364768", [:mix], [{:elixir_make, "~> 0.7", [hex: :elixir_make, repo: "hexpm", optional: false]}], "hexpm", "3427232caf0835f94680e5bcf082408a70b48ad68a5f5c0b02a3bea9f3a075b9"},
   "chacha20": {:hex, :chacha20, "1.0.4", "0359d8f9a32269271044c1b471d5cf69660c362a7c61a98f73a05ef0b5d9eb9e", [:mix], [], "hexpm", "2027f5d321ae9903f1f0da7f51b0635ad6b8819bc7fe397837930a2011bc2349"},
   "connection": {:hex, :connection, "1.1.0", "ff2a49c4b75b6fb3e674bfc5536451607270aac754ffd1bdfe175abe4a6d7a68", [:mix], [], "hexpm", "722c1eb0a418fbe91ba7bd59a47e28008a189d47e37e0e7bb85585a016b2869c"},
