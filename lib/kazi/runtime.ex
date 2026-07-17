@@ -105,7 +105,11 @@ defmodule Kazi.Runtime do
     # Synthesized by `Kazi.Goal.landed_predicate/1` at load time; evaluated
     # against the LIVE working tree (a visible, non-guard predicate) so a dirty
     # tree keeps the loop running instead of reporting a false `:converged`.
-    landed: Kazi.Providers.Landed
+    landed: Kazi.Providers.Landed,
+    # T49.3 (ADR-0064): replay a pinned Gherkin Scenario by DELEGATING to a
+    # surface provider. Only a `:pinned` classification replays; the pass is the
+    # delegate's green replay, never a demonstration claim.
+    scenario: Kazi.Providers.Scenario
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
