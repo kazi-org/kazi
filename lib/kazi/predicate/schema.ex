@@ -1,19 +1,20 @@
 defmodule Kazi.Predicate.Schema do
   @moduledoc """
   Self-describing config schemas for predicate-provider kinds (T32.1, ADR-0040
-  decision 6).
+  decision 6) — and, additively, goal-file config BLOCKS.
 
-  `kazi schema <provider-kind>` emits one of these so any agent can introspect the
-  config keys a predicate of that kind accepts — no external docs. Today this
-  covers `custom_script` (the generic command-runner whose verdict/evidence keys
-  are config, not code), the `ratchet` mode (ADR-0041), the `static` analysis
+  `kazi schema <name>` emits one of these so any agent can introspect the config
+  keys accepted — no external docs. This covers the predicate providers
+  `custom_script` (the generic command-runner whose verdict/evidence keys are
+  config, not code), the `ratchet` mode (ADR-0041), the `static` analysis
   provider (T32.7, ADR-0043), and the live providers `http_probe`, `browser`, and
-  `metrics` (T32.10, ADR-0043); other kinds can be added the same way.
+  `metrics` (T32.10, ADR-0043); plus the goal-file `integration` landing block
+  (T44.1, ADR-0055). Other kinds/blocks can be added the same way.
 
   The descriptor is intentionally flat — a `keys` list of
-  `{name, type, required, description}` rows plus an `example` config object — the
-  same field-table shape the result schemas (`Kazi.CLI.Schema`) and the goal-file
-  docs use, so the doc and the emitted schema stay legible side by side.
+  `{name, type, required, description}` rows plus an `example` object — the same
+  field-table shape the result schemas (`Kazi.CLI.Schema`) and the goal-file docs
+  use, so the doc and the emitted schema stay legible side by side.
   """
 
   @custom_script %{
@@ -779,6 +780,57 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @integration %{
+    kind: "integration",
+    title: "[integration] goal-file block",
+    description:
+      "How converged work LANDS (T44.1, ADR-0055): a goal-file `[integration]` table (NOT a " <>
+        "predicate provider). Absent, or mode = \"none\", is converge-and-stop with no landing " <>
+        "— byte-identical to a goal-file with no block. mode commit/branch/pr/merge land " <>
+        "progressively further. This block is parsed/validated/exposed here; the synthesized " <>
+        "`landed` predicate and the landing actions that consume it are later tasks.",
+    keys: [
+      %{
+        name: "mode",
+        type: "string",
+        required: false,
+        description:
+          "How far work lands: \"none\" (default; converge-and-stop, no landing), \"commit\" " <>
+            "(committed on a non-base branch), \"branch\" (pushed), \"pr\" (pushed AND a PR is " <>
+            "open against base), or \"merge\" (PR rebase-merged — never squash, never a merge " <>
+            "commit). An unknown mode is a load error."
+      },
+      %{
+        name: "branch_prefix",
+        type: "string",
+        required: false,
+        description:
+          "Prefix for the landing branch name. Stored verbatim; the landing machinery applies " <>
+            "its own default (\"kazi/\") when absent."
+      },
+      %{
+        name: "base",
+        type: "string",
+        required: false,
+        description:
+          "The base branch a pr/merge targets. Stored verbatim; absent → detected from origin " <>
+            "at landing time."
+      },
+      %{
+        name: "commit_style",
+        type: "string",
+        required: false,
+        description: "Informational commit-style hint (e.g. \"conventional\"). Stored verbatim."
+      }
+    ],
+    example: %{
+      "mode" => "pr",
+      "branch_prefix" => "kazi/",
+      "base" => "main",
+      "commit_style" => "conventional"
+    }
+  }
+
   @schemas %{
     "custom_script" => @custom_script,
     "ratchet" => @ratchet,
@@ -789,7 +841,8 @@ defmodule Kazi.Predicate.Schema do
     "coverage" => @coverage,
     "property" => @property,
     "mutation" => @mutation,
-    "cve" => @cve
+    "cve" => @cve,
+    "integration" => @integration
   }
 
   @doc "The provider kinds with a documented config schema, sorted."
