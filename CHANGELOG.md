@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.164.0](https://github.com/kazi-org/kazi/compare/v1.163.0...v1.164.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** kazi bus get &lt;id&gt; -- deliberate pull for stubbed content (ADR-0072 d3) ([0065d65](https://github.com/kazi-org/kazi/commit/0065d6551de748f2ff496dcef234c852c8f2e796))
+
 ## [1.163.0](https://github.com/kazi-org/kazi/compare/v1.162.0...v1.163.0) (2026-07-17)
 
 
