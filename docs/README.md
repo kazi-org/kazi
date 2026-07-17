@@ -89,6 +89,10 @@ its config at runtime via `kazi schema <kind>`.
   configurable codenames (E29/ADR-0034, T44.7).
 - **[Live providers](live-providers.md)** — `http_probe` sustained health,
   `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
+- **[Browser assertions](browser-assertions.md)** — the full `browser` predicate
+  `assertions[].type` reference (`console_clean`, `a11y`, `visual`,
+  `form_validation`, … 13 types) with examples, matching `kazi schema browser`
+  (E43/UC-056).
 - **[The context store (Gist provider)](context-store.md)** — budget-fitted
   retrieval over heavy text artifacts; the `gist` CLI adapter, `KAZI_GIST_DSN`
   persistence, and graceful degradation when `gist` is absent.
