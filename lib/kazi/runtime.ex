@@ -99,7 +99,13 @@ defmodule Kazi.Runtime do
     cve: Kazi.Providers.Cve,
     # issue #860: the scope `deny`-path guard, synthesized by
     # `Kazi.Scope.guard_predicates/1` — independent of the `[enforcement]` profile.
-    scope_guard: Kazi.Providers.ScopeGuard
+    scope_guard: Kazi.Providers.ScopeGuard,
+    # T44.2 (ADR-0055): the `:landed` provider — the deterministic check that
+    # converged work has landed to the goal's `[integration] mode` degree.
+    # Synthesized by `Kazi.Goal.landed_predicate/1` at load time; evaluated
+    # against the LIVE working tree (a visible, non-guard predicate) so a dirty
+    # tree keeps the loop running instead of reporting a false `:converged`.
+    landed: Kazi.Providers.Landed
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The

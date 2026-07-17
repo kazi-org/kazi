@@ -328,6 +328,51 @@ defmodule Kazi.Goal do
   end
 
   @doc """
+  The SYNTHESIZED `landed` predicate for a goal (T44.2, ADR-0055), or `nil` when
+  the goal's `[integration] mode` is `:none` (no landing declared).
+
+  When a goal declares `mode` in `commit | branch | pr | merge`, converged code is
+  not yet DONE — the work must also land to that degree (committed on a non-base
+  branch, pushed, PR-open, merged). This function builds the ordinary predicate
+  that gates on exactly that, for the loader to append to the goal's predicate
+  vector at load time. `Kazi.Providers.Landed` evaluates it against the live
+  working tree.
+
+  The predicate is deliberately a VISIBLE, ordinary predicate (not `guard?`, not
+  `held_out?`): the loop grades visible predicates against the agent's working
+  copy, and `landed` MUST see the real dirty/committed state it gates on —
+  grading it from a frozen clean ref would silently reintroduce the L-0024 / H1
+  deadlock class (a permanently-clean ref reports "landed" while the fix is still
+  stranded).
+
+  ## Examples
+
+      iex> Kazi.Goal.landed_predicate(Kazi.Goal.new("g"))
+      nil
+
+      iex> g = Kazi.Goal.new("widgets", integration: %{mode: :commit})
+      iex> p = Kazi.Goal.landed_predicate(g)
+      iex> {p.id, p.kind, p.config.mode, p.config.branch, p.guard?, p.held_out?}
+      {:landed, :landed, :commit, "task/widgets", false, false}
+  """
+  @spec landed_predicate(t()) :: Predicate.t() | nil
+  def landed_predicate(%__MODULE__{integration: %{mode: :none}}), do: nil
+
+  def landed_predicate(%__MODULE__{integration: %{mode: mode} = integration} = goal)
+      when mode in [:commit, :branch, :pr, :merge] do
+    Predicate.new(:landed, :landed,
+      description: "converged work has landed to `#{mode}` (ADR-0055)",
+      config: %{
+        mode: mode,
+        branch: integration_branch(goal),
+        base: Map.get(integration, :base)
+      }
+    )
+  end
+
+  def landed_predicate(%__MODULE__{}), do: nil
+
+  @doc """
   Returns all predicates the controller observes each iteration — the goal's
   `predicates` followed by its `guards`. Both are evaluated every observation;
   the distinction is in how the loop *interprets* a failure (a failing predicate
