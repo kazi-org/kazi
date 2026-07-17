@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.200.0](https://github.com/kazi-org/kazi/compare/v1.199.0...v1.200.0) (2026-07-17)
+
+
+### Features
+
+* **importer:** opt-in --lower scenario mode (ADR-0054 d3, default byte-identical) ([8e27afa](https://github.com/kazi-org/kazi/commit/8e27afa65c5c80e3d90fda9e6bfda35e02827231))
+
 ## [1.199.0](https://github.com/kazi-org/kazi/compare/v1.198.1...v1.199.0) (2026-07-17)
 
 
