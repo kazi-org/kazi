@@ -210,6 +210,8 @@ defmodule Kazi.CLI do
       "`spec import` only (T49.11, ADR-0054 d3): the lowering mode for TAGGED Scenarios — `test_runner` (default; byte-identical to today) or `scenario` (a Scenario tagged @interface:web lowers to a `scenario` predicate on the browser surface, @interface:cli to the cli surface, wiring the runtime scenario provider / demonstrate-then-pin ADR-0064). Untagged Scenarios and other-interface tags stay `test_runner` regardless.",
     write:
       "`approve` only (T39.3, ADR-0049): materialize the approved goal as a loadable goal-file at <path>, so a file-based / version-controlled workflow can `apply <path>` and get the SAME goal `apply <ref>` runs. Under --json the result carries the written `path`. Absent, approve is unchanged.",
+    reap:
+      "`orphans` only (T54.5, issue #1073): actually KILL each orphaned harness process group (TERM then KILL) instead of only listing it. Read-only without it.",
     debrief:
       "Opt into post-dispatch debrief capture (ADR-0058): append one capped debrief question to the dispatch prompt and persist the agent's structured answer as hypothesis rows. Overrides the goal-file's [economy] debrief field.",
     status:
