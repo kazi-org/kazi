@@ -640,7 +640,16 @@ defmodule Kazi.Loop do
               # until a dispatch reports one (or when debrief is disabled).
               # Appended last so the existing field order is untouched.
               debrief: false,
-              last_debrief: []
+              last_debrief: [],
+              # --- T49.8 (ADR-0064 d4): consecutive FAILED demonstrations -------
+              # Counts back-to-back rejected/errored demonstrator dispatches with
+              # no intervening fixer dispatch (a workspace change resets it). Two in
+              # a row means re-demonstrating is futile — the run terminates
+              # `:stuck` with cause `:capability_unreachable` (a red replay that
+              # keeps failing without a code change is a capability the demonstrator
+              # cannot reach). Appended last so the existing field order is
+              # untouched.
+              consecutive_failed_demos: 0
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -1958,6 +1967,7 @@ defmodule Kazi.Loop do
 
   defp demonstrable?(%{pin_state: :unpinned}), do: true
   defp demonstrable?(%{pin_state: {:stale, :spec_changed}}), do: true
+  defp demonstrable?(%{pin_state: {:stale, :code_drift}}), do: true
   defp demonstrable?(_), do: false
 
   defp repin_allows?(%Predicate{config: config}), do: Map.get(config, :repin, "auto") != "manual"
@@ -2071,6 +2081,12 @@ defmodule Kazi.Loop do
     # is the most recent iteration that actually reported one.
     data = record_working_set(data, result)
 
+    # T49.8: a fixer dispatch is the "intervening workspace change" that makes a
+    # subsequent demonstration worth trying again — reset the consecutive-failed
+    # demonstration counter so `:capability_unreachable` only fires on demonstrations
+    # that stall with NO code work between them.
+    data = %Data{data | consecutive_failed_demos: 0}
+
     # T48.11 (ADR-0058 §3): when the goal opted in, extract this dispatch's
     # capped hypothesis list from the reply text and carry it forward the same
     # way `record_counters/3` carries `context`/`tools` — surfaced on the NEXT
@@ -2113,7 +2129,7 @@ defmodule Kazi.Loop do
     prepare_workspace(data)
     before = demonstrator_snapshot(data)
 
-    {_outcome, info} =
+    {outcome, info} =
       Kazi.Scenario.Demonstrator.demonstrate(predicate, %{workspace: data.workspace},
         harness: data.harness,
         adapter_opts: dispatch_adapter_opts(data)
@@ -2130,7 +2146,35 @@ defmodule Kazi.Loop do
     # The code (well, the pin) changed under us: any prior land/deploy is stale.
     data = record_action(data, action, landed?: false, deployed?: false)
     data = log_dispatch(data, action)
-    reobserve(data, data.reobserve_interval_ms)
+    data = record_demonstration_outcome(data, outcome)
+
+    # T49.8 (ADR-0064 d4): two consecutive failed demonstrations with no
+    # intervening code change means re-demonstrating is futile — terminate `:stuck`
+    # with `:capability_unreachable` rather than looping (or draining the budget).
+    # Checked HERE, at the end of the dispatch, so it fires before the next tick's
+    # budget gate — the same fail-fast placement + priority as the permission-denied
+    # wedge, so `:capability_unreachable` wins over `:over_budget`.
+    if capability_unreachable?(data) do
+      failing = MapSet.new(PredicateVector.failing(data.vector))
+      terminate_stuck(failing, data, capability_reasons(predicate, info), :capability_unreachable)
+    else
+      reobserve(data, data.reobserve_interval_ms)
+    end
+  end
+
+  # An accepted demonstration resets the counter; a rejected/errored one advances
+  # it. A fixer dispatch (`dispatch_agent`) also resets it — that is the
+  # "intervening workspace change" that makes the next demonstration worth trying.
+  defp record_demonstration_outcome(%Data{} = data, :accepted),
+    do: %Data{data | consecutive_failed_demos: 0}
+
+  defp record_demonstration_outcome(%Data{} = data, _rejected_or_error),
+    do: %Data{data | consecutive_failed_demos: data.consecutive_failed_demos + 1}
+
+  defp capability_unreachable?(%Data{consecutive_failed_demos: n}), do: n >= 2
+
+  defp capability_reasons(%Predicate{id: id}, info) do
+    %{id => Map.get(info, :reasons, [:capability_unreachable])}
   end
 
   # The demonstrator's read-only snapshot: the role-scoped set it must NOT write —
