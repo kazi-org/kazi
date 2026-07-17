@@ -523,6 +523,8 @@ defmodule Kazi.Goal.Loader do
          # T44.4 (ADR-0055 decision 4b): optional `[conventions]` table (the
          # process-contract toggle + repo-specific extra rules).
          {:ok, conventions} <- build_conventions(Map.get(data, "conventions")),
+         # T45.7 (ADR-0056 decision 5): optional `[escalation]` table (the model ladder).
+         {:ok, escalation} <- build_escalation(Map.get(data, "escalation")),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
@@ -561,6 +563,7 @@ defmodule Kazi.Goal.Loader do
           memory_corpus: memory_corpus,
           integration: integration,
           conventions: conventions,
+          escalation: escalation,
           metadata: Map.get(data, "metadata", %{})
         )
 
@@ -962,6 +965,47 @@ defmodule Kazi.Goal.Loader do
 
       _ ->
         {:error, "[conventions] \"extra_rules\" must be a list of strings"}
+    end
+  end
+
+  # T45.7 (ADR-0056 decision 5): the `[escalation]` MODEL ladder. Absent → the
+  # default (an EMPTY ladder, no escalation), byte-identical to today. A PRESENT
+  # block whose `ladder` key is omitted defaults to the documented three-rung
+  # ladder (haiku → sonnet → opus, per the ADR); an explicit `ladder` is the list
+  # verbatim. `max_rungs` is an optional positive-integer cap. Model ids reuse the
+  # same free-string shape `--model`/`[harness] model` accept (no allow-list here).
+  @default_ladder ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"]
+
+  defp build_escalation(nil), do: {:ok, Goal.default_escalation()}
+
+  defp build_escalation(escalation) when is_map(escalation) do
+    with {:ok, ladder} <- fetch_ladder(escalation),
+         {:ok, max_rungs} <- fetch_max_rungs(escalation) do
+      {:ok, %{ladder: ladder, max_rungs: max_rungs}}
+    end
+  end
+
+  defp build_escalation(_), do: {:error, "[escalation] must be a table"}
+
+  defp fetch_ladder(escalation) do
+    case Map.get(escalation, "ladder", @default_ladder) do
+      list when is_list(list) ->
+        if list != [] and Enum.all?(list, &(is_binary(&1) and &1 != "")) do
+          {:ok, list}
+        else
+          {:error, "[escalation] \"ladder\" must be a non-empty list of model-id strings"}
+        end
+
+      _ ->
+        {:error, "[escalation] \"ladder\" must be a non-empty list of model-id strings"}
+    end
+  end
+
+  defp fetch_max_rungs(escalation) do
+    case Map.get(escalation, "max_rungs") do
+      nil -> {:ok, nil}
+      n when is_integer(n) and n > 0 -> {:ok, n}
+      _ -> {:error, "[escalation] \"max_rungs\" must be a positive integer"}
     end
   end
 

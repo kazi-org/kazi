@@ -953,6 +953,41 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @escalation %{
+    kind: "escalation",
+    title: "[escalation] goal-file block",
+    description:
+      "The MODEL escalation ladder as DATA (T45.7, ADR-0056 decision 5; supersedes ADR-0035's " <>
+        "skill-side location). On a `stuck` OR `over_budget` verdict on the same failing " <>
+        "predicate set (the T30.3 signal), the loop RE-DISPATCHES the SAME goal at the next " <>
+        "model in the ladder instead of terminating — bounded by the ladder length (and " <>
+        "max_rungs), at which point the terminal verdict stands. Absent (or an empty ladder) = " <>
+        "today's single-model behavior, byte-identical. kazi-core holds NO selection policy — it " <>
+        "walks exactly the declared list.",
+    keys: [
+      %{
+        name: "ladder",
+        type: "array<string>",
+        required: false,
+        description:
+          "The ordered model ids to walk (rung 0 is the initial dispatch model). Same free " <>
+            "model-id shape as --model / [harness] model. A PRESENT block with no `ladder` " <>
+            "defaults to claude-haiku-4-5 → claude-sonnet-5 → claude-opus-4-8."
+      },
+      %{
+        name: "max_rungs",
+        type: "integer",
+        required: false,
+        description:
+          "Optional positive-integer cap on how many rungs to use (default: the ladder length)."
+      }
+    ],
+    example: %{
+      "id" => "escalate-widgets",
+      "escalation" => %{"ladder" => ["claude-sonnet-5", "claude-opus-4-8"]}
+    }
+  }
+
   @cli %{
     kind: "cli",
     title: "cli predicate config",
@@ -1117,6 +1152,7 @@ defmodule Kazi.Predicate.Schema do
     "no_stubs" => @no_stubs,
     "docs_updated" => @docs_updated,
     "integration" => @integration,
+    "escalation" => @escalation,
     "scenario" => @scenario,
     "oss_hygiene" => @oss_hygiene
   }
