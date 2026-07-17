@@ -1822,14 +1822,18 @@ defmodule Kazi.CLI do
     kazi bus hook <event>
 
     The harness hook entry point `kazi install-hooks` registers (ADR-0071).
-    Events: `session-start` (Claude Code's SessionStart -- registers presence
-    and injects the project board) and `turn` (Claude Code's UserPromptSubmit
-    -- injects the traffic digest, silent when the bus is quiet).
+    Events: `session-start` (Claude Code's SessionStart -- registers presence,
+    joins the project-scope team, and injects the current board) and `turn`
+    (Claude Code's UserPromptSubmit -- injects the bounded digest of traffic
+    since the session's last turn, and is COMPLETELY SILENT when the bus is
+    quiet).
 
     Contract: ALWAYS exits 0 and never blocks a session. With no daemon
     running, or an unknown/missing <event>, it prints nothing and returns
-    immediately -- a hook must never break a session. The delivered payload
-    lands in a later release; today the command is a silent no-op.
+    immediately. A hard ~2s wall-clock bound applies even to a HUNG daemon --
+    a slow or stalled daemon can never tax or break a turn. Injected content
+    is framed as UNTRUSTED, provenance-stamped, advisory external input, never
+    a command channel (ADR-0067 point 7).
     """
   end
 
@@ -4583,15 +4587,16 @@ defmodule Kazi.CLI do
   defp execute_bus("name", _args, opts),
     do: bus_error("`bus name` requires exactly one <nickname> argument", opts)
 
-  # T55.2 (ADR-0071 decision 2): `bus hook <event>` -- the harness hook entry
-  # point `install-hooks` registers (SessionStart -> `session-start`,
-  # UserPromptSubmit -> `turn`). SKELETON until T55.9 fills the payload; the
-  # skeleton's contract IS the hook contract: ALWAYS exit 0, print NOTHING,
-  # return immediately -- it never touches the daemon (no connect, so no hang),
-  # because a hook that errors, blocks, or chatters breaks/taxes every turn of
-  # every session. An unknown or missing <event> is ALSO a silent success (a
-  # hook must never break a session); `kazi bus hook --help` documents the
-  # events.
+  # T55.2/T55.9 (ADR-0071 decisions 2/4/5): `bus hook <event>` -- the harness
+  # hook entry point `install-hooks` registers (SessionStart -> `session-start`,
+  # UserPromptSubmit -> `turn`). The payload lives in `Kazi.Bus.Hook`, which
+  # holds the whole hook contract: ALWAYS exit 0, a silent no-op with the daemon
+  # down, a hard ~2s wall-clock bound even against a HUNG daemon, and the
+  # untrusted-advisory framing on anything it injects -- because a hook that
+  # errors, blocks, or chatters breaks/taxes every turn of every session. An
+  # unknown or missing <event> is ALSO a silent success; `kazi bus hook --help`
+  # documents the events.
+  defp execute_bus("hook", [event], opts), do: Kazi.Bus.Hook.run(event, bus_call_opts(opts))
   defp execute_bus("hook", _args, _opts), do: 0
 
   defp execute_bus("who", extra, opts),
