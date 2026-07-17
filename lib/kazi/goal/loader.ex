@@ -1835,7 +1835,73 @@ defmodule Kazi.Goal.Loader do
     require_string(config, :phase, id, "plan_expanded")
   end
 
+  # T41.5 (ADR-0051 decision 4): a prod_log `correlate` trust-check, when present,
+  # must be an inline table with a non-empty string `route` (and an optional
+  # numeric `window`). Absent `correlate`, this is a no-op. Validating here means a
+  # `correlate = "checkout"` (a string, not a table) or an empty route fails loudly
+  # at load, not as a silent no-op the author reads as "correlation isn't working"
+  # (the same silent-config-error shape the download-assertion guard prevents).
+  defp validate_provider_config(:prod_log, config, id) do
+    case Map.get(config, :correlate) do
+      nil ->
+        :ok
+
+      correlate when is_map(correlate) ->
+        validate_prod_log_correlate(correlate, id)
+
+      other ->
+        {:error,
+         "prod_log predicate #{inspect(id)} \"correlate\" must be an inline table " <>
+           "{route, window} (got #{inspect(other)})"}
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  defp validate_prod_log_correlate(correlate, id) do
+    with :ok <- validate_correlate_route(correlate, id) do
+      validate_correlate_window(correlate, id)
+    end
+  end
+
+  defp validate_correlate_route(correlate, id) do
+    case correlate_value(correlate, "route") do
+      route when is_binary(route) and route != "" ->
+        :ok
+
+      other ->
+        {:error,
+         "prod_log predicate #{inspect(id)} correlate \"route\" must be a non-empty " <>
+           "string (got #{inspect(other)})"}
+    end
+  end
+
+  defp validate_correlate_window(correlate, id) do
+    case correlate_value(correlate, "window") do
+      window when is_nil(window) or is_number(window) ->
+        :ok
+
+      other ->
+        {:error,
+         "prod_log predicate #{inspect(id)} correlate \"window\" must be a number " <>
+           "(got #{inspect(other)})"}
+    end
+  end
+
+  # The correlate table arrives string-keyed from TOML, but accept an atom-keyed
+  # map too (a programmatically-built config), mirroring the provider's reader.
+  defp correlate_value(correlate, key) when is_binary(key) do
+    case Map.fetch(correlate, key) do
+      {:ok, value} -> value
+      :error -> Map.get(correlate, safe_existing_atom(key))
+    end
+  end
+
+  defp safe_existing_atom(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
 
   # --- cli assertion vocabulary (T43.7, UC-055) ------------------------------
 
