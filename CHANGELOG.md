@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.181.0](https://github.com/kazi-org/kazi/compare/v1.180.0...v1.181.0) (2026-07-17)
+
+
+### Features
+
+* **scheduler:** needs-ordered merge + git cherry silent-revert verification ([e34cbd5](https://github.com/kazi-org/kazi/commit/e34cbd5998ca0bb73ee047f18c53ab3b732acaa0))
+
 ## [1.180.0](https://github.com/kazi-org/kazi/compare/v1.179.0...v1.180.0) (2026-07-17)
 
 
