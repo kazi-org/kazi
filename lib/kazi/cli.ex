@@ -187,7 +187,7 @@ defmodule Kazi.CLI do
   # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
   # defined here (above `parse/1`) so both the `--help` interception below and
   # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who board tell status watch join leave name hook)
+  @bus_verbs ~w(post read peek who board tell status get watch join leave name hook)
   @bus_kinds ~w(fact announce note intent)
   @default_bus_kind "fact"
 
@@ -418,7 +418,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -1469,12 +1469,12 @@ defmodule Kazi.CLI do
   defp parse_bus([sub | _], _flags),
     do:
       {:error,
-       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `board`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
+       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`)"}
 
   defp parse_bus([], _flags),
     do:
       {:error,
-       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `board`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
+       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`)"}
 
   defp bus_flags(flags) do
     [
@@ -1572,6 +1572,35 @@ defmodule Kazi.CLI do
     An id that is not in the stream (never posted, or aged out of the 30-day
     retention) is a one-line error, as is an id naming a broadcast `bus post`
     -- delivery status needs one recipient whose ack state can answer for it.
+
+    Requires a running `kazi daemon` -- prints a one-line no-daemon error
+    (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("get") do
+    """
+    kazi bus get <id> [--full] [--json]
+
+    Fetch the FULL body of the message `<id>` (the JetStream stream sequence a
+    digest line or stub carries) -- the deliberate pull for a stubbed body
+    (T55.6, ADR-0072 decision 3). When the digest collapses a large body into a
+    one-line stub, this is how a session that has decided the body is worth the
+    context spends it, on purpose.
+
+    A direct stream GET by id -- NO consumer, so `get` consumes NOTHING and
+    never advances anyone's read cursor: a subsequent `bus read` still delivers
+    that same message normally. Contrast `bus read`, which acks and consumes.
+
+    Prints the message's id/kind/topic/size header, then its body. By default
+    the body is bounded to a cheap 1024-byte preview (the same threshold that
+    stubbed it); `--full` prints it unabridged. Under --json the result is a
+    versioned envelope `{ok, schema_version, message: {id, scope, kind, topic,
+    sev, session, machine, ts, bytes, text, truncated}}` (`truncated` is true
+    when the default preview cut the body; `--full` returns the whole `text`).
+
+    An id that is not in the stream (never posted, or aged out of the 30-day
+    retention) is a one-line error, never a crash.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -4360,6 +4389,21 @@ defmodule Kazi.CLI do
   defp execute_bus("status", _args, opts),
     do: bus_error("`bus status` requires <id>", opts)
 
+  # T55.6 (ADR-0072 decision 3): `bus get <id>` -- the deliberate pull for a
+  # stubbed body. A direct stream GET by id that consumes nothing.
+  defp execute_bus("get", [id], opts) do
+    case Integer.parse(id) do
+      {seq, ""} when seq > 0 ->
+        do_bus_get(seq, opts)
+
+      _other ->
+        bus_error("`bus get` requires a message id (a positive integer)", opts)
+    end
+  end
+
+  defp execute_bus("get", _args, opts),
+    do: bus_error("`bus get` requires <id>", opts)
+
   # #1059: `bus read --peek` is non-destructive -- delegates to `Kazi.Bus.peek/1`
   # exactly like `bus peek` (kept as two entry points, one shared implementation).
   defp execute_bus("read", [], opts) do
@@ -4595,6 +4639,41 @@ defmodule Kazi.CLI do
 
       recipients ->
         Enum.each(recipients, fn r -> IO.puts("  #{r["session"]} #{r["state"]}") end)
+    end
+  end
+
+  # T55.6: fetch and render one message by id. `Kazi.Bus.get/2` always returns
+  # the FULL body; `Kazi.Bus.Digest.get_view/2` bounds it to a cheap preview
+  # unless `--full` was passed -- the same 1024-byte threshold that stubbed it.
+  defp do_bus_get(seq, opts) do
+    case Kazi.Bus.get(seq, bus_call_opts(opts)) do
+      {:ok, message} ->
+        view = Kazi.Bus.Digest.get_view(message, opts[:full] || false)
+
+        emit(
+          json?(opts),
+          %{"ok" => true, "schema_version" => @run_schema_version, "message" => view},
+          fn -> print_bus_get(view) end
+        )
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp print_bus_get(view) do
+    topic = view["topic"] || "_"
+    session = if view["session"], do: " session=#{view["session"]}", else: ""
+    machine = if view["machine"], do: " machine=#{view["machine"]}", else: ""
+    IO.puts("#{view["id"]} #{view["kind"]}/#{topic} #{view["bytes"]}B#{session}#{machine}")
+    IO.puts(view["text"])
+
+    if view["truncated"] do
+      IO.puts(
+        "-- preview truncated to #{byte_size(view["text"])}B of #{view["bytes"]}B; pass --full for the whole body"
+      )
     end
   end
 

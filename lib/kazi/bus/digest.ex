@@ -73,6 +73,44 @@ defmodule Kazi.Bus.Digest do
   end
 
   @doc """
+  T55.6 (ADR-0072 decision 3): shape a single message fetched by `bus get`
+  for a rendering surface. The full body always lives in `message["text"]`
+  (`Kazi.Bus.get/2` never truncates); this only decides how much of it a
+  surface shows.
+
+  `full?` true returns the body unabridged with `"truncated" => false`.
+  `full?` false bounds `"text"` to `render_threshold_bytes/0` -- the SAME
+  1024-byte threshold that collapsed the body into a stub in the first place
+  -- on a valid UTF-8 boundary, and sets `"truncated" => true` when it cut
+  anything, so a default `get` stays cheap and the `--full` escape is what
+  spends the context. A body already within the threshold is returned whole
+  with `"truncated" => false` regardless of `full?`.
+  """
+  @spec get_view(map(), boolean()) :: map()
+  def get_view(message, full?) do
+    text = message["text"] || ""
+
+    if full? or byte_size(text) <= @render_threshold_bytes do
+      Map.put(message, "truncated", false)
+    else
+      message
+      |> Map.put("text", valid_utf8_prefix(binary_part(text, 0, @render_threshold_bytes)))
+      |> Map.put("truncated", true)
+    end
+  end
+
+  # A byte-length truncation can split a multi-byte UTF-8 codepoint, which
+  # would make the preview invalid UTF-8 and break JSON encoding. Trim up to
+  # the last 3 bytes until the prefix is valid.
+  defp valid_utf8_prefix(<<>>), do: <<>>
+
+  defp valid_utf8_prefix(bin) do
+    if String.valid?(bin),
+      do: bin,
+      else: valid_utf8_prefix(binary_part(bin, 0, byte_size(bin) - 1))
+  end
+
+  @doc """
   Splits `messages` into verbatim lines (directed `msg` or `sev: "interrupt"`)
   and digest lines (`<count> <kind>/<topic>`, grouped, most-frequent first).
   Returns `%{verbatim: [String.t()], digest: [String.t()]}`; both empty for `[]`.

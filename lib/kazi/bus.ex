@@ -902,6 +902,56 @@ defmodule Kazi.Bus do
     end)
   end
 
+  @doc """
+  T55.6 (ADR-0072 decision 3): fetch the FULL body of the message with public
+  id `id` -- the same JetStream stream sequence a digest line or stub names
+  (T55.1). This is the deliberate pull that makes a stub's collapsed body
+  addressable again, so the digest's stub-collapsing stays reachable rather
+  than a dead end: a session that has decided a stub is worth the context
+  spends it here, on purpose.
+
+  Implemented as a direct JetStream stream GET by sequence -- NO consumer is
+  involved, so `get` never advances anyone's read cursor. Contrast `read/1`,
+  which acks and CONSUMES: a `get` can be spent freely and a later `read/1`
+  still delivers that same message normally.
+
+  Returns the message's provenance (`id`, `scope`, `kind`, `topic`, `sev`,
+  `session`, `machine`, `ts`, `bytes`) plus its `text` byte-identical to what
+  was posted. Errors `{:unknown_message, id}` for an id the stream cannot
+  produce (never posted, or aged out of the 30-day retention) -- the same
+  one-line error shape `status/2` uses, never a crash.
+  """
+  @spec get(pos_integer(), keyword()) :: {:ok, map()} | {:error, error()}
+  def get(id, opts \\ []) when is_integer(id) do
+    with_conn(opts, fn conn ->
+      stream = Provision.stream_name()
+
+      case JetStream.get_message(conn, stream, %{seq: id}) do
+        {:ok, message} -> {:ok, build_get(id, message)}
+        {:error, _reason} -> {:error, {:unknown_message, id}}
+      end
+    end)
+  end
+
+  defp build_get(id, message) do
+    ["bus", scope, kind | topic_parts] = String.split(message.subject, ".")
+    headers = parse_headers(message.hdrs)
+    text = message.data || ""
+
+    %{
+      "id" => id,
+      "scope" => scope,
+      "kind" => kind,
+      "topic" => if(topic_parts == [], do: nil, else: Enum.join(topic_parts, ".")),
+      "sev" => headers["sev"] || "info",
+      "session" => headers["session"],
+      "machine" => headers["machine"],
+      "ts" => headers["ts"],
+      "bytes" => byte_size(text),
+      "text" => text
+    }
+  end
+
   defp build_status(conn, stream, id, message) do
     case String.split(message.subject, ".") do
       ["bus", _scope, "msg", target] ->

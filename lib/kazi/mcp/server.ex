@@ -412,6 +412,42 @@ defmodule Kazi.MCP.Server do
         }
       },
       %{
+        "name" => "kazi_bus_get",
+        "description" =>
+          "Fetch the FULL body of one bus message by id (T55.6, ADR-0072 d3) -- the twin " <>
+            "of `kazi bus get`, the deliberate pull for a stubbed body. When kazi_bus_read " <>
+            "collapses a large body into a one-line stub, this dereferences that stub's " <>
+            "`id` (the stream sequence) back to its body, on purpose, when you have decided " <>
+            "it is worth the context. A DIRECT stream fetch by id: NO consumer, so it " <>
+            "consumes nothing and never advances any read cursor -- a later kazi_bus_read " <>
+            "still delivers that same message normally (contrast kazi_bus_read, which " <>
+            "acks). Returns {ok: true, schema_version, message: {id, scope, kind, topic, " <>
+            "sev, session, machine, ts, bytes, text, truncated}}. By default `text` is a " <>
+            "bounded preview (the same 1024-byte threshold that stubbed it) and `truncated` " <>
+            "is true when it was cut; pass full: true for the whole body. Structured error: " <>
+            "unknown_message (never posted, or aged out of the 30-day retention), no_daemon.",
+        "inputSchema" => %{
+          "type" => "object",
+          "required" => ["id"],
+          "properties" => %{
+            "id" => %{
+              "type" => "integer",
+              "description" => "The message id (stream sequence) a digest line or stub carries."
+            },
+            "full" => %{
+              "type" => "boolean",
+              "description" =>
+                "true: return the whole body unabridged instead of the default bounded " <>
+                  "preview (ADR-0072). Default false."
+            },
+            "scope" => %{
+              "type" => "string",
+              "description" => "\"machine\" (default) or \"project\"."
+            }
+          }
+        }
+      },
+      %{
         "name" => "kazi_bus_name",
         "description" =>
           "Assign a durable, addressable name to THIS session (T55.5, ADR-0073): carried " <>
@@ -677,10 +713,25 @@ defmodule Kazi.MCP.Server do
 
   # T55.12: the `kazi bus status` twin.
   defp call_tool("kazi_bus_status", args, opts) do
-    with {:ok, id} <- fetch_message_id(args) do
+    with {:ok, id} <- fetch_message_id(args, "kazi_bus_status") do
       case Bus.status(id, bus_opts(args, opts)) do
         {:ok, status} ->
           {:ok, Map.merge(status, %{"schema_version" => Schema.schema_version(), "ok" => true})}
+
+        {:error, reason} ->
+          {:tool_error, bus_error(reason)}
+      end
+    end
+  end
+
+  # T55.6: the `kazi bus get` twin -- fetch a full body by id, consuming nothing.
+  defp call_tool("kazi_bus_get", args, opts) do
+    with {:ok, id} <- fetch_message_id(args, "kazi_bus_get") do
+      case Bus.get(id, bus_opts(args, opts)) do
+        {:ok, message} ->
+          view = Digest.get_view(message, Map.get(args, "full") == true)
+
+          {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true, "message" => view}}
 
         {:error, reason} ->
           {:tool_error, bus_error(reason)}
@@ -711,7 +762,7 @@ defmodule Kazi.MCP.Server do
   # T55.12: an id is a stream sequence -- a positive integer. JSON-RPC clients
   # routinely send it as a string, so accept that spelling rather than erroring
   # on a value that is unambiguous.
-  defp fetch_message_id(args) do
+  defp fetch_message_id(args, tool) do
     case Map.get(args, "id") do
       id when is_integer(id) and id > 0 ->
         {:ok, id}
@@ -722,11 +773,11 @@ defmodule Kazi.MCP.Server do
             {:ok, seq}
 
           _other ->
-            {:error, @invalid_params, "kazi_bus_status requires `id` (a positive integer)"}
+            {:error, @invalid_params, "#{tool} requires `id` (a positive integer)"}
         end
 
       _other ->
-        {:error, @invalid_params, "kazi_bus_status requires `id` (a positive integer)"}
+        {:error, @invalid_params, "#{tool} requires `id` (a positive integer)"}
     end
   end
 
