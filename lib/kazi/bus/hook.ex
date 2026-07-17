@@ -21,11 +21,32 @@ defmodule Kazi.Bus.Hook do
   every session and a hook that errors, blocks, or chatters taxes them all:
 
     * a no-op silent exit 0 when the daemon is down (ADR-0067 point 1);
-    * a HARD ~2s wall-clock bound: even a HUNG daemon (one that accepted the
+    * a HARD wall-clock bound: even a HUNG daemon (one that accepted the
       connection but never answers) still exits 0 silently within the bound,
       via `Task.async` + `Task.yield/2` + `Task.shutdown/2` (the same bounded-
       call pattern `Kazi.Loop`/`Kazi.Scheduler` use). A hung daemon adding
-      seconds to every turn on the machine is worse than any missed digest;
+      seconds to every turn on the machine is worse than any missed digest.
+
+      The bound is PER-EVENT, and this asymmetry is deliberate (issue #1295):
+
+        * `turn` (`UserPromptSubmit`) is a PER-TURN HOT PATH -- it runs on every
+          prompt of every session on the machine, so it keeps the TIGHT 2000ms
+          bound. A hung/slow daemon must never tax the hot path by more than that.
+        * `session-start` is a ONE-SHOT at session boot. Its board draws the
+          FULL current-state projection, whose client-side fact drain scales
+          with the fact-topic space and was measured at ~9.7s under a real
+          127-topic machine-scope backlog -- exactly the busy-team load the board
+          is meant for. A 2s bound silently `Task.shutdown`s that board to
+          `:silent`, so a starting session gets NO board precisely when it needs
+          one most. session-start therefore gets a larger 15_000ms
+          bound (matching `Kazi.Bus`'s own `@default_call_timeout_ms` control-socket
+          bound, so the hook no longer kills a call the bus would have answered).
+          A human is already waiting for their session to start, so a few extra
+          seconds ONCE is invisible; the same cost on every turn would not be.
+
+      Do NOT collapse these back into one shared constant: the whole point is
+      that the hot path stays tight while the one-shot boot tolerates a slow
+      board (see docs/session-bus.md, ADR-0071, ADR-0073).
     * the injected block is framed as UNTRUSTED, provenance-stamped, advisory
       external input -- never a command channel (ADR-0067 point 7). The payload
       is produced inside the task and only WRITTEN after the task returns within
@@ -34,7 +55,13 @@ defmodule Kazi.Bus.Hook do
 
   alias Kazi.Bus
 
-  @timeout_ms 2_000
+  # PER-EVENT wall-clock bounds (issue #1295). `turn` is the per-turn hot path
+  # and stays tight; `session-start` is a one-shot boot whose full board drain
+  # can run seconds under a busy backlog, so it tolerates the same 15s bound the
+  # bus itself allows a control-socket call (`Kazi.Bus.@default_call_timeout_ms`).
+  # These MUST stay separate -- see the moduledoc.
+  @turn_timeout_ms 2_000
+  @session_start_timeout_ms 15_000
 
   @banner "===== kazi session bus (advisory) ====="
   @footer "===== end kazi session bus ====="
@@ -67,14 +94,15 @@ defmodule Kazi.Bus.Hook do
   injection block to stdout. ALWAYS returns exit code 0 -- a hook must never
   break a session.
 
-  The payload is computed in a bounded `Task`; only a block returned within the
-  budget is written, so a hung daemon (a killed, timed-out task) prints nothing.
+  The payload is computed in a bounded `Task` under the PER-EVENT budget
+  (`timeout_ms/1`); only a block returned within the budget is written, so a hung
+  daemon (a killed, timed-out task) prints nothing.
   """
   @spec run(String.t(), keyword()) :: 0
   def run(event, opts \\ []) when is_binary(event) and is_list(opts) do
     task = Task.async(fn -> bounded_payload(event, opts) end)
 
-    case Task.yield(task, @timeout_ms) || Task.shutdown(task, :brutal_kill) do
+    case Task.yield(task, timeout_ms(event)) || Task.shutdown(task, :brutal_kill) do
       {:ok, {:emit, block}} when is_binary(block) -> IO.write(block)
       _timed_out_or_silent -> :ok
     end
@@ -82,10 +110,25 @@ defmodule Kazi.Bus.Hook do
     0
   end
 
+  @doc """
+  The wall-clock bound (ms) for `event` (issue #1295). `session-start` is a
+  one-shot boot that tolerates a slow full-board drain; `turn` is the per-turn
+  hot path and stays tight. Any other event uses the tight bound.
+  """
+  @spec timeout_ms(String.t()) :: pos_integer()
+  def timeout_ms("session-start"), do: @session_start_timeout_ms
+  def timeout_ms(_event), do: @turn_timeout_ms
+
   # Any raise/throw/exit inside the payload collapses to silence: a hook never
-  # surfaces an error to the session it is decorating.
+  # surfaces an error to the session it is decorating. `:payload_fun` is a test
+  # seam (idiomatic opts injection, cf. `Kazi.Loop`'s `:now_fn`) that lets a test
+  # drive `run/2`'s per-event bound around a controllable payload without a live
+  # daemon; production never sets it, so the real `payload/2` runs.
   defp bounded_payload(event, opts) do
-    payload(event, opts)
+    case Keyword.get(opts, :payload_fun) do
+      fun when is_function(fun, 2) -> fun.(event, opts)
+      _absent -> payload(event, opts)
+    end
   catch
     _kind, _reason -> :silent
   end
