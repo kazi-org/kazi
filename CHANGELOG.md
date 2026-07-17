@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.151.0](https://github.com/kazi-org/kazi/compare/v1.150.0...v1.151.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** bounded machine digest -- Digest.render/1 with the 1 KiB stub rule and 40-line bound (ADR-0072 d1/d2/d6) ([2eba2a6](https://github.com/kazi-org/kazi/commit/2eba2a61d8909b3384c1f5639bdc933adf9ef248))
+* **bus:** digest is the default on --json and MCP; --full/full:true is the escape (ADR-0072 d1) ([90e0d27](https://github.com/kazi-org/kazi/commit/90e0d27fa0bbe1abb00a3ebe2e2ca5d3913a7914))
+* **bus:** expose the JetStream stream sequence as the public message id (ADR-0072 d3) ([c9b3e57](https://github.com/kazi-org/kazi/commit/c9b3e5799d29bbdd3b1d136fb452f55252e1a8d4))
+* **cli:** bus digest envelope joins the versioned schema surface (kazi schema bus, ADR-0023/ADR-0072) ([ce45fb3](https://github.com/kazi-org/kazi/commit/ce45fb32ae94d98d677b34e1580561c813ead750))
+
 ## [1.150.0](https://github.com/kazi-org/kazi/compare/v1.149.0...v1.150.0) (2026-07-15)
 
 
