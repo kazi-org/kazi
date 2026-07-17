@@ -472,6 +472,16 @@ table, so cross-node lease visibility still needs the NATS Transport source
 `test/kazi_web/coordination_source/native_test.exs`,
 `test/kazi/coordination/lease_table_test.exs`,
 `test/kazi/cli_run_parallel_lease_test.exs`.
+UPDATE (2026-07-16, T55.3/ADR-0073 §4): the default is now DECIDED, not fixed --
+`KaziWeb.CoordinationSource.select/0` probes the daemon control socket and picks
+the Transport source when a daemon is alive (its no-config `snapshot/0` reads the
+daemon KV session roster read-only and NEVER raises; leases still come from the
+readable `LeaseTable`), falling back to Native when no daemon runs. The invariant
+stands in its refined form: no dashboard source may raise on a single-node run,
+and an explicit `:lease_map_source` override still wins. Regression:
+`test/kazi_web/coordination_source/select_test.exs`,
+`test/kazi_web/coordination_source/transport_test.exs`,
+`test/kazi_web/live/lease_map_live_source_test.exs`.
 
 ### L-0022 #burrito #release #custom_script #mix #env #landmine -- the released binary leaks its OWN release env into `custom_script` subprocesses, crashing a nested `mix test`
 The Burrito-packaged `kazi` binary leaks its release environment (`RELEASE_*`,

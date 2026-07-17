@@ -316,6 +316,22 @@ app's supervision tree: views whose live source has nothing to show (no
 active run registered in this node) render their honest empty state, never a
 500 (issue #801).
 
+## The lease map (`/leases`)
+
+The presence + lease map is a read-only projection of the coordination
+substrate (ADR-0011: it observes, never writes). Its source is chosen at
+render time (T55.3, [ADR-0073](adr/0073-the-board-current-state-claims-identity.md)
+§4): **when a `kazi daemon` is running** on the machine (detected by probing
+the daemon's control socket, the same check `kazi daemon status` makes), the
+view defaults to the transport-backed source and the presence rail renders the
+**live bus roster** — each session with its machine and last-seen freshness,
+the same rows `kazi bus who` lists. **Without a daemon** it falls back to the
+native source and renders exactly as a single-node run always has: the live
+native lease table, an honest empty presence rail, never a 500. An explicit
+`:lease_map_source` config override wins over both. The selected source is
+stamped on the page (`data-source`), the roster re-reads on a slow poll, and
+rows past the session TTL are hidden.
+
 ## Retention and scope
 
 Single-machine scope for now: the shared SQLite read-model requires zero new
