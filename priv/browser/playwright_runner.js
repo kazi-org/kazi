@@ -238,6 +238,122 @@ const ASSERTIONS = {
     return { ok, expected, found: { filename, sha256, path } };
   },
 
+  // --- DOM-state assertions (T43.4, UC-056) --------------------------------
+  //
+  // Four small checks the visible/text pair could not express: an attribute
+  // value, an element count, an enabled/disabled state, and a form field's
+  // current value. Each returns the same `{ok, expected, found}` verdict, with
+  // `found` carrying the ACTUAL value so a fixer reads expected-vs-found, not a
+  // bare boolean. A selector that matches nothing is a real `:fail` (the thing
+  // under test is absent), never an `:error` — the page ran, it just did not
+  // contain what was asserted. `count` is the one exception: zero matches is a
+  // legitimate `found: 0`, compared against `expected` like any other number.
+
+  // `attr` — the element's attribute equals `expected`. A missing attribute is
+  // `found: null` (distinct from `found: ""`, an attribute present but empty),
+  // so `expected: ""` does NOT spuriously match a missing attribute.
+  attr: async ({ page, assertion, timeout }) => {
+    const el = await page.waitForSelector(assertion.selector, { timeout }).catch(() => null);
+    const found = el == null ? null : await el.getAttribute(assertion.name);
+    return { ok: found === assertion.expected, expected: assertion.expected, found };
+  },
+
+  // `count` — exactly `expected` elements match `selector`. Zero is a real,
+  // comparable count (an empty list), not an absence to treat as failure.
+  count: async ({ page, assertion }) => {
+    const found = await page.locator(assertion.selector).count();
+    return { ok: found === assertion.expected, expected: assertion.expected, found };
+  },
+
+  // `enabled` — the element's enabled state equals `expected` (default true).
+  // A disabled-until-valid submit button is the canonical use; `expected: false`
+  // asserts it stays disabled. A missing element is `found: null` — neither
+  // enabled nor disabled — which fails against either expectation.
+  enabled: async ({ page, assertion, timeout }) => {
+    const expected = assertion.expected ?? true;
+    const el = await page.waitForSelector(assertion.selector, { timeout }).catch(() => null);
+    const found = el == null ? null : await el.isEnabled();
+    return { ok: found === expected, expected, found };
+  },
+
+  // `field_value` — an input/textarea/select's CURRENT value equals `expected`
+  // (`inputValue`, so it reads what the user would see, not the `value`
+  // attribute's initial default). A missing field is `found: null`.
+  field_value: async ({ page, assertion, timeout }) => {
+    const el = await page.waitForSelector(assertion.selector, { timeout }).catch(() => null);
+    const found = el == null ? null : await el.inputValue().catch(() => null);
+    return { ok: found === assertion.expected, expected: assertion.expected, found };
+  },
+
+  // `form_validation` (T43.4, UC-056) — one declarative assertion for the three
+  // things a form must do, checked in order against a live page:
+  //
+  //   (i)   invalid input surfaces the expected error. Fill the `invalid` fields,
+  //         then assert `error_text` appears at `error_selector`.
+  //   (ii)  submit is disabled-until-valid. With the form still invalid, assert
+  //         `submit_selector` is disabled.
+  //   (iii) a valid submission persists. Fill the `valid` fields, click submit,
+  //         and read back `success_selector` (or `success_url`).
+  //
+  // `found` names EACH sub-check's result — `{error_shown, submit_disabled_until_valid,
+  // submission_persisted}` — so a `:fail` says WHICH of the three broke, not just
+  // that the form is wrong. Any sub-check the goal omits its inputs for is skipped
+  // and reported `null` (not asserted), never a silent pass. A sub-check that
+  // cannot run because the page is missing an element is `false`, a real fail.
+  form_validation: async ({ page, assertion, timeout }) => {
+    const fill = async (fields) => {
+      for (const f of fields ?? []) {
+        await page.fill(f.selector, f.value ?? "", { timeout }).catch(() => {});
+      }
+    };
+
+    const found = {
+      error_shown: null,
+      submit_disabled_until_valid: null,
+      submission_persisted: null,
+    };
+
+    // (i) + (ii): drive the form invalid first.
+    if (assertion.invalid != null) await fill(assertion.invalid);
+
+    if (assertion.error_selector != null) {
+      const text = await page
+        .textContent(assertion.error_selector, { timeout })
+        .catch(() => null);
+      found.error_shown =
+        text != null && (assertion.error_text == null || text.includes(assertion.error_text));
+    }
+
+    if (assertion.submit_selector != null) {
+      const submit = await page
+        .waitForSelector(assertion.submit_selector, { timeout })
+        .catch(() => null);
+      // Disabled-until-valid: with the form invalid, submit must NOT be enabled.
+      found.submit_disabled_until_valid = submit == null ? false : !(await submit.isEnabled());
+    }
+
+    // (iii): make it valid, submit, and read back the success signal.
+    if (assertion.valid != null && assertion.submit_selector != null) {
+      await fill(assertion.valid);
+      await page.click(assertion.submit_selector, { timeout }).catch(() => {});
+
+      if (assertion.success_selector != null) {
+        found.submission_persisted = await page
+          .waitForSelector(assertion.success_selector, { state: "visible", timeout })
+          .then(() => true)
+          .catch(() => false);
+      } else if (assertion.success_url != null) {
+        found.submission_persisted = page.url().includes(assertion.success_url);
+      }
+    }
+
+    // Pass only if every sub-check the goal ASKED FOR held. A skipped sub-check
+    // (null) does not drag the verdict down; a requested one that is false does.
+    const checked = Object.values(found).filter((v) => v !== null);
+    const ok = checked.length > 0 && checked.every((v) => v === true);
+    return { ok, expected: "all requested form checks hold", found };
+  },
+
   // Accessibility: run axe-core against the current view and assert at most
   // `max_violations` (default 0) violations at or above `severity` (default
   // "serious", T43.2 / UC-056). axe-core is a RUNNER-SIDE OPTIONAL dependency
