@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.167.0](https://github.com/kazi-org/kazi/compare/v1.166.0...v1.167.0) (2026-07-17)
+
+
+### Features
+
+* **browser:** `download` file-effect assertion (T49.10, ADR-0064 d7) ([d41fd19](https://github.com/kazi-org/kazi/commit/d41fd19f5b26ae679813ddef117ca198deb9d503))
+
 ## [1.166.0](https://github.com/kazi-org/kazi/compare/v1.165.0...v1.166.0) (2026-07-17)
 
 
