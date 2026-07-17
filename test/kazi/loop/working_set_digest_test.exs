@@ -88,6 +88,9 @@ defmodule Kazi.Loop.WorkingSetDigestTest do
     goal =
       Goal.new("digest-test",
         predicates: [Predicate.new(:code, :tests)],
+        # T44.4: disable the (orthogonal) process contract so this test pins the
+        # WORKING-SET DIGEST section's byte-identity in isolation.
+        conventions: %{process_contract: false, extra_rules: []},
         metadata: %{script_pid: script_pid, collector: collector}
       )
 

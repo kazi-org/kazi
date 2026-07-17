@@ -70,6 +70,9 @@ defmodule Kazi.Loop.RetrievalOptInTest do
     goal =
       Goal.new("retr-test",
         predicates: [Predicate.new(:code, :tests)],
+        # T44.4: disable the (orthogonal) process contract so this test pins the
+        # RETRIEVAL section's byte-identity in isolation.
+        conventions: %{process_contract: false, extra_rules: []},
         metadata: %{script_pid: script_pid}
       )
 

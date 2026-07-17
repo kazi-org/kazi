@@ -92,9 +92,10 @@ defmodule Kazi.Loop.OrientationPrefixTest do
                   test_sources: [{"test/widget_test.exs", source: "assert Widget.render(1)"}]
                 )
 
-  defp goal(script_pid, metadata) do
+  defp goal(script_pid, metadata, conventions) do
     Goal.new("orientation-prefix-test",
       predicates: [Predicate.new(:code, :tests)],
+      conventions: conventions,
       metadata: Map.merge(%{script_pid: script_pid}, metadata)
     )
   end
@@ -110,7 +111,15 @@ defmodule Kazi.Loop.OrientationPrefixTest do
 
     {:ok, loop} =
       Kazi.Loop.start_link(
-        goal: goal(script_pid, Keyword.get(opts, :metadata, %{})),
+        goal:
+          goal(
+            script_pid,
+            Keyword.get(opts, :metadata, %{}),
+            # T44.4: the process contract is ON by default; these orientation
+            # tests pin ORIENTATION behavior, so a case asserting the body starts
+            # at the work-item disables the (independent) contract via this opt.
+            Keyword.get(opts, :conventions, Kazi.Goal.default_conventions())
+          ),
         providers: %{tests: ScriptedProvider},
         harness: RecordingHarness,
         integrate: NoopIntegrate,
@@ -221,8 +230,14 @@ defmodule Kazi.Loop.OrientationPrefixTest do
                   )
 
     test "adds NO prefix — byte-identical to the pre-T19.1 evidence-only prompt" do
+      # T44.4: disable the (orientation-independent) process contract so this
+      # test still pins that NO orientation ⇒ the prompt begins at the work-item.
       :ok =
-        start_loop(script: %{code: [:fail, :pass]}, adapter_opts: [graph_source: @empty_source])
+        start_loop(
+          script: %{code: [:fail, :pass]},
+          adapter_opts: [graph_source: @empty_source],
+          conventions: %{process_contract: false, extra_rules: []}
+        )
 
       assert_received {:dispatched, prompt}
 
@@ -242,7 +257,9 @@ defmodule Kazi.Loop.OrientationPrefixTest do
       :ok =
         start_loop(
           script: %{code: [:fail, :pass]},
-          adapter_opts: [graph_source: @graph_source, orientation_prefix: false]
+          adapter_opts: [graph_source: @graph_source, orientation_prefix: false],
+          # T44.4: contract off so this pins ORIENTATION disabling alone.
+          conventions: %{process_contract: false, extra_rules: []}
         )
 
       assert_received {:dispatched, prompt}

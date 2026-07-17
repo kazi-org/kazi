@@ -85,6 +85,9 @@ defmodule Kazi.Loop.ContextTierTest do
     goal =
       Goal.new("context-tier-test",
         predicates: [Predicate.new(:code, :tests)],
+        # T44.4: disable the (orthogonal) process contract so this test pins the
+        # CONTEXT-TIER prompt behavior in isolation.
+        conventions: %{process_contract: false, extra_rules: []},
         metadata: %{script_pid: script_pid}
       )
 
