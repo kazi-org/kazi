@@ -83,4 +83,87 @@ defmodule Kazi.Goal.CliLoaderTest do
     assert {:error, msg} = load(config)
     assert msg =~ "unknown match"
   end
+
+  # --- T43.8: script / golden / samples --------------------------------------
+
+  test "a cli predicate gated by a script (no top-level assertions) loads" do
+    config = %{
+      "cmd" => "kazi",
+      "script" => [
+        %{"args" => ["version"], "assertions" => [%{"target" => "exit_code", "expected" => 0}]},
+        %{"args" => ["status"], "assertions" => [%{"target" => "exit_code", "expected" => 0}]}
+      ]
+    }
+
+    assert {:ok, %Goal{predicates: [%Predicate{kind: :cli}]}} = load(config)
+  end
+
+  test "an empty script is a load error" do
+    assert {:error, msg} = load(%{"cmd" => "kazi", "script" => []})
+    assert msg =~ "NON-EMPTY"
+  end
+
+  test "a script step with no assertions is a load error naming the step" do
+    config = %{
+      "cmd" => "kazi",
+      "script" => [%{"args" => ["version"], "assertions" => []}]
+    }
+
+    assert {:error, msg} = load(config)
+    assert msg =~ "script step 1"
+  end
+
+  test "a script step's bad assertion is validated with the same vocabulary" do
+    config = %{
+      "cmd" => "kazi",
+      "script" => [
+        %{"args" => ["version"], "assertions" => [%{"target" => "exit_code", "expected" => "0"}]}
+      ]
+    }
+
+    assert {:error, msg} = load(config)
+    assert msg =~ "must be an integer"
+  end
+
+  test "a golden assertion without a golden path is a load error" do
+    config = %{
+      "cmd" => "kazi",
+      "assertions" => [%{"target" => "stdout", "match" => "golden"}]
+    }
+
+    assert {:error, msg} = load(config)
+    assert msg =~ "golden"
+  end
+
+  test "a golden assertion with a golden path loads" do
+    config = %{
+      "cmd" => "kazi",
+      "assertions" => [
+        %{"target" => "stdout", "match" => "golden", "golden" => "test/fixtures/help.golden"}
+      ]
+    }
+
+    assert {:ok, %Goal{predicates: [%Predicate{kind: :cli}]}} = load(config)
+  end
+
+  test "a non-positive samples is a load error" do
+    config = %{
+      "cmd" => "kazi",
+      "assertions" => [%{"target" => "exit_code", "expected" => 0}],
+      "samples" => 0
+    }
+
+    assert {:error, msg} = load(config)
+    assert msg =~ "positive integer"
+  end
+
+  test "a positive samples loads" do
+    config = %{
+      "cmd" => "kazi",
+      "assertions" => [%{"target" => "exit_code", "expected" => 0}],
+      "samples" => 3
+    }
+
+    assert {:ok, %Goal{predicates: [%Predicate{kind: :cli}]}} = load(config)
+  end
 end
