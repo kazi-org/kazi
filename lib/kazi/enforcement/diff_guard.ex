@@ -61,11 +61,11 @@ defmodule Kazi.Enforcement.DiffGuard do
 
   # A change record per file in the diff: the added lines (with their new-file line
   # numbers) and whether the file changed at all (added OR removed lines).
-  @typep file_change :: %{
-           file: String.t(),
-           added: [{non_neg_integer(), String.t()}],
-           changed?: boolean()
-         }
+  @type file_change :: %{
+          file: String.t(),
+          added: [{non_neg_integer(), String.t()}],
+          changed?: boolean()
+        }
 
   # The longest snippet retained as evidence — enough to read the offending line,
   # bounded so a minified/huge line can't bloat the `--json` gaming-events list.
@@ -132,6 +132,16 @@ defmodule Kazi.Enforcement.DiffGuard do
   end
 
   def scan(_diff, _opts), do: []
+
+  @doc """
+  Parses a unified diff into one `t:file_change/0` per touched file — the shared,
+  tested diff-parsing primitive (added lines with their new-file line numbers).
+  Exposed so other diff scanners reuse it rather than re-implementing the parse
+  (T44.6's `Kazi.Providers.NoStubs` uses it).
+  """
+  @spec file_changes(String.t() | nil) :: [file_change()]
+  def file_changes(diff) when is_binary(diff), do: parse(diff)
+  def file_changes(_diff), do: []
 
   # ---------------------------------------------------------------------------
   # Parse: a unified diff → one file_change per touched file
