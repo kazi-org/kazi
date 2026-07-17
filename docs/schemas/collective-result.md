@@ -47,12 +47,17 @@ Current version: **2** (bumped by ADR-0032 with the apply/plan verb rename).
     {
       "partition_id": "k-a1b2c3",
       "goal_ids": ["cli-parallel"],
-      "status": "converged"
+      "status": "converged",
+      "landed": { "branch": "kazi-partition/p-k-a1b2c3-9f8e", "pr": "pr-k-a1b2c3", "merge_commit": "sha-k-a1b2c3" }
     }
   ],
   "next_action": "done"
 }
 ```
+
+The `landed` object is ADDITIVE and present only when the partition landed (T44.10);
+a run with no `[integration]` landing omits it, leaving the entry byte-identical to
+the pre-T44.10 shape.
 
 ## Fields
 
@@ -79,6 +84,7 @@ identically regardless of shape.
 | `partition_id` | string          | The partition's stable lease key (`Kazi.Scheduler.Partitioner` `:key`): overlapping partitions share it, disjoint partitions differ. Falls back to `partition-<index>` for an unkeyed partition term. |
 | `goal_ids`     | array of string | The ids of the `%Kazi.Goal{}` member goals this partition carries, so a partition verdict maps back to its goals. |
 | `status`       | string (enum)   | This partition's terminal reconciler status — one of `converged`, `stuck`, `over_budget`, `stopped`, `crashed` (`Kazi.Scheduler.partition_status/0`). |
+| `landed`       | object          | **T44.10 (ADR-0055), ADDITIVE, present only when this partition LANDED.** The per-group landing refs for a converged partition that landed its work on its OWN group-derived branch (`<branch_prefix>/<slug>`, reusing the worktree layer's `slug_for/1`, distinct per group). Keys are the refs the integrator returned: `branch` (the group's landing branch), `pr` (its PR number/handle), `merge_commit` (the resulting merge commit) — each present only when the integrator supplied it. **Absent** when the run performed no landing (`[integration]` mode `none`, or no integration configured), so the partition entry is byte-identical to the pre-T44.10 shape. This is the flat-partition analogue of the fleet member's `integration` object. |
 
 ### `collective`
 
@@ -288,8 +294,12 @@ the JSON object. For a FLAT goal — the overall verdict and one line per partit
 ```
 COLLECTIVE CONVERGED  goal=cli-parallel
 partitions: 1
-  [0] k-a1b2c3: converged
+  [0] k-a1b2c3: converged  landed=kazi-partition/p-k-a1b2c3-9f8e pr=pr-k-a1b2c3 merge=sha-k-a1b2c3
 ```
+
+The `landed=<branch> pr=<n> merge=<sha>` suffix (T44.10) appears only for a
+partition that landed; a run with no landing prints the bare `[i] <id>: <status>`
+line unchanged.
 
 For a DAG goal — the verdict and the per-frontier schedule (plus a blocked block
 when a sub-DAG is poisoned):

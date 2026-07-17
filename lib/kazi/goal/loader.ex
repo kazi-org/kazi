@@ -178,8 +178,13 @@ defmodule Kazi.Goal.Loader do
   per the house rule — never squash, never a merge commit. A dirty tree at
   integrate time is a distinct error (never a silent bulk commit) that re-dispatches
   the agent via the failing `landed` predicate. Legacy goals with no `[integration]`
-  block keep the historical bulk-commit landing. `kazi schema integration`
-  documents this shape.
+  block keep the historical bulk-commit landing.
+
+  Under `--parallel` (T44.10) the same landing runs PER GROUP: each converged
+  partition lands on its OWN group-derived branch (`<branch_prefix>/<slug>`,
+  distinct per group) and the collective result carries a per-partition `landed:
+  {branch, pr, merge_commit}` (see `docs/schemas/collective-result.md`). `kazi
+  schema integration` documents this shape.
 
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
