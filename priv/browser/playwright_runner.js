@@ -237,6 +237,42 @@ const ASSERTIONS = {
 
     return { ok, expected, found: { filename, sha256, path } };
   },
+
+  // Accessibility: run axe-core against the current view and assert at most
+  // `max_violations` (default 0) violations at or above `severity` (default
+  // "serious", T43.2 / UC-056). axe-core is a RUNNER-SIDE OPTIONAL dependency
+  // (Node/JS side, not an Elixir dep). When it is absent the assertion is
+  // UNAVAILABLE, promoted to an overall run `status: "error"` in main() — the
+  // provider maps that to :error, NEVER :fail: a missing evidence tool is infra,
+  // not failing UI work. `found` lists each violation's rule id + impact + the
+  // node targets (the evidence a fixer needs); `count` is the violation count the
+  // provider surfaces as an envelope-v2 score (lower_better, ADR-0041).
+  a11y: async ({ page, assertion }) => {
+    let axeSource;
+    try {
+      axeSource = require("axe-core").source;
+    } catch (e) {
+      return { unavailable: true, ok: false, expected: null, found: [], error: "a11y unavailable" };
+    }
+
+    const maxViolations = assertion.max_violations ?? 0;
+    const severity = assertion.severity ?? "serious";
+    const rank = { minor: 0, moderate: 1, serious: 2, critical: 3 };
+    const threshold = rank[severity] ?? rank.serious;
+
+    await page.evaluate(axeSource);
+    const results = await page.evaluate(async () => await window.axe.run(document));
+
+    const found = (results.violations || [])
+      .filter((v) => (rank[v.impact] ?? 0) >= threshold)
+      .map((v) => ({
+        id: v.id,
+        impact: v.impact,
+        nodes: (v.nodes || []).map((n) => (n.target || []).join(" ")),
+      }));
+
+    return { ok: found.length <= maxViolations, expected: maxViolations, found, count: found.length };
+  },
 };
 
 async function evalAssertion(page, assertion, timeout, captured) {
@@ -299,14 +335,29 @@ async function main() {
       screenshot = payload.screenshot;
     }
 
-    const allOk = assertions.every((a) => a.ok);
-    emit({
-      status: allOk ? "pass" : "fail",
-      url: payload.url,
-      assertions,
-      screenshot,
-      error: null,
-    });
+    // An UNAVAILABLE assertion (e.g. a11y with axe-core not installed on the
+    // runner side) means we could not evaluate that check at all — promote the
+    // whole run to "error" so the provider maps it to :error (infra), never a UI
+    // :fail. The evidence still carries the per-assertion records.
+    const unavailable = assertions.find((a) => a.unavailable);
+    if (unavailable) {
+      emit({
+        status: "error",
+        url: payload.url,
+        assertions,
+        screenshot,
+        error: unavailable.error || "assertion unavailable",
+      });
+    } else {
+      const allOk = assertions.every((a) => a.ok);
+      emit({
+        status: allOk ? "pass" : "fail",
+        url: payload.url,
+        assertions,
+        screenshot,
+        error: null,
+      });
+    }
   } catch (e) {
     // A launch/navigation/timeout failure means we could not evaluate the UI:
     // report status "error" (the provider treats it as infra, not failing work).
