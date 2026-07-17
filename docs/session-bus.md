@@ -20,8 +20,13 @@ when the daemon isn't running, and **convergence never depends on the bus**
   enumerating the valid kinds (issue #1060).
 - **Presence.** Every bus call upserts the caller's session into a
   short-TTL KV bucket — `kazi bus who` lists the roster (session, machine,
-  pid, liveness, cwd, last-seen). Rows record the caller's pid AND its
-  process start time, so liveness checks are pid-reuse-proof (T55.11).
+  pid, liveness, cwd, last-seen). Rows record the STABLE session anchor's
+  pid AND its process start time — the same nearest-stable-ancestor the
+  session id anchors on, NOT the ephemeral CLI invocation's own pid, which
+  exits milliseconds after writing the row (T55.14, issue #1164). So a
+  short-lived one-shot's row still resolves to a live process (never a false
+  `dead-reaping`), and — because the start time is recorded too — liveness
+  checks are pid-reuse-proof (T55.11).
 - **Directed messages.** `kazi bus tell <session> <text>` publishes to
   `bus.<scope>.msg.<session>`; only that session's `bus read` durable consumer
   sees it (durable = a persistent read cursor: a second read never re-delivers
@@ -274,8 +279,11 @@ column:
   idles.
 - **`dead-reaping`** — the row's pid is verifiably gone, or the pid was
   reused by a different process (rows record pid + process start time, so
-  reuse cannot resurrect a dead session). The sweep deletes such rows on
-  its next pass — this also retires legacy `os-<pid>` ghost rows.
+  reuse cannot resurrect a dead session). The recorded pid is the session's
+  STABLE anchor (T55.14), so this fires only when that anchor is genuinely
+  gone — not merely because a short-lived one-shot CLI call exited. The sweep
+  deletes such rows on its next pass — this also retires legacy `os-<pid>`
+  ghost rows.
 
 The sweep judges ONLY rows recorded by its own machine — a daemon
 (including a connect-mode one on a shared cross-machine bus) never guesses

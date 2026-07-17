@@ -816,6 +816,24 @@ digest_machine_path_test) before an assertion like "my message round-tripped"
 holds. Tests that post into a busy shared scope and read ONCE are
 order-sensitive time bombs. (T55.1 finding, 2026-07-16.)
 
+### L-0041 #bus #presence #liveness #landmine -- a presence/identity FIELD must anchor on the stable session ancestor, not the ephemeral CLI invocation's own pid
+`Kazi.Bus.upsert_presence/2` recorded `"pid" => :os.getpid()` -- the pid of the
+short-lived `kazi` CLI invocation, which exits milliseconds after writing its
+presence row. The daemon's `Liveness.verdict/1` then found that pid already
+gone and rendered EVERY live session `dead-reaping`; `idle` was unreachable
+(T55.11 shipped the column, T55.14/#1164 made it reachable). The session ID
+already solved this exact problem by anchoring on the nearest STABLE ancestor
+(`walk_to_anchor/2`, skipping transient `-c` shell wrappers) -- but the pid
+FIELD didn't reuse that walk. INVARIANT: any per-session identity that must
+OUTLIVE a one-shot CLI call (presence pid, lock owner, heartbeat subject) has
+to anchor on the same stable ancestor the session id does, never on
+`os_pid/0`. LANDMINE for tests: a regression fixture that parks a long-lived
+`bus watch` proves nothing -- a parked watch's own pid already outlives the CLI
+call. The fixture MUST be a genuine one-shot (`bus post`/`who`) whose
+still-alive ancestor is asserted as the recorded pid (T55.13's own finding).
+Live proof: a one-shot writer with OS pid 5811 (gone at read time) left a row
+recording the alive anchor pid instead, rendering `active`, not `dead-reaping`.
+
 ## Test flakiness (known-flaky, not a real regression)
 
 ### L-0033 #test #flaky #ci #known-issue -- three tests are timing-flaky under full-suite concurrency; a solo re-run greens all three
