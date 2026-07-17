@@ -11,7 +11,6 @@ defmodule Kazi.Reconcile.GherkinImporterTagsTest do
   use ExUnit.Case, async: true
 
   alias Kazi.Goal
-  alias Kazi.Goal.Loader
   alias Kazi.Reconcile.GherkinImporter
 
   @fixture Path.expand("../../fixtures/reconcile/product_catalog.feature", __DIR__)
