@@ -143,7 +143,21 @@ defmodule Kazi.Bus do
           raise_bus_error(reason)
       end
 
-    live = entries |> Enum.map(&annotate_age/1) |> filter_fresh([])
+    # filter_fresh/2 takes {entry, verdict} PAIRS since T55.11 (liveness):
+    # pair each row with its local verdict -- which also gives tell the same
+    # never-hide-a-live-pid semantics as `who` -- and unwrap the survivors.
+    # (Union-merge regression pinned by test: plain maps here crashed every
+    # non-@ tell with FunctionClauseError.)
+    local = hostname()
+
+    annotated = Enum.map(entries, &annotate_age/1)
+    started = Liveness.started_map(local_pids(annotated, local))
+
+    live =
+      annotated
+      |> Enum.map(fn entry -> {entry, local_verdict(entry, local, started)} end)
+      |> filter_fresh([])
+      |> Enum.map(fn {entry, _verdict} -> entry end)
 
     named =
       live
@@ -541,7 +555,10 @@ defmodule Kazi.Bus do
             contents
             |> Enum.map(fn {_key, value} -> Jason.decode!(value) end)
             |> Enum.map(&annotate_age/1)
-            |> Enum.map(fn entry -> {entry, local_verdict(entry, local)} end)
+            |> then(fn annotated ->
+              started = Liveness.started_map(local_pids(annotated, local))
+              Enum.map(annotated, fn entry -> {entry, local_verdict(entry, local, started)} end)
+            end)
             |> filter_fresh(opts)
             |> Enum.map(&annotate_liveness/1)
             |> filter_team(opts)
@@ -579,8 +596,13 @@ defmodule Kazi.Bus do
 
   # A pid can only be judged on the machine that recorded it; every other
   # machine's rows are `:remote` -- never guessed about (T55.11).
-  defp local_verdict(entry, local) do
-    if entry["machine"] == local, do: Liveness.verdict(entry), else: :remote
+  defp local_verdict(entry, local, started_map) do
+    if entry["machine"] == local, do: Liveness.verdict(entry, started_map), else: :remote
+  end
+
+  # The pids this machine may judge -- one batched `ps` covers them all.
+  defp local_pids(entries, local) do
+    for e <- entries, e["machine"] == local, is_integer(e["pid"]), do: e["pid"]
   end
 
   # Freshness (the "closed sessions look active" fix): the bucket TTL
@@ -992,7 +1014,13 @@ defmodule Kazi.Bus do
       stream_name: stream,
       durable_name: consumer_name,
       filter_subject: filter_subject,
-      ack_policy: :explicit
+      ack_policy: :explicit,
+      # T54.9 fix (verification gate): pull_pending defers acks for the whole
+      # walk, so the server default max_ack_pending (1000) would stall the
+      # walk -- and starve the strictly-new message behind a >1000 backlog --
+      # once that many deliveries are in flight. Unlimited is safe here: the
+      # walk is bounded by the stream itself and NAKs everything back.
+      max_ack_pending: -1
     }
 
     case Consumer.create(conn, consumer) do
@@ -1053,10 +1081,12 @@ defmodule Kazi.Bus do
       )
 
     {round, exhausted?} = collect_unacked([], 0)
-    acc = acc ++ round
+    # Prepend-and-reverse: `acc ++ round` copied the growing accumulator on
+    # every batch (O(N^2) across a deep backlog; verification-gate finding).
+    acc = [round | acc]
 
     if exhausted? or length(round) < @pull_batch do
-      acc
+      acc |> Enum.reverse() |> List.flatten()
     else
       pull_pending(conn, stream, consumer_name, inbox, acc)
     end
@@ -1069,7 +1099,7 @@ defmodule Kazi.Bus do
   # message whose durable copy this pull round already missed.
   defp collect_unacked(acc, count) do
     receive do
-      {:msg, %{status: status}} when status in ["404", "408"] ->
+      {:msg, %{status: status}} when status in ["404", "408", "409"] ->
         {Enum.reverse(acc), true}
 
       {:msg, %{topic: topic, body: body, reply_to: reply_to} = msg}
