@@ -352,6 +352,35 @@ gives a precise RED/SLO signal, `prod_log` is now the *coarse* backstop — chea
 always-available evidence that nothing is on fire — rather than the primary
 behavioural gate. See the provider docs for its config.
 
+### `correlate` — a trust-check on the green (opt-in)
+
+A `prod_log` predicate can pass — no panic, 5xx within tolerance — while a route
+you care about is quietly erroring. `correlate` cross-checks the fetched logs for
+a named route and, when it finds a 5xx/panic there, flags the pass instead of
+silently trusting the green (ADR-0051 decision 4):
+
+```toml
+[[predicate]]
+id = "prod-behaving"
+provider = "prod_log"
+cmd = "gcloud"
+args = ["logging", "read", "resource.type=cloud_run_revision", "--freshness=1h"]
+max_5xx = 5
+correlate = { route = "/checkout", window = 60 }
+```
+
+When configured, the evidence gains `correlated_prod_error` (a boolean),
+`correlate` (the `{route, window}` it checked), and a bounded `correlated_lines`
+sample. The **verdict is unchanged** — a `:pass` stays `:pass`; the flag downgrades
+*trust* in the green, not the verdict, so a consumer can decide whether a
+correlated error on that route warrants attention. `route` matches as a literal
+substring of a log line; `window` is recorded (the span the correlation speaks
+for) but not used for filtering — the query already bounds the window, exactly
+like the informational `window_minutes`. Absent `correlate`, evidence is
+byte-identical to a goal that never named it — a pure, opt-in add. A malformed
+`correlate` (a bare string instead of a `{route, window}` table, an empty route, a
+non-numeric window) is a **load error**, not a silent no-op.
+
 ---
 
 ## Why this matters
