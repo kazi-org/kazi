@@ -60,6 +60,7 @@ defmodule Kazi.Authoring.Clarify do
   """
 
   alias Kazi.Authoring.Clarify.{Option, Question}
+  alias Kazi.Goal.Roadmap
 
   @typedoc "Answers keyed by `Question.id` -> the chosen option value or free text."
   @type answers :: %{optional(String.t()) => String.t()}
@@ -88,6 +89,51 @@ defmodule Kazi.Authoring.Clarify do
       landing_question(draft)
     ]
     |> Enum.reject(&is_nil/1)
+  end
+
+  @doc """
+  The ROADMAP-SCOPE clarify floor (T45.2, UC-059): flags run over the whole DAG,
+  not one goal. Pure; returns `[Question.t()]`.
+
+    * `roadmap-unordered` — N > 1 goals with NO `needs` edges (an unordered pile
+      that probably should have been N separate `plan` calls, not a roadmap).
+    * `roadmap-frontier-integration-<id>` — a FRONTIER goal (no dependents, terminal
+      in the DAG) whose `[integration]` mode is `:none` (ADR-0055): a terminal goal
+      that never explicitly lands is a design smell worth surfacing.
+  """
+  @spec roadmap_gaps(Roadmap.t()) :: [Question.t()]
+  def roadmap_gaps(%Roadmap{nodes: nodes, edges: edges}) do
+    ([unordered_pile_question(nodes, edges)] ++ frontier_integration_questions(nodes, edges))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp unordered_pile_question(nodes, []) when length(nodes) > 1 do
+    Question.new(
+      "roadmap-unordered",
+      "These #{length(nodes)} goals declare no `needs` relationships. If they are " <>
+        "genuinely independent, submit them as separate `plan` calls; otherwise add " <>
+        "the `needs` edges that order them into a roadmap."
+    )
+  end
+
+  defp unordered_pile_question(_nodes, _edges), do: nil
+
+  # A FRONTIER (terminal) goal is one no other goal `needs` — an id that is never an
+  # edge `from`. Flag any such goal whose integration mode is `:none`.
+  defp frontier_integration_questions(nodes, edges) do
+    predecessors = MapSet.new(edges, & &1.from)
+
+    nodes
+    |> Enum.reject(&MapSet.member?(predecessors, &1.id))
+    |> Enum.filter(fn node -> node.goal.integration.mode == :none end)
+    |> Enum.map(fn node ->
+      Question.new(
+        "roadmap-frontier-integration-#{node.id}",
+        "Frontier goal #{inspect(node.id)} declares no `[integration]` mode (ADR-0055): a " <>
+          "terminal goal that never explicitly lands is a design smell. Set an integration " <>
+          "mode (commit/branch/pr/merge) or confirm converge-and-stop is intended."
+      )
+    end)
   end
 
   @doc """
