@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.170.0](https://github.com/kazi-org/kazi/compare/v1.169.0...v1.170.0) (2026-07-17)
+
+
+### Features
+
+* **goal:** synthesize an implicit landed predicate when [integration] mode != none ([d4c76b4](https://github.com/kazi-org/kazi/commit/d4c76b4c166ad02b98806d09c8843c3c1defc6c7))
+
 ## [1.169.0](https://github.com/kazi-org/kazi/compare/v1.168.0...v1.169.0) (2026-07-17)
 
 
