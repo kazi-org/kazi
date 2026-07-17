@@ -136,11 +136,14 @@ defmodule Kazi.Scenario.Demonstrator do
   defp drive(predicate, payload, context, opts) do
     {harness, harness_opts} = resolve_harness(opts)
     workspace = context[:workspace] || File.cwd!()
+    # The pin that existed BEFORE this dispatch — nil for a fresh mint, the old
+    # bytes for a REPIN (a stale re-demonstration), so acceptance can diff them.
+    old_pin = read_pin(payload.pin_path)
 
     try do
       case harness.run(prompt(payload), workspace, harness_opts) do
         {:ok, _result} = ok ->
-          gate(predicate, context, payload.pin_path, ok)
+          gate(predicate, context, payload.pin_path, old_pin, ok)
 
         other ->
           discard(payload.pin_path)
@@ -161,13 +164,18 @@ defmodule Kazi.Scenario.Demonstrator do
 
   # Born reproducible: the pin the harness wrote is accepted ONLY if re-evaluating
   # the predicate now returns :pass (validate AND replay-green both held). Anything
-  # else discards the write.
-  defp gate(predicate, context, pin_path, harness) do
+  # else discards the write. On acceptance the pin is stamped with the minted
+  # commit (so a later red replay can distinguish code drift from a regression,
+  # T49.8), and a REPIN carries the old-vs-new unified diff as evidence.
+  defp gate(predicate, context, pin_path, old_pin, harness) do
     result = Scenario.evaluate(predicate, context)
 
     case result.status do
       :pass ->
-        {:accepted, %{result: result, harness: harness}}
+        stamp_minted(pin_path, context)
+
+        {:accepted,
+         Map.merge(%{result: result, harness: harness}, repin_evidence(old_pin, pin_path))}
 
       _ ->
         discard(pin_path)
@@ -175,6 +183,65 @@ defmodule Kazi.Scenario.Demonstrator do
         {:rejected,
          %{demonstration: :rejected, reasons: rejection_reasons(result), harness: harness}}
     end
+  end
+
+  # Stamp the pin with `minted.commit = HEAD` at acceptance time. `minted` is
+  # provenance only (Kazi.Scenario.Pin ignores it when validating), so re-writing
+  # here does not disturb the just-validated pin. Best-effort: a non-git workspace
+  # or unreadable pin simply leaves `minted` unstamped.
+  defp stamp_minted(pin_path, context) do
+    with head when is_binary(head) <- head_commit(context),
+         {:ok, contents} <- File.read(pin_path),
+         {:ok, json} when is_map(json) <- Jason.decode(contents) do
+      minted = json |> Map.get("minted", %{}) |> Map.put("commit", head)
+      _ = File.write(pin_path, Jason.encode!(Map.put(json, "minted", minted)))
+    end
+
+    :ok
+  end
+
+  # A REPIN (an old pin existed) carries the old→new unified diff as evidence, so
+  # the operator reviewing the run sees exactly what the re-demonstration changed
+  # (selector rot vs a genuine behaviour change). A fresh mint carries nothing.
+  defp repin_evidence(nil, _pin_path), do: %{}
+
+  defp repin_evidence(old_pin, pin_path) do
+    case File.read(pin_path) do
+      {:ok, new_pin} -> %{repin_diff: unified_diff(old_pin, new_pin)}
+      _ -> %{}
+    end
+  end
+
+  # A simple line-oriented unified diff over `List.myers_difference/2` (stdlib —
+  # no new dependency): context lines prefixed "  ", deletions "- ", insertions
+  # "+ ".
+  defp unified_diff(old, new) do
+    String.split(old, "\n")
+    |> List.myers_difference(String.split(new, "\n"))
+    |> Enum.flat_map(fn
+      {:eq, lines} -> Enum.map(lines, &("  " <> &1))
+      {:del, lines} -> Enum.map(lines, &("- " <> &1))
+      {:ins, lines} -> Enum.map(lines, &("+ " <> &1))
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp read_pin(path) do
+    case File.read(path) do
+      {:ok, contents} -> contents
+      _ -> nil
+    end
+  end
+
+  defp head_commit(context) do
+    workspace = context[:workspace] || File.cwd!()
+
+    case System.cmd("git", ["rev-parse", "HEAD"], cd: workspace, stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   defp rejection_reasons(%{evidence: evidence}) do
