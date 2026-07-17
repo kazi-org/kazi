@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.185.0](https://github.com/kazi-org/kazi/compare/v1.184.0...v1.185.0) (2026-07-17)
+
+
+### Features
+
+* **goal:** add the [conventions] block (process_contract toggle + extra_rules) ([39f3c8d](https://github.com/kazi-org/kazi/commit/39f3c8dab14009a5abbb727e2809810f1ccfb029))
+* **harness:** controller-owned process-contract renderer ([06478dc](https://github.com/kazi-org/kazi/commit/06478dcd55f48308cb9e70a361076e7907fbd0a7))
+* **loop:** append the process contract to the dispatch prompt (after orientation, before work item) ([1f9d9dc](https://github.com/kazi-org/kazi/commit/1f9d9dc3984ddf4bc76624c26ec964b53936af69))
+
 ## [1.184.0](https://github.com/kazi-org/kazi/compare/v1.183.0...v1.184.0) (2026-07-17)
 
 
