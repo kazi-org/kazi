@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.202.0](https://github.com/kazi-org/kazi/compare/v1.201.0...v1.202.0) (2026-07-17)
+
+
+### Features
+
+* **reconcile:** expose GherkinImporter.scenarios/1 ([768ac96](https://github.com/kazi-org/kazi/commit/768ac967b650771c562f0932e83609c750dce101))
+* **reconcile:** manifest-coverage meta-predicate (T41.3) ([1e8b4e7](https://github.com/kazi-org/kazi/commit/1e8b4e7011a8f81ed9910f467b01af7105adca99))
+
 ## [1.201.0](https://github.com/kazi-org/kazi/compare/v1.200.0...v1.201.0) (2026-07-17)
 
 
