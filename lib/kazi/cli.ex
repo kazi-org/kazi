@@ -1680,6 +1680,14 @@ defmodule Kazi.CLI do
     Watching also refreshes this session's presence, so a watcher never
     ages out of `bus who`.
 
+    The wake contract (T55.13): an IDLE session has no turn boundary to
+    deliver into, so park this verb as a BACKGROUND TASK of your harness --
+    arrival (exit 0) wakes the session with the message already in hand,
+    timeout (exit 3) means re-park. Keep the `--since now` default: with
+    `--since all` a park fires instantly on backlog and degenerates into
+    the poll loop this verb exists to replace. Full contract, and when to
+    use harness-native agent teams instead: `docs/session-bus.md`.
+
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
     """
