@@ -145,6 +145,24 @@ defmodule Kazi.Goal.Loader do
 
   A non-string-list `corpus` is a validation error.
 
+  ### `[integration]` table (optional, → `Goal.integration`, T44.1/ADR-0055)
+
+  Declares how converged work LANDS (ADR-0055). Absent → `Goal.integration` is
+  `Kazi.Goal.default_integration/0` (mode `:none`, no landing) — byte-identical
+  to a goal-file with no `[integration]` block. An explicit `mode = "none"` (or
+  an empty `[integration]` table) resolves to that SAME default map.
+
+  | Key            | TOML type | Default  | Maps to / effect |
+  |----------------|-----------|----------|------------------|
+  | `mode`         | string    | `"none"` | `integration.mode` — one of `commit` \| `branch` \| `pr` \| `merge` \| `none`. `none` is converge-and-stop (no landing); `commit`/`branch`/`pr`/`merge` land progressively further (committed / pushed / PR open against base / PR rebase-merged — the house rule, never squash, never a merge commit). An unknown mode is a load error naming `[integration] mode` and the value. |
+  | `branch_prefix`| string    | `nil`    | `integration.branch_prefix` — prefix for the landing branch name. Stored verbatim; the landing machinery (T44.2+) applies its own default (`"kazi/"`). |
+  | `base`         | string    | `nil`    | `integration.base` — the base branch a `pr`/`merge` targets. Stored verbatim; absent → detected from origin at landing time. |
+  | `commit_style` | string    | `nil`    | `integration.commit_style` — informational commit-style hint (e.g. `"conventional"`). Stored verbatim. |
+
+  This is loader-only: it parses, validates, and exposes the block. The
+  synthesized `landed` predicate (T44.2) and the landing actions (T44.3) that
+  CONSUME it are separate tasks. `kazi schema integration` documents this shape.
+
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
   Declares the goal's *group taxonomy* — the vocabulary by which a large goal
@@ -346,6 +364,17 @@ defmodule Kazi.Goal.Loader do
   # goal-file `mode` string -> Goal.mode atom (T2.1 creation mode).
   @goal_modes %{"repair" => :repair, "create" => :create}
 
+  # T44.1 (ADR-0055): the `[integration]` block's `mode` string -> atom. An
+  # unknown mode is a validation error (like `@goal_modes`), so a typo fails
+  # loudly at load time naming the field, not silently at landing.
+  @integration_modes %{
+    "commit" => :commit,
+    "branch" => :branch,
+    "pr" => :pr,
+    "merge" => :merge,
+    "none" => :none
+  }
+
   @doc """
   The canonical `provider` string → `Kazi.Predicate.kind` atom mapping the loader
   validates against (ADR-0002).
@@ -357,6 +386,17 @@ defmodule Kazi.Goal.Loader do
   """
   @spec provider_kinds() :: %{optional(String.t()) => atom()}
   def provider_kinds, do: @provider_kinds
+
+  @doc """
+  The canonical `[integration]` `mode` string → atom mapping the loader validates
+  against (T44.1, ADR-0055).
+
+  Exposed as the single source of truth so other surfaces (notably
+  `Kazi.Goal.IntegrationLint`, the advisory `kazi lint` net) recognise the same
+  known modes the loader accepts, and cannot drift from it.
+  """
+  @spec integration_modes() :: %{optional(String.t()) => atom()}
+  def integration_modes, do: @integration_modes
 
   @doc """
   Reads the TOML goal-file at `path` and parses it into a `Kazi.Goal`.
@@ -396,6 +436,8 @@ defmodule Kazi.Goal.Loader do
          {:ok, debrief} <- build_economy(Map.get(data, "economy")),
          # ADR-0062: optional `[memory]` table (semantic-recall corpus override).
          {:ok, memory_corpus} <- build_memory(Map.get(data, "memory")),
+         # T44.1 (ADR-0055): optional `[integration]` table (how work lands).
+         {:ok, integration} <- build_integration(Map.get(data, "integration")),
          {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
@@ -425,6 +467,7 @@ defmodule Kazi.Goal.Loader do
          enforcement: enforcement,
          debrief: debrief,
          memory_corpus: memory_corpus,
+         integration: integration,
          metadata: Map.get(data, "metadata", %{})
        )}
     end
@@ -653,6 +696,49 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_memory(_), do: {:error, "[memory] must be a table"}
+
+  # T44.1 (ADR-0055): the optional `[integration]` table — how converged work
+  # LANDS. Absent (nil) → `Goal.default_integration/0` (mode :none, no landing).
+  # A present table maps `mode` (default "none") to its atom and stores the
+  # optional `branch_prefix`/`base`/`commit_style` strings verbatim (their
+  # defaults are applied by the landing machinery, T44.2+, not here). An unknown
+  # `mode` fails loudly naming the field + value. Because an absent block and an
+  # empty/`mode = "none"` table both resolve to the SAME default map, a :none
+  # goal is byte-identical to a goal-file with no `[integration]` block. Modeled
+  # on the `[economy]`/`[memory]` handling above.
+  defp build_integration(nil), do: {:ok, Goal.default_integration()}
+
+  defp build_integration(integration) when is_map(integration) do
+    with {:ok, mode} <- fetch_integration_mode(integration),
+         {:ok, branch_prefix} <- optional_string(integration, "branch_prefix", "integration"),
+         {:ok, base} <- optional_string(integration, "base", "integration"),
+         {:ok, commit_style} <- optional_string(integration, "commit_style", "integration") do
+      {:ok, %{mode: mode, branch_prefix: branch_prefix, base: base, commit_style: commit_style}}
+    end
+  end
+
+  defp build_integration(_), do: {:error, "[integration] must be a table"}
+
+  # `mode` (default "none") -> its atom. An unknown value names `[integration]
+  # mode` and the offending value, so a typo fails at load, not silently at
+  # landing (the same loud-failure rule as the goal `mode` and `provider`).
+  defp fetch_integration_mode(integration) do
+    case Map.get(integration, "mode", "none") do
+      mode when is_binary(mode) ->
+        case Map.fetch(@integration_modes, mode) do
+          {:ok, atom} ->
+            {:ok, atom}
+
+          :error ->
+            {:error,
+             "[integration] \"mode\" must be one of #{known_integration_modes()} " <>
+               "(got #{inspect(mode)})"}
+        end
+
+      _ ->
+        {:error, "[integration] \"mode\" must be a string"}
+    end
+  end
 
   defp enforcement_bool(enf, key, default) do
     case Map.get(enf, key, default) do
@@ -2139,6 +2225,10 @@ defmodule Kazi.Goal.Loader do
 
   defp known_modes do
     @goal_modes |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
+  end
+
+  defp known_integration_modes do
+    @integration_modes |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
   end
 
   defp known_harnesses do

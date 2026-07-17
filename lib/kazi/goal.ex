@@ -69,6 +69,16 @@ defmodule Kazi.Goal do
       indexes instead of its own built-in default corpus. `nil` (the default)
       means "use the default corpus"; an explicit `[]` opts the goal OUT of
       recall entirely (zero recall, zero cost).
+    * `integration` — how converged work LANDS (T44.1, ADR-0055), declared in
+      the goal-file's `[integration]` table. A map `%{mode:, branch_prefix:,
+      base:, commit_style:}` — `mode` is `:commit | :branch | :pr | :merge |
+      :none`, `branch_prefix`/`base`/`commit_style` are optional strings applied
+      by the landing machinery (T44.2+). Default `default_integration/0` (mode
+      `:none` — converge-and-stop, no landing). `mode: :none` and an ABSENT
+      `[integration]` block yield the IDENTICAL default map, so a `:none` goal is
+      byte-identical to a goal-file with no block. This task parses/validates/
+      exposes the block only; the synthesized `landed` predicate and the
+      landing actions are later tasks (T44.2, T44.3).
 
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
@@ -102,6 +112,23 @@ defmodule Kazi.Goal do
           allowed_tools: [String.t()] | nil
         }
 
+  @typedoc """
+  How a converged goal LANDS (T44.1, ADR-0055): the `mode` plus optional
+  `branch_prefix`/`base`/`commit_style` from the goal-file's `[integration]`
+  table. `mode: :none` (the default) means converge-and-stop with no landing.
+  """
+  @type integration :: %{
+          mode: :commit | :branch | :pr | :merge | :none,
+          branch_prefix: String.t() | nil,
+          base: String.t() | nil,
+          commit_style: String.t() | nil
+        }
+
+  # T44.1 (ADR-0055): the default `[integration]` block — mode :none, no landing.
+  # An ABSENT block and an explicit `mode = "none"` both resolve to THIS exact
+  # map, so a :none goal is byte-identical to a goal-file with no block at all.
+  @default_integration %{mode: :none, branch_prefix: nil, base: nil, commit_style: nil}
+
   @type t :: %__MODULE__{
           id: id(),
           name: String.t() | nil,
@@ -117,6 +144,7 @@ defmodule Kazi.Goal do
           enforcement: Kazi.Enforcement.t() | nil,
           debrief: boolean(),
           memory_corpus: [String.t()] | nil,
+          integration: integration(),
           metadata: map()
         }
 
@@ -161,6 +189,11 @@ defmodule Kazi.Goal do
             # use `Kazi.Memory.SemanticIndex.default_corpus/0`. Appended
             # additively so the existing field order is untouched.
             memory_corpus: nil,
+            # T44.1 (ADR-0055): the declared `[integration]` landing block.
+            # Default = the mode-:none map (converge-and-stop, no landing), the
+            # SAME value an absent block resolves to. Appended additively so the
+            # existing field order is untouched.
+            integration: @default_integration,
             metadata: %{}
 
   @doc """
@@ -178,7 +211,9 @@ defmodule Kazi.Goal do
   taxonomy (`Kazi.Goal.Group` list, T12.1, ADR-0020). `:debrief` (default
   `false`) opts into post-dispatch debrief capture (T48.11, ADR-0058 §3).
   `:memory_corpus` (default `nil`) overrides the semantic-recall corpus
-  (ADR-0062); `nil` means "use the built-in default corpus".
+  (ADR-0062); `nil` means "use the built-in default corpus". `:integration`
+  (default `default_integration/0`, mode `:none`) is the goal's `[integration]`
+  landing block (T44.1, ADR-0055).
   `:budget` and `:scope` accept either a struct or a keyword list (forwarded to
   `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
 
@@ -219,9 +254,30 @@ defmodule Kazi.Goal do
       debrief: Keyword.get(opts, :debrief, false),
       # ADR-0062: the declared `[memory] corpus` override.
       memory_corpus: Keyword.get(opts, :memory_corpus),
+      # T44.1 (ADR-0055): the declared `[integration]` landing block.
+      integration: Keyword.get(opts, :integration, @default_integration),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
+
+  @doc """
+  The default `[integration]` landing block (T44.1, ADR-0055): mode `:none` with
+  no `branch_prefix`/`base`/`commit_style` — converge-and-stop, no landing.
+
+  An ABSENT `[integration]` goal-file block and an explicit `mode = "none"` both
+  resolve to this EXACT map, so a `:none` goal is byte-identical to a goal-file
+  with no block. Exposed as the single source of truth the loader shares.
+
+  ## Examples
+
+      iex> Kazi.Goal.default_integration()
+      %{mode: :none, branch_prefix: nil, base: nil, commit_style: nil}
+
+      iex> Kazi.Goal.new("g").integration
+      %{mode: :none, branch_prefix: nil, base: nil, commit_style: nil}
+  """
+  @spec default_integration() :: integration()
+  def default_integration, do: @default_integration
 
   @doc """
   Returns all predicates the controller observes each iteration — the goal's
