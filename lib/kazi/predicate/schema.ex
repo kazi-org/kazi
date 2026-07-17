@@ -801,6 +801,15 @@ defmodule Kazi.Predicate.Schema do
             "commit). An unknown mode is a load error."
       },
       %{
+        name: "branch",
+        type: "string",
+        required: false,
+        description:
+          "The goal's REAL target branch the run's worktree checks out onto (T54.1, #1079/#1080). " <>
+            "Stored verbatim; absent → derived \"task/<sanitized id>\", so a `landed` predicate " <>
+            "naming that branch can converge."
+      },
+      %{
         name: "branch_prefix",
         type: "string",
         required: false,
@@ -825,6 +834,7 @@ defmodule Kazi.Predicate.Schema do
     ],
     example: %{
       "mode" => "pr",
+      "branch" => "task/ship-widgets",
       "branch_prefix" => "kazi/",
       "base" => "main",
       "commit_style" => "conventional"

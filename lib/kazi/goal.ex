@@ -119,6 +119,7 @@ defmodule Kazi.Goal do
   """
   @type integration :: %{
           mode: :commit | :branch | :pr | :merge | :none,
+          branch: String.t() | nil,
           branch_prefix: String.t() | nil,
           base: String.t() | nil,
           commit_style: String.t() | nil
@@ -127,7 +128,17 @@ defmodule Kazi.Goal do
   # T44.1 (ADR-0055): the default `[integration]` block — mode :none, no landing.
   # An ABSENT block and an explicit `mode = "none"` both resolve to THIS exact
   # map, so a :none goal is byte-identical to a goal-file with no block at all.
-  @default_integration %{mode: :none, branch_prefix: nil, base: nil, commit_style: nil}
+  # T54.1 (#1079/#1080): `branch` is the goal's REAL target branch the run's
+  # worktree checks out onto; `nil` = derive `task/<sanitized id>` at
+  # consumption (`integration_branch/1`), so a `landed` predicate naming that
+  # branch can actually pass.
+  @default_integration %{
+    mode: :none,
+    branch: nil,
+    branch_prefix: nil,
+    base: nil,
+    commit_style: nil
+  }
 
   @type t :: %__MODULE__{
           id: id(),
@@ -271,13 +282,50 @@ defmodule Kazi.Goal do
   ## Examples
 
       iex> Kazi.Goal.default_integration()
-      %{mode: :none, branch_prefix: nil, base: nil, commit_style: nil}
+      %{mode: :none, branch: nil, branch_prefix: nil, base: nil, commit_style: nil}
 
       iex> Kazi.Goal.new("g").integration
-      %{mode: :none, branch_prefix: nil, base: nil, commit_style: nil}
+      %{mode: :none, branch: nil, branch_prefix: nil, base: nil, commit_style: nil}
   """
   @spec default_integration() :: integration()
   def default_integration, do: @default_integration
+
+  @doc """
+  The goal's REAL target branch (T54.1, #1079/#1080): the branch the run's
+  worktree checks out onto, and the branch `Kazi.Scheduler.SerialLanding`
+  recognizes as run-owned by explicit IDENTITY (not by a `kazi-partition/`
+  naming convention). The goal-file's `[integration] branch` verbatim when
+  authored, else the derived default `task/<sanitized id>` — so a goal-authored
+  `landed` predicate asserting `git rev-parse --abbrev-ref HEAD = task/<id>` can
+  actually converge. The derived component folds anything outside `[A-Za-z0-9._-]`
+  to `-` so the id is always a legal single git-ref component.
+
+  ## Examples
+
+      iex> Kazi.Goal.integration_branch(Kazi.Goal.new("widgets"))
+      "task/widgets"
+
+      iex> g = Kazi.Goal.new("g", integration: %{mode: :branch, branch: "release/x"})
+      iex> Kazi.Goal.integration_branch(g)
+      "release/x"
+
+      iex> Kazi.Goal.integration_branch(Kazi.Goal.new("feat: a b"))
+      "task/feat-a-b"
+  """
+  @spec integration_branch(t()) :: String.t()
+  def integration_branch(%__MODULE__{id: id, integration: integration}) do
+    case integration do
+      %{branch: branch} when is_binary(branch) and branch != "" -> branch
+      _ -> "task/" <> sanitize_branch_component(id)
+    end
+  end
+
+  defp sanitize_branch_component(id) do
+    id
+    |> to_string()
+    |> String.replace(~r/[^A-Za-z0-9._-]+/, "-")
+    |> String.trim("-")
+  end
 
   @doc """
   Returns all predicates the controller observes each iteration — the goal's

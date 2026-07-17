@@ -155,6 +155,7 @@ defmodule Kazi.Goal.Loader do
   | Key            | TOML type | Default  | Maps to / effect |
   |----------------|-----------|----------|------------------|
   | `mode`         | string    | `"none"` | `integration.mode` — one of `commit` \| `branch` \| `pr` \| `merge` \| `none`. `none` is converge-and-stop (no landing); `commit`/`branch`/`pr`/`merge` land progressively further (committed / pushed / PR open against base / PR rebase-merged — the house rule, never squash, never a merge commit). An unknown mode is a load error naming `[integration] mode` and the value. |
+  | `branch`       | string    | `nil`    | `integration.branch` — the goal's REAL target branch the run's worktree checks out onto (T54.1, #1079/#1080). Stored verbatim; absent → derived `task/<sanitized id>` by `Kazi.Goal.integration_branch/1`, so a `landed` predicate naming that branch can pass. |
   | `branch_prefix`| string    | `nil`    | `integration.branch_prefix` — prefix for the landing branch name. Stored verbatim; the landing machinery (T44.2+) applies its own default (`"kazi/"`). |
   | `base`         | string    | `nil`    | `integration.base` — the base branch a `pr`/`merge` targets. Stored verbatim; absent → detected from origin at landing time. |
   | `commit_style` | string    | `nil`    | `integration.commit_style` — informational commit-style hint (e.g. `"conventional"`). Stored verbatim. |
@@ -710,10 +711,18 @@ defmodule Kazi.Goal.Loader do
 
   defp build_integration(integration) when is_map(integration) do
     with {:ok, mode} <- fetch_integration_mode(integration),
+         {:ok, branch} <- optional_string(integration, "branch", "integration"),
          {:ok, branch_prefix} <- optional_string(integration, "branch_prefix", "integration"),
          {:ok, base} <- optional_string(integration, "base", "integration"),
          {:ok, commit_style} <- optional_string(integration, "commit_style", "integration") do
-      {:ok, %{mode: mode, branch_prefix: branch_prefix, base: base, commit_style: commit_style}}
+      {:ok,
+       %{
+         mode: mode,
+         branch: branch,
+         branch_prefix: branch_prefix,
+         base: base,
+         commit_style: commit_style
+       }}
     end
   end
 
