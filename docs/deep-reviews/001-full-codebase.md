@@ -164,7 +164,7 @@ is stdio-only (no network listener). `WEB` is supervised but does not listen in 
   (Improper Enforcement of Behavioral Workflow)
 - **CVSS:** CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:L -- 5.0 (Medium base score;
   rated High by product impact -- it defeats a default-on integrity feature)
-- **Age:** ESTABLISHED -- the isolation seam is T32.4 (~2026-06-25 per lore L-0015);
+- **Age:** ESTABLISHED -- the isolation seam is T32.4 (~2026-06-25 per lore L-0046);
   the held-out subset is ADR-0042 §6.
 - **Location:** `lib/kazi/loop.ex:1276` (`isolated?/1`), `:1245` (`observe_with_isolation/1`),
   `:1457` (`all_satisfied?/2`), `:1512` (`code_failing?/2`), `:1529` (`dispatch_action/2`);
@@ -651,7 +651,7 @@ honest degradation) + diff-guard (advisory, L-0016) + ratchets. Issues: H1, M2, 
 **P1 -- Authoring/adopt** (`authoring.ex`, `adopt.ex`): harness JSON -> proposal. Issue: M3
 (untrusted-output atom path via `adopt.ex:558`). L-0018 schema-embedding present.
 
-**P1 -- Scheduler/coordination** (`scheduler/*`, `coordination/*`): L-0019 (PartitionSupervisor
+**P1 -- Scheduler/coordination** (`scheduler/*`, `coordination/*`): L-0047 (PartitionSupervisor
 ensure-started) and L-0020 (group-parallel routing) fixes confirmed present. Issues: M7, M8, L8,
 L9, I6.
 
@@ -696,7 +696,7 @@ job. Fix M1 to close the main path.
 - **Honest degradation as a design value:** isolation reports the *actual* guarantee level when
   a clean tree can't be established (`isolation.ex`), and cost is omitted (never guessed) for
   unpriced models (`cli_adapter.ex:163`).
-- **Lore-as-tests:** every prior landmine (L-0010, L-0011, L-0019, L-0020, L-0021, L-0022,
+- **Lore-as-tests:** every prior landmine (L-0010, L-0011, L-0047, L-0020, L-0021, L-0022,
   L-0023) has a named regression test cited in the moduledoc, and all were confirmed still-fixed
   in this review.
 - **Least-privilege wiring for the inner agent** (`--allowed-tools`/`--permission-mode`) and a

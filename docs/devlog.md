@@ -3319,7 +3319,7 @@ supervisor-startup fix before a released binary can run it.** Fixture reused:
 
 Three related native-parallel bugs surfaced by the parallel-run dogfooding. #1 (the
 released-binary `--parallel` `:noproc`) was already fixed and released in v1.64.2
-(commit `1708f3b`, `ensure_started/1` on the CLI path; see lore L-0019) — left as-is,
+(commit `1708f3b`, `ensure_started/1` on the CLI path; see lore L-0047) — left as-is,
 verified present in the tag. This entry covers the two remaining fixes.
 
 **Bug #2 — disjoint GROUPS collapse into one serial partition (no parallelism
@@ -3361,7 +3361,7 @@ leasing is wired — but it RENDERS (no 500), which was the blocker. See lore L-
 **Quality gates:** `mix format` clean, `mix compile --warnings-as-errors` clean, full
 suite green (2290 passed, 24 excluded). All three fixes verified VIA TEST (ExUnit);
 released-binary `--parallel` for #1 was independently verified live on v1.64.2 (lore
-L-0019). #2/#3 not yet exercised on a released binary (post-release coordinator step).
+L-0047). #2/#3 not yet exercised on a released binary (post-release coordinator step).
 
 ## 2026-06-30 — fix: scrub the burrito release/ERTS env from custom_script children (L-0022)
 
