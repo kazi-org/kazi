@@ -119,14 +119,28 @@ defmodule Kazi.Goal.Roadmap do
   goal-level layering `kazi apply --fleet --explain` prints.
   """
   @spec frontiers(t()) :: [[String.t()]]
-  def frontiers(%__MODULE__{nodes: nodes, edges: edges}) do
+  def frontiers(%__MODULE__{} = roadmap) do
+    Fleet.frontiers(to_fleet(roadmap))
+  end
+
+  @doc """
+  Projects the roadmap onto a `Kazi.Fleet` (T45.4): each roadmap node becomes a
+  fleet node carrying its already-loaded goal, each `needs` edge an explicit fleet
+  edge. This is what lets `kazi apply <roadmap>` reuse `Kazi.Fleet.Execution` —
+  the goal-level scheduler one level up — WITHOUT re-deriving edges from goal-file
+  metadata or scope overlap: the roadmap's declared `needs` ARE the edges. The
+  fleet executor runs each node's `goal` directly, so inline goal-sets (which have
+  no file) execute exactly like path members.
+  """
+  @spec to_fleet(t()) :: Fleet.t()
+  def to_fleet(%__MODULE__{nodes: nodes, edges: edges}) do
     fleet_nodes =
       Enum.map(nodes, fn n -> %Fleet.Node{id: n.id, file: source_label(n), goal: n.goal} end)
 
     fleet_edges =
       Enum.map(edges, fn e -> %Fleet.Edge{from: e.from, to: e.to, kind: :explicit} end)
 
-    Fleet.frontiers(%Fleet{nodes: fleet_nodes, edges: fleet_edges})
+    %Fleet{nodes: fleet_nodes, edges: fleet_edges}
   end
 
   @doc """
