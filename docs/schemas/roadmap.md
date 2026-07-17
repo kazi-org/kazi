@@ -90,3 +90,42 @@ LATER topological wave (`Kazi.Goal.Roadmap.frontiers/1`) — it cannot be dispat
 until that frontier converges. A STANDING roadmap apply thus triggers the
 phase-N+1 planning pass automatically once phase N converges. See `kazi schema
 plan_expanded`.
+
+## Running a roadmap (`kazi apply <roadmap>`, T45.4)
+
+`kazi apply <roadmap-file>` runs the roadmap's **whole goals in topological
+`needs` order**. It lifts the goal-level scheduler one level up: the roadmap
+projects to a `Kazi.Fleet` (`Kazi.Goal.Roadmap.to_fleet/1`) and runs through the
+SAME `Kazi.Fleet.Execution` engine `kazi apply --fleet` uses — a goal dispatches
+the instant its `needs` settle (pipelined frontiers), each goal running its own
+normal `kazi apply` loop in its **own kazi-owned task worktree** off the shared
+`--workspace` base, inheriting its own `[integration]`/landing behavior (E44). A
+converged goal lands on the base before its dependents' worktrees branch, so a
+dependent always builds on a base that already carries its predecessors' work.
+
+- **`--explain`** prints the goal-level frontier schedule (`mode:
+  "roadmap_explain"`, `dispatched: false`, the `frontiers` waves + `edges`) and
+  dispatches nothing — exit 0.
+- **`--in-place`** is rejected: every roadmap goal needs its own worktree.
+- A **single-goal** roadmap has no scheduling to do, so it **degrades to plain
+  `kazi apply` on that one goal** — the result object and exit code are
+  byte-identical to `kazi apply <that-goal-file>`.
+
+### Collective result (`--json`)
+
+The terminal object mirrors the fleet/DAG collective shape
+(`docs/schemas/collective-result.md`); only the labels differ:
+
+| Field | Type | Description |
+|---|---|---|
+| `mode` | string | `"roadmap"` (or `"roadmap_explain"` under `--explain`). |
+| `roadmap` | string | The roadmap file path. |
+| `collective` | string | The roadmap-level verdict (`converged` / `stuck` / `over_budget` / `paused`). |
+| `goals` | array&lt;object&gt; | Per-goal `{id, status, economy, integration, error}` — one row per roadmap goal. |
+| `schedule` | array&lt;object&gt; | The goal-frontier schedule (the same `Kazi.Goal.DepGraph` layering `--explain` prints). |
+| `blocked` | array&lt;object&gt; | Goals whose predecessors did not converge, naming the blocker. |
+| `economy` | object | The honest-unknown per-goal spend rollup (`members_total` / `members_reported` / `totals`). |
+| `resume_token` | string\|null | Present when paused at a frontier (`--pause-between-waves`). |
+
+The exit code is `0` on a converged (or paused) collective, non-zero otherwise —
+the same fold as `--fleet`.
