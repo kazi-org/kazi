@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.174.0](https://github.com/kazi-org/kazi/compare/v1.173.0...v1.174.0) (2026-07-17)
+
+
+### Features
+
+* **providers:** substitute fresh inputs before scenario replay ([25a92d5](https://github.com/kazi-org/kazi/commit/25a92d5748bf32f36b6e350ed70497274ec96289))
+* **scenario:** input generators + per-replay placeholder substitution ([58c33cf](https://github.com/kazi-org/kazi/commit/58c33cf681eca3c09313d4a18dd9e3a6f46cdb0b))
+
 ## [1.173.0](https://github.com/kazi-org/kazi/compare/v1.172.0...v1.173.0) (2026-07-17)
 
 
