@@ -130,6 +130,8 @@ defmodule Kazi.Loop do
   # T48.11 (ADR-0058 §3): the opt-in post-dispatch debrief question + the
   # write-only extraction of a capped hypothesis list from a dispatch result.
   alias Kazi.Harness.Debrief
+  # T44.4 (ADR-0055 decision 4b): the controller-owned process-contract renderer.
+  alias Kazi.Harness.ProcessContract
   # T3.1d resource lease: the per-key lease substrate (acquire/renew/release via
   # CAS + TTL on an injected clock, ADR-0006). The loop leases the goal's resource
   # key before dispatch so contending instances serialize (see the dispatch-prep
@@ -2176,6 +2178,12 @@ defmodule Kazi.Loop do
 
     %{
       orientation: orientation_prefix(data),
+      # T44.4 (ADR-0055 decision 4b): the controller-owned PROCESS CONTRACT — a
+      # stable, versioned block of universal working rules rendered from the goal's
+      # `[conventions]` config ALONE (never per-iteration state), so it is
+      # byte-identical across iterations (a cacheable head). `nil` when
+      # `process_contract = false`, which reverts the prompt to the pre-E44 body.
+      process_contract: ProcessContract.section(goal.conventions),
       work_item: work_item,
       digest: Digest.render(data.working_set_digest),
       evidence: evidence,
@@ -2315,6 +2323,7 @@ defmodule Kazi.Loop do
   @spec assemble_prompt(map()) :: String.t()
   defp assemble_prompt(%{
          orientation: orientation,
+         process_contract: process_contract,
          work_item: work_item,
          digest: digest,
          evidence: evidence,
@@ -2330,11 +2339,14 @@ defmodule Kazi.Loop do
         note -> work_item <> "\n\n" <> note <> "\n\n" <> evidence
       end
 
+    # T44.4: the cacheable HEAD is orientation then process-contract (both stable
+    # across iterations), joined ahead of the volatile work-item→digest→evidence
+    # body. Each is independently optional: nil orientation AND nil contract leave
+    # the body byte-identical to the pre-E44 prompt.
     prompt =
-      case orientation do
-        nil -> body
-        prefix -> prefix <> "\n\n" <> body
-      end
+      [orientation, process_contract, body]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n\n")
 
     # T35.4: the indexed-evidence section sits AFTER the (now-compact) evidence slot
     # and BEFORE retrieval; nil when no artifact was compressed this iteration, so
