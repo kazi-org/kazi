@@ -570,6 +570,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> [--in-place] [--base <ref>]  # workspace = the BASE; --in-place edits it directly (ADR-0065)
       kazi apply <goal-file> --workspace <path> --parallel --pause-between-waves  # pause at each wave boundary with a resume_token
       kazi apply <goal-file> --workspace <path> --resume <token>        # continue a paused run from its checkpoint
+      kazi apply <roadmap-file> --workspace <path> [--explain] [--json] # run a roadmap's goals in needs order (T45.4, ADR-0075)
       kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files (ADR-0065)
       kazi status <ref> [--json]
       kazi orphans [--reap] [--json]               # list runs whose harness child is still alive (#1073); --reap kills them
@@ -2205,10 +2206,21 @@ defmodule Kazi.CLI do
   # Boot the app + read-model, load the goal, run it, report. Returns the exit
   # code (never halts) so it stays testable.
   defp execute_run(goal_source, opts, runtime_opts) do
-    if opts[:fleet] == true do
-      execute_fleet(goal_source, opts, runtime_opts)
-    else
-      execute_single_run(goal_source, opts, runtime_opts)
+    cond do
+      opts[:fleet] == true ->
+        execute_fleet(goal_source, opts, runtime_opts)
+
+      # T45.4 (ADR-0075): a positional roadmap artifact (a [[goals]] DAG) runs its
+      # whole goals in topological `needs` frontiers one level up — the SAME
+      # Kazi.Fleet.Execution scheduler the --fleet flag uses, but the DAG comes
+      # from the roadmap's DECLARED `needs`, not goal-file metadata/scope overlap.
+      # `roadmap_file?/1` peeks for a top-level [[goals]] array, so a proposal ref
+      # or plain goal-file never routes here.
+      roadmap_file?(goal_source) ->
+        execute_roadmap(goal_source, opts, runtime_opts)
+
+      true ->
+        execute_single_run(goal_source, opts, runtime_opts)
     end
   end
 
@@ -2293,30 +2305,11 @@ defmodule Kazi.CLI do
     # dispatches under is running (idempotent under mix/test).
     {:ok, _supervisor} = Kazi.Scheduler.PartitionSupervisor.ensure_started()
 
-    workspace = opts[:workspace] || "."
-    json? = json?(opts)
-
-    exec_opts =
-      runtime_opts
-      |> Keyword.take(@fleet_seam_opts)
-      |> Keyword.put(:workspace, workspace)
-      |> Keyword.put(:persist?, persist?)
-      |> Keyword.put(:runtime_opts, fleet_member_runtime_opts(opts, runtime_opts))
-      |> maybe_put(:fleet_concurrency, opts[:fleet_concurrency])
-      # T50.8: --base selects every member worktree's base ref (nil keeps the
-      # HEAD default with the stale-base warning).
-      |> maybe_put(:base_ref, opts[:base])
-      # issue #936 one level up: under --json --stream, fleet frontier
-      # boundaries emit the same-shaped frontier_complete JSONL event the
-      # --parallel needs-DAG path emits (same helper, same schema).
-      |> maybe_put_frontier_stream(opts)
-      # T50.6: --pause-between-waves / --resume act on fleet frontiers the same
-      # way they act on a needs-DAG goal's waves — same helper, one level up.
-      |> maybe_put_pause_resume(opts)
+    exec_opts = build_fleet_exec_opts(opts, runtime_opts, persist?)
 
     case Fleet.Execution.run(fleet, exec_opts) do
       {:ok, result} ->
-        report_fleet(path, fleet, result, json?)
+        report_fleet(path, fleet, result, json?(opts))
         fleet_exit_code(result)
 
       {:error, {:resume_not_found, token}} ->
@@ -2328,6 +2321,31 @@ defmodule Kazi.CLI do
       {:error, reason} ->
         fleet_error("fleet execution failed: #{inspect(reason)}", opts)
     end
+  end
+
+  # The `Kazi.Fleet.Execution.run/2` opts shared by the --fleet path and the
+  # T45.4 roadmap path — both drive the SAME goal-level scheduler, so they build
+  # the execution opts identically (member seams, per-member runtime opts,
+  # concurrency cap, base ref, frontier stream, pause/resume).
+  defp build_fleet_exec_opts(opts, runtime_opts, persist?) do
+    workspace = opts[:workspace] || "."
+
+    runtime_opts
+    |> Keyword.take(@fleet_seam_opts)
+    |> Keyword.put(:workspace, workspace)
+    |> Keyword.put(:persist?, persist?)
+    |> Keyword.put(:runtime_opts, fleet_member_runtime_opts(opts, runtime_opts))
+    |> maybe_put(:fleet_concurrency, opts[:fleet_concurrency])
+    # T50.8: --base selects every member worktree's base ref (nil keeps the
+    # HEAD default with the stale-base warning).
+    |> maybe_put(:base_ref, opts[:base])
+    # issue #936 one level up: under --json --stream, frontier boundaries emit
+    # the same-shaped frontier_complete JSONL event the --parallel needs-DAG
+    # path emits (same helper, same schema).
+    |> maybe_put_frontier_stream(opts)
+    # T50.6: --pause-between-waves / --resume act on frontiers the same way they
+    # act on a needs-DAG goal's waves — same helper, one level up.
+    |> maybe_put_pause_resume(opts)
   end
 
   # The per-member `Kazi.Runtime.run/2` opts: the caller's runtime seams (minus
@@ -2501,6 +2519,155 @@ defmodule Kazi.CLI do
       %Fleet.Edge{from: from, to: to, kind: :inferred_overlap, overlap: overlap} ->
         pairs = Enum.map_join(overlap, ", ", fn {a, b} -> "#{a}~#{b}" end)
         IO.puts("  edge: #{from} -> #{to} (inferred overlap: #{pairs})")
+    end)
+  end
+
+  # ===========================================================================
+  # apply over a roadmap (T45.4, ADR-0075)
+  # ===========================================================================
+  #
+  # `kazi apply <roadmap>` lifts the goal-level scheduler one level up: it runs
+  # the roadmap's WHOLE GOALS in topological `needs` frontiers via the SAME
+  # `Kazi.Fleet.Execution` engine `--fleet` uses (a roadmap projects to a fleet
+  # through `Kazi.Goal.Roadmap.to_fleet/1`). Per-goal loops are UNCHANGED — each
+  # goal runs its own kazi apply loop in its own task worktree, inheriting its own
+  # `[integration]`/landing (E44). The result is a roadmap-level collective
+  # mirroring the fleet/DAG collective shape (docs/schemas/collective-result.md).
+
+  defp execute_roadmap(path, opts, runtime_opts) do
+    case Kazi.Goal.Roadmap.load(path) do
+      # A SINGLE-goal roadmap has no scheduling to do, so it degrades to plain
+      # `kazi apply` on that one goal — the SAME `run_goal/4` entry the lone
+      # goal-file path takes (no proposal ref), so --explain/--check and the
+      # result object are byte-identical to `kazi apply <that-goal-file>`.
+      {:ok, %Kazi.Goal.Roadmap{nodes: [only]}} ->
+        persist? = ensure_read_model()
+        run_goal(only.goal, opts, persist?, runtime_opts)
+
+      {:ok, %Kazi.Goal.Roadmap{} = roadmap} ->
+        cond do
+          opts[:explain] == true ->
+            explain_roadmap(path, roadmap, opts)
+
+          # Every roadmap goal runs in its OWN task worktree off the shared base
+          # (isolation is the goal-level contract, ADR-0065/ADR-0075), so an
+          # in-place roadmap would race every goal in one checkout. Rejected
+          # loudly, like --fleet + --in-place.
+          opts[:in_place] == true ->
+            fleet_error(
+              "--in-place cannot run a roadmap: every roadmap goal runs in its own " <>
+                "kazi-owned task worktree off the shared --workspace base " <>
+                "(ADR-0065/ADR-0075). Drop --in-place.",
+              opts
+            )
+
+          true ->
+            run_roadmap(path, roadmap, opts, runtime_opts)
+        end
+
+      {:error, message} ->
+        fleet_error(message, opts)
+    end
+  end
+
+  defp run_roadmap(path, %Kazi.Goal.Roadmap{} = roadmap, opts, runtime_opts) do
+    fleet = Kazi.Goal.Roadmap.to_fleet(roadmap)
+    persist? = ensure_read_model()
+    {:ok, _supervisor} = Kazi.Scheduler.PartitionSupervisor.ensure_started()
+    exec_opts = build_fleet_exec_opts(opts, runtime_opts, persist?)
+
+    case Fleet.Execution.run(fleet, exec_opts) do
+      {:ok, result} ->
+        report_roadmap(path, fleet, result, json?(opts))
+        fleet_exit_code(result)
+
+      {:error, {:resume_not_found, token}} ->
+        fleet_error("resume token #{token} not found; re-run without it", opts)
+
+      {:error, {:goal_changed, message}} ->
+        fleet_error("cannot resume: #{message}", opts)
+
+      {:error, reason} ->
+        fleet_error("roadmap execution failed: #{inspect(reason)}", opts)
+    end
+  end
+
+  # The roadmap terminal object mirrors the fleet/DAG collective shape exactly —
+  # only `mode` ("roadmap"), the source key (`roadmap`), and the node vocabulary
+  # (`goals`) differ. Every sub-view (`goals`, `schedule`, `blocked`, economy,
+  # next_action) reuses the fleet builders, so the two surfaces never drift.
+  defp report_roadmap(path, %Fleet{} = fleet, result, json?) do
+    emit(json?, roadmap_result_json(path, fleet, result), fn ->
+      report_roadmap_human(path, fleet, result)
+    end)
+  end
+
+  defp roadmap_result_json(path, %Fleet{} = fleet, result) do
+    collective_str = to_string(result.collective)
+    synthetic = Fleet.Execution.synthetic_goal(fleet, ".")
+
+    %{
+      schema_version: @run_schema_version,
+      mode: "roadmap",
+      roadmap: path,
+      collective: collective_str,
+      goals: fleet_members_json(result),
+      schedule: schedule_json(synthetic, result.members),
+      blocked: blocked_json(Map.get(result, :blocked, [])),
+      economy: result.economy,
+      resume_token: result.resume_token,
+      next_action: fleet_next_action(collective_str)
+    }
+  end
+
+  defp report_roadmap_human(path, %Fleet{} = fleet, result) do
+    synthetic = Fleet.Execution.synthetic_goal(fleet, ".")
+
+    IO.puts("ROADMAP #{result.collective |> to_string() |> String.upcase()}  source=#{path}")
+    IO.puts("goals: #{length(result.members)}")
+    print_schedule_frontiers(schedule_view(synthetic, result.members))
+    print_blocked_human(Map.get(result, :blocked, []))
+    print_fleet_economy_human(result.economy)
+
+    if result.resume_token do
+      IO.puts("resume_token: #{result.resume_token}")
+    end
+  end
+
+  defp explain_roadmap(path, %Kazi.Goal.Roadmap{} = roadmap, opts) do
+    fleet = Kazi.Goal.Roadmap.to_fleet(roadmap)
+    frontiers = Fleet.frontiers(fleet)
+
+    emit(json?(opts), roadmap_explain_json(path, fleet, frontiers), fn ->
+      roadmap_explain_human(path, fleet, frontiers)
+    end)
+
+    0
+  end
+
+  defp roadmap_explain_json(path, %Fleet{nodes: nodes, edges: edges}, frontiers) do
+    %{
+      schema_version: @run_schema_version,
+      mode: "roadmap_explain",
+      dispatched: false,
+      roadmap: path,
+      goals: Enum.map(nodes, fn n -> %{id: n.id, source: n.file} end),
+      edges: Enum.map(edges, &fleet_edge_json/1),
+      frontiers: frontiers,
+      next_action: "run without --explain to execute the roadmap"
+    }
+  end
+
+  defp roadmap_explain_human(path, %Fleet{edges: edges}, frontiers) do
+    IO.puts("ROADMAP SCHEDULE (explain, nothing dispatched)  source=#{path}")
+    IO.puts("frontiers: #{length(frontiers)}")
+
+    frontiers
+    |> Enum.with_index()
+    |> Enum.each(fn {ids, index} -> IO.puts("  frontier #{index}: #{Enum.join(ids, ", ")}") end)
+
+    Enum.each(edges, fn %Fleet.Edge{from: from, to: to} ->
+      IO.puts("  edge: #{from} -> #{to}")
     end)
   end
 
