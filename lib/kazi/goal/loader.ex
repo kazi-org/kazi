@@ -1663,7 +1663,10 @@ defmodule Kazi.Goal.Loader do
   # failure shape ADR-0058 fixed for a missing `url`: a config error the loop can
   # only discover by burning its budget. Checking the vocabulary at LOAD names the
   # bad type and the valid set instead. A new runner type must be added here too.
-  @browser_assertion_types ~w(visible hidden text url console_clean)
+  @browser_assertion_types ~w(visible hidden text url console_clean a11y)
+
+  # Kept in lockstep with the axe-core impact levels the runner ranks (T43.2).
+  @a11y_severities ~w(minor moderate serious critical)
 
   defp validate_browser_assertions(config, id) do
     case Map.get(config, :assertions) do
@@ -1721,7 +1724,41 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # `a11y` (T43.2, UC-056): `severity` (when given) must be a known axe-core impact
+  # level, and `max_violations` (when given) a non-negative integer — a mis-declared
+  # gate (a typo'd severity, a negative/float budget) fails loudly at LOAD, not by
+  # burning the loop's budget at dispatch. Both default in the runner when absent.
+  defp validate_browser_assertion_keys("a11y", assertion, id) do
+    with :ok <- validate_a11y_severity(assertion, id) do
+      validate_a11y_max_violations(assertion, id)
+    end
+  end
+
   defp validate_browser_assertion_keys(_type, _assertion, _id), do: :ok
+
+  defp validate_a11y_severity(assertion, id) do
+    case assertion_key(assertion, "severity") do
+      severity when is_nil(severity) or severity in @a11y_severities ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} a11y assertion \"severity\" must be one of " <>
+           "#{Enum.join(@a11y_severities, ", ")} (got #{inspect(other)})"}
+    end
+  end
+
+  defp validate_a11y_max_violations(assertion, id) do
+    case assertion_key(assertion, "max_violations") do
+      max when is_nil(max) or (is_integer(max) and max >= 0) ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} a11y assertion \"max_violations\" must be a " <>
+           "non-negative integer (got #{inspect(other)})"}
+    end
+  end
 
   # An assertion table arrives string-keyed from TOML (the loader only atomizes
   # top-level predicate keys) or atom-keyed from an inline/authored map. Unlike
