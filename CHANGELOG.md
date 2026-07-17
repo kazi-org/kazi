@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.215.0](https://github.com/kazi-org/kazi/compare/v1.214.0...v1.215.0) (2026-07-17)
+
+
+### Features
+
+* **cli:** startup-hang watchdog dumps where a hung startup is blocked (T59.3, [#1255](https://github.com/kazi-org/kazi/issues/1255)) ([8ac02be](https://github.com/kazi-org/kazi/commit/8ac02bebaddce8c66e761e631d4feee4da52c9b1))
+
 ## [1.214.0](https://github.com/kazi-org/kazi/compare/v1.213.0...v1.214.0) (2026-07-17)
 
 
