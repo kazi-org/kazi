@@ -66,8 +66,49 @@ defmodule Kazi.Bus.HookPayloadTest do
       assert out == ""
     end
 
+    test "notification with no daemon prints nothing and exits 0 (T60.3)" do
+      out =
+        capture_io(fn ->
+          assert Hook.run("notification", sock_path: missing_sock(), summary: "x") == 0
+        end)
+
+      assert out == ""
+    end
+
     test "payload/2 returns :silent for an unknown event with no work done" do
       assert Hook.payload("nope", []) == :silent
+    end
+  end
+
+  # ===========================================================================
+  # Untagged: T60.3 (issue #1156) -- attention_topic/1's pure sanitization rule
+  # ===========================================================================
+
+  describe "attention_topic/1" do
+    test "prefixes the session with attention-" do
+      assert Hook.attention_topic("worker-1") == "attention-worker-1"
+    end
+
+    test "sanitizes any char outside [A-Za-z0-9._-] to a dash, without adding extra dots" do
+      assert Hook.attention_topic("worker@host/1") == "attention-worker-host-1"
+      assert Hook.attention_topic("s-abc123.def_ghi") == "attention-s-abc123.def_ghi"
+    end
+  end
+
+  # ===========================================================================
+  # Untagged: T60.3 -- notification/1 ALWAYS returns :silent (posts outward only)
+  # ===========================================================================
+
+  describe "notification/1 always returns :silent" do
+    test ":silent even when the post would succeed (no daemon here, but the CONTRACT holds regardless)" do
+      assert Hook.notification(sock_path: missing_sock(), summary: "blocked on approval") ==
+               :silent
+    end
+
+    test ":silent even with malformed opts / no summary / no stdin available" do
+      capture_io("", fn ->
+        assert Hook.notification(sock_path: missing_sock()) == :silent
+      end)
     end
   end
 
@@ -184,6 +225,38 @@ defmodule Kazi.Bus.HookPayloadTest do
       row = Enum.find(roster, &(&1["session"] == session))
       assert row, "the session-start session must appear in a real `who`"
       assert row["team"] == team
+    end
+
+    # T60.3 (issue #1156): notification posts a waiting-on-operator fact on
+    # `attention-<session>`, always returning :silent (it never injects).
+    test "notification posts a waiting-on-operator fact on attention-<session>, returns :silent",
+         %{conn: conn} do
+      session = unique_session()
+      opts = [conn: conn, session: session, scope: "machine", summary: "needs a decision"]
+
+      assert Hook.notification(opts) == :silent
+
+      {:ok, board} = Bus.board(opts)
+      assert [entry] = board["attention"]
+      assert entry["session"] == session
+      assert entry["summary"] == "needs a decision"
+    end
+
+    # T60.3: turn clears (posts "none" on) the session's attention topic every
+    # turn, regardless of whether a digest is emitted -- best-effort and
+    # rescue-wrapped, so it never disturbs the digest path itself.
+    test "turn clears a previously-waiting session's attention fact", %{conn: conn} do
+      session = unique_session()
+      opts = [conn: conn, session: session, scope: "machine", summary: "blocked"]
+
+      assert Hook.notification(opts) == :silent
+      {:ok, board_before} = Bus.board(opts)
+      assert [_waiting] = board_before["attention"]
+
+      Hook.turn(opts)
+
+      {:ok, board_after} = Bus.board(opts)
+      assert board_after["attention"] == []
     end
   end
 

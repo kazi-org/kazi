@@ -93,6 +93,16 @@ defmodule Kazi.CLIBusHookTest do
       assert own_stderr_lines(err) == []
     end
 
+    test "`bus hook notification` exits 0 and prints nothing (T60.3)" do
+      {out, err} =
+        with_io(:stderr, fn ->
+          capture_io("", fn -> assert Kazi.CLI.run(["bus", "hook", "notification"]) == 0 end)
+        end)
+
+      assert out == ""
+      assert err == ""
+    end
+
     test "an unknown event is STILL a silent exit 0 (a hook must never break a session)" do
       {out, err} =
         with_io(:stderr, fn ->
@@ -149,6 +159,7 @@ defmodule Kazi.CLIBusHookTest do
       assert out =~ "kazi bus hook <event>"
       assert out =~ "session-start"
       assert out =~ "turn"
+      assert out =~ "notification"
       assert out =~ "exits 0"
       assert out =~ "install-hooks"
     end

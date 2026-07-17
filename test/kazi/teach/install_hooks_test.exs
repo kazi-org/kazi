@@ -61,14 +61,27 @@ defmodule Kazi.Teach.InstallHooksTest do
       assert [%{"type" => "command", "command" => "kazi bus hook turn"}] = entry_turn["hooks"]
     end
 
-    test "binds ONLY SessionStart and UserPromptSubmit (ADR-0071 d2 -- never Stop)", %{
-      dir: dir,
-      path: path
-    } do
+    test "binds ONLY SessionStart, UserPromptSubmit, and Notification (ADR-0071 d2/T60.3 -- never Stop)",
+         %{
+           dir: dir,
+           path: path
+         } do
       {:ok, _} = InstallHooks.install(dir: dir)
       decoded = path |> File.read!() |> Jason.decode!()
 
-      assert Map.keys(decoded["hooks"]) |> Enum.sort() == ["SessionStart", "UserPromptSubmit"]
+      assert Map.keys(decoded["hooks"]) |> Enum.sort() == [
+               "Notification",
+               "SessionStart",
+               "UserPromptSubmit"
+             ]
+    end
+
+    test "registers the Notification hook (T60.3, issue #1156)", %{dir: dir, path: path} do
+      {:ok, _} = InstallHooks.install(dir: dir)
+      decoded = path |> File.read!() |> Jason.decode!()
+
+      assert [entry] = decoded["hooks"]["Notification"]
+      assert [%{"type" => "command", "command" => "kazi bus hook notification"}] = entry["hooks"]
     end
   end
 
@@ -182,6 +195,20 @@ defmodule Kazi.Teach.InstallHooksTest do
 
     test "is a no-op when the file is absent", %{dir: dir} do
       assert {:ok, %{status: :unchanged}} = InstallHooks.uninstall(dir: dir)
+    end
+
+    test "--uninstall removes the Notification hook too, exact-inverse symmetry (T60.3)", %{
+      dir: dir,
+      path: path
+    } do
+      File.write!(path, @operator_settings)
+
+      {:ok, %{status: :installed}} = InstallHooks.install(dir: dir)
+      installed = File.read!(path)
+      assert installed =~ "kazi bus hook notification"
+
+      assert {:ok, %{status: :removed}} = InstallHooks.uninstall(dir: dir)
+      assert File.read!(path) == @operator_settings
     end
 
     test "never removes an entry mixing an operator command with kazi's", %{dir: dir, path: path} do
