@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.192.0](https://github.com/kazi-org/kazi/compare/v1.191.0...v1.192.0) (2026-07-17)
+
+
+### Features
+
+* **roadmap:** kazi schema roadmap + kazi lint roadmap validation ([34554fe](https://github.com/kazi-org/kazi/commit/34554fe56349cce8d6a3c7f237ffe3d34e3d74ba))
+* **roadmap:** loader for the roadmap artifact (a declarative goal DAG) ([e5e927e](https://github.com/kazi-org/kazi/commit/e5e927e324996389187101399a72cb10f99dda88))
+
 ## [1.191.0](https://github.com/kazi-org/kazi/compare/v1.190.0...v1.191.0) (2026-07-17)
 
 
