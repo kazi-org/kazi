@@ -3743,3 +3743,58 @@ Did the kazi gate block a non-converged task, and cleanly pass a converged one?
 value holds up under real observation. The one caveat is that the shipped
 operator recipe (S2b) does not invoke it correctly and would misfire; #1306
 tracks the doc fix.
+
+## 2026-07-17 — T43.6 LIVE dogfood: the browser UI-assertion pack against kazi's own deployed site
+
+Closed E43 (the browser UI-assertion pack) with a LIVE, read-only dogfood on the
+deployed https://kazi.sire.run and a consolidated `assertions[].type` reference.
+
+### The live check actually ran (not stub-only)
+
+The blessed `agent-browser` path was **unusable here** — its global symlink
+(`/usr/local/bin/agent-browser`) is a broken link to a `-darwin-x64` binary that no
+longer exists in the package. But outbound HTTPS to the site works
+(`node -e "fetch('https://kazi.sire.run')"` → HTTP 200), and the npm registry is
+reachable, so I installed the runner's real deps into a scratch dir
+(`npm i playwright axe-core && npx playwright install chromium`) and drove the
+**actual shipped runner** — `priv/browser/playwright_runner.js`, the same code
+`Kazi.Providers.Browser` invokes — against the live site with the exact JSON
+payloads `priv/examples/live_site_ui.toml`'s predicates produce. Real Chromium,
+real navigation, real axe-core. Observed verdicts:
+
+- **`console_clean` (network = true)** → `{"status":"pass", assertions:[{type:"console_clean","ok":true,"expected":0,"found":[]}]}`.
+  Zero `console.error`, zero failed 4xx/5xx on the landing page.
+- **`a11y` (severity = "critical", max_violations = 0)** → `{"status":"pass", assertions:[{type:"a11y","ok":true,"count":0,"found":[]}]}`.
+  Zero critical accessibility violations.
+
+### The verdict is genuinely computed, not a rubber-stamp
+
+Re-running `a11y` at the stricter `severity = "serious"` bar returned
+`{"status":"fail", ...,"count":2}` — two real serious violations on the live page
+(`color-contrast`, `scrollable-region-focusable`), with the count surfaced as the
+envelope-v2 score (`lower_better`). Same page, same runner, different bar → a real
+`:fail`. That is the proof the pack returns objective verdicts about the actual DOM
+rather than always-green. The shipped goal-file gates at `critical` (a defensible
+production bar the site currently clears); raise it to `serious` once those two are
+fixed.
+
+### What was NOT exercised through the full kazi loader→provider path
+
+I drove the runner directly with the goal-file's payloads rather than through
+`kazi apply priv/examples/live_site_ui.toml`, because the browser provider's
+JSON-mapping seam (`Kazi.Providers.Browser.interpret/5`) is already covered by the
+hermetic stub suite and the `*_live_test.exs` real-runner tests; the live value
+this task adds is *the runner's verdict on the real site*, which is exactly what
+ran. The goal-file loads clean through `Kazi.Goal.Loader` (verified in the
+validation ladder), so the end-to-end path is `apply`-ready wherever Playwright +
+axe-core are installed.
+
+### Docs
+
+Consolidated the full `assertions[].type` vocabulary (13 types: `visible`,
+`hidden`, `text`, `url`, `console_clean`, `download`, `attr`, `count`, `enabled`,
+`field_value`, `form_validation`, `a11y`, `visual`) into
+`docs/browser-assertions.md`, with keys, examples, and pass/fail/error semantics
+per type, matching `kazi schema browser` and the loader's
+`browser_assertion_types/0` allow-list exactly. Linked from `docs/live-providers.md`
+and the `docs/README.md` index.

@@ -69,6 +69,11 @@ byte-identical to the original single-run behaviour. Run `kazi schema browser`.
 
 ### Assertions
 
+The full per-type how-to — every `assertions[].type` with keys, examples, and
+pass/fail/error semantics — is [docs/browser-assertions.md](browser-assertions.md)
+(the consolidated reference, matching `kazi schema browser`). The summary below
+covers the same vocabulary in the sustained-health framing.
+
 Each entry in `assertions` needs a `type`. The **runner** owns this vocabulary —
 kazi passes `assertions` verbatim to `priv/browser/playwright_runner.js`, which
 dispatches on `type` (ADR-0053 §1) — but the type must be one kazi knows, so a
