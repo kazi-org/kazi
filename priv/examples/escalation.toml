@@ -1,0 +1,23 @@
+# The `[escalation]` model ladder (T45.7, ADR-0056 decision 5): the escalation
+# ladder as goal-file DATA. On a stuck / over_budget verdict on the same failing
+# predicate set, kazi re-dispatches the SAME goal at the next model in the ladder
+# instead of terminating — bounded by the ladder length (and max_rungs). No
+# [escalation] block = today's single-model behavior, byte-identical.
+#
+#     kazi apply priv/examples/escalation.toml --workspace .
+#
+# See docs/tiering-signals.md and `kazi schema escalation`.
+
+id = "escalation-example"
+name = "Escalate the model on a stuck slice"
+
+[escalation]
+# rung 0 is the initial dispatch model; the loop steps forward on stuck/over_budget.
+ladder = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"]
+
+[[predicate]]
+id = "tests"
+provider = "custom_script"
+description = "the suite passes"
+cmd = "sh"
+args = ["-c", "true"]
