@@ -81,6 +81,9 @@ its config at runtime via `kazi schema <kind>`.
   declared command and assert on the exit code + stdout/stderr (T43.7, UC-055).
 - **[`scenario`](scenario-predicate.md)** — replay a pinned Gherkin Scenario by
   delegating to a surface provider; passes only on a green replay (ADR-0064).
+- **[`plan_expanded`](schemas/roadmap.md)** — the read-model-only "phase has been
+  planned" gate (exists + floor-passed + approved); makes planning a convergeable
+  goal via outline phases (E45/T45.3).
 - **[`oss_hygiene`](oss-hygiene-predicate.md)** — the internal-leak guard as a
   predicate: scan the diff's added lines for private IPs / home paths /
   configurable codenames (E29/ADR-0034, T44.7).
