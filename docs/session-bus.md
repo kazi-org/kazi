@@ -452,4 +452,142 @@ hook folds agent-authored text into another agent's context.
 
 For background waiters (not turn-boundary delivery), prefer `kazi bus watch`
 over a `read`-in-a-loop: it blocks server-side until traffic arrives
-instead of spawning the CLI on an interval (issue #1091).
+instead of spawning the CLI on an interval (issue #1091). That is the other
+half of delivery — see the wake contract below.
+
+## The wake contract — how an idle worker sleeps and gets woken
+
+Installed delivery lands at TURN BOUNDARIES. An idle session has no next turn,
+so it has no boundary to deliver into: a `tell` to a session that is sitting
+idle is stored and queued, and nobody is woken. The send even looks like it
+worked —
+
+```
+$ kazi bus tell worker-a "you own T12 now"
+told worker-a (id 4127)
+$ kazi bus status 4127
+4127 pending recipient=worker-a sent=...
+```
+
+— and `pending` is where it stays. Nothing is lost (the message keeps, and
+`bus who` counts it in that session's `inbox` depth), but nothing happens
+either. This is the failure the wake contract prevents, and it is the reason a
+fleet's idle workers look like they are ignoring their supervisor.
+
+The contract has two halves. Which one applies depends only on whether the
+target session is ACTIVE or IDLE.
+
+### An ACTIVE session: `tell --sev interrupt`
+
+A session that is working has a turn boundary coming, so delivery already
+works. Address it and mark the message interrupt:
+
+```
+kazi bus tell <session> "rebase onto main first" --sev interrupt
+```
+
+The digest renders directed (`kind: msg`) and `sev: interrupt` messages
+VERBATIM instead of folding them into a count line (ADR-0072), so it arrives as
+text the session reads rather than a number it skims past. This half is
+field-confirmed on a live fleet: it works, and it is the right tool whenever
+the recipient is doing something.
+
+Its limit is exactly the idle case — no turn, no boundary, no delivery.
+
+### An IDLE worker: park a `bus watch` as a background task
+
+A worker with nothing to do should not poll `bus read` on a timer, billing a
+turn's tokens per tick to usually discover silence. It should SLEEP. The way to
+sleep on the bus is to park a bounded watch as a **background task of the
+worker's own harness**:
+
+```
+kazi bus watch --timeout 600 --json
+```
+
+The pattern needs exactly two things from the harness, and nothing from kazi
+beyond the verb above: it must be able to run a shell command as a background
+task, and the completion of that task must re-invoke the session. A harness
+with both (Claude Code is one) gets the whole contract for free:
+
+- **Exit 0 — arrival is the wake, with the message already in hand.** The
+  completed task's own output IS the digest, so the session wakes up already
+  holding what woke it. No follow-up `read`, no second call to discover why it
+  was woken, no cursor left behind: the watch consumed the message.
+- **Exit 3 — the timeout expired and nothing happened. Re-park.** A timeout is
+  a non-event, always distinguishable from an arrival, so re-parking is the
+  whole handler.
+
+**Arrival wakes; timeout re-parks.** That is the contract. The worker is asleep
+in between — costing no tokens, blocked server-side rather than spinning — and
+a parked watch also refreshes the worker's presence, so an idle-but-parked
+worker stays `active` on `bus who` and never ages out of the roster. A
+supervisor's `tell` to it reports `liveness: active`, and `bus status <id>`
+turns `consumed` the moment the wake happens: the whole round trip is visible
+from the sending side.
+
+A harness that cannot re-invoke a session on a background task's completion has
+no wake mechanism, and its sessions keep using the pull verbs at turn
+boundaries — exactly as ADR-0071 says of a harness with no hook mechanism.
+
+### This depends on `--since now` (T54.9, issue #1097)
+
+The default `--since now` anchor is what makes a parked watch a SLEEP rather
+than a poll, and the pattern above is unusable without it.
+
+`--since now` anchors on the stream's current last sequence, so only messages
+posted AFTER the park starts satisfy the watch; backlog already pending on the
+session's cursor stays pending for `bus read`/`bus peek`. Every wake is
+therefore a real event. Under the pre-T54.9 drain-first behavior (still
+available, deliberately, as `--since all`) a parked watch returns IMMEDIATELY
+on any pending backlog — including messages an earlier `bus peek` already
+looked at. A worker that re-parks on completion would then wake on stale
+backlog, re-park, and wake again at full tick rate: the pattern degenerates
+into precisely the poll loop it exists to replace.
+
+So: take the default for a wake. Use `--since all` only for a deliberate
+drain-first read, never for a park.
+
+### Out of boundary: kazi does not type into your session
+
+kazi will never wake a session by reaching into it. There is no supported way
+to make kazi inject a prompt, drive a terminal, or resume a live harness
+process, and there will not be one.
+
+This is worth stating plainly because the alternative has been tried under
+field pressure: a fleet with no documented wake contract resorted to scripting
+its terminal emulator to inject keystrokes into an idle session's TTY. It cost
+a day to discover that the scripting verb types text without submitting it (an
+explicit carriage return had to be sent separately), and the result was fragile
+and platform-specific, breaking whenever TTYs were renumbered.
+
+That pain is the argument for documenting this contract — not for building an
+escape hatch. Reaching into a live harness is permanently outside kazi's
+boundary: ADR-0001 positions kazi as the outer loop that treats the harness as
+a replaceable inner loop invoked through a thin subprocess adapter, and
+ADR-0071's non-goals restate it for exactly this surface ("kazi does not reach
+into a live harness process, does not inject mid-turn, and does not require the
+harness to be running"). A wake that requires kazi to drive someone else's
+terminal would make kazi a harness. The supported wake is the harness's own
+background-task mechanic — which the harness already owns, and which kazi
+therefore never has to reach into.
+
+### When to use harness-native agent teams instead
+
+If the sessions you want to coordinate are ones your own session SPAWNED — one
+lead, one machine, one session lifetime — the harness's native agent teams are
+the better mechanism and the bus is the wrong tool. Claude Code's teams cover
+that shape natively: automatic message delivery to teammates, a roster, and a
+dependency-aware task list, with no daemon to run and no wake contract to
+arrange. Inside a team, the native mechanism already wakes the workers; adding
+the bus buys nothing and costs a moving part.
+
+The bus is for the sessions **nobody spawned**: independently-started peers,
+across machines, surviving a restart, harness-agnostic, and tied to kazi's own
+objective state (claims, runs, the board). Agent teams are structurally
+single-session and single-machine today — one team per session, mailboxes on
+the local filesystem, the team directory removed at session end — so none of
+those properties are available inside one.
+
+> **Teams orchestrate the workers one session spawns; the bus coordinates the
+> sessions nobody spawned.**
