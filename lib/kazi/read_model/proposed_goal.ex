@@ -55,12 +55,15 @@ defmodule Kazi.ReadModel.ProposedGoal do
     field(:status, :string, default: "proposed")
     field(:goal, :map, default: %{})
     field(:session_name, :string)
+    # T45.2 (UC-059): the shared roadmap ref linking the proposals a single
+    # `kazi plan --project` payload drafted. nil for an ordinary single-goal plan.
+    field(:roadmap_ref, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:proposal_ref, :idea, :goal_id, :status, :goal]
-  @optional [:session_name]
+  @optional [:session_name, :roadmap_ref]
 
   @doc """
   Builds a changeset for inserting a proposed-goal row.
