@@ -152,6 +152,35 @@ predicates in a single `goal-convergence` group, each carrying its `role`,
 `priority` and `interface` metadata — and each honestly RED until a human wires
 the real check, exactly like a task spec's.
 
+## Manifest coverage — is every surface documented? (T41.3, ADR-0054)
+
+Product specs are the use-case catalog, so a natural check falls out: **does a
+Scenario exist for every reachable surface element?** `Kazi.Reconcile.SpecCoverage`
+(the *manifest-coverage meta-predicate*) answers it. It scans the repo's public
+surface with `Kazi.Reconcile.SurfaceScanner` (T13.4) — routes, handlers, exported
+functions, Mix/CLI commands — and asserts each scanned element is **referenced by
+>=1 Scenario** across the `.feature` files. An element no Scenario names is
+**uncovered**: undocumented surface. The check FAILS and *names* it; it never
+edits anything (write the Scenario, or allow-list intentional internal surface).
+
+It reuses the SAME matching primitive as the dead-code check
+(`Kazi.Reconcile.SurfaceMatch`, factored out of T13.5's
+`Kazi.Reconcile.Coverage`), differing only in where the tokens come from:
+
+| Check | Module | Tokens from | An uncovered element means |
+|---|---|---|---|
+| Dead-code (T13.5) | `Kazi.Reconcile.Coverage` | intended **predicates** | dead code / un-predicated surface |
+| Manifest (T41.3) | `Kazi.Reconcile.SpecCoverage` | product **Scenarios** | undocumented surface |
+
+Because both derive their own tokens and call the shared `SurfaceMatch`, the two
+run over the same repo without interfering. The match is deliberately approximate
+(the surface scan itself is, `docs/lore.md` L-0006): a Scenario references an
+element when a *reference-like* word of its name/steps — one containing `/` or `.`,
+so `/healthz`, `Surface.Calc.add/2`, `surface.greet`, not plain prose —
+equals or substring-matches the element's identifier. This is the check
+`kazi init --discover` (T41.4) writes as a starter goal so `kazi apply` drives a
+repo toward "every surface has a Scenario".
+
 ## Workflow
 
 ```
@@ -188,5 +217,9 @@ lossless, git-diff-able move as the epic body itself.
 - **ADR-0050** — the decision to add this tier.
 - **ADR-0021 / T13.2** — `Kazi.Reconcile.GherkinImporter`, the deterministic
   parser this tier is wired over.
+- **ADR-0021 / T13.4-T13.5, T41.3** — the surface-coverage meta-predicates
+  (`Kazi.Reconcile.SurfaceScanner`, `Kazi.Reconcile.Coverage` for dead-code,
+  `Kazi.Reconcile.SpecCoverage` for manifest coverage) over the shared
+  `Kazi.Reconcile.SurfaceMatch` primitive.
 - **`example.feature`** — a worked example (the `spec import` verb's own
   acceptance, dogfooding the tier from day one).
