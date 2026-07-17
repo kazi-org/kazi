@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.198.0](https://github.com/kazi-org/kazi/compare/v1.197.0...v1.198.0) (2026-07-17)
+
+
+### Features
+
+* **goal:** the [escalation] goal-file block (model ladder + max_rungs) ([00705b1](https://github.com/kazi-org/kazi/commit/00705b15d412e101884403ef12589b16a18d11ff))
+* **loop:** walk a declared model ladder on stuck/over_budget (T45.7) ([4a88f88](https://github.com/kazi-org/kazi/commit/4a88f88ab849f0afac1329f20e239719a375fcbf))
+
 ## [1.197.0](https://github.com/kazi-org/kazi/compare/v1.196.1...v1.197.0) (2026-07-17)
 
 
