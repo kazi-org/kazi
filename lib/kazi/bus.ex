@@ -264,12 +264,15 @@ defmodule Kazi.Bus do
     pairs = Enum.map(annotated, fn entry -> {entry, local_verdict(entry, local, started)} end)
 
     live = pairs |> filter_fresh([]) |> Enum.map(fn {entry, _verdict} -> entry end)
+    live_ids = MapSet.new(live, & &1["session"])
 
     exact = Enum.find(pairs, fn {e, _v} -> e["session"] == recipient end)
 
     named =
       pairs
-      |> Enum.filter(fn {e, _v} -> e in live and e["name"] == recipient end)
+      |> Enum.filter(fn {e, _v} ->
+        MapSet.member?(live_ids, e["session"]) and e["name"] == recipient
+      end)
       |> Enum.min_by(fn {e, _v} -> e["age_s"] end, fn -> nil end)
 
     cond do
