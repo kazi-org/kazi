@@ -187,7 +187,7 @@ defmodule Kazi.CLI do
   # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
   # defined here (above `parse/1`) so both the `--help` interception below and
   # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who tell status watch join leave name hook)
+  @bus_verbs ~w(post read peek who board tell status watch join leave name hook)
   @bus_kinds ~w(fact announce note intent)
   @default_bus_kind "fact"
 
@@ -418,7 +418,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|status|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -582,6 +582,7 @@ defmodule Kazi.CLI do
       kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
+      kazi bus board [--scope machine|project] [--json]   # current state: last-value fact per topic + live roster (T55.4)
       kazi bus hook <event>                        # harness hook entry point (session-start | turn) -- ALWAYS exits 0 silently
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
@@ -1468,12 +1469,12 @@ defmodule Kazi.CLI do
   defp parse_bus([sub | _], _flags),
     do:
       {:error,
-       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
+       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `board`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
 
   defp parse_bus([], _flags),
     do:
       {:error,
-       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
+       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `board`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
 
   defp bus_flags(flags) do
     [
@@ -1651,6 +1652,34 @@ defmodule Kazi.CLI do
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
+    """
+  end
+
+  defp bus_help_text("board") do
+    """
+    kazi bus board [--scope machine|project] [--json]
+
+    Render the CURRENT STATE of the bus (ADR-0073): the last-value `fact` per
+    topic and the live roster (names, teams, liveness) in one shot. Where
+    `read`/`peek`/`watch` answer "what CHANGED since I last looked" -- a delta
+    of pending messages -- the board answers "what is true right now".
+
+    CURSOR-FREE and idempotent: unlike `read`, the board CONSUMES NOTHING and
+    keeps no cursor, so a session may call it every turn (it is what a
+    session-start hook injects) without draining a message a later `read`/`watch`
+    was counting on. Posting three facts on one topic shows ONE line -- the
+    latest value, not three.
+
+    Bounded by the same digest rules as `read` (ADR-0072): an oversize fact body
+    renders as a one-line stub carrying its id (the body stays addressable in the
+    stream), and the fact section is at most 40 lines regardless of topic count,
+    the tail folding into one overflow line. Under --json:
+    `{ok, schema_version, board: {facts, roster, total_facts, total_sessions}}`
+    (shape: `kazi schema bus`).
+
+    --scope machine (default) or project selects which bus subject tree to
+    project. Requires a running `kazi daemon` -- prints a one-line no-daemon
+    error (exit 1) otherwise.
     """
   end
 
@@ -4406,6 +4435,23 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T55.4 (ADR-0073): the current-state projection. Cursor-free -- consumes
+  # nothing, so a session may board every turn without draining what a read was
+  # counting on.
+  defp execute_bus("board", [], opts) do
+    case Kazi.Bus.board(bus_call_opts(opts)) do
+      {:ok, board} ->
+        emit(json?(opts), bus_board_payload(board), fn -> print_board(board) end)
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp execute_bus("board", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
   # #1091: block until a NEW message arrives, then consume and print it.
   # T54.9/#1097: --since <seq|now|all> anchors what counts as new (default
   # `now` -- pending backlog never satisfies the watch).
@@ -4609,6 +4655,51 @@ defmodule Kazi.CLI do
     %{verbatim: verbatim, digest: digest} = Kazi.Bus.Digest.summarize(messages)
     Enum.each(verbatim, &IO.puts/1)
     Enum.each(digest, &IO.puts/1)
+  end
+
+  # T55.4 (ADR-0073 d1): the `bus board` --json envelope -- the current-state
+  # projection under the ADR-0023 versioned contract, mirroring
+  # `bus_read_payload/2`'s shape (`kazi schema bus`).
+  defp bus_board_payload(board) do
+    %{"ok" => true, "schema_version" => @run_schema_version, "board" => board}
+  end
+
+  # The human board: facts first (topic = current value, or a stub/overflow
+  # notice), then the roster (addressable identity + liveness). Empty sections
+  # say so rather than rendering a blank block.
+  defp print_board(board) do
+    IO.puts("facts (#{board["total_facts"]} topics):")
+
+    if board["facts"] == [] do
+      IO.puts("  (none)")
+    else
+      Enum.each(board["facts"], &IO.puts("  " <> board_fact_line(&1)))
+    end
+
+    IO.puts("roster (#{board["total_sessions"]} sessions):")
+
+    if board["roster"] == [] do
+      IO.puts("  (none)")
+    else
+      Enum.each(board["roster"], &IO.puts("  " <> board_roster_line(&1)))
+    end
+  end
+
+  defp board_fact_line(%{"type" => "overflow", "count" => count}),
+    do: "... #{count} more topics"
+
+  defp board_fact_line(%{"type" => "stub"} = line),
+    do: "#{line["topic"] || "_"}: <#{line["bytes"]} bytes, id #{line["id"]}>"
+
+  defp board_fact_line(line),
+    do: "#{line["topic"] || "_"}: #{line["text"]}"
+
+  defp board_roster_line(row) do
+    label = if row["name"], do: "#{row["name"]} (#{row["session"]})", else: row["session"]
+    team = if row["team"], do: " team=#{row["team"]}", else: ""
+    machine = if row["machine"], do: " machine=#{row["machine"]}", else: ""
+    liveness = if row["liveness"], do: " liveness=#{row["liveness"]}", else: ""
+    "#{label}#{machine}#{liveness}#{team}"
   end
 
   @doc false
