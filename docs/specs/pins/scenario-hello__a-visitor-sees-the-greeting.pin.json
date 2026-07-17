@@ -1,0 +1,21 @@
+{
+  "pin_version": 1,
+  "spec": "docs/specs/scenario_hello.feature",
+  "scenario": "A visitor sees the greeting",
+  "scenario_sha": "9c22564564705454164ab20c3f2eadac3d400c0495569de1b758045ef2e0bf06",
+  "surface": "browser",
+  "minted": { "commit": "example-worked-pin" },
+  "inputs": {},
+  "trace": {
+    "url": "http://localhost:8080/scenario_hello_fixture.html",
+    "steps": [],
+    "assertions": [
+      { "type": "visible", "selector": "#greeting" },
+      { "type": "text", "selector": "#greeting", "contains": "Hello, kazi!" }
+    ],
+    "timeout_ms": 30000
+  },
+  "map": [
+    { "step": "the greeting is shown", "steps": [], "assertions": [0, 1] }
+  ]
+}
