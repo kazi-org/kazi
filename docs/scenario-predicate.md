@@ -221,7 +221,7 @@ the goal:
 
 ```sh
 python3 -m http.server 8080 --directory priv/examples &
-kazi run priv/examples/scenario_hello.goal.toml --workspace .
+kazi apply priv/examples/scenario_hello.goal.toml --workspace .
 ```
 
 `test/kazi/examples/scenario_hello_example_test.exs` proves the same three things
