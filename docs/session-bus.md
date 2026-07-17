@@ -643,12 +643,29 @@ payload logic upgrades with the binary. What each event injects (T55.9):
 
 Its contract: **always exit 0, never block.** With no daemon running (or an
 unknown event) `kazi bus hook` prints nothing and returns immediately. And a
-hard ~2s wall-clock bound applies even to a HUNG daemon (one that accepted
-the connection but never answers): the payload is computed in a bounded task
-and only written if it returns within budget, so a slow or stalled daemon
-can never tax or break a turn (the graceful-degradation guarantee above
-extends to delivery). A hung daemon adding seconds to every turn of every
-session on the machine is worse than any missed digest.
+hard wall-clock bound applies even to a HUNG daemon (one that accepted the
+connection but never answers): the payload is computed in a bounded task and
+only written if it returns within budget, so a slow or stalled daemon can
+never tax or break a turn (the graceful-degradation guarantee above extends
+to delivery).
+
+That bound is **per-event**, and the asymmetry is deliberate (issue #1295):
+
+- **`turn` stays tight at 2s.** It runs on every prompt of every session on
+  the machine — the per-turn hot path — so a hung/slow daemon must never add
+  more than ~2s there. A hung daemon adding seconds to every turn is worse
+  than any missed digest.
+- **`session-start` gets a larger 15s bound.** It is a ONE-SHOT at session
+  boot, and its board renders the FULL current-state projection, whose
+  client-side fact drain scales with the fact-topic space: under a real busy
+  backlog (127+ fact topics) `bus board` was measured at ~9.7s — the exact
+  team-that-nobody-reminds load the board exists for. Under the old shared 2s
+  bound the board was silently `Task.shutdown`'d to nothing, so a starting
+  session got NO board precisely when it needed one (issue #1295). 15s matches
+  the bus's own control-socket call bound, so the hook no longer kills a call
+  the daemon would have answered. A human is already waiting for their session
+  to start, so a few extra seconds ONCE is invisible — the same cost on every
+  turn would not be. **Do not collapse these back to one shared constant.**
 
 The installer merges, never clobbers: an operator's own hooks and keys
 survive byte-identically, re-running is a no-op, and `--uninstall` right

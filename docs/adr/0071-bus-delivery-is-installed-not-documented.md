@@ -105,6 +105,15 @@ what it can do; it just never taught it to listen.
    budget or exits 0 silently, because a slow daemon must never tax every turn
    of every session.
 
+   **Amendment (issue #1295): the budget is PER-EVENT.** `turn` is the per-turn
+   hot path and keeps the tight 2s bound. `session-start` is a one-shot at boot
+   whose full-board drain was measured at ~9.7s under a real busy backlog (127+
+   fact topics) — the exact load the board exists for — so a shared 2s bound
+   silently shut its board down to nothing. `session-start` therefore gets a
+   larger 15s bound (matching the bus's own control-socket call bound); a human
+   is already waiting on their session, so the one-shot cost is invisible while
+   the hot path stays tight. These MUST NOT be re-collapsed into one constant.
+
 3. **Merge, never clobber.** The installer writes a marked, idempotent block
    into the harness settings, preserving every key it does not own.
    Re-running is a no-op; `--uninstall` removes exactly what was added. An
