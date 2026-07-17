@@ -135,6 +135,8 @@ defmodule Kazi.CLI do
     adr: :boolean,
     predicates: :string,
     replace: :boolean,
+    # T45.2 (UC-059): `plan --project` reads the payload as a multi-goal roadmap.
+    project: :boolean,
     obsidian: :string,
     json: :boolean,
     stream: :boolean,
@@ -448,7 +450,17 @@ defmodule Kazi.CLI do
       summary:
         "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058).",
       args: [%{name: "idea", required: false}],
-      flags: [:workspace, :yes, :strict, :adr, :json, :predicates, :replace, :session_name]
+      flags: [
+        :workspace,
+        :yes,
+        :strict,
+        :adr,
+        :json,
+        :predicates,
+        :replace,
+        :session_name,
+        :project
+      ]
     },
     %{
       name: "list-proposed",
@@ -1949,7 +1961,8 @@ defmodule Kazi.CLI do
       json: flags[:json] || false,
       predicates: flags[:predicates],
       replace: flags[:replace] || false,
-      session_name: flags[:session_name]
+      session_name: flags[:session_name],
+      project: flags[:project] || false
     ]
   end
 
@@ -3534,6 +3547,12 @@ defmodule Kazi.CLI do
         (iteration = ReadModel.latest_iteration(ref)) != nil ->
           report_run_status(ref, iteration, opts)
 
+        # T45.2 (UC-059): a ROADMAP ref resolves to its member proposals. Checked
+        # before a single proposal ref (roadmap refs use a distinct `road-` prefix,
+        # so they never collide).
+        (members = ReadModel.list_proposed_goals_by_roadmap(ref)) != [] ->
+          report_roadmap_status(ref, members, opts)
+
         (proposal = ReadModel.get_proposed_goal(ref)) != nil ->
           report_proposal_status(proposal, opts)
 
@@ -3683,6 +3702,33 @@ defmodule Kazi.CLI do
       status: proposal.status,
       goal_id: proposal.goal_id,
       idea: proposal.idea
+    }
+  end
+
+  # T45.2 (UC-059): a roadmap ref resolves to its member proposals.
+  defp report_roadmap_status(ref, members, opts) do
+    emit(json?(opts), roadmap_status_json(ref, members), fn ->
+      IO.puts("STATUS     ref=#{ref} kind=roadmap")
+      IO.puts("goals:     #{length(members)}")
+
+      Enum.each(members, fn m ->
+        IO.puts("  - #{m.proposal_ref}  (#{m.goal_id})  #{m.status}")
+      end)
+    end)
+
+    0
+  end
+
+  defp roadmap_status_json(ref, members) do
+    %{
+      schema_version: @run_schema_version,
+      kind: "roadmap",
+      ref: ref,
+      roadmap_ref: ref,
+      proposals:
+        Enum.map(members, fn m ->
+          %{proposal_ref: m.proposal_ref, goal_id: m.goal_id, status: m.status}
+        end)
     }
   end
 
@@ -6141,11 +6187,95 @@ defmodule Kazi.CLI do
   defp execute_propose(idea, opts, inject_opts) do
     with_read_model(opts, fn ->
       case caller_proposal(opts, inject_opts) do
-        {:ok, payload} -> caller_drafts(idea, payload, opts, inject_opts)
-        :none -> kazi_drafts(idea, opts, inject_opts)
-        {:error, message} -> propose_input_error(message, opts)
+        {:ok, payload} ->
+          # T45.2 (UC-059): `--project` reads the SAME payload channel
+          # (--predicates / stdin) but as a MULTI-GOAL roadmap.
+          if opts[:project],
+            do: caller_drafts_project(payload, opts, inject_opts),
+            else: caller_drafts(idea, payload, opts, inject_opts)
+
+        :none ->
+          if opts[:project],
+            do:
+              propose_input_error(
+                "--project needs a goals payload (--predicates or piped stdin)",
+                opts
+              ),
+            else: kazi_drafts(idea, opts, inject_opts)
+
+        {:error, message} ->
+          propose_input_error(message, opts)
       end
     end)
+  end
+
+  # T45.2 (UC-059): the caller-drafts PROJECT path — a multi-goal roadmap payload
+  # (`{"goals":[...]}`) persisted as N linked proposals sharing one roadmap ref,
+  # via `Kazi.Authoring.propose_roadmap/2`. Each goal runs the per-goal floor
+  # (byte-identical to a single-goal plan); the roadmap runs the roadmap-scope
+  # floor. `--json` emits the roadmap ref + per-goal proposal refs.
+  defp caller_drafts_project(payload, opts, inject_opts) do
+    case Jason.decode(payload) do
+      {:ok, %{} = map} ->
+        propose_opts =
+          inject_opts
+          |> Keyword.take([:harness, :adapter_opts])
+          |> Keyword.put(:workspace, opts[:workspace] || ".")
+          |> Keyword.put(:replace, opts[:replace] || false)
+          |> Keyword.put(:session_name, resolve_session_name(opts))
+
+        case Authoring.propose_roadmap(map, propose_opts) do
+          {:ok, result} ->
+            emit(json?(opts), roadmap_json(result), fn -> report_roadmap(result) end)
+            0
+
+          {:error, reason} ->
+            propose_error(reason, opts)
+        end
+
+      {:ok, _other} ->
+        propose_input_error(
+          "--project payload must be a JSON object with a \"goals\" array",
+          opts
+        )
+
+      {:error, _} ->
+        propose_input_error("supplied --project payload is not valid JSON", opts)
+    end
+  end
+
+  defp roadmap_json(result) do
+    %{
+      schema_version: @run_schema_version,
+      kind: "roadmap",
+      roadmap_ref: result.roadmap_ref,
+      proposals:
+        Enum.map(result.proposals, fn draft ->
+          %{
+            proposal_ref: draft.proposal_ref,
+            goal_id: to_string(draft.goal.id),
+            status: to_string(draft.status),
+            clarify: clarify_json(draft)
+          }
+        end),
+      clarify:
+        Enum.map(result.clarify, fn %Question{} = q ->
+          %{id: q.id, prompt: q.prompt, recommended: q.recommended}
+        end)
+    }
+  end
+
+  defp report_roadmap(result) do
+    IO.puts("Drafted roadmap #{result.roadmap_ref} (#{length(result.proposals)} goals):")
+
+    Enum.each(result.proposals, fn draft ->
+      IO.puts("  - #{draft.proposal_ref}  (#{draft.goal.id})")
+    end)
+
+    case result.clarify do
+      [] -> :ok
+      questions -> Enum.each(questions, fn q -> IO.puts("  clarify: #{q.prompt}") end)
+    end
   end
 
   # The kazi-drafts path (the existing one): drive the harness to draft predicates
