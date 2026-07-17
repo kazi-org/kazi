@@ -7,7 +7,7 @@ defmodule Kazi.Retrieval.StaticRetriever do
 
   This lives only in `test/` (zero-stub policy: no doubles in `lib/`). It drives the
   retrieval-on path so the adapter's optional retrieval section can be exercised
-  without the real graphify-embeddings backend (T4.9b). Because its result is fixed
+  without a real similarity backend. Because its result is fixed
   inline, the same opts always yield the same snippets — the determinism a fixed
   retriever guarantees.
 

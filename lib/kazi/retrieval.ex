@@ -4,26 +4,28 @@ defmodule Kazi.Retrieval do
   predicates and a workspace, return the top-k most relevant prior-context
   `Kazi.Retrieval.Snippet`s to augment the harness prompt.
 
-  ## Off by default — retrieval AUGMENTS, never replaces
+  ## Off by default — no real backend ships, retrieval AUGMENTS
 
   Retrieval is an *optional* augmentation layered on top of the deterministic
   contract: the orientation pack (`Kazi.Context`, ADR-0010) and the thin failing-
-  evidence projection (ADR-0009). ADR-0012's central constraint is that enabling
-  retrieval must not silently change the default loop: the resolved default here is
-  a no-op (`Kazi.Retrieval.NoOp`) that returns `[]`, so the default
-  `Kazi.Harness.ClaudeAdapter.build_prompt/3` output is **byte-identical** to the
-  pre-retrieval path. A backend is engaged only when one is explicitly injected via
-  opts or configured per goal.
+  evidence projection (ADR-0009). **No real retrieval backend ships by default**:
+  the resolved default here is a no-op (`Kazi.Retrieval.NoOp`) that returns `[]`, so
+  the default `Kazi.Harness.ClaudeAdapter.build_prompt/3` output is
+  **byte-identical** to the pre-retrieval path (ADR-0012's central constraint —
+  enabling retrieval must not silently change the default loop). A backend is
+  engaged only when a caller explicitly supplies one via opts or per-goal config. A
+  supplied backend can wrap **any** tool that exposes an installable CLI/HTTP
+  interface for embedding + similarity search; this seam deliberately hardcodes no
+  particular tool.
 
   ## Why a behaviour
 
-  Abstracting retrieval behind a behaviour is what keeps the suite hermetic. The
-  real backend (graphify embeddings, T4.9b) embeds the target and does a similarity
-  search — an external, heavyweight, non-deterministic dependency. Behind this seam
-  the default path injects a pure double, so there is **no embedding model, no
-  index, and no network** in the default `mix test` (ADR-0012: the real backend's
-  conformance test is integration-tagged and excluded by default, like the NATS
-  lease test). This mirrors the `Kazi.Context.GraphSource` injectable-seam pattern.
+  Abstracting retrieval behind a behaviour is what keeps the suite hermetic. A real
+  backend embeds the target and does a similarity search — an external, heavyweight,
+  non-deterministic dependency. Behind this seam the default path injects a pure
+  double, so there is **no embedding model, no index, and no network** in the
+  default `mix test`. This mirrors the `Kazi.Context.GraphSource` injectable-seam
+  pattern.
 
   An implementation SHOULD be deterministic given a fixed backend state: the same
   failing set + workspace should yield the same snippets, since enabling retrieval

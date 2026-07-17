@@ -8,7 +8,7 @@ defmodule Kazi.CodexLiveTest do
   approximate. It is the Codex counterpart of `Kazi.OpencodeLiveTest`.
 
   It is tagged `:codex_live` and EXCLUDED by default (see `test/test_helper.exs`,
-  alongside `:opencode_live`/`:nats`/`:graphify`) so the standard `mix test` and
+  alongside `:opencode_live`/`:nats`) so the standard `mix test` and
   CI stay hermetic (no network, no creds). Opt in explicitly:
 
       mix test --only codex_live test/kazi/codex_live_test.exs

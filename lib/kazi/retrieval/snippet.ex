@@ -8,8 +8,8 @@ defmodule Kazi.Retrieval.Snippet do
   the deterministic orientation pack (`Kazi.Context.Pack`, ADR-0010) — which is
   *where this work lives* from a hermetic blast-radius survey — a snippet is *what
   a retriever judged relevant*. The shape is intentionally small and backend-
-  neutral so the no-op default, a test double, and the real graphify-embeddings
-  backend (T4.9b) all speak it without leaking embedding internals into the prompt.
+  neutral so the no-op default, a test double, and any real similarity backend a
+  caller supplies all speak it without leaking embedding internals into the prompt.
 
     * `:text` — the snippet body rendered into the prompt section.
     * `:source` — a human-readable reference to where the snippet came from (a

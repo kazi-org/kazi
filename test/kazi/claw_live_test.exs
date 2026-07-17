@@ -11,7 +11,7 @@ defmodule Kazi.ClawLiveTest do
   not on parsed usage) — see `Kazi.Harness.Profiles.Claw`.
 
   It is tagged `:claw_live` and EXCLUDED by default (see `test/test_helper.exs`,
-  alongside `:codex_live`/`:opencode_live`/`:antigravity_live`/`:nats`/`:graphify`)
+  alongside `:codex_live`/`:opencode_live`/`:antigravity_live`/`:nats`)
   so the standard `mix test` and CI stay hermetic (no network, no creds). Opt in
   explicitly:
 

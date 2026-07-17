@@ -29,17 +29,6 @@ for {_kind, module} <- Kazi.Runtime.provider_modules(), do: Code.ensure_loaded(m
 # `NATS_URL` to connect (see test/kazi/coordination/lease/nats_test.exs).
 nats_excluded = if System.get_env("NATS_URL"), do: [], else: [:nats]
 
-# Integration tests tagged `:graphify` need the real graphify embeddings tool and
-# are EXCLUDED by default so the standard `mix test` stays hermetic (no embedding
-# model, no index, no network). They run only when `GRAPHIFY_CMD` names the
-# executable:
-#
-#     GRAPHIFY_CMD=graphify mix test --include graphify
-#
-# `--include graphify` overrides the default exclusion; the test reads
-# `GRAPHIFY_CMD` for the command (see test/kazi/retrieval/graphify_integration_test.exs).
-graphify_excluded = if System.get_env("GRAPHIFY_CMD"), do: [], else: [:graphify]
-
 # The live opencode smoke test (tagged `:opencode_live`, T8.9/ADR-0016) is the
 # only NON-hermetic test: it drives a REAL `opencode` CLI wired to a locally-hosted
 # ~35B model on a GPU host. It is EXCLUDED by default so the standard `mix test`
@@ -137,7 +126,6 @@ browser_live_excluded = [:browser_live]
 ExUnit.start(
   exclude:
     nats_excluded ++
-      graphify_excluded ++
       opencode_live_excluded ++
       codex_live_excluded ++
       antigravity_live_excluded ++
