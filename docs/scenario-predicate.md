@@ -66,6 +66,11 @@ provider `:error`. The states and what moves between them:
   minted (its `scenario_sha` no longer matches the current normalized Scenario).
   The pin is re-demonstrated wholesale; a stale Scenario reports stale even when
   the pin is also otherwise invalid.
+- **`{:stale, :code_drift}`** — a `:pinned` pin whose replay went **red** while
+  `HEAD` has moved past the pin's minted commit (T49.8). The code changed, so a red
+  replay is plausibly the pin gone stale rather than a regression — re-demonstrate.
+- **`:stale_manual`** — a stale pin (spec-changed or code-drift) under `repin =
+  "manual"`. Parked: **never auto-demonstrated**, deliberately operator work.
 - **`{:invalid, [reasons]}`** — the pin is structurally unfaithful (a `When`
   mapping to zero trace steps, a `Then` to zero assertions), addresses a trace
   index that does not exist, references an unknown generator, or is malformed
@@ -107,6 +112,36 @@ agentic, nondeterministic authoring is quarantined at demonstration time and
 evaluation stays deterministic; a demonstration that cannot be reproduced never
 lands. A harness error or crash is best-effort — no pin is kept and the loop
 survives.
+
+## Repin lifecycle (T49.8, ADR-0064 d4)
+
+An accepted pin is stamped with `minted.commit = HEAD` at acceptance time (the
+`minted` block is provenance only — it never affects validation). That commit is
+what lets a later **red replay** be classified honestly:
+
+- **`HEAD` moved since mint** → `{:stale, :code_drift}` → a **demonstrator**
+  re-demonstration. On a successful repin the run records the old→new pin as a
+  unified diff in evidence (`%{repin_diff: "..."}`), so a reviewer sees exactly
+  what changed — selector rot distinguished from a genuine behaviour change.
+- **`HEAD` still at the minted commit** → a plain `:pinned` `:fail` — a real
+  **regression**, routed to the **fixer** (not a repin). The capability broke
+  without the surface moving.
+
+**`repin` policy** (a `scenario` config key):
+
+- `"auto"` (default) — at most one re-demonstration per iteration; the loop mints
+  the new pin itself.
+- `"manual"` — a stale pin parks as `:stale_manual` and is **never
+  auto-demonstrated**. Re-pinning is deliberately operator work (surfaced in the
+  attention queue), not something the loop resolves on its own.
+
+**`capability_unreachable`.** Two consecutive failed demonstrations with **no
+intervening code change** means re-demonstrating is futile — the run terminates
+`:stuck` with cause `capability_unreachable` (rather than looping demonstrations or
+draining the budget). It ranks as **needs-a-human** in the attention queue: the
+capability is broken or the surface unavailable, not something another dispatch or
+a bigger budget fixes. The cause is projected onto the run's
+`outcome_cause_class`, so it survives after the loop process is gone.
 
 ## Only `:pinned` replays, and the replay is the pass
 
