@@ -208,8 +208,42 @@ defmodule Kazi.Reconcile.GherkinImporter do
       probes (string). Absent (the default), those tags record their metadata but
       keep the `custom_script` scaffold: kazi never invents a url. See "Which
       provider a tagged Scenario derives".
+    * `:lower` — the lowering mode (`:test_runner` | `:scenario`, ADR-0054 d3).
+      See "Lowering mode" below. Defaults to `:test_runner`.
+    * `:spec_paths` — the on-disk `.feature` path for each source, aligned by
+      index with `sources` (a list). Under `:scenario` lowering a derived
+      `scenario` predicate records the path of the file its Scenario came from
+      (the runtime `Kazi.Providers.Scenario` re-reads that spec at evaluation
+      time). Ignored under `:test_runner` lowering. Only the CLI, which reads the
+      files, knows these paths; a bare in-memory `import_map/2` supplies them
+      explicitly.
+
+  ## Lowering mode (ADR-0054 d3)
+
+  `:lower` selects what a TAGGED Scenario derives; it never changes ids, groups,
+  or what an UNTAGGED Scenario derives:
+
+    * `:test_runner` (DEFAULT) — the output is byte-identical to a pre-lowering
+      import (pinned by the backcompat golden snapshots). Tag-driven live
+      providers (`@interface:web`/`@interface:api` + `:base_url`) still apply.
+    * `:scenario` — a Scenario tagged `@interface:web` derives a `scenario`
+      predicate on the `browser` surface, and `@interface:cli` a `scenario`
+      predicate on the `cli` surface, wiring it to the runtime
+      `Kazi.Providers.Scenario` (demonstrate-then-pin, ADR-0064) instead of the
+      `custom_script` scaffold. An UNTAGGED Scenario, and one tagged with any
+      OTHER interface (`api`/`sdk`/`grpc`/`background`/`ws`), stays
+      `test_runner` — lowering never FORCES a Scenario into the scenario-provider
+      shape it was not explicitly tagged for.
   """
   @type opts :: keyword()
+
+  # The lowering modes `:lower` accepts (ADR-0054 d3). `:test_runner` is the
+  # default and byte-identical to a pre-lowering import.
+  @lower_modes [:test_runner, :scenario]
+
+  # Under `:scenario` lowering, the `@interface` value → the scenario provider's
+  # surface. Only web/cli lower; every other interface keeps the scaffold.
+  @scenario_surfaces %{"web" => "browser", "cli" => "cli"}
 
   @doc """
   Imports gherkin `.feature` text into a goal **map** (the
@@ -248,25 +282,32 @@ defmodule Kazi.Reconcile.GherkinImporter do
   end
 
   def import_map(sources, opts) when is_list(sources) and is_list(opts) do
-    if Enum.all?(sources, &is_binary/1) do
-      scenarios = Enum.flat_map(sources, &parse/1)
+    lower = Keyword.get(opts, :lower, :test_runner)
 
-      case scenarios do
-        [] ->
-          {:error, "no Scenario found in the gherkin source (nothing to accept)"}
+    cond do
+      not Enum.all?(sources, &is_binary/1) ->
+        {:error, "gherkin source must be a string or a list of strings"}
 
-        scenarios ->
-          goal = %{
-            "id" => Keyword.get(opts, :id, @default_goal_id),
-            "mode" => "create",
-            "group" => build_groups(scenarios),
-            "predicate" => build_predicates(scenarios, opts)
-          }
+      lower not in @lower_modes ->
+        {:error,
+         "unknown lower mode #{inspect(lower)} (expected one of: " <>
+           "#{Enum.map_join(@lower_modes, ", ", &inspect/1)})"}
 
-          {:ok, maybe_put_name(goal, scenarios, opts)}
-      end
-    else
-      {:error, "gherkin source must be a string or a list of strings"}
+      true ->
+        case parse_sources(sources, opts) do
+          [] ->
+            {:error, "no Scenario found in the gherkin source (nothing to accept)"}
+
+          scenarios ->
+            goal = %{
+              "id" => Keyword.get(opts, :id, @default_goal_id),
+              "mode" => "create",
+              "group" => build_groups(scenarios),
+              "predicate" => build_predicates(scenarios, opts)
+            }
+
+            {:ok, maybe_put_name(goal, scenarios, opts)}
+        end
     end
   end
 
@@ -289,6 +330,22 @@ defmodule Kazi.Reconcile.GherkinImporter do
   end
 
   # ── Parsing ────────────────────────────────────────────────────────────────
+
+  # Parse every source in document order, tagging each Scenario with the on-disk
+  # `.feature` path of the source it came from (aligned by index with
+  # `:spec_paths`). The spec path is internal bookkeeping used ONLY by `:scenario`
+  # lowering; it never appears in a `:test_runner` predicate, so the default
+  # output is unchanged.
+  defp parse_sources(sources, opts) do
+    spec_paths = Keyword.get(opts, :spec_paths, [])
+
+    sources
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {text, index} ->
+      spec = Enum.at(spec_paths, index)
+      Enum.map(parse(text), &Map.put(&1, :spec, spec))
+    end)
+  end
 
   # Parse one `.feature` file's text into a stable, document-ordered list of
   # `%{feature: name, scenario: name, steps: [line]}`. A line-based fold: a
@@ -483,7 +540,7 @@ defmodule Kazi.Reconcile.GherkinImporter do
     }
 
     base
-    |> Map.merge(provider_config(metadata, opts))
+    |> Map.merge(provider_config(scenario, metadata, opts))
     |> Map.merge(metadata)
   end
 
@@ -494,12 +551,49 @@ defmodule Kazi.Reconcile.GherkinImporter do
   # is a LOAD error anyway (ADR-0058/T48.1). With no base url the tag still
   # records its metadata and today's `custom_script` scaffold stands — which is
   # also exactly what an UNTAGGED Scenario derives, byte-identically.
-  defp provider_config(metadata, opts) do
-    base_url = Keyword.get(opts, :base_url)
-    provider = Map.get(@interface_providers, Map.get(metadata, "interface"))
+  defp provider_config(scenario, metadata, opts) do
+    interface = Map.get(metadata, "interface")
 
-    live_config(provider, base_url) || scaffold_config()
+    case scenario_lowering(opts, interface) do
+      nil ->
+        base_url = Keyword.get(opts, :base_url)
+        provider = Map.get(@interface_providers, interface)
+        live_config(provider, base_url) || scaffold_config()
+
+      surface ->
+        scenario_config(scenario, surface)
+    end
   end
+
+  # Under `:scenario` lowering (ADR-0054 d3), a Scenario tagged `@interface:web`
+  # or `@interface:cli` lowers to the runtime `scenario` provider on the matching
+  # surface. Returns the surface (`"browser"`/`"cli"`) when this Scenario lowers,
+  # `nil` otherwise (untagged, an other-interface tag, or `:test_runner` mode) —
+  # in which case the caller keeps today's behavior. Lowering never FORCES a
+  # Scenario that was not explicitly tagged for a lowerable interface.
+  defp scenario_lowering(opts, interface) do
+    if Keyword.get(opts, :lower, :test_runner) == :scenario do
+      Map.get(@scenario_surfaces, interface)
+    end
+  end
+
+  # A `scenario` predicate (demonstrate-then-pin, ADR-0064): the runtime
+  # `Kazi.Providers.Scenario` re-reads `spec` at evaluation time, extracts the
+  # named `scenario`, and validates/replays its committed pin on `surface`. The
+  # importer records the spec path and scenario name; the pin is minted later (by
+  # a demonstrator dispatch), so the predicate is honestly RED until then — the
+  # same posture the `custom_script`/live scaffolds hold.
+  defp scenario_config(scenario, surface) do
+    %{
+      "provider" => "scenario",
+      "spec" => scenario_spec(scenario),
+      "scenario" => scenario.scenario,
+      "surface" => surface
+    }
+  end
+
+  defp scenario_spec(%{spec: spec}) when is_binary(spec) and spec != "", do: spec
+  defp scenario_spec(_scenario), do: ""
 
   defp live_config("browser", url) when is_binary(url) and url != "" do
     %{
