@@ -579,7 +579,7 @@ defmodule Kazi.CLI do
       kazi bus join <team> [--json]                      # named-team membership (issue #1069)
       kazi bus leave [--json]
       kazi bus name <nickname> [--json]                  # durable, addressable session name (T55.5)
-      kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
+      kazi bus read [--peek] [--since <cursor>] [--json]   # --peek: show pending messages WITHOUT consuming them; --since <seq>: replay from a point
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
       kazi bus board [--scope machine|project] [--json]   # current state: last-value fact per topic + live roster (T55.4)
@@ -1609,22 +1609,36 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("read") do
     """
-    kazi bus read [--peek] [--full] [--json]
+    kazi bus read [--peek] [--full] [--since <cursor>] [--json]
 
-    Pull and ACK this session's durable consumer -- prints a digest. Under
-    --json the SAME digest is the default (T55.1, ADR-0072), as a versioned
-    envelope (schema_version; shape via `kazi schema bus`): verbatim lines
-    only for directed (kind `msg`) and `sev: interrupt` messages, one-line
-    stubs for bodies over the 1024-byte render threshold (ALL kinds --
-    the body stays in the stream, addressable by its `id`), exact count
-    lines per {kind, topic} for everything else, bounded to 40 lines
-    regardless of backlog size. Every message and digest line carries the
-    message's JetStream stream sequence as its public `id`. `--full` is
-    the documented escape: every pending message unabridged.
+    Pull and ACK this session's durable consumer -- prints a digest. The
+    DAEMON assembles that digest (T55.7, ADR-0072 d5): it pulls the consumer,
+    aggregates, and enforces the bound server-side, so the CLI, the MCP tools,
+    and the installed hook all render the same bytes and a deep backlog costs
+    the same as a shallow one.
+
+    Under --json the SAME digest is the default (T55.1, ADR-0072), as a
+    versioned envelope (schema_version; shape via `kazi schema bus`): verbatim
+    lines only for directed (kind `msg`) and `sev: interrupt` messages,
+    one-line stubs for bodies over the 1024-byte render threshold (ALL kinds
+    -- the body stays in the stream, addressable by its `id`), exact count
+    lines per {kind, topic} for everything else -- carrying the LAST value for
+    a `fact` topic, since a fact states what is true now -- bounded to 40
+    lines regardless of backlog size. Every message and digest line carries
+    the message's JetStream stream sequence as its public `id`.
+
+    `--full` is the documented escape: every pending message unabridged. It is
+    the one mode the daemon does not assemble (there is no digest to assemble,
+    and its size is unbounded), so it reads the consumer directly.
 
     `--peek` (issue #1059) makes the read NON-DESTRUCTIVE: pending messages
     are shown but not consumed, so a subsequent `bus read`/`bus peek` still
     sees them. Equivalent to `bus peek`.
+
+    `--since <cursor>` (T55.7) replays from a point: consume only messages
+    whose `id` is past <cursor>, leaving everything at or before it pending
+    for a later read. A debugging escape -- `<cursor>` is a numeric stream
+    sequence (`now`/`all` are `bus watch` anchors and are not accepted here).
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -4411,16 +4425,9 @@ defmodule Kazi.CLI do
     if opts[:peek] do
       do_bus_peek(opts)
     else
-      case Kazi.Bus.read(bus_call_opts(opts)) do
-        {:ok, messages} ->
-          emit(json?(opts), bus_read_payload(messages, opts), fn ->
-            print_read_digest(messages)
-          end)
-
-          0
-
-        {:error, reason} ->
-          bus_error(reason, opts)
+      case parse_read_since(opts[:since]) do
+        {:error, message} -> bus_error(message, opts)
+        {:ok, since} -> do_bus_assembled_read(opts, since: since)
       end
     end
   end
@@ -4508,9 +4515,8 @@ defmodule Kazi.CLI do
       {:ok, since} ->
         case Kazi.Bus.watch(bus_call_opts(opts) ++ [since: since]) do
           {:ok, messages} ->
-            emit(json?(opts), bus_read_payload(messages, opts), fn ->
-              print_read_digest(messages)
-            end)
+            reply = local_bus_reply(messages, opts)
+            emit(json?(opts), bus_read_payload(reply), fn -> print_read_digest(reply) end)
 
             0
 
@@ -4689,12 +4695,19 @@ defmodule Kazi.CLI do
     end
   end
 
-  defp do_bus_peek(opts) do
-    case Kazi.Bus.peek(bus_call_opts(opts)) do
-      {:ok, messages} ->
-        emit(json?(opts), bus_read_payload(messages, opts), fn ->
-          print_read_digest(messages)
-        end)
+  defp do_bus_peek(opts), do: do_bus_assembled_read(opts, peek: true)
+
+  # T55.7 (ADR-0072 d5): the ONE read path. The daemon pulls the consumer,
+  # aggregates, and enforces the bound; the CLI renders what came back and
+  # never re-aggregates. `Kazi.Bus.read_digest/1` is the same call the MCP
+  # tools and the ADR-0071 hook make, which is what keeps the three surfaces
+  # from drifting apart.
+  defp do_bus_assembled_read(opts, mode_opts) do
+    call_opts = bus_call_opts(opts) ++ mode_opts ++ [full: opts[:full]]
+
+    case Kazi.Bus.read_digest(call_opts) do
+      {:ok, reply} ->
+        emit(json?(opts), bus_read_payload(reply), fn -> print_read_digest(reply) end)
 
         0
 
@@ -4731,15 +4744,27 @@ defmodule Kazi.CLI do
     end
   end
 
-  defp print_read_digest(messages) do
-    %{verbatim: verbatim, digest: digest} = Kazi.Bus.Digest.summarize(messages)
-    Enum.each(verbatim, &IO.puts/1)
-    Enum.each(digest, &IO.puts/1)
+  # T55.7: `bus read --since <cursor>` (T51.4's debugging escape) replays from
+  # a stream sequence. Unlike `watch --since`, `now`/`all` are not accepted:
+  # a read is not a park, so "wake me on new" has no meaning here and a plain
+  # `bus read` already is `--since all`. A bad value is a fail-fast usage
+  # error, never a silent full read.
+  defp parse_read_since(nil), do: {:ok, nil}
+
+  defp parse_read_since(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {seq, ""} when seq >= 0 ->
+        {:ok, seq}
+
+      _other ->
+        {:error,
+         "invalid --since #{inspect(value)} (expected a numeric stream sequence, e.g. `--since 42`)"}
+    end
   end
 
   # T55.4 (ADR-0073 d1): the `bus board` --json envelope -- the current-state
   # projection under the ADR-0023 versioned contract, mirroring
-  # `bus_read_payload/2`'s shape (`kazi schema bus`).
+  # `bus_read_payload/1`'s shape (`kazi schema bus`).
   defp bus_board_payload(board) do
     %{"ok" => true, "schema_version" => @run_schema_version, "board" => board}
   end
@@ -4782,25 +4807,59 @@ defmodule Kazi.CLI do
     "#{label}#{machine}#{liveness}#{team}"
   end
 
+  # T55.7: renders the daemon's already-assembled digest. The `--full` escape
+  # has no digest to render, so its TTY view is summarized locally -- the one
+  # place the bound does not apply, because asking for `--full` IS asking for
+  # the unabridged set.
+  defp print_read_digest(%{"digest" => digest}) do
+    digest |> Kazi.Bus.Digest.to_tty_lines() |> Enum.each(&IO.puts/1)
+  end
+
+  defp print_read_digest(%{"messages" => messages}) do
+    print_read_digest(%{"digest" => Kazi.Bus.Digest.render(messages)})
+  end
+
+  defp print_read_digest(_reply), do: :ok
+
   @doc false
   # T55.1 (ADR-0072 d1/d6): the machine-readable result for `bus read|peek|
   # watch --json`. The bounded DIGEST is the default; `--full` is the
   # documented escape returning every pending message unabridged. Both shapes
-  # join the ADR-0023 versioned contract (`kazi schema bus`). Public so tests
-  # pin the envelope without a live daemon.
-  @spec bus_read_payload([map()], keyword()) :: map()
-  def bus_read_payload(messages, opts) do
-    base = %{"ok" => true, "schema_version" => @run_schema_version}
+  # join the ADR-0023 versioned contract (`kazi schema bus`).
+  #
+  # T55.7: `reply` is what the DAEMON assembled (`Kazi.Bus.read_digest/1`) --
+  # this only stamps the envelope onto it. `--full` vs digest is now decided
+  # by the daemon, which is why this no longer takes opts. Public so tests pin
+  # the envelope.
+  @spec bus_read_payload(map()) :: map()
+  def bus_read_payload(reply) do
+    %{"ok" => true, "schema_version" => @run_schema_version}
+    |> Map.merge(Map.take(reply, ["digest", "messages"]))
+  end
 
+  @doc false
+  # T55.1/T54.9: `bus watch`'s local render. A watch is a PARK, not a read --
+  # the messages that woke it are already in hand, and E55 must not touch
+  # `watch/1` (T54.9 owns it) -- so it shapes the same reply the daemon would
+  # have returned and shares every renderer below it.
+  @spec local_bus_reply([map()], keyword()) :: map()
+  def local_bus_reply(messages, opts) do
     if opts[:full] do
-      Map.put(base, "messages", messages)
+      %{"messages" => messages}
     else
-      Map.put(base, "digest", Kazi.Bus.Digest.render(messages))
+      %{"digest" => Kazi.Bus.Digest.render(messages)}
     end
   end
 
   defp bus_error(:no_daemon, opts),
     do: daemon_error("no daemon running -- start one with `kazi daemon start`", opts)
+
+  # T55.7: the daemon answered, and refused. Distinct from `:no_daemon` --
+  # "the bus is unreachable from the daemon" is a different fault from "there
+  # is no daemon", and an operator who cannot tell them apart debugs the wrong
+  # one.
+  defp bus_error({:bus_read_failed, reason}, opts),
+    do: daemon_error("daemon could not read the bus: #{reason}", opts)
 
   defp bus_error({:text_too_large, cap}, opts),
     do: daemon_error("message exceeds the #{cap}-byte bus cap", opts)
