@@ -7,9 +7,10 @@ defmodule Kazi.Predicate.Schema do
   keys accepted — no external docs. This covers the predicate providers
   `custom_script` (the generic command-runner whose verdict/evidence keys are
   config, not code), the `ratchet` mode (ADR-0041), the `static` analysis
-  provider (T32.7, ADR-0043), and the live providers `http_probe`, `browser`, and
-  `metrics` (T32.10, ADR-0043); plus the goal-file `integration` landing block
-  (T44.1, ADR-0055). Other kinds/blocks can be added the same way.
+  provider (T32.7, ADR-0043), the live providers `http_probe`, `browser`, and
+  `metrics` (T32.10, ADR-0043), and the `cli` binary-invocation provider (T43.7,
+  UC-055); plus the goal-file `integration` landing block (T44.1, ADR-0055). Other
+  kinds/blocks can be added the same way.
 
   The descriptor is intentionally flat — a `keys` list of
   `{name, type, required, description}` rows plus an `example` object — the same
@@ -831,7 +832,72 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @cli %{
+    kind: "cli",
+    title: "cli predicate config",
+    description:
+      "A golden invocation of a SHIPPED binary (T43.7, UC-055): run a declared command and " <>
+        "assert on the exit code + stdout/stderr — the observable surface `mix test` never " <>
+        "exercises (a packaged binary that crashes on its first CLI call). A binary that cannot " <>
+        "launch is :error; a violated assertion is :fail. Score = assertions passed " <>
+        "(higher_better).",
+    keys: [
+      %{
+        name: "cmd",
+        type: "string",
+        required: true,
+        description:
+          "The executable (ONE executable, not a command line; use args). A name with a \"/\" " <>
+            "resolves against the workspace; a bare name is a PATH lookup. Unresolvable -> :error."
+      },
+      %{
+        name: "args",
+        type: "array<string>",
+        required: false,
+        description: "Argument list passed to cmd. Default []."
+      },
+      %{
+        name: "env",
+        type: "table | array<pair>",
+        required: false,
+        description: "Extra environment as a {name = value} table or {name, value} pairs."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description:
+          "Kill the command after this many ms and map it to :error. Default: no timeout."
+      },
+      %{
+        name: "assertions",
+        type: "array<table>",
+        required: true,
+        description:
+          "A NON-EMPTY list of checks (an empty list is a load error). Each needs a \"target\": " <>
+            "\"exit_code\" (\"expected\" = the integer the exit code must equal); or \"stdout\" / " <>
+            "\"stderr\" with a \"match\" over that stream — \"equals\" (whole-stream equality), " <>
+            "\"contains\" (substring), \"regex\" (the stream matches \"expected\"), or " <>
+            "\"json_path\" (parse the stream as JSON, extract \"path\", compare to \"expected\"). " <>
+            "\"expected\" carries the operand; \"json_path\" also needs \"path\" (a $/.key/[i] " <>
+            "subset). A violated assertion is :fail with expected-vs-found evidence."
+      }
+    ],
+    example: %{
+      "id" => "kazi-version-runs",
+      "provider" => "cli",
+      "cmd" => "kazi",
+      "args" => ["version"],
+      "assertions" => [
+        %{"target" => "exit_code", "expected" => 0},
+        %{"target" => "stdout", "match" => "contains", "expected" => "kazi"},
+        %{"target" => "stderr", "match" => "equals", "expected" => ""}
+      ]
+    }
+  }
+
   @schemas %{
+    "cli" => @cli,
     "custom_script" => @custom_script,
     "ratchet" => @ratchet,
     "static" => @static,
