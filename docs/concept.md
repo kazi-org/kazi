@@ -639,6 +639,24 @@ catalog queryable -- declare a domain's role/priority/interface once on the
 Worked example: `docs/specs/product/convergence.feature`. See
 `docs/specs/README.md` ("Two scopes").
 
+### 10d. Scenario predicates: from behavior spec to replayable truth (ADR-0064)
+
+The behavior-specs tier (10c) gives a Scenario reviewable *prose*, but a Scenario's
+`Given`/`When`/`Then` are not machine-checkable on their own: nothing owns
+prose → executable. The **`scenario` predicate** closes that last gap. It binds
+one Gherkin Scenario in `docs/specs/` to a committed, replayable **pin** — the
+Scenario's realization in an existing surface provider's own config vocabulary
+(`browser` steps + assertions, or the `cli` sub-invocation matrix) — and passes
+**iff that pin validates against the current Scenario AND replays green** through
+the surface provider. No demonstration transcript or agent claim can satisfy it;
+the truth is what the shipped surface *observes* on replay. When a Scenario is
+unpinned or its text has drifted, the loop dispatches a **demonstrator** (write-
+disjoint from the fixer, ADR-0042) that mints the pin, accepted only if it
+validates and replays green. This makes "a user can create and download a personal
+access token" a first-class, objectively-checkable capability predicate, sitting
+directly atop the same `.feature` tier — not a new spec format. See
+`docs/scenario-predicate.md` and ADR-0064.
+
 ---
 
 ## 11. What kazi is NOT
