@@ -95,6 +95,63 @@ defmodule Kazi.Bus.HookPayloadTest do
   end
 
   # ===========================================================================
+  # Untagged: the PER-EVENT wall-clock bound (issue #1295)
+  #
+  # session-start is a one-shot boot whose full-board drain can run seconds under
+  # a busy backlog, so it gets a larger bound; turn is the per-turn hot path and
+  # MUST stay at the tight 2s bound. These are proven with an injected slow
+  # payload (`:payload_fun`) so the SAME slow work succeeds under session-start
+  # and is killed under turn -- no live daemon needed.
+  # ===========================================================================
+
+  describe "per-event timeout bound" do
+    test "turn keeps the tight 2s bound and session-start gets a larger one" do
+      # The hot-path invariant issue #1295 must NOT weaken: turn stays 2000ms.
+      assert Hook.timeout_ms("turn") == 2_000
+      # An unknown event also gets the tight bound (never the generous one).
+      assert Hook.timeout_ms("frobnicate") == 2_000
+      # session-start tolerates a slow one-shot board; it is strictly larger and
+      # comfortably covers the ~9.7s board drain observed live (issue #1295).
+      assert Hook.timeout_ms("session-start") > 2_000
+      assert Hook.timeout_ms("session-start") >= 10_000
+    end
+
+    test "session-start tolerates a slow (3s) board and injects it, non-silent" do
+      slow = slow_payload_fun(3_000, {:emit, "SLOW-BOARD-CONTENT\n"})
+
+      {elapsed_us, out} =
+        :timer.tc(fn ->
+          capture_io(fn ->
+            assert Hook.run("session-start", payload_fun: slow) == 0
+          end)
+        end)
+
+      # The board that would have been shutdown-to-:silent under the old 2s bound
+      # now actually reaches the session.
+      assert out =~ "SLOW-BOARD-CONTENT"
+      # It really waited for the slow payload rather than short-circuiting.
+      assert elapsed_us >= 3_000_000
+      # And it is still bounded well under the 15s ceiling.
+      assert elapsed_us < 14_000_000
+    end
+
+    test "turn kills the SAME slow (3s) payload at the 2s bound -- injects nothing" do
+      slow = slow_payload_fun(3_000, {:emit, "SHOULD-NOT-APPEAR\n"})
+
+      {elapsed_us, out} =
+        :timer.tc(fn ->
+          capture_io(fn -> assert Hook.run("turn", payload_fun: slow) == 0 end)
+        end)
+
+      # A payload slower than the hot-path bound is shut down: nothing injected.
+      assert out == ""
+      # It was cut at ~2s, not allowed to run the full 3s.
+      assert elapsed_us < 3_000_000,
+             "turn ran #{div(elapsed_us, 1000)}ms -- the 2s hot-path bound must not be weakened"
+    end
+  end
+
+  # ===========================================================================
   # :nats-tagged (excluded by default; NATS_URL required)
   # ===========================================================================
 
@@ -133,6 +190,15 @@ defmodule Kazi.Bus.HookPayloadTest do
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
+
+  # A payload that sleeps `ms` then returns `result`, standing in for a real but
+  # SLOW board/digest so a test can drive `run/2`'s per-event bound around it.
+  defp slow_payload_fun(ms, result) do
+    fn _event, _opts ->
+      Process.sleep(ms)
+      result
+    end
+  end
 
   defp missing_sock,
     do:
