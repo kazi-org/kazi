@@ -332,7 +332,8 @@ defmodule Kazi.Goal.Loader do
   A `browser` predicate's `assertions` are additionally checked against the
   runner's assertion vocabulary (T43.1, ADR-0053): each entry must be a table
   with a known `type` (`visible`, `hidden`, `text`, `url`, `console_clean`,
-  `download`, `a11y`), and
+  `download`, `attr`, `count`, `enabled`, `field_value`, `form_validation`,
+  `a11y`), and
   `console_clean`'s optional `network` flag must be a boolean. kazi passes
   `assertions` VERBATIM to the runner, so an unknown type would otherwise come
   back as a permanent `ok: false` -- a :fail indistinguishable from a genuinely
@@ -2049,7 +2050,7 @@ defmodule Kazi.Goal.Loader do
   # failure shape ADR-0058 fixed for a missing `url`: a config error the loop can
   # only discover by burning its budget. Checking the vocabulary at LOAD names the
   # bad type and the valid set instead. A new runner type must be added here too.
-  @browser_assertion_types ~w(visible hidden text url console_clean download a11y)
+  @browser_assertion_types ~w(visible hidden text url console_clean download attr count enabled field_value form_validation a11y)
 
   # Kept in lockstep with the axe-core impact levels the runner ranks (T43.2).
   @a11y_severities ~w(minor moderate serious critical)
@@ -2131,6 +2132,75 @@ defmodule Kazi.Goal.Loader do
   defp validate_browser_assertion_keys("a11y", assertion, id) do
     with :ok <- validate_a11y_severity(assertion, id) do
       validate_a11y_max_violations(assertion, id)
+    end
+  end
+
+  # `count` (T43.4): `expected` must be a non-negative integer. A string like "3"
+  # would reach the runner and compare unequal to a JS number forever — a
+  # permanent :fail the author reads as "the wrong number of elements", the
+  # ADR-0058 config-error-as-fail shape the load guard exists to prevent.
+  defp validate_browser_assertion_keys("count", assertion, id) do
+    case assertion_key(assertion, "expected") do
+      expected when is_integer(expected) and expected >= 0 ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} count assertion \"expected\" must be a " <>
+           "non-negative integer (got #{inspect(other)})"}
+    end
+  end
+
+  # `enabled` (T43.4): the optional `expected` flag must be a real boolean. Same
+  # trap as console_clean's `network` — in the JS runner the string "false" is
+  # truthy, so `expected = "false"` would assert the INVERSE of what was authored.
+  defp validate_browser_assertion_keys("enabled", assertion, id) do
+    case assertion_key(assertion, "expected") do
+      expected when is_boolean(expected) or is_nil(expected) ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} enabled assertion \"expected\" must be a " <>
+           "boolean (got #{inspect(other)})"}
+    end
+  end
+
+  # `attr` (T43.4): `name` (which attribute) is required — without it the runner
+  # reads `getAttribute(undefined)` and every value compares unequal, a permanent
+  # :fail with no signal as to why.
+  defp validate_browser_assertion_keys("attr", assertion, id) do
+    case assertion_key(assertion, "name") do
+      name when is_binary(name) and name != "" ->
+        :ok
+
+      other ->
+        {:error,
+         "browser predicate #{inspect(id)} attr assertion needs a non-empty \"name\" " <>
+           "(the attribute to read; got #{inspect(other)})"}
+    end
+  end
+
+  # `form_validation` (T43.4): at least one of the three sub-checks must be
+  # requested, else the assertion checks nothing and would pass vacuously. Its
+  # keys are otherwise optional (a goal asserts only the sub-checks it has inputs
+  # for), but a form_validation that requests NONE is an authoring mistake, not a
+  # trivially-true check — the runner treats "no sub-check ran" as ok:false, and
+  # naming it at load is clearer than a mystery :fail.
+  defp validate_browser_assertion_keys("form_validation", assertion, id) do
+    requested? =
+      assertion_key(assertion, "error_selector") != nil or
+        assertion_key(assertion, "submit_selector") != nil or
+        assertion_key(assertion, "success_selector") != nil or
+        assertion_key(assertion, "success_url") != nil
+
+    if requested? do
+      :ok
+    else
+      {:error,
+       "browser predicate #{inspect(id)} form_validation assertion requests no sub-check " <>
+         "(needs at least one of \"error_selector\", \"submit_selector\", " <>
+         "\"success_selector\", \"success_url\")"}
     end
   end
 

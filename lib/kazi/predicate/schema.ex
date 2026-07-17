@@ -398,6 +398,22 @@ defmodule Kazi.Predicate.Schema do
             "the sha256 makes \"the RIGHT file\" checkable, not just \"a file with the right " <>
             "name\". No download within the timeout is a real fail, not an error (T49.10, " <>
             "ADR-0064); " <>
+            "\"attr\" (selector + name + expected) — the element's `name` attribute equals " <>
+            "`expected` (a missing attribute is found: null, distinct from \"\"); " <>
+            "\"count\" (selector + expected) — exactly `expected` (non-negative integer) " <>
+            "elements match the selector; " <>
+            "\"enabled\" (selector + optional expected = true) — the element's enabled state " <>
+            "equals `expected` (a disabled-until-valid submit asserts expected = false); " <>
+            "\"field_value\" (selector + expected) — an input/select's CURRENT value equals " <>
+            "`expected`; " <>
+            "\"form_validation\" (submit_selector, invalid/valid field lists, error_selector " <>
+            "+ error_text, success_selector | success_url) — one assertion for the three " <>
+            "things a form must do: (i) invalid input surfaces the expected error, (ii) " <>
+            "submit is disabled-until-valid, (iii) a valid submission persists (read-back on " <>
+            "a success selector/URL). `found` names each sub-check " <>
+            "({error_shown, submit_disabled_until_valid, submission_persisted}) so a fail " <>
+            "says WHICH broke; a sub-check whose inputs are omitted is skipped (null), not a " <>
+            "silent pass (T43.4, UC-056); " <>
             "\"a11y\" (optional severity, max_violations) — runs axe-core against the view " <>
             "and asserts <= max_violations (default 0) violations at or above severity " <>
             "(minor|moderate|serious|critical, default serious). `found` lists each " <>
