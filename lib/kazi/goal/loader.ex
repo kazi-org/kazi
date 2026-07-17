@@ -331,7 +331,8 @@ defmodule Kazi.Goal.Loader do
 
   A `browser` predicate's `assertions` are additionally checked against the
   runner's assertion vocabulary (T43.1, ADR-0053): each entry must be a table
-  with a known `type` (`visible`, `hidden`, `text`, `url`, `console_clean`), and
+  with a known `type` (`visible`, `hidden`, `text`, `url`, `console_clean`,
+  `download`, `a11y`), and
   `console_clean`'s optional `network` flag must be a boolean. kazi passes
   `assertions` VERBATIM to the runner, so an unknown type would otherwise come
   back as a permanent `ok: false` -- a :fail indistinguishable from a genuinely
@@ -1994,7 +1995,7 @@ defmodule Kazi.Goal.Loader do
   # failure shape ADR-0058 fixed for a missing `url`: a config error the loop can
   # only discover by burning its budget. Checking the vocabulary at LOAD names the
   # bad type and the valid set instead. A new runner type must be added here too.
-  @browser_assertion_types ~w(visible hidden text url console_clean a11y)
+  @browser_assertion_types ~w(visible hidden text url console_clean download a11y)
 
   # Kept in lockstep with the axe-core impact levels the runner ranks (T43.2).
   @a11y_severities ~w(minor moderate serious critical)
@@ -2018,6 +2019,20 @@ defmodule Kazi.Goal.Loader do
            "(got #{inspect(other)})"}
     end
   end
+
+  @doc """
+  The `browser` assertion vocabulary the loader admits, as strings.
+
+  Public so `Kazi.Goal.LoaderBrowserAssertionParityTest` can pin it against the
+  `ASSERTIONS` dispatch table in `priv/browser/playwright_runner.js`. The two
+  lists MUST agree in both directions: a type the runner implements but the
+  loader omits is rejected at load even though it works (T49.10 shipped
+  `download` that way — implemented and documented, unloadable); a type the
+  loader admits but the runner lacks reaches the runner and comes back a
+  permanent `ok: false`, i.e. a :fail the author reads as "my UI is broken".
+  """
+  @spec browser_assertion_types() :: [String.t()]
+  def browser_assertion_types, do: @browser_assertion_types
 
   defp validate_browser_assertion(assertion, id) when is_map(assertion) do
     case assertion_key(assertion, "type") do
