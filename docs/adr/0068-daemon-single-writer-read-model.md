@@ -4,6 +4,14 @@
 Accepted (builds on the `kazi daemon` introduced in ADR-0067; independently
 acceptable -- the daemon could ship with this role alone)
 
+**Implementation note (T52.1).** The client-side write seam of decision 1 is
+`Kazi.ReadModel.Writer` (`Writer.write/2`): it makes the presence decision
+(`Kazi.Daemon.Probe.probe/1` against `Kazi.Daemon.Supervisor.default_sock_path/0`,
+memoized per process) and routes to the daemon or to `Kazi.Repo`. T52.1 lands the
+seam and the direct-write passthrough only; moving the ~20 write call sites onto it
+and the daemon-side `write` op + version handshake (decisions 1-3) are later E52
+tasks, added additively.
+
 ## Date
 2026-07-10
 

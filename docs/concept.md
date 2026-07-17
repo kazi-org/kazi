@@ -494,6 +494,15 @@ change from one machine to many — single-machine is the same substrates with t
 cluster degenerate to one node. Nothing gets swapped later (the explicit
 requirement that drove ADR-0004/0005).
 
+Every read-model write routes through a single client-side seam,
+`Kazi.ReadModel.Writer` (ADR-0068): when the machine's `kazi daemon` is running it
+is the only process that opens the SQLite file read-write — one writer, one schema
+version, one connection pool — eliminating the mixed-migration contention class
+(#1019) by construction; with no daemon, the seam writes straight to `Kazi.Repo`,
+exactly as before (ADR-0068 "no daemon, no change"). The presence decision is
+memoized per process so a busy run does not stat the control socket on every write.
+Reads may stay direct — WAL supports concurrent readers, so only writes centralize.
+
 Memory is a fourth read of these same stores, not a fifth store (ADR-0060): see
 [docs/memory.md](memory.md) for the four-layer map and how each layer is
 projected from data this section already describes.
