@@ -7,6 +7,75 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17 — T39.6 re-drive: nested-loop spine PROVEN over CLEAN `--json` (zero goal-file reconstruction, zero prose-scraping); live opencode convergence an honest skip (no local model here)
+
+**Type:** dogfood
+**Tags:** orchestrator, opencode, json-cli, plan-approve-apply, workspace-isolation, wiring-proof, T39.6
+
+**Task.** Re-drive the T15.9 nested loop (orchestrator -> kazi -> opencode -> local
+model) end to end over `--json` now that the E39 friction fixes have landed —
+`plan --json` (caller-drafts, named goal) -> `approve --json` -> `apply
+<proposal-ref> --json --harness opencode`, parsing each result object and branching
+on `next_action`, with NO goal-file reconstruction and NO stdout log-scraping.
+
+**Live local-model arm — HONEST SKIP (sanctioned by the acc).** No local-model
+endpoint is reachable in this session: `opencode` is not installed, `ollama` is not
+installed, and outbound network probes are blocked. Without `opencode` the
+`--harness opencode` dispatch literally cannot run, so the LIVE convergence arm was
+not driven. The task acc explicitly allows this ("Requires a reachable local-model
+endpoint … a wiring proof still counts if the local model is too slow"), so this is
+a WIRING PROOF, not a fabricated live run.
+
+**Binary-vs-source caveat (a real dogfooding landmine).** The `kazi` on `$PATH`
+(release 1.193.0) is READ-MODEL-STALE relative to repo HEAD: its schema is
+`v20260709210000` but HEAD has migrated to `v20260717170000`
+(`AddDiscoveryToProposedGoals`). The stale binary therefore refuses to author
+(`plan`/`approve` return the "read-model is unavailable; authoring requires
+persistence" object and degrade to no-persistence). Notably its stdout STILL decoded
+as exactly one JSON object with the schema warning routed to **stderr** — T39.4 holds
+even on the degraded path. Drove the spine from the source `mix` build instead (which
+ran the pending migration up to `v20260717170000`), mirroring the T15.9 precedent
+where the brew binary was stale against a current source build.
+
+**The loop, step by step (all over `--json`, each stdout = exactly one object):**
+1. **plan (caller-drafts, named goal):** `kazi plan --json --predicates '<json>'
+   --replace` with a supplied `goal_id`/`idea` -> a `proposed` proposal;
+   `goal_id="hello-file-dogfood"` and `idea` were honored **verbatim** (T39.1;
+   confirmed in the persisted `INSERT … proposed_goals`), `proposal_ref
+   prop-hello-file-dogfood`. One object. PASS.
+2. **approve:** `kazi approve <ref> --json` -> `{"status":"approved",…}`. **No
+   goal-file was written** — the approved goal lives behind the ref (T39.2/T39.3).
+   One object. PASS.
+3. **apply BY REF (no goal-file):** `kazi apply <ref> --workspace <ws> --harness
+   opencode --model <local> --check --json` -> resolved the APPROVED proposal
+   directly from the ref (T39.2 — NO reconstructed goal-file), observed t0
+   (`status:"fail"`, `next_action:"investigate"` — the fixture's `custom_script`
+   predicate `test -f hello.txt && grep -q hello hello.txt` fails before any edit),
+   and under `--check` **dispatched nothing**. One object. PASS. `--check` is the
+   wiring probe that exercises ref-resolution + JSON purity + `next_action` branching
+   without needing the (absent) inner model to converge.
+
+**Convergence-enabler (T39.7) verified at the profile level.** The live convergence
+blocker T15.9 found — the inner agent's edit escaping `--workspace` — is fixed:
+`lib/kazi/harness/profiles/opencode.ex:77` threads `--dir <workspace>` into the
+opencode argv whenever the run carries a workspace, so an inner edit WOULD land
+inside the goal's workspace where the workspace-scoped predicate can see it.
+`test/kazi/harness/opencode_profile_test.exs` (15 passed) pins the `--dir <workspace>`
+argv. Actually observing an opencode-driven edit converge is the part gated on a live
+local model, hence the honest skip above.
+
+**Verdict: WIRING PROOF — PASS.** The full `plan -> approve -> apply <ref>` spine
+drives end to end over CLEAN `--json`: every step's stdout `Jason.decode`s as exactly
+one object (kazi logs on stderr), the orchestrator branched on `next_action`, and
+there was ZERO goal-file reconstruction and ZERO prose/stdout scraping. **Live
+opencode convergence — NOT observed here**, because no local-model endpoint is
+reachable in this session (not a code defect; T39.7 already removed the workspace-
+escape defect). Two friction notes for orchestrators: (a) drive authoring from a
+build whose read-model schema matches HEAD — a stale release binary silently degrades
+to no-persistence; (b) a *cold* `mix run` co-mingles **mix's own** compile banner on
+stdout (pre-compile, or use a fresh release binary) — this is a mix artifact, not a
+kazi `--json` violation (kazi's own logs correctly go to stderr, T39.4).
+
 ## 2026-07-17: T43.9 -- CLI release smoke dogfooded over the real built binary
 
 **Type:** dogfood
