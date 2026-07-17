@@ -66,6 +66,125 @@ defmodule Kazi.Economy.HistoryTest do
     finished
   end
 
+  # T49.9 (ADR-0046/0058): role attribution. Iterations carry no run id — they are
+  # correlated to a run by (goal_ref, [started_at, finished_at]) — so these seed
+  # the iterations INSIDE the run's window explicitly rather than relying on "now".
+  defp record_dispatch(goal_ref, index, kind, observed_at) do
+    {:ok, _} =
+      Kazi.ReadModel.record_iteration(%{
+        goal_ref: goal_ref,
+        iteration_index: index,
+        action: %Kazi.Action{kind: kind, params: %{}},
+        observed_at: observed_at
+      })
+  end
+
+  defp set_window(run, started_at, finished_at) do
+    run
+    |> Kazi.ReadModel.Run.changeset(%{"started_at" => started_at, "finished_at" => finished_at})
+    |> Repo.update!()
+  end
+
+  describe "aggregate/1 — dispatch_by_role (T49.9)" do
+    test "a run with one fixer and one demonstrator dispatch reports the per-role split" do
+      goal_ref = "goal-roles-#{System.unique_integer([:positive])}"
+
+      run =
+        seed_run(%{
+          goal_ref: goal_ref,
+          predicate_count: 2,
+          dispatch_count: 2,
+          wall_clock_s: 60
+        })
+
+      inside = DateTime.add(run.started_at, 1, :second)
+      record_dispatch(goal_ref, 0, :dispatch_agent, inside)
+      record_dispatch(goal_ref, 1, :dispatch_demonstrator, inside)
+
+      assert %{groups: [group]} = History.aggregate(goal_ref: goal_ref)
+
+      # The acc's invariant: two rows, distinct kinds, and the run's own
+      # loop-tracked total is 2 — the split must ADD UP to it, not drift from it.
+      assert group.dispatch_count.p50 == 2
+      assert group.dispatch_by_role.dispatch_agent.p50 == 1
+      assert group.dispatch_by_role.dispatch_demonstrator.p50 == 1
+
+      assert group.dispatch_by_role.dispatch_agent.p50 +
+               group.dispatch_by_role.dispatch_demonstrator.p50 == group.dispatch_count.p50
+    end
+
+    test "a role the run never dispatched reports an honest 0, not nil" do
+      goal_ref = "goal-fixer-only-#{System.unique_integer([:positive])}"
+
+      run =
+        seed_run(%{goal_ref: goal_ref, predicate_count: 2, dispatch_count: 1, wall_clock_s: 60})
+
+      record_dispatch(goal_ref, 0, :dispatch_agent, DateTime.add(run.started_at, 1, :second))
+
+      assert %{groups: [group]} = History.aggregate(goal_ref: goal_ref)
+
+      # A run that HAPPENED and used no demonstrator genuinely spent 0 there. That
+      # is a real measurement, unlike tokens/cost where nil means "never reported"
+      # (ADR-0046) — so 0 here, never nil.
+      assert group.dispatch_by_role.dispatch_agent.p50 == 1
+      assert group.dispatch_by_role.dispatch_demonstrator.p50 == 0
+    end
+
+    test "non-dispatch iterations are excluded from the split" do
+      goal_ref = "goal-mixed-#{System.unique_integer([:positive])}"
+
+      run =
+        seed_run(%{goal_ref: goal_ref, predicate_count: 2, dispatch_count: 1, wall_clock_s: 60})
+
+      inside = DateTime.add(run.started_at, 1, :second)
+      record_dispatch(goal_ref, 0, :dispatch_agent, inside)
+      record_dispatch(goal_ref, 1, :integrate, inside)
+      record_dispatch(goal_ref, 2, :deploy, inside)
+
+      assert %{groups: [group]} = History.aggregate(goal_ref: goal_ref)
+      assert group.dispatch_by_role.dispatch_agent.p50 == 1
+      assert group.dispatch_by_role.dispatch_demonstrator.p50 == 0
+    end
+
+    test "an earlier run's dispatches are not attributed to a later run of the same goal" do
+      goal_ref = "goal-two-runs-#{System.unique_integer([:positive])}"
+      base = DateTime.utc_now()
+
+      # goal_ref is stable ACROSS runs, so a goal_ref-only join would pool these two
+      # runs into each other. The run's time window is what keeps them apart — so
+      # pin DISJOINT windows explicitly rather than letting the fixture's default
+      # backdating overlap them.
+      first = seed_run(%{goal_ref: goal_ref, predicate_count: 2, dispatch_count: 1})
+      set_window(first, DateTime.add(base, -100, :second), DateTime.add(base, -90, :second))
+      record_dispatch(goal_ref, 0, :dispatch_agent, DateTime.add(base, -95, :second))
+
+      second = seed_run(%{goal_ref: goal_ref, predicate_count: 2, dispatch_count: 1})
+      set_window(second, DateTime.add(base, -10, :second), base)
+      record_dispatch(goal_ref, 1, :dispatch_demonstrator, DateTime.add(base, -5, :second))
+
+      assert %{groups: [group]} = History.aggregate(goal_ref: goal_ref)
+
+      # Two runs, ONE dispatch each — not two each. Each role appears in exactly one
+      # of the two runs, so per role the counts are [1, 0]: p95 sees the run that
+      # used it, p50 the run that did not.
+      assert group.n == 2
+      assert group.dispatch_count.p50 == 1
+      assert group.dispatch_by_role.dispatch_agent.p95 == 1
+      assert group.dispatch_by_role.dispatch_agent.p50 == 0
+      assert group.dispatch_by_role.dispatch_demonstrator.p95 == 1
+      assert group.dispatch_by_role.dispatch_demonstrator.p50 == 0
+    end
+
+    test "a group with no iteration history at all reports 0s, and existing metrics are untouched" do
+      goal_ref = "goal-no-iters-#{System.unique_integer([:positive])}"
+      seed_run(%{goal_ref: goal_ref, predicate_count: 2, dispatch_count: 0, wall_clock_s: 60})
+
+      assert %{groups: [group]} = History.aggregate(goal_ref: goal_ref)
+      assert group.dispatch_by_role.dispatch_agent.p50 == 0
+      assert group.dispatch_by_role.dispatch_demonstrator.p50 == 0
+    end
+  end
+
   describe "aggregate/1 — percentile grouping" do
     test "aggregates seeded runs into correct p50/p95 per group" do
       goal_ref = "goal-shared"
