@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.193.0](https://github.com/kazi-org/kazi/compare/v1.192.0...v1.193.0) (2026-07-17)
+
+
+### Features
+
+* **loader:** accept and validate oss_hygiene predicate config ([82ade95](https://github.com/kazi-org/kazi/commit/82ade95351027493365962c45f766408b2f0c970))
+* **providers:** oss_hygiene -- the internal-leak guard as a predicate ([b368d8c](https://github.com/kazi-org/kazi/commit/b368d8cf5a309a7ac7b25a7882c0bde8c8be45c1))
+* **runtime:** register the oss_hygiene provider ([32c65ad](https://github.com/kazi-org/kazi/commit/32c65ad9382301cb6788cfae2a08d26c06f1b04d))
+* **schema:** oss_hygiene predicate config schema ([de738f4](https://github.com/kazi-org/kazi/commit/de738f4d1bd84c04291726bf806e0074875457ce))
+
 ## [1.192.0](https://github.com/kazi-org/kazi/compare/v1.191.0...v1.192.0) (2026-07-17)
 
 
