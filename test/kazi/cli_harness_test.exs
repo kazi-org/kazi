@@ -513,6 +513,143 @@ defmodule Kazi.CLIHarnessTest do
   # Deliberately scoped to just that flag's values, not blanket argv membership
   # — Read/Edit/Write/Bash/Glob/Grep are ALSO always present in the separate,
   # unrelated `--tools` standard-tools flag (dispatch_surface.ex).
+  # T44.5 (ADR-0055): a goal that declares a landing mode. The agent must be
+  # allowed the git work that mode performs, or it converges the code and is then
+  # REFUSED at landing — the #769 shape (harness exits 0, nothing lands, the run
+  # stalls with no visible cause).
+  defp write_goal_with_integration(work, mode, extra \\ "") do
+    path = Path.join(work, "goal.toml")
+
+    File.write!(path, """
+    id = "cli-harness"
+    name = "CLI harness selection"
+
+    [scope]
+    workspace = "#{work}"
+
+    [integration]
+    mode = "#{mode}"
+    #{extra}
+
+    [[predicate]]
+    id = "code"
+    provider = "test_runner"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+    """)
+
+    path
+  end
+
+  describe "landing-mode permission alignment (T44.5, issue #769)" do
+    test "mode=pr with no explicit allowed_tools gets git+gh defaults injected", %{work: work} do
+      goal = write_goal_with_integration(work, "pr")
+
+      {_code, _io} =
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal, "--workspace", work],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+
+      tools = allowed_tools_values(argv_lines(work))
+      assert "Bash(git add:*)" in tools
+      assert "Bash(git commit:*)" in tools
+      assert "Bash(git push:*)" in tools
+      # pr/merge are the only modes that touch gh.
+      assert "Bash(gh pr:*)" in tools
+    end
+
+    test "mode=commit gets commit tools but NOT push — the mode never pushes", %{work: work} do
+      goal = write_goal_with_integration(work, "commit")
+
+      {_code, _io} =
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal, "--workspace", work],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+
+      tools = allowed_tools_values(argv_lines(work))
+      assert "Bash(git commit:*)" in tools
+      # Derived from what the mode DOES, not a blanket grant.
+      refute "Bash(git push:*)" in tools
+      refute "Bash(gh pr:*)" in tools
+    end
+
+    # The regression pin: a converge-and-stop goal's argv must be byte-identical
+    # to before this change.
+    test "mode=none injects NOTHING", %{work: work} do
+      goal = write_goal_with_integration(work, "none")
+
+      {_code, _io} =
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal, "--workspace", work],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+
+      refute "--allowed-tools" in argv_lines(work)
+    end
+
+    # A goal with no [integration] block at all resolves to mode :none — same pin.
+    test "no [integration] block injects NOTHING", %{work: work} do
+      goal = write_goal(work)
+
+      {_code, _io} =
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal, "--workspace", work],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+
+      refute "--allowed-tools" in argv_lines(work)
+    end
+
+    # An EXPLICIT allow-list is the author's decision and is never widened behind
+    # their back — `kazi lint` warns instead (tested in the lint suite).
+    test "an explicit allowed_tools is NOT overridden by the mode's defaults", %{work: work} do
+      goal =
+        write_goal_with_integration(
+          work,
+          "pr",
+          ~s(\n[harness]\nid = "claude"\nallowed_tools = ["Read"]\n)
+        )
+
+      {_code, _io} =
+        with_io(fn ->
+          Kazi.CLI.run(["apply", goal, "--workspace", work],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+
+      tools = allowed_tools_values(argv_lines(work))
+      assert tools == ["Read"]
+      refute "Bash(git commit:*)" in tools
+    end
+
+    # allowed_tools is Claude-only; a non-claude harness's argv must be untouched.
+    test "a non-claude harness gets no injection", %{work: work} do
+      goal = write_goal_with_integration(work, "pr")
+
+      {_code, _io} =
+        with_io(fn ->
+          Kazi.CLI.run(
+            ["apply", goal, "--workspace", work, "--harness", "opencode", "--model", "local/q"],
+            adapter_opts: [command: @stub],
+            persist?: false
+          )
+        end)
+
+      refute "--allowed-tools" in argv_lines(work)
+    end
+  end
+
   defp allowed_tools_values(argv) do
     idx = Enum.find_index(argv, &(&1 == "--allowed-tools"))
 
