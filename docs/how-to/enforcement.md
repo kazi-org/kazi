@@ -116,6 +116,41 @@ keeps its real score — so a genuine convergence is never blocked; only the *pr
 view* the stuck detector reads is downgraded. The flagged events surface in `--json`
 (below) as `diff_gaming` entries.
 
+## Role-scoped path policy (scenario predicates, ADR-0064)
+
+A `scenario` predicate (see [the scenario how-to](../scenario-predicate.md)) has TWO
+dispatch roles that must be **write-disjoint**: the **fixer** patches the app, the
+**demonstrator** mints the pin (the grader). ADR-0064 decision 7 grants the one
+mechanism extension for this — `read_only_paths` made **role-scoped** — carried on
+the profile's optional `roles` map and resolved by `Kazi.Enforcement.for_role/2`:
+
+```toml
+[enforcement.roles.fixer]
+# The fixer keeps its normal write surface, but pins and specs are read-only to it
+# (it cannot forge the grader). Same detection as the §2 lease.
+read_only_paths = ["docs/specs/pat.feature", "docs/specs/pins/pat.pin.json"]
+
+[enforcement.roles.demonstrator]
+# INVERTED: the demonstrator may write ONLY these paths — everything else is
+# read-only. A write outside them is a `disallowed_write` violation (the opposite
+# direction from the fixer's read_only_paths). The demonstrator cannot patch the
+# app, so a broken capability demonstrates as an honest failure.
+allowed_write_paths = ["docs/specs/pins/pat.pin.json"]
+```
+
+**Derived by default.** When a goal has ≥ 1 `scenario` predicate and **no**
+`[enforcement.roles]` block is authored, kazi derives the policy automatically: the
+fixer's `read_only_paths` gains every scenario predicate's `spec` **and** `pin`
+path, and the demonstrator's `allowed_write_paths` is **exactly** the pin paths.
+An explicit block is the author's override and wins untouched. A goal with **no**
+scenario predicate is byte-identical to today — `roles` stays empty and nothing in
+the five guarantees above changes.
+
+Both directions run over the SAME digest diff as the §2 lease
+(`Kazi.Enforcement.detect_role_writes/5`): the fixer flags a changed
+`read_only_paths` entry as `read_only_write`; the demonstrator flags any changed
+path NOT under `allowed_write_paths` as `disallowed_write`.
+
 ## Goal-file shape
 
 ```toml
