@@ -849,6 +849,49 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @docs_updated %{
+    kind: "docs_updated",
+    title: "docs_updated predicate config",
+    description:
+      "The \"docs land with the code\" gate (T44.8, ADR-0034): FAIL when the diff-vs-base " <>
+        "touches a USER-FACING SURFACE (a CLI command/flag, a predicate provider, a public " <>
+        "behaviour, or the MCP surface) without EITHER a matching docs change (docs/, README.md, " <>
+        "AGENTS.md) OR an explicit [no-docs] <reason> marker in a commit message. A diff that " <>
+        "touches no surface passes VACUOUSLY (the gate does not apply). Ports the T29.1 " <>
+        "docs-with-code CI check's surface heuristic.",
+    keys: [
+      %{
+        name: "base",
+        type: "string",
+        required: false,
+        description:
+          "The base ref to diff against. Default: the merge-base with origin/main, else the " <>
+            "repo root commit, else the empty tree."
+      },
+      %{
+        name: "surface_patterns",
+        type: "array<string>",
+        required: false,
+        description:
+          "Override the surface-defining path regexes (anchored). Default: lib/kazi/cli.ex, " <>
+            "lib/kazi/cli/, lib/kazi/providers/, predicate_provider.ex, harness_adapter.ex, " <>
+            "lib/kazi/mcp/."
+      },
+      %{
+        name: "doc_patterns",
+        type: "array<string>",
+        required: false,
+        description:
+          "Override the path regexes that count as a docs update. Default: docs/, README.md, " <>
+            "AGENTS.md."
+      }
+    ],
+    example: %{
+      "id" => "docs-updated",
+      "provider" => "docs_updated"
+    }
+  }
+
   @integration %{
     kind: "integration",
     title: "[integration] goal-file block",
@@ -1072,6 +1115,7 @@ defmodule Kazi.Predicate.Schema do
     "mutation" => @mutation,
     "cve" => @cve,
     "no_stubs" => @no_stubs,
+    "docs_updated" => @docs_updated,
     "integration" => @integration,
     "scenario" => @scenario,
     "oss_hygiene" => @oss_hygiene

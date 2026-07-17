@@ -102,6 +102,10 @@ defmodule Kazi.Runtime do
     # when the diff-vs-base introduces a stub/placeholder/hardcoded-return marker
     # into a NON-TEST file. Productizes the zero-stub policy as a real predicate.
     no_stubs: Kazi.Providers.NoStubs,
+    # T44.8 (ADR-0034): `:docs_updated` — the "docs land with code" gate. Fail when
+    # the diff-vs-base touches a user-facing surface (CLI/provider/public behaviour/
+    # MCP) without a matching docs change or a `[no-docs]` commit-message marker.
+    docs_updated: Kazi.Providers.DocsUpdated,
     # issue #860: the scope `deny`-path guard, synthesized by
     # `Kazi.Scope.guard_predicates/1` — independent of the `[enforcement]` profile.
     scope_guard: Kazi.Providers.ScopeGuard,
