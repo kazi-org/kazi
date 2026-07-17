@@ -168,7 +168,11 @@ so the orchestrator sees exactly what is still missing. All carry
 
 Useful propose flags: `--workspace <path>` (where a kazi-drafts harness drafts),
 `--strict` (refuse an underspecified idea non-interactively), `--adr` (also write
-an ADR-lite rationale doc).
+an ADR-lite rationale doc), `--discover` (opt-in, kazi-drafts only, T45.6/UC-059:
+attaches best-effort discovery evidence -- stack detection, `.feature` use-cases,
+a public-surface codebase scan -- to the proposal, visible via `kazi status
+<proposal-ref> --json`; caller-drafts bypass it, and any discovery step failing
+degrades to a plain draft with a warning, never a hard error).
 
 ### Step 2 -- review and approve (`kazi approve --json`)
 
