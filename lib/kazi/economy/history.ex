@@ -29,6 +29,14 @@ defmodule Kazi.Economy.History do
   `finished_at - started_at`; both timestamps are required at `RunRegistry`
   write time, so it is nil only for a row from before those columns existed.
 
+  `dispatch_by_role` (T49.9) deliberately reports 0 rather than nil for a role a
+  run never dispatched, and the distinction is real: a finished run genuinely DID
+  spend zero dispatches on a role it never used (a measured zero), whereas a nil
+  token count means the harness never REPORTED one (an unknown). Coercing an
+  unknown to 0 is the thing this section forbids; recording a measured zero is not.
+  See `dispatch_counts_by_role/1` for how a dispatch is attributed to a run, and
+  the one case (overlapping same-goal runs) where the split can overcount.
+
   ## Percentile method
 
   Nearest-rank over the ascending-sorted, non-nil values: `rank = ceil(p/100 *
@@ -46,7 +54,7 @@ defmodule Kazi.Economy.History do
   import Ecto.Query, only: [from: 2]
 
   alias Kazi.Economy.ModelIdNormalization
-  alias Kazi.ReadModel.Run
+  alias Kazi.ReadModel.{Iteration, Run}
   alias Kazi.Repo
 
   @typedoc "p50/p95 for one metric; either or both are nil when unreported (ADR-0046)."
@@ -62,6 +70,7 @@ defmodule Kazi.Economy.History do
           tokens: percentile_pair(),
           cost_usd: percentile_pair(),
           dispatch_count: percentile_pair(),
+          dispatch_by_role: %{optional(atom()) => percentile_pair()},
           wall_clock_s: percentile_pair()
         }
 
@@ -77,11 +86,14 @@ defmodule Kazi.Economy.History do
   """
   @spec aggregate(keyword()) :: %{groups: [group()]}
   def aggregate(opts \\ []) do
+    runs = finished_runs(opts)
+    # One grouped query for every run, rather than one per group.
+    by_role = dispatch_counts_by_role(Enum.map(runs, & &1.id))
+
     groups =
-      opts
-      |> finished_runs()
+      runs
       |> Enum.group_by(&group_key/1)
-      |> Enum.map(fn {key, runs} -> build_group(key, runs) end)
+      |> Enum.map(fn {key, group_runs} -> build_group(key, group_runs, by_role) end)
       |> Enum.sort_by(&{&1.goal_shape_bucket, &1.model || "", &1.harness || ""})
 
     %{groups: groups}
@@ -135,8 +147,11 @@ defmodule Kazi.Economy.History do
     |> finished_runs()
     |> Enum.filter(&(goal_shape_bucket(&1.predicate_count) == bucket))
     |> case do
-      [] -> nil
-      runs -> build_group({bucket, nil, nil}, runs)
+      [] ->
+        nil
+
+      runs ->
+        build_group({bucket, nil, nil}, runs, dispatch_counts_by_role(Enum.map(runs, & &1.id)))
     end
   end
 
@@ -152,11 +167,60 @@ defmodule Kazi.Economy.History do
     Repo.all(query)
   end
 
+  # T49.9 (ADR-0046/0058): dispatches per run, split by ROLE.
+  #
+  # `runs.dispatch_count` is one integer covering both roles — the fixer
+  # (`dispatch_agent`) and the demonstrator (`dispatch_demonstrator`, T49.7) share
+  # the dispatch path, so the total cannot say which spent the money. A
+  # demonstrator run and a fixer run of identical cost read identically today,
+  # which is exactly the attribution question this answers. `action_kind` on the
+  # iterations table is the only place the two roles are distinguishable.
+  #
+  # ## Why the join is (goal_ref, time window) and not a run id
+  #
+  # `iterations` carries NO run id — it keys on `goal_ref`, which is stable ACROSS
+  # a goal's runs, so goal_ref alone would pool every historical run of that goal
+  # into each of its runs. T49.9 is explicitly additive (no migration), so the
+  # correlation available is the run's own window: an iteration belongs to the run
+  # whose [started_at, finished_at] contains its `observed_at`. Both run bounds are
+  # required at RunRegistry write time and `observed_at` is a required iteration
+  # field, so the window is always well-defined here (and `finished_runs/1` has
+  # already excluded runs still in flight).
+  #
+  # LIMIT, stated honestly: two runs of the SAME goal whose windows OVERLAP would
+  # each count the other's dispatches. kazi refuses a duplicate live run of one
+  # goal by default (it takes `--allow-duplicate-run` to force), so overlap is the
+  # deliberate exception rather than the norm — but under that flag these per-role
+  # numbers are inflated while `dispatch_count` stays correct. The invariant that
+  # holds otherwise, and that the tests pin: the role counts SUM to the run's own
+  # loop-tracked `dispatch_count`.
+  #
+  # One grouped query for every run, not one per run.
+  @dispatch_kinds ~w(dispatch_agent dispatch_demonstrator)
+
+  defp dispatch_counts_by_role([]), do: %{}
+
+  defp dispatch_counts_by_role(run_ids) do
+    from(r in Run,
+      join: i in Iteration,
+      on:
+        i.goal_ref == r.goal_ref and i.observed_at >= r.started_at and
+          i.observed_at <= r.finished_at,
+      where: r.id in ^run_ids and i.action_kind in @dispatch_kinds,
+      group_by: [r.id, i.action_kind],
+      select: {r.id, i.action_kind, count(i.id)}
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {run_id, kind, n}, acc ->
+      Map.update(acc, run_id, %{kind => n}, &Map.put(&1, kind, n))
+    end)
+  end
+
   defp group_key(%Run{predicate_count: predicate_count, model: model, harness: harness}) do
     {goal_shape_bucket(predicate_count), ModelIdNormalization.normalize(model), harness}
   end
 
-  defp build_group({bucket, model, harness}, runs) do
+  defp build_group({bucket, model, harness}, runs, by_role) do
     %{
       goal_shape_bucket: bucket,
       model: model,
@@ -166,8 +230,26 @@ defmodule Kazi.Economy.History do
       tokens: percentiles(Enum.map(runs, & &1.budget_tokens)),
       cost_usd: percentiles(Enum.map(runs, & &1.budget_cost_usd)),
       dispatch_count: percentiles(Enum.map(runs, & &1.dispatch_count)),
+      # T49.9: the same dispatches, attributed. `dispatch_count` above stays the
+      # unchanged total (both roles); this names who spent it.
+      dispatch_by_role: dispatch_by_role_percentiles(runs, by_role),
       wall_clock_s: percentiles(Enum.map(runs, &wall_clock_seconds/1))
     }
+  end
+
+  # Per-role percentiles across the group's runs. A run with NO iteration rows for
+  # a role contributes 0 for it — that is an honest zero (the run happened and did
+  # not use that role), unlike `tokens`/`cost_usd` where a missing value means "not
+  # recorded" and is preserved as nil.
+  defp dispatch_by_role_percentiles(runs, by_role) do
+    Map.new(@dispatch_kinds, fn kind ->
+      counts =
+        Enum.map(runs, fn run ->
+          by_role |> Map.get(run.id, %{}) |> Map.get(kind, 0)
+        end)
+
+      {String.to_atom(kind), percentiles(counts)}
+    end)
   end
 
   defp wall_clock_seconds(%Run{
