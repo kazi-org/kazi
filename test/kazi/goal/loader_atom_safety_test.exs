@@ -53,22 +53,27 @@ defmodule Kazi.Goal.LoaderAtomSafetyTest do
   end
 
   test "many distinct unknown keys across many load attempts still never mint atoms" do
-    before_count = :erlang.system_info(:atom_count)
+    # Isolation (T59.5, #1025/#1186): the invariant is per-key -- none of these
+    # rejected junk keys becomes an interned atom. Assert that DIRECTLY (each key
+    # raises `String.to_existing_atom`), never via a delta on `:erlang.system_info(
+    # :atom_count)`. That counter is VM-GLOBAL: an `async: true` test measuring a
+    # delta across its own body actually measures the whole concurrent suite's
+    # atom churn, so under full-suite load a neighbour's atoms landed in the window
+    # and reddened this test (observed `left: 64`). The direct per-key check is
+    # immune to neighbours -- it is the same pattern the single-key test above uses.
+    keys =
+      for n <- 1..200 do
+        "kazi_m3_atom_safety_bulk_probe_#{n}_#{System.unique_integer([:positive])}"
+      end
 
-    for n <- 1..200 do
-      key = "kazi_m3_atom_safety_bulk_probe_#{n}_#{System.unique_integer([:positive])}"
-
+    for key <- keys do
       assert {:error, _reason} =
                Loader.from_map(goal(%{"cmd" => "sh", "args" => ["-c", "true"], key => "x"}))
     end
 
-    after_count = :erlang.system_info(:atom_count)
-
-    # A handful of atoms may be created by test/ExUnit machinery itself between
-    # the two snapshots; the important invariant is that it is NOT ~200 (one per
-    # rejected junk key), which would indicate the loader is still atomizing
-    # unknown keys.
-    assert after_count - before_count < 50
+    for key <- keys do
+      assert_raise ArgumentError, fn -> String.to_existing_atom(key) end
+    end
   end
 
   # T49.12: the OTHER side of the same guard. Rejecting unknown keys is only
