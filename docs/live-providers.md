@@ -83,6 +83,11 @@ for the rest of the run.
 | `url` | `contains` \| `exact` | the current URL matches |
 | `console_clean` | `network` (optional, bool) | the journey produced no `console.error` |
 | `download` | `filename_pattern` + `trigger_selector`, `timeout_ms` (optional) | the journey produced a download whose filename matches |
+| `attr` | `selector` + `name` + `expected` | the element's `name` attribute equals `expected` |
+| `count` | `selector` + `expected` (non-negative int) | exactly `expected` elements match the selector |
+| `enabled` | `selector` + `expected` (optional bool, default `true`) | the element's enabled state equals `expected` |
+| `field_value` | `selector` + `expected` | an input/select's current value equals `expected` |
+| `form_validation` | see below | invalid input errors, submit is disabled-until-valid, and a valid submission persists |
 | `a11y` | `severity` (optional), `max_violations` (optional) | axe-core finds `<= max_violations` violations at/above `severity` |
 
 ### `download` — the file-effect check
@@ -117,6 +122,72 @@ Two ways a download arrives, both supported:
 
 No download inside `timeout_ms` (default: the predicate's timeout) is a real
 **fail**, never an error — the page ran, it just did not deliver the file.
+
+### DOM-state checks — `attr`, `count`, `enabled`, `field_value`
+
+Four small checks the `visible`/`text` pair could not express. Each reports the
+**actual** value as `found`, so a fixer reads expected-vs-found rather than a bare
+boolean:
+
+```toml
+assertions = [
+  { type = "attr",        selector = "#email", name = "aria-invalid", expected = "true" },
+  { type = "count",       selector = "ul.results > li",               expected = 3 },
+  { type = "enabled",     selector = "button[type=submit]",           expected = false },
+  { type = "field_value", selector = "#email",                        expected = "a@b.com" },
+]
+```
+
+A selector that matches nothing is a real **fail** (the thing under test is
+absent), never an error — except `count`, where zero matches is a legitimate
+`found: 0` compared against `expected` like any other number. A missing attribute
+is `found: null` (distinct from `""`, an attribute present but empty), so
+`expected = ""` does not spuriously match a missing one.
+
+Load-time guards catch the footguns before they cost a dispatch: `count`'s
+`expected` must be a non-negative integer (a string `"3"` compares unequal to a JS
+number forever), `enabled`'s `expected` must be a real boolean (the string
+`"false"` is truthy in JS — the inverse of intent), and `attr` needs a non-empty
+`name`.
+
+### `form_validation` — the whole form contract in one assertion
+
+`form_validation` checks the three things a form must do, in order, and names
+which one broke:
+
+1. **invalid input surfaces the expected error** — fill the `invalid` fields, then
+   assert `error_text` appears at `error_selector`;
+2. **submit is disabled-until-valid** — with the form still invalid, `submit_selector`
+   is disabled;
+3. **a valid submission persists** — fill the `valid` fields, click submit, and read
+   back `success_selector` (or `success_url`).
+
+```toml
+[[predicate]]
+id = "signup-form-works"
+provider = "browser"
+url = "https://example.test/signup"
+description = "the signup form validates, gates submit, and persists a valid signup"
+
+assertions = [
+  { type = "form_validation",
+    submit_selector = "button[type=submit]",
+    invalid         = [{ selector = "#email", value = "not-an-email" }],
+    error_selector  = "#email-error",
+    error_text      = "valid email",
+    valid           = [{ selector = "#email", value = "a@b.com" }],
+    success_selector = "#signup-complete" },
+]
+```
+
+`found` names each sub-check —
+`{ error_shown, submit_disabled_until_valid, submission_persisted }` — so a
+**fail** says WHICH of the three broke, not just that the form is wrong. A
+sub-check whose inputs you omit is **skipped** (`null`), not a silent pass: a
+`form_validation` that requests none of `error_selector` / `submit_selector` /
+`success_selector` / `success_url` is a load error, because it would check
+nothing. Use `success_url` instead of `success_selector` when a valid submit
+navigates rather than swapping in a success element.
 
 ### `console_clean` — the site-smoke check
 

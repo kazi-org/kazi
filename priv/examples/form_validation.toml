@@ -1,0 +1,60 @@
+# Example kazi goal-file: a form's validation contract as ONE browser predicate
+# (T43.4, ADR-0053, UC-056).
+#
+# A signup form has to do three things, and a real acceptance check must prove all
+# three — not just that the page renders:
+#
+#   1. invalid input surfaces the expected error message,
+#   2. submit stays disabled until the input is valid,
+#   3. a valid submission actually persists (a success state you can read back).
+#
+# `form_validation` checks all three in order and, on failure, names WHICH one
+# broke via its `found` record ({error_shown, submit_disabled_until_valid,
+# submission_persisted}) — so a fixer agent gets "submit was enabled while
+# invalid", not a bare "the form is wrong".
+#
+#     kazi apply priv/examples/form_validation.toml --workspace path/to/app
+#
+# Real use requires the Playwright runtime installed once, and the app served at
+# the predicate's `url`:
+#
+#     npm i playwright && npx playwright install chromium
+
+id = "signup-form-validation"
+name = "The signup form validates input, gates submit, and persists a valid signup"
+
+[metadata]
+use_case = "UC-056"
+adr = "0053"
+
+[budget]
+max_iterations = 10
+
+[scope]
+workspace = "."
+
+# --- The whole form contract in one assertion --------------------------------
+#
+# The DOM-state assertions (attr / count / enabled / field_value) are available
+# for finer checks; here the composite covers the end-to-end contract. The extra
+# `enabled` assertion double-asserts sub-check (2) as its own line so a failure
+# there is unmistakable in the evidence.
+[[predicate]]
+id = "signup-form-works"
+provider = "browser"
+url = "https://example.test/signup"
+description = "invalid input errors, submit is disabled-until-valid, a valid signup persists"
+
+assertions = [
+  { type = "form_validation",
+    submit_selector = "button[type=submit]",
+    invalid          = [{ selector = "#email", value = "not-an-email" }],
+    error_selector   = "#email-error",
+    error_text       = "valid email",
+    valid            = [{ selector = "#email", value = "a@b.com" }],
+    success_selector = "#signup-complete" },
+
+  # A standalone read of the disabled-until-valid gate, asserted before any valid
+  # input is filled — expected = false means "must NOT be enabled yet".
+  { type = "enabled", selector = "button[type=submit]", expected = false },
+]
