@@ -616,6 +616,32 @@ recovery_test.exs` (both `reconcile_partition/2` directly and an end-to-end
 `needs`-DAG recovery through `Kazi.Scheduler.run_goals/2`, with NO injected
 reconciler -- the real production path). (2026-07-05.)
 
+### L-0042 #scheduler #worktree #landing #landmine -- a run-owned branch recognized by a NAMING CONVENTION (prefix) silently drops work when the checkout is renamed
+Issues #1079 + #1080: the serial/fleet worktree checked the loop out onto a
+SYNTHETIC branch `kazi-partition/p-<slug>-<nonce>`, so a goal-authored `landed`
+predicate asserting `git rev-parse --abbrev-ref HEAD = task/<goal-id>` could NEVER
+pass even on 100%-converged work -- the run reported stuck on a done goal. The fix
+(T54.1) checks the worktree out onto the goal's REAL target branch
+(`Kazi.Goal.integration_branch/1` -> `[integration] branch`, default derived
+`task/<sanitized id>`) via `Worktree.wrap/2`'s new `:owned_branch` opt. THE
+LANDMINE: `Kazi.Scheduler.SerialLanding.land/4` recognized the run-owned branch
+ONLY by the `kazi-partition/` prefix (`String.starts_with?`). Renaming the checkout
+WITHOUT migrating that discriminator makes `land/4` fall through to
+`:nothing_to_land` -- a SILENT DROP of converged work, not a loud failure -- because
+the checked-out branch no longer matches the prefix it keys off. RULE: a
+discriminator that recognizes a kazi-owned resource by a NAMING CONVENTION (a
+prefix/pattern) rather than an EXPLICIT identity is a silent-failure trap the moment
+the name is derived differently -- migrate it to compare the exact expected value
+(`land/4` already receives the `goal`, so it recomputes `integration_branch/1` and
+compares by `==`), and migrate the discriminator + every test that asserts the old
+name shape in ONE atomic commit so a half-migrated state never lands. The worktree
+DIR on disk stays nonce-unique regardless (the distinct-worktree-path invariant is
+independent of the branch name), and `git worktree add -B` (create-or-reset) keeps a
+stable owned branch idempotent across re-runs. Regression:
+`test/kazi/serial_integration_test.exs` (loop runs on `task/<id>`, lands by identity)
++ `test/kazi/scheduler/worktree_test.exs` (`:owned_branch` checkout + `-B` re-run).
+(2026-07-17.)
+
 ### L-0026 #loop #budget #terminal-vector #landmine -- an `:over_budget` stop reported the PRE-dispatch vector, hiding work the budget-blowing dispatch actually finished
 Issue #790: `Kazi.Loop`'s hard budget guard (T1.4) checks the ceiling ONCE at the
 START of every tick, BEFORE observing again (`handle_event(:internal, :observe,
