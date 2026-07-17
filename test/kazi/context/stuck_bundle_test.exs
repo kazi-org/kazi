@@ -80,6 +80,44 @@ defmodule Kazi.Context.StuckBundleTest do
 
       assert byte_size(StuckBundle.render(bundle)) <= 300
     end
+
+    # issue #1075: the LAST failing predicate's failure text is the real error the
+    # higher rung needs. A prior fit pass blanked it to `""` when the (expendable)
+    # changed-files list alone filled the budget — hiding the git cause behind an
+    # empty `"failure"`. The failure must survive NON-EMPTY; the file list yields.
+    test "the last predicate's failure is never blanked to make room for changed files" do
+      git_cause = "fatal: no upstream configured for branch 'kazi-partition/p-x-ab12'"
+      changed = for i <- 1..40, do: "lib/module_number_#{i}.ex"
+
+      bundle =
+        StuckBundle.assemble(
+          %{failing: [{:landed, %{output: git_cause}}], changed_files: changed},
+          budget: 400
+        )
+
+      [%{"id" => "landed", "failure" => failure}] = bundle["failing_predicates"]
+      refute failure == "", "the real git cause must not be blanked to an empty string"
+      assert failure =~ "no upstream configured", "the actual error must be visible"
+      # The bundle still respects its byte budget — the file list was shed, not
+      # the failure.
+      assert byte_size(StuckBundle.render(bundle)) <= 400
+      assert bundle["bytes"] <= 400
+    end
+
+    test "a huge failure with a huge file list keeps a non-empty failure within budget" do
+      bundle =
+        StuckBundle.assemble(
+          %{
+            failing: [{:landed, %{output: String.duplicate("boom ", 400)}}],
+            changed_files: for(i <- 1..50, do: "lib/really_long_module_path_number_#{i}.ex")
+          },
+          budget: 500
+        )
+
+      [%{"failure" => failure}] = bundle["failing_predicates"]
+      refute failure == ""
+      assert byte_size(StuckBundle.render(bundle)) <= 500
+    end
   end
 
   describe "render/1" do
