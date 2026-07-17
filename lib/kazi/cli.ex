@@ -7078,10 +7078,48 @@ defmodule Kazi.CLI do
     IO.puts("CHECK (observe-only, nothing dispatched)  goal=#{id}")
     IO.puts("status: #{status}")
 
-    Enum.each(check_predicates_json(vector), fn %{id: id, verdict: verdict} ->
-      IO.puts("  #{id}: #{verdict}")
+    Enum.each(check_results(vector), fn {predicate_id, result} ->
+      IO.puts("  #{predicate_id}: #{result.status}")
+
+      case format_reason(result) do
+        nil -> :ok
+        reason -> IO.puts("    #{reason}")
+      end
     end)
   end
+
+  # One human line for an ERRORED predicate's reason (issue #1096). An :error
+  # means the checker could not run at all, and a check has no later iteration to
+  # carry the evidence — so printing a bare `error` told the operator something
+  # broke but never what. The --json surface keeps the reason structured; this is
+  # its prose counterpart. Passing/failing predicates have no reason to print.
+  defp format_reason(%{status: :error, evidence: %{reason: reason} = evidence}) do
+    "reason: " <> reason_text(reason, evidence[:cmd])
+  end
+
+  defp format_reason(_result), do: nil
+
+  defp reason_text({:cmd_unrunnable, message}, cmd),
+    do: "exec failed: #{cmd}: #{exec_error_text(message)}"
+
+  defp reason_text({:timeout_ms, ms}, _cmd), do: "timed out after #{ms}ms"
+  defp reason_text({:error_exit, code}, _cmd), do: "checker could not run (exit #{code})"
+  defp reason_text(reason, _cmd) when is_binary(reason), do: reason
+  defp reason_text(reason, _cmd) when is_atom(reason), do: to_string(reason)
+  defp reason_text(reason, _cmd), do: inspect(reason)
+
+  # A failed exec reaches us as the raw POSIX atom `System.cmd/3` raised
+  # ("Erlang error: :enoent"), which reads as noise to an operator. Name the two
+  # they actually hit; anything else passes through verbatim.
+  defp exec_error_text(message) when is_binary(message) do
+    cond do
+      String.contains?(message, ":enoent") -> "not found"
+      String.contains?(message, ":eacces") -> "permission denied"
+      true -> message
+    end
+  end
+
+  defp exec_error_text(message), do: inspect(message)
 
   # The `--check --json` object: a single terminal verdict (never a loop
   # outcome — `run_status/2` doesn't apply here) with `dispatched: false` making
@@ -7100,23 +7138,43 @@ defmodule Kazi.CLI do
   end
 
   # The check-mode predicate list: `{id, verdict}` (same shape as
-  # `predicate_vector_json/1`) PLUS the raw captured `evidence` for a failing
-  # predicate — there is no later iteration to carry it, so a check's failure
-  # report must be self-contained (issue #805). Passing predicates omit
-  # `evidence` (nothing to investigate).
-  defp check_predicates_json(%Kazi.PredicateVector{results: results}) do
-    results
-    |> Enum.sort_by(fn {id, _} -> to_string(id) end)
-    |> Enum.map(fn {id, result} ->
+  # `predicate_vector_json/1`) PLUS the captured `evidence` for a predicate that
+  # did not pass — there is no later iteration to carry it, so a check's failure
+  # report must be self-contained (issue #805). `:error` carries evidence for the
+  # same reason `:fail` does: a checker that could not run is the case most in
+  # need of a diagnostic, and dropping it left a bare, unactionable `error`
+  # (issue #1096). Passing predicates omit `evidence` (nothing to investigate).
+  defp check_predicates_json(%Kazi.PredicateVector{} = vector) do
+    Enum.map(check_results(vector), fn {id, result} ->
       base = %{id: to_string(id), verdict: to_string(result.status)}
 
-      if result.status == :fail do
-        Map.put(base, :evidence, result.evidence)
+      if result.status in [:fail, :error] do
+        Map.put(base, :evidence, evidence_json(result.evidence))
       else
         base
       end
     end)
   end
+
+  defp check_results(%Kazi.PredicateVector{results: results}) do
+    Enum.sort_by(results, fn {id, _} -> to_string(id) end)
+  end
+
+  # Evidence is provider-supplied and an `:error` result's carries terms Jason
+  # cannot encode — notably a tuple `reason` like `{:cmd_unrunnable, "..."}`,
+  # which would raise on the way out and take the whole report with it (the
+  # encoder-side sibling of L-0010's persistence crash). Deep-sanitize to
+  # JSON-safe: stringify keys and atoms, keep scalars, inspect anything else.
+  # A JSON-safe map is unchanged by this, so `:fail` evidence renders as before.
+  defp evidence_json(v) when is_binary(v) or is_number(v) or is_boolean(v) or is_nil(v), do: v
+  defp evidence_json(v) when is_atom(v), do: to_string(v)
+  defp evidence_json(v) when is_list(v), do: Enum.map(v, &evidence_json/1)
+
+  defp evidence_json(v) when is_map(v) and not is_struct(v) do
+    Map.new(v, fn {k, val} -> {to_string(k), evidence_json(val)} end)
+  end
+
+  defp evidence_json(v), do: inspect(v)
 
   # =============================================================================
   # economy (T48.8, ADR-0058 decision 2 precursor): aggregate-view rendering

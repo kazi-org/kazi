@@ -173,8 +173,89 @@ defmodule Kazi.CLI.ApplyCheckModeTest do
   end
 
   # ===========================================================================
+  # Tier 2 — an ERRORED predicate: the reason must survive to both surfaces
+  # ===========================================================================
+  #
+  # Issue #1096: the renderer attached evidence only for :fail, so an errored
+  # predicate (the checker could not run at all) printed a bare `error` with NO
+  # reason — the operator was told something broke but never what. An :error is
+  # exactly the case a check cannot leave undiagnosed: there is no later
+  # iteration to carry the evidence.
+
+  describe "apply --check — an errored predicate" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    test "--json carries the evidence + a stringified reason for the errored predicate",
+         %{tmp_dir: tmp_dir} do
+      goal_file = write_erroring_goal_file(tmp_dir)
+
+      out =
+        capture_io(fn ->
+          exit_code =
+            Kazi.CLI.run(
+              ["apply", goal_file, "--workspace", tmp_dir, "--check", "--json"],
+              []
+            )
+
+          assert exit_code != 0
+        end)
+
+      # A tuple reason must not crash the encoder on its way out (L-0010).
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert [predicate] = payload["predicates"]
+      assert predicate["verdict"] == "error"
+      assert is_map(predicate["evidence"])
+      assert predicate["evidence"]["reason"] =~ "cmd_unrunnable"
+      assert predicate["evidence"]["cmd"] == "scripts/missing.sh"
+    end
+
+    test "the human line names the reason, not a bare `error`", %{tmp_dir: tmp_dir} do
+      goal_file = write_erroring_goal_file(tmp_dir)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["apply", goal_file, "--workspace", tmp_dir, "--check"], []) != 0
+        end)
+
+      assert out =~ "code: error"
+      assert out =~ "exec failed: scripts/missing.sh"
+      # The raw POSIX atom is noise; the line must name the real problem.
+      assert out =~ "not found"
+    end
+
+    test "a passing predicate still carries no evidence", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "fixed.txt"), "already here\n")
+      goal_file = write_all_pass_goal_file(tmp_dir)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(
+                   ["apply", goal_file, "--workspace", tmp_dir, "--check", "--json"],
+                   []
+                 ) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      refute Map.has_key?(hd(payload["predicates"]), "evidence")
+    end
+  end
+
+  # ===========================================================================
   # helpers
   # ===========================================================================
+
+  # A predicate whose checker cannot run at all: the script it names does not
+  # exist in the workspace, so the provider errors with {:cmd_unrunnable, _}.
+  defp write_erroring_goal_file(tmp_dir) do
+    write_goal_file(tmp_dir, "erroring", """
+    [[predicate]]
+    id = "code"
+    provider = "custom_script"
+    verdict = "exit_zero"
+    cmd = "scripts/missing.sh"
+    """)
+  end
 
   defp write_all_pass_goal_file(tmp_dir) do
     write_goal_file(tmp_dir, "all_pass", """
