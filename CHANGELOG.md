@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.171.0](https://github.com/kazi-org/kazi/compare/v1.170.0...v1.171.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** the kazi bus hook payload (session-start board, turn digest) ([28153cb](https://github.com/kazi-org/kazi/commit/28153cbb560e2b3b7c4c545269f1ceb60d8f26ca))
+* **cli:** wire bus hook dispatch + help to Kazi.Bus.Hook ([b9f84aa](https://github.com/kazi-org/kazi/commit/b9f84aa7cb151295ead3024ed0720e1b3127b408))
+
 ## [1.170.0](https://github.com/kazi-org/kazi/compare/v1.169.0...v1.170.0) (2026-07-17)
 
 
