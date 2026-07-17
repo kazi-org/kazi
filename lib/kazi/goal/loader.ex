@@ -170,8 +170,16 @@ defmodule Kazi.Goal.Loader do
   (the dirty file list, the unpushed branch) driving the next dispatch. `mode =
   "none"` (or an absent `[integration]` block) synthesizes NOTHING, so the vector
   is byte-identical to the pre-T44.2 behavior. See `Kazi.Goal.landed_predicate/1`.
-  The landing ACTIONS (T44.3) that perform the commit/push/PR are a separate task.
-  `kazi schema integration` documents this shape.
+
+  The landing itself is performed by the `:integrate` action (T44.3,
+  `Kazi.Actions.Integrate`): for an `[integration]` goal it VERIFIES a clean,
+  committed, non-base branch (the inner agent owns its commits) and then pushes,
+  opens the PR with the converged predicate vector as the body, and rebase-merges
+  per the house rule — never squash, never a merge commit. A dirty tree at
+  integrate time is a distinct error (never a silent bulk commit) that re-dispatches
+  the agent via the failing `landed` predicate. Legacy goals with no `[integration]`
+  block keep the historical bulk-commit landing. `kazi schema integration`
+  documents this shape.
 
   ### `[[group]]` array of tables (→ `Goal.groups`, T12.1/ADR-0020)
 
