@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.197.0](https://github.com/kazi-org/kazi/compare/v1.196.1...v1.197.0) (2026-07-17)
+
+
+### Features
+
+* **loader:** accept and validate plan_expanded predicate config ([809045e](https://github.com/kazi-org/kazi/commit/809045e72d8645f3d9901d6542d41bdccfbda25a))
+* **providers:** plan_expanded -- read-model-only 'phase has been planned' gate (T45.3) ([9b40ff7](https://github.com/kazi-org/kazi/commit/9b40ff751a2153711ac1d0241e16ba343fdf1112))
+* **runtime:** register the plan_expanded provider ([92c339a](https://github.com/kazi-org/kazi/commit/92c339a06a01f6077301540c3d1bff83a23b08d3))
+* **schema:** plan_expanded predicate config schema ([d8685d2](https://github.com/kazi-org/kazi/commit/d8685d2b8c39ea12a0614c3f20a7acf6cb808536))
+
 ## [1.196.1](https://github.com/kazi-org/kazi/compare/v1.196.0...v1.196.1) (2026-07-17)
 
 
