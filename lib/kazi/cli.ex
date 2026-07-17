@@ -224,7 +224,8 @@ defmodule Kazi.CLI do
       "`init` only: also write the canonical kazi MCP client config to the repo's .mcp.json ({command:\"kazi\",args:[\"mcp\"]}), so an MCP harness drives kazi natively (ADR-0044).",
     with_gist:
       "`init` only: opt THIS repo into the Gist context store — verify `gist doctor`, write .kazi/context.toml, register the `gist serve` MCP server in .mcp.json, and recommend KAZI_GIST_DSN. Project-local only; never touches global config (ADR-0045).",
-    out: "`init` output goal-file (default <repo>/kazi.goal.toml).",
+    out:
+      "`init`: output goal-file (default <repo>/kazi.goal.toml). `plan render`: write the generated markdown roadmap plan to this file instead of stdout (T45.5); the file is GENERATED — hand-edits are overwritten on the next render.",
     dir:
       "`install-skill` / `install-hooks`: target directory -- the skill directory for `install-skill` (default ~/.claude/skills/kazi), the settings directory for `install-hooks` (default ~/.claude). Injected to a tmp dir in tests.",
     local:
@@ -467,8 +468,8 @@ defmodule Kazi.CLI do
     %{
       name: "plan",
       summary:
-        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058).",
-      args: [%{name: "idea", required: false}],
+        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058). `plan render <roadmap>` instead renders a roadmap DAG as a GENERATED markdown plan (T45.5).",
+      args: [%{name: "idea|render <roadmap>", required: false}],
       flags: [
         :workspace,
         :yes,
@@ -479,7 +480,8 @@ defmodule Kazi.CLI do
         :replace,
         :discover,
         :session_name,
-        :project
+        :project,
+        :out
       ]
     },
     %{
@@ -590,6 +592,7 @@ defmodule Kazi.CLI do
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
       kazi plan --json [--predicates <json>] [--replace]   # caller-drafts (predicates supplied)
+      kazi plan render <roadmap-file> [--out <path>]       # render the roadmap DAG as a GENERATED markdown plan (T45.5)
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
@@ -976,6 +979,9 @@ defmodule Kazi.CLI do
       {:propose, idea, opts} ->
         execute_propose(idea, opts, inject_opts)
 
+      {:plan_render, roadmap, opts} ->
+        execute_plan_render(roadmap, opts)
+
       {:list_proposed, opts} ->
         execute_list_proposed(opts)
 
@@ -1031,6 +1037,7 @@ defmodule Kazi.CLI do
           | {:bus, String.t(), [String.t()], keyword()}
           | {:bus_help, String.t()}
           | {:propose, String.t(), keyword()}
+          | {:plan_render, Path.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
           | {:reject, String.t(), keyword()}
@@ -1059,6 +1066,8 @@ defmodule Kazi.CLI do
       then decides); `true` forces debrief capture on (T48.11, ADR-0058 §3).
     * `{:propose, idea, opts}` — the `plan` subcommand (T3.5c) with its
       positional prose idea and `opts` (`[workspace: path | nil]`).
+    * `{:plan_render, roadmap, opts}` — the `plan render <roadmap>` subcommand
+      (T45.5, UC-059) with `opts` (`[out: path | nil]`, the optional file target).
     * `{:list_proposed, opts}` — the `list-proposed` subcommand with `opts`
       (`[status: state | nil]`, an optional lifecycle-state filter).
     * `{:approve, proposal_ref, opts}` / `{:reject, proposal_ref, opts}` — the
@@ -1292,6 +1301,21 @@ defmodule Kazi.CLI do
   # T27.1/T27.9 (ADR-0032): `plan` is the ONLY authoring verb (the deprecated
   # `propose` alias was removed in v0.6.0). It parses to the `{:propose, ...}`
   # tuple — the internal handler name is unchanged; only the verb is `plan`.
+  #
+  # T45.5 (ADR-0075, UC-059): `plan render <roadmap>` is a SUBCOMMAND of `plan`
+  # (not a new verb — the help-json command set stays `plan`), matched before the
+  # authoring form so the `render` token is never mistaken for a prose idea. It
+  # renders the roadmap DAG as a generated markdown plan to stdout (or --out).
+  defp parse_command(["plan", "render", roadmap | rest], flags) do
+    case rest do
+      [] -> {:plan_render, roadmap, out: flags[:out]}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_command(["plan", "render"], _flags),
+    do: {:error, "the `plan render` command requires a <roadmap-file> argument"}
+
   defp parse_command(["plan" | rest], flags), do: parse_propose(rest, flags)
 
   # T3.5c authoring: `list-proposed` lists the proposal queue, optionally filtered
@@ -5632,6 +5656,63 @@ defmodule Kazi.CLI do
   # error. Only a genuine load FAILURE (a missing/malformed goal-file) is a
   # non-zero exit. --json emits a machine-readable list of warnings (the same
   # `emit/3` seam as the other commands); human prose otherwise.
+
+  # T45.5 (ADR-0075, UC-059): `plan render <roadmap>` renders the roadmap DAG as a
+  # GENERATED markdown plan — a wave-sectioned WBS with a read-model-driven checkbox
+  # per goal, progress counts, and a loud DO-NOT-HAND-EDIT banner — to stdout (or a
+  # file via --out). The waves are the SAME `needs`-DAG frontiers `kazi apply
+  # <roadmap> --explain` prints (`Kazi.Goal.Roadmap.frontiers/1`), and the
+  # checkboxes are a projection of live read-model verdicts, so a re-render after a
+  # verdict changes reflects the new state with no cache. Rendering never mutates
+  # the read-model; when persistence is unavailable every goal renders `unknown`
+  # rather than crashing.
+  defp execute_plan_render(roadmap_path, opts) do
+    case Kazi.Goal.Roadmap.load(roadmap_path) do
+      {:ok, roadmap} ->
+        markdown = Kazi.Goal.Roadmap.Render.render(roadmap, roadmap_verdicts(roadmap))
+        write_rendered_plan(markdown, opts[:out])
+
+      {:error, message} ->
+        IO.puts(:stderr, "error: #{message}")
+        1
+    end
+  end
+
+  # Build the `goal-id => verdict` map the renderer projects into checkboxes. The
+  # verdict is read from the read-model's latest iteration per goal; with no
+  # read-model (the escript build) every goal is an HONEST `:unknown`, never a
+  # fabricated `:pending` (ADR-0046 no-invented-state).
+  defp roadmap_verdicts(%Kazi.Goal.Roadmap{nodes: nodes}) do
+    if ensure_read_model() do
+      Map.new(nodes, fn node -> {node.id, goal_verdict(node.goal.id)} end)
+    else
+      Map.new(nodes, fn node -> {node.id, :unknown} end)
+    end
+  end
+
+  defp goal_verdict(goal_id) do
+    case ReadModel.latest_iteration(goal_id) do
+      %{converged: true} -> :converged
+      _ -> :pending
+    end
+  end
+
+  defp write_rendered_plan(markdown, nil) do
+    IO.write(markdown)
+    0
+  end
+
+  defp write_rendered_plan(markdown, out_path) do
+    case File.write(out_path, markdown) do
+      :ok ->
+        IO.puts(:stderr, "wrote generated roadmap plan to #{out_path} (do not hand-edit)")
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, "error: cannot write #{out_path}: #{:file.format_error(reason)}")
+        1
+    end
+  end
 
   defp execute_lint(goal_file, opts) do
     # T45.1 (ADR-0075): `lint` covers the roadmap artifact too. A file whose
