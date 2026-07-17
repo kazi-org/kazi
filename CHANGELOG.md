@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.183.0](https://github.com/kazi-org/kazi/compare/v1.182.0...v1.183.0) (2026-07-17)
+
+
+### Features
+
+* **scenario:** standing capability monitors + intern the delegate passthrough keys (T49.12, ADR-0064 d6) ([dc66ab7](https://github.com/kazi-org/kazi/commit/dc66ab76d14b31953eedfce15cdc175d4d6e3b0f))
+
 ## [1.182.0](https://github.com/kazi-org/kazi/compare/v1.181.0...v1.182.0) (2026-07-17)
 
 
