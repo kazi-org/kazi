@@ -3327,3 +3327,97 @@ the real release binary and asserts (1) `--json` stdout stays one JSON object
 built from the new pin is installed). The pin bump is sequenced by the
 coordinator AFTER the fork PR merges. `BURRITO_NO_CLEAN_OLD=1` remains the
 operator-side kill switch (skips the cleanup pass, and with it the notice).
+
+## 2026-07-17 — T44.14 dogfood: a goal lands itself end to end (E44 capstone) — landing works, but the serial loop does not auto-drive Integrate
+
+Live `kazi apply --harness claude` against a self-contained throwaway fixture
+(a tiny Python `calc` repo whose `add`/`mul` raise `NotImplementedError`, with
+two `custom_script` predicates that pass once implemented, `[integration] mode =
+"pr"`, `[harness] permission_mode = "bypassPermissions"`, `[budget]
+max_iterations = 12`). Goal-file shipped as `priv/examples/landing.goal.toml`.
+Run from a worktree at latest main via `mix run` (the released 1.160.0 binary
+predates the whole T44.x arc). Two live runs plus a direct Integrate call.
+
+**Run 1 (agent unconstrained). Converged in 3 iterations, 312,362 tokens.**
+The streamed predicate vector is the clean evidence for two acceptance criteria:
+
+- iter 0 — `adds=fail muls=fail landed=fail` (stubs unimplemented).
+- iter 1 — `adds=pass muls=pass` **`landed=fail`** — code green, convergence
+  BLOCKED by `landed` (T44.2 doing its job: the change was committed but not yet
+  landed to the `pr` degree).
+- iter 2 — `adds=pass muls=pass landed=pass` → **converged**.
+
+The inner agent made **3 small scoped conventional commits**, not one monolith
+(the T44.4 process contract visibly shaping it): `feat: implement add and mul`
+plus two `chore:` commits adding `.gitignore` entries. Honest nuance: the two
+`calc` functions landed together in the one `feat` commit; the extra commits are
+gitignore hygiene (pycache, kazi's own `.kazi/`/`.mcp.json` context), so the
+scoping was by concern, not one-commit-per-function.
+
+But the PR the run produced was opened **by the agent**, not by kazi's Integrate:
+its body was agent-authored prose (`## Changes` / `## Verification`), NOT kazi's
+auto-generated verification report. Under `bypassPermissions` — which the agent
+*needs* to commit its own work (`acceptEdits` grants edits but not Bash/git) —
+the agent also has `gh`, so it pushed and opened the PR itself, front-running the
+controller's Integrate step.
+
+**Run 2 (same goal + a `[conventions] extra_rules` line telling the agent to
+commit but NOT push/open a PR — leave landing to kazi). STUCK.**
+The agent implemented `add`/`mul` and committed 3 scoped conventional commits on
+`task/landing-dogfood`; the tree was clean and both code predicates passed — but
+the branch was **never pushed and no PR was opened**, so `landed` stayed failing
+for iters 1–3 and the loop escalated `STUCK — same failing set persisted:
+[:landed]` at 4 iterations. The loop's documented "code green but not landed →
+`:integrate`" decide clause did **not** drive the controller Integrate action to
+push+PR the branch; with the agent no longer self-landing, nothing landed.
+
+**Direct Integrate on run 2's committed branch → the vector-body PR.**
+Invoking `Kazi.Actions.Integrate.execute/2` (the T44.3 verifies-then-ships path)
+directly on that clean, committed, code-green branch pushed it and opened a PR
+titled `integrate(landing-dogfood): … [adds, muls]` whose body is exactly the
+auto-generated report:
+
+```
+## kazi verification report
+
+Goal `landing-dogfood` (…) converged; landing verified — clean tree, committed on `task/landing-dogfood`.
+
+Branch `task/landing-dogfood` → `main` — **rebase-merge** (never squash, never a merge commit).
+
+### Predicate vector
+
+- [x] `adds` — pass
+- [x] `muls` — pass
+```
+
+So T44.3's PR-body generation (the predicate vector in the body) **works**; it
+is simply not what opened the PR in the loop-driven run.
+
+**What each piece did, honestly:**
+- **T44.2 `landed` predicate — works.** It gated convergence in both runs: code
+  green did not converge until landing was real (run 1), and correctly held the
+  goal open → stuck when nothing landed (run 2).
+- **T44.4 process contract — works.** Small scoped conventional commits on the
+  goal branch in both runs.
+- **T44.3 Integrate verifies-then-ships — the feature works** (produces the
+  vector-body PR on a clean committed branch), but **the serial `kazi apply`
+  loop did not auto-invoke it** for a `landed`-failing state. Landing in the
+  converged run (run 1) was performed by the agent itself, not the controller.
+
+**Finding (for follow-up, not fixed here — architectural, out of a dogfood's
+scope):** in the serial single-workspace apply path, a failing `landed` predicate
+is routed to agent re-dispatch, not to the controller Integrate action, so
+landing depends on the agent self-landing under `bypassPermissions`. Two coupled
+gaps: (1) the loop's `code-green-but-not-landed → :integrate` edge does not fire
+here; (2) `bypassPermissions` (required for the agent to commit at all) also lets
+the agent push/PR, so its self-authored PR body pre-empts kazi's verification
+report even when Integrate would otherwise run. Worth a plan task to decide the
+intended division of labor (agent-lands vs controller-lands) and wire the serial
+loop accordingly.
+
+**Acceptance vs. observed:** ≥2 scoped commits — met (3, both runs). `landed`
+blocked-then-achieved — met (run 1 iter 1→2). A real PR with the predicate vector
+in its body — produced by kazi's Integrate (the report above), though in the
+loop-driven converged run the PR was agent-authored; reported honestly rather
+than overclaimed. `mode = "merge"` was not exercised. Fixture repo and its PRs
+were deleted after capture.
