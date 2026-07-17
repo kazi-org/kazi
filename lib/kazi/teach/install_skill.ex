@@ -655,6 +655,22 @@ defmodule Kazi.Teach.InstallSkill do
     Cadence: peek at turn boundaries; hold a bounded `watch` only when genuinely
     waiting on another session. Full taxonomy: `docs/session-bus.md`.
 
+    ### The board: what is true RIGHT NOW (T55.4)
+
+    `read`/`peek`/`watch` answer "what CHANGED since I last looked" -- a delta of
+    pending messages, and no state. `kazi bus board --json` (MCP:
+    `kazi_bus_board`) answers "what is true right now": the last-value `fact` per
+    topic and the live roster (names, teams, liveness), projected in one shot.
+
+    It CONSUMES NOTHING and keeps no cursor, so unlike `read` it is idempotent --
+    call it every turn (it is what a session-start hook injects) without draining
+    a message a later `read`/`watch` was counting on. Posting three facts on one
+    topic shows ONE line (the latest); it is bounded by the same ADR-0072 rules
+    as the digest (oversize bodies become stubs, at most 40 fact lines). Returns
+    `{ok, schema_version, board: {facts, roster, total_facts, total_sessions}}`.
+    Use it to orient at session start -- who is here, what facts are current --
+    instead of hand-rolling a markdown blackboard.
+
     ### The wake contract: how an IDLE session gets woken
 
     Delivery lands at TURN BOUNDARIES, and an idle session has no next turn --
