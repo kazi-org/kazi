@@ -74,7 +74,7 @@ kazi bus board [--scope machine|project] [--json]         # current state: last-
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
 kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
-kazi bus hook <event>                                      # harness hook entry point (ADR-0071) -- ALWAYS exits 0 silently
+kazi bus hook <event>                                      # harness hook entry point (ADR-0076) -- ALWAYS exits 0 silently
 kazi bus <verb> --help                                     # per-verb usage (signature, flags, valid kinds)
 ```
 
@@ -604,11 +604,11 @@ branches on, never
 (`isError: true`) with `reason: "no_daemon"`, exactly mirroring the CLI's
 no-daemon message — never a JSON-RPC protocol error.
 
-## Installing delivery (ADR-0071)
+## Installing delivery (ADR-0076)
 
 Delivery into a session ships as an **installer, not a recipe**: the
 DIY-hook recipe this section used to carry had an observed install rate of
-zero, so [ADR-0071](adr/0071-bus-delivery-is-installed-not-documented.md)
+zero, so [ADR-0076](adr/0076-bus-delivery-is-installed-not-documented.md)
 supersedes it. One opt-in command registers everything:
 
 ```
@@ -619,7 +619,7 @@ kazi install-hooks --uninstall    # remove exactly what was added
 
 It registers two hooks in the Claude Code settings, matched to the two
 moments that matter — and bound ONLY to events whose stdout reaches the
-session's context (the ADR-0071 binding rule; a `Stop` hook's output never
+session's context (the ADR-0076 binding rule; a `Stop` hook's output never
 reaches the next turn, so binding there is delivery to nowhere):
 
 | Claude Code event | Runs | Delivers |
@@ -758,7 +758,7 @@ from the sending side.
 
 A harness that cannot re-invoke a session on a background task's completion has
 no wake mechanism, and its sessions keep using the pull verbs at turn
-boundaries — exactly as ADR-0071 says of a harness with no hook mechanism.
+boundaries — exactly as ADR-0076 says of a harness with no hook mechanism.
 
 ### This depends on `--since now` (T54.9, issue #1097)
 
@@ -809,7 +809,7 @@ That pain is the argument for documenting this contract — not for building an
 escape hatch. Reaching into a live harness is permanently outside kazi's
 boundary: ADR-0001 positions kazi as the outer loop that treats the harness as
 a replaceable inner loop invoked through a thin subprocess adapter, and
-ADR-0071's non-goals restate it for exactly this surface ("kazi does not reach
+ADR-0076's non-goals restate it for exactly this surface ("kazi does not reach
 into a live harness process, does not inject mid-turn, and does not require the
 harness to be running"). A wake that requires kazi to drive someone else's
 terminal would make kazi a harness. The supported wake is the harness's own

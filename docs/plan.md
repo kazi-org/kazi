@@ -274,7 +274,29 @@ Open work:
   cursor-free board projects roster + claim ownership + current facts, so a
   starting session sees who is here and what is already claimed BEFORE it picks
   up work -- retiring the machine-local markdown blackboards two teams rebuilt
-  by hand, ADR-0071/0072/0073) -- E55.
+  by hand, ADR-0076/0072/0073) -- E55.
+- **UC-069** (a predicate carries an explicit `kind` of `capability` or `guard`
+  so vacuous convergence is disambiguated: a guard-only set passing at t0 is
+  the correct green verdict; a set containing capability predicates that all
+  pass before any work starts is flagged, not silently accepted -- scoped
+  narrowly after re-verifying whether E49's scenario predicates already close
+  the gap for goals that adopt them) -- E57.
+- **UC-070** (the operator's attention is a fleet-wide, aggregated surface --
+  every blocked-on-human session across every machine appears in ONE "waiting
+  on me" view fed by harness notification hooks, and a portfolio projection
+  (planned/in progress/stuck/complete, per-repo and fleet-wide) is composed
+  ONLY from kazi's own objective state, no manual curation, ADR-0011) -- E60.
+- **UC-071** (kazi installs as a Claude Code plugin -- skill + MCP + hooks
+  bundled into one installable, marketplace-driven, auto-updating artifact,
+  CI-generated from the same sources the existing installers use so the
+  plugin can never drift stale from the binary; existing installers stay as
+  a parallel channel) -- E61.
+- **UC-072** (a goal-file predicate with `provider = "gherkin"` expands at
+  load into one real sub-predicate per Scenario (grouped under the Feature,
+  Scenario Outline -> one per Examples row), ingesting real per-scenario
+  verdicts from ANY test runner via runner-agnostic cucumber-json, the runner
+  executing once per feature -- the runtime complement to E40's author-time
+  `kazi spec import`, ADR-0071) -- E62.
 
 ## Checkable Work Breakdown
 
@@ -328,7 +350,21 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E54 -- Reliability hardening II: the nine 2026-07-11/12 execution-sweep bugs -- partition branch lifecycle, dispatch budget-burn safety, --json locale, provider/bus DX (P0/P1) -> plans/E54.md
 
-### E55 -- Teamwork is first-class: installed delivery, a bounded digest, and a board (P1, ADR-0071/0072/0073) -> plans/E55.md
+### E55 -- Teamwork is first-class: installed delivery, a bounded digest, and a board (P1, ADR-0076/0072/0073) -> plans/E55.md
+
+### E56 -- Plan/lore/ADR doc hygiene sweep (P2) -> plans/E56.md
+
+### E57 -- Predicate correctness: landing routing, guard/acceptance flags, vacuous-convergence follow-up (P1) -> plans/E57.md
+
+### E58 -- Bus reliability: version-skew dead-letters + CLI discoverability (P1) -> plans/E58.md
+
+### E59 -- Concurrency, multi-process safety, and CI flakiness (P1) -> plans/E59.md
+
+### E60 -- Fleet-wide visibility: cross-machine runs, ghost-row reaping, operator attention, portfolio view, cost report (P2) -> plans/E60.md
+
+### E61 -- Ship kazi as a Claude Code plugin: skill + MCP + hooks in one installable, auto-updating artifact (P2) -> plans/E61.md
+
+### E62 -- Gherkin runtime predicate provider + parallel-landing follow-ups (P1, ADR-0071) -> plans/E62.md
 
 ## Risk Register
 
@@ -433,7 +469,36 @@ never swept into your commit.
 
 ## Progress Log
 
-### 2026-07-16 -- Change Summary (bus observation pass: E55 planned off ADR-0071/0072/0073; E51 Wave B superseded)
+### 2026-07-17 -- Change Summary (full open-issue triage: 8 issues closed, 7 new epics planned)
+- **Triage.** Read all 32 open kazi-org/kazi issues in full (body + comments).
+  Closed 8: #325/#335/#694/#696 were stale mirror-issues of E20/E37, both now
+  fully complete in the live WBS; #1073/#1074/#1204/#1306 were real bugs
+  already fixed in code with no linked close (T54.5, T54.2, the existing
+  `download` allowlist entry, and this session's own `/apply` skill fix,
+  respectively) -- each closed with the evidence/PR cited.
+- **24 issues remained, grouped into 7 tracks, materialized as new epics
+  E56-E62** (this change): E56 doc/lore/ADR hygiene (#1242, #1166, #1220, plus
+  an ADR-0071 numbering collision found and fixed inline -- see T56.4); E57
+  predicate correctness (#1290, #1356, #924/#1128 -- the latter pair
+  disambiguated rather than blindly built, since #924's own triage comment
+  already named E49's shipped scenario predicates as the accepted fix
+  direction); E58 bus reliability (#1227, #1060); E59 concurrency/flakiness
+  (#937, #1019, #1025, #1186, #1255); E60 fleet visibility (#1154, #1155,
+  #1156, #1160, #1070); E61 the Claude Code plugin (#1173, new ADR pending in
+  T61.1); E62 the gherkin runtime provider + parallel-landing follow-ups
+  (#1107, ADR-0071 already locked; #1241).
+- **Deliberately NOT planned:** #372/E25 epic and #382/T25.10 (a production
+  launch + public announcement task, `Owner: TBD`) -- stays a human decision,
+  not pool-dispatchable; #49.13/T49.13 similarly `Owner: TBD`, unchanged.
+- New UCs: UC-069 (capability|guard predicate kind, E57), UC-070 (operator
+  attention + portfolio view, E60), UC-071 (Claude Code plugin, E61), UC-072
+  (gherkin runtime provider, E62).
+- ADR fix (T56.4, landed inline): renumbered `0071-bus-delivery-...` to
+  `0076-bus-delivery-...` (collided with the pre-existing, chronologically
+  earlier `0071-gherkin-runtime-provider.md`); fixed every live cross-
+  reference; deliberately left CHANGELOG.md's historical entries untouched.
+
+### 2026-07-16 -- Change Summary (bus observation pass: E55 planned off ADR-0076/0072/0073; E51 Wave B superseded)
 - **Observation pass on the live bus.** The E51 bus is working: a `kazi daemon`
   up 16h carrying a dozen sessions across two machines and three projects, with
   cross-machine presence/facts/directed messages round-tripping on the released
@@ -457,7 +522,7 @@ never swept into your commit.
   `fact`'s last-value retention was already a board with no verb to render it.
   Duplicate work traced to lock VISIBILITY: `refs/claims/*` are invisible to the
   bus, so a lead hand-maintains ownership in prose.
-- ADR-0071 (delivery is installed, not documented -- supersedes 0067 point 6),
+- ADR-0076 (delivery is installed, not documented -- supersedes 0067 point 6),
   ADR-0072 (the digest bounds context at render, keeping the document-carrying
   limits -- supersedes 0067 point 5's producer cap), ADR-0073 (the board:
   current-state projection + claim visibility + stable identity -- extends 0067,

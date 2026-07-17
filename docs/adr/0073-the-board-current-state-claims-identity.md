@@ -106,7 +106,7 @@ identity — projects onto it, and both the CLI and the dashboard render it.**
    claim ownership. It is idempotent, cursor-free, and consumes nothing — a
    session may read it every turn without draining anything a `read` was
    counting on. It is bounded by ADR-0072's digest rules. This is what the
-   ADR-0071 session-start hook injects, and it is what replaces the hand-rolled
+   ADR-0076 session-start hook injects, and it is what replaces the hand-rolled
    markdown blackboards — with the cross-machine property those files gave up.
 
 2. **Claims stay authoritative where they are, and the board reads them at

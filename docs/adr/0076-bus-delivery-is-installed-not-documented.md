@@ -1,4 +1,4 @@
-# ADR 0071: Bus delivery is installed, not documented — an opt-in turn-boundary hook
+# ADR 0076: Bus delivery is installed, not documented — an opt-in turn-boundary hook
 
 ## Status
 Accepted

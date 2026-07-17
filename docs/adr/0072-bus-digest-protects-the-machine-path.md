@@ -115,7 +115,7 @@ stores.**
    verbatim-only-for-directed-or-interrupt. This is point 5's own load-bearing
    argument — "only a server can aggregate before the tokens are spent" —
    finally honoured, and it is what makes the digest uniform across the CLI,
-   the MCP tools, and the ADR-0071 hook rather than re-implemented three times.
+   the MCP tools, and the ADR-0076 hook rather than re-implemented three times.
 
 6. **The digest has a stated, tested bound.** A digest is at most N lines
    regardless of backlog depth or message size, with exact counts preserved.
@@ -129,7 +129,7 @@ stores.**
 
 ## Consequences
 
-- The ADR-0071 hook becomes affordable. Push delivery is only safe once a read
+- The ADR-0076 hook becomes affordable. Push delivery is only safe once a read
   is bounded; these two ADRs are independently correct but jointly necessary,
   and the epic must not enable delivery to real sessions before the bound
   lands.

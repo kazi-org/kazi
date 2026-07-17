@@ -94,15 +94,20 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
-**Near term (E55 waves B-D):** the board — current facts + roster + claim
-ownership read at source from `refs/claims/*` (T55.4/T55.8); deliberate pull
-for oversized messages (T55.6); digest assembly server-side in the daemon
-(T55.7); the hook payload that injects the board at session start and a
-bounded digest at turn boundaries, silent when quiet (T55.9); delivery
-visibility for directed messages (T55.12); the documented wake contract for
-idle workers (T55.13); closed by a cross-machine dogfood measured against the
-original symptom — *the operator does not have to tell a session to check the
-bus* (T55.10).
+**Near term (2026-07-17, from a full open-issue triage -- 7 new epics,
+E56-E62):** doc/lore/ADR hygiene (E56); predicate correctness -- serial-apply
+landing routing, guard/acceptance flag round-tripping, and a disambiguated
+follow-up on the vacuous-convergence class E49 was meant to close (E57); bus
+reliability -- the version-skew silent dead-letter bug and CLI
+discoverability gaps (E58); concurrency/multi-process safety and a CI
+flake-cluster root-cause pass (E59); fleet-wide visibility -- cross-machine
+run posting, ghost-row reaping, an operator-attention board, and a
+kazi-native portfolio view (E60); shipping kazi as a Claude Code plugin,
+CI-generated and lockstep-versioned with releases (E61); and the gherkin
+RUNTIME predicate provider Sire is waiting on, plus two deferred `--parallel`
+landing follow-ups (E62). E55 (the board, digest, delivery hooks) is now
+FULLY COMPLETE -- every task landed, closing the original symptom (*the
+operator does not have to tell a session to check the bus*).
 
 **Mid term (open epics by pull):**
 - *Verification climbs the ladder of intent:* browser assertion packs (E43),
