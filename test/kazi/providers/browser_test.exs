@@ -237,6 +237,105 @@ defmodule Kazi.Providers.BrowserTest do
     assert result.evidence.workspace == File.cwd!()
   end
 
+  # --- console_clean assertion (T43.1, ADR-0053 §1, UC-056) ------------------
+  #
+  # The assertion vocabulary lives in the runner (kazi passes `assertions`
+  # verbatim), so what the PROVIDER owes is the mapping: a clean journey passes, a
+  # captured error is real failing UI work (:fail) carrying the offenders as
+  # evidence, and a runner that could not produce a verdict at all is :error --
+  # never a :fail that would dispatch a fixer agent at an infra problem.
+
+  describe "console_clean assertion" do
+    test "a clean journey (ok: true) -> :pass", %{workspace: ws} do
+      verdict =
+        Jason.encode!(%{
+          status: "pass",
+          url: "https://example.test/app",
+          assertions: [%{type: "console_clean", ok: true, expected: 0, found: []}],
+          screenshot: nil,
+          error: nil
+        })
+
+      result = evaluate(ws, verdict, %{assertions: [%{type: "console_clean"}]})
+
+      assert %PredicateResult{status: :pass} = result
+      assert [assertion] = result.evidence.assertions
+      assert assertion["type"] == "console_clean"
+      assert assertion["ok"]
+      assert assertion["found"] == []
+    end
+
+    test "captured console errors (ok: false) -> :fail with the offenders as evidence", %{
+      workspace: ws
+    } do
+      found = [
+        %{kind: "console.error", text: "Uncaught TypeError: x is not a function", location: nil},
+        %{kind: "console.error", text: "Failed to load resource", location: nil}
+      ]
+
+      verdict =
+        Jason.encode!(%{
+          status: "fail",
+          url: "https://example.test/app",
+          assertions: [%{type: "console_clean", ok: false, expected: 0, found: found}],
+          screenshot: nil,
+          error: nil
+        })
+
+      result = evaluate(ws, verdict, %{assertions: [%{type: "console_clean"}]})
+
+      # A console error the page really produced is failing WORK, not infra.
+      assert %PredicateResult{status: :fail} = result
+      assert [assertion] = result.evidence.assertions
+      refute assertion["ok"]
+      assert assertion["expected"] == 0
+      assert length(assertion["found"]) == 2
+      assert hd(assertion["found"])["text"] =~ "Uncaught TypeError"
+    end
+
+    test "a failed 4xx/5xx response is reported when network: true -> :fail", %{workspace: ws} do
+      verdict =
+        Jason.encode!(%{
+          status: "fail",
+          url: "https://example.test/app",
+          assertions: [
+            %{
+              type: "console_clean",
+              ok: false,
+              expected: 0,
+              found: [%{kind: "network", status: 500, url: "https://example.test/api/cart"}]
+            }
+          ],
+          screenshot: nil,
+          error: nil
+        })
+
+      result =
+        evaluate(ws, verdict, %{assertions: [%{type: "console_clean", network: true}]})
+
+      assert %PredicateResult{status: :fail} = result
+      assert [%{"found" => [failure]}] = result.evidence.assertions
+      assert failure["status"] == 500
+      assert failure["kind"] == "network"
+    end
+
+    test "a runner crash under a console_clean assertion -> :error, never :fail", %{
+      workspace: ws
+    } do
+      # Non-zero exit with no verdict: the runner could not evaluate the journey
+      # at all (e.g. Playwright missing). Reporting :fail here would send a fixer
+      # agent hunting a console error that was never observed.
+      result =
+        Browser.evaluate(
+          predicate(nil, %{assertions: [%{type: "console_clean"}]}, [{"STUB_EXIT", "2"}]),
+          %{workspace: ws}
+        )
+
+      assert %PredicateResult{status: :error} = result
+      assert match?({:runner_failed, 2}, result.evidence.reason)
+    end
+  end
+
   # --- synthetic journey (samples > 1, T32.10) -------------------------------
 
   describe "synthetic journey (samples > 1)" do
