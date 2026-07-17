@@ -176,6 +176,25 @@ predicate in the goal-file survives the re-import untouched.
 `kazi spec import --json` emits `{ "ok": true, "into": "...", "upserted": [ids], ... }`
 so an orchestrator can drive it.
 
+### Lowering a tagged Scenario to a runtime `scenario` predicate
+
+By default every Scenario derives a `custom_script` scaffold (honestly RED until
+a human wires the check). `--lower scenario` (ADR-0054 d3, ADR-0064) instead
+lowers a Scenario TAGGED with a runnable surface directly to a runtime
+`scenario` predicate — `@interface:web` to the `browser` surface, `@interface:cli`
+to the `cli` surface — wiring the demonstrate-then-pin `Kazi.Providers.Scenario`:
+
+```sh
+kazi spec import docs/specs/my-capability.feature --into my-capability.goal.toml --lower scenario
+```
+
+Lowering is opt-in and never forces a Scenario: an UNTAGGED Scenario, and one
+tagged with any other interface (`api`/`sdk`/`grpc`/`background`/`ws`), stays a
+`test_runner` scaffold even under `--lower scenario`. Derived ids and Feature
+grouping are identical across modes, and WITHOUT the flag the import is
+byte-identical to today's (the ADR-0054 compat promise). The default is
+`--lower test_runner`.
+
 ## Lifecycle
 
 A behavior spec archives with its epic (ADR-0036 L1, T40.4): when an epic's WBS
