@@ -26,7 +26,7 @@ defmodule Kazi.Runtime.BusMirror do
 
   All of a run's facts share ONE topic -- `run:<short-run-id>` -- so the board's
   last-value-per-topic retention (ADR-0072/0073) collapses them to ONE current
-  line per run: `started ...` -> `iter N: p/t passing` -> `<verdict> ...`.
+  line per run: `started ...` -> `iter N: p/t passing <goal_ref>` -> `<verdict> ...`.
 
   The poster is injectable via `:run_mirror_poster` (default `&Kazi.Bus.post/3`)
   so a test can assert the mirrored facts' content without a live daemon.
@@ -50,17 +50,31 @@ defmodule Kazi.Runtime.BusMirror do
   the iteration index and the predicate pass/total, with a regression count when
   any predicate went green->red this observation. Detached -- never blocks the
   loop. Any payload that is not a well-formed iteration is a silent no-op.
+
+  Carries `goal_ref` in the text (T60.1, #1154 clause 3) -- the same way
+  `started/3` and `terminal/4` already do -- so a fact FANNED IN to another
+  machine's bus board can identify which goal is progressing without waiting
+  for that run's next terminal/started line (the topic alone, `run:<short-id>`,
+  does not name the goal; `last_per_subject` board retention means an
+  in-flight run's CURRENT fact is always an `iter` line, never the started
+  line, once it has progressed past iteration 0).
   """
-  @spec iteration(String.t(), String.t() | nil, map()) :: :ok
-  def iteration(run_id, session_name, %{iteration: n, vector: vector} = payload)
+  @spec iteration(String.t(), String.t(), String.t() | nil, map()) :: :ok
+  def iteration(goal_ref, run_id, session_name, %{iteration: n, vector: vector} = payload)
       when is_integer(n) do
     {passing, total} = counts(vector)
     regressions = payload |> Map.get(:regressions) |> List.wrap() |> length()
     suffix = if regressions > 0, do: " (#{regressions} regressed)", else: ""
-    emit("iter #{n}: #{passing}/#{total} passing#{suffix}", run_id, session_name, :detach)
+
+    emit(
+      "iter #{n}: #{passing}/#{total} passing#{suffix} #{goal_ref}",
+      run_id,
+      session_name,
+      :detach
+    )
   end
 
-  def iteration(_run_id, _session_name, _payload), do: :ok
+  def iteration(_goal_ref, _run_id, _session_name, _payload), do: :ok
 
   @doc """
   Post the TERMINAL verdict fact from the `Loop.await/2` result: the honest

@@ -332,4 +332,72 @@ defmodule KaziWeb.MissionControlLiveTest do
       refute html =~ ~s(id="mc-card-only-running")
     end
   end
+
+  describe "cross-machine fleet visibility (T60.1, #1154)" do
+    defp with_remote_facts(facts) do
+      Application.put_env(:kazi, :remote_run_facts_fetcher, fn -> facts end)
+      on_exit(fn -> Application.delete_env(:kazi, :remote_run_facts_fetcher) end)
+    end
+
+    defp remote_fact(topic, machine, text) do
+      %{"topic" => topic, "machine" => machine, "text" => text}
+    end
+
+    test "a run in flight on another machine renders as a distinct remote card", %{conn: conn} do
+      with_remote_facts([
+        remote_fact("run:abcdef12", "mini", "iter 3: 2/5 passing remote-goal")
+      ])
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ ~s(id="mc-card-remote-goal")
+      assert html =~ ~s(data-remote="true")
+      assert html =~ "remote · mini"
+    end
+
+    test "a fact from THIS machine is never rendered as remote (self-exclusion)", %{conn: conn} do
+      with_remote_facts([
+        remote_fact("run:abcdef12", Kazi.Bus.hostname(), "started local-goal-not-registered")
+      ])
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      refute html =~ ~s(id="mc-card-local-goal-not-registered")
+    end
+
+    test "a remote fact for a goal ALSO present in the local registry is not duplicated", %{
+      conn: conn
+    } do
+      seed(%{goal_ref: "shared-goal"})
+      with_remote_facts([remote_fact("run:abcdef12", "mini", "started shared-goal")])
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert length(:binary.matches(html, ~s(id="mc-card-shared-goal"))) == 1
+    end
+
+    test "converged/stuck/terminated remote facts map to the right state", %{conn: conn} do
+      with_remote_facts([
+        remote_fact("run:11111111", "mini", "converged goal-a (3/3 passing, 2 iters)"),
+        remote_fact("run:22222222", "mini", "stuck goal-b (1/3 passing, 5 iters)"),
+        remote_fact("run:33333333", "mini", "terminated goal-c (killed)")
+      ])
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ ~s(id="mc-card-goal-a" class="card c-ok remote")
+      assert html =~ ~s(id="mc-card-goal-b" class="card c-bad remote")
+      assert html =~ ~s(id="mc-card-goal-c" class="card c-bad remote")
+    end
+
+    test "a bus board fetch failure degrades to zero remote cards, never an error", %{conn: conn} do
+      Application.put_env(:kazi, :remote_run_facts_fetcher, fn -> raise "no daemon" end)
+      on_exit(fn -> Application.delete_env(:kazi, :remote_run_facts_fetcher) end)
+
+      seed(%{goal_ref: "local-only"})
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ ~s(id="mc-card-local-only")
+    end
+  end
 end

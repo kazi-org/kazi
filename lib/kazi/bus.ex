@@ -1927,7 +1927,15 @@ defmodule Kazi.Bus do
 
   defp slug(str), do: str |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-")
 
-  defp hostname do
+  @doc """
+  This machine's hostname, the SAME value every posted fact's `"machine"`
+  header carries (T60.1, #1154). Exposed so a consumer that cross-references
+  a fact's `machine` header against "am I local?" (e.g. the fleet dashboard
+  distinguishing a cross-machine run) reuses this single source instead of
+  a second hostname resolution.
+  """
+  @spec hostname() :: String.t()
+  def hostname do
     case :inet.gethostname() do
       {:ok, name} -> to_string(name)
       _other -> "unknown"

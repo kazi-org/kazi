@@ -935,7 +935,7 @@ defmodule Kazi.Runtime do
             persist_iteration(goal_ref, payload, events_sink_path)
             persist_debrief(run_id, goal_ref, payload)
           end,
-        fn payload -> BusMirror.iteration(run_id, session_name, payload) end
+        fn payload -> BusMirror.iteration(goal_ref, run_id, session_name, payload) end
       ]
       |> Enum.filter(&is_function(&1, 1))
 

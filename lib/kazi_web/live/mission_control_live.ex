@@ -255,7 +255,8 @@ defmodule KaziWeb.MissionControlLive do
           |> filter_window(socket.assigns.time_window)
 
         {shown, older} = Enum.split(filtered, @card_cap)
-        cards = Enum.map(shown, &card_from_run/1)
+        remote = remote_cards(all_runs)
+        cards = Enum.map(shown, &card_from_run/1) ++ remote
         visible = state_filtered(cards, socket.assigns.state_filter)
 
         socket
@@ -263,10 +264,126 @@ defmodule KaziWeb.MissionControlLive do
         |> assign(:waves, [])
         |> assign(:cards, visible)
         |> assign(:older_count, length(older))
-        |> assign(:instance_count, length(filtered))
-        |> assign(:filters_hide_runs?, deduped != [] and visible == [])
+        |> assign(:instance_count, length(filtered) + length(remote))
+        |> assign(:filters_hide_runs?, deduped != [] and remote == [] and visible == [])
         |> assign(:counts, fleet_counts(cards))
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Cross-machine fleet visibility (T60.1, #1154 clause 3): a run in flight on
+  # ANOTHER machine is invisible to `RunRegistry.list/0` (per-machine SQLite,
+  # ADR-0057) -- render it as a distinct card sourced from the bus board's
+  # last-value-per-topic `run:<short-id>` facts (T51.5's `Kazi.Runtime.BusMirror`)
+  # instead. Read-only, best-effort (ADR-0011 §2 / ADR-0067 point 1's mirror
+  # invariant mirrored here): an unreachable daemon degrades to zero remote
+  # cards, never an error -- the local fleet grid renders exactly as before.
+  # ---------------------------------------------------------------------------
+
+  defp remote_cards(all_runs) do
+    local_refs = all_runs |> Enum.map(& &1.goal_ref) |> MapSet.new()
+
+    remote_run_facts()
+    |> Enum.map(&parse_remote_fact/1)
+    |> Enum.filter(& &1)
+    |> Enum.reject(&MapSet.member?(local_refs, &1.goal_ref))
+    |> Enum.uniq_by(& &1.goal_ref)
+    |> Enum.map(&remote_card/1)
+  end
+
+  # Injectable (ADR-0011 §3, mirroring `liveness_source/0`/`CoordinationSource`):
+  # defaults to the real bus board, overridable in test config so a LiveView
+  # test can seed a fixture fact list with no daemon. The fetcher call itself
+  # (default OR injected) is wrapped in try/rescue/catch -- an unreachable
+  # daemon or a raising fixture degrades to zero remote cards, never a crashed
+  # render (same contract `assign_presence/1` already gives the SESSIONS rail).
+  defp remote_run_facts do
+    fetch = Application.get_env(:kazi, :remote_run_facts_fetcher, &default_remote_run_facts/0)
+
+    try do
+      fetch.()
+    rescue
+      _ -> []
+    catch
+      _, _ -> []
+    end
+  end
+
+  defp default_remote_run_facts do
+    case Kazi.Bus.board(claims: false) do
+      {:ok, %{"facts" => facts}} -> facts
+      _other -> []
+    end
+  end
+
+  @remote_started_re ~r/^started (?<goal_ref>\S+)$/
+  @remote_terminal_re ~r/^(?<verb>converged|over_budget|stuck|stopped|error) (?<goal_ref>\S+)(?: \(.*\))?$/
+  @remote_terminated_re ~r/^terminated (?<goal_ref>\S+) \(.*\)$/
+  @remote_iter_re ~r/^iter \d+: .+ (?<goal_ref>\S+)$/
+
+  # A fact from OUR OWN machine is not "remote" -- `Kazi.Bus.hostname/0` is the
+  # SAME value every posted fact's `machine` header carries, reused rather than
+  # a second hostname check.
+  defp parse_remote_fact(%{"topic" => "run:" <> _short, "machine" => machine, "text" => text})
+       when is_binary(machine) and is_binary(text) do
+    if machine != Kazi.Bus.hostname() do
+      case remote_fact_state(text) do
+        {goal_ref, state} -> %{goal_ref: goal_ref, state: state, machine: machine}
+        nil -> nil
+      end
+    end
+  end
+
+  defp parse_remote_fact(_other), do: nil
+
+  defp remote_fact_state(text) do
+    cond do
+      m = Regex.named_captures(@remote_started_re, text) ->
+        {m["goal_ref"], :converging}
+
+      m = Regex.named_captures(@remote_iter_re, text) ->
+        {m["goal_ref"], :converging}
+
+      m = Regex.named_captures(@remote_terminal_re, text) ->
+        {m["goal_ref"], remote_verdict_state(m["verb"])}
+
+      m = Regex.named_captures(@remote_terminated_re, text) ->
+        {m["goal_ref"], :stuck}
+
+      true ->
+        nil
+    end
+  end
+
+  defp remote_verdict_state("converged"), do: :landed
+  defp remote_verdict_state(_stuck_over_budget_stopped_error), do: :stuck
+
+  defp remote_card(%{goal_ref: goal_ref, state: state, machine: machine}) do
+    %{
+      run?: false,
+      remote?: true,
+      goal_ref: goal_ref,
+      name: goal_ref,
+      state: state,
+      over_budget?: false,
+      state_label: state_label(state, false),
+      card_cls: "card " <> card_variant(state) <> " remote",
+      pill_cls: "stpill " <> pill_variant(state),
+      harness: nil,
+      ws: nil,
+      project: nil,
+      age: nil,
+      last_active: nil,
+      iter: "—",
+      preds: [],
+      dna_overflow: 0,
+      budget_label: nil,
+      burn_cls: nil,
+      burn_w: nil,
+      spark: "",
+      sub: "remote · #{machine}",
+      machine: machine
+    }
   end
 
   # ---------------------------------------------------------------------------
@@ -1192,6 +1309,7 @@ defmodule KaziWeb.MissionControlLive do
       data-goal-ref={@card.goal_ref}
       data-run="false"
       data-state={@card.state}
+      data-remote={to_string(Map.get(@card, :remote?, false))}
     >
       <div class="cardtop">
         <div class="gname">{@card.name}</div>

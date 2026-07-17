@@ -130,6 +130,22 @@ thresholds), and harness-reported tokens (`Run.budget_tokens`) ride alongside as
 text (`· 412k tok`) only when present. Nothing is fabricated: no cap is invented
 to fake a token fraction.
 
+### Remote cards — cross-machine visibility (T60.1, #1154)
+
+A goal running on a DIFFERENT machine is invisible to `RunRegistry.list/0`
+(the per-machine SQLite read-model, ADR-0057) but may still be visible on the
+session bus, via `Kazi.Runtime.BusMirror`'s `run:<short-id>` facts. The fleet
+grid folds these in as **remote cards**: a lighter card (no project badge,
+harness, DNA strip, burn bar, or sparkline — none of that is knowable from a
+free-text bus fact) showing only the goal name, a state pill derived from the
+fact's verb (`started`/`iter` → running, `converged` → converged, anything
+else terminal → stuck), and a `.csub` line reading `remote · <machine>`.
+`data-remote="true"` distinguishes it from a local placeholder card in the
+markup. A goal_ref already present in the LOCAL registry is never duplicated
+as a remote card. Best-effort (ADR-0011 §2 / ADR-0067 point 1's mirror
+invariant): an unreachable daemon or a fact the parser can't recognize simply
+yields zero remote cards — the local fleet grid is unaffected either way.
+
 ## Roadmap wave grouping (preserving T47.2)
 
 When `kazi dashboard --roadmap <goal-file>` configures a roadmap goal
