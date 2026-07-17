@@ -49,6 +49,18 @@ defmodule Kazi.Providers.ProdLog do
       defaults to a pattern matching a ` 5xx ` / `status: 5NN` style server error.
     * `:panic_regex`   — regex (string) marking a panic / crash line. Optional;
       defaults to `panic`. Any match fails regardless of `:max_5xx`.
+    * `:correlate`     — optional trust-check (T41.5, ADR-0051 decision 4). An
+      inline table `{route, window}`. When present, the fetched log lines are
+      cross-checked for the given `route`, and a line on that route that also
+      matches the 5xx or panic pattern sets a `correlated_prod_error: true`
+      evidence flag. This DOWNGRADES TRUST in a green rather than the verdict —
+      the verdict is unchanged (a `:pass` stays `:pass`), so the flag surfaces "a
+      production error is happening on a route you named" instead of silently
+      trusting the pass. `route` is matched as a literal substring of a log line;
+      `window` is recorded in evidence (the span the correlation speaks for) but
+      not used for filtering — the query already bounds the window, exactly like
+      `:window_minutes`. Absent `:correlate`, evidence is byte-identical to a
+      goal that never named it (a pure, opt-in add).
 
   ## Context
 
@@ -63,7 +75,10 @@ defmodule Kazi.Providers.ProdLog do
   `:cmd`, `:args`, `:workspace`, and `:window_minutes` (the query used and the
   span it covers); on a completed query the `:server_error_count`, `:panic_count`,
   the `:max_5xx` threshold, and a bounded sample of the `:matched_lines`; on a
-  provider error a `:reason`.
+  provider error a `:reason`. When `:correlate` is configured, the completed-query
+  evidence additionally carries `:correlate` (the `%{route, window}` it checked),
+  `:correlated_prod_error` (whether a matching error was found on that route), and
+  a bounded sample of `:correlated_lines`.
   """
 
   @behaviour Kazi.PredicateProvider
@@ -194,11 +209,66 @@ defmodule Kazi.Providers.ProdLog do
       matched_lines: sample(panics ++ server_errors)
     }
 
+    evidence = maybe_correlate(evidence, config, lines, server_re, panic_re)
+
     if over_5xx? or has_panic? do
       PredicateResult.fail(evidence)
     else
       PredicateResult.pass(evidence)
     end
+  end
+
+  # T41.5 (ADR-0051 decision 4): opt-in prod-log correlation. Absent `:correlate`,
+  # this returns the evidence UNTOUCHED — byte-identical to before, the regression
+  # guard. When configured, it cross-checks the already-fetched log lines for the
+  # named route and flags a matching 5xx/panic: "a production error is happening on
+  # a route you named", surfaced on the evidence so the loop does not silently
+  # trust an otherwise-green predicate. It NEVER changes the verdict — the flag
+  # downgrades trust in the green, not the verdict (the base check still owns
+  # pass/fail).
+  #
+  # `route` matches as a literal substring (a route path is a literal, not a
+  # pattern — no regex-injection footgun). `window` is recorded for the operator
+  # but not used to filter: the query already bounds the window, so kazi does no
+  # time math, exactly as it does not for `:window_minutes`.
+  defp maybe_correlate(evidence, config, lines, server_re, panic_re) do
+    case Map.get(config, :correlate) do
+      correlate when is_map(correlate) ->
+        route = correlate_field(correlate, "route")
+        window = correlate_field(correlate, "window")
+
+        correlated =
+          if is_binary(route) and route != "" do
+            Enum.filter(lines, fn line ->
+              String.contains?(line, route) and
+                (Regex.match?(server_re, line) or Regex.match?(panic_re, line))
+            end)
+          else
+            []
+          end
+
+        Map.merge(evidence, %{
+          correlate: %{route: route, window: window},
+          correlated_prod_error: correlated != [],
+          correlated_lines: sample(correlated)
+        })
+
+      _ ->
+        evidence
+    end
+  end
+
+  # Read a `correlate` sub-key. The nested table arrives STRING-keyed (the loader
+  # atomizes only top-level predicate keys — see Kazi.Providers.Ratchet's
+  # normalize_metric), but a programmatically-built config (a test, an MCP inline
+  # goal) may pass atom keys, so accept either. No new atoms are created.
+  defp correlate_field(correlate, key) when is_binary(key) do
+    case Map.fetch(correlate, key) do
+      {:ok, value} -> value
+      :error -> Map.get(correlate, String.to_existing_atom(key))
+    end
+  rescue
+    ArgumentError -> nil
   end
 
   defp max_5xx(config) do
