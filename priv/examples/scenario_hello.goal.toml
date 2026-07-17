@@ -19,7 +19,7 @@
 #
 #     # Serve the fixture page, then converge:
 #     python3 -m http.server 8080 --directory priv/examples &
-#     kazi run priv/examples/scenario_hello.goal.toml --workspace .
+#     kazi apply priv/examples/scenario_hello.goal.toml --workspace .
 #
 # The pin's trace opens http://localhost:8080/scenario_hello_fixture.html and
 # asserts the greeting is visible and reads "Hello, kazi!". `mix test`
