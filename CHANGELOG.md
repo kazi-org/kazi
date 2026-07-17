@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.177.0](https://github.com/kazi-org/kazi/compare/v1.176.0...v1.177.0) (2026-07-17)
+
+
+### Features
+
+* **examples:** hand-authored scenario goal-file + replayable fixture page ([cd4a046](https://github.com/kazi-org/kazi/commit/cd4a0468701bb766ada1c66fef2da2faba088876))
+
 ## [1.176.0](https://github.com/kazi-org/kazi/compare/v1.175.0...v1.176.0) (2026-07-17)
 
 
