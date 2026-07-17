@@ -501,6 +501,96 @@ defmodule Kazi.Goal.LoaderTest do
     end
   end
 
+  # The assertion vocabulary lives in the runner and config is passed VERBATIM,
+  # so an unrecognized `type` would reach Playwright, come back `ok: false`, and
+  # read as a broken UI forever. These pin the load-time guard (T43.1, ADR-0053).
+  describe "browser assertion vocabulary (T43.1, ADR-0053)" do
+    defp browser_goal(assertions) do
+      %{
+        "id" => "ui",
+        "predicate" => [
+          %{
+            "id" => "home",
+            "provider" => "browser",
+            "url" => "https://example.test",
+            "assertions" => assertions
+          }
+        ]
+      }
+    end
+
+    test "a console_clean assertion loads" do
+      assert {:ok, goal} = Loader.from_map(browser_goal([%{"type" => "console_clean"}]))
+      assert [%Predicate{kind: :browser} = pred] = goal.predicates
+      assert [%{"type" => "console_clean"}] = pred.config[:assertions]
+    end
+
+    test "console_clean with network = true loads" do
+      goal = browser_goal([%{"type" => "console_clean", "network" => true}])
+
+      assert {:ok, loaded} = Loader.from_map(goal)
+      assert [%{"network" => true}] = hd(loaded.predicates).config[:assertions]
+    end
+
+    test "every runner assertion type loads" do
+      for type <- ~w(visible hidden text url console_clean) do
+        assert {:ok, _} = Loader.from_map(browser_goal([%{"type" => type, "selector" => "h1"}])),
+               "expected assertion type #{type} to load"
+      end
+    end
+
+    test "an UNKNOWN assertion type is a load error naming the valid set" do
+      assert {:error, reason} =
+               Loader.from_map(browser_goal([%{"type" => "console-clean"}]))
+
+      assert reason =~ "unknown type"
+      assert reason =~ "console-clean"
+      # The valid set is named so the author can spot the typo.
+      assert reason =~ "console_clean"
+      assert reason =~ "visible"
+    end
+
+    test "an assertion with no type is a load error" do
+      assert {:error, reason} = Loader.from_map(browser_goal([%{"selector" => "h1"}]))
+      assert reason =~ ~s(assertion with no "type")
+    end
+
+    test "a non-boolean console_clean network is a load error" do
+      # JS truthiness: the STRING "false" would silently turn network checking ON.
+      assert {:error, reason} =
+               Loader.from_map(browser_goal([%{"type" => "console_clean", "network" => "false"}]))
+
+      assert reason =~ "must be a boolean"
+      assert reason =~ "network"
+    end
+
+    test "console_clean network = false loads (a present false is not a missing key)" do
+      goal = browser_goal([%{"type" => "console_clean", "network" => false}])
+      assert {:ok, _} = Loader.from_map(goal)
+    end
+
+    test "a non-table assertion element is a load error" do
+      assert {:error, reason} = Loader.from_map(browser_goal(["console_clean"]))
+      assert reason =~ "must be a list of tables"
+    end
+
+    test "assertions that are not a list at all is a load error" do
+      assert {:error, reason} = Loader.from_map(browser_goal("console_clean"))
+      assert reason =~ "must be a list of tables"
+    end
+
+    test "a browser predicate with no assertions still loads (reachability only)" do
+      goal = %{
+        "id" => "ui",
+        "predicate" => [
+          %{"id" => "home", "provider" => "browser", "url" => "https://example.test"}
+        ]
+      }
+
+      assert {:ok, _} = Loader.from_map(goal)
+    end
+  end
+
   describe "from_map/1 — schema coverage" do
     test "sorts guard predicates into guards, keeps order within each bucket" do
       data = %{
