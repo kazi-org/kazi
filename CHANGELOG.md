@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.169.0](https://github.com/kazi-org/kazi/compare/v1.168.0...v1.169.0) (2026-07-17)
+
+
+### Features
+
+* **browser:** add a11y (axe-core) assertion to the playwright runner ([1fba03a](https://github.com/kazi-org/kazi/commit/1fba03a05517b71396da0671122862ccdd0177cd))
+* **browser:** surface a11y violation count as a lower_better score ([3cef3c4](https://github.com/kazi-org/kazi/commit/3cef3c468f578ce6c2fcefdf71f930992c2658ad))
+* **loader:** validate a11y browser assertion severity/max_violations ([bba9a72](https://github.com/kazi-org/kazi/commit/bba9a726cc4a3e7264c1cecaa58db162bc696ae8))
+* **schema:** document a11y in the browser predicate schema ([ac60858](https://github.com/kazi-org/kazi/commit/ac6085875ae0325bc99fdd29a6937b371f66565a))
+
 ## [1.168.0](https://github.com/kazi-org/kazi/compare/v1.167.0...v1.168.0) (2026-07-17)
 
 
