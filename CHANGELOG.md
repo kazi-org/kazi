@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.160.0](https://github.com/kazi-org/kazi/compare/v1.159.1...v1.160.0) (2026-07-17)
+
+
+### Features
+
+* **browser:** assertion dispatch table + console_clean journey capture ([d6ede52](https://github.com/kazi-org/kazi/commit/d6ede5264c455b5909e3ae8dd28376914e50bf7a))
+* **loader:** validate browser assertion types at goal-load ([ebf9307](https://github.com/kazi-org/kazi/commit/ebf9307a358f844435c1f37b6d1f990e951c889d))
+
 ## [1.159.1](https://github.com/kazi-org/kazi/compare/v1.159.0...v1.159.1) (2026-07-17)
 
 
