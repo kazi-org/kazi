@@ -9,8 +9,8 @@ screen instead of reconstructing it from 70+ ADRs and 50+ epics. E45
 ("plan-as-generated-view") may eventually generate a view like this from plan
 data; until then it is hand-maintained under the contract at the bottom.
 
-Last updated: **2026-07-16** (at v1.150.0, ADRs through 0073, E55 wave A in
-flight).
+Last updated: **2026-07-17** (at v1.153.0, ADRs through 0073, E55 wave A
+SHIPPED -- 7 tasks merged and released; waves B-D next).
 
 ## Where we came from
 
@@ -66,13 +66,20 @@ them; same-day field feedback from a five-session, two-machine fleet
 independently confirmed the diagnosis and added supervisor-grade gaps
 (idle-vs-dead presence, directed-message delivery visibility, wake semantics).
 
+Landed 2026-07-17 (v1.151.0-v1.153.0): **E55 wave A** — the digest render
+bound on every machine path (T55.1), the opt-in hook installer with a
+`kazi bus hook` entry point (T55.2), the dashboard's live roster (T55.3),
+stable session identity + tell-by-name (T55.5), presence liveness with
+ghost-row reaping (T55.11), the watch now-anchor fix (T54.9), and the
+distribution stdout-purity pin (T54.10, fork fix merged upstream). The wave's
+verification gate confirmed and fixed four cross-task union-merge bugs before
+merge — the empirical case for gate-then-merge.
+
 In flight right now:
 
-- **E55 wave A** — seven parallel pooled tasks: the digest render bound on every
-  machine path (T55.1), the opt-in hook installer (T55.2), the dashboard's live
-  roster (T55.3), stable session identity (T55.5), presence liveness (T55.11),
-  plus two E54 siblings the epic depends on: the watch now-anchor fix (T54.9)
-  and the distribution stdout-purity fix (T54.10).
+- **E55 wave B/C** — unblocked and claimable: the board (T55.4), deliberate
+  pull (T55.6), daemon-side digest (T55.7), delivery visibility (T55.12), and
+  the wake-contract doc (T55.13, now that T54.9 landed).
 - **E54** — reliability hardening II: the remaining execution-sweep bugs
   (partition branch lifecycle, budget-burn guards, `--json` locale).
 - **E51 tail** — T51.5: runs mirror lifecycle + per-iteration progress facts

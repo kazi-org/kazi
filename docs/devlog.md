@@ -7,6 +7,45 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17: E55 wave A -- 7 tasks, 4 gate-confirmed cross-task bugs, shipped v1.153.0
+
+**Type:** finding
+**Tags:** [bus, teamwork, pool, verification-gate, union-merge]
+
+**Problem:** Seven pooled tasks (T55.1/2/3/5/11 + T54.9/10) built in parallel
+worktrees, four of them writing the same files (cli.ex, bus.ex, mcp/server.ex,
+session-bus.md). Each branch was green in isolation; the risk was the merged
+interaction.
+
+**Root cause / what the wave gate caught:** union-merging the branches produced
+two CRITICAL cross-task regressions no single teammate could see -- (1) T55.5's
+tell resolver fed plain maps into the filter_fresh/2 that T55.11 had retyped to
+{entry, verdict} pairs, crashing every non-@ tell; (2) T55.2 and T55.11 both
+added a `project:` switch (boolean vs string) and OptionParser silently
+resolves duplicates to the first, making `bus who --project <dir>` unreachable.
+An adversarially-verified review workflow (4 lenses, 11 agents) confirmed both
+plus a pull-loop O(N^2)/ack-pending starvation in T54.9's new watch path and
+fork-per-row `ps` liveness checks. A full-suite confirmation run then caught a
+FOURTH class the lenses missed: a hardcoded expected-command list lost one
+branch's edit in the merge -- silent-revert via test literal, invisible to
+`git cherry`.
+
+**Fix:** all four fixed on the integration branch, validated 210/210 targeted
+(+ full suite) against fresh JetStream, landed by grafting each PR branch to
+its exact integration-resolved content (rebase-merge per PR), fixes folded in
+at the point in the sequence where the interaction first exists. Lossless
+check: final main tree == gate-validated integration tree (release-please
+files aside). install-hooks' flag shipped as `--local` (settings.local.json)
+to break the switch collision.
+
+**Impact:** tell-by-name, liveness roster, digest-by-default, watch now-anchor,
+install-hooks, and the dashboard live roster are all on main and released
+(v1.153.0). Field-reported stdout pollution did NOT reproduce (notice was
+already on stderr); the real bug was once-per-launch repetition, fixed in the
+burrito fork (kazi-org/burrito#1, merged) pending a pin bump. Un-shipped
+residue: the fork pin bump, and CI runs without NATS_URL so the :nats bus
+contract is only covered by local/dogfood runs -- worth a CI job.
+
 ## 2026-07-15: T40.7 dogfood -- `kazi spec import` on the released v1.149.0 binary caught a RELEASE-ONLY load bug every mix test missed
 
 **Type:** finding  **Tags:** [E40, T40.2, T40.7, ADR-0050, ADR-0040, dogfood, released-binary, loader, atom-safety]
