@@ -16,6 +16,19 @@ defmodule Kazi.Attention.Queue do
   `Kazi.ReadModel.iteration_history/1` / `Kazi.ReadModel.regressions/1`) so a
   test can seed both with no DB. It never mutates a run or a goal.
 
+  ## Heartbeat freshness gate (T63.1, #1155)
+
+  `build/2` drops any run whose `heartbeat_at` is older than
+  `RunRegistry.default_stale_after_seconds/0` BEFORE ranking, regardless of
+  status — this is defense in depth against ghost `running` rows (E60/T60.2
+  fixes the registry itself; this view stays robust even if a reaper misses
+  one) AND against ranking a terminal run so old it is no longer actionable.
+  Reuses the SAME window `Kazi.ReadModel.RunRegistry.stale?/2` and the
+  duplicate-run guard (`Kazi.Runtime`) already trust — no second threshold.
+  A run with no recorded heartbeat (`heartbeat_at: nil` — a pre-heartbeat
+  fixture or an as-yet-unheartbeated row) is treated as fresh: there is
+  nothing "old" to measure, so it is never dropped on that basis alone.
+
   ## Signals and ranking (the exact choice)
 
   Five signal types, each producing at most one queue entry per run
@@ -60,6 +73,7 @@ defmodule Kazi.Attention.Queue do
   alias Kazi.PredicateResult
   alias Kazi.PredicateVector
   alias Kazi.ReadModel.Run
+  alias Kazi.ReadModel.RunRegistry
 
   @budget_threshold 0.85
 
@@ -100,15 +114,36 @@ defmodule Kazi.Attention.Queue do
       defaults to `Kazi.ReadModel.iteration_history/1`.
     * `:regressions_fn` — `(goal_ref -> [{iteration_index, [map()]}])`,
       defaults to `Kazi.ReadModel.regressions/1`.
+    * `:stale_after_seconds` — the heartbeat-freshness gate (T63.1, #1155),
+      defaults to `Kazi.ReadModel.RunRegistry.default_stale_after_seconds/0`.
+      A run older than this is dropped before ranking; see the moduledoc's
+      "Heartbeat freshness gate" section.
   """
   @spec build([Run.t()], keyword()) :: [entry()]
   def build(runs, opts \\ []) when is_list(runs) do
     history_fn = Keyword.get(opts, :history_fn, &Kazi.ReadModel.iteration_history/1)
     regressions_fn = Keyword.get(opts, :regressions_fn, &Kazi.ReadModel.regressions/1)
 
+    stale_after_seconds =
+      Keyword.get(opts, :stale_after_seconds, RunRegistry.default_stale_after_seconds())
+
     runs
+    |> Enum.reject(&stale_for_attention?(&1, stale_after_seconds))
     |> Enum.flat_map(&entries_for_run(&1, history_fn, regressions_fn))
     |> Enum.sort_by(&sort_key/1)
+  end
+
+  # T63.1 (#1155): a run is too stale to rank when its heartbeat is older
+  # than the window, REGARDLESS of status — a non-terminal ("running") row
+  # this old is a ghost (E60/T60.2's registry bug); a terminal row this old
+  # is simply no longer actionable. `heartbeat_at: nil` (no heartbeat ever
+  # recorded — pre-heartbeat fixtures, or a row from before this field
+  # existed) has nothing to measure staleness against, so it is never
+  # dropped on that basis.
+  defp stale_for_attention?(%Run{heartbeat_at: nil}, _stale_after_seconds), do: false
+
+  defp stale_for_attention?(%Run{heartbeat_at: heartbeat_at}, stale_after_seconds) do
+    DateTime.diff(DateTime.utc_now(), heartbeat_at, :second) > stale_after_seconds
   end
 
   defp entries_for_run(%Run{} = run, history_fn, regressions_fn) do

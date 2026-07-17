@@ -299,4 +299,53 @@ defmodule Kazi.Attention.QueueTest do
       assert Enum.map(entries, & &1.goal_ref) == [newer.goal_ref, older.goal_ref]
     end
   end
+
+  describe "heartbeat freshness gate (T63.1, #1155)" do
+    test "a fresh-heartbeat stuck run, a 9-day-stale running ghost, and an old terminal run: only the fresh stuck run ranks" do
+      stuck_history = history([vector(["a"]), vector(["a"]), vector(["a"])])
+
+      fresh_stuck =
+        run(%{status: "running", heartbeat_at: DateTime.utc_now()})
+
+      # A ghost `running` row: status says live, but the heartbeat is 9 days
+      # stale (E60/T60.2's registry-level bug class -- this view stays
+      # robust regardless, per the task's defense-in-depth rationale).
+      stale_ghost =
+        run(%{
+          status: "running",
+          heartbeat_at: DateTime.add(DateTime.utc_now(), -9 * 24 * 60 * 60, :second)
+        })
+
+      # A terminal run so old it is no longer actionable -- also dropped,
+      # even though `RunRegistry.stale?/2` itself never flags terminal rows
+      # (this gate is broader: staleness by heartbeat age, not by status).
+      old_terminal =
+        run(%{
+          status: "converged",
+          heartbeat_at: DateTime.add(DateTime.utc_now(), -9 * 24 * 60 * 60, :second)
+        })
+
+      entries =
+        build(
+          [fresh_stuck, stale_ghost, old_terminal],
+          %{
+            fresh_stuck.goal_ref => stuck_history,
+            stale_ghost.goal_ref => stuck_history,
+            old_terminal.goal_ref => stuck_history
+          }
+        )
+
+      assert [entry] = entries
+      assert entry.goal_ref == fresh_stuck.goal_ref
+      assert entry.signal == :stuck
+    end
+
+    test "a run with no recorded heartbeat is never dropped by the freshness gate alone" do
+      r = run(%{heartbeat_at: nil})
+      h = history([vector(["a"]), vector(["a"]), vector(["a"])])
+
+      assert [entry] = build([r], %{r.goal_ref => h})
+      assert entry.goal_ref == r.goal_ref
+    end
+  end
 end
