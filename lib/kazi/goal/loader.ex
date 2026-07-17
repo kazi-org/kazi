@@ -102,6 +102,14 @@ defmodule Kazi.Goal.Loader do
   | `fail_on_skip`    | boolean          | `true`   | map skipped / errored / xfail sub-results to `:fail` |
   | `read_only_paths` | array of strings | `[]`     | repo-relative paths leased read-only to fixer agents; a post-iteration write to one is a FLAGGED gaming event (surfaced in `--json`) |
 
+  T49.6 (ADR-0064 d3/d7) adds an optional `[enforcement.roles]` sub-table for the
+  write-disjoint scenario roles: `[enforcement.roles.fixer] read_only_paths` and
+  `[enforcement.roles.demonstrator] allowed_write_paths` (both `array of strings`).
+  Absent, kazi derives them from any `scenario` predicates — the fixer leases every
+  spec + pin read-only, the demonstrator may write ONLY the pins; a goal with no
+  scenario predicate keeps `roles` empty (byte-identical). See
+  `Kazi.Enforcement.for_role/2` and `docs/how-to/enforcement.md`.
+
   A `[[enforcement.guard]]` array of tables declares test-count / coverage RATCHET
   guards (ADR-0042 §4) synthesized into the goal's `guards` as `:ratchet`
   predicates (the T32.3 machinery). Each guard:
@@ -483,6 +491,13 @@ defmodule Kazi.Goal.Loader do
 
       {predicates, guards} = Enum.split_with(all, &(not &1.guard?))
 
+      # T49.6 (ADR-0064 d3/d7): derive the write-disjoint role policy from any
+      # scenario predicates once they are parsed (build_enforcement runs before
+      # predicates). A no-op unless scenario predicates exist AND no explicit
+      # `roles` block was authored, so a goal with no scenario predicate is
+      # byte-identical to today.
+      enforcement = derive_scenario_roles(enforcement, all, mode)
+
       goal =
         Goal.new(id,
           name: Map.get(data, "name"),
@@ -691,7 +706,8 @@ defmodule Kazi.Goal.Loader do
          {:ok, clean_ref} <- enforcement_clean_ref(enf),
          {:ok, fail_on_skip} <- enforcement_bool(enf, "fail_on_skip", true),
          {:ok, read_only_paths} <- enforcement_paths(enf),
-         {:ok, guards} <- enforcement_guards(Map.get(enf, "guard", [])) do
+         {:ok, guards} <- enforcement_guards(Map.get(enf, "guard", [])),
+         {:ok, roles} <- enforcement_roles(enf) do
       {:ok,
        Kazi.Enforcement.new(
          enabled: enabled,
@@ -699,12 +715,101 @@ defmodule Kazi.Goal.Loader do
          clean_ref: clean_ref,
          fail_on_skip: fail_on_skip,
          read_only_paths: read_only_paths,
-         guards: guards
+         guards: guards,
+         roles: roles
        )}
     end
   end
 
   defp build_enforcement(_), do: {:error, "[enforcement] must be a table"}
+
+  # T49.6 (ADR-0064 d3/d7): the optional per-role path policy —
+  # `[enforcement.roles.fixer] read_only_paths` and
+  # `[enforcement.roles.demonstrator] allowed_write_paths`. Absent → `%{}` (the
+  # loader derives defaults from any scenario predicates post-parse; see
+  # derive_scenario_roles/3). An explicit block is the author's override and wins
+  # untouched. Wrong types fail loudly at load.
+  defp enforcement_roles(enf) do
+    case Map.get(enf, "roles") do
+      nil ->
+        {:ok, %{}}
+
+      roles when is_map(roles) ->
+        with {:ok, fixer_ro} <- enforcement_role_paths(roles, "fixer", "read_only_paths"),
+             {:ok, demo_aw} <-
+               enforcement_role_paths(roles, "demonstrator", "allowed_write_paths") do
+          parsed =
+            %{}
+            |> put_role(:fixer, :read_only_paths, fixer_ro)
+            |> put_role(:demonstrator, :allowed_write_paths, demo_aw)
+
+          {:ok, parsed}
+        end
+
+      _ ->
+        {:error, "[enforcement.roles] must be a table"}
+    end
+  end
+
+  defp enforcement_role_paths(roles, role, key) do
+    case Map.get(roles, role) do
+      nil ->
+        {:ok, nil}
+
+      policy when is_map(policy) ->
+        case Map.get(policy, key) do
+          nil ->
+            {:ok, nil}
+
+          list when is_list(list) ->
+            if Enum.all?(list, &is_binary/1),
+              do: {:ok, list},
+              else: {:error, "[enforcement.roles.#{role}] \"#{key}\" must be an array of strings"}
+
+          _ ->
+            {:error, "[enforcement.roles.#{role}] \"#{key}\" must be an array of strings"}
+        end
+
+      _ ->
+        {:error, "[enforcement.roles.#{role}] must be a table"}
+    end
+  end
+
+  defp put_role(roles, _role, _key, nil), do: roles
+  defp put_role(roles, role, key, paths), do: Map.put(roles, role, %{key => paths})
+
+  # T49.6 (ADR-0064 d3/d7): derive per-role path defaults from scenario predicates.
+  # A no-op (returns `enforcement` unchanged, `nil` stays `nil`) when no scenario
+  # predicate is present — the byte-identical guarantee. When scenario predicates
+  # exist and no explicit `roles` were authored, the fixer leases every spec + pin
+  # read-only and the demonstrator may write ONLY the pins. If no `[enforcement]`
+  # table was authored, a base profile is synthesized whose `enabled` matches the
+  # mode default `Kazi.Enforcement.resolve/1` would compute, so only `roles` is new.
+  defp derive_scenario_roles(enforcement, predicates, mode) do
+    paths = scenario_enforcement_paths(predicates)
+
+    if paths.specs == [] and paths.pins == [] do
+      enforcement
+    else
+      base = enforcement || Kazi.Enforcement.new(enabled: mode == :create)
+      Kazi.Enforcement.with_role_defaults(base, paths)
+    end
+  end
+
+  defp scenario_enforcement_paths(predicates) do
+    scenarios = Enum.filter(predicates, &(&1.kind == :scenario))
+
+    specs =
+      scenarios |> Enum.map(&Map.get(&1.config, :spec)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    pins =
+      scenarios
+      |> Enum.map(&Kazi.Providers.Scenario.pin_path(&1.config))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    %{specs: specs, pins: pins}
+  end
 
   # T48.11 (ADR-0058 §3): the optional `[economy]` table — currently a single
   # `debrief` boolean opt-in. Absent (nil) → `false` (byte-identical to today).
