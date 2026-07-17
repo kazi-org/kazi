@@ -22,7 +22,7 @@ kazi schema custom_script
 
 | Key | Type | Required | Meaning |
 |-----|------|----------|---------|
-| `cmd` | string | yes | The executable. ONE executable, not a command line — use `args` for the rest. |
+| `cmd` | string | yes | The executable. ONE executable, not a command line — use `args` for the rest. A name containing `/` resolves against the workspace; a bare name resolves on `PATH`. See [How `cmd` resolves](#how-cmd-resolves). |
 | `args` | array of strings | no | Arguments passed to `cmd`. Default `[]`. |
 | `env` | table / pairs | no | Extra environment as `{NAME = "value"}` or `{name, value}` pairs. |
 | `verdict` | string | no | `"exit_zero"` (default), `"exit_code"`, `"json"`, or `"match_count"`. See below. |
@@ -39,6 +39,34 @@ kazi schema custom_script
 Invalid declarations fail loudly **at load time** (an unknown verdict, a `json`
 verdict missing `path`/`pass_when`, a malformed `pass_when`, an `exit_code`
 verdict without `pass_codes`), not silently at dispatch.
+
+## How `cmd` resolves
+
+`cmd` resolves with **shell semantics**, against the workspace the command runs in:
+
+- **A name containing `/` is a path** and resolves against the workspace, so a
+  checker committed in the tree it grades just works:
+
+  ```toml
+  cmd = "scripts/check.sh"   # -> <workspace>/scripts/check.sh
+  ```
+
+  The script must be executable (`chmod +x`, and a `#!` line). Evidence records
+  the **resolved** absolute path, so you can see exactly what ran.
+
+- **A bare name is a `PATH` lookup**, exactly as in a shell:
+
+  ```toml
+  cmd = "semgrep"            # -> whatever `semgrep` resolves to on PATH
+  ```
+
+  A bare name is never joined to the workspace, so a stray `./semgrep` sitting in
+  the workspace cannot shadow the real tool.
+
+A path that does not resolve to an executable file is left as written and the exec
+fails — an `:error` naming what was tried (`exec failed: scripts/check.sh: not
+found`), never a silent pass. The same applies to a file that exists but is not
+executable, which is the usual cause of a surprising "not found".
 
 ## Verdicts
 
@@ -141,13 +169,26 @@ This is the same lesson Argo Rollouts encodes by separating `failureLimit` from
 
 ## Evidence
 
-Every result carries the proof a fixer agent needs: `cmd`, `args`, `workspace`,
-`verdict`, the `exit` code, and a truncated `output`. A `json` verdict adds
-`path`, `pass_when`, and the `observed` number. A `match_count` verdict adds
+Every result carries the proof a fixer agent needs: the **resolved** `cmd`, `args`,
+`workspace`, `verdict`, the `exit` code, and a truncated `output`. A `json` verdict
+adds `path`, `pass_when`, and the `observed` number. A `match_count` verdict adds
 `match_regex`, `pass_when`, the `observed` count, and a bounded `matched_lines`
 sample. Setting `evidence_format` to `"sarif"` or `"junit"` adds a structured
 `findings` list (file/line/rule/message for SARIF; failing case names for JUnit).
 Evidence extraction never changes the verdict.
+
+An `:error` result additionally carries a `reason` naming what went wrong
+(`{:cmd_unrunnable, _}`, `{:timeout_ms, _}`, `{:error_exit, _}`, …). `kazi apply
+--check` reports that reason on both surfaces — a `reason:` line under the
+predicate in the human output, and a stringified `evidence.reason` under `--json`
+— so an errored check is never a bare, unactionable `error`:
+
+```
+CHECK (observe-only, nothing dispatched)  goal=my-goal
+status: fail
+  lint: error
+    reason: exec failed: scripts/check.sh: not found
+```
 
 ## Folds the bespoke command-runners (test_runner, prod_log)
 
