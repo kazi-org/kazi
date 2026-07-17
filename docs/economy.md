@@ -54,6 +54,41 @@ percentile from sample density alone.
 so it is never nil for a non-empty group. `wall_clock_s` is derived from
 `finished_at - started_at`.
 
+## `dispatch_by_role`: who spent the dispatches
+
+kazi dispatches two ROLES through the same machinery: the **fixer**
+(`dispatch_agent`, which edits code) and the **demonstrator**
+(`dispatch_demonstrator`, which mints a scenario pin — ADR-0064). Both count
+against the dispatch budget, so `dispatch_count` alone cannot say which one
+spent the run's money: a demonstrator-heavy run and a fixer-heavy run of
+identical cost read identically. `dispatch_by_role` splits that same total by
+the iteration `action_kind` that distinguishes them:
+
+```json
+"dispatch_by_role": {
+  "dispatch_agent":        { "p50": 2, "p95": 4 },
+  "dispatch_demonstrator": { "p50": 1, "p95": 1 }
+}
+```
+
+`dispatch_count` is unchanged and still counts BOTH roles — the split is
+additive, and per run the two roles sum to it.
+
+A role a run never dispatched reports `0`, not `null`. That is a deliberate
+departure from the honest-unknown rule above, and the distinction is real: a
+finished run genuinely *did* spend zero dispatches on a role it never used,
+whereas a `null` token count means the harness never *reported* one. Measured
+zero, not unknown.
+
+**How a dispatch is attributed to a run.** Iterations carry no run id — they
+key on `goal_ref`, which is stable across *every* run of a goal — so an
+iteration is attributed to the run whose `[started_at, finished_at]` window
+contains its `observed_at`. Two runs of the same goal with **overlapping**
+windows would each count the other's dispatches. kazi refuses a duplicate live
+run of one goal by default (it takes `--allow-duplicate-run` to force), so this
+is the deliberate exception rather than the norm — but under that flag the
+per-role numbers inflate while `dispatch_count` stays correct.
+
 ## Percentile method
 
 Nearest-rank over the ascending-sorted, non-nil values: `rank = ceil(p/100 *
@@ -81,6 +116,10 @@ finished a run) reports `{"groups": []}` at exit `0` — never an error.
       "tokens": { "p50": 12000, "p95": 41000 },
       "cost_usd": { "p50": 0.12, "p95": 0.41 },
       "dispatch_count": { "p50": 2, "p95": 5 },
+      "dispatch_by_role": {
+        "dispatch_agent": { "p50": 2, "p95": 4 },
+        "dispatch_demonstrator": { "p50": 0, "p95": 1 }
+      },
       "wall_clock_s": { "p50": 88.0, "p95": 240.0 }
     }
   ]
