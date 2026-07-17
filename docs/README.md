@@ -100,6 +100,14 @@ its config at runtime via `kazi schema <kind>`.
 - **[Run-economics history (`kazi economy`)](economy.md)** — persisted
   run-end economics (ADR-0058) aggregated into p50/p95 percentiles by goal
   shape/model/harness; the grouping T48.9's learned budget proposals reuse.
+- **Orphaned dispatch reaping (`kazi orphans`)** — lists every run whose
+  recorded harness child process is STILL alive (a dispatch that outlived its
+  controller, issue #1073/#857); read-only by default, `--reap` sends TERM then
+  KILL to each orphaned process group, `--json` for the machine surface. The
+  primary guard is automatic: `Kazi.Runtime.ParentMonitor` watches the burrito
+  launcher and halts the BEAM if it is killed, so the existing per-dispatch
+  watchdog reaps `claude` even when the terminal (not the BEAM) receives the
+  signal. `orphans` is the manual sweep for pids that predate that guard.
 - **[`--json` signals → skill-side escalation](tiering-signals.md)** — how the
   structured output triggers adaptive model tiering.
 - **[Deprecations & removal schedule](deprecations.md)** — removed verbs and the
