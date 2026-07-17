@@ -286,6 +286,26 @@ intent, which silences the warning entirely. It is a warning, never a refusal,
 and it never triggers a network call. `--in-place` + `--base` together are
 rejected as contradictory: an in-place run has no worktree to base.
 
+**Preflight before the first dispatch (T44.9, UC-058).** Before an executing
+`apply` dispatches for the first time, it verifies the base can actually receive
+the run's work and REFUSES with a named, actionable error (exit 1, nothing
+dispatched) rather than burning a budget that can never land. The checks:
+
+- every command-backed (`custom_script`) predicate's declared `cmd` resolves on
+  `PATH` (a goal whose own checker is not installed can never converge);
+- when the goal's `[integration] mode` is `pr`/`merge`, `gh auth status`
+  succeeds;
+- when the mode pushes (`branch`/`pr`/`merge` -- anything but `commit`/`none`),
+  `git push --dry-run` succeeds, so the landing step has a working push path;
+- no STALE task worktree from a dead run of this goal is lying around (a run
+  whose heartbeat went stale, ~90s).
+
+A `commit`/`none`-mode goal skips the GitHub-specific checks (there is nothing to
+auth or push for) but still gets the smoke and stale-worktree checks. Read-only
+modes (`--check`, `--explain`) never run preflight -- they dispatch nothing.
+`--no-preflight` bypasses ALL of these (an offline run, or a base you already
+know is fine).
+
 For a LONG convergence, add `--stream` for a JSONL progress stream -- one
 `{"event": "iteration", ...}` line per loop iteration, TERMINATED by the final
 run-result object (the one line with NO `event` field). Read lines until you see
