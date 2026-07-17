@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.212.0](https://github.com/kazi-org/kazi/compare/v1.211.0...v1.212.0) (2026-07-17)
+
+
+### Features
+
+* **dashboard:** project badge, age/last-active, state/repo/time filters on mission control ([8de1bc4](https://github.com/kazi-org/kazi/commit/8de1bc4fd9b22f11369bbe4fda6fe16e59bca192))
+
 ## [1.211.0](https://github.com/kazi-org/kazi/compare/v1.210.0...v1.211.0) (2026-07-17)
 
 
