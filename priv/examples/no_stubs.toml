@@ -1,0 +1,19 @@
+# The `no_stubs` gate (T44.6): productizes the zero-stub policy as a predicate.
+#
+# It scans the run's diff-vs-base for stub/placeholder/hardcoded-return markers
+# (stub, mock, fake, dummy, placeholder, todo, fixme, notimplemented) on ADDED
+# lines in NON-TEST files. A production hit fails with file:line evidence; a clean
+# diff passes. Test files (a path under a test/ directory or a _test.ex(s) file)
+# are exempt, since stubs/mocks are legitimate there.
+#
+#     kazi apply priv/examples/no_stubs.toml --workspace .
+#
+# See docs/no-stubs-predicate.md and `kazi schema no_stubs`.
+
+id = "no-stubs-gate"
+name = "No stubs in production code"
+
+[[predicate]]
+id = "no-stubs"
+provider = "no_stubs"
+description = "the diff introduces no stub/placeholder/hardcoded-return marker in a production file"

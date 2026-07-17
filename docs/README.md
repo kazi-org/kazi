@@ -71,6 +71,9 @@ its config at runtime via `kazi schema <kind>`.
   a threshold (never 100%), surviving mutants as evidence (ADR-0043).
 - **[`cve`](cve-predicate.md)** — dependency vulnerability scanning: `govulncheck`
   reachability (call stack as proof) + manifest scanners ratcheted (ADR-0043).
+- **[`no_stubs`](no-stubs-predicate.md)** — the zero-stub gate: fail when the
+  diff-vs-base adds a stub/placeholder marker to a production (non-test) file, with
+  file:line evidence (T44.6).
 - **[`cli`](cli-provider.md)** — a golden invocation of a shipped binary: run a
   declared command and assert on the exit code + stdout/stderr (T43.7, UC-055).
 - **[`scenario`](scenario-predicate.md)** — replay a pinned Gherkin Scenario by
