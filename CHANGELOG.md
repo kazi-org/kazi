@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.164.1](https://github.com/kazi-org/kazi/compare/v1.164.0...v1.164.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **bus:** presence records the stable session-anchor pid, not the ephemeral CLI pid ([cb9f867](https://github.com/kazi-org/kazi/commit/cb9f867ec56c5e63273bd358488a682c37c9d432)), closes [#1164](https://github.com/kazi-org/kazi/issues/1164)
+
 ## [1.164.0](https://github.com/kazi-org/kazi/compare/v1.163.0...v1.164.0) (2026-07-17)
 
 
