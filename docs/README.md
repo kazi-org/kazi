@@ -87,6 +87,9 @@ its config at runtime via `kazi schema <kind>`.
 - **[`oss_hygiene`](oss-hygiene-predicate.md)** — the internal-leak guard as a
   predicate: scan the diff's added lines for private IPs / home paths /
   configurable codenames (E29/ADR-0034, T44.7).
+- **[`spec_coverage`](spec-coverage-predicate.md)** — manifest coverage: every
+  scanned surface element is referenced by ≥1 Scenario across the product's
+  `.feature` specs; a `:fail` names each undocumented element (T41.3, ADR-0050/0054).
 - **[Live providers](live-providers.md)** — `http_probe` sustained health,
   `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
 - **[Browser assertions](browser-assertions.md)** — the full `browser` predicate
