@@ -13,6 +13,16 @@ defmodule Kazi.Daemon.Probe do
   @connect_timeout 500
   @recv_timeout 2000
 
+  # T55.7 LANDMINE: `packet: :line` truncates a line longer than the socket's
+  # `buffer` SILENTLY -- no error, just a short binary that then fails to
+  # decode as JSON. Measured: a 61,461-byte reply came back as 9,216 bytes
+  # (the default buffer) with `recv` reporting `:ok`. A bounded digest (40
+  # lines, each up to the ~1 KiB render threshold plus provenance) runs to
+  # tens of KB, so the default would have corrupted real replies. This is
+  # ~16x the worst-case digest; anything genuinely unbounded (`--full`) must
+  # NOT come through this socket at all.
+  @socket_buffer 1_048_576
+
   @typedoc "`:missing` -- no socket file. `:dead` -- a stale file, connection refused. `:alive` -- a live listener accepted the connection."
   @type status :: :missing | :dead | :alive
 
@@ -36,12 +46,19 @@ defmodule Kazi.Daemon.Probe do
   @spec ping(Path.t()) :: {:ok, map()} | {:error, term()}
   def ping(sock_path), do: request(sock_path, %{"op" => "ping"})
 
-  @doc "Sends an arbitrary request map and decodes the single-line JSON reply."
-  @spec request(Path.t(), map()) :: {:ok, map()} | {:error, term()}
-  def request(sock_path, payload) do
+  @doc """
+  Sends an arbitrary request map and decodes the single-line JSON reply.
+
+  `recv_timeout` (ms, default #{@recv_timeout}) is the caller's patience for
+  the reply. An op the daemon answers from memory (`ping`) needs no more than
+  the default; one it has to do real work for (T55.7's `read`, which may walk
+  a deep backlog before it can answer) passes its own budget.
+  """
+  @spec request(Path.t(), map(), timeout()) :: {:ok, map()} | {:error, term()}
+  def request(sock_path, payload, recv_timeout \\ @recv_timeout) do
     with {:ok, socket} <- connect(sock_path),
          :ok <- :gen_tcp.send(socket, Jason.encode!(payload) <> "\n"),
-         {:ok, line} <- :gen_tcp.recv(socket, 0, @recv_timeout) do
+         {:ok, line} <- :gen_tcp.recv(socket, 0, recv_timeout) do
       :gen_tcp.close(socket)
       Jason.decode(line)
     end
@@ -51,8 +68,12 @@ defmodule Kazi.Daemon.Probe do
     :gen_tcp.connect(
       {:local, sock_path},
       0,
-      [:binary, packet: :line, active: false],
+      [:binary, packet: :line, active: false, buffer: @socket_buffer],
       @connect_timeout
     )
   end
+
+  @doc "The control socket's line buffer. Public so the listener binds the SAME bound and a test can pin the truncation contract."
+  @spec socket_buffer() :: pos_integer()
+  def socket_buffer, do: @socket_buffer
 end

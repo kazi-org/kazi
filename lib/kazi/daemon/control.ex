@@ -5,10 +5,12 @@ defmodule Kazi.Daemon.Control do
   later task (T51.2+, the bus primitives) can add ops here without touching the
   accept loop.
 
-  One op is implemented now: `ping` (the version handshake `status` reports).
-  `shutdown` is recognized so the listener can react to it, but the actual
-  supervision-tree teardown is the listener's job (`handle/2` only computes the
-  reply); an unknown op replies `{"ok":false,"error":"unknown_op"}`.
+  Ops: `ping` (the version handshake `status` reports) and `read` (T55.7,
+  ADR-0072 d5 -- the server-side bus digest, delegated to
+  `Kazi.Daemon.BusRead`). `shutdown` is recognized so the listener can react
+  to it, but the actual supervision-tree teardown is the listener's job
+  (`handle/2` only computes the reply); an unknown op replies
+  `{"ok":false,"error":"unknown_op"}`.
   """
 
   @doc """
@@ -33,6 +35,15 @@ defmodule Kazi.Daemon.Control do
       "nats_host" => nats_host(nats_name)
     }
     |> maybe_put("nats_token", nats_token(nats_name))
+  end
+
+  # T55.7 (ADR-0072 d5): assembly is the DAEMON's job -- the reply is already
+  # bounded when it reaches the client.
+  def handle(%{"op" => "read"} = request, opts) do
+    Kazi.Daemon.BusRead.handle(
+      request,
+      Keyword.take(opts, [:nats_name, :connect_opts])
+    )
   end
 
   def handle(%{"op" => "shutdown"}, _opts), do: %{"ok" => true}
