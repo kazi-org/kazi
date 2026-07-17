@@ -76,6 +76,29 @@ defmodule Kazi.Predicate.SchemaTest do
       assert {:ok, payload} = Jason.decode(String.trim(out))
       assert payload["kind"] == "metrics"
     end
+
+    # A goal author reaches the assertion vocabulary through `kazi schema browser`
+    # — it is the only place the types are enumerated at the CLI (T43.1, ADR-0053).
+    test "the browser schema documents every runner assertion type" do
+      {:ok, schema} = Schema.fetch("browser")
+      assert %{description: description} = Enum.find(schema.keys, &(&1.name == "assertions"))
+
+      for type <- ~w(visible hidden text url console_clean) do
+        assert description =~ type, "kazi schema browser must document the #{type} assertion"
+      end
+    end
+
+    test "kazi schema browser lists console_clean and its network flag" do
+      out = capture_io(fn -> assert Kazi.CLI.run(["schema", "browser"]) == 0 end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["kind"] == "browser"
+
+      assertions = Enum.find(payload["keys"], &(&1["name"] == "assertions"))
+      assert assertions["description"] =~ "console_clean"
+      assert assertions["description"] =~ "network"
+      assert assertions["description"] =~ "console.error"
+    end
   end
 
   describe "kazi schema custom_script (CLI)" do
