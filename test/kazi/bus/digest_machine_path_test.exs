@@ -101,7 +101,7 @@ defmodule Kazi.Bus.DigestMachinePathTest do
       # the recipient's presence first (any bus call does).
       assert {:ok, _} = Bus.who(conn: conn, session: session)
 
-      assert :ok = Bus.tell(session, "directed #{session}", conn: conn, scope: scope)
+      assert {:ok, _receipt} = Bus.tell(session, "directed #{session}", conn: conn, scope: scope)
       assert :ok = Bus.post("note", "urgent #{session}", opts ++ [topic: "ci", sev: "interrupt"])
       assert :ok = Bus.post("fact", "routine #{session}", opts ++ [topic: "ci"])
 
