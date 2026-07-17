@@ -36,8 +36,8 @@ Mission Control is the landing page: the root route serves it directly, and
 `/starmap` remains an alias for existing links. It is an ops-center **card
 grid** ([ADR-0070](adr/0070-mission-control-dashboard.md), superseding the
 ADR-0057 starmap home view) — a topbar fleet-count strip, a **NEEDS ATTENTION**
-row, a **FLEET** grid of one card per goal, and a bottom **EVENT RIVER**
-ticker. Each goal resolves to a display state:
+row, a **FLEET** grid of one card per goal, a **SESSIONS** rail, and a bottom
+**EVENT RIVER** ticker. Each goal resolves to a display state:
 
 | State        | Meaning                                                          |
 | ------------ | ----------------------------------------------------------------- |
@@ -52,6 +52,17 @@ The topbar chips count the shown cards per state (`OVER-BUDGET` split out of
 it never mutates a run, a goal, or a lease. The interactions are the 2-second
 poll-tick refresh, navigation deep-links, and a **CURRENT/CLOSED scope toggle**
 — no slide-over panel, no per-node filters.
+
+The **SESSIONS** rail (T51.5) shows live bus presence — who is on the bus and
+each session's last-seen freshness — alongside the run cards. It reads from the
+SAME injectable `KaziWeb.CoordinationSource` the [lease map](#the-lease-map-leases)
+uses (T55.3, [ADR-0073](adr/0073-team-board-and-claim-visibility.md) §4): the
+transport-backed source when a daemon is reachable (the live bus roster), and
+the NATS-free Native source otherwise — an honest empty rail, never a 500
+([L-0021](lore.md)). A fresh roster pushed on the source topic re-renders the
+rail live; the poll tick re-selects the source, so a daemon starting or stopping
+flips it without a reload. The rail is not built twice: Mission Control CONSUMES
+T55.3's source rather than re-deriving presence.
 
 The scope toggle (`CURRENT · n` / `CLOSED · m` pills on the FLEET header) scopes
 the grid, chips, and attention alerts. CURRENT (the default) shows runs whose

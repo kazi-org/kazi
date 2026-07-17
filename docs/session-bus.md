@@ -462,6 +462,35 @@ such posts — its `claims` section reads `refs/claims/*` at source and nothing
 else — so claim visibility is fully correct whether or not the convention is in
 use. kazi ships no claim wrapper; it only documents the convention.
 
+### Run-lifecycle mirroring (T51.5, ADR-0067 point 1)
+
+A `kazi apply` run MIRRORS its lifecycle onto the bus as best-effort `fact`s,
+so a session watching the bus sees a long run's live state instead of only a
+growing JSONL sink it cannot watch. Three posts, all on ONE topic per run —
+`run:<short-run-id>` — so the board's last-value-per-topic retention collapses
+them to ONE current line per run:
+
+- **started** when the run begins — `started <goal-ref>`;
+- **iter N: p/t passing** once per iteration — the iteration index and the
+  predicate pass/total, with a `(k regressed)` suffix when predicates went
+  green→red that observation;
+- **`<verdict>` \<goal-ref\> (p/t passing, N iters)** at termination — the
+  honest verdict (`converged` / `stuck` / `over_budget` / `stopped` / `error`).
+
+The sender identity rides the fact header (the run's `--session-name`), so a
+supervisor sees WHICH session's run it is. Because the posts share one topic,
+`kazi bus board` shows the run's *current* state (`iter 7: 5/8 passing`), while a
+`bus read`/`watch` stream sees each event as it happens.
+
+**The bus is a MIRROR, never a dependency** (ADR-0067 point 1, pinned by test):
+a goal converges byte-identically with the daemon down. Every post is
+fire-and-forget and every error / timeout / daemon-down is swallowed — the
+reconcile loop's outcome can never turn on whether a daemon is up. The
+per-iteration post is made detached so it adds no latency to the loop; the start
+and terminal posts wait a bounded moment so the verdict lands before a one-shot
+`kazi apply` process exits. There is no flag: mirroring is automatic and costs
+nothing when no daemon is running.
+
 ### Fetching a stubbed body: `bus get <id>` (T55.6, ADR-0072 d3)
 
 The digest keeps routine reads cheap by collapsing a large body into a
