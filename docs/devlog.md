@@ -7,6 +7,124 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17 — T59.4 finding: #1025 and #1186 are NOT one root cause — five distinct contended resources; T59.5 must be five fixes, not a blanket timeout bump
+
+**Type:** investigation
+**Tags:** flaky-tests, test-isolation, ci, exunit, sqlite-sandbox, T59.4, #1025, #1186
+
+**Task (acc = the finding, not the fix).** For every distinct flaky test named
+across #1025 and #1186, determine whether its failure mode traces to the SAME
+contended resource or a genuinely distinct one, and state whether the T59.5 fix
+should be one change or several. Primary source: the two GitHub issue threads
+(read in full, incl. #1186's 4 comments) plus the actual test source at HEAD
+(`origin/main` @ c864897). Not a fix task — no test was changed.
+
+**Verdict.** One shared THEME, five distinct root causes. The theme is real and
+worth stating as a rule: *an `async: true` test (or an improperly-isolated
+`async: false` one) must not assert on state the rest of the concurrently-running
+suite shares.* But that theme decomposes into FIVE different contended resources,
+each needing a different fix mechanism. There is no single defect and no single
+fix. In particular, a blanket `assert_receive` timeout bump addresses only Class 1
+and would leave the other four classes flaking. **T59.5 should be five
+independently-landable sub-fixes, grouped by class.** (#1186's own author already
+reached "two distinct isolation failures, worth splitting"; this generalizes the
+split across both issues to five.)
+
+**The nine distinct tests, classified by contended resource.**
+
+| # | Test (file:line) | async | Asserts on | Class |
+|---|---|---|---|---|
+| 1 | `Kazi.Loop.WorkspacePrepTest` (`workspace_prep_test.exs:98`) | true | `assert_receive {:dispatched,true,true}, 1_000` | **1 wall-clock deadline** |
+| 2 | `Kazi.EnforcementTest` (`enforcement_test.exs:419`) | true | `Loop.await(loop, 5_000)` | **1 wall-clock deadline** |
+| 3 | `Kazi.Loop.ContextStoreTest` (`context_store_test.exs:75`) | true | `assert_receive {:dispatched,prompt}, 2_000` | **1 wall-clock deadline** (+ 5b secondary) |
+| 4 | `Kazi.Scheduler.FrontierCompleteEventTest` (`frontier_complete_event_test.exs:51`) | true | `refute_received {:dispatched,"c",_}` — a negative at ONE instant | **2 instant-negative race** |
+| 5 | `Kazi.CLIBusHookTest` (`cli_bus_hook_test.exs:58`) | false | `with_io(:stderr,…)` then `assert err == ""` | **3 global IO capture** |
+| 6 | `Kazi.CLIInstallHooksTest` (`cli_install_hooks_test.exs:118`) | true | captured stderr line COUNT == 1 | **3 global IO capture** |
+| 7 | `Kazi.Goal.LoaderAtomSafetyTest` (`loader_atom_safety_test.exs:55`) | true | `:erlang.system_info(:atom_count)` delta < 50 | **4 VM-global counter** |
+| 8 | `Kazi.CLIPlanBudgetSuggestionTest` (`cli_plan_budget_suggestion_test.exs:90`) | false (shared-mode sandbox) | `proposed_goals` upsert → `Exqlite Database busy` | **5a read-model write lock** |
+| 9 | `Kazi.Memory.SemanticIndexTest` (`semantic_index_test.exs:186`) | false | reads back a row from a DIFFERENT workspace | **5b read-model row leakage** |
+
+**Class 1 — CPU-scheduling / wall-clock deadline too tight (tests 1, 2, 3).** The
+awaited async work genuinely completes; it just arrives later than a hard-coded
+short timeout when ~N ExUnit processes share a 4-core box under full-suite load.
+These are message-passing / loop-convergence waits (workspace prep does real file
+IO + a graph-refresh seam; the enforcement loop git-copies the tree for clean-tree
+isolation and spawns an OS subprocess guard). The contended resource is the CPU
+scheduler / wall clock, not any shared datum. Fix mechanism: raise these specific
+load-sensitive deadlines to generous bounds (or an `assert_eventually` helper) —
+NOT `Process.sleep` (re-flakes under different load), NOT a blanket global bump
+(hides the next real hang). Same mechanism across all three, so one sub-fix.
+
+**Class 2 — instantaneous negative assertion with no barrier (test 4).**
+`refute_received` (no timeout) asserts "message `{:dispatched,"c",_}` has NOT
+arrived at this exact instant." Any scheduling delay of a concurrent dispatch under
+load violates it. Sibling of Class 1 (both are timing) but the fix is the OPPOSITE
+shape: you cannot raise a deadline on a negative — you need `refute_receive` with a
+bounded window or an explicit ordering barrier that proves frontier-0 settled
+before sampling. Distinct mechanism → its own sub-fix.
+
+**Class 3 — globally-captured stderr device (tests 5, 6).** Both wrap
+`ExUnit.CaptureIO.with_io(:stderr, …)` / `capture_io` and assert the WHOLE captured
+stream is empty (test 5) or exactly one line (test 6). `:stderr` capture swaps the
+device group leader process-wide, so ANY concurrent test that logs during the window
+is captured — observed intruders: a `kazi.loop workspace prep failed … :eacces`
+warning and `provider "test_runner" is deprecated (ADR-0040)` deprecation lines from
+other modules. **Key correction to #1186's framing: `async: false` does NOT fix
+this** — test 5 (`CLIBusHookTest`) is ALREADY `async: false` and still flaked,
+because the pollution comes from concurrent `async: true` tests in OTHER modules, not
+from siblings in its own file. Fix mechanism: assert on THIS command's own output
+(scoped capture / substring of the command's own writes), never on the global device
+being empty. One shared mechanism → one sub-fix covering both.
+
+**Class 4 — VM-global counter (test 7).** `:erlang.system_info(:atom_count)` is a
+VM-wide counter; a delta measured across an async test body measures the WHOLE
+suite's atom churn (observed `left: 64` — the loader minted none; neighbours did).
+Note `test_helper.exs` ALREADY carries a partial mitigation (force-loading every
+provider module before `ExUnit.start/1` so the one-time provider-load atom burst is
+deterministic) — yet the test still flaked, so the mitigation is incomplete (other
+concurrent atom sources remain). Fix mechanism: assert the invariant DIRECTLY —
+`String.to_existing_atom(junk_key)` raising `ArgumentError`, which is what the test
+actually means and is immune to neighbours (a SIBLING test in the same file at
+`:52` already does exactly this). Distinct → its own sub-fix.
+
+**Class 5 — shared SQLite read-model, TWO sub-mechanisms (tests 8, 9).** Global
+sandbox is `:manual` (`test_helper.exs`); each test checks out and opts into shared
+mode itself, so isolation quality is per-test.
+- **5a write-lock BUSY (test 8):** `Exqlite Database busy` (SQLITE_BUSY) on the
+  `proposed_goals` upsert in `Kazi.Authoring.persist/3`, despite `busy_timeout:
+  60_000` on the pool (`config/config.exs`, present in test env — verified). SQLITE
+  does NOT honor `busy_timeout` when a DEFERRED transaction (Ecto sandbox wraps each
+  test in `BEGIN`) tries to UPGRADE to a writer while another connection holds the
+  write lock — it returns SQLITE_BUSY immediately. Compounding suspect: every
+  `plan`/`approve` call runs `ensure_read_model()` →
+  `Kazi.ReadModel.Migrate.run` (Ecto migrator lock) on EVERY invocation. Candidate
+  fixes for T59.5 to evaluate: `BEGIN IMMEDIATE` transaction mode for the write
+  path, and/or skip the per-call migration when the schema is already current. This
+  is a genuine coverage gap, not a timing assertion.
+- **5b row leakage / cross-workspace read (test 9; and test 3's secondary mode):**
+  `SemanticIndexTest` (`async: false`) queried the shared `Repo` and read back a row
+  belonging to a DIFFERENT workspace (`left: …-45891` vs `right: …-65474`). Its
+  `setup` does `Sandbox.checkout(Repo)` but sets NO `{:shared,self()}` mode and the
+  indexing/query path can see rows it did not write — pointing at per-test
+  transaction isolation not covering the read path (a query scoped too loosely, or a
+  connection outside the sandbox allowance). `ContextStoreTest`'s second observed
+  mode (`prompt =~ "## Indexed evidence"` missing at `:120`) is the same family:
+  reading shared context-store/read-model state under load.
+
+  5a and 5b share the resource (the SQLite read-model) but are different bugs
+  (write-lock contention vs read isolation) with different fixes; group them as one
+  read-model sub-workstream with two commits.
+
+**Recommended T59.5 shape (five sub-fixes, all independently landable):** (1) raise
+the three Class-1 load-sensitive deadlines; (2) give FrontierComplete a bounded
+`refute_receive`/barrier; (3) rewrite the two stderr-capture asserts to check
+own-output; (4) rewrite the atom-count assert to `String.to_existing_atom`-raises;
+(5) read-model isolation — 5a write busy-tolerance (`BEGIN IMMEDIATE` / migration
+caching), 5b sandbox ownership + query scoping. Do NOT weaken any real assertion:
+every fix changes timing/isolation mechanics only. Acc satisfied: each distinct
+test is traced to a named contended resource, and the one-vs-many question is
+answered — **many (five), so T59.5 is several fixes.**
+
 ## 2026-07-17 — T39.6 re-drive: nested-loop spine PROVEN over CLEAN `--json` (zero goal-file reconstruction, zero prose-scraping); live opencode convergence an honest skip (no local model here)
 
 **Type:** dogfood
