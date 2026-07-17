@@ -335,9 +335,16 @@ defmodule Kazi.MCP.Server do
           "Post a message directed at one session (ADR-0067). Requires `session` and " <>
             "`text` (capped at 64 KiB client-side). `session` resolves in order (T55.5): " <>
             "an @-prefixed team name, an exact session id on the roster, then a nickname " <>
-            "assigned with kazi_bus_name -- an unknown recipient is a structured error " <>
-            "naming the live roster (reason unknown_recipient), never a silent send. " <>
-            "Returns {ok: true}, or a structured error (no_daemon).",
+            "assigned with kazi_bus_name -- a recipient with no presence row AND no " <>
+            "durable inbox is a structured error naming the live roster (reason " <>
+            "unknown_recipient), never a silent send. Returns {ok: true, id, recipient, " <>
+            "liveness} (T55.12): `id` is the message's stream sequence, which " <>
+            "kazi_bus_status dereferences. Success means STORED AND QUEUED, never seen -- " <>
+            "the bus is advisory and a recipient may ignore a message. `liveness` " <>
+            "\"dead-reaping\" (the roster believes the process is gone) or \"no-presence\" " <>
+            "(no row, but a durable inbox) means it was queued somewhere that may never " <>
+            "drain it: check kazi_bus_status before assuming it landed. Or a structured " <>
+            "error (no_daemon).",
         "inputSchema" => %{
           "type" => "object",
           "required" => ["session", "text"],
@@ -352,6 +359,32 @@ defmodule Kazi.MCP.Server do
               "description" => "\"machine\" (default) or \"project\"."
             },
             "sev" => %{"type" => "string", "description" => "Severity, default \"info\"."}
+          }
+        }
+      },
+      %{
+        "name" => "kazi_bus_status",
+        "description" =>
+          "Answer what became of a directed message (T55.12) -- the twin of `kazi bus " <>
+            "status`. Requires `id` (the stream sequence kazi_bus_tell returned). Reads " <>
+            "the RECIPIENT's durable consumer ack state and returns {ok: true, id, state, " <>
+            "recipient, sent_at, recipients}. `state` is \"pending\" (stored and queued, " <>
+            "but not acked -- the recipient has not read, or only peeked) or \"consumed\" " <>
+            "(its read acked it: delivered AND drained, which is as far as an ack can " <>
+            "honestly see -- whether it acted on the message is not knowable here). For " <>
+            "an @team fan-out `recipients` breaks the verdict out per member and `state` " <>
+            "is \"consumed\" only once EVERY live member acked. Consumes nothing, so it " <>
+            "is safe to poll. Structured errors: unknown_message (never posted, or aged " <>
+            "out of the 30-day retention), not_directed (the id names a broadcast " <>
+            "kazi_bus_post, which has no one recipient to answer for it), no_daemon.",
+        "inputSchema" => %{
+          "type" => "object",
+          "required" => ["id"],
+          "properties" => %{
+            "id" => %{
+              "type" => "integer",
+              "description" => "The message id (stream sequence) kazi_bus_tell returned."
+            }
           }
         }
       },
@@ -583,13 +616,61 @@ defmodule Kazi.MCP.Server do
     end
   end
 
+  # T55.12: the receipt rides back to the agent -- `id` is what kazi_bus_status
+  # dereferences, and `liveness` is the same verdict the CLI warns on, so an
+  # agent can branch on a probably-dead recipient instead of assuming delivery.
   defp call_tool("kazi_bus_tell", args, opts) do
     with {:ok, session} <- fetch_string_or(args, "session", "kazi_bus_tell requires `session`"),
          {:ok, text} <- fetch_string_or(args, "text", "kazi_bus_tell requires `text`") do
       case Bus.tell(session, text, bus_opts(args, opts)) do
-        :ok -> {:ok, %{"schema_version" => Schema.schema_version(), "ok" => true}}
-        {:error, reason} -> {:tool_error, bus_error(reason)}
+        {:ok, receipt} ->
+          {:ok,
+           %{
+             "schema_version" => Schema.schema_version(),
+             "ok" => true,
+             "id" => receipt.id,
+             "recipient" => receipt.recipient,
+             "liveness" => receipt.liveness
+           }}
+
+        {:error, reason} ->
+          {:tool_error, bus_error(reason)}
       end
+    end
+  end
+
+  # T55.12: the `kazi bus status` twin.
+  defp call_tool("kazi_bus_status", args, opts) do
+    with {:ok, id} <- fetch_message_id(args) do
+      case Bus.status(id, bus_opts(args, opts)) do
+        {:ok, status} ->
+          {:ok, Map.merge(status, %{"schema_version" => Schema.schema_version(), "ok" => true})}
+
+        {:error, reason} ->
+          {:tool_error, bus_error(reason)}
+      end
+    end
+  end
+
+  # An id is a stream sequence: a positive integer. JSON-RPC clients routinely
+  # send it as a string, so accept that spelling rather than erroring on a
+  # value that is unambiguous.
+  defp fetch_message_id(args) do
+    case Map.get(args, "id") do
+      id when is_integer(id) and id > 0 ->
+        {:ok, id}
+
+      id when is_binary(id) ->
+        case Integer.parse(id) do
+          {seq, ""} when seq > 0 ->
+            {:ok, seq}
+
+          _other ->
+            {:error, @invalid_params, "kazi_bus_status requires `id` (a positive integer)"}
+        end
+
+      _other ->
+        {:error, @invalid_params, "kazi_bus_status requires `id` (a positive integer)"}
     end
   end
 
@@ -684,6 +765,52 @@ defmodule Kazi.MCP.Server do
       "error" => "unknown recipient #{inspect(recipient)} -- #{live}",
       "reason" => "unknown_recipient",
       "roster" => roster
+    }
+  end
+
+  # T55.12: `kazi_bus_status` on an id the stream cannot produce. Both causes
+  # are named because they call for opposite reactions -- a typo is the
+  # caller's to fix, an aged-out id means the answer is simply gone.
+  defp bus_error({:unknown_message, id}) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" =>
+        "no message with id #{id} -- it was never posted, or it aged out of the 30-day retention",
+      "reason" => "unknown_message"
+    }
+  end
+
+  defp bus_error({:not_directed, id, kind}) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" =>
+        "message #{id} is a broadcast (kind #{kind}), not a directed tell -- " <>
+          "delivery status needs one recipient whose ack state can answer for it",
+      "reason" => "not_directed"
+    }
+  end
+
+  # T55.12: a tell whose publish the stream never acked. The old
+  # fire-and-forget publish could not see this at all -- it reported success
+  # regardless.
+  defp bus_error({:publish_rejected, detail}) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" => "the bus stream rejected the message: #{inspect(detail)}",
+      "reason" => "publish_rejected"
+    }
+  end
+
+  defp bus_error({:publish_failed, reason}) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" =>
+        "the message was not acknowledged by the bus stream (#{inspect(reason)}) -- it may not have been stored",
+      "reason" => "publish_failed"
     }
   end
 
