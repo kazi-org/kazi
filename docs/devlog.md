@@ -3124,3 +3124,47 @@ Proof follows the same shape as T46.1's reopen fix:
 emits a plain-text line and a line carrying a seeded `DATABASE_URL` secret,
 then reads the transcript path off the run's registry row and asserts the
 plain line landed and the secret was redacted on disk.
+
+### 2026-07-16: T54.10 burrito maintenance notice -- measured streams vs the field report
+
+Field feedback (a 24/7 fleet): every kazi invocation prints `[l] Skipped
+cleanup of older version (vN): still in use by a running process` while ANY
+long-lived process holds an older payload, alleged to land on STDOUT and so
+break the ADR-0023 `--json` single-JSON-object contract. Reproduced against
+the released 1.150.0 binary by staging a fake older install (`_metadata.json`
+with a lower semver + a `.burrito_live/1` pidfile -- PID 1 counts alive via
+EPERM, the fork's own zig-test trick) inside the real burrito install prefix.
+Measured with streams captured separately:
+
+- The notice is on **stderr**, not stdout -- and has been for every fork-built
+  release (the only pin kazi ever had, `084e1e3`, already routed it through
+  the fork logger's stderr path). `--json` stdout parsed as exactly one JSON
+  object with the in-use payload staged; the purity contract was NOT broken.
+  The stdout half of the report did not reproduce; combined-stream capture
+  (`2>&1`, or reading a terminal) is the likely observation channel.
+- The **repetition** half is real: the wrapper's maintenance pass runs on
+  every launch, so the notice reprinted on every invocation, forever, until
+  the old process exited.
+
+Fix landed in the fork (kazi-org/burrito PR #1, `maintenance-skip-notice-once`
+onto `payload-liveness-guard`): each announced version is recorded in a
+`.burrito_announced_skips` marker next to `.burrito_live` in the CURRENT
+install dir, so the notice prints once per installed version (a new version
+extracts to a fresh dir and announces once again); recording is best-effort
+and never blocks a launch. Proven end-to-end on the fork's `cli_example`
+binary: notice exactly once on stderr, runs 2-3 silent on both streams,
+cleanup still resumes (`Uninstalled older version`) once the pidfile is gone.
+
+Kazi-side limitation, stated plainly: the pollution happens in the zig wrapper
+BEFORE the BEAM boots and `/usr/local/bin/kazi` IS the wrapper binary (no
+shell launcher), so NO in-app or launcher-side mitigation is possible -- the
+ADR-0023 `--json` logger guard cannot reach it, and there is no env kazi could
+set for its own current invocation. The kazi half is therefore a regression
+pin, not a fix: `test/kazi/cli/release_binary_stdout_purity_test.exs`
+(`:release_binary_live`, excluded by default) stages the same fixture against
+the real release binary and asserts (1) `--json` stdout stays one JSON object
+(green today) and (2) the notice appears at most once across two invocations
+(green once the fork PR merges, mix.exs bumps the `084e1e3` pin, and a release
+built from the new pin is installed). The pin bump is sequenced by the
+coordinator AFTER the fork PR merges. `BURRITO_NO_CLEAN_OLD=1` remains the
+operator-side kill switch (skips the cleanup pass, and with it the notice).
