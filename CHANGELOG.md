@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.198.1](https://github.com/kazi-org/kazi/compare/v1.198.0...v1.198.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **loader:** admit the `download` browser assertion — it shipped unloadable ([b76e8ca](https://github.com/kazi-org/kazi/commit/b76e8ca9c6ca25ad39a7f63e7cd1e1d424417b62))
+
 ## [1.198.0](https://github.com/kazi-org/kazi/compare/v1.197.0...v1.198.0) (2026-07-17)
 
 
