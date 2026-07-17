@@ -64,7 +64,10 @@ defmodule Kazi.Reconcile.GherkinImporter do
     * `"group"` — the normalized group id this Scenario belongs to (its
       Feature). A RESERVED predicate key (T12.2): the loader lands it on
       `Kazi.Predicate.group` and VALIDATES it references a declared `[[group]]`
-      entry (so the importer always declares every group it references).
+      entry (so the importer always declares every group it references),
+    * `"role"` / `"priority"` / `"interface"` — present ONLY when the Scenario
+      carries the matching kazi tag (see "Tags"); an untagged Scenario emits
+      none of them.
 
   ## Determinism, hermeticity & re-import (upsert)
 
@@ -88,12 +91,59 @@ defmodule Kazi.Reconcile.GherkinImporter do
     * a `Scenario:` or `Scenario Outline:` line opens a Scenario,
     * `Given` / `When` / `Then` / `And` / `But` / `*` lines are the Scenario's
       steps (carried verbatim as the predicate's recorded steps),
-    * comment lines (`#`), tags (`@tag`), `Background:`, `Examples:` tables, and
+    * `@tag` lines annotate the Feature or Scenario they sit above (see "Tags"),
+    * comment lines (`#`), `Background:`, `Examples:` tables, and
       doc-strings/data-tables are skipped for predicate emission (a Scenario is
       one predicate regardless of its Examples rows).
 
   This is intentionally a SUBSET of full gherkin — enough to turn the
   Feature/Scenario skeleton into grouped acceptance predicates deterministically.
+
+  ## Tags (T41.1, ADR-0054)
+
+  The tag MECHANISM is standard Cucumber (`@tag` lines above a `Feature:` or
+  `Scenario:`, several per line, Feature tags inherited by its Scenarios). The
+  VOCABULARY below is kazi's own documented convention — the same honesty this
+  module already applies to its gherkin subset:
+
+    * `@role:<role>` — who the use case is for. Recorded as `role` config.
+    * `@priority:P0`..`@priority:P3` — recorded as `priority` config.
+    * `@interface:web|api|cli|sdk|grpc|background|ws` — how the use case is
+      exercised. Recorded as `interface` config, and selects the provider (below).
+
+  `role`/`priority`/`interface` are self-describing metadata on the predicate,
+  exactly as `steps` already are: NO provider consumes them (which is why
+  `Kazi.Goal.Loader` must intern their atoms — see its `@gherkin_doc_keys`).
+
+  A tag outside this vocabulary is **IGNORED, never an error** — a team's house
+  tags (`@smoke`, `@wip`, `@owner:growth`), and malformed values
+  (`@priority:P9`), must not stop a real, pre-existing `.feature` file from
+  importing. A Scenario's own tag wins over an inherited Feature tag.
+
+  An UNTAGGED Scenario — and one carrying only tags outside this vocabulary —
+  derives exactly the predicate it derived before tags existed, byte-identically
+  (pinned by golden snapshots of the pre-T41.1 importer in
+  `test/kazi/reconcile/gherkin_importer_backcompat_test.exs`). Tags are ADDITIVE.
+
+  ## Which provider a tagged Scenario derives
+
+  `@interface:web` derives a `browser` predicate and `@interface:api` an
+  `http_probe` — but ONLY when the caller supplies a `:base_url` to probe.
+  kazi never invents a url (ADR-0013: kazi scaffolds, never guesses — cf.
+  `Kazi.Adopt.Writer.live_predicate_scaffold/0`, which leaves the url a `TODO`
+  for a human), and a url-less `browser`/`http_probe` predicate is a LOAD error
+  anyway (ADR-0058/T48.1). Without a base url the tag records its metadata and
+  the `custom_script` scaffold stands. Every other interface (`cli`, `sdk`,
+  `grpc`, `background`, `ws`) has no provider that could check it from a
+  `.feature` alone, so it records metadata and keeps the scaffold.
+
+  A derived live predicate is a SCAFFOLD too, and is honestly RED for the same
+  reason the `custom_script` placeholder is. This needs care the command scaffold
+  does not: a live provider's default is to PASS (a `browser` predicate with no
+  assertions passes on any page that renders; an `http_probe` with no expectation
+  passes on any completed request), so a bare derived probe would report a use
+  case green while verifying nothing. Each therefore carries a placeholder
+  EXPECTATION that cannot hold until a human replaces it.
   """
 
   alias Kazi.Goal
@@ -125,12 +175,39 @@ defmodule Kazi.Reconcile.GherkinImporter do
       "for this scenario (its Given/When/Then steps are recorded on this predicate).' >&2; exit 1"
   ]
 
+  # kazi's own tag vocabulary (T41.1, ADR-0054), layered on real Cucumber tag
+  # syntax. A value outside these sets is not recognized, so the tag is ignored.
+  @priorities ~w(P0 P1 P2 P3)
+  @interfaces ~w(web api cli sdk grpc background ws)
+
+  # The `@interface` values with a dedicated live provider. Every other value
+  # (cli, sdk, grpc, background, ws) has no provider that could check it from a
+  # `.feature` alone, so it records metadata and keeps the scaffold.
+  @interface_providers %{"web" => "browser", "api" => "http_probe"}
+
+  # A derived LIVE predicate is a scaffold too, and must be honestly RED for the
+  # same reason the cmd/args placeholder is: a `.feature` says WHAT must hold,
+  # never HOW to check it. But unlike a failing command, a live provider's
+  # default is to PASS — a `browser` predicate with no assertions passes on any
+  # page that renders, an `http_probe` with no expectation passes on any
+  # completed request. Emitting one bare would report a use case green while
+  # verifying nothing, and a goal whose whole vector went green that way is
+  # rejected by `Kazi.Runtime`'s t0 vacuous-goal guard. So the derived predicate
+  # carries a placeholder EXPECTATION that cannot hold until replaced.
+  @live_scaffold_todo "kazi: behavior-spec scaffold — replace this placeholder assertion " <>
+                        "with the real check for this scenario (edit the PREDICATE, not the " <>
+                        "app; the scenario's Given/When/Then steps are recorded on it)."
+
   @typedoc """
   Options for `import_map/2` and `import_goal/2`:
 
     * `:id` — the goal id (string). Defaults to `"gherkin-import"`.
     * `:name` — the goal display name. Defaults to the first Feature name when
       present, else omitted.
+    * `:base_url` — the live target an `@interface:web`/`@interface:api` Scenario
+      probes (string). Absent (the default), those tags record their metadata but
+      keep the `custom_script` scaffold: kazi never invents a url. See "Which
+      provider a tagged Scenario derives".
   """
   @type opts :: keyword()
 
@@ -183,7 +260,7 @@ defmodule Kazi.Reconcile.GherkinImporter do
             "id" => Keyword.get(opts, :id, @default_goal_id),
             "mode" => "create",
             "group" => build_groups(scenarios),
-            "predicate" => build_predicates(scenarios)
+            "predicate" => build_predicates(scenarios, opts)
           }
 
           {:ok, maybe_put_name(goal, scenarios, opts)}
@@ -222,7 +299,10 @@ defmodule Kazi.Reconcile.GherkinImporter do
   defp parse(text) do
     text
     |> String.split(~r/\r\n|\r|\n/)
-    |> Enum.reduce(%{feature: nil, current: nil, done: []}, &parse_line/2)
+    |> Enum.reduce(
+      %{feature: nil, feature_tags: [], pending: [], current: nil, done: []},
+      &parse_line/2
+    )
     |> finish()
   end
 
@@ -230,17 +310,32 @@ defmodule Kazi.Reconcile.GherkinImporter do
     trimmed = String.trim(line)
 
     cond do
-      trimmed == "" or comment?(trimmed) or tag?(trimmed) ->
+      trimmed == "" or comment?(trimmed) ->
         state
 
+      tag?(trimmed) ->
+        # Tags sit on the line(s) ABOVE the Feature/Scenario they annotate, so
+        # they are held pending until that line opens.
+        %{state | pending: state.pending ++ tags_on(trimmed)}
+
       feature = feature_name(trimmed) ->
-        # A new Feature: close any open scenario, set the feature name.
-        %{close_current(state) | feature: feature}
+        # A new Feature: close any open scenario, set the feature name. Its tags
+        # are inherited by every Scenario under it (Cucumber semantics).
+        %{close_current(state) | feature: feature, feature_tags: state.pending, pending: []}
 
       scenario = scenario_name(trimmed) ->
-        # A new Scenario: close any open scenario, open a fresh one.
+        # A new Scenario: close any open scenario, open a fresh one. Feature tags
+        # come first so a Scenario's own tag WINS on conflict (last one wins).
         closed = close_current(state)
-        %{closed | current: %{feature: state.feature, scenario: scenario, steps: []}}
+
+        current = %{
+          feature: state.feature,
+          scenario: scenario,
+          steps: [],
+          tags: state.feature_tags ++ state.pending
+        }
+
+        %{closed | current: current, pending: []}
 
       step = step_line(trimmed) ->
         append_step(state, step)
@@ -279,6 +374,51 @@ defmodule Kazi.Reconcile.GherkinImporter do
 
   defp tag?("@" <> _rest), do: true
   defp tag?(_line), do: false
+
+  # A tag line carries one or more whitespace-separated tags (`@smoke @role:admin`).
+  defp tags_on(line) do
+    line
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.filter(&tag?/1)
+  end
+
+  # ── Tag vocabulary (T41.1, ADR-0054) ───────────────────────────────────────
+
+  # Reduce a Scenario's tags to the recognized metadata. The tag MECHANISM is
+  # standard Cucumber; this VOCABULARY is kazi's own documented convention. A tag
+  # outside it — a team's house tags (`@smoke`, `@wip`), or a malformed value
+  # (`@priority:P9`) — is IGNORED, never an error: a `.feature` file authored for
+  # some other tool must import unchanged.
+  defp tag_metadata(tags) do
+    Enum.reduce(tags, %{}, fn tag, acc ->
+      case recognize(tag) do
+        {key, value} -> Map.put(acc, key, value)
+        :unknown -> acc
+      end
+    end)
+  end
+
+  defp recognize("@role:" <> role) do
+    case presence(String.trim(role)) do
+      nil -> :unknown
+      role -> {"role", role}
+    end
+  end
+
+  defp recognize("@priority:" <> priority) do
+    canonical = priority |> String.trim() |> String.upcase()
+    if canonical in @priorities, do: {"priority", canonical}, else: :unknown
+  end
+
+  defp recognize("@interface:" <> interface) do
+    canonical = interface |> String.trim() |> String.downcase()
+    if canonical in @interfaces, do: {"interface", canonical}, else: :unknown
+  end
+
+  defp recognize(_tag), do: :unknown
+
+  defp tags_of(%{tags: tags}) when is_list(tags), do: tags
+  defp tags_of(_scenario), do: []
 
   # A `Feature:` line. Returns the trimmed name (possibly empty → handled by the
   # default group). `nil` when the line is not a Feature line.
@@ -322,27 +462,67 @@ defmodule Kazi.Reconcile.GherkinImporter do
   # derived id (Feature + Scenario name) makes re-import an UPSERT: the same
   # features yield the same ids, never duplicates. A same-id collision (two
   # Scenarios that derive the same id) is de-duplicated, keeping the first.
-  defp build_predicates(scenarios) do
+  defp build_predicates(scenarios, opts) do
     scenarios
-    |> Enum.map(&predicate/1)
+    |> Enum.map(&predicate(&1, opts))
     |> Enum.uniq_by(fn predicate -> predicate["id"] end)
   end
 
-  defp predicate(scenario) do
+  defp predicate(scenario, opts) do
     {group_id, _name} = group_for(scenario)
+    metadata = scenario |> tags_of() |> tag_metadata()
 
-    %{
+    base = %{
       "id" => predicate_id(scenario),
-      "provider" => "custom_script",
-      "verdict" => @scaffold_verdict,
       "acceptance" => true,
-      "cmd" => @scaffold_cmd,
-      "args" => @scaffold_args,
       "feature" => feature_name_of(scenario),
       "scenario" => scenario.scenario,
       "steps" => scenario.steps,
       "group" => group_id,
       "description" => description(scenario)
+    }
+
+    base
+    |> Map.merge(provider_config(metadata, opts))
+    |> Map.merge(metadata)
+  end
+
+  # The provider the Scenario derives. An `@interface` with a dedicated live
+  # provider upgrades the scaffold — but ONLY when the caller supplied a
+  # `:base_url` to probe: kazi never invents a url (ADR-0013 §3, live predicates
+  # are scaffolded, never guessed), and a url-less browser/http_probe predicate
+  # is a LOAD error anyway (ADR-0058/T48.1). With no base url the tag still
+  # records its metadata and today's `custom_script` scaffold stands — which is
+  # also exactly what an UNTAGGED Scenario derives, byte-identically.
+  defp provider_config(metadata, opts) do
+    base_url = Keyword.get(opts, :base_url)
+    provider = Map.get(@interface_providers, Map.get(metadata, "interface"))
+
+    live_config(provider, base_url) || scaffold_config()
+  end
+
+  defp live_config("browser", url) when is_binary(url) and url != "" do
+    %{
+      "provider" => "browser",
+      "url" => url,
+      "assertions" => [
+        %{"type" => "text", "selector" => "body", "contains" => @live_scaffold_todo}
+      ]
+    }
+  end
+
+  defp live_config("http_probe", url) when is_binary(url) and url != "" do
+    %{"provider" => "http_probe", "url" => url, "expect_body" => @live_scaffold_todo}
+  end
+
+  defp live_config(_provider, _url), do: nil
+
+  defp scaffold_config do
+    %{
+      "provider" => "custom_script",
+      "verdict" => @scaffold_verdict,
+      "cmd" => @scaffold_cmd,
+      "args" => @scaffold_args
     }
   end
 
