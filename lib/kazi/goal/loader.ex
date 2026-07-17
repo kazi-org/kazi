@@ -356,7 +356,11 @@ defmodule Kazi.Goal.Loader do
     "coverage" => :coverage,
     "property" => :property,
     "mutation" => :mutation,
-    "cve" => :cve
+    "cve" => :cve,
+    # T49.3 (ADR-0064): replay a pinned Gherkin Scenario by delegating to a
+    # surface provider. Its spec/scenario/surface/repin keys are validated below
+    # so a missing binding or an unknown surface fails at load, not at dispatch.
+    "scenario" => :scenario
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -1545,6 +1549,25 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # Kept in lockstep with Kazi.Scenario.Pin's surface whitelist and
+  # Kazi.Providers.Scenario's `repin` handling.
+  @scenario_surfaces ~w(browser cli)
+  @scenario_repin_modes ~w(auto manual)
+
+  # T49.3 (ADR-0064): a scenario predicate BINDS one Gherkin Scenario to a pin and
+  # replays it through a surface provider. `spec` (the .feature path) and
+  # `scenario` (the name) are the required binding; a missing one is a scaffold
+  # that can never resolve a Scenario, so it fails at load. `surface`/`repin` are
+  # enums checked here so a typo names the valid set rather than surfacing as a
+  # `:surface_unavailable` error only once the loop dispatches.
+  defp validate_provider_config(:scenario, config, id) do
+    with :ok <- require_string(config, :spec, id, "scenario"),
+         :ok <- require_string(config, :scenario, id, "scenario"),
+         :ok <- validate_enum(config, :surface, @scenario_surfaces, id, "scenario") do
+      validate_enum(config, :repin, @scenario_repin_modes, id, "scenario")
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
 
   # --- cli assertion vocabulary (T43.7, UC-055) ------------------------------
@@ -1664,6 +1687,39 @@ defmodule Kazi.Goal.Loader do
         {:error,
          "cli predicate #{inspect(id)} #{target} regex assertion \"expected\" must be a " <>
            "string pattern (got #{inspect(other)})"}
+    end
+  end
+
+  defp require_string(config, key, id, provider) do
+    case Map.get(config, key) do
+      value when is_binary(value) and value != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "#{provider} predicate #{inspect(id)} is missing required key #{inspect(Atom.to_string(key))} " <>
+           "(a non-empty string)"}
+    end
+  end
+
+  defp validate_enum(config, key, allowed, id, provider) do
+    case Map.get(config, key) do
+      nil ->
+        :ok
+
+      value when is_binary(value) ->
+        if value in allowed do
+          :ok
+        else
+          {:error,
+           "#{provider} predicate #{inspect(id)} #{inspect(Atom.to_string(key))} must be one of " <>
+             "#{inspect(allowed)} (got #{inspect(value)})"}
+        end
+
+      other ->
+        {:error,
+         "#{provider} predicate #{inspect(id)} #{inspect(Atom.to_string(key))} must be a string " <>
+           "(got #{inspect(other)})"}
     end
   end
 
