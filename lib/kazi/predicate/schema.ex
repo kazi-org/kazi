@@ -419,7 +419,15 @@ defmodule Kazi.Predicate.Schema do
             "(minor|moderate|serious|critical, default serious). `found` lists each " <>
             "violation's rule id + node; the violation COUNT is the envelope-v2 score " <>
             "(lower_better). axe-core is a runner-side optional dep — absent, the run is " <>
-            ":error (\"a11y unavailable\"), never :fail (T43.2, UC-056)."
+            ":error (\"a11y unavailable\"), never :fail (T43.2, UC-056); " <>
+            "\"visual\" (name + optional selector, threshold) — screenshots the selector (or " <>
+            "the whole page) and perceptual-diffs it against a COMMITTED baseline at " <>
+            ".kazi/visual-baselines/<name>.png within threshold (default 0.01 = the max " <>
+            "fraction of differing pixels). Over threshold is :fail with the diff image path " <>
+            "(.kazi/visual-diffs/<name>.png) in `found`. A MISSING baseline is SEEDED (written) " <>
+            "and returns :error \"baseline seeded\" — never a false pass on the first run. " <>
+            "Needs pixelmatch + pngjs runner-side; absent, :error \"visual diff unavailable\" " <>
+            "(T43.3, UC-056)."
       },
       %{
         name: "samples",
