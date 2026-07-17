@@ -99,9 +99,23 @@ defmodule Kazi.Daemon.PresenceSweep do
 
     case KV.contents(conn, bucket) do
       {:ok, contents} ->
+        decoded =
+          for {key, value} <- contents,
+              {:ok, entry} <- [Jason.decode(value)],
+              do: {key, entry}
+
+        # One batched `ps` per sweep pass, not one fork per row
+        # (verification-gate finding).
+        started =
+          decoded
+          |> Enum.map(fn {_key, entry} -> entry end)
+          |> Enum.filter(fn e -> e["machine"] == machine and is_integer(e["pid"]) end)
+          |> Enum.map(fn e -> e["pid"] end)
+          |> Liveness.started_map()
+
         result =
-          Enum.reduce(contents, %{reaped: [], idled: []}, fn {key, value}, acc ->
-            sweep_row(conn, bucket, key, value, machine, idle_after_s, acc)
+          Enum.reduce(decoded, %{reaped: [], idled: []}, fn {key, entry}, acc ->
+            sweep_row(conn, bucket, key, entry, machine, idle_after_s, started, acc)
           end)
 
         {:ok, %{reaped: Enum.reverse(result.reaped), idled: Enum.reverse(result.idled)}}
@@ -113,10 +127,10 @@ defmodule Kazi.Daemon.PresenceSweep do
 
   # NEVER touch rows for other machines (the `^machine` match) or rows that
   # do not decode -- the bucket TTL is the backstop for anything unjudgeable.
-  defp sweep_row(conn, bucket, key, value, machine, idle_after_s, acc) do
-    case Jason.decode(value) do
+  defp sweep_row(conn, bucket, key, entry, machine, idle_after_s, started, acc) do
+    case {:ok, entry} do
       {:ok, %{"machine" => ^machine} = entry} ->
-        case Liveness.verdict(entry) do
+        case Liveness.verdict(entry, started) do
           :dead ->
             KV.delete_key(conn, bucket, key)
             %{acc | reaped: [key | acc.reaped]}

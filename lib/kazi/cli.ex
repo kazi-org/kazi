@@ -74,6 +74,7 @@ defmodule Kazi.CLI do
   alias Kazi.ReadModel.ProposedMemory
   alias Kazi.ReadModel.RunRegistry
   alias Kazi.Reconcile.GherkinImporter
+  alias Kazi.Teach.InstallHooks
   alias Kazi.Teach.InstallSkill
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -122,6 +123,8 @@ defmodule Kazi.CLI do
     with_gist: :boolean,
     out: :string,
     dir: :string,
+    local: :boolean,
+    uninstall: :boolean,
     harness: :string,
     model: :string,
     effort: :string,
@@ -184,7 +187,7 @@ defmodule Kazi.CLI do
   # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
   # defined here (above `parse/1`) so both the `--help` interception below and
   # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who tell watch join leave name)
+  @bus_verbs ~w(post read peek who tell watch join leave name hook)
   @bus_kinds ~w(fact announce note intent)
   @default_bus_kind "fact"
 
@@ -214,7 +217,11 @@ defmodule Kazi.CLI do
       "`init` only: opt THIS repo into the Gist context store — verify `gist doctor`, write .kazi/context.toml, register the `gist serve` MCP server in .mcp.json, and recommend KAZI_GIST_DSN. Project-local only; never touches global config (ADR-0045).",
     out: "`init` output goal-file (default <repo>/kazi.goal.toml).",
     dir:
-      "`install-skill` only: target skill directory (default ~/.claude/skills/kazi). Injected to a tmp dir in tests.",
+      "`install-skill` / `install-hooks`: target directory -- the skill directory for `install-skill` (default ~/.claude/skills/kazi), the settings directory for `install-hooks` (default ~/.claude). Injected to a tmp dir in tests.",
+    local:
+      "`install-hooks` only (ADR-0071 decision 3): target the repo's LOCAL, uncommitted .claude/settings.local.json instead of the user-level ~/.claude/settings.json. The installer NEVER writes a committed project settings file (ADR-0034).",
+    uninstall:
+      "`install-hooks` only: remove exactly the hook entries a previous install added -- every other key/entry is preserved, and uninstall right after a fresh install restores the pre-install bytes exactly.",
     harness:
       "Coding harness to drive: claude (default) or opencode. Overrides the goal-file/app config.",
     model:
@@ -382,6 +389,13 @@ defmodule Kazi.CLI do
       flags: [:dir]
     },
     %{
+      name: "install-hooks",
+      summary:
+        "Register the session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071): SessionStart + UserPromptSubmit run `kazi bus hook <event>`. Merge-never-clobber and idempotent -- an operator's own hooks/keys survive byte-identically; `--uninstall` removes exactly what was added. Default target is the user-level ~/.claude/settings.json; `--local` targets the repo's LOCAL (uncommitted) .claude/settings.local.json.",
+      args: [],
+      flags: [:dir, :local, :uninstall]
+    },
+    %{
       name: "mcp",
       summary: "Start the kazi MCP server over stdio (the same server `mix kazi.mcp` starts).",
       args: [],
@@ -404,7 +418,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave|name` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|tell|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged.",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -538,6 +552,7 @@ defmodule Kazi.CLI do
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
+      kazi install-hooks [--local] [--uninstall]  # register session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
       kazi plan --json [--predicates <json>] [--replace]   # caller-drafts (predicates supplied)
@@ -567,6 +582,7 @@ defmodule Kazi.CLI do
       kazi bus read [--peek] [--json]              # --peek: show pending messages WITHOUT consuming them
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
+      kazi bus hook <event>                        # harness hook entry point (session-start | turn) -- ALWAYS exits 0 silently
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s) or a provider schema (e.g. custom_script)
@@ -596,10 +612,22 @@ defmodule Kazi.CLI do
                              workspace.
       --out <path>           `init` output goal-file (default
                              <repo>/kazi.goal.toml).
-      --dir <path>           `install-skill` only: target skill directory
-                             (default ~/.claude/skills/kazi). Opt-in,
+      --dir <path>           `install-skill` / `install-hooks`: target directory
+                             — the skill directory for `install-skill` (default
+                             ~/.claude/skills/kazi), the settings directory for
+                             `install-hooks` (default ~/.claude). Opt-in,
                              consent-first — a normal `kazi` run never writes to
-                             ~/.claude (ADR-0024). Injected to a tmp dir in tests.
+                             ~/.claude (ADR-0024/0071). Injected to a tmp dir in
+                             tests.
+      --local                `install-hooks` only (ADR-0071): target the repo's
+                             LOCAL, uncommitted .claude/settings.local.json
+                             instead of the user-level ~/.claude/settings.json.
+                             The installer NEVER writes a committed project
+                             settings file (ADR-0034).
+      --uninstall            `install-hooks` only: remove exactly the hook
+                             entries a previous install added. Every other
+                             key/entry is preserved; run right after a fresh
+                             install it restores the pre-install bytes exactly.
       --enrich               `init` only: opt into harness enrichment (OFF by
                              default) to propose live predicates from discovered
                              endpoints. The deterministic detection always stands.
@@ -777,6 +805,7 @@ defmodule Kazi.CLI do
       kazi init ./my-service --with-mcp            # also write .mcp.json (canonical kazi MCP config)
       kazi init ./my-service --with-gist           # opt this repo into the Gist context store (ADR-0045)
       kazi install-skill
+      kazi install-hooks                           # opt into session-bus delivery (ADR-0071); --uninstall reverts
       kazi mcp                                     # an MCP client runs this as its server command
       kazi apply my.goal.toml --workspace ./svc --json --stream
       kazi status cli-e2e --json
@@ -883,6 +912,9 @@ defmodule Kazi.CLI do
       {:install_skill, opts} ->
         execute_install_skill(opts, inject_opts)
 
+      {:install_hooks, opts} ->
+        execute_install_hooks(opts, inject_opts)
+
       {:mcp, _opts} ->
         execute_mcp(inject_opts)
 
@@ -945,6 +977,7 @@ defmodule Kazi.CLI do
           | {:status, String.t() | nil, keyword()}
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
+          | {:install_hooks, keyword()}
           | {:mcp, keyword()}
           | {:dashboard, keyword()}
           | {:daemon, String.t(), [String.t()], keyword()}
@@ -1143,6 +1176,24 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T55.2 (ADR-0071 decisions 1/3/6): `kazi install-hooks` registers the
+  # session-bus delivery hooks (SessionStart + UserPromptSubmit -> `kazi bus
+  # hook <event>`) in the Claude Code settings. OPT-IN/consent-first, the same
+  # contract as `install-skill`: only this explicit command writes harness
+  # config; a normal `kazi` run never touches it. `--dir` targets a tmp dir in
+  # tests; `--local` targets the LOCAL (uncommitted) settings.local.json;
+  # `--uninstall` removes exactly what an install added.
+  defp parse_command(["install-hooks" | rest], flags) do
+    case rest do
+      [] ->
+        {:install_hooks,
+         dir: flags[:dir], project: flags[:local] || false, uninstall: flags[:uninstall] || false}
+
+      extra ->
+        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
   # T33.1 (ADR-0044): `kazi mcp` starts the MCP server over stdio — the SAME
   # `Kazi.MCP.Server` that `mix kazi.mcp` starts, shared via `Kazi.MCP.Stdio`.
   # It is a long-running stdio server, NOT a `--json` command: it takes no flags
@@ -1281,7 +1332,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `daemon`, `bus`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `install-hooks`, `mcp`, `dashboard`, `daemon`, `bus`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
@@ -1417,12 +1468,12 @@ defmodule Kazi.CLI do
   defp parse_bus([sub | _], _flags),
     do:
       {:error,
-       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`)"}
+       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
 
   defp parse_bus([], _flags),
     do:
       {:error,
-       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`)"}
+       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `tell`, `watch`, `join`, `leave`, `name`, `hook`)"}
 
   defp bus_flags(flags) do
     [
@@ -1630,6 +1681,25 @@ defmodule Kazi.CLI do
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
+    """
+  end
+
+  # T55.2 (ADR-0071 decision 2): the harness hook entry point install-hooks
+  # registers. The --help text is the ONE place the events are documented on
+  # the CLI surface itself -- the command's own contract is silence.
+  defp bus_help_text("hook") do
+    """
+    kazi bus hook <event>
+
+    The harness hook entry point `kazi install-hooks` registers (ADR-0071).
+    Events: `session-start` (Claude Code's SessionStart -- registers presence
+    and injects the project board) and `turn` (Claude Code's UserPromptSubmit
+    -- injects the traffic digest, silent when the bus is quiet).
+
+    Contract: ALWAYS exits 0 and never blocks a session. With no daemon
+    running, or an unknown/missing <event>, it prints nothing and returns
+    immediately -- a hook must never break a session. The delivered payload
+    lands in a later release; today the command is a silent no-op.
     """
   end
 
@@ -3738,6 +3808,77 @@ defmodule Kazi.CLI do
   defp format_skill_error(reason), do: inspect(reason)
 
   # =============================================================================
+  # install-hooks command (T55.2, UC-068, ADR-0071): session-bus delivery
+  # =============================================================================
+  #
+  # `kazi install-hooks` registers the two delivery hooks (SessionStart +
+  # UserPromptSubmit -> `kazi bus hook <event>`) in the Claude Code settings,
+  # the opt-in sibling of `install-skill` (same consent contract: only this
+  # explicit command writes harness config). The merge/uninstall mechanics --
+  # merge-never-clobber, byte-identical preservation, exact-inverse uninstall,
+  # malformed-input-writes-nothing -- live in `Kazi.Teach.InstallHooks`.
+  #
+  # The target dir is INJECTABLE so tests never write to the real ~/.claude:
+  # `--dir <path>` wins, else `inject_opts[:hooks_dir]` (the same seam pattern
+  # as install-skill's :skill_dir), else the default `~/.claude`.
+  defp execute_install_hooks(opts, inject_opts) do
+    hooks_opts = install_hooks_opts(opts, inject_opts)
+
+    if opts[:uninstall] do
+      case InstallHooks.uninstall(hooks_opts) do
+        {:ok, %{status: :unchanged, path: path}} ->
+          IO.puts("UNCHANGED  #{path} (no kazi hooks installed)")
+          0
+
+        {:ok, %{status: :removed, deleted: true, path: path}} ->
+          IO.puts("REMOVED  #{path} (the file install-hooks created; deleted)")
+          0
+
+        {:ok, %{status: :removed, path: path}} ->
+          IO.puts("REMOVED  kazi hooks from #{path} (everything else preserved)")
+          0
+
+        {:error, message} ->
+          IO.puts(:stderr, "error: #{message}")
+          1
+      end
+    else
+      case InstallHooks.install(hooks_opts) do
+        {:ok, %{status: :unchanged, path: path}} ->
+          IO.puts("UNCHANGED  #{path} (kazi hooks already installed)")
+          0
+
+        {:ok, %{status: :installed, path: path}} ->
+          IO.puts("WROTE  #{path}")
+          IO.puts("")
+          IO.puts("Session-bus delivery is installed (ADR-0071): SessionStart and")
+          IO.puts("UserPromptSubmit now run `kazi bus hook <event>` -- a silent no-op")
+          IO.puts("unless a `kazi daemon` is up. Re-running is a no-op;")
+          IO.puts("`kazi install-hooks --uninstall` removes exactly what was added.")
+          0
+
+        {:error, message} ->
+          IO.puts(:stderr, "error: #{message}")
+          1
+      end
+    end
+  end
+
+  # Resolve the settings target dir, NON-DEFAULT only when given: `--dir`
+  # (operator / tests) wins, else an injected `:hooks_dir` (tests), else
+  # InstallHooks' own default (~/.claude). `--local` always carries through
+  # (it picks the settings.local.json file name and, with no dir, <cwd>/.claude).
+  defp install_hooks_opts(opts, inject_opts) do
+    project = [project: opts[:project] || false]
+
+    cond do
+      is_binary(opts[:dir]) -> [dir: opts[:dir]] ++ project
+      is_binary(inject_opts[:hooks_dir]) -> [dir: inject_opts[:hooks_dir]] ++ project
+      true -> project
+    end
+  end
+
+  # =============================================================================
   # mcp command (T33.1, ADR-0044): start the MCP server over stdio
   # =============================================================================
   #
@@ -4200,6 +4341,17 @@ defmodule Kazi.CLI do
 
   defp execute_bus("name", _args, opts),
     do: bus_error("`bus name` requires exactly one <nickname> argument", opts)
+
+  # T55.2 (ADR-0071 decision 2): `bus hook <event>` -- the harness hook entry
+  # point `install-hooks` registers (SessionStart -> `session-start`,
+  # UserPromptSubmit -> `turn`). SKELETON until T55.9 fills the payload; the
+  # skeleton's contract IS the hook contract: ALWAYS exit 0, print NOTHING,
+  # return immediately -- it never touches the daemon (no connect, so no hang),
+  # because a hook that errors, blocks, or chatters breaks/taxes every turn of
+  # every session. An unknown or missing <event> is ALSO a silent success (a
+  # hook must never break a session); `kazi bus hook --help` documents the
+  # events.
+  defp execute_bus("hook", _args, _opts), do: 0
 
   defp execute_bus("who", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)

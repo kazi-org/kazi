@@ -67,4 +67,60 @@ defmodule Kazi.Bus.Liveness do
   end
 
   def verdict(_entry), do: :unknown
+
+  @doc """
+  Batched start times: ONE `ps -o pid=,lstart=` fork for the whole pid list
+  (verification-gate finding: per-row forks made `who` and the sweep O(rows)
+  in process spawns). Returns a map of pid (integer) => lstart string; pids
+  absent from the map do not exist. An empty list never forks.
+  """
+  @spec started_map([integer()]) :: %{integer() => String.t()}
+  def started_map([]), do: %{}
+
+  def started_map(pids) do
+    args = ["-o", "pid=,lstart=", "-p", Enum.map_join(pids, ",", &to_string/1)]
+
+    case System.cmd("ps", args, stderr_to_stdout: true) do
+      {out, code} when code in [0, 1] ->
+        # exit 1 = some pids not found; the found ones still print.
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.reduce(%{}, fn line, acc ->
+          case String.split(String.trim(line), " ", parts: 2) do
+            [pid_s, started] ->
+              case Integer.parse(pid_s) do
+                {pid, ""} -> Map.put(acc, pid, String.trim(started))
+                _bad -> acc
+              end
+
+            _bad ->
+              acc
+          end
+        end)
+
+      _ps_unusable ->
+        %{}
+    end
+  end
+
+  @doc """
+  `verdict/1` against a preloaded `started_map/1` -- no fork. Same contract:
+  `:alive` / `:dead` / `:unknown`.
+  """
+  @spec verdict(map(), %{integer() => String.t()}) :: :alive | :dead | :unknown
+  def verdict(%{"pid" => pid} = entry, started_map) when is_integer(pid) do
+    case Map.get(started_map, pid) do
+      nil ->
+        :dead
+
+      current ->
+        case entry["started_at"] do
+          ^current -> :alive
+          nil -> :unknown
+          _different_process -> :dead
+        end
+    end
+  end
+
+  def verdict(_entry, _started_map), do: :unknown
 end
