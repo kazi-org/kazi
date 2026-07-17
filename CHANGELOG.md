@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.195.1](https://github.com/kazi-org/kazi/compare/v1.195.0...v1.195.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **authoring:** remove dead %Kazi.Goal{} clause in draft_has_code_predicate?/1 ([609d82e](https://github.com/kazi-org/kazi/commit/609d82e5aac075c8c6e23a17cf15caf464743728))
+
 ## [1.195.0](https://github.com/kazi-org/kazi/compare/v1.194.0...v1.195.0) (2026-07-17)
 
 
