@@ -83,7 +83,13 @@ defmodule Kazi.Predicate.SchemaTest do
       {:ok, schema} = Schema.fetch("browser")
       assert %{description: description} = Enum.find(schema.keys, &(&1.name == "assertions"))
 
-      for type <- ~w(visible hidden text url console_clean) do
+      # Driven off the loader's ACTUAL vocabulary rather than a hand-kept list, so
+      # a new assertion type cannot be admitted by the loader yet left undocumented
+      # here (the failure mode that let this test claim "every type" while only
+      # spot-checking five). The loader list is itself pinned to the runner's
+      # ASSERTIONS table by Kazi.Goal.LoaderBrowserAssertionParityTest, so this
+      # transitively covers every runner type.
+      for type <- Kazi.Goal.Loader.browser_assertion_types() do
         assert description =~ type, "kazi schema browser must document the #{type} assertion"
       end
     end
