@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.190.0](https://github.com/kazi-org/kazi/compare/v1.189.0...v1.190.0) (2026-07-17)
+
+
+### Features
+
+* **examples:** deferred-surface custom_script recipes + fixtures ([9e8b918](https://github.com/kazi-org/kazi/commit/9e8b9185b0b39df55a0a488bd6c4795e91efcc35))
+
+
+### Bug Fixes
+
+* **bus:** route the hook turn payload through the daemon-assembled digest (T55.7) ([ccbbc90](https://github.com/kazi-org/kazi/commit/ccbbc90a685adc8b5aae62f091dc785265ea39e4))
+
 ## [1.189.0](https://github.com/kazi-org/kazi/compare/v1.188.0...v1.189.0) (2026-07-17)
 
 
