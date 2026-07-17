@@ -146,6 +146,8 @@ defmodule Kazi.Loop do
   # set). The loop only feeds it the T1.1 history and fires the human-escalation
   # hook + terminal stop on its verdict (see observe_tick/1).
   alias Kazi.Loop.StuckDetector
+  # T45.7 (ADR-0056 decision 5): the model escalation ladder.
+  alias Kazi.Loop.Ladder
   # T48.3 (ADR-0058, UC-064): the pure error-permanence taxonomy classifying a
   # `:error` reason as `:permanent` (config/wiring, never clears) or `:transient`
   # (may clear). The loop passes `classify_result/1` into
@@ -324,6 +326,11 @@ defmodule Kazi.Loop do
               # static config threaded to providers/adapter/actions
               workspace: nil,
               adapter_opts: [],
+              # T45.7 (ADR-0056 decision 5): the model escalation ladder
+              # (`Kazi.Loop.Ladder`) or `nil` when no `[escalation]` block is
+              # declared. `nil` keeps the loop byte-identical to its single-model
+              # self (no re-dispatch, no per-rung window/budget rebasing).
+              ladder: nil,
               # T4.5 context injection (ADR-0010 §3): opts forwarded to
               # `Kazi.Workspace.prepare/2`, which runs once before each agent
               # dispatch to expose the code-review-graph MCP in the workspace's
@@ -964,6 +971,14 @@ defmodule Kazi.Loop do
     adapter_opts = Keyword.get(opts, :adapter_opts, [])
     escalation_config = Escalation.config(Keyword.get(opts, :context_escalation))
 
+    # T45.7 (ADR-0056 decision 5): the MODEL escalation ladder from the goal's
+    # `[escalation]` block, or nil when none is declared (single-model, unchanged).
+    # A declared ladder is authoritative: rung 0 PINS the initial dispatch model,
+    # so the dispatched model sequence is exactly the declared ladder.
+    started_at_ms = now_fn.()
+    ladder = Ladder.from_escalation(goal.escalation, started_at_ms)
+    adapter_opts = pin_ladder_model(adapter_opts, ladder)
+
     data = %Data{
       goal: goal,
       providers: fetch!(opts, :providers),
@@ -972,6 +987,8 @@ defmodule Kazi.Loop do
       deploy: fetch!(opts, :deploy),
       workspace: Keyword.get(opts, :workspace),
       adapter_opts: adapter_opts,
+      # T45.7 (ADR-0056 decision 5): the model escalation ladder (nil = none).
+      ladder: ladder,
       workspace_opts: Keyword.get(opts, :workspace_opts, []),
       live_kinds: MapSet.new(Keyword.get(opts, :live_kinds, @default_live_kinds)),
       reobserve_interval_ms: Keyword.get(opts, :reobserve_interval_ms, @default_reobserve_ms),
@@ -993,7 +1010,7 @@ defmodule Kazi.Loop do
       # T1.4 budget: cache the hard ceiling + clock and start the wall-clock.
       budget: Keyword.get(opts, :budget, goal.budget),
       now_fn: now_fn,
-      started_at_ms: now_fn.(),
+      started_at_ms: started_at_ms,
       # T1.5 stuck: the window N + the human-escalation callback (default a
       # logger warning that hands off the persistent failing set).
       stuck_iterations: Keyword.get(opts, :stuck_iterations, StuckDetector.default_iterations()),
@@ -1075,7 +1092,14 @@ defmodule Kazi.Loop do
         # with the exceeded dimension as reason.
         case budget_check(data) do
           {:stop, reason} ->
-            terminate_over_budget(reason, data)
+            # T45.7 (ADR-0056 decision 5): before terminating :over_budget, try the
+            # escalation ladder — a next rung re-dispatches the SAME goal at a
+            # stronger model with a fresh per-rung budget; otherwise the terminal
+            # stop stands.
+            case maybe_escalate(data, current_failing_set(data)) do
+              {:escalated, data} -> reobserve(data, 0)
+              :halt -> terminate_over_budget(reason, data)
+            end
 
           :ok ->
             observe_tick(data)
@@ -1323,7 +1347,16 @@ defmodule Kazi.Loop do
     # merely WAITING on a live probe is not mistaken for a stalled agent.
     case StuckDetector.stuck?(code_history(data), data.stuck_iterations) do
       {:stuck, failing} ->
-        terminate_stuck(failing, data)
+        # T45.7 (ADR-0056 decision 5): the ORDINARY failing-set stall is the T30.3
+        # "same failing predicate set" signal — try the escalation ladder before
+        # terminating. A next rung re-dispatches the SAME goal at the next model
+        # with a fresh per-rung stuck window; otherwise the terminal stuck stands.
+        # (The error_stuck / permanent_error / capability_unreachable causes below
+        # are NOT escalated — they are not the failing-set stall the ADR covers.)
+        case maybe_escalate(data, failing) do
+          {:escalated, data} -> reobserve(data, 0)
+          :halt -> terminate_stuck(failing, data)
+        end
 
       :not_stuck ->
         # M5 (deep-review-001): a predicate persistently in :error is a terminal,
@@ -1381,7 +1414,7 @@ defmodule Kazi.Loop do
     drop_ids = MapSet.union(quarantine, MapSet.new(live_ids))
     flagged = data.gaming_flagged_iterations
 
-    for {index, %PredicateVector{results: results}} <- ordered_history(data) do
+    for {index, %PredicateVector{results: results}} <- rung_history(data) do
       results = Map.drop(results, MapSet.to_list(drop_ids))
       # T32.5 advisory downgrade: an observation the diff guard flagged has its
       # graded scores stripped here, so the stuck detector's score-progress escape
@@ -1393,6 +1426,18 @@ defmodule Kazi.Loop do
       {index, PredicateVector.new(results)}
     end
   end
+
+  # T45.7 (ADR-0056 decision 5): the history window the stuck classifier sees,
+  # trimmed to iterations SINCE the current escalation rung began (`window_base`),
+  # so each rung gets a FRESH stuck window rather than inheriting the prior model's
+  # stall. `nil` ladder (no escalation) returns the full history unchanged —
+  # byte-identical to the pre-T45.7 stuck detection.
+  @spec rung_history(Data.t()) :: history()
+  defp rung_history(%Data{ladder: %Ladder{window_base: base}} = data) do
+    for {index, vector} <- ordered_history(data), index >= base, do: {index, vector}
+  end
+
+  defp rung_history(%Data{} = data), do: ordered_history(data)
 
   # T48.3 (ADR-0058, UC-064): the per-iteration history reduced to only LIVE,
   # non-quarantined predicates — the mirror image of `code_history/1` (which
@@ -3454,12 +3499,83 @@ defmodule Kazi.Loop do
 
   defp budget_check(%Data{budget: budget} = data) do
     Budget.check(budget, %{
-      iterations: data.iterations,
-      elapsed_ms: elapsed_ms(data),
-      tokens: budgeted_tokens(data),
-      dispatches: data.dispatches
+      iterations: rung_iterations(data),
+      elapsed_ms: rung_elapsed_ms(data),
+      tokens: rung_tokens(data),
+      dispatches: rung_dispatches(data)
     })
   end
+
+  # T45.7 (ADR-0056 decision 5): budget usage measured PER RUNG. When an escalation
+  # ladder is active, each rung is one bounded converge (ADR-0035's bound): usage is
+  # the delta since the current rung's baseline, so a fresh model gets a fresh
+  # budget rather than the exhausted tail of the prior rung. With no ladder these
+  # return the raw totals — byte-identical to the pre-T45.7 budget check.
+  defp rung_iterations(%Data{ladder: %Ladder{iter_base: base}, iterations: n}), do: n - base
+  defp rung_iterations(%Data{iterations: n}), do: n
+
+  defp rung_dispatches(%Data{ladder: %Ladder{dispatch_base: base}, dispatches: n}), do: n - base
+  defp rung_dispatches(%Data{dispatches: n}), do: n
+
+  defp rung_tokens(%Data{ladder: %Ladder{token_base: base}} = data),
+    do: budgeted_tokens(data) - base
+
+  defp rung_tokens(%Data{} = data), do: budgeted_tokens(data)
+
+  defp rung_elapsed_ms(%Data{ladder: %Ladder{clock_base_ms: base}, now_fn: now_fn}),
+    do: max(now_fn.() - base, 0)
+
+  defp rung_elapsed_ms(%Data{} = data), do: elapsed_ms(data)
+
+  # =============================================================================
+  # T45.7 (ADR-0056 decision 5): the model escalation ladder
+  # =============================================================================
+
+  # On a `stuck`/`over_budget` terminal verdict, advance to the next model in the
+  # declared ladder (a fresh per-rung window + budget) and signal `{:escalated,
+  # data}` for the caller to re-dispatch; `:halt` when no ladder is declared or the
+  # ladder is exhausted (the terminal verdict then stands). kazi-core makes NO
+  # model choice here — it walks exactly the declared list. `failing` is the T30.3
+  # same-failing-predicate-set the rung stalled on, carried for observability.
+  @spec maybe_escalate(Data.t(), MapSet.t()) :: {:escalated, Data.t()} | :halt
+  defp maybe_escalate(%Data{ladder: ladder} = data, failing) do
+    if Ladder.next?(ladder) do
+      ladder = Ladder.advance(ladder, failing, ladder_spend(data))
+      adapter_opts = Keyword.put(data.adapter_opts, :model, Ladder.current_model(ladder))
+      data = %Data{data | ladder: ladder, adapter_opts: adapter_opts}
+
+      Logger.info(fn ->
+        "kazi.loop goal=#{data.goal.id} escalating to ladder rung #{ladder.rung} " <>
+          "model=#{Ladder.current_model(ladder)} on failing set " <>
+          "#{inspect(Enum.sort(MapSet.to_list(failing)))}"
+      end)
+
+      {:escalated, data}
+    else
+      :halt
+    end
+  end
+
+  # The current spend snapshot the ladder re-baselines each per-rung window to.
+  defp ladder_spend(%Data{} = data) do
+    %{
+      iterations: data.iterations,
+      tokens: budgeted_tokens(data),
+      dispatches: data.dispatches,
+      now_ms: data.now_fn.()
+    }
+  end
+
+  # The failing predicate-id set of the current vector (the same expression the
+  # dispatch path uses) — the over_budget path's "same failing predicate set".
+  defp current_failing_set(%Data{vector: vector}), do: MapSet.new(PredicateVector.failing(vector))
+
+  # Pin the ladder's rung-0 model as the dispatch model when a ladder is declared
+  # (the declared ladder is authoritative); a no-ladder goal keeps its opts.
+  defp pin_ladder_model(adapter_opts, %Ladder{} = ladder),
+    do: Keyword.put(adapter_opts, :model, Ladder.current_model(ladder))
+
+  defp pin_ladder_model(adapter_opts, nil), do: adapter_opts
 
   # T34.4 (ADR-0046 #4): the token total fed to the gate, with cached reads
   # discounted. `tokens_used` is the full rolled-up total (cached reads counted
