@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.186.1](https://github.com/kazi-org/kazi/compare/v1.186.0...v1.186.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **bus:** bound every with_conn-routed call so a wedged NATS reply can't hang forever (issue [#1255](https://github.com/kazi-org/kazi/issues/1255)) ([5fbc96a](https://github.com/kazi-org/kazi/commit/5fbc96a18b4b7146059892a3724e4f94325d617c))
+
 ## [1.186.0](https://github.com/kazi-org/kazi/compare/v1.185.0...v1.186.0) (2026-07-17)
 
 
