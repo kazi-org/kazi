@@ -63,6 +63,7 @@ kazi bus peek [--full] [--json]                            # non-destructive rea
 kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
 kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
                                                            # roster with liveness (active|idle) + inbox depth; --all includes stale rows
+kazi bus board [--scope machine|project] [--json]         # current state: last-value fact per topic + live roster (T55.4); consumes nothing
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
 kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
@@ -333,6 +334,53 @@ Sessions that previously parsed `.messages[]` from `bus read --json`
 should either consume the digest (the point: a thousand-message backlog
 costs the same context as forty lines) or pass `--full` for the old shape.
 
+### The board: current state, not a delta (T55.4, ADR-0073)
+
+`read`/`peek`/`watch` answer *"what changed since I last looked"* — a delta of
+pending stream messages, and no state. `kazi bus board` answers *"what is true
+right now"*: the last-value `fact` per topic plus the live roster (names, teams,
+liveness), projected in one shot. It is the surface a session reads to orient at
+session start, and the replacement for the hand-rolled markdown blackboards
+teams used to keep (which could not see a second machine — the board can).
+
+```
+kazi bus board [--scope machine|project] [--json]
+```
+
+The board is **cursor-free and idempotent**: unlike `read`, it CONSUMES NOTHING
+and keeps no cursor, so a session may read it every turn without draining a
+message a later `read`/`watch` was counting on (the `read` ack landmine). The
+facts come off a throwaway ephemeral consumer with JetStream's
+`last_per_subject` delivery — entirely separate from the durable read cursors —
+so posting three facts on one topic renders ONE current line (the latest value,
+not three).
+
+It is bounded by the SAME digest rules as `read` (ADR-0072): an oversize fact
+body renders as a one-line stub carrying its `id` (the body stays addressable in
+the stream), and the fact section is at most 40 lines regardless of topic count,
+the tail folding into one `overflow` line. Under `--json` (contract:
+`kazi schema bus`):
+
+```json
+{
+  "ok": true,
+  "schema_version": 2,
+  "board": {
+    "facts": [{"type": "verbatim", "topic": "ci", "text": "main is green", "id": 42, "...": "..."}],
+    "roster": [{"session": "s-abc", "name": "reviewer", "team": "wave1", "machine": "host", "liveness": "active"}],
+    "total_facts": 1,
+    "total_sessions": 1
+  }
+}
+```
+
+The roster is the same presence path `bus who` reads, projected to stable
+identity fields only (session, name, team, machine, liveness) and ordered by
+session id — deliberately NOT the age/heartbeat fields, so back-to-back boards
+over the same live set render identically. Claim ownership is a *separate*
+projection (a later task reads `refs/claims/*` at source, ADR-0073 point 2);
+`board` today renders facts and roster.
+
 ## Cross-machine setup
 
 ADR-0067 designed the bus for cross-machine from day one ("One machine today,
@@ -380,6 +428,7 @@ harness drives the bus natively, with no JSON-CLI shell-out:
 | `kazi_bus_read` | `kazi bus read` (`peek: true` mirrors `kazi bus peek`) | — |
 | `kazi_bus_watch` | `kazi bus watch` | — |
 | `kazi_bus_who` | `kazi bus who` | — |
+| `kazi_bus_board` | `kazi bus board` | — |
 | `kazi_bus_tell` | `kazi bus tell` | `session`, `text` |
 | `kazi_bus_status` | `kazi bus status` | `id` |
 | `kazi_bus_name` | `kazi bus name` | `name` |
