@@ -634,9 +634,12 @@ defmodule Kazi.Teach.InstallSkill do
       pulls; a casual check silently drains messages a later wait was counting
       on. Not ready to act? Peek.
     - **Wait** -- `kazi bus watch --timeout <s> --json` (MCP: `kazi_bus_watch`).
-      Blocks until traffic arrives (pending messages return immediately) and
-      keeps your presence fresh. NEVER poll `read` in a loop -- watch is the
-      no-poll primitive. The CLI exits 3 on timeout; the MCP tool returns
+      Blocks until a NEW message arrives and keeps your presence fresh.
+      `--since` anchors what counts as new: `now` (default) delivers only
+      messages posted AFTER the watch starts, leaving backlog for
+      `read`/`peek`; `all` is the drain-first behavior (T54.9). NEVER poll
+      `read` in a loop -- watch is the no-poll primitive. The CLI exits 3 on
+      timeout; the MCP tool returns
       `{ok: true, timed_out: true, digest: {total: 0, lines: []}}` -- branch
       on `timed_out`.
 
@@ -651,6 +654,37 @@ defmodule Kazi.Teach.InstallSkill do
 
     Cadence: peek at turn boundaries; hold a bounded `watch` only when genuinely
     waiting on another session. Full taxonomy: `docs/session-bus.md`.
+
+    ### The wake contract: how an IDLE session gets woken
+
+    Delivery lands at TURN BOUNDARIES, and an idle session has no next turn --
+    so a `tell` to an idle session sits `pending` (see `kazi bus status <id>`)
+    and nobody is woken. Two halves, chosen by the target's state:
+
+    - **The target is ACTIVE** -- `kazi bus tell <session> <text> --sev
+      interrupt`. It has a boundary coming, and the digest renders
+      directed/interrupt messages verbatim.
+    - **You are IDLE** -- park `kazi bus watch --timeout <s> --json` as a
+      BACKGROUND TASK of your harness, so its completion re-invokes you.
+      **Arrival (exit 0) is the wake, with the message already in hand** --
+      the finished task's output IS the digest, so you need no follow-up read.
+      **Timeout (exit 3) is a non-event: re-park.** You sleep in between at no
+      token cost and stay `active` on `bus who`. Take the `--since now`
+      default: with `--since all` a park fires instantly on backlog and
+      degenerates into the poll loop watch exists to replace.
+
+    kazi never wakes a session by reaching into it -- no prompt injection, no
+    driving a TTY. That is permanently outside its boundary (ADR-0001); the
+    harness's own background-task mechanic is the supported wake.
+
+    **Prefer harness-native agent teams** when the sessions are ones your own
+    session SPAWNED (one lead, one machine, one session lifetime) -- they
+    already deliver messages, keep a roster, and track a dependency-aware task
+    list, so the bus adds nothing inside a team. The bus is for the sessions
+    nobody spawned: independently-started peers, cross-machine,
+    restart-surviving, harness-agnostic, tied to kazi's objective state. Teams
+    orchestrate the workers one session spawns; the bus coordinates the
+    sessions nobody spawned.
 
     ### Being addressable: names, not UUIDs (T55.5)
 
