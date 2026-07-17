@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.172.0](https://github.com/kazi-org/kazi/compare/v1.171.1...v1.172.0) (2026-07-17)
+
+
+### Features
+
+* **loader:** accept and validate scenario predicate config ([f392e98](https://github.com/kazi-org/kazi/commit/f392e98e2dba806180a276c1693a3eb525c40260))
+* **providers:** scenario provider -- replay a pinned Gherkin Scenario by delegation ([c83f57a](https://github.com/kazi-org/kazi/commit/c83f57a96c899bb307747b5292f065bbe06478e1))
+* **runtime:** register the scenario provider ([fdca389](https://github.com/kazi-org/kazi/commit/fdca389467c1b6bfefbd0f742b71868a62d34fa5))
+* **schema:** scenario predicate config schema ([38d6040](https://github.com/kazi-org/kazi/commit/38d6040077a259abd347a9f2388160f727ffe8a4))
+
 ## [1.171.1](https://github.com/kazi-org/kazi/compare/v1.171.0...v1.171.1) (2026-07-17)
 
 
