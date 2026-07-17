@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.180.0](https://github.com/kazi-org/kazi/compare/v1.179.0...v1.180.0) (2026-07-17)
+
+
+### Features
+
+* **enforcement:** role-scoped path policy (fixer read-only, demonstrator write-only) ([f413c54](https://github.com/kazi-org/kazi/commit/f413c54f64e98e8c4c457d554fde08331370bdf1))
+* **loader:** parse [enforcement.roles] and derive role defaults from scenario predicates ([1f7b33c](https://github.com/kazi-org/kazi/commit/1f7b33cb81010f20cae461b1613a8ca9486562bf))
+* **providers:** public Scenario.pin_path/1 for effective pin resolution ([dae8120](https://github.com/kazi-org/kazi/commit/dae8120fe46b271be03a2e99cf7043f563eddb7d))
+
 ## [1.179.0](https://github.com/kazi-org/kazi/compare/v1.178.0...v1.179.0) (2026-07-17)
 
 
