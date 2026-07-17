@@ -135,6 +135,16 @@ defmodule Kazi.Goal do
           extra_rules: [String.t()]
         }
 
+  @typedoc """
+  The goal's `[escalation]` block (T45.7, ADR-0056 decision 5): the MODEL ladder
+  the loop walks on a `stuck`/`over_budget` verdict — a list of model ids, plus an
+  optional `max_rungs` cap. An empty `ladder` means no escalation.
+  """
+  @type escalation :: %{
+          ladder: [String.t()],
+          max_rungs: pos_integer() | nil
+        }
+
   # T44.1 (ADR-0055): the default `[integration]` block — mode :none, no landing.
   # An ABSENT block and an explicit `mode = "none"` both resolve to THIS exact
   # map, so a :none goal is byte-identical to a goal-file with no block at all.
@@ -161,6 +171,14 @@ defmodule Kazi.Goal do
     extra_rules: []
   }
 
+  # T45.7 (ADR-0056 decision 5): the default `[escalation]` block — an EMPTY ladder,
+  # i.e. no model escalation. An absent block resolves to this exact map, so a goal
+  # with no `[escalation]` is byte-identical to today's single-model loop.
+  @default_escalation %{
+    ladder: [],
+    max_rungs: nil
+  }
+
   @type t :: %__MODULE__{
           id: id(),
           name: String.t() | nil,
@@ -178,6 +196,7 @@ defmodule Kazi.Goal do
           memory_corpus: [String.t()] | nil,
           integration: integration(),
           conventions: conventions(),
+          escalation: escalation(),
           metadata: map()
         }
 
@@ -232,6 +251,11 @@ defmodule Kazi.Goal do
             # rules. Default = process contract ON, no extra rules. Appended
             # additively so the existing field order is untouched.
             conventions: @default_conventions,
+            # T45.7 (ADR-0056 decision 5): the declared `[escalation]` MODEL ladder.
+            # Default = an empty ladder (no escalation), the SAME value an absent
+            # block resolves to, so a goal with no `[escalation]` is byte-identical
+            # to the single-model loop. Appended additively.
+            escalation: @default_escalation,
             metadata: %{}
 
   @doc """
@@ -295,6 +319,7 @@ defmodule Kazi.Goal do
       # T44.1 (ADR-0055): the declared `[integration]` landing block.
       integration: Keyword.get(opts, :integration, @default_integration),
       conventions: Keyword.get(opts, :conventions, @default_conventions),
+      escalation: Keyword.get(opts, :escalation, @default_escalation),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
@@ -333,6 +358,23 @@ defmodule Kazi.Goal do
   """
   @spec default_conventions() :: conventions()
   def default_conventions, do: @default_conventions
+
+  @doc """
+  The default `[escalation]` block (T45.7, ADR-0056 decision 5): an EMPTY ladder —
+  no model escalation. An ABSENT `[escalation]` block resolves to this EXACT map,
+  the single source of truth the loader shares, so a goal without the block is
+  byte-identical to the single-model loop.
+
+  ## Examples
+
+      iex> Kazi.Goal.default_escalation()
+      %{ladder: [], max_rungs: nil}
+
+      iex> Kazi.Goal.new("g").escalation
+      %{ladder: [], max_rungs: nil}
+  """
+  @spec default_escalation() :: escalation()
+  def default_escalation, do: @default_escalation
 
   @doc """
   The goal's REAL target branch (T54.1, #1079/#1080): the branch the run's
