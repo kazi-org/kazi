@@ -16,6 +16,24 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.152.0](https://github.com/kazi-org/kazi/compare/v1.151.0...v1.152.0) (2026-07-17)
+
+
+### Features
+
+* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (docs) ([5599e08](https://github.com/kazi-org/kazi/commit/5599e08287a37611be937ece27ebbcf346b97e85))
+* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (lib) ([b29561c](https://github.com/kazi-org/kazi/commit/b29561c4bcaa2d654df45cda7ed5061a3cf2363c))
+* **bus:** T55.11 presence liveness -- idle vs dead, ghost reaping, who filters (test) ([80e6eb9](https://github.com/kazi-org/kazi/commit/80e6eb9e64ca5bf0724a8ee81e7656391071d80f))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (aux) ([0e91e03](https://github.com/kazi-org/kazi/commit/0e91e03df2601df4cb66f30f64b5b63fad80309c))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (docs) ([ede3758](https://github.com/kazi-org/kazi/commit/ede3758575517e8b9f480f70a83842f05661b745))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (lib) ([7b62d8e](https://github.com/kazi-org/kazi/commit/7b62d8e2e32e2fb16e56b7d82e12578b0a759a04))
+* **bus:** T55.5 stable identity -- bus name, nickname tell, stable fallback id (ADR-0073 d3) (test) ([974cfe4](https://github.com/kazi-org/kazi/commit/974cfe4856efb665b6c740c0bd7ef97e725561a2))
+
+
+### Bug Fixes
+
+* **bus:** T54.9 watch anchors to now -- strictly-new messages, --since escape ([#1097](https://github.com/kazi-org/kazi/issues/1097)) ([2362815](https://github.com/kazi-org/kazi/commit/2362815b0698340bbd60492a8a58c4bae2751e74))
+
 ## [1.151.0](https://github.com/kazi-org/kazi/compare/v1.150.0...v1.151.0) (2026-07-17)
 
 
