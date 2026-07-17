@@ -344,4 +344,101 @@ defmodule Kazi.CLIProposeJsonTest do
       assert ReadModel.list_proposed_goals(status: "proposed") == []
     end
   end
+
+  # ===========================================================================
+  # #1356 (T57.2): caller-supplied guard/acceptance flags round-trip VERBATIM
+  # ===========================================================================
+  #
+  # Guards gate merge/ship (ADR-0002/schema contract), so a dropped `guard: true`
+  # is data-loss-shaped. The authoring path used to hardcode `acceptance?: true`
+  # and never read `guard`, silently flattening a caller's `guard: true` to
+  # `false`. Both flags must survive `kazi plan --json --predicates`, independent
+  # of each other and of field ordering.
+  describe "#1356 — caller guard/acceptance flags round-trip through plan --json" do
+    defp draft_predicate!(payload) do
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", payload],
+                   harness: SpyHarness,
+                   adapter_opts: [spy_pid: self()]
+                 ) == 0
+        end)
+
+      refute_received :harness_invoked
+      assert {:ok, draft} = Jason.decode(String.trim(out))
+      assert [predicate] = draft["predicates"]
+      predicate
+    end
+
+    # The regression: a caller's `guard: true` must survive (it used to be
+    # flattened to false). A predicate may not be both a guard and an acceptance
+    # criterion (ADR-0002; the loader rejects the combination), so the
+    # load-bearing guard flag wins and acceptance resolves to false — the guard is
+    # NOT silently dropped, which was the #1356 data loss.
+    test "acceptance: true, guard: true keeps the guard (guard not flattened)" do
+      payload =
+        ~s({"predicates":[{"id":"g","provider":"test_runner","acceptance":true,"guard":true}]})
+
+      predicate = draft_predicate!(payload)
+      assert predicate["guard"] == true
+      assert predicate["acceptance"] == false
+    end
+
+    test "guard: true, acceptance: true keeps the guard with the fields reversed" do
+      payload =
+        ~s({"predicates":[{"id":"g","provider":"test_runner","guard":true,"acceptance":true}]})
+
+      predicate = draft_predicate!(payload)
+      assert predicate["guard"] == true
+      assert predicate["acceptance"] == false
+    end
+
+    test "acceptance: false, guard: true round-trips as a pure guard" do
+      payload =
+        ~s({"predicates":[{"id":"g","provider":"test_runner","acceptance":false,"guard":true}]})
+
+      predicate = draft_predicate!(payload)
+      assert predicate["guard"] == true
+      assert predicate["acceptance"] == false
+    end
+
+    test "guard: true alone does not become a guard+acceptance predicate" do
+      payload = ~s({"predicates":[{"id":"g","provider":"test_runner","guard":true}]})
+
+      predicate = draft_predicate!(payload)
+      assert predicate["guard"] == true
+      # A guard-only entry defaults acceptance to false so it is not the
+      # invalid guard+acceptance combination the loader rejects.
+      assert predicate["acceptance"] == false
+    end
+
+    test "no flags keeps today's default: an acceptance criterion, not a guard" do
+      payload = ~s({"predicates":[{"id":"p","provider":"test_runner"}]})
+
+      predicate = draft_predicate!(payload)
+      assert predicate["guard"] == false
+      assert predicate["acceptance"] == true
+    end
+
+    test "--replace preserves the guard flag on the replaced proposal" do
+      payload =
+        ~s({"id":"guarded-goal","predicates":[{"id":"g","provider":"test_runner","guard":true}]})
+
+      first = draft_predicate!(payload)
+      assert first["guard"] == true
+
+      # Re-drafting onto the same id with --replace must keep the guard flag.
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", payload, "--replace"],
+                   harness: SpyHarness,
+                   adapter_opts: [spy_pid: self()]
+                 ) == 0
+        end)
+
+      assert {:ok, draft} = Jason.decode(String.trim(out))
+      assert [predicate] = draft["predicates"]
+      assert predicate["guard"] == true
+    end
+  end
 end
