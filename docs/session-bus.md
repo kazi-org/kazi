@@ -54,13 +54,14 @@ kazi daemon status [--json]                               # ping the running dae
 kazi daemon stop                                          # clean shutdown
 
 kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project]  # <kind> defaults to `fact`
-kazi bus tell <session>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
+kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
 kazi bus read [--peek] [--full] [--json]                   # pull + ack this session's durable consumers, prints a digest
 kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
 kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
 kazi bus who [--team <t>] [--all] [--json]                 # list fresh presence; --all includes TTL-stale entries
 kazi bus join <team>                                       # named-team membership (issue #1069)
 kazi bus leave                                             # clear team membership
+kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
 kazi bus <verb> --help                                     # per-verb usage (signature, flags, valid kinds)
 ```
 
@@ -101,6 +102,53 @@ done
 
 Watching also refreshes the session's presence, so a watcher never ages
 out of `bus who`.
+
+### Naming sessions (T55.5, ADR-0073)
+
+Raw session ids are UUIDs (or derived fallback ids) nobody can remember, so
+directed messaging used to be unusable in practice. `kazi bus name
+<nickname>` assigns a durable human name to the calling session: it is
+carried on presence (every later bus call preserves it), rendered by `bus
+who`, and accepted by `bus tell`.
+
+Re-asserting a name RE-BINDS it: a relaunched worker that runs `kazi bus
+name worker-a` again becomes addressable under `worker-a` immediately, and
+any older presence row holding that name loses it. A nickname cannot be
+empty, contain whitespace, start with `@` (reserved for teams), or equal a
+different live session's id.
+
+`bus tell <recipient>` resolves the recipient in order:
+
+1. `@<team>` — fan-out to the named team (issue #1069), unchanged;
+2. an exact session id present on the roster;
+3. a nickname, looked up against LIVE presence.
+
+A recipient matching none of those is a ONE-LINE error naming the live
+roster — never a silent queue-to-nowhere (field feedback: a fleet
+supervisor spent hours directing messages at a replaced session id with no
+signal anything was wrong).
+
+**The portable launch recipe.** The session-name resolution chain
+(ADR-0067 point 2, extended by T55.5) is `--session-name` >
+`KAZI_SESSION_NAME` > a harness-provided session env var > a stable
+fallback id. The zero-config way to give every fleet member a role name is
+to set it at launch:
+
+```bash
+KAZI_SESSION_NAME=<role> <harness>
+```
+
+Every kazi invocation inside that session then identifies as `<role>` on
+the bus — presence, `who`, and `tell <role>` all line up with no
+per-session setup. Sessions launched without one can self-name at any time
+with `kazi bus name <nickname>`.
+
+**Stable fallback identity.** When the whole resolution chain is empty,
+the session id falls back to a STABLE derived id (`s-<12 hex>`) anchored
+on the nearest stable ancestor process (the harness or interactive shell
+that spawned the CLI), so a nameless session keeps ONE presence row
+instead of fragmenting into a new `os-<pid>` ghost row per invocation. See
+`Kazi.Bus`'s moduledoc for the mechanism.
 
 ### Teams (issue #1069)
 
@@ -205,8 +253,10 @@ harness drives the bus natively, with no JSON-CLI shell-out:
 | `kazi_bus_watch` | `kazi bus watch` | — |
 | `kazi_bus_who` | `kazi bus who` | — |
 | `kazi_bus_tell` | `kazi bus tell` | `session`, `text` |
+| `kazi_bus_name` | `kazi bus name` | `name` |
 
 Each accepts the optional `topic` / `scope` / `sev` arguments the CLI verbs
+<<<<<<< HEAD
 take. `kazi_bus_read` and `kazi_bus_watch` return the ADR-0072 digest
 envelope by default (see above); `full: true` mirrors the CLI's `--full`
 and returns `messages` unabridged. `kazi_bus_watch` takes an optional
@@ -216,6 +266,12 @@ exits 3 on expiry, the tool returns `{ok: true, timed_out: true, digest:
 {total: 0, lines: []}}` (`messages: []` under `full: true`) — an expected
 outcome the agent branches on, never
 `isError`. A tool call against a missing daemon returns an MCP tool-result error
+=======
+take. `kazi_bus_tell`'s `session` accepts a session id, a nickname, or
+`@<team>`, exactly like the CLI verb (T55.5). `kazi_bus_watch` takes an optional `timeout` (seconds); where the CLI
+exits 3 on expiry, the tool returns `{ok: true, timed_out: true, messages:
+[]}` — an expected outcome the agent branches on, never `isError`. A tool call against a missing daemon returns an MCP tool-result error
+>>>>>>> origin/task/T55.5
 (`isError: true`) with `reason: "no_daemon"`, exactly mirroring the CLI's
 no-daemon message — never a JSON-RPC protocol error.
 
