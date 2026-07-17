@@ -54,6 +54,10 @@ package-lock.json
 # fixed live in a downstream repo before it bit this one — see ADR-0059).
 /.kazi/*
 !/.kazi/goals/
+# `visual` assertion baselines (T43.3, UC-056): committed alongside the code they
+# pin, so un-ignore them the same way as goals/. The `.kazi/visual-diffs/` output
+# stays ignored (a transient per-run artifact).
+!/.kazi/visual-baselines/
 /.mcp.json
 
 # Added by code-review-graph

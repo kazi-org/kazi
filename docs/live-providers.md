@@ -89,6 +89,7 @@ for the rest of the run.
 | `field_value` | `selector` + `expected` | an input/select's current value equals `expected` |
 | `form_validation` | see below | invalid input errors, submit is disabled-until-valid, and a valid submission persists |
 | `a11y` | `severity` (optional), `max_violations` (optional) | axe-core finds `<= max_violations` violations at/above `severity` |
+| `visual` | `name` + `selector`, `threshold` (optional) | the screenshot matches a committed baseline within `threshold` |
 
 ### `download` — the file-effect check
 
@@ -265,6 +266,45 @@ must not dispatch a fixer agent against "your UI is inaccessible" when the truth
 
 `severity` must be one of the four axe-core impact levels and `max_violations` a
 non-negative integer; the loader rejects anything else at goal-load.
+
+### `visual` — pixel regression against a committed baseline
+
+`visual` screenshots a `selector` (or the whole page when `selector` is absent)
+and perceptual-diffs it against a **committed baseline image** within a
+`threshold` — the maximum fraction of pixels allowed to differ (default `0.01`,
+i.e. 1%).
+
+```toml
+[[predicate.assertions]]
+type = "visual"
+name = "home-hero"        # REQUIRED — identifies the baseline file
+selector = "#hero"        # optional; omit to diff the whole page
+threshold = 0.01          # optional; allowed differing-pixel fraction (default 0.01)
+```
+
+**Baseline path convention.** Baselines live under the workspace at
+`.kazi/visual-baselines/<name>.png` and are **committed alongside the code they
+pin**. On a failure, the diff image is written to `.kazi/visual-diffs/<name>.png`
+and its path is surfaced in `found.diff_path` so a fixer agent can open it. (kazi
+ignores `.kazi/` by default; the baselines subdirectory is un-ignored so it can be
+committed — the same pattern kazi uses for `.kazi/goals/`. Add
+`!.kazi/visual-baselines/` to your workspace's `.gitignore` if it blocks `.kazi/`.
+The `.kazi/visual-diffs/` output stays ignored — it is a transient artifact.)
+
+**The seed-on-first-run invariant.** A **missing baseline** is not a pass. The
+runner **writes** the current screenshot as the new baseline and returns an
+`:error` with reason `"baseline seeded"` — never `:pass`, never `:fail`. A goal
+must never silently pass its first run just because there was nothing to compare
+against; the seeded baseline is there for you to review and commit, and the next
+run does the real comparison. A dimension change (the view resized) is a real
+`:fail` with the diff artifact, not a seed.
+
+The pixel diff needs `pixelmatch` + `pngjs` installed alongside the runner
+(`npm i pixelmatch pngjs`, runner-side optional deps like axe-core). Absent, the
+assertion is `:error` `"visual diff unavailable"` — never a false pass.
+
+`name` is required (it is the baseline's identity) and `threshold` must be a number
+in `[0, 1]`; the loader rejects anything else at goal-load.
 
 ---
 
