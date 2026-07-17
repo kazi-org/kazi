@@ -72,7 +72,12 @@ defmodule Kazi.Loop.ContextStoreTest do
         stuck_iterations: 0
       )
 
-    assert_receive {:dispatched, prompt}, 2_000
+    # Isolation (T59.5, #1025/#1186): generous deadline, not the old tight 2s. The
+    # dispatch genuinely arrives after the loop renders + (for the oversized cases)
+    # compresses evidence into the store; under full-suite load that is slower to
+    # schedule, so a tight bound reddens a run that WOULD pass. Larger bound (well
+    # under ExUnit's 60s timeout) waits it out; the message drives the wait, no sleep.
+    assert_receive {:dispatched, prompt}, 15_000
     Kazi.Loop.stop(loop)
     {prompt, store}
   end

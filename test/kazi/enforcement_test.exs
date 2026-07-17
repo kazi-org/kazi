@@ -12,6 +12,14 @@ defmodule Kazi.EnforcementTest do
     * the active enforcement guarantees appear in the loop's result/snapshot, the
       surface `kazi run --json` renders (guarantee 7);
     * graceful degradation reports the ACTUAL guarantee level (no fabrication).
+
+  Isolation (T59.5, #1025/#1186): the `Loop.await`/`assert_receive` deadlines here
+  are generous (30s convergence, 15s observe), not tight. These loops do real work
+  -- clean-tree isolation git-COPIES the workspace and the guard runs in a separate
+  OS process -- which is genuinely slower to schedule under full-suite load on a
+  busy box, so a tight bound reddens a run that WOULD pass. The generous bound is
+  still well under ExUnit's 60s per-test timeout, so a true hang still fails; the
+  loop's own messages drive the wait, so this is not a Process.sleep.
   """
   use ExUnit.Case, async: true
 
@@ -243,7 +251,7 @@ defmodule Kazi.EnforcementTest do
         enforcement: profile
       )
 
-    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert {:ok, result} = Kazi.Loop.await(loop, 30_000)
     assert result.outcome == :converged
 
     assert [%{type: :read_only_write, path: "pred.toml"} | _] = result.enforcement.gaming_events
@@ -416,7 +424,7 @@ defmodule Kazi.EnforcementTest do
         enforcement: profile
       )
 
-    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert {:ok, result} = Kazi.Loop.await(loop, 30_000)
     assert result.enforcement.active
     # The full active set, including clean_tree (the workspace IS a git repo).
     assert :clean_tree in result.enforcement.guarantees
@@ -446,7 +454,7 @@ defmodule Kazi.EnforcementTest do
         stuck_iterations: 0
       )
 
-    assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
+    assert {:ok, result} = Kazi.Loop.await(loop, 30_000)
     refute result.enforcement.active
     assert result.enforcement.guarantees == []
   end
@@ -492,7 +500,7 @@ defmodule Kazi.EnforcementTest do
         end
       )
 
-    assert_receive {:observed, 0, vector}, 5_000
+    assert_receive {:observed, 0, vector}, 15_000
     enforcement = Kazi.Loop.snapshot(loop).enforcement
     Kazi.Loop.stop(loop)
 

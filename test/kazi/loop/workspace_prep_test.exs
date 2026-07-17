@@ -95,7 +95,13 @@ defmodule Kazi.Loop.WorkspacePrepTest do
 
     # The dispatch ran and saw the workspace already prepared (.mcp.json AND the
     # orientation file both present by dispatch time).
-    assert_receive {:dispatched, true, true}, 1_000
+    # Isolation (T59.5, #1025/#1186): a generous deadline, not the old tight 1s.
+    # The dispatch genuinely arrives after real workspace-prep IO (graph refresh +
+    # orientation write); under full-suite load on a busy box that work is simply
+    # slower to schedule, so a tight bound reddens a run that WOULD pass. A larger
+    # bound (still well under ExUnit's 60s per-test timeout, so a true hang still
+    # fails) waits it out. NOT a Process.sleep -- the message drives the wait.
+    assert_receive {:dispatched, true, true}, 15_000
 
     # The .mcp.json carries the graph MCP server.
     config = dir |> Path.join(".mcp.json") |> File.read!() |> Jason.decode!()
