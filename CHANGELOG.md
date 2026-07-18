@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.231.0](https://github.com/kazi-org/kazi/compare/v1.230.0...v1.231.0) (2026-07-18)
+
+
+### Features
+
+* **daemon:** kazi daemon restart = stop-then-start (T52.4, ADR-0068) ([924b5e5](https://github.com/kazi-org/kazi/commit/924b5e5ac3563c35d914756d47a9153238b718bc))
+* **daemon:** migrate-before-serve wiring in the supervisor (T52.4, ADR-0068) ([623be5d](https://github.com/kazi-org/kazi/commit/623be5d32160dac8339529663eddbfe47e61dc6e))
+
 ## [1.230.0](https://github.com/kazi-org/kazi/compare/v1.229.1...v1.230.0) (2026-07-18)
 
 
