@@ -78,7 +78,7 @@ defmodule Kazi.Daemon do
     with {:ok, sup_pid} <-
            opts
            |> Keyword.merge(sock_path: sock_path, pid_path: pid_path)
-           |> Supervisor.start_link() do
+           |> start_supervisor() do
       nats_port = Kazi.Daemon.Nats.port(nats_name)
       nats_host = Kazi.Daemon.Nats.host(nats_name)
       nats_token = Keyword.get(opts, :nats_token)
@@ -112,6 +112,46 @@ defmodule Kazi.Daemon do
       end
 
       {:ok, sup_pid}
+    end
+  end
+
+  # `Supervisor.start_link/1` LINKS the new tree to us. On a SUCCESSFUL boot that
+  # is what we want (a foreground `kazi daemon start` should die with its tree).
+  # But a FAILED boot -- the daemon supervisor giving up when a child cannot
+  # start, e.g. the read-model writer refusing to open (#1504) -- makes the
+  # supervisor exit with a `{:shutdown, {:failed_to_start_child, ...}}` reason
+  # that, over that same link, would KILL this (the CLI / caller) process rather
+  # than surface as the `{:error, _}` `start/1` is documented to return. So we
+  # trap exits ONLY across the start: a boot failure comes back as a clean
+  # `{:error, reason}` the caller reports ("could not start daemon"), never a
+  # crash. On success we restore the prior flag and stay linked (the running
+  # tree behaves exactly as before); on failure we drain the trapped signal so a
+  # later non-trapping `receive` never sees it. This is the same
+  # crash-must-not-reach-the-caller discipline the unlinked provisioner above
+  # already applies to nats provisioning.
+  defp start_supervisor(sup_opts) do
+    prev_trap = Process.flag(:trap_exit, true)
+
+    case Supervisor.start_link(sup_opts) do
+      {:ok, _sup_pid} = ok ->
+        Process.flag(:trap_exit, prev_trap)
+        ok
+
+      {:error, _reason} = error ->
+        drain_start_exit()
+        Process.flag(:trap_exit, prev_trap)
+        error
+    end
+  end
+
+  # A failed `Supervisor.start_link/1` under a trapping caller leaves the tree's
+  # `{:EXIT, sup_pid, reason}` in our mailbox; drop it so it never leaks into a
+  # later receive.
+  defp drain_start_exit do
+    receive do
+      {:EXIT, _pid, _reason} -> :ok
+    after
+      0 -> :ok
     end
   end
 
