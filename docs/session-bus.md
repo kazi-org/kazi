@@ -98,7 +98,8 @@ pre-T58.2 daemon (missing `bus_vsn` entirely) now fails BOTH paths loud, before
 either op is attempted, with the identical
 `{:error, {:daemon_protocol_skew, daemon_vsn}}` — surfaced by the CLI as
 `daemon is running an older version (<vsn>) that does not speak this CLI's bus
-protocol -- restart it: kazi daemon stop && kazi daemon start`. No more
+protocol -- restart it: kazi daemon restart` (T52.4's one-command stop-then-start;
+`kazi daemon stop && kazi daemon start` is the equivalent long form). No more
 asymmetry: a skewed daemon now refuses everything the same way, instead of
 writes going through invisibly while only reads carried a cryptic error.
 
@@ -109,6 +110,8 @@ kazi daemon start [--nats-bin <path>] [--nats-port <n>] [--nats-host <host>] [--
                                                             # boot the daemon (foreground; operator backgrounds it)
 kazi daemon status [--json]                               # ping the running daemon
 kazi daemon stop                                          # clean shutdown
+kazi daemon restart [--nats-bin <path>] [--nats-port <n>] [--nats-host <host>] [--nats-token <token>]
+                                                            # stop-then-start (schema-skew remedy, T52.4); errors if none was running
 
 kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project]  # <kind> defaults to `fact`
 kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project]
@@ -458,6 +461,18 @@ Schema and field names resolve via `String.to_existing_atom/1` (they already
 exist once the module is loaded), so a bad `schema`/field or an unknown `kind` is
 a clean `{"ok":false,"error":...}` — never an arbitrary-atom leak and never a
 crashed connection.
+
+**Migrate-before-serve (T52.4, ADR-0068 point 2).** Being the single writer only
+closes the #1019 class if the daemon is also the single MIGRATOR. So
+`Kazi.Daemon.Supervisor` runs the read-model migration ONCE at startup —
+`Kazi.ReadModel.Migrate.run/2`, itself bounded and degrading (a peer holding the
+SQLite lock costs the boot a few seconds, never a hang) — and starts
+`Kazi.Daemon.Write` (the write server) only after that migration returns, ordered
+BEFORE `Kazi.Daemon.Listener`. By the time the control socket accepts a `write`,
+the read-model is migrated: a client write is never served against an unmigrated
+file ("no such table"). `kazi daemon restart` is the operator's one-command way to
+re-run this boot migration after a version bump (stop-then-start; it errors
+clearly when no daemon was running).
 
 **The L-0052 bound.** `packet: :line` truncates an over-long line SILENTLY on the
 receiving end, so a request at or over `Kazi.Daemon.Probe.socket_buffer/0`
