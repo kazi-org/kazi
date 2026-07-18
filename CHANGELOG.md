@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.239.0](https://github.com/kazi-org/kazi/compare/v1.238.0...v1.239.0) (2026-07-18)
+
+
+### Features
+
+* **bus:** argless `bus join` derives the team; explicit join records derived=false (T65.1, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([f8dbd06](https://github.com/kazi-org/kazi/commit/f8dbd06cabbe23d6cba7d2e0ab582f276158d355))
+* **bus:** Kazi.Bus.TeamId canonical team derivation (T65.1, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([741f8a9](https://github.com/kazi-org/kazi/commit/741f8a9e6e499c989ee681d82d7aa763a666f810))
+
 ## [1.238.0](https://github.com/kazi-org/kazi/compare/v1.237.0...v1.238.0) (2026-07-18)
 
 
