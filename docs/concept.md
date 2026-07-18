@@ -503,6 +503,18 @@ exactly as before (ADR-0068 "no daemon, no change"). The presence decision is
 memoized per process so a busy run does not stat the control socket on every write.
 Reads may stay direct — WAL supports concurrent readers, so only writes centralize.
 
+Migration ownership follows the same single-writer rule (ADR-0068 point 2). The
+daemon migrates the read-model exactly once, at its own startup, before it serves
+a write (T52.4, migrate-before-serve). So `Kazi.CLI.migrate_read_model/1` — the
+per-process boot migration — first probes the daemon control socket: when it is
+`:alive` the process defers entirely, running no `Ecto.Migrator` and opening no
+second write connection against the file, because the daemon has already migrated
+it and is the single migrator. Only when no daemon is present does a process open
+the file and run its own bounded boot migration (the ADR-0068 point 5 rollback
+path, byte-for-byte today's behavior). A run that starts under a daemon and then
+loses it mid-run degrades via the Writer's no-daemon path; it does not
+retroactively migrate.
+
 Memory is a fourth read of these same stores, not a fifth store (ADR-0060): see
 [docs/memory.md](memory.md) for the four-layer map and how each layer is
 projected from data this section already describes.
