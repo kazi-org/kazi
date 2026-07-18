@@ -99,7 +99,7 @@ defmodule Kazi.Authoring do
   alias Kazi.Goal.Group
   alias Kazi.Goal.Loader
   alias Kazi.ReadModel.ProposedGoal
-  alias Kazi.Repo
+  alias Kazi.ReadModel.Writer
 
   # The harness adapter driven when the caller does not inject one. The real
   # `claude -p` adapter — the same default the runtime uses; tests inject a stub
@@ -974,7 +974,7 @@ defmodule Kazi.Authoring do
 
       %ProposedGoal{}
       |> ProposedGoal.changeset(attrs)
-      |> Repo.insert(
+      |> Writer.insert(
         on_conflict:
           {:replace,
            [:idea, :goal_id, :status, :goal, :session_name, :roadmap_ref, :discovery, :updated_at]},
