@@ -29,26 +29,225 @@ defmodule Kazi.Portfolio do
   """
 
   alias Kazi.Attention.Queue, as: AttentionQueue
+  alias Kazi.Goal
   alias Kazi.ReadModel
   alias Kazi.ReadModel.{Run, RunRegistry}
+  alias Kazi.Scheduler.DagSnapshot
 
   @type bucket :: :in_progress | :stuck | :complete
+
+  @typedoc """
+  The five-bucket sitrep taxonomy (E64, David's verbatim names) — every bucket a
+  read-model/DAG projection (ADR-0011), nothing hand-set:
+
+    * `:planned` — proposals `proposed` (awaiting approval).
+    * `:todo`    — proposals `approved` with NO registered run (ready to dispatch).
+    * `:running` — registry runs still converging.
+    * `:blocked` — stuck/over_budget/error runs PLUS DAG-blocked roadmap goals
+      (`DagSnapshot`'s `:blocked`). Each entry names its `:cause`.
+    * `:done`    — terminal converged runs.
+  """
+  @type five_bucket :: :planned | :todo | :running | :blocked | :done
+
+  # Headline order (highest signal first) — the tabular percentage line reads
+  # done -> in-progress -> blocked -> todo -> planned.
+  @bucket_order [:done, :running, :blocked, :todo, :planned]
 
   @doc "The full portfolio: planned proposals, local runs by repo, and cross-machine runs."
   @spec build() :: %{
           planned: [map()],
           by_repo: %{String.t() => %{bucket() => [map()]}},
-          fleet_remote: [map()]
+          fleet_remote: [map()],
+          buckets: %{five_bucket() => [map()]},
+          totals: map()
         }
   def build do
     runs = RunRegistry.list()
     stuck_refs = attention_stuck_refs(runs)
+    buckets = five_buckets(runs, stuck_refs)
 
     %{
       planned: planned_entries(),
       by_repo: local_by_repo(runs, stuck_refs),
-      fleet_remote: remote_entries(runs)
+      fleet_remote: remote_entries(runs),
+      buckets: buckets,
+      totals: totals(buckets)
     }
+  end
+
+  # ===========================================================================
+  # Five-bucket model (E64/T64.1) — the sitrep classification + headline totals.
+  # ===========================================================================
+
+  # Classify every tracked item into exactly one of the five buckets. A goal
+  # appears once: a run's own state wins over a DAG-blocked projection (R-E64-3),
+  # and an approved proposal whose goal already has a run is represented by that
+  # run, not double-counted as `:todo`.
+  @spec five_buckets([Run.t()], MapSet.t()) :: %{five_bucket() => [map()]}
+  defp five_buckets(runs, stuck_refs) do
+    latest_runs = latest_run_per_ref(runs)
+    run_refs = latest_runs |> Enum.map(& &1.goal_ref) |> MapSet.new()
+
+    run_bucketed =
+      Enum.group_by(latest_runs, &run_bucket(&1, stuck_refs), &five_run_entry(&1, stuck_refs))
+
+    dag_blocked = dag_blocked_entries(runs, run_refs)
+
+    %{
+      planned: proposal_entries("proposed"),
+      todo: todo_entries(run_refs),
+      running: Map.get(run_bucketed, :running, []),
+      blocked: Map.get(run_bucketed, :blocked, []) ++ dag_blocked,
+      done: Map.get(run_bucketed, :done, [])
+    }
+  end
+
+  # `RunRegistry.list/0` is ordered `desc: started_at`, so the FIRST row seen per
+  # `goal_ref` is the latest — the run whose state wins when a goal was retried
+  # (the SAME "latest wins" rule mission control's wave grouping applies).
+  defp latest_run_per_ref(runs) do
+    runs
+    |> Enum.reduce({%{}, []}, fn %Run{goal_ref: ref} = run, {seen, acc} ->
+      if Map.has_key?(seen, ref), do: {seen, acc}, else: {Map.put(seen, ref, true), [run | acc]}
+    end)
+    |> elem(1)
+    |> Enum.reverse()
+  end
+
+  # A run's five-bucket, reusing the existing `bucket/2` classifier so "what
+  # counts as stuck" has exactly one definition (attention-flagged live runs
+  # included), then mapping onto the sitrep names.
+  defp run_bucket(%Run{} = run, stuck_refs) do
+    case bucket(run, stuck_refs) do
+      :complete -> :done
+      :stuck -> :blocked
+      :in_progress -> :running
+    end
+  end
+
+  defp five_run_entry(%Run{} = run, stuck_refs) do
+    base = %{goal_ref: run.goal_ref, run_id: run.run_id, status: run.status}
+
+    case run_bucket(run, stuck_refs) do
+      :blocked -> Map.put(base, :cause, run_stuck_cause(run))
+      _other -> base
+    end
+  end
+
+  # The named blocker for a stuck run. T64.2 enriches these with the red
+  # predicate slice / iteration counts; T64.1 records the coarse cause so the
+  # blocked bucket already carries distinct, non-DAG causes.
+  defp run_stuck_cause(%Run{status: "over_budget"}), do: :over_budget
+  defp run_stuck_cause(%Run{status: "error"}), do: :error
+  defp run_stuck_cause(_stuck), do: :stuck
+
+  # `:todo` — approved proposals whose goal has NO registered run yet (ready to
+  # dispatch). An approved proposal already under a run is represented by that
+  # run, so it is filtered out here rather than counted twice.
+  defp todo_entries(run_refs) do
+    "approved"
+    |> proposal_entries()
+    |> Enum.reject(&MapSet.member?(run_refs, &1.goal_id))
+  end
+
+  defp proposal_entries(status) do
+    for row <- ReadModel.list_proposed_goals(status: status) do
+      %{proposal_ref: row.proposal_ref, goal_id: row.goal_id, idea: row.idea, status: row.status}
+    end
+  end
+
+  # DAG-blocked roadmap goals: reuse `DagSnapshot`'s `:blocked` — the SAME
+  # reachability the scheduler and mission control's roadmap fold compute — over
+  # the configured roadmap goal (the `:starmap_roadmap_goal` app-env seam
+  # `kazi dashboard --roadmap` sets, and tests seed). NO second walk. A goal
+  # already carried by a run (run-state wins, R-E64-3) is excluded.
+  defp dag_blocked_entries(runs, run_refs) do
+    case roadmap_goal() do
+      %Goal{} = goal ->
+        dep_states = roadmap_dep_states(goal, runs)
+
+        goal
+        |> DagSnapshot.from(dep_states)
+        |> Map.fetch!(:nodes)
+        |> Enum.filter(&(&1.state == :blocked))
+        |> Enum.reject(&MapSet.member?(run_refs, &1.id))
+        |> Enum.map(&%{goal_ref: &1.id, cause: :dag, blocked_by: &1.blocked_by})
+
+      _none ->
+        []
+    end
+  end
+
+  # Per-group dep state from each group's LATEST run — the SAME derivation
+  # mission control's `build_waves/2` feeds `DagSnapshot.from/2`.
+  defp roadmap_dep_states(%Goal{groups: groups}, runs) do
+    latest_by_ref = Map.new(latest_run_per_ref(runs), &{&1.goal_ref, &1})
+    Map.new(groups, fn %Goal.Group{id: id} -> {id, dep_state(Map.get(latest_by_ref, id))} end)
+  end
+
+  defp dep_state(nil), do: :pending
+  defp dep_state(%Run{status: "converged"}), do: :converged
+
+  defp dep_state(%Run{status: status}) when status in ["stuck", "over_budget", "error"],
+    do: :stuck
+
+  defp dep_state(%Run{status: "running"}), do: :running
+  defp dep_state(%Run{}), do: :pending
+
+  defp roadmap_goal, do: Application.get_env(:kazi, :starmap_roadmap_goal)
+
+  # ===========================================================================
+  # Headline totals — count + INTEGER percentage per bucket, summing to 100 via
+  # largest-remainder. Base = all bucketed items; an empty portfolio is flagged
+  # `empty?: true` so the renderer says "nothing tracked yet", never divides by 0.
+  # ===========================================================================
+
+  @doc """
+  The headline totals for the five buckets: an ordered `rows` list (count +
+  integer percentage per bucket, percentages summing to 100), the percentage
+  `base` (all bucketed items), and an `empty?` flag when nothing is tracked.
+  """
+  @spec totals(%{five_bucket() => [map()]}) :: %{
+          base: non_neg_integer(),
+          empty?: boolean(),
+          rows: [%{bucket: five_bucket(), count: non_neg_integer(), pct: non_neg_integer()}]
+        }
+  def totals(buckets) do
+    counts = Enum.map(@bucket_order, &length(Map.get(buckets, &1, [])))
+    base = Enum.sum(counts)
+    pcts = largest_remainder(counts, base)
+
+    rows =
+      @bucket_order
+      |> Enum.zip(Enum.zip(counts, pcts))
+      |> Enum.map(fn {bucket, {count, pct}} -> %{bucket: bucket, count: count, pct: pct} end)
+
+    %{base: base, empty?: base == 0, rows: rows}
+  end
+
+  # Largest-remainder (Hamilton) apportionment: floor each share, then hand the
+  # leftover points to the largest fractional remainders so the integer
+  # percentages sum to exactly 100. An empty base yields all-zero (no divide).
+  defp largest_remainder(_counts, 0), do: []
+
+  defp largest_remainder(counts, base) do
+    scaled = Enum.map(counts, &(&1 * 100 / base))
+    floors = Enum.map(scaled, &trunc/1)
+    remainder = 100 - Enum.sum(floors)
+
+    winners =
+      scaled
+      |> Enum.with_index()
+      |> Enum.sort_by(fn {share, idx} -> {-(share - trunc(share)), idx} end)
+      |> Enum.take(remainder)
+      |> Enum.map(&elem(&1, 1))
+      |> MapSet.new()
+
+    floors
+    |> Enum.with_index()
+    |> Enum.map(fn {floor, idx} ->
+      if MapSet.member?(winners, idx), do: floor + 1, else: floor
+    end)
   end
 
   # ===========================================================================
