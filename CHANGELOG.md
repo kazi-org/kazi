@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.223.0](https://github.com/kazi-org/kazi/compare/v1.222.0...v1.223.0) (2026-07-18)
+
+
+### Features
+
+* **schema:** kazi schema gherkin provider config (T62.4, ADR-0071) ([d9cf112](https://github.com/kazi-org/kazi/commit/d9cf112e3aac073933d89925e50faf69f0fe874e))
+
 ## [1.222.0](https://github.com/kazi-org/kazi/compare/v1.221.0...v1.222.0) (2026-07-18)
 
 
