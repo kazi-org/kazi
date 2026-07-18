@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.235.0](https://github.com/kazi-org/kazi/compare/v1.234.0...v1.235.0) (2026-07-18)
+
+
+### Features
+
+* **read_model:** client-newer-than-daemon skew degrade (T52.8, ADR-0068) ([ff63201](https://github.com/kazi-org/kazi/commit/ff63201b15b7aa2b16836f26c01527ca00f0a639))
+
 ## [1.234.0](https://github.com/kazi-org/kazi/compare/v1.233.0...v1.234.0) (2026-07-18)
 
 
