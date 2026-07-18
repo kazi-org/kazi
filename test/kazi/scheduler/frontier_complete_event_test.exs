@@ -13,6 +13,19 @@ defmodule Kazi.Scheduler.FrontierCompleteEventTest do
   """
   use ExUnit.Case, async: true
 
+  # Isolation (T59.5, #1025/#1186): the POSITIVE `assert_receive` awaits below wait
+  # for a real scheduler dispatch (a `Task.async` -> `DepScheduler.run` -> stub
+  # reconciler send), which under full-suite load on a busy box is slower to
+  # schedule than ExUnit's default 100ms `assert_receive` timeout — so the very
+  # first `assert_receive {:dispatched, "a", _}` reddened a run that WOULD pass.
+  # A generous bound (well under ExUnit's 60s per-test timeout, so a true hang
+  # still fails) waits it out; the message drives the wait, not a sleep. This is
+  # the same class-1 mechanism PR #1387 applied to the loop/enforcement awaits.
+  # NOTE: the NEGATIVE `refute_receive …, 30` / `refute_received` assertions are
+  # NOT widened -- their short window is exactly what the PR #1401 ordering barrier
+  # makes deterministic; raising a refute deadline would WEAKEN it.
+  @await_ms 15_000
+
   alias Kazi.Goal
   alias Kazi.Goal.Group
   alias Kazi.Scheduler.DepScheduler
@@ -88,8 +101,8 @@ defmodule Kazi.Scheduler.FrontierCompleteEventTest do
         )
       end)
 
-    assert_receive {:dispatched, "a", a_pid}
-    assert_receive {:dispatched, "b", b_pid}
+    assert_receive {:dispatched, "a", a_pid}, @await_ms
+    assert_receive {:dispatched, "b", b_pid}, @await_ms
     refute_receive {:dispatched, "c", _}, 30
     refute_receive {:stream_event, _, _}, 30
 
@@ -104,7 +117,7 @@ defmodule Kazi.Scheduler.FrontierCompleteEventTest do
     # so c cannot have dispatched yet.
     send(b_pid, {:release, "b", :converged})
 
-    assert_receive {:stream_event, event0, cb_pid}
+    assert_receive {:stream_event, event0, cb_pid}, @await_ms
     # Deterministic now: the scheduler is parked in the (blocked) callback, so no
     # frontier-1 group can have started — c has provably not dispatched.
     refute_received {:dispatched, "c", _}
@@ -120,10 +133,10 @@ defmodule Kazi.Scheduler.FrontierCompleteEventTest do
     # Release the barrier -> the scheduler leaves the callback and dispatches c.
     send(cb_pid, :release_frontier)
 
-    assert_receive {:dispatched, "c", c_pid}
+    assert_receive {:dispatched, "c", c_pid}, @await_ms
     send(c_pid, {:release, "c", :converged})
 
-    assert_receive {:stream_event, event1, _}
+    assert_receive {:stream_event, event1, _}, @await_ms
     assert event1.event == "frontier_complete"
     assert event1.frontier == 1
     assert event1.groups == [%{id: "c", status: :converged}]
