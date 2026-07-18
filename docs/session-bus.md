@@ -422,6 +422,50 @@ With the daemon down, every one of these surfaces still reports the clean
 one-line no-daemon error and exits 1 — moving assembly server-side did not
 make the bus a dependency of anything (ADR-0067 point 1).
 
+### The `write` op: the daemon is the single read-model writer (T52.3, ADR-0068)
+
+`{"op":"write","batch":[<plan>, ...]}` applies a batch of read-model writes
+server-side. `Kazi.Daemon.Control` routes it to `Kazi.Daemon.Write`, which runs
+the WHOLE batch inside one `Repo.transaction`: the reply is
+`{"ok":true,"applied":N}` on success, or `{"ok":false,"error":<reason>}` with the
+whole transaction rolled back on ANY failure — a client never observes a partial
+batch. With the E51 daemon up it is the one process that opens the read-model
+read-write, so every client write serializes through it (the structural fix for
+the #1019 mixed-migration-writer class).
+
+**The write-plan wire format.** A changeset and an `Ecto.Query` do not serialize
+naively (they carry functions and a schema struct), so a write is not shipped as
+"a changeset over the wire". Each `batch` entry is an OPAQUE JSON write plan the
+server reconstructs into a concrete `Repo` call. The read-model write surface is
+not all changesets — it includes the multi-statement `memory_chunks_fts` FTS
+upsert — so four `kind`s span it:
+
+- `{"kind":"insert","schema":"Kazi.ReadModel.Iteration","fields":{...},"opts":{...}}`
+  — builds the schema's `changeset/2` (so a unique violation returns a clean
+  error, not a raised `Ecto.ConstraintError`) and inserts it. `opts` carries the
+  encodable upsert options `on_conflict` (`"replace_all"`, `"nothing"`, or
+  `{"replace":["field",...]}`) and `conflict_target` (a field-name list) so the
+  `authoring.ex` / `semantic_index.ex` upserts round-trip.
+- `{"kind":"update_all","schema":...,"filters":{...},"changes":{...}}` — a
+  `Repo.update_all` with `where: filters`, `set: changes` (the run-registry
+  transitions, the proposed-goal/memory transitions, the reaper).
+- `{"kind":"delete_all","schema":...,"filters":{...}}` — a `Repo.delete_all`
+  (`invalidate_cached_*`, the pause-checkpoint delete).
+- `{"kind":"sql","sql":"...","params":[...]}` — a raw parametrized statement,
+  the only shape that covers the two-statement FTS upsert.
+
+Schema and field names resolve via `String.to_existing_atom/1` (they already
+exist once the module is loaded), so a bad `schema`/field or an unknown `kind` is
+a clean `{"ok":false,"error":...}` — never an arbitrary-atom leak and never a
+crashed connection.
+
+**The L-0052 bound.** `packet: :line` truncates an over-long line SILENTLY on the
+receiving end, so a request at or over `Kazi.Daemon.Probe.socket_buffer/0`
+(= 1 MiB) is REFUSED with `error: request_too_large` rather than applied against
+a possibly-truncated payload — the exact discipline `read` uses to refuse
+`--full`. The client caps and splits a batch below the buffer; this is the
+server-side belt to that client-side suspenders.
+
 ### The board: current state, not a delta (T55.4, ADR-0073)
 
 `read`/`peek`/`watch` answer *"what changed since I last looked"* — a delta of
