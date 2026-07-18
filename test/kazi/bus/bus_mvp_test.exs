@@ -202,6 +202,19 @@ defmodule Kazi.Bus.MvpTest do
     end
   end
 
+  # T65.4 (#1430): the rename tombstone-alias grace window is config-driven.
+  describe "rename_grace_s/0 (T65.4)" do
+    test "defaults to 600 seconds (10 minutes) and honors a config override" do
+      assert Bus.rename_grace_s() == 600
+
+      original = Application.get_env(:kazi, :bus_rename_grace_s)
+      on_exit(fn -> Application.put_env(:kazi, :bus_rename_grace_s, original) end)
+
+      Application.put_env(:kazi, :bus_rename_grace_s, 42)
+      assert Bus.rename_grace_s() == 42
+    end
+  end
+
   # ===========================================================================
   # Untagged: the TTY digest rules (T51.2)
   # ===========================================================================
@@ -605,6 +618,73 @@ defmodule Kazi.Bus.MvpTest do
       texts = messages |> Enum.filter(&(&1.kind == "msg")) |> Enum.map(& &1.text)
       assert "via assigned #{session}" in texts
       assert "via alias #{session}" in texts
+    end
+
+    # ---- rename = alias update with tombstone grace (T65.4, #1430) -------
+
+    # acc (T65.4): a rename yields ONE presence row + a tombstone; `tell <old>`
+    # within the grace window lands on the UUID and the ack NAMES the rename.
+    test "a rename tombstones the old name; tell old in-window lands with a renamed-notice", %{
+      conn: conn
+    } do
+      session = unique_session()
+      first = "old_#{System.unique_integer([:positive])}"
+      second = "new_#{System.unique_integer([:positive])}"
+
+      assert :ok = Bus.name(first, conn: conn, session: session, scope: "machine")
+      assert :ok = Bus.name(second, conn: conn, session: session, scope: "machine")
+
+      # exactly ONE presence row, labelled with the CURRENT name
+      assert {:ok, sessions} = Bus.who(conn: conn, session: session)
+      rows = Enum.filter(sessions, fn s -> s["session"] == session end)
+      assert length(rows) == 1
+      assert hd(rows)["name"] == second
+
+      # the old name is still bound (as a tombstone) -- both names appear in the
+      # durable bindings, but only ONE presence row exists
+      bindings = Bus.name_bindings(conn: conn)
+      assert bindings[first] == session
+      assert bindings[second] == session
+
+      # a tell to the OLD name (default 600s grace) lands on the same UUID and
+      # the receipt carries a renamed-notice naming the CURRENT name
+      text = "via tombstone #{session}"
+      assert {:ok, receipt} = Bus.tell(first, text, conn: conn, scope: "machine")
+      assert receipt.recipient == session
+      assert is_binary(receipt.notice)
+      assert receipt.notice =~ second
+
+      assert {:ok, messages} = Bus.read(conn: conn, session: session, scope: "machine")
+      assert Enum.any?(messages, fn m -> m.kind == "msg" and m.text == text end)
+
+      # presence row count is STILL exactly 1 after the whole lifecycle
+      assert {:ok, after_sessions} = Bus.who(conn: conn, session: session)
+      assert Enum.count(after_sessions, fn s -> s["session"] == session end) == 1
+    end
+
+    # acc (T65.4): after the grace window expires, `tell <old>` ERRORS, naming
+    # the session's current name as the hint to re-address.
+    test "after grace expiry, tell old errors naming the current name", %{conn: conn} do
+      session = unique_session()
+      first = "stale_#{System.unique_integer([:positive])}"
+      second = "current_#{System.unique_integer([:positive])}"
+
+      # force an already-expired window: grace 0 means any elapsed time is past it
+      original = Application.get_env(:kazi, :bus_rename_grace_s)
+      on_exit(fn -> Application.put_env(:kazi, :bus_rename_grace_s, original) end)
+      Application.put_env(:kazi, :bus_rename_grace_s, 0)
+
+      assert :ok = Bus.name(first, conn: conn, session: session, scope: "machine")
+      assert :ok = Bus.name(second, conn: conn, session: session, scope: "machine")
+
+      assert {:error, {:name_tombstoned, ^first, ^second}} =
+               Bus.tell(first, "too late #{session}", conn: conn, scope: "machine")
+
+      # the presence row is untouched -- still exactly 1, still the current name
+      assert {:ok, sessions} = Bus.who(conn: conn, session: session)
+      rows = Enum.filter(sessions, fn s -> s["session"] == session end)
+      assert length(rows) == 1
+      assert hd(rows)["name"] == second
     end
 
     # acc (T65.3): two concurrent joins never receive the same name. The race is
