@@ -194,13 +194,18 @@ defmodule Kazi.Memory.SemanticIndexTest do
 
       {:ok, %{rows: rows}} =
         Repo.query(
-          "SELECT workspace_root, content_hash FROM memory_index_files WHERE path = ? ORDER BY workspace_root",
+          "SELECT workspace_root, content_hash FROM memory_index_files WHERE path = ?",
           ["docs/lore.md"]
         )
 
-      assert [[root_a, hash_a], [root_b, hash_b]] = rows
-      assert root_a == Path.expand(dir_a)
-      assert root_b == Path.expand(dir_b)
+      # Isolation (T59.5, #1186): fixture_dir names embed System.unique_integer,
+      # so lexicographic ORDER BY workspace_root flips whenever the two integers
+      # differ in digit count ("107843" < "84770") — pairing row A with dir B.
+      # Key by root instead of assuming a sort order.
+      assert length(rows) == 2
+      hash_by_root = Map.new(rows, fn [root, hash] -> {root, hash} end)
+      hash_a = Map.fetch!(hash_by_root, Path.expand(dir_a))
+      hash_b = Map.fetch!(hash_by_root, Path.expand(dir_b))
       refute hash_a == hash_b
     end
 
