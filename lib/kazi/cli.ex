@@ -459,7 +459,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`; join also returns a daemon-ASSIGNED short name `<team>-a/b/c...` allocated atomically through the KV bucket, T65.3)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -635,9 +635,9 @@ defmodule Kazi.CLI do
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
       kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
       kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--json]  # block until a NEW message arrives (#1091/#1097)
-      kazi bus join [--json]                             # derive team from git origin (T65.1); `join -- <team>` for explicit
+      kazi bus join [--json]                             # derive team from git origin + daemon-assigned name (T65.1/T65.3); `join -- <team>` for explicit
       kazi bus leave [--json]
-      kazi bus name <nickname> [--json]                  # durable, addressable session name (T55.5)
+      kazi bus name <alias> [--json]                     # attach an alias on top of the assigned name (T55.5/T65.3)
       kazi bus read [--peek] [--since <cursor>] [--json]   # --peek: show pending messages WITHOUT consuming them; --since <seq>: replay from a point
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
@@ -1947,6 +1947,14 @@ defmodule Kazi.CLI do
     bus calls and ages out with presence (rejoin after long idles); `bus
     leave` clears it.
 
+    DAEMON-ASSIGNED NAME (T65.3, #1430): join also assigns this session its
+    next-free short name for the team (`<team>-a`, `<team>-b`, ... in order) and
+    prints it (`joined <team> as <team>-a`), so the session's name comes from the
+    join output. The allocation is ATOMIC through the KV bucket (create-if-absent
+    optimistic concurrency), so concurrent joiners never receive the same name. A
+    re-join is idempotent and returns the SAME assigned name. Attach extra
+    human aliases on top with `bus name <alias>`.
+
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
     """
@@ -1966,13 +1974,19 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("name") do
     """
-    kazi bus name <nickname> [--json]
+    kazi bus name <alias> [--json]
 
     Bind a durable, addressable name to this session's UUID (T55.5, ADR-0073;
     durable bindings T65.2, #1430): carried on presence across every later bus
-    call, rendered by `bus who`, accepted by `bus tell <nickname>`, and stored
+    call, rendered by `bus who`, accepted by `bus tell <alias>`, and stored
     in a TTL-less KV bucket so the binding SURVIVES a daemon restart (names no
     longer drop back to raw UUIDs on a bounce).
+
+    ATTACHES an alias on top of any daemon-assigned name (T65.3, #1430): when the
+    session already has an assigned name from `bus join`, THAT stays canonical in
+    `bus who` and the alias is an additional resolvable name; both reach the
+    session via `bus tell`. A session that never joined takes the alias as its
+    presence label directly.
 
     Identity is the UUID; the name is a unique label bound to it. A rename
     updates the one presence row (never a second). Binding a name already held
@@ -5430,16 +5444,7 @@ defmodule Kazi.CLI do
   defp execute_bus("join", [], opts) do
     case Kazi.Bus.join_derived(bus_call_opts(opts)) do
       {:ok, %{slug: slug, source: source, notice: notice}} ->
-        emit(
-          json?(opts),
-          %{"ok" => true, "team" => slug, "derived" => true, "source" => to_string(source)},
-          fn ->
-            IO.puts("joined #{slug} (derived)")
-            if notice, do: IO.puts(notice)
-          end
-        )
-
-        0
+        assign_and_report_name(slug, source, notice, true, opts)
 
       {:error, reason} ->
         bus_error(reason, opts)
@@ -5452,11 +5457,7 @@ defmodule Kazi.CLI do
   defp execute_bus("join", [team], opts) do
     case Kazi.Bus.join(team, Keyword.put(bus_call_opts(opts), :derived, false)) do
       :ok ->
-        emit(json?(opts), %{"ok" => true, "team" => team, "derived" => false}, fn ->
-          IO.puts("joined #{team}")
-        end)
-
-        0
+        assign_and_report_name(team, nil, nil, false, opts)
 
       {:error, reason} ->
         bus_error(reason, opts)
@@ -5512,6 +5513,32 @@ defmodule Kazi.CLI do
 
   defp execute_bus("who", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
+  # T65.3 (#1430): after a join lands the presence row, the daemon assigns the
+  # session its next-free short name for the team (atomic KV allocation) and the
+  # join OUTPUT reports it -- so the operator learns the session's name straight
+  # from `bus join`. Assignment is idempotent, so a re-join prints the SAME name.
+  defp assign_and_report_name(team, source, notice, derived?, opts) do
+    case Kazi.Bus.assign_name(team, bus_call_opts(opts)) do
+      {:ok, name} ->
+        payload =
+          %{"ok" => true, "team" => team, "derived" => derived?, "name" => name}
+          |> maybe_put_json("source", source && to_string(source))
+
+        emit(json?(opts), payload, fn ->
+          IO.puts("joined #{team}#{if derived?, do: " (derived)", else: ""} as #{name}")
+          if notice, do: IO.puts(notice)
+        end)
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  defp maybe_put_json(map, _key, nil), do: map
+  defp maybe_put_json(map, key, value), do: Map.put(map, key, value)
 
   # T55.12: the two liveness verdicts worth interrupting a send for. Both still
   # queue, so the wording says what happened AND what to check -- never
@@ -5889,6 +5916,15 @@ defmodule Kazi.CLI do
     do:
       daemon_error(
         "name #{inspect(nickname)} is already bound to session #{holder} -- pick another name",
+        opts
+      )
+
+  # T65.3 (#1430): all 26 assigned-name letters for the team are taken.
+  defp bus_error({:name_pool_exhausted, team}, opts),
+    do:
+      daemon_error(
+        "no free assigned name for team #{inspect(team)} -- all of #{team}-a..z are in use; " <>
+          "attach an explicit alias with `kazi bus name <alias>`",
         opts
       )
 
