@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.227.0](https://github.com/kazi-org/kazi/compare/v1.226.0...v1.227.0) (2026-07-18)
+
+
+### Features
+
+* **integrate:** scope staging to authored paths in shared workspaces (T59.8, [#937](https://github.com/kazi-org/kazi/issues/937)) ([ba9e2b0](https://github.com/kazi-org/kazi/commit/ba9e2b007b1f84cedf53371ca2f361f843afa6d0))
+
 ## [1.226.0](https://github.com/kazi-org/kazi/compare/v1.225.0...v1.226.0) (2026-07-18)
 
 
