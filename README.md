@@ -526,6 +526,43 @@ before the BEAM, so its time is not counted against the deadline.
 > fails at the Zig link; build the macOS binaries on a macOS 15 (or earlier)
 > runner — which is what the release CI matrix (T6.3) targets.
 
+### Render the Claude Code plugin bundle
+
+kazi also ships as a [Claude Code plugin](https://code.claude.com/docs/en/plugins-reference):
+one install bundles the kazi skill, the kazi MCP server registration, and the
+session-bus hooks together, and marketplace updates refresh them with the binary
+release cadence instead of on-demand re-runs of the explicit installers
+([ADR-0077](docs/adr/0077-claude-code-plugin-distribution.md)). The explicit
+`install-skill` / `init --with-mcp` / `install-hooks` commands are unchanged — the
+plugin is an *additional* channel rendered from the SAME sources, never a fork.
+
+`mix kazi.plugin` renders that bundle from those single sources of truth (the
+generator adds no new teaching content — it only re-renders what the installers
+already produce):
+
+```sh
+mix kazi.plugin --out ./dist/plugin              # plugin version = the kazi version
+mix kazi.plugin --out ./dist/plugin --version 1.246.0   # pin the version (release pipeline)
+```
+
+It writes a self-contained plugin directory:
+
+```
+dist/plugin/
+├── .claude-plugin/plugin.json   # metadata + inline MCP server + hook declarations
+└── skills/kazi/
+    ├── SKILL.md                 # the router (same content install-skill writes)
+    ├── AUTHORING.md
+    └── RECIPES.md
+```
+
+The render is deterministic — the same version yields a byte-identical bundle
+(no timestamps, no randomness) — so the release pipeline (T61.4) can publish it
+reproducibly. `LOCAL.md` is deliberately never bundled: a plugin update replaces
+the skill directory wholesale, so operator customization stays at the stable
+`~/.claude/skills/kazi/LOCAL.md` path outside the bundle
+([ADR-0077](docs/adr/0077-claude-code-plugin-distribution.md)).
+
 ---
 
 ## Quickstart 1 — describe what you want in plain English
