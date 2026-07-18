@@ -4829,6 +4829,12 @@ defmodule Kazi.CLI do
   defp execute_install_skill(opts, inject_opts) do
     write_opts = install_skill_opts(opts, inject_opts)
 
+    # ADR-0077 (the ADR-0074 amendment): before writing, migrate any operator
+    # `LOCAL.md` sitting inside the (possibly plugin-managed) content dir to the
+    # STABLE path, never silently ignoring one. For the classic install-skill
+    # channel the two paths coincide, so this is a no-op.
+    report_local_migration(InstallSkill.migrate_local(write_opts))
+
     case InstallSkill.write(write_opts) do
       {:ok, path} ->
         dir = Path.dirname(path)
@@ -4839,8 +4845,9 @@ defmodule Kazi.CLI do
         IO.puts("then branch on the result's next_action.")
 
         IO.puts(
-          "\nSite-specific wiring goes in #{Path.join(dir, InstallSkill.local_file())} -- " <>
-            "install-skill never touches it (ADR-0074)."
+          "\nSite-specific wiring goes in #{InstallSkill.local_path(write_opts)} -- " <>
+            "install-skill never touches it, and it lives at a STABLE path a plugin " <>
+            "update cannot overwrite (ADR-0077)."
         )
 
         0
@@ -4864,6 +4871,28 @@ defmodule Kazi.CLI do
 
   defp format_skill_error(reason) when is_atom(reason), do: :file.format_error(reason)
   defp format_skill_error(reason), do: inspect(reason)
+
+  # Report the LOCAL.md migration outcome (ADR-0077). A migration or a conflict
+  # is surfaced; a no-op is silent. A conflict leaves BOTH files untouched and
+  # asks the operator to merge -- never a silent clobber.
+  defp report_local_migration({:ok, :noop}), do: :ok
+
+  defp report_local_migration({:ok, {:migrated, from, to}}) do
+    IO.puts("MIGRATED  #{from} -> #{to} (LOCAL.md moved to its stable path, ADR-0077)")
+  end
+
+  defp report_local_migration({:warn, {:conflict, old, new}}) do
+    IO.puts(
+      :stderr,
+      "warning: LOCAL.md exists at BOTH #{old} (old, inside the skill dir) and " <>
+        "#{new} (stable); left both untouched -- merge the old one into the stable " <>
+        "one by hand, then delete the old (ADR-0077)."
+    )
+  end
+
+  defp report_local_migration({:error, reason}) do
+    IO.puts(:stderr, "warning: could not migrate LOCAL.md: #{format_skill_error(reason)}")
+  end
 
   # =============================================================================
   # install-hooks command (T55.2, UC-068, ADR-0071): session-bus delivery
