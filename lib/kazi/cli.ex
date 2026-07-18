@@ -451,7 +451,7 @@ defmodule Kazi.CLI do
     %{
       name: "daemon",
       summary:
-        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status` over a local Unix-socket control plane with a version handshake (`status --json` reports `schema_vsn`, the daemon's stamped read-model schema version, for the ADR-0068 skew handshake); `start` also supervises nats-server for the session bus. Convergence never depends on the daemon.",
+        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status|restart` over a local Unix-socket control plane with a version handshake (`status --json` reports `schema_vsn`, the daemon's stamped read-model schema version, for the ADR-0068 skew handshake); `start` also supervises nats-server for the session bus and migrates the read-model ONCE before serving any write (T52.4, migrate-before-serve). `restart` (T52.4) is stop-then-start -- the operator's one-command schema-skew remedy -- and errors clearly if no daemon was running. Convergence never depends on the daemon.",
       args: [%{name: "subcommand", required: true}],
       flags: [:json, :nats_bin, :nats_port, :nats_host, :nats_token]
     },
@@ -630,6 +630,7 @@ defmodule Kazi.CLI do
       kazi daemon start [--nats-bin <path>] [--nats-port <n>]  # boot the session-bus daemon (foreground)
       kazi daemon status [--json]                  # ping the running daemon (--json includes schema_vsn, the daemon's read-model schema version)
       kazi daemon stop                             # clean shutdown
+      kazi daemon restart [--nats-bin <path>] [--nats-port <n>]  # stop-then-start (schema-skew remedy); errors if none was running
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
       kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
       kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--json]  # block until a NEW message arrives (#1091/#1097)
@@ -1568,9 +1569,10 @@ defmodule Kazi.CLI do
     ]
   end
 
-  # T51.1: `daemon start|stop|status [--json]` -- exactly the three verbs
-  # ADR-0067 decision point 1 lands; no positional args beyond the subcommand.
-  @daemon_subcommands ~w(start stop status)
+  # T51.1: `daemon start|stop|status [--json]`; T52.4 adds `restart`
+  # (stop-then-start, the operator's one-command schema-skew remedy, ADR-0068
+  # point 2). No positional args beyond the subcommand.
+  @daemon_subcommands ~w(start stop status restart)
 
   defp parse_daemon([sub | rest], flags) when sub in @daemon_subcommands do
     case rest do
@@ -1590,10 +1592,12 @@ defmodule Kazi.CLI do
   defp parse_daemon([sub | _], _flags),
     do:
       {:error,
-       "unknown daemon subcommand #{inspect(sub)} (expected `start`, `stop`, or `status`)"}
+       "unknown daemon subcommand #{inspect(sub)} (expected `start`, `stop`, `status`, or `restart`)"}
 
   defp parse_daemon([], _flags),
-    do: {:error, "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`)"}
+    do:
+      {:error,
+       "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`, `restart`)"}
 
   # T51.2 (ADR-0067 decision point 4)/#1060: `bus post|read|peek|who|tell` --
   # `post`/`tell` take a required positional (kind+text, or session+text);
@@ -5050,8 +5054,60 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T52.4 (ADR-0068 point 2): `daemon restart` = stop-then-start. The operator's
+  # one-command remedy when a running daemon's stamped schema is skewed from the
+  # binary. It REQUIRES a running daemon (errors with one clear line otherwise --
+  # unlike `start`, which stands one up unconditionally): "restart" of nothing is
+  # a mistake worth naming, not a silent fresh start. On a live daemon it shuts
+  # the old one down, waits for the socket to free, then runs the SAME foreground
+  # `start` (fresh pid, socket re-bound) -- so any `--nats-*` flags on the restart
+  # carry through exactly as they would on `start`.
+  defp execute_daemon("restart", [], opts, inject_opts) do
+    sock_path = Kazi.Daemon.Supervisor.default_sock_path()
+    pid_path = Kazi.Daemon.Supervisor.default_pid_path()
+
+    case Kazi.Daemon.Probe.probe(sock_path) do
+      :missing ->
+        daemon_error("no daemon running to restart (no socket at #{sock_path})", opts)
+
+      :dead ->
+        daemon_clean_stale(sock_path, pid_path, opts)
+
+      :alive ->
+        case Kazi.Daemon.Probe.request(sock_path, %{"op" => "shutdown"}) do
+          {:ok, %{"ok" => true}} ->
+            wait_for_socket_free(sock_path)
+            execute_daemon("start", [], opts, inject_opts)
+
+          {:ok, resp} ->
+            daemon_error("daemon refused shutdown: #{inspect(resp)}", opts)
+
+          {:error, reason} ->
+            daemon_error("failed to stop daemon for restart: #{inspect(reason)}", opts)
+        end
+    end
+  end
+
   defp execute_daemon(sub, _args, opts, _inject_opts),
     do: daemon_error("unknown daemon subcommand #{inspect(sub)}", opts)
+
+  # The shutdown ack means "accepted", not "torn down": the listener frees the
+  # socket asynchronously as the tree exits. Poll (bounded) until the old daemon
+  # no longer holds the socket so the fresh `start` sees `:missing`/`:dead` and
+  # binds cleanly, never `:already_running`.
+  defp wait_for_socket_free(sock_path, attempts \\ 40)
+  defp wait_for_socket_free(_sock_path, 0), do: :ok
+
+  defp wait_for_socket_free(sock_path, attempts) do
+    case Kazi.Daemon.Probe.probe(sock_path) do
+      :alive ->
+        Process.sleep(25)
+        wait_for_socket_free(sock_path, attempts - 1)
+
+      _free ->
+        :ok
+    end
+  end
 
   # T52.2: the daemon's stamped read-model `schema_vsn` (ADR-0068), shown when a
   # daemon reports it and omitted for an older daemon that predates the field.
