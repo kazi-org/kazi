@@ -15,8 +15,23 @@ defmodule KaziWeb.MissionControlLiveTest do
   use KaziWeb.ConnCase, async: false
 
   alias Kazi.{PredicateResult, PredicateVector, ReadModel}
-  alias Kazi.ReadModel.{Run, RunRegistry}
+  alias Kazi.ReadModel.{ProposedGoal, Run, RunRegistry}
   alias Kazi.Repo
+
+  defp seed_proposal(overrides \\ %{}) do
+    attrs =
+      Map.merge(
+        %{
+          proposal_ref: "prop-todo-#{System.unique_integer([:positive])}",
+          goal_id: "todo-goal-#{System.unique_integer([:positive])}",
+          idea: "an approved but undispatched goal",
+          status: "approved"
+        },
+        overrides
+      )
+
+    Repo.insert!(struct(ProposedGoal, attrs))
+  end
 
   defp seed(overrides \\ %{}) do
     attrs =
@@ -398,6 +413,34 @@ defmodule KaziWeb.MissionControlLiveTest do
       {:ok, _view, html} = live(conn, ~p"/")
 
       assert html =~ ~s(id="mc-card-local-only")
+    end
+  end
+
+  describe "PLANNED section (T60.4, #1160)" do
+    test "approved undispatched proposals render as todo cards", %{conn: conn} do
+      p = seed_proposal()
+      {:ok, _view, html} = live(conn, "/")
+
+      assert html =~ "mc-planned-#{p.proposal_ref}"
+      assert html =~ "PLANNED"
+      assert html =~ p.goal_id
+      assert html =~ "TODO"
+    end
+
+    test "a proposal whose goal has ANY registered run leaves PLANNED", %{conn: conn} do
+      p = seed_proposal()
+      seed(%{goal_ref: p.goal_id})
+      {:ok, _view, html} = live(conn, "/")
+
+      refute html =~ "mc-planned-#{p.proposal_ref}"
+    end
+
+    test "proposed and rejected proposals do not render; no approved -> no section", %{conn: conn} do
+      seed_proposal(%{status: "proposed"})
+      seed_proposal(%{status: "rejected"})
+      {:ok, _view, html} = live(conn, "/")
+
+      refute html =~ "id=\"mc-planned"
     end
   end
 end
