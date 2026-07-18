@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.237.0](https://github.com/kazi-org/kazi/compare/v1.236.0...v1.237.0) (2026-07-18)
+
+
+### Features
+
+* **portfolio:** blocker attribution on every blocked entry (T64.2, UC-061/UC-033) ([7218f10](https://github.com/kazi-org/kazi/commit/7218f10de1e4113cbbd09d29f8388f3570c013d7))
+
 ## [1.236.0](https://github.com/kazi-org/kazi/compare/v1.235.0...v1.236.0) (2026-07-18)
 
 
