@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.233.0](https://github.com/kazi-org/kazi/compare/v1.232.0...v1.233.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** defer read-model migration to a live daemon (T52.6, ADR-0068) ([7c5123b](https://github.com/kazi-org/kazi/commit/7c5123bf2db4ab9d4467782e444da00816af2700))
+
 ## [1.232.0](https://github.com/kazi-org/kazi/compare/v1.231.0...v1.232.0) (2026-07-18)
 
 
