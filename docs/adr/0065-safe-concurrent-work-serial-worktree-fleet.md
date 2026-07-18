@@ -102,6 +102,21 @@ goal-files there is nothing, which is #937's Gap D.
    session lore is exactly the class of convention ADR-0056 requires kazi
    to own.
 
+6. **The workspace itself is guarded against cross-goal co-tenancy, not
+   only against same-goal duplication** (T59.7, #937 Gap G). The
+   duplicate-run guard (#942/#944) refuses a second live apply of the SAME
+   `goal_ref`; it does not notice N DIFFERENT goals dispatched against one
+   shared `--workspace`, whose agents cross-contaminate each other's commits
+   (the commit-bleed incidents in #937). So an executing apply also refuses
+   to start when a LIVE run for a DIFFERENT goal already holds the resolved
+   working directory, reusing the SAME fresh-heartbeat liveness the
+   duplicate-run guard trusts (`RunRegistry.list_live/0`) -- a stale/dead
+   holder never blocks, aging out within ~90s. `--allow-workspace-collision`
+   is the explicit override, mirroring `--allow-duplicate-run`. This is the
+   backstop for callers who still pass an explicit shared `--workspace`; the
+   default per-run task worktree (decision 1) already keeps two goals off one
+   directory, so in the common case the guard never fires.
+
 ## Consequences
 
 Positive: the data-loss class #937 documents becomes structurally
