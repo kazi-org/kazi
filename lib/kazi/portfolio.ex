@@ -60,7 +60,8 @@ defmodule Kazi.Portfolio do
           by_repo: %{String.t() => %{bucket() => [map()]}},
           fleet_remote: [map()],
           buckets: %{five_bucket() => [map()]},
-          totals: map()
+          totals: map(),
+          rate: map()
         }
   def build do
     runs = RunRegistry.list()
@@ -72,7 +73,8 @@ defmodule Kazi.Portfolio do
       by_repo: local_by_repo(runs, stuck_refs),
       fleet_remote: remote_entries(runs),
       buckets: buckets,
-      totals: totals(buckets)
+      totals: totals(buckets),
+      rate: fleet_rate(Map.get(buckets, :running, []))
     }
   end
 
@@ -131,6 +133,7 @@ defmodule Kazi.Portfolio do
 
     case run_bucket(run, stuck_refs) do
       :blocked -> Map.merge(base, blocked_attribution(run))
+      :running -> Map.put(base, :rate, run_rate(run.goal_ref))
       _other -> base
     end
   end
@@ -323,6 +326,74 @@ defmodule Kazi.Portfolio do
       if MapSet.member?(winners, idx), do: floor + 1, else: floor
     end)
   end
+
+  # ===========================================================================
+  # Honest rate ("how is it going", E64/T64.3) — predicates green/total from a
+  # run's LAST recorded vector, plus the red->green movement over the run's
+  # recorded iterations (green_last - green_first). NEVER a projected date
+  # (ADR-0046): rate is rendered AS rate, never extrapolated to an ETA.
+  # ===========================================================================
+
+  @doc """
+  A running goal's honest rate from its recorded iteration history: `green`/`total`
+  predicates in the LAST recorded vector and `delta`, the net red->green movement
+  across the run (green in the last vector minus green in the first). A goal with
+  no recorded iterations yet returns `nil` (honest-unknown, ADR-0046) — never a
+  fabricated 0/0.
+  """
+  @spec run_rate(Kazi.Goal.id()) ::
+          %{green: non_neg_integer(), total: non_neg_integer(), delta: integer()} | nil
+  def run_rate(goal_ref) do
+    case ReadModel.iteration_history(goal_ref) do
+      [] ->
+        nil
+
+      history ->
+        {_first_idx, first} = List.first(history)
+        {_last_idx, last} = List.last(history)
+
+        %{
+          green: length(PredicateVector.passing(last)),
+          total: PredicateVector.size(last),
+          delta: length(PredicateVector.passing(last)) - length(PredicateVector.passing(first))
+        }
+    end
+  end
+
+  # The fleet-wide rate: the running entries' rates summed into one honest
+  # aggregate (total green over total predicates, total movement). `empty?: true`
+  # when no running goal has a recorded rate yet — the renderer stays silent
+  # rather than printing a fabricated 0/0 line.
+  defp fleet_rate(running_entries) do
+    rates = running_entries |> Enum.map(&Map.get(&1, :rate)) |> Enum.reject(&is_nil/1)
+
+    case rates do
+      [] ->
+        %{green: 0, total: 0, delta: 0, empty?: true}
+
+      rates ->
+        %{
+          green: Enum.sum(Enum.map(rates, & &1.green)),
+          total: Enum.sum(Enum.map(rates, & &1.total)),
+          delta: Enum.sum(Enum.map(rates, & &1.delta)),
+          empty?: false
+        }
+    end
+  end
+
+  @doc """
+  Renders a rate map into the honest one-line rate string the sitrep appends to a
+  running entry, e.g. `preds 5/8, +1 this run`. `nil` (no recorded iterations)
+  renders as `no iterations yet` — never a projected date (ADR-0046).
+  """
+  @spec rate_label(map() | nil) :: String.t()
+  def rate_label(nil), do: "no iterations yet"
+
+  def rate_label(%{green: green, total: total, delta: delta}),
+    do: "preds #{green}/#{total}, #{signed(delta)} this run"
+
+  defp signed(n) when n >= 0, do: "+#{n}"
+  defp signed(n), do: "#{n}"
 
   # ===========================================================================
   # :planned -- proposals not yet applied
