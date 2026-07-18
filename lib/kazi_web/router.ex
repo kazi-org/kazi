@@ -84,6 +84,11 @@ defmodule KaziWeb.Router do
 
       post("/seed", TestSeedController, :seed)
       post("/reset", TestSeedController, :reset)
+      # T63.6: seed/clear the run registry for the Mission Control direction-B
+      # fleet-grid cert (project-grouped cards + segmented header filters).
+      post("/fleet/seed", TestSeedController, :seed_fleet)
+      post("/fleet/seed_single", TestSeedController, :seed_fleet_single)
+      post("/fleet/reset", TestSeedController, :reset_fleet)
       # T3.6c: drive the lease-map fixture source (presence/intent/lease snapshot).
       post("/leases/seed", LeaseMapSeedController, :seed)
       post("/leases/release", LeaseMapSeedController, :release)
