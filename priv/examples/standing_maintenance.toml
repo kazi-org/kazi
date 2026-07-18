@@ -16,7 +16,7 @@
 #      maps it to `Goal.standing`; `Kazi.Runtime` threads it into the loop opts so
 #      the loop runs in standing mode (`Kazi.Loop` `standing: true`, T3.4a).
 #
-#   2. CLI FLAG: `kazi run <goal-file> --workspace <path> --standing`. The
+#   2. CLI FLAG: `kazi apply <goal-file> --workspace <path> --standing`. The
 #      `--standing` flag OVERRIDES whatever the goal-file declares, so any goal
 #      can be run standing on demand. (Without the flag, the goal-file decides.)
 #
@@ -26,10 +26,10 @@
 # ## How a human runs this goal
 #
 #     # standing because the goal-file declares it:
-#     kazi run priv/examples/standing_maintenance.toml --workspace /path/to/svc
+#     kazi apply priv/examples/standing_maintenance.toml --workspace /path/to/svc
 #
 #     # or force standing on ANY goal from the CLI:
-#     kazi run priv/examples/deploy_target.toml --workspace /path/to/svc --standing
+#     kazi apply priv/examples/deploy_target.toml --workspace /path/to/svc --standing
 #
 # A standing run does not return — it holds the predicates true until the operator
 # stops it (a clean stop ends it as :stopped; T3.4c). Run it as a long-lived
