@@ -90,6 +90,22 @@ ADR-0067 introduces one.
   operator's service manager; `kazi daemon status|restart`).
 - Read-model rebuildability (ADR-0005) is unchanged -- the file remains a
   disposable projection; only who holds the pen changes.
+- The client-newer-than-daemon skew (decision 3) is realized at write time in
+  `Kazi.ReadModel.Writer` (T52.8): with a live daemon whose `ping` `schema_vsn`
+  is OLDER than this binary's schema version (`SchemaSkew.classify/2 ==
+  :client_newer`), the seam does NOT write blind. It logs exactly
+
+  ```
+  daemon is older than this client (schema vN < vM); restart it (`kazi daemon restart`) or continue without persistence
+  ```
+
+  and continues Guard-style without persistence, returning the same shaped
+  `{:error, :read_model_unavailable}` degrade the no-daemon refuse (T52.7) uses --
+  one visible degrade shape, never an implicit deadlock. The daemon's `schema_vsn`
+  is read from the handshake at most once per short TTL window (memoized like the
+  presence probe, not per write); a daemon that reports no `schema_vsn` writes
+  through. The remedy is one command, `kazi daemon restart`. The reverse case (a
+  daemon NEWER than the client) writes through the additive API unchanged.
 
 ## Alternatives rejected
 

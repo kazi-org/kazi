@@ -77,6 +77,39 @@ and prints the reply. The reply is a single JSON line:
   `ping` reply IS the skew signal — it names a daemon compiled before this field
   existed.
 
+### Write-path schema skew (T52.7 / T52.8, ADR-0068)
+
+The `schema_vsn` handshake is what the read-model write seam
+(`Kazi.ReadModel.Writer`) branches on so a write never lands against a schema the
+writer does not understand. Two directions, one visible degrade shape
+(`{:error, :read_model_unavailable}`, the read-model-wide Guard degrade —
+callers already tolerate it, so a persistence-blind run never deadlocks or hangs):
+
+- **Daemon newer than this client** (`:client_older`) — the daemon holds a newer
+  schema. Its write API is additive within a major, so the older client keeps
+  writing THROUGH the daemon; nothing to degrade.
+- **Daemon older than this client** (`:client_newer`, T52.8) — a live daemon is
+  running an OLDER schema than this binary (the mid-release-window case). The seam
+  does NOT write blind. It reads the daemon's `schema_vsn` from the `ping`
+  handshake (once per short TTL window — memoized like the presence probe, never a
+  `ping` per write) and, on a `:client_newer` classification, logs the single-line
+  operator choice
+
+  ```
+  daemon is older than this client (schema vN < vM); restart it (`kazi daemon restart`) or continue without persistence
+  ```
+
+  then continues without persistence. `kazi daemon restart` (T52.4's one-command
+  stop-then-start) brings the daemon up on the newer schema; doing nothing leaves
+  the run persistence-blind but VISIBLE — never an implicit deadlock or a silent
+  blind write. A daemon that does not report a `schema_vsn` (an old daemon, or a
+  `ping` that fails) writes through — the degrade blocks only on a positive
+  older-daemon reading.
+- **No daemon at all** (T52.7) — with no daemon owning the file, the seam compares
+  this binary against the file's stamped schema directly; an OLDER binary against a
+  newer-stamped file refuses the write the same visible way (`read-model schema vN
+  is newer than this binary (vM); running without persistence -- upgrade kazi`).
+
 ### Read/write version-skew symmetry (T58.2, #1227)
 
 **The bug this closes.** A long-running daemon started under an older kazi kept
