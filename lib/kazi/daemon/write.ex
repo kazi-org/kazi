@@ -3,8 +3,12 @@ defmodule Kazi.Daemon.Write do
   T52.3 (ADR-0068 decision 1): the daemon's SERVER-SIDE read-model write. The
   client sends `{"op":"write","batch":[...]}` over the control socket; this
   module applies the whole batch inside ONE `Kazi.Repo.transaction` and hands
-  back `{"ok":true,"applied":N}` -- or, on ANY failure, `{"ok":false,"error":
-  <reason>}` with the WHOLE transaction rolled back (never a partial batch).
+  back `{"ok":true,"applied":N,"results":[...]}` -- or, on ANY failure,
+  `{"ok":false,"error":<reason>}` with the WHOLE transaction rolled back (never
+  a partial batch). `results` is a per-entry JSON-safe outcome (a row count for
+  `update_all`/`delete_all`, `null` for `insert`/`sql`) so a count-returning
+  client call reconstructs its return faithfully; `applied` (the entry count) is
+  unchanged.
   It is the sibling of `Kazi.Daemon.BusRead`: `Kazi.Daemon.Control` routes the
   `write` op here exactly as it routes `read` there.
 
@@ -146,20 +150,30 @@ defmodule Kazi.Daemon.Write do
 
   # One transaction for the whole batch: the first failing entry rolls back every
   # prior one, so a client never observes a partial batch (ADR-0068).
+  #
+  # Each entry also contributes a JSON-safe `result` (a row count for
+  # `update_all`/`delete_all`, `nil` for `insert`/`sql`) collected into
+  # `"results"` alongside `"applied"`, so a client can reconstruct a
+  # count-returning call (`invalidate_cached_*`, the reaper) faithfully instead
+  # of guessing. `"applied"` (the count of entries) is unchanged and additive.
   defp apply_batch(repo, batch) do
     result =
       repo.transaction(fn ->
-        Enum.reduce(batch, 0, fn entry, applied ->
+        Enum.reduce(batch, [], fn entry, results ->
           case apply_entry(repo, entry) do
-            :ok -> applied + 1
+            {:ok, value} -> [value | results]
             {:error, reason} -> repo.rollback(reason)
           end
         end)
       end)
 
     case result do
-      {:ok, applied} -> %{"ok" => true, "applied" => applied}
-      {:error, reason} -> error(reason)
+      {:ok, results} ->
+        ordered = Enum.reverse(results)
+        %{"ok" => true, "applied" => length(ordered), "results" => ordered}
+
+      {:error, reason} ->
+        error(reason)
     end
   end
 
@@ -168,7 +182,7 @@ defmodule Kazi.Daemon.Write do
       changeset = insert_changeset(mod, Map.get(entry, "fields", %{}))
 
       case repo.insert(changeset, decode_opts(Map.get(entry, "opts", %{}))) do
-        {:ok, _row} -> :ok
+        {:ok, _row} -> {:ok, nil}
         {:error, changeset} -> {:error, changeset_error(changeset)}
       end
     end
@@ -179,8 +193,12 @@ defmodule Kazi.Daemon.Write do
          {:ok, filters} <- keyword(Map.get(entry, "filters", %{})),
          {:ok, changes} <- keyword(Map.get(entry, "changes", %{})) do
       query = from(x in mod, where: ^filters)
-      {_count, _} = repo.update_all(query, set: changes)
-      :ok
+      # `update_all` does NOT cast its `set:` values, but a value that crossed the
+      # wire is JSON-decoded (a datetime is an ISO string, not a `DateTime`). Cast
+      # each change through the schema's declared field type so a typed column
+      # (the run-registry `heartbeat_at`/`finished_at` transitions) round-trips.
+      {_count, _} = repo.update_all(query, set: cast_changes(mod, changes))
+      {:ok, nil}
     end
   end
 
@@ -188,14 +206,14 @@ defmodule Kazi.Daemon.Write do
     with {:ok, mod} <- resolve_schema(schema),
          {:ok, filters} <- keyword(Map.get(entry, "filters", %{})) do
       query = from(x in mod, where: ^filters)
-      {_count, _} = repo.delete_all(query)
-      :ok
+      {count, _} = repo.delete_all(query)
+      {:ok, count}
     end
   end
 
   defp apply_entry(repo, %{"kind" => "sql", "sql" => sql} = entry) when is_binary(sql) do
     case repo.query(sql, Map.get(entry, "params", [])) do
-      {:ok, _result} -> :ok
+      {:ok, _result} -> {:ok, nil}
       {:error, reason} -> {:error, "sql_failed: #{inspect(reason)}"}
     end
   end
@@ -262,6 +280,26 @@ defmodule Kazi.Daemon.Write do
   end
 
   defp keyword(_other), do: {:error, "malformed_fields"}
+
+  # Cast each `set:` value through the schema's declared field type so a
+  # JSON-decoded value (an ISO datetime string, a numeric string) is dumped as
+  # the right runtime type by `update_all` (which, unlike `insert`, applies no
+  # cast of its own). A field the schema does not declare, or a value the type
+  # rejects, is passed through untouched — the DB layer then decides.
+  defp cast_changes(mod, changes) do
+    Enum.map(changes, fn {field, value} ->
+      case mod.__schema__(:type, field) do
+        nil ->
+          {field, value}
+
+        type ->
+          case Ecto.Type.cast(type, value) do
+            {:ok, cast} -> {field, cast}
+            _ -> {field, value}
+          end
+      end
+    end)
+  end
 
   defp atomize(map) do
     Map.new(map, fn {k, v} -> {to_field(k), v} end)
