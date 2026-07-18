@@ -289,17 +289,31 @@ sending to: it read the bus at least once, so its cursor exists, and it will
 drain the queue if it comes back. An inbox can only exist for a session that
 was really there — a typo has neither.
 
-### Naming sessions (T55.5, ADR-0073)
+### Naming sessions (T55.5, ADR-0073; durable bindings T65.2, #1430)
 
 Raw session ids are UUIDs (or derived fallback ids) nobody can remember, so
 directed messaging used to be unusable in practice. `kazi bus name
-<nickname>` assigns a durable human name to the calling session: it is
-carried on presence (every later bus call preserves it), rendered by `bus
-who`, and accepted by `bus tell`.
+<nickname>` binds a durable human name to the calling session's UUID: it is
+carried on the session's one presence row (rendered by `bus who`, accepted
+by `bus tell`) **and** recorded in a dedicated, TTL-less JetStream KV bucket
+(`kazi_names`).
 
-Re-asserting a name RE-BINDS it: a relaunched worker that runs `kazi bus
-name worker-a` again becomes addressable under `worker-a` immediately, and
-any older presence row holding that name loses it. A nickname cannot be
+**Bindings are durable.** The presence bucket ages entries out after 600s so
+a closed session leaves `who` — but that same TTL used to WIPE every friendly
+name whenever the daemon bounced (#1430 failure mode 1: two restarts one night
+dropped every name back to a raw UUID). Name→UUID bindings now live in their
+own bucket with **no TTL**, so they survive both the presence TTL and a daemon
+restart. On the next bus call after a restart, a session with no presence-row
+label has its name re-derived from the durable binding, so friendly names
+reappear instead of dropping to UUIDs.
+
+**Identity is the UUID; the name is a unique label bound to it.** A rename
+UPDATES the one UUID-keyed presence row — it never mints a second (#1430
+failure mode 1). Binding a nickname already held by a **different** session is
+a HARD error naming the holder (`name "<x>" is already bound to session
+<holder>`); names are never silently stolen. Re-binding a session's OWN name is
+idempotent. (This supersedes T55.5's steal-on-reassert: identity anchored on
+the UUID means the name has exactly one owner.) A nickname still cannot be
 empty, contain whitespace, start with `@` (reserved for teams), or equal a
 different live session's id.
 
