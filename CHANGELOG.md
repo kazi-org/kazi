@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.224.0](https://github.com/kazi-org/kazi/compare/v1.223.0...v1.224.0) (2026-07-18)
+
+
+### Features
+
+* **scheduler:** worktree-less origin landing for --parallel per-group results (T62.5, [#1241](https://github.com/kazi-org/kazi/issues/1241)) ([449c95e](https://github.com/kazi-org/kazi/commit/449c95e82e4298f656b512658a8f6e99676d1059))
+
 ## [1.223.0](https://github.com/kazi-org/kazi/compare/v1.222.0...v1.223.0) (2026-07-18)
 
 
