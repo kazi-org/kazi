@@ -27,6 +27,7 @@ defmodule Kazi.ReadModel do
 
   alias Kazi.ReadModel.{
     DebriefHypothesis,
+    GoalGapFields,
     GoalSummary,
     Iteration,
     LandedRef,
@@ -644,6 +645,61 @@ defmodule Kazi.ReadModel do
   # convergence signal it already records, T0.8.)
   defp derive_status(%Iteration{converged: true}, _vector), do: :converged
   defp derive_status(%Iteration{}, _vector), do: :in_progress
+
+  @doc """
+  Projects the three T63.3 gap-list field groups for a goal (E63, UC-062,
+  ADR-0011 — projection only): narrative-intent per iteration, display grouping
+  tags for the latest vector's predicate ids, and a per-goal tally of iterations
+  missing their tool/context counters. See `Kazi.ReadModel.GoalGapFields` for the
+  shape and the honest-unknown rules.
+
+  Absent data is surfaced as explicit `nil`/empty, never a fabricated value: a
+  goal with no recorded iterations yields empty narrative + groups and a zeroed
+  `total_iterations`; an observe-only iteration contributes a `nil` `action_kind`;
+  a predicate id with no separable prefix maps to a `nil` group. This is a pure
+  read over the iterations projection — it never touches the loop or a write path.
+  """
+  @spec goal_gap_fields(Kazi.Goal.id()) :: GoalGapFields.t()
+  def goal_gap_fields(goal_ref) do
+    ref = to_string(goal_ref)
+    iterations = list_iterations(ref)
+
+    narrative_intent =
+      Enum.map(iterations, fn %Iteration{} = it ->
+        %{
+          iteration_index: it.iteration_index,
+          action_kind: it.action_kind,
+          action_params: it.action_params || %{}
+        }
+      end)
+
+    predicate_groups =
+      case List.last(iterations) do
+        nil ->
+          %{}
+
+        latest ->
+          %PredicateVector{results: results} = to_predicate_vector(latest)
+
+          Map.new(results, fn {id, _result} ->
+            id = to_string(id)
+            {id, GoalGapFields.group_for(id)}
+          end)
+      end
+
+    missing_counters = %{
+      tools_missing: Enum.count(iterations, &(map_size(&1.tools) == 0)),
+      context_missing: Enum.count(iterations, &(map_size(&1.context) == 0)),
+      total_iterations: length(iterations)
+    }
+
+    %GoalGapFields{
+      goal_ref: ref,
+      narrative_intent: narrative_intent,
+      predicate_groups: predicate_groups,
+      missing_counters: missing_counters
+    }
+  end
 
   @doc """
   Rehydrates a stored row's `predicate_vector` back into a
