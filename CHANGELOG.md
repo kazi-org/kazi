@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.242.0](https://github.com/kazi-org/kazi/compare/v1.241.0...v1.242.0) (2026-07-18)
+
+
+### Features
+
+* **bus:** daemon-assigned names on join via atomic KV allocation (T65.3, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([3c16370](https://github.com/kazi-org/kazi/commit/3c1637056c10a92bac580a0d1eb5b3bc39d87591))
+* **cli:** report the daemon-assigned name from bus join; name = attach-alias (T65.3, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([b3993ad](https://github.com/kazi-org/kazi/commit/b3993ad42c1687475326d9de4eb67bdda3f7ac24))
+
 ## [1.241.0](https://github.com/kazi-org/kazi/compare/v1.240.0...v1.241.0) (2026-07-18)
 
 
