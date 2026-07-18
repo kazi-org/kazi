@@ -289,6 +289,36 @@ sending to: it read the bus at least once, so its cursor exists, and it will
 drain the queue if it comes back. An inbox can only exist for a session that
 was really there — a typo has neither.
 
+### The identity model (E65, #1430)
+
+Session/team identity used to be three loosely-coupled free-form strings — a
+session id, a friendly name, and a team string — each chosen at a different
+time by a different actor, which in one day produced three variants of one team
+string, friendly names wiped on every daemon restart, and renames minting
+duplicate presence rows. E65 replaces that with one model, and the three
+sections below are its parts:
+
+- **Identity is the immutable session UUID.** Everything keys on it: the one
+  presence row, every name binding, every rename. It is resolved from
+  `--session-name` > `KAZI_SESSION_NAME` > a harness session env var > a stable
+  derived fallback (see "Naming sessions" below).
+- **Teams are DERIVED, not typed.** `kazi bus join` (argless) computes the team
+  from the repo's git origin as a fixed-prefix `t-<host>-<org>-<repo>` slug, so
+  two checkouts of one repo land in the same team with no typed string and no
+  slug can begin with `-` (see "Teams").
+- **Names are DAEMON-ASSIGNED labels bound to the UUID, durable in JetStream
+  KV.** Join hands the session a sequential `<team>-a/b/c…` name from a TTL-less
+  bucket, so names survive a daemon restart; `kazi bus name` attaches extra
+  aliases and, on a genuine label change, tombstones the old name for a bounded
+  grace window (see "Naming sessions").
+
+**Compat for existing explicit teams.** Derived slugs are ADDITIVE — nothing is
+migrated. `kazi bus join -- <team>` still joins a literal free-form team
+verbatim (recorded `derived=false`), the deliberate cross-repo override; the
+`--` also lets a team name that begins with `-` join as a positional. Adoption
+is per-session: a session on a derived team and a session on an explicit team
+coexist, and scripts pinned to the old team string keep working.
+
 ### Naming sessions (T55.5, ADR-0073; durable bindings T65.2, assigned names T65.3, #1430)
 
 Raw session ids are UUIDs (or derived fallback ids) nobody can remember, so
