@@ -33,7 +33,8 @@ defmodule Kazi.ReadModel do
     OrientationPackCache,
     ProposedGoal,
     ProposedMemory,
-    RetrievalSnippetCache
+    RetrievalSnippetCache,
+    Writer
   }
 
   alias Kazi.Retrieval.Snippet
@@ -106,7 +107,7 @@ defmodule Kazi.ReadModel do
     result =
       %Iteration{}
       |> Iteration.changeset(row)
-      |> Repo.insert(insert_opts(attrs))
+      |> Writer.insert(insert_opts(attrs))
 
     # T3.6b (ADR-0011): on a successful record, broadcast on the goal-board topic
     # so a subscribed dashboard LiveView re-reads and pushes a live diff. This is
@@ -293,7 +294,7 @@ defmodule Kazi.ReadModel do
     Enum.reduce_while(items, {:ok, []}, fn item, {:ok, acc} ->
       row = %{goal_ref: goal_ref, run_id: run_id, iteration: iteration, item: item}
 
-      case %DebriefHypothesis{} |> DebriefHypothesis.changeset(row) |> Repo.insert() do
+      case %DebriefHypothesis{} |> DebriefHypothesis.changeset(row) |> Writer.insert() do
         {:ok, hypothesis} -> {:cont, {:ok, [hypothesis | acc]}}
         {:error, _} = error -> {:halt, error}
       end
@@ -389,7 +390,7 @@ defmodule Kazi.ReadModel do
 
         case %LandedRef{}
              |> LandedRef.changeset(row)
-             |> Repo.insert(
+             |> Writer.insert(
                on_conflict: {:replace, [:branch, :pr, :merge_commit, :updated_at]},
                conflict_target: [:run_ref, :partition_id]
              ) do
@@ -490,7 +491,7 @@ defmodule Kazi.ReadModel do
       %ProposedGoal{} = row ->
         row
         |> ProposedGoal.transition_changeset(%{status: status, goal: goal})
-        |> Repo.update()
+        |> Writer.update()
     end
   end
 
@@ -511,7 +512,7 @@ defmodule Kazi.ReadModel do
     fingerprint = Map.get(attrs, :fingerprint) || Map.get(attrs, "fingerprint")
 
     case Repo.get_by(ProposedMemory, fingerprint: fingerprint) do
-      nil -> %ProposedMemory{} |> ProposedMemory.changeset(attrs) |> Repo.insert()
+      nil -> %ProposedMemory{} |> ProposedMemory.changeset(attrs) |> Writer.insert()
       %ProposedMemory{} = existing -> {:ok, existing}
     end
   end
@@ -564,7 +565,7 @@ defmodule Kazi.ReadModel do
         {:error, :not_found}
 
       %ProposedMemory{status: "proposed"} = row ->
-        row |> ProposedMemory.transition_changeset(%{status: status}) |> Repo.update()
+        row |> ProposedMemory.transition_changeset(%{status: status}) |> Writer.update()
 
       %ProposedMemory{status: current} ->
         {:error, {:invalid_transition, current, status}}
@@ -712,7 +713,7 @@ defmodule Kazi.ReadModel do
 
     %OrientationPackCache{}
     |> OrientationPackCache.changeset(attrs)
-    |> Repo.insert(
+    |> Writer.insert(
       on_conflict: {:replace, [:workspace, :git_sha, :pack, :blast_radius, :updated_at]},
       conflict_target: :cache_key
     )
@@ -758,10 +759,7 @@ defmodule Kazi.ReadModel do
   """
   @spec invalidate_cached_pack(String.t()) :: non_neg_integer()
   def invalidate_cached_pack(cache_key) when is_binary(cache_key) do
-    {count, _} =
-      Repo.delete_all(from(c in OrientationPackCache, where: c.cache_key == ^cache_key))
-
-    count
+    Writer.delete_all(OrientationPackCache, %{cache_key: cache_key})
   end
 
   # --- retrieval-snippet cache (T4.9c, ADR-0012 §4) --------------------------
@@ -795,7 +793,7 @@ defmodule Kazi.ReadModel do
 
     %RetrievalSnippetCache{}
     |> RetrievalSnippetCache.changeset(attrs)
-    |> Repo.insert(
+    |> Writer.insert(
       on_conflict: {:replace, [:workspace, :git_sha, :snippets, :blast_radius, :updated_at]},
       conflict_target: :cache_key
     )
@@ -841,10 +839,7 @@ defmodule Kazi.ReadModel do
   """
   @spec invalidate_cached_snippets(String.t()) :: non_neg_integer()
   def invalidate_cached_snippets(cache_key) when is_binary(cache_key) do
-    {count, _} =
-      Repo.delete_all(from(c in RetrievalSnippetCache, where: c.cache_key == ^cache_key))
-
-    count
+    Writer.delete_all(RetrievalSnippetCache, %{cache_key: cache_key})
   end
 
   # --- serialization helpers -------------------------------------------------
