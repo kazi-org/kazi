@@ -208,6 +208,61 @@ defmodule Kazi.CLIRunJsonTest do
     end
   end
 
+  # ===========================================================================
+  # T60.5 (#1070): the human-readable convergence report gains a cost/token
+  # breakdown table -- purely additive terminal UX, `--json` unaffected (the
+  # test above already pins the `--json` `usage`/`economy` shape byte-for-byte).
+  # ===========================================================================
+
+  describe "run (human report) — cost/token breakdown table" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    test "convergence prints a cost/token breakdown table (non --json)", %{tmp_dir: tmp_dir} do
+      %{work: work, bare: bare} = setup_repo(tmp_dir)
+
+      {server, url, body_file} = start_http_server("down")
+      on_exit(fn -> :inets.stop(:httpd, server) end)
+
+      goal_file = write_goal_file(tmp_dir, work, url)
+
+      runtime_opts =
+        converge_runtime_opts(
+          tmp_dir,
+          work,
+          url,
+          body_file,
+          bare,
+          write_json_harness_stub(tmp_dir)
+        )
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(
+                   [
+                     "apply",
+                     goal_file,
+                     "--workspace",
+                     work,
+                     "--allow-primary-workspace"
+                   ],
+                   runtime_opts
+                 ) == 0
+        end)
+
+      assert out =~ "CONVERGED"
+      assert out =~ "predicate vector:"
+
+      # The table: header row, cost/predicates row, token breakdown line.
+      assert out =~ "│ Goal"
+      assert out =~ "│ Iterations │"
+      assert out =~ "│ Cost"
+      assert out =~ "│ Predicates │"
+      assert out =~ ~r/│ \d+\s+│ \$0\.01\s+│ 2\/2 pass\s+│/
+      assert out =~ ~r/tokens: input=100 output=250 cached=5000 cache_write=0/
+    end
+  end
+
   describe "run --json — over_budget" do
     setup :checkout_sandbox
     @describetag :tmp_dir

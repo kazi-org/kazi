@@ -375,4 +375,51 @@ defmodule Kazi.Economy.KPIsTest do
       assert kpis.fresh_input_tokens_avoided == nil
     end
   end
+
+  describe "token_breakdown/1 (T60.5, #1070)" do
+    test "reads each category from the usage envelope, atom-keyed" do
+      usage = %{
+        input_tokens: 100,
+        output_tokens: 250,
+        cached_input_tokens: 5000,
+        cache_write_tokens: 0
+      }
+
+      assert KPIs.token_breakdown(usage) == %{
+               input: 100,
+               output: 250,
+               cached: 5000,
+               cache_write: 0
+             }
+    end
+
+    test "reads each category from the usage envelope, string-keyed (JSON round-trip)" do
+      usage = %{"input_tokens" => 100, "output_tokens" => 250}
+
+      assert KPIs.token_breakdown(usage) == %{
+               input: 100,
+               output: 250,
+               cached: nil,
+               cache_write: nil
+             }
+    end
+
+    test "an unreported category is nil, never a fabricated 0" do
+      assert KPIs.token_breakdown(%{}) == %{
+               input: nil,
+               output: nil,
+               cached: nil,
+               cache_write: nil
+             }
+    end
+
+    test "a non-map input degrades to all-nil rather than raising" do
+      assert KPIs.token_breakdown(nil) == %{
+               input: nil,
+               output: nil,
+               cached: nil,
+               cache_write: nil
+             }
+    end
+  end
 end
