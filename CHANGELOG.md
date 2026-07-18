@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.221.0](https://github.com/kazi-org/kazi/compare/v1.220.0...v1.221.0) (2026-07-18)
+
+
+### Features
+
+* **dashboard:** PLANNED section on mission control -- approved undispatched proposals as todo cards (T60.4, [#1160](https://github.com/kazi-org/kazi/issues/1160)) ([6f29330](https://github.com/kazi-org/kazi/commit/6f29330e4f7fde3bef074e8cefa0371f742d0e0f))
+
 ## [1.220.0](https://github.com/kazi-org/kazi/compare/v1.219.0...v1.220.0) (2026-07-18)
 
 
