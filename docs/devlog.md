@@ -4427,3 +4427,46 @@ pass-through — no full release build needed for the test.
 Confirmed the stream split for the burrito-stdout gap: the `[l] Skipped cleanup`
 lines go to STDERR (already correct); only the `[i] New install path is:` line
 goes to STDOUT. So T58.4's precise fix target is the `[i]` install-path line.
+
+## 2026-07-18 — T62.5: live origin-branch landing for `--parallel` per-group results (#1241 part 1)
+
+T44.10 (PR #1240) shipped the per-group landed-refs contract but tested it only
+through the injectable integrator seam. The live gap it deferred turned out to be
+TWO concrete defects, not just a missing verification — both found and fixed here:
+
+**Finding 1 — converged commits never reached origin.** A `--parallel` partition's
+worktree is torn down the instant its reconcile returns (issue #1053). The only
+push was the CREATE-time upstream push (issue #1075), which pushes the isolation
+branch while it is still at the base tip — the converged commit that lands AFTER it
+was never pushed, so origin's group branch carried nothing to land. Fix: on
+`:converged` (parallel path only, and only when a landing is configured), the
+worktree wrapper now pushes the worktree HEAD to the STABLE group landing branch
+before teardown.
+
+**Finding 2 — the landing branch and the pushed branch disagreed.** The worktree
+branch carries a per-process nonce suffix (issue #1074) for cross-run isolation,
+but the scheduler derives the collective's landed branch as the NONCE-LESS
+`<branch_prefix>/<slug>` (`partition_landing_branch/2`). A live worktree-less
+landing keyed on the derived name would never find the pushed nonce branch. Fix:
+the pre-teardown push targets the stable name explicitly (`HEAD:<prefix>/<slug>`),
+so the pushed branch and the landing target agree.
+
+**Shipped — `Kazi.Scheduler.Integration.OriginIntegrator`.** The worktree-less
+landing the default `ActionIntegrator` could not do (`{:error, :no_worktree}` when
+the worktree is gone): given a group branch already on `origin` and the shared
+base, it rebase-merges the branch onto the base entirely through a kazi-owned
+scratch worktree of a checkout that shares `origin`, then pushes the advanced base
+back. A rebase/push conflict maps to the same re-dispatchable `{:conflict, _}` the
+other integrators use; a missing `origin/<branch>` is an honest hard error, never a
+silent success.
+
+**Live proof.** `test/kazi/scheduler/origin_landing_live_test.exs` (tagged
+`:integration`) runs a real 2-group `run_goals` against a throwaway bare origin —
+real worktrees, real disjoint commits, the real OriginIntegrator (no mock) — then
+verifies every surfaced `landed` ref INDEPENDENTLY against a fresh clone of that
+origin: each branch exists, each `merge_commit` is a real commit reachable from
+`origin/main`, and both groups' disjoint files are present on the landed base. A
+`mode:none` run (no integrator) leaves the base byte-identical — regression pin.
+Deferred to T62.6: persisting these refs into the read-model `kazi status` verb,
+and auto-selecting OriginIntegrator from a goal's `[integration]` mode in the real
+CLI (still its own review, per PR #1240's scoping).
