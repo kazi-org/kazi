@@ -51,6 +51,8 @@ defmodule Kazi.Runtime do
     Scope
   }
 
+  alias Kazi.Runtime.GoalDrift
+
   alias Kazi.Harness.ChildSupervisor
   alias Kazi.ReadModel.{HeartbeatTicker, Iteration, RunRegistry}
   alias Kazi.Runtime.BusMirror
@@ -238,6 +240,17 @@ defmodule Kazi.Runtime do
       iteration under `run --json --stream`. A raising observer is contained (it
       never alters convergence). Default `nil` (no streaming).
     * `:goal_ref` — the read-model `goal_ref` (default `goal.id`).
+    * `:goal_source` — goal-drift-guard-1415: the goal-file PATH `goal` was
+      loaded from (never a proposal ref), when the caller has one. When set,
+      `run/2` fingerprints the fully-resolved predicate bar at t0 and, once the
+      loop terminates, re-loads THIS SAME path and compares — a mismatch (a
+      predicate added/removed/reconfigured on disk since t0) is reported via
+      the result's additive `:goal_drifted` / `:goal_drift` fields (see
+      `Kazi.Runtime.GoalDrift`, `docs/schemas/run-result.md`). Purely
+      observational: the loop already converges against the ORIGINAL in-memory
+      `goal` regardless of what happens to the file on disk, whether or not
+      this option is set. Default `nil` (no drift report; byte-identical to
+      before this option existed).
     * `:await_timeout` — how long `run/2` blocks for termination (default
       `:infinity`).
     * `:providers` — override the predicate-kind → provider-module map (advanced;
@@ -300,6 +313,15 @@ defmodule Kazi.Runtime do
           goal.guards ++
             Enforcement.guard_predicates(enforcement) ++ Scope.guard_predicates(goal.scope)
     }
+
+    # goal-drift-guard-1415: fingerprint the FULLY resolved predicate bar
+    # (authored predicates + the synthesized guards above) the instant this run
+    # commits to it — the t0 snapshot `detect_goal_drift/3` compares the on-disk
+    # goal-file against once the loop terminates. `goal` itself never changes
+    # for the rest of this run (the loop reads this same struct throughout), so
+    # the ORIGINAL bar governs convergence regardless of what happens to the
+    # file on disk — this snapshot only powers the observational report.
+    t0_snapshot = GoalDrift.snapshot(goal)
 
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
@@ -380,7 +402,10 @@ defmodule Kazi.Runtime do
           :debrief,
           # T32.4: resolved above and re-set in the merge below as the loop's
           # `:enforcement` profile.
-          :enforcement
+          :enforcement,
+          # goal-drift-guard-1415: consumed after the loop terminates
+          # (detect_goal_drift/2 below), never a Loop opt.
+          :goal_source
         ])
         |> Keyword.merge(
           goal: goal,
@@ -480,7 +505,10 @@ defmodule Kazi.Runtime do
         stop_parent_monitor(parent_monitor)
         finish_run(persist?, run_id, result)
         harvest_memory(persist?, run_id, goal_ref, result)
-        normalize_await(result)
+
+        result
+        |> normalize_await()
+        |> put_goal_drift(t0_snapshot, Keyword.get(opts, :goal_source))
       else
         {:error, reason} = error ->
           # Registration now happens before `Loop.start_link/1` (see the
@@ -1548,4 +1576,23 @@ defmodule Kazi.Runtime do
   # work), but run/2 owns this loop's lifecycle, so a timeout is a real error.
   defp normalize_await({:ok, result}), do: {:ok, result}
   defp normalize_await({:error, :timeout}), do: {:error, :await_timeout}
+
+  # =============================================================================
+  # Goal-drift detection (goal-drift-guard-1415)
+  # =============================================================================
+
+  # Additive report on TOP of the terminal result: whether the goal-file on disk
+  # at `:goal_source` (when the caller supplied one — a real file path, never a
+  # proposal ref) still matches the `t0_snapshot` this run actually converged
+  # against. Never changes the outcome the loop already decided — the ORIGINAL
+  # bar (`t0_snapshot`, captured before the loop started) already won by
+  # construction; this only surfaces whether it was quietly moved.
+  defp put_goal_drift({:ok, result}, t0_snapshot, goal_source) when is_map(result) do
+    case GoalDrift.detect(t0_snapshot, goal_source) do
+      :unchanged -> {:ok, result}
+      {:drifted, diff} -> {:ok, Map.merge(result, %{goal_drifted: true, goal_drift: diff})}
+    end
+  end
+
+  defp put_goal_drift(result, _t0_snapshot, _goal_source), do: result
 end
