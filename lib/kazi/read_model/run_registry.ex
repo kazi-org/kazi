@@ -22,6 +22,7 @@ defmodule Kazi.ReadModel.RunRegistry do
 
   alias Kazi.ReadModel.Guard
   alias Kazi.ReadModel.Run
+  alias Kazi.ReadModel.Writer
   alias Kazi.Repo
 
   # A run with no heartbeat in this long is considered stale (crashed or hung)
@@ -52,7 +53,7 @@ defmodule Kazi.ReadModel.RunRegistry do
 
     %Run{}
     |> Run.changeset(attrs)
-    |> Repo.insert(
+    |> Writer.insert(
       on_conflict:
         {:replace,
          [
@@ -96,7 +97,7 @@ defmodule Kazi.ReadModel.RunRegistry do
       run ->
         run
         |> Run.changeset(%{"heartbeat_at" => DateTime.utc_now()})
-        |> Repo.update()
+        |> Writer.update()
     end
   end
 
@@ -135,7 +136,7 @@ defmodule Kazi.ReadModel.RunRegistry do
       run ->
         run
         |> Run.changeset(%{"harness_session_id" => session_id})
-        |> Repo.update()
+        |> Writer.update()
     end
   end
 
@@ -161,7 +162,7 @@ defmodule Kazi.ReadModel.RunRegistry do
       run ->
         run
         |> Run.changeset(%{"harness_child_pid" => pid})
-        |> Repo.update()
+        |> Writer.update()
     end
   end
 
@@ -206,7 +207,7 @@ defmodule Kazi.ReadModel.RunRegistry do
 
         run
         |> Run.changeset(attrs)
-        |> Repo.update()
+        |> Writer.update()
     end
   end
 
@@ -307,7 +308,7 @@ defmodule Kazi.ReadModel.RunRegistry do
       run ->
         run
         |> Run.changeset(%{"status" => "terminated", "finished_at" => DateTime.utc_now()})
-        |> Repo.update()
+        |> Writer.update()
     end
   end
 end
