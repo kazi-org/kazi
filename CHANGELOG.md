@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.229.0](https://github.com/kazi-org/kazi/compare/v1.228.0...v1.229.0) (2026-07-18)
+
+
+### Features
+
+* **authoring:** clarify-floor warning for whole-tree-clean acceptance predicates (T59.10, [#937](https://github.com/kazi-org/kazi/issues/937) Gap E) ([a5d8d06](https://github.com/kazi-org/kazi/commit/a5d8d06b37fe70865ad7f5c9d503be391353a4e8))
+
 ## [1.228.0](https://github.com/kazi-org/kazi/compare/v1.227.0...v1.228.0) (2026-07-18)
 
 
