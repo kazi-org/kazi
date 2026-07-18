@@ -462,12 +462,11 @@ defmodule Kazi.Teach.InstallSkill do
     For a LONG convergence add `--stream` (JSONL progress); for a partitioned
     goal-set add `--parallel`; for a continuous hold-true reconciler add
     `--standing`; `--explain` (alias `--dry-run`) prints the wave schedule and
-    exits without dispatching. ONE OPEN CAVEAT on `--parallel` (#936): the
-    scheduler runs the needs-DAG frontiers back-to-back with no supervised
-    checkpoint between waves, so a wave whose predicates pass vacuously can
-    cascade into dependent waves unreviewed -- arrange pause points yourself
-    when waves build on each other. Details for all four flags and the
-    workaround: kazi/RECIPES.md.
+    exits without dispatching. For a supervised checkpoint between needs-DAG
+    waves (#936, T50.3) add `--pause-between-waves`: stops starting new groups
+    once the current frontier settles, persists a resume checkpoint, and exits
+    0 with a `paused` collective carrying a `resume_token` -- continue later
+    with `--resume <token>`. Details for all five flags: kazi/RECIPES.md.
 
     ### Step 4 -- parse the result and branch on `next_action`
 
@@ -823,11 +822,17 @@ defmodule Kazi.Teach.InstallSkill do
     - `--parallel [N]`: for a goal-set partitioned by `[[groups]]` + `needs`
       edges, kazi drives one supervised reconciler per partition in
       needs-ordered waves to a COLLECTIVE verdict (one result object, same
-      `next_action` branching). Single-partition degrades to serial. CAVEAT
-      (#936): frontiers run back-to-back with no supervised checkpoint between
-      waves -- a vacuously-passing wave can cascade unreviewed. Until a
-      checkpoint mode lands, split the DAG into one goal-file per wave or stop
-      at `frontier_complete` boundaries you want to inspect.
+      `next_action` branching). Single-partition degrades to serial. For a
+      supervised checkpoint between waves (#936, T50.3), add
+      `--pause-between-waves` -- see below.
+    - `--pause-between-waves` / `--resume <token>` (T50.3, #936): with
+      `--parallel` on a needs-DAG/group goal, or with `--fleet`, stop starting
+      new groups once the current frontier settles (in-flight groups finish),
+      persist a resume checkpoint to the read-model, and exit 0 with a
+      `paused` collective carrying `resume_token` -- continue later with
+      `--resume <token>` against the SAME goal-file; a changed goal-set
+      refuses loudly rather than resuming against different work. Rejected
+      without `--parallel`/`--fleet` (a serial loop has no wave boundaries).
     - `--standing`: a continuous reconciler that holds predicates true and
       re-converges on drift, instead of converging once and stopping.
     - `--explain` (alias `--dry-run`): prints the computed wave schedule (the
@@ -838,19 +843,16 @@ defmodule Kazi.Teach.InstallSkill do
 
     ## Check-only gate variant (observe without dispatching)
 
-    kazi has no observe-only verb (#805 context). To read the predicate vector
-    without letting a red vector dispatch kazi's harness: copy the goal-file to
-    a scratch location (never edit the original), set
-    `[budget] max_iterations = 1` and `[harness] id = "claude"` /
-    `command = "/usr/bin/true"` (drop model/permission_mode lines), strip any
-    `landed` predicate, then `kazi apply <gate-variant> --json --workspace
-    <root>`. A red vector terminates after one observation with zero tokens and
-    zero edits. `--json` stdout may carry a stray log line before the JSON --
-    extract with `grep -a '^{' <out> | tail -1`. Verdict mapping for a gate:
-    `converged` green; `error` + `reason: "vacuous_goal"` = all predicates pass
-    at t0 (green ONLY for guard-shaped sets -- kazi/AUTHORING.md red-at-t0
-    rule); `stuck`/`over_budget` red (the failing `predicates[]` name why); any
-    other `error` = authoring/infra problem, not evidence about the code.
+    `kazi apply <goal-file> --check --json --workspace <root>` (issue #805) IS
+    the observe-only verb: it evaluates the predicate vector EXACTLY ONCE
+    through the real provider path -- never a harness dispatch, never an
+    integrate/deploy -- and exits. Unlike a normal `apply`, an all-pass vector
+    is the intended success case (`status: "pass"`, exit 0), not the
+    `vacuous_goal` rejection; any failing predicate exits 1 (`status: "fail"`)
+    with `predicates[]` naming the failures and their captured evidence. No
+    scratch-copy, no fake no-op harness workaround, and no goal-file edit
+    needed -- run it against the real goal-file directly. For merge gates
+    (ADR-0026) and release qualification.
 
     ## status and the dashboard
 
