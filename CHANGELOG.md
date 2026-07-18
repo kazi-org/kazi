@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.218.0](https://github.com/kazi-org/kazi/compare/v1.217.1...v1.218.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** T60.4 -- kazi portfolio: planned/in progress/stuck/complete ([#1160](https://github.com/kazi-org/kazi/issues/1160)) ([96ccc53](https://github.com/kazi-org/kazi/commit/96ccc536ffe9d943cbd1918d42578a128e4315db))
+
 ## [1.217.1](https://github.com/kazi-org/kazi/compare/v1.217.0...v1.217.1) (2026-07-18)
 
 
