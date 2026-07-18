@@ -213,6 +213,90 @@ defmodule Kazi.PortfolioTest do
     end
   end
 
+  describe "blocker attribution (T64.2, UC-033/UC-061)" do
+    setup do
+      on_exit(fn -> Application.delete_env(:kazi, :starmap_roadmap_goal) end)
+    end
+
+    defp record_red(goal_ref, id, iterations) do
+      for i <- 1..iterations do
+        {:ok, _} =
+          Kazi.ReadModel.record_iteration(%{
+            goal_ref: goal_ref,
+            iteration_index: i,
+            predicate_vector: %{id => Kazi.PredicateResult.fail()}
+          })
+      end
+    end
+
+    defp blocked_entry(goal_ref) do
+      %{buckets: %{blocked: blocked}} = Portfolio.build()
+      Enum.find(blocked, &(&1.goal_ref == goal_ref))
+    end
+
+    test "a stuck run names its persistently-red predicate slice" do
+      run = start_run(%{goal_ref: "stuck-probe"})
+      record_red("stuck-probe", "probe", 3)
+      {:ok, _} = RunRegistry.finish(run.run_id, "stuck")
+
+      entry = blocked_entry("stuck-probe")
+
+      assert entry.cause == :stuck
+      assert entry.red_predicates == [%{id: "probe", red_iterations: 3}]
+      assert Portfolio.blocker_label(entry) == "blocked: probe red 3 iterations"
+    end
+
+    test "a DAG-blocked goal names the dep it waits on" do
+      b = Kazi.Goal.Group.new("b", "B")
+      d = Kazi.Goal.Group.new("d", "D", needs: ["b"])
+      Application.put_env(:kazi, :starmap_roadmap_goal, Kazi.Goal.new("roadmap", groups: [b, d]))
+
+      stuck = start_run(%{goal_ref: "b"})
+      {:ok, _} = RunRegistry.finish(stuck.run_id, "stuck")
+
+      entry = blocked_entry("d")
+
+      assert entry.cause == :dag
+      assert entry.blocked_by == "b"
+      assert Portfolio.blocker_label(entry) == "blocked by: b"
+    end
+
+    test "an over_budget run names iterations over its cap" do
+      run = start_run(%{goal_ref: "ob", max_iterations: 8})
+      record_red("ob", "probe", 8)
+      {:ok, _} = RunRegistry.finish(run.run_id, "over_budget")
+
+      entry = blocked_entry("ob")
+
+      assert entry.cause == :over_budget
+      assert entry.iterations == 8
+      assert entry.cap == 8
+      assert Portfolio.blocker_label(entry) == "blocked: 8/8 iterations"
+    end
+
+    test "no blocked entry renders without a cause" do
+      b = Kazi.Goal.Group.new("b", "B")
+      d = Kazi.Goal.Group.new("d", "D", needs: ["b"])
+      Application.put_env(:kazi, :starmap_roadmap_goal, Kazi.Goal.new("roadmap", groups: [b, d]))
+
+      stuck = start_run(%{goal_ref: "b"})
+      record_red("b", "probe", 2)
+      {:ok, _} = RunRegistry.finish(stuck.run_id, "stuck")
+
+      ob = start_run(%{goal_ref: "ob", max_iterations: 4})
+      {:ok, _} = RunRegistry.finish(ob.run_id, "over_budget")
+
+      %{buckets: %{blocked: blocked}} = Portfolio.build()
+
+      assert blocked != []
+
+      Enum.each(blocked, fn entry ->
+        assert Map.has_key?(entry, :cause)
+        assert is_binary(Portfolio.blocker_label(entry))
+      end)
+    end
+  end
+
   describe "fleet_remote (cross-machine, T60.1)" do
     test "a remote fact for a goal not present locally renders as a fleet_remote entry" do
       Application.put_env(:kazi, :remote_run_facts_fetcher, fn ->
