@@ -865,6 +865,98 @@ defmodule Kazi.Bus do
     end)
   end
 
+  @attention_topic_prefix "attention-"
+  @waiting_prefix "waiting-on-operator"
+
+  @doc """
+  The bus topic a session's attention fact (waiting/clear) is posted on
+  (T60.3, issue #1156): `"attention-" <> <session, sanitized>` -- any character
+  outside `[A-Za-z0-9._-]` becomes `-`, so a session id with arbitrary
+  characters still yields one legal subject token in
+  `bus.<scope>.fact.<topic>`.
+  """
+  @spec attention_topic(String.t()) :: String.t()
+  def attention_topic(session) when is_binary(session) do
+    @attention_topic_prefix <> String.replace(session, ~r/[^A-Za-z0-9._-]/, "-")
+  end
+
+  @doc """
+  True when THIS session currently has a live `waiting-on-operator` attention
+  fact on the bus (T60.3). Read as the single source of truth so the turn hook
+  only clears a fact that actually exists -- posting a `none` clear on a
+  session that was never waiting would add a bus message that every digest's
+  message count then sees (the #1392 regression: it inflated a pinned
+  200/150-message digest assertion by one). Best-effort: any bus/daemon error
+  is `false`, so a hiccup never makes the hot turn path post a spurious clear.
+  """
+  @spec waiting_on_operator?(keyword()) :: boolean()
+  def waiting_on_operator?(opts) do
+    subject = Enum.join(["bus", scope(opts), "fact", attention_topic(session(opts))], ".")
+
+    with_conn(opts, fn conn -> last_value_waiting?(conn, subject) end) == true
+  rescue
+    _ -> false
+  catch
+    _kind, _reason -> false
+  end
+
+  # A single-subject `last_per_subject` read (the board's mechanism narrowed to
+  # one subject): create an ephemeral consumer on its OWN cursor, pull the one
+  # current value, delete it. Reads only -- never posts, never disturbs the
+  # durable `read`/`peek` cursors -- so checking attention state costs no bus
+  # message.
+  defp last_value_waiting?(conn, subject) do
+    stream = Provision.stream_name()
+
+    consumer = %Consumer{
+      stream_name: stream,
+      filter_subject: subject,
+      deliver_policy: :last_per_subject,
+      ack_policy: :explicit,
+      replay_policy: :instant,
+      inactive_threshold: @board_consumer_ttl_ns,
+      max_ack_pending: -1
+    }
+
+    case Consumer.create(conn, consumer) do
+      {:ok, info} ->
+        try do
+          pull_one_waiting?(conn, stream, info.name)
+        after
+          Consumer.delete(conn, stream, info.name)
+        end
+
+      {:error, _reason} ->
+        false
+    end
+  end
+
+  defp pull_one_waiting?(conn, stream, consumer_name) do
+    inbox = "_INBOX.#{Integer.to_string(System.unique_integer([:positive]))}"
+    {:ok, sid} = Gnat.sub(conn, self(), inbox)
+
+    :ok =
+      Consumer.request_next_message(conn, stream, consumer_name, inbox, nil,
+        batch: 1,
+        no_wait: true
+      )
+
+    result =
+      receive do
+        {:msg, %{status: _status}} ->
+          false
+
+        {:msg, %{body: body} = msg} ->
+          if msg[:reply_to], do: Gnat.pub(conn, msg.reply_to, "")
+          String.starts_with?(body || "", @waiting_prefix)
+      after
+        @pull_timeout_ms -> false
+      end
+
+    Gnat.unsub(conn, sid)
+    result
+  end
+
   # ADR-0073 point 2: the ownership section is a DIRECT projection of
   # `refs/claims/*` read at source (`Kazi.Bus.Claims`) -- never routed through
   # the bus, never touched by the daemon. It is read only when a caller asks for
