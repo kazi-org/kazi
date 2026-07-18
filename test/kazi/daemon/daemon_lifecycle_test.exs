@@ -28,6 +28,14 @@ defmodule Kazi.Daemon.LifecycleTest do
     use Ecto.Repo, otp_app: :kazi, adapter: Ecto.Adapters.SQLite3
   end
 
+  # #1504: a throwaway read-model repo the daemon must START ITSELF (create the
+  # file, open it) at boot -- deliberately NOT started up front, so the boot
+  # seam's own `storage_up` + `start_link` (the standalone-binary path) is what
+  # brings it up before a write is served.
+  defmodule BootRepo do
+    use Ecto.Repo, otp_app: :kazi, adapter: Ecto.Adapters.SQLite3
+  end
+
   setup_all do
     NatsPrereq.ensure!()
     :ok
@@ -253,5 +261,92 @@ defmodule Kazi.Daemon.LifecycleTest do
 
     # A write issued right after the daemon is alive now succeeds.
     assert %{"ok" => true, "applied" => 1} = Write.handle(request, repo: FreshRepo)
+  end
+
+  # ===========================================================================
+  # (7) #1504 (the WRITER half of #1483): the daemon is the ONE read-model
+  # writer/migrator (ADR-0068). Under a standalone binary the app supervision
+  # tree never stood `Kazi.Repo` up, so the daemon must START the writer itself
+  # -- create the file, open it, keep it running -- BEFORE it migrates and
+  # BEFORE any write is served. Absent this the boot migration hit "could not
+  # lookup Ecto repo Kazi.Repo because it was not started", degraded to
+  # no-persistence, and the daemon SERVED anyway with every write silently lost.
+  # ===========================================================================
+
+  test "the daemon starts an unstarted read-model writer, migrates it, and a write round-trips" do
+    {sock_path, pid_path} = tmp_paths()
+    db_path = "/tmp/kazi_daemon_writer_#{System.unique_integer([:positive])}.db"
+
+    # Configure BootRepo's db so the daemon's REAL `ensure_repo_started` path
+    # (`storage_up(repo.config())` + `repo.start_link()`) resolves it. The repo
+    # is deliberately NOT started here -- the daemon boot seam must bring it up.
+    Application.put_env(:kazi, BootRepo, database: db_path, pool_size: 1, busy_timeout: 5_000)
+
+    on_exit(fn ->
+      Application.delete_env(:kazi, BootRepo)
+      File.rm(db_path)
+    end)
+
+    refute repo_running?(BootRepo)
+
+    request = %{
+      "op" => "write",
+      "batch" => [
+        %{
+          "kind" => "insert",
+          "schema" => "Kazi.ReadModel.Iteration",
+          "fields" => %{
+            "goal_ref" => "g-writer",
+            "iteration_index" => 0,
+            "predicate_vector" => %{},
+            "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+          }
+        }
+      ]
+    }
+
+    # `migrate_repo: BootRepo` drives the REAL default repo-start (storage_up +
+    # start_link) at BootRepo; only the migration is seamed to kazi's own
+    # migrations dir (BootRepo's own priv path holds none), exactly as (6).
+    migrations_path = Ecto.Migrator.migrations_path(Kazi.Repo)
+
+    opts =
+      daemon_opts(sock_path, pid_path) ++
+        [
+          migrate_repo: BootRepo,
+          migrate_fun: fn ->
+            Kazi.ReadModel.Migrate.run(BootRepo, migrations_path: migrations_path)
+          end
+        ]
+
+    start_supervised!(%{id: unique_name(:daemon), start: {Daemon, :start, [opts]}})
+
+    assert Probe.probe(sock_path) == :alive
+    # The daemon started the writer ...
+    assert repo_running?(BootRepo)
+    # ... migrated it, and a write now round-trips against it (no "could not
+    # lookup Ecto repo", no "continuing without persistence").
+    assert %{"ok" => true, "applied" => 1} = Write.handle(request, repo: BootRepo)
+  end
+
+  # #1504 fail-loud: a writer that genuinely CANNOT start must make the daemon
+  # REFUSE to serve, never come up healthy-looking with no write path. The
+  # repo-start failure propagates out of the supervisor `init/1`, so
+  # `Kazi.Daemon.start/1` returns `{:error, _}` and no socket is ever bound --
+  # the silent, write-less "continuing without persistence" mode is structurally
+  # impossible on this path.
+  test "a writer that cannot start makes the daemon refuse to serve" do
+    {sock_path, pid_path} = tmp_paths()
+
+    opts =
+      daemon_opts(sock_path, pid_path) ++
+        [repo_start_fun: fn -> raise "read-model writer unavailable" end]
+
+    assert {:error, _reason} = Daemon.start(opts)
+    assert Probe.probe(sock_path) == :missing
+  end
+
+  defp repo_running?(repo) do
+    is_pid(Process.whereis(repo)) or is_pid(GenServer.whereis(repo))
   end
 end
