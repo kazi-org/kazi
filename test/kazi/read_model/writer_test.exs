@@ -265,4 +265,126 @@ defmodule Kazi.ReadModel.WriterTest do
       assert result == :routed
     end
   end
+
+  describe "client-newer-than-daemon skew degrade (T52.8, ADR-0068 point 3)" do
+    test "an older daemon degrades visibly without any socket write (the ping handshake path)" do
+      test_pid = self()
+
+      log =
+        capture_log(fn ->
+          # binary_version ABOVE the daemon's ping schema_vsn -> :client_newer ->
+          # the daemon is OLDER. Read via a stubbed T52.2 ping handshake.
+          result =
+            Writer.insert(proposed_changeset(), [],
+              probe: fn _ -> :alive end,
+              binary_version: 20_990_101_000_000,
+              ping: fn _ ->
+                send(test_pid, :pinged)
+                {:ok, %{"ok" => true, "schema_vsn" => 1}}
+              end,
+              remote: fn ->
+                send(test_pid, :remote_called)
+                :routed
+              end
+            )
+
+          # Same shaped degrade as the T52.7 refuse — one degrade shape for callers.
+          assert result == {:error, :read_model_unavailable}
+        end)
+
+      # The daemon WAS probed via the handshake, but NO socket write was issued.
+      assert_received :pinged
+      refute_received :remote_called
+
+      # Exact single-line operator choice naming both versions + the restart remedy.
+      assert log =~
+               "daemon is older than this client (schema v1 < v20990101000000); " <>
+                 "restart it (`kazi daemon restart`) or continue without persistence"
+
+      # One line, operator-readable, no stacktrace.
+      degrade_lines =
+        log |> String.split("\n") |> Enum.filter(&(&1 =~ "daemon is older than this client"))
+
+      assert length(degrade_lines) == 1
+      refute log =~ "** ("
+      refute log =~ "stacktrace"
+
+      # No persistence: the run proceeds (no deadlock, no hang), nothing written.
+      assert Repo.aggregate(ProposedMemory, :count, :id) == 0
+    end
+
+    test "a newer daemon writes through the socket (additive-within-major)" do
+      test_pid = self()
+
+      # binary_version BELOW the daemon's schema_vsn -> :client_older -> the daemon
+      # is newer; the older client keeps writing through the additive API (T52.5).
+      result =
+        Writer.write(fn -> :direct end,
+          probe: fn _ -> :alive end,
+          binary_version: 1,
+          ping: fn _ -> {:ok, %{"schema_vsn" => 20_990_101_000_000}} end,
+          remote: fn ->
+            send(test_pid, :remote_called)
+            :routed
+          end
+        )
+
+      assert result == :routed
+      assert_received :remote_called
+    end
+
+    test "an equal-schema daemon writes through" do
+      result =
+        Writer.write(fn -> :direct end,
+          probe: fn _ -> :alive end,
+          binary_version: 20_990_101_000_000,
+          daemon_schema_vsn: 20_990_101_000_000,
+          remote: fn -> :routed end
+        )
+
+      assert result == :routed
+    end
+
+    test "a daemon that reports no schema_vsn writes through (never a silent block)" do
+      # An old daemon (no schema_vsn) or a failed ping must not deadlock a newer
+      # client: absent a POSITIVE older reading, the write goes through.
+      for reply <- [{:ok, %{"ok" => true}}, {:error, :closed}] do
+        assert Writer.write(fn -> :direct end,
+                 probe: fn _ -> :alive end,
+                 binary_version: 20_990_101_000_000,
+                 ping: fn _ -> reply end,
+                 remote: fn -> :routed end
+               ) == :routed
+      end
+    end
+
+    test "the daemon-skew decision is memoized per process (one degrade line, one ping per TTL window)" do
+      test_pid = self()
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..3 do
+            Writer.write(fn -> :direct end,
+              probe: fn _ -> :alive end,
+              binary_version: 20_990_101_000_000,
+              ping: fn _ ->
+                send(test_pid, :pinged)
+                {:ok, %{"schema_vsn" => 1}}
+              end,
+              remote: fn -> :routed end,
+              ttl_ms: 60_000
+            )
+          end
+        end)
+
+      lines =
+        log |> String.split("\n") |> Enum.filter(&(&1 =~ "daemon is older than this client"))
+
+      assert length(lines) == 1
+
+      # The handshake fired at most once across the burst, not per write.
+      assert_received :pinged
+      refute_received :pinged
+    end
+  end
 end
