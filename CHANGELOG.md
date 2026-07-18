@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.217.1](https://github.com/kazi-org/kazi/compare/v1.217.0...v1.217.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **bus:** close the read/write version-skew asymmetry ([#1227](https://github.com/kazi-org/kazi/issues/1227), T58.2) ([0e0ae89](https://github.com/kazi-org/kazi/commit/0e0ae897f43a2c3afd3f5a6b7c8d8b7295c2f61b))
+
 ## [1.217.0](https://github.com/kazi-org/kazi/compare/v1.216.1...v1.217.0) (2026-07-18)
 
 
