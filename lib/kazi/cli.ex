@@ -7908,8 +7908,56 @@ defmodule Kazi.CLI do
       function_exported?(Exqlite.Sqlite3NIF, :open, 2)
   end
 
-  defp migrate_read_model do
+  @doc false
+  # T52.6 (ADR-0068 points 2 & 5): the single-migrator cutover. When a daemon is
+  # LIVE it has ALREADY migrated the read-model once at its own startup (T52.4,
+  # migrate-before-serve) and is the ONE process that opens the file read-write.
+  # This process must therefore NOT run `Ecto.Migrator` and must NOT open a
+  # second write connection against the same file -- doing so would recreate the
+  # exact #1019 mixed-migration-writer class ADR-0068 closes by construction. So
+  # when the daemon control socket probes `:alive` we defer, returning `:ok`
+  # without touching the file. Writes from this process route through the daemon
+  # over the socket (T52.3/T52.5); the daemon is the single writer and the single
+  # migrator.
+  #
+  # Absent a daemon (`:missing`/`:dead`), today's behavior stands UNCHANGED
+  # (ADR-0068 point 5, the rollback path): create the file, start a
+  # process-linked repo, run the bounded, version-stamp-checked, degrading boot
+  # migration. A run that starts under a daemon and then loses it mid-run
+  # degrades via the Writer's no-daemon path (T52.7); it does NOT retroactively
+  # migrate here.
+  #
+  # The daemon control socket is resolved via the SAME `:read_model_writer_sock`
+  # config seam the Writer uses, so the test env points presence at a
+  # never-existing socket and unrelated suites never route to a developer's live
+  # daemon. `:probe`/`:sock_path` are test seams (mirroring the Writer's presence
+  # probe and the daemon supervisor's `:migrate_fun`). `:migrate_fun` (default
+  # the bounded boot migration) is the migrator seam: a test asserts it is
+  # NEVER invoked on the `:alive` path and invoked exactly once on the
+  # no-daemon path.
+  @spec migrate_read_model(keyword()) :: :ok | {:error, term()}
+  def migrate_read_model(opts \\ []) do
+    probe = Keyword.get(opts, :probe, &Kazi.Daemon.Probe.probe/1)
+    sock_path = Keyword.get(opts, :sock_path, read_model_writer_sock())
+
+    case probe.(sock_path) do
+      :alive -> :ok
+      _missing_or_dead -> migrate_read_model_direct(opts)
+    end
+  end
+
+  # The daemon control socket dialed to decide migration ownership. Overridable
+  # via `config :kazi, :read_model_writer_sock` (the same seam the Writer uses)
+  # so the test env points it at a never-existing socket.
+  defp read_model_writer_sock do
+    Application.get_env(:kazi, :read_model_writer_sock) ||
+      Kazi.Daemon.Supervisor.default_sock_path()
+  end
+
+  # The no-daemon (rollback) path: direct open, unchanged from before T52.6.
+  defp migrate_read_model_direct(opts) do
     repo = Kazi.Repo
+    migrate_fun = Keyword.get(opts, :migrate_fun, fn -> run_migrations_bounded(repo) end)
 
     try do
       if started?(repo) do
@@ -7918,7 +7966,7 @@ defmodule Kazi.CLI do
         # transient connection here to `storage_up` races the supervised pool and
         # SQLite's single writer ("database is locked"); instead just run pending
         # migrations against the live, already-connected repo.
-        run_migrations_bounded(repo)
+        migrate_fun.()
       else
         # Standalone binary path (the Burrito release): no supervised repo, because
         # `Kazi.Application.start/2` hands straight to the CLI before standing up the
@@ -7941,7 +7989,7 @@ defmodule Kazi.CLI do
           {:error, {:already_started, _pid}} -> :ok
         end
 
-        run_migrations_bounded(repo)
+        migrate_fun.()
       end
     rescue
       error -> {:error, Exception.message(error)}
