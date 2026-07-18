@@ -4645,3 +4645,97 @@ shipped `cli_release_smoke.goal.toml` reproduced the same red here (its nested
   it as CHECK-not-converge, mirroring `cli_release_smoke`'s live-infra surfaces.
 - Binary flavor is 1.228.0, one release behind the newest tag (1.229.0, assets not
   yet published at run time).
+
+## 2026-07-18 — T65.5 LIVE DOGFOOD: derived teams + daemon-assigned names + rename tombstone on v1.243.0 (#1430)
+
+E65's exit proof. The three identity guarantees exercised end-to-end on the
+RELEASED binary against a THROWAWAY daemon — a scratch state dir
+(`KAZI_STATE_DIR` pointed at a short `/tmp` path so the control-socket path
+stays under macOS's ~104-byte `sun_path` limit) supervising its own
+`nats-server -js` on a scratch port. The operator's real team daemon (its own
+socket + NATS port) was never touched.
+
+**Binary (verified first, L-0035).** `kazi_macos_x86_64` from tag `v1.243.0`,
+GoReleaser/burrito asset, `shasum -a 256` matched the published `.sha256`
+(`bdbb8bb9…97917`), installed to a scratch path; `kazi version` → `kazi 1.243.0`.
+`v1.243.0` contains all of E65 (T65.1 #1471, T65.2 #1475, T65.3 #1477, T65.4
+#1479) by ancestry. First-run of a fresh burrito binary does its version
+housekeeping on stdout and can take a minute before the first command answers
+(the documented T59.3 non-repro / T58.4 housekeeping behavior) — subsequent
+invocations are immediate.
+
+**Throwaway daemon.** `kazi daemon status --json` →
+`{"bus_vsn":1,"nats_host":"127.0.0.1","nats_port":<scratch>,"ok":true,"pid":67039,"vsn":"1.243.0"}`.
+(The read-model Repo was not started in this scratch daemon — one
+`read-model migrate unavailable … continuing without persistence` warning — which
+is irrelevant to these proofs: name/team bindings live in the JetStream KV
+buckets, file-backed under the scratch store dir, not in the SQLite read-model.)
+
+### Proof (a) — two checkouts join ARGLESS → same derived team, distinct assigned names
+
+Two real checkouts of this repo (the repo worktree + a scratch clone whose
+`origin` was set to the same `https://github.com/kazi-org/kazi.git`), two
+distinct session UUIDs, each running a bare `kazi bus join`:
+
+```
+# checkout 1 (session A):
+joined t-github.com-kazi-org-kazi (derived) as t-github.com-kazi-org-kazi-a
+# checkout 2 (session B):
+joined t-github.com-kazi-org-kazi (derived) as t-github.com-kazi-org-kazi-b
+```
+
+Zero typed team strings. Both derived the SAME slug `t-github.com-kazi-org-kazi`
+from the git origin (fixed `t-` prefix — cannot begin with `-`); the daemon
+assigned distinct sequential names `-a` and `-b`. `bus who --team … --json`
+confirmed two rows, both `"derived":true`, same `"team"`, distinct `"name"`,
+distinct `"session"` UUIDs.
+
+### Proof (b) — daemon restarted mid-session → names survive
+
+`kazi daemon restart` (stop-then-start on the same scratch NATS store). Daemon
+pid changed `67039 → 68654` (a real bounce). The roster afterward:
+
+```
+t-github.com-kazi-org-kazi-b (…000002) … team=t-github.com-kazi-org-kazi
+t-github.com-kazi-org-kazi-a (…000001) … team=t-github.com-kazi-org-kazi
+```
+
+Both assigned names came back — NOT the raw UUIDs that #1430 failure-mode-1
+described (two bounces one night wiping every friendly name). The name→UUID
+bindings rehydrated from the TTL-less `kazi_names` KV bucket across the restart.
+
+*Honest scope of (b):* the JetStream file store recovered BOTH the presence
+bucket and the name bucket, so within the test window presence rows also
+survived; I did not wait out the 600s presence TTL to isolate a
+name-rehydration-with-aged-out-presence case. The load-bearing observation —
+names present, not UUIDs, after a genuine daemon pid change — is the regression
+this pins, and it held.
+
+### Proof (c) — rename → presence row count stays 1, tell to OLD name lands in-window
+
+A rename tombstone requires a genuine presence-LABEL change, which an
+assigned-name session does not get from `bus name` (there it only ATTACHES an
+alias, by design). So a third self-named session was used: `bus name worker-old`
+→ exactly 1 row labeled `worker-old`; then `bus name worker-new` → still exactly
+1 row, now labeled `worker-new` (never a second row across the rename). A
+directed tell to the OLD name from session A, within the grace window:
+
+```
+$ kazi bus tell worker-old "still reachable at your old name?"
+told 33333333-…-000000000003 (id 1)
+note: worker-old was renamed to worker-new -- delivered via a grace alias; use worker-new next
+```
+
+`--json` carried the same as a structured field:
+`{"id":2,"liveness":"active","notice":"note: worker-old was renamed to worker-new -- delivered via a grace alias; use worker-new next","ok":true,"recipient":"33333333-…-000000000003","schema_version":2}`.
+The old name resolved to the same session UUID (delivered, not errored), and the
+sender's ack named the current name — the T65.4 in-window behavior exactly.
+
+### Verdict
+
+All three proofs PASS on `v1.243.0`. Derived-team + assigned-name + durable
+bindings + rename-tombstone behave as the shipped docs describe. Docs
+(`docs/session-bus.md` identity/teams/naming sections, `kazi help bus`) already
+match this observed behavior (landed with T65.1–T65.4). Cleanup: throwaway
+daemon stopped, scratch state dir and clone removed; the operator's real daemon
+untouched throughout.
