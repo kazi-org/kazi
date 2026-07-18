@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.229.1](https://github.com/kazi-org/kazi/compare/v1.229.0...v1.229.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **cli:** decouple exit code from landing verdict by default ([#1407](https://github.com/kazi-org/kazi/issues/1407)) ([63a1d40](https://github.com/kazi-org/kazi/commit/63a1d40eff1bd8c716386b1e17cd59180b4b8ab6))
+
 ## [1.229.0](https://github.com/kazi-org/kazi/compare/v1.228.0...v1.229.0) (2026-07-18)
 
 
