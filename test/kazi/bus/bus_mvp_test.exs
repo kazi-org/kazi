@@ -16,6 +16,7 @@ defmodule Kazi.Bus.MvpTest do
   """
   use ExUnit.Case, async: false
 
+  alias Gnat.Jetstream.API.KV
   alias Kazi.Bus
   alias Kazi.Bus.Digest
 
@@ -429,29 +430,85 @@ defmodule Kazi.Bus.MvpTest do
       assert Enum.any?(roster, fn label -> label =~ nickname end)
     end
 
-    test "re-asserting a name re-binds it to the current session", %{conn: conn} do
-      old_session = unique_session()
-      new_session = unique_session()
-      nickname = "rebind_#{System.unique_integer([:positive])}"
+    # T65.2 (#1430): identity is the UUID; a name is a unique label bound to
+    # it. The T55.5 steal-on-reassert behaviour is superseded -- a name held by
+    # a DIFFERENT session is a hard error naming the holder, never stolen.
+    test "two sessions cannot bind the same name -- a hard error names the holder", %{conn: conn} do
+      holder = unique_session()
+      other = unique_session()
+      nickname = "taken_#{System.unique_integer([:positive])}"
 
-      assert :ok = Bus.name(nickname, conn: conn, session: old_session)
-      assert :ok = Bus.name(nickname, conn: conn, session: new_session)
+      assert :ok = Bus.name(nickname, conn: conn, session: holder)
 
-      assert {:ok, sessions} = Bus.who(conn: conn, session: new_session)
+      assert {:error, {:name_taken, ^nickname, ^holder}} =
+               Bus.name(nickname, conn: conn, session: other)
 
-      assert Enum.any?(sessions, fn s -> s["session"] == new_session and s["name"] == nickname end)
+      # the binding stays with the holder; the loser never got the label
+      assert {:ok, sessions} = Bus.who(conn: conn, session: other)
+      assert Enum.any?(sessions, fn s -> s["session"] == holder and s["name"] == nickname end)
+      refute Enum.any?(sessions, fn s -> s["session"] == other and s["name"] == nickname end)
+    end
 
-      refute Enum.any?(sessions, fn s -> s["session"] == old_session and s["name"] == nickname end)
+    test "re-binding a session's OWN name is idempotent (no error, one row)", %{conn: conn} do
+      session = unique_session()
+      nickname = "idem_#{System.unique_integer([:positive])}"
 
-      # the nickname now routes to the NEW session only
-      assert {:ok, _receipt} =
-               Bus.tell(nickname, "for the new holder", conn: conn, scope: "machine")
+      assert :ok = Bus.name(nickname, conn: conn, session: session)
+      assert :ok = Bus.name(nickname, conn: conn, session: session)
 
-      assert {:ok, new_messages} = Bus.read(conn: conn, session: new_session, scope: "machine")
-      assert Enum.any?(new_messages, fn m -> m.text == "for the new holder" end)
+      assert {:ok, sessions} = Bus.who(conn: conn, session: session)
+      matching = Enum.filter(sessions, fn s -> s["session"] == session end)
+      assert length(matching) == 1
+      assert hd(matching)["name"] == nickname
+    end
 
-      assert {:ok, old_messages} = Bus.read(conn: conn, session: old_session, scope: "machine")
-      refute Enum.any?(old_messages, fn m -> m.text == "for the new holder" end)
+    # acc (T65.2): a rename UPDATES the one UUID-keyed row, never inserts a
+    # second -- presence row count for the UUID stays exactly 1.
+    test "renaming a session yields exactly ONE presence row, label updated", %{conn: conn} do
+      session = unique_session()
+      first = "first_#{System.unique_integer([:positive])}"
+      second = "second_#{System.unique_integer([:positive])}"
+
+      assert :ok = Bus.name(first, conn: conn, session: session)
+      assert :ok = Bus.name(second, conn: conn, session: session)
+
+      assert {:ok, sessions} = Bus.who(conn: conn, session: session)
+      rows = Enum.filter(sessions, fn s -> s["session"] == session end)
+
+      assert length(rows) == 1
+      assert hd(rows)["name"] == second
+    end
+
+    # acc (T65.2): name bindings live in the durable, TTL-less `kazi_names`
+    # bucket, so they survive a daemon restart. A restart is a fresh Gnat
+    # connection re-running the (idempotent) provisioner against the same
+    # JetStream store -- the bindings must still be there, and a presence
+    # upsert on the new connection must RESTORE the friendly label.
+    test "a daemon restart restores every name binding from durable KV", %{conn: conn} do
+      session = unique_session()
+      nickname = "durable_#{System.unique_integer([:positive])}"
+
+      assert :ok = Bus.name(nickname, conn: conn, session: session)
+      assert %{^nickname => ^session} = Bus.name_bindings(conn: conn)
+
+      # simulate a daemon restart: a brand-new connection, provisioner re-run
+      {host, port} = parse_nats_url(System.fetch_env!("NATS_URL"))
+      {:ok, conn2} = Gnat.start_link(%{host: host, port: port})
+      on_exit(fn -> if Process.alive?(conn2), do: Gnat.stop(conn2) end)
+      :ok = Kazi.Bus.Provision.provision(conn2)
+
+      # the durable binding survived the "restart" -- the acc property: names
+      # are NOT lost on a daemon bounce (unlike the presence bucket's 600s TTL)
+      assert %{^nickname => ^session} = Bus.name_bindings(conn: conn2)
+
+      # PROVE restoration comes from the durable binding, not a lingering
+      # presence row: purge the presence row first (as its TTL eventually
+      # would), then a fresh presence upsert must re-derive the label from KV.
+      key = String.replace(session, ~r/[^a-zA-Z0-9_-]/, "_")
+      :ok = KV.purge_key(conn2, Kazi.Bus.Provision.sessions_bucket(), key)
+
+      assert {:ok, sessions} = Bus.who(conn: conn2, session: session)
+      assert Enum.any?(sessions, fn s -> s["session"] == session and s["name"] == nickname end)
     end
 
     test "a nickname equal to a DIFFERENT live session's id is rejected", %{conn: conn} do
