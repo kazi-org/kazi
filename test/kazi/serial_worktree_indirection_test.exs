@@ -64,6 +64,46 @@ defmodule Kazi.SerialWorktreeIndirectionTest do
     assert status_after == status_before, "the base checkout's git status must be unchanged"
   end
 
+  test "T59.6: a serial run against a partition-less goal materializes EXACTLY ONE linked worktree during the run",
+       %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    untracked = Path.join(work, "sibling-wip.txt")
+    File.write!(untracked, "concurrent session's file\n")
+
+    goal_file = write_goal_file(tmp_dir, work)
+    marker = Path.join(tmp_dir, "worktree-list-during-run.porcelain")
+
+    {_out, code} =
+      with_io(fn ->
+        Kazi.CLI.run(
+          ["apply", goal_file, "--workspace", work, "--json"],
+          adapter_opts: [command: worktree_recording_harness(tmp_dir, marker)],
+          reobserve_interval_ms: 5,
+          await_timeout: 15_000
+        )
+      end)
+      |> then(fn {code, out} -> {out, code} end)
+
+    assert code == 0
+
+    # Captured by the harness WHILE it was dispatched inside the run's
+    # effective workspace: the base repo plus EXACTLY ONE kazi-owned linked
+    # worktree, and the linked worktree is NOT the passed --workspace tree.
+    linked_during_run = parse_linked_worktrees(File.read!(marker), work)
+    assert length(linked_during_run) == 1
+
+    [linked] = linked_during_run
+
+    refute Path.expand(linked) == Path.expand(work),
+           "kazi edits an isolated worktree, never the passed --workspace tree directly"
+
+    # The passed --workspace tree is never written directly: an untracked
+    # sibling file outside the goal's diff is byte-identical after the run.
+    assert File.read!(untracked) == "concurrent session's file\n"
+    refute File.exists?(Path.join(work, "fixed.txt"))
+    assert linked_worktrees(work) == [], "the worktree is removed once the run terminates"
+  end
+
   test "--in-place: no worktree, the run edits the workspace directly", %{tmp_dir: tmp_dir} do
     work = git_repo(tmp_dir)
     goal_file = write_goal_file(tmp_dir, work)
@@ -206,6 +246,29 @@ defmodule Kazi.SerialWorktreeIndirectionTest do
     {out, 0} = System.cmd("git", ["worktree", "list", "--porcelain"], cd: repo)
 
     out
+    |> String.split("\n\n", trim: true)
+    |> Enum.map(&List.first(String.split(&1, "\n", trim: true)))
+    |> Enum.map(&String.replace_prefix(&1, "worktree ", ""))
+    |> Enum.reject(&(Path.expand(&1) == Path.expand(repo)))
+  end
+
+  # A passing harness that ALSO records, from inside its own cwd (the run's
+  # effective workspace), the full `git worktree list` at dispatch time -- so a
+  # test can assert what worktree kazi actually materialized WHILE the run was
+  # live, not just what survived cleanup.
+  defp worktree_recording_harness(tmp_dir, marker) do
+    write_stub(
+      tmp_dir,
+      "worktree-recording",
+      "git worktree list --porcelain > #{marker}\n" <>
+        "echo \"the converged fix\" > fixed.txt\nexit 0"
+    )
+  end
+
+  # The LINKED worktrees named in a captured `git worktree list --porcelain`
+  # dump (excludes the primary `repo` line itself).
+  defp parse_linked_worktrees(porcelain, repo) do
+    porcelain
     |> String.split("\n\n", trim: true)
     |> Enum.map(&List.first(String.split(&1, "\n", trim: true)))
     |> Enum.map(&String.replace_prefix(&1, "worktree ", ""))
