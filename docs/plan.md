@@ -362,7 +362,7 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E60 -- Fleet-wide visibility: cross-machine runs, ghost-row reaping, operator attention, portfolio view, cost report (P2) -> plans/E60.md
 
-### E61 -- Ship kazi as a Claude Code plugin: skill + MCP + hooks in one installable, auto-updating artifact (P2) -> plans/E61.md
+### E61 -- Ship kazi as a Claude Code plugin: skill + MCP + hooks in one installable, auto-updating artifact (P2, ADR-0077) -> plans/E61.md
 
 ### E62 -- Gherkin runtime predicate provider + parallel-landing follow-ups (P1, ADR-0071) -> plans/E62.md
 
@@ -517,8 +517,8 @@ never swept into your commit.
   already named E49's shipped scenario predicates as the accepted fix
   direction); E58 bus reliability (#1227, #1060); E59 concurrency/flakiness
   (#937, #1019, #1025, #1186, #1255); E60 fleet visibility (#1154, #1155,
-  #1156, #1160, #1070); E61 the Claude Code plugin (#1173, new ADR pending in
-  T61.1); E62 the gherkin runtime provider + parallel-landing follow-ups
+  #1156, #1160, #1070); E61 the Claude Code plugin (#1173, decided in
+  docs/adr/0077-claude-code-plugin-distribution.md via T61.1); E62 the gherkin runtime provider + parallel-landing follow-ups
   (#1107, ADR-0071 already locked; #1241).
 - **Deliberately NOT planned:** #372/E25 epic and #382/T25.10 (a production
   launch + public announcement task, `Owner: TBD`) -- stays a human decision,
