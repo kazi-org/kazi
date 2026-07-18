@@ -40,6 +40,13 @@ config :kazi, :session_liveness_source, Kazi.TestSupport.SessionLivenessStub
 # its own listening socket.
 config :kazi, :lease_map_daemon_sock, Path.expand("../tmp/no-daemon/daemon.sock", __DIR__)
 
+# Read-model write routing (T52.5, ADR-0068): the same isolation for
+# `Kazi.ReadModel.Writer`'s presence probe -- point it at a never-existing socket
+# so unit suites take the direct write path regardless of a real daemon on the
+# developer machine. The socket round-trip acceptance overrides this with its own
+# listening test-harness socket.
+config :kazi, :read_model_writer_sock, Path.expand("../tmp/no-daemon/daemon.sock", __DIR__)
+
 # Crash-dump dir override (issue #856): keep `mix test` from ever pointing
 # `ERL_CRASH_DUMP` at a real `~/.kazi/crash`, mirroring the tmp/-scoped DB path
 # above. See `Kazi.CrashDump`.

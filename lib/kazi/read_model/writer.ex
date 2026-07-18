@@ -119,8 +119,11 @@ defmodule Kazi.ReadModel.Writer do
   @spec insert!(Ecto.Changeset.t(), keyword(), keyword()) :: Ecto.Schema.t()
   def insert!(%Ecto.Changeset{} = changeset, insert_opts \\ [], writer_opts \\ []) do
     case insert(changeset, insert_opts, writer_opts) do
-      {:ok, struct} -> struct
-      {:error, changeset} -> raise Ecto.InvalidChangesetError, action: :insert, changeset: changeset
+      {:ok, struct} ->
+        struct
+
+      {:error, changeset} ->
+        raise Ecto.InvalidChangesetError, action: :insert, changeset: changeset
     end
   end
 
@@ -253,7 +256,7 @@ defmodule Kazi.ReadModel.Writer do
   # One control-socket round-trip carrying a batch of write plans. Returns the
   # reply's per-entry `results` on success, or the server/transport error.
   defp send_batch(batch, writer_opts) do
-    sock_path = Keyword.get(writer_opts, :sock_path, Supervisor.default_sock_path())
+    sock_path = Keyword.get(writer_opts, :sock_path, default_sock_path())
 
     case Probe.request(sock_path, %{"op" => "write", "batch" => batch}) do
       {:ok, %{"ok" => true} = reply} -> {:ok, Map.get(reply, "results", [])}
@@ -294,9 +297,14 @@ defmodule Kazi.ReadModel.Writer do
 
   defp encode_insert_opts(opts) do
     Enum.reduce(opts, %{}, fn
-      {:on_conflict, on_conflict}, acc -> Map.put(acc, "on_conflict", encode_on_conflict(on_conflict))
-      {:conflict_target, target}, acc -> Map.put(acc, "conflict_target", stringify_list(target))
-      _other, acc -> acc
+      {:on_conflict, on_conflict}, acc ->
+        Map.put(acc, "on_conflict", encode_on_conflict(on_conflict))
+
+      {:conflict_target, target}, acc ->
+        Map.put(acc, "conflict_target", stringify_list(target))
+
+      _other, acc ->
+        acc
     end)
   end
 
@@ -317,10 +325,19 @@ defmodule Kazi.ReadModel.Writer do
   defp stringify_keys(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
   defp stringify_list(value), do: value |> List.wrap() |> Enum.map(&to_string/1)
 
+  # The control socket the presence probe and the write client dial when a call
+  # site supplies none. Overridable via `config :kazi, :read_model_writer_sock`
+  # so the test env points it at a never-existing socket (mirroring
+  # `:lease_map_daemon_sock`) and unrelated suites never route to a real daemon a
+  # developer's machine happens to be running.
+  defp default_sock_path do
+    Application.get_env(:kazi, :read_model_writer_sock) || Supervisor.default_sock_path()
+  end
+
   # Presence, memoized per process with a short TTL (ADR-0068: do not stat the
   # socket on every write of a busy run).
   defp daemon_status(opts) do
-    sock_path = Keyword.get(opts, :sock_path, Supervisor.default_sock_path())
+    sock_path = Keyword.get(opts, :sock_path, default_sock_path())
     probe = Keyword.get(opts, :probe, &Probe.probe/1)
     ttl_ms = Keyword.get(opts, :ttl_ms, @default_ttl_ms)
     now = System.monotonic_time(:millisecond)
