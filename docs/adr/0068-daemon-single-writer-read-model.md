@@ -97,9 +97,11 @@ ADR-0067 introduces one.
   absent this the boot migration hit "could not lookup Ecto repo ... not
   started" and the daemon served blind (the #1483 writer half). This is
   fail-loud, not a silent degrade: a writer that genuinely cannot start (an
-  unwritable state dir, a corrupt db) makes `kazi daemon start` refuse to serve
-  (`{:error, _}`, non-zero exit) rather than come up healthy-looking with no
-  write path. The boot migration's OWN bounded degrade (a peer holding the lock,
+  unwritable state dir, a corrupt db) fails the daemon supervisor start cleanly
+  (a deliberately-failing child, never a raw raise that would crash the caller),
+  so `kazi daemon start` returns `{:error, _}`, prints "could not start daemon",
+  and exits non-zero rather than come up healthy-looking with no write path. The
+  boot migration's OWN bounded degrade (a peer holding the lock,
   a newer schema stamp) is unchanged -- that is the visible, logged skew case
   above, not a not-started repo.
 - The client-newer-than-daemon skew (decision 3) is realized at write time in
