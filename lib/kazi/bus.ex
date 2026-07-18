@@ -103,8 +103,17 @@ defmodule Kazi.Bus do
       `"no-presence"` when the tell landed on a durable inbox whose presence
       row is gone. `"dead-reaping"`/`"no-presence"` are the warning-worthy
       values; the CLI prints a warning and still sends.
+    * `:notice` -- T65.4 (#1430): a one-line renamed-notice when the tell landed
+      via a still-live tombstone-alias (the recipient was renamed and the sender
+      used the OLD name inside the grace window), else `nil`. The CLI prints it
+      so the sender learns the current name.
   """
-  @type receipt :: %{id: pos_integer(), recipient: String.t(), liveness: String.t()}
+  @type receipt :: %{
+          id: pos_integer(),
+          recipient: String.t(),
+          liveness: String.t(),
+          notice: String.t() | nil
+        }
 
   @doc """
   Publishes `text` (kind `kind`, optional `opts[:topic]`) to `bus.<scope>.<kind>.<topic|_>`,
@@ -175,7 +184,7 @@ defmodule Kazi.Bus do
     with :ok <- check_size(text) do
       with_conn(opts, fn conn ->
         upsert_presence(conn, opts)
-        {target, liveness} = resolve_recipient!(conn, recipient)
+        {target, liveness, notice} = resolve_recipient!(conn, recipient)
         scope = scope(opts)
         subject = Enum.join(["bus", scope, "msg", target], ".")
 
@@ -189,7 +198,7 @@ defmodule Kazi.Bus do
         ensure_inbox(conn, target)
         id = publish_for_seq!(conn, subject, text, headers)
 
-        {:ok, %{id: id, recipient: target, liveness: liveness}}
+        {:ok, %{id: id, recipient: target, liveness: liveness, notice: notice}}
       end)
     end
   end
@@ -269,7 +278,7 @@ defmodule Kazi.Bus do
   # aged out but whose cursor still exists WILL drain the queue when it
   # returns, so that tell must land. Only a recipient with neither raises
   # `:unknown_recipient` with the live roster, naming who IS addressable.
-  defp resolve_recipient!(_conn, "@" <> _rest = team), do: {team, "team"}
+  defp resolve_recipient!(_conn, "@" <> _rest = team), do: {team, "team", nil}
 
   defp resolve_recipient!(conn, recipient) do
     entries =
@@ -305,29 +314,85 @@ defmodule Kazi.Bus do
       end)
       |> Enum.min_by(fn {e, _v} -> e["age_s"] end, fn -> nil end)
 
-    # T65.3 (#1430): resolve a durable BINDING (an attached alias, or an
-    # assigned name whose presence label was overwritten) to its live session --
-    # so both the assigned name and any alias reach the session, not just the
-    # one currently rendered as the presence label.
+    # T65.3/T65.4 (#1430): the durable binding `recipient` names, if any, as
+    # `{uuid, kind, ts}`. `assigned`/`alias` kinds resolve to their live session
+    # exactly as before; a `tombstone` (a renamed-away name) resolves ONLY inside
+    # the grace window and is handled separately so an expired one can error.
+    binding = binding_for_name(conn, recipient)
+
     bound =
-      case bound_session_for_name(conn, recipient) do
-        uuid when is_binary(uuid) ->
+      case binding do
+        {uuid, kind, _ts} when kind in ["assigned", "alias"] ->
           Enum.find(pairs, fn {e, _v} ->
             e["session"] == uuid and MapSet.member?(live_ids, uuid)
           end)
 
-        _absent ->
+        _other ->
           nil
       end
 
+    # T65.4 (#1430): a tombstone-alias resolution -- only consulted when no live
+    # session id (`exact`) or live label (`named`) already claims the recipient,
+    # so a name RECYCLED onto a new session always beats its own stale tombstone.
+    # Within the window it returns the delivery target + a renamed-notice; past
+    # the window it RAISES with the current name as a hint.
+    tombstone_res =
+      if is_nil(exact) and is_nil(named),
+        do: resolve_tombstone!(conn, recipient, binding, pairs),
+        else: nil
+
     cond do
-      exact -> {recipient, rendered_liveness(exact)}
-      named -> {elem(named, 0)["session"], rendered_liveness(named)}
-      bound -> {elem(bound, 0)["session"], rendered_liveness(bound)}
-      has_inbox?(conn, recipient) -> {recipient, "no-presence"}
-      true -> raise_bus_error({:unknown_recipient, recipient, roster_labels(live)})
+      exact ->
+        {recipient, rendered_liveness(exact), nil}
+
+      named ->
+        {elem(named, 0)["session"], rendered_liveness(named), nil}
+
+      match?({:grace, _target, _liveness, _notice}, tombstone_res) ->
+        {:grace, target, liveness, notice} = tombstone_res
+        {target, liveness, notice}
+
+      bound ->
+        {elem(bound, 0)["session"], rendered_liveness(bound), nil}
+
+      has_inbox?(conn, recipient) ->
+        {recipient, "no-presence", nil}
+
+      true ->
+        raise_bus_error({:unknown_recipient, recipient, roster_labels(live)})
     end
   end
+
+  # T65.4 (#1430): resolve a `tombstone` binding under the grace window.
+  #   * a non-tombstone binding (or none) -> nil (the caller's other clauses run);
+  #   * within the window -> `{:grace, uuid, liveness, notice}` (deliver to the
+  #     UUID, appending a one-line renamed-notice to the sender's ack);
+  #   * past the window -> RAISE `{:name_tombstoned, old, current}`, naming the
+  #     session's CURRENT name so the sender can re-address.
+  defp resolve_tombstone!(conn, recipient, {uuid, "tombstone", ts}, pairs) do
+    current = bound_name_for(conn, uuid) || uuid
+
+    if within_rename_grace?(ts) do
+      liveness =
+        case Enum.find(pairs, fn {e, _v} -> e["session"] == uuid end) do
+          nil -> "no-presence"
+          pair -> rendered_liveness(pair)
+        end
+
+      {:grace, uuid, liveness, rename_notice(recipient, current)}
+    else
+      raise_bus_error({:name_tombstoned, recipient, current})
+    end
+  end
+
+  defp resolve_tombstone!(_conn, _recipient, _binding, _pairs), do: nil
+
+  # T65.4 (#1430): the one-line renamed-notice appended to a sender's ack when a
+  # tell landed via a still-live tombstone-alias -- it tells the sender the name
+  # they used is stale and what to use next.
+  defp rename_notice(old, current),
+    do:
+      "note: #{old} was renamed to #{current} -- delivered via a grace alias; use #{current} next"
 
   # T55.12: does `recipient` own a durable inbox cursor? True only for a
   # session that has read the bus at least once, or that a previous tell
@@ -375,7 +440,13 @@ defmodule Kazi.Bus do
   def name(nickname, opts \\ []) when is_binary(nickname) do
     with :ok <- validate_nickname(nickname) do
       with_conn(opts, fn conn ->
-        bind_name!(conn, nickname, session(opts))
+        uuid = session(opts)
+        # T65.4 (#1430): the label the session carries BEFORE this call -- the
+        # name being renamed away from. Captured before `bind_name!` so a
+        # genuine rename can tombstone it.
+        old_label = stored_entry(conn, opts)["name"]
+
+        bind_name!(conn, nickname, uuid)
         # T65.3 (#1430): `bus name` ATTACHES an alias on top of any
         # daemon-assigned name. When the session already carries an assigned
         # name (from `join`), THAT stays the canonical label `who/1` renders --
@@ -383,7 +454,18 @@ defmodule Kazi.Bus do
         # bindings, so both names reach the session). A session that never
         # joined (no assigned name) still takes the nickname as its label,
         # exactly as before.
-        label = assigned_name_for(conn, session(opts)) || nickname
+        label = assigned_name_for(conn, uuid) || nickname
+
+        # T65.4 (#1430): a genuine RENAME -- the presence label actually
+        # changes -- turns the OLD name into a tombstone-alias for the grace
+        # window, so an in-flight `tell <old-name>` still lands (with a
+        # renamed-notice) until it expires. When the label DOESN'T change (an
+        # assigned session merely attaching an alias, or a re-assert of the
+        # same name) nothing is tombstoned -- the old name stays live.
+        if is_binary(old_label) and old_label != label do
+          tombstone_name!(conn, old_label, uuid)
+        end
+
         upsert_presence(conn, Keyword.put(opts, :name, label))
         :ok
       end)
@@ -505,6 +587,49 @@ defmodule Kazi.Bus do
     :ok
   end
 
+  # T65.4 (#1430): OVERWRITE `name`'s binding with a `tombstone` marker resolving
+  # to `uuid`, stamped now. The overwrite (not an additive binding) is deliberate:
+  # the old name was an `alias`/plain binding that `bound_session_for_name` would
+  # otherwise resolve FOREVER; recording it as a tombstone lets resolution apply
+  # the bounded grace window instead. `tell <old-name>` within the window lands on
+  # `uuid` (with a renamed-notice); past it, resolution errors with the current
+  # name. The `kazi_names` bucket is TTL-less by design (T65.2), so expiry is a
+  # `ts`-check at resolve time -- never a per-bucket TTL that would also wipe live
+  # assigned/alias bindings.
+  defp tombstone_name!(conn, name, uuid) do
+    payload =
+      Jason.encode!(%{
+        "name" => name,
+        "session" => uuid,
+        "kind" => "tombstone",
+        "ts" => DateTime.to_iso8601(DateTime.utc_now())
+      })
+
+    KV.put_value(conn, Provision.names_bucket(), sanitize(name), payload)
+    :ok
+  end
+
+  # T65.4 (#1430): the configurable tombstone-alias grace window, in seconds
+  # (`config :kazi, :bus_rename_grace_s`, default 10 minutes). A renamed name
+  # resolves for this long before it expires.
+  @spec rename_grace_s() :: integer()
+  def rename_grace_s, do: Application.get_env(:kazi, :bus_rename_grace_s, 600)
+
+  # A tombstone stamped `ts` is still WITHIN the grace window when fewer than
+  # `rename_grace_s/0` seconds have elapsed. An unparseable/absent stamp is
+  # treated as expired (fail closed -- an old name should not resolve forever).
+  defp within_rename_grace?(ts) when is_binary(ts) do
+    case DateTime.from_iso8601(ts) do
+      {:ok, stamped, _offset} ->
+        DateTime.diff(DateTime.utc_now(), stamped) < rename_grace_s()
+
+      _unparseable ->
+        false
+    end
+  end
+
+  defp within_rename_grace?(_ts), do: false
+
   # T65.3 (#1430): the atomic letter allocation. Walks `a..z`, and for each
   # candidate attempts a CREATE-ONLY KV write; the FIRST create that wins is
   # this session's name. A create that LOSES (the key already exists -- another
@@ -587,15 +712,20 @@ defmodule Kazi.Bus do
     end
   end
 
-  # T65.3 (#1430): the session UUID a durable name -- an assigned name OR an
-  # attached alias -- resolves to, or nil. `tell` consults this so an alias
-  # that is NOT the presence label still reaches its session.
-  defp bound_session_for_name(conn, name) do
+  # T65.3/T65.4 (#1430): the durable binding a name carries, as
+  # `{uuid, kind, ts}`, or nil. `kind` is `assigned` | `alias` | `tombstone`;
+  # `tell` consults this so an alias that is NOT the presence label still reaches
+  # its session, and so a renamed-away name (a `tombstone`) resolves under the
+  # grace window rather than forever. `ts` may be nil for a legacy binding.
+  defp binding_for_name(conn, name) do
     case KV.get_value(conn, Provision.names_bucket(), sanitize(name)) do
       value when is_binary(value) ->
         case Jason.decode(value) do
-          {:ok, %{"session" => uuid}} -> uuid
-          _other -> nil
+          {:ok, %{"session" => uuid} = entry} ->
+            {uuid, entry["kind"] || "alias", entry["ts"]}
+
+          _other ->
+            nil
         end
 
       _missing ->
@@ -640,6 +770,10 @@ defmodule Kazi.Bus do
         bindings =
           for {_key, value} <- contents,
               {:ok, %{"name" => name, "session" => ^uuid} = entry} <- [Jason.decode(value)],
+              # T65.4 (#1430): a `tombstone` is a renamed-AWAY name, never a
+              # current label -- exclude it so a restore/current-name lookup
+              # never resurrects the old name.
+              (entry["kind"] || "alias") != "tombstone",
               do: {name, entry["kind"], entry["ts"] || ""}
 
         # T65.3 (#1430): the daemon-ASSIGNED name is the canonical label, so it
