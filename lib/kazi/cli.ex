@@ -321,7 +321,8 @@ defmodule Kazi.CLI do
     peek:
       "`bus read` only (issue #1059): non-destructive -- NAKs instead of acking, so the pending messages are shown but NOT consumed; a subsequent `bus read`/`bus peek` still sees them. Equivalent to `bus peek`.",
     full:
-      "`bus read`/`bus peek`/`bus watch` only (T55.1, ADR-0072): under --json return EVERY pending message unabridged instead of the default bounded digest -- the documented debugging escape. Without it, --json returns the digest envelope (`kazi schema bus`): verbatim lines only for directed (kind msg) and sev interrupt messages, one-line stubs for bodies over the 1024-byte render threshold, exact count lines per {kind, topic} for everything else, at most 40 lines regardless of backlog size.",
+      "`portfolio` (E64/T64.3): restore the COMPLETE per-bucket ledger instead of the default bounded sitrep (each bucket's top-3 one-liners + '+N more'); every tracked entry is listed. " <>
+        "`bus read`/`bus peek`/`bus watch` (T55.1, ADR-0072): under --json return EVERY pending message unabridged instead of the default bounded digest -- the documented debugging escape. Without it, --json returns the digest envelope (`kazi schema bus`): verbatim lines only for directed (kind msg) and sev interrupt messages, one-line stubs for bodies over the 1024-byte render threshold, exact count lines per {kind, topic} for everything else, at most 40 lines regardless of backlog size.",
     team:
       "`bus who` only (issue #1069): filter the presence roster to members of this named team (sessions register with `bus join <team>`).",
     all:
@@ -410,9 +411,9 @@ defmodule Kazi.CLI do
     %{
       name: "portfolio",
       summary:
-        "Render the fleet's portfolio state (T60.4, #1160) -- planned / in progress / stuck / complete, grouped by repo -- composed ONLY from kazi's own objective surfaces (proposals, the run registry, the attention queue, the cross-machine bus facts T60.1 posts). No manual curation, no new task-management data model.",
+        "Sitrep: 'where are we / how is it going?' (E64, #1427). One headline line of counts + percentages across the five buckets (done / in-progress / blocked / todo / planned), then each bucket's top-3 one-liners + '+N more' (blocked entries name their blocker; in-progress entries carry an honest predicates-green rate, never a projected date). --full restores the complete ledger. Composed ONLY from kazi's own objective surfaces (proposals, the run registry, the attention queue, the roadmap DAG). No manual curation.",
       args: [],
-      flags: [:json]
+      flags: [:full, :json]
     },
     %{
       name: "init",
@@ -603,7 +604,7 @@ defmodule Kazi.CLI do
       kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files (ADR-0065)
       kazi status <ref> [--json]
       kazi orphans [--reap] [--json]               # list runs whose harness child is still alive (#1073); --reap kills them
-      kazi portfolio [--json]                      # planned/in progress/stuck/complete, by repo + fleet-wide (T60.4, #1160)
+      kazi portfolio [--full] [--json]             # sitrep: headline % + bucketed summaries + honest rate (E64, #1427); --full = full ledger
       kazi economy [--goal <ref>] [--json]         # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
@@ -1242,7 +1243,7 @@ defmodule Kazi.CLI do
   # complete state, grouped by repo. No args; --json is the only flag.
   defp parse_command(["portfolio" | rest], flags) do
     case rest do
-      [] -> {:portfolio, json: flags[:json] || false}
+      [] -> {:portfolio, json: flags[:json] || false, full: flags[:full] || false}
       extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
@@ -4117,13 +4118,21 @@ defmodule Kazi.CLI do
     with_read_model(opts, fn ->
       portfolio = Kazi.Portfolio.build()
 
-      emit(json?(opts), portfolio_json(portfolio), fn -> print_portfolio(portfolio) end)
+      emit(json?(opts), portfolio_json(portfolio), fn ->
+        print_portfolio(portfolio, opts[:full] || false)
+      end)
 
       0
     end)
   end
 
-  defp portfolio_json(%{planned: planned, by_repo: by_repo, fleet_remote: fleet_remote}) do
+  # v1 keys (schema_version, kind, planned, by_repo, fleet_remote) are byte-
+  # identical to T60.4; E64/T64.3 ADDS totals / todo / blocked / rate beside them
+  # (schema_version stays 2). Bucket atoms are stringified for the JSON surface.
+  defp portfolio_json(portfolio) do
+    %{planned: planned, by_repo: by_repo, fleet_remote: fleet_remote} = portfolio
+    %{buckets: buckets, totals: totals, rate: rate} = portfolio
+
     %{
       schema_version: @run_schema_version,
       kind: "portfolio",
@@ -4132,50 +4141,90 @@ defmodule Kazi.CLI do
         Map.new(by_repo, fn {repo, buckets} ->
           {repo, Map.new(buckets, fn {bucket, entries} -> {to_string(bucket), entries} end)}
         end),
-      fleet_remote: Enum.map(fleet_remote, &Map.update!(&1, :bucket, fn b -> to_string(b) end))
+      fleet_remote: Enum.map(fleet_remote, &Map.update!(&1, :bucket, fn b -> to_string(b) end)),
+      totals: portfolio_totals_json(totals),
+      todo: buckets.todo,
+      blocked: Enum.map(buckets.blocked, &portfolio_blocked_json/1),
+      rate: rate
     }
   end
 
-  defp print_portfolio(%{planned: planned, by_repo: by_repo, fleet_remote: fleet_remote}) do
-    IO.puts("PLANNED (#{length(planned)}):")
-
-    if planned == [] do
-      IO.puts("  (none)")
-    else
-      Enum.each(planned, fn p ->
-        IO.puts("  #{p.status}\t#{p.proposal_ref}\t#{p.goal_id}\t#{p.idea}")
-      end)
-    end
-
-    IO.puts("")
-
-    if map_size(by_repo) == 0 do
-      IO.puts("(no local runs)")
-    else
-      Enum.each(by_repo, fn {repo, buckets} -> print_repo_buckets(repo, buckets) end)
-    end
-
-    if fleet_remote != [] do
-      IO.puts("")
-      IO.puts("FLEET-WIDE (cross-machine, #{length(fleet_remote)}):")
-
-      Enum.each(fleet_remote, fn r ->
-        IO.puts("  #{r.bucket}\t#{r.goal_ref}\tmachine=#{r.machine}")
-      end)
-    end
+  defp portfolio_totals_json(%{base: base, empty?: empty?, rows: rows}) do
+    %{
+      base: base,
+      empty: empty?,
+      rows: Enum.map(rows, fn r -> %{bucket: to_string(r.bucket), count: r.count, pct: r.pct} end)
+    }
   end
 
-  defp print_repo_buckets(repo, buckets) do
-    IO.puts("#{repo}:")
+  defp portfolio_blocked_json(entry) do
+    entry
+    |> Map.update(:cause, nil, &to_string/1)
+    |> Map.put(:blocker, Kazi.Portfolio.blocker_label(entry))
+  end
 
-    Enum.each([:in_progress, :stuck, :complete], fn bucket ->
-      entries = Map.get(buckets, bucket, [])
+  # E64/T64.3 sitrep: a headline percentage line, then each of the five buckets
+  # (top-3 one-liners + "+N more"; --full restores the complete ledger), then the
+  # fleet-wide honest rate. NEVER a projected date (ADR-0046).
+  @portfolio_bucket_labels [
+    done: "DONE",
+    running: "IN PROGRESS",
+    blocked: "BLOCKED",
+    todo: "TODO",
+    planned: "PLANNED"
+  ]
 
-      if entries != [] do
-        IO.puts("  #{bucket} (#{length(entries)}):")
-        Enum.each(entries, fn e -> IO.puts("    #{e.goal_ref}\trun_id=#{e.run_id}") end)
-      end
+  defp print_portfolio(%{totals: totals, buckets: buckets, rate: rate}, full?) do
+    IO.puts(portfolio_headline(totals))
+
+    Enum.each(@portfolio_bucket_labels, fn {bucket, label} ->
+      print_portfolio_bucket(label, Map.get(buckets, bucket, []), bucket, full?)
     end)
+
+    print_portfolio_rate(rate)
+  end
+
+  defp portfolio_headline(%{empty?: true}), do: "nothing tracked yet"
+
+  defp portfolio_headline(%{rows: rows}) do
+    Enum.map_join(rows, " | ", fn %{bucket: bucket, count: count, pct: pct} ->
+      "#{portfolio_headline_label(bucket)} #{pct}% (#{count})"
+    end)
+  end
+
+  defp portfolio_headline_label(:running), do: "in-progress"
+  defp portfolio_headline_label(bucket), do: to_string(bucket)
+
+  defp print_portfolio_bucket(_label, [], _bucket, _full?), do: :ok
+
+  defp print_portfolio_bucket(label, entries, bucket, full?) do
+    IO.puts("")
+    IO.puts("#{label} (#{length(entries)}):")
+
+    shown = if full?, do: entries, else: Enum.take(entries, 3)
+    Enum.each(shown, fn entry -> IO.puts("  " <> portfolio_entry_line(bucket, entry)) end)
+
+    hidden = length(entries) - length(shown)
+    if hidden > 0, do: IO.puts("  +#{hidden} more")
+  end
+
+  defp portfolio_entry_line(:done, %{goal_ref: ref}), do: ref
+
+  defp portfolio_entry_line(:running, %{goal_ref: ref} = entry),
+    do: "#{ref}\t#{Kazi.Portfolio.rate_label(Map.get(entry, :rate))}"
+
+  defp portfolio_entry_line(:blocked, %{goal_ref: ref} = entry),
+    do: "#{ref}\t#{Kazi.Portfolio.blocker_label(entry)}"
+
+  defp portfolio_entry_line(bucket, entry) when bucket in [:todo, :planned],
+    do: "#{entry.goal_id}\t#{entry.idea}"
+
+  defp print_portfolio_rate(%{empty?: true}), do: :ok
+
+  defp print_portfolio_rate(%{green: green, total: total, delta: delta}) do
+    sign = if delta >= 0, do: "+#{delta}", else: "#{delta}"
+    IO.puts("")
+    IO.puts("fleet rate: #{green}/#{total} preds green, #{sign} this run")
   end
 
   defp print_orphans([], _reap?) do
