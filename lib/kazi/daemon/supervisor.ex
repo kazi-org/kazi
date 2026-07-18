@@ -42,9 +42,25 @@ defmodule Kazi.Daemon.Supervisor do
           _other -> []
         end)
 
+    # T52.4 (ADR-0068 point 2): migrate-before-serve. The daemon is the ONE and
+    # ONLY read-model migrator (#1019: a mixed migration-writer field is the
+    # exact class ADR-0068 closes) -- run the bounded, degrading boot migration
+    # ONCE here, synchronously, BEFORE any child starts. `Kazi.Daemon.Write`
+    # (the write server) is then ordered before `Kazi.Daemon.Listener`, so by
+    # the time the socket accepts a `write` the read-model is migrated and the
+    # write server is up -- a client write is never served against an
+    # unmigrated file ("no such table").
+    run_boot_migration(opts)
+
+    write_opts =
+      [name: default_write_name(opts)]
+      |> maybe_put(:repo, Keyword.get(opts, :migrate_repo))
+      |> maybe_put(:on_start, Keyword.get(opts, :write_on_start))
+
     children = [
       {Kazi.Daemon.Nats, nats_opts},
       {Kazi.Daemon.PresenceSweep, sweep_opts},
+      {Kazi.Daemon.Write, write_opts},
       {Kazi.Daemon.Listener,
        sock_path: sock_path,
        pid_path: pid_path,
@@ -55,6 +71,26 @@ defmodule Kazi.Daemon.Supervisor do
 
     Supervisor.init(children, strategy: :one_for_one)
   end
+
+  # The boot migration. `Kazi.ReadModel.Migrate.run/2` is itself bounded and
+  # degrading (L-0035: never raises, never blocks past its bound), so a peer
+  # holding the SQLite lock costs this boot a few seconds of no-persistence,
+  # never a hang -- and its result is deliberately not fatal to daemon start
+  # (a degraded read-model is the read-model's own concern, not the daemon's).
+  # `:migrate_fun`/`:migrate_repo` are test seams: a lifecycle test injects a
+  # recorder (to prove ordering) or points the migration at a throwaway repo.
+  defp run_boot_migration(opts) do
+    migrate_fun =
+      Keyword.get(opts, :migrate_fun, fn ->
+        Kazi.ReadModel.Migrate.run(Keyword.get(opts, :migrate_repo, Kazi.Repo), [])
+      end)
+
+    _ = migrate_fun.()
+    :ok
+  end
+
+  defp maybe_put(kw, _key, nil), do: kw
+  defp maybe_put(kw, key, value), do: Keyword.put(kw, key, value)
 
   @doc """
   The default control socket: `<state dir>/daemon/daemon.sock`, where the
@@ -95,6 +131,18 @@ defmodule Kazi.Daemon.Supervisor do
   @spec default_sweep_name(keyword()) :: atom()
   def default_sweep_name(opts) do
     Module.concat(Keyword.get(opts, :name, __MODULE__), PresenceSweep)
+  end
+
+  @doc """
+  The `Kazi.Daemon.Write` process name `init/1` uses absent an explicit
+  `opts[:write_name]` -- derived from this supervisor's own `opts[:name]`
+  exactly like `default_nats_name/1`, so two co-existing supervisor instances
+  (the double-start lifecycle test) never race for one registered write-server
+  name (T52.4).
+  """
+  @spec default_write_name(keyword()) :: atom()
+  def default_write_name(opts) do
+    Keyword.get(opts, :write_name, Module.concat(Keyword.get(opts, :name, __MODULE__), Write))
   end
 
   defp daemon_dir do

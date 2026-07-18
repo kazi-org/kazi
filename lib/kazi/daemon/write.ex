@@ -65,9 +65,42 @@ defmodule Kazi.Daemon.Write do
   so a concurrent reader never turns a write into a hang.
   """
 
+  use GenServer
+
   require Logger
 
   import Ecto.Query, only: [from: 2]
+
+  # ===========================================================================
+  # T52.4 (ADR-0068 point 2): the write server as a supervised child.
+  #
+  # `Kazi.Daemon.Supervisor` migrates the read-model ONCE (it is the one and
+  # only migrator) and starts THIS process only after that migration returns,
+  # ordered before `Kazi.Daemon.Listener` -- so by the time the socket accepts
+  # a `write`, the read-model is migrated and this write server is up. The
+  # process itself holds no mutable state today; its PLACE IN THE TREE is the
+  # invariant (a `write` is never served against an unmigrated file). The
+  # actual per-request write logic stays in the stateless `handle/2` below,
+  # which `Kazi.Daemon.Control` calls directly.
+  # ===========================================================================
+
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+  end
+
+  @impl true
+  def init(opts) do
+    # `:on_start` is a test seam (mirrors the sweep/nats naming seams): a
+    # lifecycle test injects it to observe that this child is started AFTER the
+    # supervisor's boot migration returns, never before.
+    case Keyword.get(opts, :on_start) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+
+    {:ok, %{repo: Keyword.get(opts, :repo, Kazi.Repo)}}
+  end
 
   @doc """
   Applies one control-socket `write` request and returns the reply map.
