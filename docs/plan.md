@@ -370,6 +370,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E64 -- kazi portfolio v2 "sitrep": headline percentages, todo/blocked buckets, honest summaries (#1427, P2) -> plans/E64.md
 
+### E65 -- Deterministic session/team identity: derived teams, daemon-assigned names, UUID-keyed presence (#1430, P1) -> plans/E65.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -472,6 +474,16 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-18 -- Change Summary (E65 planned: deterministic bus identity)
+- New epic E65 (plans/E65.md, executable, 5 tasks ~15h) from the operator's
+  identity failure report (#1430): teams DERIVED from normalized git origin
+  (argless join, t- prefixed slugs -- leading-dash class dies), names
+  DAEMON-ASSIGNED and KV-durable across restarts, presence UUID-keyed (rename
+  = alias update + tombstone grace, one row ever). Four design decisions
+  recorded on the issue; scope kazi-core only. Live specimens from 2026-07-17/18
+  (3-variant team split, name-wiping bounces, duplicate presence rows) are the
+  fixtures.
 
 ### 2026-07-18 -- Change Summary (E64 planned: portfolio sitrep v2)
 - New epic E64 (plans/E64.md, executable, 4 serial tasks ~10h): upgrade `kazi
