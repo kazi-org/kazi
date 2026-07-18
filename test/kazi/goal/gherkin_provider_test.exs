@@ -284,14 +284,14 @@ defmodule Kazi.Goal.GherkinProviderTest do
     end
   end
 
-  describe "provider evaluation (T62.1 scope: honest :unknown until T62.2)" do
-    test "the gherkin provider evaluates to :unknown, never a fabricated pass" do
-      pred =
-        Predicate.new("f__s", :gherkin,
-          config: %{feature: "f.feature", scenario: "S", runner_cmd: "bash"}
-        )
+  describe "provider evaluation (honest :unknown when nothing can be observed)" do
+    test "a sub-predicate with no runner_cmd evaluates to :unknown, never a fabricated pass" do
+      # The expander always copies a runner spec on, but a defensively-constructed
+      # predicate that names no runner cannot be observed — honest :unknown, never
+      # a fake pass or spurious fail (ADR-0046).
+      pred = Predicate.new("f__s", :gherkin, config: %{feature: "f.feature", scenario: "S"})
 
-      assert %PredicateResult{status: :unknown} =
+      assert %PredicateResult{status: :unknown, evidence: %{reason: :missing_runner_cmd}} =
                Kazi.Providers.Gherkin.evaluate(pred, %{})
     end
   end
