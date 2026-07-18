@@ -29,6 +29,12 @@ Kazi.Repo.delete_all(Kazi.ReadModel.Iteration)
 Application.put_env(:kazi, :lease_map_source, KaziWeb.CoordinationFixtureSource)
 {:ok, _} = KaziWeb.CoordinationFixtureSource.start_link([])
 
+# T63.6: keep Mission Control's cross-machine card source hermetic. A developer
+# box may have a real bus daemon reachable, which would otherwise inject phantom
+# remote cards into the fleet grid and its counts during a browser cert. Pin the
+# remote-run-facts fetcher to empty so the grid renders only the seeded runs.
+Application.put_env(:kazi, :remote_run_facts_fetcher, fn -> [] end)
+
 # Block this (owner) process for the lifetime of the Playwright run so the shared
 # checkout never reverts to :manual. `mix run --no-halt` would otherwise let the
 # script process finish while the node stays up — terminating the owner.
