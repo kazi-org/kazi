@@ -1993,6 +1993,15 @@ defmodule Kazi.CLI do
     by a DIFFERENT session is a hard error naming the holder -- names are never
     silently stolen; re-binding your OWN name is idempotent.
 
+    RENAME with a grace window (T65.4, #1430): when this changes the session's
+    presence label, the OLD name lingers as a resolvable tombstone-alias for a
+    bounded window (default 10 minutes, `config :kazi, :bus_rename_grace_s`). An
+    in-flight `bus tell <old-name>` inside the window still lands on the session
+    and the sender's ack notes the rename with the current name; after the window
+    the old name errors, naming the current name as a hint. (Attaching an alias
+    to an assigned-name session does NOT change the label, so it tombstones
+    nothing -- the old name stays live.)
+
     A nickname cannot be empty, contain whitespace, start with `@` (reserved
     for teams), or equal a different live session's id.
 
@@ -5275,10 +5284,16 @@ defmodule Kazi.CLI do
             "id" => receipt.id,
             "recipient" => receipt.recipient,
             "liveness" => receipt.liveness
-          },
+          }
+          # T65.4 (#1430): carry the renamed-notice only when the tell landed via
+          # a tombstone-alias, so the JSON stays byte-identical for the common case.
+          |> maybe_put_json("notice", Map.get(receipt, :notice)),
           fn ->
             warn_on_liveness(receipt)
             IO.puts("told #{receipt.recipient} (id #{receipt.id})")
+            # T65.4 (#1430): the recipient was renamed and the sender used the
+            # OLD name inside the grace window -- name the current name.
+            if notice = Map.get(receipt, :notice), do: IO.puts(notice)
           end
         )
 
@@ -5925,6 +5940,16 @@ defmodule Kazi.CLI do
       daemon_error(
         "no free assigned name for team #{inspect(team)} -- all of #{team}-a..z are in use; " <>
           "attach an explicit alias with `kazi bus name <alias>`",
+        opts
+      )
+
+  # T65.4 (#1430): a `tell` to a renamed name whose tombstone-alias grace window
+  # has expired -- name the session's CURRENT name so the sender can re-address.
+  defp bus_error({:name_tombstoned, old, current}, opts),
+    do:
+      daemon_error(
+        "name #{inspect(old)} was renamed to #{inspect(current)} and its grace window " <>
+          "has expired -- address #{inspect(current)} instead",
         opts
       )
 
