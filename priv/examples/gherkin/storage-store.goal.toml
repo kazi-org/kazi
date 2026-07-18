@@ -1,0 +1,18 @@
+# storage-store.feature reconciled NATIVELY by the `gherkin` runtime provider
+# (ADR-0071). The feature is the executable storage-port contract from the Sire
+# project (sire.run); it is reconciled here into per-scenario verdicts.
+#
+# runner_cmd/runner_args below point at a CI-safe replay of a REAL godog
+# `--format=cucumber` run (see storage-store-replay.sh). To reconcile against a
+# live godog run instead, point runner_args at a script that invokes godog with
+# `Format: "cucumber"` over this feature and emits the cucumber-json on stdout.
+id = "sire-storage-store"
+name = "sire-storage-store"
+
+[[predicate]]
+provider       = "gherkin"
+feature        = "storage-store.feature"
+verdict_format = "cucumber_json"
+runner_cmd     = "bash"
+runner_args    = ["storage-store-replay.sh"]
+acceptance     = true

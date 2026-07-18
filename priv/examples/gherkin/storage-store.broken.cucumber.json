@@ -1,0 +1,259 @@
+[
+  {
+    "uri": "../docs/specs/storage-store.feature",
+    "id": "storage-store-+-migrator",
+    "keyword": "Feature",
+    "name": "storage Store + Migrator",
+    "description": "",
+    "line": 1,
+    "comments": [
+      {
+        "value": "# Executable contract (ADR 0015): storage/contract_test.go binds every step",
+        "line": 2
+      },
+      {
+        "value": "# to the real store \u2014 SQLite always, Postgres when SIRE_TEST_POSTGRES_URL is",
+        "line": 3
+      },
+      {
+        "value": "# set. Observed, never asserted.",
+        "line": 4
+      }
+    ],
+    "elements": [
+      {
+        "id": "storage-store-+-migrator;a-conflicting-transaction-rolls-back",
+        "keyword": "Scenario",
+        "name": "a conflicting transaction rolls back",
+        "description": "",
+        "line": 6,
+        "type": "scenario",
+        "steps": [
+          {
+            "keyword": "Given ",
+            "name": "an open store",
+            "line": 7,
+            "match": {
+              "location": "contract_test.go:59"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 1285829
+            }
+          },
+          {
+            "keyword": "When ",
+            "name": "a transaction writes key \"a\" and then fails",
+            "line": 8,
+            "match": {
+              "location": "contract_test.go:62"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 140097
+            }
+          },
+          {
+            "keyword": "Then ",
+            "name": "key \"a\" is absent and the caller saw the error",
+            "line": 9,
+            "match": {
+              "location": "contract_test.go:66"
+            },
+            "result": {
+              "status": "failed",
+              "duration": 192644,
+              "error_message": "injected failure for T62.3 isolation proof"
+            }
+          }
+        ]
+      },
+      {
+        "id": "storage-store-+-migrator;values-round-trip-through-a-committed-transaction",
+        "keyword": "Scenario",
+        "name": "values round-trip through a committed transaction",
+        "description": "",
+        "line": 11,
+        "type": "scenario",
+        "steps": [
+          {
+            "keyword": "Given ",
+            "name": "an open store",
+            "line": 12,
+            "match": {
+              "location": "contract_test.go:59"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 300512
+            }
+          },
+          {
+            "keyword": "When ",
+            "name": "a transaction puts key \"b\" with value \"v1\" and commits",
+            "line": 13,
+            "match": {
+              "location": "contract_test.go:63"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 132669
+            }
+          },
+          {
+            "keyword": "Then ",
+            "name": "reading key \"b\" returns \"v1\"",
+            "line": 14,
+            "match": {
+              "location": "contract_test.go:67"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 174237
+            }
+          }
+        ]
+      },
+      {
+        "id": "storage-store-+-migrator;migrations-apply-up-and-roll-back-down",
+        "keyword": "Scenario",
+        "name": "migrations apply up and roll back down",
+        "description": "",
+        "line": 16,
+        "type": "scenario",
+        "steps": [
+          {
+            "keyword": "Given ",
+            "name": "an open store with the embedded migration set",
+            "line": 17,
+            "match": {
+              "location": "contract_test.go:60"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 1068562
+            }
+          },
+          {
+            "keyword": "When ",
+            "name": "Up runs to the latest version",
+            "line": 18,
+            "match": {
+              "location": "contract_test.go:64"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 29865027
+            }
+          },
+          {
+            "keyword": "Then ",
+            "name": "Version reports the latest migration",
+            "line": 19,
+            "match": {
+              "location": "contract_test.go:68"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 95399
+            }
+          },
+          {
+            "keyword": "And ",
+            "name": "the baseline schema accepts a tenant row",
+            "line": 20,
+            "match": {
+              "location": "contract_test.go:69"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 200531
+            }
+          },
+          {
+            "keyword": "When ",
+            "name": "Down rolls back one step",
+            "line": 21,
+            "match": {
+              "location": "contract_test.go:65"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 166194
+            }
+          },
+          {
+            "keyword": "Then ",
+            "name": "Version returns to the previous version",
+            "line": 22,
+            "match": {
+              "location": "contract_test.go:70"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 309105
+            }
+          }
+        ]
+      },
+      {
+        "id": "storage-store-+-migrator;a-dirty-migration-state-blocks-further-migration",
+        "keyword": "Scenario",
+        "name": "a dirty migration state blocks further migration",
+        "description": "",
+        "line": 24,
+        "type": "scenario",
+        "steps": [
+          {
+            "keyword": "Given ",
+            "name": "an open store with the embedded migration set",
+            "line": 25,
+            "match": {
+              "location": "contract_test.go:60"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 486535
+            }
+          },
+          {
+            "keyword": "And ",
+            "name": "the migration state is marked dirty",
+            "line": 26,
+            "match": {
+              "location": "contract_test.go:61"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 92783
+            }
+          },
+          {
+            "keyword": "Then ",
+            "name": "Up fails with DirtyState",
+            "line": 27,
+            "match": {
+              "location": "contract_test.go:71"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 55462
+            }
+          },
+          {
+            "keyword": "And ",
+            "name": "Down fails with DirtyState",
+            "line": 28,
+            "match": {
+              "location": "contract_test.go:72"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 80766
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
