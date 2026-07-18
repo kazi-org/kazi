@@ -475,10 +475,18 @@ defmodule Kazi.Bus do
     sock_path = opts[:sock_path] || Supervisor.default_sock_path()
 
     with :alive <- Probe.probe(sock_path),
+         {:ok, pong} <- Probe.ping(sock_path),
+         :ok <- check_protocol_skew(pong),
          {:ok, reply} <- Probe.request(sock_path, read_request(opts), read_timeout_ms(opts)),
          %{"ok" => true} <- reply do
       {:ok, reply}
     else
+      # T58.2: a skewed daemon is caught by the ping above and named clearly,
+      # before this ever reaches the `unknown_op` a pre-T58.2 daemon would
+      # have returned for `read` specifically.
+      {:error, {:daemon_protocol_skew, _vsn}} = skew_error ->
+        skew_error
+
       # An `ok: false` reply is the DAEMON refusing the read (a bus that is
       # provisioned but unreachable, say) -- distinct from "no daemon", and
       # surfaced rather than flattened, so the operator sees which it was.
@@ -1542,6 +1550,7 @@ defmodule Kazi.Bus do
 
     with :alive <- Probe.probe(sock_path),
          {:ok, %{"nats_port" => port} = pong} when is_integer(port) <- Probe.ping(sock_path),
+         :ok <- check_protocol_skew(pong),
          {:ok, conn} <- Gnat.start_link(discovered_connect_opts(pong, port)) do
       try do
         run(conn, fun, timeout_ms)
@@ -1549,7 +1558,22 @@ defmodule Kazi.Bus do
         if Process.alive?(conn), do: Gnat.stop(conn)
       end
     else
+      {:error, {:daemon_protocol_skew, _vsn}} = skew_error -> skew_error
       _other -> {:error, :no_daemon}
+    end
+  end
+
+  # T58.2 (#1227): the single seam every write verb (`tell`/`join`/`who`/...)
+  # already passes through via `with_discovered_conn/3`, and `read_assembled/1`
+  # passes through explicitly -- so a skewed daemon is caught here, loud, BEFORE
+  # any op is attempted, instead of writes silently succeeding while only reads
+  # fail with an unexplained `unknown_op`. `pong["vsn"]` (already present pre-T58.2)
+  # names the daemon's actual version in the error even when `bus_vsn` itself is
+  # missing (the exact skewed-daemon case).
+  defp check_protocol_skew(pong) do
+    case Kazi.Bus.ProtocolSkew.classify(pong) do
+      :ok -> :ok
+      :daemon_outdated -> {:error, {:daemon_protocol_skew, pong["vsn"] || "unknown"}}
     end
   end
 

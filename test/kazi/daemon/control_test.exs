@@ -35,6 +35,11 @@ defmodule Kazi.Daemon.ControlTest do
     assert ping(repo: Repo)["schema_vsn"] == 20_260_709_210_000
   end
 
+  test "the ping reply always carries bus_vsn (T58.2, #1227) regardless of repo availability" do
+    assert ping(repo: Repo)["bus_vsn"] == Kazi.Bus.ProtocolSkew.required_bus_vsn()
+    assert ping(repo: :no_such_repo)["bus_vsn"] == Kazi.Bus.ProtocolSkew.required_bus_vsn()
+  end
+
   test "every pre-existing ping field is unchanged and an old-client decode still succeeds" do
     resp = ping(repo: Repo)
 
