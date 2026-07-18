@@ -413,6 +413,12 @@ defmodule Kazi.Goal.Loader do
     "property" => :property,
     "mutation" => :mutation,
     "cve" => :cve,
+    # issue #1406: `:swift_test` reads a Swift/XCTest suite's verdict from an
+    # Xcode `.xcresult` bundle (via `xcresulttool`), gated on the PARSED
+    # pass/fail/zero-tests counts rather than the exit code. Its
+    # `xcresult_path` is validated below so a predicate with nothing to read
+    # fails at load, not at dispatch.
+    "swift_test" => :swift_test,
     # T44.6: `no_stubs` is a deterministic diff scanner — fail when the diff-vs-base
     # introduces a stub/placeholder/hardcoded-return marker into a non-test file.
     "no_stubs" => :no_stubs,
@@ -2013,6 +2019,21 @@ defmodule Kazi.Goal.Loader do
   defp validate_provider_config(:cve, config, id) do
     with {:ok, tool} <- validate_cve_tool(config, id) do
       validate_cve_count_path(tool, config, id)
+    end
+  end
+
+  # issue #1406: a swift_test predicate requires a non-empty `xcresult_path` —
+  # the .xcresult bundle it reads. Without it there is nothing to gate on, the
+  # same empty-gate class ADR-0058 fixed for a missing http_probe `url`.
+  defp validate_provider_config(:swift_test, config, id) do
+    case Map.get(config, :xcresult_path) do
+      path when is_binary(path) and path != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "swift_test predicate #{inspect(id)} requires a non-empty \"xcresult_path\" " <>
+           "(the .xcresult bundle to read)"}
     end
   end
 
