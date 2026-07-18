@@ -107,6 +107,57 @@ defmodule Kazi.Predicate.SchemaTest do
     end
   end
 
+  describe "gherkin provider schema (T62.4, ADR-0071)" do
+    # The config keys the loader ACTUALLY reads for a `provider = "gherkin"`
+    # entry at expansion (gherkin_runner_spec/3 + fetch_gherkin_feature/1 +
+    # ensure_feature_group/4). Pinned here so the schema can never drift from the
+    # loader's accepted set — the same parity discipline browser assertions use.
+    @gherkin_keys ~w(feature verdict_format runner_cmd runner_args report_path group)
+
+    test "the gherkin schema lists EVERY config key the loader reads" do
+      {:ok, schema} = Schema.fetch("gherkin")
+      listed = schema.keys |> Enum.map(& &1.name) |> MapSet.new()
+
+      assert MapSet.equal?(listed, MapSet.new(@gherkin_keys)),
+             "gherkin schema keys drifted from the loader: #{inspect(listed)}"
+    end
+
+    test "feature is the only required key (matches the loader's required/optional split)" do
+      {:ok, schema} = Schema.fetch("gherkin")
+      required = schema.keys |> Enum.filter(& &1.required) |> Enum.map(& &1.name)
+      assert required == ["feature"]
+    end
+
+    test "verdict_format documents EXACTLY the loader's accepted values" do
+      {:ok, schema} = Schema.fetch("gherkin")
+      %{description: description} = Enum.find(schema.keys, &(&1.name == "verdict_format"))
+
+      for format <- Kazi.Goal.Loader.gherkin_verdict_formats() do
+        assert description =~ format,
+               "kazi schema gherkin must document the #{format} verdict_format"
+      end
+    end
+
+    test "every key descriptor is fully documented" do
+      {:ok, schema} = Schema.fetch("gherkin")
+
+      for key <- schema.keys do
+        assert is_binary(key.name) and key.name != ""
+        assert is_binary(key.type) and key.type != ""
+        assert is_boolean(key.required)
+        assert is_binary(key.description) and key.description != ""
+      end
+    end
+
+    test "kazi schema gherkin emits the key schema as JSON and exits 0" do
+      out = capture_io(fn -> assert Kazi.CLI.run(["schema", "gherkin"]) == 0 end)
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert payload["kind"] == "gherkin"
+      key_names = payload["keys"] |> Enum.map(& &1["name"]) |> MapSet.new()
+      assert MapSet.equal?(key_names, MapSet.new(@gherkin_keys))
+    end
+  end
+
   describe "kazi schema custom_script (CLI)" do
     test "emits the custom_script key schema as JSON and exits 0" do
       out = capture_io(fn -> assert Kazi.CLI.run(["schema", "custom_script"]) == 0 end)
