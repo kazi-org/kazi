@@ -152,6 +152,39 @@ defmodule Kazi.Economy.KPIs do
     }
   end
 
+  @typedoc """
+  Per-category token usage (T60.5/#1070): the SAME components `tokens/1`
+  (inside `compute/1`) sums, unsummed. `nil` (never a fabricated 0) per
+  category the harness did not report.
+  """
+  @type token_breakdown :: %{
+          input: non_neg_integer() | nil,
+          output: non_neg_integer() | nil,
+          cached: non_neg_integer() | nil,
+          cache_write: non_neg_integer() | nil
+        }
+
+  @doc """
+  The per-category token breakdown for the human-readable convergence report
+  (T60.5/#1070): `input`/`output`/`cached`/`cache_write`, each `nil` when the
+  harness did not report that category (honest-unknown, never a fabricated 0).
+  Takes a raw `usage` map (the SAME ADR-0046 envelope `tokens/1`'s sum reads,
+  atom OR string keyed) directly -- deliberately NOT folded into `t:kpis/0`,
+  so the `--json` `economy` object this module also produces stays
+  byte-unchanged; this is purely additive human-terminal-output data.
+  """
+  @spec token_breakdown(map()) :: token_breakdown()
+  def token_breakdown(usage) when is_map(usage) do
+    %{
+      input: usage_field(usage, :input_tokens),
+      output: usage_field(usage, :output_tokens),
+      cached: usage_field(usage, :cached_input_tokens),
+      cache_write: usage_field(usage, :cache_write_tokens)
+    }
+  end
+
+  def token_breakdown(_not_a_map), do: %{input: nil, output: nil, cached: nil, cache_write: nil}
+
   @doc """
   Build a normalized `t:run/0` from recorded `Kazi.ReadModel.Iteration` rows (or
   the equivalent maps) plus a `meta` map, and fold it to `t:kpis/0`.
@@ -365,6 +398,13 @@ defmodule Kazi.Economy.KPIs do
   # simply did not report usage; a run that DID report usage carries the real,
   # non-zero total here without a capture shim.
   defp tokens(run), do: token_total(Map.get(run, :usage, %{}) || %{})
+
+  defp usage_field(usage, key) do
+    case fetch(usage, key) do
+      {:ok, n} when is_integer(n) and n >= 0 -> n
+      _ -> nil
+    end
+  end
 
   # The token fields of the ADR-0046 `usage` envelope (the same five
   # `Kazi.CLI.Usage` renders, minus `cost_usd`). Summed for the economy `tokens`

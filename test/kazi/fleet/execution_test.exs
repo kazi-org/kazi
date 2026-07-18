@@ -271,6 +271,57 @@ defmodule Kazi.Fleet.ExecutionTest do
   end
 
   # ---------------------------------------------------------------------------
+  # T60.5 (#1070): the fleet human report gains a per-member cost/token table,
+  # sourced from each member's `:human_cost` (never `--json`-serialized).
+  # ---------------------------------------------------------------------------
+
+  test "CLI --fleet (human report): prints a per-member cost/token breakdown table",
+       %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    fleet_path = two_member_fleet_dir(tmp_dir)
+
+    {out, code} =
+      run_cli(
+        ["apply", fleet_path, "--fleet", "--workspace", work],
+        adapter_opts: [command: json_usage_harness(tmp_dir)],
+        reobserve_interval_ms: 5,
+        await_timeout: 60_000
+      )
+
+    assert code == 0
+    assert out =~ "FLEET CONVERGED"
+
+    # One row per member, same table shape the single-goal report renders.
+    assert out =~ "│ Goal"
+    assert out =~ "│ m1"
+    assert out =~ "│ m2"
+    assert out =~ ~r/│ \$0\.01\s+│/
+    assert out =~ ~r/tokens: input=100 output=250 cached=5000 cache_write=0/
+
+    # `--json` on the SAME fleet is unaffected by the human_cost plumbing —
+    # only the documented economy/member fields are present.
+    {json_out, 0} =
+      run_cli(
+        [
+          "apply",
+          two_member_fleet_dir(Path.join(tmp_dir, "json")),
+          "--fleet",
+          "--workspace",
+          git_repo(Path.join(tmp_dir, "json")),
+          "--json"
+        ],
+        adapter_opts: [command: json_usage_harness(tmp_dir)],
+        reobserve_interval_ms: 5,
+        await_timeout: 60_000
+      )
+
+    payload = Jason.decode!(json_out)
+    member = Enum.find(payload["members"], &(&1["id"] == "m1"))
+    refute Map.has_key?(member["economy"] || %{}, "human_cost")
+    refute Map.has_key?(member["economy"] || %{}, "token_breakdown")
+  end
+
+  # ---------------------------------------------------------------------------
   # 5. registry rows are LIVE during execution
   # ---------------------------------------------------------------------------
 
@@ -448,6 +499,19 @@ defmodule Kazi.Fleet.ExecutionTest do
   # (workspace threading), never the base checkout.
   defp passing_harness(tmp_dir) do
     write_stub(tmp_dir, "passing", "echo \"the converged fix\" > fixed.txt\nexit 0")
+  end
+
+  # T60.5 (#1070): like passing_harness/1, but also emits a Claude JSON
+  # result envelope (usage + total_cost_usd) so the run reports real cost/
+  # token data for the human report's cost table to render.
+  defp json_usage_harness(tmp_dir) do
+    write_stub(tmp_dir, "json_usage", """
+    echo "the converged fix" > fixed.txt
+    cat <<'JSON'
+    {"type":"result","subtype":"success","is_error":false,"result":"fixed","total_cost_usd":0.0123,"usage":{"input_tokens":100,"output_tokens":250,"cache_creation_input_tokens":0,"cache_read_input_tokens":5000}}
+    JSON
+    exit 0
+    """)
   end
 
   # Blocks until the test writes the go-file, then converges — keeps the

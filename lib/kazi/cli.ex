@@ -2530,10 +2530,43 @@ defmodule Kazi.CLI do
     print_schedule_frontiers(schedule_view(synthetic, result.members))
     print_blocked_human(Map.get(result, :blocked, []))
     print_fleet_economy_human(result.economy)
+    print_fleet_cost_table(result)
 
     if result.resume_token do
       IO.puts("resume_token: #{result.resume_token}")
     end
+  end
+
+  # T60.5 (#1070): "kazi apply --fleet prints one row per goal in the same
+  # table shape" as the single-goal report -- reuses print_cost_table/1
+  # (the "not two separate implementations" requirement). Sourced from each
+  # member's `:human_cost` (never `--json`-serialized; see
+  # `Kazi.Fleet.Execution`'s moduledoc). Members that reported no usage at
+  # all are skipped, same honest-unknown rule as the single-goal path;
+  # nothing prints when NO member reported usage.
+  defp print_fleet_cost_table(%{members: members, member_results: member_results}) do
+    rows =
+      members
+      |> Enum.map(fn {id, _status} -> {id, Map.get(member_results, id, %{})} end)
+      |> Enum.filter(fn {_id, member} -> is_map(Map.get(member, :human_cost)) end)
+      |> Enum.map(fn {id, member} -> fleet_cost_row(id, member) end)
+
+    if rows != [] do
+      IO.puts("")
+      print_cost_table(rows)
+    end
+  end
+
+  defp print_fleet_cost_table(_result), do: :ok
+
+  defp fleet_cost_row(id, %{economy: economy, human_cost: human_cost}) do
+    %{
+      goal: id,
+      iterations: Map.get(economy || %{}, :iterations, 0),
+      cost_usd: Map.get(human_cost, :cost_usd),
+      predicates: predicates_label(Map.get(human_cost, :vector)),
+      token_breakdown: Map.get(human_cost, :token_breakdown)
+    }
   end
 
   defp print_fleet_economy_human(%{totals: nil} = economy) do
@@ -3672,7 +3705,7 @@ defmodule Kazi.CLI do
   # otherwise. Both share the SAME loop result; only the OUTPUT shape differs.
   defp report_outcome(%Goal{} = goal, outcome, result, economy, workspace, json?) do
     emit(json?, run_result_json(goal, outcome, result, economy, workspace), fn ->
-      report(goal, human_outcome(outcome), result)
+      report(goal, human_outcome(outcome), result, economy)
       Kazi.MCP.Nudge.maybe_print(workspace)
     end)
   end
@@ -7713,7 +7746,7 @@ defmodule Kazi.CLI do
   # outcome reporting
   # =============================================================================
 
-  defp report(%Goal{} = goal, outcome, result) do
+  defp report(%Goal{} = goal, outcome, result, economy) do
     IO.puts(outcome_line(goal, outcome, result))
     IO.puts("iterations: #{result.iterations}")
     IO.puts("actions:    #{format_actions(result.actions)}")
@@ -7723,7 +7756,109 @@ defmodule Kazi.CLI do
     maybe_report_release(result)
     IO.puts("\npredicate vector:")
     IO.puts(format_vector(result.vector))
+    print_convergence_cost_table(goal, result, economy)
   end
+
+  # T60.5 (#1070): the human-readable cost/token breakdown table on
+  # convergence/budget-exhaustion. `--json` already carries this data
+  # (`economy`/`usage`); this is purely additive terminal UX. Skipped when
+  # the run reported no usage at all (honest-unknown -- no fabricated $0 row).
+  defp print_convergence_cost_table(%Goal{id: id}, result, economy) do
+    usage = Map.get(result, :usage) || %{}
+
+    if map_size(usage) > 0 or is_map(economy) do
+      IO.puts("")
+      print_cost_table([cost_row(to_string(id), result, economy, usage)])
+    end
+  end
+
+  defp cost_row(goal_id, result, economy, usage) do
+    %{
+      goal: goal_id,
+      iterations: result.iterations,
+      cost_usd: economy_field(economy, :cost_usd),
+      predicates: predicates_label(result.vector),
+      token_breakdown: Kazi.Economy.KPIs.token_breakdown(usage)
+    }
+  end
+
+  defp economy_field(economy, key) when is_map(economy), do: Map.get(economy, key)
+  defp economy_field(_economy, _key), do: nil
+
+  defp predicates_label(nil), do: "—"
+
+  defp predicates_label(%Kazi.PredicateVector{results: results}) do
+    total = map_size(results)
+    passing = Enum.count(results, fn {_id, r} -> r.status == :pass end)
+    "#{passing}/#{total} pass"
+  end
+
+  # A single, reusable ASCII table renderer for the per-goal cost/token
+  # breakdown (T60.5, #1070) -- shared by the single-goal report above and the
+  # fleet report below so both surfaces render the SAME shape (the issue's
+  # explicit "not two separate implementations" requirement), one row per
+  # goal. Column widths size to content (never truncate a goal id/number).
+  defp print_cost_table(rows) when is_list(rows) and rows != [] do
+    headers = ["Goal", "Iterations", "Cost", "Predicates"]
+
+    cells =
+      Enum.map(rows, fn r ->
+        [r.goal, to_string(r.iterations), cost_cell(r.cost_usd), r.predicates]
+      end)
+
+    widths =
+      Enum.zip([headers | cells])
+      |> Enum.map(fn col ->
+        col |> Tuple.to_list() |> Enum.map(&String.length/1) |> Enum.max()
+      end)
+
+    IO.puts(table_border(widths, "┌", "┬", "┐"))
+    IO.puts(table_row(headers, widths))
+    IO.puts(table_border(widths, "├", "┼", "┤"))
+
+    Enum.each(Enum.zip(rows, cells), fn {row, cell} ->
+      IO.puts(table_row(cell, widths))
+      print_token_breakdown_line(row.token_breakdown)
+    end)
+
+    IO.puts(table_border(widths, "└", "┴", "┘"))
+  end
+
+  defp print_cost_table(_rows), do: :ok
+
+  defp cost_cell(nil), do: "—"
+
+  defp cost_cell(usd) when is_number(usd),
+    do: "$" <> :erlang.float_to_binary(usd / 1.0, decimals: 2)
+
+  defp table_border(widths, left, mid, right) do
+    left <> Enum.map_join(widths, mid, &String.duplicate("─", &1 + 2)) <> right
+  end
+
+  defp table_row(cells, widths) do
+    "│ " <>
+      Enum.map_join(Enum.zip(cells, widths), " │ ", fn {cell, w} ->
+        String.pad_trailing(cell, w)
+      end) <>
+      " │"
+  end
+
+  defp print_token_breakdown_line(%{
+         input: input,
+         output: output,
+         cached: cached,
+         cache_write: cache_write
+       }) do
+    if input || output || cached || cache_write do
+      IO.puts(
+        "    tokens: input=#{token_cell(input)} output=#{token_cell(output)} " <>
+          "cached=#{token_cell(cached)} cache_write=#{token_cell(cache_write)}"
+      )
+    end
+  end
+
+  defp token_cell(nil), do: "—"
+  defp token_cell(n) when is_integer(n), do: to_string(n)
 
   # Print the release ref line only when a deploy produced one this run.
   defp maybe_report_release(%{release_ref: ref}) when is_binary(ref),

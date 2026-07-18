@@ -110,6 +110,15 @@ its config at runtime via `kazi schema <kind>`.
 - **[Run-economics history (`kazi economy`)](economy.md)** — persisted
   run-end economics (ADR-0058) aggregated into p50/p95 percentiles by goal
   shape/model/harness; the grouping T48.9's learned budget proposals reuse.
+- **Convergence cost/token table (T60.5, #1070)** — the human-readable
+  (non-`--json`) terminal report on `kazi apply` convergence/budget-exhaustion
+  now prints a per-goal table (iterations, cost, predicates pass/total) plus a
+  token breakdown line (input/output/cached/cache_write), one row per goal for
+  both single-goal `apply` and `apply --fleet`. Sourced from the SAME
+  `Kazi.Economy.KPIs`/harness-reported usage data `--json`'s `economy`/`usage`
+  objects already carry — purely additive terminal UX, `--json` output is
+  unaffected. Skipped when the harness reported no usage at all
+  (honest-unknown, never a fabricated `$0.00` row).
 - **Orphaned dispatch reaping (`kazi orphans`)** — lists every run whose
   recorded harness child process is STILL alive (a dispatch that outlived its
   controller, issue #1073/#857); read-only by default, `--reap` sends TERM then

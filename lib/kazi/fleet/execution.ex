@@ -89,14 +89,19 @@ defmodule Kazi.Fleet.Execution do
       worktree, or the base for an in-place run);
     * `:integration` — the T50.2 landing info map for a worktree-isolated
       converged member, or `nil`;
-    * `:error` — the run error term when the member's run could not start.
+    * `:error` — the run error term when the member's run could not start;
+    * `:human_cost` — T60.5 (#1070): `%{cost_usd:, token_breakdown:, vector:}`
+      for the HUMAN fleet report table only (never serialized to `--json` --
+      see `member_human_cost/1`), `nil` when the member reported no usage.
   """
   @type member :: %{
           status: Kazi.Scheduler.partition_status(),
           economy: Kazi.Scheduler.Budget.spent() | nil,
           workspace: Path.t() | nil,
           integration: map() | nil,
-          error: term() | nil
+          error: term() | nil,
+          human_cost:
+            %{cost_usd: float() | nil, token_breakdown: map(), vector: term() | nil} | nil
         }
 
   @typedoc """
@@ -232,11 +237,21 @@ defmodule Kazi.Fleet.Execution do
   # Normalize whatever a (possibly injected) runner returned into a full member
   # record, so the collective fold and the rollup are total.
   defp normalize_member(%{status: _} = member) do
-    Map.merge(%{economy: nil, workspace: nil, integration: nil, error: nil}, member)
+    Map.merge(
+      %{economy: nil, workspace: nil, integration: nil, error: nil, human_cost: nil},
+      member
+    )
   end
 
   defp normalize_member(other) do
-    %{status: :stuck, economy: nil, workspace: nil, integration: nil, error: {:bad_member, other}}
+    %{
+      status: :stuck,
+      economy: nil,
+      workspace: nil,
+      integration: nil,
+      error: {:bad_member, other},
+      human_cost: nil
+    }
   end
 
   # issue #1053 sub-fix (2): a member runner that genuinely CRASHES (not the
@@ -326,6 +341,7 @@ defmodule Kazi.Fleet.Execution do
         normalize_member(%{
           status: status_for(outcome, result),
           economy: member_economy(result, elapsed_ms),
+          human_cost: member_human_cost(result),
           workspace: workspace
         })
 
@@ -352,6 +368,7 @@ defmodule Kazi.Fleet.Execution do
     base = %{
       status: :converged,
       economy: member_economy(result, elapsed_ms),
+      human_cost: member_human_cost(result),
       workspace: workspace
     }
 
@@ -387,6 +404,21 @@ defmodule Kazi.Fleet.Execution do
   end
 
   defp member_economy(_result, _elapsed_ms), do: nil
+
+  # T60.5 (#1070): cost/token-breakdown data for the HUMAN fleet report table
+  # only -- deliberately kept OUT of `:economy` (which flows verbatim into
+  # `--json`'s `economy` object via `fleet_members_json/1`), so `--json` stays
+  # byte-unchanged. `nil` when the member reported no usage at all
+  # (honest-unknown, never a fabricated $0/0-token row).
+  defp member_human_cost(%{usage: usage} = result) when map_size(usage) > 0 do
+    %{
+      cost_usd: Map.get(usage, :cost_usd),
+      token_breakdown: Kazi.Economy.KPIs.token_breakdown(usage),
+      vector: Map.get(result, :vector)
+    }
+  end
+
+  defp member_human_cost(_result), do: nil
 
   # `workspace` is only isolatable when it is itself a repo/worktree ROOT
   # (`--show-toplevel` resolves back to it) — the same rule the serial path
