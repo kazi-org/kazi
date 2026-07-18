@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.248.0](https://github.com/kazi-org/kazi/compare/v1.247.0...v1.248.0) (2026-07-18)
+
+
+### Features
+
+* **read_model:** project T63.3 gap fields — narrative intent, predicate group tags, missing tool/context counters (T63.10, UC-062) ([9c4017c](https://github.com/kazi-org/kazi/commit/9c4017c52169eabd5a0739b4d19dae8b3913133d))
+
 ## [1.247.0](https://github.com/kazi-org/kazi/compare/v1.246.0...v1.247.0) (2026-07-18)
 
 
