@@ -66,6 +66,18 @@ defmodule Kazi.Teach.InstallSkill do
   # its absence from docs/0 is the guarantee re-installs preserve it.
   @local_file "LOCAL.md"
 
+  # The STABLE LOCAL.md path (ADR-0077, the ADR-0074 amendment). Operator
+  # customization must live OUTSIDE any directory a plugin install/update
+  # replaces wholesale, so `LOCAL.md`'s canonical home is decoupled from
+  # wherever the skill CONTENT is written (`:dir`): it lives under the fixed
+  # `~/.claude/skills/kazi/` regardless. For the classic `install-skill`
+  # channel the two coincide (content and LOCAL.md both under that dir); for
+  # the plugin channel the content dir is plugin-managed and replaced on
+  # update, while LOCAL.md stays here, untouched. `@stable_local_display` is
+  # the tilde-form path the shipped SKILL.md points at (kept tilde, never an
+  # absolute home path -- the OSS no-leak rule); `local_path/1` expands it.
+  @stable_local_display Path.join(["~", ".claude", "skills", "kazi", @local_file])
+
   @doc """
   Renders the kazi skill documents and writes them to `<dir>/`.
 
@@ -124,6 +136,92 @@ defmodule Kazi.Teach.InstallSkill do
   def local_file, do: @local_file
 
   @doc """
+  The STABLE `LOCAL.md` location as a tilde-form display path
+  (`~/.claude/skills/kazi/LOCAL.md`, ADR-0077). This is the string the shipped
+  SKILL.md points at and the CLI reports -- kept in tilde form so it never
+  leaks an absolute home path into committed docs (the OSS no-leak rule). Use
+  `local_path/1` for the runtime-expanded path.
+  """
+  @spec local_display_path() :: String.t()
+  def local_display_path, do: @stable_local_display
+
+  @doc """
+  The STABLE `LOCAL.md` path, tilde-expanded for runtime use (ADR-0077).
+
+  Opts:
+
+    * `:local_dir` -- the stable LOCAL.md directory (default
+      `~/.claude/skills/kazi`). Tests inject a tmp dir so the real `~/.claude`
+      is never touched. This is DELIBERATELY separate from `write/1`'s `:dir`
+      (the skill CONTENT dir): a plugin update replaces the content dir
+      wholesale, so LOCAL.md must live outside it.
+  """
+  @spec local_path(keyword()) :: Path.t()
+  def local_path(opts \\ []) do
+    opts
+    |> Keyword.get(:local_dir, @default_dir)
+    |> Path.expand()
+    |> Path.join(@local_file)
+  end
+
+  @doc """
+  Migrate an operator's `LOCAL.md` from an OLD in-content-dir location to the
+  STABLE path (ADR-0077, the ADR-0074 amendment), detecting-and-never-silently
+  -ignoring an existing one.
+
+  Plugin updates replace the skill CONTENT directory wholesale, so a `LOCAL.md`
+  kept inside it would be destroyed on every marketplace update -- the exact
+  drift-class ADR-0074 exists to prevent. This moves such a file to the stable
+  path so operator customization survives updates, re-installs, and any future
+  relocation of the skill directory.
+
+  Opts:
+
+    * `:dir` -- the skill CONTENT dir (the OLD, possibly-replaced location),
+      default `~/.claude/skills/kazi`.
+    * `:local_dir` -- the STABLE LOCAL.md dir, default `~/.claude/skills/kazi`.
+
+  Never overwrites and never deletes an operator's content:
+
+    * `{:ok, :noop}` -- nothing to do (the two dirs coincide, as in the classic
+      `install-skill` channel, or there is no old-path `LOCAL.md`).
+    * `{:ok, {:migrated, from, to}}` -- the old-path file was moved to the
+      stable path (copy-then-remove, so it survives a cross-device move).
+    * `{:warn, {:conflict, old, new}}` -- a `LOCAL.md` exists at BOTH the old
+      and the stable path; BOTH are left untouched and the operator is asked to
+      merge by hand (never a silent clobber of either).
+    * `{:error, reason}` -- a filesystem error during the move.
+  """
+  @spec migrate_local(keyword()) ::
+          {:ok, :noop}
+          | {:ok, {:migrated, Path.t(), Path.t()}}
+          | {:warn, {:conflict, Path.t(), Path.t()}}
+          | {:error, term()}
+  def migrate_local(opts \\ []) do
+    content_dir = opts |> Keyword.get(:dir, @default_dir) |> Path.expand()
+    local_dir = opts |> Keyword.get(:local_dir, @default_dir) |> Path.expand()
+    old = Path.join(content_dir, @local_file)
+    new = Path.join(local_dir, @local_file)
+
+    cond do
+      old == new -> {:ok, :noop}
+      not File.exists?(old) -> {:ok, :noop}
+      File.exists?(new) -> {:warn, {:conflict, old, new}}
+      true -> move_local(old, new, local_dir)
+    end
+  end
+
+  # Copy-then-remove (not File.rename) so the move survives a cross-device
+  # relocation (e.g. the content dir on a different mount than ~/.claude).
+  defp move_local(old, new, local_dir) do
+    with :ok <- File.mkdir_p(local_dir),
+         {:ok, _bytes} <- File.copy(old, new),
+         :ok <- File.rm(old) do
+      {:ok, {:migrated, old, new}}
+    end
+  end
+
+  @doc """
   The default install directory (`~/.claude/skills/kazi`, tilde-expanded). Exposed
   so the CLI can report where the skill landed on a default install.
   """
@@ -164,11 +262,15 @@ defmodule Kazi.Teach.InstallSkill do
 
     ## Site-specific routing: LOCAL.md
 
-    If a `LOCAL.md` exists in this skill directory, READ IT FIRST. It carries the
-    operator's own wiring -- e.g. which local orchestration skill owns plan-driven
-    work, house conventions, model policy overrides -- and it takes precedence
-    over the generic routing below. `kazi install-skill` never writes or
-    overwrites `LOCAL.md`, so it is the safe place for anything site-specific.
+    Operator wiring lives at a STABLE path OUTSIDE this skill directory:
+    `#{@stable_local_display}`. If that file exists, READ IT FIRST. It carries
+    the operator's own wiring -- e.g. which local orchestration skill owns
+    plan-driven work, house conventions, model policy overrides -- and it takes
+    precedence over the generic routing below. It lives outside the skill
+    directory ON PURPOSE (ADR-0077, the ADR-0074 amendment): a plugin update
+    replaces the skill directory wholesale, so customization kept at the stable
+    path survives plugin updates, re-installs, and any future relocation of the
+    skill directory. `kazi install-skill` never writes or overwrites it.
 
     ## How to drive kazi: MCP first, JSON-CLI fallback
 
