@@ -305,9 +305,25 @@ defmodule Kazi.Bus do
       end)
       |> Enum.min_by(fn {e, _v} -> e["age_s"] end, fn -> nil end)
 
+    # T65.3 (#1430): resolve a durable BINDING (an attached alias, or an
+    # assigned name whose presence label was overwritten) to its live session --
+    # so both the assigned name and any alias reach the session, not just the
+    # one currently rendered as the presence label.
+    bound =
+      case bound_session_for_name(conn, recipient) do
+        uuid when is_binary(uuid) ->
+          Enum.find(pairs, fn {e, _v} ->
+            e["session"] == uuid and MapSet.member?(live_ids, uuid)
+          end)
+
+        _absent ->
+          nil
+      end
+
     cond do
       exact -> {recipient, rendered_liveness(exact)}
       named -> {elem(named, 0)["session"], rendered_liveness(named)}
+      bound -> {elem(bound, 0)["session"], rendered_liveness(bound)}
       has_inbox?(conn, recipient) -> {recipient, "no-presence"}
       true -> raise_bus_error({:unknown_recipient, recipient, roster_labels(live)})
     end
@@ -360,10 +376,49 @@ defmodule Kazi.Bus do
     with :ok <- validate_nickname(nickname) do
       with_conn(opts, fn conn ->
         bind_name!(conn, nickname, session(opts))
-        upsert_presence(conn, Keyword.put(opts, :name, nickname))
+        # T65.3 (#1430): `bus name` ATTACHES an alias on top of any
+        # daemon-assigned name. When the session already carries an assigned
+        # name (from `join`), THAT stays the canonical label `who/1` renders --
+        # the alias only adds another resolvable binding (`tell` consults the
+        # bindings, so both names reach the session). A session that never
+        # joined (no assigned name) still takes the nickname as its label,
+        # exactly as before.
+        label = assigned_name_for(conn, session(opts)) || nickname
+        upsert_presence(conn, Keyword.put(opts, :name, label))
         :ok
       end)
     end
+  end
+
+  @doc """
+  T65.3 (#1430): assigns the calling session its DAEMON-ISSUED short name for
+  `team` -- the next free letter in `<team>-a..z` order -- and returns it. The
+  allocation is ATOMIC through JetStream KV: each candidate is a CREATE-ONLY
+  write (NATS optimistic concurrency via `Nats-Expected-Last-Subject-Sequence:
+  0`), so two sessions racing for the same letter can never both win -- the
+  loser's create is rejected server-side and it advances to the next letter, no
+  client-side lock required. The assigned name is bound durably (kind
+  `assigned`) to the session UUID and set as the canonical presence label.
+
+  Idempotent: a session that ALREADY holds an assigned name KEEPS it (a re-join
+  never churns the name) -- the binding is simply refreshed onto presence.
+  Returns `{:error, {:name_pool_exhausted, team}}` only when all 26 letters for
+  the team are taken.
+  """
+  @spec assign_name(String.t(), keyword()) :: {:ok, String.t()} | {:error, error()}
+  def assign_name(team, opts \\ []) when is_binary(team) do
+    with_conn(opts, fn conn ->
+      uuid = session(opts)
+
+      name =
+        case assigned_name_for(conn, uuid) do
+          existing when is_binary(existing) -> existing
+          _absent -> allocate_assigned_name!(conn, team, uuid)
+        end
+
+      upsert_presence(conn, Keyword.put(opts, :name, name))
+      {:ok, name}
+    end)
   end
 
   @doc """
@@ -439,11 +494,113 @@ defmodule Kazi.Bus do
       Jason.encode!(%{
         "name" => nickname,
         "session" => self_id,
+        # T65.3 (#1430): an ATTACHED alias -- distinct from a daemon-`assigned`
+        # name, so `assigned_name_for/2` (canonical-label + idempotent-rejoin)
+        # never mistakes an alias for the assigned name.
+        "kind" => "alias",
         "ts" => DateTime.to_iso8601(DateTime.utc_now())
       })
 
     KV.put_value(conn, Provision.names_bucket(), sanitize(nickname), payload)
     :ok
+  end
+
+  # T65.3 (#1430): the atomic letter allocation. Walks `a..z`, and for each
+  # candidate attempts a CREATE-ONLY KV write; the FIRST create that wins is
+  # this session's name. A create that LOSES (the key already exists -- another
+  # session already holds that letter) advances to the next. Because the create
+  # is server-enforced optimistic concurrency, concurrent joiners never collide
+  # on one letter.
+  defp allocate_assigned_name!(conn, team, uuid) do
+    Enum.find_value(assigned_name_candidates(team), fn candidate ->
+      case create_binding(conn, candidate, uuid) do
+        :ok -> candidate
+        {:error, :exists} -> nil
+      end
+    end) || raise_bus_error({:name_pool_exhausted, team})
+  end
+
+  @doc """
+  T65.3 (#1430): the ordered `<team>-a` .. `<team>-z` assigned-name candidates
+  for `team` -- the DETERMINISTIC allocation order. Pure (no I/O): `assign_name/2`
+  walks this list and the first candidate whose atomic KV create WINS is the
+  session's name, so the ordering here is exactly the a, b, c... sequence
+  successive joiners receive.
+  """
+  @spec assigned_name_candidates(String.t()) :: [String.t()]
+  def assigned_name_candidates(team) when is_binary(team),
+    do: for(letter <- ?a..?z, do: team <> "-" <> <<letter>>)
+
+  # T65.3 (#1430): a CREATE-ONLY write into the durable `kazi_names` bucket --
+  # the atomic allocation primitive. The `Nats-Expected-Last-Subject-Sequence:
+  # 0` header makes JetStream ACCEPT the publish only when the subject has no
+  # live value, so a race for the same key resolves entirely server-side:
+  # exactly one create is acked (`{"seq" => _}`), every other gets an error ack
+  # (`:exists`). `KV.put_value/4` is last-write-wins and could NOT give this
+  # guarantee, which is why allocation goes straight to the KV subject.
+  defp create_binding(conn, nickname, uuid) do
+    payload =
+      Jason.encode!(%{
+        "name" => nickname,
+        "session" => uuid,
+        "kind" => "assigned",
+        "ts" => DateTime.to_iso8601(DateTime.utc_now())
+      })
+
+    subject = "$KV." <> Provision.names_bucket() <> "." <> sanitize(nickname)
+
+    case Gnat.request(conn, subject, payload,
+           headers: [{"Nats-Expected-Last-Subject-Sequence", "0"}],
+           receive_timeout: 5_000
+         ) do
+      {:ok, %{body: body}} ->
+        case Jason.decode(body) do
+          # The CONFLICT ack carries BOTH an `error` and a `seq` (0), so the
+          # error MUST be matched first -- a create that lost the race is
+          # `wrong last sequence` (err_code 10071), i.e. the key already exists.
+          {:ok, %{"error" => _}} -> {:error, :exists}
+          {:ok, %{"seq" => seq}} when is_integer(seq) and seq > 0 -> :ok
+          _unparseable -> {:error, :exists}
+        end
+
+      _no_ack ->
+        {:error, :exists}
+    end
+  end
+
+  # T65.3 (#1430): the DAEMON-ASSIGNED name bound to `uuid` (kind `assigned`) in
+  # the durable bucket, or nil. Distinct from an attached alias: only the
+  # assigned name is canonical for the presence label and the idempotent-rejoin
+  # keep.
+  defp assigned_name_for(conn, uuid) do
+    case KV.contents(conn, Provision.names_bucket()) do
+      {:ok, contents} ->
+        Enum.find_value(contents, fn {_key, value} ->
+          case Jason.decode(value) do
+            {:ok, %{"name" => name, "session" => ^uuid, "kind" => "assigned"}} -> name
+            _other -> nil
+          end
+        end)
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  # T65.3 (#1430): the session UUID a durable name -- an assigned name OR an
+  # attached alias -- resolves to, or nil. `tell` consults this so an alias
+  # that is NOT the presence label still reaches its session.
+  defp bound_session_for_name(conn, name) do
+    case KV.get_value(conn, Provision.names_bucket(), sanitize(name)) do
+      value when is_binary(value) ->
+        case Jason.decode(value) do
+          {:ok, %{"session" => uuid}} -> uuid
+          _other -> nil
+        end
+
+      _missing ->
+        nil
+    end
   end
 
   # A nickname that collides with another session's UUID could never be
@@ -480,12 +637,24 @@ defmodule Kazi.Bus do
   defp bound_name_for(conn, uuid) do
     case KV.contents(conn, Provision.names_bucket()) do
       {:ok, contents} ->
-        Enum.find_value(contents, fn {_key, value} ->
-          case Jason.decode(value) do
-            {:ok, %{"name" => name, "session" => ^uuid}} -> name
-            _other -> nil
-          end
-        end)
+        bindings =
+          for {_key, value} <- contents,
+              {:ok, %{"name" => name, "session" => ^uuid} = entry} <- [Jason.decode(value)],
+              do: {name, entry["kind"], entry["ts"] || ""}
+
+        # T65.3 (#1430): the daemon-ASSIGNED name is the canonical label, so it
+        # wins the restore. Absent one (a legacy alias-only session), fall back
+        # to the most-recently-bound alias.
+        case Enum.find(bindings, fn {_name, kind, _ts} -> kind == "assigned" end) do
+          {name, _kind, _ts} ->
+            name
+
+          nil ->
+            case Enum.max_by(bindings, fn {_name, _kind, ts} -> ts end, fn -> nil end) do
+              {name, _kind, _ts} -> name
+              nil -> nil
+            end
+        end
 
       {:error, _reason} ->
         nil
