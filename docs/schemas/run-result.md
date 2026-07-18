@@ -87,11 +87,14 @@ ADR-0065 (T50.2) adds the OPTIONAL `integration` object reporting how a
 worktree-isolated serial run's converged commits landed on the base.
 **Additive** — present only when a landing was attempted, absent on in-place
 runs and runs with nothing integrable — so `schema_version` stays **2**. One
-behavioral note an orchestrator should absorb: a `converged` result with
-`integration.landed == false` exits **1** (converged-but-not-landed is not a
-clean success; the work survives on the reported `task_branch`). See
+behavioral note an orchestrator should absorb: by DEFAULT a `converged` result
+with `integration.landed == false` still exits **0** (issue #1407 — the exit
+code mirrors convergence alone; the landing failure is surfaced via this object
+and a stderr warning, and the work survives on the reported `task_branch`).
+Pass `--strict-landing` to couple the exit code back to the landing verdict (a
+converged-but-not-landed run then exits **1**). See
 [`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065)
-below.
+below and `docs/landing.md`.
 
 ## Shape
 
@@ -488,7 +491,7 @@ that landing's verdict:
 
 | Field         | Type              | Meaning |
 |---------------|-------------------|---------|
-| `landed`      | boolean           | Whether the task-branch commits landed on the base. `false` ⇒ the run exits **1** even though `status` is `converged` — a converged-but-not-landed run is not a clean success. |
+| `landed`      | boolean           | Whether the task-branch commits landed on the base. `false` ⇒ the SERIAL run's exit code stays **0** by default even though `status` is `converged` (issue #1407); pass `--strict-landing` to downgrade it to **1** instead. |
 | `base`        | string            | The base ref the landing targeted: the caller's checked-out branch, never a hardcoded default. |
 | `task_branch` | string            | The task branch holding the converged commits. On `landed: false` this branch SURVIVES worktree cleanup in the base repo — the work is never lost; integrate it by hand or re-run. |
 | `refs`        | object (optional) | The integrator's refs on success — `pr`/`merge_commit` from the remote (gh) integrator, or `merge_commit` + `local: true` from the remote-less local rebase-merge. |
