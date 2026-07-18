@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.228.0](https://github.com/kazi-org/kazi/compare/v1.227.0...v1.228.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** default per-partition worktree isolation on --parallel + surface it in --explain (T59.9, [#937](https://github.com/kazi-org/kazi/issues/937)) ([5f6a2e1](https://github.com/kazi-org/kazi/commit/5f6a2e163c2ee6c6ee6d7148c250c6b79f7cff72))
+
 ## [1.227.0](https://github.com/kazi-org/kazi/compare/v1.226.0...v1.227.0) (2026-07-18)
 
 
