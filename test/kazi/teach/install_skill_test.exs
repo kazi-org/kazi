@@ -189,6 +189,32 @@ defmodule Kazi.Teach.InstallSkillTest do
     end
   end
 
+  test "teaches the real --check observe-only verb, not the max_iterations=1 hack (#1166)" do
+    docs = InstallSkill.docs() |> Map.new()
+    recipes = Map.fetch!(docs, "RECIPES.md")
+
+    refute recipes =~ "no observe-only verb",
+           "RECIPES.md still teaches the pre-#805-fix 'kazi has no observe-only verb' line"
+
+    refute recipes =~ "max_iterations = 1",
+           "RECIPES.md still teaches the gate-variant max_iterations=1 hack instead of --check"
+
+    refute recipes =~ "/usr/bin/true",
+           "RECIPES.md still teaches the gate-variant command=\"/usr/bin/true\" hack"
+
+    assert recipes =~ "--check",
+           "RECIPES.md must teach the real observe-only verb, kazi apply <goal> --check"
+  end
+
+  test "drops the closed-#936 split-goal-file workaround caveat" do
+    docs = InstallSkill.docs() |> Map.new()
+    recipes = Map.fetch!(docs, "RECIPES.md")
+
+    refute recipes =~ "split the DAG into one goal-file per wave",
+           "RECIPES.md still carries the pre-T50.3 #936 split-goal-file workaround " <>
+             "(--pause-between-waves/--resume now ship as the real checkpoint mechanism)"
+  end
+
   test "is overwrite-stable: re-running rewrites the same paths", %{dir: dir} do
     assert {:ok, path1} = InstallSkill.write(dir: dir)
     assert {:ok, path2} = InstallSkill.write(dir: dir)
