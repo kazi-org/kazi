@@ -333,6 +333,21 @@ the UUID means the name has exactly one owner.) A nickname still cannot be
 empty, contain whitespace, start with `@` (reserved for teams), or equal a
 different live session's id.
 
+**Rename with a tombstone grace window (T65.4, #1430).** When `kazi bus name`
+CHANGES a session's presence label (a genuine rename, not an alias attach on an
+assigned-name session), the OLD name is written into the `kazi_names` bucket as
+a **tombstone-alias** resolving to the same UUID for a bounded grace window —
+default 10 minutes, configurable via `config :kazi, :bus_rename_grace_s`. Inside
+the window an in-flight `bus tell <old-name>` still lands on the session, and the
+sender's ack carries a one-line renamed-notice naming the current name (`note:
+<old> was renamed to <current> …`). After the window the old name errors,
+naming the current name as the hint to re-address (`name "<old>" was renamed to
+"<current>" and its grace window has expired`). The bucket stays TTL-less
+(assigned/alias bindings must survive restarts, T65.2), so expiry is a
+timestamp check at resolve time — not a per-bucket TTL. Presence row count is
+exactly 1 across the whole rename lifecycle; only the `kazi_names` binding for
+the old name flips to a tombstone.
+
 `bus tell <recipient>` resolves the recipient in order:
 
 1. `@<team>` — fan-out to the named team (issue #1069), unchanged;
@@ -341,7 +356,12 @@ different live session's id.
 4. a durable binding (an attached alias, or an assigned name whose presence
    label was overwritten), resolved through the `kazi_names` bucket to its live
    session (T65.3) — so an alias reaches its session even though `who` shows the
-   assigned name instead.
+   assigned name instead;
+5. a **tombstone-alias** of a renamed-away name (T65.4) — resolved to the same
+   UUID only within the grace window (with a renamed-notice on the ack), and an
+   error naming the current name once expired. A live session id (2) or live
+   label (3) always wins over a tombstone, so a name RECYCLED onto a new session
+   beats its own stale tombstone.
 
 A recipient matching none of those falls back to its durable inbox (T55.12)
 — a session whose presence aged out but whose cursor still exists will drain
