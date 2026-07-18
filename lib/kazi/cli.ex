@@ -3568,6 +3568,13 @@ defmodule Kazi.CLI do
 
     case Kazi.Scheduler.run_goals([goal], scheduler_opts) do
       {:ok, result} ->
+        # T62.6 (issue #1241 part 2): persist the per-group landed refs the
+        # collective just computed so `kazi status <goal-id>` shows the same
+        # per-group landing detail AFTER the run exits, not only this immediate
+        # invocation's output. Best-effort (a projection, never gates the run);
+        # skipped when persistence is off (`--json` boundary tests without a
+        # read-model) — the immediate collective surface is unchanged.
+        if persist?, do: persist_landed_refs(goal, result)
         report_collective(goal, result, json?)
         collective_exit_code(result)
 
@@ -4125,8 +4132,14 @@ defmodule Kazi.CLI do
   # JSON object under --json, a human block otherwise.
   defp report_run_status(ref, iteration, opts) do
     vector = ReadModel.to_predicate_vector(iteration)
+    # T62.6 (issue #1241 part 2): the run's persisted per-group landed refs, so a
+    # completed `--parallel` run's status shows the same per-group landing detail
+    # (branch/pr/merge_commit) the immediate collective output carried. Empty for
+    # a run that never landed (e.g. a single-goal run) — the surface then stays
+    # byte-identical to the pre-T62.6 shape.
+    landed = ReadModel.landed_refs(ref)
 
-    emit(json?(opts), run_status_json(ref, iteration, vector), fn ->
+    emit(json?(opts), run_status_json(ref, iteration, vector, landed), fn ->
       IO.puts("STATUS     ref=#{ref} kind=run")
       IO.puts("converged: #{iteration.converged}")
       IO.puts("iteration: #{iteration.iteration_index}")
@@ -4134,9 +4147,25 @@ defmodule Kazi.CLI do
       IO.puts("observed:  #{iteration.observed_at}")
       IO.puts("\npredicate vector:")
       IO.puts(format_vector(vector))
+      print_status_landed(landed)
     end)
 
     0
+  end
+
+  # T62.6: the persisted per-group landed refs appended to a run's human status
+  # block — one line per group, `<partition-id>: landed=<branch> pr=<pr>
+  # merge=<merge_commit>`, mirroring the collective block's `landed_human/1`.
+  # Nothing printed when the run recorded no landed refs.
+  defp print_status_landed([]), do: :ok
+
+  defp print_status_landed(landed) do
+    IO.puts("\nlanded:")
+
+    Enum.each(landed, fn row ->
+      refs = %{branch: row.branch, pr: row.pr, merge_commit: row.merge_commit}
+      IO.puts("  #{row.partition_id}#{landed_human(refs)}")
+    end)
   end
 
   # Report a PROPOSAL's current lifecycle state (T15.5): a JSON object under
@@ -4179,8 +4208,8 @@ defmodule Kazi.CLI do
   # predicate VECTOR (the same `{id, verdict}` shape as `run --json`), the last
   # iteration index, the release ref, and the observation timestamp — plus
   # `schema_version`. `kind: "run"` distinguishes it from a proposal status.
-  defp run_status_json(ref, iteration, vector) do
-    %{
+  defp run_status_json(ref, iteration, vector, landed) do
+    base = %{
       schema_version: @run_schema_version,
       kind: "run",
       ref: to_string(ref),
@@ -4191,6 +4220,25 @@ defmodule Kazi.CLI do
       release_ref: iteration.release_ref,
       observed_at: status_timestamp(iteration.observed_at)
     }
+
+    # T62.6 (issue #1241 part 2): a run that landed per-group work carries its
+    # persisted `landed` refs — ADDITIVE, so a run with none (a single-goal run,
+    # or a pre-T62.6 row) omits the key entirely and the object is byte-identical
+    # to the pre-T62.6 status shape (regression pin).
+    case landed do
+      [] -> base
+      rows -> Map.put(base, :landed, Enum.map(rows, &status_landed_json/1))
+    end
+  end
+
+  # One persisted landed-ref row on the `status --json` surface: the group's
+  # stable `partition_id` plus the T44.10 `{branch, pr, merge_commit}` shape,
+  # each key present only when the run recorded it (honest-unknown, ADR-0046).
+  defp status_landed_json(row) do
+    %{partition_id: row.partition_id}
+    |> maybe_put_ref(:branch, row.branch)
+    |> maybe_put_ref(:pr, row.pr)
+    |> maybe_put_ref(:merge_commit, row.merge_commit)
   end
 
   # The `status --json` result object for a PROPOSAL (T15.5): its lifecycle state,
@@ -8428,6 +8476,40 @@ defmodule Kazi.CLI do
       end
     end)
   end
+
+  # T62.6 (issue #1241 part 2): project the collective's per-group landed refs
+  # into the read-model, keyed by the run handle (`goal.id`) + each group's
+  # stable partition id — the SAME id `partitions_json` surfaces — so `kazi
+  # status <goal-id>` shows the per-group `{branch, pr, merge_commit}` detail
+  # after the fact. A run with no landing (mode :none / an empty landed index)
+  # writes nothing, leaving status byte-identical to the pre-T62.6 surface.
+  defp persist_landed_refs(%Goal{id: id}, %{partitions: partitions} = result) do
+    landed = landed_index(result)
+
+    entries =
+      partitions
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{partition, _status}, index} ->
+        case Map.get(landed, partition_key(partition)) do
+          nil ->
+            []
+
+          refs ->
+            [
+              Map.put(landed_json(refs), :partition_id, partition_id(partition, index))
+            ]
+        end
+      end)
+
+    if entries != [], do: ReadModel.record_landed_refs(id, entries)
+
+    :ok
+  end
+
+  # A DAG/group collective (or any result without a flat `:partitions` list) has
+  # no per-partition landed index to persist here (its landing is surfaced
+  # per-group elsewhere); a no-op keeps this total.
+  defp persist_landed_refs(_goal, _result), do: :ok
 
   # Index the collective integration's per-partition landed refs by the partition's
   # stable key, so `partitions_json` can attribute each group's landing to its
