@@ -148,6 +148,23 @@ function defaultDocFiles() {
   return out;
 }
 
+// T56.1 (#1242): priv/examples/*.toml goal-files carry `#`-prefixed comment
+// lines that hand the reader a runnable `kazi <verb> ...` invocation (e.g.
+// "#     kazi run priv/examples/deploy_target.toml --workspace ..."). These
+// slipped past the .md-only scan above -- there is no fence/backtick around a
+// TOML comment, so the KAZI_AT_START match never fired on them. Scanned as a
+// SEPARATE file set (not merged into docFiles()) because their command
+// context is a bare `#` comment line, not a fence/backtick span.
+function tomlExampleFiles() {
+  if (process.env.KAZI_TOML_FILES) {
+    return process.env.KAZI_TOML_FILES.split(/\s+/).filter(Boolean);
+  }
+  const dir = join(repoRoot, "priv", "examples");
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".toml"))
+    .map((e) => join(dir, e.name));
+}
+
 function docFiles() {
   if (process.env.KAZI_DOC_FILES) {
     return process.env.KAZI_DOC_FILES.split(/\s+/).filter(Boolean);
@@ -259,18 +276,78 @@ function scan(surface, files) {
   return findings;
 }
 
+// TOML comment scan (T56.1, #1242): a `#`-prefixed comment line's body is
+// command context by convention in these goal-files (every `kazi <verb>`
+// comment here is a "run it like this" example, never prose). No fence/inline
+// backtick concept applies, so this is a standalone pass, not a fence branch
+// inside `scan()`.
+function scanTomlComments(surface, files) {
+  const { commands, flags, shortFlags } = surface;
+  const findings = [];
+  const record = (file, lineno, kind, token, text) =>
+    findings.push({ file, lineno, kind, token, text: text.trim() });
+
+  const checkInvocation = (file, lineno, line, verb, rest) => {
+    if (isAllowed(line)) return;
+    if (REMOVED_VERBS.has(verb)) {
+      record(file, lineno, "removed-command", `kazi ${verb}`, line);
+      return;
+    }
+    if (!commands.has(verb)) {
+      record(file, lineno, "unknown-command", `kazi ${verb}`, line);
+      return;
+    }
+    for (const f of flagsOf(rest)) {
+      const known = f.long ? flags.has(f.name) : shortFlags.has(f.name);
+      if (!known) record(file, lineno, "unknown-flag", `--${f.name}`, line);
+    }
+  };
+
+  const COMMENT_RE = /^\s*#\s?(.*)$/;
+  const KAZI_AT_START = /^\s*[$>]?\s*kazi\s+([a-z][a-z-]*)(.*)$/;
+  const MIX_REMOVED = /\bmix\s+kazi\.(run|propose)\b/;
+
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    text.split("\n").forEach((line, i) => {
+      const lineno = i + 1;
+      const mix = line.match(MIX_REMOVED);
+      if (mix && !isAllowed(line)) {
+        record(file, lineno, "removed-command", `mix kazi.${mix[1]}`, line);
+      }
+      const comment = line.match(COMMENT_RE);
+      if (!comment) return;
+      const m = comment[1].match(KAZI_AT_START);
+      // A prose comment can start a new line with "kazi <word>" too ("kazi
+      // does not ship...", "kazi only DRIVING it..."); a REAL invocation's
+      // token right after the verb is always either a flag or the goal-file
+      // path being invoked (every raw, non-backtick example in this repo's
+      // priv/examples/ follows "kazi <verb> <file>.toml ..."), never a bare
+      // prose word. Requiring that shape is the TOML analogue of the .md
+      // scanner's fence/backtick-only restriction.
+      const firstToken = m && m[2].trim().split(/\s+/)[0];
+      const looksLikeInvocation =
+        m && (m[2].trim() === "" || firstToken.startsWith("--") || /\.toml$/.test(firstToken));
+      if (looksLikeInvocation) checkInvocation(file, lineno, line, m[1], m[2]);
+    });
+  }
+  return findings;
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 const surface = realSurface();
 const files = docFiles();
-const findings = scan(surface, files);
+const tomlFiles = tomlExampleFiles();
+const findings = scan(surface, files).concat(scanTomlComments(surface, tomlFiles));
 
 const rel = (f) => relative(repoRoot, f);
 
 if (findings.length === 0) {
   console.log(
-    `doc command-accuracy OK (${files.length} docs scanned; every kazi command/flag ` +
-      `matches the live CLI surface: ${surface.commands.size} commands, ${surface.flags.size} flags).`,
+    `doc command-accuracy OK (${files.length} docs + ${tomlFiles.length} goal-file ` +
+      `examples scanned; every kazi command/flag matches the live CLI surface: ` +
+      `${surface.commands.size} commands, ${surface.flags.size} flags).`,
   );
   process.exit(0);
 }
