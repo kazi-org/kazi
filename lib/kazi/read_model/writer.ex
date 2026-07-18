@@ -46,11 +46,59 @@ defmodule Kazi.ReadModel.Writer do
   with a short TTL, so a burst of writes probes at most once per window. The cache
   is per process — it never leaks a stale "alive" across an unrelated caller — and
   a probe after the TTL expires picks up a daemon that started or stopped meanwhile.
+
+  ## Write-time version-stamp-and-refuse (T52.7, ADR-0068)
+
+  With no daemon (the `_absent` branch), before running the direct `Repo` write
+  this seam compares THIS binary's schema version against the version stamped in
+  the direct db file. When the binary is OLDER than the file
+  (`SchemaSkew.classify/2 == :client_older`) it refuses the write rather than
+  writing against a schema it does not understand: it logs the one-line operator
+  degrade (the `Kazi.ReadModel.Migrate.migrate_or_refuse/2` message, extended from
+  migrate-time to write-time — "read-model schema vN is newer than this binary …
+  upgrade kazi") and returns a shaped degrade, so the run continues
+  persistence-blind and VISIBLY (Guard-style, L-0035) instead of hanging or
+  corrupting a newer schema. An equal-or-newer binary writes direct exactly as
+  before. This mirrors the migrate-time refuse (`Migrate.run/2`) at write time,
+  closing the gap for a run whose db was migrated forward by a newer peer AFTER
+  this (older) binary already booted past its migration step.
+
+  The refuse is decided ONLY when no daemon owns the file. With a daemon `:alive`,
+  an older client keeps writing through the daemon's additive write API (T52.5) —
+  the daemon is the single writer on the newer schema, so there is nothing to
+  refuse.
+
+  ### Refused-write return contract (keeps every caller alive)
+
+  A refused write performs NO `Repo` write, yet must return a value each call
+  site's existing match tolerates — the same discipline the Guard degrade
+  (`{:error, :read_model_unavailable}`) already establishes read-model-wide:
+
+    * `insert/3`, `update/2`, `insert_or_update/2` → `{:error,
+      :read_model_unavailable}` (their callers already match `{:ok, _}` with a
+      `with`/`case` and tolerate the `:read_model_unavailable` error tuple, e.g.
+      `Kazi.ReadModel.record_iteration/1`'s typespec).
+    * `insert!/3` → returns the `{:error, :read_model_unavailable}` tuple WITHOUT
+      raising (it raises only on a genuine `%Ecto.Changeset{}` error); its lone
+      caller (`Kazi.Memory.SemanticIndex` FTS upkeep) discards the result.
+    * `delete_all/3` → `0` (truthful: no rows were removed) — its `non_neg_integer`
+      count contract is preserved.
+    * `query!/3` → `:ok` (mirrors its own remote-path discard return).
+
+  ### Memoized skew (per process, short TTL)
+
+  Like the presence probe, the file's stamped version is NOT read on every write:
+  the refuse decision is cached in the process dictionary with the same TTL, so a
+  write burst reads the stamp at most once per window and picks up a peer's
+  forward-migration after the TTL expires.
   """
+
+  require Logger
 
   import Ecto.Query, only: [where: 2]
 
   alias Kazi.Daemon.{Probe, Supervisor}
+  alias Kazi.ReadModel.{Migrate, SchemaSkew}
   alias Kazi.Repo
 
   # Short enough that a daemon starting/stopping mid-run is noticed within a
@@ -64,17 +112,39 @@ defmodule Kazi.ReadModel.Writer do
   Route a read-model write through the single-writer seam.
 
   `direct` is today's exact `Kazi.Repo` write, run as-is when no daemon owns the
-  file. When a daemon is `:alive`, the `:remote` writer runs instead (defaulting to
-  `direct` until the socket-client path is wired). Returns whatever the chosen
-  writer returns.
+  file AND this binary's schema is not older than the file's stamped schema. When a
+  daemon is `:alive`, the `:remote` writer runs instead (defaulting to `direct`
+  until the socket-client path is wired). When no daemon owns the file and this
+  binary is OLDER than the file's stamped schema (T52.7), the write is REFUSED: the
+  `:refused` closure runs (a shaped Guard-style degrade) and no `Repo` write
+  happens. Returns whatever the chosen writer returns.
+
+  ## Options (T52.7 additions)
+
+    * `:refused` — a zero-arity closure producing the shaped degrade value when the
+      write is refused at write time. Defaults to `{:error, :read_model_unavailable}`
+      (the read-model-wide Guard degrade). Typed helpers override it to preserve
+      their own return contract (`delete_all` → `0`, `query!` → `:ok`).
+    * `:binary_version` — this binary's schema version, for the skew check.
+      Defaults to `Kazi.ReadModel.Migrate.binary_version/0`. Injectable for tests.
+    * `:db_stamped_version` — the direct file's stamped schema version. Defaults to
+      `Kazi.ReadModel.Migrate.db_stamped_version(Kazi.Repo)`. Injectable for tests.
   """
   @spec write(writer(), keyword()) :: term()
   def write(direct, opts \\ []) when is_function(direct, 0) do
     remote = Keyword.get(opts, :remote, direct)
 
     case daemon_status(opts) do
-      :alive -> remote.()
-      _absent -> direct.()
+      :alive ->
+        remote.()
+
+      _absent ->
+        if refuse_direct?(opts) do
+          refused = Keyword.get(opts, :refused, fn -> {:error, :read_model_unavailable} end)
+          refused.()
+        else
+          direct.()
+        end
     end
   end
 
@@ -115,14 +185,25 @@ defmodule Kazi.ReadModel.Writer do
     )
   end
 
-  @doc "Bang variant of `insert/3`; raises on `{:error, changeset}` like `Repo.insert!/2`."
-  @spec insert!(Ecto.Changeset.t(), keyword(), keyword()) :: Ecto.Schema.t()
+  @doc """
+  Bang variant of `insert/3`; raises on `{:error, changeset}` like `Repo.insert!/2`.
+
+  A write-time refuse (T52.7) surfaces as `{:error, :read_model_unavailable}` and
+  is returned WITHOUT raising — a refused write is a degrade, not an invalid
+  changeset — so an older binary running persistence-blind never crashes a caller
+  that discards the result (the `SemanticIndex` FTS upkeep).
+  """
+  @spec insert!(Ecto.Changeset.t(), keyword(), keyword()) ::
+          Ecto.Schema.t() | {:error, :read_model_unavailable}
   def insert!(%Ecto.Changeset{} = changeset, insert_opts \\ [], writer_opts \\ []) do
     case insert(changeset, insert_opts, writer_opts) do
       {:ok, struct} ->
         struct
 
-      {:error, changeset} ->
+      {:error, :read_model_unavailable} = degrade ->
+        degrade
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         raise Ecto.InvalidChangesetError, action: :insert, changeset: changeset
     end
   end
@@ -174,7 +255,9 @@ defmodule Kazi.ReadModel.Writer do
         {count, _} = Repo.delete_all(where(schema, ^Map.to_list(filters)))
         count
       end,
-      Keyword.put(writer_opts, :remote, fn -> remote_delete_all(schema, filters, writer_opts) end)
+      writer_opts
+      |> Keyword.put(:remote, fn -> remote_delete_all(schema, filters, writer_opts) end)
+      |> Keyword.put(:refused, fn -> 0 end)
     )
   end
 
@@ -188,7 +271,9 @@ defmodule Kazi.ReadModel.Writer do
   def query!(sql, params \\ [], writer_opts \\ []) when is_binary(sql) do
     write(
       fn -> Repo.query!(sql, params) end,
-      Keyword.put(writer_opts, :remote, fn -> remote_query!(sql, params, writer_opts) end)
+      writer_opts
+      |> Keyword.put(:remote, fn -> remote_query!(sql, params, writer_opts) end)
+      |> Keyword.put(:refused, fn -> :ok end)
     )
   end
 
@@ -354,4 +439,48 @@ defmodule Kazi.ReadModel.Writer do
   end
 
   defp cache_key(sock_path), do: {__MODULE__, :presence, sock_path}
+
+  # The write-time version-stamp-and-refuse decision (T52.7), memoized per process
+  # with the same short TTL as the presence probe: read the file's stamped version
+  # at most once per window rather than on every write of a burst. Returns `true`
+  # when this binary is OLDER than the file's stamped schema (refuse), `false`
+  # otherwise (write direct). The one-line operator degrade is logged on each fresh
+  # (post-TTL) refuse decision, so a persistence-blind run stays visible without
+  # spamming a line per write.
+  defp refuse_direct?(opts) do
+    ttl_ms = Keyword.get(opts, :ttl_ms, @default_ttl_ms)
+    now = System.monotonic_time(:millisecond)
+
+    case Process.get(skew_key()) do
+      {decision, expires_at} when expires_at > now ->
+        decision
+
+      _expired_or_missing ->
+        decision = probe_skew(opts)
+        Process.put(skew_key(), {decision, now + ttl_ms})
+        decision
+    end
+  end
+
+  defp probe_skew(opts) do
+    bin_version = Keyword.get_lazy(opts, :binary_version, &Migrate.binary_version/0)
+
+    db_version =
+      Keyword.get_lazy(opts, :db_stamped_version, fn -> Migrate.db_stamped_version(Repo) end)
+
+    # An unstamped (nil) db — a freshly-created, pre-migration file — is never
+    # "newer", so it always writes direct (mirrors Migrate's brand-new-db path).
+    if is_integer(db_version) and SchemaSkew.classify(bin_version, db_version) == :client_older do
+      Logger.warning(fn ->
+        "read-model schema v#{db_version} is newer than this binary " <>
+          "(v#{bin_version}); running without persistence -- upgrade kazi"
+      end)
+
+      true
+    else
+      false
+    end
+  end
+
+  defp skew_key, do: {__MODULE__, :skew}
 end
