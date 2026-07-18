@@ -119,6 +119,100 @@ defmodule Kazi.PortfolioTest do
     end
   end
 
+  describe "five-bucket model + totals (T64.1)" do
+    setup do
+      on_exit(fn -> Application.delete_env(:kazi, :starmap_roadmap_goal) end)
+    end
+
+    # A roadmap goal `b needs a`: when `a` is stuck, `b` is DAG-blocked (poisoned
+    # by its ancestor) — the SAME `DagSnapshot`/`DepGraph` reachability mission
+    # control's roadmap fold uses. The stuck run for `a` also seeds the blocked
+    # bucket's OTHER cause.
+    defp seed_roadmap_ab do
+      a = Kazi.Goal.Group.new("a", "A")
+      b = Kazi.Goal.Group.new("b", "B", needs: ["a"])
+      Application.put_env(:kazi, :starmap_roadmap_goal, Kazi.Goal.new("roadmap", groups: [a, b]))
+    end
+
+    test "classifies the acc fixture exactly into the five buckets" do
+      seed_roadmap_ab()
+
+      # 1 proposed, 2 approved-unrun.
+      propose(%{status: "proposed"})
+      propose(%{status: "approved", goal_id: "todo-1"})
+      propose(%{status: "approved", goal_id: "todo-2"})
+
+      # 3 running.
+      for i <- 1..3, do: start_run(%{goal_ref: "running-#{i}"})
+
+      # 1 stuck — the DAG ancestor `a`.
+      stuck = start_run(%{goal_ref: "a"})
+      {:ok, _} = RunRegistry.finish(stuck.run_id, "stuck")
+
+      # 5 converged.
+      for i <- 1..5 do
+        r = start_run(%{goal_ref: "done-#{i}"})
+        {:ok, _} = RunRegistry.finish(r.run_id, "converged")
+      end
+
+      %{buckets: b} = Portfolio.build()
+
+      assert length(b.planned) == 1
+      assert length(b.todo) == 2
+      assert length(b.running) == 3
+      assert length(b.done) == 5
+
+      # todo goals are NOT also counted as planned.
+      todo_goals = Enum.map(b.todo, & &1.goal_id)
+      assert "todo-1" in todo_goals and "todo-2" in todo_goals
+      refute Enum.any?(b.planned, &(&1.goal_id in todo_goals))
+
+      # blocked = the stuck run (`a`) + the DAG-blocked group (`b`), distinct causes.
+      assert length(b.blocked) == 2
+      causes = b.blocked |> Enum.map(& &1.cause) |> Enum.sort()
+      assert causes == [:dag, :stuck]
+
+      dag_entry = Enum.find(b.blocked, &(&1.cause == :dag))
+      assert dag_entry.goal_ref == "b"
+      assert dag_entry.blocked_by == "a"
+    end
+
+    test "totals are integer percentages summing to 100" do
+      seed_roadmap_ab()
+
+      propose(%{status: "proposed"})
+      propose(%{status: "approved", goal_id: "todo-1"})
+      propose(%{status: "approved", goal_id: "todo-2"})
+      for i <- 1..3, do: start_run(%{goal_ref: "running-#{i}"})
+      stuck = start_run(%{goal_ref: "a"})
+      {:ok, _} = RunRegistry.finish(stuck.run_id, "stuck")
+
+      for i <- 1..5 do
+        r = start_run(%{goal_ref: "done-#{i}"})
+        {:ok, _} = RunRegistry.finish(r.run_id, "converged")
+      end
+
+      %{totals: totals} = Portfolio.build()
+
+      refute totals.empty?
+      assert totals.base == 13
+      assert Enum.all?(totals.rows, &is_integer(&1.pct))
+      assert totals.rows |> Enum.map(& &1.pct) |> Enum.sum() == 100
+
+      counts = Map.new(totals.rows, &{&1.bucket, &1.count})
+      assert counts == %{done: 5, running: 3, blocked: 2, todo: 2, planned: 1}
+    end
+
+    test "an empty read-model yields the empty message flag, no divide-by-zero" do
+      %{totals: totals, buckets: buckets} = Portfolio.build()
+
+      assert totals.empty?
+      assert totals.base == 0
+      assert Enum.all?(totals.rows, &(&1.count == 0 and &1.pct == 0))
+      assert Enum.all?(Map.values(buckets), &(&1 == []))
+    end
+  end
+
   describe "fleet_remote (cross-machine, T60.1)" do
     test "a remote fact for a goal not present locally renders as a fleet_remote entry" do
       Application.put_env(:kazi, :remote_run_facts_fetcher, fn ->
