@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.219.0](https://github.com/kazi-org/kazi/compare/v1.218.0...v1.219.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** T60.5 -- human-readable cost/token breakdown table on convergence ([#1070](https://github.com/kazi-org/kazi/issues/1070)) ([fc19dc3](https://github.com/kazi-org/kazi/commit/fc19dc386254b0b02b61c6a4df2daca890d3037b))
+
 ## [1.218.0](https://github.com/kazi-org/kazi/compare/v1.217.1...v1.218.0) (2026-07-18)
 
 
