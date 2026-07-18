@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.243.1](https://github.com/kazi-org/kazi/compare/v1.243.0...v1.243.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **daemon:** start read-model Repo on the long-lived dashboard path ([#1483](https://github.com/kazi-org/kazi/issues/1483)) ([c9f643a](https://github.com/kazi-org/kazi/commit/c9f643a95a246141cba1e818adb790a2b2850771))
+
 ## [1.243.0](https://github.com/kazi-org/kazi/compare/v1.242.0...v1.243.0) (2026-07-18)
 
 
