@@ -18,6 +18,13 @@ defmodule Kazi.Bus.Provision do
 
   @stream_name "KAZI_BUS"
   @sessions_bucket "kazi_sessions"
+  # T65.2 (#1430): name->UUID bindings live in their OWN bucket, DELIBERATELY
+  # TTL-less. The `kazi_sessions` presence bucket ages entries out at 600s so a
+  # closed session leaves `who` -- but that same TTL WIPED every friendly name
+  # on a daemon bounce (issue #1430 failure mode 1). Bindings are durable
+  # identity, not liveness: they must outlive both the session's presence row
+  # and daemon restarts, so this bucket carries no `max_age`.
+  @names_bucket "kazi_names"
   @max_age_ns 30 * 24 * 60 * 60 * 1_000_000_000
   @max_msg_size 131_072
   @session_ttl_ns 600 * 1_000_000_000
@@ -34,6 +41,10 @@ defmodule Kazi.Bus.Provision do
   @doc "The KV bucket name `who()` and presence upserts use."
   @spec sessions_bucket() :: String.t()
   def sessions_bucket, do: @sessions_bucket
+
+  @doc "The durable (TTL-less) KV bucket name->UUID bindings live in (T65.2, #1430)."
+  @spec names_bucket() :: String.t()
+  def names_bucket, do: @names_bucket
 
   @doc """
   Connects to `opts[:host]`/`opts[:port]` (optionally authenticating with
@@ -60,7 +71,8 @@ defmodule Kazi.Bus.Provision do
   @spec provision(Gnat.t()) :: :ok | {:error, term()}
   def provision(conn) do
     with :ok <- ensure_stream(conn),
-         :ok <- ensure_sessions_bucket(conn) do
+         :ok <- ensure_sessions_bucket(conn),
+         :ok <- ensure_names_bucket(conn) do
       :ok
     end
   end
@@ -112,6 +124,19 @@ defmodule Kazi.Bus.Provision do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # T65.2 (#1430): the durable name-binding bucket. Idempotent -- an existing
+  # bucket is left as-is (already durable); only a genuinely fresh store is
+  # created. Unlike the sessions bucket it takes NO ttl, so bindings survive
+  # daemon restarts (the regression #1430 pins).
+  defp ensure_names_bucket(conn) do
+    case KV.create_bucket(conn, @names_bucket, []) do
+      {:ok, _info} -> :ok
+      {:error, %{"err_code" => 10_058}} -> :ok
+      {:error, %{"description" => "stream name already in use" <> _}} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

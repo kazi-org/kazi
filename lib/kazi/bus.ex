@@ -338,14 +338,18 @@ defmodule Kazi.Bus do
   end
 
   @doc """
-  T55.5 (ADR-0073 decision point 3): assigns `nickname` as the calling
-  session's durable name -- carried on presence (every later bus call
-  preserves it), rendered by `who/1`, and resolvable by `tell/3`.
+  T55.5 (ADR-0073 decision point 3) / T65.2 (#1430): binds `nickname` to the
+  calling session's UUID. The binding is written to the DURABLE `kazi_names`
+  KV bucket (no TTL), so it survives both the session's 600s presence TTL and
+  a daemon restart -- the regression #1430 pins (a daemon bounce wiped every
+  friendly name). The nickname is also carried as the label on the session's
+  ONE UUID-keyed presence row (`who/1` renders it; `tell/3` resolves it).
 
-  Re-asserting a name RE-BINDS it to the current session: any other presence
-  row holding the same name loses it, so a relaunched worker that runs
-  `bus name <role>` again becomes addressable under that role immediately
-  (and the old row can no longer soak up its messages).
+  Identity is the immutable session UUID; the name is a LABEL bound to it, so
+  a name is unique across sessions: binding a nickname already held by a
+  DIFFERENT session is a HARD error, `{:error, {:name_taken, nickname,
+  holder}}`, naming the holding session -- names are never silently stolen.
+  Re-asserting the SAME session's own nickname is idempotent.
 
   A nickname that is empty, whitespace-containing, `@`-prefixed (reserved
   for teams), or equal to a DIFFERENT live session's id is rejected
@@ -355,11 +359,33 @@ defmodule Kazi.Bus do
   def name(nickname, opts \\ []) when is_binary(nickname) do
     with :ok <- validate_nickname(nickname) do
       with_conn(opts, fn conn ->
-        rebind_name!(conn, nickname, session(opts))
+        bind_name!(conn, nickname, session(opts))
         upsert_presence(conn, Keyword.put(opts, :name, nickname))
         :ok
       end)
     end
+  end
+
+  @doc """
+  T65.2 (#1430): every durable name binding, as a `%{nickname => uuid}` map
+  read straight from the `kazi_names` KV bucket. Because the bucket carries no
+  TTL, this returns the SAME bindings after a daemon restart -- the durability
+  property #1430 requires. `%{}` when the bucket is empty or unreachable.
+  """
+  @spec name_bindings(keyword()) :: %{optional(String.t()) => String.t()}
+  def name_bindings(opts \\ []) do
+    with_conn(opts, fn conn ->
+      case KV.contents(conn, Provision.names_bucket()) do
+        {:ok, contents} ->
+          for {_key, value} <- contents,
+              {:ok, %{"name" => name, "session" => uuid}} <- [Jason.decode(value)],
+              into: %{},
+              do: {name, uuid}
+
+        {:error, _reason} ->
+          %{}
+      end
+    end)
   end
 
   defp validate_nickname(nickname) do
@@ -378,33 +404,65 @@ defmodule Kazi.Bus do
     end
   end
 
-  # Rebinding pass: rejects a nickname that shadows ANOTHER session's id
-  # (`tell` resolves exact ids first, so such a name could never be reached),
-  # then strips the name from every other row holding it -- re-asserting a
-  # name moves it to the caller.
-  defp rebind_name!(conn, nickname, self_id) do
+  # T65.2 (#1430): the binding pass. A nickname is a LABEL owned by exactly one
+  # session UUID, recorded durably in the `kazi_names` bucket.
+  #
+  #   * A nickname equal to a DIFFERENT session's id is rejected (`tell`
+  #     resolves exact ids first, so such a name could never be reached).
+  #   * A nickname already bound to a DIFFERENT session is a HARD error naming
+  #     the holder -- names are NEVER silently stolen (the T55.5 steal
+  #     behaviour is superseded: identity is the UUID, the name is unique).
+  #   * Re-binding by the SAME session is idempotent.
+  #
+  # The durable write is what makes the binding survive the presence TTL and a
+  # daemon restart.
+  defp bind_name!(conn, nickname, self_id) do
+    reject_if_other_session_id!(conn, nickname, self_id)
+
+    case KV.get_value(conn, Provision.names_bucket(), sanitize(nickname)) do
+      value when is_binary(value) ->
+        case Jason.decode(value) do
+          {:ok, %{"session" => holder}} when holder != self_id ->
+            raise_bus_error({:name_taken, nickname, holder})
+
+          _same_or_corrupt ->
+            put_binding!(conn, nickname, self_id)
+        end
+
+      _missing ->
+        put_binding!(conn, nickname, self_id)
+    end
+  end
+
+  defp put_binding!(conn, nickname, self_id) do
+    payload =
+      Jason.encode!(%{
+        "name" => nickname,
+        "session" => self_id,
+        "ts" => DateTime.to_iso8601(DateTime.utc_now())
+      })
+
+    KV.put_value(conn, Provision.names_bucket(), sanitize(nickname), payload)
+    :ok
+  end
+
+  # A nickname that collides with another session's UUID could never be
+  # reached by `tell` (exact-id resolution wins), so it is rejected outright.
+  defp reject_if_other_session_id!(conn, nickname, self_id) do
     case KV.contents(conn, Provision.sessions_bucket()) do
       {:ok, contents} ->
-        decoded =
-          for {key, value} <- contents, {:ok, entry} <- [Jason.decode(value)], do: {key, entry}
+        taken? =
+          Enum.any?(contents, fn {_k, value} ->
+            case Jason.decode(value) do
+              {:ok, %{"session" => sid}} -> sid == nickname and sid != self_id
+              _other -> false
+            end
+          end)
 
-        if Enum.any?(decoded, fn {_k, e} ->
-             e["session"] == nickname and e["session"] != self_id
-           end) do
+        if taken? do
           raise_bus_error(
             {:invalid_nickname, nickname,
              "it is another live session's id -- pick a different name"}
-          )
-        end
-
-        for {key, entry} <- decoded,
-            entry["name"] == nickname,
-            entry["session"] != self_id do
-          KV.put_value(
-            conn,
-            Provision.sessions_bucket(),
-            key,
-            Jason.encode!(Map.delete(entry, "name"))
           )
         end
 
@@ -412,6 +470,25 @@ defmodule Kazi.Bus do
 
       {:error, _reason} ->
         :ok
+    end
+  end
+
+  # T65.2 (#1430): the durable name bound to a given session UUID (reverse
+  # lookup over `kazi_names`), or nil. Presence upserts use it to RESTORE a
+  # session's label after a daemon restart aged its presence row out -- the
+  # binding outlives the row, so the name reappears on the next bus call.
+  defp bound_name_for(conn, uuid) do
+    case KV.contents(conn, Provision.names_bucket()) do
+      {:ok, contents} ->
+        Enum.find_value(contents, fn {_key, value} ->
+          case Jason.decode(value) do
+            {:ok, %{"name" => name, "session" => ^uuid}} -> name
+            _other -> nil
+          end
+        end)
+
+      {:error, _reason} ->
+        nil
     end
   end
 
@@ -1838,13 +1915,23 @@ defmodule Kazi.Bus do
         nil -> stored["team"]
       end
 
-    # `name` refresh rule (T55.5): `name/2` sets it via :name; every other
-    # bus call preserves the stored one, so a nickname survives across calls
-    # exactly like team membership does.
+    # `name` refresh rule (T55.5 / T65.2): `name/2` sets it via :name; every
+    # other bus call preserves the stored one, so a nickname survives across
+    # calls exactly like team membership does. T65.2 (#1430): when the presence
+    # row carries no name (a fresh row, or one rebuilt after a daemon restart
+    # aged the old row out), fall back to the DURABLE `kazi_names` binding for
+    # this UUID -- that is how a friendly name reappears after a bounce instead
+    # of the session dropping back to a raw UUID.
     name =
       case opts[:name] do
-        name when is_binary(name) -> name
-        nil -> stored["name"]
+        name when is_binary(name) ->
+          name
+
+        nil ->
+          case stored["name"] do
+            stored_name when is_binary(stored_name) -> stored_name
+            _absent -> bound_name_for(conn, session(opts))
+          end
       end
 
     # T55.11: pid AND process start time -- a pid alone is reusable, so the
