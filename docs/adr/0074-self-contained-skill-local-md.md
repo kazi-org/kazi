@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted (amended by [ADR-0077](0077-claude-code-plugin-distribution.md), decision 3:
+`LOCAL.md` moves to a STABLE path -- `~/.claude/skills/kazi/LOCAL.md` -- decoupled
+from the skill CONTENT directory, so a plugin update that replaces the content dir
+wholesale can never destroy operator customization. See "Decision" point 3 below.)
 
 ## Date
 
@@ -45,10 +48,24 @@ deserve progressive disclosure rather than one monolithic prompt.
    of use. All three are exposed as functions (`skill_md/0`, `authoring_md/0`,
    `recipes_md/0`) and all three are held to the T16.4 coherence guard.
 3. **`LOCAL.md` is the operator-owned extension point.** `install-skill` NEVER
-   writes or overwrites `<skill-dir>/LOCAL.md`. The generated SKILL.md
-   instructs the agent to read `LOCAL.md` FIRST when present -- that is where
-   site-specific routing (e.g. "plan-driven engineering goes through my local
-   orchestration skill") lives, and it survives every re-install.
+   writes or overwrites `LOCAL.md`. The generated SKILL.md instructs the agent
+   to read `LOCAL.md` FIRST when present -- that is where site-specific routing
+   (e.g. "plan-driven engineering goes through my local orchestration skill")
+   lives, and it survives every re-install.
+
+   **Amended by ADR-0077 (the stable-path move).** `LOCAL.md`'s canonical home
+   is a STABLE path -- `~/.claude/skills/kazi/LOCAL.md` -- DECOUPLED from
+   wherever the skill CONTENT is written. Originally the two coincided (both
+   under the skill dir); the plugin distribution channel installs the content
+   into a plugin-managed directory that a marketplace update REPLACES wholesale,
+   so an in-content-dir `LOCAL.md` would be destroyed on every update -- the
+   exact drift class this decision exists to prevent. The generated SKILL.md now
+   points at the stable path, and `install-skill` migrates an operator's
+   old in-content-dir `LOCAL.md` to the stable path (or warns, never silently
+   ignores, when one exists at both). This benefits non-plugin installs equally:
+   customization survives any future relocation of the skill directory, not just
+   the plugin channel. Mechanics: T61.2. Invariant: **no operator customization
+   may live in a directory a plugin update replaces.**
 
 ## Consequences
 
