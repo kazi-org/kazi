@@ -16,7 +16,8 @@ defmodule Kazi.Bus.Hook do
       acks what it pulls, so the durable cursor IS the "last checked" marker --
       a quiet turn drains nothing and prints nothing, which is what makes
       ambient bus-awareness free when the bus is quiet. It also clears this
-      session's attention fact every turn (T60.3, see `notification/1`).
+      session's attention fact -- but ONLY when one is actually live (T60.3,
+      see `notification/1`), so a session that was never waiting posts nothing.
     * `notification` (Claude Code `Notification`, T60.3/issue #1156): fires
       when the harness blocks on a human. ADR-0071's binding rule constrains
       INJECTION hooks (only stdout that reaches context may carry weight); it
@@ -157,23 +158,28 @@ defmodule Kazi.Bus.Hook do
   checked, or `:silent` when the bus is quiet (or the daemon is down). `read`
   acks what it pulls, so a second quiet turn drains nothing and emits nothing.
 
-  T60.3: also posts the CLEAR fact (`"none"`) on this session's attention
-  topic (`attention_topic/1`) -- best-effort, rescue-wrapped, and NEVER
-  altering the digest injection result below. Clearing on every turn is
-  intended and cheap: facts are last-value-per-topic, so a repeated clear is
-  idempotent, and the NEXT `bus board` a session/operator reads simply drops
-  this session out of the NEEDS OPERATOR section the moment a turn happens --
-  an automatic clear-on-unblock with no extra signal required.
+  T60.3: AFTER reading the digest, if this session currently has a live
+  `waiting-on-operator` fact (`Kazi.Bus.waiting_on_operator?/1`, read as the
+  single source of truth), posts the CLEAR fact (`"none"`) on its attention
+  topic -- best-effort, rescue-wrapped, and never altering the digest result
+  above. Gating on the live fact means a session that was never waiting posts
+  NOTHING (an unconditional per-turn clear would add a bus message to every
+  session's backlog every turn -- the #1392 regression that inflated a pinned
+  digest count). So the clear fires at most once per real block, on the turn
+  after the human responds, and the NEXT `bus board` drops the session out of
+  the NEEDS OPERATOR section -- an automatic clear-on-unblock.
   """
   @spec turn(keyword()) :: payload()
   def turn(opts) do
-    clear_attention(opts)
+    result =
+      case Bus.read_digest(opts) do
+        {:ok, %{"digest" => %{"total" => 0}}} -> :silent
+        {:ok, %{"digest" => digest}} -> {:emit, block(turn_lines(digest))}
+        {:error, _reason} -> :silent
+      end
 
-    case Bus.read_digest(opts) do
-      {:ok, %{"digest" => %{"total" => 0}}} -> :silent
-      {:ok, %{"digest" => digest}} -> {:emit, block(turn_lines(digest))}
-      {:error, _reason} -> :silent
-    end
+    clear_attention_if_waiting(opts)
+    result
   end
 
   @doc """
@@ -205,23 +211,27 @@ defmodule Kazi.Bus.Hook do
   end
 
   @doc """
-  The bus topic a session's attention fact (waiting/clear) is posted on:
-  `"attention-" <> <session, sanitized>`. Sanitizing replaces any character
-  outside `[A-Za-z0-9._-]` with `-` -- no additional dots are introduced, so
-  the topic stays ONE subject token (`bus.<scope>.fact.<topic>` splits on
-  `.`, and a session id can otherwise carry arbitrary characters).
+  The bus topic a session's attention fact (waiting/clear) is posted on --
+  delegates to `Kazi.Bus.attention_topic/1` (the single definition, since the
+  clear-gate read `Kazi.Bus.waiting_on_operator?/1` builds the same subject).
   """
   @spec attention_topic(String.t()) :: String.t()
-  def attention_topic(session) when is_binary(session) do
-    "attention-" <> String.replace(session, ~r/[^A-Za-z0-9._-]/, "-")
-  end
+  def attention_topic(session) when is_binary(session), do: Bus.attention_topic(session)
 
-  # Best-effort clear: posted every turn regardless of whether this session
-  # was ever waiting (idempotent last-value fact), rescue-wrapped so a post
-  # failure can never surface past this hook or block the digest below.
-  defp clear_attention(opts) do
-    session = Bus.session(opts)
-    Bus.post("fact", "none", Keyword.merge(opts, topic: attention_topic(session)))
+  # Clear ONLY when the session actually has a live `waiting-on-operator` fact
+  # (checked against the bus as the single source of truth). Posting a `none`
+  # clear unconditionally every turn would add a bus message to every session's
+  # backlog on every turn -- which inflated a pinned digest message-count
+  # assertion (#1392 regression) and would spam the bus in production. Now the
+  # clear posts at most once per real block, on the turn after the human
+  # responds. Runs AFTER `read_digest/1` so the clear never counts in the same
+  # turn's own digest. Best-effort: any error leaves the fact for a later turn.
+  defp clear_attention_if_waiting(opts) do
+    if Bus.waiting_on_operator?(opts) do
+      session = Bus.session(opts)
+      Bus.post("fact", "none", Keyword.merge(opts, topic: attention_topic(session)))
+    end
+
     :ok
   rescue
     _ -> :ok

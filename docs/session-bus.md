@@ -465,12 +465,15 @@ hooks T55.9 already installs:
    only posts OUTWARD — its own stdout is always discarded — so ADR-0071's
    binding rule (only events whose stdout reaches context may inject) does not
    constrain it; it is exempt by construction, not by exception.
-2. **The `turn` hook clears it**: on the session's very next `UserPromptSubmit`,
-   the existing `turn` hook (T55.9) ALSO posts `"none"` on the same
-   `attention-<session>` topic, alongside its unchanged digest injection.
-   Facts are last-value-per-topic, so clearing every turn is cheap and
-   idempotent — the moment a blocked session's next prompt runs, it drops out
-   of the NEEDS OPERATOR section automatically, with no extra signal.
+2. **The `turn` hook clears it**: on the session's next `UserPromptSubmit`, the
+   existing `turn` hook (T55.9) posts `"none"` on the same `attention-<session>`
+   topic — but ONLY when the session actually has a live `waiting-on-operator`
+   fact (checked against the bus as the single source of truth via
+   `Kazi.Bus.waiting_on_operator?/1`), so a session that was never waiting posts
+   nothing. This runs after the digest read, so the clear never counts in the
+   same turn's own digest. The moment a blocked session's next prompt runs, it
+   drops out of the NEEDS OPERATOR section automatically, with no extra signal —
+   and the bus is never spammed with a clear on every turn of every session.
 3. **The board renders it**: `Board.render/2` filters the collapsed per-topic
    facts to every `attention-*` topic whose current value starts with
    `waiting-on-operator` (a `"none"` clear excludes the session), parses each

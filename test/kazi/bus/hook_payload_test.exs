@@ -242,9 +242,9 @@ defmodule Kazi.Bus.HookPayloadTest do
       assert entry["summary"] == "needs a decision"
     end
 
-    # T60.3: turn clears (posts "none" on) the session's attention topic every
-    # turn, regardless of whether a digest is emitted -- best-effort and
-    # rescue-wrapped, so it never disturbs the digest path itself.
+    # T60.3: turn clears (posts "none" on) the session's attention topic ONLY
+    # when a live waiting fact exists -- best-effort and rescue-wrapped, so it
+    # never disturbs the digest path itself.
     test "turn clears a previously-waiting session's attention fact", %{conn: conn} do
       session = unique_session()
       opts = [conn: conn, session: session, scope: "machine", summary: "blocked"]
@@ -257,6 +257,24 @@ defmodule Kazi.Bus.HookPayloadTest do
 
       {:ok, board_after} = Bus.board(opts)
       assert board_after["attention"] == []
+    end
+
+    # T60.3 / #1392 REGRESSION GUARD: a turn on a session that was NEVER waiting
+    # must post NOTHING. An unconditional per-turn `none` clear added a bus
+    # message on every turn, which inflated a pinned digest message-count
+    # assertion (daemon_digest_test) and would spam the bus in production. Using
+    # a fresh, isolated scope, `total_facts` after the turn must be exactly 0.
+    test "turn posts nothing when the session was never waiting (#1392 regression)",
+         %{conn: conn} do
+      session = unique_session()
+      scope = "attn-regress-#{System.unique_integer([:positive])}"
+      opts = [conn: conn, session: session, scope: scope]
+
+      Hook.turn(opts)
+
+      {:ok, board} = Bus.board(opts)
+      assert board["attention"] == []
+      assert board["total_facts"] == 0
     end
   end
 
