@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.232.0](https://github.com/kazi-org/kazi/compare/v1.231.0...v1.232.0) (2026-07-18)
+
+
+### Features
+
+* **read_model:** Writer socket round-trip + typed write helpers (T52.5, ADR-0068) ([9bc9995](https://github.com/kazi-org/kazi/commit/9bc99958e543706d93f1167360b6a7c17ecad21d))
+
+
+### Bug Fixes
+
+* **read_model:** isolate Writer sock in test env; supersede T52.1 staging test (T52.5) ([7a6bacb](https://github.com/kazi-org/kazi/commit/7a6bacbebc7eb6c9dfe3758eeaba5ed30cd422bf))
+
 ## [1.231.0](https://github.com/kazi-org/kazi/compare/v1.230.0...v1.231.0) (2026-07-18)
 
 
