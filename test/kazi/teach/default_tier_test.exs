@@ -170,9 +170,13 @@ defmodule Kazi.Teach.DefaultTierTest do
       refute @skill_md =~ "it is COMING"
     end
 
-    test "the proven claim carries the open #936 wave-checkpoint caveat" do
+    test "the wave-checkpoint gap (#936) is taught as SHIPPED, not an open caveat (T56.2)" do
+      # #936 closed when --pause-between-waves/--resume (T50.3) shipped as the
+      # real supervised checkpoint; the doc must teach the flag, not the old
+      # "no supervised checkpoint between waves" workaround caveat.
       assert @skill_md =~ "#936"
-      assert @skill_md =~ ~r/no\s+supervised\s+checkpoint\s+between\s+waves/i
+      assert @skill_md =~ "--pause-between-waves"
+      refute @skill_md =~ ~r/no\s+supervised\s+checkpoint\s+between\s+waves/i
     end
   end
 end
