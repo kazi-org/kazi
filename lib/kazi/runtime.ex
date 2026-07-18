@@ -130,7 +130,12 @@ defmodule Kazi.Runtime do
     # T41.3/T41.4: manifest-coverage — every scanned surface element is referenced
     # by >=1 Scenario across the product's `.feature` specs. The goal-file-runnable
     # form of `Kazi.Reconcile.SpecCoverage`.
-    spec_coverage: Kazi.Providers.SpecCoverage
+    spec_coverage: Kazi.Providers.SpecCoverage,
+    # T62.1 (ADR-0071): the runtime `gherkin` provider — a `.feature` entry
+    # expands at goal-load into one `:gherkin` sub-predicate per Scenario (per
+    # Examples row for an outline). Verdict ingestion from the shared runner's
+    # cucumber-json is T62.2; until then it evaluates to honest :unknown.
+    gherkin: Kazi.Providers.Gherkin
   }
 
   # The real Slice-0 behaviour implementations bound to the loop's seams. The
