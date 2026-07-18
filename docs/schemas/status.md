@@ -84,7 +84,10 @@ error, it is "safe to upgrade."
     { "id": "live", "verdict": "fail" }
   ],
   "release_ref": "v2026.06.24-abc1234",
-  "observed_at": "2026-06-24T03:25:31.118115Z"
+  "observed_at": "2026-06-24T03:25:31.118115Z",
+  "landed": [
+    { "partition_id": "p-a1b2c3", "branch": "kazi/p-a1b2c3", "pr": "42", "merge_commit": "abc1234" }
+  ]
 }
 ```
 
@@ -98,7 +101,16 @@ error, it is "safe to upgrade."
 | `predicates`     | array of objects | The predicate **vector** at the latest observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as `apply --json`, including the optional ADR-0041 graded fields (`score`, `prior_score`, `direction`, `evidence`) when present. See [`run-result.md`](run-result.md#predicates--graded-fields-adr-0041). |
 | `release_ref`    | string \| null   | The release ref recorded on the latest iteration (T3.3c), or `null`. |
 | `observed_at`    | string (ISO 8601)| When the latest iteration's predicates were evaluated. |
+| `landed`         | array of objects | **Optional** (T62.6, issue #1241). Present only when the run PERSISTED per-group landed refs — a `--parallel` run with `[integration] mode != none` that landed converged work. One entry per landed group, carrying the SAME `{branch, pr, merge_commit}` detail (T44.10 shape) the immediate `apply --parallel --json` collective output showed, so `kazi status` surfaces "what landed where" AFTER the run has exited. **Omitted entirely** for a run that landed nothing (a single-goal run, or `mode = none`), keeping the object byte-identical to the pre-T62.6 shape. |
+| `landed[].partition_id` | string    | The group's stable partition id (matches the collective output's `partitions[].partition_id`). |
+| `landed[].branch` | string          | The group's landing branch (present when recorded). |
+| `landed[].pr`     | string          | The group's PR handle (present when recorded). |
+| `landed[].merge_commit` | string    | The group's merge commit (present when recorded). |
 | `schema_version` | integer          | The contract version. |
+
+The `landed` array is a purely additive projection: `schema_version` is
+**unchanged** (still `2`), since a run without landed refs emits the identical
+object it did pre-T62.6.
 
 ## Proposal status (`kind: "proposal"`)
 

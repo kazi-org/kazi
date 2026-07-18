@@ -59,6 +59,12 @@ The `landed` object is ADDITIVE and present only when the partition landed (T44.
 a run with no `[integration]` landing omits it, leaving the entry byte-identical to
 the pre-T44.10 shape.
 
+These per-group landed refs are also PERSISTED into the read-model (T62.6, issue
+#1241), so `kazi status <run-ref> --json` shows the same per-group `{branch, pr,
+merge_commit}` detail AFTER the run has exited — not only this immediate
+invocation's output. See [`status.md`](status.md#run-status-kind-run) (the
+optional `landed` array).
+
 ## Fields
 
 | Field            | Type             | Meaning |
