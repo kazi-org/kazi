@@ -572,6 +572,9 @@ defmodule Kazi.Teach.InstallSkill do
 
     - `http_probe` when the text names an HTTP verb + path, or mentions "prod",
       "deployed", "live", or a URL.
+    - `swift_test` when the text names an Xcode/XCTest/`.xcresult` acceptance
+      criterion (a Swift test suite passing, an `.xcresult` bundle showing zero
+      failures). Requires `xcresult_path`; see `kazi schema swift_test`.
     - `custom_script` for everything else (test assertions, build/lint
       conditions, CLI behavior). Do NOT emit `test_runner`: deprecated
       (ADR-0040, removal in v2.0.0); every load prints a deprecation warning.
