@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.244.0](https://github.com/kazi-org/kazi/compare/v1.243.1...v1.244.0) (2026-07-18)
+
+
+### Features
+
+* **goal:** register the swift_test provider kind ([eef0bca](https://github.com/kazi-org/kazi/commit/eef0bca1cea712cf0dd83f5fab4c783f5b980b1c))
+* **predicate:** document the swift_test config schema ([60b10c6](https://github.com/kazi-org/kazi/commit/60b10c6607e498ec05d34b3336c63ae39f82cd96))
+* **providers:** add the swift_test predicate provider ([da93cb9](https://github.com/kazi-org/kazi/commit/da93cb94a158687646f69343925f68366e9b5c74))
+* **runtime:** wire :swift_test to Kazi.Providers.SwiftTest ([d058978](https://github.com/kazi-org/kazi/commit/d0589787dc6607317a2082e3368e321b9ff86083))
+
 ## [1.243.1](https://github.com/kazi-org/kazi/compare/v1.243.0...v1.243.1) (2026-07-18)
 
 
