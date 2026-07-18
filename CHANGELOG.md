@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.220.0](https://github.com/kazi-org/kazi/compare/v1.219.0...v1.220.0) (2026-07-18)
+
+
+### Features
+
+* **goal:** gherkin provider load-time expansion into per-scenario sub-predicates (T62.1, ADR-0071, [#1107](https://github.com/kazi-org/kazi/issues/1107)) ([58cc9c4](https://github.com/kazi-org/kazi/commit/58cc9c4d42c624797da3d0573ba6a9af5e184faa))
+
 ## [1.219.0](https://github.com/kazi-org/kazi/compare/v1.218.0...v1.219.0) (2026-07-18)
 
 
