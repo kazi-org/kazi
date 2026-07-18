@@ -432,7 +432,14 @@ defmodule Kazi.Goal.Loader do
     "plan_expanded" => :plan_expanded,
     # T41.3/T41.4: manifest-coverage — every scanned surface element is referenced
     # by >=1 Scenario across the product's `.feature` specs.
-    "spec_coverage" => :spec_coverage
+    "spec_coverage" => :spec_coverage,
+    # T62.1 (ADR-0071): the runtime `gherkin` provider. A `provider = "gherkin"`
+    # entry is EXPANDED at goal-load (expand_gherkin_predicates/1) into one
+    # `:gherkin` sub-predicate per Scenario (per Examples row for an outline), so
+    # no author writes a `[[predicate]]` with this kind directly — the expander
+    # synthesizes them. Its feature/verdict_format keys are validated at expansion
+    # so a missing feature or an unknown verdict_format fails loudly at load.
+    "gherkin" => :gherkin
   }
 
   # T32.1b (ADR-0040 decision 7): the command-runner provider names that are
@@ -518,8 +525,19 @@ defmodule Kazi.Goal.Loader do
          {:ok, scope} <- build_scope(Map.get(data, "scope", %{})),
          # T8.6 harness selection (ADR-0016): optional `[harness]` table.
          {:ok, harness} <- build_harness(Map.get(data, "harness")),
-         # T12.1 group taxonomy (ADR-0020): optional `[[group]]` array.
-         {:ok, groups} <- build_groups(Map.get(data, "group", [])),
+         # T62.1 (ADR-0071): expand any `provider = "gherkin"` entry into one
+         # `:gherkin` sub-predicate per Scenario (per Examples row for an
+         # outline) BEFORE groups/predicates are built, synthesizing one group
+         # per Feature. The expanded raw maps + synth groups then flow through
+         # the unchanged build_groups/build_predicates path (no special-casing).
+         {:ok, {raw_predicates, synth_groups}} <-
+           expand_gherkin_predicates(Map.get(data, "predicate", []), Map.get(data, "group", [])),
+         # T12.1 group taxonomy (ADR-0020): optional `[[group]]` array. The
+         # synthesized per-Feature groups (T62.1) are appended only when the
+         # declared value is actually a list; a non-list `group` falls through to
+         # build_groups so it still owns its own "must be an array" error.
+         {:ok, groups} <-
+           build_groups(merge_synth_groups(Map.get(data, "group", []), synth_groups)),
          # T32.4 anti-gaming enforcement (ADR-0042): optional `[enforcement]` table.
          {:ok, enforcement} <- build_enforcement(Map.get(data, "enforcement")),
          # T48.11 (ADR-0058 §3): optional `[economy]` table (debrief opt-in).
@@ -533,7 +551,7 @@ defmodule Kazi.Goal.Loader do
          {:ok, conventions} <- build_conventions(Map.get(data, "conventions")),
          # T45.7 (ADR-0056 decision 5): optional `[escalation]` table (the model ladder).
          {:ok, escalation} <- build_escalation(Map.get(data, "escalation")),
-         {:ok, all} <- build_predicates(Map.get(data, "predicate", [])),
+         {:ok, all} <- build_predicates(raw_predicates),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
          # and every group `parent` must reference a DECLARED id, and the parent
@@ -1463,6 +1481,229 @@ defmodule Kazi.Goal.Loader do
         end
     end
   end
+
+  # ── T62.1 (ADR-0071): `gherkin` load-time expansion ──────────────────────────
+
+  @gherkin_verdict_formats ~w(cucumber_json scenario_map)
+
+  # Expands every `provider = "gherkin"` entry in the raw `predicate` array into
+  # one `:gherkin` sub-predicate per Scenario (per Examples row for an outline),
+  # reusing `Kazi.Reconcile.GherkinExpander` for scenario identity. Each expanded
+  # entry carries the SHARED runner spec (runner_cmd/runner_args/verdict_format/
+  # report_path) copied from its parent, and is grouped under one synthesized
+  # `[[group]]` per Feature. Non-gherkin entries pass through untouched.
+  #
+  # Returns `{:ok, {expanded_raw_predicates, synthesized_group_maps}}`; a schema
+  # error (missing `feature`, unknown `verdict_format`, unreadable/empty feature
+  # file) is a NAMED load error. A non-list `predicate` passes through so
+  # build_predicates still owns its own shape error.
+  defp expand_gherkin_predicates(predicates, declared_groups) when is_list(predicates) do
+    declared_ids = declared_group_ids(declared_groups)
+
+    Enum.reduce_while(predicates, {:ok, {[], []}}, fn raw, {:ok, {preds, synth}} ->
+      case expand_one_gherkin(raw, synth, declared_ids) do
+        {:ok, {expanded, synth}} -> {:cont, {:ok, {preds ++ expanded, synth}}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp expand_gherkin_predicates(other, _declared_groups), do: {:ok, {other, []}}
+
+  # Append the synthesized per-Feature groups only when the declared `[[group]]`
+  # value is a list; otherwise leave it untouched so build_groups raises its own
+  # "must be an array of tables" error (never `++` a non-list).
+  defp merge_synth_groups(declared, synth) when is_list(declared), do: declared ++ synth
+  defp merge_synth_groups(declared, _synth), do: declared
+
+  defp declared_group_ids(declared) when is_list(declared) do
+    declared
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(&Map.get(&1, "id"))
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.map(&Group.normalize_id/1)
+    |> MapSet.new()
+  end
+
+  defp declared_group_ids(_declared), do: MapSet.new()
+
+  # A `provider = "gherkin"` map expands; anything else passes through verbatim
+  # (a non-map raw entry fails later in build_predicate, its own error path).
+  defp expand_one_gherkin(raw, synth, declared_ids) when is_map(raw) do
+    if Map.get(raw, "provider") == "gherkin" do
+      do_expand_gherkin(raw, synth, declared_ids)
+    else
+      {:ok, {[raw], synth}}
+    end
+  end
+
+  defp expand_one_gherkin(raw, synth, _declared_ids), do: {:ok, {[raw], synth}}
+
+  defp do_expand_gherkin(raw, synth, declared_ids) do
+    with {:ok, feature_path} <- fetch_gherkin_feature(raw),
+         {:ok, verdict_format} <- fetch_gherkin_verdict_format(raw),
+         {:ok, source} <- read_gherkin_feature(raw, feature_path),
+         {:ok, entries} <- run_gherkin_expander(raw, feature_path, source) do
+      {group_id, synth} = ensure_feature_group(raw, entries, synth, declared_ids)
+      runner = gherkin_runner_spec(raw, feature_path, verdict_format)
+      expanded = Enum.map(entries, &gherkin_subpredicate(&1, raw, group_id, runner))
+      {:ok, {expanded, synth}}
+    end
+  end
+
+  defp fetch_gherkin_feature(raw) do
+    case Map.get(raw, "feature") do
+      f when is_binary(f) and f != "" ->
+        {:ok, f}
+
+      nil ->
+        {:error, "gherkin predicate #{gherkin_label(raw)} is missing required key \"feature\""}
+
+      _ ->
+        {:error, "gherkin predicate #{gherkin_label(raw)} \"feature\" must be a non-empty string"}
+    end
+  end
+
+  defp fetch_gherkin_verdict_format(raw) do
+    case Map.get(raw, "verdict_format") do
+      nil ->
+        {:ok, "cucumber_json"}
+
+      format when format in @gherkin_verdict_formats ->
+        {:ok, format}
+
+      format when is_binary(format) ->
+        {:error,
+         "gherkin predicate #{gherkin_label(raw)} has unknown verdict_format #{inspect(format)} " <>
+           "(known: #{Enum.join(@gherkin_verdict_formats, ", ")})"}
+
+      _ ->
+        {:error, "gherkin predicate #{gherkin_label(raw)} \"verdict_format\" must be a string"}
+    end
+  end
+
+  # The feature path is resolved relative to the current working directory — the
+  # same workspace the runner (runner_cmd/runner_args) executes in at dispatch —
+  # so a goal that loads is a goal whose runner can find the same file.
+  defp read_gherkin_feature(raw, path) do
+    case File.read(path) do
+      {:ok, contents} ->
+        {:ok, contents}
+
+      {:error, reason} ->
+        {:error,
+         "gherkin predicate #{gherkin_label(raw)} feature file #{inspect(path)} could not be " <>
+           "read (#{:file.format_error(reason)})"}
+    end
+  end
+
+  defp run_gherkin_expander(raw, path, source) do
+    case Kazi.Reconcile.GherkinExpander.expand(source) do
+      {:ok, entries} ->
+        {:ok, entries}
+
+      {:error, reason} ->
+        {:error, "gherkin predicate #{gherkin_label(raw)} feature #{inspect(path)}: #{reason}"}
+    end
+  end
+
+  # The synthesized (or explicit) group id every sub-predicate of this feature is
+  # placed under. An explicit `group` on the parent entry wins (assumed declared,
+  # validated by validate_group_references later); otherwise one group per Feature
+  # is synthesized, deduped against declared + already-synthesized ids so
+  # build_groups never sees a duplicate.
+  defp ensure_feature_group(raw, entries, synth, declared_ids) do
+    case Map.get(raw, "group") do
+      g when is_binary(g) and g != "" ->
+        {Group.normalize_id(g), synth}
+
+      _ ->
+        {group_id, group_name} = feature_group_identity(entries)
+
+        exists? =
+          MapSet.member?(declared_ids, group_id) or
+            Enum.any?(synth, &(Map.get(&1, "id") == group_id))
+
+        if exists? do
+          {group_id, synth}
+        else
+          {group_id, synth ++ [%{"id" => group_id, "name" => group_name}]}
+        end
+    end
+  end
+
+  defp feature_group_identity(entries) do
+    feature_name =
+      entries
+      |> List.first(%{})
+      |> Map.get(:feature, "")
+      |> to_string()
+
+    case String.trim(feature_name) do
+      "" -> {"ungrouped", "ungrouped"}
+      name -> {Group.normalize_id(name), name}
+    end
+  end
+
+  defp gherkin_runner_spec(raw, feature_path, verdict_format) do
+    %{
+      feature: feature_path,
+      verdict_format: verdict_format,
+      runner_cmd: Map.get(raw, "runner_cmd"),
+      runner_args: Map.get(raw, "runner_args"),
+      report_path: Map.get(raw, "report_path")
+    }
+  end
+
+  # Build the string-keyed raw map for one expanded scenario. It re-enters the
+  # unchanged build_predicate path, so the shared runner spec becomes `:gherkin`
+  # config and the scenario metadata rides along as self-describing keys.
+  defp gherkin_subpredicate(entry, raw, group_id, runner) do
+    %{
+      "id" => entry.id,
+      "provider" => "gherkin",
+      "group" => group_id,
+      "description" => gherkin_description(entry),
+      "feature" => runner.feature,
+      "scenario" => entry.scenario,
+      "steps" => entry.steps,
+      "verdict_format" => runner.verdict_format,
+      "runner_cmd" => runner.runner_cmd,
+      "runner_args" => runner.runner_args
+    }
+    |> gherkin_maybe_put("report_path", runner.report_path)
+    |> gherkin_maybe_put("row_key", entry.row_key)
+    |> gherkin_maybe_put("example", entry.example)
+    |> inherit_gherkin_flags(raw)
+  end
+
+  defp gherkin_description(%{scenario: scenario, row_key: nil}), do: "Scenario: #{scenario}"
+
+  defp gherkin_description(%{scenario: scenario, row_key: row_key}),
+    do: "Scenario: #{scenario} [#{row_key}]"
+
+  # The parent entry's acceptance/guard/held_out intent is inherited by every
+  # expanded sub-predicate (ADR-0071: `acceptance = true` applies to all).
+  defp inherit_gherkin_flags(map, raw) do
+    Enum.reduce(~w(acceptance guard held_out), map, fn key, acc ->
+      case Map.get(raw, key) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp gherkin_maybe_put(map, _key, nil), do: map
+  defp gherkin_maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp gherkin_label(raw) when is_map(raw) do
+    case Map.get(raw, "id") || Map.get(raw, "feature") do
+      value when is_binary(value) and value != "" -> inspect(value)
+      _ -> "(gherkin)"
+    end
+  end
+
+  defp gherkin_label(_raw), do: "(gherkin)"
 
   defp build_predicates([]), do: {:error, "goal-file must declare at least one [[predicate]]"}
 
