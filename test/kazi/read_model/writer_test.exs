@@ -7,8 +7,10 @@ defmodule Kazi.ReadModel.WriterTest do
   """
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Kazi.ReadModel
-  alias Kazi.ReadModel.{ProposedMemory, Writer}
+  alias Kazi.ReadModel.{MemoryIndexFile, OrientationPackCache, ProposedMemory, Writer}
   alias Kazi.Repo
 
   setup do
@@ -120,6 +122,147 @@ defmodule Kazi.ReadModel.WriterTest do
 
       assert_received {:probed, "/tmp/a.sock"}
       assert_received {:probed, "/tmp/b.sock"}
+    end
+  end
+
+  describe "write-time version-stamp-and-refuse (T52.7, no daemon)" do
+    # Stamp the direct db's kazi_schema_meta row (the same table Migrate reads),
+    # so the default db_stamped_version path — not just an injected integer —
+    # exercises the real skew read against the file.
+    defp stamp_db!(version) do
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "CREATE TABLE IF NOT EXISTS kazi_schema_meta (version INTEGER NOT NULL)",
+        []
+      )
+
+      Ecto.Adapters.SQL.query!(Repo, "DELETE FROM kazi_schema_meta", [])
+
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "INSERT INTO kazi_schema_meta (version) VALUES (?1)",
+        [version]
+      )
+    end
+
+    defp proposed_changeset, do: ProposedMemory.changeset(%ProposedMemory{}, attrs())
+
+    test "an older binary refuses every write against a newer-stamped file and persists nothing" do
+      stamp_db!(20_990_101_000_000)
+
+      log =
+        capture_log(fn ->
+          # binary_version below the file's stamp -> :client_older -> refuse.
+          result =
+            Writer.insert(proposed_changeset(), [],
+              probe: fn _ -> :missing end,
+              binary_version: 1
+            )
+
+          assert result == {:error, :read_model_unavailable}
+        end)
+
+      # Guard-style visible degrade, naming both schema versions + the remedy.
+      assert log =~ "read-model schema v20990101000000 is newer than this binary (v1)"
+      assert log =~ "upgrade kazi"
+
+      # NO Repo write: the row does not appear, the run proceeds (no crash/hang).
+      assert Repo.aggregate(ProposedMemory, :count, :id) == 0
+    end
+
+    test "an equal-or-newer binary writes direct and persists" do
+      a = attrs()
+
+      # binary_version at/above the file's stamp -> :equal/:client_newer -> direct.
+      result =
+        %ProposedMemory{}
+        |> ProposedMemory.changeset(a)
+        |> Writer.insert([],
+          probe: fn _ -> :missing end,
+          binary_version: 20_990_101_000_000,
+          db_stamped_version: 20_990_101_000_000
+        )
+
+      assert {:ok, %ProposedMemory{} = row} = result
+      assert Repo.get_by(ProposedMemory, fingerprint: a.fingerprint).id == row.id
+    end
+
+    test "delete_all preserves its count contract on refuse (returns 0, deletes nothing)" do
+      assert Writer.delete_all(OrientationPackCache, %{cache_key: "k"},
+               probe: fn _ -> :missing end,
+               binary_version: 1,
+               db_stamped_version: 20_990_101_000_000
+             ) == 0
+    end
+
+    test "query! returns :ok on refuse and issues no Repo statement" do
+      assert Writer.query!("DELETE FROM memory_chunks_fts WHERE path = ?", ["p"],
+               probe: fn _ -> :missing end,
+               binary_version: 1,
+               db_stamped_version: 20_990_101_000_000
+             ) == :ok
+    end
+
+    test "insert! degrades without raising on refuse" do
+      changeset =
+        MemoryIndexFile.changeset(%MemoryIndexFile{}, %{
+          workspace_root: "/w",
+          path: "p.md",
+          content_hash: "h"
+        })
+
+      assert Writer.insert!(changeset, [],
+               probe: fn _ -> :missing end,
+               binary_version: 1,
+               db_stamped_version: 20_990_101_000_000
+             ) == {:error, :read_model_unavailable}
+    end
+
+    test "an unstamped (nil) file writes direct — a brand-new db is never refused" do
+      a = attrs()
+
+      result =
+        %ProposedMemory{}
+        |> ProposedMemory.changeset(a)
+        |> Writer.insert([],
+          probe: fn _ -> :missing end,
+          binary_version: 1,
+          db_stamped_version: nil
+        )
+
+      assert {:ok, %ProposedMemory{}} = result
+      assert Repo.get_by(ProposedMemory, fingerprint: a.fingerprint)
+    end
+
+    test "the skew decision is memoized per process (one degrade line per TTL window)" do
+      log =
+        capture_log(fn ->
+          for _ <- 1..3 do
+            Writer.delete_all(OrientationPackCache, %{cache_key: "k"},
+              probe: fn _ -> :missing end,
+              binary_version: 1,
+              db_stamped_version: 20_990_101_000_000,
+              ttl_ms: 60_000
+            )
+          end
+        end)
+
+      lines = log |> String.split("\n") |> Enum.filter(&(&1 =~ "running without persistence"))
+      assert length(lines) == 1
+    end
+
+    test "an alive daemon never refuses an older client (additive write API, T52.5)" do
+      # :client_older against an alive daemon must route remote, not refuse: the
+      # skew check lives only in the no-daemon branch.
+      result =
+        Writer.write(fn -> :direct end,
+          probe: fn _ -> :alive end,
+          binary_version: 1,
+          db_stamped_version: 20_990_101_000_000,
+          remote: fn -> :routed end
+        )
+
+      assert result == :routed
     end
   end
 end
