@@ -57,6 +57,7 @@ defmodule Kazi.Memory.SemanticIndex do
   """
 
   alias Kazi.ReadModel.MemoryIndexFile
+  alias Kazi.ReadModel.Writer
   alias Kazi.Repo
 
   @typedoc "One recalled snippet: its source (`path`/`line`), text, and relevance score."
@@ -258,14 +259,14 @@ defmodule Kazi.Memory.SemanticIndex do
   end
 
   defp delete_chunks(root, path) do
-    Repo.query!("DELETE FROM memory_chunks_fts WHERE workspace_root = ? AND path = ?", [
+    Writer.query!("DELETE FROM memory_chunks_fts WHERE workspace_root = ? AND path = ?", [
       root,
       path
     ])
   end
 
   defp insert_chunk(root, path, %{heading: heading, line_start: s, line_end: e, text: text}) do
-    Repo.query!(
+    Writer.query!(
       "INSERT INTO memory_chunks_fts (workspace_root, path, heading, line_start, line_end, body) VALUES (?, ?, ?, ?, ?, ?)",
       [root, path, heading, s, e, text]
     )
@@ -274,7 +275,7 @@ defmodule Kazi.Memory.SemanticIndex do
   defp upsert_hash(root, path, hash) do
     %MemoryIndexFile{}
     |> MemoryIndexFile.changeset(%{workspace_root: root, path: path, content_hash: hash})
-    |> Repo.insert!(
+    |> Writer.insert!(
       on_conflict: {:replace, [:content_hash, :updated_at]},
       conflict_target: [:workspace_root, :path]
     )
