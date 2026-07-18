@@ -96,6 +96,17 @@ converged-but-not-landed run then exits **1**). See
 [`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065)
 below and `docs/landing.md`.
 
+goal-drift-guard-1415 adds the OPTIONAL top-level `goal_drifted` boolean and
+`goal_drift` object. **Additive** — present only when the run was started from a
+real goal-file path (never a proposal ref) AND the file on disk no longer
+matches the predicate bar the run actually converged against — absent on every
+other run, so `schema_version` stays **2**. This never changes `status`: the
+loop always converges against the ORIGINAL predicate bar it fingerprinted at
+t0, regardless of what happens to the file on disk afterward — `goal_drifted`
+only tells the operator that it happened. See
+[`goal_drift` — on-disk bar mismatch](#goal_drift--on-disk-bar-mismatch-goal-drift-guard-1415)
+below.
+
 ## Shape
 
 ```json
@@ -174,6 +185,8 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `cause`          | object (optional)   | T48.4 (ADR-0058 decision 4): the honest terminal cause class alongside `status`/`reason`. **Additive, optional** — present only when the loop classified one. See [`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058). |
 | `integration`    | object (optional)   | T50.2 (ADR-0065 decision 2): how a worktree-isolated serial run's converged task-branch commits LANDED on the base. **Additive, optional** — present only when a landing was attempted. See [`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065) below. Absent ⇒ nothing was integrable (in-place run, or no commits ahead of the base), byte-identical to before this field existed. |
 | `collateral`     | array of objects (optional) | issue #860: files changed this run that sit OUTSIDE the goal's write scope, net-deletion entries first. **Additive, optional** — present only when non-empty. See [`collateral` — out-of-intent diff report](#collateral--out-of-intent-diff-report-issue-860) below. Absent ⇒ nothing collateral was found, byte-identical to before this field existed. |
+| `goal_drifted`   | boolean (optional) | goal-drift-guard-1415: `true` when the goal-file this run was loaded from no longer matches the predicate bar it was fingerprinted against at t0. **Additive, optional** — present only when a drift was actually detected. See [`goal_drift` — on-disk bar mismatch](#goal_drift--on-disk-bar-mismatch-goal-drift-guard-1415) below. Absent ⇒ no drift detected (or the run was not started from a goal-file path), byte-identical to before this field existed. |
+| `goal_drift`     | object (optional) | goal-drift-guard-1415: paired with `goal_drifted: true` — names which predicate ids were added/removed/reconfigured on disk since t0. See below. |
 | `next_action`    | string (enum)       | An orchestration **hint** — `done`, `investigate`, or `raise_budget`. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`, `max_dispatches` — T48.6, ADR-0058) or `stuck`. `null` on a clean converge. |
 | `release_ref`    | string \| null      | The release tag of the artifact deployed this run (T3.3c), or `null` if nothing was deployed. |
@@ -563,6 +576,55 @@ Rules:
 - Computed by `Kazi.CollateralReport.collateral/2`, over the SAME diff
   `Kazi.Providers.ScopeGuard` measures (`Kazi.ScopeDiff`) — the two features
   share one notion of "what changed this run".
+
+## `goal_drift` — on-disk bar mismatch (goal-drift-guard-1415)
+
+`kazi apply <goal-file>` loads a goal-file **once**, at t0, into an in-memory
+predicate bar — every convergence check for the rest of the run reads that same
+bar; the loop never re-parses the source path. So editing the goal-file on disk
+mid-run already has **zero** effect on what `converged` means: the ORIGINAL bar
+always wins, by construction (a dispatched agent cannot fake convergence by
+deleting or weakening the predicate it cannot satisfy). What `goal_drift`
+answers is a different question: did the file on disk change underneath the run
+anyway? An operator otherwise has no signal of that short of eyeballing `git
+diff` themselves.
+
+```json
+{
+  "status": "over_budget",
+  "goal_drifted": true,
+  "goal_drift": {
+    "added": [],
+    "removed": ["hard"],
+    "changed": []
+  }
+}
+```
+
+| Field     | Type             | Meaning |
+|-----------|------------------|---------|
+| `added`   | array of strings | Predicate ids present on disk now that were NOT in the t0 bar. |
+| `removed` | array of strings | Predicate ids in the t0 bar that are no longer on disk. |
+| `changed` | array of strings | Predicate ids present in both, whose `kind`/`config`/`guard?` differ from t0 (`description` alone does not count — it is prose, not the bar). |
+
+Rules:
+
+- **Additive, optional.** Present only when the run was started from a real
+  goal-file **path** (`kazi apply path/to/goal.toml`, never a `prop-...`
+  proposal ref, which has no on-disk bar to drift against) AND a drift was
+  actually detected. Absent on every other run — byte-identical to before this
+  field existed.
+- **Never changes `status` or `next_action`.** The predicate vector, the
+  convergence verdict, and the exit code are ALL decided against the ORIGINAL
+  t0 bar; `goal_drift` is purely observational.
+- **Best-effort.** A goal-file that fails to re-parse at detection time (mid
+  edit, deleted, or replaced with something that no longer loads) is treated as
+  `:unchanged` — drift detection can never itself become a new way for a run to
+  fail.
+- Computed by `Kazi.Runtime.GoalDrift` — `snapshot/1` fingerprints the fully
+  resolved bar (authored predicates + any synthesized guards) the instant the
+  run commits to it; `detect/2` re-loads the same path once the run terminates
+  and diffs the two.
 
 ## Error object
 
