@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.249.0](https://github.com/kazi-org/kazi/compare/v1.248.1...v1.249.0) (2026-07-18)
+
+
+### Features
+
+* **dashboard:** widget direction B — project-grouped cards, single timestamp, segmented header filters (T63.6, UC-061) ([c0b15dc](https://github.com/kazi-org/kazi/commit/c0b15dccfc6d34d7d8200e0e8453c741f6a1192d))
+
 ## [1.248.1](https://github.com/kazi-org/kazi/compare/v1.248.0...v1.248.1) (2026-07-18)
 
 
