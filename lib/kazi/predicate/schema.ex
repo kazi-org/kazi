@@ -760,6 +760,63 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @swift_test %{
+    kind: "swift_test",
+    title: "swift_test predicate config",
+    description:
+      "Swift/XCTest suite verdicts (issue #1406), read from an Xcode .xcresult bundle via " <>
+        "`xcresulttool get test-results summary` rather than an exit code. Gated on the " <>
+        "PARSED totalTestCount/passedTests/failedTests: zero tests run is a :fail (broken " <>
+        "config, not a green suite), any failedTests is a :fail with each failure surfaced " <>
+        "as evidence, and a summary missing those counts (an unrecognized xcresulttool " <>
+        "schema) is honestly :unknown rather than a guessed pass.",
+    keys: [
+      %{
+        name: "xcresult_path",
+        type: "string",
+        required: true,
+        description: "Path to the .xcresult bundle a prior test run produced."
+      },
+      %{
+        name: "cmd",
+        type: "string",
+        required: false,
+        description: "The executable that emits the summary JSON. Default \"xcrun\"."
+      },
+      %{
+        name: "args",
+        type: "array<string>",
+        required: false,
+        description:
+          "Argument list. Default [\"xcresulttool\", \"get\", \"test-results\", \"summary\", " <>
+            "\"--format\", \"json\", \"--path\", xcresult_path]. Overrides the default entirely."
+      },
+      %{
+        name: "env",
+        type: "table | array<pair>",
+        required: false,
+        description: "Extra environment as a {name = value} table or {name, value} pairs."
+      },
+      %{
+        name: "merge_stderr",
+        type: "boolean",
+        required: false,
+        description: "Fold stderr into stdout. Default false (keeps the summary JSON clean)."
+      },
+      %{
+        name: "timeout_ms",
+        type: "integer",
+        required: false,
+        description: "Kill the command after this many ms and map it to :error. Default: none."
+      }
+    ],
+    example: %{
+      "id" => "swift-suite-green",
+      "provider" => "swift_test",
+      "xcresult_path" => "TestResults.xcresult"
+    }
+  }
+
   @cve %{
     kind: "cve",
     title: "cve predicate config",
@@ -1343,6 +1400,7 @@ defmodule Kazi.Predicate.Schema do
     "property" => @property,
     "mutation" => @mutation,
     "cve" => @cve,
+    "swift_test" => @swift_test,
     "no_stubs" => @no_stubs,
     "docs_updated" => @docs_updated,
     "integration" => @integration,
