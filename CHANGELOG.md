@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.246.0](https://github.com/kazi-org/kazi/compare/v1.245.0...v1.246.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** install-skill migrates LOCAL.md to the stable path (T61.2) ([5f88e2f](https://github.com/kazi-org/kazi/commit/5f88e2f27ff24e1be46fca2e5026256d5c13248e))
+* **teach:** LOCAL.md stable-path migration (T61.2, ADR-0077) ([268be16](https://github.com/kazi-org/kazi/commit/268be16a4b60276061725811abd6df8278b35ebd))
+
 ## [1.245.0](https://github.com/kazi-org/kazi/compare/v1.244.0...v1.245.0) (2026-07-18)
 
 
