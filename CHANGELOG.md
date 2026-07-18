@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.234.0](https://github.com/kazi-org/kazi/compare/v1.233.0...v1.234.0) (2026-07-18)
+
+
+### Features
+
+* **read_model:** write-time version-stamp-and-refuse degrade (T52.7, ADR-0068) ([5ec2347](https://github.com/kazi-org/kazi/commit/5ec2347b2aaf8b42fdf704e2557d87dbb89e0b5e))
+
 ## [1.233.0](https://github.com/kazi-org/kazi/compare/v1.232.0...v1.233.0) (2026-07-18)
 
 
