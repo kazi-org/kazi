@@ -18,6 +18,16 @@ defmodule KaziWeb.MissionControlLiveTest do
   alias Kazi.ReadModel.{ProposedGoal, Run, RunRegistry}
   alias Kazi.Repo
 
+  # Hermetic default: no cross-machine bus facts unless a test opts in. CI has no
+  # daemon, but a developer box may have one reachable, which would otherwise
+  # inject phantom remote cards into the grid and its counts. The cross-machine
+  # describe block overrides this in-body via `with_remote_facts/1`.
+  setup do
+    Application.put_env(:kazi, :remote_run_facts_fetcher, fn -> [] end)
+    on_exit(fn -> Application.delete_env(:kazi, :remote_run_facts_fetcher) end)
+    :ok
+  end
+
   defp seed_proposal(overrides \\ %{}) do
     attrs =
       Map.merge(
@@ -270,17 +280,22 @@ defmodule KaziWeb.MissionControlLiveTest do
   end
 
   describe "filters and card provenance" do
-    test "a card shows its project, age, and last-active", %{conn: conn} do
+    test "a card shows its harness/workspace and one relative timestamp (direction B)", %{
+      conn: conn
+    } do
       run = seed(%{goal_ref: "prov", workspace: "/tmp/ws/kazi-repo"})
       age_heartbeat(run, 300)
 
       {:ok, _view, html} = live(conn, ~p"/")
 
-      # Workspace has no git remote, so the project falls back to the last two
-      # path segments — still the grouping key the repo dropdown uses.
-      assert html =~ ~s(data-project="ws/kazi-repo")
-      assert html =~ ~r/AGE \d+[smhd]/
-      assert html =~ "ACTIVE 5m ago"
+      # Direction B (T63.6): the project badge and the AGE/ACTIVE row are gone;
+      # provenance moves to the group header and a single right-aligned relative
+      # timestamp (5m since the heartbeat) replaces the two-value age row.
+      refute html =~ ~s(class="projbadge")
+      refute html =~ "AGE "
+      refute html =~ ~s(class="agerow")
+      assert html =~ ~s(class="cardtime")
+      assert html =~ "5m ago"
     end
 
     test "clicking a fleet chip filters to that state; clicking again clears", %{conn: conn} do
@@ -441,6 +456,86 @@ defmodule KaziWeb.MissionControlLiveTest do
       {:ok, _view, html} = live(conn, "/")
 
       refute html =~ "id=\"mc-planned"
+    end
+  end
+
+  describe "widget direction B (T63.6, David's T63.2 selection)" do
+    test "a fleet across 2 projects groups into ruled project sections", %{conn: conn} do
+      # Two workspaces with no git remote fall back to their last two path
+      # segments as the project label — the grid's grouping key.
+      seed(%{goal_ref: "goal-a", workspace: "/tmp/org-a/repo-a"})
+      seed(%{goal_ref: "goal-b", workspace: "/tmp/org-b/repo-b"})
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      # Two project groups, each under a ruled header naming the project.
+      assert html =~ ~s(data-project-group="org-a/repo-a")
+      assert html =~ ~s(data-project-group="org-b/repo-b")
+      assert html =~ ~s(data-project-group-head="org-a/repo-a")
+      assert html =~ ~s(data-project-group-head="org-b/repo-b")
+      # Both cards still render, one per goal.
+      assert html =~ ~s(id="mc-card-goal-a")
+      assert html =~ ~s(id="mc-card-goal-b")
+    end
+
+    test "a single-project fleet renders without a redundant group header", %{conn: conn} do
+      # Both runs share one workspace -> one project -> no ruled header.
+      seed(%{goal_ref: "solo-a", workspace: "/tmp/one/repo"})
+      seed(%{goal_ref: "solo-b", workspace: "/tmp/one/repo"})
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      refute html =~ ~s(class="projgroup-head)
+      refute html =~ "data-project-group-head"
+      # The single group still renders both cards.
+      assert html =~ ~s(data-project-group="one/repo")
+      assert html =~ ~s(id="mc-card-solo-a")
+      assert html =~ ~s(id="mc-card-solo-b")
+    end
+
+    test "cards carry the original anatomy: no project badge, one timestamp", %{conn: conn} do
+      run = seed(%{goal_ref: "anat", workspace: "/tmp/ws/kazi-repo"})
+      age_heartbeat(run, 120)
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      # The card no longer carries the cyan project badge or the two-value age row.
+      refute html =~ ~s(class="projbadge")
+      refute html =~ ~s(class="agerow")
+      # Exactly one relative timestamp per card (2m since the heartbeat).
+      assert html =~ ~s(class="cardtime" data-rel="2m")
+      assert html =~ "2m ago"
+    end
+
+    test "state/scope/repo/time filters fold into the FLEET header as segmented controls", %{
+      conn: conn
+    } do
+      seed(%{goal_ref: "hdr"})
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      # The controls cluster lives in the FLEET header, not the topbar.
+      assert html =~ ~s(class="fleetcontrols")
+      # State filter is a segmented control (buttons keep their data-count hooks).
+      assert html =~ ~s(id="mc-fleet-chips" class="segmented")
+      assert html =~ ~s(data-count="running")
+      # Scope and the repo/time filter form sit in the same header cluster.
+      assert html =~ ~s(id="mc-scope" class="segmented scopetoggle")
+      assert html =~ ~s(id="mc-filters")
+      # The topbar no longer carries the standalone chip row.
+      refute html =~ ~s(class="chips")
+    end
+
+    test "the segmented state control still filters the grid", %{conn: conn} do
+      seed(%{goal_ref: "run-one"})
+      done = seed(%{goal_ref: "done-one"})
+      {:ok, _} = RunRegistry.finish(done.run_id, "converged")
+
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      html = view |> element(~s(button[data-count="converged"])) |> render_click()
+      assert html =~ ~s(id="mc-card-done-one")
+      refute html =~ ~s(id="mc-card-run-one")
     end
   end
 end
