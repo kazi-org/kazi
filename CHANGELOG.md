@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.226.0](https://github.com/kazi-org/kazi/compare/v1.225.0...v1.226.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** --allow-workspace-collision flag + collision refusal message (T59.7, [#937](https://github.com/kazi-org/kazi/issues/937)) ([49fac96](https://github.com/kazi-org/kazi/commit/49fac96e636518d6023ff597c90debb415e510a1))
+* **runtime:** refuse workspace collision across different live goals (T59.7, [#937](https://github.com/kazi-org/kazi/issues/937)) ([466c43f](https://github.com/kazi-org/kazi/commit/466c43f28451f66bdde87a41b2278adcd04a9b7c))
+
 ## [1.225.0](https://github.com/kazi-org/kazi/compare/v1.224.0...v1.225.0) (2026-07-18)
 
 
