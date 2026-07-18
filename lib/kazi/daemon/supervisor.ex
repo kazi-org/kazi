@@ -51,27 +51,42 @@ defmodule Kazi.Daemon.Supervisor do
     # the time the socket accepts a `write` the writer is up, the read-model is
     # migrated, and a client write is never served against an unmigrated file
     # ("no such table") or a not-started repo ("could not lookup Ecto repo").
-    ensure_repo_started(opts)
-    run_boot_migration(opts)
+    #
+    # Fail-loud (#1504): a writer that CANNOT start makes the daemon REFUSE to
+    # serve. We do NOT raise here -- a raise out of `init/1` propagates as a
+    # linked exit that would KILL `Kazi.Daemon.start/1`'s caller (the CLI /
+    # test) with a stack trace, not return the documented `{:error, _}`.
+    # Instead we install a single child that fails to start, so
+    # `Supervisor.start_link/1` returns CLEANLY -- the caller survives, gets
+    # `{:error, {:shutdown, {:failed_to_start_child, ...}}}`, and `kazi daemon
+    # start` prints "could not start daemon: ..." and exits non-zero, no socket
+    # ever bound.
+    case ensure_repo_started(opts) do
+      :ok ->
+        run_boot_migration(opts)
 
-    write_opts =
-      [name: default_write_name(opts)]
-      |> maybe_put(:repo, Keyword.get(opts, :migrate_repo))
-      |> maybe_put(:on_start, Keyword.get(opts, :write_on_start))
+        write_opts =
+          [name: default_write_name(opts)]
+          |> maybe_put(:repo, Keyword.get(opts, :migrate_repo))
+          |> maybe_put(:on_start, Keyword.get(opts, :write_on_start))
 
-    children = [
-      {Kazi.Daemon.Nats, nats_opts},
-      {Kazi.Daemon.PresenceSweep, sweep_opts},
-      {Kazi.Daemon.Write, write_opts},
-      {Kazi.Daemon.Listener,
-       sock_path: sock_path,
-       pid_path: pid_path,
-       name: listener_name,
-       sup_pid: self(),
-       nats_name: nats_name}
-    ]
+        children = [
+          {Kazi.Daemon.Nats, nats_opts},
+          {Kazi.Daemon.PresenceSweep, sweep_opts},
+          {Kazi.Daemon.Write, write_opts},
+          {Kazi.Daemon.Listener,
+           sock_path: sock_path,
+           pid_path: pid_path,
+           name: listener_name,
+           sup_pid: self(),
+           nats_name: nats_name}
+        ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+        Supervisor.init(children, strategy: :one_for_one)
+
+      {:error, reason} ->
+        Supervisor.init([refusal_child(reason)], strategy: :one_for_one)
+    end
   end
 
   # #1504: START the read-model writer (`Kazi.Repo`) BEFORE the boot migration
@@ -93,12 +108,13 @@ defmodule Kazi.Daemon.Supervisor do
   # to degrade on its OWN bounded cases (a peer holding the migration lock, a
   # newer schema stamp: never fatal, always logged, per ADR-0068) -- a repo that
   # CANNOT start (an unwritable state dir, a corrupt db) leaves the daemon with
-  # NO writer at all. That is NOT a silent-degrade case: any failure here is left
-  # to propagate out of `init/1`, so `Kazi.Daemon.start/1` returns `{:error, _}`
-  # and `kazi daemon start` REFUSES to serve rather than come up healthy-looking
-  # with no write path. `:repo_start_fun`/`:migrate_repo` are test seams (mirror
-  # `:migrate_fun`): a lifecycle test injects a start that fails (to pin the
-  # refusal) or points the writer at a throwaway repo.
+  # NO writer at all. That is NOT a silent-degrade case: it returns `{:error,
+  # reason}` and `init/1` installs `refusal_child/1` so the daemon REFUSES to
+  # serve (see the `init/1` comment for why a return, not a raise). Returns `:ok`
+  # once the writer is up (or already was). `:repo_start_fun`/`:migrate_repo` are
+  # test seams (mirror `:migrate_fun`): a lifecycle test injects a start that
+  # fails (to pin the refusal) or points the writer at a throwaway repo.
+  @spec ensure_repo_started(keyword()) :: :ok | {:error, term()}
   defp ensure_repo_started(opts) do
     start_fun =
       Keyword.get(opts, :repo_start_fun, fn ->
@@ -112,16 +128,42 @@ defmodule Kazi.Daemon.Supervisor do
           case repo.start_link() do
             {:ok, _pid} -> :ok
             {:error, {:already_started, _pid}} -> :ok
+            {:error, reason} -> {:error, reason}
           end
         end
       end)
 
     start_fun.()
+  rescue
+    error -> {:error, Exception.message(error)}
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   defp repo_started?(repo) do
     is_pid(Process.whereis(repo)) or is_pid(GenServer.whereis(repo))
   end
+
+  # The fail-loud refusal (#1504): a child spec whose start returns `{:error,
+  # reason}`, so `Supervisor.start_link/1` fails CLEANLY (the linked caller
+  # survives with `{:error, {:shutdown, {:failed_to_start_child, ...}}}`) rather
+  # than the raw linked-exit a raise out of `init/1` would deliver. It is the
+  # ONLY child on the refusal path, so no socket/listener is ever bound.
+  # `:temporary` so the failure is terminal, never restart-looped.
+  defp refusal_child(reason) do
+    %{
+      id: :read_model_writer,
+      start: {__MODULE__, :refuse_start, [reason]},
+      restart: :temporary
+    }
+  end
+
+  @doc false
+  # Invoked by the supervisor as `refusal_child/1`'s start MFA. Always fails,
+  # carrying the writer-start `reason` out through the supervisor's clean
+  # failed-to-start-child path.
+  @spec refuse_start(term()) :: {:error, term()}
+  def refuse_start(reason), do: {:error, reason}
 
   # The boot migration. `Kazi.ReadModel.Migrate.run/2` is itself bounded and
   # degrading (L-0035: never raises, never blocks past its bound), so a peer
