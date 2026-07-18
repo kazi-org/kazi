@@ -18,7 +18,15 @@ defmodule Kazi.Daemon.LifecycleTest do
 
   alias Kazi.Daemon
   alias Kazi.Daemon.Probe
+  alias Kazi.Daemon.Write
   alias Kazi.TestSupport.NatsPrereq
+
+  # A throwaway read-model repo for the migrate-before-serve test: a FRESH
+  # SQLite file the daemon's boot migration must create the tables in before a
+  # `write` is served (mirrors `Kazi.ReadModel.MigrationLockTest`'s pattern).
+  defmodule FreshRepo do
+    use Ecto.Repo, otp_app: :kazi, adapter: Ecto.Adapters.SQLite3
+  end
 
   setup_all do
     NatsPrereq.ensure!()
@@ -167,5 +175,83 @@ defmodule Kazi.Daemon.LifecycleTest do
 
     assert {:error, {:already_running, vsn}} = Daemon.start(daemon_opts(sock_path, pid_path))
     assert vsn == expected_vsn()
+  end
+
+  # ===========================================================================
+  # (6) T52.4 (ADR-0068 point 2): migrate-before-serve. The supervisor runs the
+  # boot migration ONCE, then starts the write server ONLY after it returns,
+  # ordered before the listener.
+  # ===========================================================================
+
+  test "the write server starts only AFTER the boot migration returns, and is in the tree" do
+    {sock_path, pid_path} = tmp_paths()
+    {:ok, order} = Agent.start_link(fn -> [] end)
+
+    opts =
+      daemon_opts(sock_path, pid_path) ++
+        [
+          migrate_fun: fn ->
+            Agent.update(order, &[:migrated | &1])
+            :ok
+          end,
+          write_on_start: fn -> Agent.update(order, &[:write_started | &1]) end
+        ]
+
+    sup_pid = start_supervised!(%{id: unique_name(:daemon), start: {Daemon, :start, [opts]}})
+
+    # The migration recorded BEFORE the write server's init ran.
+    assert Enum.reverse(Agent.get(order, & &1)) == [:migrated, :write_started]
+
+    # The write server IS a supervised child of the daemon tree.
+    child_ids = for {id, _pid, _type, _mods} <- Supervisor.which_children(sup_pid), do: id
+    assert Kazi.Daemon.Write in child_ids
+  end
+
+  test "a fresh read-model is migrated before the daemon serves a write ('no such table' gone)" do
+    {sock_path, pid_path} = tmp_paths()
+    db_path = "/tmp/kazi_daemon_migrate_#{System.unique_integer([:positive])}.db"
+    on_exit(fn -> File.rm(db_path) end)
+
+    start_supervised!({FreshRepo, database: db_path, pool_size: 1, busy_timeout: 5_000})
+
+    request = %{
+      "op" => "write",
+      "batch" => [
+        %{
+          "kind" => "insert",
+          "schema" => "Kazi.ReadModel.Iteration",
+          "fields" => %{
+            "goal_ref" => "g-migrate",
+            "iteration_index" => 0,
+            "predicate_vector" => %{},
+            "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+          }
+        }
+      ]
+    }
+
+    # BEFORE the daemon migrates it, the fresh db has no iterations table.
+    assert %{"ok" => false} = Write.handle(request, repo: FreshRepo)
+
+    # The daemon's boot migration (point 2) migrates FreshRepo before it serves.
+    # FreshRepo is a test module, so point the migration at kazi's OWN migrations
+    # dir (FreshRepo's own priv path holds none) -- otherwise identical to the
+    # production `Kazi.ReadModel.Migrate.run/2` boot path.
+    migrations_path = Ecto.Migrator.migrations_path(Kazi.Repo)
+
+    opts =
+      daemon_opts(sock_path, pid_path) ++
+        [
+          migrate_fun: fn ->
+            Kazi.ReadModel.Migrate.run(FreshRepo, migrations_path: migrations_path)
+          end
+        ]
+
+    start_supervised!(%{id: unique_name(:daemon), start: {Daemon, :start, [opts]}})
+
+    assert Probe.probe(sock_path) == :alive
+
+    # A write issued right after the daemon is alive now succeeds.
+    assert %{"ok" => true, "applied" => 1} = Write.handle(request, repo: FreshRepo)
   end
 end
