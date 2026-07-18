@@ -190,6 +190,47 @@ status: fail
     reason: exec failed: scripts/check.sh: not found
 ```
 
+## Authoring hazard: whole-tree cleanliness checks
+
+Do **not** write an acceptance predicate that asserts the *whole working tree* is
+clean as a stand-in for "my change landed". The classic shape is:
+
+```toml
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+cmd = "sh"
+args = ["-c", "test -z \"$(git status --porcelain)\""]
+```
+
+Under shared-workspace scheduling — several goals reconciling in **one** checkout,
+kazi's default for a pooled run — this predicate is structurally unsafe. It reads
+the state of the *entire* tree, so a **sibling** goal that commits (or leaves
+working changes) in the same checkout flips your predicate to a false-negative
+verdict even though your own goal is done. Issue #937 hit exactly this: a
+`landed` predicate reported `fail` while a sibling goal was mid-commit in the same
+tree.
+
+Two safe alternatives:
+
+- **Scope the check to your goal's own paths** with a pathspec, so a sibling's
+  changes elsewhere can't perturb it:
+
+  ```toml
+  args = ["-c", "test -z \"$(git status --porcelain -- lib/foo)\""]
+  ```
+
+- **Rely on kazi's identity-based landing gate** (T54.1) rather than hand-writing
+  a tree-cleanliness check at all — kazi tracks which commits belong to *this*
+  run's identity and gates landing on those, immune to sibling activity. See
+  [`docs/landing.md`](landing.md).
+
+The authoring clarify floor (`Kazi.Authoring.Clarify`, ADR-0019) surfaces a
+`tree-clean-predicate` advisory when a drafted `custom_script` predicate carries an
+unscoped `git status --porcelain` (or `git diff --quiet` / `--exit-code`)
+whole-tree check — the same tier that flags a vacuous bare-grep predicate. It is a
+WARN only; it never blocks drafting.
+
 ## Folds the bespoke command-runners (test_runner, prod_log)
 
 `custom_script` is **the** command-runner. The two older command-runner
