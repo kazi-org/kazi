@@ -90,6 +90,18 @@ ADR-0067 introduces one.
   operator's service manager; `kazi daemon status|restart`).
 - Read-model rebuildability (ADR-0005) is unchanged -- the file remains a
   disposable projection; only who holds the pen changes.
+- Because the daemon is the single writer/migrator (decisions 1-2), it STARTS
+  the read-model writer itself at boot, before it migrates and before any child
+  serves a write (`Kazi.Daemon.Supervisor.ensure_repo_started/1`, #1504): under
+  a standalone binary the app supervision tree never stood `Kazi.Repo` up, so
+  absent this the boot migration hit "could not lookup Ecto repo ... not
+  started" and the daemon served blind (the #1483 writer half). This is
+  fail-loud, not a silent degrade: a writer that genuinely cannot start (an
+  unwritable state dir, a corrupt db) makes `kazi daemon start` refuse to serve
+  (`{:error, _}`, non-zero exit) rather than come up healthy-looking with no
+  write path. The boot migration's OWN bounded degrade (a peer holding the lock,
+  a newer schema stamp) is unchanged -- that is the visible, logged skew case
+  above, not a not-started repo.
 - The client-newer-than-daemon skew (decision 3) is realized at write time in
   `Kazi.ReadModel.Writer` (T52.8): with a live daemon whose `ping` `schema_vsn`
   is OLDER than this binary's schema version (`SchemaSkew.classify/2 ==
