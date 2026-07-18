@@ -391,6 +391,107 @@ defmodule Kazi.CLIRunScheduleExplainTest do
   end
 
   # ===========================================================================
+  # Tier 3 — T59.9 (#937 Gap F): --explain surfaces the per-partition worktree
+  # ISOLATION plan, so a caller can CONFIRM each partition runs in its own
+  # working dir (never the shared workspace root) BEFORE a long grind.
+  # ===========================================================================
+
+  describe "run --explain — surfaces per-partition worktree isolation" do
+    setup :checkout_sandbox
+    @describetag :tmp_dir
+
+    test "human output reports the isolation base + each partition's isolated working dir",
+         %{tmp_dir: tmp_dir} do
+      # Two disjoint no-needs groups -> one frontier, two partitions.
+      goal_file = write_no_needs_goal_file(tmp_dir)
+      {:ok, spy} = Agent.start_link(fn -> [] end)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(
+                   ["apply", goal_file, "--workspace", tmp_dir, "--explain"],
+                   spy_inject_opts(spy)
+                 ) == 0
+        end)
+
+      # The run-level isolation surface: worktree-per-partition, under the managed
+      # base dir, with the workspace root named as the thing that is NEVER a cwd.
+      assert out =~ "isolation: git worktree per partition"
+      assert out =~ "workspace root (never a partition's cwd): #{tmp_dir}"
+
+      # Each of the two partitions shows its OWN isolated working dir, under the
+      # managed base dir and NOT the workspace root.
+      base_dir = Kazi.Scheduler.Worktree.default_base_dir()
+      assert out =~ "isolated working dir: #{base_dir}"
+
+      working_dirs =
+        out
+        |> String.split("\n")
+        |> Enum.filter(&(&1 =~ "isolated working dir:"))
+        |> Enum.map(fn line -> line |> String.split(": ", parts: 2) |> List.last() end)
+
+      assert length(working_dirs) == 2
+
+      Enum.each(working_dirs, fn dir ->
+        assert String.starts_with?(dir, base_dir)
+        refute String.starts_with?(dir, tmp_dir <> "-")
+        refute dir == tmp_dir
+      end)
+
+      # The two partitions' working dirs are DISTINCT (disjoint isolation).
+      assert working_dirs |> Enum.uniq() |> length() == 2
+
+      # Still a pure dry-run: nothing dispatched.
+      assert Agent.get(spy, & &1) == []
+    end
+
+    test "--json carries the run isolation plan + a per-partition isolated working dir",
+         %{tmp_dir: tmp_dir} do
+      goal_file = write_no_needs_goal_file(tmp_dir)
+      {:ok, spy} = Agent.start_link(fn -> [] end)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(
+                   ["apply", goal_file, "--workspace", tmp_dir, "--explain", "--json"],
+                   spy_inject_opts(spy)
+                 ) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+
+      base_dir = Kazi.Scheduler.Worktree.default_base_dir()
+
+      # Run-level plan.
+      assert payload["isolation"]["strategy"] == "worktree_per_partition"
+      assert payload["isolation"]["base_dir"] == base_dir
+      assert payload["isolation"]["workspace_root"] == tmp_dir
+
+      # One frontier holding both groups' partitions.
+      assert [f0] = payload["frontiers"]
+      partitions = f0["partitions"]
+      assert length(partitions) == 2
+
+      prefixes =
+        Enum.map(partitions, fn p ->
+          iso = p["isolation"]
+          assert iso["isolated"] == true
+          assert iso["workspace_root"] == tmp_dir
+          prefix = iso["working_dir_prefix"]
+          # Provably isolated: under the managed base dir, never the workspace root.
+          assert String.starts_with?(prefix, base_dir)
+          refute prefix == tmp_dir
+          prefix
+        end)
+
+      # The K partitions each show a DISTINCT isolated working dir.
+      assert prefixes |> Enum.uniq() |> length() == 2
+
+      assert Agent.get(spy, & &1) == []
+    end
+  end
+
+  # ===========================================================================
   # helpers
   # ===========================================================================
 
