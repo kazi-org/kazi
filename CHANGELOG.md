@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.243.0](https://github.com/kazi-org/kazi/compare/v1.242.0...v1.243.0) (2026-07-18)
+
+
+### Features
+
+* **bus:** configurable tombstone-alias grace window (T65.4, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([55f85e0](https://github.com/kazi-org/kazi/commit/55f85e0671300c769e65efb45e46a77443f5539e))
+* **bus:** rename writes old name as a grace tombstone-alias (T65.4, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([da1d492](https://github.com/kazi-org/kazi/commit/da1d492ec8d02f5cdf39ec400aee538d5421d453))
+* **cli:** renamed-notice on tell ack + expired-tombstone error (T65.4, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([0117347](https://github.com/kazi-org/kazi/commit/011734756f7caf53c9f637c8c9a6862356980d64))
+
 ## [1.242.0](https://github.com/kazi-org/kazi/compare/v1.241.0...v1.242.0) (2026-07-18)
 
 
