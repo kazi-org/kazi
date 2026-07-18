@@ -156,6 +156,7 @@ defmodule Kazi.CLI do
     session_name: :string,
     allow_primary_workspace: :boolean,
     allow_duplicate_run: :boolean,
+    allow_workspace_collision: :boolean,
     no_preflight: :boolean,
     in_place: :boolean,
     base: :string,
@@ -288,6 +289,8 @@ defmodule Kazi.CLI do
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
       "`apply` only: start this run even when the run registry already shows a LIVE run (status running, fresh heartbeat) for the same goal id. Without this flag, an executing apply refuses the duplicate -- a second concurrent apply of one goal burns a second budget and races the first's edits. Zombie rows never block (a dead run's heartbeat goes stale within ~90s); pass this flag only for a deliberate re-run alongside a live one.",
+    allow_workspace_collision:
+      "`apply` only (T59.7, issue #937): start this run even when the run registry already shows a LIVE run (status running, fresh heartbeat) for a DIFFERENT goal holding the SAME resolved workspace. Without this flag, an executing apply refuses -- N different goals dispatched against one shared --workspace cross-contaminate each other's commits. This complements --allow-duplicate-run (which covers a second run of the SAME goal). Zombie rows never block (a dead run's heartbeat goes stale within ~90s); pass this flag only for deliberate co-tenancy you know is safe.",
     no_preflight:
       "`apply` only (T44.9): SKIP the base-dispatchability preflight run before the first dispatch. By default an executing apply first verifies the base can receive the work -- command-backed predicates' tools are installed, and (per the goal's [integration] mode) `gh auth status` succeeds for pr/merge and `git push --dry-run` succeeds for branch/pr/merge -- plus that no stale worktree from a dead run of this goal is lying around; any failure REFUSES dispatch with a named, actionable error instead of burning a budget that can never land. Pass this flag to bypass ALL those checks (e.g. an offline run, or a base you know is fine). Read-only modes (--check, --explain) never run preflight.",
     in_place:
@@ -380,6 +383,7 @@ defmodule Kazi.CLI do
         :session_name,
         :allow_primary_workspace,
         :allow_duplicate_run,
+        :allow_workspace_collision,
         :no_preflight,
         :in_place,
         :base
@@ -2043,6 +2047,7 @@ defmodule Kazi.CLI do
           session_name: flags[:session_name],
           allow_primary_workspace: flags[:allow_primary_workspace] || false,
           allow_duplicate_run: flags[:allow_duplicate_run] || false,
+          allow_workspace_collision: flags[:allow_workspace_collision] || false,
           no_preflight: flags[:no_preflight] || false,
           in_place: flags[:in_place] || false,
           base: flags[:base],
@@ -2454,6 +2459,10 @@ defmodule Kazi.CLI do
     |> maybe_put(:allowed_tools, opts[:allowed_tools])
     |> maybe_put(:session_name, resolve_session_name(opts))
     |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
+    |> maybe_put(
+      :allow_workspace_collision,
+      if(opts[:allow_workspace_collision] == true, do: true)
+    )
   end
 
   # 0 on a converged collective — and on a PAUSE (T50.3 one level up: a pause
@@ -3292,6 +3301,10 @@ defmodule Kazi.CLI do
       |> maybe_put(:session_name, resolve_session_name(opts))
       |> maybe_put(:proposal_ref, opts[:proposal_ref])
       |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
+      |> maybe_put(
+        :allow_workspace_collision,
+        if(opts[:allow_workspace_collision] == true, do: true)
+      )
       # T15.4 (ADR-0023 decision 3): under --json --stream, thread a per-iteration
       # streaming observer into the runtime's `:stream` seam, which composes it
       # OVER the read-model projection (one `on_iteration` fires both). It emits
@@ -3682,6 +3695,10 @@ defmodule Kazi.CLI do
     |> maybe_put(:session_name, resolve_session_name(opts))
     |> maybe_put(:proposal_ref, opts[:proposal_ref])
     |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
+    |> maybe_put(
+      :allow_workspace_collision,
+      if(opts[:allow_workspace_collision] == true, do: true)
+    )
   end
 
   # Merge the CLI-owned per-goal opts OVER any caller-supplied `:run_opts` (tests),
@@ -3886,6 +3903,18 @@ defmodule Kazi.CLI do
       "edits. Wait for it (kazi status <goal-id>), stop it, or pass " <>
       "--allow-duplicate-run for a deliberate re-run alongside it. A dead run " <>
       "stops blocking on its own once its heartbeat goes stale (~90s)."
+  end
+
+  defp format_run_error({:workspace_collision, %{run_id: run_id} = live}) do
+    session = if live[:session_name], do: " session=#{live[:session_name]}", else: ""
+
+    "a LIVE run for a DIFFERENT goal (#{live[:goal_ref]}) already holds this " <>
+      "workspace: run #{run_id}#{session} workspace=#{live[:workspace]} last " <>
+      "heartbeat #{live[:heartbeat_at]}. Running a second goal against one shared " <>
+      "workspace cross-contaminates their commits. Use a dedicated task worktree " <>
+      "(the default), wait for the live run (kazi status), stop it, or pass " <>
+      "--allow-workspace-collision to accept the co-tenancy. A dead run stops " <>
+      "blocking on its own once its heartbeat goes stale (~90s)."
   end
 
   # T50.6 (the ADR-0065/T50.3 CLI surface): the DepScheduler's resume refusals,
