@@ -459,7 +459,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join <team>`/`bus leave` manage named-team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -635,7 +635,7 @@ defmodule Kazi.CLI do
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
       kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
       kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--json]  # block until a NEW message arrives (#1091/#1097)
-      kazi bus join <team> [--json]                      # named-team membership (issue #1069)
+      kazi bus join [--json]                             # derive team from git origin (T65.1); `join -- <team>` for explicit
       kazi bus leave [--json]
       kazi bus name <nickname> [--json]                  # durable, addressable session name (T55.5)
       kazi bus read [--peek] [--since <cursor>] [--json]   # --peek: show pending messages WITHOUT consuming them; --since <seq>: replay from a point
@@ -1929,12 +1929,23 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("join") do
     """
-    kazi bus join <team> [--json]
+    kazi bus join [--json]                # derive the team from git origin
+    kazi bus join -- <team> [--json]      # explicit team (cross-repo override)
 
-    Register this session under a named team (issue #1069): `bus who --team
-    <team>` lists members, and `bus tell @<team> <text>` reaches every
-    member's read/peek/watch. Membership survives across bus calls and ages
-    out with presence (rejoin after long idles); `bus leave` clears it.
+    Register this session under a team. ARGLESS (T65.1, #1430): the team is
+    DERIVED from the workspace's `git remote get-url origin` -- ssh/https/scp
+    forms of one repo normalize to a single `t-<host>-<org>-<repo>` slug, so
+    two checkouts (or machines) of the same repo land in the SAME team with no
+    typed string. The fixed `t-` prefix means a team slug can never begin with
+    `-`. With no origin remote the team falls back to the repo-root path slug
+    (still `t-` prefixed) with a one-line machine-local notice.
+
+    An explicit `bus join -- <team>` still works verbatim (existing teams keep
+    functioning) and is recorded `derived=false` -- the deliberate cross-repo
+    override. `bus who --team <team>` lists members and `bus tell @<team>
+    <text>` reaches every member's read/peek/watch. Membership survives across
+    bus calls and ages out with presence (rejoin after long idles); `bus
+    leave` clears it.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -5401,11 +5412,37 @@ defmodule Kazi.CLI do
   defp execute_bus("watch", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
-  # #1069: named-team membership.
+  # T65.1 (#1430): argless `bus join` DERIVES the team from the workspace's git
+  # origin -- no team string typed, so the leading-dash class cannot recur.
+  defp execute_bus("join", [], opts) do
+    case Kazi.Bus.join_derived(bus_call_opts(opts)) do
+      {:ok, %{slug: slug, source: source, notice: notice}} ->
+        emit(
+          json?(opts),
+          %{"ok" => true, "team" => slug, "derived" => true, "source" => to_string(source)},
+          fn ->
+            IO.puts("joined #{slug} (derived)")
+            if notice, do: IO.puts(notice)
+          end
+        )
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
+
+  # #1069: named-team membership. An explicit team argument is the deliberate
+  # cross-repo override (T65.1) -- recorded `derived=false`. `bus join -- <team>`
+  # reaches here with the team as a positional even when it begins with `-`.
   defp execute_bus("join", [team], opts) do
-    case Kazi.Bus.join(team, bus_call_opts(opts)) do
+    case Kazi.Bus.join(team, Keyword.put(bus_call_opts(opts), :derived, false)) do
       :ok ->
-        emit(json?(opts), %{"ok" => true, "team" => team}, fn -> IO.puts("joined #{team}") end)
+        emit(json?(opts), %{"ok" => true, "team" => team, "derived" => false}, fn ->
+          IO.puts("joined #{team}")
+        end)
+
         0
 
       {:error, reason} ->
@@ -5414,7 +5451,7 @@ defmodule Kazi.CLI do
   end
 
   defp execute_bus("join", _args, opts),
-    do: bus_error("`bus join` requires exactly one <team> argument", opts)
+    do: bus_error("`bus join` takes at most one <team> argument", opts)
 
   defp execute_bus("leave", [], opts) do
     case Kazi.Bus.leave(bus_call_opts(opts)) do

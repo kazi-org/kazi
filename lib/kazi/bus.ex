@@ -1764,6 +1764,25 @@ defmodule Kazi.Bus do
     end)
   end
 
+  @doc """
+  T65.1 (#1430): derives the team from the workspace's git origin (via
+  `Kazi.Bus.TeamId`) and joins it argless -- no team string is ever typed, so
+  the leading-dash team-name class cannot recur. Records `derived=true` on the
+  presence row (an explicit `join/2` records `derived=false`, the deliberate
+  cross-repo override). Returns `{:ok, team_id}` with the derived
+  `%{slug, source, notice}` so the caller can print the assigned team and the
+  machine-local notice when there is no origin remote.
+  """
+  @spec join_derived(keyword()) :: {:ok, Kazi.Bus.TeamId.t()} | {:error, error()}
+  def join_derived(opts \\ []) do
+    team_id = Kazi.Bus.TeamId.derive(cwd: opts[:cwd])
+
+    with_conn(opts, fn conn ->
+      upsert_presence(conn, Keyword.merge(opts, team: team_id.slug, derived: true))
+      {:ok, team_id}
+    end)
+  end
+
   @doc "Clears the caller's team membership (#1069). Presence itself remains until its TTL lapses."
   @spec leave(keyword()) :: :ok | {:error, error()}
   def leave(opts \\ []) do
@@ -1854,6 +1873,18 @@ defmodule Kazi.Bus do
 
     entry = if team, do: Map.put(entry, "team", team), else: entry
     entry = if is_binary(name), do: Map.put(entry, "name", name), else: entry
+
+    # T65.1 (#1430): whether the team membership was DERIVED from the git origin
+    # (argless `bus join`) or an explicit `--team`/`join <team>` override. An
+    # explicit :derived option sets it; otherwise the stored flag is preserved,
+    # and a bare presence rewrite with no team defaults it to absent.
+    derived =
+      case opts[:derived] do
+        flag when is_boolean(flag) -> flag
+        nil -> stored["derived"]
+      end
+
+    entry = if team && is_boolean(derived), do: Map.put(entry, "derived", derived), else: entry
 
     KV.put_value(conn, Provision.sessions_bucket(), sanitize(session(opts)), Jason.encode!(entry))
   end
