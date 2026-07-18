@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.240.0](https://github.com/kazi-org/kazi/compare/v1.239.0...v1.240.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** surface goal_drifted/goal_drift on kazi apply --json ([156081e](https://github.com/kazi-org/kazi/commit/156081e47e5a83532d1bf8ed50d4df3e983f88b0))
+* **runtime:** goal-drift guard — snapshot the t0 bar, detect on-disk drift ([d5e6e60](https://github.com/kazi-org/kazi/commit/d5e6e60d82ccd97c11d2a5e2a1c5774a71c23ca5))
+
 ## [1.239.0](https://github.com/kazi-org/kazi/compare/v1.238.0...v1.239.0) (2026-07-18)
 
 
