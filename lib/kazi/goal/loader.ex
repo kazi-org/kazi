@@ -1486,6 +1486,14 @@ defmodule Kazi.Goal.Loader do
 
   @gherkin_verdict_formats ~w(cucumber_json scenario_map)
 
+  @doc """
+  The `verdict_format` values the `gherkin` provider's loader accepts (T62.1,
+  ADR-0071). Exposed so `kazi schema gherkin` can pin its documented values to
+  the loader's ACTUAL accepted set rather than a hand-kept copy that could drift.
+  """
+  @spec gherkin_verdict_formats() :: [String.t()]
+  def gherkin_verdict_formats, do: @gherkin_verdict_formats
+
   # Expands every `provider = "gherkin"` entry in the raw `predicate` array into
   # one `:gherkin` sub-predicate per Scenario (per Examples row for an outline),
   # reusing `Kazi.Reconcile.GherkinExpander` for scenario identity. Each expanded

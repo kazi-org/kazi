@@ -1149,6 +1149,84 @@ defmodule Kazi.Predicate.Schema do
     }
   }
 
+  @gherkin %{
+    kind: "gherkin",
+    title: "gherkin predicate config",
+    description:
+      "Reconcile a whole `.feature` spec at RUN TIME into per-scenario verdicts (T62.1/T62.2, " <>
+        "ADR-0071). One `provider = \"gherkin\"` entry names a feature; the loader EXPANDS it at " <>
+        "goal-load into one `:gherkin` sub-predicate per Scenario (per Examples row for a " <>
+        "Scenario Outline), each grouped under one synthesized [[group]] per Feature. A shared " <>
+        "BDD runner (runner_cmd/runner_args) runs ONCE per feature per reconcile pass (memoized) " <>
+        "and its machine report is ingested into each scenario's verdict. This is the RUNTIME " <>
+        "sibling of the author-time `kazi spec import` verb (ADR-0064): `spec import` scaffolds " <>
+        "one RED custom_script per Scenario for a human to wire; `gherkin` binds the whole " <>
+        "feature to a caller-supplied runner and ingests native verdicts with zero change to the " <>
+        ".feature. Honest-:unknown (ADR-0046): a Scenario absent from the report, or a runner " <>
+        "that cannot produce a parseable report, is :unknown (never a fabricated :fail); a " <>
+        "nonzero runner exit is NOT a failure to observe (a BDD runner exits nonzero precisely " <>
+        "when a scenario fails and still reports every verdict).",
+    keys: [
+      %{
+        name: "feature",
+        type: "string",
+        required: true,
+        description:
+          "Path to the `.feature` file, resolved relative to the workspace (the directory the " <>
+            "runner also executes in). A missing or empty value is a named load error."
+      },
+      %{
+        name: "verdict_format",
+        type: "string",
+        required: false,
+        description:
+          "How the runner's machine report is read: \"cucumber_json\" (default; the cucumber-json " <>
+            "array godog --format=cucumber and playwright-bdd emit — a scenario passes iff it has " <>
+            "steps and every step's result.status is \"passed\") or \"scenario_map\" (a minimal " <>
+            "{\"<scenario>\": \"pass\"|\"fail\"} JSON object). Any other value is a named load error."
+      },
+      %{
+        name: "runner_cmd",
+        type: "string",
+        required: false,
+        description:
+          "The BDD runner executable, resolved on PATH. Shared by every expanded sub-predicate " <>
+            "and run EXACTLY ONCE per (feature, runner) per reconcile pass (memoized across the " <>
+            "feature's sibling scenarios)."
+      },
+      %{
+        name: "runner_args",
+        type: "array<string>",
+        required: false,
+        description: "Arguments passed to runner_cmd."
+      },
+      %{
+        name: "report_path",
+        type: "string",
+        required: false,
+        description:
+          "Read the machine report from this workspace-relative file instead of the runner's " <>
+            "stdout. Either way the runner's captured stream (stdout+stderr) is retained as evidence."
+      },
+      %{
+        name: "group",
+        type: "string",
+        required: false,
+        description:
+          "An explicit declared [[group]] id for the sub-predicates. Default: one group " <>
+            "synthesized per Feature (the normalized Feature name)."
+      }
+    ],
+    example: %{
+      "provider" => "gherkin",
+      "feature" => "storage-store.feature",
+      "verdict_format" => "cucumber_json",
+      "runner_cmd" => "bash",
+      "runner_args" => ["storage-store-replay.sh"],
+      "acceptance" => true
+    }
+  }
+
   @oss_hygiene %{
     kind: "oss_hygiene",
     title: "oss_hygiene predicate config",
@@ -1270,6 +1348,7 @@ defmodule Kazi.Predicate.Schema do
     "integration" => @integration,
     "escalation" => @escalation,
     "scenario" => @scenario,
+    "gherkin" => @gherkin,
     "oss_hygiene" => @oss_hygiene,
     "plan_expanded" => @plan_expanded,
     "spec_coverage" => @spec_coverage
