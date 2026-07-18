@@ -206,3 +206,4 @@ defmodule Kazi.Plugin.Manifest do
   end
 
   defp normalize_version(version) when is_binary(version), do: version
+end
