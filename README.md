@@ -184,7 +184,13 @@ The skill ships as three files (ADR-0074): `SKILL.md` (the router), `AUTHORING.m
 It is fully self-contained — it never assumes any other skill exists. To wire kazi into
 your own local workflow (routing conventions, model policy), put them in
 `~/.claude/skills/kazi/LOCAL.md`: the skill reads it first when present, and
-`install-skill` never overwrites it.
+`install-skill` never overwrites it. That is a **stable path**, deliberately decoupled
+from wherever the skill content is installed (ADR-0077): a Claude Code plugin update
+replaces the skill directory wholesale, so keeping your customization at the stable path
+means it survives plugin updates, re-installs, and any future relocation of the skill
+directory. If you already have a `LOCAL.md` inside an old skill directory, `install-skill`
+migrates it to the stable path (or warns if one exists at both — it never silently
+discards your wiring).
 
 ---
 
