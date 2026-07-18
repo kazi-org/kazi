@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.238.0](https://github.com/kazi-org/kazi/compare/v1.237.0...v1.238.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** portfolio sitrep rendering with headline + honest rate (T64.3, UC-061) ([40f925e](https://github.com/kazi-org/kazi/commit/40f925e5eb12020cae11ba3eb801159de416b9de))
+* **portfolio:** honest green/total rate from iteration history (T64.3) ([3f212bc](https://github.com/kazi-org/kazi/commit/3f212bcc8e7a788b00df49ff92c9acd5560cf9d0))
+
 ## [1.237.0](https://github.com/kazi-org/kazi/compare/v1.236.0...v1.237.0) (2026-07-18)
 
 
