@@ -32,7 +32,7 @@ defmodule Kazi.ReadModel.RunReaper do
 
   alias Kazi.ReadModel.Run
   alias Kazi.ReadModel.RunRegistry
-  alias Kazi.Repo
+  alias Kazi.ReadModel.Writer
 
   # Time backstop: a stale `running` row this old is abandoned regardless of
   # whether its recorded os_pid probes as alive (guards against PID recycling).
@@ -104,7 +104,7 @@ defmodule Kazi.ReadModel.RunReaper do
   defp mark_abandoned(run) do
     run
     |> Run.changeset(%{"status" => "abandoned", "finished_at" => DateTime.utc_now()})
-    |> Repo.update()
+    |> Writer.update()
   end
 
   defp ok_tuple?({:ok, _}), do: true
