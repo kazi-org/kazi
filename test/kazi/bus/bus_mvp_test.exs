@@ -186,6 +186,22 @@ defmodule Kazi.Bus.MvpTest do
     end
   end
 
+  # T65.3 (#1430): the pure allocation ORDER. The atomic KV create picks the
+  # first free candidate, so this ordered list IS the a, b, c... sequence.
+  describe "assigned_name_candidates/1 (T65.3)" do
+    test "is the ordered <team>-a .. <team>-z sequence, fixed-prefix, never leading-dash" do
+      candidates = Bus.assigned_name_candidates("t-github.com-org-repo")
+
+      assert length(candidates) == 26
+
+      assert Enum.take(candidates, 3) ==
+               ~w(t-github.com-org-repo-a t-github.com-org-repo-b t-github.com-org-repo-c)
+
+      assert List.last(candidates) == "t-github.com-org-repo-z"
+      refute Enum.any?(candidates, &String.starts_with?(&1, "-"))
+    end
+  end
+
   # ===========================================================================
   # Untagged: the TTY digest rules (T51.2)
   # ===========================================================================
@@ -518,6 +534,109 @@ defmodule Kazi.Bus.MvpTest do
 
       assert {:error, {:invalid_nickname, ^other, _why}} =
                Bus.name(other, conn: conn, session: me)
+    end
+
+    # ---- daemon-assigned names on join (T65.3, #1430) --------------------
+
+    # acc (T65.3): three sessions joining one team receive a, b, c
+    # deterministically. A UNIQUE team keeps the a..z pool fresh regardless of
+    # what other tests left in the (TTL-less) durable bucket.
+    test "three sessions joining one team receive assigned names a, b, c deterministically", %{
+      conn: conn
+    } do
+      team = "t-assign-#{System.unique_integer([:positive])}"
+      s1 = unique_session()
+      s2 = unique_session()
+      s3 = unique_session()
+
+      assert {:ok, n1} = Bus.assign_name(team, conn: conn, session: s1, scope: "machine")
+      assert {:ok, n2} = Bus.assign_name(team, conn: conn, session: s2, scope: "machine")
+      assert {:ok, n3} = Bus.assign_name(team, conn: conn, session: s3, scope: "machine")
+
+      assert n1 == team <> "-a"
+      assert n2 == team <> "-b"
+      assert n3 == team <> "-c"
+    end
+
+    # acc (T65.3): a re-join returns the SAME name (no churn) -- the assigned
+    # name is bound to the UUID, so re-assigning KEEPS it and stays canonical
+    # in `who`.
+    test "a re-join returns the SAME assigned name (no churn), canonical in who", %{conn: conn} do
+      team = "t-idem-#{System.unique_integer([:positive])}"
+      session = unique_session()
+
+      assert {:ok, name} = Bus.assign_name(team, conn: conn, session: session, scope: "machine")
+      assert {:ok, ^name} = Bus.assign_name(team, conn: conn, session: session, scope: "machine")
+
+      assert {:ok, sessions} = Bus.who(conn: conn, session: session)
+      rows = Enum.filter(sessions, fn s -> s["session"] == session end)
+      assert length(rows) == 1
+      assert hd(rows)["name"] == name
+    end
+
+    # acc (T65.3): `bus name <alias>` ATTACHES an alias on top of the assigned
+    # name -- BOTH resolve via `tell`, while the assigned name stays canonical
+    # in `who`.
+    test "an attached alias resolves alongside the assigned name; assigned stays canonical", %{
+      conn: conn
+    } do
+      team = "t-alias-#{System.unique_integer([:positive])}"
+      session = unique_session()
+
+      assert {:ok, assigned} =
+               Bus.assign_name(team, conn: conn, session: session, scope: "machine")
+
+      alias_name = "alias_#{System.unique_integer([:positive])}"
+      assert :ok = Bus.name(alias_name, conn: conn, session: session, scope: "machine")
+
+      # the assigned name -- NOT the alias -- remains the canonical presence label
+      assert {:ok, sessions} = Bus.who(conn: conn, session: session)
+      row = Enum.find(sessions, fn s -> s["session"] == session end)
+      assert row["name"] == assigned
+
+      # both the assigned name and the alias reach the SAME session via tell
+      assert {:ok, _} =
+               Bus.tell(assigned, "via assigned #{session}", conn: conn, scope: "machine")
+
+      assert {:ok, _} =
+               Bus.tell(alias_name, "via alias #{session}", conn: conn, scope: "machine")
+
+      assert {:ok, messages} = Bus.read(conn: conn, session: session, scope: "machine")
+      texts = messages |> Enum.filter(&(&1.kind == "msg")) |> Enum.map(& &1.text)
+      assert "via assigned #{session}" in texts
+      assert "via alias #{session}" in texts
+    end
+
+    # acc (T65.3): two concurrent joins never receive the same name. The race is
+    # shaped through the DAEMON seam -- independent NATS connections allocating
+    # against the shared KV bucket at once -- so the atomicity is the server-side
+    # create-if-absent (a client-side lock would be untested by this).
+    test "concurrent joins never collide on an assigned name (atomic KV allocation)", %{
+      conn: _conn
+    } do
+      team = "t-race-#{System.unique_integer([:positive])}"
+      {host, port} = parse_nats_url(System.fetch_env!("NATS_URL"))
+
+      results =
+        1..5
+        |> Enum.map(fn _ ->
+          Task.async(fn ->
+            {:ok, c} = Gnat.start_link(%{host: host, port: port})
+            session = unique_session()
+            outcome = Bus.assign_name(team, conn: c, session: session, scope: "machine")
+            if Process.alive?(c), do: Gnat.stop(c)
+            outcome
+          end)
+        end)
+        |> Task.await_many(20_000)
+
+      names = for {:ok, name} <- results, do: name
+
+      # every racer got a name AND they are all distinct -- no two sessions ever
+      # won the same letter
+      assert length(names) == 5
+      assert length(Enum.uniq(names)) == 5
+      assert Enum.all?(names, &String.starts_with?(&1, team <> "-"))
     end
 
     test "a nameless session upserts ONE presence row across calls (stable fallback id)", %{
