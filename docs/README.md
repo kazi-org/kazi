@@ -118,6 +118,15 @@ its config at runtime via `kazi schema <kind>`.
   launcher and halts the BEAM if it is killed, so the existing per-dispatch
   watchdog reaps `claude` even when the terminal (not the BEAM) receives the
   signal. `orphans` is the manual sweep for pids that predate that guard.
+- **Portfolio state (`kazi portfolio`)** — T60.4 (#1160): planned / in progress
+  / stuck / complete, composed ONLY from kazi's own objective surfaces
+  (`Kazi.Portfolio`) — proposed goals (`list-proposed`'s own rows), the run
+  registry, the attention queue (ADR-0057), and the cross-machine bus facts
+  T60.1's `Kazi.Runtime.BusMirror` posts. Local runs are grouped by repo
+  (resolved from the workspace's git `origin` remote, same convention as
+  Mission Control's fleet grid); proposals and cross-machine runs are reported
+  fleet-wide since neither carries a workspace to group by. `--json` for the
+  machine surface.
 - **[`--json` signals → skill-side escalation](tiering-signals.md)** — how the
   structured output triggers adaptive model tiering.
 - **[Deprecations & removal schedule](deprecations.md)** — removed verbs and the
