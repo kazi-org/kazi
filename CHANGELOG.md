@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.222.0](https://github.com/kazi-org/kazi/compare/v1.221.0...v1.222.0) (2026-07-18)
+
+
+### Features
+
+* **gherkin:** cucumber-json verdict ingestion with per-feature runner memoization (T62.2, ADR-0071, [#1107](https://github.com/kazi-org/kazi/issues/1107)) ([3fd031c](https://github.com/kazi-org/kazi/commit/3fd031ce006764a50b6f7412d77fe928baa39f01))
+
 ## [1.221.0](https://github.com/kazi-org/kazi/compare/v1.220.0...v1.221.0) (2026-07-18)
 
 
