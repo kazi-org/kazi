@@ -159,6 +159,7 @@ defmodule Kazi.CLI do
     no_preflight: :boolean,
     in_place: :boolean,
     base: :string,
+    strict_landing: :boolean,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -294,6 +295,8 @@ defmodule Kazi.CLI do
       "`apply` only (T50.1, ADR-0065 decision 1): edit --workspace directly instead of kazi's default of creating a kazi-owned task worktree off its HEAD and editing there. Without this flag, --workspace is the base the run integrates ONTO, not the edit site itself -- the dispatched agent's shell, and every predicate, runs inside a worktree kazi creates and removes on every terminal state (converged / stuck / over_budget / error / crash). Pass this flag to reproduce pre-T50.1 direct-edit behavior byte-identically (e.g. a throwaway clone where isolation buys nothing). A non-git workspace always runs in place -- worktree isolation needs a git repo.",
     base:
       "`apply` only (T50.8, ADR-0065 decision 5): the git ref the kazi-owned task worktree is created FROM (e.g. origin/main), instead of the default — the workspace's current HEAD. Passing it states intent: the stale-base warning (emitted when the defaulted HEAD base is behind its locally-known upstream) is silenced. The ref must already resolve in the local ref store — kazi NEVER fetches; an unknown ref is an error naming it, not a network call. Contradicts --in-place (there is no worktree to base): the combination is rejected.",
+    strict_landing:
+      "`apply` only (issue #1407): couple the exit code to landing, not just convergence. By DEFAULT the exit code mirrors convergence alone (0 on `:converged`, even when the worktree-isolated serial landing FAILS — a converged-but-unlanded run still exits 0; the surviving task branch and the `integration.landed == false` evidence remain visible in the result and a stderr warning). Pass --strict-landing to restore the pre-#1407 behavior: a converged-but-unlanded run downgrades the exit code to 1, for a caller (e.g. a CI gate) that wants a landing failure to fail the invocation outright. Has no effect on an in-place run (nothing to land) or when landing succeeds.",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -382,7 +385,8 @@ defmodule Kazi.CLI do
         :allow_duplicate_run,
         :no_preflight,
         :in_place,
-        :base
+        :base,
+        :strict_landing
       ]
     },
     %{
@@ -2046,6 +2050,7 @@ defmodule Kazi.CLI do
           no_preflight: flags[:no_preflight] || false,
           in_place: flags[:in_place] || false,
           base: flags[:base],
+          strict_landing: flags[:strict_landing] || false,
           json: flags[:json] || false,
           stream: flags[:stream] || false,
           parallel: flags[:parallel] || false,
@@ -3316,10 +3321,20 @@ defmodule Kazi.CLI do
         # T50.2 (ADR-0065 decision 2): a worktree-isolated serial run that
         # converged LANDS its task-branch commits on the base before the
         # worktree is cleaned up. Runs BEFORE report_outcome so the result
-        # object carries the landing verdict, and the exit code is 0 only when
-        # the work both converged AND landed (or there was nothing to land).
+        # object carries the landing verdict. (issue #1407): the exit code
+        # mirrors CONVERGENCE alone by default — a converged-but-unlanded run
+        # still exits 0 (the landing failure stays visible via
+        # `integration.landed == false` plus a stderr warning); pass
+        # --strict-landing to couple the exit code to landing too.
         {result, exit_code} =
-          land_converged_serial(goal, result, runtime_opts, base_workspace, workspace)
+          land_converged_serial(
+            goal,
+            result,
+            runtime_opts,
+            base_workspace,
+            workspace,
+            opts[:strict_landing] == true
+          )
 
         report_outcome(
           goal,
@@ -3370,11 +3385,25 @@ defmodule Kazi.CLI do
   # on the base before the ephemeral worktree is cleaned up — converging in a
   # worktree nobody integrates is a silent drop. The landing itself lives in
   # `Kazi.Scheduler.SerialLanding` (shared with the fleet member path, T50.5);
-  # this wrapper folds its verdict into the CLI surface: a landing failure
-  # downgrades the exit code to 1 — a converged-but-not-landed run is NOT a
-  # clean success — and surfaces the surviving task-branch ref (the branch
-  # outlives worktree removal by design, so the work is never lost).
-  defp land_converged_serial(%Goal{} = goal, result, runtime_opts, base_workspace, workspace) do
+  # this wrapper folds its verdict into the CLI surface.
+  #
+  # (issue #1407): the exit code is DECOUPLED from the landing verdict by
+  # default — convergence alone earns exit 0, and a landing failure is
+  # surfaced (the `integration.landed == false` evidence, the stderr warning,
+  # the surviving task-branch ref the worktree teardown never destroys)
+  # WITHOUT downgrading the exit code, so a caller polling exit status alone
+  # cannot mistake "the fix converged but a landing hiccup left it on a task
+  # branch" for "nothing happened". `strict_landing?` (--strict-landing)
+  # restores the pre-#1407 coupling for a caller that wants a landing failure
+  # to fail the invocation outright (e.g. a CI gate).
+  defp land_converged_serial(
+         %Goal{} = goal,
+         result,
+         runtime_opts,
+         base_workspace,
+         workspace,
+         strict_landing?
+       ) do
     if Path.expand(base_workspace) == Path.expand(workspace) do
       # In-place (or non-git) run: the work already lives in the caller's checkout.
       {result, 0}
@@ -3387,14 +3416,19 @@ defmodule Kazi.CLI do
           {Map.put(result, :integration, info), 0}
 
         {:unlanded, info} ->
+          hint =
+            if strict_landing?,
+              do: "",
+              else: " (exit 0 — pass --strict-landing to fail the invocation on this)"
+
           IO.puts(
             :stderr,
             "warning: goal #{goal.id} converged but its work did NOT land on " <>
               "#{info[:base] || "the base"}: #{info[:reason] || "integration failed"}; " <>
-              "the task branch #{info[:task_branch]} survives in #{base_workspace}"
+              "the task branch #{info[:task_branch]} survives in #{base_workspace}#{hint}"
           )
 
-          {Map.put(result, :integration, info), 1}
+          {Map.put(result, :integration, info), if(strict_landing?, do: 1, else: 0)}
       end
     end
   end
@@ -8005,8 +8039,9 @@ defmodule Kazi.CLI do
   # T50.2 (ADR-0065 decision 2): the additive `integration` object — how a
   # worktree-isolated serial run's converged commits landed on the base
   # (`landed: true` + refs), or the surviving `task_branch` + reason when they
-  # did not (converged-but-unlanded exits 1). Present only when a landing was
-  # attempted; absent ⇒ byte-identical to before this field existed.
+  # did not (issue #1407: converged-but-unlanded exits 0 by default, 1 under
+  # --strict-landing). Present only when a landing was attempted; absent ⇒
+  # byte-identical to before this field existed.
   defp put_integration(map, %{integration: info}) when is_map(info),
     do: Map.put(map, :integration, info)
 
