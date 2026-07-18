@@ -101,6 +101,10 @@ defmodule Kazi.Runtime do
     # reachability (fail on a transitively-called vuln, call stack as proof);
     # trivy/grype/npm-audit are manifest-only, ratcheted vs a baseline.
     cve: Kazi.Providers.Cve,
+    # issue #1406: `:swift_test` reads a Swift/XCTest suite's verdict from an
+    # Xcode `.xcresult` bundle (via `xcresulttool`) — parsed pass/fail/zero-tests
+    # counts, never the exit code.
+    swift_test: Kazi.Providers.SwiftTest,
     # T44.6 (ADR-0043 shape): `:no_stubs` is a deterministic diff scanner — fail
     # when the diff-vs-base introduces a stub/placeholder/hardcoded-return marker
     # into a NON-TEST file. Productizes the zero-stub policy as a real predicate.
