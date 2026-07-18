@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.247.0](https://github.com/kazi-org/kazi/compare/v1.246.0...v1.247.0) (2026-07-18)
+
+
+### Features
+
+* **dashboard:** busy indicator on filter change ([27da28b](https://github.com/kazi-org/kazi/commit/27da28bb386425fe21c866e23fd26d6dbbd793f8))
+
 ## [1.246.0](https://github.com/kazi-org/kazi/compare/v1.245.0...v1.246.0) (2026-07-18)
 
 
