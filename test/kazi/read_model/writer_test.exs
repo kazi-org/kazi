@@ -76,15 +76,14 @@ defmodule Kazi.ReadModel.WriterTest do
       assert Repo.aggregate(ProposedMemory, :count, :id) == 0
     end
 
-    test "remote defaults to the direct writer until a socket client is supplied" do
-      # ADR-0068 staging: an alive daemon with no :remote still lands the write
-      # directly rather than dropping it while the socket path is being built.
-      a = attrs()
-
-      assert {:ok, %ProposedMemory{}} =
-               Writer.write(fn -> ReadModel.propose_memory(a) end, probe: fn _ -> :alive end)
-
-      assert Repo.get_by(ProposedMemory, fingerprint: a.fingerprint)
+    test "write/2's remote defaults to the direct writer when none is supplied" do
+      # The write/2 seam contract (T52.1): an alive daemon with no :remote still
+      # runs the direct closure rather than dropping the write. T52.5 supplies
+      # real :remote closures at the typed helpers (insert/update/...); this pins
+      # the raw seam with a pure closure so it does not itself route (which would
+      # read the injected-:alive presence cache and dial a nonexistent socket).
+      assert Writer.write(fn -> :landed_direct end, probe: fn _ -> :alive end) ==
+               :landed_direct
     end
   end
 

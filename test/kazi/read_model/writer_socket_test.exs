@@ -38,6 +38,12 @@ defmodule Kazi.ReadModel.WriterSocketTest do
     sock_path = Supervisor.default_sock_path()
     File.mkdir_p!(Path.dirname(sock_path))
 
+    # The test env points the Writer's default sock at a never-existing socket
+    # (config/test.exs); override it to THIS harness so RunRegistry's calls
+    # (which pass no sock_path) route here.
+    prev_sock = Application.get_env(:kazi, :read_model_writer_sock)
+    Application.put_env(:kazi, :read_model_writer_sock, sock_path)
+
     {:ok, counter} = Agent.start_link(fn -> [] end)
     listen_socket = start_harness!(sock_path, counter)
 
@@ -48,6 +54,10 @@ defmodule Kazi.ReadModel.WriterSocketTest do
       :gen_tcp.close(listen_socket)
       File.rm(sock_path)
       File.rm_rf(state_dir)
+
+      if prev_sock,
+        do: Application.put_env(:kazi, :read_model_writer_sock, prev_sock),
+        else: Application.delete_env(:kazi, :read_model_writer_sock)
 
       if prev,
         do: System.put_env("KAZI_STATE_DIR", prev),
