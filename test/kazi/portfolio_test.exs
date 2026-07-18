@@ -297,6 +297,56 @@ defmodule Kazi.PortfolioTest do
     end
   end
 
+  describe "honest rate (T64.3, UC-061/UC-033)" do
+    defp record_vector(goal_ref, index, vector) do
+      {:ok, _} =
+        Kazi.ReadModel.record_iteration(%{
+          goal_ref: goal_ref,
+          iteration_index: index,
+          predicate_vector: vector
+        })
+    end
+
+    test "a running goal's rate is green/total from the last vector + red->green movement" do
+      start_run(%{goal_ref: "rate-goal"})
+
+      # iteration 1: 4/8 green; iteration 2: 5/8 green (one predicate flipped
+      # red->green) -> preds 5/8, +1.
+      pass = Kazi.PredicateResult.pass()
+      fail = Kazi.PredicateResult.fail()
+
+      v1 = Map.new(1..8, fn i -> {"p#{i}", if(i <= 4, do: pass, else: fail)} end)
+      v2 = Map.put(v1, "p5", pass)
+
+      record_vector("rate-goal", 1, v1)
+      record_vector("rate-goal", 2, v2)
+
+      %{buckets: %{running: running}, rate: fleet} = Portfolio.build()
+      entry = Enum.find(running, &(&1.goal_ref == "rate-goal"))
+
+      assert entry.rate == %{green: 5, total: 8, delta: 1}
+      assert Portfolio.rate_label(entry.rate) == "preds 5/8, +1 this run"
+
+      refute fleet.empty?
+      assert fleet.green == 5 and fleet.total == 8 and fleet.delta == 1
+    end
+
+    test "a running goal with no recorded iterations has a nil rate (honest-unknown)" do
+      start_run(%{goal_ref: "no-iters"})
+
+      %{buckets: %{running: running}} = Portfolio.build()
+      entry = Enum.find(running, &(&1.goal_ref == "no-iters"))
+
+      assert entry.rate == nil
+      assert Portfolio.rate_label(nil) == "no iterations yet"
+    end
+
+    test "the fleet rate is empty when no running goal has a recorded rate" do
+      %{rate: fleet} = Portfolio.build()
+      assert fleet.empty?
+    end
+  end
+
   describe "fleet_remote (cross-machine, T60.1)" do
     test "a remote fact for a goal not present locally renders as a fleet_remote entry" do
       Application.put_env(:kazi, :remote_run_facts_fetcher, fn ->
