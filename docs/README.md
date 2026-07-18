@@ -71,6 +71,9 @@ its config at runtime via `kazi schema <kind>`.
   a threshold (never 100%), surviving mutants as evidence (ADR-0043).
 - **[`cve`](cve-predicate.md)** — dependency vulnerability scanning: `govulncheck`
   reachability (call stack as proof) + manifest scanners ratcheted (ADR-0043).
+- **[`swift_test`](swift-test-predicate.md)** — Swift/XCTest suite verdicts read
+  from an Xcode `.xcresult` bundle, gated on the parsed pass/fail/zero-tests
+  counts rather than the exit code (issue #1406).
 - **[`no_stubs`](no-stubs-predicate.md)** — the zero-stub gate: fail when the
   diff-vs-base adds a stub/placeholder marker to a production (non-test) file, with
   file:line evidence (T44.6).
