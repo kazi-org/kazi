@@ -372,6 +372,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E65 -- Deterministic session/team identity: derived teams, daemon-assigned names, UUID-keyed presence (#1430, P1) -> plans/E65.md
 
+### E66 -- Triage 2026-07-18: release-binary boot correctness (P0 #1483, #1484) + swift_test provider landing (#1406) -> plans/E66.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
