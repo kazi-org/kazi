@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.230.0](https://github.com/kazi-org/kazi/compare/v1.229.1...v1.230.0) (2026-07-18)
+
+
+### Features
+
+* **daemon:** write control op with atomic batch handler (T52.3, ADR-0068) ([12b6ab7](https://github.com/kazi-org/kazi/commit/12b6ab790293d93de9c3df2e3852051857ef4769))
+
 ## [1.229.1](https://github.com/kazi-org/kazi/compare/v1.229.0...v1.229.1) (2026-07-18)
 
 
