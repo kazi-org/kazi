@@ -368,6 +368,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E63 -- Dashboard UX: truthful attention, balanced widgets, legible goal views, operator questions (P1) -> plans/E63.md
 
+### E64 -- kazi portfolio v2 "sitrep": headline percentages, todo/blocked buckets, honest summaries (#1427, P2) -> plans/E64.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -470,6 +472,15 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+### 2026-07-18 -- Change Summary (E64 planned: portfolio sitrep v2)
+- New epic E64 (plans/E64.md, executable, 4 serial tasks ~10h): upgrade `kazi
+  portfolio` (v1 shipped 96ccc53, T60.4/#1160) to ANSWER "where are we / how is
+  it going" -- one headline line of five-bucket percentages
+  (planned/todo/in-progress/blocked/done), blocker attribution on every blocked
+  entry, bounded per-bucket summaries with --full, honest rate never an ETA
+  (ADR-0046), --json additive. Tracking issue #1427 (related: #1160 close-on-
+  evidence in T64.4, #1070 reserved cost line).
 
 ### 2026-07-17 -- Change Summary (E63 planned: dashboard UX from operator feedback)
 - New epic E63 (plans/E63.md, executable) from David's live review of the
