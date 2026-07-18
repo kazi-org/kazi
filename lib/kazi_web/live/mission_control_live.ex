@@ -1082,6 +1082,7 @@ defmodule KaziWeb.MissionControlLive do
                 LAST {label}
               </option>
             </select>
+            <span id="mc-filters-busy" class="mc-busy-indicator" aria-hidden="true"></span>
           </form>
 
           <p
@@ -1211,6 +1212,9 @@ defmodule KaziWeb.MissionControlLive do
         .filterrow { display: flex; gap: 8px; margin: 10px 0 4px; }
         .filtersel { background: var(--panel); border: 1px solid var(--line); color: var(--txt); font: inherit; font-size: 10px; letter-spacing: .12em; padding: 5px 8px; border-radius: 3px; cursor: pointer; }
         .filtersel:hover { border-color: var(--dim); }
+        .mc-busy-indicator { display: none; width: 12px; height: 12px; align-self: center; border: 2px solid var(--line); border-top-color: var(--cyn); border-radius: 50%; animation: mc-spin .6s linear infinite; }
+        .filterrow.phx-change-loading .mc-busy-indicator { display: inline-block; }
+        @keyframes mc-spin { to { transform: rotate(360deg); } }
         .wave { margin-bottom: 8px; }
         .wavehead { color: var(--cyn); opacity: .8; letter-spacing: .3em; margin: 14px 0 10px; }
 
