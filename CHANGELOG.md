@@ -16,6 +16,19 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.217.0](https://github.com/kazi-org/kazi/compare/v1.216.1...v1.217.0) (2026-07-18)
+
+
+### Features
+
+* **bus:** fleet-wide operator-attention board section (T60.3, [#1156](https://github.com/kazi-org/kazi/issues/1156)) ([ebf16c7](https://github.com/kazi-org/kazi/commit/ebf16c7f239eca2185d1a0c484e670303e287cbb))
+* **teach:** register the Notification hook in install-hooks (T60.3, [#1156](https://github.com/kazi-org/kazi/issues/1156)) ([f0ddcae](https://github.com/kazi-org/kazi/commit/f0ddcae0078bdf6dc480ad7a510647a530839774))
+
+
+### Bug Fixes
+
+* **bus:** gate the turn-hook attention clear on a live waiting fact ([a4384b0](https://github.com/kazi-org/kazi/commit/a4384b0928372611815b7cb193355ca33e80251d))
+
 ## [1.216.1](https://github.com/kazi-org/kazi/compare/v1.216.0...v1.216.1) (2026-07-17)
 
 
