@@ -29,6 +29,7 @@ defmodule Kazi.ReadModel do
     DebriefHypothesis,
     GoalSummary,
     Iteration,
+    LandedRef,
     OrientationPackCache,
     ProposedGoal,
     ProposedMemory,
@@ -340,6 +341,85 @@ defmodule Kazi.ReadModel do
         where: i.goal_ref == ^ref,
         order_by: [desc: i.iteration_index],
         limit: 1
+      )
+    )
+  end
+
+  # --- landed-ref store (T62.6, issue #1241 part 2) --------------------------
+
+  @doc """
+  Records (projects) a run's per-group landed refs into the read-model so
+  `kazi status <run-ref>` can show the same per-group `{branch, pr,
+  merge_commit}` landing detail AFTER the run exits that the immediate
+  `apply --parallel` output carried (T62.6, issue #1241 part 2).
+
+  `entries` is a list of `%{partition_id, branch, pr, merge_commit}` maps (a
+  `--parallel` run supplies one per landed group; a single-goal landing one with
+  `partition_id: ""`). Each entry UPSERTS on `(run_ref, partition_id)`, so
+  re-running the same goal overwrites its prior landed refs rather than
+  accumulating stale rows. Reuses T44.3/T44.10's landed-ref shape — one storage
+  mechanism for both single-goal and parallel landing, not a parallel side
+  table.
+
+  Best-effort like every projection: a degraded read-model (`Guard`) returns
+  `{:error, :read_model_unavailable}` and never fails the run.
+  """
+  @spec record_landed_refs(Kazi.Goal.id(), [map()]) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def record_landed_refs(run_ref, entries) when is_list(entries) do
+    Kazi.ReadModel.Guard.run("landed-refs record", fn ->
+      do_record_landed_refs(to_string(run_ref), entries)
+    end)
+  end
+
+  defp do_record_landed_refs(run_ref, entries) do
+    now = DateTime.utc_now()
+
+    count =
+      Enum.reduce(entries, 0, fn entry, acc ->
+        row = %{
+          run_ref: run_ref,
+          partition_id: to_string(Map.get(entry, :partition_id, "")),
+          branch: ref_string(Map.get(entry, :branch)),
+          pr: ref_string(Map.get(entry, :pr)),
+          merge_commit: ref_string(Map.get(entry, :merge_commit)),
+          inserted_at: now,
+          updated_at: now
+        }
+
+        case %LandedRef{}
+             |> LandedRef.changeset(row)
+             |> Repo.insert(
+               on_conflict: {:replace, [:branch, :pr, :merge_commit, :updated_at]},
+               conflict_target: [:run_ref, :partition_id]
+             ) do
+          {:ok, _} -> acc + 1
+          {:error, _} -> acc
+        end
+      end)
+
+    {:ok, count}
+  end
+
+  # A landed ref value is stored as text; a PR handle the integrator returned as
+  # an integer (a `gh` PR number) is stringified. nil stays nil (honest-unknown).
+  defp ref_string(nil), do: nil
+  defp ref_string(v) when is_binary(v), do: v
+  defp ref_string(v), do: to_string(v)
+
+  @doc """
+  Lists a run's persisted per-group landed refs (T62.6), ordered by
+  `partition_id` for a deterministic surface. Empty list for a run that never
+  landed (or a pre-T62.6 row) — never an error.
+  """
+  @spec landed_refs(Kazi.Goal.id()) :: [LandedRef.t()]
+  def landed_refs(run_ref) do
+    ref = to_string(run_ref)
+
+    Repo.all(
+      from(l in LandedRef,
+        where: l.run_ref == ^ref,
+        order_by: [asc: l.partition_id]
       )
     )
   end
