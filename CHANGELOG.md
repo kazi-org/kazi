@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.225.0](https://github.com/kazi-org/kazi/compare/v1.224.0...v1.225.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** persist --parallel landed refs + surface them in kazi status (T62.6, [#1241](https://github.com/kazi-org/kazi/issues/1241)) ([e6c7746](https://github.com/kazi-org/kazi/commit/e6c774629f8ff29c7e8ac6c5b800cd3320545775))
+* **read_model:** record/read per-group landed refs (T62.6, [#1241](https://github.com/kazi-org/kazi/issues/1241)) ([7386872](https://github.com/kazi-org/kazi/commit/73868724b48a13202ec957fee2a516077c79e9c0))
+* **read_model:** run_landed_refs table + schema for per-group landed refs (T62.6, [#1241](https://github.com/kazi-org/kazi/issues/1241)) ([78651cb](https://github.com/kazi-org/kazi/commit/78651cb272d6bd4a79b1a5e9b241c37a780411a6))
+
 ## [1.224.0](https://github.com/kazi-org/kazi/compare/v1.223.0...v1.224.0) (2026-07-18)
 
 
