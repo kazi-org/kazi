@@ -590,6 +590,14 @@ defmodule Kazi.Scheduler do
             {partition, nil, partition_landing_branch(partition, branch_prefix)}
           end
 
+        # T62.5 (issue #1241): the parallel entries are worktree-less (`nil`) — the
+        # partition worktrees are already torn down (#1053). Default the integrator
+        # opts' `:origin_repo` to the run workspace so a worktree-less integrator
+        # (`Kazi.Scheduler.Integration.OriginIntegrator`) can land each group's
+        # pushed `origin` branch without a local worktree. An explicit
+        # `:integrator_opts[:origin_repo]` (a test's fixture checkout) wins.
+        integrate_opts = put_default_origin_repo(integrate_opts, Keyword.get(opts, :workspace))
+
         {:ok, integration} = Kazi.Scheduler.Integration.integrate(entries, integrate_opts)
 
         # The collective is green ONLY when reconcile converged everywhere AND the
@@ -614,6 +622,21 @@ defmodule Kazi.Scheduler do
     branch_prefix <> "/" <> Kazi.Scheduler.Worktree.slug_for(partition)
   end
 
+  # T62.5: default the integrator opts' `:origin_repo` to the run workspace (a
+  # checkout that has `origin`), so a worktree-less parallel integrator can land
+  # each group's pushed origin branch. Only defaults it — an explicit fixture
+  # checkout in `:integrator_opts` is preserved; a nil workspace injects nothing.
+  defp put_default_origin_repo(integrate_opts, nil), do: integrate_opts
+
+  defp put_default_origin_repo(integrate_opts, workspace) do
+    Keyword.update(
+      integrate_opts,
+      :integrator_opts,
+      [origin_repo: workspace],
+      fn io -> Keyword.put_new(io, :origin_repo, workspace) end
+    )
+  end
+
   # Compose the per-partition reconciler chain: lease (outer) → worktree (inner) →
   # the supplied 2-arity reconciler. Each wrapper is OPTIONAL — omitting its opts
   # skips that layer — so a degenerate single-partition run can run with neither
@@ -631,7 +654,15 @@ defmodule Kazi.Scheduler do
           fn partition -> inner.(partition, workspace) end
 
         wt_opts ->
-          wt_opts = Keyword.put_new(wt_opts, :repo, workspace)
+          # T62.5: only push each converged partition's STABLE landing branch to
+          # origin (pre-teardown, for worktree-less live landing) when a landing is
+          # actually configured (`:integrate`) — a mode:none run leaves origin's
+          # base untouched by any landing branch.
+          wt_opts =
+            wt_opts
+            |> Keyword.put_new(:repo, workspace)
+            |> Keyword.put_new(:push_landing_branch, Keyword.has_key?(opts, :integrate))
+
           Kazi.Scheduler.Worktree.wrap(inner, wt_opts)
       end
 

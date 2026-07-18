@@ -513,4 +513,186 @@ defmodule Kazi.Scheduler.Integration do
       end
     end
   end
+
+  defmodule OriginIntegrator do
+    @moduledoc """
+    The **worktree-less origin-branch landing** (T62.5, issue #1241 part 1): land a
+    converged partition whose isolated worktree has ALREADY been torn down (issue
+    #1053) by operating against the branch it PUSHED to `origin` at wrap time
+    (T54.3), with NO local worktree required.
+
+    This is the piece T44.10 (PR #1240) deliberately deferred. The default
+    `ActionIntegrator` needs a live local worktree (`{:error, :no_worktree}` when
+    `worktree: nil`), but a `--parallel` run's partition worktree is removed the
+    instant its reconcile returns — so a real `mode != none` parallel run had no
+    integrator that could land. `OriginIntegrator` closes that gap: given the
+    group's pushed `origin/<branch>` and the shared `base`, it rebase-merges the
+    branch onto the base ENTIRELY through a kazi-owned scratch worktree of a local
+    checkout that shares `origin`, then pushes the advanced base to `origin`.
+
+    ## Contract
+
+    Requires `opts[:origin_repo]` — a local checkout that has `origin` configured
+    (the run's `--workspace` base). The scratch worktree is created under it and
+    shares its object store, so no re-clone is needed; it is removed on every exit
+    path (clean landing, conflict, or error), exactly like the partition worktree.
+
+    Returns `{:ok, %{branch:, base:, merge_commit:, origin: true}}` on a clean
+    landing — `merge_commit` is the real commit now on `origin/<base>`, and
+    `branch` is the group branch still present on `origin`, so BOTH surfaced refs
+    are independently verifiable against actual origin state (T62.5's acceptance).
+    A merge/rebase conflict maps to `{:error, {:conflict, reason}}` so the
+    collective routes it through the re-dispatch seam, identical to
+    `ActionIntegrator`/`LocalIntegrator`. A missing `origin/<branch>` (the wrap-time
+    push never landed) is a hard `{:error, {:missing_origin_branch, branch}}` — an
+    honest failure, never a silent success.
+
+    Safety: every mutating git op runs in the kazi-owned scratch worktree; the
+    only write to shared state is `git push origin <base>` (a fast-forwardable
+    ref advance from a clean rebase). No `git reset`, no `git clean`, no force —
+    a non-fast-forward push (the base moved under a concurrent group's landing) is
+    surfaced as a conflict the re-dispatch re-rebases, mirroring `LocalIntegrator`.
+    """
+
+    require Logger
+
+    @doc """
+    Lands one partition's pushed `origin/<branch>` onto `origin/<base>`,
+    worktree-lessly, via a scratch worktree of `opts[:origin_repo]`.
+    """
+    @spec integrate(Kazi.Scheduler.Integration.integration_request(), keyword()) ::
+            {:ok, map()} | {:error, term()}
+    def integrate(%{branch: branch, base: base}, opts)
+        when is_binary(branch) and branch != "" do
+      case Keyword.fetch(opts, :origin_repo) do
+        {:ok, origin_repo} when is_binary(origin_repo) ->
+          land(origin_repo, branch, base)
+
+        _ ->
+          {:error, :missing_origin_repo}
+      end
+    end
+
+    def integrate(%{branch: nil}, _opts), do: {:error, :no_branch}
+    def integrate(%{}, _opts), do: {:error, :no_branch}
+
+    # Fetch origin, confirm the group branch is there, then rebase-merge it onto
+    # the base in a throwaway scratch worktree and push the advanced base to
+    # origin. The scratch worktree is removed on EVERY exit path.
+    defp land(origin_repo, branch, base) do
+      scratch =
+        Path.join(
+          System.tmp_dir!(),
+          "kazi-origin-land-#{System.unique_integer([:positive])}"
+        )
+
+      try do
+        with :ok <- fetch(origin_repo),
+             :ok <- ensure_origin_branch(origin_repo, branch),
+             :ok <- add_worktree(origin_repo, scratch, branch),
+             {:ok, merge_commit} <- rebase_merge_and_push(origin_repo, scratch, branch, base) do
+          {:ok, %{branch: branch, base: base, merge_commit: merge_commit, origin: true}}
+        end
+      after
+        remove_worktree(origin_repo, scratch)
+      end
+    end
+
+    defp fetch(origin_repo) do
+      case git(origin_repo, ["fetch", "origin"]) do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, {:fetch_failed, reason}}
+      end
+    end
+
+    defp ensure_origin_branch(origin_repo, branch) do
+      case git(origin_repo, ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/" <> branch]) do
+        {:ok, _} -> :ok
+        {:error, _} -> {:error, {:missing_origin_branch, branch}}
+      end
+    end
+
+    # A scratch worktree checked out on the GROUP branch as origin has it (a
+    # detached checkout of origin/<branch>), so the rebase never touches
+    # origin_repo's own working tree or branches.
+    defp add_worktree(origin_repo, scratch, branch) do
+      case git(origin_repo, [
+             "worktree",
+             "add",
+             "--detach",
+             scratch,
+             "refs/remotes/origin/" <> branch
+           ]) do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, {:worktree_add_failed, reason}}
+      end
+    end
+
+    # Rebase the group branch's commits onto the (possibly advanced) base tip, then
+    # fast-forward the base to the rebased result and push it back to origin —
+    # mirroring `LocalIntegrator`'s rebase-then-merge, but worktree-less against
+    # origin. A rebase conflict is a re-dispatchable cross-partition conflict; a
+    # rejected push means the base advanced under us (also a conflict), so the
+    # re-attempt re-rebases onto the newly-advanced base.
+    defp rebase_merge_and_push(origin_repo, scratch, _branch, base) do
+      with :ok <- rebase(scratch, base),
+           {:ok, sha} <- head_sha(scratch),
+           :ok <- push_base(origin_repo, scratch, base) do
+        {:ok, sha}
+      end
+    end
+
+    defp rebase(scratch, base) do
+      case git(scratch, ["rebase", "refs/remotes/origin/" <> base]) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          _ = git(scratch, ["rebase", "--abort"])
+          {:error, {:conflict, {:rebase_failed, reason}}}
+      end
+    end
+
+    defp head_sha(scratch) do
+      case git(scratch, ["rev-parse", "HEAD"]) do
+        {:ok, out} -> {:ok, String.trim(out)}
+        {:error, reason} -> {:error, {:head_resolve_failed, reason}}
+      end
+    end
+
+    # Push the scratch worktree's HEAD to origin's base branch. No force: origin
+    # rejects a non-fast-forward, which we map to a conflict so the collective
+    # re-dispatches (re-rebases onto the now-advanced base).
+    defp push_base(origin_repo, scratch, base) do
+      case git(scratch, ["push", "origin", "HEAD:refs/heads/" <> base]) do
+        {:ok, _} ->
+          # Keep origin_repo's local view of the base current for any sibling
+          # landing that reads it next in the serial order.
+          _ = git(origin_repo, ["fetch", "origin"])
+          :ok
+
+        {:error, reason} ->
+          if reason =~ ~r/non-fast-forward|rejected|fetch first/i do
+            {:error, {:conflict, {:push_rejected, reason}}}
+          else
+            {:error, {:push_failed, reason}}
+          end
+      end
+    end
+
+    defp remove_worktree(origin_repo, scratch) do
+      _ = git(origin_repo, ["worktree", "remove", "--force", scratch])
+      _ = File.rm_rf(scratch)
+      :ok
+    end
+
+    defp git(repo, args) do
+      {out, status} = System.cmd("git", args, cd: repo, stderr_to_stdout: true)
+
+      case status do
+        0 -> {:ok, out}
+        _ -> {:error, String.trim(out)}
+      end
+    end
+  end
 end
