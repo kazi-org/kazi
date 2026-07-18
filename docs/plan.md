@@ -374,6 +374,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E66 -- Triage 2026-07-18: release-binary boot correctness (P0 #1483, #1484) + swift_test provider landing (#1406) -> plans/E66.md
 
+### E67 -- Dashboard velocity surface: per-agent delivery, tokens, and stuck stats, full-fusion (P2) -> plans/E67.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
