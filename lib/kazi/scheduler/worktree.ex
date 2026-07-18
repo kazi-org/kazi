@@ -139,6 +139,7 @@ defmodule Kazi.Scheduler.Worktree do
     git_cmd = Keyword.get(opts, :git_cmd, "git")
     branch_prefix = Keyword.get(opts, :branch_prefix, "kazi-partition")
     owned_branch = Keyword.get(opts, :owned_branch)
+    push_landing_branch = Keyword.get(opts, :push_landing_branch, false)
     worktree_table = Keyword.get(opts, :worktree_table, WorktreeTable)
     run_id = Keyword.get(opts, :run_id)
     base_ref = Keyword.get(opts, :base_ref)
@@ -165,7 +166,13 @@ defmodule Kazi.Scheduler.Worktree do
           push_owned_branch_upstream(git_cmd, repo, branch)
 
           try do
-            inner.(partition, path)
+            status = inner.(partition, path)
+
+            if push_landing_branch do
+              maybe_push_landing_branch(git_cmd, path, branch_prefix, slug, owned_branch, status)
+            end
+
+            status
           after
             # Remove on EVERY exit path — normal, error return, crash, timeout.
             # `--force` covers a dirty tree the run left behind. Guard-safe: this
@@ -614,6 +621,52 @@ defmodule Kazi.Scheduler.Worktree do
       :ok
     end
   end
+
+  # T62.5 (issue #1241): a `--parallel` partition's worktree is torn down the
+  # instant its reconcile returns (issue #1053), so its CONVERGED commits must
+  # reach `origin` BEFORE teardown or the worktree-less live landing
+  # (`Kazi.Scheduler.Integration.OriginIntegrator`) has nothing to land against.
+  # On the PARALLEL path only (no `:owned_branch` — the serial/fleet paths land
+  # through `Kazi.Scheduler.SerialLanding` and own their own push) and only when
+  # the partition CONVERGED and an `origin` exists, push the worktree HEAD to the
+  # STABLE group landing branch `<branch_prefix>/<slug>` — the exact name the
+  # scheduler derives for the collective's landed refs
+  # (`Kazi.Scheduler.partition_landing_branch/2`), with the per-worktree nonce
+  # stripped so the pushed branch and the landing target AGREE (the mismatch
+  # T44.10 would have hit live). Best-effort and TOTAL: a push failure is logged,
+  # never raised (teardown independence, #1053), and a local-only fixture with no
+  # origin is a silent no-op (mirrors the create-time push).
+  defp maybe_push_landing_branch(_git_cmd, _path, _prefix, _slug, owned_branch, _status)
+       when not is_nil(owned_branch),
+       do: :ok
+
+  defp maybe_push_landing_branch(git_cmd, path, branch_prefix, slug, nil, :converged) do
+    if origin_configured?(git_cmd, path) do
+      landing = branch_prefix <> "/" <> slug
+
+      case push_with_retry(
+             git_cmd,
+             path,
+             ["push", "--force", "origin", "HEAD:refs/heads/" <> landing],
+             @network_attempts
+           ) do
+        {:ok, _out} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(fn ->
+            "kazi.scheduler.worktree could not push landing branch #{landing} " <>
+              "(T62.5, issue #1241): #{inspect(reason)}; live per-group landing may find nothing"
+          end)
+
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp maybe_push_landing_branch(_git_cmd, _path, _prefix, _slug, _owned, _status), do: :ok
 
   defp origin_configured?(git_cmd, repo) do
     match?({:ok, _}, git(git_cmd, repo, ["remote", "get-url", "origin"]))
