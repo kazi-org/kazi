@@ -43,13 +43,15 @@ defmodule Kazi.Daemon.Supervisor do
         end)
 
     # T52.4 (ADR-0068 point 2): migrate-before-serve. The daemon is the ONE and
-    # ONLY read-model migrator (#1019: a mixed migration-writer field is the
-    # exact class ADR-0068 closes) -- run the bounded, degrading boot migration
-    # ONCE here, synchronously, BEFORE any child starts. `Kazi.Daemon.Write`
+    # ONLY read-model migrator AND writer (#1019: a mixed migration-writer field
+    # is the exact class ADR-0068 closes) -- so BEFORE any child starts we, in
+    # order: (1) START the read-model writer `Kazi.Repo` (#1504), then (2) run
+    # the bounded, degrading boot migration ONCE against it. `Kazi.Daemon.Write`
     # (the write server) is then ordered before `Kazi.Daemon.Listener`, so by
-    # the time the socket accepts a `write` the read-model is migrated and the
-    # write server is up -- a client write is never served against an
-    # unmigrated file ("no such table").
+    # the time the socket accepts a `write` the writer is up, the read-model is
+    # migrated, and a client write is never served against an unmigrated file
+    # ("no such table") or a not-started repo ("could not lookup Ecto repo").
+    ensure_repo_started(opts)
     run_boot_migration(opts)
 
     write_opts =
@@ -70,6 +72,55 @@ defmodule Kazi.Daemon.Supervisor do
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  # #1504: START the read-model writer (`Kazi.Repo`) BEFORE the boot migration
+  # and BEFORE any write is served, and LEAVE IT RUNNING for the daemon's
+  # lifetime. The daemon is the ONE writer/migrator (ADR-0068), so under a
+  # standalone (Burrito) binary -- where `Kazi.Application.start/2` hands
+  # straight to the CLI and never stands up the supervision tree that would own
+  # `Kazi.Repo` -- the daemon must open the read-model read-write ITSELF.
+  # Mirrors the reader-side standalone path
+  # (`Kazi.CLI.migrate_read_model_direct`): `storage_up` creates the SQLite file
+  # if absent, then `start_link` opens it. Idempotent: a no-op when the repo is
+  # already supervised (the mix / dev / test / non-Burrito release path -- where
+  # the app tree owns exactly one repo, never double-started) or already started
+  # here. Absent this the boot migration hits "could not lookup Ecto repo
+  # Kazi.Repo because it was not started", degrades to no-persistence, and the
+  # daemon serves anyway with every run-registry / KPI write silently lost.
+  #
+  # Fail-loud contract (#1504): unlike `run_boot_migration/1` -- which is DESIGNED
+  # to degrade on its OWN bounded cases (a peer holding the migration lock, a
+  # newer schema stamp: never fatal, always logged, per ADR-0068) -- a repo that
+  # CANNOT start (an unwritable state dir, a corrupt db) leaves the daemon with
+  # NO writer at all. That is NOT a silent-degrade case: any failure here is left
+  # to propagate out of `init/1`, so `Kazi.Daemon.start/1` returns `{:error, _}`
+  # and `kazi daemon start` REFUSES to serve rather than come up healthy-looking
+  # with no write path. `:repo_start_fun`/`:migrate_repo` are test seams (mirror
+  # `:migrate_fun`): a lifecycle test injects a start that fails (to pin the
+  # refusal) or points the writer at a throwaway repo.
+  defp ensure_repo_started(opts) do
+    start_fun =
+      Keyword.get(opts, :repo_start_fun, fn ->
+        repo = Keyword.get(opts, :migrate_repo, Kazi.Repo)
+
+        if repo_started?(repo) do
+          :ok
+        else
+          _ = repo.__adapter__().storage_up(repo.config())
+
+          case repo.start_link() do
+            {:ok, _pid} -> :ok
+            {:error, {:already_started, _pid}} -> :ok
+          end
+        end
+      end)
+
+    start_fun.()
+  end
+
+  defp repo_started?(repo) do
+    is_pid(Process.whereis(repo)) or is_pid(GenServer.whereis(repo))
   end
 
   # The boot migration. `Kazi.ReadModel.Migrate.run/2` is itself bounded and
