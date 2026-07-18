@@ -158,10 +158,10 @@ kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  
 kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
                                                            # roster with liveness (active|idle) + inbox depth; --all includes stale rows
 kazi bus board [--scope machine|project] [--json]         # current state: last-value fact per topic + live roster (T55.4); consumes nothing
-kazi bus join                                             # derive team from git origin (T65.1, #1430)
-kazi bus join -- <team>                                    # explicit team, cross-repo override (recorded derived=false)
+kazi bus join                                             # derive team from git origin + get a daemon-assigned name (T65.1/T65.3, #1430)
+kazi bus join -- <team>                                    # explicit team, cross-repo override (recorded derived=false); still gets an assigned name
 kazi bus leave                                             # clear team membership
-kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
+kazi bus name <alias>                                     # attach an alias on top of the assigned name (T55.5/T65.3, ADR-0073)
 kazi bus hook <event>                                      # harness hook entry point (ADR-0076) -- ALWAYS exits 0 silently
 kazi bus <verb> --help                                     # per-verb usage (signature, flags, valid kinds)
 ```
@@ -289,14 +289,30 @@ sending to: it read the bus at least once, so its cursor exists, and it will
 drain the queue if it comes back. An inbox can only exist for a session that
 was really there — a typo has neither.
 
-### Naming sessions (T55.5, ADR-0073; durable bindings T65.2, #1430)
+### Naming sessions (T55.5, ADR-0073; durable bindings T65.2, assigned names T65.3, #1430)
 
 Raw session ids are UUIDs (or derived fallback ids) nobody can remember, so
-directed messaging used to be unusable in practice. `kazi bus name
-<nickname>` binds a durable human name to the calling session's UUID: it is
-carried on the session's one presence row (rendered by `bus who`, accepted
-by `bus tell`) **and** recorded in a dedicated, TTL-less JetStream KV bucket
-(`kazi_names`).
+directed messaging used to be unusable in practice. Names are recorded in a
+dedicated, TTL-less JetStream KV bucket (`kazi_names`) as name→UUID bindings and
+carried on the session's one presence row (rendered by `bus who`, accepted by
+`bus tell`). There are two ways a session gets a name:
+
+- **A daemon-assigned name on join (T65.3).** `kazi bus join` returns an
+  auto-assigned short name — the next free letter in `<team>-a`, `<team>-b`,
+  `<team>-c`… order for that team — and prints it (`joined <team> as
+  <team>-a`), so the operator learns the session's name straight from the join
+  output. This name is the **canonical** label `bus who` renders. Allocation is
+  ATOMIC through the KV bucket: each candidate is a create-only write enforced
+  by JetStream optimistic concurrency (`Nats-Expected-Last-Subject-Sequence:
+  0`), so two sessions racing for the same letter can never both win — the
+  loser's create is rejected server-side and it advances to the next letter. No
+  client-side lock, no race. A re-join is idempotent: a session that already
+  holds an assigned name KEEPS it (no churn).
+- **An attached alias (`kazi bus name <alias>`).** This ATTACHES an additional
+  human name on top of the assigned one. Both the assigned name and every alias
+  resolve via `bus tell`, but the daemon-assigned name stays canonical in `bus
+  who`. A session that never joined (so has no assigned name) takes the alias as
+  its presence label directly, exactly as before T65.3.
 
 **Bindings are durable.** The presence bucket ages entries out after 600s so
 a closed session leaves `who` — but that same TTL used to WIPE every friendly
@@ -321,7 +337,11 @@ different live session's id.
 
 1. `@<team>` — fan-out to the named team (issue #1069), unchanged;
 2. an exact session id present on the roster;
-3. a nickname, looked up against LIVE presence.
+3. a presence label (the canonical assigned name), looked up against LIVE presence;
+4. a durable binding (an attached alias, or an assigned name whose presence
+   label was overwritten), resolved through the `kazi_names` bucket to its live
+   session (T65.3) — so an alias reaches its session even though `who` shows the
+   assigned name instead.
 
 A recipient matching none of those falls back to its durable inbox (T55.12)
 — a session whose presence aged out but whose cursor still exists will drain
