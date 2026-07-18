@@ -304,7 +304,8 @@ defmodule Kazi.Runtime do
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
          :ok <- guard_not_vacuous(goal, providers, workspace),
-         :ok <- guard_no_live_duplicate(goal, opts) do
+         :ok <- guard_no_live_duplicate(goal, opts),
+         :ok <- guard_no_workspace_collision(goal, opts, workspace) do
       # T46.1 (ADR-0057): the fleet run registry's identity for this process —
       # generated fresh unless the caller reclaims a prior id (a restarted
       # process resuming its own registry row).
@@ -352,6 +353,8 @@ defmodule Kazi.Runtime do
           :session_name,
           # Consumed by guard_no_live_duplicate/2 above, not a Loop opt.
           :allow_duplicate_run,
+          # Consumed by guard_no_workspace_collision/3 above, not a Loop opt.
+          :allow_workspace_collision,
           # T15.4 (ADR-0023 decision 3): the streaming observer is consumed by
           # build_on_iteration/2 (composed over the persistence projection), not
           # a Loop opt.
@@ -627,6 +630,49 @@ defmodule Kazi.Runtime do
     error ->
       Logger.warning(fn ->
         "kazi.runtime duplicate-run guard raised (failing open): #{Exception.message(error)}"
+      end)
+
+      :ok
+  end
+
+  # Refuse to START a run when the resolved workspace is already held by a LIVE
+  # run for a DIFFERENT goal (T59.7, #937 Gap G). `guard_no_live_duplicate` only
+  # notices a second apply of the SAME goal_ref; it does not catch N DIFFERENT
+  # goals dispatched against one shared --workspace, which cross-contaminate each
+  # other's commits (the cross-goal commit-bleed incidents in #937). This is the
+  # guard for callers who still pass an explicit shared --workspace (the common
+  # case is already obviated by the default per-run task worktree, ADR-0065).
+  #
+  # It reuses the SAME liveness classification the duplicate-run guard trusts
+  # (`RunRegistry.list_live/0`: status "running" AND a fresh heartbeat), so a
+  # stale/dead holder never blocks -- its heartbeat ages out within ~90s. Same
+  # goal_ref is skipped so that case falls through to the (unchanged) duplicate
+  # guard. Deliberate co-tenancy passes `:allow_workspace_collision` (CLI:
+  # --allow-workspace-collision). Best-effort fail-open like every registry touch.
+  defp guard_no_workspace_collision(%Goal{} = goal, opts, workspace) do
+    if Keyword.get(opts, :allow_workspace_collision) == true or
+         Keyword.get(opts, :persist?, true) == false or is_nil(workspace) do
+      :ok
+    else
+      goal_ref = Keyword.get(opts, :goal_ref, to_string(goal.id))
+      run_id = Keyword.get(opts, :run_id) || ""
+      resolved = Path.expand(to_string(workspace))
+
+      RunRegistry.list_live()
+      |> Enum.find(fn run ->
+        run.run_id != run_id and run.goal_ref != goal_ref and
+          run.workspace not in [nil, ""] and Path.expand(run.workspace) == resolved
+      end)
+      |> case do
+        nil -> :ok
+        %ReadModel.Run{} = live -> {:error, {:workspace_collision, duplicate_info(live)}}
+      end
+    end
+  rescue
+    error ->
+      Logger.warning(fn ->
+        "kazi.runtime workspace-collision guard raised (failing open): " <>
+          Exception.message(error)
       end)
 
       :ok
