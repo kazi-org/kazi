@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.248.1](https://github.com/kazi-org/kazi/compare/v1.248.0...v1.248.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **teach:** RECIPES.md teaches the real --check verb, drops closed-[#936](https://github.com/kazi-org/kazi/issues/936) caveat ([10af480](https://github.com/kazi-org/kazi/commit/10af480cf89bf86960f0a9c9da99c4dbe3efa3b9))
+
 ## [1.248.0](https://github.com/kazi-org/kazi/compare/v1.247.0...v1.248.0) (2026-07-18)
 
 
