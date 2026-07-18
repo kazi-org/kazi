@@ -10,9 +10,8 @@ defmodule Kazi.ReadModel.PauseCheckpointStore do
   `:resume_token` option resolves it in a SEPARATE process lifecycle.
   """
 
-  import Ecto.Query
-
   alias Kazi.ReadModel.PauseCheckpoint
+  alias Kazi.ReadModel.Writer
   alias Kazi.Repo
 
   @doc """
@@ -52,7 +51,7 @@ defmodule Kazi.ReadModel.PauseCheckpointStore do
       existing -> existing
     end
     |> PauseCheckpoint.changeset(attrs)
-    |> Repo.insert_or_update()
+    |> Writer.insert_or_update()
   end
 
   @doc "Fetches a checkpoint by its resume token, or `:error` when unknown."
@@ -67,7 +66,7 @@ defmodule Kazi.ReadModel.PauseCheckpointStore do
   @doc "Deletes a checkpoint (a completed resume no longer needs it)."
   @spec delete(String.t()) :: :ok
   def delete(token) do
-    Repo.delete_all(from(c in PauseCheckpoint, where: c.token == ^token))
+    Writer.delete_all(PauseCheckpoint, %{token: token})
     :ok
   end
 end
