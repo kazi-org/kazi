@@ -397,7 +397,7 @@ defmodule Kazi.Runtime do
           on_iteration: build_on_iteration(goal, opts, run_id, persist?, events_sink_path),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
-          extra_action_context: build_action_context(opts),
+          extra_action_context: build_action_context(opts, run_id, goal_ref),
           # T3.4d standing wiring: the CLI `--standing` flag (an explicit
           # `:standing` opt) wins; otherwise fall back to the goal-file's own
           # declared `standing` field. So a goal authored standing runs standing
@@ -931,10 +931,16 @@ defmodule Kazi.Runtime do
   # action's `:integrator` (PR/merge) and the deploy action's `:deploy_cmd` — at
   # local stubs in tests and at the real `gh`/`gcloud` defaults in production
   # (each action falls back to its real default when the key is absent).
-  defp build_action_context(opts) do
+  # `run_id`/`goal_ref` thread this run's registry identity into the integrate
+  # action so its shared-workspace staging guard (T59.8, #937 Gap A4) can skip
+  # this run's own row and same-goal rows when it asks the registry whether a
+  # DIFFERENT live run holds the workspace.
+  defp build_action_context(opts, run_id, goal_ref) do
     %{}
     |> maybe_put(:integrator, Keyword.get(opts, :integrator))
     |> maybe_put(:deploy_cmd, Keyword.get(opts, :deploy_cmd))
+    |> maybe_put(:run_id, run_id)
+    |> maybe_put(:goal_ref, goal_ref)
   end
 
   defp maybe_put(map, _key, nil), do: map
