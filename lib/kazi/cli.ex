@@ -2352,6 +2352,10 @@ defmodule Kazi.CLI do
           opts
           |> maybe_put(:proposal_ref, proposal_ref)
           |> maybe_put(:proposal_session_name, proposal_session_name)
+          # goal-drift-guard-1415: only a REAL goal-file path (never a proposal
+          # ref, which has no on-disk bar to drift against) is worth threading
+          # through to Kazi.Runtime.run/2's drift detector.
+          |> maybe_put(:goal_source, if(proposal_ref == nil, do: goal_source))
 
         run_goal(goal, run_opts, persist?, runtime_opts)
 
@@ -3325,6 +3329,10 @@ defmodule Kazi.CLI do
       # when one resolves, so the default path is unchanged when none do.
       |> maybe_put(:session_name, resolve_session_name(opts))
       |> maybe_put(:proposal_ref, opts[:proposal_ref])
+      # goal-drift-guard-1415: forward the loaded goal-file path so
+      # Kazi.Runtime.run/2 can fingerprint the t0 bar and report if the file
+      # on disk drifted from it by the time the run terminates.
+      |> maybe_put(:goal_source, opts[:goal_source])
       |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
       |> maybe_put(
         :allow_workspace_collision,
@@ -8327,6 +8335,15 @@ defmodule Kazi.CLI do
   #                        `Kazi.CollateralReport`). Present only when non-empty
   #                        (absent ⇒ nothing collateral was found, byte-identical
   #                        to before this field existed).
+  #   * `goal_drifted`   — goal-drift-guard-1415: an ADDITIVE boolean, present
+  #                        only `true` when the goal-file this run was loaded
+  #                        from no longer matches the predicate bar it was
+  #                        fingerprinted against at t0 (see
+  #                        `Kazi.Runtime.GoalDrift`). Paired with `goal_drift`
+  #                        (the added/removed/changed predicate ids). Absent ⇒
+  #                        no drift detected, byte-identical to before this
+  #                        field existed. Never changes `status` — the loop
+  #                        always converges against the ORIGINAL t0 bar.
   @spec run_result_json(
           Goal.t(),
           :converged | :stopped | :over_budget,
@@ -8359,6 +8376,7 @@ defmodule Kazi.CLI do
     |> put_cause(result)
     |> put_integration(result)
     |> put_collateral(goal, workspace)
+    |> put_goal_drifted(result)
   end
 
   # T50.2 (ADR-0065 decision 2): the additive `integration` object — how a
@@ -8382,6 +8400,26 @@ defmodule Kazi.CLI do
       entries -> Map.put(map, :collateral, Enum.map(entries, &collateral_entry_json/1))
     end
   end
+
+  # goal-drift-guard-1415: the additive `goal_drifted` boolean + `goal_drift`
+  # diff — whether the goal-file this run was loaded from (`:goal_source`) no
+  # longer matches the predicate bar it was fingerprinted against at t0 by the
+  # time the run terminated (see `Kazi.Runtime.GoalDrift`). Present only when a
+  # drift was actually detected (`result.goal_drifted` was set by
+  # `Kazi.Runtime.run/2`); absent ⇒ byte-identical to before this field
+  # existed. Never affects `status` — the ORIGINAL bar already governed
+  # convergence regardless of what happened to the file on disk.
+  defp put_goal_drifted(map, %{goal_drifted: true, goal_drift: diff}) do
+    map
+    |> Map.put(:goal_drifted, true)
+    |> Map.put(:goal_drift, %{
+      added: Enum.map(diff.added, &to_string/1),
+      removed: Enum.map(diff.removed, &to_string/1),
+      changed: Enum.map(diff.changed, &to_string/1)
+    })
+  end
+
+  defp put_goal_drifted(map, _result), do: map
 
   defp collateral_entry_json(%{
          path: path,
