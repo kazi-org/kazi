@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.236.0](https://github.com/kazi-org/kazi/compare/v1.235.0...v1.236.0) (2026-07-18)
+
+
+### Features
+
+* **portfolio:** five-bucket classification + headline totals (T64.1, UC-061) ([ef5297d](https://github.com/kazi-org/kazi/commit/ef5297d9d7b28337be34940f05358b6c1e0818f3))
+
 ## [1.235.0](https://github.com/kazi-org/kazi/compare/v1.234.0...v1.235.0) (2026-07-18)
 
 
