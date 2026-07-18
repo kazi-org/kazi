@@ -6,7 +6,10 @@ defmodule KaziWeb.MissionControlLive do
   A read-only projection of the run registry (`Kazi.ReadModel.RunRegistry`) laid
   out as an ops-center card grid rather than a spatial constellation: a topbar
   fleet-count strip, a **NEEDS ATTENTION** row (the ranked attention queue,
-  `Kazi.Attention.Queue`), a **FLEET** grid of one card per goal, and a bottom
+  `Kazi.Attention.Queue`), a **FLEET** grid of one card per goal, a **PLANNED**
+  section of approved-but-undispatched proposals (T60.4, #1160 — the queue's
+  unstarted/todo goals, per-machine by construction since proposals are not
+  bus-synced), and a bottom
   **EVENT RIVER** ticker. It renders state; it never mutates a run, a goal, or a
   lease (ADR-0011 §2 reaffirmed at fleet scope) — the only interactions are the
   navigation deep-links into the full drill-in / board / lease / event pages.
@@ -104,6 +107,11 @@ defmodule KaziWeb.MissionControlLive do
   # large predicate set can't stretch a card's DNA strip past its row.
   @dna_cap 24
 
+  # PLANNED section (T60.4, #1160): approved proposals no run has picked up
+  # yet render as light todo cards; beyond this many, a "+N more" line points
+  # at `kazi list-proposed`. Same DOM-size rationale as @card_cap.
+  @planned_cap 12
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -196,7 +204,36 @@ defmodule KaziWeb.MissionControlLive do
     |> assign_grid(all_runs, scoped)
     |> assign(:clock, utc_clock())
     |> assign(:alerts, alerts(scoped))
+    |> assign_planned(all_runs)
     |> assign(:river_entries, river_entries(all_runs))
+  end
+
+  # T60.4 (#1160): the PLANNED bucket — approved proposals no run has picked up
+  # yet, i.e. the queue's unstarted/todo goals. A read-only projection over the
+  # proposed-goals store (ADR-0011); a proposal leaves PLANNED the moment ANY
+  # run registers its goal_id (dispatched work is the fleet grid's job,
+  # whatever its state). Proposals are machine-local (not bus-synced), so this
+  # bucket is per-machine by construction. Best-effort like every other
+  # read-model touch here: an unavailable store renders an empty section,
+  # never a 500.
+  defp assign_planned(socket, all_runs) do
+    planned = planned_proposals(all_runs)
+    {shown, more} = Enum.split(planned, @planned_cap)
+
+    socket
+    |> assign(:planned, shown)
+    |> assign(:planned_more, length(more))
+  end
+
+  defp planned_proposals(all_runs) do
+    dispatched = MapSet.new(all_runs, & &1.goal_ref)
+
+    ReadModel.list_proposed_goals(status: "approved")
+    |> Enum.reject(&MapSet.member?(dispatched, &1.goal_id))
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
   end
 
   # T51.5 (ADR-0073 §4): the SESSIONS rail's live bus presence, read from the
@@ -1078,6 +1115,30 @@ defmodule KaziWeb.MissionControlLive do
             +{@older_count} more on the goal board →
           </.link>
         </section>
+
+        <section :if={@planned != []} id="mc-planned">
+          <div class="seclabel section-label">
+            PLANNED · {length(@planned) + @planned_more} APPROVED, NOT DISPATCHED
+          </div>
+          <div class="grid">
+            <div
+              :for={p <- @planned}
+              id={"mc-planned-#{p.proposal_ref}"}
+              class="card c-todo"
+              data-proposal-ref={p.proposal_ref}
+            >
+              <div class="cardtop">
+                <div class="gname">{p.goal_id}</div>
+                <div class="stpill st-todo">TODO</div>
+              </div>
+              <div class="csub">{p.proposal_ref}</div>
+              <div :if={p.roadmap_ref} class="csub">{p.roadmap_ref}</div>
+            </div>
+          </div>
+          <p :if={@planned_more > 0} id="mc-planned-more" class="older-link">
+            +{@planned_more} more approved — `kazi list-proposed`
+          </p>
+        </section>
       </div>
 
       <section id="mc-sessions" data-source={inspect(@coord_source)}>
@@ -1176,6 +1237,8 @@ defmodule KaziWeb.MissionControlLive do
         .c-warn { border-color: rgba(255,180,84,.5); box-shadow: 0 0 26px -14px rgba(255,180,84,.5); }
         .c-claimed { border-color: rgba(83,214,255,.35); border-style: dashed; }
         .c-pending { border-color: var(--line); opacity: .7; }
+        .c-todo { border-style: dashed; border-color: var(--line); opacity: .8; }
+        .c-todo:hover { opacity: 1; border-color: var(--dim); }
         .cardtop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .gname { color: #EAF3FC; font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
         .stpill { font-size: 9px; font-weight: 700; letter-spacing: .16em; padding: 3px 8px; border-radius: 2px; flex-shrink: 0; }
@@ -1185,6 +1248,7 @@ defmodule KaziWeb.MissionControlLive do
         .st-warn { color: var(--amb); border: 1px solid rgba(255,180,84,.5); }
         .st-claimed { color: var(--cyn); border: 1px dashed rgba(83,214,255,.5); }
         .st-pending { color: var(--dim); border: 1px solid var(--line); }
+        .st-todo { color: var(--dim); border: 1px dashed var(--line); }
         .gmeta2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .csub { color: var(--dim); font-size: 11px; }
         .ws { color: var(--dim); font-size: 11px; }
