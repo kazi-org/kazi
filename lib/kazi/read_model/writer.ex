@@ -68,6 +68,28 @@ defmodule Kazi.ReadModel.Writer do
   the daemon is the single writer on the newer schema, so there is nothing to
   refuse.
 
+  ## Client-newer-than-daemon skew degrade (T52.8, ADR-0068 point 3)
+
+  The reverse skew — a daemon that IS `:alive` but is OLDER than this client (the
+  mid-release-window case) — is handled at write time in the `:alive` branch. The
+  client learns the daemon's schema version from the T52.2 `ping` handshake (its
+  stamped `schema_vsn`), read at most once per TTL window (memoized like presence
+  and the T52.7 file-skew read — never a `ping` per write). When
+  `SchemaSkew.classify(binary_version, schema_vsn) == :client_newer` the seam does
+  NOT write blind: it logs the single-line operator choice
+
+      daemon is older than this client (schema vN < vM); restart it
+      (`kazi daemon restart`) or continue without persistence
+
+  and runs the SAME shaped `:refused` degrade the T52.7 no-daemon refuse uses, so
+  every caller sees one degrade shape and the run proceeds persistence-blind and
+  VISIBLY (Guard-style, L-0035) — never an implicit deadlock or a silent blind
+  write against a schema the older single writer does not understand. An equal or
+  newer daemon (`:equal`/`:client_older`) writes through, because the daemon's
+  write API is additive within a major (T52.5). A daemon that does not report a
+  `schema_vsn` (an old daemon, or a `ping` that fails) writes through as well —
+  the degrade blocks only on a POSITIVE older-daemon reading, never on silence.
+
   ### Refused-write return contract (keeps every caller alive)
 
   A refused write performs NO `Repo` write, yet must return a value each call
@@ -113,11 +135,15 @@ defmodule Kazi.ReadModel.Writer do
 
   `direct` is today's exact `Kazi.Repo` write, run as-is when no daemon owns the
   file AND this binary's schema is not older than the file's stamped schema. When a
-  daemon is `:alive`, the `:remote` writer runs instead (defaulting to `direct`
-  until the socket-client path is wired). When no daemon owns the file and this
-  binary is OLDER than the file's stamped schema (T52.7), the write is REFUSED: the
-  `:refused` closure runs (a shaped Guard-style degrade) and no `Repo` write
-  happens. Returns whatever the chosen writer returns.
+  daemon is `:alive` AND not older than this client, the `:remote` writer runs
+  instead (defaulting to `direct` until the socket-client path is wired). When the
+  daemon is `:alive` but OLDER than this client (T52.8, `SchemaSkew.classify/2 ==
+  :client_newer` against the `ping` `schema_vsn`), the write is REFUSED the same
+  way: the one-line operator choice is logged and the `:refused` closure runs, so a
+  newer client never blind-writes through an older single writer. When no daemon
+  owns the file and this binary is OLDER than the file's stamped schema (T52.7), the
+  write is REFUSED: the `:refused` closure runs (a shaped Guard-style degrade) and
+  no `Repo` write happens. Returns whatever the chosen writer returns.
 
   ## Options (T52.7 additions)
 
@@ -129,6 +155,12 @@ defmodule Kazi.ReadModel.Writer do
       Defaults to `Kazi.ReadModel.Migrate.binary_version/0`. Injectable for tests.
     * `:db_stamped_version` — the direct file's stamped schema version. Defaults to
       `Kazi.ReadModel.Migrate.db_stamped_version(Kazi.Repo)`. Injectable for tests.
+    * `:daemon_schema_vsn` — the alive daemon's stamped schema version, for the
+      T52.8 client-newer skew degrade. Defaults to the `schema_vsn` from the T52.2
+      `ping` handshake. Injectable for tests.
+    * `:ping` — a 1-arity `(sock_path -> {:ok, map()} | {:error, term()})` used to
+      read the daemon's `schema_vsn`. Defaults to `Kazi.Daemon.Probe.ping/1`.
+      Injectable for tests.
   """
   @spec write(writer(), keyword()) :: term()
   def write(direct, opts \\ []) when is_function(direct, 0) do
@@ -136,7 +168,12 @@ defmodule Kazi.ReadModel.Writer do
 
     case daemon_status(opts) do
       :alive ->
-        remote.()
+        if daemon_older?(opts) do
+          refused = Keyword.get(opts, :refused, fn -> {:error, :read_model_unavailable} end)
+          refused.()
+        else
+          remote.()
+        end
 
       _absent ->
         if refuse_direct?(opts) do
@@ -483,4 +520,71 @@ defmodule Kazi.ReadModel.Writer do
   end
 
   defp skew_key, do: {__MODULE__, :skew}
+
+  # The client-newer-than-daemon skew degrade (T52.8, ADR-0068 point 3), memoized
+  # per process with the same short TTL as presence and the T52.7 file-skew read.
+  # A daemon is `:alive` but may be OLDER than this client mid-release-window: its
+  # `ping` `schema_vsn` (T52.2 handshake) is below this binary's schema version
+  # (`SchemaSkew.classify/2 == :client_newer`). Writing blind through an older
+  # daemon would let a newer client silently persist against a schema the single
+  # writer does not understand, so instead the run degrades VISIBLY (Guard-style,
+  # L-0035): the one-line operator choice is logged and the write returns the same
+  # shaped `{:error, :read_model_unavailable}` family the T52.7 no-daemon refuse
+  # uses, so every caller sees ONE degrade shape. Returns `true` when the daemon is
+  # older (degrade, no socket write), `false` otherwise — an equal or newer daemon
+  # writes through, since the daemon's write API is additive within a major (T52.5).
+  #
+  # The daemon `schema_vsn` is read via one `ping` per TTL window (the decision is
+  # memoized, so the handshake fires at most once per window, never per write); a
+  # daemon that does not report a `schema_vsn` (an old daemon, or a `ping` that
+  # fails) is treated as not-older and writes through — never a silent block.
+  defp daemon_older?(opts) do
+    ttl_ms = Keyword.get(opts, :ttl_ms, @default_ttl_ms)
+    now = System.monotonic_time(:millisecond)
+
+    case Process.get(daemon_skew_key()) do
+      {decision, expires_at} when expires_at > now ->
+        decision
+
+      _expired_or_missing ->
+        decision = probe_daemon_skew(opts)
+        Process.put(daemon_skew_key(), {decision, now + ttl_ms})
+        decision
+    end
+  end
+
+  defp probe_daemon_skew(opts) do
+    bin_version = Keyword.get_lazy(opts, :binary_version, &Migrate.binary_version/0)
+    daemon_vsn = daemon_schema_vsn(opts)
+
+    if is_integer(daemon_vsn) and
+         SchemaSkew.classify(bin_version, daemon_vsn) == :client_newer do
+      Logger.warning(fn ->
+        "daemon is older than this client (schema v#{daemon_vsn} < v#{bin_version}); " <>
+          "restart it (`kazi daemon restart`) or continue without persistence"
+      end)
+
+      true
+    else
+      false
+    end
+  end
+
+  # The daemon's stamped schema version, from the T52.2 `ping` handshake. Injectable
+  # directly (`:daemon_schema_vsn`) for tests, or read via `:ping` (defaults to
+  # `Kazi.Daemon.Probe.ping/1`) against the same `sock_path` the presence probe and
+  # write client dial. A missing/omitted `schema_vsn` is `nil` (write through).
+  defp daemon_schema_vsn(opts) do
+    Keyword.get_lazy(opts, :daemon_schema_vsn, fn ->
+      sock_path = Keyword.get(opts, :sock_path, default_sock_path())
+      ping = Keyword.get(opts, :ping, &Probe.ping/1)
+
+      case ping.(sock_path) do
+        {:ok, %{"schema_vsn" => vsn}} when is_integer(vsn) -> vsn
+        _no_schema_vsn -> nil
+      end
+    end)
+  end
+
+  defp daemon_skew_key, do: {__MODULE__, :daemon_skew}
 end
