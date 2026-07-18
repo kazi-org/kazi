@@ -105,6 +105,30 @@ defmodule Kazi.PredicateVector do
   end
 
   @doc """
+  The number of predicates recorded in the vector — the denominator of the
+  green/total rate the portfolio sitrep renders (E64/T64.3).
+
+      iex> v = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass(), b: Kazi.PredicateResult.fail()})
+      iex> Kazi.PredicateVector.size(v)
+      2
+  """
+  @spec size(t()) :: non_neg_integer()
+  def size(%__MODULE__{results: results}), do: map_size(results)
+
+  @doc """
+  The ids whose result is green (`:pass`) — the numerator of the green/total rate
+  (E64/T64.3). Only genuine passes count; `:fail`/`:error`/`:unknown` do not.
+
+      iex> v = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass(), b: Kazi.PredicateResult.fail()})
+      iex> Kazi.PredicateVector.passing(v)
+      [:a]
+  """
+  @spec passing(t()) :: [Kazi.Predicate.id()]
+  def passing(%__MODULE__{results: results}) do
+    for {id, result} <- results, PredicateResult.passed?(result), do: id
+  end
+
+  @doc """
   Compares a previous vector to a new one and returns the ids that regressed:
   predicates that were `:pass` in `previous` and are no longer `:pass` in
   `current` (concept §5).
