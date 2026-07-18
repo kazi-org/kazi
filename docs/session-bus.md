@@ -70,6 +70,37 @@ and prints the reply. The reply is a single JSON line:
   persistence. The field is **additive** — an older `daemon status` client simply
   ignores it, and a daemon predating it (or one that cannot read the stamp) omits
   it. `kazi daemon status --json` surfaces it verbatim.
+- `bus_vsn` (T58.2, #1227) — the daemon's self-reported BUS control-protocol
+  level, an integer bumped only when a control-socket op is added that an older
+  daemon binary cannot serve at all (the `read`/T55.7 class of change). Unlike
+  `schema_vsn` it is never omitted by an up-to-date daemon: its absence on a real
+  `ping` reply IS the skew signal — it names a daemon compiled before this field
+  existed.
+
+### Read/write version-skew symmetry (T58.2, #1227)
+
+**The bug this closes.** A long-running daemon started under an older kazi kept
+accepting `bus join`/`who`/`tell` from a newer CLI — those publish DIRECTLY to
+NATS and never touch the daemon's Elixir op-dispatch code at all, so an old
+daemon binary cannot break them — while `bus read`/`bus read --peek` (assembled
+server-side via the control socket, T55.7) failed with a bare
+`error: daemon could not read the bus: unknown_op`, because the running daemon
+predated the `read` op and fell through to `Kazi.Daemon.Control`'s catch-all.
+Net effect: writes silently "succeeded" (an ack, a nonzero inbox count on
+`who`) while the recipient could never actually read any of it — a silent
+dead-letter queue with no version information in the error to explain why.
+
+**The fix.** `Kazi.Bus.ProtocolSkew.classify/1` compares a `ping` reply's
+`bus_vsn` against this client's required level, at the SAME connection seam
+every bus verb already passes through: `with_discovered_conn/3` (every write —
+`tell`/`join`/`who`/...) and `read_assembled/1` (the digest read). A skewed or
+pre-T58.2 daemon (missing `bus_vsn` entirely) now fails BOTH paths loud, before
+either op is attempted, with the identical
+`{:error, {:daemon_protocol_skew, daemon_vsn}}` — surfaced by the CLI as
+`daemon is running an older version (<vsn>) that does not speak this CLI's bus
+protocol -- restart it: kazi daemon stop && kazi daemon start`. No more
+asymmetry: a skewed daemon now refuses everything the same way, instead of
+writes going through invisibly while only reads carried a cryptic error.
 
 ## CLI
 

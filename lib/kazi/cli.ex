@@ -5408,6 +5408,18 @@ defmodule Kazi.CLI do
   defp bus_error({:bus_read_failed, reason}, opts),
     do: daemon_error("daemon could not read the bus: #{reason}", opts)
 
+  # T58.2 (#1227): the daemon's `bus_vsn` is older than this CLI requires (or
+  # missing entirely -- a pre-T58.2 daemon). Caught before any op is attempted,
+  # for both reads and writes, instead of writes silently succeeding while
+  # reads fail with an unexplained `unknown_op`.
+  defp bus_error({:daemon_protocol_skew, daemon_vsn}, opts),
+    do:
+      daemon_error(
+        "daemon is running an older version (#{daemon_vsn}) that does not speak this " <>
+          "CLI's bus protocol -- restart it: `kazi daemon stop && kazi daemon start`",
+        opts
+      )
+
   defp bus_error({:text_too_large, cap}, opts),
     do: daemon_error("message exceeds the #{cap}-byte bus cap", opts)
 

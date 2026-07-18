@@ -11,7 +11,18 @@ defmodule Kazi.Daemon.Control do
   to it, but the actual supervision-tree teardown is the listener's job
   (`handle/2` only computes the reply); an unknown op replies
   `{"ok":false,"error":"unknown_op"}`.
+
+  T58.2 (#1227): `ping` also reports `bus_vsn` (`@bus_vsn`, an integer
+  bumped only when a control-socket op is added that an older daemon binary
+  cannot serve at all -- the `read`/T55.7 class of change). This is what
+  `Kazi.Bus.ProtocolSkew` compares client-side, at the SAME connection seam
+  every bus verb already passes through, so an old daemon is caught with a
+  clear "restart the daemon" error BEFORE an op is attempted, instead of
+  reaching the `unknown_op` catch-all below.
   """
+
+  # T58.2: bump together with `Kazi.Bus.ProtocolSkew`'s `@required_bus_vsn`.
+  @bus_vsn 1
 
   @doc """
   Decides the reply for a decoded request. `opts[:started_at]` is the daemon's
@@ -29,6 +40,7 @@ defmodule Kazi.Daemon.Control do
     %{
       "ok" => true,
       "vsn" => vsn(),
+      "bus_vsn" => @bus_vsn,
       "uptime_s" => uptime_s(Keyword.get(opts, :started_at)),
       "pid" => os_pid(),
       "nats_port" => nats_port(nats_name),
