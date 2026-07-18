@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.245.0](https://github.com/kazi-org/kazi/compare/v1.244.0...v1.245.0) (2026-07-18)
+
+
+### Features
+
+* **ci:** scan priv/examples/*.toml comments for removed-verb refs ([#1242](https://github.com/kazi-org/kazi/issues/1242)) ([212931d](https://github.com/kazi-org/kazi/commit/212931d05d04bccc2377dbf931e165bbd6ded2cc))
+
+
+### Bug Fixes
+
+* **examples:** replace removed 'kazi run' with 'kazi apply' ([#1242](https://github.com/kazi-org/kazi/issues/1242)) ([59c2d37](https://github.com/kazi-org/kazi/commit/59c2d37fdabea44592cadcbb083193c58c7215df))
+
 ## [1.244.0](https://github.com/kazi-org/kazi/compare/v1.243.1...v1.244.0) (2026-07-18)
 
 
