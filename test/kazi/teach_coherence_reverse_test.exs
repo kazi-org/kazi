@@ -64,7 +64,9 @@ defmodule Kazi.TeachCoherenceReverseTest do
     "--session-name" =>
       "run-labeling flag; documented in docs/dashboard.md and docs/orchestrator-recipe.md",
     "--no-preflight" =>
-      "base-dispatchability preflight escape (T44.9); an advanced safety flag documented in docs/orchestrator-recipe.md and `kazi help`, not part of the intro recipes"
+      "base-dispatchability preflight escape (T44.9); an advanced safety flag documented in docs/orchestrator-recipe.md and `kazi help`, not part of the intro recipes",
+    "--strict-landing" =>
+      "opt-in exit-code/landing coupling (issue #1407); an advanced CI-gate flag documented in docs/landing.md and docs/schemas/run-result.md, not part of the intro recipes"
   }
 
   describe "every real `apply` flag is documented somewhere (the reverse guard, issue #973)" do
