@@ -104,6 +104,21 @@ defmodule Kazi.Actions.Integrate do
       workspace is never staged, let alone committed. A goal with no declared
       scope paths keeps the prior whole-workspace behavior (backward compatible
       default) — declaring `paths` is how a goal opts into the stricter guard.
+
+      **Shared-workspace guard (T59.8, #937 Gap A4).** The whole-workspace
+      `git add -A` default is only safe for a SOLO goal in its own isolated
+      worktree (the post-ADR-0065 common case). When the SAME working tree is
+      held by ANOTHER live run (a different `goal_ref`, classified live by the
+      SAME fresh-heartbeat rule the T59.7 collision guard trusts,
+      `RunRegistry.list_live/0`), a blind `-A` can absorb the co-tenant's
+      uncommitted files into this goal's commit — the commit-boundary-corruption
+      incident in #937 comment 5. So a goal with no declared `[scope] paths`
+      running in a shared workspace refuses the blind `-A` and downgrades to
+      `git add -u` (tracked modifications only) — the co-tenant's UNTRACKED
+      files are never swept in. To also commit its own NEW (untracked) files in
+      a shared workspace, such a goal must declare `[scope] paths` (which stages
+      exactly those). Registry lookup is best-effort fail-open: if the read
+      model is unavailable the guard falls back to the prior `-A` behavior.
     * **CI wait** — the integrator seam now takes a `:wait_for_checks` option
       (default `true`); the default `GhIntegrator` blocks on `gh pr checks
       --watch` before merging, so a red or still-running check blocks the
@@ -120,6 +135,7 @@ defmodule Kazi.Actions.Integrate do
   alias Kazi.PredicateResult
   alias Kazi.PredicateVector
   alias Kazi.Providers.Landed
+  alias Kazi.ReadModel.RunRegistry
   alias Kazi.Scope
 
   @typedoc """
@@ -279,7 +295,7 @@ defmodule Kazi.Actions.Integrate do
          branch = resolve_branch(action.params),
          message = resolve_message(action.params, branch, base, goal, passed),
          {:ok, _} <- create_branch(workspace, branch),
-         :ok <- stage_all(workspace, resolve_scope(context)),
+         :ok <- stage_all(workspace, resolve_scope(context), context),
          {:ok, commit} <- commit(workspace, message),
          {:ok, _} <- push(workspace, branch),
          {:ok, remote} <-
@@ -502,26 +518,63 @@ defmodule Kazi.Actions.Integrate do
   end
 
   # Scoped staging (issue #819): a goal with no declared `[scope] paths` keeps
-  # the prior whole-workspace `git add -A` (backward compatible default). A
-  # goal that DOES declare `paths` gets the stricter guard: tracked
+  # the prior whole-workspace `git add -A` (backward compatible default) — but
+  # ONLY when the workspace is not shared with another live run (T59.8, #937 Gap
+  # A4). A goal that DOES declare `paths` gets the stricter guard: tracked
   # modifications are staged everywhere (`git add -u`, never introduces a new
   # untracked file), and only the explicitly declared paths are staged for
   # untracked content — an untracked file elsewhere in the workspace is never
   # swept into the commit.
-  defp stage_all(workspace, %Scope{paths: []}) do
-    case git(workspace, ["add", "-A"]) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, {:stage_failed, reason}}
+  defp stage_all(workspace, %Scope{paths: []}, context) do
+    if workspace_shared_by_live_run?(workspace, context) do
+      # Shared workspace, no scope: refuse the blind `-A` that would absorb a
+      # co-tenant run's untracked files (commit-boundary corruption, #937
+      # comment 5). Stage tracked modifications only; the goal must declare
+      # `[scope] paths` to also commit its own new (untracked) files here.
+      stage_tracked_only(workspace)
+    else
+      case git(workspace, ["add", "-A"]) do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, {:stage_failed, reason}}
+      end
     end
   end
 
-  defp stage_all(workspace, %Scope{paths: paths}) do
+  defp stage_all(workspace, %Scope{paths: paths}, _context) do
     with {:ok, _} <- git(workspace, ["add", "-u"]),
          {:ok, _} <- git(workspace, ["add", "--"] ++ paths) do
       :ok
     else
       {:error, reason} -> {:error, {:stage_failed, reason}}
     end
+  end
+
+  defp stage_tracked_only(workspace) do
+    case git(workspace, ["add", "-u"]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:stage_failed, reason}}
+    end
+  end
+
+  # True when the resolved workspace is currently held by a LIVE run for a
+  # DIFFERENT goal (T59.8, #937 Gap A4). Reuses the SAME liveness classification
+  # the T59.7 start-time collision guard trusts (`RunRegistry.list_live/0`:
+  # status "running" AND a fresh heartbeat), so a stale/dead holder never trips
+  # it. This run's own row (matched by run_id) and same-goal rows are skipped.
+  # Best-effort fail-open: any registry error is treated as "not shared", which
+  # restores the prior whole-workspace `-A` behavior.
+  defp workspace_shared_by_live_run?(workspace, context) do
+    run_id = context[:run_id] || ""
+    goal_ref = context[:goal_ref] || goal_ref(context[:goal])
+    resolved = Path.expand(to_string(workspace))
+
+    RunRegistry.list_live()
+    |> Enum.any?(fn run ->
+      run.run_id != run_id and run.goal_ref != goal_ref and
+        run.workspace not in [nil, ""] and Path.expand(run.workspace) == resolved
+    end)
+  rescue
+    _ -> false
   end
 
   defp commit(workspace, message) do
