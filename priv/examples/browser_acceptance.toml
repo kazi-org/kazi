@@ -6,7 +6,7 @@
 # steps, and asserts on the rendered page. "Done" is the conjunction of every
 # assertion holding in a real browser — not an agent's claim that the UI works.
 #
-#     kazi run priv/examples/browser_acceptance.toml --workspace path/to/app
+#     kazi apply priv/examples/browser_acceptance.toml --workspace path/to/app
 #
 # Real use requires the Playwright runtime installed once (alongside this app or
 # in the workspace the runner runs in):

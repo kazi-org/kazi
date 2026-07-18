@@ -25,7 +25,7 @@
 #
 # Run it like the repair example:
 #
-#     kazi run priv/examples/create_feature.toml --workspace <target-repo>
+#     kazi apply priv/examples/create_feature.toml --workspace <target-repo>
 #
 # See Kazi.Goal.Loader for the full schema and Kazi.Predicate for the acceptance
 # marker.

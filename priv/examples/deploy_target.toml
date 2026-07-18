@@ -4,7 +4,7 @@
 # deliberately FAILING test to a live, verified Cloud Run deployment. It is the
 # goal the Slice 0 dogfood (plan task T0.12) loads with:
 #
-#     kazi run priv/examples/deploy_target.toml --workspace fixtures/deploy-target
+#     kazi apply priv/examples/deploy_target.toml --workspace fixtures/deploy-target
 #
 # "Done" is the conjunction of both predicates below: the unit tests pass AND
 # the deployed /healthz endpoint returns the body "ok". The fixture currently
@@ -26,7 +26,7 @@ max_tokens = 500000
 
 [scope]
 # The target workspace is the fixture's standalone Go module. In the dogfood
-# this is passed as `kazi run ... --workspace fixtures/deploy-target`; declared
+# this is passed as `kazi apply ... --workspace fixtures/deploy-target`; declared
 # here so the goal-file is self-describing.
 workspace = "fixtures/deploy-target"
 paths = ["main.go"]
