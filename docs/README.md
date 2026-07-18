@@ -133,15 +133,33 @@ its config at runtime via `kazi schema <kind>`.
   launcher and halts the BEAM if it is killed, so the existing per-dispatch
   watchdog reaps `claude` even when the terminal (not the BEAM) receives the
   signal. `orphans` is the manual sweep for pids that predate that guard.
-- **Portfolio state (`kazi portfolio`)** — T60.4 (#1160): planned / in progress
-  / stuck / complete, composed ONLY from kazi's own objective surfaces
-  (`Kazi.Portfolio`) — proposed goals (`list-proposed`'s own rows), the run
-  registry, the attention queue (ADR-0057), and the cross-machine bus facts
-  T60.1's `Kazi.Runtime.BusMirror` posts. Local runs are grouped by repo
-  (resolved from the workspace's git `origin` remote, same convention as
-  Mission Control's fleet grid); proposals and cross-machine runs are reported
-  fleet-wide since neither carries a workspace to group by. `--json` for the
-  machine surface.
+- **Portfolio sitrep (`kazi portfolio`)** — the answer to "where are we / how is
+  it going?" (E64, #1427; v1 was T60.4/#1160). The output opens with ONE headline
+  line of counts and integer percentages across the five buckets — **done**,
+  **in-progress**, **blocked**, **todo**, **planned** — e.g. `done 62% (13) |
+  in-progress 14% (3) | blocked 10% (2) | todo 10% (2) | planned 5% (1)`. The
+  buckets map to objective sources (ADR-0011), nothing hand-set: **planned** =
+  proposals awaiting approval; **todo** = approved proposals with no registered
+  run yet (ready to dispatch); **in-progress** = registry runs with a fresh
+  heartbeat; **blocked** = runs that are stuck, over budget, or waiting on an
+  unconverged/poisoned roadmap-DAG dependency (`DagSnapshot`'s `:blocked`, the
+  same computation Mission Control's roadmap mode folds); **done** = terminal
+  converged. Percentages use largest-remainder rounding and always sum to 100; an
+  empty portfolio prints `nothing tracked yet`, never a divide-by-zero. Each
+  bucket then renders a bounded summary — its top-3 one-liners plus `+N more` —
+  and **every blocked entry names its blocker** (the persistently-red predicate
+  slice, the iterations/cap, or the dep id). Pass `--full` to restore the
+  complete per-bucket ledger. "How is it going" is answered as honest **rate**
+  data — predicates green/total and red→green movement over recent iterations
+  (in-progress entries append e.g. `preds 5/8, +2 this run`, plus a fleet-wide
+  rate line) — and is **NEVER a projected date or ETA** (ADR-0046): kazi reports
+  what it objectively knows, and a schedule is not one of those things. Composed
+  ONLY from kazi's own surfaces (`Kazi.Portfolio`) — proposals, the run registry,
+  the attention queue (ADR-0057), the roadmap DAG, and the cross-machine bus facts
+  T60.1's `Kazi.Runtime.BusMirror` posts; local runs are grouped by repo,
+  proposals and cross-machine runs reported fleet-wide. `--json` gains `totals`,
+  `todo`, `blocked` (with causes), and `rate` additively next to the v1 keys;
+  `schema_version` stays 2, so v1 consumers are byte-unaffected.
 - **[`--json` signals → skill-side escalation](tiering-signals.md)** — how the
   structured output triggers adaptive model tiering.
 - **[Deprecations & removal schedule](deprecations.md)** — removed verbs and the
