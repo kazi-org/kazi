@@ -274,6 +274,8 @@ defmodule KaziWeb.MissionControlLive do
         |> assign(:roadmap?, true)
         |> assign(:waves, waves)
         |> assign(:cards, [])
+        |> assign(:card_groups, [])
+        |> assign(:multi_project?, false)
         |> assign(:older_count, 0)
         |> assign(:instance_count, length(cards))
         |> assign(:filters_hide_runs?, false)
@@ -295,11 +297,14 @@ defmodule KaziWeb.MissionControlLive do
         remote = remote_cards(all_runs)
         cards = Enum.map(shown, &card_from_run/1) ++ remote
         visible = state_filtered(cards, socket.assigns.state_filter)
+        groups = group_cards_by_project(visible)
 
         socket
         |> assign(:roadmap?, false)
         |> assign(:waves, [])
         |> assign(:cards, visible)
+        |> assign(:card_groups, groups)
+        |> assign(:multi_project?, length(groups) > 1)
         |> assign(:older_count, length(older))
         |> assign(:instance_count, length(filtered) + length(remote))
         |> assign(:filters_hide_runs?, deduped != [] and remote == [] and visible == [])
@@ -411,6 +416,7 @@ defmodule KaziWeb.MissionControlLive do
       project: nil,
       age: nil,
       last_active: nil,
+      rel: nil,
       iter: "—",
       preds: [],
       dna_overflow: 0,
@@ -472,6 +478,21 @@ defmodule KaziWeb.MissionControlLive do
       last = run.heartbeat_at || run.started_at
       is_struct(last, DateTime) and DateTime.compare(last, cutoff) != :lt
     end)
+  end
+
+  # Direction B (T63.6): the flat grid groups by project ("org/repo") under ruled
+  # headers. Groups preserve the cards' heartbeat-desc order and appear in order
+  # of first appearance, so the newest run's project leads. A card with no
+  # project (a remote card) folds under a stable "—" bucket. The caller drops the
+  # per-group header when there is only one group (a single-project fleet needs
+  # no redundant header).
+  defp group_cards_by_project(cards) do
+    cards
+    |> Enum.group_by(&(&1.project || "—"))
+    |> Enum.sort_by(fn {project, _group_cards} ->
+      {Enum.find_index(cards, &((&1.project || "—") == project)), project}
+    end)
+    |> Enum.map(fn {project, group_cards} -> %{project: project, cards: group_cards} end)
   end
 
   defp state_filtered(cards, nil), do: cards
@@ -610,6 +631,7 @@ defmodule KaziWeb.MissionControlLive do
       project: project_label(run),
       age: rel_time(run.started_at),
       last_active: rel_time(run.heartbeat_at),
+      rel: rel_time(run.heartbeat_at) || rel_time(run.started_at),
       iter: iter_label(iterations),
       preds: dna_squares(iterations),
       dna_overflow: dna_overflow(iterations),
@@ -639,6 +661,7 @@ defmodule KaziWeb.MissionControlLive do
       project: nil,
       age: nil,
       last_active: nil,
+      rel: nil,
       iter: "—",
       preds: [],
       dna_overflow: 0,
@@ -983,26 +1006,6 @@ defmodule KaziWeb.MissionControlLive do
         <header class="topbar">
           <div class="wordmark display-heading">KAZI<span class="wm2">FLEET</span></div>
 
-          <div id="mc-fleet-chips" class="chips" data-state-filter={@state_filter}>
-            <button
-              :for={
-                {key, dot, count, label} <- [
-                  {:running, "dg", @counts.running, "RUNNING"},
-                  {:converged, "dgg", @counts.converged, "CONVERGED"},
-                  {:stuck, "dr", @counts.stuck, "STUCK"},
-                  {:over_budget, "da", @counts.over_budget, "OVER-BUDGET"}
-                ]
-              }
-              type="button"
-              class={"chip" <> if(@state_filter == key, do: " on", else: "")}
-              data-count={key}
-              phx-click="toggle_state_filter"
-              phx-value-state={key}
-            >
-              <span class={"dot " <> dot}></span>{count} {label}
-            </button>
-          </div>
-
           <div class="clockwrap">
             <span class="live"><span class="livedot"></span>LIVE</span>
             <span id="mc-clock" class="clock">{@clock} UTC</span>
@@ -1041,49 +1044,67 @@ defmodule KaziWeb.MissionControlLive do
             <span class="seclabel section-label">
               FLEET · {@instance_count} {scope_word(@session_scope)}
             </span>
-            <div id="mc-scope" class="scopetoggle" data-scope={@session_scope}>
-              <button
-                :for={
-                  {scope, label, count} <- [
-                    {:current, "CURRENT", @scope_counts.current},
-                    {:closed, "CLOSED", @scope_counts.closed}
-                  ]
-                }
-                type="button"
-                class={"scopebtn" <> if(@session_scope == scope, do: " on", else: "")}
-                data-scope-option={scope}
-                phx-click="set_session_scope"
-                phx-value-scope={scope}
-              >
-                {label} · {count}
-              </button>
+
+            <div class="fleetcontrols">
+              <div id="mc-fleet-chips" class="segmented" data-state-filter={@state_filter}>
+                <button
+                  :for={
+                    {key, dot, count, label} <- [
+                      {:running, "dg", @counts.running, "RUNNING"},
+                      {:converged, "dgg", @counts.converged, "CONVERGED"},
+                      {:stuck, "dr", @counts.stuck, "STUCK"},
+                      {:over_budget, "da", @counts.over_budget, "OVER-BUDGET"}
+                    ]
+                  }
+                  type="button"
+                  class={"seg" <> if(@state_filter == key, do: " on", else: "")}
+                  data-count={key}
+                  phx-click="toggle_state_filter"
+                  phx-value-state={key}
+                >
+                  <span class={"dot " <> dot}></span>{count} {label}
+                </button>
+              </div>
+
+              <div id="mc-scope" class="segmented scopetoggle" data-scope={@session_scope}>
+                <button
+                  :for={
+                    {scope, label, count} <- [
+                      {:current, "CURRENT", @scope_counts.current},
+                      {:closed, "CLOSED", @scope_counts.closed}
+                    ]
+                  }
+                  type="button"
+                  class={"seg" <> if(@session_scope == scope, do: " on", else: "")}
+                  data-scope-option={scope}
+                  phx-click="set_session_scope"
+                  phx-value-scope={scope}
+                >
+                  {label} · {count}
+                </button>
+              </div>
+
+              <form id="mc-filters" class="filterrow" phx-change="set_filters">
+                <select name="repo" class="filtersel" data-filter="repo">
+                  <option value="" selected={is_nil(@repo_filter)}>ALL REPOS</option>
+                  <option :for={repo <- @repos} value={repo} selected={@repo_filter == repo}>
+                    {repo}
+                  </option>
+                </select>
+                <select name="window" class="filtersel" data-filter="window">
+                  <option value="" selected={is_nil(@time_window)}>ALL TIME</option>
+                  <option
+                    :for={label <- ["1h", "6h", "24h", "7d", "30d"]}
+                    value={label}
+                    selected={time_window_label(@time_window) == label}
+                  >
+                    LAST {label}
+                  </option>
+                </select>
+                <span id="mc-filters-busy" class="mc-busy-indicator" aria-hidden="true"></span>
+              </form>
             </div>
           </div>
-
-          <form
-            :if={not @roadmap?}
-            id="mc-filters"
-            class="filterrow"
-            phx-change="set_filters"
-          >
-            <select name="repo" class="filtersel" data-filter="repo">
-              <option value="" selected={is_nil(@repo_filter)}>ALL REPOS</option>
-              <option :for={repo <- @repos} value={repo} selected={@repo_filter == repo}>
-                {repo}
-              </option>
-            </select>
-            <select name="window" class="filtersel" data-filter="window">
-              <option value="" selected={is_nil(@time_window)}>ALL TIME</option>
-              <option
-                :for={label <- ["1h", "6h", "24h", "7d", "30d"]}
-                value={label}
-                selected={time_window_label(@time_window) == label}
-              >
-                LAST {label}
-              </option>
-            </select>
-            <span id="mc-filters-busy" class="mc-busy-indicator" aria-hidden="true"></span>
-          </form>
 
           <p
             :if={not @roadmap? and @cards == [] and @filters_hide_runs?}
@@ -1101,8 +1122,26 @@ defmodule KaziWeb.MissionControlLive do
             {empty_message(@session_scope, @scope_counts)}
           </p>
 
-          <div :if={not @roadmap? and @cards != []} class="grid">
-            <.fleet_card :for={g <- @cards} card={g} />
+          <%!-- Direction B (T63.6): the flat grid groups by project under ruled
+          headers. A single-project fleet drops the header (it would be
+          redundant) and renders one bare grid. --%>
+          <div :if={not @roadmap? and @card_groups != []} id="mc-fleet-groups">
+            <div
+              :for={group <- @card_groups}
+              class="projgroup"
+              data-project-group={group.project}
+            >
+              <div
+                :if={@multi_project?}
+                class="projgroup-head section-label"
+                data-project-group-head={group.project}
+              >
+                {group.project}
+              </div>
+              <div class="grid">
+                <.fleet_card :for={g <- group.cards} card={g} />
+              </div>
+            </div>
           </div>
 
           <div :for={wave <- @waves} class="wave" data-frontier={wave.frontier}>
@@ -1188,10 +1227,6 @@ defmodule KaziWeb.MissionControlLive do
         .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
         .wordmark { font-size: 18px; letter-spacing: .22em; color: #EAF3FC; }
         .wordmark .wm2 { color: var(--cyn); margin-left: 8px; font-weight: 500; }
-        .chips { display: flex; gap: 10px; flex-wrap: wrap; }
-        .chip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; border-radius: 3px; font-size: 11px; letter-spacing: .08em; color: var(--txt); font: inherit; font-size: 11px; cursor: pointer; }
-        .chip:hover { border-color: var(--dim); }
-        .chip.on { color: var(--cyn); border-color: rgba(83,214,255,.55); background: rgba(83,214,255,.08); }
         .dot { width: 7px; height: 7px; border-radius: 50%; }
         .dot.dg { background: var(--cyn); box-shadow: 0 0 8px var(--cyn); }
         .dot.dgg { background: var(--grn); box-shadow: 0 0 8px var(--grn); }
@@ -1204,12 +1239,18 @@ defmodule KaziWeb.MissionControlLive do
 
         .seclabel { margin: 20px 0 10px; }
         .attnaffordance { color: var(--dim); font-size: 10px; letter-spacing: .04em; margin: -6px 0 8px; }
-        .fleethead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-        .scopetoggle { display: flex; gap: 6px; }
-        .scopebtn { background: transparent; border: 1px solid var(--line); color: var(--dim); font: inherit; font-size: 9px; letter-spacing: .18em; padding: 5px 10px; border-radius: 3px; cursor: pointer; }
-        .scopebtn:hover { color: var(--txt); border-color: var(--dim); }
-        .scopebtn.on { color: var(--cyn); border-color: rgba(83,214,255,.55); background: rgba(83,214,255,.08); }
-        .filterrow { display: flex; gap: 8px; margin: 10px 0 4px; }
+        .fleethead { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
+        /* Direction B (T63.6): state / scope / repo / time controls fold into the
+           FLEET header as one right-aligned cluster of segmented controls. */
+        .fleetcontrols { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+        .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--panel); }
+        .segmented .seg { display: flex; align-items: center; gap: 7px; background: transparent; border: 0; border-right: 1px solid var(--line); color: var(--txt); font: inherit; font-size: 10px; letter-spacing: .1em; padding: 6px 11px; cursor: pointer; }
+        .segmented .seg:last-child { border-right: 0; }
+        .segmented .seg:hover { background: rgba(255,255,255,.03); }
+        .segmented .seg.on { color: var(--cyn); background: rgba(83,214,255,.1); }
+        .scopetoggle .seg { font-size: 9px; letter-spacing: .16em; color: var(--dim); }
+        .scopetoggle .seg.on { color: var(--cyn); }
+        .filterrow { display: flex; align-items: center; gap: 8px; margin: 0; }
         .filtersel { background: var(--panel); border: 1px solid var(--line); color: var(--txt); font: inherit; font-size: 10px; letter-spacing: .12em; padding: 5px 8px; border-radius: 3px; cursor: pointer; }
         .filtersel:hover { border-color: var(--dim); }
         .mc-busy-indicator { display: none; width: 12px; height: 12px; align-self: center; border: 2px solid var(--line); border-top-color: var(--cyn); border-radius: 50%; animation: mc-spin .6s linear infinite; }
@@ -1253,12 +1294,18 @@ defmodule KaziWeb.MissionControlLive do
         .st-claimed { color: var(--cyn); border: 1px dashed rgba(83,214,255,.5); }
         .st-pending { color: var(--dim); border: 1px solid var(--line); }
         .st-todo { color: var(--dim); border: 1px dashed var(--line); }
+        /* Direction B (T63.6): the flat grid groups by project under a ruled
+           header; the header carries the org/repo the card badge used to. */
+        .projgroup + .projgroup { margin-top: 6px; }
+        .projgroup-head { display: flex; align-items: center; gap: 12px; color: var(--cyn); opacity: .85; letter-spacing: .2em; margin: 18px 0 10px; overflow-wrap: anywhere; }
+        .projgroup-head::after { content: ""; flex: 1; height: 1px; background: var(--line); }
         .gmeta2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .csub { color: var(--dim); font-size: 11px; }
         .ws { color: var(--dim); font-size: 11px; }
         .hbadge { font-size: 10px; color: var(--txt); border: 1px solid var(--line); background: var(--panel2); padding: 3px 8px; border-radius: 2px; }
-        .projbadge { font-size: 10px; color: var(--cyn); border: 1px solid rgba(83,214,255,.35); background: var(--panel2); padding: 3px 8px; border-radius: 2px; overflow-wrap: anywhere; }
-        .agerow { display: flex; gap: 14px; font-size: 10px; color: var(--dim); letter-spacing: .08em; }
+        /* Direction B (T63.6): one right-aligned relative timestamp per card
+           (last heartbeat, falling back to run start) replaces the AGE/ACTIVE row. */
+        .cardtime { margin-left: auto; font-size: 10px; color: var(--dim); letter-spacing: .08em; }
         .iter { font-size: 10px; color: var(--dim); letter-spacing: .08em; }
         .dnarow { display: flex; gap: 4px; padding: 2px 0; flex-wrap: wrap; align-items: center; }
         .dna { width: 14px; height: 14px; border-radius: 2px; background: #1A2433; }
@@ -1334,19 +1381,10 @@ defmodule KaziWeb.MissionControlLive do
       </div>
 
       <div class="gmeta2">
-        <span :if={@card.project} class="projbadge" data-project={@card.project}>
-          {@card.project}
-        </span>
         <span class="hbadge">{@card.harness}</span>
         <span :if={@card.ws} class="ws">{@card.ws}</span>
         <span class="iter">ITER {@card.iter}</span>
-      </div>
-
-      <div :if={@card.age || @card.last_active} class="agerow">
-        <span :if={@card.age} class="age" data-age={@card.age}>AGE {@card.age}</span>
-        <span :if={@card.last_active} class="lastactive" data-last-active={@card.last_active}>
-          ACTIVE {@card.last_active} ago
-        </span>
+        <span :if={@card.rel} class="cardtime" data-rel={@card.rel}>{@card.rel} ago</span>
       </div>
 
       <div class="dnarow">
