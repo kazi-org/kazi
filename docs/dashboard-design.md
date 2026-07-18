@@ -46,18 +46,11 @@ column with a soft cyan radial glow at the top; `.inner` is `max-width: 1440px`,
 centered, `padding: 0 28px`. Three stacked regions plus a pinned footer:
 
 - **Topbar** (`.topbar`, bottom hairline): wordmark `KAZI` (bright) + `FLEET`
-  (cyan, weight 500) on the left; the **fleet-count chips** centered
-  (`RUNNING` cyan dot, `CONVERGED` green dot, `STUCK` red dot, `OVER-BUDGET`
-  amber dot — each a `.chip` with a glowing `.dot`); a `LIVE` badge (pulsing
-  green `.livedot`) + a `HH:MM:SS UTC` clock on the right. The counts sum to the
-  shown fleet cards (`OVER-BUDGET` is split out of `STUCK`, never double-counted).
-  The clock reflects the server time as of the last poll tick (a glance, not a
-  wall clock — no per-second client JS, keeping the page build-free and tests
-  hermetic). Each chip is a **toggle button**: clicking it filters the flat
-  FLEET grid to that state (`.chip.on` highlights the active filter); clicking
-  the same chip again clears the filter. Chip counts are computed after the
-  repo/time filters but before the state filter, so the numbers always describe
-  the set the chips slice.
+  (cyan, weight 500) on the left; a `LIVE` badge (pulsing green `.livedot`) + a
+  `HH:MM:SS UTC` clock on the right. The clock reflects the server time as of the
+  last poll tick (a glance, not a wall clock — no per-second client JS, keeping
+  the page build-free and tests hermetic). The fleet-count / state filters no
+  longer live here — direction B (T63.6) folds them into the FLEET header (below).
 
 - **NEEDS ATTENTION** (`#mc-attention`, rendered only when the queue is
   non-empty): a `.section-label` + a 3-column grid (`.attnrow`) of **alert
@@ -70,20 +63,31 @@ centered, `padding: 0 28px`. Three stacked regions plus a pinned footer:
   `Kazi.Attention.Queue` (one entry per goal+signal).
 
 - **FLEET** (`#mc-fleet`): a `.fleethead` row — a `FLEET · N LIVE|CLOSED` label
-  plus a **CURRENT/CLOSED scope toggle** (`#mc-scope`, `.scopebtn` pills showing
-  `CURRENT · n` / `CLOSED · m`) — then a 3-column `.grid` of **goal cards**, one
-  per goal (its latest run), newest first. CURRENT (default) shows live-session
-  runs; CLOSED shows dead history (converged / stuck / crashed-stale). An empty
-  CURRENT grid with closed history points at the CLOSED toggle rather than
-  implying nothing ran (`#mission-control-empty`). Overflow past the card cap
-  folds into a `+N more on the goal board →` link (`#mc-older`, → `/goals`). The
-  chips and NEEDS ATTENTION alerts honor the same scope; roadmap wave mode
-  ignores it (durable-plan state across all runs). Below the fleethead, a
-  **filter row** (`#mc-filters`, flat mode only): a repo dropdown (project =
-  `org/repo`, default `ALL REPOS`) and a time-window dropdown (`ALL TIME` /
-  `LAST 1h · 6h · 24h · 7d · 30d`, filtering by last-active). Filters that hide
-  every run render `#mission-control-filtered-empty` (an honest "clear the
-  filters" message) rather than the no-runs empty state.
+  on the left and, folded into the header on the right (direction B, T63.6), a
+  `.fleetcontrols` cluster of **segmented controls**: the **state filter**
+  (`#mc-fleet-chips`, a `.segmented` group of `.seg` buttons — `RUNNING` cyan dot,
+  `CONVERGED` green dot, `STUCK` red dot, `OVER-BUDGET` amber dot; each a toggle
+  that filters the grid to that state, `.seg.on` highlights the active one,
+  clicking again clears it; counts sum to the shown cards, `OVER-BUDGET` split
+  out of `STUCK`, computed after the repo/time filters but before the state
+  filter), the **CURRENT/CLOSED scope toggle** (`#mc-scope`, a `.segmented
+  .scopetoggle` of `CURRENT · n` / `CLOSED · m`), and the **repo/time filter
+  form** (`#mc-filters`: a repo dropdown, project = `org/repo`, default
+  `ALL REPOS`, and a time-window dropdown `ALL TIME` / `LAST 1h · 6h · 24h · 7d ·
+  30d`, filtering by last-active; a `#mc-filters-busy` spinner shows while a
+  change is in flight). Below the header the flat grid **groups by project**
+  under ruled headers (`.projgroup` / `.projgroup-head`, `data-project-group`):
+  one `.grid` per `org/repo`, newest run's project first. A single-project fleet
+  drops the redundant header and renders one bare grid. Cards are one per goal
+  (its latest run), newest first. CURRENT (default) shows live-session runs;
+  CLOSED shows dead history (converged / stuck / crashed-stale). An empty CURRENT
+  grid with closed history points at the CLOSED toggle rather than implying
+  nothing ran (`#mission-control-empty`). Overflow past the card cap folds into a
+  `+N more on the goal board →` link (`#mc-older`, → `/goals`). The state filter
+  and NEEDS ATTENTION alerts honor the same scope; roadmap wave mode ignores it
+  (durable-plan state across all runs). Filters that hide every run render
+  `#mission-control-filtered-empty` (an honest "clear the filters" message)
+  rather than the no-runs empty state.
 
 - **EVENT RIVER** (`.river` footer, top hairline): a `.section-label` + a
   masked marquee ticker (`.ticker`, 48s linear scroll, span duplicated for a
@@ -100,13 +104,12 @@ Each run-backed card (`.card`, a link to `/goals/:ref/drillin`) stacks:
   `STUCK` (`.st-bad` red) / `STALE` (`.st-warn` amber) / `OVER-BUDGET`
   (`.st-bad`, its own label). Card frame mirrors state: `.c-run` quiet cyan,
   `.c-ok` green glow, `.c-bad` red alarm glow (pulses), `.c-warn` amber.
-- **Meta** (`.gmeta2`): a **project badge** (`.projbadge`, cyan — `org/repo`
-  resolved from the workspace's git `origin` remote, falling back to the last
-  two workspace path segments when the worktree is gone or has no remote), a
-  harness badge (`.hbadge`, `harness · model`), the workspace basename (`.ws`),
-  and `ITER n`.
-- **Age row** (`.agerow`): `AGE 3d` (since `started_at`) and `ACTIVE 5m ago`
-  (since the last heartbeat), so stale vs current reads at a glance.
+- **Meta** (`.gmeta2`): a harness badge (`.hbadge`, `harness · model`), the
+  workspace basename (`.ws`), `ITER n`, and a single right-aligned relative
+  timestamp (`.cardtime`, `5m ago` — the last heartbeat, falling back to the run
+  start). Direction B (T63.6) removed the per-card project badge — the `org/repo`
+  provenance now lives in the grid's ruled project-group header — and collapsed
+  the two-value AGE/ACTIVE row into this one timestamp.
 - **Predicate DNA** (`.dnarow`): one 14px square per predicate in the LATEST
   iteration's vector — `.dna.dg` green (pass), `.dna.dr` red (fail/error),
   `.dna.dx` dark (not-evaluated). A large set folds a trailing `+N`.
