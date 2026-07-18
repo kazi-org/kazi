@@ -42,6 +42,18 @@ defmodule Kazi.Authoring.Clarify do
       only be computed AFTER a draft exists (predicates are the harness's
       choice, not the idea's), so it never participates in the pre-draft
       `--strict` refusal and never blocks drafting or persisting.
+    * `tree-clean-predicate` -- ADVISORY (issue #937 Gap E, T59.10): when the
+      draft carries a `custom_script` predicate whose command asserts the WHOLE
+      working tree is clean (`test -z "$(git status --porcelain)"` and
+      equivalents) with NO pathspec scoping it to the goal's own files. Under
+      multi-goal-same-workspace scheduling a sibling goal committing in the same
+      tree flips such a predicate to a false-negative verdict (the exact shape
+      #937 comment 2 hit). T54.1 fixed kazi's built-in serial landing gate, but a
+      hand-written whole-tree-cleanliness acceptance predicate is still
+      structurally unsafe. WARN only, like `naked-grep-predicate`: draft-derived,
+      so it never participates in the pre-draft `--strict` refusal and never
+      blocks drafting or persisting. A path-scoped form
+      (`git status --porcelain -- lib/foo`) is safe and never flagged.
     * `landing` -- T44.12 (ADR-0055): when the draft carries CODE predicates but
       no `integration` block. "Landing is part of convergence": without one the
       goal converges and stops, leaving the change on a branch nobody asked for.
@@ -86,6 +98,7 @@ defmodule Kazi.Authoring.Clarify do
       scope_question(idea),
       http_status_question(idea),
       naked_grep_question(draft),
+      tree_clean_question(draft),
       landing_question(draft)
     ]
     |> Enum.reject(&is_nil/1)
@@ -526,6 +539,34 @@ defmodule Kazi.Authoring.Clarify do
     end
   end
 
+  # When the draft carries a custom_script predicate that asserts the WHOLE
+  # working tree is clean (unscoped `git status --porcelain` and equivalents),
+  # warn (issue #937 Gap E). Advisory only -- see the tree-clean-predicate floor
+  # entry in the moduledoc.
+  defp tree_clean_question(draft) do
+    commands = custom_script_commands(draft)
+
+    if Enum.any?(commands, &whole_tree_clean_command?/1) do
+      Question.new(
+        "tree-clean-predicate",
+        "One of this goal's custom_script predicates asserts the WHOLE working " <>
+          "tree is clean (e.g. `test -z \"$(git status --porcelain)\"`). Under " <>
+          "shared-workspace scheduling -- several goals reconciling in one " <>
+          "checkout -- a SIBLING goal committing in the same tree flips this " <>
+          "predicate to a false-negative verdict, even though your goal is done. " <>
+          "Scope the check to your goal's own paths (e.g. " <>
+          "`git status --porcelain -- lib/foo`), or rely on kazi's identity-based " <>
+          "landing gate (T54.1) rather than a hand-written whole-tree check.",
+        options: [
+          Option.new("Scope the check to the goal's own paths", "scope_paths"),
+          Option.new("Rely on kazi's identity-based landing", "kazi_landing"),
+          Option.new("Leave as-is -- accept the risk", "accept_risk")
+        ],
+        recommended: "scope_paths"
+      )
+    end
+  end
+
   # --- signal detectors (pure) -----------------------------------------------
 
   defp live_target_present?(idea) do
@@ -660,5 +701,28 @@ defmodule Kazi.Authoring.Clarify do
   defp negated_grep?(text) do
     String.starts_with?(text, "!") or
       text |> String.split() |> Enum.any?(&(&1 =~ @grep_negation_flag_re))
+  end
+
+  # --- whole-tree-clean-predicate signal (issue #937 Gap E, T59.10) ------------
+
+  # A whole-tree cleanliness assertion: `git status` with a porcelain/short
+  # format (`--porcelain`, `--short`, `-s`), or `git diff` with `--quiet`/
+  # `--exit-code`. `[^|&;\n]*` keeps the match within the single git invocation so
+  # an unrelated later pipeline stage is not swept in.
+  @git_tree_clean_re ~r/git\s+(status\b[^|&;\n]*(--porcelain|--short|(?<![\w-])-s(?![\w]))|diff\b[^|&;\n]*(--quiet|--exit-code))/
+
+  # A command asserting the WHOLE tree is clean is flagged only when it is NOT
+  # scoped to a pathspec. Scoping makes the check safe under shared-workspace
+  # scheduling, so a scoped form never triggers the advisory.
+  defp whole_tree_clean_command?(text) do
+    text =~ @git_tree_clean_re and not tree_scan_path_scoped?(text)
+  end
+
+  # A git pathspec scopes the cleanliness check to specific files: either an
+  # explicit `-- <path>` separator, or a path-like token (containing a `/`)
+  # trailing the porcelain/short flag.
+  defp tree_scan_path_scoped?(text) do
+    text =~ ~r/\s--\s+[\w.\/*@-]+/ or
+      text =~ ~r/(--porcelain|--short|--quiet|--exit-code)\s+[\w.\/*@-]*\/[\w.\/*@-]*/
   end
 end
