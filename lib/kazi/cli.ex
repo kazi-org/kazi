@@ -1968,11 +1968,16 @@ defmodule Kazi.CLI do
     """
     kazi bus name <nickname> [--json]
 
-    Assign a durable, addressable name to this session (T55.5, ADR-0073):
-    carried on presence across every later bus call, rendered by `bus who`,
-    and accepted by `bus tell <nickname>`. Re-asserting a name RE-BINDS it
-    to the current session, so a relaunched worker that runs `bus name
-    <role>` again becomes addressable under that role immediately.
+    Bind a durable, addressable name to this session's UUID (T55.5, ADR-0073;
+    durable bindings T65.2, #1430): carried on presence across every later bus
+    call, rendered by `bus who`, accepted by `bus tell <nickname>`, and stored
+    in a TTL-less KV bucket so the binding SURVIVES a daemon restart (names no
+    longer drop back to raw UUIDs on a bounce).
+
+    Identity is the UUID; the name is a unique label bound to it. A rename
+    updates the one presence row (never a second). Binding a name already held
+    by a DIFFERENT session is a hard error naming the holder -- names are never
+    silently stolen; re-binding your OWN name is idempotent.
 
     A nickname cannot be empty, contain whitespace, start with `@` (reserved
     for teams), or equal a different live session's id.
@@ -5869,6 +5874,15 @@ defmodule Kazi.CLI do
 
   defp bus_error({:invalid_nickname, nickname, why}, opts),
     do: daemon_error("invalid nickname #{inspect(nickname)} -- #{why}", opts)
+
+  # T65.2 (#1430): a name is a unique label bound to one session UUID. Binding
+  # one already held by another session names the holder rather than stealing it.
+  defp bus_error({:name_taken, nickname, holder}, opts),
+    do:
+      daemon_error(
+        "name #{inspect(nickname)} is already bound to session #{holder} -- pick another name",
+        opts
+      )
 
   # T55.12: `bus status` on an id the stream cannot produce. Both causes are
   # named because they call for opposite reactions -- a typo is the sender's to
