@@ -262,7 +262,7 @@ defmodule Kazi.CLI do
     parallel:
       "`apply` only: drive the PARALLEL scheduler over the partitioned goal-set instead of the serial loop; under --json emits the collective result. An optional `--parallel N` records a concurrency hint.",
     explain:
-      "`apply` only: PRINT the computed wave schedule (the topological `needs`-DAG frontiers + the blast-radius parallelism within each) and EXIT 0 WITHOUT EXECUTING — dispatches nothing, so over-constraint is visible before a run. Under --json emits the schedule as JSON. Alias of --dry-run.",
+      "`apply` only: PRINT the computed wave schedule (the topological `needs`-DAG frontiers + the blast-radius parallelism within each) and EXIT 0 WITHOUT EXECUTING — dispatches nothing, so over-constraint is visible before a run. Also reports the per-partition worktree isolation plan (T59.9, #937): each partition's own git worktree, never the --workspace root, so isolation is inspectable up front. Under --json emits the schedule as JSON. Alias of --dry-run.",
     dry_run:
       "`apply` only: alias of --explain — print the computed schedule and exit 0 without dispatching anything.",
     fleet:
@@ -800,7 +800,11 @@ defmodule Kazi.CLI do
                              them and dispatches NOTHING — so over-constraint (too
                              many `needs` edges serializing everything) is VISIBLE
                              before a run. A goal with NO `needs` shows ONE frontier
-                             (everything parallel); a chain shows N frontiers. Pure
+                             (everything parallel); a chain shows N frontiers. It
+                             also reports the per-partition worktree ISOLATION plan
+                             (T59.9, #937): each partition's own git worktree, under
+                             the managed base dir, NEVER the --workspace root — so a
+                             caller can CONFIRM isolation before a long grind. Pure
                              planning: no reconciler/harness/lease is touched. Under
                              --json the schedule is emitted as a JSON object;
                              NON-INTERACTIVE. `--dry-run` is an alias of `--explain`.
@@ -3576,6 +3580,7 @@ defmodule Kazi.CLI do
         &merge_parallel_run_opts(&1, opts, persist?)
       )
       |> maybe_put_default_lease()
+      |> maybe_put_default_worktree(workspace, opts)
       |> maybe_put_frontier_stream(opts)
       |> maybe_put_pause_resume(opts)
 
@@ -3648,6 +3653,59 @@ defmodule Kazi.CLI do
         lease_table: Kazi.Coordination.LeaseTable
       )
     end
+  end
+
+  # T59.9 (#937 Gap F): DEFAULT per-partition worktree isolation on the parallel
+  # path, mirroring the serial path (`run_goal_serial_in_worktree`). Without this
+  # the flat/group scheduler handed EVERY partition the SAME `--workspace` root
+  # (compose_reconciler skips the worktree layer when no `:worktree` opts are
+  # given), so N group reconcilers edited one cwd concurrently — the exact
+  # 9-10-agents-share-one-cwd symptom #937 comment 3 observed. Each partition now
+  # gets its own git worktree off the workspace base (`repo: workspace`), created
+  # from `--base` when set (else HEAD, with the staleness warning). The DIRs live
+  # under the managed base dir, never the workspace root.
+  #
+  # Skipped when the caller already injected `:worktree` (an explicit fixture base
+  # dir) or a `:reconciler`/`:group_reconciler` stub (hermetic boundary tests that
+  # drive a chosen status against a non-git tmp workspace and must NOT touch git),
+  # mirroring `maybe_put_default_lease/1`. Also skipped when the workspace is NOT a
+  # git work-tree: isolation is a `git worktree add`, so there is nothing to branch
+  # from — an executing real `apply` runs against a git repo (the primary-worktree
+  # guard + integration already require it), while a bare-directory boundary run
+  # keeps its pre-T59.9 in-workspace behavior instead of failing worktree creation.
+  defp maybe_put_default_worktree(scheduler_opts, workspace, opts) do
+    cond do
+      Keyword.has_key?(scheduler_opts, :worktree) -> scheduler_opts
+      Keyword.has_key?(scheduler_opts, :reconciler) -> scheduler_opts
+      Keyword.has_key?(scheduler_opts, :group_reconciler) -> scheduler_opts
+      not git_worktree_root?(workspace) -> scheduler_opts
+      true -> Keyword.put(scheduler_opts, :worktree, default_worktree_opts(workspace, opts))
+    end
+  end
+
+  # Is `workspace` a git work-tree ROOT (the repo's toplevel — primary or linked)?
+  # A real `kazi apply` runs against the repo root, so `git worktree add` yields a
+  # faithful checkout; a workspace that is merely a SUBDIR of some repo (e.g. a
+  # test tmp dir under this checkout) is NOT a valid isolation base — isolating it
+  # would branch the enclosing repo, not the workspace — so it keeps the pre-T59.9
+  # in-workspace behavior. A pure local read; false for a bare/non-string dir.
+  defp git_worktree_root?(workspace) when is_binary(workspace) do
+    case System.cmd("git", ["-C", workspace, "rev-parse", "--show-toplevel"],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} -> Path.expand(String.trim(out)) == Path.expand(workspace)
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp git_worktree_root?(_workspace), do: false
+
+  # The default worktree opts the parallel path isolates each partition with:
+  # `repo` is the workspace, `base_ref` is the explicit `--base` (nil ⇒ HEAD).
+  defp default_worktree_opts(workspace, opts) do
+    [repo: workspace] |> maybe_put(:base_ref, opts[:base])
   end
 
   # issue #936: wire the DepScheduler's `:on_frontier_complete` seam to the same
@@ -8673,8 +8731,8 @@ defmodule Kazi.CLI do
 
     schedule = explain_frontiers(goal, frontiers, workspace, partition_opts)
 
-    emit(json?, explain_json(goal, schedule), fn ->
-      explain_human(goal, schedule)
+    emit(json?, explain_json(goal, schedule, workspace), fn ->
+      explain_human(goal, schedule, workspace)
     end)
 
     0
@@ -8733,9 +8791,14 @@ defmodule Kazi.CLI do
   # its groups and — within the frontier — the blast-radius partitions (the
   # parallelism). A single frontier means everything is parallel; N frontiers means
   # the DAG serializes into N waves (over-constraint made visible).
-  defp explain_human(%Goal{id: id}, schedule) do
+  defp explain_human(%Goal{id: id}, schedule, workspace) do
     IO.puts("SCHEDULE (dry-run, nothing dispatched)  goal=#{id}")
     IO.puts("frontiers: #{length(schedule)}")
+    # T59.9 (#937 Gap F): the isolation base every partition's worktree lives
+    # under — so a caller can CONFIRM per-partition isolation up front, before a
+    # long grind, rather than discovering it via `git worktree list` mid-run.
+    IO.puts("isolation: git worktree per partition, under #{explain_base_dir()}")
+    IO.puts("workspace root (never a partition's cwd): #{workspace}")
 
     Enum.each(schedule, fn %{frontier: index, groups: groups, partitions: partitions} ->
       IO.puts("  frontier #{index}: #{Enum.join(groups, ", ")}")
@@ -8745,7 +8808,9 @@ defmodule Kazi.CLI do
       |> Enum.with_index()
       |> Enum.each(fn {partition, p_index} ->
         ids = Enum.join(partition.goal_ids, ", ")
+        %{worktree_prefix: prefix} = partition_isolation(partition, workspace)
         IO.puts("    [#{p_index}] #{partition_id(partition, p_index)}: #{ids}")
+        IO.puts("        isolated working dir: #{prefix}-<nonce>")
       end)
     end)
   end
@@ -8753,18 +8818,29 @@ defmodule Kazi.CLI do
   # The `--explain --json` object (T23.6): the computed schedule as a single JSON
   # object — the frontiers + the per-frontier partitioning — with `dispatched: false`
   # making the no-execution contract explicit and machine-checkable.
-  defp explain_json(%Goal{id: id}, schedule) do
+  defp explain_json(%Goal{id: id}, schedule, workspace) do
     %{
       schema_version: @run_schema_version,
       goal_id: to_string(id),
       mode: "explain",
       dispatched: false,
-      frontiers: Enum.map(schedule, &explain_frontier_json/1),
+      # T59.9 (#937 Gap F): the per-run isolation plan — git worktree per
+      # partition, under the managed base dir, NEVER the workspace root. Each
+      # partition below also carries its own `isolation` (the planned working dir).
+      isolation: %{
+        strategy: "worktree_per_partition",
+        base_dir: explain_base_dir(),
+        workspace_root: workspace
+      },
+      frontiers: Enum.map(schedule, &explain_frontier_json(&1, workspace)),
       next_action: "schedule"
     }
   end
 
-  defp explain_frontier_json(%{frontier: index, groups: groups, partitions: partitions}) do
+  defp explain_frontier_json(
+         %{frontier: index, groups: groups, partitions: partitions},
+         workspace
+       ) do
     %{
       frontier: index,
       groups: Enum.map(groups, &to_string/1),
@@ -8774,11 +8850,39 @@ defmodule Kazi.CLI do
         |> Enum.map(fn {partition, p_index} ->
           %{
             partition_id: partition_id(partition, p_index),
-            goal_ids: Enum.map(partition.goal_ids, &to_string/1)
+            goal_ids: Enum.map(partition.goal_ids, &to_string/1),
+            # T59.9: this partition's PLANNED isolated working dir — a managed
+            # git worktree, provably distinct from the workspace root, so a
+            # caller can confirm isolation before dispatching.
+            isolation: explain_partition_isolation_json(partition, workspace)
           }
         end)
     }
   end
+
+  defp explain_partition_isolation_json(partition, workspace) do
+    %{worktree_prefix: prefix} = partition_isolation(partition, workspace)
+
+    %{
+      isolated: true,
+      working_dir_prefix: prefix,
+      workspace_root: workspace
+    }
+  end
+
+  # T59.9 (#937 Gap F): the PLANNED per-partition isolation, derived from the SAME
+  # `Kazi.Scheduler.Worktree` primitives the real run uses — the managed base dir
+  # and the deterministic per-partition slug. The on-disk path appends a random
+  # nonce at dispatch (so two runs never collide), so this surfaces the stable
+  # PREFIX; the invariant a caller checks is that it is under the managed base dir
+  # and is NOT the workspace root, which holds for every partition.
+  defp partition_isolation(partition, workspace) do
+    slug = Kazi.Scheduler.Worktree.slug_for(partition)
+    prefix = Path.join(explain_base_dir(), slug)
+    %{worktree_prefix: prefix, workspace_root: workspace}
+  end
+
+  defp explain_base_dir, do: Kazi.Scheduler.Worktree.default_base_dir()
 
   # ===========================================================================
   # --check: observe-only mode (issue #805, ADR-0026 L1)
