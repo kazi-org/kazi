@@ -187,7 +187,7 @@ same loop, no cloud:
 kazi apply <goal-file> --workspace <path> --harness opencode --model <local-model> --json
 ```
 
-Two safety refusals an executing `apply` makes by default -- fix the CONDITION,
+Three safety refusals an executing `apply` makes by default -- fix the CONDITION,
 do not reflexively add the override flag:
 
 - A `--workspace` that is a git repo's PRIMARY worktree root is refused: the
@@ -200,6 +200,10 @@ do not reflexively add the override flag:
   races the first's edits. Wait or stop the first; `--allow-duplicate-run` is
   only for a deliberate re-run alongside it. A dead run's row stops blocking on
   its own once its heartbeat goes stale.
+- A `--workspace` a DIFFERENT live goal already holds is refused (T59.7): two
+  goals sharing one directory cross-contaminate each other's commits. Give each
+  goal its own worktree (the default already does); `--allow-workspace-collision`
+  is only for co-tenancy you know is safe. A dead holder ages out the same way.
 
 By default a serial `apply` against a git repo does not edit `--workspace`
 directly either (T50.1, ADR-0065 decision 1): it creates its own task worktree

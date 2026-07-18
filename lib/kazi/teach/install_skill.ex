@@ -346,14 +346,16 @@ defmodule Kazi.Teach.InstallSkill do
     the read-model, ADR-0049) or a goal-file path, and drives the goal to a
     TERMINAL VERDICT. The exit code mirrors convergence: 0 only on `converged`.
 
-    Respect kazi's two safety refusals -- do NOT reflexively override them. It
+    Respect kazi's three safety refusals -- do NOT reflexively override them. It
     refuses (a) a `--workspace` that is a git repo's PRIMARY worktree root (the
     dispatched agent's shell can reset/clean the whole checkout) -- run against a
     dedicated task worktree (`git worktree add <path> <branch>`), and pass
     `--allow-primary-workspace` only for a throwaway checkout you accept losing;
     and (b) a goal the run registry already shows LIVE (fresh heartbeat) --
-    `--allow-duplicate-run` only for a deliberate re-run. When a refusal
-    surfaces, fix the CONDITION, not the flag.
+    `--allow-duplicate-run` only for a deliberate re-run; and (c) a `--workspace`
+    a DIFFERENT live goal already holds (two goals on one directory bleed commits
+    into each other) -- `--allow-workspace-collision` only for co-tenancy you know
+    is safe. When a refusal surfaces, fix the CONDITION, not the flag.
 
     For a LONG convergence add `--stream` (JSONL progress); for a partitioned
     goal-set add `--parallel`; for a continuous hold-true reconciler add
