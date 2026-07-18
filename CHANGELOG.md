@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.241.0](https://github.com/kazi-org/kazi/compare/v1.240.0...v1.241.0) (2026-07-18)
+
+
+### Features
+
+* **bus:** durable name-&gt;UUID bindings in the kazi_names KV bucket (T65.2, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([61eadbd](https://github.com/kazi-org/kazi/commit/61eadbd951a732134965a2972b3bdae7321c1a5e))
+* **cli,mcp:** render name_taken error and document durable name bindings (T65.2, [#1430](https://github.com/kazi-org/kazi/issues/1430)) ([1d62f60](https://github.com/kazi-org/kazi/commit/1d62f603fb4a27055b4d0bea66189fa6dd614cd9))
+
 ## [1.240.0](https://github.com/kazi-org/kazi/compare/v1.239.0...v1.240.0) (2026-07-18)
 
 
