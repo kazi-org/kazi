@@ -155,8 +155,9 @@ defmodule Kazi.SerialIntegrationTest do
         integrate: [redispatcher: redispatcher, max_attempts: 2]
       )
 
-    # Converged in the worktree, but the landing conflicted past its budget.
-    assert code == 1
+    # Converged in the worktree; the landing conflicted past its budget, but
+    # (issue #1407) the exit code is decoupled from landing by default.
+    assert code == 0
     assert_received {:redispatched, %{key: "serial-integration-fixture"}}
 
     assert File.read!(Path.join(work, "seed.txt")) == "base advanced\n",
@@ -184,7 +185,10 @@ defmodule Kazi.SerialIntegrationTest do
         integrate: [integrator: fn _request, _opts -> {:error, :boom} end]
       )
 
-    assert code == 1, "a converged-but-not-landed run is not a clean success"
+    # (issue #1407): the exit code is decoupled from landing by default — a
+    # converged-but-unlanded run still exits 0, with the failure surfaced via
+    # `integration.landed == false` rather than a non-zero exit.
+    assert code == 0
 
     assert %{"status" => "converged", "integration" => integration} = Jason.decode!(out)
     assert integration["landed"] == false
