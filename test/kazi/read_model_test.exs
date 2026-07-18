@@ -556,4 +556,77 @@ defmodule Kazi.ReadModelTest do
                Enum.map(ReadModel.list_goals(), & &1.goal_ref)
     end
   end
+
+  describe "goal_gap_fields/1 (T63.10, UC-062 — T63.3 gap list)" do
+    alias Kazi.ReadModel.GoalGapFields
+
+    test "exposes the three field groups for a fixture goal with real iterations" do
+      # Iteration 0: an observe-only iteration (no action, no counters) — the exact
+      # shape of the runtime-gherkin fixture goal David reported.
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "gap-goal",
+          iteration_index: 0,
+          predicate_vector:
+            PredicateVector.new(%{
+              "loader.parses" => PredicateResult.fail(%{}),
+              "guard.formatted" => PredicateResult.pass(%{exit: 0}),
+              "bareword" => PredicateResult.fail(%{})
+            }),
+          observed_at: ~U[2026-07-18 09:00:00.000000Z]
+        })
+
+      # Iteration 1: a dispatch iteration that recorded an action + full counters.
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "gap-goal",
+          iteration_index: 1,
+          predicate_vector:
+            PredicateVector.new(%{
+              "loader.parses" => PredicateResult.pass(%{exit: 0}),
+              "guard.formatted" => PredicateResult.pass(%{exit: 0}),
+              "bareword" => PredicateResult.fail(%{})
+            }),
+          action: Action.new(:dispatch_agent, params: %{"failing" => ["loader.parses"]}),
+          observed_at: ~U[2026-07-18 10:00:00.000000Z],
+          tools: %{tool_calls: 3},
+          context: %{tier: 1}
+        })
+
+      gap = ReadModel.goal_gap_fields("gap-goal")
+      assert %GoalGapFields{goal_ref: "gap-goal"} = gap
+
+      # narrative-intent: one entry per iteration, oldest-first; the observe-only
+      # iteration surfaces a nil action_kind (absent, never fabricated), the
+      # dispatch iteration surfaces its stored coarse action verbatim.
+      assert [obs, dispatch] = gap.narrative_intent
+      assert obs == %{iteration_index: 0, action_kind: nil, action_params: %{}}
+      assert dispatch.iteration_index == 1
+      assert dispatch.action_kind == "dispatch_agent"
+      assert dispatch.action_params == %{"failing" => ["loader.parses"]}
+
+      # predicate grouping tags derived from the latest vector's id convention; an
+      # id with no separable prefix maps to nil (honest-unknown), not a guess.
+      assert gap.predicate_groups == %{
+               "loader.parses" => "loader",
+               "guard.formatted" => "guard",
+               "bareword" => nil
+             }
+
+      # missing tool/context counters: iteration 0 has neither, iteration 1 has both.
+      assert gap.missing_counters == %{
+               tools_missing: 1,
+               context_missing: 1,
+               total_iterations: 2
+             }
+    end
+
+    test "a goal with no iterations yields empty groups and a zeroed tally, never fabricated values" do
+      gap = ReadModel.goal_gap_fields("absent-goal")
+
+      assert gap.narrative_intent == []
+      assert gap.predicate_groups == %{}
+      assert gap.missing_counters == %{tools_missing: 0, context_missing: 0, total_iterations: 0}
+    end
+  end
 end
