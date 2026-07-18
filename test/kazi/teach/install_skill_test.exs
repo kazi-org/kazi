@@ -213,4 +213,119 @@ defmodule Kazi.Teach.InstallSkillTest do
     assert {:ok, path} = InstallSkill.write(dir: dir)
     assert File.read!(path) == InstallSkill.skill_md()
   end
+
+  # ===========================================================================
+  # T61.2 (ADR-0077, the ADR-0074 amendment): LOCAL.md stable-path migration.
+  # A plugin update replaces the skill CONTENT dir wholesale, so LOCAL.md must
+  # live at a STABLE path OUTSIDE it -- decoupled from `write/1`'s `:dir`.
+  # ===========================================================================
+
+  describe "LOCAL.md stable path (T61.2, ADR-0077)" do
+    test "local_display_path/0 is the stable ~/.claude/skills/kazi/LOCAL.md (tilde form)" do
+      assert InstallSkill.local_display_path() == "~/.claude/skills/kazi/LOCAL.md"
+    end
+
+    test "local_path/1 expands the stable path, injectable for hermetic tests", %{dir: dir} do
+      # Default resolves under the real ~/.claude (never written here, just a path).
+      assert InstallSkill.local_path() ==
+               Path.expand(Path.join(["~", ".claude", "skills", "kazi", "LOCAL.md"]))
+
+      # Injected :local_dir keeps it off the real ~/.claude.
+      assert InstallSkill.local_path(local_dir: dir) == Path.join(dir, "LOCAL.md")
+    end
+
+    test "the generated SKILL.md points LOCAL.md at the stable path exactly (acc 3)", %{dir: dir} do
+      assert {:ok, path} = InstallSkill.write(dir: dir)
+      content = File.read!(path)
+
+      # The reference matches the new stable path EXACTLY, not a path relative to
+      # whatever dir the skill content is installed in.
+      assert content =~ "~/.claude/skills/kazi/LOCAL.md"
+      assert content =~ "READ IT FIRST"
+      # It explains WHY the file lives outside the skill dir (the plugin bug).
+      assert content =~ "ADR-0077"
+    end
+
+    test "a fresh install points to the stable LOCAL.md and still never mints it (acc 1)",
+         %{dir: dir} do
+      # Content dir distinct from the stable LOCAL.md dir (the plugin shape).
+      content_dir = Path.join(dir, "content")
+      local_dir = Path.join(dir, "stable")
+
+      assert {:ok, _} = InstallSkill.write(dir: content_dir)
+      # Nothing to migrate on a fresh install; the stable path is where LOCAL.md
+      # is discovered, and the module still NEVER writes it (ADR-0074 preserved).
+      assert InstallSkill.migrate_local(dir: content_dir, local_dir: local_dir) == {:ok, :noop}
+      refute File.exists?(InstallSkill.local_path(local_dir: local_dir))
+      refute File.exists?(Path.join(content_dir, "LOCAL.md"))
+    end
+
+    test "an existing old-path LOCAL.md is MIGRATED to the stable path (acc 2)", %{dir: dir} do
+      content_dir = Path.join(dir, "content")
+      local_dir = Path.join(dir, "stable")
+      File.mkdir_p!(content_dir)
+
+      old = Path.join(content_dir, "LOCAL.md")
+      operator = "# my site wiring\nplan-driven work goes through my own orchestrator\n"
+      File.write!(old, operator)
+
+      assert {:ok, {:migrated, ^old, new}} =
+               InstallSkill.migrate_local(dir: content_dir, local_dir: local_dir)
+
+      assert new == InstallSkill.local_path(local_dir: local_dir)
+      # Content preserved verbatim at the stable path; the old one is gone.
+      assert File.read!(new) == operator
+      refute File.exists?(old)
+    end
+
+    test "a LOCAL.md at BOTH paths is a loud conflict, never a silent clobber (acc 2)",
+         %{dir: dir} do
+      content_dir = Path.join(dir, "content")
+      local_dir = Path.join(dir, "stable")
+      File.mkdir_p!(content_dir)
+      File.mkdir_p!(local_dir)
+
+      old = Path.join(content_dir, "LOCAL.md")
+      new = Path.join(local_dir, "LOCAL.md")
+      File.write!(old, "# old\n")
+      File.write!(new, "# stable\n")
+
+      assert {:warn, {:conflict, ^old, ^new}} =
+               InstallSkill.migrate_local(dir: content_dir, local_dir: local_dir)
+
+      # BOTH untouched -- the operator merges by hand.
+      assert File.read!(old) == "# old\n"
+      assert File.read!(new) == "# stable\n"
+    end
+
+    test "classic same-dir install is a migration no-op (content dir == stable dir)", %{dir: dir} do
+      # The install-skill channel writes content and discovers LOCAL.md in the
+      # SAME dir, so there is nothing to move.
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "LOCAL.md"), "# wiring\n")
+      assert InstallSkill.migrate_local(dir: dir, local_dir: dir) == {:ok, :noop}
+      assert File.read!(Path.join(dir, "LOCAL.md")) == "# wiring\n"
+    end
+
+    test "a simulated plugin-dir replacement leaves the stable LOCAL.md untouched (acc 4)",
+         %{dir: dir} do
+      content_dir = Path.join(dir, "plugin-skill")
+      local_dir = Path.join(dir, "stable")
+
+      # Operator installs and writes their wiring at the STABLE path.
+      assert {:ok, _} = InstallSkill.write(dir: content_dir)
+      stable_local = InstallSkill.local_path(local_dir: local_dir)
+      File.mkdir_p!(local_dir)
+      operator = "# survives plugin updates\n"
+      File.write!(stable_local, operator)
+
+      # A plugin update replaces the skill CONTENT dir wholesale: delete + recreate.
+      File.rm_rf!(content_dir)
+      assert {:ok, _} = InstallSkill.write(dir: content_dir)
+
+      # The stable LOCAL.md is untouched -- the actual bug this task prevents.
+      assert File.exists?(stable_local)
+      assert File.read!(stable_local) == operator
+    end
+  end
 end
