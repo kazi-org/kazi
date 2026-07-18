@@ -400,6 +400,13 @@ defmodule Kazi.CLI do
       flags: [:reap, :json]
     },
     %{
+      name: "portfolio",
+      summary:
+        "Render the fleet's portfolio state (T60.4, #1160) -- planned / in progress / stuck / complete, grouped by repo -- composed ONLY from kazi's own objective surfaces (proposals, the run registry, the attention queue, the cross-machine bus facts T60.1 posts). No manual curation, no new task-management data model.",
+      args: [],
+      flags: [:json]
+    },
+    %{
       name: "init",
       summary:
         "Adopt a repo by stack detection and write a starter goal-file (incl. a learned [budget] suggestion when local history has one, ADR-0058).",
@@ -588,6 +595,7 @@ defmodule Kazi.CLI do
       kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files (ADR-0065)
       kazi status <ref> [--json]
       kazi orphans [--reap] [--json]               # list runs whose harness child is still alive (#1073); --reap kills them
+      kazi portfolio [--json]                      # planned/in progress/stuck/complete, by repo + fleet-wide (T60.4, #1160)
       kazi economy [--goal <ref>] [--json]         # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
@@ -961,6 +969,9 @@ defmodule Kazi.CLI do
       {:orphans, opts} ->
         execute_orphans(opts)
 
+      {:portfolio, opts} ->
+        execute_portfolio(opts)
+
       {:init, source, opts} ->
         execute_init(source, opts, inject_opts)
 
@@ -1034,6 +1045,7 @@ defmodule Kazi.CLI do
           | {:run, Path.t(), keyword()}
           | {:status, String.t() | nil, keyword()}
           | {:orphans, keyword()}
+          | {:portfolio, keyword()}
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
           | {:install_hooks, keyword()}
@@ -1209,6 +1221,15 @@ defmodule Kazi.CLI do
   defp parse_command(["orphans" | rest], flags) do
     case rest do
       [] -> {:orphans, reap: flags[:reap] || false, json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  # T60.4 (#1160): `kazi portfolio` -- the fleet's planned/in-progress/stuck/
+  # complete state, grouped by repo. No args; --json is the only flag.
+  defp parse_command(["portfolio" | rest], flags) do
+    case rest do
+      [] -> {:portfolio, json: flags[:json] || false}
       extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
@@ -3923,6 +3944,73 @@ defmodule Kazi.CLI do
       status: run.status,
       reap_outcome: to_string(outcome)
     }
+  end
+
+  # T60.4 (#1160): the fleet's portfolio state, composed purely from
+  # Kazi.Portfolio.build/0 -- this function only renders it.
+  defp execute_portfolio(opts) do
+    with_read_model(opts, fn ->
+      portfolio = Kazi.Portfolio.build()
+
+      emit(json?(opts), portfolio_json(portfolio), fn -> print_portfolio(portfolio) end)
+
+      0
+    end)
+  end
+
+  defp portfolio_json(%{planned: planned, by_repo: by_repo, fleet_remote: fleet_remote}) do
+    %{
+      schema_version: @run_schema_version,
+      kind: "portfolio",
+      planned: planned,
+      by_repo:
+        Map.new(by_repo, fn {repo, buckets} ->
+          {repo, Map.new(buckets, fn {bucket, entries} -> {to_string(bucket), entries} end)}
+        end),
+      fleet_remote: Enum.map(fleet_remote, &Map.update!(&1, :bucket, fn b -> to_string(b) end))
+    }
+  end
+
+  defp print_portfolio(%{planned: planned, by_repo: by_repo, fleet_remote: fleet_remote}) do
+    IO.puts("PLANNED (#{length(planned)}):")
+
+    if planned == [] do
+      IO.puts("  (none)")
+    else
+      Enum.each(planned, fn p ->
+        IO.puts("  #{p.status}\t#{p.proposal_ref}\t#{p.goal_id}\t#{p.idea}")
+      end)
+    end
+
+    IO.puts("")
+
+    if map_size(by_repo) == 0 do
+      IO.puts("(no local runs)")
+    else
+      Enum.each(by_repo, fn {repo, buckets} -> print_repo_buckets(repo, buckets) end)
+    end
+
+    if fleet_remote != [] do
+      IO.puts("")
+      IO.puts("FLEET-WIDE (cross-machine, #{length(fleet_remote)}):")
+
+      Enum.each(fleet_remote, fn r ->
+        IO.puts("  #{r.bucket}\t#{r.goal_ref}\tmachine=#{r.machine}")
+      end)
+    end
+  end
+
+  defp print_repo_buckets(repo, buckets) do
+    IO.puts("#{repo}:")
+
+    Enum.each([:in_progress, :stuck, :complete], fn bucket ->
+      entries = Map.get(buckets, bucket, [])
+
+      if entries != [] do
+        IO.puts("  #{bucket} (#{length(entries)}):")
+        Enum.each(entries, fn e -> IO.puts("    #{e.goal_ref}\trun_id=#{e.run_id}") end)
+      end
+    end)
   end
 
   defp print_orphans([], _reap?) do
