@@ -84,7 +84,9 @@ its config at runtime via `kazi schema <kind>`.
 - **[`gherkin`](gherkin-provider.md)** — reconcile a whole `.feature` at run time:
   one `[[predicate]]` expands at goal-load into one sub-predicate per Scenario
   (per Examples row for an outline), each reading its verdict from a shared BDD
-  runner's cucumber-json (ADR-0071). _Verdict ingestion lands in T62.2._
+  runner's cucumber-json, run once per feature per pass and ingested natively
+  (ADR-0071). The runtime sibling of the author-time `spec import` (ADR-0064).
+  Introspect every key with `kazi schema gherkin`.
 - **[`plan_expanded`](schemas/roadmap.md)** — the read-model-only "phase has been
   planned" gate (exists + floor-passed + approved); makes planning a convergeable
   goal via outline phases (E45/T45.3).

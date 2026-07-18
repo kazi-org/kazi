@@ -7,16 +7,29 @@ the loader **expands** it, at goal-load, into one real sub-predicate per Scenari
 scenario-granular dashboard while kazi's one-`[[predicate]]`-to-one-verdict
 invariant is preserved (ADR-0071).
 
-This is the runtime sibling of the author-time [`kazi spec import`](specs.md)
-path: `spec import` scaffolds one RED `custom_script` per Scenario for a human to
-wire; `gherkin` instead binds the whole feature to a caller-supplied BDD runner
-and ingests its verdicts natively, with **zero change to the `.feature`**.
-
 Introspect every key at runtime with:
 
 ```
 kazi schema gherkin
 ```
+
+## `spec import` vs. `provider = "gherkin"` — two mechanisms, two needs
+
+kazi has **two** ways to turn a `.feature` behavior spec (ADR-0050) into
+predicates, and they are not interchangeable. Reach for the one that matches
+where the verification actually lives.
+
+| | [`kazi spec import`](specs/README.md) (E40, ADR-0050/0054) | `provider = "gherkin"` (this epic, ADR-0071) |
+|---|---|---|
+| **When** | Author-time, once — a human runs the verb | Run time, every reconcile pass |
+| **What it produces** | Scaffolds one **RED `custom_script`** (or, `--lower scenario`, one `scenario`) predicate per Scenario, **written into** the goal-file for a human to wire to a real check | Binds the **whole feature** to a caller-supplied BDD runner and ingests its machine report into **per-scenario verdicts** — nothing is written into the goal-file per scenario |
+| **Who owns the verdict** | The command you wire into each scaffolded `custom_script` | The BDD runner (godog, playwright-bdd, …) named by `runner_cmd` |
+| **The `.feature`** | A source you import **from** (its Scenarios become editable predicate stubs) | Bound **as-is** at run time — **zero change**, editing it re-expands the sub-predicate set at the next load |
+| **Use it when** | You want each Scenario as a separate, hand-tuned predicate you'll flesh out | You already have a BDD runner that executes the feature and you want its native verdicts, scenario-granular, with no per-scenario wiring |
+
+In short: `spec import` is a **scaffolding verb** (draft predicates for a human
+to finish), `gherkin` is a **runtime provider** (native BDD verdicts, no
+scaffolding). This page documents the latter.
 
 ## Goal-file schema
 
