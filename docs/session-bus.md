@@ -158,7 +158,8 @@ kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  
 kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
                                                            # roster with liveness (active|idle) + inbox depth; --all includes stale rows
 kazi bus board [--scope machine|project] [--json]         # current state: last-value fact per topic + live roster (T55.4); consumes nothing
-kazi bus join <team>                                       # named-team membership (issue #1069)
+kazi bus join                                             # derive team from git origin (T65.1, #1430)
+kazi bus join -- <team>                                    # explicit team, cross-repo override (recorded derived=false)
 kazi bus leave                                             # clear team membership
 kazi bus name <nickname>                                   # assign a durable, addressable session name (T55.5, ADR-0073)
 kazi bus hook <event>                                      # harness hook entry point (ADR-0076) -- ALWAYS exits 0 silently
@@ -338,15 +339,41 @@ that spawned the CLI), so a nameless session keeps ONE presence row
 instead of fragmenting into a new `os-<pid>` ghost row per invocation. See
 `Kazi.Bus`'s moduledoc for the mechanism.
 
-### Teams (issue #1069)
+### Teams (issue #1069; derivation T65.1, #1430)
 
-`kazi bus join <team>` registers the session under a named team; presence
-carries the membership across every later bus call, `bus who --team
-<team>` lists the roster, and `bus tell @<team> <text>` reaches every
-member. Membership ages out with presence (the 10-minute TTL) when a
-session goes idle and vanishes on `bus leave` — a live roster rather than
-a static list. Sessions that keep a `bus watch` open stay fresh
-indefinitely.
+`kazi bus join` registers the session under a team; presence carries the
+membership across every later bus call, `bus who --team <team>` lists the
+roster, and `bus tell @<team> <text>` reaches every member. Membership ages
+out with presence (the 10-minute TTL) when a session goes idle and vanishes
+on `bus leave` — a live roster rather than a static list. Sessions that keep
+a `bus watch` open stay fresh indefinitely.
+
+**The team is DERIVED, not typed (T65.1, #1430).** Argless `kazi bus join`
+computes the team from the workspace's `git remote get-url origin`
+(`Kazi.Bus.TeamId`). Every equivalent URL form normalizes to ONE identity —
+`git@github.com:Org/Repo.git`, `https://github.com/org/repo`, and
+`ssh://git@github.com/org/repo.git` all become the SAME slug — by stripping
+the scheme, credentials, and `.git` suffix and case-folding host+path. The
+slug is `t-<host>-<org>-<repo>` (e.g. `t-github.com-org-repo`). The fixed
+`t-` prefix is deliberate: no derived team slug can ever begin with `-`, so
+the leading-dash class that split one team into three variants in a single
+day (`-users-…`, `users-…`, `\-users-…`) is structurally impossible. Two
+checkouts — or two machines — of the same repo therefore land in the SAME
+team with zero typed strings.
+
+With **no origin remote**, the team falls back to the canonicalized repo-root
+realpath, slugged the same way (still `t-` prefixed), and `join` prints a
+one-line notice that the team is machine-local (not shared across checkouts).
+
+**Explicit teams still work (compat).** `kazi bus join -- <team>` joins the
+literal `<team>` verbatim — existing free-form team strings keep functioning —
+and is recorded `derived=false` on the presence row: the deliberate cross-repo
+override (e.g. joining one logical team across two different repos). The `--`
+separates the team from flag parsing, so a team name that begins with `-`
+still joins as a positional. Derived slugs are additive; adoption is
+per-session with no forced migration. Caveat: origin-URL derivation maps forks
+and mirrors of one upstream to the SAME team — use the explicit `-- <team>`
+override when you want them kept apart.
 
 ### Presence liveness and freshness (T55.11)
 
@@ -391,7 +418,7 @@ kazi bus who --machine <host>     # sessions on that machine (exact hostname)
 ```
 
 New sessions appear on their first bus call — orchestrators should have
-members run `kazi bus join <team>` at session start so the roster is
+members run `kazi bus join` at session start so the roster is
 explicit rather than implicit.
 
 Every `bus` verb prints a one-line `no daemon running -- start one with
