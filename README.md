@@ -858,6 +858,8 @@ kazi apply <goal-file> --workspace <path>      # drive a goal to convergence
 kazi apply --fleet <dir|manifest> --workspace <path> [--fleet-concurrency N]  # a DAG of goal-files, one worktree per member (ADR-0065)
 kazi status <ref>                            # report a run's (or proposal's) current state
 kazi status                                  # list every currently LIVE run (pre-upgrade check, issue #971)
+kazi portfolio [--full]                      # sitrep "where are we / how is it going?": headline % across done/in-progress/blocked/todo/planned, bounded per-bucket summaries (blocked entries name their blocker), honest predicates-green rate — never a projected date (ADR-0046); --full restores the complete ledger (E64, #1427)
+kazi orphans [--reap]                         # list runs whose harness child process is still alive (#1073/#857); --reap sends TERM then KILL to each
 kazi install-hooks [--local] [--uninstall] # opt-in: register session-bus delivery hooks (SessionStart + UserPromptSubmit -> `kazi bus hook <event>`, ADR-0076); --uninstall reverts exactly
 kazi economy [--goal <ref>]                  # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
 kazi context index <label> <file>            # context store: index a heavy artifact
