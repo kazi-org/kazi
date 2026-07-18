@@ -4470,3 +4470,77 @@ origin: each branch exists, each `merge_commit` is a real commit reachable from
 Deferred to T62.6: persisting these refs into the read-model `kazi status` verb,
 and auto-selecting OriginIntegrator from a goal's `[integration]` mode in the real
 CLI (still its own review, per PR #1240's scoping).
+
+## 2026-07-18 — T49.13 DOGFOOD: kazi's own capabilities as scenario predicates (UC-066/UC-067)
+
+kazi's shipped surfaces gated as `scenario` predicates (ADR-0064) against the
+RELEASED binary. Artifacts: `docs/specs/kazi_cli.feature` (an `@interface:cli`
+Scenario "A user inits plans approves and applies a hello goal" + an
+`@interface:web` dashboard Scenario), `priv/examples/kazi_capabilities.goal.toml`,
+and the cli pin
+`docs/specs/pins/kazi-cli__a-user-inits-plans-approves-and-applies-a-hello-goal.pin.json`.
+
+**Binary flavor (honest).** Released binary `kazi 1.228.0` — the macOS x86_64
+GoReleaser/burrito asset of tag `v1.228.0`, sha256 verified, installed to
+`/usr/local/bin/kazi`. This was the newest release WITH published assets: the
+newest tag at run time, `v1.229.0`, had 0 assets (released minutes earlier, still
+building), so per the task's "newest release with assets" fallback I used 1.228.0
+and recorded the flavor here rather than block.
+
+**The cli pin (the grader).** A `:cli`-surface pin whose `trace.script` is the four
+real sub-invocations of the journey — `kazi init .` → `kazi plan --json
+--predicates <hello> --replace` → `kazi approve <content-hashed-ref>` → `kazi apply
+<trivially-green fixture> --check` — each with its own exit-code + stdout
+assertions. The proposal ref is deterministic (`prop-caller-supplied-predicates-<hash>`,
+a content hash, not random), so `--replace` makes the plan→approve handoff
+replayable without a `{{placeholder}}`. `scenario_sha` matched on first try (the
+pin classified `:pinned`, i.e. reached replay, never `{:stale, :spec_changed}`).
+
+**GREEN replay (observed — the truth invariant).**
+`kazi apply priv/examples/kazi_capabilities.goal.toml --workspace . --check --json`
+with the cli predicate's `cmd` resolving to the CLI binary → predicate
+`cli-hello-goal-journey` verdict **pass**, all four journey steps green, replayed
+by the `:cli` surface provider against the released binary. No agent claim in the
+loop — the pass is what the surface provider observed on replay.
+
+**RED chain (observed — capability regression, not selector rot).** With the pin
+UNCHANGED and the workspace `HEAD` still equal to the pin's `minted.commit` (so a
+red replay is classified a regression, not `{:stale, :code_drift}`), pointing
+`cmd` at a throwaway shim that delegates every verb to the real binary EXCEPT
+`apply` (which it fails, exit 1, no `pass` on stdout): predicate verdict **fail**,
+`pin_state: pinned`, `passing_steps: 3 / 4`, `failed_step` = the `apply` step, with
+`assertion_failures` `exit_code expected 0 found 1` and `stdout contains "pass"
+found ""`. The pin did not move; the surface (binary) broke — exactly the
+regression signature the truth invariant is meant to catch. The shim was never
+committed. **Re-demonstration fails by construction:** the demonstrator's
+born-reproducible acceptance gate (T49.7) mints a pin then IMMEDIATELY
+validate-and-replays it, keeping it only on green; that replay is the very red
+observed above against the broken surface, so no freshly-minted pin can be
+accepted — a broken capability cannot be re-pinned green.
+
+**Finding — nested-`kazi` PATH shadowing.** `cmd = "kazi"` (a `$PATH` lookup)
+reds when the OUTER driver is itself the release binary: the release process
+prepends its release `bin/` — which holds a `kazi` START LAUNCHER
+(start/daemon/eval/rpc), not the CLI — to the child `$PATH`, so a nested bare
+`kazi` hits the launcher and every step reds with the launcher usage on stderr.
+Driving the identical pin against the CLI binary directly (an outer that does not
+shadow `kazi`, or `cmd` set to the binary's absolute path) replays green. The
+shipped `cli_release_smoke.goal.toml` reproduced the same red here (its nested
+`kazi version`/`status`/`apply` all exited 1), so this is a latent hazard of the
+`:cli` surface under a release-binary outer, not specific to this pin.
+
+**Honest gaps.**
+- The pin was HAND-AUTHORED (docs/scenario-predicate.md sanctions this as an
+  identical artifact to a demonstrator-minted one); a LIVE harness-driven
+  demonstrator dispatch was NOT run — no coding-agent harness is available in this
+  sandbox. The demonstrate→reject mechanics are covered by T49.7/T49.8 ExUnit; the
+  load-bearing observation here is the REPLAY verdict (green→red), which is the
+  predicate's truth regardless of who authored the pin.
+- The `@interface:web` dashboard Scenario is NOT live-verified. `kazi dashboard`
+  DOES boot on the released binary (observed: it logged `Running KaziWeb.Endpoint
+  ... at 127.0.0.1` and served), but the `:browser` replay could not run from this
+  sandbox — HTTP egress even to loopback is blocked here (no live browser). Its pin
+  is left `:unpinned` (demonstrator/live-browser work), and the goal-file documents
+  it as CHECK-not-converge, mirroring `cli_release_smoke`'s live-infra surfaces.
+- Binary flavor is 1.228.0, one release behind the newest tag (1.229.0, assets not
+  yet published at run time).
