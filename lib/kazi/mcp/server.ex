@@ -465,12 +465,14 @@ defmodule Kazi.MCP.Server do
       %{
         "name" => "kazi_bus_name",
         "description" =>
-          "Assign a durable, addressable name to THIS session (T55.5, ADR-0073): carried " <>
-            "on presence across every later bus call, rendered by kazi_bus_who, and " <>
-            "accepted by kazi_bus_tell. Re-asserting a name re-binds it to the current " <>
-            "session. Returns {ok: true, name: <name>}, or a structured error (no_daemon; " <>
-            "invalid_nickname for an empty/whitespace/@-prefixed name or one equal to a " <>
-            "different live session's id).",
+          "Bind a durable, addressable name to THIS session's UUID (T55.5, ADR-0073; " <>
+            "durable bindings T65.2, #1430): carried on presence across every later bus " <>
+            "call, rendered by kazi_bus_who, accepted by kazi_bus_tell, and stored in a " <>
+            "TTL-less KV bucket so it survives a daemon restart. Binding a name held by a " <>
+            "DIFFERENT session is a hard error naming the holder (names are never stolen); " <>
+            "re-binding your own name is idempotent. Returns {ok: true, name: <name>}, or a " <>
+            "structured error (no_daemon; name_taken with the holder; invalid_nickname for " <>
+            "an empty/whitespace/@-prefixed name or one equal to a different live session's id).",
         "inputSchema" => %{
           "type" => "object",
           "required" => ["name"],
@@ -949,6 +951,16 @@ defmodule Kazi.MCP.Server do
       "status" => "error",
       "error" => "invalid nickname #{inspect(nickname)} -- #{why}",
       "reason" => "invalid_nickname"
+    }
+  end
+
+  defp bus_error({:name_taken, nickname, holder}) do
+    %{
+      "schema_version" => Schema.schema_version(),
+      "status" => "error",
+      "error" =>
+        "name #{inspect(nickname)} is already bound to session #{holder} -- pick another name",
+      "reason" => "name_taken"
     }
   end
 
