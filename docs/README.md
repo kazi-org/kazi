@@ -81,6 +81,10 @@ its config at runtime via `kazi schema <kind>`.
   declared command and assert on the exit code + stdout/stderr (T43.7, UC-055).
 - **[`scenario`](scenario-predicate.md)** — replay a pinned Gherkin Scenario by
   delegating to a surface provider; passes only on a green replay (ADR-0064).
+- **[`gherkin`](gherkin-provider.md)** — reconcile a whole `.feature` at run time:
+  one `[[predicate]]` expands at goal-load into one sub-predicate per Scenario
+  (per Examples row for an outline), each reading its verdict from a shared BDD
+  runner's cucumber-json (ADR-0071). _Verdict ingestion lands in T62.2._
 - **[`plan_expanded`](schemas/roadmap.md)** — the read-model-only "phase has been
   planned" gate (exists + floor-passed + approved); makes planning a convergeable
   goal via outline phases (E45/T45.3).
