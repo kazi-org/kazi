@@ -7,6 +7,67 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-18 — T59.5 close-out: flake-cluster remediation verified under stress; one class-1 residual fixed; a self-inflicted `Database busy` debunked
+
+**Type:** verification
+**Tags:** flaky-tests, test-isolation, stress-run, exunit, sqlite-wal, T59.5, #1025, #1186
+
+**Task.** Verify T59.4's five-class flake remediation actually holds: the three
+merged PRs (#1387 class 1 load-sensitive await/receive deadlines; #1401 class 2
+frontier ordering barrier; #1383 class 3 own-stderr-lines) plus commit `ca159352`
+(class 4, atom-count -> direct `String.to_existing_atom` per key). Diff-review for
+assertion weakening; stress the nine named tests under full-suite load; fix any
+residual gap without weakening an assertion; tick T59.5 honestly.
+
+**Assertion-weakening review: clean.** All four remediations change timing/isolation
+mechanics only. #1387 raises `Loop.await`/`assert_receive` deadlines (5s->30s,
+1s/2s->15s) — same assertions. #1401 replaces an instantaneous `refute_received`
+with a blocking ordering barrier that makes the "c has not dispatched" check
+*deterministic* (strengthens it). #1383 asserts on the command's OWN `error:`
+stderr lines instead of the whole globally-captured `:standard_error` device (the
+command is silent otherwise, so this still proves silence, immune to a concurrent
+module's leaked `[warning]`/deprecation line). Class 4 asserts the real invariant
+(an unknown key never interns an atom) directly, instead of a VM-global
+`:erlang.system_info(:atom_count)` delta.
+
+**Stress evidence (4-core box, ~35-agent pool load, `TEST_SERVER=false`,
+`CLAUDE_CODE_SESSION_ID` unset, random seeds, in-VM concurrency via elevated
+`--max-cases`).** Classes 1-4 held across every run. Two things surfaced:
+
+1. **Class-2 residual (fixed here).** `FrontierCompleteEventTest` flaked once, but
+   NOT in the barrier logic #1401 fixed — at its very FIRST `assert_receive
+   {:dispatched, "a", _}`, which still used ExUnit's DEFAULT 100ms timeout. Under
+   load the initial `Task.async -> DepScheduler.run -> stub reconciler` dispatch
+   arrives later than 100ms. Fix: give the POSITIVE `assert_receive` awaits in that
+   test a generous `@await_ms 15_000` bound (the exact class-1 mechanism #1387 used
+   elsewhere), leaving the NEGATIVE `refute_receive …, 30` / `refute_received`
+   barriers untouched (raising a refute window would weaken it). Verified frontier-
+   flake-free under concurrent load after the fix.
+
+2. **A self-inflicted `Database busy` — NOT a real flake.** While stress-driving,
+   `SemanticIndexTest` (class 5b, `async: false`) hit `Exqlite.Error Database busy`
+   on the `memory_chunks_fts` DELETE, all-or-nothing per run. Root cause was the
+   harness, not the test: a `pkill -f "mix test"` mid-run hard-kills a SQLite writer
+   and leaves the REUSED per-worktree `tmp/kazi_test.db` WAL/lock in a busy state
+   that persists into later runs. Proof: a fresh DB per run passed 8/8; clean
+   sequential reuse with NO kills passed 10/10. CI creates a fresh DB each run, so
+   it never sees this. LANDMINE for future stress work: never `pkill` a mid-run
+   `mix test` against a reused SQLite DB — checkpoint/recreate the tmp DB instead.
+   The two class-5 tests are `async: false`, so ExUnit runs them with no concurrent
+   test — they are not perturbable by the async cluster and needed no change.
+
+**Out-of-scope load casualties (NOT in #1025/#1186; follow-up candidates, not
+scoped into T59.5).** Under the pathological ~35-agent load, heavier suites reddened
+on genuine wall-clock overload — most persistently `Kazi.Goal.DocLifecycleGoalTest`
+("a freshness custom_script wrapper EVALUATES to a real verdict", a 60s per-test
+timeout on a `custom_script` that shells out), and the worktree-copying
+`Kazi.Scheduler.RunGoalsTest` / `PerGroupLandedTest` family. These are the same
+class-1 shape (a real, slower-under-load operation against a tight-ish bound) and a
+future flake-hardening pass could give them the same generous-deadline treatment.
+
+**Outcome.** Classes 1-4 verified stable; class 5 needed no change (async:false);
+one class-1 residual in `FrontierCompleteEventTest` fixed. T59.5 acc met.
+
 ## 2026-07-18 — T52.9: two versions, one daemon, never blind — E52 exit-criteria live dogfood (ADR-0068)
 
 **Type:** dogfood / live verification
@@ -4739,3 +4800,59 @@ bindings + rename-tombstone behave as the shipped docs describe. Docs
 match this observed behavior (landed with T65.1–T65.4). Cleanup: throwaway
 daemon stopped, scratch state dir and clone removed; the operator's real daemon
 untouched throughout.
+
+## 2026-07-18 — T59.5 VERIFICATION: flaky-test cluster remediation held under stress (#1025, #1186)
+
+Close-out verification of the T59.5 remediation, which shipped as three class
+PRs (#1383 capture-bleed, #1387 load-sensitive await deadlines, #1401
+scheduler-event ordering barrier) per T59.4's root-cause finding.
+
+### Diff review — no assertion weakened
+
+- **#1387** widened POSITIVE `Loop.await`/`assert_receive` deadlines only
+  (5s→30s, 1–5s→15s). A true hang still fails (ExUnit per-test timeout);
+  message arrival drives the wait, not a sleep.
+- **#1401** made the frontier-ordering assertion STRONGER: replaced an
+  instantaneous `refute_received` race with a callback barrier and pid-carrying
+  events, so "c has not dispatched" is provable, not timing-lucky.
+- **#1383** changed `assert err == ""` to `own_stderr_lines(err) == []` — a
+  scoping change so a test asserts on ITS command's stderr rather than
+  whatever concurrent tests bleed into the shared capture. The silence claim
+  is preserved (no `error:` line from the command under test); the rationale
+  is a code comment at each site.
+
+### Residual flakes found and fixed here (2)
+
+1. Under full-suite load, `Kazi.Scheduler.FrontierCompleteEventTest` still
+   reddened on its FIRST positive `assert_receive {:dispatched, ...}` — the
+   default 100ms deadline losing to scheduler latency on a busy box. Same
+   class-1 mechanism as #1387: widened only the positive awaits to a bounded
+   15s (`@await_ms`); the negative `refute_receive …, 30` / `refute_received`
+   windows are deliberately untouched — those are exactly what the #1401
+   barrier makes deterministic, and raising them would weaken it.
+2. `Kazi.Memory.SemanticIndexTest` "two workspaces … no clobber" (seen red on
+   a main CI run post-remediation) is a LATENT ORDERING BUG, not a timing
+   flake: fixture dirs embed `System.unique_integer`, and the assertion
+   assumed `ORDER BY workspace_root` returns dir_a first — false whenever the
+   two integers differ in digit count (lexically "107843" < "84770"), which
+   depends on how many unique integers prior tests consumed. Fixed by keying
+   rows by workspace root (Map + `Map.fetch!`) instead of assuming sort
+   order; the distinct-rows-per-workspace claim is unchanged and now
+   order-independent.
+
+### Stress evidence (local, per acc)
+
+Ran the full cluster named across #1025/#1186 (`workspace_prep`,
+`enforcement`, `cli_plan_budget_suggestion`, `semantic_index`,
+`context_store`, plus `frontier_complete_event`) 10x with varied seeds on a
+heavily loaded box (load averages 35-57 on 4 cores from concurrent sibling
+test runs): zero failures. Method note, honestly recorded: an earlier
+attempt ran a SECOND full-suite mix process in the SAME worktree as the load
+generator — that produced failures from the two beam nodes sharing one
+SQLite read-model file, a self-inflicted collision no CI run has (CI runs
+one node per checkout); those iterations were discarded and the load
+generator moved off the shared DB. CI cross-check: of the last 30 main runs,
+the only cluster-member failure was the SemanticIndexTest ordering bug fixed
+above; the other 3 failures are distinct, non-cluster tests
+(`OriginLandingLiveTest`, `HeartbeatTickerTest` DateTime struct-compare,
+`DaemonDigestTest`) — noted for triage, out of T59.5 scope.
