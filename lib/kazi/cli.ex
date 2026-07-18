@@ -8084,10 +8084,21 @@ defmodule Kazi.CLI do
   # This process must therefore NOT run `Ecto.Migrator` and must NOT open a
   # second write connection against the same file -- doing so would recreate the
   # exact #1019 mixed-migration-writer class ADR-0068 closes by construction. So
-  # when the daemon control socket probes `:alive` we defer, returning `:ok`
-  # without touching the file. Writes from this process route through the daemon
-  # over the socket (T52.3/T52.5); the daemon is the single writer and the single
-  # migrator.
+  # when the daemon control socket probes `:alive` we DEFER MIGRATION, never
+  # running `Ecto.Migrator` or opening a write/`storage_up` path against the file.
+  # Writes from this process route through the daemon over the socket
+  # (T52.3/T52.5); the daemon is the single writer and the single migrator.
+  #
+  # This process is STILL a reader, though (#1483): the operator dashboard
+  # (`KaziWeb.MissionControlLive` -> `RunRegistry.list/0` -> `Kazi.Repo.all/1`)
+  # and every read verb query `Kazi.Repo` DIRECTLY -- only writes go over the
+  # socket. Under a standalone binary the app supervision tree never started the
+  # repo (`Kazi.Application` hands straight to the CLI before standing the tree
+  # up), so on the `:alive` path we still START `Kazi.Repo` here as a read
+  # connection -- WITHOUT migrating -- and leave it running. Absent that, a
+  # reader crashes with "could not lookup Ecto repo Kazi.Repo because it was not
+  # started" (the reported dashboard 500s / "no read-model persistence" under a
+  # live daemon, e.g. one supervised by launchd).
   #
   # Absent a daemon (`:missing`/`:dead`), today's behavior stands UNCHANGED
   # (ADR-0068 point 5, the rollback path): create the file, start a
@@ -8110,9 +8121,38 @@ defmodule Kazi.CLI do
     sock_path = Keyword.get(opts, :sock_path, read_model_writer_sock())
 
     case probe.(sock_path) do
-      :alive -> :ok
+      :alive -> ensure_repo_started_for_read(opts)
       _missing_or_dead -> migrate_read_model_direct(opts)
     end
+  end
+
+  # The `:alive`-daemon reader path (#1483). A live daemon has ALREADY migrated
+  # the read-model (T52.4) and is the single writer/migrator, so this process
+  # must NOT migrate or open a write/`storage_up` path. It IS still a reader,
+  # though -- the dashboard and the read verbs query `Kazi.Repo` directly -- and
+  # under a standalone binary the supervision tree never started the repo, so we
+  # START it HERE as a read connection and LEAVE IT RUNNING for the rest of this
+  # (long-lived dashboard / short-lived CLI) process. Idempotent: a no-op when
+  # the repo is already supervised (the mix task / dev / test path) or already
+  # started here. `:read_start_fun` is the test seam, mirroring `:migrate_fun`.
+  defp ensure_repo_started_for_read(opts) do
+    start_fun =
+      Keyword.get(opts, :read_start_fun, fn ->
+        repo = Kazi.Repo
+
+        if started?(repo) do
+          :ok
+        else
+          case repo.start_link() do
+            {:ok, _pid} -> :ok
+            {:error, {:already_started, _pid}} -> :ok
+          end
+        end
+      end)
+
+    start_fun.()
+  rescue
+    error -> {:error, Exception.message(error)}
   end
 
   # The daemon control socket dialed to decide migration ownership. Overridable

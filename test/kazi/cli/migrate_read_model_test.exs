@@ -27,6 +27,22 @@ defmodule Kazi.CLI.MigrateReadModelTest do
     {fun, count}
   end
 
+  # A repo-start recorder: counts how many times the `:alive`-daemon reader path
+  # ensured `Kazi.Repo` was started (#1483). Mirrors `recording_migrate_fun/0`.
+  defp recording_start_fun do
+    ref = make_ref()
+    key = {__MODULE__, :start, ref}
+    :persistent_term.put(key, 0)
+
+    fun = fn ->
+      :persistent_term.put(key, :persistent_term.get(key) + 1)
+      :ok
+    end
+
+    count = fn -> :persistent_term.get(key) end
+    {fun, count}
+  end
+
   describe "migrate_read_model/1 -- a live daemon owns migration" do
     test "with a stubbed :alive probe it performs NO migration and opens no write connection" do
       {migrate_fun, count} = recording_migrate_fun()
@@ -40,6 +56,29 @@ defmodule Kazi.CLI.MigrateReadModelTest do
       # Zero migration runs: the process deferred entirely to the daemon and
       # never opened the read-model file read-write.
       assert count.() == 0
+    end
+  end
+
+  describe "migrate_read_model/1 -- a live daemon: the reader still starts the repo (#1483)" do
+    test "the :alive path ensures Kazi.Repo is started for reads but runs NO migration" do
+      {migrate_fun, migrate_count} = recording_migrate_fun()
+      {start_fun, start_count} = recording_start_fun()
+
+      assert Kazi.CLI.migrate_read_model(
+               probe: fn _sock -> :alive end,
+               sock_path: "/nonexistent/daemon.sock",
+               migrate_fun: migrate_fun,
+               read_start_fun: start_fun
+             ) == :ok
+
+      # The reader ensured its own `Kazi.Repo` connection exactly once: without
+      # this a standalone-binary reader (the dashboard, the read verbs) crashes
+      # with "could not lookup Ecto repo Kazi.Repo" under a live daemon, because
+      # the supervision tree never started the repo in this process.
+      assert start_count.() == 1
+      # ...and it STILL deferred ALL migration to the daemon (T52.6 invariant:
+      # the daemon is the single migrator/writer; the reader never migrates).
+      assert migrate_count.() == 0
     end
   end
 
