@@ -1,0 +1,64 @@
+{
+  "pin_version": 1,
+  "spec": "docs/specs/kazi_cli.feature",
+  "scenario": "A user inits plans approves and applies a hello goal",
+  "scenario_sha": "7290e46448143047fede41769fee82e132a9c5b5b623d6b92c652ab95f96cbd8",
+  "surface": "cli",
+  "minted": { "commit": "6ab56ae0c96b67103c4601e844ef707db4d7627f" },
+  "inputs": {},
+  "trace": {
+    "script": [
+      {
+        "args": ["init", ".", "--out", ".claude/scratch/kazi-hello/init.goal.toml"],
+        "assertions": [
+          { "target": "exit_code", "expected": 0 },
+          { "target": "stdout", "match": "contains", "expected": "WROTE" }
+        ]
+      },
+      {
+        "args": [
+          "plan",
+          "--json",
+          "--predicates",
+          "[{\"id\":\"ok\",\"provider\":\"custom_script\",\"cmd\":\"true\",\"verdict\":\"exit_zero\",\"description\":\"noop\"}]",
+          "--replace",
+          "--workspace",
+          "."
+        ],
+        "assertions": [
+          { "target": "exit_code", "expected": 0 },
+          { "target": "stdout", "match": "contains", "expected": "\"status\":\"proposed\"" }
+        ]
+      },
+      {
+        "args": ["approve", "prop-caller-supplied-predicates-2b66f3dbd894", "--json"],
+        "assertions": [
+          { "target": "exit_code", "expected": 0 },
+          { "target": "stdout", "match": "contains", "expected": "\"status\":\"approved\"" }
+        ]
+      },
+      {
+        "args": [
+          "apply",
+          "priv/examples/cli_release_smoke.fixture.toml",
+          "--check",
+          "--workspace",
+          "."
+        ],
+        "assertions": [
+          { "target": "exit_code", "expected": 0 },
+          { "target": "stdout", "match": "contains", "expected": "pass" }
+        ]
+      }
+    ],
+    "assertions": [{ "target": "exit_code", "expected": 0 }],
+    "timeout_ms": 120000
+  },
+  "map": [
+    { "step": "the operator initialises a goal file from the repo", "steps": [0], "assertions": [] },
+    { "step": "the operator drafts a hello-goal proposal", "steps": [1], "assertions": [] },
+    { "step": "the operator approves the proposal", "steps": [2], "assertions": [] },
+    { "step": "the operator applies the hello goal in check mode", "steps": [3], "assertions": [] },
+    { "step": "kazi reports the hello goal converged to pass", "steps": [], "assertions": [0] }
+  ]
+}
