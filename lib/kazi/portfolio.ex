@@ -30,6 +30,7 @@ defmodule Kazi.Portfolio do
 
   alias Kazi.Attention.Queue, as: AttentionQueue
   alias Kazi.Goal
+  alias Kazi.PredicateVector
   alias Kazi.ReadModel
   alias Kazi.ReadModel.{Run, RunRegistry}
   alias Kazi.Scheduler.DagSnapshot
@@ -129,17 +130,90 @@ defmodule Kazi.Portfolio do
     base = %{goal_ref: run.goal_ref, run_id: run.run_id, status: run.status}
 
     case run_bucket(run, stuck_refs) do
-      :blocked -> Map.put(base, :cause, run_stuck_cause(run))
+      :blocked -> Map.merge(base, blocked_attribution(run))
       _other -> base
     end
   end
 
-  # The named blocker for a stuck run. T64.2 enriches these with the red
-  # predicate slice / iteration counts; T64.1 records the coarse cause so the
-  # blocked bucket already carries distinct, non-DAG causes.
-  defp run_stuck_cause(%Run{status: "over_budget"}), do: :over_budget
-  defp run_stuck_cause(%Run{status: "error"}), do: :error
-  defp run_stuck_cause(_stuck), do: :stuck
+  # The named blocker for a blocked run (T64.2, UC-033/UC-061): every blocked
+  # entry carries a `:cause` AND the data that names WHY, read from the run's own
+  # objective surfaces (ADR-0011) — never hand-set:
+  #
+  #   * `:over_budget` — the run hit its declared iteration ceiling: the recorded
+  #     iteration count over the run's `max_iterations` cap.
+  #   * `:error`/`:stuck` — the persistently-red predicate slice from the run's
+  #     LAST recorded vector: the same failing predicates `kazi economy`'s cause
+  #     detail implicates, each with how many trailing iterations it stayed red.
+  #
+  # T64.1 recorded the coarse cause so the blocked bucket already carried distinct
+  # causes; T64.2 enriches each with its named blocker (rendered by
+  # `blocker_label/1`).
+  defp blocked_attribution(%Run{status: "over_budget"} = run) do
+    %{cause: :over_budget, iterations: iteration_count(run.goal_ref), cap: run.max_iterations}
+  end
+
+  defp blocked_attribution(%Run{status: "error"} = run) do
+    %{cause: :error, red_predicates: red_predicate_slice(run.goal_ref)}
+  end
+
+  defp blocked_attribution(%Run{} = run) do
+    %{cause: :stuck, red_predicates: red_predicate_slice(run.goal_ref)}
+  end
+
+  # The persistently-red predicate slice from the run's LAST recorded vector: the
+  # ids failing in the final observation, each tagged with how many trailing
+  # consecutive iterations it stayed red (the "N iterations" persistence signal).
+  # An empty history yields `[]` (honest-unknown, ADR-0046) — never a fabricated
+  # blocker.
+  defp red_predicate_slice(goal_ref) do
+    history = ReadModel.iteration_history(goal_ref)
+
+    case List.last(history) do
+      nil ->
+        []
+
+      {_index, last_vector} ->
+        vectors = history |> Enum.map(fn {_index, vector} -> vector end) |> Enum.reverse()
+
+        last_vector
+        |> PredicateVector.failing()
+        |> Enum.map(&%{id: to_string(&1), red_iterations: trailing_red_count(vectors, &1)})
+    end
+  end
+
+  # How many trailing (most-recent-first) iterations `id` stayed red before the
+  # first non-red observation — the persistence depth of a failing predicate.
+  defp trailing_red_count(vectors_newest_first, id) do
+    Enum.reduce_while(vectors_newest_first, 0, fn vector, count ->
+      case PredicateVector.get(vector, id) do
+        %Kazi.PredicateResult{status: :fail} -> {:cont, count + 1}
+        _other -> {:halt, count}
+      end
+    end)
+  end
+
+  defp iteration_count(goal_ref), do: goal_ref |> ReadModel.iteration_history() |> length()
+
+  @doc """
+  Renders a blocked entry's named cause into a one-line human blocker string
+  (T64.2, UC-033). Every blocked entry — DAG-blocked, over-budget, stuck, or
+  errored — names WHY it is blocked; a stuck run with no recorded vector degrades
+  to an honest "no recorded vector" rather than an empty or fabricated blocker.
+  """
+  @spec blocker_label(map()) :: String.t()
+  def blocker_label(%{cause: :dag, blocked_by: dep}), do: "blocked by: #{dep}"
+
+  def blocker_label(%{cause: :over_budget, iterations: iters, cap: cap}),
+    do: "blocked: #{iters}/#{cap} iterations"
+
+  def blocker_label(%{cause: cause, red_predicates: reds}) when cause in [:stuck, :error] do
+    case reds do
+      [] -> "blocked: #{cause} (no recorded vector)"
+      reds -> "blocked: " <> Enum.map_join(reds, ", ", &red_label/1)
+    end
+  end
+
+  defp red_label(%{id: id, red_iterations: n}), do: "#{id} red #{n} iterations"
 
   # `:todo` — approved proposals whose goal has NO registered run yet (ready to
   # dispatch). An approved proposal already under a run is represented by that
