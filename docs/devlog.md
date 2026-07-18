@@ -7,6 +7,69 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-17 — T57.3: re-verified #924's vacuous convergence against shipped E49 scenario predicates — the failure class is closed for goals that adopt them
+
+**Type:** verification
+**Tags:** predicate, scenario, vacuous-convergence, T57.3, #924, #1128, ADR-0064
+
+**What #924 was.** A UI+backend+integration feature (onboarding coach
+integration) terminated `converged` with every predicate passing while the
+feature was largely unbuilt. The acceptance predicates were `custom_script`
+greps (`grep -rqiE 'onboarding' internal/ai && go build && go test`). Two
+failure modes: (1) string-stuffing — a new headline spliced into old markup
+passed a copy grep though the redesigned screen never shipped; (2) vacuous match
+— `grep 'onboarding'` matched only an unrelated pre-existing comment ("there is
+no onboarding or Settings surface yet"); the real coach-context integration was
+never built and nothing ever called the backend. `build`/`test` passed because
+existing tests never covered the new behavior. The gate was: keep #924 open
+until E49 Wave A (scenario predicates) shipped and the class was reproducible.
+E49 is now fully shipped (ADR-0064; `docs/plans/E49.md` — all tasks `[x]` except
+the `Owner: TBD` live dogfood T49.13), so that gate has passed.
+
+**What I did.** Built a reproduction that re-authors the SAME capability two
+ways and runs both through the genuine providers (no browser, no network — the
+browser surface is stubbed by the shipped `test/support/stub_playwright.sh`,
+exactly as `scenario_test.exs` does):
+`test/kazi/regression/vacuous_convergence_scenario_test.exs`.
+
+- **Raw `custom_script` grep (the #924 shape) still vacuously PASSES.** The
+  workspace has `internal/ai/context.go` whose only "onboarding" occurrence is an
+  unrelated comment (failure mode 2, verbatim in shape). `grep -rqiE 'onboarding'
+  internal/ai` exits 0 → `:pass`. No real work behind it. Reproduced.
+- **The same capability as a `scenario` predicate does NOT pass vacuously.**
+  Authored as a tagged Gherkin Scenario bound to a pin (ADR-0064):
+  - Unbuilt feature → no committed pin → classifies `:unpinned` → `:fail`
+    (`pin_state: :unpinned`). There is no string to stuff and no comment to match.
+  - Even a fabricated, well-formed pin (correct scenario hash, valid trace) can
+    only pass by replaying green through the surface provider. The unbuilt UI
+    yields a RED surface verdict → `:fail`. This is the ADR-0064 truth invariant
+    a grep structurally cannot enforce.
+  - Positive control: with the surface actually demonstrating the behavior
+    (green stub verdict) the predicate `:pass`es (`pin_state: :pinned`). Pass is
+    reachable — but its truth-maker is the surface observation, never a string.
+
+**Result — closed, for goals that adopt scenario predicates.** By construction a
+scenario predicate's pass is gated on a validated pin replaying green through a
+real surface provider; string presence in unrelated content cannot satisfy it.
+Both of #924's failure modes are string-match artifacts, so both are eliminated
+the moment the capability is stated as a scenario predicate rather than a grep.
+
+**What was and wasn't exercised.** Exercised: the real `CustomScript` System.cmd
+path and the real `Scenario` classify → resolve → delegate → extend path, with
+the browser surface stubbed at the subprocess seam. NOT exercised: a live
+browser, a real end-to-end `kazi apply` loop, or the demonstrator dispatch that
+mints pins (T49.4+) — this verification is about the evaluation-time truth
+invariant, which is where #924's gap lived, not about pin authoring.
+
+**The residual gap (feeds #1128).** Scenario predicates close the class only for
+goals that CHOOSE to use them. A goal that stays on raw `custom_script`/`grep`
+predicates is still exactly as vulnerable as #924 — the mechanism is opt-in, not
+a controller-level guard-rail over all goals. That remaining case is what #1128
+is really about; recommendation posted there (narrow #1128 to the
+non-scenario-goal guard-rail rather than close it, and do NOT build its `kind`
+field speculatively). #924 itself is left OPEN for the human to close alongside
+the #1128 disposition, since the two are coupled.
+
 ## 2026-07-17 — T58.1: root-caused the bus read/write version-skew asymmetry (#1227) — writes bypass the daemon's op dispatch entirely, reads don't
 
 **Type:** investigation
