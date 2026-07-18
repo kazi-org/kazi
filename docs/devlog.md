@@ -7,6 +7,107 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-18 — T52.9: two versions, one daemon, never blind — E52 exit-criteria live dogfood (ADR-0068)
+
+**Type:** dogfood / live verification
+**Tags:** E52, T52.9, ADR-0068, daemon, single-writer, run-registry, schema-skew, release-binary, #1019
+
+**What.** Ran the E52 exit-criteria dogfood: stood up one daemon as the single
+writer for the read-model and drove writes from two kazi versions through it,
+then exercised the schema-skew handshake and the no-daemon fallback. All four
+ADR-0068 exit assertions were observed to hold; the shortfalls are recorded
+honestly below.
+
+**Binary flavors (release-availability reality, per the T52.9 outcome (b)).**
+The newest release at run time, **v1.235.0** (tagged 33s after PR #1461/T52.8
+merged), DOES contain the full E52 write path by git ancestry — but it shipped
+with **zero downloadable assets** (GoReleaser produced none at cut time), so the
+"new" side could not be a released binary. Every asset-bearing release
+(v1.228.0 … v1.234.0) and `main` carry an **identical migration set** (through
+`20260718120000_create_run_landed_refs`), so there is **no natural schema skew
+between released binaries** — the ADR-0068 premise that an older release carries
+fewer migrations did not hold here. Flavors actually used:
+- **new** = locally-built `MIX_ENV=prod mix release` from `main` @ `ece8142e`
+  (reports vsn 1.234.0 from mix.exs but carries the full E52 set incl. the
+  T52.7/T52.8 *client-side* skew checks). Driven via the release `bin/kazi eval`.
+- **old** = the released **v1.234.0** `macos_x86_64` burrito asset (has the
+  routed write path through T52.7; predates T52.8's client-newer check).
+- The locally-installed `kazi` on `$PATH` is **1.228.0**, which predates the
+  daemon write op (T52.3) entirely — it cannot be the single writer. The dogfood
+  therefore ran against a from-source prod release, not the `$PATH` install.
+
+Isolation: throwaway `KAZI_STATE_DIR` (short path — macOS caps the Unix-socket
+`sun_path` at ~104 bytes; the first scratch path `:einval`'d the listener),
+`KAZI_DB`, and `--nats-port 14223` (never the default). The real per-machine
+daemon was never touched.
+
+**Observed, per exit assertion.**
+1. **Two versions, one daemon, no deadlock.** The new release wrote RunRegistry
+   rows through the daemon socket (probe `:alive`), and the released **v1.234.0**
+   binary — a genuinely different build — registered its own run
+   (`session_name=v234-oldclient`, via a real `apply`) through the SAME daemon.
+   The daemon stayed responsive throughout (same pid, uptime climbing; `status
+   --json` answered after the concurrent writes). Final single-writer DB held
+   all 3 runs from both versions. No hang, no deadlock.
+2. **Duplicate-run guard + economics correct through the one writer.** The
+   dup-guard live lookup (`RunRegistry.list_by_goal_ref` + liveness filter) saw
+   exactly **1 live row** for the shared goal_ref while a run was open — a second
+   same-goal `apply` would be refused. `finish/3` persisted economics through
+   the socket: `budget_cost_usd`, `budget_tokens`, `dispatch_count` all landed.
+   **Single-writer routing proven directly:** with the client's local `KAZI_DB`
+   pointed at a *different empty file* while it still probed the daemon's socket,
+   an insert landed in the **daemon's** DB and was **absent** from the client's
+   local file — the write provably crossed the socket to the single writer.
+3. **Deliberately-older client hits the explicit skew handshake, not a blind
+   run.** Both directions of `SchemaSkew.classify/2`, constructed by stamping
+   `kazi_schema_meta` (since released binaries share a schema):
+   - *client-newer / daemon-older (T52.8):* the daemon's `status` ping reported
+     `schema_vsn 20260709210000` (below the client's `20260718120000`); the new
+     client emitted the exact single line *"daemon is older than this client
+     (schema v20260709210000 < v20260718120000); restart it (`kazi daemon
+     restart`) or continue without persistence"*, returned
+     `{:error, :read_model_unavailable}`, and **wrote no row**.
+   - *client-older / no-daemon (T52.7):* against a file stamped
+     `20260801000000` (newer than the binary), the direct write refused with
+     *"read-model schema v20260801000000 is newer than this binary
+     (v20260718120000); running without persistence -- upgrade kazi"*, and
+     **wrote no row**. Both are visible degrades; the run continues, never a
+     silent blind write.
+4. **Daemon-down degrades to today's direct-write semantics, byte-for-byte.**
+   With the daemon stopped and the file stamped to the binary's own schema, the
+   full `start` → `finish` lifecycle persisted **direct** (status converged,
+   economics present) — the pre-E52 `Repo` path, unchanged.
+
+**Verdict on the ADR-0068 exit criteria: MET**, with the honest caveats below.
+Two versions ran through one daemon with zero deadlocks; the duplicate-run guard
+and economics stayed correct through the single writer; every skew case surfaced
+the explicit operator choice instead of a blind run; and rollback to no-daemon
+preserved today's direct-write semantics.
+
+**Honest gaps / deviations.**
+- **New side is a from-source prod release, not a published asset** — v1.235.0
+  carries the code but shipped no downloadable binaries, so a true
+  released-binary-vs-released-binary run of the *full* E52 path was not possible.
+  Recorded per the task's sanctioned outcome (b).
+- **No natural migration skew between released binaries.** All asset-bearing
+  releases and `main` share the same migration set, so `run_landed_refs` was
+  already released — contra the task brief. Both skew directions were therefore
+  **constructed** by stamping `kazi_schema_meta`, not by pointing two
+  differently-migrated binaries at one file.
+- **The skew handshake is only observable with the NEW binary as the newer
+  party.** An actually-older released client (v1.228.0/v1.234.0) has no T52.8
+  client-newer check, so old-client-vs-new-daemon writes through per the
+  additive-within-major design — exactly as the brief anticipated. The
+  "deliberately-older client" in assertion 3 is thus the new binary judged
+  against an older-*stamped* daemon/file, which is the only construction the
+  available binaries permit.
+- **RunRegistry rows were driven via the release `bin/kazi eval` calling
+  `RunRegistry.start/finish` directly** (the exact production Writer→socket
+  path), plus one real `apply` on the v1.234.0 binary to prove a second genuine
+  build writes through the same daemon. A full harness-driven convergence on
+  both binaries was not run (no need — the load-bearing surface is the write
+  path and the guard, both exercised end-to-end).
+
 ## 2026-07-18 — T62.3: Sire's `storage-store.feature` reconciles natively through the `gherkin` provider — live godog proof, per-scenario verdicts, broken-scenario isolation
 
 **Type:** dogfood / live verification
