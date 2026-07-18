@@ -7,6 +7,60 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-18 — T62.3: Sire's `storage-store.feature` reconciles natively through the `gherkin` provider — live godog proof, per-scenario verdicts, broken-scenario isolation
+
+**Type:** dogfood / live verification
+**Tags:** gherkin, provider, ADR-0071, T62.3, #1107, release-binary, godog, cucumber
+
+**What.** Wired the Sire project's (sire.run) executable storage-port contract
+`storage-store.feature` (4 Scenarios, real SQLite store) as the live acceptance
+fixture for the runtime `gherkin` provider (ADR-0071), and proved it reconciles
+NATIVELY: `kazi apply --check --json` returns one verdict PER Scenario, not one
+opaque feature-level result. Fixture committed under `priv/examples/gherkin/`.
+
+**Live godog run (observed).** Sire's own runner (`scripts/storage-contract.sh`
+-> `go test ./storage/`) hardcodes godog `Format: "pretty"`, so it emits an
+opaque package pass/fail — no cucumber-json. To get REAL per-scenario
+cucumber-json without modifying the (strictly read-only) Sire repo, I ran godog
+via `go test -overlay` (go1.26.4): the overlay adds one scratch-dir test file
+that reuses Sire's REAL `contractWorld` step bindings and real store, changing
+only `Format` to `"cucumber"`. Nothing was written into the Sire repo. Driving
+the goal-file with `runner_args` pointing at that live godog invocation, the
+release binary `kazi` reconciled all 4 scenarios to `pass`:
+
+```
+storage-store-migrator__a-conflicting-transaction-rolls-back            -> pass
+storage-store-migrator__a-dirty-migration-state-blocks-further-migration -> pass
+storage-store-migrator__migrations-apply-up-and-roll-back-down          -> pass
+storage-store-migrator__values-round-trip-through-a-committed-transaction -> pass
+```
+
+**Edge case 3 (verbatim names) — CONFIRMED, no T62.2 gap.** godog's
+`--format=cucumber` reports the Feature name `"storage Store + Migrator"` and
+each Scenario name (`"a conflicting transaction rolls back"`, …) EXACTLY as the
+`.feature` text — matching the provider's verbatim `config[:scenario]` lookup
+(ADR-0071 assumption). No keyword prefix, no outline-row renaming for a plain
+Scenario. Nothing to fix.
+
+**Broken-scenario isolation — CONFIRMED.** Flipping ONE scenario's step to
+`"failed"` in a captured report reds only that scenario's sub-predicate; the
+other three stay `pass` (overall `fail`). Per-scenario granularity is real, not
+cosmetic.
+
+**Release-binary atom-safety — CONFIRMED (and a stale-binary trap hit).** The
+goal loaded and evaluated identically under `mix` (source) and the release
+binary (no `String.to_atom/1` on report content; L-0041). Trap: the `kazi` on
+`$PATH` was a directly-installed 1.221.0 file shadowing Homebrew's 1.222.0 (whose
+symlink couldn't overwrite the real file); against 1.221.0 every verdict was
+`unknown` (that build predates T62.2's ingestion). Upgrading the on-PATH binary
+to 1.222.0 turned all four green — exactly the CLAUDE.md landmine: verify
+`kazi version` matches the newest release, don't trust `brew upgrade` alone.
+
+**What CI keeps.** `test/kazi/goal/gherkin_sire_fixture_test.exs` replays the
+CAPTURED real godog cucumber-json (`storage-store.cucumber.json`) through the
+loader + provider — 3 tests, green without a Go toolchain. The live godog run is
+this devlog entry.
+
 ## 2026-07-17 — T57.3: re-verified #924's vacuous convergence against shipped E49 scenario predicates — the failure class is closed for goals that adopt them
 
 **Type:** verification
