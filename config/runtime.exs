@@ -45,3 +45,23 @@ end
 if System.get_env("KAZI_MEMORY_RECALL") in ~w(1 true) do
   config :kazi, :memory_recall, true
 end
+
+# T67.6 dogfood gap 3: `:velocity_collector` `workspaces:` is compile-time
+# config, baked `[]` into a shipped artifact — so the delivery-event projection
+# (the velocity ticker's second pass) could never run on a released binary.
+# `KAZI_VELOCITY_WORKSPACES` is the runtime override: a colon-separated list of
+# absolute git-workspace paths. Unset leaves the compile-time default in force.
+# Merged over the existing keyword config so the interval/transcript_dir keys
+# (and the KAZI_VELOCITY_COLLECTOR opt-in, which is read directly at runtime by
+# `SessionCollector.enabled?/0`) are unaffected.
+if workspaces = System.get_env("KAZI_VELOCITY_WORKSPACES") do
+  paths = workspaces |> String.split(":", trim: true)
+
+  config :kazi,
+         :velocity_collector,
+         Keyword.put(
+           Application.get_env(:kazi, :velocity_collector, []),
+           :workspaces,
+           paths
+         )
+end
