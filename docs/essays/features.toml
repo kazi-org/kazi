@@ -1,0 +1,103 @@
+# The curated manifest of SIGNIFICANT SHIPPED FEATURES an essay should cover.
+# This file is the single source of truth for essay coverage
+# (check_essay_coverage.py reads it; the essays.goal.toml standing goal drives
+# it). Adding a significant feature to kazi means adding a row here — the same
+# "docs land with the code" discipline as ADR-0034.
+#
+# anchors: the files that DEFINE the feature. An essay is stale when any anchor
+# has a git commit newer than the essay's `reviewed:` date.
+
+[[feature]]
+id = "objective-done"
+title = "Objective done: truth lives in the controller"
+anchors = [
+  "docs/adr/0001-positioning-outer-loop-reconciler.md",
+  "docs/adr/0002-goals-as-predicates.md",
+]
+
+[[feature]]
+id = "guard-predicates"
+title = "Guard predicates + anti-gaming enforcement"
+anchors = [
+  "docs/adr/0002-goals-as-predicates.md",
+  "docs/adr/0042-anti-gaming-enforcement.md",
+]
+
+[[feature]]
+id = "budgets"
+title = "Hard budgets: the loop that cannot run forever"
+anchors = [
+  "docs/adr/0002-goals-as-predicates.md",
+  "docs/economy.md",
+]
+
+[[feature]]
+id = "live-predicates"
+title = "Live predicates: verify the deployed system"
+anchors = [
+  "docs/live-providers.md",
+  "docs/adr/0043-predicate-catalog-expansion.md",
+]
+
+[[feature]]
+id = "ratchet-predicate"
+title = "Ratchets: metrics that only move one way"
+anchors = [
+  "docs/ratchet-predicate.md",
+  "docs/adr/0041-predicate-envelope-v2-score-evidence-ratchet.md",
+]
+
+[[feature]]
+id = "blast-radius-leases"
+title = "Blast-radius leases: coordinate on resources, not identities"
+anchors = [
+  "docs/adr/0006-coordination-leases-and-graph-partitioning.md",
+]
+
+[[feature]]
+id = "predicate-graph-waves"
+title = "Native scheduler + predicate-graph waves"
+anchors = [
+  "docs/adr/0027-kazi-owns-parallelization-native-scheduler.md",
+  "docs/adr/0028-dependency-aware-partitioning-predicate-graph-waves.md",
+]
+
+[[feature]]
+id = "token-economy"
+title = "Two-tier economics: frontier judgment once, cheap iterations gated"
+anchors = [
+  "docs/adr/0033-cheaper-via-in-family-claude-tiering.md",
+  "docs/adr/0035-skill-driven-adaptive-model-tiering.md",
+]
+
+[[feature]]
+id = "harness-agnostic"
+title = "Harness-agnostic profiles: drive any CLI agent"
+anchors = [
+  "docs/adr/0016-generic-harness-profiles.md",
+  "docs/adr/0022-harness-onboarding-conformance.md",
+]
+
+[[feature]]
+id = "self-teaching"
+title = "Self-teaching surfaces: skill, MCP, machine-readable help"
+anchors = [
+  "docs/adr/0024-kazi-self-teaching-to-harnesses.md",
+  "docs/adr/0044-kazi-mcp-installed-subcommand.md",
+]
+
+[[feature]]
+id = "self-maintaining-docs"
+title = "Self-maintaining docs: kazi reconciles its own documentation"
+anchors = [
+  "docs/adr/0036-self-maintaining-docs-via-kazi-standing-goal.md",
+  "docs/doc-freshness.md",
+]
+
+[[feature]]
+id = "scenario-predicates"
+title = "Scenario predicates: from Gherkin prose to replayable truth"
+anchors = [
+  "docs/adr/0064-scenario-predicates-demonstrate-then-pin.md",
+  "docs/scenario-predicate.md",
+]
