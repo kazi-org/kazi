@@ -280,12 +280,34 @@ defmodule Kazi.Bus.Hook do
   end
 
   @doc """
-  The `session-start` payload: registers presence + joins the project-scope
-  team (`Kazi.Bus.project_id/0`), then injects the current board. `:silent`
-  when the daemon is down.
+  The `session-start` payload: a best-effort binary/plugin version-skew line
+  (T61.5/ADR-0077, `Kazi.Plugin.Skew`) followed by the bus board.
+
+  The two parts are INDEPENDENT: the skew line is a LOCAL diagnostic (not
+  untrusted external bus input, so it sits OUTSIDE the advisory banner) and is
+  emitted even when the daemon is down, while the board still needs presence +
+  a live daemon. `:silent` only when BOTH are silent -- versions match/absent
+  AND no daemon. Both run inside `run/2`'s bounded session-start task, so the
+  skew file read shares the hook's hard wall-clock bound and fail-silent
+  contract.
   """
   @spec session_start(keyword()) :: payload()
   def session_start(opts) do
+    combine(skew_payload(opts), board_payload(opts))
+  end
+
+  # The version-skew line as a hook payload (its own trailing newline so it
+  # renders as one clean line above any board block). `:silent` on match/absent.
+  defp skew_payload(opts) do
+    case Kazi.Plugin.Skew.check(opts) do
+      {:emit, line} -> {:emit, line <> "\n"}
+      :silent -> :silent
+    end
+  end
+
+  # The bus board block: registers presence + joins the project-scope team, then
+  # injects the current board. `:silent` when the daemon is down.
+  defp board_payload(opts) do
     team = Bus.project_id()
 
     with :ok <- Bus.join(team, opts),
@@ -295,6 +317,13 @@ defmodule Kazi.Bus.Hook do
       _error -> :silent
     end
   end
+
+  # Fold the two independent session-start parts into one payload: emit whichever
+  # are present, skew line first; `:silent` only when both are silent.
+  defp combine({:emit, a}, {:emit, b}), do: {:emit, a <> b}
+  defp combine({:emit, a}, :silent), do: {:emit, a}
+  defp combine(:silent, {:emit, b}), do: {:emit, b}
+  defp combine(:silent, :silent), do: :silent
 
   # The framed, advisory block: banner, the untrusted-input contract, the body,
   # closing banner. One trailing newline so the injected text ends cleanly.
