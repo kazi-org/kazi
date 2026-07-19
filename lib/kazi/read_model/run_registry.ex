@@ -211,9 +211,30 @@ defmodule Kazi.ReadModel.RunRegistry do
     end
   end
 
-  @doc "Lists every registered run, most recently started first."
+  @doc """
+  Lists every registered run, most recently started first.
+
+  Bounded (#1483 reopened): `MissionControlLive.assign_fleet/1` calls this on
+  every mount AND every 2s poll tick, so an unbounded `Repo.all/2` here is a
+  single point of failure for the whole dashboard process -- under fleet write
+  contention (RunReaperTicker/HeartbeatTicker/VelocityTicker all share this
+  one SQLite writer) a raw call can queue behind a writer for the full 60s
+  `busy_timeout`, and LiveView is single-process per connection, so `GET /`
+  simply never responds. Routed through the SAME `Guard.run/3` bounded-task
+  deadline every WRITE in this module already uses; degrades to `[]` on
+  timeout/crash rather than blocking, matching every other `assign_*` helper
+  in `MissionControlLive`'s already-documented "never blocks, never 500s"
+  read-only-projection contract (ADR-0011 §2) -- this was the one gap in it.
+  """
   @spec list() :: [Run.t()]
   def list do
+    case Guard.run("run list", fn -> do_list() end) do
+      {:error, :read_model_unavailable} -> []
+      runs -> runs
+    end
+  end
+
+  defp do_list do
     Run
     |> order_by(desc: :started_at)
     |> Repo.all()
