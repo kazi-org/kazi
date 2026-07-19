@@ -143,8 +143,51 @@ defmodule KaziWeb.TestSeedController do
     text(conn, "reset-attention")
   end
 
+  @doc """
+  Seeds a single ACTIVE goal with two recorded iterations and an iteration
+  budget for the Mission Control progress-rate panel cert (T63.9, IA Q4): a
+  running run whose vector went 3/8 green with two predicates flipped red→green
+  across one transition, and a 2-of-10 iteration budget. Returns `200
+  seeded-progress`.
+  """
+  def seed_progress(conn, _params) do
+    reset_iterations()
+    reset_fleet()
+
+    run = seed_run("mc-prog-goal", "/tmp/pw/org-alpha/api")
+
+    run
+    |> Run.changeset(%{"dispatch_count" => 2, "max_iterations" => 10})
+    |> Kazi.Repo.update!()
+
+    {:ok, _} =
+      ReadModel.record_iteration(%{
+        goal_ref: "mc-prog-goal",
+        iteration_index: 0,
+        predicate_vector: octo_vector(1)
+      })
+
+    {:ok, _} =
+      ReadModel.record_iteration(%{
+        goal_ref: "mc-prog-goal",
+        iteration_index: 1,
+        predicate_vector: octo_vector(3)
+      })
+
+    text(conn, "seeded-progress")
+  end
+
   defp reset_iterations, do: Kazi.Repo.delete_all(Iteration)
   defp reset_fleet, do: Kazi.Repo.delete_all(Run)
+
+  # An 8-predicate vector whose first `passing` predicates are green.
+  defp octo_vector(passing) do
+    PredicateVector.new(
+      for i <- 0..7, into: %{} do
+        {:"p#{i}", PredicateResult.new(if(i < passing, do: :pass, else: :fail), %{})}
+      end
+    )
+  end
 
   # A live-session run (the liveness stub treats a non-"dead" pid as alive, so it
   # lands in the CURRENT scope the dashboard defaults to).
