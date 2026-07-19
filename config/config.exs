@@ -82,10 +82,24 @@ config :kazi, :velocity_collector,
 # runs contend for the single WAL writer. exqlite's 2s default surfaces as
 # SQLITE_BUSY wedges once a handful of processes overlap; 60s lets a waiting
 # writer ride out another process's write burst instead of erroring.
+#
+# `default_transaction_mode: :immediate` (T59.5, #1025/#1186): a DEFERRED
+# transaction (exqlite's default) takes only a read lock at BEGIN and upgrades
+# to a write lock on the first write. If another connection holds the writer at
+# that moment, SQLite returns SQLITE_BUSY *immediately* and does NOT honor
+# `busy_timeout` on the upgrade (rolling back the read snapshot could break
+# serializability). So `busy_timeout` silently failed to cover any
+# read-then-write transaction — the `proposed_goals` upsert in
+# `Kazi.Authoring.persist/3` reached via `kazi plan` flaked with "Database busy"
+# under a parallel suite. IMMEDIATE takes the write lock at BEGIN, where
+# `busy_timeout` DOES apply, so a contended writer waits instead of erroring.
+# ecto_sqlite3 recommends IMMEDIATE for balanced read/write workloads like this
+# shared read-model. See test/kazi/read_model/transaction_mode_test.exs.
 config :kazi, Kazi.Repo,
   database: Path.expand("../priv/kazi_dev.db", __DIR__),
   journal_mode: :wal,
   busy_timeout: 60_000,
+  default_transaction_mode: :immediate,
   pool_size: 5
 
 import_config "#{config_env()}.exs"
