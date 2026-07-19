@@ -2020,18 +2020,47 @@ defmodule Kazi.Bus do
   defp with_discovered_conn(opts, fun, timeout_ms) do
     sock_path = opts[:sock_path] || Supervisor.default_sock_path()
 
-    with :alive <- Probe.probe(sock_path),
-         {:ok, %{"nats_port" => port} = pong} when is_integer(port) <- Probe.ping(sock_path),
-         :ok <- check_protocol_skew(pong),
-         {:ok, conn} <- Gnat.start_link(discovered_connect_opts(pong, port)) do
-      try do
-        run(conn, fun, timeout_ms)
-      after
-        if Process.alive?(conn), do: Gnat.stop(conn)
-      end
-    else
-      {:error, {:daemon_protocol_skew, _vsn}} = skew_error -> skew_error
-      _other -> {:error, :no_daemon}
+    # #1579: distinguish "no daemon" (no socket file) from "socket present but not
+    # accepting" (a stale/deaf socket, or a daemon alive-but-wedged out of file
+    # descriptors — `accept failed: :emfile`). Folding both into `:no_daemon` sent
+    # operators chasing the wrong fix ("start one" when one was already there).
+    case Probe.probe(sock_path) do
+      :missing ->
+        {:error, :no_daemon}
+
+      :dead ->
+        # The socket FILE exists but the connection is refused: a crashed/deaf
+        # daemon whose socket file survives, or one that cannot accept.
+        {:error, :daemon_socket_unresponsive}
+
+      :alive ->
+        connect_discovered(sock_path, fun, timeout_ms)
+    end
+  end
+
+  # The control socket accepted a connection; complete the handshake (ping →
+  # protocol-skew check → NATS connect) and run the op. A ping that does not
+  # answer means the daemon accepted the TCP connection but is not servicing
+  # requests — alive-but-deaf, the #1579 wedge — distinct from "no daemon". A NATS
+  # connect failure keeps its prior `:no_daemon` fold (a bus-reachability fault,
+  # out of scope for #1579).
+  defp connect_discovered(sock_path, fun, timeout_ms) do
+    case Probe.ping(sock_path) do
+      {:ok, %{"nats_port" => port} = pong} when is_integer(port) ->
+        with :ok <- check_protocol_skew(pong),
+             {:ok, conn} <- Gnat.start_link(discovered_connect_opts(pong, port)) do
+          try do
+            run(conn, fun, timeout_ms)
+          after
+            if Process.alive?(conn), do: Gnat.stop(conn)
+          end
+        else
+          {:error, {:daemon_protocol_skew, _vsn}} = skew_error -> skew_error
+          _other -> {:error, :no_daemon}
+        end
+
+      _no_reply ->
+        {:error, :daemon_socket_unresponsive}
     end
   end
 
