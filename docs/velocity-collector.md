@@ -83,6 +83,23 @@ config :kazi, :velocity_collector,
   workspaces: ["/abs/path/to/repo", "/abs/path/to/another"]
 ```
 
+- **On the released binary, use `KAZI_VELOCITY_WORKSPACES`.** The `:workspaces`
+  keyword above is compile-time config, baked into the shipped Burrito artifact as
+  its default `[]`. Setting it at runtime through `config/runtime.exs` does **not**
+  reach the ticker on the release binary: the daemon supervision tree (the ticker's
+  `init/1`) boots before the `runtime.exs` config provider applies, so a
+  provider-set value is invisible at init (T67.6 gap 4). The release-binary way to
+  configure workspaces is the `KAZI_VELOCITY_WORKSPACES` environment variable — a
+  colon-separated list of absolute git-workspace paths, read **directly at ticker
+  init** and taking precedence over app-env:
+
+  ```bash
+  KAZI_VELOCITY_WORKSPACES=/abs/path/to/repo:/abs/path/to/another kazi daemon start
+  ```
+
+  Unset, the ticker falls back to the compile-time `:workspaces` config. Blank
+  segments are trimmed. This mirrors `KAZI_VELOCITY_COLLECTOR` (the opt-in gate),
+  which `SessionCollector.enabled?/0` likewise reads at call time.
 - **Not gated on `enabled`.** Delivery projection reads only committed git history
   (never a transcript), so it runs whenever `:workspaces` is non-empty regardless of
   the session-collector opt-in. An empty list (the default) does no projection work.

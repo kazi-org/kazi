@@ -406,6 +406,87 @@ defmodule Kazi.Daemon.VelocityTickerTest do
     end
   end
 
+  describe "KAZI_VELOCITY_WORKSPACES (release-binary override, read at init)" do
+    setup do
+      System.delete_env("KAZI_VELOCITY_WORKSPACES")
+      on_exit(fn -> System.delete_env("KAZI_VELOCITY_WORKSPACES") end)
+      :ok
+    end
+
+    # T67.6 gap 4: on the Burrito release binary the daemon supervision tree
+    # (the ticker's init/1) boots BEFORE config/runtime.exs applies its override
+    # to app-env, so a provider-set :workspaces is invisible at init. The ticker
+    # must therefore read the env DIRECTLY at init, taking precedence over -- and
+    # not depending on -- app-env. Here app-env is set to a DIFFERENT value to
+    # prove the env wins and app-env is not consulted when the env is present.
+    test "env is honored at init even when app-env holds a different value",
+         %{state_dir: state_dir} do
+      prev = Application.get_env(:kazi, :velocity_collector)
+
+      Application.put_env(:kazi, :velocity_collector, workspaces: ["/from-app-env"])
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:kazi, :velocity_collector, prev),
+          else: Application.delete_env(:kazi, :velocity_collector)
+      end)
+
+      System.put_env("KAZI_VELOCITY_WORKSPACES", "/a:/b:/c")
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_env_precedence,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: fn _opts -> {:ok, []} end}
+        )
+
+      assert VelocityTicker.status(pid).workspaces == ["/a", "/b", "/c"]
+    end
+
+    test "unset env falls back to app-env :workspaces", %{state_dir: state_dir} do
+      prev = Application.get_env(:kazi, :velocity_collector)
+
+      Application.put_env(:kazi, :velocity_collector, workspaces: ["/from-app-env"])
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:kazi, :velocity_collector, prev),
+          else: Application.delete_env(:kazi, :velocity_collector)
+      end)
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_env_fallback,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: fn _opts -> {:ok, []} end}
+        )
+
+      assert VelocityTicker.status(pid).workspaces == ["/from-app-env"]
+    end
+
+    test "empty/blank env segments are trimmed", %{state_dir: state_dir} do
+      System.put_env("KAZI_VELOCITY_WORKSPACES", "/a::/b:")
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_env_trim,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: fn _opts -> {:ok, []} end}
+        )
+
+      assert VelocityTicker.status(pid).workspaces == ["/a", "/b"]
+    end
+  end
+
   defp wait_until(fun, attempts \\ 100)
   defp wait_until(_fun, 0), do: flunk("condition not met in time")
 
