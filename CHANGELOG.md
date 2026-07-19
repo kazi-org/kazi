@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.265.0](https://github.com/kazi-org/kazi/compare/v1.264.2...v1.265.0) (2026-07-19)
+
+
+### Features
+
+* **daemon:** KAZI_VELOCITY_WORKSPACES read at ticker init -- runtime workspaces on the release binary (T67.6 gap 4) ([50d9ec0](https://github.com/kazi-org/kazi/commit/50d9ec018d33ab8175f1f574e197c9ce21482a11))
+
 ## [1.264.2](https://github.com/kazi-org/kazi/compare/v1.264.1...v1.264.2) (2026-07-19)
 
 
