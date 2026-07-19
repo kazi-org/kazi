@@ -1,0 +1,79 @@
+# E51/T51.2 (ADR-0067). Second node of the E51 Wave-A fleet DAG.
+# depends_on 0024 (builds on the daemon skeleton + control protocol).
+# Conflict surface: lib/kazi/daemon/ (shared with 0024 -- also an inferred scope edge),
+# new lib/kazi/bus/, lib/kazi/cli.ex.
+
+id = "bus-mvp-nats"
+name = "T51.2: bus MVP -- the daemon supervises nats-server (JetStream) and `kazi bus post|read|who|tell` round-trip with per-session durable-consumer cursors (ADR-0067)"
+
+[metadata]
+epic = "E51"
+task = "T51.2"
+depends_on = ["daemon-skeleton"]
+
+[scope]
+paths = ["lib/kazi/daemon/", "lib/kazi/bus/", "lib/kazi/cli.ex", "test/kazi/bus/"]
+
+[[predicate]]
+id = "bus-mvp-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E51 task T51.2, ADR-0067 -- read docs/adr/0067-session-coordination-bus.md, decision points 2-6; goal 0024 (daemon skeleton) is this goal's dependency and its control protocol is the seam to extend).
+
+PRECONDITION: goal 0024 must already be landed -- verify lib/kazi/daemon/ and test/kazi/daemon/daemon_lifecycle_test.exs exist in this workspace. If absent, STOP and report.
+
+REUSE, DO NOT REINVENT: `{:gnat, "~> 1.9"}` is ALREADY in mix.exs; `Kazi.Coordination.Lease.Nats` + `Kazi.Coordination.Transport` show the existing Gnat connection idioms; test_helper.exs ALREADY gates `:nats`-tagged tests behind the NATS_URL env var (test/kazi/coordination/lease/nats_test.exs is the pattern to mirror).
+
+BUILD THIS:
+(1) nats-server supervision in the daemon: a new child (Kazi.Daemon.Nats) launching `nats-server -js -p <port> -sd ~/.kazi/daemon/jetstream` as a supervised Port, restart with backoff. Binary resolution: `System.find_executable("nats-server")` or `--nats-bin <path>` on `kazi daemon start`; port via `--nats-port`, DEFAULT 4223 (non-standard on purpose -- never collide with an operator's own NATS on 4222). Binary absent -> `kazi daemon start` fails with ONE clear line naming the missing binary + an install hint (the daemon does not limp along busless). Health: after Port start, connect via Gnat (brief retry loop) before reporting ready. Extend the 0024 ping response with `"nats_port": N` so clients discover the port through the control socket, never by guessing.
+(2) Boot provisioning (Kazi.Bus.Provision, called once Gnat connects): JetStream stream `KAZI_BUS` (subjects `bus.>`, max_age 24h, max_msg_size 1024, storage file) and KV bucket `kazi_sessions` (TTL 600s). Use gnat 1.9's Jetstream API modules (check deps/gnat for Gnat.Jetstream.API.Stream / KV) or raw `$JS.API` requests -- whichever tests more simply. Idempotent (already-exists -> ok).
+(3) `Kazi.Bus` client module (new lib/kazi/bus/): connects lazily per invocation -- discover the daemon via the 0024 control-socket ping (-> nats_port); no daemon -> {:error, :no_daemon}. API: `post(kind, text, opts)` -> publish to `bus.<scope>.<kind>.<topic>` (scope "machine" | the project id -- derive from the canonical `git rev-parse --show-toplevel` slugged; helper + unit test) with headers session=<id>, machine=<hostname>, ts=<iso8601>, sev=<info|interrupt>; reject text > 1024 bytes CLIENT-SIDE naming the cap. `who()` -> list `kazi_sessions` KV entries. `tell(session, text)` -> publish to `bus.<scope>.msg.<session>`. `read(opts)` -> ensure a durable consumer named after the sanitized session id (filtered to this scope), pull, ack, return structured messages. PRESENCE: every Bus call upserts the caller's `kazi_sessions` key (JSON: session id, os pid, cwd, ts). Session identity: reuse the EXISTING session-name resolution chain (grep lib/kazi/cli.ex for the --session-name / KAZI_SESSION_NAME / CLAUDE_CODE_SESSION_ID helper and call it).
+(4) CLI verbs: `kazi bus post <kind> <text> [--topic t] [--sev info|interrupt] [--scope machine|project]`, `kazi bus read [--json]`, `kazi bus who [--json]`, `kazi bus tell <session> <text>` -- wire like other command groups; every verb prints the one-line no-daemon error (exit 1) on {:error, :no_daemon}. `read` MVP output: directed messages + sev=interrupt VERBATIM (one line each); everything else as `<count> <kind>/<topic>` digest lines. Keep aggregation in ONE pure function `Kazi.Bus.Digest.summarize/1` with its own unit test (T51.4 moves it server-side later).
+(5) ADR guardrail: NOTHING outside `kazi daemon`/`kazi bus` may call Kazi.Bus (ADR-0067: convergence never depends on the bus). Do not touch lib/kazi/loop.ex.
+
+WRITE test/kazi/bus/bus_mvp_test.exs tagged `@moduletag :nats` (mirror test/kazi/coordination/lease/nats_test.exs; runs only when NATS_URL is set): (1) post -> read round-trip returns the message with provenance headers; (2) CURSOR: a second read returns nothing new; (3) tell reaches only the named session's consumer (two session ids in-test); (4) who reflects an upserted presence entry; (5) oversize post rejected client-side. The tagged suite connects to NATS_URL directly and provisions for itself -- it must NOT require the daemon. UNTAGGED (always run): no-daemon error path (socket absent -> {:error, :no_daemon} + CLI line), the 1024-byte cap, project-id derivation, Digest.summarize/1 unit cases.
+
+VERIFICATION NOTE: the predicate below spawns a THROWAWAY nats-server (port 4224, tmp store dir) around the tagged suite when the binary is on PATH -- it is on PATH on this machine. CI keeps excluding :nats (no NATS_URL); the untagged tests carry CI coverage.
+
+DOCS LAND WITH CODE (ADR-0034): `kazi help` for the bus verbs + new daemon flags; AGENTS.md command-surface additions (teach-coherence guard, issue #973 landmine). The full concepts doc is goal 0026's -- keep this goal's docs to help text + moduledocs cross-referencing ADR-0067.
+
+PROCESS: branch task/bus-mvp-nats off main; small conventional commits (lib/ vs test/ vs AGENTS.md separate); push with -u.
+"""
+cmd = "sh"
+args = ["-c", 'set -e; env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/bus/; if command -v nats-server >/dev/null 2>&1; then SD=$(mktemp -d); nats-server -js -p 4224 -sd "$SD" >/dev/null 2>&1 & NP=$!; sleep 1; env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false NATS_URL=nats://127.0.0.1:4224 mix test test/kazi/bus/ --include nats; RC=$?; kill $NP 2>/dev/null; rm -rf "$SD"; exit $RC; fi']
+timeout_ms = 600000
+
+[[predicate]]
+id = "daemon-suite-still-green"
+provider = "custom_script"
+description = "GUARD: the 0024 daemon lifecycle suite stays green -- this task extends its control protocol."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/daemon/']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The NAMED task branch exists, is pushed, and is current with its remote (pinned to the branch, not HEAD)."
+cmd = "sh"
+args = ["-c", 'git rev-parse --verify refs/heads/task/bus-mvp-nats >/dev/null 2>&1 && git rev-parse --verify refs/remotes/origin/task/bus-mvp-nats >/dev/null 2>&1 && [ "$(git rev-parse task/bus-mvp-nats)" = "$(git rev-parse origin/task/bus-mvp-nats)" ] && [ -n "$(git log --oneline origin/main..task/bus-mvp-nats)" ]']
+timeout_ms = 30000

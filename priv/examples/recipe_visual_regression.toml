@@ -1,0 +1,26 @@
+# Recipe (T32.9, ADR-0043): visual regression — no unreviewed pixel diff.
+#
+# A visual-regression runner (BackstopJS, reg-cli, Playwright's `toHaveScreenshot`)
+# renders the UI and compares it against approved reference images, exiting
+# non-zero when any screenshot differs beyond threshold. Its exit code IS the
+# verdict, so `exit_zero` is exactly right.
+#
+# Evidence tier: DEMONSTRATION (fail directly). A mismatch is a concrete, reviewable
+# pixel diff against a committed reference — not a heuristic — so it is safe to fail
+# the loop on directly. The runner writes a diff report/images for the fixer agent.
+#
+#     kazi apply priv/examples/recipe_visual_regression.toml --workspace .
+#
+# Adapt `cmd`/`args` to your runner (and make sure its reference images are
+# committed). See docs/custom-script-recipes.md and `kazi schema custom_script`.
+
+id = "recipe-visual-regression"
+name = "Visual regression: no unreviewed pixel diff"
+
+[[predicate]]
+id = "no-visual-diff"
+provider = "custom_script"
+description = "the visual-regression suite matches every approved reference screenshot"
+cmd = "backstop"
+args = ["test", "--config", "backstop.json"]
+verdict = "exit_zero"

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>kazi history redesign mock — T63.3</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #101a2e; --ink: #dbe4f3; --dim: #7d8db3;
+    --grn: #2ee6a8; --red: #ff5c6c; --amb: #ffb454; --line: #1c2a45;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", sans-serif; padding: 2rem; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  .annot {
+    background: #1a2542; border: 1px dashed var(--amb); color: var(--amb);
+    font-size: 12px; padding: .35rem .6rem; border-radius: 4px; margin: .4rem 0 1rem;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  .purpose { color: var(--dim); font-size: .95rem; margin: 0 0 1.2rem; }
+  .summary {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.2rem; margin-bottom: 1.5rem; font-size: 1.05rem;
+  }
+  .summary b { color: var(--amb); }
+  nav a { color: var(--dim); text-decoration: none; font-size: .85rem; }
+  ol.timeline { list-style: none; margin: 0; padding: 0; }
+  .event {
+    position: relative; padding: 0 0 1.4rem 1.6rem; border-left: 2px solid var(--line);
+  }
+  .event:last-child { border-left-color: transparent; }
+  .event::before {
+    content: ""; position: absolute; left: -7px; top: .15rem; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--panel); border: 2px solid var(--dim);
+  }
+  .event.inprogress::before { border-color: var(--amb); background: var(--amb); }
+  .event-head { display: flex; align-items: baseline; gap: .6rem; }
+  .event-head .idx { font-weight: 700; }
+  .event-head time { color: var(--dim); font-size: .78rem; margin-left: auto; }
+  .badge { font-size: .7rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid; }
+  .badge.inprogress { color: var(--amb); border-color: var(--amb); background: rgba(255,180,84,.1); }
+  .narrative { margin: .3rem 0 .5rem; }
+  .narrative .arrow { color: var(--dim); margin: 0 .3rem; }
+  .narrative .pass { color: var(--grn); }
+  .narrative .fail { color: var(--red); }
+  details { margin-top: .3rem; }
+  summary { cursor: pointer; color: var(--dim); font-size: .8rem; }
+  .vector { font-size: .78rem; font-family: ui-monospace, monospace; margin-top: .4rem; }
+  .vector div { display: flex; justify-content: space-between; padding: .15rem 0; border-bottom: 1px solid var(--line); gap: 1rem; }
+  .status-pass { color: var(--grn); }
+  .status-fail { color: var(--red); }
+  .future-note {
+    padding: 0 0 0 1.6rem; color: #3a4a6b; font-style: italic; font-size: .85rem;
+  }
+  .gap-panel { margin-top: 2.5rem; border-top: 2px solid var(--line); padding-top: 1rem; }
+  .gap-panel h2 { font-size: .95rem; color: var(--amb); }
+  .gap-panel table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+  .gap-panel td, .gap-panel th { text-align: left; padding: .3rem .4rem; border: 1px solid var(--line); }
+  code { background: #16233f; padding: .1rem .3rem; border-radius: 3px; font-size: .82em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="annot">
+    MOCK — T63.3 (no production code changed). Fixture is the REAL goal
+    <code>runtime-gherkin-provider-adr-0071-loader</code> named in this epic's
+    Notes section, pulled live via <code>kazi status ... --json</code> and the
+    local read-model. This goal has exactly ONE recorded iteration (in
+    progress) — the timeline below shows that one real event plus a
+    grayed-out placeholder explaining what a SECOND entry would look like,
+    it is not fabricated history.
+  </div>
+
+  <!-- (a) one-line purpose statement -->
+  <h1>History · runtime-gherkin-provider-adr-0071-loader</h1>
+  <p class="purpose">
+    What this view is for: <b>read the goal's whole story, newest event first —
+    what was tried each iteration and what it changed.</b>
+  </p>
+  <div class="annot">Renamed subtitle from "Read-only iteration/evidence timeline for this goal (ADR-0011). Live-updating, oldest first." — that sentence describes the IMPLEMENTATION (a read projection, oldest-first order) rather than what a viewer gets out of reading it.</div>
+
+  <!-- (a) plain-language summary -->
+  <div class="summary">
+    This goal is <b>in progress, iteration 1</b> of an unknown total: 3 of 8
+    predicates pass, 5 fail. No regressions recorded (only one observation
+    exists — a flip needs a prior iteration to compare against).
+  </div>
+  <div class="annot">Same summary sentence as the drill-in mock (both views should agree on this headline, computed once from the read-model and shared). "of an unknown total" is deliberate ADR-0046 honest-unknown phrasing — this view must not imply a known iteration budget it doesn't have.</div>
+
+  <nav><a href="drillin.html">→ Predicate × iteration heatmap</a></nav>
+
+  <!-- (c) reordered newest-first, narrative framing -->
+  <ol class="timeline">
+
+    <li class="event inprogress">
+      <div class="event-head">
+        <span class="idx">Iteration 1</span>
+        <span class="badge inprogress">in progress</span>
+        <time>2026-07-16T00:58:23Z</time>
+      </div>
+      <p class="narrative">
+        first observation <span class="arrow">→</span>
+        3 of 8 predicates <span class="pass">pass</span>
+        (<code>landed</code>, <code>guard-format-clean</code>, plus 1 more)
+        <span class="arrow">→</span>
+        5 <span class="fail">failing</span>, all in the loader/provider/doc
+        surface this goal is building <span class="arrow">→</span>
+        <b style="color:var(--amb)">not yet converged</b>
+      </p>
+      <details>
+        <summary>full predicate vector (8)</summary>
+        <div class="vector">
+          <div><span>landed</span><span class="status-pass">pass</span></div>
+          <div><span>guard-format-clean</span><span class="status-pass">pass</span></div>
+          <div><span>guard-full-suite-green</span><span class="status-fail">fail</span></div>
+          <div><span>docs-land-with-code</span><span class="status-fail">fail</span></div>
+          <div><span>loader-gherkin-kind-and-validation</span><span class="status-fail">fail</span></div>
+          <div><span>loader-expansion-to-subpredicates</span><span class="status-fail">fail</span></div>
+          <div><span>provider-module-evaluator</span><span class="status-fail">fail</span></div>
+          <div><span>provider-registered-in-dispatch</span><span class="status-fail">fail</span></div>
+        </div>
+      </details>
+    </li>
+
+  </ol>
+
+  <p class="future-note">
+    ⋯ a future iteration 2 would appear ABOVE this entry (newest-first), with
+    its narrative computed by diffing this vector against the new one — e.g.
+    "dispatched a fix for provider-module-evaluator → flipped fail → pass →
+    4 of 8 passing". No such iteration exists yet for this goal.
+  </p>
+  <div class="annot">Reordered newest-first (was oldest-first &lt;ol&gt;) and the entry now leads with a ONE-SENTENCE narrative built from action_kind + a diff against the PRIOR iteration's vector, instead of a raw &lt;ul&gt; dump of every predicate's id/status/evidence string. With only one real iteration there is nothing to diff against yet, so the narrative here is phrased as a first-observation summary rather than a flip — this mock is honest about that rather than inventing a fake prior iteration.</div>
+
+  <div class="gap-panel">
+    <h2>Data gaps — fields this redesign wants that the read-model does not (yet) expose</h2>
+    <table>
+      <tr><th>Needed for</th><th>Field</th><th>Source today</th></tr>
+      <tr>
+        <td>Narrative's "dispatched a fix for X" clause (future iterations)</td>
+        <td>What the harness intended to change this iteration</td>
+        <td>Absent — <code>Iteration.action_kind</code> is a coarse enum ("dispatch"/"observe"/etc.), not a free-text summary of intent. A future-iteration narrative would have to infer the target predicate by diffing consecutive vectors (which predicate flipped), the same technique the drill-in mock's gap list notes.</td>
+      </tr>
+      <tr>
+        <td>"5 failing, all in the loader/provider/doc surface" grouping clause</td>
+        <td>A category/group tag per predicate id</td>
+        <td>Absent — same gap as the drill-in mock: grouping here is inferred from id prefix, not a stored field.</td>
+      </tr>
+      <tr>
+        <td>Per-iteration diff / flip computation (for when a 2nd+ iteration exists)</td>
+        <td>none missing — reused as-is</td>
+        <td><code>Iteration.regressions</code> (T1.2) already carries <code>red_iteration</code>/<code>predicate_id</code> for green→red flips; a red→green flip is derivable the same way by diffing <code>predicate_vector</code> across consecutive iterations client-side. No new field needed once a second iteration exists.</td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "kazi-dashboard-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright browser harness for the kazi operator dashboard (T3.6a). Tier-3 browser certification of the LiveView surfaces; hermetic (no NATS/harness).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  },
+  "dependencies": {
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.61.1",
+    "pngjs": "^7.0.0"
+  }
+}

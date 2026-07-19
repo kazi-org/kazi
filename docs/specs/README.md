@@ -1,0 +1,244 @@
+# `docs/specs/` — behavior specs (the Gherkin tier, ADR-0050)
+
+This directory is kazi's **behavior-spec tier**: Gherkin `.feature` files that state
+*the behavior being built*, in reviewable prose, upstream of the machine check.
+
+It fills the gap between the other doc tiers:
+
+| Tier | Answers | Form |
+|------|---------|------|
+| `docs/adr/` | **why** a decision was made | prose ADR |
+| `docs/plan.md` + `docs/plans/*.md` | **what** work is scheduled | one-line WBS tasks |
+| `docs/specs/` (this tier) | **what behavior** is being built | Gherkin `.feature` |
+| `goal.toml` predicates | **the machine check** | `[[predicate]]` entries |
+
+The point of the tier: predicates should be **derived from a reviewed behavior
+spec**, not hand-typed. You write the Scenarios a human can review, then run
+`kazi spec import` to turn each Scenario into a `custom_script` acceptance
+predicate — the importer (`Kazi.Reconcile.GherkinImporter`, ADR-0021/T13.2) is
+deterministic, so the same spec always yields the same predicates.
+
+Each generated predicate is a **scaffold**, not a runnable check: a `.feature`
+says WHAT behavior must hold, never HOW to verify it, so the importer emits a
+`custom_script` predicate with a placeholder command that loads but exits
+non-zero (honestly RED) until you replace it with the scenario's real check. The
+scenario's Given/When/Then steps ride along on the predicate so you know exactly
+what to wire. This is deliberate — kazi scaffolds, it does not guess (ADR-0013).
+
+## Naming — "behavior spec", not "spec"
+
+kazi already overloads the word *spec*. To avoid collision, this tier is always
+called a **behavior spec**:
+
+- a **behavior spec** is a `.feature` file *here* (this tier, ADR-0050);
+- a **goal spec** is a `goal.toml` (ADR-0036);
+- an Elixir `@spec` is a typespec.
+
+When you mean this tier, say "behavior spec".
+
+## Files
+
+Each behavior spec is:
+
+- **`<slug>.feature`** (required) — the Gherkin. One `Feature:` per capability,
+  one `Scenario:` per behavior. The importer parses a deliberate SUBSET of
+  Gherkin — `Feature:` / `Scenario:` / `Scenario Outline:`,
+  `Given`/`When`/`Then`/`And`/`But`/`*` steps, and `@tag` lines (see
+  [Tags](#tags)). Comments (`#`), `Background:`, and `Examples:` tables are
+  skipped for predicate emission (a Scenario is one predicate regardless of its
+  Examples rows).
+- **`<slug>.md`** (optional) — a paired proposal note: rationale, links to the
+  ADR/WBS task, anything the `.feature` cannot carry.
+
+## Tags
+
+The importer reads Cucumber `@tag` lines (T41.1, ADR-0054). The tag **mechanism**
+is standard Gherkin — tags sit above a `Feature:` or `Scenario:`, several per
+line, and a Feature's tags are inherited by its Scenarios. The **vocabulary**
+below is kazi's own documented convention, the same honesty this tier already
+applies to its Gherkin subset:
+
+| Tag | Means | Lands on the predicate as |
+|-----|-------|---------------------------|
+| `@role:<role>` | who the use case is for | `role` |
+| `@priority:P0`..`P3` | how important it is | `priority` |
+| `@interface:web\|api\|cli\|sdk\|grpc\|background\|ws` | how it is exercised | `interface` |
+
+```gherkin
+@role:shopper
+Feature: Storefront
+
+  @interface:web @priority:P0
+  Scenario: A shopper checks out a basket
+    Given a basket with two items
+    Then the order is confirmed
+```
+
+Like `steps`, these are **self-describing metadata**: no provider consumes them,
+they are there so the predicate carries its own "what and for whom".
+
+Three properties worth relying on:
+
+- **Tags are additive.** An untagged `.feature` derives exactly the predicates it
+  always did, byte-for-byte. Every spec written before tags existed still imports
+  unchanged.
+- **An unknown tag is ignored, never an error.** Your house tags (`@smoke`,
+  `@wip`, `@owner:growth`) and malformed values (`@priority:P9`) pass through
+  harmlessly — so a `.feature` file you already maintain for Cucumber imports as-is.
+- **A Scenario's own tag wins** over one inherited from its Feature.
+
+### What `@interface` derives
+
+`@interface:web` derives a `browser` predicate and `@interface:api` an
+`http_probe` — but only when you tell the importer *where* to probe. kazi never
+invents a URL (ADR-0013: kazi scaffolds, it does not guess), and a live predicate
+without one will not even load (ADR-0058). Without a base URL, the tag records its
+metadata and the `custom_script` scaffold stands. The other interfaces (`cli`,
+`sdk`, `grpc`, `background`, `ws`) have no provider that could check them from a
+`.feature` alone, so they record metadata and keep the scaffold.
+
+A derived live predicate is a **scaffold too, and honestly RED** — it ships with a
+placeholder expectation you replace. This matters more than it might sound: a
+`browser` predicate with no assertions passes on any page that renders, and an
+`http_probe` with no expectation passes on any completed request, so a derived
+probe that just pointed at your URL would report every use case green while
+verifying nothing.
+
+## When to use a behavior spec (vs. a plain WBS line + hand predicate)
+
+Use a behavior spec when a capability has **several distinct behaviors** worth
+reviewing as a set before any predicate exists — a sign-up flow, an import verb,
+a lifecycle with multiple terminal states. The Gherkin is the review artifact and
+the predicate set falls out of it.
+
+Skip it for a **single, obvious** acceptance (one `custom_script` or `http_probe`
+check): a one-line WBS task plus a hand-written predicate is less ceremony and
+just as clear. The tier is optional — a plan task references its spec via an
+optional `spec:` field (T40.3) only when it has one.
+
+## Two scopes: task specs and product specs (T41.2, ADR-0054)
+
+The same tier, the same Gherkin subset, the same importer and the same
+`kazi spec import` verb serve **two scopes**. This is a naming convention, **not a
+second schema** — nothing below changes how a `.feature` parses:
+
+| Scope | Path | One `Feature:` is | One `Scenario:` is | Lifecycle |
+|---|---|---|---|---|
+| **Task** (ADR-0050) | `docs/specs/<slug>.feature` | one task's capability | one behavior of it | archives with its epic (10a Layer 1) |
+| **Product** (ADR-0054) | `docs/specs/product/<domain>.feature` | one product capability / domain | one **use case** | lives as long as the capability does |
+
+A **task spec** is scaffolding for work in flight: it answers "what behavior is
+this task building?", is referenced by a WBS `spec:` field, and moves to
+`docs/specs/archive/` when its epic archives (T40.4). A **product spec** is the
+durable **use-case catalog**: it answers "what can this product do, for whom, and
+how is it exercised?" and outlives any one task. `docs/specs/product/` is a
+convention, not a mechanism — a documented equivalent path works identically,
+because the importer only ever sees the file you hand it.
+
+Product specs are where the [tag vocabulary](#tags) earns its keep. Declare the
+domain's `@role:`/`@priority:`/`@interface:` once on the `Feature:` — every
+Scenario inherits them — and let a Scenario override only where it genuinely
+differs. Derive the catalog's predicates with the SAME verb, no new flag:
+
+```sh
+kazi spec import docs/specs/product/convergence.feature --into product.goal.toml
+```
+
+The worked example is [`product/convergence.feature`](product/convergence.feature):
+one Feature (`Goal convergence`), six Scenarios, `@role:operator @priority:P0
+@interface:cli` declared once at Feature level, and one Scenario marked
+`@priority:P1` to show the override. It imports to six `custom_script` scaffold
+predicates in a single `goal-convergence` group, each carrying its `role`,
+`priority` and `interface` metadata — and each honestly RED until a human wires
+the real check, exactly like a task spec's.
+
+## Manifest coverage — is every surface documented? (T41.3, ADR-0054)
+
+Product specs are the use-case catalog, so a natural check falls out: **does a
+Scenario exist for every reachable surface element?** `Kazi.Reconcile.SpecCoverage`
+(the *manifest-coverage meta-predicate*) answers it. It scans the repo's public
+surface with `Kazi.Reconcile.SurfaceScanner` (T13.4) — routes, handlers, exported
+functions, Mix/CLI commands — and asserts each scanned element is **referenced by
+>=1 Scenario** across the `.feature` files. An element no Scenario names is
+**uncovered**: undocumented surface. The check FAILS and *names* it; it never
+edits anything (write the Scenario, or allow-list intentional internal surface).
+
+It reuses the SAME matching primitive as the dead-code check
+(`Kazi.Reconcile.SurfaceMatch`, factored out of T13.5's
+`Kazi.Reconcile.Coverage`), differing only in where the tokens come from:
+
+| Check | Module | Tokens from | An uncovered element means |
+|---|---|---|---|
+| Dead-code (T13.5) | `Kazi.Reconcile.Coverage` | intended **predicates** | dead code / un-predicated surface |
+| Manifest (T41.3) | `Kazi.Reconcile.SpecCoverage` | product **Scenarios** | undocumented surface |
+
+Because both derive their own tokens and call the shared `SurfaceMatch`, the two
+run over the same repo without interfering. The match is deliberately approximate
+(the surface scan itself is, `docs/lore.md` L-0006): a Scenario references an
+element when a *reference-like* word of its name/steps — one containing `/` or `.`,
+so `/healthz`, `Surface.Calc.add/2`, `surface.greet`, not plain prose —
+equals or substring-matches the element's identifier. This is the check
+`kazi init --discover` (T41.4) writes as a starter goal so `kazi apply` drives a
+repo toward "every surface has a Scenario".
+
+## Workflow
+
+```
+# 1. Write the behavior spec.
+$EDITOR docs/specs/my-capability.feature
+
+# 2. Derive predicates into a goal-file (creates it, or upserts into an existing one).
+kazi spec import docs/specs/my-capability.feature --into priv/examples/my-capability.goal.toml
+
+# 3. Review the generated [[predicate]] blocks, add any LIVE predicate by hand.
+$EDITOR priv/examples/my-capability.goal.toml
+
+# 4. Run it.
+kazi apply priv/examples/my-capability.goal.toml --workspace .
+```
+
+Re-running step 2 after editing the `.feature` is an **upsert**: the importer
+derives each predicate's id from `Feature + Scenario`, so unchanged Scenarios
+keep their predicate, edited ones are replaced in place, and a hand-added live
+predicate in the goal-file survives the re-import untouched.
+
+`kazi spec import --json` emits `{ "ok": true, "into": "...", "upserted": [ids], ... }`
+so an orchestrator can drive it.
+
+### Lowering a tagged Scenario to a runtime `scenario` predicate
+
+By default every Scenario derives a `custom_script` scaffold (honestly RED until
+a human wires the check). `--lower scenario` (ADR-0054 d3, ADR-0064) instead
+lowers a Scenario TAGGED with a runnable surface directly to a runtime
+`scenario` predicate — `@interface:web` to the `browser` surface, `@interface:cli`
+to the `cli` surface — wiring the demonstrate-then-pin `Kazi.Providers.Scenario`:
+
+```sh
+kazi spec import docs/specs/my-capability.feature --into my-capability.goal.toml --lower scenario
+```
+
+Lowering is opt-in and never forces a Scenario: an UNTAGGED Scenario, and one
+tagged with any other interface (`api`/`sdk`/`grpc`/`background`/`ws`), stays a
+`test_runner` scaffold even under `--lower scenario`. Derived ids and Feature
+grouping are identical across modes, and WITHOUT the flag the import is
+byte-identical to today's (the ADR-0054 compat promise). The default is
+`--lower test_runner`.
+
+## Lifecycle
+
+A behavior spec archives with its epic (ADR-0036 L1, T40.4): when an epic's WBS
+block is archived, any `.feature`/`.md` files its tasks reference via `spec:`
+move verbatim to `docs/specs/archive/` alongside the epic file — the same
+lossless, git-diff-able move as the epic body itself.
+
+## See also
+
+- **ADR-0050** — the decision to add this tier.
+- **ADR-0021 / T13.2** — `Kazi.Reconcile.GherkinImporter`, the deterministic
+  parser this tier is wired over.
+- **ADR-0021 / T13.4-T13.5, T41.3** — the surface-coverage meta-predicates
+  (`Kazi.Reconcile.SurfaceScanner`, `Kazi.Reconcile.Coverage` for dead-code,
+  `Kazi.Reconcile.SpecCoverage` for manifest coverage) over the shared
+  `Kazi.Reconcile.SurfaceMatch` primitive.
+- **`example.feature`** — a worked example (the `spec import` verb's own
+  acceptance, dogfooding the tier from day one).

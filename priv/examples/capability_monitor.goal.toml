@@ -1,0 +1,90 @@
+# Example kazi goal-file: STANDING capability monitors (T49.12, ADR-0064 d6).
+#
+# This is the definition-of-done's "verified live" step expressed as a PREDICATE
+# rather than a ritual. Each entry replays a COMMITTED pin — the recorded trace of
+# a capability that was demonstrated once — against the deployed `url`. Green here
+# means a real browser just performed the capability in production. Not a synthetic
+# check written to look like the feature; the same trace the demonstration minted.
+#
+#     kazi apply priv/examples/capability_monitor.goal.toml --workspace .
+#
+# STANDING (not converge-and-stop): the goal never finishes. Once green it keeps
+# re-observing on the poll interval and re-converges on drift, so a capability that
+# breaks in production turns the vector red without anyone running anything.
+#
+# Real use requires the Playwright runtime installed once, and pins that already
+# exist (mint them by demonstrating the capability — see docs/scenario-predicate.md,
+# "The pin-state lifecycle"). The urls below are PLACEHOLDERS: kazi scaffolds, it
+# never guesses (ADR-0013). Point them at your own deployment.
+
+id = "capability-monitor"
+name = "Every shipped capability still works in production"
+
+# T3.4d: a STANDING/maintenance reconciler. It does not stop at convergence — it
+# holds the predicates true and re-converges on drift.
+#
+# This MUST sit above the first [table] header: in TOML a bare key after a header
+# belongs to THAT table, so `standing = true` written below `[metadata]` silently
+# becomes `metadata.standing` and the goal loads as an ordinary converge-and-stop
+# one. It reads as declared and behaves as not — no error, no warning.
+standing = true
+
+[metadata]
+use_case = "UC-067"
+adr = "0064"
+kind = "standing"
+
+[budget]
+# A standing goal runs indefinitely, so no max_iterations / wall-clock ceiling; a
+# per-fix-arc token ceiling still bounds runaway drift remediation.
+max_tokens = 500000
+
+[scope]
+workspace = "."
+
+# --- The monitors -----------------------------------------------------------
+#
+# `samples` is the monitor's own knob, NOT part of the pin: the pin records what
+# the capability IS; `samples` is how hard THIS monitor probes it. It passes
+# through the scenario provider to the browser delegate unchanged (T49.3), which
+# requires N CONSECUTIVE passes — so a flaky production surface cannot show green
+# on a lucky single run. Reported as envelope-v2 `score` = passing runs,
+# `direction: higher_better`.
+
+[[predicate]]
+id = "signup-still-works"
+provider = "scenario"
+spec = "docs/specs/product/onboarding.feature"
+scenario = "A new user signs up and lands on the dashboard"
+url = "https://app.example.com"
+# Three consecutive passes: one green run against a live surface proves little.
+samples = 3
+
+[[predicate]]
+id = "token-creation-still-works"
+provider = "scenario"
+spec = "docs/specs/product/tokens.feature"
+scenario = "An operator creates an API token and sees it once"
+url = "https://app.example.com"
+samples = 3
+
+# A capability exercised through the CLI rather than a browser: the SAME provider,
+# a different surface. `surface = "cli"` replays the pin against a real binary.
+[[predicate]]
+id = "cli-apply-still-converges"
+provider = "scenario"
+spec = "docs/specs/product/convergence.feature"
+scenario = "A failing predicate drives the harness until it holds"
+surface = "cli"
+samples = 1
+
+# --- Why a monitor is a scenario predicate, not a new provider ---------------
+#
+# Nothing here is monitor-specific machinery. A monitor is the ORDINARY scenario
+# predicate (ADR-0064) with three properties composed:
+#
+#   * the goal is `standing`      -> it re-observes forever rather than stopping;
+#   * `url` names a DEPLOYED host -> the replay drives production, not localhost;
+#   * `samples > 1`               -> N consecutive passes, so flake is not green.
+#
+# That is the ADR-0040 dividend again: the capability is config, not a release.

@@ -1,0 +1,36 @@
+id = "plan-apply-session-provenance"
+name = "session provenance part 2: proposals carry session_name, and a run records the proposal it came from"
+
+[[predicate]]
+id = "session-attribution-test"
+provider = "custom_script"
+description = "TASK BRIEF: complete the session-attribution work started on branch feat-plan-apply-provenance (WIP commit 027b7a1 -- a `kazi plan --session-name` CLI flag and a proposed_goals session_name schema field are drafted there; you may cherry-pick/reuse that branch or re-implement from main, it is small). MISSING PIECES: (1) an Ecto migration adding a session_name column to proposed_goals; (2) Kazi.Authoring persisting session_name on the proposal row (plumb the opt from the CLI flag through propose/persist; when the flag is absent fall back to the CLAUDE_CODE_SESSION_ID env auto-detect the runs path already uses, else nil); (3) run-row linkage: when an approved proposal is run (`kazi apply <prop-ref>`), copy the proposal's proposal_ref and session_name onto the runs row at registration (a migration adding runs.proposal_ref is expected; runs.session_name already exists); (4) tests; (5) docs (kazi help for the flag, docs/orchestrator-recipe.md provenance note). Write test/kazi/authoring/session_attribution_test.exs covering: (a) plan --json --predicates with --session-name persists that session_name on the proposed_goals row; (b) without the flag but with CLAUDE_CODE_SESSION_ID set, the env value is persisted; (c) applying an approved proposal by ref records that proposal's proposal_ref (and session_name) on the runs row; (d) applying a plain goal-file path leaves runs.proposal_ref nil (unchanged behavior). PROCESS: branch task/plan-apply-session-provenance, small conventional commits (migration, lib, test, docs separate), push with -u. This predicate passes when the new test file passes."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/authoring/session_attribution_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green -- the migration and persist changes must not break existing authoring/runtime tests."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

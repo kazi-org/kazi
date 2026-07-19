@@ -1,0 +1,64 @@
+# kazi's OWN capabilities as scenario predicates (T49.13, ADR-0064; verifies
+# UC-066/UC-067) — the dogfood that proves a `scenario` predicate can gate kazi's
+# shipped surfaces against the RELEASED binary.
+#
+# Two surfaces, two Scenarios in docs/specs/kazi_cli.feature:
+#
+#   1. cli  — "A user inits plans approves and applies a hello goal": a scripted
+#             journey (`kazi init` -> `kazi plan` -> `kazi approve` -> `kazi apply
+#             <hello-goal> --check`) replayed by the `:cli` surface provider
+#             against `kazi` on the `$PATH`. Green iff every step exits 0 with the
+#             expected stdout signal — the observable surface a user sees.
+#
+#   2. web  — "An operator sees mission control in the dashboard": a `kazi
+#             dashboard` page replayed by the `:browser` surface provider. Needs a
+#             running dashboard AND a Playwright browser; CHECK it, do not
+#             converge it in a sandbox without a browser.
+#
+# How a human runs the CLI surface (deterministic, no harness/LLM):
+#
+#     kazi apply priv/examples/kazi_capabilities.goal.toml --workspace . --check
+#
+# The pins are the graders. No agent claim satisfies them — only what the surface
+# provider observes on replay (the ADR-0064 truth invariant).
+#
+# NESTING HAZARD (a T49.13 dogfood finding). The cli predicate's `cmd = "kazi"`
+# is a `$PATH` lookup. When the OUTER driver of this goal is ITSELF the release
+# binary (`kazi apply ...`), that release process prepends its own release
+# `bin/` — which contains a `kazi` START LAUNCHER (start/daemon/eval/rpc), NOT
+# the CLI — to the child `$PATH`, so a nested bare `kazi` resolves to the
+# launcher and every step reds with the release-launcher usage on stderr. The
+# CAPABILITY is fine: driving the SAME pin against the CLI binary directly (an
+# outer that does not shadow `kazi`, or `cmd` set to the binary's absolute path)
+# replays green. The shipped `cli_release_smoke.goal.toml` shares this latent
+# hazard. See docs/devlog.md (2026-07-18).
+
+id = "kazi-capabilities"
+name = "kazi's own capabilities as scenario predicates (CLI + dashboard)"
+
+[budget]
+max_iterations = 5
+
+[[predicate]]
+id = "cli-hello-goal-journey"
+provider = "scenario"
+description = "the released kazi binary inits, plans, approves, and applies a hello goal"
+acceptance = true
+spec = "docs/specs/kazi_cli.feature"
+scenario = "A user inits plans approves and applies a hello goal"
+surface = "cli"
+cmd = "kazi"
+pin = "docs/specs/pins/kazi-cli__a-user-inits-plans-approves-and-applies-a-hello-goal.pin.json"
+repin = "auto"
+
+[[predicate]]
+id = "web-mission-control"
+provider = "scenario"
+description = "the kazi dashboard renders mission control (fleet view)"
+acceptance = true
+spec = "docs/specs/kazi_cli.feature"
+scenario = "An operator sees mission control in the dashboard"
+surface = "browser"
+url = "http://127.0.0.1:4050/"
+pin = "docs/specs/pins/kazi-cli__an-operator-sees-mission-control-in-the-dashboard.pin.json"
+repin = "auto"

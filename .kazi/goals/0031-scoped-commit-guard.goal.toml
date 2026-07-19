@@ -1,0 +1,40 @@
+id = "scoped-commit-guard"
+name = "issue #937 Gap A remainder: dispatch landing must commit only paths attributable to this goal's own work -- never a tree-wide git add"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/937"
+depends_on = ["ci-daemon-nats-green"]
+
+[[predicate]]
+id = "scoped-landing"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #937, the one remaining gap -- worktree indirection itself shipped via goals 0013/0014, primary-worktree refusal via #940, duplicate-run refusal via #944): the documented incident class is silent COMMIT-BOUNDARY CORRUPTION -- when multiple goals shared one working tree, one group's commit carried another in-flight group's uncommitted diff (a user-deletion commit shipped a foreign ReorderTaskSteps interface fragment and broke the build until hand-stripped across 3 commits). Worktree isolation (shipped) is the primary guard; THIS goal adds the independent second guard the issue asks for: kazi-side landing/integration must never stage with a tree-wide add. AUDIT first: grep lib/ for `git add` / add -A / add . / commit -a (likely sites: lib/kazi/actions/integrate.ex, lib/kazi/scheduler/worktree.ex, any dispatch commit step). Everywhere kazi itself stages: stage ONLY attributable paths -- the goal's declared [scope] paths when present, else the file list actually modified this run (diff the worktree against the iteration-start snapshot; git status --porcelain captured before dispatch vs after gives the delta). Untracked/modified files OUTSIDE that set must be structurally impossible for kazi to stage, commit, clean, or delete. NOTE the harness (claude -p) makes its own commits inside the worktree -- those are out of kazi's control and OUT OF SCOPE; scope this to commits/stages KAZI's own code performs. If the audit finds kazi already never stages broadly (a prior triage claimed core never runs reset/clean -- verify for add/commit too), then this goal reduces to: (a) add a regression test PINNING that property, (b) add the guard at the one seam commits go through so a future broad add cannot be introduced silently. Write test/kazi/scoped_commit_guard_test.exs: fixture repo worktree with (1) a file modified by the 'run' (inside scope), (2) an unrelated untracked file, (3) an unrelated modified tracked file; invoke the landing/integration path; assert the resulting commit contains ONLY (1), and (2)+(3) survive untouched in the tree. PROCESS: branch task/scoped-commit-guard, conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/scoped_commit_guard_test.exs test/kazi/scheduler/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

@@ -1,0 +1,644 @@
+---
+import Layout from "../layouts/Layout.astro";
+import {
+  INSTALL_CMD,
+  POSITIONING,
+  KUBERNETES_LINE,
+  HERO_TAGLINE,
+  INVOCATION_PHRASE,
+  HARNESSES,
+} from "../canonical.mjs";
+
+const REPO = "https://github.com/kazi-org/kazi";
+
+// Version is injected at build time from the repo-root release-please manifest
+// (see astro.config.mjs `define`), so it can never drift from the actual release.
+const VERSION = __KAZI_VERSION__;
+
+// Render the canonical HARNESSES list as readable prose: "a, b and c".
+const harnessList =
+  HARNESSES.length <= 1
+    ? HARNESSES.join("")
+    : `${HARNESSES.slice(0, -1).join(", ")} and ${HARNESSES[HARNESSES.length - 1]}`;
+
+// The 10-second on-ramp — the FIRST thing a visitor sees (T25.4, ADR-0030). The
+// human's primary path is the kazi *skill* driven from inside Claude Code, not
+// the raw CLI. The raw `kazi` verbs live under "Drive kazi directly" (advanced).
+const onramp = [
+  {
+    label: "Install kazi",
+    code: INSTALL_CMD,
+    note: "One self-contained binary via Homebrew — no Erlang prerequisite.",
+    copy: true,
+  },
+  {
+    label: "Teach Claude Code the kazi skill",
+    code: "kazi install-skill",
+    note: "Writes the kazi skill to ~/.claude/skills/kazi — a one-time, opt-in step.",
+  },
+  {
+    label: "In Claude Code, drive it with the kazi skill",
+    code: '/kazi plan "add a /healthz endpoint that returns 200 ok, with a test, deployed"\n/kazi apply',
+    phrase: INVOCATION_PHRASE,
+    note: "Claude drafts the acceptance predicates, then loops — editing, testing, deploying — reporting back only when every predicate is objectively true (or it is genuinely stuck). You never leave your chat with Claude.",
+  },
+];
+
+const features = [
+  {
+    title: "Objective termination",
+    body: "kazi cannot declare success while any predicate is failing. “Done” means tests pass, the endpoint answers, the change is deployed — not an agent's say-so.",
+  },
+  {
+    title: "Drives any coding agent",
+    body: `It conducts a harness; it is not one. Today it drives ${harnessList}; add any other CLI agent by declaring a profile — no core change.`,
+  },
+  {
+    title: "Bring Your Own Model",
+    body: "Use cloud models or run entirely locally. Wire kazi to a local model (e.g., Llama 3, Qwen) via opencode for zero data leaks. Your context stays on your hardware.",
+  },
+  {
+    title: "AI-Ready Execution",
+    body: "kazi creates deterministic goals that coding agents can naturally pursue. It understands your codebase and drives agents safely within their allowed blast radius.",
+  },
+  {
+    title: "Stops honestly",
+    body: "If it can't converge, it tells you why — stuck on the same failure, or out of budget — instead of pretending it finished.",
+  },
+  {
+    title: "One self-contained binary",
+    body: "brew install and go. The binary bundles the runtime and a SQLite read-model, so every iteration and decision is persisted — no Erlang prerequisite.",
+  },
+  {
+    title: "See your whole fleet",
+    body: "kazi dashboard renders every run as a live starmap — which goals are converging, which are stuck, which need you — so you can watch a fleet of agents without tailing a dozen terminals.",
+  },
+  {
+    title: "Agents that coordinate, not collide",
+    body: "kazi bus gives concurrent sessions a shared channel — broadcast a fact, message a session directly, or block until the next update — so a supervising agent can coordinate a fleet by messaging instead of polling logs.",
+  },
+];
+
+const loop = [
+  ["Observe", "evaluate every predicate against reality"],
+  ["Diff", "compare desired vs actual state"],
+  ["Dispatch", "hand the failing slice to a coding agent"],
+  ["Re-observe", "re-check the predicates"],
+  ["Decide", "converged, stuck, or over budget"],
+];
+
+const comparison = [
+  [
+    "“The agent says it’s done.” You trust it on faith.",
+    "Every predicate verified true, with stored evidence. Truth lives in the controller, not the agent.",
+  ],
+  [
+    "Two parallel agents edit the same files → merge conflicts.",
+    "Agents lease their blast radius first — disjoint work runs free, overlapping work serializes.",
+  ],
+  [
+    "Green tests on a laptop, broken in production.",
+    "A live predicate probes the deployed endpoint. Green-on-my-machine is never enough.",
+  ],
+  [
+    "It stops when it feels finished.",
+    "It stops only on converged, stuck, or over-budget — and tells you which.",
+  ],
+];
+
+const personas = [
+  [
+    "Builders who ship fast but need reliability",
+    "If an agent has ever “finished” something that wasn’t actually done, objective termination is the guardrail against plausible-but-broken output.",
+  ],
+  [
+    "Teams running parallel coding agents",
+    "Resource leases coordinate who edits what before any file changes, so concurrent runs converge instead of collide.",
+  ],
+  [
+    "Engineers who refuse “works on my machine”",
+    "Predicates can verify the live, deployed system — not just the local checkout.",
+  ],
+];
+---
+
+<Layout>
+  <!-- Nav -->
+  <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+    <a href="/" class="flex items-center gap-2" aria-label="kazi home">
+      <img src="/logo/kazi-mark.svg" alt="" width="34" height="34" />
+      <span class="ui-strong text-xl font-bold tracking-tight">kazi</span>
+    </a>
+    <nav class="flex items-center gap-6 text-sm" aria-label="Primary">
+      <a href="#try" class="ui-body ui-link">Try it</a>
+      <a href="#how" class="ui-body ui-link">How it works</a>
+      <a href="/proof" class="ui-body ui-link">Proof</a>
+      <a href="/blog" class="ui-body ui-link">Blog</a>
+      <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-body ui-link">Docs</a>
+      <a
+        href={REPO}
+        class="ui-outline rounded-lg border px-3 py-1.5 font-medium"
+        >GitHub</a
+      >
+    </nav>
+  </header>
+
+  <!-- Hero — leads with the 10-second on-ramp (the agent paradigm), not the CLI -->
+  <main>
+    <section class="relative overflow-hidden" aria-labelledby="hero-heading">
+      <div
+        class="kazi-gradient pointer-events-none absolute -top-40 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full opacity-20 blur-[120px]"
+        aria-hidden="true"
+      >
+      </div>
+      <div class="mx-auto max-w-4xl px-6 pb-12 pt-16 text-center sm:pt-24">
+        <a
+          href={REPO}
+          class="ui-chip inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
+        >
+          <span class="kazi-text font-semibold">Open source</span>
+          <span class="ui-muted">Apache-2.0 &middot; v<span id="kazi-version">{VERSION}</span></span>
+        </a>
+        <h1
+          id="hero-heading"
+          class="ui-strong mt-6 text-balance text-4xl font-extrabold tracking-tight sm:text-6xl"
+        >
+          {HERO_TAGLINE}
+        </h1>
+        <p class="ui-body mx-auto mt-6 max-w-2xl text-pretty text-lg">
+          Give <strong class="ui-strong">Claude Code</strong> the power to actually{" "}
+          <em>finish</em>. You chat with Claude the way you already do; kazi works in the
+          background to make &ldquo;done&rdquo; <strong class="ui-strong">objective</strong>
+          &mdash; looping your agent until every check passes (tests green, the endpoint
+          live, the change deployed), or stopping to tell you why
+          (<code class="ui-body">stuck</code>, or out of budget) instead of pretending it's
+          finished.
+        </p>
+        <p class="ui-strong mx-auto mt-5 max-w-2xl text-pretty text-lg font-semibold">
+          You never run kazi yourself &mdash; Claude does.
+        </p>
+      </div>
+    </section>
+
+    <!-- Try it in 10 seconds — the primary on-ramp (install → install-skill → invoke) -->
+    <section id="try" class="mx-auto max-w-3xl px-6 pb-8" aria-labelledby="try-heading">
+      <h2
+        id="try-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        Try it in 10 seconds
+      </h2>
+      <ol class="mt-8 space-y-4">
+        <li class="ui-card rounded-2xl border p-5">
+          <div class="flex items-baseline gap-3">
+            <span class="kazi-text text-xl font-extrabold">1</span>
+            <span class="ui-strong font-semibold">{onramp[0].label}</span>
+          </div>
+          <button
+            id="copy-install"
+            type="button"
+            class="ui-code group mt-3 flex w-full items-center justify-between gap-4 rounded-xl border px-5 py-4 text-left font-mono text-sm"
+            data-cmd={INSTALL_CMD}
+            title="Copy the install command"
+          >
+            <span><span class="ui-muted">$ </span>{INSTALL_CMD}</span>
+            <span
+              class="ui-chip ui-muted shrink-0 rounded-md border px-2 py-1 text-xs"
+              id="copy-label">copy</span
+            >
+          </button>
+          <p class="ui-muted mt-2 text-xs">{onramp[0].note}</p>
+        </li>
+        <li class="ui-card rounded-2xl border p-5">
+          <div class="flex items-baseline gap-3">
+            <span class="kazi-text text-xl font-extrabold">2</span>
+            <span class="ui-strong font-semibold">{onramp[1].label}</span>
+          </div>
+          <pre class="ui-code mt-3 overflow-x-auto rounded-xl border px-5 py-4 font-mono text-sm"><code><span class="ui-muted">$ </span>{onramp[1].code}</code></pre>
+          <p class="ui-muted mt-2 text-xs">{onramp[1].note}</p>
+        </li>
+        <li class="ui-card rounded-2xl border p-5">
+          <div class="flex items-baseline gap-3">
+            <span class="kazi-text text-xl font-extrabold">3</span>
+            <span class="ui-strong font-semibold">{onramp[2].label}</span>
+          </div>
+          <pre class="ui-code mt-3 overflow-x-auto rounded-xl border px-5 py-4 font-mono text-sm"><code>{onramp[2].code}</code></pre>
+          <p class="ui-muted mt-2 text-xs">{onramp[2].note}</p>
+          <p class="ui-body mt-3 text-sm">
+            Prefer plain English? Just say{" "}
+            <strong class="ui-strong">&ldquo;{INVOCATION_PHRASE}&rdquo;</strong>
+            &mdash; the skill runs the same <code class="ui-body">/kazi plan</code> &rarr;{" "}
+            <code class="ui-body">/kazi apply</code> for you.
+          </p>
+        </li>
+      </ol>
+      <p class="ui-muted mx-auto mt-6 max-w-2xl text-center text-sm">
+        That's it. You stay in your chat with Claude Code &mdash; kazi runs underneath.
+      </p>
+    </section>
+
+    <!-- Chat with Claude Code, it drives kazi (the primary spine) -->
+    <section
+      class="mx-auto max-w-4xl px-6 py-12"
+      aria-labelledby="spine-heading"
+    >
+      <h2
+        id="spine-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        You chat with Claude Code, it drives kazi
+      </h2>
+      <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
+        You don't operate kazi directly &mdash; your coding agent does. Once you've run{" "}
+        <code class="ui-body">kazi install-skill</code>, the skill verbs{" "}
+        <code class="ui-body">/kazi plan</code> and <code class="ui-body">/kazi apply</code>{" "}
+        &mdash; or the plain-English phrase{" "}
+        <strong class="ui-strong">&ldquo;{INVOCATION_PHRASE}&rdquo;</strong> &mdash; route to
+        kazi. They're triggers on the kazi skill, so they only work once it's installed.
+      </p>
+      <ol class="mx-auto mt-10 grid max-w-3xl gap-3 sm:grid-cols-4">
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">You</div>
+          <div class="ui-muted mt-1 text-xs">describe the outcome you want, in plain language</div>
+        </li>
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">Claude Code</div>
+          <div class="ui-muted mt-1 text-xs">authors the acceptance predicates with <code class="ui-body">kazi&nbsp;plan</code></div>
+        </li>
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">kazi</div>
+          <div class="ui-muted mt-1 text-xs">runs <code class="ui-body">kazi&nbsp;apply</code>, looping the agent until the predicates are objectively true</div>
+        </li>
+        <li class="ui-card rounded-xl border p-4 text-center">
+          <div class="ui-strong font-semibold">Claude Code</div>
+          <div class="ui-muted mt-1 text-xs">reports back &mdash; converged, or honestly <code class="ui-body">stuck</code></div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- How it works — the reconcile-loop mechanic, demoted below the on-ramp -->
+    <section id="how" class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="how-heading">
+      <h2 id="how-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
+        How it works
+      </h2>
+      <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
+        Under the hood, <em>kazi</em> is <strong class="ui-strong">{POSITIONING}</strong>
+        &mdash; your agent runs it, not you. It <em>drives</em> the coding agent you already
+        use (Claude Code, Codex, &hellip;) in a reconcile loop: observe every failing check,
+        dispatch a fix, integrate, re-check. It is <strong class="ui-strong">not</strong>{" "}
+        another coding agent, terminal, or IDE &mdash; as that agent gets better, kazi gets
+        better for free.
+      </p>
+      <p class="ui-muted mx-auto mt-4 max-w-2xl text-center text-sm">
+        Think of it like <strong class="ui-body">{KUBERNETES_LINE}</strong>: you declare
+        desired state, kazi watches actual state, and it closes the gap until the two
+        match.
+      </p>
+      <ol class="mx-auto mt-10 grid max-w-4xl gap-3 sm:grid-cols-5">
+        {
+          loop.map(([step, desc], i) => (
+            <li class="ui-card rounded-xl border p-4 text-center">
+              <div class="kazi-text text-2xl font-extrabold">{i + 1}</div>
+              <div class="ui-strong mt-1 font-semibold">{step}</div>
+              <div class="ui-muted mt-1 text-xs">{desc}</div>
+            </li>
+          ))
+        }
+      </ol>
+
+      <!-- Proof artifact: a REAL recorded kazi apply run converging (T25.2) -->
+      <figure class="mx-auto mt-12 max-w-3xl">
+        <img
+          src="/proof-loop.gif"
+          alt="A real kazi apply run: kazi.loop reports iter=1 failing=[tests-pass], then iter=2 failing=[], then CONVERGED — every predicate is satisfied (predicate vector: [pass] tests-pass)."
+          class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
+          width="905"
+          height="291"
+          loading="lazy"
+        />
+        <figcaption class="ui-muted mt-3 text-center text-xs">
+          A <strong class="ui-body">real</strong> <code>kazi apply</code> run &mdash; one
+          acceptance predicate, <em><code>go test</code> passes</em>, false at t0 and driven
+          to convergence by the <code>claude</code> harness. Done is observed, not asserted.
+        </figcaption>
+      </figure>
+    </section>
+
+    <!-- Features -->
+    <section class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="features-heading">
+      <h2 id="features-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
+        Why kazi
+      </h2>
+      <div class="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+        {
+          features.map((f) => (
+            <div class="ui-card rounded-2xl border p-6">
+              <h3 class="ui-strong text-lg font-semibold">{f.title}</h3>
+              <p class="ui-body mt-2 text-sm leading-relaxed">{f.body}</p>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <!-- With vs. without kazi -->
+    <section class="mx-auto max-w-5xl px-6 py-12" aria-labelledby="compare-heading">
+      <h2 id="compare-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">
+        With kazi vs. without
+      </h2>
+      <div class="ui-hairline mt-10 overflow-hidden rounded-2xl border">
+        <div class="ui-card grid grid-cols-2 text-sm font-semibold">
+          <div class="ui-hairline ui-muted border-b px-5 py-3">Without kazi</div>
+          <div class="ui-hairline ui-strong border-b border-l px-5 py-3">With kazi</div>
+        </div>
+        {
+          comparison.map(([before, after], i) => (
+            <div class="grid grid-cols-2 text-sm">
+              <div
+                class:list={[
+                  "ui-body px-5 py-4",
+                  i < comparison.length - 1 && "ui-hairline border-b",
+                ]}
+              >
+                {before}
+              </div>
+              <div
+                class:list={[
+                  "ui-body ui-hairline border-l px-5 py-4",
+                  i < comparison.length - 1 && "border-b",
+                ]}
+              >
+                {after}
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <!-- Token economy without local models (in-family Claude tiering) -->
+    <section class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="economy-heading">
+      <h2
+        id="economy-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        Token economy without local models
+      </h2>
+      <p class="ui-body mx-auto mt-3 max-w-2xl text-center">
+        The cheapest agent loop isn't a local GPU &mdash; it's spending frontier
+        reasoning <em>once</em>, then grinding on a cheap model the predicates keep
+        honest. kazi makes that an <strong class="ui-strong">in-family Claude</strong>{" "}
+        move, so any Claude Code user gets it with{" "}
+        <strong class="ui-strong">no local model and no local GPU host</strong>.
+      </p>
+      <ul class="mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-2">
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">The grind &rarr; default grind tier</div>
+          <div class="ui-muted mt-1 text-sm">
+            The N-iteration grind runs on the default grind tier
+            (Sonnet 5, <code class="ui-body">claude-sonnet-5</code>).
+          </div>
+        </li>
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">Hard reasoning &rarr; frontier model</div>
+          <div class="ui-muted mt-1 text-sm">
+            Authoring the predicates runs once on a frontier model
+            (e.g. Opus 4.8, <code class="ui-body">claude-opus-4-8</code>).
+          </div>
+        </li>
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">Predicates keep it honest</div>
+          <div class="ui-muted mt-1 text-sm">
+            The cheap model can't declare a false &ldquo;done&rdquo; &mdash;
+            convergence is gated on objective checks, not its say-so.
+          </div>
+        </li>
+        <li class="ui-card rounded-xl border p-4">
+          <div class="ui-strong font-semibold">Pay frontier rates only for judgment</div>
+          <div class="ui-muted mt-1 text-sm">
+            Frontier pricing for authoring the predicates, cheap rates for the bulk
+            of the work.
+          </div>
+        </li>
+      </ul>
+
+      <div class="mt-8">
+        <p class="ui-body text-sm font-semibold">
+          Author on a frontier model, grind on a cheap one
+        </p>
+        <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code># Author the predicates once (a frontier model drafts them), then approve:
+kazi plan "add a /healthz endpoint that returns 200 ok" --workspace ./svc
+kazi approve &lt;proposal-ref&gt;
+
+# Drive the grind on the default grind tier &mdash; no local model needed:
+kazi apply my-goal.toml --workspace ./svc --harness claude --model claude-sonnet-5</code></pre>
+        <p class="ui-muted mt-2 text-xs">
+          <code class="ui-body">--harness claude --model &lt;id&gt;</code> selects which
+          Claude model runs that call; <code class="ui-body">claude</code> is already the
+          default harness, so the only new thing is naming a cheaper model for the grind.
+        </p>
+      </div>
+
+      <div class="mt-8">
+        <p class="ui-body text-sm font-semibold">
+          Start cheap, escalate on stuck (the smart default)
+        </p>
+        <p class="ui-muted mt-1 text-sm">
+          The adaptive default starts on the cheapest model and steps up only when kazi
+          reports the same slice is stuck &mdash; so you pay frontier rates only for the
+          slices that need them:
+        </p>
+        <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>claude-haiku-4-5  &rarr;  claude-sonnet-5  &rarr;  claude-opus-4-8   (cap &mdash; don't escalate past Opus)</code></pre>
+        <p class="ui-muted mt-2 text-xs">
+          The ladder lives in the orchestrating skill, never in kazi: kazi reports
+          per-iteration state (<code class="ui-body">converged</code> /
+          <code class="ui-body">stuck</code> / <code class="ui-body">over_budget</code>)
+          via <code class="ui-body">kazi apply --json</code>, and the skill owns the rungs.
+        </p>
+      </div>
+
+      <p class="ui-muted mx-auto mt-8 max-w-2xl text-center text-sm">
+        <strong class="ui-body">Designed-for, not yet measured.</strong> The cost win is
+        the <em>intended</em> economics &mdash; frontier judgment once, cheap iterations
+        gated by predicates. The headline dollar figure is being measured by the
+        multi-iteration benchmark; until it lands we state the <em>shape</em> of the
+        saving, not an unproven number.
+      </p>
+      <p class="ui-muted mx-auto mt-4 max-w-2xl text-center text-sm">
+        <strong class="ui-body">Want full privacy instead?</strong> Local /
+        bring-your-own-model is the <strong class="ui-body">secondary</strong> option:
+        point kazi at a local model via <code class="ui-body">opencode</code> so your code
+        and context never leave your hardware. It trades the in-family convenience for
+        on-prem privacy.
+      </p>
+    </section>
+
+    <!-- What a coding agent says (agent-voiced testimonial) -->
+    <section
+      class="mx-auto max-w-3xl px-6 py-12"
+      aria-labelledby="testimonial-heading"
+    >
+      <h2
+        id="testimonial-heading"
+        class="ui-strong text-center text-3xl font-bold tracking-tight"
+      >
+        What a coding agent says
+      </h2>
+      <figure class="ui-card mx-auto mt-10 max-w-2xl rounded-2xl border p-8">
+        <blockquote class="ui-body text-lg leading-relaxed">
+          &ldquo;Left to myself, I'll tell you a task is done the moment the code
+          looks right. kazi won't let me &mdash; it holds the predicates and
+          re-checks them against reality, so I stop claiming &lsquo;done&rsquo;
+          when it isn't. I end up shipping the thing you actually asked for, not
+          the thing I hoped was finished.&rdquo;
+        </blockquote>
+        <figcaption class="ui-muted mt-5 text-sm">
+          &mdash; Claude (Anthropic), describing kazi in its own words.{" "}
+          <span class="ui-body">Agent-authored</span>, kept verbatim and labelled
+          as such &mdash; not a human testimonial.
+        </figcaption>
+      </figure>
+    </section>
+
+    <!-- Who it's for -->
+    <section class="mx-auto max-w-6xl px-6 py-12" aria-labelledby="who-heading">
+      <h2 id="who-heading" class="ui-strong text-center text-3xl font-bold tracking-tight">Who it's for</h2>
+      <div class="mt-10 grid gap-4 sm:grid-cols-3">
+        {
+          personas.map(([who, why]) => (
+            <div class="ui-card rounded-2xl border p-6">
+              <h3 class="ui-strong text-base font-semibold">{who}</h3>
+              <p class="ui-body mt-2 text-sm leading-relaxed">{why}</p>
+            </div>
+          ))
+        }
+      </div>
+      <p class="ui-muted mx-auto mt-8 max-w-2xl text-center text-sm">
+        <strong class="ui-body">Not for you (yet)</strong> if you want an agent to
+        decide <em>what</em> to build &mdash; that's your call; kazi only drives toward an
+        outcome you declare. It also needs a coding harness
+        (<code class="ui-body">claude</code>,{" "}
+        <code class="ui-body">opencode</code>, &hellip;) on your PATH &mdash; kazi
+        drives one, it isn't one.
+      </p>
+    </section>
+
+    <!-- Reference / Advanced: drive kazi directly (the raw CLI — NOT the primary path) -->
+    <section id="advanced" class="mx-auto max-w-4xl px-6 py-12" aria-labelledby="advanced-heading">
+      <h2 id="advanced-heading" class="ui-strong text-3xl font-bold tracking-tight">
+        Reference: drive kazi directly
+      </h2>
+      <p class="ui-body mt-3 max-w-2xl text-sm">
+        Most people never touch these &mdash; Claude Code runs them for you (above).
+        They're here for agents and for anyone who wants to drive the loop by hand.
+      </p>
+      <div class="mt-6 space-y-6">
+        <div>
+          <p class="ui-body text-sm font-semibold">1. Install</p>
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>{INSTALL_CMD}</code></pre>
+          <p class="ui-muted mt-2 text-xs">
+            A coding agent (<code class="ui-body">claude</code> or{" "}
+            <code class="ui-body">opencode</code>) must be on your PATH &mdash; kazi
+            drives one, it does not bundle one.
+          </p>
+        </div>
+        <div>
+          <p class="ui-body text-sm font-semibold">2. Describe what you want</p>
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi plan "a /healthz endpoint that returns 200"
+kazi approve &lt;proposal-ref&gt;</code></pre>
+        </div>
+        <div>
+          <p class="ui-body text-sm font-semibold">3. Drive it to convergence</p>
+          <pre class="ui-code mt-2 overflow-x-auto rounded-xl border p-4 font-mono text-sm"><code>kazi apply my-goal.toml --workspace ./my-project</code></pre>
+          <p class="ui-muted mt-2 text-xs">
+            kazi loops &mdash; observe, dispatch, re-observe &mdash; and exits 0 only when
+            every predicate is objectively true.
+          </p>
+        </div>
+      </div>
+      <div class="mt-8">
+        <a href={`${REPO}#readme`} class="kazi-text font-semibold hover:underline"
+          >Read the full docs and quickstarts on GitHub &rarr;</a
+        >
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="ui-hairline border-t">
+    <div
+      class="ui-muted mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm sm:flex-row"
+    >
+      <div class="flex flex-col items-center gap-1 sm:items-start">
+        <div class="flex items-center gap-2">
+          <img src="/logo/kazi-mark.svg" alt="" width="22" height="22" />
+          <span>kazi &middot; Apache-2.0 &middot; &copy; Sire Run, Inc.</span>
+        </div>
+        <span>Built by the team behind <a href="https://sire.run" class="ui-link">Sire</a>.</span>
+      </div>
+      <nav class="flex items-center gap-5" aria-label="Footer">
+        <a href="/proof" class="ui-link">Proof</a>
+        <a href="/blog" class="ui-link">Blog</a>
+        <a href={REPO} class="ui-link">GitHub</a>
+        <a href={`${REPO}/releases`} class="ui-link">Releases</a>
+        <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
+        <a href={`${REPO}/discussions`} class="ui-link">Discussions</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    const btn = document.getElementById("copy-install");
+    const label = document.getElementById("copy-label");
+    btn?.addEventListener("click", async () => {
+      const cmd = btn.getAttribute("data-cmd") ?? "";
+      try {
+        await navigator.clipboard.writeText(cmd);
+        if (label) {
+          label.textContent = "copied!";
+          setTimeout(() => (label.textContent = "copy"), 1500);
+        }
+      } catch {
+        /* clipboard unavailable; no-op */
+      }
+    });
+
+    // Dynamic version: the build-time value (from .release-please-manifest.json) is
+    // the fallback; on load we fetch the latest GitHub release so the badge is never
+    // stale between deploys -- no site rebuild needed on a version bump. Cached in
+    // localStorage (1h TTL) to stay well under the unauthenticated API rate limit;
+    // any failure silently keeps the baked-in fallback.
+    (async () => {
+      const el = document.getElementById("kazi-version");
+      if (!el) return;
+      const KEY = "kazi-latest-version";
+      const TTL = 3600000;
+      try {
+        const c = JSON.parse(localStorage.getItem(KEY) || "null");
+        if (c && c.v && Date.now() - c.t < TTL) {
+          el.textContent = c.v;
+          return;
+        }
+      } catch {
+        /* ignore cache read errors */
+      }
+      try {
+        const r = await fetch(
+          "https://api.github.com/repos/kazi-org/kazi/releases/latest",
+        );
+        if (!r.ok) return;
+        const data = await r.json();
+        const v = (data.tag_name ?? "").replace(/^v/, "");
+        if (!v) return;
+        el.textContent = v;
+        try {
+          localStorage.setItem(KEY, JSON.stringify({ v, t: Date.now() }));
+        } catch {
+          /* ignore cache write errors */
+        }
+      } catch {
+        /* offline / rate-limited: keep the build-time fallback */
+      }
+    })();
+  </script>
+</Layout>

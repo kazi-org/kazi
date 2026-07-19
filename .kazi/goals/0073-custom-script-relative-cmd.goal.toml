@@ -1,0 +1,40 @@
+id = "custom-script-relative-cmd"
+name = "E54 T54.8 (#1096): custom_script resolves a relative-path cmd against the workspace and surfaces exec errors with a reason"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1096"
+epic = "E54"
+
+[[predicate]]
+id = "relative-cmd-and-diagnostic"
+provider = "custom_script"
+description = "TASK BRIEF (github #1096). A custom_script predicate with `cmd = \"scripts/foo.sh\"` (an executable in the workspace, cwd=workspace) yields a bare `error` with NO reason. Two compounding defects: (1) System.cmd(cmd, args, cd: workspace) (lib/kazi/providers/command_runner.ex:82,96) resolves cmd via PATH, NOT `cd:`, so a relative path raises :enoent (caught and mapped to `{:cmd_unrunnable, msg}` evidence in lib/kazi/providers/custom_script.ex:190-196); (2) the --check renderer attaches evidence ONLY for :fail, dropping it for :error (lib/kazi/cli.ex:6520-6532 JSON path, :6490-6497 human path). FIX (b, MANDATORY -- no silent error): surface evidence for :error too -- `if result.status in [:fail, :error]` at cli.ex:6526 -- and print a reason line in check_human/2 via a new format_reason/1 (render `{:cmd_unrunnable, msg}` as e.g. `exec failed: <cmd>: <msg>`, map :enoent -> not found). FIX (a, ergonomic): in custom_script.ex run/5 (~:177) resolve cmd to Path.join(workspace, cmd) ONLY when it CONTAINS a path separator AND the file exists AND is executable (a bare name like `semgrep` stays a PATH lookup -- shell semantics; the moduledoc at :76-78 already promises the resolved cmd is recorded); feed the resolved path into base_evidence. Keep encode_json! tolerant of tuple reasons (stringify for the human line). PROCESS: branch task/custom-script-relative-cmd, conventional commits, push -u. Full design: docs/plans/E54.md T54.8."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/providers/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref (partition-safe: no hardcoded branch name)."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

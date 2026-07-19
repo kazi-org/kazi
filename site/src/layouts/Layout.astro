@@ -1,0 +1,81 @@
+---
+import "../styles/global.css";
+import Analytics from "../components/Analytics.astro";
+
+interface Props {
+  title?: string;
+  description?: string;
+  // Per-page OpenGraph/Twitter overrides (additive — defaults preserve the
+  // site-wide card). `ogType` is "website" for marketing pages, "article" for
+  // blog posts. `image` (a site-relative path like "/og/foo.png" or an absolute
+  // URL) and `imageAlt` let a post supply its own social card.
+  ogType?: string;
+  image?: string;
+  imageAlt?: string;
+}
+
+const {
+  title = "kazi — make your coding agent actually finish the job",
+  description = "Give Claude Code the power to actually finish. Install one skill and kazi keeps your agent working until the goal is objectively true — tests pass, the endpoint is live, the change is deployed — or it stops and tells you why. You never run kazi yourself; Claude does. (Under the hood: the outer reconciliation loop for coding agents.)",
+  ogType = "website",
+  image,
+  imageAlt,
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+// A real raster OG image (1200x630 PNG). SVG OG images are not rendered by
+// Twitter / Slack / LinkedIn / Facebook, so the social card points at a PNG.
+// A page may override it via `image` (relative path or absolute URL); the
+// default is the site-wide card. `new URL` passes absolute URLs through and
+// resolves a relative path against `Astro.site`.
+const ogImage = new URL(image ?? "/og-image.png", Astro.site).href;
+const ogImageAlt =
+  imageAlt ?? "kazi - the outer/reconciliation loop for coding agents";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href="/logo/kazi-badge.svg" />
+    <!-- Honor the visitor's OS theme. color-scheme lets the UA pick light/dark
+         form controls + scrollbars; theme-color is set per scheme so the mobile
+         browser chrome matches the page in both. -->
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+
+    <!-- OpenGraph / Twitter -->
+    <meta property="og:type" content={ogType} />
+    <meta property="og:site_name" content="kazi" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogImageAlt} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={ogImageAlt} />
+
+    <!-- Per-page <head> extras (e.g. a blog post's article:published_time /
+         article:author / article:tag). Empty on every page that omits it. -->
+    <slot name="head" />
+
+    <!-- Cookieless, privacy-respecting analytics (T38.21). Config-gated: emits a
+         tracker only when PUBLIC_ANALYTICS_DOMAIN is set at build time, else an
+         HTML comment marker. See docs/site-analytics.md. -->
+    <Analytics />
+  </head>
+  <body class="page-shell min-h-screen antialiased selection:bg-violet-500/30">
+    <slot />
+  </body>
+</html>

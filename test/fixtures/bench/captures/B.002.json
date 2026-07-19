@@ -1,0 +1,15 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 4,
+  "result": "Dispatch 2 (no prefix): re-explored, more progress.",
+  "session_id": "bench-B-noprefix-0002",
+  "total_cost_usd": 0.1700,
+  "usage": {
+    "input_tokens": 4500,
+    "output_tokens": 420,
+    "cache_creation_input_tokens": 96500,
+    "cache_read_input_tokens": 0
+  }
+}

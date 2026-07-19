@@ -1,0 +1,96 @@
+# Example kazi goal-file: a STANDING (continuous/maintenance) reconciler.
+#
+# A default kazi goal is a ONE-SHOT reconcile: the loop runs until the predicate
+# vector is objectively :pass (or stuck / over budget), then it STOPS. A standing
+# goal is a MAINTENANCE reconciler — it does not terminate at convergence; once
+# green it keeps re-observing its predicates on a bounded interval and re-runs the
+# fix arc whenever one of them later regresses (drift). It is the difference
+# between "fix this once" and "keep this true forever" (concept §10 Slice 3+,
+# "standing reconcilers"; ADR-0002; UC-016).
+#
+# ## How standing mode is AUTHORED (T3.4d)
+#
+# Two equivalent ways — this file shows the goal-file way:
+#
+#   1. GOAL-FILE: set the top-level `standing = true` field (below). The loader
+#      maps it to `Goal.standing`; `Kazi.Runtime` threads it into the loop opts so
+#      the loop runs in standing mode (`Kazi.Loop` `standing: true`, T3.4a).
+#
+#   2. CLI FLAG: `kazi apply <goal-file> --workspace <path> --standing`. The
+#      `--standing` flag OVERRIDES whatever the goal-file declares, so any goal
+#      can be run standing on demand. (Without the flag, the goal-file decides.)
+#
+# Both are additive and back-compatible: omit `standing` (or set it false) and the
+# goal is the ordinary converge-and-stop reconciler — nothing changes.
+#
+# ## How a human runs this goal
+#
+#     # standing because the goal-file declares it:
+#     kazi apply priv/examples/standing_maintenance.toml --workspace /path/to/svc
+#
+#     # or force standing on ANY goal from the CLI:
+#     kazi apply priv/examples/deploy_target.toml --workspace /path/to/svc --standing
+#
+# A standing run does not return — it holds the predicates true until the operator
+# stops it (a clean stop ends it as :stopped; T3.4c). Run it as a long-lived
+# process / supervised child (Kazi.Loop ships a child_spec/1, T3.4c).
+#
+# ## "Done" for this goal
+#
+# The conjunction of both predicates below: the service's unit tests pass AND the
+# deployed /healthz endpoint returns 200 with body "ok". In a one-shot goal that
+# conjunction terminates the loop; in THIS standing goal it instead puts the loop
+# into steady observing — and if either predicate later drifts red, kazi
+# re-dispatches the coding agent, re-integrates, re-deploys, and re-converges
+# (T3.4b), then returns to steady observing. Forever.
+#
+# See Kazi.Goal.Loader for the full schema and Kazi.Loop for the standing-mode
+# semantics.
+
+id = "standing-maintenance-example"
+name = "Standing maintenance: keep the service green and live forever"
+
+# T3.4d: the authoring switch. true = standing/maintenance reconciler (UC-016);
+# omit or set false for the default one-shot converge-and-stop goal.
+standing = true
+
+[metadata]
+use_case = "UC-016"
+kind = "standing"
+
+[budget]
+# A standing goal runs indefinitely, so a max_iterations / wall-clock ceiling
+# would force it to stop — leave those unset. A per-fix-arc token ceiling is
+# still sensible to bound runaway drift remediation.
+max_tokens = 500000
+
+[scope]
+# The target workspace is the maintained service. Passed at run time as
+# `--workspace <path>`; declared here so the goal-file is self-describing.
+workspace = "fixtures/deploy-target"
+paths = ["main.go"]
+
+# CODE predicate (test_runner): the service's unit tests must stay green. If they
+# ever regress (drift), the standing loop re-dispatches the coding agent to fix
+# them, then re-integrates and re-deploys before returning to steady observing.
+[[predicate]]
+id = "tests-green"
+provider = "test_runner"
+description = "the service's `go test ./...` stays green"
+cmd = "go"
+args = ["test", "./..."]
+
+# LIVE predicate (http_probe): the deployed /healthz must keep returning 200 "ok".
+# This is the production probe that makes "still healthy" objective, not assumed
+# (concept §1) — a standing goal polls it forever and re-converges on any drift.
+# Set `url` to the concrete deployed target when driving a real run (T48.1,
+# ADR-0058) — http_probe only ever reads `url`; a bare relative path is never
+# resolved at dispatch time, so it would silently error `missing_url` on every
+# observation instead of ever holding green.
+[[predicate]]
+id = "healthz-live"
+provider = "http_probe"
+description = "deployed GET /healthz keeps returning 200 with body \"ok\""
+url = "https://REPLACE-WITH-DEPLOYED-SERVICE-URL/healthz"
+expect_status = 200
+expect_body = "ok"

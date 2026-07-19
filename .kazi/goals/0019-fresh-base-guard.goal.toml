@@ -1,0 +1,67 @@
+# E50/T50.8 (ADR-0065 decision 5). DEPENDS ON: goal 0013 (T50.1) merged to main.
+# Do not start this goal until the serial worktree indirection landed -- the
+# brief's precondition check enforces this. Wave E50-2.
+# Conflict surface: lib/kazi/cli.ex (flag parsing, shared with 0013/0015/0016)
+# and lib/kazi/scheduler/worktree.ex (0013 changes how it is invoked).
+
+id = "fresh-base-guard"
+name = "T50.8: --base <ref> selects the worktree base; a stale base warns loudly, never fetches; the indirection contract covers every mutating verb (ADR-0065 decision 5)"
+
+[[predicate]]
+id = "fresh-base-guard-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E50 task T50.8, ADR-0065 decision 5, docs/adr/0065-safe-concurrent-work-serial-worktree-fleet.md).
+
+PRECONDITION: T50.1 (goal 0013, serial worktree indirection) must already be on main -- verify `grep -rn "in_place" lib/kazi/cli.ex` finds the flag and test/kazi/serial_worktree_indirection_test.exs exists. If absent, STOP: this goal is premature; report that instead of building on a missing seam.
+
+WHY: T50.1 makes kazi create the task worktree, but from whatever the workspace's HEAD happens to be. Operators keep a manual ritual -- "fetch, branch off origin/main, THEN apply" -- in skills and session lore because a stale base silently produces work rebased onto weeks-old code. ADR-0065 decision 5: the base must be demonstrably fresh -- selectable via --base, loudly warned about when it is behind what the local repo ALREADY KNOWS about its upstream, and NEVER implicitly fetched (kazi core does not touch the network for this; an unexpected fetch inside a build tool is its own bug class).
+
+BUILD THIS: (1) new flag `--base <ref>` on `kazi apply`: when given, the task worktree is created FROM that ref instead of the workspace's HEAD. Seam: Kazi.Scheduler.Worktree -- create/4 (lib/kazi/scheduler/worktree.ex ~159) runs `git worktree add -b <branch> <path> "HEAD"` with HEAD hardcoded (~162); make the base ref a parameter threaded from wrap/2's opts (add e.g. `:base_ref`, default "HEAD" so every existing caller is untouched), validate the ref resolves (`git rev-parse --verify <ref>^{commit}`) and fail with a clear error naming the ref when it does not. (2) staleness warning: when the EFFECTIVE base (default HEAD, or the --base ref) is behind its locally-known upstream -- `git rev-parse --abbrev-ref <base>@{u}` when an upstream is configured, else the remote default branch if already fetched (`git rev-parse --verify origin/HEAD` or origin/main present in the local ref store) -- emit `IO.puts(:stderr, "warning: ...")` (the cli.ex ~1814 idiom) naming BOTH SHAs (base and upstream tip) and the behind-count (`git rev-list --count <base>..<upstream>`), plus the remedy ('fetch and re-run, or pass --base to state intent'). An explicit --base states intent and SILENCES the warning entirely (R-E50-4: the warning must not nag pinned-base callers). It is a WARNING, never a refusal, and NEVER triggers a fetch -- every git call here reads the local ref store only. No upstream configured and no remote-default ref locally known -> silent (nothing to compare against). (3) flag interplay: `--in-place` + `--base` together are REJECTED with a clear error (there is no worktree to base; the combination is contradictory) -- reject at parse/validation time like other flag conflicts in run_goal/4's cond. (4) mutating-verb coverage: the code change is SCOPED TO APPLY (the only workspace-mutating verb shipped today -- `kazi plan` writes to the read-model, not the tree). For the surfaces ADR-0065 names but which do not exist yet (goal-file materialization per ADR-0059, `kazi plan render` per ADR-0056), write the seam CONTRACT into Kazi.Scheduler.Worktree's @moduledoc: every workspace-mutating verb MUST route through this module's create/cleanup pair with an explicit base ref and the same staleness check -- so those features inherit the guarantee by construction. Do NOT build speculative code paths for verbs that do not exist.
+
+FLAG WIRING (same seams 0013 used, lib/kazi/cli.ex, verified on main at v1.125.0; line numbers approximate, trust names): add `base: :string` to @switches (~113-160), a @flag_docs entry (~163-225), the apply command's flags allow-list (~257-277), and the parse_run opts map (~1148-1211); thread into run_goal/4 alongside how 0013 threads in_place. Precedent for CLI-side git reads: primary_workspace_refused?/2 already shells `git rev-parse` via System.cmd (~1584). The staleness check itself belongs next to the worktree creation (worktree.ex or a small helper it owns), using the SAME :git_cmd injection seam (worktree.ex ~72, ~87) so tests record every git argv.
+
+WRITE test/kazi/fresh_base_guard_test.exs (mirror test/kazi/scheduler/worktree_test.exs + test/kazi/serial_worktree_indirection_test.exs from T50.1 -- real fixture git repos in tmp with a FIXTURE REMOTE (a second local bare/clone repo as origin), no network, no real harness, vacuous/trivial predicates): (1) with the fixture checkout's HEAD moved past origin/main (or vice versa), a worktree created with --base origin/main is based on THAT ref -- assert the worktree's HEAD SHA equals the fixture origin/main SHA, not the checkout's HEAD SHA; (2) a stale HEAD (checkout behind its upstream) produces the stderr warning naming both SHAs; the same run with --base <ref> emits NO warning; (3) NO fetch is ever invoked: inject :git_cmd as a recording wrapper (a script that appends its argv to a file, then execs real git -- worktree_test's seam) and assert no recorded argv contains "fetch" (nor "pull"); (4) --in-place + --base together exit non-zero with a clear error mentioning both flags; (5) an unresolvable --base ref fails with an error naming the ref, before any worktree is created; (6) default behavior unchanged: no --base, base up to date -> no warning, worktree from HEAD (existing T50.1 tests must stay green).
+
+DOCS LAND WITH CODE (ADR-0034): document --base in the cli.ex @flag_docs help text; extend docs/orchestrator-recipe.md's workspace-semantics section (started by T50.1): base selection, the staleness warning and how --base silences it, never-fetch. Cross-reference ADR-0065 decision 5.
+
+PROCESS: branch task/fresh-base-guard off main; small conventional commits (lib/ vs test/ vs docs/ separate); push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/fresh_base_guard_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "serial-worktree-still-green"
+provider = "custom_script"
+description = "GUARD: T50.1's serial worktree indirection tests stay green -- this task changes the same create path."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/serial_worktree_indirection_test.exs test/kazi/scheduler/worktree_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

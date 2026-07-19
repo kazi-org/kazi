@@ -1,0 +1,85 @@
+name: Pages
+
+# T9.3 (ADR-0018): build the Astro site in site/ and deploy it to GitHub Pages.
+# Triggers on pushes to main that touch the site (or this workflow), plus manual
+# dispatch. The README <-> website coherence drift-check (T9.9) gates the build,
+# so a divergence between site/src/canonical.mjs and README.md fails the deploy.
+#
+# T9.10: the site bakes its version badge from .release-please-manifest.json at
+# build time (site/astro.config.mjs). A release-please version bump touches that
+# manifest (plus mix.exs/CHANGELOG.md) but NOT site/, so without the manifest in
+# the paths filter the site never redeploys on a release and the live badge goes
+# stale. We add the manifest to paths, and also redeploy on a published Release as
+# a belt-and-suspenders. No job branches on github.event_name, so both triggers
+# feed the same build+deploy with no extra conditions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "README.md"
+      - ".release-please-manifest.json"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; let an in-progress run finish (don't cancel a live deploy).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: README <-> website coherence check (T9.9)
+        run: npm run check:coherence
+
+      - name: Build
+        run: npm run build
+        # T38.21: privacy-respecting, cookieless analytics is config-gated. The
+        # include (site/src/components/Analytics.astro) emits a tracker only when
+        # PUBLIC_ANALYTICS_DOMAIN is set at build time. Sourced from the
+        # `ANALYTICS_DOMAIN` repo variable so analytics can be turned on by setting
+        # one variable — no code change. When the variable is unset GitHub passes an
+        # empty string and the site ships analytics-free (an HTML comment says so).
+        # See docs/site-analytics.md.
+        env:
+          PUBLIC_ANALYTICS_DOMAIN: ${{ vars.ANALYTICS_DOMAIN }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

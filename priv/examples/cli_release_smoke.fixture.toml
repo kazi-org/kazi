@@ -1,0 +1,23 @@
+# Trivial always-green fixture for the CLI release smoke (T43.9).
+#
+# `cli_release_smoke.goal.toml`'s third predicate invokes the SHIPPED binary as
+# `kazi apply <this-file> --check`, exercising the real `apply` command path —
+# argv parse, app boot, read-model touch, provider dispatch, terminal verdict —
+# end to end against the packaged binary. Its single `custom_script` predicate
+# runs `/usr/bin/true` (exit 0 == pass, the default `exit_zero` verdict), so the
+# vector is objectively green with NO workspace, git, or network dependency and
+# `--check` reports `status: "pass"` and exits 0 deterministically.
+#
+# `--check` is the sanctioned observe-only smoke invocation (issue #805): it runs
+# the full provider dispatch ONCE and never starts the convergence loop, so no
+# harness/LLM is required — which is what lets this run in a build/CI sandbox.
+
+id = "cli-release-smoke-fixture"
+name = "CLI release smoke: a trivially-green apply target"
+
+[[predicate]]
+id = "always-green"
+provider = "custom_script"
+description = "a no-op command exits 0, so the apply --check vector is green"
+cmd = "true"
+verdict = "exit_zero"

@@ -1,0 +1,9 @@
+# A roadmap member goal-file (T45.1).
+id = "api"
+name = "API tests pass"
+
+[[predicate]]
+id = "api-tests"
+provider = "custom_script"
+description = "the API test suite passes"
+cmd = "true"

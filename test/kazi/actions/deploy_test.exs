@@ -1,0 +1,520 @@
+defmodule Kazi.Actions.DeployTest do
+  @moduledoc """
+  Tier 2 boundary test for the deploy action (T0.10b, UC-015).
+
+  The deployer command is injectable, so these tests point it at a STUB script
+  that emulates `gcloud run deploy` — echoing its args to a side file and
+  printing a fake service URL — with no real cloud call. We assert the action
+  invokes the deployer with the right `run deploy` argument vector and returns
+  the parsed deploy ref, and that a non-zero exit becomes an `{:error, ...}`
+  result rather than an exception.
+  """
+  use ExUnit.Case, async: true
+
+  alias Kazi.Action
+  alias Kazi.Actions.Deploy
+
+  @fake_url "https://kazi-deploy-target-abc123-uc.a.run.app"
+
+  setup do
+    dir = Path.join(System.tmp_dir!(), "kazi_deploy_test_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    args_file = Path.join(dir, "args.txt")
+    on_exit(fn -> File.rm_rf!(dir) end)
+    %{dir: dir, args_file: args_file}
+  end
+
+  # A stub that emulates `gcloud run deploy`: it records the args it was called
+  # with, prints a (possibly multi-line) fake service URL on stdout, and exits 0.
+  defp ok_stub(path, args_file, url) do
+    script = """
+    #!/bin/sh
+    # Record every argument, one per line, so the test can assert on them.
+    for a in "$@"; do echo "$a" >> "#{args_file}"; done
+    # gcloud build-from-source emits progress before the final value(status.url);
+    # emulate that so the parser must pick the last line.
+    echo "Building and deploying from source..."
+    echo "#{url}"
+    exit 0
+    """
+
+    write_executable(path, script)
+  end
+
+  # A stub that emulates a failed deploy: prints an error and exits non-zero.
+  defp fail_stub(path) do
+    script = """
+    #!/bin/sh
+    echo "ERROR: (gcloud.run.deploy) PERMISSION_DENIED" 1>&2
+    exit 1
+    """
+
+    write_executable(path, script)
+  end
+
+  defp write_executable(path, script) do
+    File.write!(path, script)
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  defp deploy_action(cmd, extra \\ %{}) do
+    params =
+      Map.merge(
+        %{
+          cmd: cmd,
+          service: "kazi-deploy-target",
+          project: "my-proj",
+          region: "us-central1",
+          source: "fixtures/deploy-target"
+        },
+        extra
+      )
+
+    Action.new(:deploy, params: params)
+  end
+
+  test "invokes the deployer with the right args and returns the parsed deploy ref",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    assert {:ok, result} = Deploy.execute(deploy_action(stub), %{})
+
+    # The deploy ref is the printed service URL (last line of stdout).
+    assert result.deploy_ref == @fake_url
+    assert result.url == @fake_url
+    assert result.service == "kazi-deploy-target"
+
+    # The deployer was invoked as `gcloud run deploy <service> --source ...`.
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert ["run", "deploy", "kazi-deploy-target" | rest] = args
+    assert "--source" in rest
+    assert "fixtures/deploy-target" in rest
+    assert "--project" in rest
+    assert "my-proj" in rest
+    assert "--region" in rest
+    assert "us-central1" in rest
+    assert "--port" in rest
+    assert "8080" in rest
+    assert "--allow-unauthenticated" in rest
+    assert "--quiet" in rest
+    assert "--format" in rest
+    assert "value(status.url)" in rest
+  end
+
+  test "honours custom port and omits --allow-unauthenticated when disabled",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    action = deploy_action(stub, %{port: 9000, allow_unauthenticated: false})
+    assert {:ok, _} = Deploy.execute(action, %{})
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert "9000" in args
+    refute "--allow-unauthenticated" in args
+  end
+
+  test "a non-zero exit becomes an error result (no exception)", %{dir: dir} do
+    stub = fail_stub(Path.join(dir, "gcloud_fail"))
+
+    assert {:error, {:deploy_failed, 1, output}} = Deploy.execute(deploy_action(stub), %{})
+    assert output =~ "PERMISSION_DENIED"
+  end
+
+  test "deployer command can be injected via context", %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ctx"), args_file, @fake_url)
+
+    # No :cmd in params; supply it through the execution context instead.
+    params = %{
+      service: "svc",
+      project: "p",
+      region: "r",
+      source: "."
+    }
+
+    action = Action.new(:deploy, params: params)
+
+    assert {:ok, %{deploy_ref: @fake_url}} = Deploy.execute(action, %{deploy_cmd: stub})
+  end
+
+  test "missing required config returns an error", %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    action = Action.new(:deploy, params: %{cmd: stub, project: "p", region: "r"})
+    assert {:error, {:missing_param, :service}} = Deploy.execute(action, %{})
+  end
+
+  test "rejects a non-deploy action kind" do
+    assert {:error, {:unsupported_kind, :integrate}} =
+             Deploy.execute(Action.new(:integrate), %{})
+  end
+
+  # --- Multi-environment deploy config (T3.3a, UC-015) -----------------------
+
+  # An action whose env-specific targets live under `:envs`, with shared
+  # settings (`:cmd`, `:source`) at the top level. Selecting an env merges its
+  # target (service/project/region) over the shared params.
+  defp multi_env_action(cmd, env) do
+    params = %{
+      cmd: cmd,
+      env: env,
+      source: "fixtures/deploy-target",
+      envs: %{
+        staging: %{
+          service: "kazi-staging",
+          project: "proj-staging",
+          region: "us-central1"
+        },
+        prod: %{
+          service: "kazi-prod",
+          project: "proj-prod",
+          region: "europe-west1"
+        }
+      }
+    }
+
+    Action.new(:deploy, params: params)
+  end
+
+  test "env :staging selects the staging service/project/region",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    assert {:ok, result} = Deploy.execute(multi_env_action(stub, :staging), %{})
+    assert result.service == "kazi-staging"
+    assert result.project == "proj-staging"
+    assert result.region == "us-central1"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert ["run", "deploy", "kazi-staging" | rest] = args
+    assert "proj-staging" in rest
+    assert "us-central1" in rest
+    # Shared, non-env-specific settings are still applied.
+    assert "fixtures/deploy-target" in rest
+    refute "kazi-prod" in args
+    refute "europe-west1" in args
+  end
+
+  test "env :prod selects the prod service/project/region",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    assert {:ok, result} = Deploy.execute(multi_env_action(stub, :prod), %{})
+    assert result.service == "kazi-prod"
+    assert result.project == "proj-prod"
+    assert result.region == "europe-west1"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert ["run", "deploy", "kazi-prod" | rest] = args
+    assert "proj-prod" in rest
+    assert "europe-west1" in rest
+    refute "kazi-staging" in args
+    refute "us-central1" in args
+  end
+
+  test "an unknown env returns a clear error result (no exception)",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    assert {:error, {:unknown_env, :qa}} =
+             Deploy.execute(multi_env_action(stub, :qa), %{})
+
+    # An :env with no :envs map at all is also a clear error, not a crash.
+    action = Action.new(:deploy, params: %{cmd: stub, env: :staging})
+    assert {:error, {:unknown_env, :staging}} = Deploy.execute(action, %{})
+  end
+
+  test "back-compat: no env/envs behaves as a single-target deploy",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+
+    # The original single-target action (no :env, no :envs) is unchanged.
+    assert {:ok, result} = Deploy.execute(deploy_action(stub), %{})
+    assert result.service == "kazi-deploy-target"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert ["run", "deploy", "kazi-deploy-target" | _rest] = args
+  end
+
+  # --- Rollback (T3.3b, UC-015) ----------------------------------------------
+
+  @prior_revision "kazi-deploy-target-00041-prior"
+  @current_revision "kazi-deploy-target-00042-current"
+
+  # A stub that emulates the two `gcloud run` calls a rollback makes. It records
+  # every arg, then branches on the subcommand: `run revisions list` prints the
+  # revisions newest-first (current then prior); `run services update-traffic`
+  # prints the service URL. Both exit 0. No real gcloud/network.
+  defp rollback_ok_stub(path, args_file, revisions, url) do
+    [current, prior] = revisions
+
+    script = """
+    #!/bin/sh
+    for a in "$@"; do echo "$a" >> "#{args_file}"; done
+    case "$2" in
+      revisions)
+        # `gcloud run revisions list ...` — newest first.
+        echo "#{current}"
+        echo "#{prior}"
+        ;;
+      services)
+        # `gcloud run services update-traffic ...` — print the service URL.
+        echo "#{url}"
+        ;;
+    esac
+    exit 0
+    """
+
+    write_executable(path, script)
+  end
+
+  # A stub whose `revisions list` succeeds but whose `update-traffic` exits
+  # non-zero — the rollback's traffic shift failed.
+  defp rollback_traffic_fail_stub(path, revisions) do
+    [current, prior] = revisions
+
+    script = """
+    #!/bin/sh
+    case "$2" in
+      revisions)
+        echo "#{current}"
+        echo "#{prior}"
+        ;;
+      services)
+        echo "ERROR: (gcloud.run.services.update-traffic) PERMISSION_DENIED" 1>&2
+        exit 1
+        ;;
+    esac
+    exit 0
+    """
+
+    write_executable(path, script)
+  end
+
+  defp rollback_action(cmd, extra \\ %{}) do
+    params =
+      Map.merge(
+        %{
+          cmd: cmd,
+          service: "kazi-deploy-target",
+          project: "my-proj",
+          region: "us-central1"
+        },
+        extra
+      )
+
+    Action.new(:rollback, params: params)
+  end
+
+  test "rollback invokes the deployer with rollback args and returns the prior ref",
+       %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    assert {:ok, result} = Deploy.execute(rollback_action(stub), %{})
+
+    # The prior revision is returned as the rollback ref.
+    assert result.prior_ref == @prior_revision
+    assert result.deploy_ref == @prior_revision
+    assert result.rolled_back_to == @prior_revision
+    assert result.url == @fake_url
+    assert result.service == "kazi-deploy-target"
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+
+    # Step 1: it listed revisions for the service.
+    assert "revisions" in args
+    assert "list" in args
+    assert "--service" in args
+    assert "kazi-deploy-target" in args
+
+    # Step 2: it shifted 100% of traffic to the prior revision.
+    assert "services" in args
+    assert "update-traffic" in args
+    assert "--to-revisions" in args
+    assert "#{@prior_revision}=100" in args
+    assert "my-proj" in args
+    assert "us-central1" in args
+  end
+
+  test "rollback honours env selection (multi-env target)",
+       %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback_env"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    action =
+      Action.new(:rollback,
+        params: %{
+          cmd: stub,
+          env: :prod,
+          envs: %{
+            prod: %{service: "kazi-prod", project: "proj-prod", region: "europe-west1"}
+          }
+        }
+      )
+
+    assert {:ok, result} = Deploy.execute(action, %{})
+    assert result.service == "kazi-prod"
+    assert result.prior_ref == @prior_revision
+
+    args = File.read!(args_file) |> String.split("\n", trim: true)
+    assert "kazi-prod" in args
+    assert "proj-prod" in args
+    assert "europe-west1" in args
+  end
+
+  test "rollback with no prior revision returns an error result (no exception)",
+       %{dir: dir, args_file: args_file} do
+    # A stub whose `revisions list` returns only the current revision.
+    script = """
+    #!/bin/sh
+    for a in "$@"; do echo "$a" >> "#{args_file}"; done
+    case "$2" in
+      revisions) echo "#{@current_revision}" ;;
+      services) echo "#{@fake_url}" ;;
+    esac
+    exit 0
+    """
+
+    stub = write_executable(Path.join(dir, "gcloud_no_prior"), script)
+
+    assert {:error, :no_prior_revision} = Deploy.execute(rollback_action(stub), %{})
+  end
+
+  test "rollback whose traffic shift exits non-zero becomes an error result (no exception)",
+       %{dir: dir} do
+    stub =
+      rollback_traffic_fail_stub(
+        Path.join(dir, "gcloud_rollback_fail"),
+        [@current_revision, @prior_revision]
+      )
+
+    assert {:error, {:rollback_failed, 1, output}} =
+             Deploy.execute(rollback_action(stub), %{})
+
+    assert output =~ "PERMISSION_DENIED"
+  end
+
+  test "rollback with missing required config returns an error", %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback_missing"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    action = Action.new(:rollback, params: %{cmd: stub, project: "p", region: "r"})
+    assert {:error, {:missing_param, :service}} = Deploy.execute(action, %{})
+  end
+
+  test "rollback honours an unknown env as a clear error", %{dir: dir, args_file: args_file} do
+    stub =
+      rollback_ok_stub(
+        Path.join(dir, "gcloud_rollback_unknown_env"),
+        args_file,
+        [@current_revision, @prior_revision],
+        @fake_url
+      )
+
+    action = Action.new(:rollback, params: %{cmd: stub, env: :qa, envs: %{}})
+    assert {:error, {:unknown_env, :qa}} = Deploy.execute(action, %{})
+  end
+
+  # --- Release tagging (T3.3c, UC-015) ---------------------------------------
+
+  # A stub tagger that emulates `git tag <ref>`: records the args it was called
+  # with (so the test can assert the tag created) and exits 0.
+  defp ok_tagger(path, tag_args_file) do
+    script = """
+    #!/bin/sh
+    for a in "$@"; do echo "$a" >> "#{tag_args_file}"; done
+    exit 0
+    """
+
+    write_executable(path, script)
+  end
+
+  # A stub tagger that emulates a failed `git tag` (e.g. tag already exists).
+  defp fail_tagger(path) do
+    script = """
+    #!/bin/sh
+    echo "fatal: tag 'release-x' already exists" 1>&2
+    exit 128
+    """
+
+    write_executable(path, script)
+  end
+
+  test "a successful deploy creates a release tag via the injected tagger and returns it in the result",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tag_args_file = Path.join(dir, "tag_args.txt")
+    tagger = ok_tagger(Path.join(dir, "git_ok"), tag_args_file)
+
+    action = deploy_action(stub, %{tag_cmd: tagger, release_ref: "release-kazi-v1"})
+    assert {:ok, result} = Deploy.execute(action, %{})
+
+    # The release ref is recorded in the deploy result and is distinct from the
+    # deploy (live URL) ref.
+    assert result.release_ref == "release-kazi-v1"
+    assert result.deploy_ref == @fake_url
+    refute Map.has_key?(result, :release_error)
+
+    # The tagger was invoked as `git tag <release_ref>`.
+    tag_args = File.read!(tag_args_file) |> String.split("\n", trim: true)
+    assert tag_args == ["tag", "release-kazi-v1"]
+  end
+
+  test "derives a timestamped release ref when none is supplied",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tag_args_file = Path.join(dir, "tag_args.txt")
+    tagger = ok_tagger(Path.join(dir, "git_ok"), tag_args_file)
+
+    action = deploy_action(stub, %{tag_cmd: tagger})
+    assert {:ok, result} = Deploy.execute(action, %{})
+
+    # The derived ref names the deployed service and is the one passed to the tagger.
+    assert result.release_ref =~ ~r/^release-kazi-deploy-target-\d+$/
+    tag_args = File.read!(tag_args_file) |> String.split("\n", trim: true)
+    assert tag_args == ["tag", result.release_ref]
+  end
+
+  test "the tagger command can be injected via context",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tag_args_file = Path.join(dir, "tag_args.txt")
+    tagger = ok_tagger(Path.join(dir, "git_ctx"), tag_args_file)
+
+    action = deploy_action(stub, %{release_ref: "release-ctx"})
+    assert {:ok, result} = Deploy.execute(action, %{tag_cmd: tagger})
+    assert result.release_ref == "release-ctx"
+  end
+
+  test "a tagger failure does not fail the (successful) deploy",
+       %{dir: dir, args_file: args_file} do
+    stub = ok_stub(Path.join(dir, "gcloud_ok"), args_file, @fake_url)
+    tagger = fail_tagger(Path.join(dir, "git_fail"))
+
+    action = deploy_action(stub, %{tag_cmd: tagger, release_ref: "release-x"})
+    assert {:ok, result} = Deploy.execute(action, %{})
+
+    # The deploy still succeeded; the release ref is still recorded, with the
+    # tagger error surfaced separately rather than aborting the deploy.
+    assert result.deploy_ref == @fake_url
+    assert result.release_ref == "release-x"
+    assert {:tag_failed, 128, output} = result.release_error
+    assert output =~ "already exists"
+  end
+end

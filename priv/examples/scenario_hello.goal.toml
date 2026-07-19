@@ -1,0 +1,49 @@
+# Example kazi goal-file: a hand-authored `scenario` predicate (ADR-0064, T49.5).
+#
+# A `scenario` predicate binds ONE Gherkin Scenario in a docs/specs/*.feature
+# spec to a committed, replayable PIN, and passes only when that pin validates
+# AND replays green through the underlying surface provider (here `browser`). No
+# demonstration transcript or agent claim can satisfy it — the truth is what the
+# surface provider observes on replay (the ADR-0064 truth invariant).
+#
+# ## The three artifacts, all committed and hand-authored
+#
+#   1. spec  — docs/specs/scenario_hello.feature (the Scenario prose).
+#   2. pin   — docs/specs/pins/scenario-hello__a-visitor-sees-the-greeting.pin.json
+#              (the executable realization, in the browser provider's own config
+#              vocabulary; see docs/scenario-predicate.md for the full reference).
+#   3. page  — priv/examples/scenario_hello_fixture.html (the repo-local fixture
+#              the pin's browser trace replays against).
+#
+# ## How a human runs this goal
+#
+#     # Serve the fixture page, then converge:
+#     python3 -m http.server 8080 --directory priv/examples &
+#     kazi apply priv/examples/scenario_hello.goal.toml --workspace .
+#
+# The pin's trace opens http://localhost:8080/scenario_hello_fixture.html and
+# asserts the greeting is visible and reads "Hello, kazi!". `mix test`
+# (test/kazi/examples/scenario_hello_example_test.exs) replays the SAME pin
+# hermetically through the stub runner, so CI needs no browser.
+#
+# ## "Done" for this goal
+#
+# The single acceptance predicate below: the committed pin validates against the
+# current Scenario text and replays green through the browser surface.
+
+id = "scenario-hello-example"
+name = "Scenario hello: a visitor sees the greeting (a worked scenario-predicate example)"
+
+[budget]
+max_iterations = 5
+
+[[predicate]]
+id = "visitor-sees-greeting"
+provider = "scenario"
+description = "the greeting page renders and shows the welcome heading"
+acceptance = true
+spec = "docs/specs/scenario_hello.feature"
+scenario = "A visitor sees the greeting"
+surface = "browser"
+pin = "docs/specs/pins/scenario-hello__a-visitor-sees-the-greeting.pin.json"
+repin = "auto"

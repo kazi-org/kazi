@@ -1,0 +1,20 @@
+id = "integration-branch-demo"
+name = "integration [branch] mode demo"
+description = "A minimal goal-file exercising the [integration] landing block (T44.1, ADR-0055)."
+
+# T44.1 (ADR-0055): declare HOW converged work lands. mode = "branch" means the
+# converged change is committed and PUSHED to a branch (no PR). The optional
+# branch_prefix/base/commit_style are stored verbatim; the landing machinery
+# (T44.2+) applies its own defaults.
+[integration]
+mode = "branch"
+branch_prefix = "kazi/"
+base = "main"
+commit_style = "conventional"
+
+[[predicate]]
+id = "tests"
+provider = "custom_script"
+description = "the suite passes"
+cmd = "sh"
+args = ["-c", "true"]

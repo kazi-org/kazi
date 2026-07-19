@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "status": "stuck",
+  "predicates": [{ "id": "code", "verdict": "fail" }],
+  "iterations": 5,
+  "usage": { "input_tokens": 20000, "cached_input_tokens": 0, "output_tokens": 2000 },
+  "economy": { "status": "stuck" }
+}

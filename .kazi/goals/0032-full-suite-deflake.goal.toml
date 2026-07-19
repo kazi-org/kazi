@@ -1,0 +1,32 @@
+id = "full-suite-deflake"
+name = "issue #1025 (+#1013 residual): fix the three full-suite load flakes so the suite is trustworthy as a guard predicate"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1025"
+issue_also = "https://github.com/kazi-org/kazi/issues/1013"
+depends_on = ["ci-daemon-nats-green"]
+
+[[predicate]]
+id = "three-flakes-fixed"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #1025): three tests fail under full-suite load but pass in isolation -- they red PRs/main spuriously and erode the full-suite guard this repo's own goal-files rely on. The three, with their per-test fix directions from the issue (do these, not a global retry hack):\n(1) Kazi.Loop.WorkspacePrepTest 'loop prepares the workspace (mcp + graph freshness) before dispatching' (test/kazi/loop/workspace_prep_test.exs:54): assert_receive {:dispatched, true, true} times out at 1000ms under load -- raise the assert_receive timeout meaningfully (5000ms+) and/or make the setup deterministic (await the loop's readiness rather than racing it).\n(2) Kazi.EnforcementTest 'the active enforcement guarantees are surfaced in the loop result' (test/kazi/enforcement_test.exs:379): Kazi.Loop.await(loop, 5000) times out -- raise the await bound and check the test isn't depending on wall-clock scheduling under a saturated scheduler (use the test's own convergence signal).\n(3) Kazi.CLIPlanBudgetSuggestionTest (test/kazi/cli_plan_budget_suggestion_test.exs:90): Exqlite 'Database busy' on the proposed_goals upsert via Kazi.Authoring.persist/3 -- this write path misses the busy_timeout settings other paths already have; route the plan-drafting persist through the busy-tolerant connection settings (find how the read_model repo config sets busy_timeout and apply the same to this connection).\nAlso re-check #1013's RunRegistryWiringTest session-id capture: its hardening (projection polling + WARN tracers) already landed -- do NOT rework it; just confirm it passes in your full-suite runs, and if it reds, capture the new WARN output into the commit message rather than patching blind.\nVERIFICATION BAR: the fix must hold under load, so this predicate runs the FULL suite twice back-to-back and then the three files 3x -- all must pass every time. PROCESS: branch task/full-suite-deflake, one conventional commit per test fixed, push with -u."
+cmd = "sh"
+args = ["-c", 'set -e; for i in 1 2; do env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test; done; for i in 1 2 3; do env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/loop/workspace_prep_test.exs test/kazi/enforcement_test.exs test/kazi/cli_plan_budget_suggestion_test.exs; done']
+timeout_ms = 1800000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

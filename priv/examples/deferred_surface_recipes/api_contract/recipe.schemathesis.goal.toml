@@ -1,0 +1,45 @@
+# Deferred-surface recipe (T43.10, ADR-0053 §3): API schema conformance —
+# property-based fuzzing of a RUNNING API against its OpenAPI spec.
+#
+# oasdiff (recipe.oasdiff.goal.toml) is a STATIC diff of two committed specs.
+# schemathesis is the LIVE complement: it generates requests from the spec and
+# asserts the running server's responses conform (status codes, schemas, headers).
+# Together they are the "api_flow / :openapi" surface ADR-0053 §3 keeps as a recipe.
+#
+# `schemathesis run <spec> --base-url <url> --checks all` exits non-zero when any
+# generated case finds a conformance violation, 0 when every check holds — so the
+# `exit_zero` verdict is exactly right (the tool's exit code already means
+# pass/fail; no parse needed).
+#
+# Evidence tier: DEMONSTRATION (fail directly, ADR-0043 §2). A conformance failure
+# is a concrete request/response the tool replays as proof, not a rolled-up score.
+#
+# Point `--base-url` at a LOCAL fixture app you control (a stub server serving the
+# committed spec), never an arbitrary live internet service. Bring the server up
+# first, then:
+#
+#     kazi apply recipe.schemathesis.goal.toml --workspace .
+#
+# See ../README.md and docs/custom-script-recipes.md.
+
+id = "recipe-api-schema-conformance-schemathesis"
+name = "API contract: server conforms to its OpenAPI spec (schemathesis)"
+
+[[predicate]]
+id = "api-conforms-to-spec"
+provider = "custom_script"
+description = "schemathesis finds no conformance violation against the running API"
+cmd = "schemathesis"
+args = [
+  "run",
+  "openapi.base.yaml",
+  "--base-url",
+  "http://127.0.0.1:8080",
+  "--checks",
+  "all",
+]
+verdict = "exit_zero"
+# schemathesis exits 1 for a found conformance violation and >1 for its own
+# internal errors (bad spec, unreachable base-url). Treat the latter as :error so
+# an unreachable fixture server is not read as failing API work.
+error_codes = [2, 3]

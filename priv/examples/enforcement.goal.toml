@@ -1,0 +1,50 @@
+# Example kazi goal-file: anti-gaming ENFORCEMENT (T32.4, ADR-0042).
+#
+# The `[enforcement]` profile turns kazi's guard markers into guarantees a capable
+# agent cannot quietly defeat (concept §2: "truth lives in the controller, not the
+# agent"). It is default-on for creation-mode goals; declaring the table opts in.
+#
+# Guarantees here:
+#   - clean_tree   : the GUARD + held-out graders run from a clean worktree at
+#                    `clean_ref`, so an in-iteration edit to a checker file in the
+#                    working copy cannot change the verdict (degrades gracefully +
+#                    drops `clean_tree` from the reported guarantees off-git).
+#   - fail_on_skip : skipped/errored/xfail sub-results count as :fail.
+#   - read_only_paths : a write to a leased path during a dispatch is FLAGGED.
+#   - [[enforcement.guard]] : test-count / coverage RATCHET guards (may only
+#                    improve) — deleting a test is a regression, not progress.
+#
+#     kazi apply priv/examples/enforcement.goal.toml --workspace .
+#
+# `kazi apply --json` reports the active guarantees + any flagged gaming event
+# under `enforcement` (see `kazi schema apply`). See docs/how-to/enforcement.md.
+
+id = "enforcement-demo"
+name = "Ship widgets under anti-gaming enforcement"
+mode = "create"
+
+[enforcement]
+enabled = true
+clean_tree = true
+clean_ref = "HEAD"
+fail_on_skip = true
+read_only_paths = ["test/acceptance"]
+
+# A test-count ratchet guard: the suite may only grow. Counting *_test files is a
+# stand-in — adapt the metric to your stack.
+[[enforcement.guard]]
+id = "test-count-no-drop"
+direction = "higher_better"
+baseline = "stored"
+allowed_regression = 0
+metric = { cmd = "sh", args = ["-c", "find test -name '*_test.exs' | wc -l"] }
+
+# The feature's acceptance test: failing at t0, green once the agent builds it.
+[[predicate]]
+id = "feature-built"
+provider = "custom_script"
+description = "the widgets feature test passes"
+acceptance = true
+cmd = "sh"
+args = ["-c", "grep -q '^built$' feature.txt"]
+verdict = "exit_zero"

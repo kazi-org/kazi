@@ -1,0 +1,264 @@
+name: release-please
+
+# T6.6 + T6.7 (ADR-0017): the fully-automated brew release pipeline.
+#
+# Push Conventional Commits to main -> release-please maintains a release PR that
+# bumps mix.exs + CHANGELOG. Merge that PR and the rest is automatic:
+#   1. release-please creates the vX.Y.Z tag + GitHub Release.
+#   2. `build` (the reusable release.yml) builds the Burrito binaries on native-arch
+#      runners and uploads them + .sha256 to that Release. Chained via workflow_call
+#      so it needs NO PAT (a GITHUB_TOKEN-created tag would not trigger `push: tags`).
+#   3. `tap-bump` regenerates the kazi formula in kazi-org/homebrew-tap from the
+#      published checksums and pushes it -- so `brew upgrade` serves the latest.
+#      This step needs the HOMEBREW_TAP_TOKEN secret (a fine-grained PAT with
+#      contents:write on homebrew-tap); without it the step SKIPS with a warning
+#      rather than failing, so the rest of the pipeline still works.
+#   4. `plugin-publish` (T61.4, ADR-0077) regenerates the Claude Code plugin
+#      bundle at the release version and pushes it + a version bump into the
+#      kazi-org/claude-plugins marketplace repo -- so `/plugin install kazi@kazi`
+#      always serves the just-released version (lockstep). It mirrors tap-bump's
+#      failure-tolerance: it needs the PLUGIN_MARKETPLACE_TOKEN secret and SKIPS
+#      with a warning if absent, and is `continue-on-error` so a plugin-publish
+#      failure never fails the binary release (plugin publishing is additive).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    # Gated OFF until the operator completes the one-time activation (see
+    # docs/plan.md E6 / ADR-0017). Set the repo VARIABLE `RELEASE_AUTOMATION=true`
+    # to turn the whole pipeline on. Until then this job is skipped (no red runs),
+    # because release-please ALSO needs the org setting "Allow GitHub Actions to
+    # create and approve pull requests" enabled -- without it the action errors.
+    # Activation checklist:
+    #   1. Org/repo: enable "Allow GitHub Actions to create and approve pull
+    #      requests" (Settings > Actions > General), OR pass a PAT as the action's
+    #      `token:` input.
+    #   2. Add the `HOMEBREW_TAP_TOKEN` secret (fine-grained PAT, contents:write on
+    #      kazi-org/homebrew-tap) so the tap-bump job can push the formula.
+    #   3. Set repo variable `RELEASE_AUTOMATION=true`.
+    #   4. (Optional, for HANDS-OFF releases) Add the `RELEASE_PLEASE_PAT` secret
+    #      (fine-grained PAT, contents:write + pull-requests:write on this repo) and
+    #      enable repo auto-merge. The "Auto-merge the release PR" step then merges
+    #      each release PR automatically, so every merge to main that carries
+    #      releasable commits ships without a human. Without the PAT the release PR
+    #      is left for manual merge (the pipeline still works).
+    if: ${{ vars.RELEASE_AUTOMATION == 'true' }}
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Hands-off releases: auto-merge the release PR that release-please just
+      # opened/updated, so every merge to main that carries releasable commits
+      # ships without a human merging the release PR by hand.
+      #
+      # This REQUIRES a PAT (RELEASE_PLEASE_PAT): a GITHUB_TOKEN-performed merge
+      # does NOT re-fire the `push: main` event, so release-please would never run
+      # again to cut the vX.Y.Z tag/Release -- the release would stall at "PR
+      # merged, no tag". A PAT push DOES trigger this workflow, closing the loop.
+      # The PAT must be a fine-grained token with `contents: write` +
+      # `pull-requests: write` on this repo, added as the RELEASE_PLEASE_PAT secret.
+      #
+      # Without the secret the step SKIPS with a warning, so the pipeline keeps
+      # working exactly as before (the operator merges the release PR manually).
+      - name: Auto-merge the release PR
+        if: ${{ steps.rp.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
+          PR_JSON: ${{ steps.rp.outputs.pr }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::RELEASE_PLEASE_PAT not set -- the release PR is left for manual merge. Add a fine-grained PAT (contents:write + pull-requests:write on this repo) as the RELEASE_PLEASE_PAT secret to make every merge release hands-off."
+            exit 0
+          fi
+          num="$(printf '%s' "$PR_JSON" | jq -r '.number // empty')"
+          if [ -z "$num" ]; then
+            echo "release-please reported no release PR number; nothing to auto-merge."
+            exit 0
+          fi
+          echo "Enabling auto-merge (rebase) on release PR #${num}."
+          # Prefer GitHub auto-merge (waits for any required checks); fall back to an
+          # immediate rebase merge when the branch has no required checks to wait on.
+          gh pr merge "$num" --auto --rebase --repo "$REPO" \
+            || gh pr merge "$num" --rebase --repo "$REPO"
+
+  # Build + upload the binaries to the freshly-created Release (reuses release.yml).
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit
+
+  # Auto-bump the Homebrew tap formula from the published checksums (T6.7).
+  tap-bump:
+    needs: [release-please, build]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Regenerate and push the kazi formula
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set -- skipping the tap formula auto-bump (T6.7). Add a fine-grained PAT (contents:write on kazi-org/homebrew-tap) as the HOMEBREW_TAP_TOKEN secret to enable hands-off brew releases."
+            exit 0
+          fi
+
+          ver="${TAG#v}"
+          base="https://github.com/kazi-org/kazi/releases/download/${TAG}"
+          mac_arm="$(curl -fsSL "${base}/kazi_macos_aarch64.sha256" | awk '{print $1}')"
+          mac_intel="$(curl -fsSL "${base}/kazi_macos_x86_64.sha256" | awk '{print $1}')"
+          linux_x86="$(curl -fsSL "${base}/kazi_linux_x86_64.sha256" | awk '{print $1}')"
+          linux_arm="$(curl -fsSL "${base}/kazi_linux_aarch64.sha256" | awk '{print $1}')"
+
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/kazi-org/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cat > tap/Formula/kazi.rb <<RUBY
+          # Generated by the kazi release pipeline (ADR-0017). Do not hand-edit.
+          class Kazi < Formula
+            desc "Reconciliation controller that drives a coding agent until goal predicates are true"
+            homepage "https://github.com/kazi-org/kazi"
+            version "${ver}"
+            license "Apache-2.0"
+
+            on_macos do
+              on_arm do
+                url "${base}/kazi_macos_aarch64"
+                sha256 "${mac_arm}"
+              end
+              on_intel do
+                url "${base}/kazi_macos_x86_64"
+                sha256 "${mac_intel}"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "${base}/kazi_linux_x86_64"
+                sha256 "${linux_x86}"
+              end
+              on_arm do
+                url "${base}/kazi_linux_aarch64"
+                sha256 "${linux_arm}"
+              end
+            end
+
+            def install
+              bin.install Dir["kazi_*"].first => "kazi"
+            end
+
+            test do
+              assert_match "kazi", shell_output("#{bin}/kazi --help")
+            end
+          end
+          RUBY
+
+          cd tap
+          git config user.name "kazi-release-bot"
+          git config user.email "release@kazi.invalid"
+          git add Formula/kazi.rb
+          if git diff --staged --quiet; then
+            echo "Formula already up to date for ${TAG}."
+          else
+            git commit -m "kazi ${ver}"
+            git push origin HEAD:main
+            echo "Bumped kazi-org/homebrew-tap to ${ver}."
+          fi
+
+  # Regenerate and publish the Claude Code plugin bundle at the release version
+  # into the marketplace repo (T61.4, ADR-0077). The plugin version IS the binary
+  # release version -- the bundle is generated in THIS run from the release tag,
+  # never hand-bumped, so marketplace content can never lag the binary.
+  #
+  # continue-on-error: a plugin-publish failure must NOT fail the binary release
+  # (the binaries are already published by `build`); plugin distribution is an
+  # additive channel, matching the failure-tolerant tap-bump convention above.
+  plugin-publish:
+    needs: [release-please, build]
+    if: needs.release-please.outputs.release_created == 'true'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    env:
+      ELIXIR_VERSION: "1.20.1"
+      OTP_VERSION: "28.3"
+    steps:
+      - name: Checkout (the release tag's source renders the plugin bundle)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Erlang/OTP and Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Regenerate the plugin bundle and publish it to the marketplace
+        env:
+          MARKETPLACE_TOKEN: ${{ secrets.PLUGIN_MARKETPLACE_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MARKETPLACE_TOKEN:-}" ]; then
+            echo "::warning::PLUGIN_MARKETPLACE_TOKEN not set -- skipping the Claude Code plugin marketplace publish (T61.4). Add a fine-grained PAT (contents:write on kazi-org/claude-plugins) as the PLUGIN_MARKETPLACE_TOKEN secret to enable hands-off plugin releases."
+            exit 0
+          fi
+
+          # Lockstep: the plugin version IS the release tag (minus the leading v).
+          ver="${TAG#v}"
+
+          mix local.hex --force && mix local.rebar --force
+          mix deps.get
+
+          # Clone the marketplace repo, replace the kazi bundle with a freshly
+          # rendered one at the release version, and bump the entry's version.
+          git clone --depth 1 \
+            "https://x-access-token:${MARKETPLACE_TOKEN}@github.com/kazi-org/claude-plugins.git" market
+
+          rm -rf market/plugins/kazi
+          mix kazi.plugin --out market/plugins/kazi --version "${ver}"
+
+          # Bump the marketplace entry's version to match (lockstep). The bundle's
+          # own .claude-plugin/plugin.json already carries ${ver} from the generator.
+          mkfile="market/.claude-plugin/marketplace.json"
+          tmp="$(mktemp)"
+          jq --arg v "${ver}" \
+            '.plugins |= map(if .name == "kazi" then .version = $v else . end)' \
+            "$mkfile" > "$tmp"
+          mv "$tmp" "$mkfile"
+
+          cd market
+          git config user.name "kazi-release-bot"
+          git config user.email "release@kazi.invalid"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "Marketplace already up to date for ${TAG}."
+          else
+            git commit -m "kazi ${ver}"
+            git push origin HEAD:main
+            echo "Published kazi plugin ${ver} to kazi-org/claude-plugins."
+          fi

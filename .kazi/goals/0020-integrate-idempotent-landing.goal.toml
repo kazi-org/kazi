@@ -1,0 +1,70 @@
+# E53/T53.1 (issue #1027). No deps -- runs first in Wave E53-1: every later
+# goal's landing gets cleaner once integrate is idempotent.
+# Conflict surface: lib/kazi/actions/integrate.ex, lib/kazi/scheduler/serial_landing.ex.
+
+id = "integrate-idempotent-landing"
+name = "T53.1: integrate is idempotent for already-landed work -- no fresh kazi/integrate-* branch when the tree is clean and HEAD == @{u} (issue #1027)"
+
+[metadata]
+epic = "E53"
+task = "T53.1"
+
+[scope]
+paths = ["lib/kazi/actions/integrate.ex", "lib/kazi/scheduler/serial_landing.ex", "test/kazi/actions/"]
+
+[[predicate]]
+id = "integrate-idempotence-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E53 task T53.1, issue #1027 -- read it: `gh issue view 1027 --repo kazi-org/kazi`).
+
+WHY: `Kazi.Actions.Integrate` mints a fresh `kazi/integrate-<timestamp>` branch (lib/kazi/actions/integrate.ex ~176, default at ~108) on EVERY invocation, even when the work is already committed, pushed, and current. Two observed failure modes on real runs: (a) a goal whose `landed` predicate checks HEAD==@{u} loops forever because each iteration's integrate moves HEAD to a fresh upstream-less branch; (b) WORSE -- after integrate re-branches and pushes, a `landed` predicate checking "whatever branch HEAD is on" silently PASSES on the substituted integrate branch while the named task branch has zero commits, i.e. `converged` lies.
+
+BUILD THIS in lib/kazi/actions/integrate.ex: BEFORE any branch creation/rename/checkout, detect ALREADY LANDED and return success as a NO-OP. Already landed = ALL THREE: (1) working tree clean (`git status --porcelain` empty, staged included); (2) the CURRENT branch has an upstream (`git rev-parse --abbrev-ref @{u}` succeeds); (3) `git rev-parse HEAD` == `git rev-parse @{u}`. When all three hold, integrate must NOT create a branch, NOT commit, NOT push -- log/report that the work is already landed and succeed. Additionally: when the workspace sits on a pushed-and-current branch (same three conditions) the workspace is left on that branch, exactly where it was -- integrate never moves HEAD off an already-landed branch. When ANY condition fails (dirty tree, no upstream, ahead/behind), today's behavior is preserved byte-for-byte.
+
+DO NOT TOUCH `Kazi.Scheduler.SerialLanding`'s `kazi-partition/` discriminator (lib/kazi/scheduler/serial_landing.ex ~29) -- its behavior and tests are a GUARD here. Also preserve the existing "nothing to commit" tolerance the integrate action already has for pre-committed task branches (T50.2). Update the integrate @moduledoc to state the idempotence contract (the three conditions).
+
+WRITE test/kazi/actions/integrate_idempotence_test.exs (fixture pattern: a tmp git repo plus a second local bare repo as `origin`, like test/kazi/serial_worktree_indirection_test.exs; no network, no real harness): (1) dirty work -> integrate behaves as today (branch minted or commit made, pushed) -- pin whatever today's observable contract is by exercising the existing code first; (2) IDEMPOTENCE: run integrate a second time on the now-clean, pushed, current workspace -> assert `git for-each-ref --format='%(refname)' refs/heads/` count is UNCHANGED (no new branch), no new commit (HEAD SHA unchanged), exit/return success; (3) a workspace already on a pushed-and-current `task/x` branch -> integrate succeeds without moving HEAD (branch name unchanged) and without creating any ref; (4) a clean tree WITHOUT an upstream still lands (no false no-op). Run the existing integrate + serial_landing suites to prove no regression.
+
+DOCS: the @moduledoc contract update IS the doc for this change (internal behavior, no user-facing flag). Mention the idempotence in docs/orchestrator-recipe.md's landing section ONLY if that section already describes integrate re-branching; otherwise no doc change needed -- note [no-docs] rationale in the commit body.
+
+PROCESS: branch task/integrate-idempotent-landing off main; small conventional commits (lib/ vs test/ separate); push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/actions/integrate_idempotence_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "serial-landing-still-green"
+provider = "custom_script"
+description = "GUARD: SerialLanding + the existing integrate suite stay green -- this task changes the landing path they share."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/scheduler/serial_landing_test.exs test/kazi/actions/integrate_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The NAMED task branch exists, is pushed, and is current with its remote (pinned to the branch, not HEAD -- the #1027-safe shape)."
+cmd = "sh"
+args = ["-c", 'git rev-parse --verify refs/heads/task/integrate-idempotent-landing >/dev/null 2>&1 && git rev-parse --verify refs/remotes/origin/task/integrate-idempotent-landing >/dev/null 2>&1 && [ "$(git rev-parse task/integrate-idempotent-landing)" = "$(git rev-parse origin/task/integrate-idempotent-landing)" ] && [ -n "$(git log --oneline origin/main..task/integrate-idempotent-landing)" ]']
+timeout_ms = 30000

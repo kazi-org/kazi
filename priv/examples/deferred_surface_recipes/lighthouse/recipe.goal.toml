@@ -1,0 +1,47 @@
+# Deferred-surface recipe (T43.10, ADR-0053 §3): Lighthouse — a page's performance
+# score must meet a budget. First-class promotion of a `:lighthouse` provider is
+# DEFERRED until a concrete goal earns it (ADR-0053 §3, ADR-0007); this ships the
+# check as a `custom_script` recipe so it is reachable without a kazi release.
+#
+# `lighthouse <url> --output=json --output-path=stdout ...` scores the page and
+# prints a JSON report; the performance category score is a 0–1 float at
+# `categories.performance.score`. Lighthouse exits 0 on a successful run REGARDLESS
+# of the score, so a naive `exit_zero` would pass a page that is well under budget.
+# The `json` verdict dodges that: it reads the score out of the report and gates it
+# with `pass_when = ">= 0.9"` — the verdict comes from the PARSED score, never the
+# exit code (the ADR-0043 §2 exit-code gotcha).
+#
+# Evidence tier: this recipe uses a BUDGET (a fixed floor, `>= 0.9`), a
+# demonstration-style hard gate. For a "must not regress vs a stored baseline"
+# signal instead, use the `ratchet` mode — see recipe_a11y_lighthouse.toml, which
+# is the presence/claim (ADR-0043 §2) counterpart of this budget gate.
+#
+# A page whose performance score is under 0.9 (see report.lowscore.json,
+# score 0.42) FAILS this predicate; report.goodscore.json (0.95) PASSES.
+#
+#     kazi apply recipe.goal.toml --workspace .
+#
+# Requires headless Chrome (Lighthouse drives it). Serve the page first, e.g.
+# `python3 -m http.server 8000 --directory page`, then point `args` at the URL.
+#
+# See ../README.md and docs/custom-script-recipes.md.
+
+id = "recipe-lighthouse-budget"
+name = "Lighthouse: performance score meets budget"
+
+[[predicate]]
+id = "performance-meets-budget"
+provider = "custom_script"
+description = "the Lighthouse performance score is at or above the 0.9 budget"
+cmd = "lighthouse"
+args = [
+  "http://127.0.0.1:8000/",
+  "--only-categories=performance",
+  "--output=json",
+  "--output-path=stdout",
+  "--quiet",
+  "--chrome-flags=--headless",
+]
+verdict = "json"
+path = "$.categories.performance.score"
+pass_when = ">= 0.9"

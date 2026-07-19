@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>kazi drill-in redesign mock — T63.3</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #101a2e; --ink: #dbe4f3; --dim: #7d8db3;
+    --grn: #2ee6a8; --red: #ff5c6c; --amb: #ffb454; --line: #1c2a45;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", sans-serif; padding: 2rem; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  .annot {
+    background: #1a2542; border: 1px dashed var(--amb); color: var(--amb);
+    font-size: 12px; padding: .35rem .6rem; border-radius: 4px; margin: .4rem 0 1rem;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  .purpose { color: var(--dim); font-size: .95rem; margin: 0 0 1.2rem; }
+  .summary {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.2rem; margin-bottom: 1.5rem; font-size: 1.05rem;
+  }
+  .summary b { color: var(--amb); }
+  nav a { color: var(--dim); text-decoration: none; font-size: .85rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { padding: .4rem .55rem; text-align: center; border: 1px solid var(--line); font-size: .85rem; }
+  th.predicate-col, td.predicate-col { text-align: left; font-family: ui-monospace, monospace; font-size: .78rem; color: var(--dim); max-width: 320px; }
+  th.iter-col { color: var(--dim); font-weight: 600; }
+  th.iter-col.current { color: var(--ink); background: #16233f; }
+  th.iter-col.future { color: #3a4a6b; font-style: italic; }
+  .cell { width: 34px; }
+  .status-pass { background: rgba(46,230,168,.16); color: var(--grn); }
+  .status-fail { background: rgba(255,92,108,.16); color: var(--red); }
+  .status-future { background: repeating-linear-gradient(45deg,#131d33,#131d33 4px,#0e1729 4px,#0e1729 8px); color: #3a4a6b; }
+  .legend { display: flex; gap: 1.2rem; flex-wrap: wrap; margin: 1rem 0 1.6rem; font-size: .8rem; color: var(--dim); }
+  .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  .swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+  .detail {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.2rem; margin-top: 1.5rem;
+  }
+  .detail h2 { font-size: 1rem; margin: 0 0 .6rem; }
+  .detail ul { list-style: none; margin: 0; padding: 0; font-size: .85rem; }
+  .detail li { display: flex; justify-content: space-between; padding: .25rem 0; border-bottom: 1px solid var(--line); }
+  .gap-panel { margin-top: 2.5rem; border-top: 2px solid var(--line); padding-top: 1rem; }
+  .gap-panel h2 { font-size: .95rem; color: var(--amb); }
+  .gap-panel table { font-size: .8rem; }
+  .gap-panel td, .gap-panel th { text-align: left; }
+  code { background: #16233f; padding: .1rem .3rem; border-radius: 3px; font-size: .82em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="annot">
+    MOCK — T63.3 (no production code changed). Fixture is the REAL goal
+    <code>runtime-gherkin-provider-adr-0071-loader</code> named in this epic's
+    Notes section (`docs/plans/E63.md`), pulled live via
+    <code>kazi status runtime-gherkin-provider-adr-0071-loader --json</code> /
+    the local read-model. It has exactly <b>one</b> recorded iteration so far
+    (still in progress) — the striped "future" column is an ILLUSTRATION of
+    how a second iteration would render, not fabricated data; it carries no
+    predicate statuses.
+  </div>
+
+  <!-- (a) one-line purpose statement -->
+  <h1>Drill-in · runtime-gherkin-provider-adr-0071-loader</h1>
+  <p class="purpose">
+    What this view is for: <b>see exactly which predicate is blocking this goal,
+    on which iteration, and what evidence says why.</b>
+  </p>
+  <div class="annot">Renamed from "kazi drill-in · &lt;goal_ref&gt;" (a system label) to a purpose sentence a first-time viewer can act on without reading source. The old subtitle ("Predicate x iteration convergence heatmap...") described the MECHANISM, not the QUESTION it answers.</div>
+
+  <!-- (a) plain-language summary -->
+  <div class="summary">
+    This goal is <b>in progress, iteration 1</b>: 3 of 8 predicates pass,
+    5 are blocking convergence (<code>docs-land-with-code</code>,
+    <code>guard-full-suite-green</code>, <code>loader-expansion-to-subpredicates</code>,
+    <code>loader-gherkin-kind-and-validation</code>,
+    <code>provider-module-evaluator</code>, <code>provider-registered-in-dispatch</code>
+    — six named, table shows all eight). No regressions recorded yet (only one
+    observation exists).
+  </div>
+  <div class="annot">NEW — the original view had no summary at all. Counts and blocking-predicate names are read directly from this iteration's REAL <code>predicate_vector</code> (via the read-model); "no regressions recorded yet" reflects that <code>Iteration.regressions</code> is necessarily empty with only one observation, not a fabricated claim.</div>
+
+  <nav><a href="history.html">→ Full history (narrative)</a></nav>
+
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--grn)"></span> pass</span>
+    <span><span class="swatch" style="background:var(--red)"></span> fail</span>
+    <span><span class="swatch" style="background:repeating-linear-gradient(45deg,#131d33,#131d33 3px,#0e1729 3px,#0e1729 6px)"></span> not yet observed (future iteration)</span>
+  </div>
+  <div class="annot">NEW — the original heatmap had a color key baked silently into inline &lt;style&gt; (● fail ✕ etc. glyphs) with no on-page legend. A first-time viewer had to guess what "●" vs "✕" vs "·" meant.</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="predicate-col">predicate</th>
+        <th class="iter-col current">1 · current</th>
+        <th class="iter-col future">2 · not yet run</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="predicate-col">landed</td><td class="cell status-pass">pass</td><td class="cell status-future">·</td></tr>
+      <tr><td class="predicate-col">guard-format-clean</td><td class="cell status-pass">pass</td><td class="cell status-future">·</td></tr>
+      <tr><td class="predicate-col">guard-full-suite-green</td><td class="cell status-fail">fail</td><td class="cell status-future">·</td></tr>
+      <tr><td class="predicate-col">docs-land-with-code</td><td class="cell status-fail">fail</td><td class="cell status-future">·</td></tr>
+      <tr><td class="predicate-col">loader-gherkin-kind-and-validation</td><td class="cell status-fail">fail</td><td class="cell status-future">·</td></tr>
+      <tr><td class="predicate-col">loader-expansion-to-subpredicates</td><td class="cell status-fail">fail</td><td class="cell status-future">·</td></tr>
+      <tr><td class="predicate-col">provider-module-evaluator</td><td class="cell status-fail">fail</td><td class="cell status-future">·</td></tr>
+      <tr><td class="predicate-col">provider-registered-in-dispatch</td><td class="cell status-fail">fail</td><td class="cell status-future">·</td></tr>
+    </tbody>
+  </table>
+  <div class="annot">All 8 rows and the "current" column's statuses are the REAL predicate ids + verdicts from this goal's actual (only) iteration. Rows are grouped loosely by concern in this mock (guard/doc predicates first, loader/provider predicates after) rather than the original's plain alphabetical sort — a first-time viewer scans "what kind of thing is failing" faster than an alphabetical list lets them.</div>
+
+  <div class="detail">
+    <h2>Iteration 1 (current) — what happened here</h2>
+    <div class="annot">NEW framing — the original detail panel was a bare &lt;dl&gt; of counters with no sentence connecting them. This restates the iteration as a narrative line first, counters second.</div>
+    <p style="margin:.2rem 0 1rem;color:var(--dim)">
+      First observation of this goal <span style="color:var(--amb)">→</span>
+      3 of 8 predicates <span style="color:var(--grn)">pass</span>
+      <span style="color:var(--amb)">→</span>
+      5 <span style="color:var(--red)">failing</span>, mostly the new
+      loader/provider predicates that have no implementation yet
+      <span style="color:var(--amb)">→</span> not converged.
+    </p>
+    <ul>
+      <li><span>tool calls</span><span data-real="unknown">(not present in this iteration's row — see gap list)</span></li>
+      <li><span>file reads</span><span data-real="unknown">(not present in this iteration's row — see gap list)</span></li>
+      <li><span>tier</span><span data-real="unknown">(not present in this iteration's row — see gap list)</span></li>
+    </ul>
+  </div>
+
+  <div class="gap-panel">
+    <h2>Data gaps — fields this redesign wants that the read-model does not (yet) expose</h2>
+    <table>
+      <tr><th>Needed for</th><th>Field</th><th>Source today</th></tr>
+      <tr>
+        <td>"why is this failing" one-liner per predicate (beyond raw evidence blob)</td>
+        <td>A short, pre-formatted human-readable reason string</td>
+        <td>Partial — <code>Iteration.predicate_vector[id].evidence</code> exists and is rich (this goal's real evidence includes full command args, exit codes, and captured stdout), but it is a raw provider-shaped map, not a summarized sentence; the mock's "mostly the new loader/provider predicates that have no implementation yet" is a human paraphrase of that evidence, not a stored field.</td>
+      </tr>
+      <tr>
+        <td>tool_calls / file_reads / tier counters shown in the detail panel</td>
+        <td>Per-iteration <code>tools</code> / <code>context</code> maps</td>
+        <td>Absent for THIS goal's real iteration — <code>kazi status --json</code>'s row for this fixture carries no <code>tools</code>/<code>context</code> keys (likely because this goal has not yet gone through a harness-dispatch iteration; iteration 0 here is an initial observation). The LiveView code path (<code>counter/3</code>) already handles a missing counter by rendering "-", so this is a data-availability gap for THIS specific goal, not a schema gap.</td>
+      </tr>
+      <tr>
+        <td>Predicate grouping (guard vs. loader vs. provider, as this mock's row order implies)</td>
+        <td>A category/group tag per predicate id</td>
+        <td>Absent — grouping in this mock is inferred from the id's own naming convention (prefix pattern), not a real field. <code>docs/adr/0020-hierarchical-predicate-grouping.md</code> covers goal-authored GROUPS for scoring, but nothing in <code>Iteration.predicate_vector</code> tags a predicate's category for display purposes.</td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>

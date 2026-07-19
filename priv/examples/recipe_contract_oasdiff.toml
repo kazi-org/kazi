@@ -1,0 +1,28 @@
+# Recipe (T32.9, ADR-0043): OpenAPI contract compat — no breaking REST change.
+#
+# `oasdiff breaking <base> <revision> --fail-on ERR` diffs two OpenAPI specs and,
+# with `--fail-on ERR`, exits 1 when it finds a breaking change at or above the
+# ERR level (0 otherwise). The `exit_code` verdict makes the contract explicit:
+# 0 passes, 1 fails, and any OTHER code is treated as a fail — a gate never passes
+# an undeclared code (an unexpected exit usually means oasdiff itself misbehaved).
+#
+# Evidence tier: DEMONSTRATION (fail directly). A breaking diff is a concrete,
+# rule-identified incompatibility between two committed specs.
+#
+#     kazi apply priv/examples/recipe_contract_oasdiff.toml --workspace .
+#
+# Adapt the base/revision spec paths to your repo. See
+# docs/custom-script-recipes.md and `kazi schema custom_script`.
+
+id = "recipe-contract-oasdiff"
+name = "API contract: no breaking OpenAPI change"
+
+[[predicate]]
+id = "no-breaking-openapi"
+provider = "custom_script"
+description = "oasdiff reports no breaking change (ERR level) between base and revision"
+cmd = "oasdiff"
+args = ["breaking", "openapi/base.yaml", "openapi/revision.yaml", "--fail-on", "ERR"]
+verdict = "exit_code"
+pass_codes = [0]
+fail_codes = [1]

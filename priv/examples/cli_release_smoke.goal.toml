@@ -1,0 +1,118 @@
+# CLI RELEASE SMOKE (T43.9, UC-055): a `:cli` STANDING goal over kazi's OWN
+# shipped binary — the dogfood that would have red-flagged the CLI-path boot
+# crashes that all passed `mix test`.
+#
+# `mix test` proves the code compiles and the unit paths hold; it does NOT prove
+# the PACKAGED binary boots and answers `kazi version` on a real `$PATH`. Four
+# real regressions shipped GREEN through the whole suite while the released
+# binary crashed (or dirtied stderr) on its very first CLI call:
+#
+#   * a `:noproc` on the read-model the moment the CLI path touched it;
+#   * an OTP-28.0 spurious warning printed to stderr on boot;
+#   * the L-0022 `RELEASE_*` env leak that broke the packaged run;
+#   * the Homebrew `Kazi.Repo`-not-started crash (`kazi status` touches the
+#     read-model — `mix test` starts the Repo for you; the shipped binary must
+#     start it itself).
+#
+# Every predicate below runs the binary the way a USER invokes it (`cmd = "kazi"`
+# is a real `$PATH` lookup — install the release binary on `$PATH` first) and
+# gates on the OBSERVABLE surface a user sees: the exit code and the two output
+# streams.
+#
+# stderr calibration (a T43.9 dogfood finding). kazi's I/O contract splits the
+# streams DELIBERATELY (config/config.exs, Kazi.CLI.run/1): stdout carries the
+# result, stderr carries diagnostics. A read-model command therefore writes a
+# legitimate Ecto `[info] Migrations already up` line to stderr on EVERY boot, so
+# a blanket `stderr equals ""` would red `status`/`apply` against a perfectly
+# HEALTHY binary. The clean-stderr gate belongs on the PURE `version` probe,
+# which boots the same app (so it still reds the OTP-28 boot-warning class) but
+# touches no read-model; `status`/`apply` are gated on exit 0 + a positive stdout
+# signal, which is exactly what reds a `:noproc`/`Kazi.Repo`-not-started crash (a
+# crash exits non-zero and never prints its result line).
+#
+# This is a STANDING goal: CHECK it against the shipped binary, never converge it
+#
+#     kazi apply priv/examples/cli_release_smoke.goal.toml --workspace . --check
+#
+# See Kazi.Providers.Cli, docs/cli-provider.md, and `kazi schema cli`.
+
+id = "cli-release-smoke"
+name = "CLI release smoke: the shipped kazi binary boots and answers cleanly"
+
+# `kazi version` — the cheapest boot probe. Exits 0, names the tool on stdout,
+# and (touching no read-model) writes NOTHING to stderr. This exact invocation
+# reds the `:noproc` boot crash, the `RELEASE_*` env leak, and — because it boots
+# the full app — the OTP-28 boot-time stderr warning.
+[[predicate]]
+id = "version-boots-clean"
+provider = "cli"
+description = "kazi version exits 0, names the tool on stdout, clean stderr"
+cmd = "kazi"
+args = ["version"]
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.assertions]]
+target = "stdout"
+match = "contains"
+expected = "kazi"
+
+[[predicate.assertions]]
+target = "stderr"
+match = "equals"
+expected = ""
+
+# `kazi status` (no ref) is the pre-upgrade check: it LISTS the live runs from the
+# read-model (issue #971). Because it TOUCHES the read-model, this is the probe
+# that reds the Homebrew `Kazi.Repo`-not-started crash — the shipped binary must
+# start its own Repo, and `mix test`'s Repo-for-you masks that. Exit 0 plus a
+# non-empty stdout line proves the read-model query actually returned (a
+# not-started Repo crashes non-zero before printing anything). stderr is NOT
+# gated here: the read-model boot legitimately logs diagnostics to it.
+[[predicate]]
+id = "status-touches-read-model"
+provider = "cli"
+description = "kazi status exits 0 and prints its summary (reds a Repo-not-started boot)"
+cmd = "kazi"
+args = ["status"]
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.assertions]]
+target = "stdout"
+match = "regex"
+expected = "\\S"
+
+# `kazi apply <fixture> --check` drives the full APPLY command path against a
+# trivially-green fixture: argv parse, app boot, provider dispatch, terminal
+# verdict, exit 0 — the reconcile entrypoint a user actually runs. `--check`
+# evaluates the vector ONCE without starting the loop (issue #805), so no
+# harness/LLM is needed and the run is deterministic in a build/CI sandbox. Exit
+# 0 plus `pass` on stdout proves the vector was evaluated to a terminal pass (a
+# read-model crash on this path would exit non-zero before the verdict prints).
+# The fixture ships alongside this goal (cli_release_smoke.fixture.toml).
+[[predicate]]
+id = "apply-command-path-converges"
+provider = "cli"
+description = "kazi apply <trivial-fixture> --check reports pass and exits 0"
+cmd = "kazi"
+args = [
+  "apply",
+  "priv/examples/cli_release_smoke.fixture.toml",
+  "--check",
+  "--workspace",
+  ".",
+]
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.assertions]]
+target = "stdout"
+match = "contains"
+expected = "pass"

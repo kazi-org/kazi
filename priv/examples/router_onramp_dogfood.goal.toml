@@ -1,0 +1,44 @@
+# Example kazi goal-file: the ROUTER ON-RAMP dogfood (T26.6 / E26 / ADR-0031).
+#
+# This is the goal-file leg of the kazi skill ROUTER flow, materialized verbatim
+# from the proposal that `kazi plan` drafted and `kazi approve` blessed. It proves
+# the router drives a goal to OBJECTIVE convergence using only kazi verbs -- no
+# legacy `/loop`, `/apply`, or `/qualify`:
+#
+#   1. kazi plan "Create a file named VERSION.txt ... contents ... 1.0.0" --yes --json
+#        -> drafts a proposal (1 custom_script predicate, canonical cmd/args)
+#   2. kazi list-proposed --status proposed --json   -> proposal queued
+#   3. kazi approve <proposal-ref> --json            -> {"status":"approved"} (goal loads)
+#   4. kazi status <proposal-ref> --json             -> approved (read-model)
+#   5. kazi apply router_onramp_dogfood.goal.toml --workspace <scratch> --harness claude
+#        -> status: converged, predicate verdict: pass
+#
+# `kazi approve` does NOT auto-write a goal-file; this file IS the approved
+# predicate transcribed for the `apply` leg (see docs/devlog.md, T26.6 entry).
+#
+# CREATE mode: VERSION.txt does not exist at t0, so the predicate FAILS at t0 and
+# the failing predicate IS the work-list (vacuous-goal guard satisfied). Run against
+# a throwaway SCRATCH workspace, NOT the kazi repo:
+#
+#     kazi apply priv/examples/router_onramp_dogfood.goal.toml --workspace <scratch>
+#
+# Schema: Kazi.Goal.Loader. custom_script verdict="exit_zero" = T32.1/ADR-0040
+# (pass iff the command exits 0). The `[ = ]` against `$(cat ...)` rejects any
+# extra bytes; command substitution strips a single trailing newline, so a written
+# `1.0.0\n` still satisfies the exact-content check.
+
+id = "create-a-file-named-version-txt"
+name = "version-txt-exact-content"
+mode = "create"
+
+[budget]
+max_iterations = 6
+
+[[predicate]]
+id = "version_file_exists_with_exact_content"
+provider = "custom_script"
+description = "VERSION.txt exists in the workspace and its contents are exactly the text 1.0.0"
+acceptance = true
+verdict = "exit_zero"
+cmd = "sh"
+args = ["-c", "test -f VERSION.txt && [ \"$(cat VERSION.txt)\" = \"1.0.0\" ]"]

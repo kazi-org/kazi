@@ -1,0 +1,48 @@
+# Example kazi goal-file: a Slice 2 browser-acceptance target (T2.2, UC-012).
+#
+# This goal declares a UI acceptance predicate evaluated by the `browser`
+# provider (Kazi.Providers.Browser): kazi drives a real Chromium via the shipped
+# Playwright runner (priv/browser/playwright_runner.js), replays the interaction
+# steps, and asserts on the rendered page. "Done" is the conjunction of every
+# assertion holding in a real browser — not an agent's claim that the UI works.
+#
+#     kazi apply priv/examples/browser_acceptance.toml --workspace path/to/app
+#
+# Real use requires the Playwright runtime installed once (alongside this app or
+# in the workspace the runner runs in):
+#
+#     npm i playwright && npx playwright install chromium
+#
+# See Kazi.Goal.Loader and Kazi.Providers.Browser for the full schema.
+
+id = "ui-acceptance-slice2"
+name = "Slice 2 browser acceptance: the app's home page renders and works"
+
+[metadata]
+slice = "2"
+
+[budget]
+max_iterations = 10
+
+# BROWSER predicate (browser, T2.2): open the app, click through to the
+# dashboard, and assert the heading + a key element are present. `url`, `steps`,
+# and `assertions` are handed verbatim to the Playwright runner.
+[[predicate]]
+id = "home-renders"
+provider = "browser"
+description = "home page shows the welcome heading and the dashboard link works"
+url = "https://app.example.test/"
+timeout_ms = 30000
+
+[[predicate.steps]]
+action = "click"
+selector = "a[href='/dashboard']"
+
+[[predicate.assertions]]
+type = "visible"
+selector = "h1"
+
+[[predicate.assertions]]
+type = "text"
+selector = "h1"
+contains = "Dashboard"

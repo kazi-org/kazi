@@ -1,0 +1,1 @@
+{"type":"result","total_cost_usd":0.055,"usage":{"input_tokens":140,"output_tokens":520,"cache_creation_input_tokens":13000,"cache_read_input_tokens":23000},"modelUsage":{"claude-haiku-4-5":{"costUSD":0.055}}}

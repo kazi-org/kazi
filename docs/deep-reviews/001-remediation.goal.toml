@@ -1,0 +1,309 @@
+# kazi goal-file: remediate the findings in docs/deep-reviews/001-full-codebase.md
+#
+# Authored caller-drafts (ADR-0023) by the frontier model that produced the deep
+# review. Each predicate is an OBJECTIVE, machine-checkable acceptance gate:
+#   * code fixes  -> a NAMED regression test that fails at t0 (no file yet) and
+#                    passes once the fix + its test are written. The test file
+#                    path IS the contract: it must exist and be green.
+#   * supply-chain / config fixes -> a grep/match_count assertion over the
+#                    workflow or config file (no test process to boot).
+#   * whole-suite + format -> a `verify` group gated (needs) behind every fix
+#                    group, so the full suite + `mix format` run only after the
+#                    per-fix groups converge (spatial parallelism first).
+#
+# Finding -> predicate map (see the report for the full trace + fix code):
+#   H1  -> h1_isolation        (held-out grades working tree, not frozen HEAD)
+#   M1  -> m1_zig_verified      (release.yml verifies the Zig tarball)
+#   M2  -> m2_ratchet_atomic    (atomic write + corrupt != missing)
+#   M3  -> m3_atom_safety       (no unbounded String.to_atom on goal/proposal keys)
+#   M4  -> m4_metrics_le        (non-numeric `le` -> :error, not a crash)
+#   M5  -> m5_error_terminates  (persistent :error terminates, never spins)
+#   M6  -> m6_history_bounded   (standing-loop history is bounded)
+#   M7  -> m7_await_restart     (await bound accounts for the restart budget)
+#   M8  -> m8_timeout_cleanup   (brutal-kill still releases lease + worktree)
+#   M9  -> m9_apply_json        (`apply --json` emits JSON on a load error)
+#   L3  -> l3_actions_pinned     (GitHub Actions pinned to SHAs, no @vN tags)
+#   L4  -> l4_gist_perms         (context-store /tmp artifacts are 0600/0700)
+#   L1,L2,L7,L8,L9,L10,L11,L12,L13 -> lows_regressions (one rollup test file)
+#   suite/format -> suite_green + format_clean (the verify group)
+#
+# Mode "create": the regression-test files do NOT exist at t0, so the predicates
+# FAIL at t0 (the failing set IS the work-list; the vacuous-goal guard holds).
+# NO [enforcement] block and NO guard/held_out predicates -> clean-tree isolation
+# never engages (which is correct: H1 is the bug we are FIXING; we must not route
+# these graders through the very isolation seam under repair).
+#
+# mix commands are wrapped `env -i HOME=... PATH=... LANG=... MIX_ENV=test mix ...`
+# per lore L-0022: a burrito-packaged kazi leaks RELEASE_*/ERTS vars into
+# custom_script children, which crashes a nested app-booting `mix test` (exit 2,
+# empty output). The wrapper is the documented workaround and is harmless when the
+# running binary already scrubs the env.
+#
+# Run (against THIS repo, serially or parallel):
+#   kazi apply docs/deep-reviews/001-remediation.goal.toml --workspace . \
+#     --harness claude --model claude-haiku-4-5 --json
+#   kazi apply docs/deep-reviews/001-remediation.goal.toml --workspace . --explain
+#
+# Schema: Kazi.Goal.Loader. custom_script verdicts: exit_zero (ADR-0040),
+# match_count (count matching output lines vs pass_when).
+
+id = "deep-review-001-remediation"
+name = "Remediate deep-review 001 findings (1 High, 8 Medium, Lows)"
+mode = "create"
+
+[metadata]
+source = "docs/deep-reviews/001-full-codebase.md"
+severities = "High:1 Medium:8 Low:11 Info:4"
+
+[budget]
+# Generous: ~13 fixes each with a regression test, plus a full-suite verify pass.
+# Raise if a slice reports over_budget; this is a hint, not a hard cap on quality.
+max_iterations = 120
+max_tokens = 12000000
+
+[scope]
+# The files the fixes touch (blast radius). Disjoint modules across groups let the
+# native partitioner run the fix groups concurrently.
+paths = [
+  "lib/kazi/loop.ex",
+  "lib/kazi/enforcement/isolation.ex",
+  "lib/kazi/enforcement.ex",
+  "lib/kazi/ratchet/store.ex",
+  "lib/kazi/ratchet.ex",
+  "lib/kazi/goal/loader.ex",
+  "lib/kazi/authoring.ex",
+  "lib/kazi/providers/metrics.ex",
+  "lib/kazi/scheduler.ex",
+  "lib/kazi/scheduler/leased_reconciler.ex",
+  "lib/kazi/scheduler/worktree.ex",
+  "lib/kazi/coordination/lease/memory.ex",
+  "lib/kazi/cli.ex",
+  "lib/kazi/context_store/gist_cli.ex",
+  "lib/kazi/read_model.ex",
+  ".github/workflows/release.yml",
+  ".github/workflows/ci.yml",
+  ".github/workflows/release-please.yml",
+  ".github/workflows/pages.yml",
+  ".github/workflows/deploy-fixture.yml",
+  ".github/workflows/site-smoke.yml",
+  "test/**",
+]
+
+# ===========================================================================
+# Groups: one per severity tier; the fix groups are spatially independent and
+# run concurrently. `verify` is gated behind all of them (final suite + format).
+# ===========================================================================
+
+[[group]]
+id = "high"
+name = "High-severity fix (H1: held-out isolation)"
+
+[[group]]
+id = "medium"
+name = "Medium-severity fixes (M1-M9)"
+
+[[group]]
+id = "low"
+name = "Low-severity fixes (supply chain, perms, rollup)"
+
+[[group]]
+id = "verify"
+name = "Final verification: whole suite green + format clean"
+needs = ["high", "medium", "low"]
+
+# ===========================================================================
+# HIGH
+# ===========================================================================
+
+[[predicate]]
+id = "h1_isolation"
+provider = "custom_script"
+description = "H1: a held-out/guard checker grades the agent's WORKING TREE, not frozen HEAD; a held-out custom_script acceptance predicate can converge, while a committed grader edit still cannot change the verdict. Regression test must exist and pass."
+group = "high"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/enforcement/isolation_working_tree_test.exs"]
+
+# ===========================================================================
+# MEDIUM
+# ===========================================================================
+
+[[predicate]]
+id = "m1_zig_verified"
+provider = "custom_script"
+description = "M1: release.yml verifies the downloaded Zig tarball (sha256sum -c or minisign) before `mix release`, in BOTH build jobs. Count >= 2 verification lines."
+group = "medium"
+acceptance = true
+verdict = "match_count"
+match_regex = "sha256sum|minisign"
+pass_when = ">= 2"
+cmd = "sh"
+args = ["-c", "grep -nE 'sha256sum|minisign' .github/workflows/release.yml || true"]
+
+[[predicate]]
+id = "m2_ratchet_atomic"
+provider = "custom_script"
+description = "M2: ratchet Store.write is atomic (temp+rename) and read distinguishes a corrupt store from a missing one (corrupt -> :error, never a silent reseed at the current value). Regression test must pass."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/ratchet/store_atomicity_test.exs"]
+
+[[predicate]]
+id = "m3_atom_safety"
+provider = "custom_script"
+description = "M3: the goal loader / authoring no longer calls unbounded String.to_atom on untrusted predicate-config keys (to_existing_atom + unknown-key rejection, or keys kept as strings). Regression test proves an unknown key does NOT mint an atom and is rejected/ignored safely."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/goal/loader_atom_safety_test.exs"]
+
+[[predicate]]
+id = "m4_metrics_le"
+provider = "custom_script"
+description = "M4: metrics provider maps a non-numeric histogram `le` label to :error (checker could not run), never a raised MatchError that crashes the reconcile tick. Regression test must pass."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/providers/metrics_le_label_test.exs"]
+
+[[predicate]]
+id = "m5_error_terminates"
+provider = "custom_script"
+description = "M5: a predicate persistently in :error terminates the loop (:stuck with a checker-unrunnable reason, or a default ceiling) instead of re-observing forever with no budget. Regression test must pass."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/loop/error_state_termination_test.exs"]
+
+[[predicate]]
+id = "m6_history_bounded"
+provider = "custom_script"
+description = "M6: a standing (continuous) loop bounds its per-iteration vector history to the detection window, so memory and per-tick cost do not grow unbounded. Regression test must pass."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/loop/standing_history_bound_test.exs"]
+
+[[predicate]]
+id = "m7_await_restart"
+provider = "custom_script"
+description = "M7: the coordinator's await bound accounts for (max_restarts + 1) * reconcile_timeout so a restarting partition cannot make the run crash with exit(:timeout) before the slot terminates; the :await call is also protected. Regression test must pass."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/scheduler/await_restart_budget_test.exs"]
+
+[[predicate]]
+id = "m8_timeout_cleanup"
+provider = "custom_script"
+description = "M8: on a finite reconcile_timeout the partition's lease is still released and its worktree still removed (holder monitor auto-release + coordinator-side worktree cleanup), so a brutal-killed reconciler leaks neither. Regression test must pass."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/scheduler/timeout_cleanup_test.exs"]
+
+[[predicate]]
+id = "m9_apply_json"
+provider = "custom_script"
+description = "M9: `kazi apply <missing-or-bad-goal> --json` emits a single JSON error object on STDOUT (not just a human stderr line) with a non-zero exit, matching every other --json command. Regression test must pass."
+group = "medium"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/cli_apply_json_error_test.exs"]
+
+# ===========================================================================
+# LOW
+# ===========================================================================
+
+[[predicate]]
+id = "l3_actions_pinned"
+provider = "custom_script"
+description = "L3: every third-party GitHub Action is pinned to a full commit SHA; NO `uses: owner/action@vN` mutable-tag references remain across .github/workflows/. Count of @vN uses must be 0."
+group = "low"
+acceptance = true
+verdict = "match_count"
+match_regex = "uses:.*@v[0-9]"
+pass_when = "== 0"
+cmd = "sh"
+args = ["-c", "grep -rnhE 'uses:[^#]*@v[0-9]+' .github/workflows/ || true"]
+
+[[predicate]]
+id = "l4_gist_perms"
+provider = "custom_script"
+description = "L4: context-store artifacts staged under the temp dir are created 0600 and their parent dir 0700, so a co-tenant on a shared host cannot read indexed content. Regression test asserts the file mode."
+group = "low"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/context_store/gist_cli_perms_test.exs"]
+
+[[predicate]]
+id = "lows_regressions"
+provider = "custom_script"
+description = "L1,L2,L7,L8,L9,L10,L11,L12,L13: the remaining Low fixes (needs-cycle memo, with_read_model --json error, goal-summary nil guard, lease-table holder-keyed forget, budget Agent after-stop, notify_iteration converged? consistency, unknown --context-store warning, guard-config validation, serialize_action_params sanitize) each carry a case in one rollup test file that must exist and pass."
+group = "low"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 600000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test test/kazi/deep_review_lows_test.exs"]
+
+# ===========================================================================
+# VERIFY (needs all fix groups): the whole suite is green + format is clean, so
+# no fix regressed anything else and the tree is committable.
+# ===========================================================================
+
+[[predicate]]
+id = "suite_green"
+provider = "custom_script"
+description = "The entire ExUnit suite passes (every fix ships its regression test and nothing else regressed)."
+group = "verify"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 900000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix test"]
+
+[[predicate]]
+id = "format_clean"
+provider = "custom_script"
+description = "`mix format --check-formatted` is clean (CI gate parity)."
+group = "verify"
+acceptance = true
+verdict = "exit_zero"
+merge_stderr = true
+timeout_ms = 300000
+cmd = "sh"
+args = ["-c", "env -i HOME=\"$HOME\" PATH=\"$PATH\" LANG=\"${LANG:-C}\" MIX_ENV=test mix format --check-formatted"]

@@ -1,0 +1,30 @@
+# Deferred-surface recipe (T43.10, ADR-0053 §3): TUI — an expect/pty-driven check
+# of an interactive terminal program. First-class promotion of a `:tui` provider
+# is DEFERRED until a concrete goal earns it (ADR-0053 §3, ADR-0007); this ships
+# the check as a `custom_script` recipe so it is reachable without a kazi release.
+#
+# `expect check_tui.exp <app>` drives the program in a real pseudo-terminal and
+# exits 0 only when every assertion holds; a wrong line or a hang trips the
+# `timeout` guard and exits non-zero. The tool's exit code already means pass/fail,
+# so the `exit_zero` verdict is exactly right — no output parse needed.
+#
+# Evidence tier: DEMONSTRATION (fail directly, ADR-0043 §2). A failed expectation
+# is a concrete, reproduced terminal interaction, not a rolled-up score.
+#
+# Point args at tui_app.broken.sh to see it FAIL (add returns the wrong result);
+# tui_app.sh is the passing app.
+#
+#     kazi apply recipe.goal.toml --workspace .
+#
+# See ../README.md and docs/custom-script-recipes.md.
+
+id = "recipe-tui-expect"
+name = "TUI: interactive terminal program behaves (expect/pty)"
+
+[[predicate]]
+id = "tui-flow-holds"
+provider = "custom_script"
+description = "the expect pty flow drives the TUI and every assertion holds"
+cmd = "expect"
+args = ["check_tui.exp", "tui_app.sh"]
+verdict = "exit_zero"

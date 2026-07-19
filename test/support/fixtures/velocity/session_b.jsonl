@@ -1,0 +1,3 @@
+{"type":"custom-title","customTitle":"kazi-beta","sessionId":"sess-bbbb-2222"}
+{"type":"assistant","timestamp":"2026-07-18T09:00:00Z","sessionId":"sess-bbbb-2222","message":{"role":"assistant","usage":{"input_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":5},"content":[{"type":"text","text":"SUPERSECRETPROMPT reply"}]}}
+{"type":"user","timestamp":"2026-07-18T09:10:00Z","sessionId":"sess-bbbb-2222","message":{"role":"user","content":[{"type":"text","text":"idle then a late follow up"}]}}

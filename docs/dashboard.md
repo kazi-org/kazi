@@ -1,0 +1,461 @@
+# The fleet dashboard: run registry, Mission Control, `kazi dashboard` (ADR-0057, ADR-0070)
+
+The operator often runs several concurrent `kazi apply` sessions on one
+machine. Without a fleet-wide surface, that's a black box: a one-shot CLI run
+has no visible surface, and a dead run is indistinguishable from a converged
+one. `kazi dashboard` closes that gap with three pieces that reuse what
+already exists rather than rebuild it — the shared per-user SQLite
+read-model, and the KaziWeb LiveView assets.
+
+See [ADR-0057](adr/0057-fleet-observability-dashboard.md) for the fleet
+substrate (registry, sinks, drill-in) and
+[ADR-0070](adr/0070-mission-control-dashboard.md) for the Mission Control home
+view that supersedes ADR-0057's starmap, plus
+[docs/plans/E46.md](plans/E46.md) for the epic. This doc is the cross-cutting
+overview; it grows as the epic's later tasks land.
+
+## The run registry
+
+Every `kazi apply` process upserts a row in the shared read-model's `runs`
+table on start (`run_id`, `pid`, `workspace`, `goal_ref`, `harness`/`model`,
+`started_at`), and heartbeats it (`heartbeat_at`) as it iterates. On exit it
+records a terminal `status` (`"converged"` / `"stuck"` / `"over_budget"` /
+`"error"`).
+
+Liveness is **heartbeat staleness**, not an explicit "dead" flag — there is no
+IPC and no port discovery. A run with no terminal status whose heartbeat is
+older than the staleness threshold (90 seconds by default) is classified
+**stale**: it crashed or hung rather than converging on purpose. A row is
+never deleted; a dead run's last state is exactly the fleet dashboard's
+post-mortem record. See `Kazi.ReadModel.RunRegistry` (`start/1`,
+`heartbeat/1`, `finish/2`, `stale?/2`, `list_stale/1`).
+
+## Mission Control (`/`, alias `/starmap`)
+
+Mission Control is the landing page: the root route serves it directly, and
+`/starmap` remains an alias for existing links. It is an ops-center **card
+grid** ([ADR-0070](adr/0070-mission-control-dashboard.md), superseding the
+ADR-0057 starmap home view) — a topbar fleet-count strip, a **NEEDS ATTENTION**
+row, a **FLEET** grid of one card per goal, a **SESSIONS** rail, and a bottom
+**EVENT RIVER** ticker. Each goal resolves to a display state:
+
+| State        | Meaning                                                          |
+| ------------ | ----------------------------------------------------------------- |
+| `landed`     | terminal status `"converged"` (ADR-0055: converged and landed)    |
+| `converging` | no terminal status, heartbeating normally (card label: RUNNING)    |
+| `stale`      | no terminal status, heartbeat older than the staleness threshold  |
+| `stuck`      | a terminal non-converging status (`stuck` / `over_budget` / `error`) |
+
+The topbar chips count the shown cards per state (`OVER-BUDGET` split out of
+`STUCK`, never double-counted). It is a pure read projection
+([ADR-0011](adr/0011-slice3-operator-surfaces.md) reaffirmed at fleet scope):
+it never mutates a run, a goal, or a lease. The interactions are the 2-second
+poll-tick refresh, navigation deep-links, and a **CURRENT/CLOSED scope toggle**
+— no slide-over panel, no per-node filters.
+
+The **SESSIONS** rail (T51.5) shows live bus presence — who is on the bus and
+each session's last-seen freshness — alongside the run cards. It reads from the
+SAME injectable `KaziWeb.CoordinationSource` the [lease map](#the-lease-map-leases)
+uses (T55.3, [ADR-0073](adr/0073-team-board-and-claim-visibility.md) §4): the
+transport-backed source when a daemon is reachable (the live bus roster), and
+the NATS-free Native source otherwise — an honest empty rail, never a 500
+([L-0021](lore.md)). A fresh roster pushed on the source topic re-renders the
+rail live; the poll tick re-selects the source, so a daemon starting or stopping
+flips it without a reload. The rail is not built twice: Mission Control CONSUMES
+T55.3's source rather than re-deriving presence.
+
+The scope toggle (`CURRENT · n` / `CLOSED · m` pills on the FLEET header) scopes
+the grid, chips, and attention alerts. CURRENT (the default) shows runs whose
+driving agent session is still alive; CLOSED shows dead history — converged,
+stuck, and crashed/stale runs whose session has ended, so a crash stays
+reviewable on the home screen rather than only on `/goals`. An empty CURRENT grid
+with closed history points at the CLOSED toggle rather than implying nothing ran.
+
+With no roadmap configured the fleet is a flat grid, satisfying "single-goal
+groups" (ADR-0056): every run is its own card with no declared order between
+them, newest first (past the card cap, a `+N more` link points to `/goals`).
+Roadmap wave mode resolves state across all runs and ignores the scope.
+
+**Fleet cards.** Each run-backed card (a link to `/goals/:ref/drillin`) shows
+the goal name and a state pill (RUNNING / CONVERGED / STUCK / STALE /
+OVER-BUDGET), a harness badge (`harness · model`), the workspace basename, and
+`ITER n`, plus three at-a-glance telemetry strips read from the SAME persisted
+per-iteration history the drill-in heatmap reads: a **predicate DNA** strip
+(the latest vector as squares — green pass / red fail-or-error / dark
+not-evaluated), an iteration **burn bar**, and a green **sparkline** of
+passing-predicate count over the history. Nothing is fabricated; a run with no
+iterations shows an empty strip and `ITER —`.
+
+**The burn bar reads iterations, not tokens.** kazi's run registry has no token
+*cap* — only `max_iterations` (ADR-0046: the harness reports tokens USED, not a
+ceiling). So the bar reads iteration progress (`iter n / max`, colored cyan <
+65% / amber 65–85% / red ≥ 85%), with harness-reported tokens shown as text
+alongside when present. No token fraction is invented.
+
+The operator-assigned **session name** (`kazi apply --session-name <label>`,
+`KAZI_SESSION_NAME`, or the auto-detected `CLAUDE_CODE_SESSION_ID` when kazi
+runs under a Claude Code session) is captured on the run row and surfaces in
+the full drill-in view; when the claude harness reports its own `session_id`,
+the drill-in view shows the ready-to-paste resume command
+(`claude -r <session-id>`).
+
+Live DOM patching (the poll-tick refresh) rides the LiveView socket: the
+endpoint serves the pre-built `phoenix` / `phoenix_live_view` client bundles
+straight from the hex packages (no node, no bundler) and the root layout
+connects the socket. With JavaScript unavailable the page still renders as a
+read-only snapshot.
+
+On a phone (below 820px) the card grid re-flows to a single column and the
+topbar wraps into the thumb zone — no bespoke mobile mode, just responsive
+grid reflow. See docs/dashboard-design.md "Mobile" for the normative spec.
+
+### Roadmap wave grouping
+
+When a roadmap ref IS configured (`KaziWeb.Starmap.GoalSource`, the ADR-0011
+§3 injection seam — production defaults to `GoalSource.None`, i.e. no
+roadmap), the FLEET grid GROUPS into topological **wave sections**, reusing
+`Kazi.Goal.DepGraph.frontiers/1` — the exact same computation `kazi apply
+--explain` prints, so the waves can never disagree with the schedule a real
+`kazi apply --parallel` run would take. The header reads `ROADMAP · N GOALS ·
+M WAVES` and each wave is a `WAVE k · <ACTIVE|LANDED|FRONTIER|HORIZON>`
+sub-header over its own card grid. A declared group nothing has dispatched yet
+renders as a lighter placeholder card:
+
+| State      | Meaning                                                                  |
+| ---------- | ------------------------------------------------------------------------- |
+| `claimed`  | every `needs` dep converged (the live frontier), but no run has started yet |
+| `pending`  | still waiting on an unconverged dep (a later wave), or poisoned by a stuck ancestor |
+
+Roadmap-mode wave state resolves from the LATEST run per group across the whole
+registry (the roadmap is the durable plan — a group converged by a since-closed
+session still reads landed). Without a roadmap the flat grid declares no order,
+so no waves are drawn — Mission Control never fabricates structure it doesn't
+have.
+
+`kazi dashboard --roadmap <goal-file>` (T47.2) wires a REAL goal-file into
+this seam: it loads `<goal-file>` through `Kazi.Goal.Loader` — the same loader
+`apply` uses — and points `GoalSource` at the loaded goal, so the fleet grid
+groups by ITS `needs`-DAG. Only takes effect on a fresh standalone boot; like
+`--port`/`--bind`, it is advisory (ignored, with a printed warning) when this
+process already serves the endpoint. Absent the flag, `GoalSource` stays `None`
+and the flat-grid fallback is unchanged. A bad or unloadable path is a loud
+boot error (a non-zero exit, nothing started) — never a silently empty roadmap.
+ADR-0056 §Decision 1 (a first-class roadmap read-model object, written by a
+future plan-side surface) is still future work; today `--roadmap` is the
+on-ramp, and `GoalSource` remains a seam a test can also point at any
+`Kazi.Goal.t()` directly.
+
+### The attention queue (T46.6, cause-ranked T48.14)
+
+Alongside the fleet list, a rail ranks what needs the operator right now —
+`Kazi.Attention.Queue.build/2`, a pure projection over the SAME persisted
+signals the per-goal detectors already compute:
+
+| Signal                  | Severity | Fires when                                                                 |
+| ------------------------ | -------- | --------------------------------------------------------------------------- |
+| `cause`                 | 5 (highest) | a FINISHED run's read-model row carries a T48.4 terminal cause of `error_wedged` or `quarantine_blocked` -- a config error or a flake-pinned predicate an agent cannot fix by itself. `budget_exhausted` and a run with no classified cause raise no `cause` entry (the operator can reasonably raise the budget, or there is simply nothing to explain beyond the outcome already shown). |
+| `stuck`                 | 4        | `Kazi.Loop.StuckDetector.stuck?/2` over the goal's `iteration_history/1`: N consecutive observations share the same non-empty failing set. |
+| `budget`                | 3        | the run's declared `max_iterations` (captured at registration, T46.6) is >= 85% consumed by its observed iteration count. |
+| `flake_suspicion`       | 2        | some predicate's claim-bearing status has flipped at least twice across the history -- nondeterministic-looking, even though no detector has quarantined it. |
+| `regression_recovered`  | 1 (lowest) | `Kazi.ReadModel.regressions/1` recorded a green→red flip whose predicate is back to `:pass` as of the latest observation. |
+
+Entries are ranked by severity, ties broken by recency (the triggering
+iteration index, most recent first) then `goal_ref` -- a fully pinned order.
+In Mission Control these entries render as the **NEEDS ATTENTION** row of
+alert cards (severity badge + goal + a one-line detail + `PEEK →`), each a
+link to that goal's `/goals/:id/drillin`; a `cause` entry's detail is its
+compact cause line (`Kazi.Loop.CauseClass.format/2`, e.g. `error_wedged
+(live_route: missing_url)`) -- the SAME formatter the drill-in view uses, so
+the two surfaces never disagree on how a cause reads. An empty fleet (or a
+fleet with nothing to flag) renders no attention row. See
+`Kazi.Attention.Queue` and `KaziWeb.MissionControlLive`.
+
+## The events sink (T46.2)
+
+When a run is persisted (`persist?: true`, the default), every observed
+iteration is appended as one JSON line to a per-run `events.jsonl` under
+`<sinks_dir>/<run_id>/events.jsonl` (the same `:kazi, :sinks_dir` app config
+as the transcript sink, alongside `transcript.jsonl`), and the path is
+recorded on the run's registry row (`events_sink_path`). See
+`Kazi.Sink.Events`.
+
+Each line is built from the SAME `Kazi.ReadModel.Iteration` row the read-model
+projection just inserted for that observation — the predicate vector, the
+`converged` flag, dispatch metadata (`action_kind`/`action_params`, e.g. a
+budget-stop stamp), the regression-detector's green→red firings, the release
+ref, and the ADR-0046 context/tool counters — so an events-sink line and its
+read-model row can never disagree in shape or values. Every string value is
+redacted the same way the transcript sink is. `Kazi.Sink.Events.read/1` tails
+the file back into decoded maps and tolerates a torn final line (a process
+killed mid-write) by dropping it rather than erroring the whole read.
+
+Retention is a separate, explicit pass rather than something the write path
+does automatically: `Kazi.Sink.Events.sweep/2` deletes a run's whole sink
+directory once it is aged past `:max_age_seconds` (default 7 days,
+`default_max_age_seconds/0`) OR sized past `:max_bytes` (default 200 MiB per
+run directory, `default_max_bytes/0`) — except any run_id passed in
+`:live_run_ids` (e.g. the non-stale rows from `Kazi.ReadModel.RunRegistry.list/0`),
+which is never touched regardless of age or size.
+
+## The transcript sink (T46.3)
+
+When a run is persisted (`persist?: true`, the default), every dispatch's raw
+harness output is teed to a per-run `transcript.jsonl` under
+`<sinks_dir>/<run_id>/transcript.jsonl` (`:kazi, :sinks_dir` app config,
+falling back to `<user-home>/.kazi/runs`), and the path is recorded on the
+run's registry row (`transcript_sink_path`). See `Kazi.Sink.Transcript`.
+
+The sink is a **passive tee**: it never changes what a dispatch returns, and a
+write failure is caught and logged rather than raised. Each line is a JSON
+event — a harness's own structured stream events pass through as-is, and
+plain-text stdout/stderr lines are wrapped as `{"type": "text", "text": ...}`
+— so the file is valid JSONL regardless of which harness produced it.
+
+Every string value is **redacted** (`Kazi.Redaction.redact/1`) before it
+touches disk, matching the prompt and context-store paths — a secret shape in
+the harness stream never lands in the transcript file. The sink also caps its
+own size (10 MiB by default, overridable per-run); once a run's transcript
+would exceed the cap, further events are dropped and a single `{"type":
+"truncated"}` marker is appended so a reader can tell an intentionally
+truncated transcript apart from a torn one. `Kazi.Sink.Transcript.read/1`
+tails a sink file back into decoded maps (dropping a torn final line), the
+same contract as `Kazi.Sink.Events.read/1` -- the reader the transcript peek
+view below polls.
+
+## The drill-in convergence heatmap (`/goals/:id/drillin`, T46.7, legibility T63.11)
+
+The view leads with a one-line **purpose** statement (`#drillin-purpose` — "see
+exactly which predicate is blocking this goal, on which iteration, and what the
+evidence says") and, once the goal has run, a plain-language **summary**
+sentence (`#drillin-summary`): the status, iteration, `pass / total` count, the
+named blocking predicates, and a regression tally — every number read straight
+from the latest real vector (T63.11, the approved #1379 mock). An on-page
+**legend** (`#drillin-legend`) decodes every cell state (pass / fail / error /
+not-evaluated / regression-flip) so a first-time viewer need not read the
+stylesheet. Predicate rows carry a display **group tag** (`data-group`, derived
+from the id's prefix via `Kazi.ReadModel.goal_gap_fields/1`, T63.10), the detail
+panel opens with a **narrative** line (`#drillin-detail-narrative`, paraphrasing
+the recorded `action_kind`), and when a goal's tool/context counters are
+genuinely absent an honest note (`#drillin-detail-missing`) says so rather than
+letting the `-` placeholders read as zeros. The empty state
+(`#drillin-empty`) explains itself ("not an error"). Below that:
+
+Per-goal, below the full history timeline (`/goals/:id/history`): a
+**predicates x iterations matrix** built straight from
+`Kazi.ReadModel.list_iterations/1` — one row per predicate id (the union seen
+across the goal's whole history, so a predicate introduced mid-run still gets
+a row), one column per iteration oldest-to-newest, each cell that predicate's
+status at that observation (`pass`/`fail`/`error`/`unknown`, or
+`not_evaluated` for an iteration before the predicate existed). The newest
+column is marked **current**; a green→red regression flip
+(`Kazi.Loop.RegressionDetector`, T1.2) is marked `regression-flip` on the exact
+cell where it was first observed, so a pinned green→red→green run is visually
+distinct from ordinary outstanding work in the same row.
+
+Clicking a column header (the **scrubber**) selects that iteration; the detail
+panel below then shows that iteration's full predicate vector (id + status),
+its dispatch action (`action_kind`, when the loop dispatched), and the
+ADR-0046 context/tool counters (`tool_calls`, `file_reads`,
+`orientation_tokens`, `evidence_tokens`, `tier`). With nothing scrubbed the
+panel follows the current (latest) iteration live, matching the matrix's
+current-column marker. See `KaziWeb.DrillinHeatmapLive`.
+
+## The transcript peek (`/runs/:run_id/transcript`, T46.8)
+
+Per-run: tails the run's `transcript.jsonl` (`Kazi.Sink.Transcript`). There is
+exactly **one code path** for a live run and a finished/dead one -- `mount/3`
+resolves the run (`Kazi.ReadModel.RunRegistry.get/1`) and reads its sink fully,
+so opening a terminal run's transcript renders the whole thing immediately
+with no watcher required; a connected mount additionally polls on a short
+interval and reloads the sink when a growing file has new lines to tail in
+(for a finished run the file never grows, so the same poll is simply a no-op).
+
+Tool-shaped events (a `"type"` starting with `"tool"`, e.g. `tool_use` /
+`tool_result`) collapse to a one-line pill (the tool name); clicking a pill
+expands it to its full JSON payload. A `{"type": "truncated"}` marker (the
+transcript sink's size-cap event) renders as an explicit notice rather than
+folding or silently vanishing. The **follow** toggle pauses/resumes picking up
+newly tailed lines without discarding what's already rendered. See
+`KaziWeb.TranscriptPeekLive`.
+
+## The event river (`/events`, T47.1)
+
+A single fleet-wide feed of every registered run's `events.jsonl`, newest
+first (bounded to the 100 most recent entries across the whole fleet): each
+entry is one loop observation, tagged with its goal ref and run id, with
+deep links to that run's transcript peek and that goal's drill-in. A run
+with no events sink (not persisted) or an unreadable/missing sink file
+contributes zero events rather than erroring the feed; a torn final line is
+dropped the same way `Kazi.Sink.Events.read/1` already tolerates it
+everywhere else. A connected mount polls (2s) and rereads every run's sink,
+so a newly appended event appears on the next tick with no restart. An empty
+fleet renders an honest empty state. See `KaziWeb.EventRiverLive`.
+
+## The JSON API (`/api/*`, issue #1077)
+
+Every dashboard view above is a session-cookie + CSRF LiveView page — fine
+for a human in a browser, unusable from a bare `fetch()`. `/api/*` is a
+stateless JSON scope mounted on its own `:api` pipeline (`accepts: ["json"]`,
+no session, no CSRF) reading the SAME projections the LiveView pages already
+read from (ADR-0011: pure read projection, never mutates a run/goal/lease) —
+an operator aggregating kazi state across machines can poll these with no
+cookie dance.
+
+* `GET /api/runs` — every registered run (`Kazi.ReadModel.RunRegistry.list/0`,
+  the same read `kazi status --json` with no ref uses): `run_id`, `goal_ref`,
+  `status`, `heartbeat_age_s`, `harness`, `model`.
+* `GET /api/goals` — every goal with a recorded iteration
+  (`Kazi.ReadModel.list_goals/0`, the same read `KaziWeb.GoalBoardLive`
+  renders): `id`, `status` (`"converged"` / `"in_progress"`),
+  `iteration_count`, and `predicates` (the `{id, verdict}` vector, sorted by
+  predicate id).
+
+Both respond `%{"runs" => [...]}` / `%{"goals" => [...]}`; an empty fleet or
+goal board returns an empty list, never an error. See
+`KaziWeb.API.RunsController` / `KaziWeb.API.GoalsController`.
+
+## `kazi dashboard`
+
+```
+kazi dashboard [--port <n>] [--bind <ip>] [--roadmap <goal-file>]
+```
+
+Boots the web endpoint standalone — **no goal loop in the process** — against
+the shared read-model + run registry, localhost-bound by default
+(`127.0.0.1`); pass `--bind` explicitly to listen on a non-loopback address.
+`--port`/`--bind`/`--roadmap` apply to a **fresh** standalone boot; if this
+process already supervises the endpoint (the normal dev-server / `mix
+kazi.apply` / test entry points), the verb reports the endpoint's existing
+bind instead of rebinding it, and `--roadmap` is ignored (printed, never
+silent).
+
+`--roadmap <goal-file>` (T47.2) loads that goal-file and groups the fleet grid
+into its `needs`-DAG wave sections (see "Roadmap wave grouping" above) — the
+user-visible consumer of `KaziWeb.Starmap.GoalSource`. An unloadable path
+(missing file, malformed TOML, a schema violation) is a loud boot error: kazi
+prints the reason to stderr and exits non-zero without starting the endpoint,
+never a silently empty roadmap.
+
+A standalone boot serves **every** dashboard view (`/`, `/starmap`, `/goals`,
+`/leases`, `/dag`, `/goals/:id/history`, `/goals/:id/drillin`,
+`/runs/:run_id/transcript`, `/events`), with web-tree parity to the full
+app's supervision tree: views whose live source has nothing to show (no
+active run registered in this node) render their honest empty state, never a
+500 (issue #801).
+
+## The lease map (`/leases`)
+
+The presence + lease map is a read-only projection of the coordination
+substrate (ADR-0011: it observes, never writes). Its source is chosen at
+render time (T55.3, [ADR-0073](adr/0073-the-board-current-state-claims-identity.md)
+§4): **when a `kazi daemon` is running** on the machine (detected by probing
+the daemon's control socket, the same check `kazi daemon status` makes), the
+view defaults to the transport-backed source and the presence rail renders the
+**live bus roster** — each session with its machine and last-seen freshness,
+the same rows `kazi bus who` lists. **Without a daemon** it falls back to the
+native source and renders exactly as a single-node run always has: the live
+native lease table, an honest empty presence rail, never a 500. An explicit
+`:lease_map_source` config override wins over both. The selected source is
+stamped on the page (`data-source`), the roster re-reads on a slow poll, and
+rows past the session TTL are hidden.
+
+## Velocity surface (E67, ADR-0079)
+
+The velocity surface answers "how fast is my fleet delivering?" from data kazi
+already has — **no GitHub call at render time**. It is an *operator* panel on
+Mission Control (`/`), present in both the operator and `?debug=1` modes (unlike
+the DAG / lease-map / event-river expert surfaces, which are debug-only per
+ADR-0078). `assign_velocity/1` in `KaziWeb.MissionControlLive` calls
+`Kazi.Velocity.Kpis.compute/1` each poll tick; it is a pure read projection
+(ADR-0011) that renders an honest empty state rather than a 500 when the
+read-model is unavailable.
+
+Every figure is a **rate, ratio, or measured historical distribution** over a
+trailing window (default 7 days, labelled e.g. "last 7d"). There is deliberately
+**no date, ETA, or completion-estimate** anywhere — the schema has no such column
+(ADR-0046), so a future UI cannot render one. A number that cannot yet be measured
+shows an explicit "not enough data yet" (or "no terminal runs yet"), never a `0`
+masquerading as a measurement.
+
+### Where the numbers come from
+
+The panel fuses **three** read-model sources. Knowing which one feeds a number
+tells you which opt-in (below) it needs:
+
+- **Delivery projection** (`delivery_events`, T67.2) — delivered plan tasks and
+  merge instants derived from a workspace's **git history** (added `- [x] TNN …
+  Done: <date> (PR #N)` plan lines and PR-merge commits). Reads committed history
+  only; never a transcript.
+- **Session collector** (`session_counters`, T67.3) — aggregate token/event
+  counters from the operator's **interactive harness sessions**, whitelisted
+  counters only (never transcript content).
+- **Run registry** (`runs`, ADR-0057) — kazi's own run rows and their terminal
+  verdicts (`converged` / `stuck` / `over_budget` / `error`), already written by
+  every `kazi apply`.
+
+See [velocity.md](velocity.md) for the full data architecture (the projection
+grammar, the KPI query module, and the exact join keys); this section is the
+operator's read of what the panel shows.
+
+### The fleet strip — four cards
+
+| Card | Copy it renders | What it means | Source | Empty state |
+|---|---|---|---|---|
+| **DELIVERED** | `<per_day> /day · <count> in last 7d` | plan tasks marked `[x]` in the window ÷ window days (a measured `0.0/day` is real) | delivery projection | `— not enough data yet` |
+| **TOKENS / TASK** | `<tokens> tok/task` (compact, e.g. `5.5k`) | cumulative session tokens ÷ delivered tasks in the window | session collector ÷ delivery projection | `— not enough data yet` (no delivery, or no session counter) |
+| **STUCK RATIO** | `<pct>% stuck · <stuck>/<terminal> terminal` | `(stuck + over_budget) ÷ terminal verdicts` over finished runs, aggregated across the per-model split | run registry | `— no terminal runs yet` |
+| **CLAIM → MERGE LEAD** | `p50 <dur> · p90 <dur> · <n> samples` | a p50/p90 **distribution** of `merged_at − claim` over *past* deliveries — a historical span (`1h 23m`, `45s`), never a countdown | delivery projection ⋈ run registry | `— not enough data yet` (no joinable sample) |
+
+A fresh fleet with **no** delivery, session counter, or terminal run in the window
+renders one explicit **"Not enough data yet"** message (`#mc-velocity-empty`)
+instead of the strip; velocity appears only once the fleet actually ships.
+
+### Per-agent drill-in
+
+Below the strip, one expandable row (`<details>`) per session shows that agent's
+`<per_day> /day · <count>` delivered and `<pct>% stuck · <terminal> terminal`;
+expanding it **names the offending stuck goals** — the `goal_ref`s whose runs went
+`stuck` / `over_budget`, attributed from the run registry (the same terminal-verdict
+universe the fleet stuck ratio counts, the same attribution `kazi economy` reads).
+A high stuck ratio thus points at *which* lane needs attention, not just a number.
+
+### The opt-in story — why a card is empty
+
+Both delivery-side and session-side inputs are written in production by
+`Kazi.Daemon.VelocityTicker`, a supervised GenServer in the **daemon's**
+supervision tree (the daemon owns the read-model write path, ADR-0068). No daemon
+running, or neither input configured, and the panel stays on its honest empty
+state. The two inputs opt in **independently**:
+
+- **Session counters (TOKENS / TASK) are opt-in and OFF by default.** A machine
+  that has not opted in reads no transcript at all. Enable per machine with
+  `KAZI_VELOCITY_COLLECTOR=1` (or `config :kazi, :velocity_collector, enabled:
+  true`). Until then TOKENS / TASK shows "not enough data yet" even when tasks are
+  landing.
+- **Delivery projection (DELIVERED, CLAIM → MERGE LEAD) is NOT gated on that
+  opt-in** — it reads only committed git history — but it does nothing until you
+  list workspaces to scan. Set them with `config :kazi, :velocity_collector,
+  workspaces: ["/abs/repo", …]`; **on the released binary use the
+  `KAZI_VELOCITY_WORKSPACES` environment variable** (colon-separated absolute
+  paths), because the compile-time `:workspaces` default is baked into the Burrito
+  artifact and a `runtime.exs`-set value is applied *after* the ticker's `init/1`
+  and so never reaches it (T67.6). With no workspaces configured, the delivery
+  cards stay empty.
+- **Run-registry numbers (STUCK RATIO, per-agent stuck goals) need no opt-in** —
+  every `kazi apply` already writes its run row.
+
+`kazi daemon status` (and `--json`) prints a `velocity collector:` line and a
+sibling `delivery projection:` line so you can confirm what is actually wired
+before wondering why a card is empty.
+
+See [velocity-collector.md](velocity-collector.md) for both knobs in full, the
+in-daemon-direct-write invariant, and the **privacy contract** — the closed
+whitelist of aggregate counters and the explicit list of what is *never* collected
+(no prompt/response text, tool names, inputs, or file paths).
+
+## Retention and scope
+
+Single-machine scope for now: the shared SQLite read-model requires zero new
+infrastructure. Cross-node fleets and the NATS fan-in stay Slice 3
+(ADR-0057 §5) — this dashboard becomes that slice's first real consumer when
+it arrives.

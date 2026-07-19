@@ -1,0 +1,17 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 4242,
+  "num_turns": 3,
+  "result": "Made the failing unit test pass.",
+  "session_id": "golden-session-0001",
+  "total_cost_usd": 0.0123,
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 250,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 5000
+  },
+  "touched": ["lib/app/widget.ex", "test/app/widget_test.exs"]
+}

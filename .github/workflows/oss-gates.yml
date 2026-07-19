@@ -1,0 +1,264 @@
+name: OSS gates
+
+# Contribution gates for this public repo (ADR-0034 / E29, ADR-0036 / E31):
+#   1. docs-with-code  (T29.1) -- a user-facing surface change must ship docs.
+#                                  Phase 1: strict-but-warn (non-blocking).
+#   2. no-internal-leak (T29.2) -- the PR diff must not introduce private IPs,
+#                                  absolute home paths, or internal codenames.
+#                                  Blocking on a real hit; diff-scoped so the
+#                                  pre-existing leaks (scrubbed by T29.3) do not
+#                                  red every PR.
+#   3. doc-freshness   (T31.5) -- the self-maintaining doc-freshness predicate
+#                                  set (T31.4) run as a gate. Phase 1: WARN only
+#                                  (exits 0) so the known offenders -- README
+#                                  command coverage (T22.x/T28.3), the kazi
+#                                  mcp/adopt drift (T28.3), and the untrimmed
+#                                  plan (T31.2) -- do not red every PR.
+#   4. site-commands   (T29.4, blog glob T38.4) -- the site source must not
+#                                  present a REMOVED kazi verb (`kazi run`,
+#                                  `kazi propose`) as a live command. Scans site/
+#                                  incl. .svg assets AND the E38 blog content
+#                                  (site/src/content/blog/**, .md + .mdx).
+#                                  BLOCKING (ratcheted at T38.4 once T27.6 + T25.2
+#                                  cleaned the site). Only scans on PRs that touch
+#                                  site/.
+#   5. doc-commands    (T28.4) -- every kazi command/flag a LIVE doc (README +
+#                                  docs/concept.md + docs/) presents as runnable
+#                                  must exist in the REAL CLI surface (parsed from
+#                                  lib/kazi/cli.ex @commands/@switches == kazi help
+#                                  --json). BLOCKING: the docs tree is clean, so a
+#                                  new fake command/flag reds the PR. Runs when a
+#                                  PR touches docs/README/concept or cli.ex.
+#   6. tiering-coherence (T30.5) -- the in-family Claude tiering surfaces (skill /
+#                                  AGENTS.md / README / site) must name only
+#                                  CURRENT model ids (claude-api current
+#                                  generation) and must NOT state an unproven cost
+#                                  NUMBER as measured (the cost win is being
+#                                  measured by T19.7). Composes the command (T28.4
+#                                  / T16.4 / T29.4) and README<->site / SKILL<->CLI
+#                                  (T9.9 / T16.4) gates for those surfaces.
+#                                  BLOCKING: the surfaces are clean at ship.
+#
+# Kept separate from ci.yml on purpose: the gates evolve (warn -> block, diff ->
+# full-tree) independently of the build/test pipeline.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-with-code:
+    name: docs land with code (T29.1, warn)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - name: Run docs-with-code guard
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          # Phase 1: warn only. Flip to "1" to ratchet this gate to blocking.
+          BLOCKING: "0"
+        run: .github/scripts/docs_with_code_guard.sh
+
+  no-internal-leak:
+    name: no internal-info leak (T29.2, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - name: Run no-internal-leak guard
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # Diff-scoped by default. Flip to "1" once T29.3 scrubs the existing
+          # leaks, to also scan the full working tree.
+          SCAN_TREE: "0"
+        run: .github/scripts/no_internal_leak_guard.sh
+
+  doc-freshness:
+    name: docs are fresh (T31.5, warn)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Full history + tags: predicate (d) compares plan task Done: dates
+          # against the newest v* release tag's commit date.
+          fetch-depth: 0
+
+      - name: Run doc-freshness predicates (T31.4)
+        env:
+          # Phase 1: WARN only. The T31.4 runner exits 1 while the known
+          # offenders stand -- README command coverage (T22.x/T28.3), the
+          # `kazi mcp` / `kazi adopt` drift (T28.3), and the untrimmed plan
+          # (T31.2). In WARN mode this step prints the report + offenders and
+          # exits 0 regardless, so it never reds a PR. Flip FRESHNESS_BLOCKING
+          # to "1" (one toggle) once those tasks land and the set is green.
+          FRESHNESS_BLOCKING: "0"
+          # The (E)/(F) coherence checks (T9.9/T16.4) need node site deps and
+          # fetched mix deps that this lightweight gate does not install. Tell
+          # the runner to print their reference instead of invoking them, so a
+          # missing toolchain cannot register a false FAIL. They keep their own
+          # coverage in ci.yml / site-smoke.yml.
+          SKIP_SUBSUMED: "1"
+        run: |
+          set -uo pipefail
+          echo "== doc-freshness gate (T31.5, ADR-0036) =="
+          # GitHub runs this step under `bash -e`; capture the runner's exit with
+          # `|| status=$?` so a nonzero does NOT abort the step before the phase-1
+          # WARN swallow below (a bare call + `status=$?` would errexit out here).
+          status=0
+          .github/scripts/doc_freshness/doc_freshness.sh || status=$?
+          echo "doc_freshness.sh exit status: ${status}"
+          if [ "${status}" -eq 0 ]; then
+            echo "doc-freshness: PASS."
+            exit 0
+          fi
+          if [ "${FRESHNESS_BLOCKING}" = "1" ]; then
+            echo "doc-freshness gate is in BLOCKING mode -> failing the job."
+            exit "${status}"
+          fi
+          echo "::warning title=doc-freshness::predicates failed; phase-1 WARN, not blocking. See the report above and docs/doc-freshness.md."
+          echo "doc-freshness gate is in phase-1 WARN mode -> reporting only, exiting 0."
+          echo "(Set FRESHNESS_BLOCKING=1 on this job to ratchet it to blocking once green.)"
+          exit 0
+
+      - name: Test the plan-trim tool (T31.2 fixtures)
+        run: python3 .github/scripts/test_trim_plan.py
+
+      - name: Test the knowledge-extraction tool (T31.3 fixtures)
+        run: python3 .github/scripts/test_extract_knowledge.py
+
+      - name: Test the lore-id tool (T56.3 fixtures)
+        run: python3 .github/scripts/test_lore_ids.py
+
+      - name: No duplicate lore ids (T56.3, blocking)
+        run: python3 .github/scripts/lore_ids.py --check docs/lore.md
+
+  site-commands:
+    name: site command accuracy (T29.4, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Run site command-accuracy guard (only when site/ changed)
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # BLOCKING (ratcheted at T38.4). T27.6 + T25.2 cleaned the site (the
+          # proof SVG + index.astro no longer ship a removed verb), so the whole
+          # site/ tree -- now including the E38 blog content under
+          # site/src/content/blog/** (scanned for .md + .mdx) -- passes clean. A
+          # removed kazi verb (`kazi run` / `kazi propose`) on any site surface,
+          # blog posts included, now reds the PR.
+          BLOCKING: "1"
+        run: |
+          set -uo pipefail
+          # oss-gates.yml triggers on every PR (no path filter), so gate the scan
+          # on a real site/ change -- the scanner only inspects site/ source.
+          if git diff --name-only "${BASE_REF}"...HEAD | grep -qE '^site/'; then
+            echo "site/ changed -> running command-accuracy guard."
+            node site/scripts/check-commands.mjs
+          else
+            echo "no site/ changes in this PR -> skipping (exit 0)."
+          fi
+
+  doc-commands:
+    name: doc command accuracy (T28.4, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Run doc command-accuracy guard (when docs/README/concept or cli.ex changed)
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # BLOCKING by default (the scanner ships blocking; the docs tree is
+          # clean). The gate scans the FULL docs tree, so a stale ref reds the PR.
+          BLOCKING: "1"
+        run: |
+          set -uo pipefail
+          # oss-gates.yml triggers on every PR (no path filter). The scan only
+          # depends on the docs and the CLI surface, so gate it on a change to
+          # README, docs/, or lib/kazi/cli.ex -- a cli.ex change can orphan a doc
+          # reference even when no doc file changed.
+          if git diff --name-only "${BASE_REF}"...HEAD | grep -qE '^(README\.md|docs/|lib/kazi/cli\.ex)'; then
+            echo "docs/README/concept or cli.ex changed -> running doc command-accuracy guard."
+            node .github/scripts/check-doc-commands.mjs
+          else
+            echo "no docs/README/cli.ex changes in this PR -> skipping (exit 0)."
+          fi
+
+  tiering-coherence:
+    name: tiering accuracy + coherence (T30.5, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Run tiering accuracy + coherence guard (when a tiering surface or cli.ex changed)
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # BLOCKING by default: the tiering surfaces are clean at ship (T25.11 /
+          # T30.1 / T30.2 use current ids and keep the cost claim hedged), so a
+          # stale model id or un-hedged cost number reds the PR.
+          BLOCKING: "1"
+        run: |
+          set -uo pipefail
+          # oss-gates.yml triggers on every PR (no path filter). The gate scans
+          # the skill source, AGENTS.md, README, and site/ -- and cli.ex can change
+          # what counts as a real command -- so gate the run on a change to any of
+          # those. The load-bearing tests always run (cheap, no toolchain).
+          if git diff --name-only "${BASE_REF}"...HEAD \
+              | grep -qE '^(README\.md|AGENTS\.md|lib/kazi/teach/|lib/kazi/cli\.ex|site/|\.github/scripts/check-tiering-coherence)'; then
+            echo "a tiering surface (or cli.ex) changed -> running the tiering gate."
+            node .github/scripts/check-tiering-coherence.mjs
+          else
+            echo "no tiering-surface changes in this PR -> skipping the full-tree scan (exit 0)."
+          fi
+          # Always run the load-bearing proof: the gate must FAIL on a planted bad
+          # id / un-hedged cost number / unshipped command, and PASS on the clean
+          # current surfaces (T30.5 zero-stub requirement).
+          echo "running the tiering-gate load-bearing tests."
+          node --test .github/scripts/check-tiering-coherence.test.mjs

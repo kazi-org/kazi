@@ -1,0 +1,356 @@
+---
+// Per-post route + layout (T38.3, epic E38). Renders a single blog post through
+// the shared site chrome (Layout.astro), with a post header (title, date,
+// author, reading-time, tags), per-post OpenGraph/Twitter meta, a header image,
+// in-series prev/next, and code-block styling on the site's design tokens.
+//
+// Draft handling mirrors the index (T38.2): drafts are EXCLUDED from the
+// production build and only become routable in `astro dev` (import.meta.env.DEV).
+// So a `draft: true` post 404s in the shipped site but is previewable locally —
+// no faked published post is ever committed.
+import type { GetStaticPaths } from "astro";
+import { getCollection, render } from "astro:content";
+import type { CollectionEntry } from "astro:content";
+import Layout from "../../layouts/Layout.astro";
+import { withUtm } from "../../utm.mjs";
+
+const REPO = "https://github.com/kazi-org/kazi";
+
+type Post = CollectionEntry<"blog">;
+
+export const getStaticPaths = (async () => {
+  // Published posts in production; in dev, drafts are previewable too. This is
+  // the SAME visibility rule the index/series pages filter on, so prev/next and
+  // the routable set never disagree.
+  const visible = await getCollection(
+    "blog",
+    ({ data }) => import.meta.env.DEV || !data.draft,
+  );
+  // Pass the full visible set as a prop so each page can resolve its in-series
+  // neighbours without re-querying.
+  return visible.map((post) => ({
+    params: { slug: post.id },
+    props: { post, visible },
+  }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  post: Post;
+  visible: Post[];
+}
+
+const { post, visible } = Astro.props;
+const { Content } = await render(post);
+
+const {
+  title,
+  description,
+  date,
+  author,
+  tags,
+  series,
+  part,
+  ogImage,
+  heroAlt,
+} = post.data;
+
+// Reading time: ~200 wpm over the raw markdown body, floored at 1 minute. The
+// glob loader exposes the raw source on `post.body`.
+const wordCount = (post.body ?? "").trim().split(/\s+/).filter(Boolean).length;
+const readingMinutes = Math.max(1, Math.round(wordCount / 200));
+
+// In-series prev/next, ordered by `part`. Bounded by construction: the first
+// part (index 0) has no prev, the last has no next — so part 1 → no prev and
+// part 12 → no next fall out without special-casing the numbers.
+const seriesPosts = visible
+  .filter((p) => p.data.series === series)
+  .sort((a, b) => a.data.part - b.data.part);
+const here = seriesPosts.findIndex((p) => p.id === post.id);
+const prev = here > 0 ? seriesPosts[here - 1] : null;
+const next =
+  here >= 0 && here < seriesPosts.length - 1 ? seriesPosts[here + 1] : null;
+
+const dateFmt = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+// The series landing page slug (T38.2) — link the post's series back to it.
+const seriesSlug = "from-vibe-coding-to-reconciliation";
+const isFlagshipSeries = series === "From Vibe Coding to Reconciliation";
+
+// Outbound repo/install link, UTM-tagged so the click is attributed to THIS post
+// (the series' one adoption signal — see utm.mjs / docs/blog-style.md).
+const repoHref = withUtm(REPO, post.id);
+---
+
+<Layout
+  title={`${title} — kazi blog`}
+  description={description}
+  ogType="article"
+  image={ogImage}
+  imageAlt={heroAlt ?? title}
+>
+  <!-- Per-post article meta (rendered into <head> via the Layout's head slot). -->
+  <Fragment slot="head">
+    <meta property="article:published_time" content={date.toISOString()} />
+    <meta property="article:author" content={author} />
+    {tags.map((tag) => <meta property="article:tag" content={tag} />)}
+  </Fragment>
+
+  <!-- Nav (mirrors the home page + index chrome) -->
+  <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+    <a href="/" class="flex items-center gap-2" aria-label="kazi home">
+      <img src="/logo/kazi-mark.svg" alt="" width="34" height="34" />
+      <span class="ui-strong text-xl font-bold tracking-tight">kazi</span>
+    </a>
+    <nav class="flex items-center gap-6 text-sm" aria-label="Primary">
+      <a href="/#try" class="ui-body ui-link">Try it</a>
+      <a href="/#how" class="ui-body ui-link">How it works</a>
+      <a href="/blog" class="ui-body ui-link">Blog</a>
+      <a href={repoHref} class="ui-outline rounded-lg border px-3 py-1.5 font-medium"
+        >GitHub</a
+      >
+    </nav>
+  </header>
+
+  <main>
+    <article class="mx-auto max-w-3xl px-6 pb-8 pt-12 sm:pt-16">
+      <p class="ui-muted text-sm">
+        <a href="/blog" class="ui-link">&larr; All posts</a>
+      </p>
+
+      <!-- Post header -->
+      <header class="mt-6">
+        {
+          isFlagshipSeries ? (
+            <a
+              href={`/blog/${seriesSlug}`}
+              class="kazi-text text-sm font-semibold hover:underline"
+            >
+              {series} &middot; Part {part}
+            </a>
+          ) : (
+            <span class="ui-muted text-sm font-semibold">
+              {series} &middot; Part {part}
+            </span>
+          )
+        }
+        <h1
+          class="ui-strong mt-3 text-balance text-4xl font-extrabold tracking-tight sm:text-5xl"
+        >
+          {title}
+        </h1>
+        <p class="ui-body mt-4 text-pretty text-lg">{description}</p>
+        <div
+          class="ui-muted mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+        >
+          <span>{author}</span>
+          <span aria-hidden="true">&middot;</span>
+          <time datetime={date.toISOString()}>{dateFmt.format(date)}</time>
+          <span aria-hidden="true">&middot;</span>
+          <span>{readingMinutes} min read</span>
+        </div>
+        {
+          tags.length > 0 && (
+            <ul class="mt-4 flex flex-wrap gap-2" aria-label="Tags">
+              {tags.map((tag) => (
+                <li class="ui-chip ui-body rounded-md border px-2 py-0.5 text-xs">
+                  {tag}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </header>
+
+      <!-- Header image -->
+      {
+        ogImage && (
+          <img
+            src={ogImage}
+            alt={heroAlt ?? title}
+            class="ui-card mt-8 w-full rounded-2xl border"
+            loading="eager"
+          />
+        )
+      }
+
+      <!-- Post body -->
+      <div class="post-prose ui-body mt-10">
+        <Content />
+      </div>
+
+      <!-- In-series prev/next -->
+      {
+        (prev || next) && (
+          <nav
+            class="ui-hairline mt-14 grid gap-4 border-t pt-8 sm:grid-cols-2"
+            aria-label="More in this series"
+          >
+            {prev ? (
+              <a
+                href={`/blog/${prev.id}`}
+                class="ui-card group rounded-2xl border p-5"
+                rel="prev"
+              >
+                <span class="ui-muted text-xs font-semibold uppercase tracking-wide">
+                  &larr; Previous &middot; Part {prev.data.part}
+                </span>
+                <span class="ui-strong mt-1 block font-semibold group-hover:underline">
+                  {prev.data.title}
+                </span>
+              </a>
+            ) : (
+              <span aria-hidden="true" class="hidden sm:block" />
+            )}
+            {next ? (
+              <a
+                href={`/blog/${next.id}`}
+                class="ui-card group rounded-2xl border p-5 sm:text-right"
+                rel="next"
+              >
+                <span class="ui-muted text-xs font-semibold uppercase tracking-wide">
+                  Next &middot; Part {next.data.part} &rarr;
+                </span>
+                <span class="ui-strong mt-1 block font-semibold group-hover:underline">
+                  {next.data.title}
+                </span>
+              </a>
+            ) : (
+              <span aria-hidden="true" class="hidden sm:block" />
+            )}
+          </nav>
+        )
+      }
+    </article>
+  </main>
+
+  <!-- Footer (mirrors the home page chrome) -->
+  <footer class="ui-hairline border-t">
+    <div
+      class="ui-muted mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm sm:flex-row"
+    >
+      <div class="flex flex-col items-center gap-1 sm:items-start">
+        <div class="flex items-center gap-2">
+          <img src="/logo/kazi-mark.svg" alt="" width="22" height="22" />
+          <span>kazi &middot; Apache-2.0 &middot; &copy; Sire Run, Inc.</span>
+        </div>
+        <span
+          >Built by the team behind <a href="https://sire.run" class="ui-link"
+            >Sire</a
+          >.</span
+        >
+      </div>
+      <nav class="flex items-center gap-5" aria-label="Footer">
+        <a href="/blog" class="ui-link">Blog</a>
+        <a href={repoHref} class="ui-link">GitHub</a>
+        <a href={`${REPO}/releases`} class="ui-link">Releases</a>
+        <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
+      </nav>
+    </div>
+  </footer>
+</Layout>
+
+<!--
+  Post typography on the site design tokens. Scoped to .post-prose so it only
+  styles rendered markdown, never the chrome. Code blocks reuse the --code-*
+  tokens (kept dark in both themes per global.css) and the card border/radius so
+  they read as part of the site, not a default Shiki slab.
+-->
+<style>
+  .post-prose :global(h2) {
+    color: var(--text-strong);
+    font-weight: 700;
+    font-size: 1.6rem;
+    line-height: 1.25;
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+    letter-spacing: -0.01em;
+  }
+  .post-prose :global(h3) {
+    color: var(--text-strong);
+    font-weight: 600;
+    font-size: 1.25rem;
+    line-height: 1.3;
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+  }
+  .post-prose :global(p),
+  .post-prose :global(ul),
+  .post-prose :global(ol),
+  .post-prose :global(blockquote) {
+    margin-top: 1.1rem;
+    margin-bottom: 1.1rem;
+    line-height: 1.75;
+  }
+  .post-prose :global(ul),
+  .post-prose :global(ol) {
+    padding-left: 1.4rem;
+  }
+  .post-prose :global(ul) {
+    list-style: disc;
+  }
+  .post-prose :global(ol) {
+    list-style: decimal;
+  }
+  .post-prose :global(li) {
+    margin-top: 0.35rem;
+    margin-bottom: 0.35rem;
+  }
+  .post-prose :global(a) {
+    color: var(--text-strong);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .post-prose :global(strong) {
+    color: var(--text-strong);
+    font-weight: 600;
+  }
+  .post-prose :global(blockquote) {
+    border-left: 3px solid var(--card-border);
+    padding-left: 1rem;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  /* Inline code (not inside a fenced block) reads as a chip in the code palette. */
+  .post-prose :global(:not(pre) > code) {
+    background-color: var(--code-bg);
+    color: var(--code-text);
+    border: 1px solid var(--card-border);
+    border-radius: 0.375rem;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.875em;
+  }
+  /* Fenced code blocks: frame Shiki output with the site card border + radius.
+     The dark code background matches the site's --code-bg family in both themes. */
+  .post-prose :global(pre) {
+    border: 1px solid var(--card-border);
+    border-radius: 0.75rem;
+    padding: 1rem 1.2rem;
+    margin-top: 1.25rem;
+    margin-bottom: 1.25rem;
+    overflow-x: auto;
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+  .post-prose :global(pre) > :global(code) {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+  .post-prose :global(img) {
+    border-radius: 0.75rem;
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .post-prose :global(hr) {
+    border: 0;
+    border-top: 1px solid var(--hairline);
+    margin-top: 2.5rem;
+    margin-bottom: 2.5rem;
+  }
+</style>

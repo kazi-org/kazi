@@ -1,0 +1,40 @@
+id = "stuck-teardown-salvage"
+name = "E54 T54.4 (#1081): salvage a stuck run's uncommitted collateral before removing the worktree; make the leak/delete paths symmetric"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1081"
+epic = "E54"
+
+[[predicate]]
+id = "salvage-before-teardown"
+provider = "custom_script"
+description = "TASK BRIEF (github #1081). On a clean `:stuck` return the wrap/2 `after` block runs teardown/6 -> safe_cleanup/3 = `git worktree remove --force` (lib/kazi/scheduler/worktree.ex:146-166, :338-401), DESTROYING whatever the agent left UNCOMMITTED. Reported: a run finished stuck with 10/11 predicates PASSING, the fix uncommitted; --force nuked it -- ~$5.70 + 27min irrecoverable, no dangling commit, no patch in ~/.kazi/runs/<id>/. ASYMMETRY: a crash/brutal-kill LEAKS the worktree+branch forever (the `after` never runs; reap/3 is liveness-gated), while a clean-stuck DELETES eagerly -- opposite behaviors, both lose. FIX: at the single chokepoint teardown/6 (worktree.ex:338, BEFORE safe_cleanup) AND the reap/3 survivor path (worktree.ex:211-230), when the worktree tree is dirty (`git -C <path> status --porcelain` non-empty) PERSIST it before removal -- write `git -C <path> diff HEAD` to `<run_dir>/collateral.patch` and/or a `refs/kazi/salvage/<slug>` ref -- SYMMETRICALLY across both paths. CONSTRAINTS: teardown must not raise (issue #1053 teardown-independence, worktree.ex:338-362); must STILL remove the worktree and end with only the repo listed (test/kazi/scheduler/worktree_test.exs:150-160 dirty-force-remove); the salvage step must not cd/rm outside the managed base (managed_path?/3, worktree.ex:370-376). The `unpassable landed predicate` half of #1081 is fixed separately by T54.1. Write a teardown-salvage test asserting the collateral is recoverable after a `:stuck` teardown while the worktree dir is gone. PROCESS: branch task/stuck-teardown-salvage, conventional commits, push -u. Full design: docs/plans/E54.md T54.4."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/scheduler/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref (partition-safe: no hardcoded branch name)."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

@@ -1,0 +1,12 @@
+{"version": 2, "width": 92, "height": 12, "timestamp": 1782673450, "idle_time_limit": 2.0, "command": "kazi apply hero_cast_demo/goal.toml --workspace ./demo --harness claude", "title": "kazi reconcile loop converging"}
+[0.018221, "o", "\u001b[3J\u001b[H\u001b[2J"]
+[0.01841, "o", "$ kazi apply hero_cast_demo/goal.toml --workspace ./demo --harness claude\r\n"]
+[1.46246, "o", "kazi.loop goal=hero-greet-converge iter=1 failing=[\"tests-pass\"]\r\n"]
+[28.662255, "o", "kazi.loop goal=hero-greet-converge iter=2 failing=[]\r\n"]
+[28.668835, "o", "CONVERGED  goal=hero-greet-converge — every predicate is satisfied.\r\n"]
+[28.668842, "o", "iterations: 2\r\n"]
+[28.668906, "o", "actions:    dispatch_agent\r\n"]
+[28.668952, "o", "predicate vector:\r\n"]
+[28.668959, "o", "  [pass] tests-pass: pass\r\n"]
+[28.673041, "o", "\r\n"]
+[28.673281, "x", "0"]

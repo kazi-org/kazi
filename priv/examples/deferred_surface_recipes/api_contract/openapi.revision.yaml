@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: Widgets API
+  version: 2.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      summary: List widgets
+      parameters:
+        # BREAKING: `limit` went from optional to required — an existing client
+        # that omits it now gets rejected. oasdiff flags this at the ERR level.
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: A page of widgets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Widget"
+  # BREAKING: the /widgets/{id} path was removed entirely — every client that
+  # fetches a single widget by id now 404s.
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string

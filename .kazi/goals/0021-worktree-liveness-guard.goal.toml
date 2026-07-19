@@ -1,0 +1,71 @@
+# E53/T53.2 (issue #1022). Independent of 0020 (different seams).
+# Conflict surface: lib/kazi/scheduler/worktree.ex, lib/kazi/loop.ex (observe path).
+
+id = "worktree-liveness-guard"
+name = "T53.2: never reap a live run's worktree; a vanished workspace terminates with a distinct cause, not exit-128 grinding (issue #1022)"
+
+[metadata]
+epic = "E53"
+task = "T53.2"
+
+[scope]
+paths = ["lib/kazi/scheduler/worktree.ex", "lib/kazi/loop.ex", "test/kazi/scheduler/", "test/kazi/loop/"]
+
+[[predicate]]
+id = "worktree-liveness-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E53 task T53.2, issue #1022 -- read it: `gh issue view 1022 --repo kazi-org/kazi`).
+
+WHY: during a live serial run, the task worktree was deleted out from under a mid-iteration dispatched agent (issue #1022): every subsequent predicate evaluation failed with git exit 128 against the dead path and the run could only burn iterations. Two gaps: cleanup paths do not check run liveness, and the loop has no distinct handling for "my workspace no longer exists".
+
+BUILD THIS, two halves:
+
+(A) Liveness check on removal. In lib/kazi/scheduler/worktree.ex: `reap/2` (~184) and every removal path (the `after` teardown ~84, the guarded remove ~284) must SKIP a worktree whose owning run/partition is still live, logging a one-line skip naming the worktree and why. Liveness source: the WorktreeTable row's owning partition/run state (find how rows record their owner; if they do not, add the owning pid/run-ref to the row at create time and consider it live while that process is alive -- `Process.alive?/1` for local pids). The normal terminal-state teardown (run finished -> its OWN worktree removed) must keep working exactly as today; only removal of a worktree owned by a DIFFERENT, still-live run is refused.
+
+(B) Vanished-workspace detection in the loop. In lib/kazi/loop.ex's observe/predicate-evaluation path: BEFORE evaluating predicates each iteration, if the workspace directory no longer exists (`File.dir?/1` false) -- or the first predicate batch comes back with the git not-a-repository/deleted-cwd exit-128 signature AND the dir check confirms it is gone -- terminate the run with a DISTINCT stuck/error cause (`:workspace_missing`; wire it through the same cause plumbing ADR-0058 uses, permanence: permanent -- re-dispatching cannot fix a deleted directory) and a remedy line in the result mentioning that committed work may survive in .git/worktrees admin data (issue #1022's recovery). NO further dispatch after detection.
+
+WRITE test/kazi/scheduler/worktree_liveness_test.exs + a loop test (mirror existing fixtures; tmp git repos, stub harness, no network): (1) reap skips a worktree row owned by a live process (spawn a process holding ownership; assert the dir survives + the skip is logged) and reaps it once the owner is dead; (2) a run's own terminal teardown still removes its worktree (no regression); (3) a run whose workspace dir is deleted between iterations (delete it from the test between stub dispatches) terminates with the `:workspace_missing` cause visible in the result and performs NO further dispatch (stub counts invocations); (4) the remedy text appears in the terminal result/evidence.
+
+DOCS: add the `:workspace_missing` cause to whatever doc enumerates stuck causes (grep docs/ for an existing cause list, e.g. the ADR-0058 taxonomy section or docs/orchestrator-recipe.md); if none enumerates causes, the @moduledoc note suffices -- state [no-docs] rationale in the commit body.
+
+PROCESS: branch task/worktree-liveness-guard off main; small conventional commits; push with -u. This predicate passes when the new tests pass.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/scheduler/worktree_liveness_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "worktree-suite-still-green"
+provider = "custom_script"
+description = "GUARD: the existing worktree + serial indirection suites stay green -- this task changes their removal paths."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/scheduler/worktree_test.exs test/kazi/serial_worktree_indirection_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The NAMED task branch exists, is pushed, and is current with its remote (pinned to the branch, not HEAD)."
+cmd = "sh"
+args = ["-c", 'git rev-parse --verify refs/heads/task/worktree-liveness-guard >/dev/null 2>&1 && git rev-parse --verify refs/remotes/origin/task/worktree-liveness-guard >/dev/null 2>&1 && [ "$(git rev-parse task/worktree-liveness-guard)" = "$(git rev-parse origin/task/worktree-liveness-guard)" ] && [ -n "$(git log --oneline origin/main..task/worktree-liveness-guard)" ]']
+timeout_ms = 30000

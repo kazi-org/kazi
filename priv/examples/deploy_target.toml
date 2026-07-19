@@ -1,0 +1,57 @@
+# Example kazi goal-file: the Slice 0 walking-skeleton convergence target.
+#
+# This goal drives the deploy-target fixture (fixtures/deploy-target/) from a
+# deliberately FAILING test to a live, verified Cloud Run deployment. It is the
+# goal the Slice 0 dogfood (plan task T0.12) loads with:
+#
+#     kazi apply priv/examples/deploy_target.toml --workspace fixtures/deploy-target
+#
+# "Done" is the conjunction of both predicates below: the unit tests pass AND
+# the deployed /healthz endpoint returns the body "ok". The fixture currently
+# returns "not-ok" (see fixtures/deploy-target/README.md), so both fail until
+# kazi lands the one-line convergence edit.
+#
+# See Kazi.Goal.Loader for the full schema.
+
+id = "deploy-target-slice0"
+name = "Slice 0 walking skeleton: deploy-target fixture goes green and live"
+
+[metadata]
+fixture = "fixtures/deploy-target"
+slice = "0"
+
+[budget]
+max_iterations = 10
+max_tokens = 500000
+
+[scope]
+# The target workspace is the fixture's standalone Go module. In the dogfood
+# this is passed as `kazi apply ... --workspace fixtures/deploy-target`; declared
+# here so the goal-file is self-describing.
+workspace = "fixtures/deploy-target"
+paths = ["main.go"]
+
+# CODE predicate (test_runner, T0.5): run the fixture's Go unit tests in the
+# target workspace. Passes only when TestHealthzReturnsOK is green.
+[[predicate]]
+id = "go-tests"
+provider = "test_runner"
+description = "fixtures/deploy-target `go test ./...` passes (TestHealthzReturnsOK green)"
+cmd = "go"
+args = ["test", "./..."]
+
+# LIVE predicate (http_probe, T0.5b): assert the deployed service's /healthz
+# returns 200 with the body "ok". This is the production probe that makes
+# convergence real, not just locally-green (concept §1, CLAUDE.md success bar).
+# NOTE: liveness is at /livez, NOT /healthz — Cloud Run intercepts the exact path
+# /healthz (docs/lore.md L-0003). body_match MUST be "exact": "ok" is a substring
+# of "not-ok", so a contains-match would falsely pass pre-convergence. Set `url`
+# to the concrete deployed service URL when driving a real run.
+[[predicate]]
+id = "livez-live"
+provider = "http_probe"
+description = "deployed GET /livez returns 200 with body \"ok\""
+url = "https://REPLACE-WITH-DEPLOYED-SERVICE-URL/livez"
+expect_status = 200
+expect_body = "ok"
+body_match = "exact"

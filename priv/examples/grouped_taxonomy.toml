@@ -1,0 +1,46 @@
+# Example kazi goal-file: a declared `[[group]]` taxonomy (T12.1, ADR-0020).
+#
+# A large goal organizes its predicates into a tree — pillar -> domain ->
+# capability — by declaring a flat `[[group]]` vocabulary and referencing it by
+# id. Declaring the vocabulary once and referencing it by a stable slug is the
+# structural fix for text drift: a free-text group silently FRAGMENTS the
+# hierarchy when spelling drifts ("Identity & Access" vs "Identity and Access");
+# a referenced-by-id taxonomy cannot.
+#
+# T12.1 PARSES and STORES the taxonomy (with id normalization + a duplicate-id
+# guard). Predicates referencing a group, and parent reference / cycle
+# validation, are T12.2 — note this file declares `parent` but kazi does not yet
+# validate that the parent exists.
+#
+# See Kazi.Goal.Loader for the full schema and Kazi.Goal.Group for the struct.
+
+id = "grouped-taxonomy-example"
+name = "A goal with a declared group taxonomy (pillar -> domain)"
+
+# A pillar. `name` is the display label; the id normalizes from the loosely
+# authored "Identity & Access" to the canonical slug "identity-access".
+[[group]]
+id = "Identity & Access"
+name = "Identity & Access"
+
+# A domain under the pillar. `parent` references the pillar by its normalized
+# id; the reference is stored but not yet validated (that is T12.2).
+[[group]]
+id = "sign-up"
+name = "Sign Up"
+parent = "identity-access"
+budget = 5
+
+# A second pillar with no children.
+[[group]]
+id = "billing"
+name = "Billing"
+
+# At least one [[predicate]] is still required (the taxonomy organizes the
+# predicates; it does not replace them).
+[[predicate]]
+id = "placeholder"
+provider = "test_runner"
+description = "a placeholder predicate so the goal-file is valid"
+cmd = "mix"
+args = ["test"]

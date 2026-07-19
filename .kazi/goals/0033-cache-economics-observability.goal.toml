@@ -1,0 +1,57 @@
+id = "cache-economics-observability"
+name = "ADR-0069: cache-read-ratio in kazi economy + operator-reachable --bare / --exclude-dynamic-system-prompt-sections dispatch levers (off by default)"
+
+[metadata]
+adr = "docs/adr/0069-prompt-cache-economics-observability-and-argv-pinning.md"
+research = "docs/research/token-efficiency-and-cheaper-agentic-coding.md"
+depends_on = ["ci-daemon-nats-green"]
+
+[[predicate]]
+id = "economy-cache-ratio"
+provider = "custom_script"
+description = "TASK BRIEF (ADR-0069 decision 1): kazi ALREADY parses the Anthropic cache split per dispatch (Kazi.Harness.Profiles.Claude.parse/1, T34.2: cache_read_input_tokens -> :cached_input_tokens, cache_creation_input_tokens -> :cache_write_tokens, honest-unknown fidelity-tagged) and ALREADY persists cached-input tokens per run (T48.7, budget_cached_input_tokens on Kazi.ReadModel.Run) -- but Kazi.Economy.History.aggregate/1's groups expose only tokens/cost_usd/dispatch_count/wall_clock_s percentiles, so `kazi economy` cannot show whether a goal-shape bucket's dispatches actually reuse the harness prompt cache. ADD the cached dimension to the aggregate: (a) each {goal_shape_bucket, model, harness} group gains a `cached_input_tokens` percentile pair (p50/p95, nearest-rank like the existing metrics) AND a `cache_read_ratio` percentile pair, where a run's ratio = cached_input / (cached_input + fresh input_tokens) -- compute per-run then percentile, do NOT ratio the percentiles; skip a run from the ratio input when EITHER side is unreported (ADR-0046 honest-unknown: excluded, never coerced to 0; a group with no reporting runs renders null for both new metrics -- n_with_usage already conveys density; check whether the existing history row carries fresh input_tokens split from the total -- if only the summed total and cached are persisted, derive fresh = total - cached ONLY when both are non-nil, else exclude the run). (b) Render both in `kazi economy` human output and --json; the --json change is ADDITIVE -- bump schema_version per the existing contract (docs/economy.md currently documents schema_version 2; follow whatever the schema-versioning convention in docs/schemas/ prescribes for additive keys). (c) Update docs/economy.md: document the two new group metrics, the per-run-ratio-then-percentile method, and the honest-unknown exclusion rule (ADR-0034: docs land with the code). Write test/kazi/economy/history_cache_ratio_test.exs pinning: percentile math on a mixed set (reporting + non-reporting runs), the exclusion rule (a nil on either side of the ratio excludes that run), the all-unreported group rendering null, and the --json shape (schema_version bumped, keys present). PROCESS: branch task/economy-cache-ratio, conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/economy/history_cache_ratio_test.exs test/kazi/economy/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "argv-levers-reachable"
+provider = "custom_script"
+description = "TASK BRIEF (ADR-0069 decision 2): the :claude profile's economy-flag map (Kazi.Harness.Profiles.Claude @economy_flags, T36.1/ADR-0047) already renders :exclude_dynamic_system_prompt_sections -> --exclude-dynamic-system-prompt-sections (version-gated), but nothing can SET it (no CLI flag, no goal-file key, DispatchSurface.minimal_default does not supply it) -- and there is no bare-mode opt at all, so every dispatch auto-discovers ambient host CLAUDE.md/hooks/plugins/auto-memory (upstream `claude -p` plans to default to --bare; kazi must own its choice explicitly first). DO: (a) add :bare -> --bare to @economy_flags as kind :boolean with a conservative min_version floor (same pattern as :exclude_dynamic_system_prompt_sections -- on an older CLI the flag is DROPPED, never emitted to a binary that would error; verify the actual Claude Code version that introduced --bare and use it as the floor, do not guess 1.0.0 blindly); add :bare to the :claude profile's supported_opts. (b) Make BOTH opts operator-reachable following the T36.6 --effort precedent exactly: a `kazi apply`/`kazi run` CLI flag each (--bare, --exclude-dynamic-system-prompt-sections), threaded CLI > goal-file [harness] key > absent, Claude-profile-only by design (only :claude advertises them in supported_opts so Kazi.Harness.resolve/1's opt-filtering drops them for other harnesses -- parity-by-design, mirror how :effort documents this). (c) OFF by default is non-negotiable: with neither opt supplied the rendered argv must be byte-for-byte unchanged -- extend test/kazi/harness/claude_economy_flags_test.exs pinning the unchanged-argv property, the rendered flags when set, the version-gate drop behavior for :bare, and the non-Claude-profile filtering. (d) Do NOT flip any default anywhere (no DispatchSurface change, no loop change) -- ADR-0069 decision 3 reserves flips for the T48.12 benchmark gate. (e) Docs land with code (ADR-0034): document both flags in the kazi help text, docs/add-a-harness.md's economy-flag list if it has one, and a pointer to ADR-0069's benchmark-gate rule for anyone tempted to default them on. PROCESS: branch task/argv-levers-reachable, conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/harness/claude_economy_flags_test.exs test/kazi/harness/']
+timeout_ms = 600000
+
+[[predicate]]
+id = "docs-updated"
+provider = "custom_script"
+description = "GUARD (ADR-0034 docs-land-with-code, cheap grep form): docs/economy.md mentions cache_read_ratio, and ADR-0069 is referenced from the docs the tasks touch."
+cmd = "sh"
+args = ["-c", "grep -q 'cache_read_ratio' docs/economy.md && grep -rq '0069' docs/economy.md"]
+timeout_ms = 30000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

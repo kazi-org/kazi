@@ -1,0 +1,39 @@
+id = "ci-daemon-nats-green"
+name = "issue #1061: main CI hard-red -- all 8 Kazi.Daemon lifecycle/CLI tests fail on Linux because nats-server is not installed"
+
+[metadata]
+issue = "https://github.com/kazi-org/kazi/issues/1061"
+
+[[predicate]]
+id = "ci-installs-nats"
+provider = "custom_script"
+description = "TASK BRIEF (github issue #1061): main's CI workflow is deterministically red (5/5 consecutive runs) -- all 5 Kazi.Daemon.LifecycleTest tests and all 3 Kazi.CLI.DaemonTest tests fail with `(RuntimeError) failed to start child ... {Kazi.Daemon, :start, ...}`. ROOT CAUSE, already researched -- do not re-derive: T51.2 (ADR-0067, commit 032b1a0) made `Kazi.Daemon.start/1` fail fast with {:error, :nats_bin_not_found} when the `nats-server` binary cannot be resolved (lib/kazi/daemon/nats.ex resolve_bin/1: opts[:nats_bin] || System.find_executable(\"nats-server\")). Dev machines have nats-server via brew; the ubuntu CI runner does NOT, and .github/workflows/ci.yml never installs it -- so every daemon test reds on Linux while passing locally. TWO fixes, both required:\n(1) .github/workflows/ci.yml: install nats-server on the runner BEFORE the test step. Prefer downloading the official pinned release binary (https://github.com/nats-io/nats-server/releases -- pick the current stable, pin the version AND its sha256, verify the checksum before install, same M1 pattern release.yml uses for the Zig tarball) over apt (not packaged) or a floating 'latest'. Put it on PATH (e.g. install to /usr/local/bin).\n(2) test hygiene so the NEXT missing prerequisite fails legibly: in the daemon test setup (test/kazi/daemon/lifecycle_test.exs, test/kazi/cli/daemon_test.exs -- and any other test that starts Kazi.Daemon), when System.find_executable(\"nats-server\") is nil and no :nats_bin opt is injected, fail the test with a ONE-LINE actionable message ('nats-server not on PATH -- install it or pass nats_bin') instead of the raw failed-to-start-child RuntimeError. A shared test helper is fine. Do NOT auto-skip silently (@tag :skip) -- CI must fail loudly if provisioning regresses, just with a clear reason.\nPROCESS: branch task/ci-daemon-nats-green, small conventional commits (ci workflow vs test helper separate), push with -u. This predicate passes when the daemon test files pass locally (nats-server IS on PATH here) AND ci.yml contains a pinned, checksum-verified nats-server install step (grep for 'nats-server' and a sha256 in ci.yml)."
+cmd = "sh"
+args = ["-c", 'grep -q "nats-server" .github/workflows/ci.yml && grep -Eq "[a-f0-9]{64}" .github/workflows/ci.yml && env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/daemon/ test/kazi/cli/daemon_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

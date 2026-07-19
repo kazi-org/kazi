@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+/* kazi brand tokens (ADR-0018: Electric Blue, the logo gradient) */
+@theme {
+  --color-ink: #0b1220;
+  --color-slate-deep: #0f172a;
+  --color-kazi-cyan: #22d3ee;
+  --color-kazi-blue: #3b82f6;
+  --color-kazi-violet: #8b5cf6;
+}
+
+/* Semantic surface/text tokens. Dark is the brand default; prefers-color-scheme:
+   light gives light-mode users a genuinely light, high-contrast page instead of
+   forcing a dark UI on them. The page reads these via the .ui-* helper classes
+   below so a single media query flips the whole surface. */
+:root {
+  --page-bg: #0b1220; /* ink */
+  --text-strong: #ffffff;
+  --text-body: #cbd5e1; /* slate-300 */
+  --text-muted: #94a3b8; /* slate-400 */
+  --card-bg: rgba(255, 255, 255, 0.03);
+  --card-border: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(255, 255, 255, 0.1);
+  --code-bg: #0f172a;
+  --code-text: #f1f5f9; /* slate-100 */
+  --chip-bg: rgba(255, 255, 255, 0.05);
+  --chip-border: rgba(255, 255, 255, 0.1);
+  --btn-border: rgba(255, 255, 255, 0.15);
+  --link-hover: #ffffff;
+  /* gradient stops used for .kazi-text / .kazi-gradient */
+  --grad-1: #22d3ee;
+  --grad-2: #3b82f6;
+  --grad-3: #8b5cf6;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --page-bg: #f8fafc; /* slate-50 */
+    --text-strong: #0f172a; /* slate-900 */
+    --text-body: #334155; /* slate-700 */
+    --text-muted: #475569; /* slate-600, AA on slate-50 */
+    --card-bg: #ffffff;
+    --card-border: rgba(15, 23, 42, 0.1);
+    --hairline: rgba(15, 23, 42, 0.1);
+    --code-bg: #0f172a; /* keep code blocks dark for legible monospace */
+    --code-text: #f1f5f9;
+    --chip-bg: rgba(15, 23, 42, 0.04);
+    --chip-border: rgba(15, 23, 42, 0.12);
+    --btn-border: rgba(15, 23, 42, 0.18);
+    --link-hover: #0f172a;
+    /* Darken the cyan->blue->violet ramp so gradient text keeps >= 4.5:1 on white. */
+    --grad-1: #0e7490;
+    --grad-2: #1d4ed8;
+    --grad-3: #6d28d9;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: light dark;
+}
+
+/* Drop smooth-scroll easing for users who ask for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Page shell: single source of truth for background + base text color. */
+.page-shell {
+  background-color: var(--page-bg);
+  color: var(--text-body);
+}
+
+/* Theme-aware UI helpers used across the page so light/dark flip in one place. */
+.ui-strong {
+  color: var(--text-strong);
+}
+.ui-body {
+  color: var(--text-body);
+}
+.ui-muted {
+  color: var(--text-muted);
+}
+.ui-card {
+  background-color: var(--card-bg);
+  border-color: var(--card-border);
+}
+.ui-hairline {
+  border-color: var(--hairline);
+}
+.ui-code {
+  background-color: var(--code-bg);
+  color: var(--code-text);
+  border-color: var(--card-border);
+}
+.ui-chip {
+  background-color: var(--chip-bg);
+  border-color: var(--chip-border);
+}
+.ui-chip:hover {
+  background-color: var(--card-bg);
+}
+.ui-outline {
+  border-color: var(--btn-border);
+  color: var(--text-strong);
+}
+.ui-outline:hover {
+  background-color: var(--card-bg);
+}
+.ui-link:hover {
+  color: var(--link-hover);
+}
+
+/* The kazi gradient, reusable for text + accents. */
+.kazi-gradient {
+  background-image: linear-gradient(120deg, var(--grad-1), var(--grad-2), var(--grad-3));
+}
+.kazi-text {
+  background-image: linear-gradient(120deg, var(--grad-1), var(--grad-2), var(--grad-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

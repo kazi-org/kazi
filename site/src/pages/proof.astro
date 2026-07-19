@@ -1,0 +1,304 @@
+---
+// The dogfood "done" gallery / leaderboard (T25.7, epic E25).
+//
+// Lists real goals a naive (prose) pipeline leaves subtly broken that kazi drove
+// to OBJECTIVE convergence — each with before/after evidence and a reproducible
+// method. The rule (acceptance risk #1): NO unverifiable claims. Every iteration
+// count, cost, and wall-clock figure below is copied from a real
+// `kazi apply --json` envelope recorded in docs/devlog.md — none are invented.
+//
+// Self-updating-by-construction: add a new converged dogfood by appending one
+// object to `cases` (and a method block to docs/dogfood-methodology.md). See the
+// "Keeping the gallery honest" section of that doc.
+import Layout from "../layouts/Layout.astro";
+
+const REPO = "https://github.com/kazi-org/kazi";
+const METHODOLOGY = `${REPO}/blob/main/docs/dogfood-methodology.md`;
+const DEVLOG = `${REPO}/blob/main/docs/devlog.md`;
+
+// Each case is a REAL converged run. `metrics` come verbatim from the cited
+// devlog envelope; `source` names the devlog entry so a reader can trace it.
+const cases = [
+  {
+    id: "exact-content",
+    title: "Exact-content file",
+    goal: "Create VERSION.txt whose contents are exactly 1.0.0",
+    version: "1.64.2",
+    subtle:
+      "“The file exists” looks done — but the bytes have to be exact. A naive run is happy with a stray trailing line, v1.0.0, or 1.0.0\\n\\n.",
+    before:
+      "File created, declared done. Content is plausible but not byte-exact — the version string silently wrong.",
+    after:
+      "kazi’s predicate compares the content exactly (test -f VERSION.txt && [ \"$(cat VERSION.txt)\" = \"1.0.0\" ]). “Exists” is never mistaken for “done”; VERSION.txt verified to be the bytes 1.0.0.",
+    command:
+      "kazi apply version.goal.toml --workspace <ws> --harness claude --json",
+    metrics: [
+      ["status", "converged"],
+      ["iterations", "2"],
+      ["wall clock", "18.5 s"],
+      ["tokens", "39,712"],
+    ],
+    source: "docs/devlog.md — 2026-06-26 · T26.6",
+  },
+  {
+    id: "opaque-oracle",
+    title: "Self-correcting against an opaque oracle",
+    goal:
+      "Write solution.py printing the sum of n<1,000,000 that are palindromes in base 10, 2 AND 8 (answer 610)",
+    version: "1.64.1",
+    subtle:
+      "The agent’s first multi-step attempt looks plausible but is wrong. With no objective check, that wrong answer ships.",
+    before:
+      "First dispatch prints a plausible-but-wrong number. A prose pipeline accepts it — there’s nothing grading the result.",
+    after:
+      "kazi grades the output against a one-way sha256 oracle (the model can’t read the answer out of the checker), catches the wrong first attempt, and re-drives. The cheap model (Haiku 4.5) self-corrected on iteration 2; solution.py verified to print 610.",
+    command:
+      "kazi apply ./goal.toml --workspace ./ws --harness claude --model claude-haiku-4-5 --json",
+    metrics: [
+      ["status", "converged"],
+      ["iterations", "2"],
+      ["wall clock", "39.3 s"],
+      ["model", "claude-haiku-4-5"],
+    ],
+    source: "docs/devlog.md — 2026-06-26 · T30.4 (Run A)",
+  },
+  {
+    id: "needs-dag",
+    title: "A real cross-group dependency, parallelized correctly",
+    goal:
+      "Build three Go capabilities (contract, /healthz, streaming) where streaming consumes the contract type",
+    version: "1.64.2",
+    subtle:
+      "Split the work across parallel agents naively and the streaming endpoint compiles against a Widget type that doesn’t exist yet — a broken build that “looks done” per-agent.",
+    before:
+      "Naive parallel split → streaming dispatched before the contract exists → broken compile, or a serial run that gives up all the parallelism.",
+    after:
+      "kazi computes the wave schedule from authored needs edges: result-contract and health dispatch in the SAME millisecond (disjoint blast radius), streaming waits 0.222 s until result-contract objectively converges, then all three merge into one workspace. Collective converged, exit 0.",
+    command:
+      "kazi apply priv/examples/predicate_graph_waves.toml --workspace <scratch> --parallel --harness claude --json",
+    metrics: [
+      ["collective", "converged"],
+      ["groups", "3 (2 concurrent, 1 gated)"],
+      ["blocked", "0"],
+      ["scheduler", "single-node, NATS-free"],
+    ],
+    source: "docs/devlog.md — 2026-06-26 · T21.12 + T23.9",
+    fixture: "priv/examples/predicate_graph_waves.toml",
+  },
+];
+---
+
+<Layout
+  title="Proof — kazi"
+  description="Real goals a naive pipeline leaves subtly broken that kazi drove to objective convergence — each with before/after evidence and a reproducible method. No unverifiable claims: every number comes from a real kazi apply --json run."
+>
+  <!-- Nav (mirrors the home page chrome) -->
+  <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+    <a href="/" class="flex items-center gap-2" aria-label="kazi home">
+      <img src="/logo/kazi-mark.svg" alt="" width="34" height="34" />
+      <span class="ui-strong text-xl font-bold tracking-tight">kazi</span>
+    </a>
+    <nav class="flex items-center gap-6 text-sm" aria-label="Primary">
+      <a href="/#try" class="ui-body ui-link">Try it</a>
+      <a href="/#how" class="ui-body ui-link">How it works</a>
+      <a href="/proof" class="ui-strong ui-link" aria-current="page">Proof</a>
+      <a href="/blog" class="ui-body ui-link">Blog</a>
+      <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-body ui-link">Docs</a>
+      <a
+        href={REPO}
+        class="ui-outline rounded-lg border px-3 py-1.5 font-medium">GitHub</a
+      >
+    </nav>
+  </header>
+
+  <main>
+    <!-- Header -->
+    <section class="mx-auto max-w-3xl px-6 pb-6 pt-12 sm:pt-16">
+      <h1
+        class="ui-strong text-balance text-4xl font-extrabold tracking-tight sm:text-5xl"
+      >
+        Proof, not vibes
+      </h1>
+      <p class="ui-body mt-5 max-w-2xl text-pretty text-lg">
+        Real goals a naive pipeline leaves <em>subtly broken</em> &mdash; the file
+        looks created, the answer looks right, the parallel split looks done &mdash;
+        that kazi drove to <strong class="ui-strong">objective convergence</strong>.
+        Each case below is a genuine{" "}
+        <code class="ui-body">kazi apply --json</code> run on a released binary, with
+        before/after evidence and a command you can re-run.
+      </p>
+      <p class="ui-muted mt-4 max-w-2xl text-pretty text-sm">
+        <strong class="ui-body">No unverifiable claims.</strong> Every iteration
+        count, cost, and wall-clock figure is copied verbatim from a real run
+        recorded in the{" "}
+        <a href={DEVLOG} class="kazi-text font-semibold hover:underline">devlog</a>
+; the full reproduction steps &mdash; and the metered{" "}
+        <code class="ui-body">cost_usd</code> per run &mdash; live in the{" "}
+        <a href={METHODOLOGY} class="kazi-text font-semibold hover:underline"
+          >methodology doc</a
+        >. If a number can&rsquo;t be traced to a captured run, it isn&rsquo;t on
+        this page.
+      </p>
+    </section>
+
+    <!-- Cases -->
+    <section class="mx-auto max-w-4xl px-6 pb-12">
+      <ol class="space-y-8">
+        {
+          cases.map((c, i) => (
+            <li class="ui-card rounded-2xl border p-6 sm:p-8" id={c.id}>
+              <div class="ui-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span class="kazi-text font-extrabold">#{i + 1}</span>
+                <span aria-hidden="true">&middot;</span>
+                <span>kazi v{c.version}</span>
+                <span aria-hidden="true">&middot;</span>
+                <span class="ui-chip rounded-md border px-2 py-0.5">
+                  released binary &middot; real claude harness
+                </span>
+              </div>
+              <h2 class="ui-strong mt-2 text-2xl font-bold tracking-tight">
+                {c.title}
+              </h2>
+              <p class="ui-body mt-2 text-sm">
+                <strong class="ui-strong">Goal:</strong> {c.goal}
+              </p>
+              <p class="ui-muted mt-2 text-sm leading-relaxed">
+                <strong class="ui-body">The subtle break:</strong> {c.subtle}
+              </p>
+
+              {/* Before / after evidence */}
+              <div class="ui-hairline mt-5 grid gap-px overflow-hidden rounded-xl border sm:grid-cols-2">
+                <div class="ui-card p-4">
+                  <div class="ui-muted text-xs font-semibold uppercase tracking-wide">
+                    Without kazi
+                  </div>
+                  <p class="ui-body mt-2 text-sm leading-relaxed">{c.before}</p>
+                </div>
+                <div class="ui-card p-4">
+                  <div class="kazi-text text-xs font-semibold uppercase tracking-wide">
+                    With kazi
+                  </div>
+                  <p class="ui-body mt-2 text-sm leading-relaxed">{c.after}</p>
+                </div>
+              </div>
+
+              {/* Metrics row — verbatim from the cited run */}
+              <dl class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                {c.metrics.map(([k, v]) => (
+                  <div class="ui-code rounded-lg border px-3 py-2 text-center">
+                    <dt class="ui-muted text-[0.65rem] uppercase tracking-wide">
+                      {k}
+                    </dt>
+                    <dd class="ui-strong mt-0.5 font-mono text-sm font-semibold">
+                      {v}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              {/* Reproduce */}
+              <div class="mt-5">
+                <div class="ui-body text-xs font-semibold">Reproduce</div>
+                <pre class="ui-code mt-2 overflow-x-auto rounded-xl border px-4 py-3 font-mono text-xs"><code><span class="ui-muted">$ </span>{c.command}</code></pre>
+                {c.fixture && (
+                  <p class="ui-muted mt-2 text-xs">
+                    Committed goal-file:{" "}
+                    <a
+                      href={`${REPO}/blob/main/${c.fixture}`}
+                      class="kazi-text font-semibold hover:underline"
+                    >
+                      <code>{c.fixture}</code>
+                    </a>
+                  </p>
+                )}
+                <p class="ui-muted mt-2 text-xs">
+                  Source:{" "}
+                  <a href={DEVLOG} class="ui-link">
+                    {c.source}
+                  </a>
+                </p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <!-- The discipline exhibit — kazi refusing a false done -->
+    <section class="mx-auto max-w-4xl px-6 pb-12" aria-labelledby="discipline-heading">
+      <div class="ui-card rounded-2xl border border-dashed p-6 sm:p-8">
+        <h2
+          id="discipline-heading"
+          class="ui-strong text-2xl font-bold tracking-tight"
+        >
+          Why the “converged” verdicts mean something
+        </h2>
+        <p class="ui-body mt-3 text-sm leading-relaxed">
+          The inverse case is the founding dogfood: a deterministic test where a
+          naive fix makes one predicate pass while <strong class="ui-strong"
+            >regressing another</strong
+          >, and kazi catches the green&rarr;red regression instead of declaring
+          success. Two coupled predicates &mdash; fixing <code class="ui-body"
+            >a.txt</code
+          > breaks <code class="ui-body">b.txt</code> as a side effect &mdash; and
+          kazi attributes the regression to the dispatch that caused it and{" "}
+          <strong class="ui-strong">never declares done</strong>. A single exit
+          code would have hidden it.
+        </p>
+        <pre class="ui-code mt-4 overflow-x-auto rounded-xl border px-4 py-3 font-mono text-xs"><code><span class="ui-muted">$ </span>mix test test/kazi/slice1_dogfood_test.exs</code></pre>
+        <p class="ui-muted mt-2 text-xs">
+          Deterministic &mdash; no model, no network. Source:{" "}
+          <a
+            href={`${REPO}/blob/main/test/kazi/slice1_dogfood_test.exs`}
+            class="ui-link">test/kazi/slice1_dogfood_test.exs</a
+          >{" "}
+          (the Slice-1 acceptance dogfood, T1.8). Labelled as a test, not a live
+          <code class="ui-body"> kazi apply</code> run.
+        </p>
+      </div>
+    </section>
+
+    <!-- Methodology pointer -->
+    <section class="mx-auto max-w-4xl px-6 pb-20 text-center">
+      <a
+        href={METHODOLOGY}
+        class="ui-outline inline-flex rounded-lg border px-4 py-2 text-sm font-medium"
+      >
+        Read the full methodology &rarr;
+      </a>
+      <p class="ui-muted mx-auto mt-4 max-w-xl text-xs">
+        Each new converged dogfood becomes a new entry here. To add one: capture a
+        real <code class="ui-body">kazi apply --json</code> envelope, record it in
+        the devlog, and append a case &mdash; never a number without a run behind
+        it.
+      </p>
+    </section>
+  </main>
+
+  <!-- Footer (mirrors the home page chrome) -->
+  <footer class="ui-hairline border-t">
+    <div
+      class="ui-muted mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm sm:flex-row"
+    >
+      <div class="flex flex-col items-center gap-1 sm:items-start">
+        <div class="flex items-center gap-2">
+          <img src="/logo/kazi-mark.svg" alt="" width="22" height="22" />
+          <span>kazi &middot; Apache-2.0 &middot; &copy; Sire Run, Inc.</span>
+        </div>
+        <span
+          >Built by the team behind <a href="https://sire.run" class="ui-link"
+            >Sire</a
+          >.</span
+        >
+      </div>
+      <nav class="flex items-center gap-5" aria-label="Footer">
+        <a href="/proof" class="ui-link">Proof</a>
+        <a href="/blog" class="ui-link">Blog</a>
+        <a href={REPO} class="ui-link">GitHub</a>
+        <a href={`${REPO}/releases`} class="ui-link">Releases</a>
+        <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
+        <a href={`${REPO}/discussions`} class="ui-link">Discussions</a>
+      </nav>
+    </div>
+  </footer>
+</Layout>

@@ -1,0 +1,300 @@
+---
+// Series landing page (T38.2, epic E38): "From Vibe Coding to Reconciliation".
+//
+// Lists the 12 parts in ascending `part` order with title + description. Each
+// part surfaces its real published post where one exists; otherwise it is marked
+// "coming". The scaffold below is the canonical 12-part outline transcribed from
+// docs/plans/E38.md (the T38.6–T38.17 post titles + the series arc); it is the
+// source of truth for ordering and titles until the posts themselves ship.
+//
+// Published posts are matched into the scaffold by `part` among non-draft entries
+// of this series — so a "coming" row flips to a live link automatically the moment
+// the matching post is published (T38.6+). Nothing here fakes a published post.
+import { getCollection } from "astro:content";
+import Layout from "../../layouts/Layout.astro";
+import { withUtm } from "../../utm.mjs";
+
+const REPO = "https://github.com/kazi-org/kazi";
+
+const SERIES_TITLE = "From Vibe Coding to Reconciliation";
+
+// Outbound repo/install link, UTM-tagged to the series landing page so the click
+// is attributed to the series (the one adoption signal — see utm.mjs).
+const repoHref = withUtm(REPO, "from-vibe-coding-to-reconciliation");
+
+// Canonical 12-part scaffold (titles transcribed verbatim from docs/plans/E38.md
+// T38.6–T38.17; descriptions condensed from the series arc in that epic). Kept in
+// ascending `part` order — the page asserts/renders this order.
+const PARTS = [
+  {
+    part: 1,
+    title: "The ceiling of “looks good to me”",
+    description:
+      "Where prompting-by-feel quietly breaks: the agent decides it is finished, and there is no objective gate. The bottleneck is not the model — it is the missing gate and the missing structure.",
+  },
+  {
+    part: 2,
+    title: "Teach your agent to remember",
+    description:
+      "Persistent context — a project memory file, conventions, checkpoints — so the agent stops re-learning your repo every session.",
+  },
+  {
+    part: 3,
+    title: "Decisions need a home: knowledge tiers (and keeping them honest)",
+    description:
+      "Give architecture, decisions, operations, and invariants distinct homes — then the hygiene that stops them rotting: linting for contradictions, trimming stale work, fixing tier drift.",
+  },
+  {
+    part: 4,
+    title: "Give your agent eyes (all the way to prod)",
+    description:
+      "Real-world verification: drive a browser, screenshot, exploratory-test — so “green locally” becomes “exercised live” — and carry it through to production and a stuck-deploy triage.",
+  },
+  {
+    part: 5,
+    title: "Stop re-reading the whole repo (and refactor without fear)",
+    description:
+      "Structural understanding and context economy: a code graph for callers and blast radius, compressing what you feed the agent, and reshaping code safely with ordered, build-green changes.",
+  },
+  {
+    part: 6,
+    title: "From prompts to skills",
+    description:
+      "Codify the good prompt you keep retyping into a reusable skill — the compounding move from one-off cleverness to a repeatable workflow.",
+  },
+  {
+    part: 7,
+    title: "Plan the work, then work the plan",
+    description:
+      "Intent as an artifact: a checkable plan, tasks linked to outcomes, declared dependencies — instead of an oral to-do list.",
+  },
+  {
+    part: 8,
+    title: "A definition of “done” that can’t lie",
+    description:
+      "The credibility centerpiece: tests, coverage, wiring, live probes — plus an adversary trying to break it — and why “the agent said done” is the wrong gate.",
+  },
+  {
+    part: 9,
+    title: "One developer, many agents (and how to recover)",
+    description:
+      "Parallelism without collisions: pools, claims, worktrees; coordinate on resources, not identities. Plus the resilience discipline — preflight before fan-out, resume a halted run.",
+  },
+  {
+    part: 10,
+    title: "The pattern underneath: reconciliation",
+    description:
+      "The conceptual turn: every rung above is the same loop — declare desired state, drive an agent, check against reality, repeat. The CI / Kubernetes analogy; truth in the controller.",
+  },
+  {
+    part: 11,
+    title: "Meet kazi: “done,” proven",
+    description:
+      "The product as the packaging of the preceding rungs into a controller: declare a goal as predicates, the agent drives kazi, it converges or stops honestly (stuck / over_budget).",
+  },
+  {
+    part: 12,
+    title: "Your on-ramp",
+    description:
+      "Recap the ladder — you can start at any rung — wire kazi into Claude Code, harden your harness first, an honest “where it is going,” and a respectful call to try it.",
+  },
+];
+
+// Match published posts into the scaffold by `part` (non-draft entries of this
+// series). Until Post 1 ships this map is empty and every row reads "coming".
+const publishedPosts = await getCollection(
+  "blog",
+  ({ data }) => !data.draft && data.series === SERIES_TITLE,
+);
+type BlogPost = (typeof publishedPosts)[number];
+const published: Record<number, BlogPost> = {};
+for (const post of publishedPosts) {
+  published[post.data.part] = post;
+}
+
+const rows = PARTS.map((p) => ({ ...p, post: published[p.part] ?? null }));
+---
+
+<Layout
+  title={`${SERIES_TITLE} — kazi blog`}
+  description="A twelve-part series that walks from a vanilla coding-agent workflow up the ladder — persistent context, knowledge tiers, real verification, structural understanding, skills, a written plan, an honest definition of done, safe parallelism — to a reconciliation workflow."
+>
+  <!-- Nav (mirrors the home page chrome) -->
+  <header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+    <a href="/" class="flex items-center gap-2" aria-label="kazi home">
+      <img src="/logo/kazi-mark.svg" alt="" width="34" height="34" />
+      <span class="ui-strong text-xl font-bold tracking-tight">kazi</span>
+    </a>
+    <nav class="flex items-center gap-6 text-sm" aria-label="Primary">
+      <a href="/#try" class="ui-body ui-link">Try it</a>
+      <a href="/#how" class="ui-body ui-link">How it works</a>
+      <a href="/blog" class="ui-body ui-link">Blog</a>
+      <a
+        href={repoHref}
+        class="ui-outline rounded-lg border px-3 py-1.5 font-medium">GitHub</a
+      >
+    </nav>
+  </header>
+
+  <main>
+    <section class="mx-auto max-w-3xl px-6 pb-6 pt-12 sm:pt-16">
+      <p class="ui-muted text-sm">
+        <a href="/blog" class="ui-link">&larr; All posts</a>
+      </p>
+      <h1
+        class="ui-strong mt-4 text-balance text-4xl font-extrabold tracking-tight sm:text-5xl"
+      >
+        {SERIES_TITLE}
+      </h1>
+      <p class="ui-body mt-5 max-w-2xl text-pretty text-lg">
+        A twelve-part series. It walks from a vanilla coding-agent workflow —
+        prompting by feel — up the same ladder we climbed: persistent context,
+        knowledge tiers, real-world verification, structural understanding,
+        reusable skills, a written plan, an honest definition of done, and safe
+        parallelism — to a reconciliation workflow. Each post is independently
+        useful, and each ends on the limitation that motivates the next.
+      </p>
+      <p class="ui-muted mt-4 max-w-2xl text-pretty text-sm">
+        Parts marked <span class="ui-strong">coming</span> are still being
+        written; published parts link through to the post.
+      </p>
+    </section>
+
+    <!--
+      Explanatory diagrams (T38.20, ADR-0048 dec. 7): the series cannot be
+      text-only — the reader should SEE the loop, the ladder, and the without/with
+      contrast. These are hand-authored SVGs in the site's visual language (the
+      ADR-0018 cyan→blue→violet gradient on the ink surface), not ad creative, each
+      with descriptive alt text.
+    -->
+    <section
+      class="mx-auto max-w-3xl px-6 pb-10"
+      aria-labelledby="series-diagrams-heading"
+    >
+      <h2
+        id="series-diagrams-heading"
+        class="ui-strong text-xl font-semibold tracking-tight"
+      >
+        See the loop, the ladder, and the contrast
+      </h2>
+      <div class="mt-6 space-y-10">
+        <figure>
+          <img
+            src="/diagrams/reconcile-loop.svg"
+            alt="Diagram of the kazi reconcile loop: observe, diff, dispatch, re-observe, decide — repeating while predicates still fail, and exiting only on converged, stuck, or over budget."
+            class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
+            width="960"
+            height="360"
+            loading="lazy"
+          />
+          <figcaption class="ui-muted mt-3 text-center text-xs">
+            The loop the whole series climbs toward: declare the goal as
+            predicates, drive an agent, check against reality, repeat.
+          </figcaption>
+        </figure>
+        <figure>
+          <img
+            src="/diagrams/ladder.svg"
+            alt="Diagram of the twelve-rung ladder from vibe coding at the bottom to a reconciliation workflow at the top; each rung is independently useful and you can start at any rung."
+            class="ui-hairline mx-auto w-full max-w-md rounded-xl border shadow-2xl shadow-black/40"
+            width="760"
+            height="620"
+            loading="lazy"
+          />
+          <figcaption class="ui-muted mt-3 text-center text-xs">
+            The rungs, bottom to top. Each post is one rung; you can start
+            wherever you are today.
+          </figcaption>
+        </figure>
+        <figure>
+          <img
+            src="/diagrams/before-after.svg"
+            alt="Before-and-after diagram contrasting working without kazi (trusting the agent's word, parallel agents colliding, green-on-a-laptop, stopping when it feels finished) against with kazi (every predicate verified with evidence, leased blast radius, a live deployed probe, and stopping only on converged, stuck, or over budget)."
+            class="ui-hairline w-full rounded-xl border shadow-2xl shadow-black/40"
+            width="960"
+            height="430"
+            loading="lazy"
+          />
+          <figcaption class="ui-muted mt-3 text-center text-xs">
+            The without/with contrast the series argues for, rung by rung.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-3xl px-6 pb-20">
+      <ol class="space-y-3" id="series-parts">
+        {
+          rows.map(({ part, title, description, post }) => (
+            <li class="ui-card rounded-2xl border p-5" data-part={part}>
+              <div class="flex items-start gap-4">
+                {/* Per-post header art (T38.20): the same SVG each post wires as
+                    its `ogImage`/`heroAlt` header when it ships (T38.6+); shown
+                    here as a thumbnail so the art renders before the posts do. */}
+                <img
+                  src={`/blog/art/part-${String(part).padStart(2, "0")}.svg`}
+                  alt={`Header art for Part ${part} of ${SERIES_TITLE}: ${title}. Rung ${part} of 12 on the kazi gradient.`}
+                  width="160"
+                  height="90"
+                  class="ui-hairline aspect-video w-20 shrink-0 rounded-lg border sm:w-40"
+                  loading="lazy"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {post ? (
+                      <a
+                        href={`/blog/${post.id}`}
+                        class="ui-strong text-lg font-semibold hover:underline"
+                      >
+                        {title}
+                      </a>
+                    ) : (
+                      <span class="ui-strong text-lg font-semibold">{title}</span>
+                    )}
+                    {post ? (
+                      <span class="ui-chip ui-body shrink-0 rounded-md border px-2 py-0.5 text-xs">
+                        published
+                      </span>
+                    ) : (
+                      <span class="ui-chip ui-muted shrink-0 rounded-md border px-2 py-0.5 text-xs">
+                        coming
+                      </span>
+                    )}
+                  </div>
+                  <p class="ui-body mt-2 text-sm leading-relaxed">
+                    {description}
+                  </p>
+                </div>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+  </main>
+
+  <!-- Footer (mirrors the home page chrome) -->
+  <footer class="ui-hairline border-t">
+    <div
+      class="ui-muted mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm sm:flex-row"
+    >
+      <div class="flex flex-col items-center gap-1 sm:items-start">
+        <div class="flex items-center gap-2">
+          <img src="/logo/kazi-mark.svg" alt="" width="22" height="22" />
+          <span>kazi &middot; Apache-2.0 &middot; &copy; Sire Run, Inc.</span>
+        </div>
+        <span
+          >Built by the team behind <a href="https://sire.run" class="ui-link"
+            >Sire</a
+          >.</span
+        >
+      </div>
+      <nav class="flex items-center gap-5" aria-label="Footer">
+        <a href="/blog" class="ui-link">Blog</a>
+        <a href={repoHref} class="ui-link">GitHub</a>
+        <a href={`${REPO}/releases`} class="ui-link">Releases</a>
+        <a href={`${REPO}/blob/main/docs/concept.md`} class="ui-link">Concept</a>
+      </nav>
+    </div>
+  </footer>
+</Layout>

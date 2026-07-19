@@ -1,0 +1,105 @@
+import Config
+
+# kazi's local read-model is a SQLite (WAL) projection of the kazi.events log:
+# predicate/iteration history and convergence analytics. It is rebuildable and
+# never authoritative (concept §7 — CQRS: JetStream is the coordination truth,
+# SQLite is a disposable projection).
+config :kazi, ecto_repos: [Kazi.Repo]
+
+# kazi is a CLI: stdout is the program's output surface (prose, or a single JSON
+# object under --json), stderr is diagnostics. The default `:logger` handler
+# writes to `:standard_io` (stdout) unless told otherwise, so an Ecto migrator/OTP
+# log line (e.g. "Migrations already up") would otherwise land on stdout ahead of
+# the JSON object and break a `jq`-based parse (issue #804). Route it to stderr
+# everywhere, not just under --json, so the byte-clean-stdout contract holds
+# unconditionally.
+config :logger, :default_handler, config: [type: :standard_error]
+
+# JSON library Ecto uses to (de)serialize :map columns (the predicate vector and
+# action params are stored as JSON text in SQLite).
+config :ecto_sqlite3, json_library: Jason
+
+# Phoenix uses Jason for JSON across the framework.
+config :phoenix, :json_library, Jason
+
+# ADR-0061 decision 6 / ADR-0060 guardrail 4: the episodic attempt ledger ships
+# behind a flag, DEFAULT OFF, until the ADR-0046 benchmark proves it pays rent.
+# With the default `false` the dispatch prompt carries no ATTEMPT LEDGER
+# section — byte-identical to before the ledger existed (see docs/memory.md).
+config :kazi, :attempt_ledger, false
+
+# ADR-0062 decision 4 / ADR-0060 guardrail 4: semantic recall over the
+# git-native corpus (`Kazi.Memory.SemanticIndex`) also ships behind a flag,
+# DEFAULT OFF, until it pays rent under the ADR-0046 envelope. With the
+# default `false` the dispatch prompt carries no recalled-knowledge section —
+# byte-identical to before this layer existed (see docs/memory.md).
+config :kazi, :memory_recall, false
+
+# Slice-3 operator dashboard endpoint (ADR-0011, T3.6). Compile-time defaults
+# shared by all envs; per-env http binding / server enablement / secrets are set
+# in dev.exs / test.exs / prod.exs. The endpoint is asset-free (no esbuild), so
+# there is no live_reload or watchers block.
+config :kazi, KaziWeb.Endpoint,
+  url: [host: "localhost"],
+  render_errors: [formats: [html: KaziWeb.ErrorHTML], layout: false],
+  pubsub_server: Kazi.PubSub,
+  live_view: [signing_salt: "kazi-live"]
+
+# T65.4 (#1430): the tombstone-alias grace window for a bus rename. When
+# `kazi bus name` renames an already-named session, the OLD name lingers as a
+# resolvable tombstone-alias for this many seconds so an in-flight
+# `bus tell <old-name>` still lands (with a renamed-notice on the sender's ack);
+# after the window it errors with the current name as a hint. Default 10 minutes.
+config :kazi, :bus_rename_grace_s, 600
+
+# T67.3 (ADR-0079 / ADR-0034): the opt-in session-stats velocity collector is
+# DISABLED by default. A machine reads NO local transcript until the operator
+# opts in here (`enabled: true`) or via the `KAZI_VELOCITY_COLLECTOR` env
+# override. See `docs/velocity-collector.md` for the privacy contract (what is and
+# is NOT collected).
+#
+# T67.6 (ADR-0079): when enabled, the daemon's `Kazi.Daemon.VelocityTicker` runs
+# the collector every `:interval_s` seconds (default 300) over `:transcript_dir`
+# (default `~/.claude/projects`, the standard Claude Code transcript location).
+# A disabled collector reads no transcript -- the ticker only performs the gate
+# check each interval.
+#
+# T67.6 finding 2: `:workspaces` is a list of git workspace paths whose DELIVERY
+# events (plan ticks + PR merges) the same ticker projects into `delivery_events`
+# after session collection each tick (default `[]` -- no projection). The scan is
+# incremental and the upsert idempotent; a failing workspace is skipped, never
+# crashing the ticker. Unlike session collection this is NOT gated on `enabled`.
+config :kazi, :velocity_collector,
+  enabled: false,
+  interval_s: 300,
+  workspaces: []
+
+# Default (dev) read-model database. WAL keeps reads (the LiveView console,
+# analytics queries) from blocking the projector's writes (concept §7).
+#
+# `busy_timeout`: every `kazi` process on a machine shares one read-model DB
+# (`~/.kazi/kazi.db`, runtime.exs), so a fleet of concurrent `kazi apply`
+# runs contend for the single WAL writer. exqlite's 2s default surfaces as
+# SQLITE_BUSY wedges once a handful of processes overlap; 60s lets a waiting
+# writer ride out another process's write burst instead of erroring.
+#
+# `default_transaction_mode: :immediate` (T59.5, #1025/#1186): a DEFERRED
+# transaction (exqlite's default) takes only a read lock at BEGIN and upgrades
+# to a write lock on the first write. If another connection holds the writer at
+# that moment, SQLite returns SQLITE_BUSY *immediately* and does NOT honor
+# `busy_timeout` on the upgrade (rolling back the read snapshot could break
+# serializability). So `busy_timeout` silently failed to cover any
+# read-then-write transaction — the `proposed_goals` upsert in
+# `Kazi.Authoring.persist/3` reached via `kazi plan` flaked with "Database busy"
+# under a parallel suite. IMMEDIATE takes the write lock at BEGIN, where
+# `busy_timeout` DOES apply, so a contended writer waits instead of erroring.
+# ecto_sqlite3 recommends IMMEDIATE for balanced read/write workloads like this
+# shared read-model. See test/kazi/read_model/transaction_mode_test.exs.
+config :kazi, Kazi.Repo,
+  database: Path.expand("../priv/kazi_dev.db", __DIR__),
+  journal_mode: :wal,
+  busy_timeout: 60_000,
+  default_transaction_mode: :immediate,
+  pool_size: 5
+
+import_config "#{config_env()}.exs"

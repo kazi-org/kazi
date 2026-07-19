@@ -1,0 +1,32 @@
+# Recipe (T32.9, ADR-0043): performance ratchet — latency may not regress.
+#
+# A benchmark run (Criterion, bencher.dev, hyperfine, JMH, ...) emits a scalar —
+# here a p95 latency in milliseconds. Performance is a PRESENCE/CLAIM signal: a
+# single number that should only get better, so it is gated with the T32.3
+# `ratchet` mode rather than failed directly. Latency is `lower_better` (up is a
+# regression), the baseline is the metric's own stored last-passing value, and a
+# small `allowed_regression` budget (2.0 ms) absorbs measurement noise.
+#
+# Evidence tier: PRESENCE / CLAIM (ratchet against a baseline) — the gate only
+# fires on a regression beyond the budget, so pre-existing latency never blocks.
+#
+# The `metric` table declares how to read the number: run `cmd`/`args` and read
+# `path` off the benchmark's JSON stdout. Swap `baseline = "stored"` for a git ref
+# (e.g. `"main"`) to gate "no slower than main" instead.
+#
+#     kazi apply priv/examples/recipe_perf_ratchet.toml --workspace .
+#
+# See docs/custom-script-recipes.md, docs/ratchet-predicate.md, and
+# `kazi schema ratchet`.
+
+id = "recipe-perf-ratchet"
+name = "Performance: p95 latency may not regress"
+
+[[predicate]]
+id = "p95-latency-no-regression"
+provider = "ratchet"
+description = "p95 latency stays at or below its stored baseline (within a 2 ms budget)"
+baseline = "stored"
+direction = "lower_better"
+allowed_regression = 2.0
+metric = { cmd = "scripts/bench", args = ["--json"], path = "$.benchmarks[0].p95_ms" }

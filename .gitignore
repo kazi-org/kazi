@@ -1,0 +1,71 @@
+# Elixir / Mix
+/_build/
+/cover/
+/deps/
+/doc/
+/.fetch
+erl_crash.dump
+*.ez
+*.beam
+/config/*.secret.exs
+.elixir_ls/
+kazi-*.tar
+
+# Built escript binary (`mix escript.build` — do not commit, T0.10)
+/kazi
+
+# SQLite local read-model
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+
+# env
+.env
+
+# Node / Playwright runtime for the :browser provider (T2.2). The runner script
+# (priv/browser/playwright_runner.js) is committed; its installed deps are not —
+# real use runs `npm i playwright && npx playwright install chromium` locally.
+node_modules/
+priv/browser/node_modules/
+package-lock.json
+
+# Playwright output for the dashboard browser harness (T3.6a). The harness
+# (playwright.config.ts + test/playwright/) is committed; its run artifacts are
+# per-run and ignored.
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright/
+
+# Claude Code coordination artifacts (per-machine)
+.claude/scratch/
+.claude/worktrees/
+.claude-checkpoint.*.md
+
+# Per-dispatch, per-workspace kazi artifacts (T4.4, ADR-0010): the orientation
+# pack (`.kazi/context.md`) is regenerated fresh each dispatch, and `.mcp.json`
+# is machine-local MCP client wiring written into the target workspace ahead of
+# a dispatch (docs/devlog.md) — neither is a repo source file. `.kazi/goals/`
+# is the opposite: hand-authored, durable goal-files with their own lifecycle
+# (ADR-0059) — un-ignore that one subdirectory explicitly. A bare `/.kazi/`
+# blocks git from descending into it at all, so this ignores `.kazi/`'s direct
+# children instead and re-includes `goals/` specifically (a landmine found and
+# fixed live in a downstream repo before it bit this one — see ADR-0059).
+/.kazi/*
+!/.kazi/goals/
+# `visual` assertion baselines (T43.3, UC-056): committed alongside the code they
+# pin, so un-ignore them the same way as goals/. The `.kazi/visual-diffs/` output
+# stays ignored (a transient per-run artifact).
+!/.kazi/visual-baselines/
+/.mcp.json
+
+# Added by code-review-graph
+.code-review-graph/
+
+# Machine-local agent/tooling artifacts (never repo sources)
+/.claude/
+/.cursorrules
+/.opencode.json
+/.windsurfrules
+/graphify-out/

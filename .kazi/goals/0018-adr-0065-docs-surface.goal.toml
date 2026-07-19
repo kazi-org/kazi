@@ -1,0 +1,61 @@
+# E50/T50.6 (ADR-0034 docs-land-with-code closeout for ADR-0065). DEPENDS ON:
+# goals 0013 (T50.1), 0015 (T50.3), and 0017 (T50.5) merged to main -- the
+# brief's precondition check enforces this. Wave E50-3.
+# Conflict surface: README.md, docs/orchestrator-recipe.md, docs/schemas/.
+
+id = "adr-0065-docs-surface"
+name = "T50.6: the ADR-0065 surface is documented end to end -- help text, orchestrator recipe, README, schema docs, issue closeout"
+
+[[predicate]]
+id = "docs-coverage-test"
+provider = "custom_script"
+description = """
+TASK BRIEF (epic E50 task T50.6; ADR-0034 docs-land-with-code applied to the whole ADR-0065 surface, docs/adr/0065-safe-concurrent-work-serial-worktree-fleet.md).
+
+PRECONDITIONS (verify on main; if any is absent, STOP and report): --in-place (T50.1/goal 0013), --pause-between-waves + --resume (T50.3/goal 0015), and --fleet + --fleet-concurrency (T50.5/goal 0017) are all shipped. Each task landed its own doc slice; this task is the COHERENCE pass -- one voice across the surfaces, nothing missed, plus the issue closeout.
+
+BUILD THIS: (1) HELP: every new flag (--in-place, --pause-between-waves, --resume, --fleet, --fleet-concurrency) appears in the kazi help text (lib/kazi/cli.ex @flag_docs + the apply USAGE block near the top of the help, which today shows --parallel/--explain/--check variants -- add the --fleet and pause/resume forms) and in `kazi help --json` (generated from the command table -- verify the apply command's flags allow-list at @commands includes them all); (2) docs/orchestrator-recipe.md: a coherent ADR-0065 section that reads as ONE story -- workspace-as-base semantics + --in-place, the supervised-checkpoint walkthrough (--pause-between-waves then --resume), and a FULL fleet walkthrough: a directory of NNNN-slug.goal.toml files (ADR-0059 naming), [metadata] depends_on, scope-overlap inference and its escape hatches, --explain output, execution with a concurrency cap, the economy rollup -- an orchestrating agent should be able to drive a fleet from this section alone; (3) README.md: the parallel/safety story mentions worktree-by-default serial isolation and fleets (one short paragraph or bullet -- match the README's existing register; no vaporware: describe only what shipped); (4) docs/schemas/run-result.md + docs/schemas/collective-result.md: verify the resume-handle and fleet-result fields the earlier tasks added are documented; ALSO close a documented gap found during planning: NEITHER schema doc has a --stream section -- add one documenting the iteration event and the frontier_complete event shapes (both carry schema_version 2; the terminal object has no event key and ends the stream); (5) ADR-0065 status: flip Proposed -> Accepted ONLY if the operator has signed off (check the ADR's current status on main; if still Proposed, leave it and note it in the PR body -- do not self-accept an ADR); cross-link ADR-0065 from the recipe + schema sections you touch; (6) ISSUE CLOSEOUT: comment on github issues #937 and #936 pointing at the shipped surface (gh issue comment 937 --body ... / gh issue comment 936 --body ... -- one short comment each naming the flags and the ADR; do NOT close #937 yourself unless its full checklist is genuinely covered -- state honestly which gaps shipped; #936's full ask is covered by --pause-between-waves, say so and let the maintainer close).
+
+WRITE test/kazi/cli_adr_0065_docs_test.exs: an ExUnit test that renders the help surface WITHOUT a built binary (call the help/usage rendering seam in Kazi.CLI directly, or drive Kazi.CLI.run(["help"]) capturing IO, and parse `help --json` output the way the existing skill/CLI coherence tests do -- see test files matching *coherence* or *help* for the established pattern) and asserts every ADR-0065 flag name appears in BOTH the human help text and the help --json apply flags. Keep it a pure string/JSON assertion -- no network, no binary build.
+
+ALSO SATISFY (checked by a separate grep predicate on this goal): docs/orchestrator-recipe.md contains --fleet, --pause-between-waves, --in-place, and depends_on; README.md mentions fleet; docs/schemas/run-result.md and docs/schemas/collective-result.md each contain a --stream section mentioning frontier_complete.
+
+PROCESS: branch task/adr-0065-docs off main; small conventional commits, ONE DIRECTORY PER COMMIT (lib/ vs test/ vs docs/ vs README.md separate -- the repo rule is strict here); push with -u. This predicate passes when the new test file passes.
+"""
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test test/kazi/cli_adr_0065_docs_test.exs']
+timeout_ms = 300000
+
+[[predicate]]
+id = "docs-mention-surface"
+provider = "custom_script"
+description = "The written docs actually cover the ADR-0065 surface: recipe mentions --fleet/--pause-between-waves/--in-place/depends_on, README mentions fleet, both schema docs document the --stream events including frontier_complete."
+cmd = "sh"
+args = ["-c", 'grep -q -- --fleet docs/orchestrator-recipe.md && grep -q -- --pause-between-waves docs/orchestrator-recipe.md && grep -q -- --in-place docs/orchestrator-recipe.md && grep -q depends_on docs/orchestrator-recipe.md && grep -qi fleet README.md && grep -q frontier_complete docs/schemas/run-result.md && grep -q frontier_complete docs/schemas/collective-result.md']
+timeout_ms = 30000
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green (the help coherence tests are part of it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false mix test']
+timeout_ms = 600000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000

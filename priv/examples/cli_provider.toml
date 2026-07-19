@@ -1,0 +1,111 @@
+# Example kazi goal-file: assert a SHIPPED binary actually runs (T43.7, UC-055).
+#
+# `mix test` proves the code compiles; it does NOT prove the PACKAGED binary boots
+# and answers on a real $PATH. The `cli` provider (Kazi.Providers.Cli) closes that
+# gap: it runs a declared command and gates on the observable surface a user sees —
+# the exit code and the stdout/stderr streams. A binary that cannot launch is an
+# :error (infra, not failing work); a violated assertion is a :fail carrying
+# expected-vs-found evidence.
+#
+#     kazi apply priv/examples/cli_provider.toml --workspace . --check
+#
+# See Kazi.Providers.Cli and `kazi schema cli`.
+
+id = "cli-kazi-binary-runs"
+name = "CLI: the kazi binary runs as a user invokes it"
+
+[budget]
+max_iterations = 10
+
+# `kazi version` exits 0 and prints a line naming the tool. This is the exact
+# golden invocation that WOULD HAVE red-flagged the CLI-path boot crashes that
+# passed `mix test` (a :noproc on the read-model, the RELEASE_* env leak).
+[[predicate]]
+id = "kazi-version-runs"
+provider = "cli"
+description = "kazi version exits 0 and names the tool on stdout"
+cmd = "kazi"
+args = ["version"]
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.assertions]]
+target = "stdout"
+match = "contains"
+expected = "kazi"
+
+# `kazi version --json` emits a stable machine envelope; gate on the parsed
+# schema_version via a json_path matcher (parse stdout as JSON, extract the path,
+# compare to the expected value) — not the exit code, not a brittle substring.
+[[predicate]]
+id = "kazi-version-json-envelope"
+provider = "cli"
+description = "kazi version --json returns the versioned result envelope"
+cmd = "kazi"
+args = ["version", "--json"]
+
+[[predicate.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.assertions]]
+target = "stdout"
+match = "json_path"
+path = "$.schema_version"
+expected = 2
+
+# A SCRIPT of ordered sub-invocations of the SAME binary (T43.8): `version` then
+# `version --json` must BOTH succeed, back to back. The predicate passes only when
+# every step passes and names the first failing step; `samples = 3` then requires
+# THREE consecutive clean passes before it is considered stably green (flake
+# detection, the browser-provider shape) — so an intermittent boot crash cannot
+# sneak through on a lucky single run.
+[[predicate]]
+id = "kazi-core-flow-stable"
+provider = "cli"
+description = "version then version --json both succeed, 3 runs in a row"
+cmd = "kazi"
+samples = 3
+
+[[predicate.script]]
+args = ["version"]
+
+[[predicate.script.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.script.assertions]]
+target = "stdout"
+match = "contains"
+expected = "kazi"
+
+[[predicate.script]]
+args = ["version", "--json"]
+
+[[predicate.script.assertions]]
+target = "exit_code"
+expected = 0
+
+[[predicate.script.assertions]]
+target = "stdout"
+match = "json_path"
+path = "$.schema_version"
+expected = 2
+
+# A GOLDEN snapshot (T43.8): the whole stdout must equal a COMMITTED golden file,
+# so any drift in the help/usage text trips a diff. Capture it once with
+# `kazi --help > test/golden/kazi_help.txt` and commit it, then uncomment:
+#
+# [[predicate]]
+# id = "kazi-help-golden"
+# provider = "cli"
+# description = "kazi --help matches its committed golden snapshot"
+# cmd = "kazi"
+# args = ["--help"]
+#
+# [[predicate.assertions]]
+# target = "stdout"
+# match = "golden"
+# golden = "test/golden/kazi_help.txt"

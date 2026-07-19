@@ -1,0 +1,1122 @@
+# kazi lore -- invariants, landmines, gotchas
+
+Append-only, topic-ordered, greppable by tag. Grep before debugging. This file
+is part of kazi memory's corpus (`docs/memory.md` -- see "Boundary: kazi
+memory vs. Claude Code memory vs. docs/lore.md / docs/devlog.md"): entries
+here are recalled at dispatch time (ADR-0062) and new ones can be proposed
+here by harvest (ADR-0063).
+
+Id allocation (T56.3, #1220): do NOT pick the next L-NNNN from your local
+tree -- parallel pool tasks and merged-but-unpulled work make local numbering
+stale, the same hazard the /apply teammate contract guards for migrations.
+Run `python3 .github/scripts/lore_ids.py --next` (fetches origin/main and
+allocates above the remote AND local max). CI blocks a PR that introduces a
+duplicate id (`lore_ids.py --check`, oss-gates).
+
+## Deploy / Cloud Run
+
+### L-0001 #deploy #gcp #cloudrun #iam -- `run deploy --source` needs artifactregistry.admin on first deploy
+`gcloud run deploy --source .` (used by `.github/workflows/deploy-fixture.yml`)
+auto-creates an Artifact Registry repo named `cloud-run-source-deploy` on the
+FIRST deploy to a project/region. That create needs the permission
+`artifactregistry.repositories.create`, which is in `roles/artifactregistry.admin`
+but NOT in `roles/artifactregistry.writer`. Symptom in the deploy log:
+`PERMISSION_DENIED: Permission 'artifactregistry.repositories.create' denied`.
+Fix: grant the deploy service account `roles/artifactregistry.admin` (or pre-create
+the repo once: `gcloud artifacts repositories create cloud-run-source-deploy
+--repository-format=docker --location=$REGION`). The `--source` build also runs via
+Cloud Build, so the SA needs `roles/cloudbuild.builds.editor` + `roles/storage.admin`
+and the `cloudbuild.googleapis.com` API enabled. (T0.6h / T0.12, 2026-06-22.)
+
+### L-0002 #deploy #gcp #cloudrun #iam #cloudbuild -- the BUILD runs as the default compute SA, which needs build roles
+`gcloud run deploy --source .` builds via Cloud Build, and on a fresh project the
+build runs as the project's DEFAULT COMPUTE ENGINE service account
+(`PROJECT_NUMBER-compute@developer.gserviceaccount.com`), NOT the deploy SA that
+authenticated. That compute SA has no permissions by default, so the build fails
+reading the uploaded source. Symptom: `INVALID_ARGUMENT: Invalid build request.
+could not resolve source: ... PROJECT_NUMBER-compute@developer.gserviceaccount.com
+does not have storage.objects.get access to ... buckets/run-sources-...`. Fix:
+grant the COMPUTE SA the Cloud Build builder bundle (covers source storage read,
+Artifact Registry push, and log write):
+`gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:$PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role="roles/cloudbuild.builds.builder"`.
+The project number is in the error string. This is distinct from L-0001 (that one
+is the DEPLOY SA needing AR admin; this one is the BUILD SA needing build roles).
+(T0.6h / T0.12, 2026-06-22.)
+
+### L-0003 #deploy #cloudrun #fixture #livecheck -- Cloud Run intercepts the exact path `/healthz`
+Cloud Run's front end swallows the EXACT request path `/healthz`: it returns a
+Google-branded 404 and the request never reaches the container (no entry in
+`gcloud run services logs read`). Every other path -- `/`, `/health`, `/healthzz`,
+`/HEALTHZ` -- reaches the app normally. So a service that exposes its liveness
+endpoint at `/healthz` is unprobeable through its Cloud Run URL. Fix: use a
+non-reserved path (we moved the fixture's health route to `/livez`). This bit the
+T0.12 dogfood: the deploy + public-access were fine, but the live `http_probe`
+against `/healthz` always 404'd from the edge. (T0.12, 2026-06-22.)
+
+### L-0004 #provider #http_probe #goalfile #livecheck -- body_match="exact" string + "ok"⊂"not-ok" false-pass
+A TOML goal-file can only supply `body_match = "exact"` as a STRING (TOML has no
+atoms; `Kazi.Goal.Loader` passes config values verbatim). The http_probe provider
+originally matched only the `:exact` ATOM, so a goal-file's `"exact"` silently
+degraded to the default substring-contains. Combined with the fixture body, that
+caused a FALSE PASS: expecting `"ok"` matched `"not-ok"` because "not-ok" CONTAINS
+"ok". Two lessons: (1) providers must accept string config values from goal-files,
+not only atoms (fixed: `body_matches?` accepts `:exact` and `"exact"`); (2) never
+pick a liveness sentinel that is a substring of the success value — use exact match
+or a non-overlapping token. Surfaced by the T0.12 dogfood. (2026-06-22.)
+
+## Release / CI / Burrito
+
+### L-0005 #release #ci #burrito #cache -- cache a release `_build` and `mix release` skips the Burrito wrap
+The release workflow (`.github/workflows/release.yml`) caches `deps` + `_build`
+across runs. The FIRST run (cold cache) built fine; a LATER run with the warm
+cache failed at the checksum step with `cd: burrito_out: No such file or
+directory`. Root cause: `mix release` saw the already-assembled
+`_build/prod/rel/kazi` from the restored cache and -- non-interactive, no
+overwrite -- SKIPPED re-assembly and the Burrito wrap step, so `burrito_out/` was
+never produced. The failure surfaces one step LATER (checksum), masking the real
+cause. Fix: `mix release --overwrite` forces a fresh assemble + wrap every run
+while keeping the cache for compile speed. The container arm64 job never hit this
+because it has no cache step. Landmine: ALSO mind that deleting a GitHub Release
+before its replacement has built leaves the Homebrew formula pointing at missing
+assets -- build the new release FIRST, then swap. (E6 / T6.3, 2026-06-22.)
+
+### L-0019 #release #homebrew #tap #onramp -- the Homebrew tap lags the latest release, so `brew install` ships a STALE binary
+`brew install kazi-org/tap/kazi` does NOT track the newest GitHub release
+automatically -- the tap formula is bumped separately, and it drifts behind. As
+of the T16.6 dogfood (2026-06-25) the tap still served **1.41.1** while the
+latest release was **v1.46.2+**. That matters because behavioral fixes ride the
+binary: 1.41.1 carries the BROKEN prose on-ramp (the `kazi plan` "proposal is not
+valid JSON" / "proposal has no predicates" bug fixed in T26.8 and shipped in
+v1.46.x). Consequence: a user who `brew install`s kazi, runs `kazi install-skill`
+(the skill content is correct and version-agnostic), and follows the skill's
+`plan -> approve -> apply` flow FAILS at the very first step (`plan`) on the stale
+binary -- even though the released binary converges the same goal end to end. The
+skill is not the gate; the packaged binary is. Fix: auto-bump the tap on every
+release so `brew install` is never more than one version behind. Until then,
+verify on-ramp behavior against the DOWNLOADED release binary
+(`gh release download <tag> -R kazi-org/kazi`), never the `brew`-installed one,
+and tell brew users to upgrade. (E16 / T16.6, 2026-06-25.)
+
+### L-0036 #release #burrito #vendored-zig #landmine -- installing/running a newer burrito binary can UNCONDITIONALLY DELETE a still-executing older BEAM's own unpacked ERTS payload
+Every burrito-built `kazi` launch runs `do_clean_old_versions` (vendored Zig,
+`deps/burrito/src/maintenance.zig:75-108`, called from
+`deps/burrito/src/wrapper.zig:109-110`) BEFORE any BEAM/Elixir code loads. It
+iterates sibling install dirs under `~/Library/Application
+Support/.burrito/` and unconditionally `std.fs.deleteTreeAbsolute`s any
+OLDER-version payload -- with NO PID/liveness check. There is no Elixir-side
+seam to intercept this: it is native code that runs ahead of the runtime that
+would otherwise host a fix. Consequence: a long `kazi apply` run (or a standing
+`kazi dashboard`) built from an older payload does not always crash
+immediately when a newer binary is installed/run alongside it -- it can keep
+running for a while on already-loaded/mmap'd pages -- but WILL crash on its
+next LAZY module load (observed failure signature: `io_lib_pretty,nofile` ->
+kernel logger crash -> Kernel pid terminated). Patching the vendored Zig (or
+keeping N-1 payloads with a liveness check) is real work, deliberately NOT done
+here. MITIGATION (issue #971): `kazi status` called with NO ref lists every
+run the registry currently considers LIVE (`Kazi.ReadModel.RunRegistry.list_live/1`
+-- `status == "running"` AND a heartbeat fresher than the existing staleness
+window, `stale?/2`'s `@stale_after_seconds`). Run this BEFORE `brew upgrade`/
+reinstalling a newer `kazi`; never install/run a newer binary while it reports
+any LIVE run. (Issue #971.)
+
+## Reconcile / surface scanner
+
+### L-0006 #reconcile #surface #scanner #deadcode -- the surface scan is APPROXIMATE: reflection and string-dispatch are invisible
+`Kazi.Reconcile.SurfaceScanner` (ADR-0021, decision 3) inventories a project's
+public surface (exported `def`s, Mix tasks) by parsing source ASTs statically. A
+static scan, by construction, CANNOT see surface that is reached dynamically:
+`apply(mod, fun, args)` with a runtime-computed function, a route/command table
+keyed by strings, a `Module.concat/1` or `String.to_existing_atom/1` lookup, a
+behaviour invoked through a registry. Those entry points are real surface but are
+INVISIBLE to the scan -- exactly the same blind spot the code-review-graph has
+(it never sees reflection or string dispatch). Consequence for the
+surface-coverage meta-predicate (T13.5): a dynamically-dispatched entry point will
+look UNOWNED ("dead") even when it is live, and a genuinely-dead `def` is only
+flagged if it is statically defined. This is why ADR-0021 mandates a "warn, don't
+auto-delete" posture and an explicit allow-list for intentional un-predicated /
+dynamic surface -- never let the scanner drive a destructive delete on its own. A
+file that does not parse is silently skipped (its surface is simply unreported),
+so a syntax error degrades coverage rather than crashing the scan. Always grep for
+a symbol as a literal string before trusting "this surface is dead." (T13.4,
+2026-06-23.)
+
+## Harness / CLI profiles
+
+### L-0007 #harness #antigravity #non-tty #stdout #landmine -- `antigravity -p` SILENTLY DROPS stdout under a non-TTY subprocess (#76); use `--prompt-file`
+kazi drives every harness as a NON-INTERACTIVE SUBPROCESS (no TTY) and parses its
+stdout (ADR-0001/ADR-0022). Google's Antigravity CLI (`antigravity`, also `agy`)
+has a load-bearing bug for exactly this mode: invoked with the bare `-p` /
+`--prompt` flag, it SILENTLY DROPS its stdout when stdout is not a TTY (a
+pipe/redirect/subprocess) -- issue `google-antigravity/antigravity-cli#76`. The
+process exits 0 with EMPTY stdout, so a naive `-p` profile parses nothing and the
+loop concludes the agent "said nothing" -- a fake non-result, not an error. The
+WORKAROUND (the only conformant path, ADR-0022 decision 3): write the prompt to a
+TEMP FILE and invoke `antigravity run --prompt-file <tmp> --output json --yes`
+(`--yes` auto-approves so it stays non-interactive); read the `--output json`
+envelope back. Because `Kazi.Harness.Profile.build_args` is PURE it cannot create
+the temp file mid-call, so the `:antigravity` profile declares `prompt_via: :file`
+and the `Kazi.Harness.CliAdapter` owns the temp-file IO: it writes the prompt to a
+`.kazi-prompt-*.txt` under the workspace, threads the path to `build_args` as
+`opts[:prompt_file]`, and DELETES it after dispatch (in an `after`, so it cleans up
+even on a missing-binary error or a raise). NEVER add a bare-`-p` Antigravity
+profile -- it will pass a TTY smoke run by hand and then silently no-op under kazi.
+The `:antigravity_live` smoke is the catch if a future release regresses the
+workaround (a dropped stdout -> no `:result` -> no convergence, reported honestly);
+Antigravity may need version pinning. (T14.3, 2026-06-23.)
+
+### L-0045 #harness #gemini #non-tty #stdout #auth #landmine -- gemini's non-TTY stdout is UNVERIFIED (fully-conformant `-o json` on theory); a credential-less `gemini -p` BLOCKS on interactive auth instead of erroring
+The `:gemini_cli` profile (`Kazi.Harness.Profiles.GeminiCli`, T37.1) is wired as a
+FULLY-CONFORMANT `-o json` profile (the Codex template, NOT Antigravity's
+`prompt_via: :file` workaround), on the THEORY that gemini's first-class
+`-o/--output-format json` is non-TTY-safe -- i.e. it does NOT drop stdout under a
+pipe the way `antigravity -p` does (#76, see [[L-0007]]). That theory is NOT yet
+live-verified: T37.2 built the `:gemini_cli_live` smoke (a convergence test plus a
+dedicated non-TTY stdout conformance test that runs the production argv under
+`System.cmd/3`'s pipe and asserts a non-empty, parseable `:result`), but it could
+NOT be run here because no `GEMINI_API_KEY`/`GOOGLE_API_KEY` was available -- an
+HONEST SKIP (the opencode-smoke precedent), not a verified pass. LANDMINE found
+while building it: with NO creds, `gemini -p "<prompt>" -o json` does NOT
+fast-fail -- it HANGS a non-interactive subprocess on interactive auth, emitting
+nothing (probed at v0.32.1, exit only on kill). So a credential-less environment
+cannot verify the success-path non-TTY stdout AT ALL; the smoke's `gemini_auth`
+preflight therefore REQUIRES an explicit key and skips honestly otherwise (never
+faking a green off an empty/hung stdout). VERSION NOTE: the profile's argv/parse
+were researched against `gemini` v0.38.2; the binary on this machine was v0.32.1
+-- the pinned version at which a maintainer confirms non-TTY safety (or catches a
+regression and drops to `prompt_via: :file`) MUST be recorded here when the live
+smoke is actually run with creds. Until then: gemini non-TTY conformance is
+ASSUMED, not proven. (T37.2, 2026-07-17.)
+
+### L-0029 #harness #childsupervisor #processgroup #shell #landmine -- a `kill <pid>` on a background watchdog leaves its OWN `sleep` grandchild running, delaying `System.cmd/3` by a whole poll interval
+`Kazi.Harness.ChildSupervisor.wrap/3` (issue #857) wraps every harness dispatch
+in a small `sh` script: a background watchdog subshell polls whether the
+controller is alive, sleeping `poll_interval` between checks. The FIRST version
+reaped that watchdog with a plain `kill "$watchdog_pid"` once the real dispatch
+finished. `kill <pid>` (no leading `-`) targets only that ONE process -- the
+watchdog SUBSHELL -- not its current `sleep N` invocation, which is a SEPARATE
+exec'd process (a child of the subshell). Killing the subshell does not kill
+that lingering `sleep`; it keeps running for up to one whole `poll_interval`,
+holding the SAME inherited stdout/stderr pipe `System.cmd/3` is reading from
+open the entire time. Since `System.cmd/3` waits for that pipe to reach EOF (all
+writers to close) before returning, EVERY dispatch was silently ~1 second
+slower than it needed to be (`poll_interval`'s default) -- invisible in an
+isolated shell-script prototype (which doesn't share a pipe with anything), only
+showing up as the WHOLE ExUnit suite mysteriously taking 100x longer once wired
+into `CliAdapter`. FIX: group-kill with the leading `-` (`kill -TERM
+-"$watchdog_pid"`), which (under `set -m` job control, where each backgrounded
+job gets its own process group) kills the subshell AND its `sleep` child
+together. Lesson: reaping a shell background job by pid alone is not enough
+when that job itself forks further children sharing your process's file
+descriptors -- always target the GROUP. (2026-07-06.)
+
+### L-0035 #harness #opencode #workspace #cwd #dir #landmine -- `opencode run` IGNORES the launch cwd; without `--dir <workspace>` the inner agent edits OUTSIDE the goal's workspace and the run never converges
+The `Kazi.Harness.CliAdapter` runs every harness with `System.cmd(..., cd:
+workspace)`, and for most harnesses that is what scopes the inner agent to the
+goal's `--workspace`. `opencode run` does NOT honor that launch cwd: it
+resolves its OWN project root (and may attach to a persistent opencode server
+whose working directory was fixed at server start), so the dispatched agent's
+edits land in opencode's resolved directory, not kazi's workspace. A dogfood
+run proved the failure mode is SILENT and looks like model failure: the inner
+local model SUCCEEDED at the fixture task (it wrote `hello.txt`), but the file
+landed in opencode's git/server root -- kazi's workspace-scoped predicate never
+saw it, so the run never converged and burned iterations on an agent that had
+already finished. FIX (T39.7): opencode exposes `--dir <path>` ("directory to
+run in, path on remote server if attaching"; verified against `opencode run
+--help`, v1.17.9), and the `:opencode` profile now renders `--dir <workspace>`
+from the CliAdapter-threaded `opts[:workspace]` on every dispatch. VERSION
+SENSITIVITY: both the cwd-ignoring behavior and the `--dir` flag are opencode
+implementation details pinned only against v1.17.9 -- if a future opencode
+release renames/drops `--dir` or changes project-root resolution, the same
+silent non-convergence returns; re-verify with `opencode run --help` and the
+`:opencode_live` smoke before trusting a bumped opencode. NEVER assume `cd:`
+alone isolates a harness -- prove it by asserting the edit lands in the
+workspace. (2026-07-08.)
+
+## Context / token efficiency
+
+### L-0008 #context #prompt #orientation #landmine -- T4.3 orientation-prefix is built but UNWIRED on the live loop
+The live dispatch path `Kazi.Loop.dispatch_prompt/2` (`lib/kazi/loop.ex:1208`) builds
+its OWN lean prompt -- working-set digest + `inspect(evidence)` + optional retrieval
+-- and does NOT call `Kazi.Harness.Prompt.build_prompt/3`. So the ranked orientation
+pack reaches the agent ONLY as the `.kazi/context.md` workspace file (which the agent
+must READ: tool calls + tokens, no prompt-cache discount), never as a stable prompt
+PREFIX. Do not assume "T4.3 done" (it has unit tests on `build_prompt/3`) means the
+live prompt carries the pack -- it does not. E19/T19.1 wires it. (Verified 2026-06-24
+by reading `dispatch_prompt/2`.)
+
+### L-0009 #context #cache #harness #invariant -- kazi drives a SUBPROCESS, so it cannot set Anthropic cache_control
+kazi shells out to `claude -p` (and opencode/codex) as a subprocess; it makes NO raw
+Anthropic API calls. Therefore kazi cannot attach `cache_control` to the prompt --
+the inner CLI manages its own caching. The ONLY prompt-cache lever kazi has is making
+its injected prefix BYTE-STABLE across iterations so the inner harness's own cache
+(5-min TTL) hits across kazi's separate stateless dispatches. Any claim that "kazi
+enables prompt caching" must mean prefix stability, not headers (ADR-0010 frames it
+this way). (2026-06-24.)
+
+## Read-model / persistence
+
+### L-0010 #readmodel #persistence #predicate #landmine -- errored-predicate evidence (tuples) crashes iteration persistence
+`Kazi.ReadModel.serialize_vector/1` (`read_model.ex:550`) stores a PredicateResult's
+`evidence` VERBATIM under the Ecto `:map` field. An `:error` result's evidence holds
+non-JSON terms -- e.g. `reason: {:cmd_unrunnable, "..."}` (a tuple) and atom keys --
+which fail the `:map` cast, so `record_iteration/1` RAISES and the iteration is never
+recorded (the on_iteration callback log fills with the raise). Evidence must be
+deep-sanitized to JSON-safe before insert. E18/T18.2 fixes it. (Observed in the token
+benchmark, 2026-06-24.)
+
+### L-0011 #readmodel #persistence #loop #landmine -- terminal/budget-stop re-persists the same iteration_index
+The loop's per-iteration callback AND the terminal/budget-stop callback both persist
+the SAME `(goal_ref, iteration_index)`, so the second insert hits the unique index
+`iterations_goal_ref_iteration_index_index` ("has already been taken") and is logged
+as a failure. Terminal persistence must be idempotent (skip-if-recorded or an
+`on_conflict` upsert). E18/T18.3 fixes it. (2026-06-24.)
+
+## Goal-file / providers
+
+### L-0012 #provider #test_runner #goalfile #landmine -- `cmd` is ONE executable, NOT a command line
+A `test_runner` predicate's `cmd` is passed straight to `System.cmd/3` as the
+executable; `args` is the (separate) argument list. `cmd = "go test ./..."` is parsed
+as a single binary named "go test ./..." -> `{:cmd_unrunnable, :enoent}` and the
+predicate ERRORS (not fails). Use `cmd = "go"`, `args = ["test", "./..."]`. The
+shipped `priv/examples/deploy_target.toml` had the wrong single-string form; E18/T18.1
+fixes it + adds a runnability guard over all shipped examples. (README quickstart 2
+already uses the correct split form.) (2026-06-24.)
+
+### L-0015 #provider #cve #govulncheck #landmine -- `govulncheck -json` exits 0 EVEN WITH vulns; gate on parsed output
+`govulncheck` returns a non-zero exit (3) when it finds vulns ONLY in its default
+text mode. Under `-json` / `-format json` it ALWAYS exits 0 regardless of findings
+(the structured-output mode suppresses the failure code). So a `:cve` (or any
+`custom_script`) check that trusts the exit code under JSON output reads "exit 0" as
+"no vulns" and FALSE-PASSES. The `:cve` provider (T32.8, ADR-0043) gates on the
+PARSED finding stream, never the exit code: a non-zero exit with NO parseable JSON is
+the only `:error` path; a parsed stream decides pass/fail. The same gotcha bites
+manifest-tier tools the other way -- `npm audit`/`grype` exit NON-zero WITH findings
+(`grype` exits 2, `npm audit` exits 1), so tier-2 also parses the count exit-code-
+agnostically. Reachability matters too: govulncheck emits a finding per OSV at
+increasing trace depth; a vuln is REACHABLE (safe to fail on) iff a finding's
+`trace` leaf frame carries a `function` (the vulnerable symbol is actually called),
+not merely imported. (2026-06-24.)
+
+## Benchmarking
+
+### L-0013 #benchmark #tokens #harness #method -- measure kazi tokens with a harness shim, in a REAL git repo
+kazi captures per-dispatch tokens internally (claude `--output-format json` -> result
+map) but PERSISTS/PRINTS no total, so the measurement seam is a SHIM: a wrapper named
+`claude`/`opencode` on PATH that tees the JSON envelope to a log, then sum
+input/output/cache tokens across `===CALL===` markers. Run each arm in a REAL git repo
+with workspace permissions granted (`.claude/settings.local.json` accept-edits +
+`Bash`; `opencode.json` edit/bash allow) -- NOT a `/tmp` scratch dir (opencode
+auto-rejects edits in external/scratch dirs, T8.11). macOS has no `timeout`; background
+the run and poll. Single-dispatch result (2026-06-24): kazi adds ~0% tokens vs vanilla
+claude; the multi-dispatch case is the open question (E19/T19.4). (2026-06-24.)
+
+## Concurrency / shared working tree
+
+### L-0014 #concurrency #git #worktree #landmine -- the operator runs many sessions in ONE shared working dir; uncommitted edits get wiped
+The operator runs several Claude Code sessions via `/loop /apply --pool` in the SAME
+working directory on `main`. Those sessions `git checkout` / `git pull --ff-only` /
+`git reset` the SHARED tree. So any UNCOMMITTED edits you hold -- and any UNTRACKED
+new file (a new ADR, a new test) -- can be discarded at any moment by a sibling
+process (observed 2026-06-24: a sibling reset wiped an in-progress ADR-0030 + plan +
+devlog draft; reflog showed `reset: moving to HEAD`). Branch checkouts do NOT protect
+you, because all branches share the one working tree in this dir.
+Fix: for any multi-file edit (a plan/ADR/docs change), work in an ISOLATED
+`git worktree add -b <branch> <path> origin/main`, edit + commit + push THERE, then
+PR. Within the worktree your tree is private to that path. If you must edit in the
+shared dir, commit immediately after each file (smallest possible uncommitted
+window); never hold uncommitted work across tool calls. This is the textual companion
+to the PreToolUse worktree hook + the CLAUDE.md Worktree Guardrail.
+
+### L-0037 #claims #pool #identity -- claim refs are unattributable: every pool session claims as the same identity string
+`claim.sh` mints claim commits as the repo's configured git user, so N pool
+sessions on one machine all claim as ONE identity -- when a shared-file lock
+(`R-<slug>`) went stale mid-wave, the coordinator could not tell WHICH session
+held it and had to broadcast release requests to every candidate (2026-07-16
+E55 wave A; one 45-minute stale hold serialized four tasks). Rule: treat any
+R-lock older than ~15 min as suspect; coordinator MAY break it (worktree
+isolation + the merge protocol absorb a parallel edit as a visible conflict,
+never lost work). Fix direction: claim.sh should embed the SESSION name
+(`kazi bus who` identity) in the claim message, and prefer fine-grained locks
+over mega-locks like R-cli-ex.
+
+### L-0038 #pool #worktree #tests -- fixed test ports and shared scratchpads collide across concurrent pool sessions
+Concurrent worktree suites on one machine race on every fixed resource:
+`TEST_HTTP_PORT` defaults (4002) held by a live apply run, "dedicated" ports
+claimed twice by different sessions, and the session-shared scratchpad
+overwriting one teammate's staged file with another's. Rule: derive per-run
+ports (unique_integer/ephemeral), never share a literal port in two prompts,
+and treat any cross-session file handoff as unsafe unless it carries the task
+id in its name. Also: a full suite under load-average >30 flakes in the
+documented assert_receive classes -- rerun-once before believing a failure,
+and let clean-runner CI arbitrate. (2026-07-16 E55 wave A.)
+
+## Enforcement / anti-gaming
+
+### L-0046 #enforcement #loop #worktree #invariant -- the checker-isolation seam is `run_provider/3`; scope clean-tree to graders only
+The ONLY place `Kazi.Loop` invokes a predicate provider is `run_provider/3`
+(`lib/kazi/loop.ex`), reached from `observe/2` -> `evaluate/4`; the checker cwd is
+`context.workspace` built by `provider_context/2` from `data.workspace` (the agent's
+working copy). That single seam is where T32.4 anti-gaming isolation sits. Two rungs
+(ADR-0042 §1; container isolation deferred): SEPARATE-PROCESS is ALREADY held -- the
+command-runner providers (`CustomScript`/`TestRunner`/`Ratchet` via `CommandRunner`)
+use `System.cmd`, a fresh OS subprocess distinct from the agent's `claude -p`
+dispatch -- so no change was needed for it. CLEAN-TREE is added by
+`observe_with_isolation/1` wrapping the tick in a throwaway detached worktree at
+`clean_ref` (`Kazi.Enforcement.Isolation.with_clean_tree/4` as of L-0024 -- see
+that entry, candidate-overlaid + `read_only_paths`-pinned, arity was `/3` at
+T32.4 -- the same `git worktree add --detach` pattern as
+`Kazi.Ratchet.resolve_git_ref/3`).
+LANDMINE: clean-tree MUST be scoped to the tamper-prone GRADERS (guard + held-out
+predicates), NOT all checkers -- running a visible iterating predicate from a clean
+ref would never see the agent's UNCOMMITTED work, so the loop could never converge
+(a deadlock). The visible predicates run against the working copy; only the graders
+are isolated. When the workspace is not a git repo the worktree-add fails, isolation
+DEGRADES to the working copy, and `:clean_tree` is dropped from the reported
+guarantees (`enforcement_status/1`) -- report the ACTUAL level, never a fabricated
+one. The clean worktree is a temp dir, always removed in an `after` (L-0014: a
+sibling can reset the shared tree). (2026-06-25, T32.4.)
+
+### L-0016 #enforcement #loop #gaming #diff #invariant -- the diff guard is ADVISORY: downgrade progress, never block convergence
+T32.5's `Kazi.Enforcement.DiffGuard` (ADR-0042 §5) scans the agent's `git diff HEAD`
+for gaming signatures (skip/xfail markers, `if <input> == <literal>` special-casing,
+grader-path edits) and is wired into `Kazi.Loop.flag_diff_gaming/1` AFTER the
+dispatch, next to the §2 read-only-lease flagging. LANDMINE: it is ADVISORY -- a hit
+must NOT fail the goal or touch the `:converged` gate. The "downgrade" is narrow: the
+flagged observation's index is recorded in `gaming_flagged_iterations`, and ONLY
+`code_history/1` (the history fed to the stuck detector) strips that observation's
+graded SCORE, so a GAMED apparent score improvement can't fire the ADR-0041
+graded-progress escape and rescue the loop from a stuck verdict. The STORED vector
+keeps its real score and the boolean failing-set logic is untouched -- if predicates
+genuinely pass, the loop still converges. Do NOT "harden" this into a hard block: the
+ratchets (§4) + read-only lease (§2) are the hard guard; this is the cheap
+early-warning layer with a low-false-positive bar (an `if mode == "create"` branch or
+a whitespace refactor must NOT flag). The diff source is an injectable `diff_fn`
+(default `git diff HEAD`); a crashing/non-git source degrades to "" -> no events, so
+the guard can never break the tick. New untracked files don't appear in
+`git diff HEAD` -- the guard sees edits to existing files only. (2026-06-25, T32.5.)
+
+### L-0017 #harness #claude #stderr #parse #landmine -- claude's stderr warnings get merged into stdout and break the JSON-envelope parse
+`Kazi.Harness.CliAdapter` runs the harness with `cmd_opts`'s `stderr_to_stdout: true`,
+so ANYTHING the CLI prints to stderr is prepended/interleaved into the `output` the
+profile parser reads. The `claude` CLI prints `Warning: no stdin data received in 3s,
+proceeding without it. ...` to stderr (it waits for stdin under `System.cmd`, which
+provides none), so on essentially EVERY dispatch the stdout the parser sees is
+`"<warning line>\n{<envelope>}"`. LANDMINE: a naive `Jason.decode(output)` then FAILS
+on the prefix and SILENTLY drops every structured field (`:result`, `:tokens`,
+`:cost_usd`, `:usage`) -- it does not crash, it just returns `%{}`, so token/cost
+accounting degrades to an estimate and the authoring on-ramp (which needs `:result`)
+reports "proposal has no predicates". `Kazi.Harness.Profiles.Claude.parse/1` therefore
+NARROWS to the JSON object span (first `{` .. last `}`) before decoding. INVARIANT: any
+profile parsing a `--output-format json` style envelope must tolerate leading/trailing
+stderr noise the same way -- never feed raw merged stdout straight to `Jason.decode`.
+`kazi apply` masked this for a long time because it re-runs predicates to judge done
+and the budget falls back to a token estimate (ADR-0008), so the dropped fields are
+invisible there; only authoring surfaced it. (2026-06-25, T26.8.)
+
+### L-0018 #authoring #harness #custom_script #schema #landmine -- a drafting harness GUESSES predicate config; `custom_script` is `cmd`, NOT `script`
+A drafting harness (claude) told only the provider NAMES will INVENT each predicate's
+`config` shape, and the guess does not match kazi's loader. Live on v1.46.1: claude
+drafted a `custom_script` predicate with `{"script": "<bash>", "interpreter": "bash",
+"working_dir": ".", "expected_exit_code": 0}`. The REAL `custom_script` schema (what
+`kazi schema custom_script` prints, sourced from `Kazi.Predicate.Schema`) requires
+`cmd` (ONE executable, not a command line) plus optional `args`/`verdict`/`env`/… and
+has NO `script`/`interpreter`/`working_dir`/`expected_exit_code`. LANDMINE: the bad
+config PARSES fine (authoring carries config through verbatim) and only EXPLODES one
+layer later, at `approve` → `Kazi.Goal.Loader.from_map/1`, with `custom_script
+predicate "…" requires a non-empty string "cmd"` — so the on-ramp dies at approve,
+not at draft, making it look like an approval bug rather than a drafting one. FIX:
+`Kazi.Authoring.build_prompt/2` EMBEDS the per-provider config contract rendered from
+`Kazi.Predicate.Schema` (the single source of truth — never hand-duplicate the field
+list, it WILL drift) and explicitly pins `custom_script` to `cmd` (a shell line goes
+in `cmd:"sh", args:["-c","<line>"]`, never a `script` key). INVARIANT: when you teach
+a harness to emit a kazi goal-file, embed the AUTHORITATIVE config schema, do not let
+it guess — and source that schema from `Kazi.Predicate.Schema`, the same place the CLI
+reads. (2026-06-25, T26.8.)
+
+### L-0047 #scheduler #cli #burrito #release #parallel #landmine -- the released binary's `--parallel` crashes `:noproc`; `PartitionSupervisor` is never started in the standalone path
+`kazi apply <goal> --parallel` on a RELEASED (Burrito standalone) binary crashes
+immediately and deterministically with `{:noproc, {GenServer, :call,
+[Kazi.Scheduler.PartitionSupervisor, {:start_child, ...DepScheduler.start_group...}]}}`.
+Cause: `Kazi.Application.start/2` detects a Burrito standalone run and hands straight
+to `Kazi.Release.burrito_main()`, so the supervision tree below it -- including
+`{Kazi.Scheduler.PartitionSupervisor, name: ...}` (application.ex) -- is NEVER stood
+up. The CLI then manually `start_link`s ONLY `Kazi.Repo` (in `migrate_read_model/0`,
+the same retrofit the homebrew read-model crash needed, [[homebrew-tap-stale-readmodel-crash]]);
+nothing starts `PartitionSupervisor`. So `run_goal_parallel/4` -> `Kazi.Scheduler.run_goals/2`
+-> `DepScheduler` -> `PartitionSupervisor.start_child(PartitionSupervisor, …)` targets
+a named process that does not exist -> `:noproc`. This breaks the ENTIRE E21/E23
+parallel-execution surface on every released binary. LANDMINE: `--explain`
+(pure planning, no supervisor) and serial `--apply` BOTH work, so the break is
+invisible unless you actually run `--parallel` live -- exactly the gap the T23.9
+dogfood hit. INVARIANT: any process the supervision tree starts that a CLI command
+needs must ALSO be started in the Burrito standalone path (mirror `ensure_read_model`
+/ `migrate_read_model`); declaring it in `Kazi.Application` children is NOT enough,
+because that tree never boots under a standalone binary. FIXED (2026-06-26, T21.12):
+`Kazi.Scheduler.PartitionSupervisor.ensure_started/1` (idempotent under the app
+tree, process-linked-start under the standalone binary) is called by
+`run_goal_parallel/4` BEFORE `Kazi.Scheduler.run_goals/2`, so BOTH start_child
+sites (`scheduler.ex` flat path + `dep_scheduler.ex` DAG path, both targeting the
+named `PartitionSupervisor`) have a running supervisor. The two coordinator
+`GenServer.start_link`s (scheduler/dep_scheduler) do NOT need a supervisor, so they
+were never affected. Regression: `test/kazi/scheduler/partition_supervisor_test.exs`
+proves `start_child/2` works after `ensure_started/1` on a fresh (absent) name.
+GENERAL RULE for the future: when adding any new CLI command that reaches a
+supervised process (a `start_child`/`GenServer.call` to a named child of
+`Kazi.Application`), ensure-start it on the CLI path or it will `:noproc` only on
+the released binary. (Found on v1.64.1, T23.9; fixed T21.12, PR #740.) VERIFIED LIVE
+on the FIXED released binary v1.64.2: `kazi apply
+priv/examples/predicate_graph_waves.toml --parallel --json` ran end-to-end (no
+`:noproc`), dispatched two disjoint partitions concurrently, gated the dependent
+group, and converged collectively (exit 0) -- see docs/devlog.md (2026-06-26
+re-verify entry).
+
+### L-0020 #scheduler #partition #groups #parallel #landmine -- a single goal's disjoint GROUPS collapse into ONE serial partition unless they declare `needs`
+The CLI `--parallel` path ALWAYS hands `Kazi.Scheduler.run_goals/2` exactly ONE goal
+(the loaded goal-file). The flat partition unit is the WHOLE goal, so a single bare
+goal always partitions to exactly ONE partition (`Kazi.Partition.partition([goal])`
+=> 1 entry; proven by the long-standing "single goal degenerates to one partition"
+test). The GROUP axis (parallelising a goal's predicate groups) only kicked in when
+`Kazi.Scheduler.DepScheduler.dag?/1` was true -- i.e. some group declared a `needs`
+edge. So a goal with 2+ INDEPENDENT groups and NO `needs` (the "fully parallel,
+ADR-0027 default" case the `Group.needs` doc promises) silently ran as ONE serial
+loop over all predicates -- disjoint groups did NOT parallelise. LANDMINE: `--explain`
+computed the frontiers and partitioned the groups WITHIN a frontier, so the dry-run
+schedule SHOWED N parallel partitions while the real run collapsed to 1 -- explain
+and execution disagreed. FIXED (2026-06-26): `run_goals/2` now routes a single goal
+through the group scheduler when `dag?` OR `group_parallel?/1` (2+ groups AND every
+acceptance predicate carries a declared group). With no `needs`, `DepScheduler`
+dispatches every group in ONE frontier (concurrent), matching explain. GUARD: a goal
+with any UNGROUPED acceptance predicate stays FLAT -- the per-group sub-goal split
+keeps only each group's predicates, so an ungrouped predicate would be DROPPED;
+guards (which may be ungrouped) are replicated into every sub-goal, so they are safe.
+Regression: `test/kazi/scheduler/run_goals_group_parallel_test.exs`.
+
+### L-0021 #dashboard #leases #coordination #nats #native #landmine -- `/leases` 500s on a NATS-free run; the default Transport source RAISES with no `:bus`
+The operator lease-map dashboard (`/leases`, `KaziWeb.LeaseMapLive`) defaulted to
+`KaziWeb.CoordinationSource.Transport`, whose `snapshot/0` calls
+`Kazi.Coordination.Presence.snapshot/1` -> `Kazi.Coordination.Transport.Memory.fetch/2`
+-> `bus_pid/1`, which RAISES `ArgumentError "requires a :bus handle"` when no
+`:coordination_opts` (`:bus`) is configured -- the native, NATS-free default. So
+opening `/leases` on a single-node run 500'd. Root cause beyond the raise: native
+parallel coordinates on PER-RUN `Kazi.Coordination.Lease.Memory` stores passed by
+handle, deliberately NOT global, so there was NO readable singleton the dashboard
+could project. FIXED (2026-06-26): added `Kazi.Coordination.LeaseTable` -- a
+globally-readable, best-effort `Agent` registry of held native leases (every write a
+no-op when it is not running, so it never couples the scheduler to the web tree or
+crashes a headless run) -- started in the web subtree; `Kazi.Scheduler.LeasedReconciler`
+records on acquire / forgets on terminal. A new non-NATS source
+`KaziWeb.CoordinationSource.Native` projects that table and is now the DEFAULT, so
+`/leases` renders the live native lease map (empty state when nothing is held)
+without touching NATS. INVARIANT: a web read seam over coordination MUST NOT require
+the NATS transport on a single-node run; default to the native source and opt into
+Transport only when NATS is wired. UPDATE (2026-06-28, T21.9): the CLI
+`--parallel` path now INJECTS a default `:lease` -- `Kazi.CLI.run_goal_parallel/4`
+starts a per-run `Kazi.Coordination.Lease.Memory` store, calls
+`Kazi.Coordination.LeaseTable.ensure_started/0` (the Burrito CLI bypasses the app
+tree, same class as the `PartitionSupervisor`/`Repo` ensure-started fixes), and
+points the lease layer at the global `LeaseTable`, so native partition leases
+publish and a SAME-NODE dashboard renders the live lease map. Skipped when a
+caller injects its own `:reconciler` or `:lease` (hermetic boundary tests).
+LANDMINE that remains: the published table is per-BEAM-node -- a one-shot released
+CLI and a separately-deployed dashboard are different nodes and share no in-memory
+table, so cross-node lease visibility still needs the NATS Transport source
+(Slice 3). Regression:
+`test/kazi_web/live/lease_map_live_native_test.exs`,
+`test/kazi_web/coordination_source/native_test.exs`,
+`test/kazi/coordination/lease_table_test.exs`,
+`test/kazi/cli_run_parallel_lease_test.exs`.
+UPDATE (2026-07-16, T55.3/ADR-0073 §4): the default is now DECIDED, not fixed --
+`KaziWeb.CoordinationSource.select/0` probes the daemon control socket and picks
+the Transport source when a daemon is alive (its no-config `snapshot/0` reads the
+daemon KV session roster read-only and NEVER raises; leases still come from the
+readable `LeaseTable`), falling back to Native when no daemon runs. The invariant
+stands in its refined form: no dashboard source may raise on a single-node run,
+and an explicit `:lease_map_source` override still wins. Regression:
+`test/kazi_web/coordination_source/select_test.exs`,
+`test/kazi_web/coordination_source/transport_test.exs`,
+`test/kazi_web/live/lease_map_live_source_test.exs`.
+
+### L-0022 #burrito #release #custom_script #mix #env #landmine -- the released binary leaks its OWN release env into `custom_script` subprocesses, crashing a nested `mix test`
+The Burrito-packaged `kazi` binary leaks its release environment (`RELEASE_*`,
+`ELIXIR_ERL_OPTIONS`, etc.) into the subprocesses spawned by a `custom_script`
+predicate. A `custom_script` of `cmd = "mix", args = ["test", ...]` then boots the
+target app under the leaked release env and dies with **exit 2 and EMPTY output** --
+the same "kazi can't SEE the green" failure class as the opencode `--workspace`
+landmine: the inner harness makes the correct edit, but the grader can never read it
+as passing, so the goal never converges (it loops to `max_iterations`). `mix format
+--check-formatted` SURVIVES the leak (it does not boot the app), which makes the
+failure look model-specific rather than env-specific. Sibling of L-0047's "Burrito
+bypasses the app tree" class -- here the leak is OUTWARD into children, not a missing
+supervisor inward. Workaround for a goal-file author: wrap the predicate so it starts
+from a clean environment, e.g. `env -i HOME="$HOME" PATH="$PATH" LANG="$LANG"
+MIX_ENV=test mix test ...` (keep only PATH/HOME/LANG so mix still resolves its
+toolchain). Found 2026-06-30 dogfooding the `support-claude-sonnet-5` goal (driving
+claude-sonnet-5): the price-map/suite predicates read `exit 2` until the clean-env
+wrapper was added, after which the goal converged in 2 iterations. Real fix lives in
+kazi core: scrub `RELEASE_*` / `ELIXIR_ERL_OPTIONS` from the `custom_script`
+provider's spawn env so `mix test` (and any app-booting child) is hermetic without an
+author workaround.
+
+### L-0023 #claude #harness #permission #trust-dialog #stuck #landmine -- a headless `claude -p` dispatch against an untrusted workspace silently denies EVERY tool call, burning cost with zero progress
+`kazi apply --harness claude` against a workspace that has never been through
+Claude Code's interactive trust dialog (the common case for CI, fresh clones, or any
+automated first-run) gets **every tool call (Write, Bash, ...) silently denied** --
+`-p`/headless mode has no human to accept the dialog. The model tries, is refused,
+and nothing changes on disk; the goal burns real tokens/`usage.cost_usd` each
+iteration and eventually reports `stuck` with `stuck_bundle.changed_files == []`.
+This is the same "kazi can't SEE the green" failure SHAPE as L-0021 (opencode
+`--workspace`) but a DIFFERENT cause: here the inner harness never even makes the
+edit, because Claude Code itself refused the write. The raw
+`claude --output-format json` envelope's `permission_denials` array names exactly
+which tool calls were refused (`tool_name`/`tool_input`); before this fix nothing in
+kazi's own output surfaced it, so diagnosing it required manually re-deriving kazi's
+argv from source and replaying `claude -p ...` by hand outside kazi (github.com/
+kazi-org/kazi/issues/769). Fixed: `--permission-mode <mode>` / `--allowed-tools
+<t> ...` are now real `kazi apply` CLI flags and goal-file `[harness]
+permission_mode`/`allowed_tools` fields (CLI wins, mirroring `effort`'s precedence,
+ADR-0047), wired to the `Kazi.Harness.Profiles.Claude.build_args/2` opts that
+already knew how to render them but were never set anywhere in kazi. The parsed
+envelope also now surfaces `:permission_denials` (`Kazi.Harness.Profiles.Claude.
+parse/1`) so a `stuck` run with zero changed files and non-zero cost is diagnosable
+from kazi's OWN result, not a manual argv replay. Regression:
+`test/kazi/cli_harness_test.exs`, `test/kazi/harness/usage_test.exs`,
+`test/kazi/goal/loader_test.exs`. NOT YET DONE: the denial isn't threaded into
+`stuck_bundle`/the `--stream` per-iteration event (would need a new `Data` field +
+carry-forward, mirroring `working_set_digest`) -- today it is on the raw harness
+dispatch result, not yet distilled into the loop's terminal/streamed output.
+
+### L-0024 #enforcement #isolation #held-out #worktree #landmine -- clean-tree isolation grading the WHOLE cwd from frozen `ref` makes a held-out predicate structurally unable to converge
+Deep-review 001 H1: L-0046 scoped clean-tree isolation to the tamper-prone graders
+(guard + held-out predicates) correctly, but the ORIGINAL realization then swapped
+the checker's ENTIRE cwd to a worktree at frozen `clean_ref` -- so a held-out
+`:custom_script`/`:tests` acceptance predicate graded committed `HEAD`, never the
+agent's uncommitted working-copy fix. Because `dispatch_action/2` also filters
+held-out ids out of the agent's work-list (T32.6, ADR-0042 §6 -- the agent must not
+see what it's graded on), and `integrate` (the only commit path) never runs while
+`decide/2` clause 2 (code still "failing") keeps firing, a goal with a held-out
+acceptance predicate under default enforcement could loop FOREVER without ever
+reaching either `:converged` or `integrate` -- a documented, default-on integrity
+feature silently defeating itself. Fixed: `Kazi.Enforcement.Isolation.prepare/3`
+(now arity 3, `with_clean_tree/4`) OVERLAYS the agent's candidate working-tree state
+(tracked edits via a `git diff ref` patch + untracked new files copied
+individually, respecting `.gitignore`) onto the clean worktree BEFORE the checker
+runs, then re-checks-out ONLY the configured `read_only_paths` from `ref` -- so the
+grader's OWN definition stays pinned (an in-iteration edit to IT still cannot flip
+the verdict) while the candidate fix under test is graded live. LANDMINE for
+operators: a grader/checker file is protected from overlay ONLY if it is listed in
+`read_only_paths` -- before this fix EVERY file was implicitly pinned (too strong,
+the root cause); a held-out `:custom_script` predicate's own script/config path
+must now be added to `read_only_paths` to keep it tamper-proof. Regression:
+`test/kazi/enforcement/isolation_working_tree_test.exs` (candidate overlay, deletion
+overlay, grader-path pinning, absent-at-ref pinning, graceful degradation, and an
+end-to-end `Kazi.Loop` convergence proof). (2026-07-03, deep-review 001
+remediation.)
+
+### L-0025 #scheduler #parallel #vacuous-goal #landmine -- a killed `--parallel` run's leftover partial progress permanently poisons LATER applies as an instant, zero-evaluation `:stuck`
+Issue #786: `kazi apply <goal> --parallel` externally killed mid-collective (a
+`kill -9` of the CLI process while a wave was in progress) made every SUBSEQUENT
+`apply` for that goal terminate in ~1 second with a persisted-LOOKING `"collective":
+"stuck"` verdict and ZERO evaluations (no `kazi.loop` iterations, no `iterations`
+rows) -- and the poison SURVIVED a new goal id, renamed groups (new partition
+content-hashes), and a fresh git worktree passed via `--workspace`, which looked
+exactly like leaked scheduler/lease/partition state. It was not: `Kazi.Scheduler`
+has NO cross-process persistence at that layer (`Kazi.Coordination.LeaseTable`,
+`Kazi.Scheduler.WorktreeTable`, `Kazi.Coordination.Lease.Memory` are all per-BEAM-
+process `Agent`s that die with the killed VM). The real cause: `Kazi.Runtime.run/2`'s
+t0 vacuous-goal guard (T2.3, R3) rejects a goal whose WHOLE predicate vector already
+passes with `{:error, :vacuous_goal}` -- correct for a human-authored goal, but a
+scheduler PARTITION's or `needs`-DAG GROUP's sub-goal is authored by kazi itself and
+can legitimately already be satisfied (a killed run's fix landed in the workspace
+before the run recorded convergence, or a sibling partition's edit touched the same
+files). `Kazi.Scheduler.reconcile_partition/2` (and `reconcile_partition_with_spend/2`,
+`default_group_reconciler/2`) folded EVERY `{:error, _}` -- including `:vacuous_goal`
+-- into `:stuck`, with NO iteration recorded (the t0 observation is real, per
+`guard_not_vacuous/3`, but is never projected to the read-model). So a later apply
+re-observing the SAME already-fixed files (a new goal id / renamed groups / a fresh
+worktree checked out from the same branch all still see the same fixed files)
+DETERMINISTICALLY re-derives the identical `:stuck` verdict -- indistinguishable from
+poisoned state, because it is RECOMPUTED FRESH from the world every time, never
+replayed from anything persisted. FIX: `reconcile_partition/2` and
+`reconcile_partition_with_spend/2` now map `{:error, :vacuous_goal}` to `:converged`
+(an already-satisfied sub-goal spent nothing to get there) instead of `:stuck`.
+INVARIANT: convergence is recomputed from the world (concept §1) -- a sub-goal the
+world already satisfies IS converged, never an error, at every scheduler layer that
+folds a reconciler's terminal status. Regression: `test/kazi/scheduler/killed_run_
+recovery_test.exs` (both `reconcile_partition/2` directly and an end-to-end
+`needs`-DAG recovery through `Kazi.Scheduler.run_goals/2`, with NO injected
+reconciler -- the real production path). (2026-07-05.)
+
+### L-0042 #scheduler #worktree #landing #landmine -- a run-owned branch recognized by a NAMING CONVENTION (prefix) silently drops work when the checkout is renamed
+Issues #1079 + #1080: the serial/fleet worktree checked the loop out onto a
+SYNTHETIC branch `kazi-partition/p-<slug>-<nonce>`, so a goal-authored `landed`
+predicate asserting `git rev-parse --abbrev-ref HEAD = task/<goal-id>` could NEVER
+pass even on 100%-converged work -- the run reported stuck on a done goal. The fix
+(T54.1) checks the worktree out onto the goal's REAL target branch
+(`Kazi.Goal.integration_branch/1` -> `[integration] branch`, default derived
+`task/<sanitized id>`) via `Worktree.wrap/2`'s new `:owned_branch` opt. THE
+LANDMINE: `Kazi.Scheduler.SerialLanding.land/4` recognized the run-owned branch
+ONLY by the `kazi-partition/` prefix (`String.starts_with?`). Renaming the checkout
+WITHOUT migrating that discriminator makes `land/4` fall through to
+`:nothing_to_land` -- a SILENT DROP of converged work, not a loud failure -- because
+the checked-out branch no longer matches the prefix it keys off. RULE: a
+discriminator that recognizes a kazi-owned resource by a NAMING CONVENTION (a
+prefix/pattern) rather than an EXPLICIT identity is a silent-failure trap the moment
+the name is derived differently -- migrate it to compare the exact expected value
+(`land/4` already receives the `goal`, so it recomputes `integration_branch/1` and
+compares by `==`), and migrate the discriminator + every test that asserts the old
+name shape in ONE atomic commit so a half-migrated state never lands. The worktree
+DIR on disk stays nonce-unique regardless (the distinct-worktree-path invariant is
+independent of the branch name), and `git worktree add -B` (create-or-reset) keeps a
+stable owned branch idempotent across re-runs. Regression:
+`test/kazi/serial_integration_test.exs` (loop runs on `task/<id>`, lands by identity)
++ `test/kazi/scheduler/worktree_test.exs` (`:owned_branch` checkout + `-B` re-run).
+(2026-07-17.)
+
+### L-0026 #loop #budget #terminal-vector #landmine -- an `:over_budget` stop reported the PRE-dispatch vector, hiding work the budget-blowing dispatch actually finished
+Issue #790: `Kazi.Loop`'s hard budget guard (T1.4) checks the ceiling ONCE at the
+START of every tick, BEFORE observing again (`handle_event(:internal, :observe,
+...)` calls `budget_check/1` first and only falls through to `observe_tick/1` on
+`:ok`) -- by design, so a dispatch that would blow the budget is never even
+started. But this meant a dispatch that FINISHED all the remaining work while
+itself consuming the last of the budget (a completed fix, reported over-budget
+purely on cost/iterations/wall-clock) terminated on the STALE vector from the
+observation before that dispatch ran -- `result.vector` reported the predicates
+as still failing even though the workspace was, at that moment, fully converged.
+This is more than cosmetic: `budget_spent.tokens` is cache-inclusive (ADR-0046),
+so a modest cap can be a small fraction of one dispatch's cost, and the ADR-0035
+model-ladder escalation reads the terminal vector to decide whether to re-dispatch
+a higher-rung model -- a stale all-failing vector drove it to re-spend a frontier
+model's budget re-doing work that was already done. FIX: `terminate_over_budget/2`
+now runs `reeval_terminal_vector/1` (a one-shot re-observation mirroring the
+relevant slice of `observe_tick/1` -- fresh vector, prior-score threading,
+quarantine -- WITHOUT bumping `iterations`/history/regressions, since this is a
+terminal re-check, not another tick) before building the result. INVARIANT: any
+terminal outcome's `result.vector` must reflect the workspace as the loop actually
+leaves it, not as of the last full tick -- `:stuck` already satisfied this (its
+stuck-check runs AFTER that tick's fresh observation), only `:over_budget`'s early
+short-circuit needed the extra re-check. Regression:
+`test/kazi/loop/terminal_vector_fresh_test.exs` (a provider that flips from
+`:fail` to `:pass` the moment the harness dispatches, budget capped at
+`max_iterations: 1`, asserting the terminal `result.vector` reports `:pass`, not
+the stale `:fail`). (2026-07-06.)
+
+### L-0027 #loop #flake #quarantine #stuck #landmine -- a quarantined-but-passing predicate had no way back onto the convergence bar, and no honest terminal either -- it spun the loop at full tick rate to `max_iterations`
+Issue #820 (live occurrence on kazi 1.74.0): `suite_green` flapped once, got
+quarantined (`:unknown`, per #795 correctly blocking `:converged`), then passed
+every subsequent real evaluation while the loop had nothing left to dispatch --
+`decide/2`'s clause 5 (`landed?`/`deployed?` both true, vector still unsatisfied)
+re-observed on the fixed `reobserve_interval_ms` (default 1s) with no exit
+condition of its own, so it ticked ~1/s to `max_iterations` (40) and stopped
+`:over_budget` reporting a passing-evidence `unknown` predicate as the reason --
+even though the code was demonstrably green. Root cause was two compounding gaps:
+(1) an already-quarantined predicate was NEVER re-evaluated by the real provider
+(`evaluate/4`'s quarantined branch returned `:unknown` unconditionally) -- so
+there was no mechanism to ever leave quarantine, and (2) the `code_history/1`
+window the ordinary T1.5 stuck detector reads DROPS quarantined ids entirely, so
+a goal blocked SOLELY by quarantine has an empty failing set forever and that
+detector can never fire on it either. FIX: `Kazi.Loop.Flake` gained
+`record_pass_streak/3` (a quarantined predicate is now polled through the real
+provider every tick; `rehab_streak/0`, 3, consecutive REAL passes un-quarantines
+it and the vector converges the same tick) and `quarantine_blocks_only?/2` (true
+iff every non-passing id in the vector is quarantined); `Kazi.Loop.decide/2`'s
+clause 5 (`handle_no_work/2`) now stops honestly `:stuck` -- naming the
+quarantined ids -- after `quarantine_only_stuck_ticks/0` (3) consecutive no-work
+observations of that condition, and otherwise backs off the reobserve interval
+(capped, doubling per consecutive no-work tick) instead of a fixed sub-second
+poll forever. INVARIANT: quarantine excludes a predicate from WORK and from the
+convergence bar, but never from OBSERVATION -- a quarantined id must keep being
+checked for real, both so it can be rehabilitated and so "blocked only by
+quarantine, nothing to do" is a distinguishable, honestly-terminable state rather
+than an indefinite idle. This is independent of `stuck_iterations` (which gates
+only the ordinary same-failing-set detector) by design -- disabling that detector
+must not resurrect the burn-to-budget bug. Regression:
+`test/kazi/loop/quarantine_exit_test.exs` (rehabilitation converging, honest
+`:stuck` bounded well under a 40-iteration budget naming the quarantined id, and
+the no-work backoff bounding tick count over a wall-clock window); four
+pre-existing tests that asserted the OLD idle-forever symptom
+(`test/kazi/loop_test.exs`, `test/kazi/loop/verdict_bar_test.exs`,
+`test/kazi/deep_review_lows_test.exs`, `test/kazi/slice1_test.exs`) were updated
+to the new, honestly-terminating expectation. (2026-07-06.)
+
+### L-0028 #dashboard #liveview #phx-click #landmine -- the dashboard shipped ZERO JavaScript, so every `phx-click`/live-patch silently did nothing in a real browser
+
+Until the starmap slide-over panel (2026-07-06), no dashboard page loaded any
+JS: the root layout was deliberately asset-free, so LiveViews rendered as dead
+server-side snapshots. LiveView tests (`render_click/1`) still pass against
+such a page -- they drive the server directly and never notice the browser
+gap -- so an interactive feature can be fully "test-green" yet do nothing when
+clicked in Chrome. Symptom in the wild: `window.liveSocket` is `undefined`,
+`[data-phx-main]` never gains `phx-connected`, clicks are inert, and pages
+only update on manual refresh. Fix (no-build, release-safe): serve
+`phoenix.min.js` + `phoenix_live_view.min.js` straight from the hex packages
+via `Plug.Static` (`from: {:phoenix, "priv/static"}` resolves via
+`:code.priv_dir/1` inside a release too), add the csrf meta + connect script
+to the root layout, and `protect_from_forgery` in the browser pipeline so the
+socket's csrf check has a session token. INVARIANT: any new `phx-*` binding
+on a dashboard page must be verified in a REAL browser (agent-browser),
+not only via `Phoenix.LiveViewTest` -- the test harness cannot see a missing
+client. Regression: `test/kazi_web/live_client_test.exs`. (2026-07-06.)
+
+### L-0048 #harness #shell #portability #dash #landmine -- "works on macOS sh" means bash: dash ignores `set -m`, its builtin `kill` cannot group-kill, and bash prints job notices into merged output
+
+The #857 child-supervision wrapper converged green on macOS (2,556 tests) and
+hard-failed CI on Ubuntu, three distinct ways. (1) Non-interactive dash
+(Ubuntu /bin/sh) accepts `set -m` but creates NO process groups for
+background jobs, so any `kill -- -$pid` group signal has nothing to hit —
+make children real group leaders with `setsid` where it exists (Linux; macOS
+ships none but its /bin/sh is bash, whose non-interactive `set -m` works).
+(2) dash's BUILTIN `kill` rejects negative-pid group syntax outright
+("Illegal number: -"), even with `--`; route group kills through `env kill`
+so the external binary handles them, with a single-pid fallback. (3) On the
+bash side, a background helper killed by the script becomes an asynchronous
+"Terminated" job notice in the shell's output — which `stderr_to_stdout`
+merges into the harness envelope; double-fork helpers (`( (...) & )`) so
+they are never jobs, detach all three fds to /dev/null so a surviving helper
+can never hold the port's stdout-EOF hostage (the exact Linux hang: an
+orphaned grandchild `sleep` kept the pipe open and every dispatch timed
+out). INVARIANT: any /bin/sh script kazi ships must be proven under dash,
+not just macOS sh — locally: `dash script.sh` plus a `setsid` shim
+(python3 os.setsid+exec) to simulate the Ubuntu group semantics.
+Regression: the wrapper itself in `Kazi.Harness.ChildSupervisor` (moduledoc
+documents all three); test/kazi/harness/child_lifetime_test.exs. (2026-07-06.)
+
+### L-0030 #dashboard #liveview #websocket #check_origin #landmine -- a released `kazi dashboard` on any non-default host/port renders fine but every phx-click is silently dead: prod check_origin rejects the LV socket
+
+The standalone `kazi dashboard` boot (released binary, prod config) never
+set `check_origin`, so Phoenix defaulted to checking the websocket Origin
+against the compiled url host -- which cannot know what the operator will
+browse (`localhost`, `127.0.0.1`, a LAN IP, a `--port` override). Result:
+the page server-renders perfectly, `phoenix*.min.js` load 200, but
+`liveSocket.isConnected()` stays false and the server log repeats "Could
+not check origin for Phoenix.Socket transport" -- every interaction
+(slide-over panel, fleet/session filters, mobile tabs) silently no-ops.
+This is L-0028's evil twin: the CLIENT was present, the SOCKET was refused;
+LiveViewTest is blind to both. Fix: the standalone boot merges
+`check_origin: :conn` (origin must match the host the request arrived on --
+works for any browse host, still blocks cross-site pages / CSWSH). See
+`Kazi.CLI.standalone_endpoint_config/3`. INVARIANT: dashboard interactivity
+must be browser-verified against the RELEASED binary on a NON-default
+host:port (e.g. `--port 4050` via the machine's LAN IP), not just a dev
+`mix` boot on 4000 -- the dev/test configs set `check_origin: false`, so
+they can never catch this class. Regression:
+test/kazi/cli/dashboard_test.exs "standalone_endpoint_config/3". (2026-07-07.)
+
+## CLI / release boot
+
+### L-0031 #cli #readmodel #repo #with_read_model #landmine -- any CLI command that touches `Kazi.Repo` MUST route through `with_read_model`, or the released binary crashes the whole VM
+
+`kazi memory recall`/`list-proposed`/`approve`/`reject` called into
+`Kazi.Repo` directly (`execute_memory/3` skipped the wrapper every other
+repo-touching command uses). Under `mix test`, this is invisible: ExUnit's
+setup already has `Kazi.Repo` running before any CLI dispatch, so a missing
+`with_read_model` call never surfaces. Under the Burrito standalone entry
+(`running_standalone?/0`), the read-model supervision tree only starts on
+demand -- so the FIRST real invocation of the unwrapped command crashed with
+`RuntimeError: could not lookup Ecto repo Kazi.Repo because it was not
+started`, which Kernel then escalated to `Kernel pid terminated
+(application_controller)` -- the whole VM, not just the command. Fix: wrap
+the command's dispatch in `with_read_model(opts, fn -> ... end)`, exactly
+like `execute_list_proposed/1`, `execute_approve/2`, etc. already do. A
+source-level coherence guard (`deep_review_lows_test.exs`, "L2:
+with_read_model surfaces --json errors") pins the EXACT count of
+`with_read_model(opts, fn ->` call sites in `cli.ex` -- when you add a new
+repo-touching command, that count assertion WILL fail until you bump it,
+which is the guard doing its job, not a false positive. INVARIANT: never
+trust `mix test` alone for a new CLI command that reads/writes the
+read-model -- hand-verify it against the actual released binary
+(`kazi <command> ...` with the freshly-installed release) before calling it
+done. Regression: PR#927 (2026-07-08), `test/kazi/deep_review_lows_test.exs`.
+
+### L-0032 #burrito #release #compile-time #module-attribute #landmine -- a `@attr System.user_home!()`-style module attribute freezes at COMPILE time, baking the CI RUNNER's home directory into the shipped binary
+
+`Kazi.Logging.DashboardLogRotation` resolved its default log path via
+`@default_log_path Path.join([System.user_home!() || File.cwd!(), ".kazi",
+"dashboard.log"])` -- a module attribute, evaluated ONCE when the module
+compiles. Every other codebase site that needs the same `<user-home>/.kazi`
+root (`Kazi.CrashDump.dir/0`, `Kazi.Runtime`'s `sinks_dir/1`) does this
+correctly as a FUNCTION, re-evaluated on every call. For a `mix test`/`mix
+compile` run, this distinction is invisible -- you compile locally, so
+`System.user_home!()` correctly resolves to your own home either way. For a
+Burrito release built in CI, the module attribute bakes in the CI RUNNER's
+home directory (`/Users/runner`) into the compiled bytecode; every operator
+who then runs the shipped binary gets `mkdir_p!("/Users/runner/.kazi")`,
+which fails `:eacces` on their machine and crashes the VM on boot. This bug
+sat completely latent since the module shipped (#907) because
+`DashboardLogRotation` only ran under `Kazi.Application`'s always-supervised
+tree, never under a genuinely FRESH `kazi dashboard` boot -- it was exposed
+the moment L-0031's sibling fix (wiring it into
+`standalone_dashboard_children/0`, PR#929) gave it its first real chance to
+`init/1` outside dev/test. INVARIANT: any module-level default that reads
+`System.user_home!()`, `System.get_env/1`, `System.cwd/0`, or
+`Application.get_env/2` for something environment-dependent MUST be a
+function called at runtime, never a `@module_attribute` literal -- grepped
+`lib/` for this exact shape (`^\s*@[a-z_]* .*System\.` and
+`^\s*@[a-z_]*.*Application\.get_env`) after this fix; ZERO other instances
+found as of 2026-07-08, so this was an isolated latent bug, not a systemic
+one -- but re-run that grep after any new module ships a compile-time-looking
+default. Regression: PR#931 (2026-07-08),
+`test/kazi/logging/dashboard_log_rotation_test.exs` (first-ever coverage for
+this module).
+
+### L-0039 #daemon #macos #socket -- macOS caps Unix-socket paths at ~104 bytes; deep KAZI_STATE_DIR fails as :einval
+`kazi daemon start` under a deep state dir fails with
+`Kazi.Daemon.Listener :einval` and no hint: the control socket path exceeds
+the macOS `sun_path` limit (~104 bytes). Two independent wave-A teammates hit
+it and both worked around with `/tmp/<short>` state dirs. Fix direction: the
+daemon should detect the over-long path and say so in one line.
+
+### L-0040 #bus #read #batch -- Bus pulls in batches of 100; one read does not drain a deep backlog
+`Kazi.Bus` pulls durable consumers with `batch: 100, no_wait`: a backlog
+deeper than 100 needs multiple `read` calls (or the drain-until-empty loop in
+digest_machine_path_test) before an assertion like "my message round-tripped"
+holds. Tests that post into a busy shared scope and read ONCE are
+order-sensitive time bombs. (T55.1 finding, 2026-07-16.)
+
+### L-0041 #bus #presence #liveness #landmine -- a presence/identity FIELD must anchor on the stable session ancestor, not the ephemeral CLI invocation's own pid
+`Kazi.Bus.upsert_presence/2` recorded `"pid" => :os.getpid()` -- the pid of the
+short-lived `kazi` CLI invocation, which exits milliseconds after writing its
+presence row. The daemon's `Liveness.verdict/1` then found that pid already
+gone and rendered EVERY live session `dead-reaping`; `idle` was unreachable
+(T55.11 shipped the column, T55.14/#1164 made it reachable). The session ID
+already solved this exact problem by anchoring on the nearest STABLE ancestor
+(`walk_to_anchor/2`, skipping transient `-c` shell wrappers) -- but the pid
+FIELD didn't reuse that walk. INVARIANT: any per-session identity that must
+OUTLIVE a one-shot CLI call (presence pid, lock owner, heartbeat subject) has
+to anchor on the same stable ancestor the session id does, never on
+`os_pid/0`. LANDMINE for tests: a regression fixture that parks a long-lived
+`bus watch` proves nothing -- a parked watch's own pid already outlives the CLI
+call. The fixture MUST be a genuine one-shot (`bus post`/`who`) whose
+still-alive ancestor is asserted as the recorded pid (T55.13's own finding).
+Live proof: a one-shot writer with OS pid 5811 (gone at read time) left a row
+recording the alive anchor pid instead, rendering `active`, not `dead-reaping`.
+
+### L-0052 #daemon #socket #packet-line #truncation #landmine -- `packet: :line` truncates an over-long line SILENTLY; set `buffer` on BOTH ends
+A `:gen_tcp` socket in `packet: :line` mode drops everything past its
+`buffer` (default **9216 bytes**) and reports `{:ok, short_binary}` — no
+`:emsgsize`, no error, nothing to branch on. Measured while moving digest
+assembly into the daemon (T55.7): a 61,461-byte reply arrived as 9,216 bytes,
+and the only symptom was a `Jason.DecodeError` far from the cause — which, if
+flattened into a generic fallback, reads as "no daemon" and sends the operator
+to debug a daemon that is running perfectly. The control socket now sets an
+explicit `buffer` on the listener AND the client
+(`Kazi.Daemon.Probe.socket_buffer/0`); the two MUST agree, since whichever end
+receives does the truncating. Corollary: never send an UNBOUNDED payload over
+this socket. `bus read --full` is unbounded by definition (64 KiB × N
+messages), so it reads NATS directly and the daemon refuses `full` outright
+rather than silently answering with a digest. A bounded digest (40 lines ×
+~1 KiB) already exceeds the default buffer, so this was live, not theoretical.
+(T55.7 finding, 2026-07-17.)
+
+## Test flakiness (known-flaky, not a real regression)
+
+### L-0033 #test #flaky #ci #known-issue -- three tests are timing-flaky under full-suite concurrency; a solo re-run greens all three
+
+Three ExUnit cases fail intermittently ONLY under the full `mix test` run
+(concurrent async cases contending for timing/process-lifecycle windows),
+and pass cleanly every time when re-run in isolation -- none of the three is
+a real regression when it shows up red:
+
+  * `Kazi.Scheduler.SupervisionTest` (crash-containment case) -- `:converged`
+    vs `:stuck` timing race.
+  * `Kazi.Providers.ProviderDeprecationTest` ("emits NO hint" case) --
+    process-global `capture_io(:stderr)` races a concurrent module.
+  * `Kazi.Harness.ChildLifetimeTest` ("a dispatched harness subprocess is
+    killed when the controller dies") -- "the stub harness never reported
+    its pid -- dispatch never started"; a subprocess-spawn timing race under
+    concurrent load, confirmed transient by re-running
+    `test/kazi/harness/child_lifetime_test.exs` alone (passes in 0.2s, every
+    time). First observed 2026-07-08.
+
+Before treating any of these three as a real failure, re-run the single file
+in isolation (`mix test <path>`) -- if it's green alone, it's this landmine,
+not your diff.
+
+## Agent-driven git safety
+
+### L-0034 #agents #git #worktree #bypasspermissions #data-loss #landmine -- an inner agent's unrestricted Bash can do anything git can do; no kazi config sandboxes it. Two git-level defenses now standing.
+
+Three incidents in ONE day (2026-07-08, a sibling repo's lore records them in
+detail) established that `allowed_tools` / `[scope]` / goal-file config do
+NOT constrain what a dispatched agent with Bash + bypassPermissions does via
+git: (1) a serial `kazi apply` pointed at a repo's PRIMARY checkout instead
+of a worktree ended with every untracked file in that checkout wiped --
+including a CONCURRENT session's uncommitted docs (issue #937 Gap A); (2) an
+agent escaped its assigned branch, checked out main inside its worktree, and
+pushed unreviewed work straight to an auto-deploying origin/main, breaking a
+production migration state; (3) a repo-wide clean-tree predicate instructed
+an agent to delete unrelated untracked production files. kazi CORE never
+runs `git reset`/`git clean` against a workspace (enforcement graders use
+throwaway detached worktrees) -- every wipe was the INNER AGENT's own shell.
+
+Standing defenses in THIS repo (both must stay):
+
+  * `main` is pinned permanently checked out in a dedicated sibling worktree
+    (`../kazi-main`), so `git checkout main` fails instantly in any other
+    checkout on the machine ("already used by worktree at ..."). Per-machine;
+    re-pin after a fresh clone.
+  * `.githooks/pre-push` (wired by `mix setup` via `core.hooksPath`) rejects
+    any push updating `refs/heads/main` -- main auto-releases via
+    release-please, so a direct push ships unreviewed code to users. The
+    deliberate HUMAN override is `ALLOW_PUSH_TO_MAIN=1`; an agent is never
+    given it.
+
+L-0043 is the sequel: on 2026-07-17 BOTH of the defenses below were found
+DOWN on the operator's machine, and an agent rewound `origin/main`.
+
+INVARIANTS when driving kazi natively against this repo: `--workspace` is a
+task-specific worktree, never the primary checkout (the operator's own
+memory-slice runs on 2026-07-08 violated this and got lucky); scope any
+clean-tree/`landed` predicate to the goal's own paths, never repo-wide; after
+any agent run, `git reflog` before trusting the working tree. (2026-07-08.)
+
+### L-0043 #agents #git #cwd #force-push #data-loss #landmine -- an agent's shell cwd silently resets to the SHARED checkout (which has `main` checked out), so a bare `git push --force` rewinds origin/main and a `git reset --hard` wipes a sibling's staged work
+
+L-0034's two standing defenses were both DOWN on 2026-07-17 and nothing said
+so. An agent working in an isolated worktree ran `git push --force` (no
+refspec) and `git reset --hard origin/main`, and BOTH landed on the shared
+checkout instead: `origin/main` was rewound ~14 commits, and a concurrent
+session's staged `docs/plan.md` + `docs/plans/E56..E60.md` were wiped.
+
+**Why the cwd is the trap.** An agent's Bash cwd is not sticky the way a
+human's terminal is: it can reset to the repo root between tool calls, and
+the repo root IS the shared checkout with `main` checked out. So a `cd
+<worktree>` in an earlier call does not protect a later one, and a git
+command with no explicit target silently retargets `main`. Nothing in the
+output says which checkout you were in -- `git push --force` prints
+`main -> main` only AFTER it has already rewritten the remote.
+
+**Why neither defense fired (check BOTH; each is per-machine and silent):**
+
+  * `core.hooksPath` was UNSET, so `.githooks/pre-push` -- which exists, and
+    whose entire job is `refs/heads/main -> exit 1` -- never ran. `mix setup`
+    wires it (`mix.exs`), so a checkout where setup was never run, or where
+    config was reset, has NO push protection while still CONTAINING the hook
+    file. The hook's presence proves nothing; only `git config --get
+    core.hooksPath` does.
+  * `../kazi-main` did not exist, so `main` was checked out in the primary
+    shared checkout -- the exact arrangement the pin exists to prevent. The
+    pin also has the side effect of making the shared checkout's HEAD not
+    be `main`, which defuses the bare-push trap entirely.
+
+**Rules that actually hold** (a `cd` does not): use `git -C <abs-worktree>`
+on EVERY git command, and an EXPLICIT refspec on every push
+(`git push --force-with-lease origin <branch>:<branch>`). Never run
+`reset --hard`/`clean` in the shared checkout at all -- a sibling's
+uncommitted work is routinely staged there (L-0014).
+
+**Recovery, both directions, if it happens anyway:**
+
+  * A rewound branch: the objects survive on the server. `git fetch origin
+    <sha>` may refuse an unreachable sha, but the API does not --
+    `gh api repos/<org>/<repo>/commits/<sha>` confirms it exists and
+    `gh api -X PATCH repos/<org>/<repo>/git/refs/heads/main -f sha=<full>
+    -F force=true` restores the ref without needing the object locally.
+    Then verify every recently-merged PR's merge commit is an ancestor of
+    main again, and that release TAGS are still reachable.
+  * Wiped STAGED work: `git reset --hard` destroys the index, not the
+    objects. `git fsck --unreachable | grep blob` plus `git cat-file -p
+    <blob>` recovers the exact staged content. Wiped UNSTAGED edits are
+    gone and are also INVISIBLE -- you cannot enumerate what you destroyed,
+    so never claim a full recovery.
+
+(T55.7 finding, 2026-07-17. Both incidents were fully recovered and
+independently verified; the point of this entry is that the agent was
+following a documented rule set and the machine was silently missing the two
+controls that would have made it impossible.)
+
+### L-0049 #sqlite #read-model #concurrency #busy-timeout #landmine -- the shared read-model DB wedges under concurrent kazi processes without a generous busy_timeout
+
+`~/.kazi/kazi.db` is one SQLite file shared by EVERY kazi process on the
+machine (CLI applies, the dashboard). WAL allows one writer at a time;
+exqlite's default `busy_timeout` is 2000ms. With 5+ concurrent `kazi apply`
+runs, writers exceeded the 2s window and runs wedged for ~20 minutes at 0%
+CPU (2026-07-09 incident). Fix: `busy_timeout: 60_000` on `Kazi.Repo`
+(config.exs), pinned by `test/kazi/repo_busy_timeout_test.exs`. If a fleet
+still wedges, suspect a long write transaction holding the WAL writer, not
+the timeout.
+
+INVARIANT (follow-up fix): kazi never hangs on its own telemetry. The
+read-model is authoritative for nothing, so no run-path touch of it may
+block the reconcile loop: every registry/projection write and the boot
+migration runs under `Kazi.ReadModel.Guard` — a hard deadline (15s writes,
+60s migrate) that kills the blocked task, logs a warning, and returns
+`{:error, :read_model_unavailable}` so the run continues without
+persistence. Pinned by `test/kazi/read_model/guard_test.exs`. When adding a
+NEW read-model write to the run path, route it through the Guard.
+
+### L-0050 #otp #genserver #supervisor #trap_exit #terminate #landmine -- a non-trapping GenServer's `terminate/2` does NOT run on a `Supervisor.stop/2`-driven shutdown
+
+Building `Kazi.Daemon.Listener` (T51.1, ADR-0067): a plain (non-trapping)
+`GenServer` child, torn down via `Supervisor.stop(sup_pid, reason)`, does
+**not** invoke its own `terminate/2` — verified empirically (a socket
+file + pidfile the listener was supposed to clean up on shutdown were
+still on disk after the owning supervisor's `:DOWN` fired). This is
+counter to the common assumption that supervised children always get a
+graceful `terminate/2` on shutdown; that guarantee only holds if the
+child calls `Process.flag(:trap_exit, true)` in its own `init/1`. With
+trapping on, the exit signal from the child's `proc_lib` "parent" (the
+process that started it — here, the supervisor) is handled specially and
+`terminate/2` runs reliably, with no extra `handle_info({:EXIT, ...})`
+clause needed.
+
+INVARIANT: any GenServer whose `terminate/2` performs load-bearing
+cleanup (closing a socket/port, removing a pidfile, releasing a lock) on
+a supervisor-initiated shutdown MUST trap exits. Verify this kind of
+cleanup with a real `Supervisor.stop/2` in the test, not just a
+self-initiated `{:stop, :normal, state}` return — the latter always
+calls `terminate/2` regardless of trapping and would hide this gap.
+
+## Self-teaching docs / retrieval
+
+### L-0051 #teach #retrieval #docs #audience-of-one #landmine -- shipped self-teaching artifacts assumed the operator's PERSONAL skill library as a universal baseline; a retrieval backend shelled out to a Claude Code skill as if it were an installable CLI
+kazi's public, git-committed teaching artifacts (`AGENTS.md`,
+`lib/kazi/teach/install_skill.ex`'s generated `SKILL.md`) told EVERY reader to
+"fall back to `/plan`/`/apply`" and treated `/tidy`/`/loop`/`/qualify` as
+"general skills" that "remain available" -- but those bare `/word` tokens name
+the operator's own personal global Claude Code skills, not anything kazi ships
+or that Claude Code provides by convention. Most kazi users have none of them,
+so the guidance is broken for the majority. Separately, `Kazi.Retrieval.Graphify`
+hardcoded `System.cmd("graphify", ...)`, treating the `/graphify` Claude Code
+skill as an installable CLI binary -- but that skill has NO such executable
+(each subcommand is an inline `$PYTHON -c "..."` snippet the agent runs while
+following the skill's Markdown), so there is nothing named `graphify` on any
+PATH to shell out to, for anyone. Both are the same failure: an "audience of
+one" surface baked into a public artifact.
+RULE: before writing self-teaching prose OR a shell-out, grep the diff for bare
+`/<word>` tokens and for `System.cmd`/`System.shell` targets, and confirm each
+names a real, shipped, installable capability (a documented `kazi` CLI verb, or
+a presence-checked external binary with a working fallback), not a personal tool
+you happen to have. Describe the CONTRACT ("an upstream planning process
+produced acceptance criteria"), never a specific external skill name.
+Cross-refs: ADR-0015 first named and rejected this "audience of one" class --
+it withdrew the `capabilities.json` registry adapter because a bespoke input
+only one internal product produces is a liability on a public open-source
+surface; ADR-0052 is this SAME failure recurring in a different location, and
+its decision is what this entry guards: rewrite the two artifacts to describe
+the contract, add a coherence guard that fails on any `/<word>` that is not a
+kazi CLI verb, and retire the non-functional `Kazi.Retrieval.Graphify` (the
+pluggable `Kazi.Retrieval` seam + `NoOp` default stays; only the fake "real"
+backend goes). (T42.5, verifies UC-054.)
+
+### L-0044 #stuck-bundle #budget #escalation #landmine -- a size-budget trim pass silently BLANKED the most important field (the failing predicate's real error) to make room for expendable file paths
+`Kazi.Context.StuckBundle.fit_budget/2` shrinks a stuck bundle to its byte
+budget by dropping the most expendable content first (snippets, then extra
+failing predicates). Its last-resort branch -- ONE failing predicate still over
+budget -- computed the failure's room as `budget - overhead`, where `overhead`
+was the rendered bundle with the failure blanked to `""` but the FULL
+changed-files list still present. When that file list alone met/exceeded the
+budget, `room` collapsed to 0 and `cap(failure, 0)` erased the failure to `""` --
+so the escalation report surfaced `"failure": ""` (no cause) while faithfully
+listing 50 file paths the higher rung did not need. The irreducible signal (the
+actual error) was treated as MORE expendable than a file-path list, exactly
+inverting the module's own stated priority ("the failing evidence + changed
+files are the irreducible signal"). Symptom seen in the field: an unpushed-branch
+`landed` failure whose real git cause (`no upstream configured for branch ...`)
+was invisible in the stuck bundle.
+RULE: when a projection has a hard size budget AND a clearly-most-important
+field, shed the EXPENDABLE parts to protect that field's floor -- never let a
+budget pass zero out the payload it exists to carry. `fit_budget` now sheds
+changed-file paths until the failure has a usable floor (`@min_failure_room`),
+and caps the failure to `max(room, 1)` so it is shrunk, never blanked. Test the
+degenerate case (budget so small only the frame fits), not just the happy path.
+(T54.3, #1075, verifies UC-036.)
