@@ -66,6 +66,48 @@ defmodule Kazi.Actions.IntegrateTest do
       assert tree =~ "fix.txt"
     end
 
+    test "the landing commit carries the real goal id + name + converged predicates (issue #1550)",
+         %{tmp_dir: tmp_dir} do
+      %{work: work, bare: bare} = setup_repo(tmp_dir)
+      File.write!(Path.join(work, "fix.txt"), "the converged fix\n")
+
+      integrator = fn request, _opts ->
+        merge_commit = local_rebase_merge(bare, request.branch, request.base)
+        {:ok, %{pr: 7, merge_commit: merge_commit}}
+      end
+
+      # The goal + converged vector the loop/serial-landing threads through
+      # `integrate_context`. Before #1550 the serial-landing path threaded
+      # NEITHER, so the commit read `integrate(unknown-goal): converged change
+      # [(none recorded)]`.
+      goal = %Kazi.Goal{id: "adopt-widgets", name: "Spec-coverage discovery goal for widgets"}
+
+      vector =
+        Kazi.PredicateVector.new(%{
+          spec_coverage: Kazi.PredicateResult.pass(%{ratio: 1.0})
+        })
+
+      action = Action.new(:integrate, params: %{branch: "kazi/fix-meta"})
+      ctx = %{workspace: work, integrator: integrator, goal: goal, vector: vector}
+
+      assert {:ok, result} = Integrate.execute(action, ctx)
+
+      {subject, 0} =
+        System.cmd("git", ["log", "-1", "--format=%s", result.commit], cd: work)
+
+      subject = String.trim(subject)
+
+      assert subject ==
+               "integrate(adopt-widgets): Spec-coverage discovery goal for widgets [spec_coverage]"
+
+      refute subject =~ "unknown-goal"
+      refute subject =~ "converged change"
+      refute subject =~ "(none recorded)"
+
+      {body, 0} = System.cmd("git", ["log", "-1", "--format=%b", result.commit], cd: work)
+      assert body =~ "Converged predicates: spec_coverage"
+    end
+
     test "uses defaults for branch/base/message when params omitted", %{tmp_dir: tmp_dir} do
       %{work: work, bare: bare} = setup_repo(tmp_dir)
       File.write!(Path.join(work, "fix.txt"), "default-path fix\n")

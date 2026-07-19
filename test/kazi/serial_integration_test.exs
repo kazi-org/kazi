@@ -61,6 +61,26 @@ defmodule Kazi.SerialIntegrationTest do
     assert integration["refs"]["local"] == true
   end
 
+  test "the human report LOUDLY names the branch the converged work landed on (issue #1550)",
+       %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    goal_file = write_goal_file(tmp_dir, work, "test -f fixed.txt")
+
+    {out, code} = run_apply_human(goal_file, work, committing_harness(tmp_dir), [])
+
+    assert code == 0
+
+    # Before #1550 the human report stopped at the predicate vector, so an
+    # operator saw `converged` but not WHERE the work went (it sat on a
+    # kazi-internal branch with the checkout looking clean).
+    assert out =~ "landed:", "the human report must announce where the work landed"
+
+    assert out =~ "task/serial-integration-fixture",
+           "the landed line must name the branch the work is on"
+
+    assert out =~ "→ main", "the landed line must name the base the branch integrated onto"
+  end
+
   test "T54.1: the loop runs on the goal's REAL target branch task/<id>, not a synthetic one",
        %{tmp_dir: tmp_dir} do
     work = git_repo(tmp_dir)
@@ -227,6 +247,25 @@ defmodule Kazi.SerialIntegrationTest do
     with_io(fn ->
       Kazi.CLI.run(
         ["apply", goal_file, "--workspace", work, "--json"],
+        Keyword.merge(
+          [
+            adapter_opts: [command: harness],
+            reobserve_interval_ms: 5,
+            await_timeout: 15_000
+          ],
+          runtime_opts
+        )
+      )
+    end)
+    |> then(fn {code, out} -> {out, code} end)
+  end
+
+  # Same as run_apply/4 but on the HUMAN surface (no --json), so the terminal
+  # report text (including the #1550 "landed:" line) is asserted directly.
+  defp run_apply_human(goal_file, work, harness, runtime_opts) do
+    with_io(fn ->
+      Kazi.CLI.run(
+        ["apply", goal_file, "--workspace", work],
         Keyword.merge(
           [
             adapter_opts: [command: harness],
