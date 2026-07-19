@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.270.1](https://github.com/kazi-org/kazi/compare/v1.270.0...v1.270.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **daemon:** run velocity tick off the ticker mainloop so a hung pass can't wedge the daemon ([#1595](https://github.com/kazi-org/kazi/issues/1595)) ([8995e35](https://github.com/kazi-org/kazi/commit/8995e35713d830c7f2221e054a33b09186be0cef))
+
 ## [1.270.0](https://github.com/kazi-org/kazi/compare/v1.269.0...v1.270.0) (2026-07-19)
 
 
