@@ -192,6 +192,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `reason`         | string \| null      | The loop's stop reason — the exceeded budget dimension (e.g. `max_iterations`, `wall_clock`, `token_budget`, `max_dispatches` — T48.6, ADR-0058) or `stuck`. `null` on a clean converge. |
 | `release_ref`    | string \| null      | The release tag of the artifact deployed this run (T3.3c), or `null` if nothing was deployed. |
 | `error`          | string              | Present **only** when `status` is `error`: a human-readable failure message (a pre-loop failure, e.g. a vacuous goal or an unknown provider/harness). |
+| `tampered_file`  | object (optional)   | ADR-0080 (#1520): present **only** when `status` is `tampered` — the sealed input (or goal-file) that changed mid-run, `{ "path": string, "change": "modified" \| "removed" \| "added" }`. Names the file only, never its contents. Absent on every other run. |
 
 ### `status`
 
@@ -201,6 +202,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `stuck`        | `:stopped` (reason `:stuck` or other) | The loop stopped before converging — a stuck stop (T1.5: the same failing set persisted across N iterations) or any other non-converged halt (operator/await stop). Investigate. Exit non-zero. |
 | `over_budget`  | `:over_budget`                        | A hard budget ceiling was hit (T1.4); `reason` / `budget_spent.exceeded` name the dimension. Exit non-zero. |
 | `error`        | _(pre-loop failure)_                  | The run could not start — a vacuous goal (R3), an unknown provider/harness, or an await timeout. The object carries `error`. Exit non-zero. |
+| `tampered`     | `:tampered`                           | ADR-0080 (#1520): a sealed input (the goal-file or a declared predicate input) was edited mid-run — the acceptance contract was tampered with. The run is **void**: never `converged`, distinct from `stuck`. `tampered_file` names the file. Exit non-zero. |
 
 ### `next_action`
 
