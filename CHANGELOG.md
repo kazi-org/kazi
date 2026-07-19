@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.261.0](https://github.com/kazi-org/kazi/compare/v1.260.0...v1.261.0) (2026-07-19)
+
+
+### Features
+
+* **dashboard:** fleet velocity strip + per-agent drill-in (T67.5, ADR-0079) ([d578520](https://github.com/kazi-org/kazi/commit/d5785205993c75656ff227cf46b329a8688d8cea))
+
 ## [1.260.0](https://github.com/kazi-org/kazi/compare/v1.259.0...v1.260.0) (2026-07-19)
 
 
