@@ -41,7 +41,8 @@ empty. It rides the existing daemon lifecycle rather than adding a second transp
 config :kazi, :velocity_collector,
   enabled: false,           # opt-in gate (above)
   interval_s: 300,          # seconds between collection passes (default 300)
-  transcript_dir: "..."     # transcript root to scan; default ~/.claude/projects
+  transcript_dir: "...",    # transcript root to scan; default ~/.claude/projects
+  workspaces: []            # git workspaces to project delivery events from (below)
 ```
 
 When the collector is **disabled**, the ticker still starts but performs no
@@ -67,11 +68,42 @@ its writes never touch its own socket. The cross-machine bus `fact` still dials 
 socket to find the NATS port, but is bounded by `Kazi.Bus.run/3`'s hard deadline
 (degrading to `:bus_unavailable` rather than blocking), so it cannot wedge the daemon.
 
+## The delivery projection (T67.6 finding 2)
+
+The E67 velocity dashboard has two halves: the **session counters** above, and a
+**delivery** half — delivered plan tasks and claim→merge lead time derived from a
+workspace's git history by `Kazi.ReadModel.DeliveryProjection` (T67.2). Like the
+collector, that projection shipped with **no production caller**, so the delivery
+tables stayed silently empty and the dashboard's delivery half rendered over
+nothing. The same daemon ticker now closes that gap: after each session-collection
+pass it projects every git workspace listed under `:workspaces`.
+
+```elixir
+config :kazi, :velocity_collector,
+  workspaces: ["/abs/path/to/repo", "/abs/path/to/another"]
+```
+
+- **Not gated on `enabled`.** Delivery projection reads only committed git history
+  (never a transcript), so it runs whenever `:workspaces` is non-empty regardless of
+  the session-collector opt-in. An empty list (the default) does no projection work.
+- **Incremental & idempotent.** Each pass scans `<last_seen_commit>..HEAD` and
+  upserts on a composed `dedup_key`, so a re-scan of unchanged history writes nothing
+  new (same history in ⇒ same rows out).
+- **Crash-isolated per workspace.** A workspace that does not exist, is not a git
+  repo, or whose history is unreadable is logged and skipped — it never aborts the
+  other workspaces, session collection, or the ticker itself.
+- **In-daemon writes go direct (same T67.6 invariant).** The projection's default
+  sink is `Kazi.ReadModel.Writer` (the socket-routing client seam); running inside
+  the daemon it would self-deadlock exactly as the collector did, so the ticker
+  injects `DeliveryProjection.direct_write/2` — a straight `Kazi.Repo` upsert — and
+  its writes never touch the daemon's own control socket.
+
 **Observability.** `kazi daemon status` prints a `velocity collector:` line —
-`disabled`, `enabled (no run yet)`, or `enabled (last run <ts>, <n> session(s))`.
-The run timestamp and session count come from real runs only; nothing is fabricated
-when no collection has happened yet. The same fields appear under `"velocity"` in
-`kazi daemon status --json`.
+`disabled`, `enabled (no run yet)`, or `enabled (last run <ts>, <n> session(s))` —
+and a sibling `delivery projection:` line — `no workspaces configured` or `last pass
+<ts>, <n> workspace(s), <m> event(s)`. Both come from real runs only; nothing is
+fabricated when no collection or projection has happened yet. The same fields appear
+under `"velocity"` (with a nested `"last_projection"`) in `kazi daemon status --json`.
 
 ## The privacy contract — what is and is NOT collected
 
