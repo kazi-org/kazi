@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.264.1](https://github.com/kazi-org/kazi/compare/v1.264.0...v1.264.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **read_model:** IMMEDIATE transaction mode so busy_timeout covers read-then-write (T59.5 class 5a, [#1025](https://github.com/kazi-org/kazi/issues/1025)/[#1186](https://github.com/kazi-org/kazi/issues/1186)) ([5b76b93](https://github.com/kazi-org/kazi/commit/5b76b93a5ca280a087a69e8dd2496a07caca3386))
+
 ## [1.264.0](https://github.com/kazi-org/kazi/compare/v1.263.0...v1.264.0) (2026-07-19)
 
 
