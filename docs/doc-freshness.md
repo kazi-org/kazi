@@ -69,11 +69,18 @@ Asserts: a newly-shipped command cannot be invisible in the README.
 under `docs/` (NOT the archival tiers -- see scope below) for two failure classes:
 
 1. A known-removed verb token: `kazi run`, `kazi propose`, `mix kazi.run`
-   (removed in v1.0.0, ADR-0032; recorded in `docs/deprecations.md`). Matched on
-   a word boundary, so prose like "kazi runs the loop" does NOT trip.
+   (removed in v1.0.0, ADR-0032; recorded in `docs/deprecations.md`) **in command
+   position** — inside a fenced code block, at the start of a command line
+   (optionally after indentation or a `$ ` prompt), or inline-backtick-quoted.
+   Matched on a trailing word boundary, so "kazi runs the loop" is safe; and
+   because only command-position occurrences count, ordinary prose like "Every
+   kazi run already asks an agent…" does NOT trip either (the token has to read
+   as an invocation, not an English verb). Pinned by
+   `test_check_b_no_dead_command_refs.sh`.
 2. A backtick-quoted `` `kazi <cmd>` `` whose `<cmd>` is not in the `@commands`
    table. Catches forward drift such as `kazi mcp` or `kazi adopt` (conceptual
-   names that are not shipped commands).
+   names that are not shipped commands). A backtick-quoted removed verb
+   (`` `kazi run` ``) is caught here too, since it is absent from the table.
 
 Each offender is reported with `file:line`.
 
