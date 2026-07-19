@@ -764,4 +764,113 @@ defmodule KaziWeb.MissionControlLiveTest do
       refute html =~ ~s(id="mc-progress-all-done")
     end
   end
+
+  describe "fleet velocity strip + per-agent drill-in (T67.5, ADR-0079)" do
+    alias Kazi.ReadModel.{DeliveryEvent, SessionCounters}
+
+    defp seed_delivery(attrs) do
+      sha = "velo-sha-#{System.unique_integer([:positive])}"
+
+      base = %{
+        kind: "task_tick",
+        merge_commit_sha: sha,
+        dedup_key: "task_tick|#{sha}"
+      }
+
+      %DeliveryEvent{}
+      |> DeliveryEvent.changeset(Map.merge(base, attrs))
+      |> Repo.insert!()
+    end
+
+    defp seed_counters(attrs) do
+      %SessionCounters{}
+      |> SessionCounters.changeset(attrs)
+      |> Repo.insert!()
+    end
+
+    defp velocity_panel(html) do
+      html
+      |> String.split(~s(id="mc-velocity"))
+      |> Enum.at(1)
+      |> String.split("</section>")
+      |> hd()
+    end
+
+    test "seeded KPIs render the strip with rate-labeled copy and no date/ETA strings", %{
+      conn: conn
+    } do
+      now = DateTime.utc_now()
+      session = "velo-agent-1"
+
+      seed_delivery(%{
+        session_uuid: session,
+        goal_ref: "velo-goal",
+        merged_at: DateTime.add(now, -3600, :second)
+      })
+
+      seed_counters(%{
+        session_uuid: session,
+        session_name: "agent-one",
+        input_tokens: 30_000,
+        output_tokens: 6_000,
+        first_observed_at: DateTime.add(now, -7200, :second),
+        last_observed_at: now
+      })
+
+      # A terminal stuck run: the fleet + agent stuck ratio is a measured 100%,
+      # and the drill-in must NAME the offending goal.
+      stuck =
+        seed(%{
+          goal_ref: "the-stuck-lane",
+          harness_session_id: session,
+          session_name: "agent-one"
+        })
+
+      {:ok, _} = RunRegistry.finish(stuck.run_id, "stuck")
+
+      {:ok, _view, html} = live(conn, ~p"/")
+      panel = velocity_panel(html)
+
+      assert panel =~ ~s(id="mc-velocity-strip")
+      # Rate/ratio-labeled copy for each metric.
+      assert panel =~ ~s(data-velocity-metric="delivered")
+      assert panel =~ "/day"
+      assert panel =~ ~s(data-velocity-metric="tokens")
+      assert panel =~ "tok/task"
+      assert panel =~ ~s(data-velocity-metric="stuck")
+      assert panel =~ "stuck"
+      assert panel =~ ~s(data-velocity-metric="lead-time")
+
+      # The per-agent drill-in NAMES the offending stuck goal.
+      assert panel =~ ~s(data-stuck-goal="the-stuck-lane")
+      assert panel =~ "the-stuck-lane"
+
+      # ADR-0046 honest-unknown: no fabricated time estimate anywhere in the panel.
+      refute panel =~ ~r/\bETA\b/
+      refute panel =~ ~r/estimated/i
+      refute panel =~ ~r/remaining/i
+      refute panel =~ ~r/\bdate\b/i
+    end
+
+    test "a fresh fleet renders honest 'not enough data yet', not zeros as measurements", %{
+      conn: conn
+    } do
+      {:ok, _view, html} = live(conn, ~p"/")
+      panel = velocity_panel(html)
+
+      assert panel =~ ~s(id="mc-velocity-empty")
+      assert panel =~ "Not enough data yet"
+      refute panel =~ ~s(id="mc-velocity-strip")
+    end
+
+    test "the strip is an operator surface — present in both operator and debug modes", %{
+      conn: conn
+    } do
+      {:ok, _view, operator} = live(conn, ~p"/")
+      {:ok, _view, debug} = live(conn, ~p"/?debug=1")
+
+      assert operator =~ ~s(id="mc-velocity")
+      assert debug =~ ~s(id="mc-velocity")
+    end
+  end
 end
