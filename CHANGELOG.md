@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.267.1](https://github.com/kazi-org/kazi/compare/v1.267.0...v1.267.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **doc-freshness:** scope check_b removed-verb match to command position ([81234ed](https://github.com/kazi-org/kazi/commit/81234eda0fa5dd46e3100cc686af82aad04d7311))
+
 ## [1.267.0](https://github.com/kazi-org/kazi/compare/v1.266.1...v1.267.0) (2026-07-19)
 
 
