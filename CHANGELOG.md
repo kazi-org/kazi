@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.259.0](https://github.com/kazi-org/kazi/compare/v1.258.0...v1.259.0) (2026-07-19)
+
+
+### Features
+
+* **adopt:** spec_coverage_predicate for init --discover ([b023099](https://github.com/kazi-org/kazi/commit/b023099515e243d5dfe21c7072382f4480ea6de3))
+* **cli:** kazi init --discover ([78013a2](https://github.com/kazi-org/kazi/commit/78013a20a214f31138a3f3ab6a289c017a387844))
+
 ## [1.258.0](https://github.com/kazi-org/kazi/compare/v1.257.0...v1.258.0) (2026-07-19)
 
 
