@@ -1,0 +1,101 @@
+# kazi's own live roadmap goal-DAG (T45.9, ADR-0082 option B; refines ADR-0056,
+# ADR-0075). A declarative DAG over the OPEN epics of docs/plan.md — authored,
+# linted, and rendered BESIDE the WBS (docs/plan-generated.md), never in place of
+# it. docs/plan.md + docs/plans/*.md remain the task-level substrate for
+# parse_plan.py, /apply --pool, and the doc-freshness checkers.
+#
+# Each node is one open epic. Its predicates are HONEST, checkable completeness
+# checks over the WBS itself (a task is done iff its `- [x] TNN` line is ticked),
+# so the goal-set is objectively evaluable, never a vacuous `cmd = "true"` stub.
+# Frontier epics (active work — E66 P0 release correctness, E45 the one-system
+# epic) carry a full goal-set: one predicate per open task. Later epics (E25
+# launch, founder-gated; E67 velocity, waiting on an upstream fix) are outline
+# goals with a single epic-completeness predicate (ADR-0056 decision 2).
+#
+# Validate:  kazi lint docs/roadmap/kazi.roadmap.toml
+# Render:    kazi plan render docs/roadmap/kazi.roadmap.toml --out docs/plan-generated.md
+
+# --- E66 (frontier, P0): release-binary boot correctness + swift_test ---------
+[[goals]]
+id = "e66"
+
+  [goals.goal]
+  name = "E66 — release-binary boot correctness"
+
+  [[goals.goal.predicate]]
+  id = "t66-2-launchd-boot"
+  provider = "custom_script"
+  description = "T66.2: launchctl kickstart from a clean slate either starts the daemon (stable pid, socket, vsn log line) or exits non-zero WITH a diagnostic line — the exit-78-zero-output mode is impossible (#1484)"
+  cmd = "bash"
+  args = ["-c", "grep -qE '^- \\[x\\] T66\\.2 ' docs/plans/E66.md"]
+
+  [[goals.goal.predicate]]
+  id = "t66-5-mount-query-bounded"
+  provider = "custom_script"
+  description = "T66.5: the mission-control mount query is bounded; GET / answers 200 well under the 20s ceiling hours after a restart with real accumulated history (#1483)"
+  cmd = "bash"
+  args = ["-c", "grep -qE '^- \\[x\\] T66\\.5 ' docs/plans/E66.md"]
+
+  [[goals.goal.predicate]]
+  id = "t66-6-bus-daemon-reliability"
+  provider = "custom_script"
+  description = "T66.6: LaunchAgent fd limits are pinned; a socket-alive-but-deaf daemon and a stale-version bind conflict each yield a distinct, state-naming diagnostic (#1579)"
+  cmd = "bash"
+  args = ["-c", "grep -qE '^- \\[x\\] T66\\.6 ' docs/plans/E66.md"]
+
+  [[goals.goal.predicate]]
+  id = "t66-7-collector-pass-completes"
+  provider = "custom_script"
+  description = "T66.7: a hanging SessionCollector pass is killed at the deadline and the kill is observable; the released binary shows a COMPLETED pass on a real transcript tree (#1606)"
+  cmd = "bash"
+  args = ["-c", "grep -qE '^- \\[x\\] T66\\.7 ' docs/plans/E66.md"]
+
+# --- E25 (later, P1, founder-gated): launch / no-vaporware gate ---------------
+[[goals]]
+id = "e25"
+
+  [goals.goal]
+  name = "E25 — content-marketing refocus + launch"
+
+  [[goals.goal.predicate]]
+  id = "e25-complete"
+  provider = "custom_script"
+  description = "E25 (T25.10): the accuracy/coherence/publish launch gate — automated freshness/coherence checks pass, zero unshipped-command or stale-model-id references, and the announcement leads with human -> Claude -> kazi -> Claude. Founder-gated publish."
+  cmd = "bash"
+  args = ["-c", "! grep -qE '^- \\[ \\] T25\\.' docs/plans/E25.md"]
+
+# --- E67 (later, P2, waiting on an upstream fix): velocity surface ------------
+[[goals]]
+id = "e67"
+
+  [goals.goal]
+  name = "E67 — dashboard velocity surface"
+
+  [[goals.goal.predicate]]
+  id = "e67-complete"
+  provider = "custom_script"
+  description = "E67 (T67.6): the velocity surface is documented and live full-fusion dogfooded — on the released binary the read-model holds >0 session-counter and >0 delivery-event rows from real activity, and the panel renders them."
+  cmd = "bash"
+  args = ["-c", "! grep -qE '^- \\[ \\] T67\\.' docs/plans/E67.md"]
+
+# --- E45 (frontier, P1): the one-system epic; caps once the base is correct ---
+[[goals]]
+id = "e45"
+needs = ["e66"]
+
+  [goals.goal]
+  name = "E45 — one system: plan-as-generated-view + exit proof"
+
+  [[goals.goal.predicate]]
+  id = "t45-9-roadmap-generated-view"
+  provider = "custom_script"
+  description = "T45.9: the live roadmap goal-DAG is authored, lints clean, and persists; docs/plan-generated.md is the committed render kept fresh by a drift check, beside the untouched WBS (ADR-0082)"
+  cmd = "bash"
+  args = ["-c", "grep -qE '^- \\[x\\] T45\\.9 ' docs/plans/E45.md"]
+
+  [[goals.goal.predicate]]
+  id = "t45-10-exit-proof"
+  provider = "custom_script"
+  description = "T45.10: exit proof — a zero-skill idea -> landed -> live dogfood drives one real engineering slice end to end, after which the plan/apply skills retire"
+  cmd = "bash"
+  args = ["-c", "grep -qE '^- \\[x\\] T45\\.10 ' docs/plans/E45.md"]
