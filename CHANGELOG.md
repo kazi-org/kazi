@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.260.0](https://github.com/kazi-org/kazi/compare/v1.259.0...v1.260.0) (2026-07-19)
+
+
+### Features
+
+* **velocity:** per-agent and fleet KPI query module (T67.4, ADR-0079) ([bb539ca](https://github.com/kazi-org/kazi/commit/bb539ca047a87c8d4e68da9d7c982fb508939246))
+
 ## [1.259.0](https://github.com/kazi-org/kazi/compare/v1.258.0...v1.259.0) (2026-07-19)
 
 
