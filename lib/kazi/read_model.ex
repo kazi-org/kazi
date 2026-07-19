@@ -33,6 +33,7 @@ defmodule Kazi.ReadModel do
     Iteration,
     LandedRef,
     OrientationPackCache,
+    PredicateAudit,
     ProposedGoal,
     ProposedMemory,
     RetrievalSnippetCache,
@@ -427,6 +428,82 @@ defmodule Kazi.ReadModel do
         order_by: [asc: l.partition_id]
       )
     )
+  end
+
+  # --- predicate mutation audit store (T68.9, #1501) -------------------------
+
+  @doc """
+  Records a goal's sampled predicate mutation audit (T68.9, #1501) — the
+  verification-of-verification score from `Kazi.Audit.PredicateSensitivity`.
+
+  `summary` is that module's `t/0` map (`:tested`, `:constrained`, `:survived`,
+  `:sensitivity`, `:survivors`). UPSERTS on `goal_ref` (last-write-wins), so a
+  re-audit overwrites the goal's prior score rather than accumulating rows.
+  `:sensitivity` persists NULL when the audit had nothing to test (honest-unknown,
+  ADR-0046). Best-effort like every projection: a degraded read-model returns
+  `{:error, :read_model_unavailable}` and never fails the caller.
+  """
+  @spec record_predicate_audit(Kazi.Goal.id(), map()) ::
+          {:ok, PredicateAudit.t()} | {:error, term()}
+  def record_predicate_audit(goal_ref, summary) when is_map(summary) do
+    Kazi.ReadModel.Guard.run("predicate-audit record", fn ->
+      do_record_predicate_audit(to_string(goal_ref), summary)
+    end)
+  end
+
+  defp do_record_predicate_audit(goal_ref, summary) do
+    now = DateTime.utc_now()
+
+    row = %{
+      goal_ref: goal_ref,
+      tested: Map.fetch!(summary, :tested),
+      constrained: Map.fetch!(summary, :constrained),
+      survived: Map.fetch!(summary, :survived),
+      sensitivity: Map.get(summary, :sensitivity),
+      survivors: encode_survivors(Map.get(summary, :survivors, [])),
+      sampled_at: now,
+      inserted_at: now,
+      updated_at: now
+    }
+
+    %PredicateAudit{}
+    |> PredicateAudit.changeset(row)
+    |> Writer.insert(
+      on_conflict:
+        {:replace,
+         [:tested, :constrained, :survived, :sensitivity, :survivors, :sampled_at, :updated_at]},
+      conflict_target: :goal_ref,
+      returning: true
+    )
+  end
+
+  # Survivor ids are stored as a JSON array of strings so the audit surface can
+  # name the weak/gamed predicates. Stringified for a stable on-disk form.
+  defp encode_survivors(survivors) when is_list(survivors) do
+    Jason.encode!(Enum.map(survivors, &to_string/1))
+  end
+
+  @doc """
+  The goal's most recent predicate mutation audit (T68.9, #1501), or `nil` when
+  it has never been audited. A pure read.
+  """
+  @spec latest_predicate_audit(Kazi.Goal.id()) :: PredicateAudit.t() | nil
+  def latest_predicate_audit(goal_ref) do
+    Repo.get_by(PredicateAudit, goal_ref: to_string(goal_ref))
+  end
+
+  @doc """
+  Decodes a `PredicateAudit` row's `survivors` JSON back to a list of predicate
+  id strings (empty list when absent or unparseable).
+  """
+  @spec audit_survivors(PredicateAudit.t()) :: [String.t()]
+  def audit_survivors(%PredicateAudit{survivors: nil}), do: []
+
+  def audit_survivors(%PredicateAudit{survivors: json}) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, list} when is_list(list) -> list
+      _ -> []
+    end
   end
 
   # --- proposed-goal store (T3.5a authoring / T3.5b approval) ----------------
