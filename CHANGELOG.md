@@ -16,6 +16,22 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.271.0](https://github.com/kazi-org/kazi/compare/v1.270.1...v1.271.0) (2026-07-19)
+
+
+### Features
+
+* **cli:** surface velocity passes-killed in kazi daemon status (T66.7, [#1606](https://github.com/kazi-org/kazi/issues/1606)) ([1d53013](https://github.com/kazi-org/kazi/commit/1d53013bd1c5c2af9ffe83046e3f692f0add5839))
+* **daemon:** LaunchAgent/systemd templates with explicit fd limits (T66.6, [#1579](https://github.com/kazi-org/kazi/issues/1579)) ([a250e29](https://github.com/kazi-org/kazi/commit/a250e291a3b232ceda91990d1ad7bac6a8882209))
+* **daemon:** make the velocity deadline-kill observable via a status counter (T66.7, [#1606](https://github.com/kazi-org/kazi/issues/1606)) ([094d8e6](https://github.com/kazi-org/kazi/commit/094d8e6e97c2e96d8c13ac7524da77965b70603c))
+
+
+### Bug Fixes
+
+* **cli:** distinct daemon errors — deaf socket + version-named conflict (T66.6, [#1579](https://github.com/kazi-org/kazi/issues/1579)) ([c7ce711](https://github.com/kazi-org/kazi/commit/c7ce711f9b7e42f4b03b05e341063da7e8f91008))
+* **daemon:** detect socket-present-but-not-accepting distinctly from no-daemon (T66.6, [#1579](https://github.com/kazi-org/kazi/issues/1579)) ([c2f0510](https://github.com/kazi-org/kazi/commit/c2f051045380069268cab0f35786e9aa5d09c8e6))
+* **velocity:** bound the transcript scan so a pass completes on large trees (T66.7, [#1606](https://github.com/kazi-org/kazi/issues/1606)) ([3de7715](https://github.com/kazi-org/kazi/commit/3de7715d2d94094b7649040c20ea480a52fd73f1))
+
 ## [1.270.1](https://github.com/kazi-org/kazi/compare/v1.270.0...v1.270.1) (2026-07-19)
 
 
