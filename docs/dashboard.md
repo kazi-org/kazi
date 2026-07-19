@@ -359,6 +359,14 @@ native lease table, an honest empty presence rail, never a 500. An explicit
 stamped on the page (`data-source`), the roster re-reads on a slow poll, and
 rows past the session TTL are hidden.
 
+## Velocity surface (E67)
+
+The velocity surface fuses kazi-run KPIs with interactive-session activity. The
+latter arrives via the **opt-in session-stats collector** — aggregate counters
+only, never transcript content. It is disabled by default; see
+[velocity-collector.md](velocity-collector.md) for the opt-in flag/config and the
+full privacy contract (what is and is NOT collected).
+
 ## Retention and scope
 
 Single-machine scope for now: the shared SQLite read-model requires zero new
