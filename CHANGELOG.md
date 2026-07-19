@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.267.0](https://github.com/kazi-org/kazi/compare/v1.266.1...v1.267.0) (2026-07-19)
+
+
+### Features
+
+* **audit:** audit orchestration + predicate-quality docs (T68.9, [#1501](https://github.com/kazi-org/kazi/issues/1501)) ([f4bfd1f](https://github.com/kazi-org/kazi/commit/f4bfd1f957e01fb0d06567e8d6c28e7e123bef71))
+* **audit:** predicate sensitivity mutation audit core (T68.9, [#1501](https://github.com/kazi-org/kazi/issues/1501)) ([bedd246](https://github.com/kazi-org/kazi/commit/bedd24670603a994cd1757d9ee44ad06c12395c9))
+* **read-model:** predicate_audits projection records audit score per goal (T68.9, [#1501](https://github.com/kazi-org/kazi/issues/1501)) ([b708a3c](https://github.com/kazi-org/kazi/commit/b708a3c8fa6d76fd92e744b91415e017d5ba69b7))
+* **reconcile:** predicate first-pass rate projection (T68.9, [#1501](https://github.com/kazi-org/kazi/issues/1501)) ([2d7de42](https://github.com/kazi-org/kazi/commit/2d7de422f8430d3ee0b6f52759322e12773d582d))
+* **status:** surface predicate audit score in kazi status (T68.9, [#1501](https://github.com/kazi-org/kazi/issues/1501)) ([1d90e0a](https://github.com/kazi-org/kazi/commit/1d90e0aaf7cd06c397c0a826030604c2fe1e6040))
+* **status:** surface predicate first-pass rate in kazi status (T68.9, [#1501](https://github.com/kazi-org/kazi/issues/1501)) ([a11b1f5](https://github.com/kazi-org/kazi/commit/a11b1f50ae91139a24933dd056c3f918d0899493))
+
 ## [1.266.1](https://github.com/kazi-org/kazi/compare/v1.266.0...v1.266.1) (2026-07-19)
 
 
