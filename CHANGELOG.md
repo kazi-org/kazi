@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.272.0](https://github.com/kazi-org/kazi/compare/v1.271.0...v1.272.0) (2026-07-19)
+
+
+### Features
+
+* **roadmap:** author kazi's live roadmap goal-DAG over the open epics (T45.9, ADR-0082) ([97b5f29](https://github.com/kazi-org/kazi/commit/97b5f29709f904e7845e4181122e33365cb6ad11))
+
 ## [1.271.0](https://github.com/kazi-org/kazi/compare/v1.270.1...v1.271.0) (2026-07-19)
 
 
