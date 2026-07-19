@@ -179,6 +179,34 @@ Two audiences, two tracks, one demo asset:
 Product Hunt is a low-priority checkbox weeks later; DevHunt and Peerlist are
 the dev-native equivalents worth the small effort.
 
+**Track C — agent-facing surfaces (2026-07 addition).** Everything above
+targets humans discovering kazi. A distinct, smaller set of surfaces targets
+an *agent* discovering and recommending kazi to its own user mid-session —
+the literal "have your coding agent tell you about kazi" channel:
+
+- **`llms.txt` at the repo root** — a curated pointer to README, concept.md,
+  AGENTS.md, quickstart, so an agent's retrieval pass gets the high-value
+  docs first instead of parsing the full tree. kazi already has `AGENTS.md`
+  (T25.6, "how to represent us"); `llms.txt` is the missing "what to read"
+  companion.
+- **MCP registry listings for `kazi mcp`** (E33, already shipped): the
+  official MCP registry, plus mcp.so / Smithery / glama.ai, plus the Claude
+  Code plugin marketplace (`claudemarketplaces.com`,
+  `anthropics/claude-plugins-official`) and `punkpeye/awesome-mcp-servers`.
+  This is the most direct version of "an agent recommends kazi" — a user
+  asks their agent what's available and the registry surfaces it.
+- **Comparison content shaped as agent-query answers**, not just human
+  reading — essays and field notes already prosecute kazi's thesis (§6); the
+  addition is writing at least one piece explicitly in the query shape an
+  agent's web-search tool call would fire ("verify an agent's done claim",
+  "stop an agentic loop from stopping early"), so it's the page retrieved
+  when an agent searches on a user's behalf.
+
+This track is mechanically identical to the ecosystem-embeds metric already
+tracked in §9 (registries and marketplaces are just awesome-lists with a
+schema) — it does not change the strategy's shape, only extends "be listed"
+to agent-facing directories alongside the human-facing ones.
+
 ## 8. The founder surface
 
 Every breakout case has a human protagonist compounding attention across
@@ -206,7 +234,9 @@ this). We track:
   ≥3 days; each benchmark post sustaining a velocity spike.
 - **Ecosystem embeds**: awesome-list inclusions, downstream READMEs naming
   kazi, harness/plugin marketplaces carrying it — the Ollama "be the
-  dependency" measure.
+  dependency" measure. Now explicitly includes Track C's agent-facing
+  registries (MCP registry, mcp.so/Smithery/glama, Claude Code plugin
+  marketplace).
 
 ## 10. Risks and their standing answers
 

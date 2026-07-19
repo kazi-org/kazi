@@ -106,6 +106,13 @@ essay shipped: *"The agent that deleted the failing test."*
 Product Hunt is a low-priority checkbox weeks later; DevHunt/Peerlist are the
 dev-native equivalents worth the small effort.
 
+**Track C (added 2026-07):** agent-facing surfaces — `llms.txt` at the repo
+root (companion to the existing `AGENTS.md`), MCP registry + Claude Code
+plugin marketplace listings for `kazi mcp`, and comparison content shaped as
+agent-query answers. The "an agent recommends kazi to its user" channel;
+mechanically the same as the ecosystem-embeds metric, extended to agent
+directories. Full detail in `strategy.md` §7.
+
 ## Metrics — honest by construction
 
 Stars are the visibility scoreboard, not the success metric (gameable; the

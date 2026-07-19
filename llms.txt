@@ -1,0 +1,43 @@
+# kazi
+
+> kazi is a reconciliation controller for coding agents: you declare a goal
+> as machine-checkable acceptance predicates, and kazi drives a coding
+> harness (Claude Code, opencode, Codex, Gemini CLI, ...) in a loop until
+> those predicates are objectively true, stuck, or over budget. kazi is a
+> TOOL an agent calls, not a harness itself — "the outer/reconciliation loop
+> for coding agents."
+
+The canonical invocation phrase is **"have kazi drive this until done."** An
+agent that hears it should author acceptance predicates with `kazi plan`,
+then converge them with `kazi apply` (or the equivalent `kazi_plan` /
+`kazi_apply` MCP tools) until the goal is objectively true — never declare
+victory on its own opinion of "done."
+
+## Start here
+
+- [AGENTS.md](AGENTS.md): the condensed, harness-neutral recipe for driving
+  kazi (MCP tools first, JSON-CLI fallback) — read this first if you are an
+  agent about to drive kazi.
+- [README.md](README.md): what kazi is, the human → Claude → kazi → Claude
+  spine, install, full CLI/capability reference.
+- [docs/quickstart.md](docs/quickstart.md): wire kazi into Claude Code and
+  converge one real goal end-to-end.
+- [docs/concept.md](docs/concept.md): the full architecture — why a
+  reconciliation controller, predicate envelope, guard/ratchet/enforcement
+  semantics, the native parallel scheduler.
+- [docs/orchestrator-recipe.md](docs/orchestrator-recipe.md): the full
+  (non-condensed) driving recipe AGENTS.md summarizes.
+
+## Reference
+
+- [docs/README.md](docs/README.md): full docs index (predicate providers,
+  economy, live probes, pooled multi-session execution, memory).
+- [docs/dogfood-methodology.md](docs/dogfood-methodology.md): reproducible
+  evidence of kazi converging goals a prose pipeline left subtly broken.
+- [docs/adr/](docs/adr/): the frozen architectural decisions (0001–0067+).
+
+## Optional
+
+- [docs/essays/](docs/essays/): evergreen deep-dives, one per significant
+  shipped feature, each naming the specific failure mode it closes.
+- [CHANGELOG.md](CHANGELOG.md): release history.

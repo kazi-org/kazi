@@ -45,6 +45,7 @@ truth for launch-ops state; tick items here as they complete.
 | OP-15 | Pitch Thinking Elixir / Elixir Wizards | 1–3 | 45m | todo |
 | OP-16 | Draft + submit the Latent Space guest essay (idea-first, kazi as example) | 3–4 | 4h | todo |
 | OP-17 | AI Engineer CFP submission when the Sessionize wave opens; PlatformCon as secondary | 4 | 2h | todo |
+| OP-21 | Submit `kazi mcp` to the official MCP registry (namespace/ownership proof required) + Claude Code plugin marketplace submission form | 3 | 1h | todo |
 
 ## Recurring (after week 6)
 
@@ -56,5 +57,7 @@ truth for launch-ops state; tick items here as they complete.
 
 Agent-executable counterparts (awesome-list PRs, DevHunt/Peerlist listings,
 dev.to cross-posts with canonical URLs, benchmark harness construction, essay
-drafts) are intentionally NOT here — they run through the normal workflow and
-only need OP-level approval where noted.
+drafts, `llms.txt` authoring, mcp.so/Smithery/glama.ai listing PRs) are
+intentionally NOT here — they run through the normal workflow and only need
+OP-level approval where noted (OP-21 covers the two registries that require
+proven account/namespace ownership).
