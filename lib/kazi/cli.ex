@@ -5159,6 +5159,7 @@ defmodule Kazi.CLI do
           )
 
           IO.puts("  velocity collector: #{velocity_status_line(resp["velocity"])}")
+          IO.puts("  delivery projection: #{delivery_projection_line(resp["velocity"])}")
         end)
 
         0
@@ -5270,6 +5271,18 @@ defmodule Kazi.CLI do
   end
 
   defp velocity_status_line(_absent), do: "unknown"
+
+  # T67.6 finding 2: the `kazi daemon status` line for the delivery projection --
+  # real pass facts only (workspaces scanned, events written), never fabricated. No
+  # configured workspaces (or no pass yet) reads "no workspaces configured"; a
+  # daemon older than this field omits it and falls back to "unknown".
+  defp delivery_projection_line(%{"last_projection" => nil}), do: "no workspaces configured"
+
+  defp delivery_projection_line(%{"last_projection" => p}) when is_map(p) do
+    "last pass #{p["at"]}, #{p["workspaces_scanned"]} workspace(s), #{p["events_written"]} event(s)"
+  end
+
+  defp delivery_projection_line(_absent), do: "unknown"
 
   # Shared `status` probe: `:missing` / `:dead` render the point-4 down/stale
   # messages; `:alive` pings and surfaces the raw handshake.
