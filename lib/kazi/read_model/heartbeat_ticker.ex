@@ -51,6 +51,28 @@ defmodule Kazi.ReadModel.HeartbeatTicker do
         Logger.debug("HeartbeatTicker: run #{run_id} not found in registry")
         schedule_heartbeat()
         {:noreply, run_id}
+
+      {:error, :read_model_unavailable} ->
+        # The read-model degraded (Guard hard-deadline, T52.7 refuse, or a
+        # transient CLI-side degrade -- issue #1511). This is the SAME degrade
+        # shape the Writer already tolerates: skip the beat quietly and keep the
+        # ticker alive rather than crash-looping. Logged at most ONCE per ticker
+        # (not per 30s tick) so a persistence-blind run stays visible without
+        # spamming the log.
+        log_degrade_once(run_id)
+        schedule_heartbeat()
+        {:noreply, run_id}
+    end
+  end
+
+  defp log_degrade_once(run_id) do
+    unless Process.get(:heartbeat_degrade_logged) do
+      Logger.warning(
+        "HeartbeatTicker: read-model unavailable for run #{run_id}; " <>
+          "skipping heartbeats without persistence"
+      )
+
+      Process.put(:heartbeat_degrade_logged, true)
     end
   end
 
