@@ -35,6 +35,11 @@ Application.put_env(:kazi, :lease_map_source, KaziWeb.CoordinationFixtureSource)
 # remote-run-facts fetcher to empty so the grid renders only the seeded runs.
 Application.put_env(:kazi, :remote_run_facts_fetcher, fn -> [] end)
 
+# T63.8: same hermeticity for the attention fan-in's waiting-on-operator source
+# — start empty so no real daemon injects a WAITING entry; the /test/attention/*
+# endpoints set it for the attention cert.
+Application.put_env(:kazi, :waiting_sessions_fetcher, fn -> [] end)
+
 # Block this (owner) process for the lifetime of the Playwright run so the shared
 # checkout never reverts to :manual. `mix run --no-halt` would otherwise let the
 # script process finish while the node stays up — terminating the owner.
