@@ -5157,6 +5157,8 @@ defmodule Kazi.CLI do
           IO.puts(
             "kazi daemon: running (vsn #{resp["vsn"]}, uptime #{resp["uptime_s"]}s, pid #{resp["pid"]}#{schema_vsn_suffix(resp)})"
           )
+
+          IO.puts("  velocity collector: #{velocity_status_line(resp["velocity"])}")
         end)
 
         0
@@ -5254,6 +5256,20 @@ defmodule Kazi.CLI do
   # daemon reports it and omitted for an older daemon that predates the field.
   defp schema_vsn_suffix(%{"schema_vsn" => v}) when is_integer(v), do: ", schema_vsn #{v}"
   defp schema_vsn_suffix(_resp), do: ""
+
+  # T67.6: the `kazi daemon status` line for the opt-in session-stats collector.
+  # Reports real run facts only (never fabricated). A daemon older than T67.6
+  # omits the field entirely -- fall back to "unknown".
+  defp velocity_status_line(%{"enabled" => false}), do: "disabled"
+
+  defp velocity_status_line(%{"enabled" => true} = v) do
+    case {v["last_run_at"], v["last_session_count"]} do
+      {nil, _} -> "enabled (no run yet)"
+      {at, n} -> "enabled (last run #{at}, #{n} session(s))"
+    end
+  end
+
+  defp velocity_status_line(_absent), do: "unknown"
 
   # Shared `status` probe: `:missing` / `:dead` render the point-4 down/stale
   # messages; `:alive` pings and surfaces the raw handshake.
