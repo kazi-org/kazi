@@ -16,6 +16,21 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.258.0](https://github.com/kazi-org/kazi/compare/v1.257.0...v1.258.0) (2026-07-19)
+
+
+### Features
+
+* **velocity:** opt-in session-stats collector + parser + cursor (T67.3, ADR-0079) ([fa1949f](https://github.com/kazi-org/kazi/commit/fa1949ff443e2ee8f3e326bde01698d675446c91))
+* **velocity:** session_counters read-model migration (T67.3, ADR-0079) ([5c063a8](https://github.com/kazi-org/kazi/commit/5c063a8959c436963c5ed7b891959af0da44ce97))
+* **velocity:** SessionCounters schema (closed counter whitelist, T67.3) ([74586d4](https://github.com/kazi-org/kazi/commit/74586d465a03a528137831d5ae304632df7a6d79))
+* **velocity:** velocity_collector disabled by default (T67.3, ADR-0034) ([cd7c703](https://github.com/kazi-org/kazi/commit/cd7c7038e79ba3fdbf322da782c75e96abad93c2))
+
+
+### Bug Fixes
+
+* **velocity:** unique migration version + guard-safe fixture paths (T67.3) ([4ab79ac](https://github.com/kazi-org/kazi/commit/4ab79ace23a789c064b0270da4d874f6a8689e27))
+
 ## [1.257.0](https://github.com/kazi-org/kazi/compare/v1.256.0...v1.257.0) (2026-07-19)
 
 
