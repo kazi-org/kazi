@@ -481,6 +481,7 @@ never swept into your commit.
 
 ## Progress Log
 
+- 2026-07-19: /plan resolve-open-issues -- ADR-0082 proposed (#1554 option B), T45.9 re-scoped (deps: ADR acceptance), wave E66-C added for T66.5-T66.7 (#1483 reopen, #1579, #1606); all 7 open issues now have plan homes.
 ### 2026-07-18 -- Change Summary (E65 planned: deterministic bus identity)
 - New epic E65 (plans/E65.md, executable, 5 tasks ~15h) from the operator's
   identity failure report (#1430): teams DERIVED from normalized git origin
