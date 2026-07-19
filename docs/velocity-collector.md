@@ -53,6 +53,17 @@ and the ticker is a `one_for_one` child, so a failure never takes down the daemo
 Cursors persist under `<KAZI_STATE_DIR>/velocity/cursors` so collection stays
 incremental across daemon restarts.
 
+**Bounded scan (#1606).** A pass never reads a whole transcript: for each file it
+`stat`s the size and, if the cursor is already at EOF, skips it without a read, so a
+steady-state pass over a large `~/.claude` tree costs only a stat per file and
+finishes in seconds. When a transcript has grown, only the new bytes past the cursor
+are read (a positioned `pread`, not a full-file read), capped at a per-pass
+`:max_bytes` budget (default 8 MiB) — so a first scan of a very large tree advances
+the cursors in bounded chunks across successive passes instead of one unbounded read
+that overruns the ticker's `collect_timeout` and is killed every tick (the live
+#1606 hang). The cumulative counters are identical either way; only how much a single
+pass ingests is bounded.
+
 **In-daemon writes go direct (T67.6 invariant).** The collector's default
 read-model sink is `Kazi.ReadModel.Writer`, a *client* seam: when a daemon is alive
 it routes the write over the daemon control socket to the single writer (ADR-0068).
@@ -121,6 +132,17 @@ and a sibling `delivery projection:` line — `no workspaces configured` or `las
 <ts>, <n> workspace(s), <m> event(s)`. Both come from real runs only; nothing is
 fabricated when no collection or projection has happened yet. The same fields appear
 under `"velocity"` (with a nested `"last_projection"`) in `kazi daemon status --json`.
+
+**Deadline-kill counter (#1606).** A pass that overruns the hard
+`collect_timeout_ms` deadline is killed and logged at `:error`. Because that `:error`
+log did not always reach the LaunchAgent log file on the release binary, a pass that
+was killed every tick looked indistinguishable from "no run yet". The ticker now also
+keeps a run-lifetime `passes_killed` counter (with `last_kill_at`), surfaced in
+`kazi daemon status`: when non-zero the collector line gains a
+`-- WARNING: <n> pass(es) killed at deadline` suffix (and the raw counts appear in
+`--json`). So a silently-dying pass is impossible — it is visible from status alone,
+with no dependence on log delivery. In steady state the bounded scan above keeps the
+counter at 0.
 
 ## The privacy contract — what is and is NOT collected
 
