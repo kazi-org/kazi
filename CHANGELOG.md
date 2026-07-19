@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.254.0](https://github.com/kazi-org/kazi/compare/v1.253.0...v1.254.0) (2026-07-19)
+
+
+### Features
+
+* **dashboard:** rate-only progress panel in mission control (T63.9, IA Q4) ([b8ffc24](https://github.com/kazi-org/kazi/commit/b8ffc2463802af19f698239926ae0e4f9bd6b299))
+* **read-model:** goal_progress_rate/1 projection (T63.9, ADR-0011) ([d86ee26](https://github.com/kazi-org/kazi/commit/d86ee26949bccd8b609de61e56c799a1cb6a5381))
+
 ## [1.253.0](https://github.com/kazi-org/kazi/compare/v1.252.0...v1.253.0) (2026-07-19)
 
 
