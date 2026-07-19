@@ -88,6 +88,8 @@ defmodule KaziWeb.Router do
       # fleet-grid cert (project-grouped cards + segmented header filters).
       post("/fleet/seed", TestSeedController, :seed_fleet)
       post("/fleet/seed_single", TestSeedController, :seed_fleet_single)
+      # T63.9: seed an active goal with iterations + budget for the progress-rate panel.
+      post("/fleet/seed_progress", TestSeedController, :seed_progress)
       post("/fleet/reset", TestSeedController, :reset_fleet)
       # T63.8: seed/clear the attention fan-in (a run-attention alert + a
       # waiting-on-operator session) for the browser cert.
