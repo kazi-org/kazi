@@ -462,6 +462,11 @@ defmodule Kazi.Goal.Loader do
     # T41.3/T41.4: manifest-coverage — every scanned surface element is referenced
     # by >=1 Scenario across the product's `.feature` specs.
     "spec_coverage" => :spec_coverage,
+    # ADR-0081 (#1521): `render_proof` gates on a CONTROLLER-produced capture
+    # (`[[capture]]`) being a plausible non-blank/non-crash frame, so a UI goal
+    # cannot converge on file presence. Its `capture`/`input` reference is
+    # validated below so a predicate pointing at no capture fails at load.
+    "render_proof" => :render_proof,
     # T62.1 (ADR-0071): the runtime `gherkin` provider. A `provider = "gherkin"`
     # entry is EXPANDED at goal-load (expand_gherkin_predicates/1) into one
     # `:gherkin` sub-predicate per Scenario (per Examples row for an outline), so
@@ -571,6 +576,9 @@ defmodule Kazi.Goal.Loader do
          {:ok, enforcement} <- build_enforcement(Map.get(data, "enforcement")),
          # ADR-0080 (#1520): optional `[seal]` table (sealed-input tamper contract).
          {:ok, seal} <- build_seal(Map.get(data, "seal")),
+         # ADR-0081 (#1521): optional `[[capture]]` array (controller-owned capture
+         # recipes producing evidence a UI predicate consumes by name).
+         {:ok, captures} <- build_captures(Map.get(data, "capture", [])),
          # T48.11 (ADR-0058 §3): optional `[economy]` table (debrief opt-in).
          {:ok, debrief} <- build_economy(Map.get(data, "economy")),
          # ADR-0062: optional `[memory]` table (semantic-recall corpus override).
@@ -617,6 +625,7 @@ defmodule Kazi.Goal.Loader do
           groups: groups,
           enforcement: enforcement,
           seal: seal,
+          captures: captures,
           debrief: debrief,
           memory_corpus: memory_corpus,
           integration: integration,
@@ -853,6 +862,113 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_seal(_), do: {:error, "[seal] must be a table"}
+
+  # ADR-0081 (#1521): the optional `[[capture]]` array of controller-owned capture
+  # recipes. Each entry requires `name`, `launch_cmd`, and `output`; optional
+  # `launch_args`/`reset_cmd`/`reset_args`/`post_launch_wait_ms`/`timeout_ms`.
+  # Absent → `[]` (no captures; byte-identical to before). Duplicate names, a
+  # missing required key, or a wrong type fails loudly at load.
+  defp build_captures([]), do: {:ok, []}
+
+  defp build_captures(captures) when is_list(captures) do
+    captures
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {raw, index}, {:ok, acc} ->
+      case build_capture(raw, index) do
+        {:ok, capture} -> {:cont, {:ok, [capture | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, built} ->
+        built = Enum.reverse(built)
+
+        case duplicate_capture_name(built) do
+          nil -> {:ok, built}
+          name -> {:error, "[[capture]] declares a duplicate name #{inspect(name)}"}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp build_captures(_), do: {:error, "[[capture]] must be an array of tables"}
+
+  defp build_capture(raw, index) when is_map(raw) do
+    with {:ok, name} <- capture_string(raw, "name", index),
+         {:ok, launch_cmd} <- capture_string(raw, "launch_cmd", index),
+         {:ok, output} <- capture_string(raw, "output", index),
+         {:ok, launch_args} <- capture_args(raw, "launch_args", index),
+         {:ok, reset_cmd} <- capture_optional_string(raw, "reset_cmd", index),
+         {:ok, reset_args} <- capture_args(raw, "reset_args", index),
+         {:ok, wait_ms} <- capture_nonneg_int(raw, "post_launch_wait_ms", 0, index),
+         {:ok, timeout_ms} <- capture_pos_int(raw, "timeout_ms", 60_000, index) do
+      {:ok,
+       Kazi.Capture.new(
+         name: name,
+         launch_cmd: launch_cmd,
+         launch_args: launch_args,
+         reset_cmd: reset_cmd,
+         reset_args: reset_args,
+         output: output,
+         post_launch_wait_ms: wait_ms,
+         timeout_ms: timeout_ms
+       )}
+    end
+  end
+
+  defp build_capture(_raw, index),
+    do: {:error, "[[capture]] ##{index} must be a table"}
+
+  defp duplicate_capture_name(captures) do
+    captures
+    |> Enum.map(& &1.name)
+    |> Enum.frequencies()
+    |> Enum.find_value(fn {name, count} -> if count > 1, do: name end)
+  end
+
+  defp capture_string(raw, key, index) do
+    case Map.get(raw, key) do
+      v when is_binary(v) and v != "" -> {:ok, v}
+      nil -> {:error, "[[capture]] ##{index} is missing required key #{inspect(key)}"}
+      _ -> {:error, "[[capture]] ##{index} #{inspect(key)} must be a non-empty string"}
+    end
+  end
+
+  defp capture_optional_string(raw, key, index) do
+    case Map.get(raw, key) do
+      nil -> {:ok, nil}
+      v when is_binary(v) and v != "" -> {:ok, v}
+      _ -> {:error, "[[capture]] ##{index} #{inspect(key)} must be a non-empty string"}
+    end
+  end
+
+  defp capture_args(raw, key, index) do
+    case Map.get(raw, key, []) do
+      list when is_list(list) ->
+        if Enum.all?(list, &is_binary/1),
+          do: {:ok, list},
+          else: {:error, "[[capture]] ##{index} #{inspect(key)} must be a list of strings"}
+
+      _ ->
+        {:error, "[[capture]] ##{index} #{inspect(key)} must be a list of strings"}
+    end
+  end
+
+  defp capture_nonneg_int(raw, key, default, index) do
+    case Map.get(raw, key, default) do
+      n when is_integer(n) and n >= 0 -> {:ok, n}
+      _ -> {:error, "[[capture]] ##{index} #{inspect(key)} must be a non-negative integer"}
+    end
+  end
+
+  defp capture_pos_int(raw, key, default, index) do
+    case Map.get(raw, key, default) do
+      n when is_integer(n) and n > 0 -> {:ok, n}
+      _ -> {:error, "[[capture]] ##{index} #{inspect(key)} must be a positive integer"}
+    end
+  end
 
   defp seal_bool(seal, key, default) do
     case Map.get(seal, key, default) do
@@ -2198,7 +2314,33 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # ADR-0081 (#1521): a render_proof predicate must name the capture it consumes,
+  # via `capture = "<name>"` or `input = "capture:<name>"`, so a predicate pointing
+  # at no capture fails at load, not silently at dispatch.
+  defp validate_provider_config(:render_proof, config, id) do
+    case render_proof_capture(config) do
+      name when is_binary(name) and name != "" ->
+        :ok
+
+      _ ->
+        {:error,
+         "render_proof predicate #{inspect(id)} must name a capture via " <>
+           "`capture = \"<name>\"` or `input = \"capture:<name>\"`"}
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  defp render_proof_capture(config) do
+    cond do
+      is_binary(config[:capture]) -> config[:capture]
+      is_binary(config[:input]) -> render_proof_input(config[:input])
+      true -> nil
+    end
+  end
+
+  defp render_proof_input("capture:" <> name), do: name
+  defp render_proof_input(_other), do: nil
 
   defp validate_prod_log_correlate(correlate, id) do
     with :ok <- validate_correlate_route(correlate, id) do

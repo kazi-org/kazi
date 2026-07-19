@@ -238,6 +238,12 @@ defmodule Kazi.Goal do
             # goal-file itself is sealed (the default-on implicit seal). Appended
             # additively so the existing field order is untouched.
             seal: nil,
+            # ADR-0081 (#1521): the declared `[[capture]]` recipes (`Kazi.Capture`
+            # list) — controller-owned capture commands producing evidence a UI
+            # predicate consumes by name. Default [] = no captures (byte-identical
+            # to today). Appended additively so the existing field order is
+            # untouched.
+            captures: [],
             # T48.11 (ADR-0058 §3): opt-in post-dispatch debrief capture, declared
             # in the goal-file's `[economy]` table. Default false = byte-identical
             # to today (no debrief question, no hypothesis rows). Appended
@@ -320,6 +326,8 @@ defmodule Kazi.Goal do
       enforcement: Keyword.get(opts, :enforcement),
       # ADR-0080 (#1520): the authored `[seal]` tamper contract.
       seal: Keyword.get(opts, :seal),
+      # ADR-0081 (#1521): the declared `[[capture]]` recipes.
+      captures: Keyword.get(opts, :captures, []),
       # T48.11 (ADR-0058 §3): opt-in post-dispatch debrief capture.
       debrief: Keyword.get(opts, :debrief, false),
       # ADR-0062: the declared `[memory] corpus` override.
