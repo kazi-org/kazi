@@ -80,6 +80,29 @@ pre-#1407 behavior: a converged-but-unlanded run then exits `1`, for a caller
 outright. `--strict-landing` has no effect when landing succeeds, or on an
 in-place run (there is nothing to land).
 
+### The terminal report names WHERE the work landed (issue #1550)
+
+A converged run's **human report** ends with a `landed:` line naming the branch
+the work landed on and the base it integrated onto, e.g.
+
+```
+landed: task/adopt-widgets → main (commit 0e3e8ba0c1d2)
+```
+
+so an operator is never left thinking a `converged` run did nothing when its
+commits went to a kazi-owned branch (`task/…`, `kazi/integrate-…`) while the
+checkout looked clean. A converged-but-unlanded run instead prints a loud `NOT
+LANDED:` line naming the surviving task branch and the reason. The same facts are
+on the `--json` surface's `integration` object (`landed`, `base`, `task_branch`,
+`refs`); the human line is additive. An in-place run (nothing to land) prints
+neither.
+
+The landing commit/PR message itself names the **real goal id, goal name, and
+converged predicates** — the serial-landing path threads the goal and the
+converged predicate vector into the integrator, so the commit reads
+`integrate(<goal-id>): <goal name> [<predicates>]` rather than the pre-#1550
+`integrate(unknown-goal): converged change [(none recorded)]`.
+
 ### `[conventions]` — the controller-owned process contract (ADR-0055 decision 4b)
 
 ```toml

@@ -48,8 +48,8 @@ defmodule Kazi.Scheduler.SerialLanding do
   nothing to land. A detached base checkout has no branch to rebase-merge onto —
   surfaced honestly rather than guessing a target.
   """
-  @spec land(Goal.t(), keyword(), Path.t(), Path.t()) :: verdict()
-  def land(%Goal{} = goal, runtime_opts, base_workspace, worktree) do
+  @spec land(Goal.t(), keyword(), Path.t(), Path.t(), keyword()) :: verdict()
+  def land(%Goal{} = goal, runtime_opts, base_workspace, worktree, opts \\ []) do
     owned_branch = Goal.integration_branch(goal)
 
     with {:ok, base_sha} <- git(base_workspace, ["rev-parse", "HEAD"]),
@@ -67,7 +67,7 @@ defmodule Kazi.Scheduler.SerialLanding do
            }}
 
         {:ok, base_branch} ->
-          integrate(goal, runtime_opts, base_workspace, worktree, base_branch, task_branch)
+          integrate(goal, runtime_opts, base_workspace, worktree, base_branch, task_branch, opts)
 
         {:error, reason} ->
           {:unlanded, %{landed: false, task_branch: task_branch, reason: inspect(reason)}}
@@ -79,7 +79,7 @@ defmodule Kazi.Scheduler.SerialLanding do
     end
   end
 
-  defp integrate(%Goal{} = goal, runtime_opts, base_workspace, worktree, base, branch) do
+  defp integrate(%Goal{} = goal, runtime_opts, base_workspace, worktree, base, branch, opts) do
     integrate_opts =
       runtime_opts
       |> Keyword.get(:integrate, [])
@@ -87,8 +87,8 @@ defmodule Kazi.Scheduler.SerialLanding do
       |> Keyword.put_new_lazy(:integrator, fn -> default_integrator(base_workspace) end)
       |> Keyword.update(
         :integrator_opts,
-        [base_repo: base_workspace],
-        &Keyword.put_new(&1, :base_repo, base_workspace)
+        default_integrator_opts(base_workspace, goal, opts),
+        &merge_integrator_opts(&1, base_workspace, goal, opts)
       )
 
     {:ok, integration} =
@@ -108,6 +108,31 @@ defmodule Kazi.Scheduler.SerialLanding do
            task_branch: branch,
            reason: Enum.map_join(conflicts, "; ", fn {_partition, r} -> inspect(r) end)
          }}
+    end
+  end
+
+  # The integrator opts carry BOTH the base-repo (LocalIntegrator's fast-forward
+  # target) AND the integrate-context the ActionIntegrator threads into the real
+  # `Kazi.Actions.Integrate` action -- the goal (so the landing commit/PR names
+  # the REAL goal id and change summary instead of `unknown-goal`/`converged
+  # change`) and the converged predicate vector (so the commit message's
+  # converged-predicate list is populated instead of `(none recorded)`), issue
+  # #1550. The vector is optional: a caller that does not thread one still lands,
+  # with the predicate list simply omitted.
+  defp default_integrator_opts(base_workspace, goal, opts) do
+    [base_repo: base_workspace, integrate_context: integrate_context(goal, opts)]
+  end
+
+  defp merge_integrator_opts(integrator_opts, base_workspace, goal, opts) do
+    integrator_opts
+    |> Keyword.put_new(:base_repo, base_workspace)
+    |> Keyword.put_new(:integrate_context, integrate_context(goal, opts))
+  end
+
+  defp integrate_context(goal, opts) do
+    case Keyword.get(opts, :vector) do
+      nil -> [goal: goal]
+      vector -> [goal: goal, vector: vector]
     end
   end
 
