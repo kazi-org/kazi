@@ -78,15 +78,30 @@ by asking the server to patch the param back in. The URL stays canonical (so
 the first server render is already correct and a shared link carries its mode);
 `localStorage` only makes a bare visit sticky.
 
-- **NEEDS ATTENTION** (`#mc-attention`, rendered only when the queue is
-  non-empty): a `.section-label` + a 3-column grid (`.attnrow`) of **alert
-  cards**. Each alert (`.alert`, a link to that goal's drill-in) carries a
-  severity badge (`.asev`: `NEEDS YOU` / `STUCK` / `BUDGET` / `FLAKE` /
-  `REGRESS`), the goal name (`.atitle`), a truncated one-line detail
-  (`.adetail`), and a `PEEK →` affordance. Variants: `.al-bad` (red border +
-  glow) for a needs-a-human cause or a stuck predicate; `.al-warn` (amber) for
-  budget / flake / regression. Ranked and de-duplicated by
-  `Kazi.Attention.Queue` (one entry per goal+signal).
+- **NEEDS ATTENTION** (`#mc-attention`, the "where can I help / what is
+  blocking" fan-in — T63.8, IA Q2/Q3; always rendered). It composes TWO
+  labeled sub-sections whose entries each NAME the blocker, never just count a
+  state:
+  - **run attention** (`#mc-attention-runs`, `.attnrow`): the ranked
+    `Kazi.Attention.Queue` (one entry per goal+signal). Each alert (`.alert`, a
+    link to that goal's drill-in) carries a severity badge (`.asev`: `NEEDS
+    YOU` / `STUCK` / `BUDGET` / `FLAKE` / `REGRESS`), the goal name, a named
+    detail — the failing predicate id for `:stuck`, `"N of M iteration budget
+    consumed (cap M)"` for `:budget` — and a `PEEK →` affordance. Variants:
+    `.al-bad` (red) for a needs-a-human cause or a stuck predicate, `.al-warn`
+    (amber) for budget / flake / regression.
+  - **WAITING ON YOU** (`#mc-attention-waiting`): sessions blocked on a human,
+    fanned in fleet-wide from the bus board's `waiting-on-operator` facts
+    (E60/T60.3 ships the plumbing; the dashboard only reads it via
+    `Kazi.Bus.board`'s `"attention"` list). Each `#mc-waiting-<session>` entry
+    names the awaited action (the harness's stdin summary, or "awaiting
+    operator input" in the degraded form). A session vs a run is a different
+    identity with a different lifecycle (cleared by a human reply, not a state
+    change — #1386), so it composes as its own sub-section, not interleaved.
+  When both halves are empty, an honest empty state renders
+  (`#mc-attention-empty`, "Nothing needs you right now."). Reading the board is
+  best-effort (ADR-0011 §2): an unreachable daemon degrades to an empty
+  WAITING sub-section, never a crash.
 
 - **FLEET** (`#mc-fleet`): a `.fleethead` row — a `FLEET · N LIVE|CLOSED` label
   on the left and, folded into the header on the right (direction B, T63.6), a
