@@ -100,3 +100,53 @@ population `Kazi.Economy.History.aggregate/1` groups (`finished_at` not nil) and
 buckets `model` through the SAME normalizer, so the per-model terminal counts
 reconcile with economy's group sizes rather than forking a second cost/outcome
 truth — pinned in `kpis_test.exs`.
+
+# The dashboard velocity panel (T67.5, ADR-0079)
+
+The KPIs above render on the operator dashboard (Mission Control, `/`) as a
+**fleet velocity strip** plus a **per-agent drill-in**. It is an *operator*
+surface — present in both the operator and `?debug=1` modes (unlike the
+DAG/lease-map/event-river expert surfaces, which are debug-only per ADR-0078,
+T63.7) — and it reuses T63.9's progress-rate vocabulary so the two panels read as
+one system: every figure is a **rate, ratio, or measured historical
+distribution**, and there is deliberately no date, ETA, or completion-estimate
+copy anywhere (ADR-0046). `assign_velocity/1` in
+`lib/kazi_web/live/mission_control_live.ex` calls `Kazi.Velocity.Kpis.compute/1`
+each poll tick; it is a read-only projection (ADR-0011) that renders the honest
+empty state rather than a 500 if the read-model is unavailable.
+
+## The strip
+
+Four cards over the trailing window (labelled, e.g. "last 7d"):
+
+| card | copy | honest-unknown |
+|---|---|---|
+| **DELIVERED** | `<per_day> /day · <count> in last 7d` | — |
+| **TOKENS / TASK** | `<tokens> tok/task` (compact, e.g. `5.5k`) | `— not enough data yet` when no delivery or no token counter |
+| **STUCK RATIO** | `<pct>% stuck · <stuck>/<terminal> terminal` (the fleet terminal-verdict population, aggregated across the per-model split) | `— no terminal runs yet` |
+| **CLAIM → MERGE LEAD** | `p50 <dur> · p90 <dur> · <n> samples` — a measured span of *past* deliveries, never a promise | `— not enough data yet` when no joinable sample |
+
+Durations are compact spans (`1h 23m`, `45s`) of already-merged deliveries, not a
+countdown; they are historical measurements, not an ETA.
+
+## Insufficient-data edge (R-E67-4)
+
+A fresh fleet with **no** delivery, session counter, or terminal run in the window
+renders an explicit **"Not enough data yet"** message (`#mc-velocity-empty`)
+instead of the strip — zeros are never presented as measurements. Velocity appears
+only once the fleet actually ships.
+
+## Per-agent drill-in
+
+Below the strip, one expandable (`<details>`) per session shows that agent's
+delivered/day and stuck ratio at a glance; expanding it **names the offending
+stuck goals** — the `goal_ref`s whose runs went `stuck`/`over_budget`, attributed
+from the run registry (the same terminal-verdict universe the stuck ratio counts,
+the attribution `kazi economy` reads — not a second truth). A high stuck ratio thus
+points the operator at *which* lane needs attention, not just a number.
+
+Certified by `test/kazi_web/live/mission_control_live_test.exs` (seeded-KPI render
+with the rate-labeled copy + no-ETA negative assertion, the insufficient-data
+edge, and the operator/debug mode presence) and
+`test/playwright/mission_control_velocity.spec.ts` (the golden path and the
+insufficient-data edge in a real browser).
