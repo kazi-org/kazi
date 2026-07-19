@@ -179,8 +179,11 @@ its config at runtime via `kazi schema <kind>`.
   (`essays/essays.goal.toml`): coverage and staleness are machine-checked, so
   the tier cannot silently rot.
 - **[Growth strategy](marketing/strategy.md)** — the public, research-grounded
-  plan for kazi's adoption, with the [launch plan](marketing/launch-plan.md)
-  and the [operator task list](marketing/operator-tasks.md).
+  plan for kazi's adoption, with a two-page
+  [executive summary](marketing/strategy-summary.md), the
+  [launch plan](marketing/launch-plan.md), the ready-to-paste
+  [launch kit](marketing/launch-kit.md), and the
+  [operator task list](marketing/operator-tasks.md).
 
 ## Decision records
 
