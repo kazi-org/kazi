@@ -52,6 +52,21 @@ and the ticker is a `one_for_one` child, so a failure never takes down the daemo
 Cursors persist under `<KAZI_STATE_DIR>/velocity/cursors` so collection stays
 incremental across daemon restarts.
 
+**In-daemon writes go direct (T67.6 invariant).** The collector's default
+read-model sink is `Kazi.ReadModel.Writer`, a *client* seam: when a daemon is alive
+it routes the write over the daemon control socket to the single writer (ADR-0068).
+The ticker, though, runs *inside* the daemon, so that probe would find the daemon
+alive (itself) and the ticker would block on a control-socket round-trip the daemon
+must serve — while `kazi daemon status` also calls into the ticker — self-deadlocking
+the daemon. (This wedged v1.262.0 live: with the collector enabled the daemon went
+0% CPU exactly one interval after boot, every status ping timing out, until killed.)
+The daemon *is* the single writer, so the ticker injects
+`SessionCollector.direct_write/1` — a direct `Kazi.Repo` upsert, the same mechanism
+`Kazi.Daemon.Write` uses to apply a client batch — as the collector's write sink, and
+its writes never touch its own socket. The cross-machine bus `fact` still dials the
+socket to find the NATS port, but is bounded by `Kazi.Bus.run/3`'s hard deadline
+(degrading to `:bus_unavailable` rather than blocking), so it cannot wedge the daemon.
+
 **Observability.** `kazi daemon status` prints a `velocity collector:` line —
 `disabled`, `enabled (no run yet)`, or `enabled (last run <ts>, <n> session(s))`.
 The run timestamp and session count come from real runs only; nothing is fabricated
