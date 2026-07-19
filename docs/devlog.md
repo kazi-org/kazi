@@ -7,6 +7,62 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-18 — T41.7 LIVE dogfood: `kazi init --discover` converges real spec-coverage in 2 iterations; `spec import` swallows Jekyll's 288 real Scenarios; two honest wrinkles
+
+**Type:** dogfood
+**Tags:** spec-coverage, init-discover, spec-import, gherkin, T41.7, UC-053
+
+**Setup.** All on the RELEASED binary (`kazi 1.260.0`, the release carrying T41.4).
+Proof A target: a fresh clone of a real OSS Elixir library (`dashbitco/nimble_csv`,
+zero `.feature` files). Proof B source: `jekyll/jekyll`'s real, unmodified Cucumber
+suite (28 `.feature` files).
+
+**Proof A — discovery converge (PASS, 2 iterations).**
+`kazi init <repo> --discover --out coverage.goal.toml` wrote a goal whose sole
+predicate is `spec_coverage`. Observe-only baseline (`kazi apply --check`): RED,
+`3 surface element(s) referenced by no Scenario: NimbleCSV.Mixfile.cli/0,
+NimbleCSV.Mixfile.project/0, NimbleCSV.define/2` — each named, not counted.
+`kazi apply --harness claude --model claude-sonnet-5` (budget capped at 5
+iterations): **converged in 2 iterations**, writing `docs/specs/define.feature` +
+`docs/specs/mixfile.feature` (2 files, 33 lines, 4 Scenarios). Quality on
+inspection: honest. `define.feature` names the REAL generated API
+(`parse_string/2`, `parse_stream/2`, `parse_enumerable/2`, `dump_to_iodata/1`,
+options-merge derivation) — a first-time reader learns true behavior from it.
+
+**Standing re-open proof (PASS).** With coverage green, adding a new public module
+(`NimbleCSV.Sniffer.sniff/1`) flipped the next `--check` to RED naming exactly
+`NimbleCSV.Sniffer.sniff/1` — the predicate re-opens on new undocumented surface,
+so a `--standing` run would drive it back down. Before/after Scenario count: 0 →
+4 (then red again on the 5th surface element until documented).
+
+**Proof B — zero-discovery import (PASS).** `kazi spec import
+jekyll/features/*.feature --into jekyll-import.goal.toml` on 28 unmodified
+real-world files: `{"ok": true, "count": 288}` — 288 Scenario predicates upserted
+across 28 groups, `kazi lint` clean (0 warnings), and a second run merged
+idempotently (`"merged": true`, same 288, no duplicates).
+
+**Wrinkle 1 — converged work is operator-invisible without `[integration]`.** The
+generated discovery goal has no `[integration]` block, so the agent's Scenario
+commit landed on kazi-internal branches (`task/adopt-nimble_csv`,
+`kazi/integrate-*`) while the clone's checked-out branch stayed CLEAN — `git
+status` showed nothing and `find . -name '*.feature'` returned zero even though
+the goal reported `converged`. An operator would reasonably conclude nothing
+happened. The integrate commit message also read `integrate(unknown-goal):
+converged change [(none recorded)]`. Filed as a follow-up candidate: `init
+--discover` should emit an `[integration]` block (or the convergence output should
+say WHERE the work landed).
+
+**Wrinkle 2 — mix.exs boilerplate counts as public surface.** 2 of the 3
+"uncovered" elements were `NimbleCSV.Mixfile.project/0`/`cli/0` — build config,
+not product surface. The resulting `mixfile.feature` is accurate but is spec
+noise ("Scenario: Resolving the project's Mix configuration"). A default
+`allow_list` for `*.Mixfile.*` (or excluding `mix.exs` from the discovery goal's
+scan) would keep discovery goals product-focused.
+
+**Verdict.** Both proofs PASS with real numbers; the discovery loop and the
+standing re-open behave exactly as designed. The two wrinkles are UX/precision
+gaps, not correctness failures.
+
 ## 2026-07-18 — T59.5 close-out: flake-cluster remediation verified under stress; one class-1 residual fixed; a self-inflicted `Database busy` debunked
 
 **Type:** verification
