@@ -81,6 +81,44 @@ defmodule Kazi.Bus.HookPayloadTest do
   end
 
   # ===========================================================================
+  # Untagged: T61.5 (ADR-0077) -- binary/plugin version-skew line at session-start
+  # ===========================================================================
+
+  describe "session-start surfaces a version-skew line (T61.5)" do
+    test "a skew emits EXACTLY the one-line warning even with no daemon (board silent)" do
+      out =
+        capture_io(fn ->
+          assert Hook.run("session-start",
+                   sock_path: missing_sock(),
+                   local_version: "1.251.0",
+                   plugin_version: "1.250.0"
+                 ) == 0
+        end)
+
+      # Exactly one line, naming both versions -- and NO bus advisory banner,
+      # because the skew line is a local diagnostic outside the untrusted block.
+      assert out == String.trim_trailing(out) <> "\n"
+      assert [line] = String.split(String.trim_trailing(out), "\n")
+      assert line =~ "1.251.0"
+      assert line =~ "1.250.0"
+      refute line =~ Hook.banner()
+    end
+
+    test "matching versions emit nothing extra at session-start with no daemon" do
+      out =
+        capture_io(fn ->
+          assert Hook.run("session-start",
+                   sock_path: missing_sock(),
+                   local_version: "1.250.0",
+                   plugin_version: "1.250.0"
+                 ) == 0
+        end)
+
+      assert out == ""
+    end
+  end
+
+  # ===========================================================================
   # Untagged: T60.3 (issue #1156) -- attention_topic/1's pure sanitization rule
   # ===========================================================================
 
