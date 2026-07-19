@@ -233,8 +233,30 @@ defmodule KaziWeb.MissionControlLive do
     |> assign(:clock, utc_clock())
     |> assign(:alerts, alerts(scoped))
     |> assign(:waiting, waiting_alerts())
+    |> assign_progress(scoped)
     |> assign_planned(all_runs)
     |> assign(:river_entries, river_entries(all_runs))
+  end
+
+  # T63.9 (E63 IA Q4): the "how long until done" progress-RATE panel. Per still-
+  # active goal in the current scope, project the objective rate/ratio facts
+  # (predicate pass/total, red→green flip velocity, iteration budget consumed vs
+  # cap) — ADR-0046 honest-unknown means NO ETA/date is ever computed. Keyed by
+  # the goal_refs of the scope's non-terminal runs, deduped, so a goal that has
+  # converged or stopped drops out. A read-only projection (ADR-0011); an
+  # unavailable read-model renders an empty section, never a 500.
+  defp assign_progress(socket, scoped) do
+    progress =
+      scoped
+      |> Enum.filter(&(state(&1) == :converging))
+      |> Enum.map(& &1.goal_ref)
+      |> Enum.uniq()
+      |> Enum.map(&ReadModel.goal_progress_rate/1)
+      |> Enum.reject(&(elem(&1.predicates, 1) == 0))
+
+    assign(socket, :progress, progress)
+  rescue
+    _error -> assign(socket, :progress, [])
   end
 
   # T60.4 (#1160): the PLANNED bucket — approved proposals no run has picked up
@@ -1034,6 +1056,23 @@ defmodule KaziWeb.MissionControlLive do
     do: "a past regression has recovered"
 
   # ---------------------------------------------------------------------------
+  # Progress-rate labels (T63.9) — every string is a RATE or RATIO, never a date
+  # or a duration. `per_iteration: nil` is the honest "not enough iterations to
+  # measure a velocity yet" (ADR-0046), not a fabricated 0.
+  # ---------------------------------------------------------------------------
+
+  defp progress_flip_label(%{per_iteration: nil}), do: "— needs 2+ iterations"
+
+  defp progress_flip_label(%{per_iteration: per_iteration, flips: flips}),
+    do: "#{per_iteration} /iter · #{flips} red→green"
+
+  defp progress_budget_label(%{consumed: consumed, cap: nil}),
+    do: "#{consumed} iterations · no cap"
+
+  defp progress_budget_label(%{consumed: consumed, cap: cap}),
+    do: "#{consumed} / #{cap} iterations"
+
+  # ---------------------------------------------------------------------------
   # Event river — the newest fleet-wide events (`Kazi.Sink.Events`), the SAME
   # source `KaziWeb.EventRiverLive` reads, windowed tight for a glance ticker.
   # ---------------------------------------------------------------------------
@@ -1303,6 +1342,41 @@ defmodule KaziWeb.MissionControlLive do
           </.link>
         </section>
 
+        <%!-- T63.9 (E63 IA Q4): "how long until done" answered with RATES, never
+        an ETA (ADR-0046 honest-unknown). Per active goal: predicate ratio, the
+        red→green flip velocity, and iteration budget consumed vs cap. Every label
+        states a rate or ratio; there is deliberately no date or duration copy. --%>
+        <section :if={@progress != []} id="mc-progress">
+          <div class="seclabel section-label">PROGRESS RATE · OBJECTIVE RATES ONLY</div>
+          <div id="mc-progress-affordance" class="attnaffordance">
+            rates and ratios only — extrapolate yourself; kazi does not guess when a goal will finish
+          </div>
+          <div class="grid">
+            <div
+              :for={p <- @progress}
+              id={"mc-progress-#{p.goal_ref}"}
+              class="card prog"
+              data-goal-ref={p.goal_ref}
+            >
+              <div class="cardtop">
+                <div class="gname">{p.goal_ref}</div>
+              </div>
+              <div class="progrow" data-metric="predicates">
+                <span class="proglabel">PREDICATES GREEN</span>
+                <span class="progval">{elem(p.predicates, 0)} / {elem(p.predicates, 1)}</span>
+              </div>
+              <div class="progrow" data-metric="flip-velocity">
+                <span class="proglabel">FLIP VELOCITY</span>
+                <span class="progval">{progress_flip_label(p.flip_velocity)}</span>
+              </div>
+              <div class="progrow" data-metric="budget">
+                <span class="proglabel">BUDGET CONSUMED</span>
+                <span class="progval">{progress_budget_label(p.budget)}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section :if={@planned != []} id="mc-planned">
           <div class="seclabel section-label">
             PLANNED · {length(@planned) + @planned_more} APPROVED, NOT DISPATCHED
@@ -1428,6 +1502,13 @@ defmodule KaziWeb.MissionControlLive do
         @keyframes mc-spin { to { transform: rotate(360deg); } }
         .wave { margin-bottom: 8px; }
         .wavehead { color: var(--cyn); opacity: .8; letter-spacing: .3em; margin: 14px 0 10px; }
+
+        /* PROGRESS RATE panel (T63.9): objective rate/ratio rows, no ETA. */
+        #mc-progress { margin-top: 14px; }
+        .card.prog { gap: 8px; }
+        .progrow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 11px; }
+        .proglabel { color: var(--dim); letter-spacing: .12em; font-size: 9px; }
+        .progval { color: var(--txt); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 
         .attnrow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
         .alert { display: flex; align-items: center; gap: 14px; border: 1px solid var(--line); background: var(--panel); padding: 12px 14px; border-radius: 4px; text-decoration: none; color: inherit; }
