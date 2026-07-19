@@ -2202,15 +2202,25 @@ defmodule Kazi.Loop do
     # detector can attribute a later green→red edge to it.
     data = log_dispatch(data, action)
 
-    # T54.6 (#1072) fix (b): the agent was REFUSED, not merely unsuccessful —
-    # stop now rather than buy the identical no-op N more times.
-    if permission_denial_wedged?(data) do
-      # `terminate_stuck/4` takes a StuckDetector.failing_set() — a MapSet, not the
-      # list `PredicateVector.failing/1` returns.
-      failing = MapSet.new(PredicateVector.failing(data.vector))
-      terminate_stuck(failing, data, nil, :permission_denied)
-    else
-      reobserve(data, data.reobserve_interval_ms)
+    # Two fail-fast fingerprints that grinding can never converge — stop now
+    # rather than buy the identical no-op N more times. `terminate_stuck/4` takes
+    # a StuckDetector.failing_set() (a MapSet, not the list PredicateVector.failing/1
+    # returns).
+    cond do
+      # T54.6 (#1072) fix (b): the agent was REFUSED, not merely unsuccessful.
+      permission_denial_wedged?(data) ->
+        failing = MapSet.new(PredicateVector.failing(data.vector))
+        terminate_stuck(failing, data, nil, :permission_denied)
+
+      # T68.4 (#1546): the dispatch ended parked on its own backgrounded
+      # verification jobs, zero diff — it only verified, never edited.
+      parked_on_background_wedged?(data, result) ->
+        warn_parked_on_background(data)
+        failing = MapSet.new(PredicateVector.failing(data.vector))
+        terminate_stuck(failing, data, nil, :parked_on_background)
+
+      true ->
+        reobserve(data, data.reobserve_interval_ms)
     end
   end
 
@@ -2339,6 +2349,76 @@ defmodule Kazi.Loop do
 
   defp permission_denial_wedged?(%Data{} = data) do
     data.working_set_digest.files == [] and run_cost(data) > 0
+  end
+
+  # T68.4 (#1546): the fingerprint of a dispatch that spent its whole session and
+  # ended PARKED on its own backgrounded verification jobs — it edited NOTHING this
+  # dispatch, it COST something, and its final message says it is waiting on
+  # background checks it launched (a full `mix test` / doc-freshness suite). Named
+  # apart from `:permission_denied` (nothing was refused) and from an ordinary
+  # failing-set `:stuck` (it only verified, never made an edit). Grinding cannot
+  # converge a session that only verifies, so the loop fails fast after one arc.
+  #
+  # All three conjuncts matter:
+  #   * this dispatch touched no files — a dispatch that DID land edits is making
+  #     progress even if it also backgrounded a check; do not kill it. Read from
+  #     THIS result (not the carried digest, which reflects the last dispatch that
+  #     touched anything) so a later parked dispatch after an earlier productive
+  #     one is still caught.
+  #   * cost > 0 — proves the harness really ran (a refusal/park, not a stubbed
+  #     no-op dispatch in a test).
+  #   * the final message parks on background jobs — the authoritative signal that
+  #     the session ended waiting rather than finishing its work.
+  @spec parked_on_background_wedged?(Data.t(), Kazi.HarnessAdapter.result()) :: boolean()
+  defp parked_on_background_wedged?(%Data{} = data, result) do
+    Digest.from_result(result).files == [] and run_cost(data) > 0 and
+      parked_on_background_final?(result)
+  end
+
+  # A final result message that says the session is ending while backgrounded
+  # verification it launched is still running. Deliberately narrow: it must name
+  # BOTH a waiting/parked posture AND a background job, so an ordinary "I ran the
+  # tests, all green" report does not trip it.
+  @spec parked_on_background_final?(Kazi.HarnessAdapter.result()) :: boolean()
+  defp parked_on_background_final?({:ok, %{result: text}}) when is_binary(text) do
+    lower = String.downcase(text)
+
+    waiting? =
+      String.contains?(lower, "waiting for") or String.contains?(lower, "waiting on") or
+        String.contains?(lower, "still running") or String.contains?(lower, "once both") or
+        String.contains?(lower, "once they") or String.contains?(lower, "finalize once") or
+        String.contains?(lower, "report results and finalize")
+
+    background? =
+      String.contains?(lower, "background") or String.contains?(lower, "in the background") or
+        (String.contains?(lower, "mix test") and String.contains?(lower, "finish")) or
+        (String.contains?(lower, "check") and String.contains?(lower, "to finish"))
+
+    waiting? and background?
+  end
+
+  defp parked_on_background_final?(_result), do: false
+
+  # Loud, once-per-run warning on the parked-on-background wedge. It ALSO reports
+  # the leftover-background-process risk: the agent's own `run_in_background` Bash
+  # jobs are detached grandchildren of the harness process, so kazi does not track
+  # or reap them here — a leftover `mix test` beam can keep a port/DB bound and
+  # poison the NEXT observation (#1546). Reaping those detached grandchildren
+  # reliably is out of scope for this fix; `kazi orphans --reap` sweeps orphaned
+  # process groups after the fact.
+  @spec warn_parked_on_background(Data.t()) :: :ok
+  defp warn_parked_on_background(%Data{} = data) do
+    Logger.warning(fn ->
+      "kazi.loop goal=#{goal_id(data.goal)} a harness dispatch ended PARKED on its own " <>
+        "backgrounded verification jobs with ZERO file edits (issue #1546) — it only " <>
+        "verified, never edited, so grinding cannot converge; stopping :stuck " <>
+        "(:parked_on_background). NOTE: any background job the agent launched (e.g. a " <>
+        "full `mix test`) is a detached grandchild kazi does not reap here and may still " <>
+        "be running — it can hold a port/DB and poison the next observation. Run " <>
+        "`kazi orphans --reap` to sweep leftover process groups."
+    end)
+
+    :ok
   end
 
   # T36.2 (ADR-0047 §1): the adapter opts for THIS dispatch — the loop's standing
