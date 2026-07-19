@@ -1,0 +1,62 @@
+# kazi STANDING goal: the essays tier stays covered and fresh
+# (docs/essays/README.md). Same shape as the doc-lifecycle flagship dogfood
+# (priv/examples/doc_lifecycle.goal.toml, ADR-0036): ALL logic lives in the
+# checker script; kazi only DRIVES it. When a significant feature ships or an
+# anchor doc changes, the predicates go red and kazi dispatches an agent to
+# write or refresh the essay; a human reviews and bumps `reviewed:`.
+#
+#     kazi apply docs/essays/essays.goal.toml --workspace .
+
+id = "essays-fresh"
+name = "Essays: every significant feature covered, no essay stale"
+standing = true
+
+[budget]
+max_tokens = 400000
+
+[scope]
+workspace = "."
+paths = ["docs/essays"]
+
+# ADR-0042: the agent fixes the ESSAYS, never the grader or the manifest —
+# deleting a feature row to fake coverage is exactly the "delete the failing
+# test" shortcut kazi exists to block.
+[enforcement]
+enabled = true
+clean_tree = true
+clean_ref = "HEAD"
+fail_on_skip = true
+read_only_paths = [
+  "docs/essays/check_essay_coverage.py",
+  "docs/essays/features.toml",
+]
+
+# Integrity + freshness: no unknown covers-ids, no dangling anchors, no essay
+# older than its anchors.
+[[predicate]]
+id = "essays-fresh"
+provider = "custom_script"
+description = "every essay is integral and no essay is staler than its anchors"
+cmd = "python3"
+args = ["docs/essays/check_essay_coverage.py", "--check"]
+verdict = "exit_zero"
+
+# Coverage ratchet: % of manifest features covered by >= 1 essay may only grow.
+[[predicate]]
+id = "essay-coverage-ratchet"
+provider = "ratchet"
+description = "the % of significant features covered by an essay may only improve"
+baseline = "stored"
+direction = "higher_better"
+allowed_regression = 0.0
+metric = { cmd = "python3", args = ["docs/essays/check_essay_coverage.py", "--metric", "coverage"] }
+
+# Staleness ratchet: the count of stale essays ratchets to 0.
+[[predicate]]
+id = "stale-essays-ratchet"
+provider = "ratchet"
+description = "the count of stale essays ratchets to 0"
+baseline = 0
+direction = "lower_better"
+allowed_regression = 0.0
+metric = { cmd = "python3", args = ["docs/essays/check_essay_coverage.py", "--metric", "stale"] }
