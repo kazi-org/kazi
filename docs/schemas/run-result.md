@@ -69,7 +69,8 @@ ADR-0058 (T48.4) adds the OPTIONAL `cause` object naming the honest terminal
 cause alongside `status`/`reason` — `over_budget` is not always genuine budget
 exhaustion, and `stuck` is not always an ordinary failing-set stall. **Additive**
 — present only when the loop classified one (`budget_exhausted` / `error_wedged`
-/ `quarantine_blocked` / `workspace_missing` / `permission_denied`), absent on a
+/ `quarantine_blocked` / `workspace_missing` / `permission_denied` /
+`parked_on_background`), absent on a
 clean converge or a stop that is exactly what it says it is — so
 `schema_version` stays **2**. See
 [`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058)
@@ -428,7 +429,7 @@ RIGHT next move instead of leaving `status`/`reason` as the only signal.
 
 | Field       | Type                | Meaning |
 |-------------|---------------------|---------|
-| `class`     | string (enum)       | One of `budget_exhausted`, `error_wedged`, `quarantine_blocked`, `workspace_missing`, `permission_denied` (see below). |
+| `class`     | string (enum)       | One of `budget_exhausted`, `error_wedged`, `quarantine_blocked`, `workspace_missing`, `permission_denied`, `parked_on_background` (see below). |
 | `ids`       | array of strings (optional) | The implicated predicate ids, sorted. Present only when non-empty. |
 | `reasons`   | object (optional)   | `{ id: reason }` — the implicated ids' last-observed error reasons, as strings. Present only for `error_wedged`. |
 | `exhausted` | string (optional)   | The exceeded budget dimension (`max_iterations` / `wall_clock` / `token_budget` / `max_dispatches`, T48.6). Present only for `budget_exhausted`. |
@@ -463,6 +464,19 @@ The classes:
   a human and never a bigger budget. The companion top-level fields
   `permission_denied_tool_calls` / `permission_denied_tools` name what was
   refused. See `docs/lore.md` L-0023.
+- **`parked_on_background`** — T68.4 (#1546): a full-cost dispatch spent its
+  whole session and ended PARKED on its own backgrounded verification jobs (a
+  `mix test` / doc-freshness suite it launched with the Bash tool), changing NO
+  files — it only verified, never edited. Distinct from `permission_denied`
+  (nothing was refused) and from an ordinary failing-set `stuck` (it never made
+  an edit). The loop stops after the FIRST such dispatch so an orchestrator
+  reacts after one wasted arc instead of grinding the identical park to
+  `over_budget`. The fix is the grind-prompt nudge (implement before verifying;
+  verify in the foreground — the controller re-verifies every predicate itself),
+  never a human and never a bigger budget. NOTE: a background job the agent
+  launched is a detached grandchild kazi does not reap and may still be running
+  (holding a port/DB, poisoning the next observation); run `kazi orphans --reap`
+  to sweep leftover process groups.
 
 Every other stop — a clean `converged`, an ordinary failing-set `stuck`, or
 the pre-existing code `error_stuck?` (M5) `stuck` — carries **no** `cause`
