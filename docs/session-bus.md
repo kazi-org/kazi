@@ -989,7 +989,15 @@ payload logic upgrades with the binary. What each event does (T55.9/T60.3):
 - **`session-start`** registers presence, joins the team named for the
   project (the git toplevel slug), and injects the current board — the
   last-value fact per topic plus the live roster, bounded by the ADR-0072
-  digest rules.
+  digest rules. It ALSO emits a one-line **binary/plugin version-skew
+  warning** when the local `kazi` binary and the installed Claude Code
+  plugin ([ADR-0077](adr/0077-claude-code-plugin-distribution.md), the
+  marketplace distribution channel) declare different versions (T61.5). The
+  warning names both versions and which channel to update; it is silent when
+  the versions match, when no kazi plugin is installed, or when the plugin
+  manifest is unreadable, and — being a LOCAL diagnostic, not untrusted bus
+  input — it prints OUTSIDE the advisory banner. It rides this same bounded
+  task, so a slow read fails silent under the wall-clock bound like the rest.
 - **`turn`** injects the digest of what arrived since the session last
   looked. It uses `read` (which ACKS what it shows), so the durable cursor
   IS the "last checked" marker: a turn with new traffic renders the bounded
