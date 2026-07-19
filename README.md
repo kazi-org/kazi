@@ -546,6 +546,14 @@ the binary release it was cut from, so marketplace content can never lag the bin
 /plugin install kazi@kazi
 ```
 
+Because the binary (brew/direct install) and the plugin (marketplace) can be
+upgraded independently, kazi warns you if they drift out of lockstep: on
+`SessionStart` the session-bus hook (T61.5, ADR-0077) compares the local `kazi
+version` against the installed plugin's declared version and, on a mismatch,
+emits a single line naming both versions and which channel to update. It is
+silent when the versions match or when no plugin is installed, and never blocks
+the session.
+
 `mix kazi.plugin` renders that bundle from those single sources of truth (the
 generator adds no new teaching content — it only re-renders what the installers
 already produce):
