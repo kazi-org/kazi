@@ -192,6 +192,7 @@ defmodule Kazi.Goal do
           harness: harness() | nil,
           groups: [Group.t()],
           enforcement: Kazi.Enforcement.t() | nil,
+          seal: Kazi.Seal.t() | nil,
           debrief: boolean(),
           memory_corpus: [String.t()] | nil,
           integration: integration(),
@@ -232,6 +233,11 @@ defmodule Kazi.Goal do
             # `Kazi.Enforcement.resolve/1`). Appended additively so the existing
             # field order is untouched.
             enforcement: nil,
+            # ADR-0080 (#1520): the authored `[seal]` block (`Kazi.Seal`) — the
+            # sealed-input tamper contract. nil = no `[seal]` block, so only the
+            # goal-file itself is sealed (the default-on implicit seal). Appended
+            # additively so the existing field order is untouched.
+            seal: nil,
             # T48.11 (ADR-0058 §3): opt-in post-dispatch debrief capture, declared
             # in the goal-file's `[economy]` table. Default false = byte-identical
             # to today (no debrief question, no hypothesis rows). Appended
@@ -312,6 +318,8 @@ defmodule Kazi.Goal do
       groups: Keyword.get(opts, :groups, []),
       # T32.4 anti-gaming enforcement (ADR-0042): the authored enforcement profile.
       enforcement: Keyword.get(opts, :enforcement),
+      # ADR-0080 (#1520): the authored `[seal]` tamper contract.
+      seal: Keyword.get(opts, :seal),
       # T48.11 (ADR-0058 §3): opt-in post-dispatch debrief capture.
       debrief: Keyword.get(opts, :debrief, false),
       # ADR-0062: the declared `[memory] corpus` override.

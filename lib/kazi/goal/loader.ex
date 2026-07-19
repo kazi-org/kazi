@@ -125,6 +125,29 @@ defmodule Kazi.Goal.Loader do
   See ADR-0042 and `docs/how-to/enforcement.md`; `kazi schema apply` documents the
   `enforcement` object surfaced in the `--json` run result.
 
+  ### `[seal]` table (optional, → `Goal.seal`, ADR-0080/#1520)
+
+  Declares the SEALED-INPUT tamper contract — the files whose CONTENT is part of
+  the acceptance bar and must not change for the duration of the run. At run start
+  kazi content-hashes the goal-file plus every sealed input; before every observe
+  pass it re-hashes; a mismatch terminates the run in a distinct `tampered`
+  hard-FAIL naming the file (never silent, never `converged`). This is the
+  cryptographic-DETECTION layer that gives ADR-0042's advisory `read_only_paths`
+  its teeth: enforcement FLAGS a write; sealing VOIDS the run.
+
+  **The goal-file itself is always implicitly sealed** whenever sealing is enabled,
+  even with no `[seal]` block — so every goal already gets "the declared bar cannot
+  be edited mid-run" for free (fully backward-compatible).
+
+  | Key             | TOML type        | Default | Maps to / effect |
+  |-----------------|------------------|---------|------------------|
+  | `enabled`       | boolean          | `true`  | whole-run switch; `false` fully opts out INCLUDING the implicit goal-file seal (for a self-modifying / standing goal that rewrites its own contract by design) |
+  | `sealed_inputs` | array of strings | `[]`    | repo-relative paths (globs allowed; a directory seals its whole tree) whose content is part of the contract — manifests, reference images, checker scripts, fixtures |
+  | `mutable_inputs`| array of strings | `[]`    | subtractive opt-out: a path excluded from the seal even if a `sealed_inputs` glob matches it (for an input the goal legitimately regenerates while converging) |
+
+  See ADR-0080 and `docs/how-to/enforcement.md`; `kazi schema apply` documents the
+  `tampered` status + `tampered_file` diagnostic surfaced in the `--json` run result.
+
   ### `[economy]` table (optional, → `Goal.debrief`, T48.11/ADR-0058)
 
   Opts a goal into the economy feedback loop's SELF-REPORT (hypothesis) tier
@@ -546,6 +569,8 @@ defmodule Kazi.Goal.Loader do
            build_groups(merge_synth_groups(Map.get(data, "group", []), synth_groups)),
          # T32.4 anti-gaming enforcement (ADR-0042): optional `[enforcement]` table.
          {:ok, enforcement} <- build_enforcement(Map.get(data, "enforcement")),
+         # ADR-0080 (#1520): optional `[seal]` table (sealed-input tamper contract).
+         {:ok, seal} <- build_seal(Map.get(data, "seal")),
          # T48.11 (ADR-0058 §3): optional `[economy]` table (debrief opt-in).
          {:ok, debrief} <- build_economy(Map.get(data, "economy")),
          # ADR-0062: optional `[memory]` table (semantic-recall corpus override).
@@ -591,6 +616,7 @@ defmodule Kazi.Goal.Loader do
           harness: harness,
           groups: groups,
           enforcement: enforcement,
+          seal: seal,
           debrief: debrief,
           memory_corpus: memory_corpus,
           integration: integration,
@@ -804,6 +830,48 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_enforcement(_), do: {:error, "[enforcement] must be a table"}
+
+  # ADR-0080 (#1520): the optional `[seal]` table — the sealed-input tamper
+  # contract. `enabled` (default true) with `enabled = false` the whole-run
+  # opt-out; `sealed_inputs` the repo-relative paths (globs allowed) whose content
+  # is part of the acceptance bar; `mutable_inputs` the subtractive opt-out (a
+  # sealed-glob-matched path the goal legitimately regenerates). Absent → nil (no
+  # block, so only the goal-file is implicitly sealed). Wrong types fail loudly.
+  defp build_seal(nil), do: {:ok, nil}
+
+  defp build_seal(seal) when is_map(seal) do
+    with {:ok, enabled} <- seal_bool(seal, "enabled", true),
+         {:ok, sealed_inputs} <- seal_paths(seal, "sealed_inputs"),
+         {:ok, mutable_inputs} <- seal_paths(seal, "mutable_inputs") do
+      {:ok,
+       Kazi.Seal.new(
+         enabled: enabled,
+         sealed_inputs: sealed_inputs,
+         mutable_inputs: mutable_inputs
+       )}
+    end
+  end
+
+  defp build_seal(_), do: {:error, "[seal] must be a table"}
+
+  defp seal_bool(seal, key, default) do
+    case Map.get(seal, key, default) do
+      value when is_boolean(value) -> {:ok, value}
+      _ -> {:error, "seal \"#{key}\" must be a boolean"}
+    end
+  end
+
+  defp seal_paths(seal, key) do
+    case Map.get(seal, key, []) do
+      paths when is_list(paths) ->
+        if Enum.all?(paths, &is_binary/1),
+          do: {:ok, paths},
+          else: {:error, "seal \"#{key}\" must be a list of strings"}
+
+      _ ->
+        {:error, "seal \"#{key}\" must be a list of strings"}
+    end
+  end
 
   # T49.6 (ADR-0064 d3/d7): the optional per-role path policy —
   # `[enforcement.roles.fixer] read_only_paths` and
