@@ -130,8 +130,28 @@ defmodule KaziWeb.MissionControlLive do
      |> assign(:state_filter, nil)
      |> assign(:repo_filter, nil)
      |> assign(:time_window, nil)
+     |> assign(:debug?, false)
      |> assign_fleet()
      |> assign_presence()}
+  end
+
+  # Operator/debug mode split (ADR-0078, T63.7): the mode is a URL query param —
+  # `?debug=1` reveals the expert surfaces (DAG/lease-map/event-river), its
+  # absence is the calmer default operator view. Canonical in the URL so the
+  # first server-rendered DOM is already correct (no flash, testable); each
+  # param change mirrors the active mode to the browser's localStorage via the
+  # `McDebug` hook so the choice sticks per browser across bare `/` visits.
+  @impl true
+  def handle_params(params, _uri, socket) do
+    debug? = params["debug"] in ["1", "true"]
+    socket = assign(socket, :debug?, debug?)
+
+    socket =
+      if connected?(socket),
+        do: push_event(socket, "mc-store-debug", %{on: debug?}),
+        else: socket
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -183,6 +203,14 @@ defmodule KaziWeb.MissionControlLive do
      |> assign(:repo_filter, repo)
      |> assign(:time_window, parse_time_window(params["window"]))
      |> assign_fleet()}
+  end
+
+  # The `McDebug` hook fires this on connect when localStorage holds a debug
+  # preference but the URL is silent on the mode (a bare `/` visit) — restore it
+  # by patching the canonical param in (ADR-0078, T63.7).
+  @impl true
+  def handle_event("mc-restore-debug", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/?debug=1")}
   end
 
   # ---------------------------------------------------------------------------
@@ -1007,6 +1035,30 @@ defmodule KaziWeb.MissionControlLive do
           <div class="wordmark display-heading">KAZI<span class="wm2">FLEET</span></div>
 
           <div class="clockwrap">
+            <%!-- Operator/debug mode toggle (ADR-0078, T63.7). The McDebug hook
+            mirrors the active mode to localStorage and restores it on a bare
+            `/` visit; the links are the canonical URL-param switch. --%>
+            <div
+              id="mc-mode"
+              class="segmented modetoggle"
+              data-mode={if @debug?, do: "debug", else: "operator"}
+              phx-hook="McDebug"
+            >
+              <.link
+                patch={~p"/"}
+                class={"seg" <> if(not @debug?, do: " on", else: "")}
+                data-mode-option="operator"
+              >
+                OPERATOR
+              </.link>
+              <.link
+                patch={~p"/?debug=1"}
+                class={"seg" <> if(@debug?, do: " on", else: "")}
+                data-mode-option="debug"
+              >
+                DEBUG
+              </.link>
+            </div>
             <span class="live"><span class="livedot"></span>LIVE</span>
             <span id="mc-clock" class="clock">{@clock} UTC</span>
           </div>
@@ -1181,7 +1233,18 @@ defmodule KaziWeb.MissionControlLive do
         </section>
       </div>
 
-      <section id="mc-sessions" data-source={inspect(@coord_source)}>
+      <%!-- Expert surfaces (ADR-0078, T63.7): only present in DEBUG mode. The
+      debug nav links the three full expert pages; the SESSIONS rail (lease
+      presence) and the EVENT RIVER footer render inline below it. In operator
+      mode none of this is in the DOM. --%>
+      <nav :if={@debug?} id="mc-debug-nav" class="debugnav">
+        <span class="seclabel section-label">DEBUG · EXPERT SURFACES</span>
+        <.link id="mc-debug-dag" navigate={~p"/dag"} class="debuglink">DAG</.link>
+        <.link id="mc-debug-leases" navigate={~p"/leases"} class="debuglink">LEASE MAP</.link>
+        <.link id="mc-debug-events" navigate={~p"/events"} class="debuglink">EVENT RIVER</.link>
+      </nav>
+
+      <section :if={@debug?} id="mc-sessions" data-source={inspect(@coord_source)}>
         <div class="seclabel section-label">SESSIONS</div>
         <ul :if={@presence != []} id="mc-sessions-list" class="sessions">
           <li
@@ -1204,7 +1267,7 @@ defmodule KaziWeb.MissionControlLive do
         </p>
       </section>
 
-      <footer class="river">
+      <footer :if={@debug?} id="mc-event-river" class="river">
         <div class="riverin">
           <div class="riverlabel section-label">EVENT RIVER</div>
           <div :if={@river_entries != []} class="tickerwrap">
@@ -1250,6 +1313,15 @@ defmodule KaziWeb.MissionControlLive do
         .segmented .seg.on { color: var(--cyn); background: rgba(83,214,255,.1); }
         .scopetoggle .seg { font-size: 9px; letter-spacing: .16em; color: var(--dim); }
         .scopetoggle .seg.on { color: var(--cyn); }
+        /* Operator/debug mode toggle (ADR-0078, T63.7): a topbar segmented
+           control; the <.link> segments reuse the .seg look. */
+        .modetoggle .seg { font-size: 9px; letter-spacing: .16em; color: var(--dim); text-decoration: none; }
+        .modetoggle .seg.on { color: var(--cyn); }
+        /* DEBUG expert-surface nav (ADR-0078, T63.7): only present in debug mode. */
+        .debugnav { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 8px 0 4px; }
+        .debugnav .seclabel { margin: 0; }
+        .debuglink { font-size: 10px; letter-spacing: .12em; color: var(--dim); text-decoration: none; border: 1px solid var(--line); border-radius: 3px; padding: 5px 10px; }
+        .debuglink:hover { color: var(--cyn); border-color: rgba(83,214,255,.45); }
         .filterrow { display: flex; align-items: center; gap: 8px; margin: 0; }
         .filtersel { background: var(--panel); border: 1px solid var(--line); color: var(--txt); font: inherit; font-size: 10px; letter-spacing: .12em; padding: 5px 8px; border-radius: 3px; cursor: pointer; }
         .filtersel:hover { border-color: var(--dim); }

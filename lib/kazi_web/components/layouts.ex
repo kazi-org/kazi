@@ -93,10 +93,39 @@ defmodule KaziWeb.Layouts do
             var csrf = document
               .querySelector("meta[name='csrf-token']")
               .getAttribute("content");
+            // McDebug (ADR-0078, T63.7): persist the Mission Control operator/
+            // debug mode per browser. The URL param `?debug=1` is canonical; this
+            // hook mirrors the active mode to localStorage and, on a bare `/`
+            // visit, restores a stored debug preference by asking the server to
+            // patch the param back in.
+            var Hooks = {
+              McDebug: {
+                mounted: function () {
+                  var self = this;
+                  this.handleEvent("mc-store-debug", function (payload) {
+                    try {
+                      window.localStorage.setItem(
+                        "kazi:mc-debug",
+                        payload.on ? "1" : "0"
+                      );
+                    } catch (e) {}
+                  });
+                  try {
+                    var url = new URL(window.location.href);
+                    if (
+                      !url.searchParams.has("debug") &&
+                      window.localStorage.getItem("kazi:mc-debug") === "1"
+                    ) {
+                      self.pushEvent("mc-restore-debug", {});
+                    }
+                  } catch (e) {}
+                },
+              },
+            };
             var liveSocket = new window.LiveView.LiveSocket(
               "/live",
               window.Phoenix.Socket,
-              { params: { _csrf_token: csrf } }
+              { params: { _csrf_token: csrf }, hooks: Hooks }
             );
             liveSocket.connect();
             window.liveSocket = liveSocket;
