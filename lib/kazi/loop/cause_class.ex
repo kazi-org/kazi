@@ -39,6 +39,21 @@ defmodule Kazi.Loop.CauseClass do
       (`--permission-mode` / `[harness] permission_mode`), never a human and never
       a bigger budget. `Kazi.Loop.ErrorPermanence` terms: permanent — it will not
       clear on retry, only on the mode changing.
+    * `:parked_on_background` — T68.4 (#1546): the dispatch spent its whole
+      session and then ENDED PARKED on its own backgrounded verification jobs
+      (a full `mix test` / doc-freshness suite it launched with the Bash tool),
+      changing NO files. Distinct from `:permission_denied` (nothing was
+      refused — the agent ran plenty of tools) and from an ordinary failing-set
+      `:stuck` (it never made an edit; it only verified). The production mislabel
+      this class exists for: a full-cost dispatch (97 turns / ~$4) ended with the
+      final message "I'm waiting for two background checks to finish… I'll report
+      once both complete", the harness session terminated with those jobs still
+      running, the iteration recorded zero diff, and a leftover background
+      `mix test` beam kept a test port bound and poisoned the next observation.
+      The fix is a prompt nudge (implement before verifying; verify in the
+      foreground) plus this fail-fast so an orchestrator reacts after one wasted
+      arc, never a human and never a bigger budget. `Kazi.Loop.ErrorPermanence`
+      terms: permanent — re-grinding the identical park buys the identical no-op.
     * `:workspace_missing` — T53.2 (#1022): the loop's target workspace
       vanished between iterations (the dir is gone, or git reports the
       not-a-repository/deleted-cwd exit-128 signature). This is a distinct
@@ -71,6 +86,7 @@ defmodule Kazi.Loop.CauseClass do
           | :workspace_missing
           | :permission_denied
           | :capability_unreachable
+          | :parked_on_background
 
   @typedoc """
   The cause detail: `ids` are the predicate ids implicated (sorted, `[]` when
@@ -118,6 +134,7 @@ defmodule Kazi.Loop.CauseClass do
             | :permission_denied
             | :workspace_missing
             | :capability_unreachable
+            | :parked_on_background
             | nil,
           stuck_failing: [Kazi.Predicate.id()] | nil,
           stuck_reasons: %{Kazi.Predicate.id() => term()} | nil
@@ -193,6 +210,19 @@ defmodule Kazi.Loop.CauseClass do
   def classify(%{outcome: :stopped, reason: :stuck, stuck_cause: :permission_denied} = inputs) do
     %{
       class: :permission_denied,
+      ids: sorted_ids(inputs.stuck_failing),
+      reasons: nil,
+      exhausted: nil
+    }
+  end
+
+  # T68.4 (#1546): the dispatch ended parked on its own backgrounded verification
+  # jobs, zero diff. Named apart from an ordinary failing-set `:stuck` because the
+  # right move is a prompt nudge (implement before verifying), not a human and not
+  # a bigger budget.
+  def classify(%{outcome: :stopped, reason: :stuck, stuck_cause: :parked_on_background} = inputs) do
+    %{
+      class: :parked_on_background,
       ids: sorted_ids(inputs.stuck_failing),
       reasons: nil,
       exhausted: nil
