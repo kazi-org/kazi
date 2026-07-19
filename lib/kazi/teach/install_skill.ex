@@ -676,6 +676,15 @@ defmodule Kazi.Teach.InstallSkill do
     - `swift_test` when the text names an Xcode/XCTest/`.xcresult` acceptance
       criterion (a Swift test suite passing, an `.xcresult` bundle showing zero
       failures). Requires `xcresult_path`; see `kazi schema swift_test`.
+    - `render_proof` / `visual_judge` for a VISUAL/UI acceptance criterion, over
+      a controller-owned `[[capture]]` screenshot (ADR-0081), never a workspace
+      path the worker chose. `render_proof` gates that it actually RENDERED (not a
+      blank/crash frame); `visual_judge` sends the capture + a pinned `model` + a
+      `rubric` (a list of pass/fail criteria) to a strong model and gates on its
+      ITEMIZED verdict — the critique reaches the worker as the red detail. Seal
+      the rubric/model (goal-file) and reference images (`[seal] sealed_inputs`,
+      ADR-0080) so the bar is tamper-evident. See
+      `docs/visual-judge-predicate.md`.
     - `custom_script` for everything else (test assertions, build/lint
       conditions, CLI behavior). Do NOT emit `test_runner`: deprecated
       (ADR-0040, removal in v2.0.0); every load prints a deprecation warning.
