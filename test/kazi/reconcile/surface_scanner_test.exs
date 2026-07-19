@@ -61,6 +61,79 @@ defmodule Kazi.Reconcile.SurfaceScannerTest do
     end
   end
 
+  describe "scan/2 Mix.Project boilerplate exclusion" do
+    setup do
+      root =
+        Path.join(System.tmp_dir!(), "kazi_surface_mix_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+      {:ok, root: root}
+    end
+
+    test "a boilerplate-only mix.exs yields zero surface elements", %{root: root} do
+      File.write!(Path.join(root, "mix.exs"), """
+      defmodule Demo.Mixfile do
+        use Mix.Project
+
+        def project do
+          [app: :demo, version: "0.1.0", deps: deps()]
+        end
+
+        def application do
+          [extra_applications: [:logger]]
+        end
+
+        def cli do
+          [preferred_envs: [docs: :docs]]
+        end
+
+        defp deps, do: []
+      end
+      """)
+
+      assert SurfaceScanner.scan(root) == []
+    end
+
+    test "a custom public helper in mix.exs still surfaces", %{root: root} do
+      File.write!(Path.join(root, "mix.exs"), """
+      defmodule Demo.Mixfile do
+        use Mix.Project
+
+        def project do
+          [app: :demo, version: version(), deps: deps()]
+        end
+
+        def application, do: []
+
+        def version, do: "1.2.3"
+
+        defp deps, do: []
+      end
+      """)
+
+      funs = SurfaceScanner.scan(root) |> identifiers(:exported_function)
+      assert "Demo.Mixfile.version/0" in funs
+      refute "Demo.Mixfile.project/0" in funs
+      refute "Demo.Mixfile.application/0" in funs
+    end
+
+    test "callbacks named project/0 in a non-Mix.Project module are still surface", %{root: root} do
+      File.mkdir_p!(Path.join(root, "lib"))
+
+      File.write!(Path.join(root, "lib/plain.ex"), """
+      defmodule Plain do
+        def project, do: :ok
+        def application, do: :ok
+      end
+      """)
+
+      funs = SurfaceScanner.scan(root) |> identifiers(:exported_function)
+      assert "Plain.project/0" in funs
+      assert "Plain.application/0" in funs
+    end
+  end
+
   describe "scan/2 robustness" do
     setup do
       root = Path.join(System.tmp_dir!(), "kazi_surface_#{System.unique_integer([:positive])}")

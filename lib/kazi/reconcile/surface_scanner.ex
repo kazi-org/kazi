@@ -25,6 +25,17 @@ defmodule Kazi.Reconcile.SurfaceScanner do
 
   ## Approximate by design
 
+  ## Mix.Project boilerplate is excluded by default
+
+  `mix.exs` is always scanned so a project's own Mix tasks and any custom public
+  helpers it defines are not missed. But a `Mixfile` module (one that
+  `use Mix.Project`) must expose the `Mix.Project` behaviour callbacks
+  (`project/0`, `application/0`, `cli/0`) — universal build configuration present
+  on essentially every repo, not product surface. Those callbacks are dropped
+  from the inventory so they do not produce spec noise on discovery goals. Any
+  *other* public function in the Mixfile (a custom helper the project chose to
+  export) and every `Mix.Tasks.*` task module stay in scope.
+
   A static scan cannot see surface reached by **reflection or string dispatch**
   — `apply/3` with a runtime-computed function, a route table keyed by strings, a
   `Module.concat/1` lookup. Those entry points are invisible here and will look
@@ -53,6 +64,11 @@ defmodule Kazi.Reconcile.SurfaceScanner do
   @default_source_dirs ["lib"]
   @default_max_files 2000
   @ignored_segments ~w(.git _build deps node_modules .elixir_ls cover)
+
+  # `Mix.Project` behaviour callbacks a Mixfile must export — universal build
+  # configuration, not product surface. Dropped from the inventory when the
+  # enclosing module `use`s `Mix.Project` (see moduledoc).
+  @mix_project_callbacks ~w(project/0 application/0 cli/0)
 
   @doc """
   Scans `workspace` and returns its public-surface inventory, sorted and
@@ -130,7 +146,13 @@ defmodule Kazi.Reconcile.SurfaceScanner do
     mod_name = Enum.join(parts, ".")
 
     task = mix_task_elements(body, mod_name, rel)
-    children = collect(body, rel, parts)
+
+    children =
+      body
+      |> collect(rel, parts)
+      |> List.flatten()
+      |> drop_mix_project_boilerplate(body, mod_name)
+
     [task, children]
   end
 
@@ -163,6 +185,30 @@ defmodule Kazi.Reconcile.SurfaceScanner do
     else
       []
     end
+  end
+
+  # A Mixfile (`use Mix.Project`) must export the behaviour callbacks; drop those
+  # so universal build config is not reported as product surface. Custom public
+  # helpers the Mixfile defines are kept — only the known callbacks are excluded.
+  defp drop_mix_project_boilerplate(elements, body, mod_name) do
+    if uses_mix_project?(body) do
+      excluded = MapSet.new(@mix_project_callbacks, &"#{mod_name}.#{&1}")
+
+      Enum.reject(elements, fn el ->
+        el.kind == :exported_function and el.identifier in excluded
+      end)
+    else
+      elements
+    end
+  end
+
+  defp uses_mix_project?(body) do
+    body
+    |> block_exprs()
+    |> Enum.any?(fn
+      {:use, _meta, [alias_ast | _]} -> module_parts(alias_ast) == [:Mix, :Project]
+      _ -> false
+    end)
   end
 
   defp uses_mix_task?(body) do
