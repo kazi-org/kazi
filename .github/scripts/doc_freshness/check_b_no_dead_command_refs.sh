@@ -65,17 +65,45 @@ rel() { printf '%s' "${1#"$DF_ROOT/"}"; }
 valid_cmds="$(df_commands)"
 offenders=0
 
-# --- class 1: known-removed verb tokens -----------------------------------
-# Word-boundary match: `kazi run` / `kazi propose` / `mix kazi.run` not followed
-# by a word char (so "runs"/"proposes" are safe).
-removed_re='(kazi (run|propose)|mix kazi\.run)([^a-zA-Z]|$)'
+# --- class 1: known-removed verb tokens (COMMAND POSITION only) ------------
+# `kazi run` / `kazi propose` / `mix kazi.run` were removed in v1.0.0 (ADR-0032,
+# docs/deprecations.md); the #1242 guard class catches a live doc that still
+# tells a reader to invoke one.
+#
+# A removed verb is only a dead COMMAND REFERENCE when it appears where a command
+# would -- NOT as bare English prose. "Every kazi run already asks an agent..."
+# uses "run" as an ordinary verb and must NOT trip (the pre-fix regex matched
+# `kazi run ` followed by any non-letter, so this prose false-positived). We
+# therefore require the token to be in command position, one of:
+#   * inside a fenced code block (``` ... ```), or
+#   * at the start of a command line (optionally after indentation / a `$ `
+#     shell prompt), or
+#   * inline-backtick-quoted (`` `kazi run` `` / `` `mix kazi.run` ``).
+# A backtick-quoted `kazi run`/`kazi propose` is ALSO caught by class 2 below (it
+# is not in the shipped table); class 1 additionally covers the fenced and
+# `mix kazi.run` forms class 2's `` `kazi <cmd>` `` grep cannot see. Word-bounded
+# on the trailing side so "runs"/"proposes"/"kazi.runner" stay safe.
+# One awk pass per file tracks the fenced-code-block state and emits
+# `<lineno>:<line>` only for a removed verb in command position, so this stays
+# as fast as the pre-fix single-grep scan (no per-line subshell).
 for f in "${LIVE_DOCS[@]}"; do
   [ -f "$f" ] || continue
-  while IFS=: read -r lineno _; do
-    line_text="$(sed -n "${lineno}p" "$f")"
+  while IFS=: read -r lineno line_text; do
     df_fail "(b) removed verb referenced -> $(rel "$f"):${lineno}: ${line_text#"${line_text%%[![:space:]]*}"}"
     offenders=$((offenders + 1))
-  done < <(grep -nE "$removed_re" "$f" || true)
+  done < <(
+    awk '
+      # A fence delimiter toggles the code-block state; it is never itself a ref.
+      /^[[:space:]]*```/ { infence = !infence; next }
+      # Trailing word boundary so "runs"/"proposes"/"kazi.runner" stay safe.
+      $0 !~ /(kazi (run|propose)|mix kazi\.run)([^a-zA-Z]|$)/ { next }
+      {
+        cmdline  = ($0 ~ /^[[:space:]]*(\$[[:space:]]+)?(kazi (run|propose)|mix kazi\.run)([^a-zA-Z]|$)/)
+        backtick = ($0 ~ /`(kazi (run|propose)|mix kazi\.run)([^a-zA-Z]|`|$)/)
+        if (infence || cmdline || backtick) print NR ":" $0
+      }
+    ' "$f"
+  )
 done
 
 # --- class 2: backtick `kazi <cmd>` not in the shipped table ---------------
