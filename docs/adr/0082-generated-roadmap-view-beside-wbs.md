@@ -46,5 +46,8 @@ generated view is committed and diffable beside the WBS.
   WBS files until a future ADR gives the read-model task fidelity.
 - A future option-A ADR may still replace plan.md wholesale once (and only
   once) render can express the full substrate; nothing here forecloses that.
+- "Kept fresh" needs a mechanism, not a discipline: the T45.9 landing adds
+  a CI check that regenerates the render and fails on drift from the
+  committed docs/plan-generated.md, so staleness is impossible to miss.
 - Issue #1554 closes when this ADR is accepted and the re-scoped T45.9
   lands.
