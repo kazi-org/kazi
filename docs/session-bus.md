@@ -970,6 +970,20 @@ kazi install-hooks --local        # this repo's LOCAL .claude/settings.local.jso
 kazi install-hooks --uninstall    # remove exactly what was added
 ```
 
+There are **two install paths** for this delivery mechanism, and they register the
+SAME hook declarations from the same source (T61.3):
+
+- **`kazi install-hooks`** (above) — the explicit, standalone command. Works for any
+  harness and for operators who prefer an opt-in command; `--uninstall` reverts
+  exactly what it added.
+- **The Claude Code plugin** ([ADR-0077](adr/0077-claude-code-plugin-distribution.md))
+  — one marketplace install (`/plugin install kazi@kazi`) bundles these hooks
+  alongside the skill and the kazi MCP server, and refreshes them on the release
+  cadence. The plugin's hook declarations are rendered from the same source as
+  `install-hooks`, so the two paths are equivalent, not a fork — pick whichever
+  install channel you already use (see the README's *Install via the Claude Code
+  plugin* section). Installing both is redundant, not harmful.
+
 It registers three hooks in the Claude Code settings. Two are matched to the
 two moments that matter — and bound ONLY to events whose stdout reaches the
 session's context (the ADR-0076 binding rule; a `Stop` hook's output never
