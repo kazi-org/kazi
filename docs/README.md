@@ -103,6 +103,9 @@ its config at runtime via `kazi schema <kind>`.
   `[[capture]]` screenshots so a UI goal proves pixels, not file presence: the
   controller runs the recipe each observe pass into a run-keyed evidence store the
   worker cannot write, and `render_proof` fails a blank/crash frame (ADR-0081).
+- **[`visual_judge`](visual-judge-predicate.md)** — pinned strong-model judgment
+  of a capture against a hashed rubric + optional sealed reference: itemized
+  pass/fail (critique-as-red-detail), never a beauty score (T68.8, #1522).
 - **[Live providers](live-providers.md)** — `http_probe` sustained health,
   `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
 - **[Browser assertions](browser-assertions.md)** — the full `browser` predicate
