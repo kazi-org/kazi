@@ -536,6 +536,16 @@ release cadence instead of on-demand re-runs of the explicit installers
 `install-skill` / `init --with-mcp` / `install-hooks` commands are unchanged — the
 plugin is an *additional* channel rendered from the SAME sources, never a fork.
 
+**Install from the marketplace.** The release pipeline publishes the bundle to the
+[kazi-org/claude-plugins](https://github.com/kazi-org/claude-plugins) marketplace on
+every release, at the release version (lockstep — the plugin version always equals
+the binary release it was cut from, so marketplace content can never lag the binary):
+
+```
+/plugin marketplace add kazi-org/claude-plugins
+/plugin install kazi@kazi
+```
+
 `mix kazi.plugin` renders that bundle from those single sources of truth (the
 generator adds no new teaching content — it only re-renders what the installers
 already produce):
