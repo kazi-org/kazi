@@ -16,6 +16,19 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.250.0](https://github.com/kazi-org/kazi/compare/v1.249.0...v1.250.0) (2026-07-19)
+
+
+### Features
+
+* **plugin:** mix kazi.plugin task to render the plugin bundle (T61.3) ([83ba61e](https://github.com/kazi-org/kazi/commit/83ba61e5ccba5b8c76028f3aeeee3744a317f88d))
+* **plugin:** render Claude Code plugin manifest from installer sources (T61.3, ADR-0077) ([696ba4a](https://github.com/kazi-org/kazi/commit/696ba4ac7edee7787450c623a33efbd1dde5575d))
+
+
+### Bug Fixes
+
+* **plugin:** restore missing module end in manifest.ex (T61.3) ([bf3b83a](https://github.com/kazi-org/kazi/commit/bf3b83ab9897dd750fd8f0a1615fced3aed4c65e))
+
 ## [1.249.0](https://github.com/kazi-org/kazi/compare/v1.248.1...v1.249.0) (2026-07-18)
 
 
