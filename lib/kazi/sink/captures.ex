@@ -71,6 +71,65 @@ defmodule Kazi.Sink.Captures do
   end
 
   @doc """
+  Enumerates a run's retained captures per observe iteration, reading the
+  provenance sidecars under `captures_root`
+  (`<sinks_dir>/<run_id>/captures`). Returns `%{iteration => [entry]}` where each
+  entry is `%{name, ok, artifact_path, sha256, bytes}` — the evidence-store view a
+  reviewer / `kazi status --json` reads. A missing/empty root is `%{}`.
+  """
+  @spec list_for_run(String.t()) :: %{optional(non_neg_integer()) => [map()]}
+  def list_for_run(captures_root) do
+    case File.ls(captures_root) do
+      {:ok, iters} ->
+        iters
+        |> Enum.filter(&iteration_index/1)
+        |> Map.new(fn iter ->
+          {iteration_index(iter), iteration_entries(Path.join(captures_root, iter))}
+        end)
+
+      {:error, _} ->
+        %{}
+    end
+  end
+
+  defp iteration_index(name) do
+    case Integer.parse(name) do
+      {n, ""} when n >= 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp iteration_entries(iteration_dir) do
+    case File.ls(iteration_dir) do
+      {:ok, names} ->
+        names
+        |> Enum.sort()
+        |> Enum.flat_map(fn name -> entry_for(Path.join(iteration_dir, name), name) end)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  defp entry_for(capture_dir, name) do
+    with true <- File.dir?(capture_dir),
+         {:ok, raw} <- File.read(Path.join(capture_dir, @provenance_file)),
+         {:ok, prov} <- Jason.decode(raw) do
+      [
+        %{
+          name: prov["name"] || name,
+          ok: prov["ok"] == true,
+          artifact_path: prov["output"] && Path.join(capture_dir, prov["output"]),
+          sha256: prov["sha256"],
+          bytes: prov["bytes"]
+        }
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  @doc """
   Executes every recipe in `captures` for one observe pass, writing artifacts +
   provenance into `opts[:dir]` (the `iteration_dir/3` above), and returns
   `%{name => result}`.

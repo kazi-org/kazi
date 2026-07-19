@@ -123,4 +123,34 @@ defmodule Kazi.Sink.CapturesTest do
     # The launch never ran, so no artifact was produced.
     refute File.regular?(Path.join([dir, "now_screen", "now_screen.png"]))
   end
+
+  test "list_for_run enumerates retained captures per iteration from the sidecars",
+       %{tmp_dir: tmp_dir} do
+    sinks = Path.join(tmp_dir, "runs")
+    workspace = Path.join(tmp_dir, "ws")
+    File.mkdir_p!(workspace)
+    run_id = "run-list"
+    capture = recipe(launch_args: ["-c", ~s|head -c 2048 /dev/urandom > "$KAZI_CAPTURE_OUTPUT"|])
+
+    for iter <- [0, 1] do
+      dir = Captures.iteration_dir(sinks, run_id, iter)
+      File.mkdir_p!(dir)
+      Captures.run([capture], dir: dir, workspace: workspace)
+    end
+
+    root = Path.join([sinks, run_id, "captures"])
+    by_iteration = Captures.list_for_run(root)
+
+    assert Map.keys(by_iteration) |> Enum.sort() == [0, 1]
+    assert [entry] = by_iteration[0]
+    assert entry.name == "now_screen"
+    assert entry.ok == true
+    assert entry.bytes == 2048
+    assert entry.sha256 =~ ~r/^[0-9a-f]{64}$/
+    assert File.regular?(entry.artifact_path)
+  end
+
+  test "list_for_run of a missing store is empty" do
+    assert Kazi.Sink.Captures.list_for_run("/nonexistent/path/9f3a/captures") == %{}
+  end
 end

@@ -4542,10 +4542,60 @@ defmodule Kazi.CLI do
     # persisted `landed` refs — ADDITIVE, so a run with none (a single-goal run,
     # or a pre-T62.6 row) omits the key entirely and the object is byte-identical
     # to the pre-T62.6 status shape (regression pin).
-    case landed do
-      [] -> base
-      rows -> Map.put(base, :landed, Enum.map(rows, &status_landed_json/1))
+    base =
+      case landed do
+        [] -> base
+        rows -> Map.put(base, :landed, Enum.map(rows, &status_landed_json/1))
+      end
+
+    put_captures(base, ref)
+  end
+
+  # ADR-0081 (#1521): the run's retained capture evidence, per observe iteration,
+  # from the run-keyed evidence store (`Kazi.Sink.Captures`). ADDITIVE — a run
+  # that declared no `[[capture]]` (or whose store is absent) omits the key
+  # entirely, so the object is byte-identical to before. Located via the latest
+  # run row for this ref whose events sink path names its `<run_id>` dir; the
+  # captures store is that dir's `captures/` sibling.
+  defp put_captures(map, ref) do
+    with captures_root when is_binary(captures_root) <- captures_root_for_ref(ref),
+         by_iteration when map_size(by_iteration) > 0 <-
+           Kazi.Sink.Captures.list_for_run(captures_root) do
+      Map.put(map, :captures, captures_json(by_iteration))
+    else
+      _ -> map
     end
+  end
+
+  # The `<sinks_dir>/<run_id>/captures` dir for a ref: the latest run row for the
+  # goal_ref whose `events_sink_path` (`.../<run_id>/events.jsonl`) locates the
+  # run dir; captures live in its `captures/` sibling. `nil` when no such row.
+  defp captures_root_for_ref(ref) do
+    RunRegistry.list()
+    |> Enum.filter(&(&1.goal_ref == to_string(ref) and is_binary(&1.events_sink_path)))
+    |> Enum.sort_by(& &1.started_at, {:desc, DateTime})
+    |> case do
+      [row | _] -> Path.join(Path.dirname(row.events_sink_path), "captures")
+      [] -> nil
+    end
+  end
+
+  defp captures_json(by_iteration) do
+    by_iteration
+    |> Enum.sort_by(fn {iteration, _} -> iteration end)
+    |> Enum.map(fn {iteration, entries} ->
+      %{iteration: iteration, artifacts: Enum.map(entries, &capture_entry_json/1)}
+    end)
+  end
+
+  defp capture_entry_json(entry) do
+    %{
+      name: entry.name,
+      ok: entry.ok,
+      artifact_path: entry.artifact_path,
+      sha256: entry.sha256,
+      bytes: entry.bytes
+    }
   end
 
   # One persisted landed-ref row on the `status --json` surface: the group's
