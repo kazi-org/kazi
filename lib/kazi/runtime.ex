@@ -327,6 +327,14 @@ defmodule Kazi.Runtime do
     # file on disk — this snapshot only powers the observational report.
     t0_snapshot = GoalDrift.snapshot(goal)
 
+    # ADR-0080 (#1520): arm the seal at the SAME t0 instant — content-hash the
+    # goal-file (`:goal_source`) + every declared sealed input against the
+    # workspace. The loop re-verifies this manifest before every observe pass and
+    # terminates `:tampered` on the first mismatch. Empty (nothing sealed) when the
+    # goal declared no `[seal]` block AND has no on-disk source, so a byte-identical
+    # no-op for an in-memory goal.
+    seal_manifest = Kazi.Seal.arm(goal.seal, Keyword.get(opts, :goal_source), workspace)
+
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
          :ok <- guard_not_vacuous(goal, providers, workspace),
@@ -444,7 +452,9 @@ defmodule Kazi.Runtime do
           # that CAN vanish mid-run (a deleted worktree, a wiped tmp dir) — so
           # the runtime always turns on the loop's workspace-liveness precheck,
           # unlike the loop's own default (off, for fixture-path test loops).
-          check_workspace_liveness: true
+          check_workspace_liveness: true,
+          # ADR-0080 (#1520): the t0 seal manifest the loop re-verifies each observe.
+          seal_manifest: seal_manifest
         )
 
       # Issue #1013 (T53.4): register the run BEFORE starting the loop, not
@@ -1569,6 +1579,9 @@ defmodule Kazi.Runtime do
   # `KaziWeb.MissionControlLive`'s state resolution).
   defp registry_status(:converged, _reason), do: "converged"
   defp registry_status(:over_budget, _reason), do: "over_budget"
+  # ADR-0080 (#1520): a tampered run gets its own distinct terminal status — never
+  # folded into "stuck"/"stopped", so the fleet surfaces it as the hard-FAIL it is.
+  defp registry_status(:tampered, _reason), do: "tampered"
   defp registry_status(:stopped, :stuck), do: "stuck"
   defp registry_status(:stopped, _reason), do: "stopped"
 

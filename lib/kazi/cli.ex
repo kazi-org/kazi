@@ -3442,6 +3442,20 @@ defmodule Kazi.CLI do
 
         1
 
+      # ADR-0080 (#1520): a sealed input was tampered with mid-run — a distinct
+      # hard-FAIL, exit non-zero, never green.
+      {:ok, %{outcome: :tampered} = result} ->
+        report_outcome(
+          goal,
+          :tampered,
+          result,
+          run_economy(goal, :tampered, result, opts, persist?),
+          workspace,
+          json?
+        )
+
+        1
+
       {:error, reason} ->
         report_run_error(goal, reason, json?)
         1
@@ -3893,6 +3907,9 @@ defmodule Kazi.CLI do
   # the existing `:stopped` human line (the JSON surface carries the precise
   # `over_budget` status + the exceeded dimension in `next_action`/`budget_spent`).
   defp human_outcome(:converged), do: :converged
+  # ADR-0080 (#1520): a tampered run gets its own human line naming the file, not
+  # the generic STOPPED line — the operator must see WHY the run is void.
+  defp human_outcome(:tampered), do: :tampered
   defp human_outcome(_), do: :stopped
 
   # A pre-loop run error (an unknown provider/harness, a vacuous goal, an await
@@ -8581,6 +8598,19 @@ defmodule Kazi.CLI do
   defp outcome_line(%Goal{id: id}, :stopped, _result),
     do: "STOPPED    goal=#{id} — the loop stopped before converging."
 
+  # ADR-0080 (#1520): a sealed input changed mid-run — the acceptance contract was
+  # tampered with. Name the file + the change so the operator sees the void cause.
+  defp outcome_line(%Goal{id: id}, :tampered, result) do
+    case Map.get(result, :tampered_file) do
+      %{path: path, change: change} ->
+        "TAMPERED   goal=#{id} — sealed input #{path} was #{change} mid-run; " <>
+          "the run is void (ADR-0080)."
+
+      _ ->
+        "TAMPERED   goal=#{id} — a sealed input changed mid-run; the run is void (ADR-0080)."
+    end
+  end
+
   defp format_actions([]), do: "(none)"
   defp format_actions(actions), do: Enum.map_join(actions, " → ", &to_string/1)
 
@@ -8688,7 +8718,7 @@ defmodule Kazi.CLI do
   #                        always converges against the ORIGINAL t0 bar.
   @spec run_result_json(
           Goal.t(),
-          :converged | :stopped | :over_budget,
+          :converged | :stopped | :over_budget | :tampered,
           map(),
           map(),
           String.t() | nil
@@ -8719,7 +8749,16 @@ defmodule Kazi.CLI do
     |> put_integration(result)
     |> put_collateral(goal, workspace)
     |> put_goal_drifted(result)
+    |> put_tampered_file(result)
   end
+
+  # ADR-0080 (#1520): the additive `tampered_file` object — the sealed input (or
+  # goal-file) that changed mid-run, `%{path:, change:}`. Present ONLY on a
+  # `tampered` run; absent otherwise, so a normal result is byte-identical.
+  defp put_tampered_file(map, %{tampered_file: %{path: path, change: change}}),
+    do: Map.put(map, :tampered_file, %{path: to_string(path), change: to_string(change)})
+
+  defp put_tampered_file(map, _result), do: map
 
   # T50.2 (ADR-0065 decision 2): the additive `integration` object — how a
   # worktree-isolated serial run's converged commits landed on the base
@@ -8928,6 +8967,8 @@ defmodule Kazi.CLI do
   # non-converged halt the orchestrator should investigate, never a success.
   defp run_status(:converged, _result), do: "converged"
   defp run_status(:over_budget, _result), do: "over_budget"
+  # ADR-0080 (#1520): a distinct terminal status, never folded into "stuck".
+  defp run_status(:tampered, _result), do: "tampered"
   defp run_status(:stopped, _result), do: "stuck"
 
   # The orchestrator's branch hint, derived purely from the terminal status.

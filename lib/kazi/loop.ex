@@ -230,7 +230,7 @@ defmodule Kazi.Loop do
   saw the same non-empty failing set persist across N iterations, escalated to a
   human, and stopped rather than burning more work (concept §5).
   """
-  @type outcome :: :converged | :stopped | :over_budget
+  @type outcome :: :converged | :stopped | :over_budget | :tampered
 
   @typedoc """
   The final result handed to `await/2` waiters when the loop stops.
@@ -656,7 +656,18 @@ defmodule Kazi.Loop do
               # keeps failing without a code change is a capability the demonstrator
               # cannot reach). Appended last so the existing field order is
               # untouched.
-              consecutive_failed_demos: 0
+              consecutive_failed_demos: 0,
+              # --- ADR-0080 (#1520): sealed-predicate tamper detection ----------
+              # `seal_manifest` is the t0 content-hash manifest of the goal-file +
+              # sealed inputs (`Kazi.Seal.arm/3`), armed by the runtime and threaded
+              # in as a loop opt. Before every observe pass the loop re-verifies it
+              # (`Kazi.Seal.verify/1`); the FIRST mismatch sets `tampered_file`
+              # (`%{path:, change:}`) and terminates the run `:tampered`. Empty
+              # manifest (a Loop.start_link with no seal, or `[seal] enabled=false`)
+              # = nothing sealed, byte-identical to pre-ADR-0080. Appended last so
+              # the existing field order is untouched.
+              seal_manifest: %{},
+              tampered_file: nil
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -1046,7 +1057,10 @@ defmodule Kazi.Loop do
       # disk — checking existence there would be a false positive, not a
       # detection. `Kazi.Runtime` turns this on for every REAL `kazi apply`,
       # where the workspace is an actual checkout that can actually vanish.
-      check_workspace_liveness: Keyword.get(opts, :check_workspace_liveness, false)
+      check_workspace_liveness: Keyword.get(opts, :check_workspace_liveness, false),
+      # ADR-0080 (#1520): the t0 seal manifest, armed by the runtime. Absent = %{}
+      # (nothing sealed), so a loop with no seal is byte-identical to pre-ADR-0080.
+      seal_manifest: Keyword.get(opts, :seal_manifest, %{})
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -1085,25 +1099,7 @@ defmodule Kazi.Loop do
         terminate_workspace_missing(remedy, data)
 
       :ok ->
-        # T1.4 budget: the hard ceiling is checked ONCE at the start of every
-        # tick, BEFORE observing/dispatching more work. If a dimension is
-        # exceeded the loop makes a hard stop here — it does not dispatch
-        # another agent / integrate / deploy — terminating as :over_budget
-        # with the exceeded dimension as reason.
-        case budget_check(data) do
-          {:stop, reason} ->
-            # T45.7 (ADR-0056 decision 5): before terminating :over_budget, try the
-            # escalation ladder — a next rung re-dispatches the SAME goal at a
-            # stronger model with a fresh per-rung budget; otherwise the terminal
-            # stop stands.
-            case maybe_escalate(data, current_failing_set(data)) do
-              {:escalated, data} -> reobserve(data, 0)
-              :halt -> terminate_over_budget(reason, data)
-            end
-
-          :ok ->
-            observe_tick(data)
-        end
+        seal_check_then_observe(data)
     end
   end
 
@@ -1179,13 +1175,13 @@ defmodule Kazi.Loop do
   # under a `:transient` supervisor would even resurrect a deliberately stopped
   # standing loop. Terminal states accept no more observations, so it is a no-op.
   def handle_event({:timeout, :reobserve}, :reobserve, state, %Data{})
-      when state in [:converged, :stopped, :over_budget] do
+      when state in [:converged, :stopped, :over_budget, :tampered] do
     :keep_state_and_data
   end
 
   # --- stop / await / snapshot (handled in any state) --------------------------
   def handle_event(:cast, :stop, state, %Data{} = data)
-      when state not in [:converged, :stopped, :over_budget] do
+      when state not in [:converged, :stopped, :over_budget, :tampered] do
     terminate_with(:stopped, data)
   end
 
@@ -1193,7 +1189,7 @@ defmodule Kazi.Loop do
 
   # In a terminal state the result is cached in data; reply to await immediately.
   def handle_event({:call, from}, :await, state, %Data{} = data)
-      when state in [:converged, :stopped, :over_budget] do
+      when state in [:converged, :stopped, :over_budget, :tampered] do
     {:keep_state_and_data, [{:reply, from, {:ok, data.result}}]}
   end
 
@@ -1268,6 +1264,41 @@ defmodule Kazi.Loop do
 
   # The normal observe → diff → decide tick, reached only when the budget guard
   # passed (T1.4).
+  # ADR-0080 (#1520): re-verify the seal BEFORE budget/observe — a tampered
+  # acceptance contract (the goal-file or a sealed input edited mid-run) is a
+  # distinct fatal cause, checked at the same precedence as the workspace-liveness
+  # precheck (and AFTER it, so a vanished workspace reports workspace_missing, not
+  # a spurious tamper). A converging worker that edits its own bar to reach green
+  # must never be able to report `:converged`; the run terminates `:tampered`
+  # naming the file instead. A no-op when nothing is sealed.
+  defp seal_check_then_observe(%Data{} = data) do
+    case Kazi.Seal.verify(data.seal_manifest) do
+      {:tampered, info} ->
+        terminate_tampered(info, data)
+
+      :ok ->
+        # T1.4 budget: the hard ceiling is checked ONCE at the start of every
+        # tick, BEFORE observing/dispatching more work. If a dimension is
+        # exceeded the loop makes a hard stop here — it does not dispatch
+        # another agent / integrate / deploy — terminating as :over_budget
+        # with the exceeded dimension as reason.
+        case budget_check(data) do
+          {:stop, reason} ->
+            # T45.7 (ADR-0056 decision 5): before terminating :over_budget, try the
+            # escalation ladder — a next rung re-dispatches the SAME goal at a
+            # stronger model with a fresh per-rung budget; otherwise the terminal
+            # stop stands.
+            case maybe_escalate(data, current_failing_set(data)) do
+              {:escalated, data} -> reobserve(data, 0)
+              :halt -> terminate_over_budget(reason, data)
+            end
+
+          :ok ->
+            observe_tick(data)
+        end
+    end
+  end
+
   defp observe_tick(%Data{} = data) do
     # T1.3 flake: observe now also evolves the quarantine set (a failing
     # predicate is re-run via the real provider path and may be classified flaky).
@@ -3259,6 +3290,9 @@ defmodule Kazi.Loop do
       case state do
         :converged -> :converged
         :over_budget -> :over_budget
+        # ADR-0080 (#1520): a tampered run is a distinct terminal outcome — it can
+        # NEVER collapse to :converged, and is not an ordinary :stopped either.
+        :tampered -> :tampered
         _ -> :stopped
       end
 
@@ -3305,7 +3339,19 @@ defmodule Kazi.Loop do
     }
     |> maybe_attach_stuck_bundle(data)
     |> maybe_attach_permission_denials(data)
+    |> maybe_attach_tampered_file(data)
   end
+
+  # ADR-0080 (#1520): on a :tampered stop, surface the offending file + the kind
+  # of change (`:modified`/`:removed`/`:added`) as `tampered_file` on the terminal
+  # result, so the CLI/read-model name WHICH sealed input the run was voided over.
+  # Names only — never the file's contents (size + open-source-leak hygiene).
+  # ABSENT on every non-tampered stop, so a normal result stays byte-identical.
+  @spec maybe_attach_tampered_file(map(), Data.t()) :: map()
+  defp maybe_attach_tampered_file(result, %Data{tampered_file: nil}), do: result
+
+  defp maybe_attach_tampered_file(result, %Data{tampered_file: info}),
+    do: Map.put(result, :tampered_file, info)
 
   # T54.6 (#1072, regression of #769): surface the denied tool calls on the TERMINAL
   # result, beside `changed_files` in the bundle. `permission_denied_tool_calls` is
@@ -3436,6 +3482,9 @@ defmodule Kazi.Loop do
   # The terminal result's `:reason`: the budget dimension on an :over_budget stop
   # (T1.4), `:stuck` on a stuck stop (T1.5), nil otherwise.
   @spec stop_reason(Data.t()) :: Budget.reason() | :stuck | nil
+  # ADR-0080 (#1520): a tampered stop names itself, ahead of the stuck/budget
+  # reasons (a tamper terminates before either fires).
+  defp stop_reason(%Data{tampered_file: file}) when not is_nil(file), do: :tampered
   defp stop_reason(%Data{stuck_failing: failing}) when not is_nil(failing), do: :stuck
   defp stop_reason(%Data{budget_reason: reason}), do: reason
 
@@ -3540,6 +3589,25 @@ defmodule Kazi.Loop do
       %{workspace: remedy},
       :workspace_missing
     )
+  end
+
+  # ADR-0080 (#1520): a sealed input (or the goal-file) changed mid-run — the
+  # acceptance contract was tampered with. A genuinely distinct terminal outcome
+  # (`:tampered`), NOT a stuck :stopped: the run is VOID, never green, exit
+  # non-zero, with the offending file named. `info` is the `%{path:, change:}`
+  # from `Kazi.Seal.verify/1`.
+  @spec terminate_tampered(%{path: String.t(), change: atom()}, Data.t()) ::
+          :gen_statem.event_handler_result(atom())
+  defp terminate_tampered(%{path: path, change: change} = info, %Data{} = data) do
+    Logger.warning(fn ->
+      "kazi.loop goal=#{goal_id(data.goal)} SEALED input #{inspect(path)} was #{change} " <>
+        "mid-run (ADR-0080, #1520) — the acceptance contract was tampered with. " <>
+        "Terminating :tampered (the run is VOID, never converged). If this file is " <>
+        "regenerated legitimately, add it to [seal] mutable_inputs or set " <>
+        "[seal] enabled = false."
+    end)
+
+    terminate_with(:tampered, %Data{data | tampered_file: info})
   end
 
   # Fire the human-escalation callback with the stuck context (the persistent
