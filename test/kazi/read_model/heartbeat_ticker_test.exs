@@ -7,12 +7,10 @@ defmodule Kazi.ReadModel.HeartbeatTickerTest do
   """
   use ExUnit.Case, async: false
 
-  alias Kazi.ReadModel.{Run, RunRegistry}
-  alias Kazi.Repo
+  import ExUnit.CaptureLog
 
-  setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-  end
+  alias Kazi.ReadModel.{HeartbeatTicker, Run, RunRegistry}
+  alias Kazi.Repo
 
   defp run_attrs(overrides \\ %{}) do
     Map.merge(
@@ -29,6 +27,10 @@ defmodule Kazi.ReadModel.HeartbeatTickerTest do
   end
 
   describe "heartbeat updates" do
+    setup do
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
+    end
+
     test "a run's heartbeat timestamp advances on successive registry operations" do
       attrs = run_attrs()
 
@@ -77,6 +79,47 @@ defmodule Kazi.ReadModel.HeartbeatTickerTest do
 
       stale_runs = RunRegistry.list_stale(1800)
       assert not Enum.any?(stale_runs, &(&1.run_id == run.run_id))
+    end
+  end
+
+  describe "read-model degrade (issue #1511)" do
+    # No sandbox checkout here: in manual mode a Repo call without an owned
+    # connection raises, which Guard converts to the `{:error,
+    # :read_model_unavailable}` degrade tuple -- the exact state that used to
+    # crash the ticker's handle_info/2 with a CaseClauseError.
+
+    test "a tick against an unavailable read-model skips the beat and keeps the ticker alive" do
+      # Sanity: the read-model really is degraded (no owned connection).
+      assert {:error, :read_model_unavailable} = RunRegistry.heartbeat("run-degraded")
+
+      # On pre-fix code this raises CaseClauseError; the fix returns :noreply.
+      assert {:noreply, "run-degraded"} =
+               HeartbeatTicker.handle_info(:tick, "run-degraded")
+
+      # The ticker re-armed via Process.send_after (30s delay), so no :tick is
+      # delivered synchronously -- proving it survived rather than tearing down.
+      refute_received :tick
+    end
+
+    test "the degrade is logged at most once across many ticks" do
+      log =
+        capture_log(fn ->
+          # Prime the same process dictionary the ticker uses, then drive
+          # several ticks; only the first should emit a degrade line.
+          Enum.reduce(1..5, "run-degraded", fn _i, run_id ->
+            {:noreply, ^run_id} = HeartbeatTicker.handle_info(:tick, run_id)
+            run_id
+          end)
+        end)
+
+      occurrences =
+        log
+        |> String.split("read-model unavailable for run")
+        |> length()
+        |> Kernel.-(1)
+
+      assert occurrences == 1,
+             "expected the degrade to be logged exactly once, got #{occurrences}:\n#{log}"
     end
   end
 end
