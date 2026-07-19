@@ -130,6 +130,24 @@ the first server render is already correct and a shared link carries its mode);
   `#mission-control-filtered-empty` (an honest "clear the filters" message)
   rather than the no-runs empty state.
 
+- **PROGRESS RATE** (`#mc-progress`, operator view; rendered only when at least
+  one active goal has recorded iterations): the honest answer to the operator's
+  "how long until done" question (IA Q4, T63.9). It is **rate-only per ADR-0046**
+  — no ETA, no date, no duration is ever computed or displayed. A `.section-label`
+  (`PROGRESS RATE · OBJECTIVE RATES ONLY`) + an affordance line stating that kazi
+  does not guess a finish, above a `.grid` of one `.card.prog` per active goal
+  (`#mc-progress-<goal_ref>`, `data-goal-ref`). Each card shows three `.progrow`
+  metrics (`data-metric`): **PREDICATES GREEN** (the `passing / total` ratio over
+  the latest vector), **FLIP VELOCITY** (`per_iteration /iter · N red→green`, the
+  red→green flips summed over recent iteration transitions; a single-iteration
+  goal shows an honest `— needs 2+ iterations`, never a fabricated `0`), and
+  **BUDGET CONSUMED** (`consumed / cap iterations`, or `consumed iterations · no
+  cap` for an unbounded goal). Backed by the `Kazi.ReadModel.goal_progress_rate/1`
+  projection (`Kazi.ReadModel.GoalProgressRate`; ADR-0011 projection only — the
+  predicate/flip data from the iterations log, the budget from the run registry).
+  Every label is a rate or ratio by construction; the panel's own copy names no
+  date/ETA so the operator learns the number is objective, not a promise.
+
 - **EVENT RIVER** (`#mc-event-river` `.river` footer, top hairline; **debug mode
   only** — ADR-0078): a `.section-label` + a masked marquee ticker (`.ticker`,
   48s linear scroll, span duplicated for a seamless loop) of `[HH:MM:SS] goal ·
