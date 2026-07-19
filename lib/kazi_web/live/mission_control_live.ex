@@ -85,6 +85,7 @@ defmodule KaziWeb.MissionControlLive do
   alias Kazi.Scheduler.DagSnapshot
   alias Kazi.SessionLiveness
   alias Kazi.Sink.Events
+  alias Kazi.Velocity.Kpis
   alias KaziWeb.Starmap.GoalSource
   alias KaziWeb.CoordinationSource
   alias KaziWeb.CoordinationSource.Snapshot
@@ -234,6 +235,7 @@ defmodule KaziWeb.MissionControlLive do
     |> assign(:alerts, alerts(scoped))
     |> assign(:waiting, waiting_alerts())
     |> assign_progress(scoped)
+    |> assign_velocity(all_runs)
     |> assign_planned(all_runs)
     |> assign(:river_entries, river_entries(all_runs))
   end
@@ -257,6 +259,125 @@ defmodule KaziWeb.MissionControlLive do
     assign(socket, :progress, progress)
   rescue
     _error -> assign(socket, :progress, [])
+  end
+
+  # T67.5 (E67, ADR-0079 §4): the fleet velocity strip + per-agent drill-in.
+  # Renders `Kazi.Velocity.Kpis.compute/1` — delivered/day, tokens-per-delivered-
+  # task, fleet stuck ratio, and the claim→merge lead-time p50/p90 DISTRIBUTION —
+  # over a trailing window. Every figure is a RATE, RATIO, or measured historical
+  # DISTRIBUTION; per ADR-0046 there is no ETA/date copy (the render test pins the
+  # negative assertion). The per-agent drill-in NAMES each agent's offending stuck
+  # goals, attributed from the run registry (the same terminal-verdict universe the
+  # KPI stuck ratio counts). A read-only projection (ADR-0011): an unavailable
+  # read-model renders the honest "not enough data yet" strip, never a 500.
+  defp assign_velocity(socket, all_runs) do
+    kpis = Kpis.compute()
+
+    socket
+    |> assign(:velocity, kpis)
+    |> assign(:velocity_ready?, velocity_ready?(kpis))
+    |> assign(:velocity_stuck_goals, stuck_goals_by_session(all_runs))
+  end
+
+  # Honest-unknown gate (ADR-0046, R-E67-4): a fresh fleet with no delivery, no
+  # counter, and no terminal run has NOTHING measured yet — the strip must say so
+  # rather than render zeros pretending to be measurements.
+  defp velocity_ready?(%Kpis{delivered_count: 0, per_agent: [], stuck_by_model: []}), do: false
+  defp velocity_ready?(%Kpis{}), do: true
+
+  # Offending stuck goals per agent (session): the goal_refs whose runs went
+  # `stuck`/`over_budget`, grouped by the run's harness session. The KPI stuck
+  # ratio counts these same terminal verdicts; the drill-in NAMES them so the
+  # operator can act (reusing the run-registry attribution `kazi economy` reads,
+  # not a second truth).
+  defp stuck_goals_by_session(all_runs) do
+    all_runs
+    |> Enum.filter(&(&1.status in ~w(stuck over_budget) and not is_nil(&1.harness_session_id)))
+    |> Enum.group_by(& &1.harness_session_id, & &1.goal_ref)
+    |> Map.new(fn {session, goals} ->
+      {session, goals |> Enum.reject(&is_nil/1) |> Enum.uniq()}
+    end)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Velocity-strip labels (T67.5) — every string is a RATE, RATIO, or measured
+  # historical DISTRIBUTION, never a date or an ETA (ADR-0046). A `nil` figure is
+  # the honest "not enough data yet", never a fabricated 0.
+  # ---------------------------------------------------------------------------
+
+  defp velocity_delivered_label(%Kpis{delivered_per_day: nil}), do: "— not enough data yet"
+
+  defp velocity_delivered_label(%Kpis{
+         delivered_per_day: per_day,
+         delivered_count: count,
+         window_label: window
+       }),
+       do: "#{per_day} /day · #{count} in #{window}"
+
+  defp velocity_tokens_label(%Kpis{tokens_per_delivered_task: nil}), do: "— not enough data yet"
+
+  defp velocity_tokens_label(%Kpis{tokens_per_delivered_task: tokens}),
+    do: "#{fmt_tokens(tokens)} tok/task"
+
+  # Fleet stuck ratio: the terminal-verdict population aggregated across the
+  # per-model split (the SAME universe `kazi economy` groups). `nil` (never 0)
+  # when no run has reached a terminal verdict yet.
+  defp velocity_stuck_label(%Kpis{stuck_by_model: models}) do
+    stuck = models |> Enum.map(& &1.stuck_count) |> Enum.sum()
+    terminal = models |> Enum.map(& &1.terminal_count) |> Enum.sum()
+
+    case terminal do
+      0 -> "— no terminal runs yet"
+      total -> "#{pct(stuck / total)} stuck · #{stuck}/#{total} terminal"
+    end
+  end
+
+  # Claim→merge lead time as a measured DISTRIBUTION (p50/p90), never a promise.
+  defp velocity_leadtime_label(%Kpis{lead_time: %{n: 0}}), do: "— not enough data yet"
+
+  defp velocity_leadtime_label(%Kpis{lead_time: %{p50_s: p50, p90_s: p90, n: n}}),
+    do: "p50 #{fmt_duration(p50)} · p90 #{fmt_duration(p90)} · #{n} samples"
+
+  # Per-agent drill-in labels reuse the same rate/ratio vocabulary.
+  defp agent_delivered_label(%{delivered_per_day: nil}), do: "— not enough data yet"
+
+  defp agent_delivered_label(%{delivered_per_day: per_day, delivered_count: count}),
+    do: "#{per_day} /day · #{count}"
+
+  defp agent_stuck_label(%{stuck_ratio: nil}), do: "— no terminal runs yet"
+
+  defp agent_stuck_label(%{stuck_ratio: ratio, terminal_count: terminal}),
+    do: "#{pct(ratio)} stuck · #{terminal} terminal"
+
+  defp agent_name(%{session_name: name}) when is_binary(name) and name != "", do: name
+  defp agent_name(%{session_uuid: uuid}), do: uuid
+
+  # A ratio in [0,1] as a whole-number percent (ratios are the honest unit here).
+  defp pct(ratio), do: "#{round(ratio * 100)}%"
+
+  # Compact token count: 12_300 → "12.3k", 4_500_000 → "4.5M".
+  defp fmt_tokens(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)}M"
+  defp fmt_tokens(n) when n >= 1_000, do: "#{Float.round(n / 1_000, 1)}k"
+  defp fmt_tokens(n) when is_float(n), do: "#{round(n)}"
+  defp fmt_tokens(n), do: "#{n}"
+
+  # Compact duration from seconds — a measured span (past deliveries), NOT a date
+  # or an ETA: largest two non-zero units, e.g. 5_000s → "1h 23m", 45s → "45s".
+  defp fmt_duration(nil), do: "—"
+
+  defp fmt_duration(seconds) when is_number(seconds) do
+    s = round(seconds)
+    d = div(s, 86_400)
+    h = div(rem(s, 86_400), 3600)
+    m = div(rem(s, 3600), 60)
+    sec = rem(s, 60)
+
+    [{d, "d"}, {h, "h"}, {m, "m"}, {sec, "s"}]
+    |> Enum.drop_while(fn {v, _} -> v == 0 end)
+    |> case do
+      [] -> "0s"
+      parts -> parts |> Enum.take(2) |> Enum.map(fn {v, u} -> "#{v}#{u}" end) |> Enum.join(" ")
+    end
   end
 
   # T60.4 (#1160): the PLANNED bucket — approved proposals no run has picked up
@@ -1374,6 +1495,89 @@ defmodule KaziWeb.MissionControlLive do
                 <span class="progval">{progress_budget_label(p.budget)}</span>
               </div>
             </div>
+          </div>
+        </section>
+
+        <%!-- T67.5 (E67, ADR-0079): the fleet velocity strip + per-agent drill-in.
+        An operator surface (present in both modes, like the progress panel). Every
+        figure is a RATE, RATIO, or measured historical DISTRIBUTION — no ETA or
+        date copy (ADR-0046). A fleet with nothing measured yet renders the honest
+        "not enough data yet" strip rather than zeros pretending to be data. --%>
+        <section id="mc-velocity">
+          <div class="seclabel section-label">
+            FLEET VELOCITY · {@velocity.window_label} · RATES AND RATIOS ONLY
+          </div>
+          <div id="mc-velocity-affordance" class="attnaffordance">
+            how fast the fleet is moving — measured rates, not a promise of when work finishes
+          </div>
+
+          <p :if={not @velocity_ready?} id="mc-velocity-empty" class="empty-state">
+            Not enough data yet — no deliveries, session counters, or terminal runs in this window.
+            Velocity appears once the fleet ships.
+          </p>
+
+          <div :if={@velocity_ready?} id="mc-velocity-strip" class="grid">
+            <div class="card prog" data-velocity-metric="delivered">
+              <div class="progrow">
+                <span class="proglabel">DELIVERED</span>
+                <span class="progval">{velocity_delivered_label(@velocity)}</span>
+              </div>
+            </div>
+            <div class="card prog" data-velocity-metric="tokens">
+              <div class="progrow">
+                <span class="proglabel">TOKENS / TASK</span>
+                <span class="progval">{velocity_tokens_label(@velocity)}</span>
+              </div>
+            </div>
+            <div class="card prog" data-velocity-metric="stuck">
+              <div class="progrow">
+                <span class="proglabel">STUCK RATIO</span>
+                <span class="progval">{velocity_stuck_label(@velocity)}</span>
+              </div>
+            </div>
+            <div class="card prog" data-velocity-metric="lead-time">
+              <div class="progrow">
+                <span class="proglabel">CLAIM → MERGE LEAD</span>
+                <span class="progval">{velocity_leadtime_label(@velocity)}</span>
+              </div>
+            </div>
+          </div>
+
+          <%!-- Per-agent drill-in: one expandable per session. The summary is a
+          glance rate; expanding NAMES the agent's offending stuck goals (the
+          run-registry attribution), so a high stuck ratio points at WHICH lane. --%>
+          <div :if={@velocity_ready? and @velocity.per_agent != []} id="mc-velocity-agents">
+            <div class="seclabel section-label attnsublabel">PER-AGENT</div>
+            <details
+              :for={a <- @velocity.per_agent}
+              id={"mc-velocity-agent-#{a.session_uuid}"}
+              class="agentrow"
+              data-session-uuid={a.session_uuid}
+            >
+              <summary class="agentsummary">
+                <span class="agentname">{agent_name(a)}</span>
+                <span class="agentmetric" data-agent-metric="delivered">
+                  {agent_delivered_label(a)}
+                </span>
+                <span class="agentmetric" data-agent-metric="stuck">{agent_stuck_label(a)}</span>
+              </summary>
+              <div class="agentdrill">
+                <% stuck_goals = Map.get(@velocity_stuck_goals, a.session_uuid, []) %>
+                <div :if={stuck_goals != []} class="stuckgoals" data-stuck-goals>
+                  <span class="proglabel">OFFENDING GOALS</span>
+                  <span
+                    :for={goal <- stuck_goals}
+                    class="stuckgoal"
+                    data-stuck-goal={goal}
+                  >
+                    {goal}
+                  </span>
+                </div>
+                <p :if={stuck_goals == []} class="empty-state" data-stuck-goals-empty>
+                  No stuck or over-budget goals for this agent.
+                </p>
+              </div>
+            </details>
           </div>
         </section>
 
