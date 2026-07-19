@@ -50,6 +50,7 @@ defmodule Kazi.Daemon.Control do
     }
     |> maybe_put("nats_token", nats_token(nats_name))
     |> maybe_put("schema_vsn", schema_vsn(opts))
+    |> Map.put("velocity", velocity_status(opts))
   end
 
   # T55.7 (ADR-0072 d5): assembly is the DAEMON's job -- the reply is already
@@ -71,6 +72,29 @@ defmodule Kazi.Daemon.Control do
   def handle(%{"op" => "shutdown"}, _opts), do: %{"ok" => true}
 
   def handle(_other, _opts), do: %{"ok" => false, "error" => "unknown_op"}
+
+  # T67.6 (ADR-0079): honest observability for the opt-in session-stats collector
+  # so `kazi daemon status` shows an operator whether it is alive. Reports the
+  # collector's enabled state plus, from REAL runs only (never fabricated), the
+  # last run's ISO-8601 timestamp and session count. Defensive: a ticker that is
+  # not running / not answering yields `enabled` from the gate check and null run
+  # fields, never a crashed handshake. `:velocity_name` is a test seam.
+  defp velocity_status(opts) do
+    name =
+      Keyword.get(opts, :velocity_name, Kazi.Daemon.Supervisor.default_velocity_ticker_name([]))
+
+    s = Kazi.Daemon.VelocityTicker.status(name)
+
+    %{
+      "enabled" => s.enabled,
+      "last_run_at" => s.last_run_at && DateTime.to_iso8601(s.last_run_at),
+      "last_session_count" => s.last_session_count
+    }
+  rescue
+    _ -> %{"enabled" => false, "last_run_at" => nil, "last_session_count" => nil}
+  catch
+    _, _ -> %{"enabled" => false, "last_run_at" => nil, "last_session_count" => nil}
+  end
 
   defp vsn do
     case Application.spec(:kazi, :vsn) do

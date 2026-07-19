@@ -70,9 +70,27 @@ defmodule Kazi.Daemon.Supervisor do
           |> maybe_put(:repo, Keyword.get(opts, :migrate_repo))
           |> maybe_put(:on_start, Keyword.get(opts, :write_on_start))
 
+        # T67.6 (ADR-0079): the production trigger for the opt-in session-stats
+        # collector. Named per-supervisor (as PresenceSweep/Nats are) so two
+        # co-existing lifecycle-test trees never race for the process name. The
+        # `:velocity_*` keys are test seams (a short interval, a fixture
+        # transcript dir, an injected collector); production uses config +
+        # defaults. Boot never blocks on it -- the first collection is on its
+        # first timer tick, not in its `init/1`.
+        velocity_opts =
+          [name: default_velocity_ticker_name(opts)] ++
+            Enum.flat_map(opts, fn
+              {:velocity_interval_ms, v} -> [interval_ms: v]
+              {:velocity_dir, v} -> [dir: v]
+              {:velocity_state_dir, v} -> [state_dir: v]
+              {:velocity_collect_fun, v} -> [collect_fun: v]
+              _other -> []
+            end)
+
         children = [
           {Kazi.Daemon.Nats, nats_opts},
           {Kazi.Daemon.PresenceSweep, sweep_opts},
+          {Kazi.Daemon.VelocityTicker, velocity_opts},
           {Kazi.Daemon.Write, write_opts},
           {Kazi.Daemon.Listener,
            sock_path: sock_path,
@@ -236,6 +254,22 @@ defmodule Kazi.Daemon.Supervisor do
   @spec default_write_name(keyword()) :: atom()
   def default_write_name(opts) do
     Keyword.get(opts, :write_name, Module.concat(Keyword.get(opts, :name, __MODULE__), Write))
+  end
+
+  @doc """
+  The `Kazi.Daemon.VelocityTicker` process name `init/1` uses absent an explicit
+  `opts[:velocity_name]` -- derived from this supervisor's own `opts[:name]` for
+  the same reason as `default_sweep_name/1`, so two co-existing supervisor
+  instances (the double-start lifecycle test) never race for one registered
+  ticker name (T67.6).
+  """
+  @spec default_velocity_ticker_name(keyword()) :: atom()
+  def default_velocity_ticker_name(opts) do
+    Keyword.get(
+      opts,
+      :velocity_name,
+      Module.concat(Keyword.get(opts, :name, __MODULE__), VelocityTicker)
+    )
   end
 
   defp daemon_dir do
