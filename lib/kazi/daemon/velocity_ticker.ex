@@ -67,16 +67,33 @@ defmodule Kazi.Daemon.VelocityTicker do
   collector additionally swallows any post error. It can never wedge the daemon
   the way the unbounded `Writer` socket write did.
 
+  ## Delivery projection (T67.6 finding 2)
+
+  T67.2 shipped `Kazi.ReadModel.DeliveryProjection.project/2` but nothing invoked
+  it in production, so the E67 dashboard's DELIVERY half rendered over an empty
+  `delivery_events` table (the same no-callers class as the collector). After
+  session collection each tick, this ticker projects every workspace listed under
+  `config :kazi, :velocity_collector, workspaces: [paths]` (default `[]` -- no
+  projection). The scan is incremental (`since: last_seen_commit()`) and the upsert
+  is idempotent, so a re-scan of unchanged history writes nothing new. The
+  projection is independent of and crash-isolated from session collection: a
+  failing workspace (nonexistent / not-git / format-broken) is logged and skipped,
+  never killing the ticker or the other workspaces. It writes DIRECT
+  (`DeliveryProjection.direct_write/2`) for exactly the in-daemon self-deadlock
+  reason above -- never through `Kazi.ReadModel.Writer`'s socket-routing seam.
+
   ## Observability
 
   `status/1` reports `{enabled?, last run's timestamp, last run's session count}`
-  from real runs only (never fabricated) so `kazi daemon status` can show the
-  operator the collector is alive.
+  from real runs only (never fabricated), plus the last delivery-projection pass
+  (`{workspaces_scanned, events_written, at}` or `nil` before the first pass), so
+  `kazi daemon status` can show the operator both halves are alive.
   """
 
   use GenServer
   require Logger
 
+  alias Kazi.ReadModel.DeliveryProjection
   alias Kazi.Velocity.SessionCollector
 
   @default_interval_s 300
@@ -110,8 +127,20 @@ defmodule Kazi.Daemon.VelocityTicker do
       # the write back over that socket, self-deadlocking the daemon (T67.6 live
       # wedge). Injectable so a test can pin the sink. `(map -> term())`.
       write_fun: Keyword.get(opts, :write_fun, &SessionCollector.direct_write/1),
+      # T67.6 finding 2: the delivery half of the E67 dashboard. Each configured
+      # workspace's git history is projected into `delivery_events` after session
+      # collection every tick. Same in-daemon invariant: the projection MUST write
+      # direct (`DeliveryProjection.direct_write/2`), never through `Writer`.
+      workspaces: Keyword.get(opts, :workspaces, configured_workspaces()),
+      project_fun: Keyword.get(opts, :project_fun, &DeliveryProjection.project/2),
+      delivery_write_fun:
+        Keyword.get(opts, :delivery_write_fun, &DeliveryProjection.direct_write/2),
+      # The incremental cursor: the newest already-projected landing commit. A
+      # seam so a test drives a deterministic `<since>..HEAD` range.
+      last_seen_fun: Keyword.get(opts, :last_seen_fun, &DeliveryProjection.last_seen_commit/0),
       last_run_at: nil,
-      last_session_count: nil
+      last_session_count: nil,
+      last_projection: nil
     }
 
     schedule(state.interval_ms)
@@ -119,21 +148,35 @@ defmodule Kazi.Daemon.VelocityTicker do
   end
 
   @doc """
-  Enabled state plus the last real run's timestamp and session count. Fields are
-  `nil` until the first run that actually collected (a disabled machine leaves
-  them `nil`). Best-effort: a ticker that is not running or not answering yields
-  `%{enabled: <check>, last_run_at: nil, last_session_count: nil}`.
+  Enabled state plus the last real run's timestamp and session count, and the last
+  delivery-projection pass (`%{workspaces_scanned, events_written, at}` or `nil`).
+  Fields are `nil` until the first run that actually collected/projected (a disabled
+  machine leaves the collection fields `nil`; an empty `workspaces` list leaves
+  `last_projection` `nil`). Best-effort: a ticker that is not running or not
+  answering yields all-`nil` run fields.
   """
   @spec status(GenServer.server()) :: %{
           enabled: boolean(),
           last_run_at: DateTime.t() | nil,
-          last_session_count: non_neg_integer() | nil
+          last_session_count: non_neg_integer() | nil,
+          last_projection:
+            %{
+              workspaces_scanned: non_neg_integer(),
+              events_written: non_neg_integer(),
+              at: DateTime.t()
+            }
+            | nil
         }
   def status(server \\ __MODULE__) do
     GenServer.call(server, :status)
   catch
     _, _ ->
-      %{enabled: safe_enabled?(), last_run_at: nil, last_session_count: nil}
+      %{
+        enabled: safe_enabled?(),
+        last_run_at: nil,
+        last_session_count: nil,
+        last_projection: nil
+      }
   end
 
   @doc """
@@ -151,7 +194,8 @@ defmodule Kazi.Daemon.VelocityTicker do
     reply = %{
       enabled: safe_enabled?(),
       last_run_at: state.last_run_at,
-      last_session_count: state.last_session_count
+      last_session_count: state.last_session_count,
+      last_projection: state.last_projection
     }
 
     {:reply, reply, state}
@@ -160,12 +204,14 @@ defmodule Kazi.Daemon.VelocityTicker do
   @impl true
   def handle_call(:collect_now, _from, state) do
     {result, state} = run_tick(state)
+    state = run_projection(state)
     {:reply, {:ok, result}, state}
   end
 
   @impl true
   def handle_info(:collect, state) do
     {_result, state} = run_tick(state)
+    state = run_projection(state)
     schedule(state.interval_ms)
     {:noreply, state}
   end
@@ -201,6 +247,67 @@ defmodule Kazi.Daemon.VelocityTicker do
       {{:error, :caught}, state}
   end
 
+  # T67.6 finding 2: project each configured workspace's delivery events after
+  # session collection. Independent of collection and per-workspace crash-isolated
+  # -- a failing (nonexistent / not-git / format-broken) workspace is logged and
+  # skipped, never killing the ticker or the other workspaces. An empty workspace
+  # list is a no-op that leaves `last_projection` untouched (no fabricated pass).
+  defp run_projection(%{workspaces: []} = state), do: state
+
+  defp run_projection(state) do
+    since = safe_last_seen(state)
+
+    {scanned, written} =
+      Enum.reduce(state.workspaces, {0, 0}, fn workspace, {scanned, written} ->
+        case project_workspace(state, workspace, since) do
+          {:ok, count} -> {scanned + 1, written + count}
+          :error -> {scanned, written}
+        end
+      end)
+
+    projection = %{workspaces_scanned: scanned, events_written: written, at: DateTime.utc_now()}
+    %{state | last_projection: projection}
+  end
+
+  # One workspace's projection, fully isolated. Returns `{:ok, events_written}` on a
+  # clean pass or `:error` (logged) on any failure, so one bad workspace never
+  # aborts the reduce.
+  defp project_workspace(state, workspace, since) do
+    case state.project_fun.(workspace, since: since, write: state.delivery_write_fun) do
+      {:ok, summary} ->
+        {:ok, summary.task_ticks + summary.pr_merges}
+
+      {:error, reason} ->
+        Logger.debug("kazi daemon: delivery projection skipped #{workspace} (#{inspect(reason)})")
+
+        :error
+    end
+  rescue
+    error ->
+      Logger.debug(
+        "kazi daemon: delivery projection failed for #{workspace} (#{Exception.message(error)})"
+      )
+
+      :error
+  catch
+    kind, reason ->
+      Logger.debug(
+        "kazi daemon: delivery projection failed for #{workspace} (#{inspect(kind)}: #{inspect(reason)})"
+      )
+
+      :error
+  end
+
+  # The incremental cursor, guarded: a read-model read that raises must not abort
+  # the tick -- fall back to a full scan (`nil` since), which is idempotent anyway.
+  defp safe_last_seen(state) do
+    state.last_seen_fun.()
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
+  end
+
   defp safe_enabled? do
     SessionCollector.enabled?()
   rescue
@@ -211,6 +318,16 @@ defmodule Kazi.Daemon.VelocityTicker do
 
   defp configured_interval_s do
     Application.get_env(:kazi, :velocity_collector, [])[:interval_s] || @default_interval_s
+  end
+
+  # The workspaces whose delivery events the ticker projects each tick (default
+  # `[]` -- no projection). Non-list config degrades to `[]` rather than crashing
+  # the ticker's `init/1`.
+  defp configured_workspaces do
+    case Application.get_env(:kazi, :velocity_collector, [])[:workspaces] do
+      paths when is_list(paths) -> paths
+      _ -> []
+    end
   end
 
   defp default_dir do
