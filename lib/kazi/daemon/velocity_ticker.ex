@@ -39,6 +39,21 @@ defmodule Kazi.Daemon.VelocityTicker do
   never synchronously in `init/1`, so a slow first scan cannot delay the daemon
   coming up.
 
+  ## The tick never blocks the ticker mainloop (#1595)
+
+  The collection+projection pass runs in an ISOLATED monitored child process, not
+  inline in this GenServer. A pass that hangs forever (the #1595 live wedge: a
+  session-transcript scan that never returned on the first 300s tick) therefore
+  can NEVER wedge the ticker — `:status` reads stay instant, so the daemon's
+  status control op (`Kazi.Daemon.Control` → `VelocityTicker.status/1`, a
+  `GenServer.call` into this process) can never go alive-but-deaf behind a stuck
+  pass. The child is bounded by a hard `collect_timeout_ms` deadline: an overrun
+  is killed and logged at `:error` (a hung collector must never persist — the
+  crash-only guard the issue asks for). An overlapping tick (a previous pass still
+  running when the next interval fires) is skipped, never queued, so passes cannot
+  pile up. The synchronous `collect_now/1` remains an explicit opt-in blocking call
+  for tests/debug.
+
   ## Supervised, crash-isolated
 
   A tick is wrapped so a collector error is logged and swallowed -- the ticker
@@ -97,6 +112,7 @@ defmodule Kazi.Daemon.VelocityTicker do
   alias Kazi.Velocity.SessionCollector
 
   @default_interval_s 300
+  @default_collect_timeout_ms 120_000
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -140,7 +156,16 @@ defmodule Kazi.Daemon.VelocityTicker do
       last_seen_fun: Keyword.get(opts, :last_seen_fun, &DeliveryProjection.last_seen_commit/0),
       last_run_at: nil,
       last_session_count: nil,
-      last_projection: nil
+      last_projection: nil,
+      # #1595: the collection+projection pass runs in an ISOLATED monitored child,
+      # never inline in this GenServer, so a pass that hangs forever can never
+      # wedge the ticker's mainloop (and thus never block the daemon status path,
+      # which `GenServer.call`s into `:status`). `pass` is `nil` when idle, or
+      # `%{pid, ref}` while a pass runs; a hung pass is killed after
+      # `collect_timeout_ms` and logged LOUD. A second tick that fires while a
+      # pass is still running is skipped (never piled up).
+      pass: nil,
+      collect_timeout_ms: Keyword.get(opts, :collect_timeout_ms, configured_collect_timeout_ms())
     }
 
     schedule(state.interval_ms)
@@ -204,20 +229,94 @@ defmodule Kazi.Daemon.VelocityTicker do
 
   @impl true
   def handle_call(:collect_now, _from, state) do
+    # The explicit synchronous test/debug path: run the pass inline and return the
+    # collector result. NOT the production wedge vector — the periodic timer path
+    # below never runs inline. A caller that invokes this opts into blocking.
     {result, state} = run_tick(state)
     state = run_projection(state)
     {:reply, {:ok, result}, state}
   end
 
+  # #1595: the PERIODIC tick. The pass runs in a monitored child, so this returns
+  # immediately and the ticker stays responsive to `:status` no matter how long
+  # (or forever) the collector blocks. Always reschedule the next interval; an
+  # overlapping tick (previous pass still running) is skipped, never queued.
   @impl true
+  def handle_info(:collect, %{pass: nil} = state) do
+    parent = self()
+    {pid, ref} = spawn_monitor(fn -> send(parent, {:pass_done, self(), run_pass(state)}) end)
+    Process.send_after(self(), {:pass_timeout, ref}, state.collect_timeout_ms)
+    schedule(state.interval_ms)
+    {:noreply, %{state | pass: %{pid: pid, ref: ref}}}
+  end
+
   def handle_info(:collect, state) do
-    {_result, state} = run_tick(state)
-    state = run_projection(state)
+    Logger.warning(
+      "kazi daemon: velocity pass still running after #{state.interval_ms}ms; skipping this tick"
+    )
+
     schedule(state.interval_ms)
     {:noreply, state}
   end
 
+  # A pass finished cleanly: adopt only the observability deltas it computed (the
+  # only fields a pass mutates), demonitor, and go idle.
+  def handle_info({:pass_done, pid, deltas}, %{pass: %{pid: pid, ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, apply_pass_deltas(state, deltas)}
+  end
+
+  # The pass process went down WITHOUT delivering a result. `run_pass/1` is fully
+  # guarded (a collector error is caught, not raised), so this is the killed-on-
+  # timeout DOWN or an unexpected crash — either way go idle, never wedged.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{pass: %{ref: ref}} = state) do
+    {:noreply, %{state | pass: nil}}
+  end
+
+  # A pass overran its hard deadline: kill it LOUD (a hung collector must never
+  # persist), release the monitor, go idle. This is the crash-only guard for the
+  # collector half (#1595) — deaf-but-running is impossible because the pass is
+  # off the mainloop AND bounded.
+  def handle_info({:pass_timeout, ref}, %{pass: %{ref: ref, pid: pid}} = state) do
+    Logger.error(
+      "kazi daemon: velocity pass exceeded #{state.collect_timeout_ms}ms and was killed " <>
+        "(a hung session-transcript scan or projection); the daemon stayed responsive"
+    )
+
+    Process.exit(pid, :kill)
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | pass: nil}}
+  end
+
+  # A stale timeout/down for a pass that already completed — ignore.
+  def handle_info({:pass_timeout, _ref}, state), do: {:noreply, state}
+
   def handle_info(_other, state), do: {:noreply, state}
+
+  # Run one full pass (session collection + delivery projection) OFF the ticker
+  # mainloop, returning only the observability deltas the ticker adopts. Runs in
+  # the monitored child; `run_tick`/`run_projection` already catch every collector
+  # error, so this never raises.
+  defp run_pass(state) do
+    {_result, state} = run_tick(state)
+    state = run_projection(state)
+
+    %{
+      last_run_at: state.last_run_at,
+      last_session_count: state.last_session_count,
+      last_projection: state.last_projection
+    }
+  end
+
+  defp apply_pass_deltas(state, deltas) do
+    %{
+      state
+      | pass: nil,
+        last_run_at: deltas.last_run_at,
+        last_session_count: deltas.last_session_count,
+        last_projection: deltas.last_projection
+    }
+  end
 
   # One collection pass. `run/1` is a no-op returning `{:ok, :disabled}` when the
   # collector is off, so a disabled machine reads NO transcript here. On a run
@@ -319,6 +418,18 @@ defmodule Kazi.Daemon.VelocityTicker do
 
   defp configured_interval_s do
     Application.get_env(:kazi, :velocity_collector, [])[:interval_s] || @default_interval_s
+  end
+
+  # #1595: the hard deadline a single collection+projection pass may run before it
+  # is killed. A real pass completes in seconds; this bound only ever fires on a
+  # pathological hang (the wedge this fix prevents). Default 120s, overridable via
+  # `config :kazi, :velocity_collector, collect_timeout_s: N` or the `:collect_timeout_ms`
+  # opt (the test seam).
+  defp configured_collect_timeout_ms do
+    case Application.get_env(:kazi, :velocity_collector, [])[:collect_timeout_s] do
+      s when is_integer(s) and s > 0 -> s * 1000
+      _ -> @default_collect_timeout_ms
+    end
   end
 
   # The workspaces whose delivery events the ticker projects each tick (default
