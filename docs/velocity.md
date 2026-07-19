@@ -103,6 +103,10 @@ truth — pinned in `kpis_test.exs`.
 
 # The dashboard velocity panel (T67.5, ADR-0079)
 
+> Operator's-eye view: [dashboard.md § Velocity surface](dashboard.md#velocity-surface-e67-adr-0079)
+> walks each card, what it means, which of the three sources feeds it, and the
+> opt-in needed to make it non-empty.
+
 The KPIs above render on the operator dashboard (Mission Control, `/`) as a
 **fleet velocity strip** plus a **per-agent drill-in**. It is an *operator*
 surface — present in both the operator and `?debug=1` modes (unlike the

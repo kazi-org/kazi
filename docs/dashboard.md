@@ -359,13 +359,99 @@ native lease table, an honest empty presence rail, never a 500. An explicit
 stamped on the page (`data-source`), the roster re-reads on a slow poll, and
 rows past the session TTL are hidden.
 
-## Velocity surface (E67)
+## Velocity surface (E67, ADR-0079)
 
-The velocity surface fuses kazi-run KPIs with interactive-session activity. The
-latter arrives via the **opt-in session-stats collector** — aggregate counters
-only, never transcript content. It is disabled by default; see
-[velocity-collector.md](velocity-collector.md) for the opt-in flag/config and the
-full privacy contract (what is and is NOT collected).
+The velocity surface answers "how fast is my fleet delivering?" from data kazi
+already has — **no GitHub call at render time**. It is an *operator* panel on
+Mission Control (`/`), present in both the operator and `?debug=1` modes (unlike
+the DAG / lease-map / event-river expert surfaces, which are debug-only per
+ADR-0078). `assign_velocity/1` in `KaziWeb.MissionControlLive` calls
+`Kazi.Velocity.Kpis.compute/1` each poll tick; it is a pure read projection
+(ADR-0011) that renders an honest empty state rather than a 500 when the
+read-model is unavailable.
+
+Every figure is a **rate, ratio, or measured historical distribution** over a
+trailing window (default 7 days, labelled e.g. "last 7d"). There is deliberately
+**no date, ETA, or completion-estimate** anywhere — the schema has no such column
+(ADR-0046), so a future UI cannot render one. A number that cannot yet be measured
+shows an explicit "not enough data yet" (or "no terminal runs yet"), never a `0`
+masquerading as a measurement.
+
+### Where the numbers come from
+
+The panel fuses **three** read-model sources. Knowing which one feeds a number
+tells you which opt-in (below) it needs:
+
+- **Delivery projection** (`delivery_events`, T67.2) — delivered plan tasks and
+  merge instants derived from a workspace's **git history** (added `- [x] TNN …
+  Done: <date> (PR #N)` plan lines and PR-merge commits). Reads committed history
+  only; never a transcript.
+- **Session collector** (`session_counters`, T67.3) — aggregate token/event
+  counters from the operator's **interactive harness sessions**, whitelisted
+  counters only (never transcript content).
+- **Run registry** (`runs`, ADR-0057) — kazi's own run rows and their terminal
+  verdicts (`converged` / `stuck` / `over_budget` / `error`), already written by
+  every `kazi apply`.
+
+See [velocity.md](velocity.md) for the full data architecture (the projection
+grammar, the KPI query module, and the exact join keys); this section is the
+operator's read of what the panel shows.
+
+### The fleet strip — four cards
+
+| Card | Copy it renders | What it means | Source | Empty state |
+|---|---|---|---|---|
+| **DELIVERED** | `<per_day> /day · <count> in last 7d` | plan tasks marked `[x]` in the window ÷ window days (a measured `0.0/day` is real) | delivery projection | `— not enough data yet` |
+| **TOKENS / TASK** | `<tokens> tok/task` (compact, e.g. `5.5k`) | cumulative session tokens ÷ delivered tasks in the window | session collector ÷ delivery projection | `— not enough data yet` (no delivery, or no session counter) |
+| **STUCK RATIO** | `<pct>% stuck · <stuck>/<terminal> terminal` | `(stuck + over_budget) ÷ terminal verdicts` over finished runs, aggregated across the per-model split | run registry | `— no terminal runs yet` |
+| **CLAIM → MERGE LEAD** | `p50 <dur> · p90 <dur> · <n> samples` | a p50/p90 **distribution** of `merged_at − claim` over *past* deliveries — a historical span (`1h 23m`, `45s`), never a countdown | delivery projection ⋈ run registry | `— not enough data yet` (no joinable sample) |
+
+A fresh fleet with **no** delivery, session counter, or terminal run in the window
+renders one explicit **"Not enough data yet"** message (`#mc-velocity-empty`)
+instead of the strip; velocity appears only once the fleet actually ships.
+
+### Per-agent drill-in
+
+Below the strip, one expandable row (`<details>`) per session shows that agent's
+`<per_day> /day · <count>` delivered and `<pct>% stuck · <terminal> terminal`;
+expanding it **names the offending stuck goals** — the `goal_ref`s whose runs went
+`stuck` / `over_budget`, attributed from the run registry (the same terminal-verdict
+universe the fleet stuck ratio counts, the same attribution `kazi economy` reads).
+A high stuck ratio thus points at *which* lane needs attention, not just a number.
+
+### The opt-in story — why a card is empty
+
+Both delivery-side and session-side inputs are written in production by
+`Kazi.Daemon.VelocityTicker`, a supervised GenServer in the **daemon's**
+supervision tree (the daemon owns the read-model write path, ADR-0068). No daemon
+running, or neither input configured, and the panel stays on its honest empty
+state. The two inputs opt in **independently**:
+
+- **Session counters (TOKENS / TASK) are opt-in and OFF by default.** A machine
+  that has not opted in reads no transcript at all. Enable per machine with
+  `KAZI_VELOCITY_COLLECTOR=1` (or `config :kazi, :velocity_collector, enabled:
+  true`). Until then TOKENS / TASK shows "not enough data yet" even when tasks are
+  landing.
+- **Delivery projection (DELIVERED, CLAIM → MERGE LEAD) is NOT gated on that
+  opt-in** — it reads only committed git history — but it does nothing until you
+  list workspaces to scan. Set them with `config :kazi, :velocity_collector,
+  workspaces: ["/abs/repo", …]`; **on the released binary use the
+  `KAZI_VELOCITY_WORKSPACES` environment variable** (colon-separated absolute
+  paths), because the compile-time `:workspaces` default is baked into the Burrito
+  artifact and a `runtime.exs`-set value is applied *after* the ticker's `init/1`
+  and so never reaches it (T67.6). With no workspaces configured, the delivery
+  cards stay empty.
+- **Run-registry numbers (STUCK RATIO, per-agent stuck goals) need no opt-in** —
+  every `kazi apply` already writes its run row.
+
+`kazi daemon status` (and `--json`) prints a `velocity collector:` line and a
+sibling `delivery projection:` line so you can confirm what is actually wired
+before wondering why a card is empty.
+
+See [velocity-collector.md](velocity-collector.md) for both knobs in full, the
+in-daemon-direct-write invariant, and the **privacy contract** — the closed
+whitelist of aggregate counters and the explicit list of what is *never* collected
+(no prompt/response text, tool names, inputs, or file paths).
 
 ## Retention and scope
 
