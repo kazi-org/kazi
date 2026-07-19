@@ -77,6 +77,11 @@ defmodule Kazi.ReadModel.DeliveryProjection do
       (defaults to a full scan).
     * `:repo_slug` — override the `org/repo` grouping (defaults to the workspace's
       git `origin` remote, then its basename).
+    * `:write` — the read-model sink, `(Ecto.Changeset.t(), keyword() -> term())`.
+      Defaults to `&Kazi.ReadModel.Writer.insert/2` (the ADR-0068 client seam). A
+      caller running INSIDE the daemon injects `&direct_write/2` so its writes go
+      straight to `Kazi.Repo` and never route back over the daemon's own control
+      socket (the T67.6 in-daemon self-deadlock class).
 
   Returns `{:ok, summary}` with per-kind insert counts, or `{:error, reason}` when
   git is unreadable (a format break degrades to no rows, never a crash).
@@ -84,12 +89,13 @@ defmodule Kazi.ReadModel.DeliveryProjection do
   @spec project(String.t(), keyword()) :: {:ok, summary()} | {:error, term()}
   def project(workspace, opts \\ []) when is_binary(workspace) do
     repo_slug = opts[:repo_slug] || derive_repo_slug(workspace)
+    write = opts[:write] || (&Writer.insert/2)
 
     with {:ok, shas} <- commit_shas(workspace, opts[:since]) do
       summary =
         Enum.reduce(shas, %{task_ticks: 0, pr_merges: 0, commits: 0}, fn sha, acc ->
           rows = commit_rows(workspace, sha, repo_slug)
-          Enum.each(rows, &upsert/1)
+          Enum.each(rows, &upsert(&1, write))
 
           %{
             task_ticks: acc.task_ticks + Enum.count(rows, &(&1.kind == "task_tick")),
@@ -297,13 +303,33 @@ defmodule Kazi.ReadModel.DeliveryProjection do
     end
   end
 
-  defp upsert(row) do
+  defp upsert(row, write) do
     row = attribute_session(row)
     attrs = Map.put(row, :dedup_key, dedup_key(row))
 
-    %DeliveryEvent{}
-    |> DeliveryEvent.changeset(attrs)
-    |> Writer.insert(on_conflict: :nothing, conflict_target: :dedup_key)
+    changeset = DeliveryEvent.changeset(%DeliveryEvent{}, attrs)
+    write.(changeset, on_conflict: :nothing, conflict_target: :dedup_key)
+  end
+
+  @doc """
+  The IN-DAEMON DIRECT read-model sink: the same `dedup_key` upsert as the default
+  `Kazi.ReadModel.Writer.insert/2` path, but written STRAIGHT to `Kazi.Repo`
+  instead of through the `Writer` client seam.
+
+  This mirrors `Kazi.Velocity.SessionCollector.direct_write/1` and exists for the
+  same reason: `Writer.insert/2` probes the daemon control socket and, when a
+  daemon is alive, routes the write over that socket to the single writer. When the
+  PROJECTION runs inside the daemon (the `Kazi.Daemon.VelocityTicker` path), that
+  probe finds the daemon alive — itself — and the write would block on a
+  control-socket round-trip the daemon must serve while the ticker is busy: a
+  self-deadlock (the T67.6 live wedge class). The daemon IS the ADR-0068 single
+  writer, so a write it originates must be a direct `Repo` write. The ticker injects
+  this as the projection's `:write` sink so its writes never touch its own socket.
+  """
+  @spec direct_write(Ecto.Changeset.t(), keyword()) ::
+          {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  def direct_write(%Ecto.Changeset{} = changeset, insert_opts \\ []) do
+    Repo.insert(changeset, insert_opts)
   end
 
   defp dedup_key(%{kind: kind, task_id: task_id, pr_number: pr, merge_commit_sha: sha}) do
