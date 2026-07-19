@@ -4,7 +4,7 @@
 fails when a run introduces a stub, placeholder, or hardcoded-return marker into
 **production** code.
 
-Every kazi run already asks an agent to *not* leave stubs behind — but "don't stub"
+Every reconcile run already asks an agent to *not* leave stubs behind — but "don't stub"
 is prose the controller cannot check. `no_stubs` turns that policy into an
 **objective predicate** a goal-file can declare, so the loop gates on it the same
 way it gates on tests: a production-reachable marker keeps the vector unsatisfied
