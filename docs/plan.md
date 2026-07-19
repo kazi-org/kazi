@@ -376,6 +376,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E67 -- Dashboard velocity surface: per-agent delivery, tokens, and stuck stats, full-fusion (P2) -> plans/E67.md
 
+### E68 -- Triage 2026-07-19: runtime robustness fixes + predicate-integrity feature family (#1511, #1547, #1551, #1546, #1550, #1520, #1521, #1522, #1501) -> plans/E68.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
