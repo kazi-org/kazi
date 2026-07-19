@@ -29,7 +29,7 @@ defmodule Kazi.Daemon.Probe do
   @spec probe(Path.t()) :: status()
   def probe(sock_path) do
     if File.exists?(sock_path) do
-      case connect(sock_path) do
+      case safe_connect(sock_path) do
         {:ok, socket} ->
           :gen_tcp.close(socket)
           :alive
@@ -40,6 +40,19 @@ defmodule Kazi.Daemon.Probe do
     else
       :missing
     end
+  end
+
+  # #1579: a path EXISTS at the socket location but connecting to it either is
+  # refused (a crashed daemon's leftover socket) OR raises (a non-socket regular
+  # file left at the path — `:gen_tcp.connect` on a non-socket AF_UNIX path is a
+  # `:badarg`). Both mean "present but not a working daemon" — `:dead`, never a
+  # crash that takes down the probing CLI.
+  defp safe_connect(sock_path) do
+    connect(sock_path)
+  rescue
+    _ -> {:error, :not_a_socket}
+  catch
+    _, _ -> {:error, :not_a_socket}
   end
 
   @doc "Sends `{\"op\":\"ping\"}` and decodes the reply. Caller should already know the socket is `:alive`."
