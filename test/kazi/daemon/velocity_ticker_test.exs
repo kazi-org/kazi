@@ -13,7 +13,7 @@ defmodule Kazi.Daemon.VelocityTickerTest do
 
   alias Kazi.Daemon.VelocityTicker
   alias Kazi.Repo
-  alias Kazi.ReadModel.SessionCounters
+  alias Kazi.ReadModel.{DeliveryEvent, DeliveryProjection, SessionCounters}
   alias Kazi.Velocity.SessionCollector
 
   @fixtures Path.expand("../../support/fixtures/velocity", __DIR__)
@@ -236,6 +236,173 @@ defmodule Kazi.Daemon.VelocityTickerTest do
       assert {:ok, {:error, :rescued}} = VelocityTicker.collect_now(pid)
       assert Process.alive?(pid)
       assert %{enabled: _} = VelocityTicker.status(pid)
+    end
+  end
+
+  defp delivery_rows, do: Repo.all(from(d in DeliveryEvent, order_by: d.dedup_key))
+
+  # A throwaway git workspace whose history has one commit that ticks a plan task
+  # and lands a PR -- the minimum the DeliveryProjection derives a row from.
+  defp git_fixture_workspace do
+    dir =
+      Path.join(System.tmp_dir!(), "kazi-velticker-repo-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(Path.join(dir, "docs"))
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    git = fn args -> {_, 0} = System.cmd("git", ["-C", dir | args], stderr_to_stdout: true) end
+    git.(["init", "-q"])
+    git.(["config", "user.email", "t@example.test"])
+    git.(["config", "user.name", "t"])
+    # Neutralize any developer's global excludesfile (~/.gitignore) so the plan
+    # path is never silently ignored on the machine running the suite.
+    git.(["config", "core.excludesfile", "/dev/null"])
+
+    File.write!(
+      Path.join(dir, "docs/plan.md"),
+      "- [x] T1.1 do the thing Done: 2026-07-17 (PR #4242)\n"
+    )
+
+    git.(["add", "-A"])
+    git.(["commit", "-q", "-m", "docs(plan): tick T1.1 (PR #4242)"])
+    dir
+  end
+
+  describe "delivery projection (T67.6 finding 2)" do
+    test "projects a configured workspace's delivery rows via the DIRECT write path",
+         %{state_dir: state_dir} do
+      workspace = git_fixture_workspace()
+
+      pid =
+        start_supervised!({
+          VelocityTicker,
+          # No session collection interferes; only the projection writes here.
+          name: :velticker_delivery,
+          interval_ms: 3_600_000,
+          dir: @fixtures,
+          state_dir: state_dir,
+          collect_fun: fn _opts -> {:ok, []} end,
+          workspaces: [workspace]
+        })
+
+      assert {:ok, _} = VelocityTicker.collect_now(pid)
+
+      # The commit yields a task_tick and a pr_merge row -- written straight to Repo.
+      kinds = delivery_rows() |> Enum.map(& &1.kind) |> Enum.sort()
+      assert kinds == ["pr_merge", "task_tick"]
+
+      status = VelocityTicker.status(pid)
+      assert %{workspaces_scanned: 1, events_written: 2, at: %DateTime{}} = status.last_projection
+    end
+
+    test "injects direct_write/2 as the projection sink, not the socket-routing default",
+         %{state_dir: state_dir} do
+      test_pid = self()
+
+      capturing = fn workspace, opts ->
+        send(test_pid, {:project_opts, workspace, opts})
+        {:ok, %{task_ticks: 0, pr_merges: 0, commits: 0}}
+      end
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_delivery_sink,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: fn _opts -> {:ok, []} end,
+           workspaces: ["/some/workspace"],
+           project_fun: capturing}
+        )
+
+      assert {:ok, _} = VelocityTicker.collect_now(pid)
+      assert_received {:project_opts, "/some/workspace", opts}
+      assert Keyword.fetch!(opts, :write) == (&DeliveryProjection.direct_write/2)
+    end
+
+    test "projects even when the control socket would block on connect (direct path)",
+         %{state_dir: state_dir} do
+      workspace = git_fixture_workspace()
+
+      # Point the Writer client seam at a socket that will NEVER connect: any write
+      # that (wrongly) routed through `Writer` would hang here. The direct sink
+      # ignores it, so the projection must still complete, bounded, and write rows.
+      prev = Application.get_env(:kazi, :read_model_writer_sock)
+
+      Application.put_env(
+        :kazi,
+        :read_model_writer_sock,
+        Path.join(
+          System.tmp_dir!(),
+          "kazi-velticker-delivery-nonexistent-#{System.unique_integer([:positive])}.sock"
+        )
+      )
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:kazi, :read_model_writer_sock, prev),
+          else: Application.delete_env(:kazi, :read_model_writer_sock)
+      end)
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_delivery_wedge,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: fn _opts -> {:ok, []} end,
+           workspaces: [workspace]}
+        )
+
+      task = Task.async(fn -> VelocityTicker.collect_now(pid) end)
+      assert {:ok, {:ok, _}} = Task.yield(task, 2_000) || Task.shutdown(task)
+      assert length(delivery_rows()) == 2
+    end
+
+    test "empty workspaces (default): no projection work, last_projection stays nil",
+         %{state_dir: state_dir} do
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_delivery_empty,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: fn _opts -> {:ok, []} end}
+        )
+
+      assert {:ok, _} = VelocityTicker.collect_now(pid)
+      assert delivery_rows() == []
+      assert VelocityTicker.status(pid).last_projection == nil
+    end
+
+    test "a failing workspace is skipped; the ticker survives and keeps projecting",
+         %{state_dir: state_dir} do
+      good = git_fixture_workspace()
+      missing = Path.join(System.tmp_dir!(), "kazi-velticker-nope-#{System.unique_integer()}")
+
+      pid =
+        start_supervised!({
+          VelocityTicker,
+          # The nonexistent (not-git) path must be skipped, not fatal.
+          name: :velticker_delivery_fail,
+          interval_ms: 3_600_000,
+          dir: @fixtures,
+          state_dir: state_dir,
+          collect_fun: fn _opts -> {:ok, []} end,
+          workspaces: [missing, good]
+        })
+
+      assert {:ok, _} = VelocityTicker.collect_now(pid)
+      assert Process.alive?(pid)
+
+      # Only the good workspace's rows land; the bad one was skipped.
+      assert length(delivery_rows()) == 2
+      status = VelocityTicker.status(pid)
+      assert status.last_projection.workspaces_scanned == 1
+      assert status.last_projection.events_written == 2
     end
   end
 
