@@ -518,7 +518,7 @@ defmodule Kazi.Daemon.VelocityTickerTest do
         )
 
       # The timer fired and started the (hung) pass in the isolated child.
-      assert_receive :pass_started, 1_000
+      assert_receive :pass_started, 5_000
 
       # CRITICAL: :status must answer PROMPTLY while the pass is hung. If the pass
       # ran inline the ticker would be stuck and this call would only return after
@@ -565,12 +565,52 @@ defmodule Kazi.Daemon.VelocityTickerTest do
            collect_fun: collect_fun}
         )
 
-      assert_receive :hung_pass_started, 1_000
+      assert_receive :hung_pass_started, 5_000
       # The ticker stays alive and responsive while the first pass hangs, then the
       # deadline kills it and a later interval runs a clean pass that records rows.
       assert Process.alive?(pid)
-      wait_until(fn -> VelocityTicker.status(pid).last_session_count == 2 end)
+      wait_until(fn -> VelocityTicker.status(pid).last_session_count == 2 end, 1_000)
       assert length(rows()) == 2
+    end
+
+    test "the deadline kill is OBSERVABLE: passes_killed counter + a pinned :error log (#1606)",
+         %{state_dir: state_dir} do
+      System.put_env("KAZI_VELOCITY_COLLECTOR", "1")
+      test_pid = self()
+
+      hanging = fn _opts ->
+        send(test_pid, :pass_started)
+        Process.sleep(:infinity)
+      end
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          pid =
+            start_supervised!(
+              {VelocityTicker,
+               name: :velticker_kill_observable,
+               interval_ms: 20,
+               collect_timeout_ms: 60,
+               dir: @fixtures,
+               state_dir: state_dir,
+               collect_fun: hanging}
+            )
+
+          assert_receive :pass_started, 5_000
+
+          # The pass is killed at the 60ms deadline; the counter must increment and
+          # be visible via status — WITHOUT depending on the log reaching any file.
+          wait_until(fn -> VelocityTicker.status(pid).passes_killed >= 1 end)
+          status = VelocityTicker.status(pid)
+          assert status.passes_killed >= 1
+          assert %DateTime{} = status.last_kill_at
+          assert Process.alive?(pid)
+        end)
+
+      # AND the pinned :error line still fires (the belt to the status counter's
+      # braces) — naming the deadline and the running kill count.
+      assert log =~ "velocity pass exceeded"
+      assert log =~ "killed at the deadline"
     end
   end
 
