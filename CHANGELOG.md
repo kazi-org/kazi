@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.253.0](https://github.com/kazi-org/kazi/compare/v1.252.0...v1.253.0) (2026-07-19)
+
+
+### Features
+
+* **dashboard:** attention fan-in — compose run + waiting-on-operator surfaces, name the blocker (T63.8, UC-068) ([7b53ef6](https://github.com/kazi-org/kazi/commit/7b53ef672f960e2f04290ce61efc3dd6063956ec))
+
 ## [1.252.0](https://github.com/kazi-org/kazi/compare/v1.251.0...v1.252.0) (2026-07-19)
 
 
