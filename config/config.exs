@@ -63,9 +63,16 @@ config :kazi, :bus_rename_grace_s, 600
 # (default `~/.claude/projects`, the standard Claude Code transcript location).
 # A disabled collector reads no transcript -- the ticker only performs the gate
 # check each interval.
+#
+# T67.6 finding 2: `:workspaces` is a list of git workspace paths whose DELIVERY
+# events (plan ticks + PR merges) the same ticker projects into `delivery_events`
+# after session collection each tick (default `[]` -- no projection). The scan is
+# incremental and the upsert idempotent; a failing workspace is skipped, never
+# crashing the ticker. Unlike session collection this is NOT gated on `enabled`.
 config :kazi, :velocity_collector,
   enabled: false,
-  interval_s: 300
+  interval_s: 300,
+  workspaces: []
 
 # Default (dev) read-model database. WAL keeps reads (the LiveView console,
 # analytics queries) from blocking the projector's writes (concept §7).
