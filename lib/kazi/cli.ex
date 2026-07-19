@@ -5306,7 +5306,17 @@ defmodule Kazi.CLI do
         0
 
       {:error, {:already_running, vsn}} ->
-        daemon_error("daemon already running (vsn #{vsn})", opts)
+        # #1579: name BOTH the running daemon's version and this binary's, plus the
+        # remedy. A stale-version daemon still holding the socket when a newer
+        # binary starts otherwise read as a bare "already running", leaving the
+        # operator to guess that the OLD process must be force-restarted first.
+        daemon_error(
+          "daemon already running: the socket is held by vsn #{vsn}, this binary is " <>
+            "vsn #{version()}. If this binary is newer, the old daemon still owns the " <>
+            "socket -- restart it with `kazi daemon restart` (or force it with " <>
+            "`#{Kazi.Daemon.LaunchAgent.kickstart_command()}` under launchd).",
+          opts
+        )
 
       {:error, :nats_bin_not_found} ->
         daemon_error(
@@ -6120,6 +6130,23 @@ defmodule Kazi.CLI do
 
   defp bus_error(:no_daemon, opts),
     do: daemon_error("no daemon running -- start one with `kazi daemon start`", opts)
+
+  # #1579: the socket FILE is present but the daemon is not accepting connections
+  # -- a crashed daemon whose socket survives, or (the observed case) a daemon
+  # alive-but-deaf after exhausting its file descriptors under fleet churn
+  # (`accept failed: :emfile`). DISTINCT from `:no_daemon` -- the process may well
+  # be alive, so "start one" is the wrong fix and misleads the operator. Name the
+  # state and the force-restart remedy (`KeepAlive` cannot recover a deaf-but-
+  # running process).
+  defp bus_error(:daemon_socket_unresponsive, opts),
+    do:
+      daemon_error(
+        "daemon socket exists but is not accepting connections (the process may be " <>
+          "alive but wedged, or out of file descriptors) -- force-restart it with " <>
+          "`#{Kazi.Daemon.LaunchAgent.kickstart_command()}` (macOS launchd) or " <>
+          "`kazi daemon restart`",
+        opts
+      )
 
   # This fix: a `with_conn`-routed call (who/board/tell/...) hit its hard
   # deadline (`Kazi.Bus.run/3`) instead of hanging -- distinct from
