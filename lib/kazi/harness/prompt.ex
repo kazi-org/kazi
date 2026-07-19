@@ -143,7 +143,13 @@ defmodule Kazi.Harness.Prompt do
     header =
       "#{work_item}\n\n" <>
         "The following predicates are currently failing. Make each one pass. " <>
-        "Change the code under test, not the checks themselves.\n"
+        "Change the code under test, not the checks themselves.\n" <>
+        "Implement first: edit the code before you verify. If you run tests or " <>
+        "checks, run them in the FOREGROUND and wait for them inline — do NOT " <>
+        "background them (no `&`, no run-in-background). Your session ending is " <>
+        "the deadline: the controller re-verifies every predicate itself after " <>
+        "you finish, so a turn spent only running background verification that " <>
+        "outlives your session changes nothing and wastes the whole dispatch.\n"
 
     body =
       failing
