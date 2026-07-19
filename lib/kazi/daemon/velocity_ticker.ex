@@ -193,6 +193,7 @@ defmodule Kazi.Daemon.VelocityTicker do
   def handle_call(:status, _from, state) do
     reply = %{
       enabled: safe_enabled?(),
+      workspaces: state.workspaces,
       last_run_at: state.last_run_at,
       last_session_count: state.last_session_count,
       last_projection: state.last_projection
@@ -323,7 +324,23 @@ defmodule Kazi.Daemon.VelocityTicker do
   # The workspaces whose delivery events the ticker projects each tick (default
   # `[]` -- no projection). Non-list config degrades to `[]` rather than crashing
   # the ticker's `init/1`.
+  #
+  # `KAZI_VELOCITY_WORKSPACES` (colon-separated absolute paths) is read directly
+  # here at init time, taking precedence over app-env. On the Burrito release
+  # binary the daemon supervision tree (this ticker's `init/1`) boots BEFORE the
+  # `config/runtime.exs` provider has applied its override to app-env, so a
+  # provider-set `:workspaces` value is not yet visible when the ticker starts
+  # (T67.6 gap 4). Reading the env at call time -- mirroring how
+  # `SessionCollector.enabled?/0` reads `KAZI_VELOCITY_COLLECTOR` -- is immune to
+  # that boot ordering. Unset falls back to the compile-time app-env config.
   defp configured_workspaces do
+    case System.get_env("KAZI_VELOCITY_WORKSPACES") do
+      value when is_binary(value) -> String.split(value, ":", trim: true)
+      _ -> app_env_workspaces()
+    end
+  end
+
+  defp app_env_workspaces do
     case Application.get_env(:kazi, :velocity_collector, [])[:workspaces] do
       paths when is_list(paths) -> paths
       _ -> []
