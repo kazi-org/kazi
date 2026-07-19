@@ -7,6 +7,11 @@ Copy rules throughout: the ADR-0048 no-hype checklist, canonical strings
 quoted verbatim from `site/src/canonical.mjs`, syndication per
 `docs/blog-series-announcement.md`.
 
+The **ready-to-paste copy** for the Phase 1–2 posts (Show HN title + first
+comment, the X/Bluesky thread, the ElixirForum post, the r/ClaudeAI showcase)
+lives in [launch-kit.md](launch-kit.md) — personalize the backstory lines and
+post.
+
 ## Phase 0 — polish the conversion surface (week 1)
 
 Everything below multiplies traffic; do these before sending any.
