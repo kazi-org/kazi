@@ -84,6 +84,9 @@ defmodule Kazi.Runtime do
     # capture being a plausible non-blank/non-crash frame, so a UI goal cannot
     # converge on file presence. Consumes `context[:captures]`.
     render_proof: Kazi.Providers.RenderProof,
+    # T68.8 (#1522): pinned strong-model screenshot judgment against a hashed
+    # rubric + optional sealed reference; itemized pass/fail verdict.
+    visual_judge: Kazi.Providers.VisualJudge,
     # T32.3 (ADR-0041): the first-class ratchet mode — signal-vs-baseline within
     # an allowed regression. Coverage/perf/size are configs of this one provider.
     ratchet: Kazi.Providers.Ratchet,
