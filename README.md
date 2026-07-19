@@ -842,6 +842,25 @@ Pass `--enrich` (off by default) to have your coding agent propose live
 predicates from discovered endpoints; the deterministic detection always stands.
 Review the goal-file, fill in the live TODO, then `kazi apply` it.
 
+Pass `--discover` (off by default, mirroring `--enrich`) to instead write a
+**spec-coverage discovery goal**: a starter goal-file whose sole predicate is the
+manifest-coverage check (`spec_coverage`,
+[ADR-0054](docs/adr/0054-product-usecases-are-gherkin-not-bespoke-manifest.md))
+scoped to the target repo.
+It asks one objective question — is every public surface element (functions, Mix
+tasks, CLI commands) referenced by at least one Scenario across the repo's
+`.feature` specs? On a repo with no specs yet the whole surface is undocumented,
+so the predicate starts **RED**, naming each uncovered element — the honest
+starting state a discovery run drives down. `kazi init --discover` only *authors*
+the goal; it never dispatches a harness. Run `kazi apply` on the written goal (add
+`--standing` to keep it re-opening as new undocumented surface lands) to converge
+it:
+
+```sh
+kazi init ./my-service --discover --out coverage.goal.toml
+kazi apply coverage.goal.toml --workspace ./my-service
+```
+
 Pass `--with-gist` to opt **this repo** into the Gist context store
 ([ADR-0045](docs/adr/0045-context-store-layer-gist-provider.md)) — a budget-fitted
 text-artifact memory that keeps each agent prompt small. It verifies `gist doctor`,
@@ -917,7 +936,7 @@ pins this output, so the example never drifts from what the tool produces.
 ## CLI reference
 
 ```
-kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]  # adopt a repo -> a goal-file (+ .mcp.json / context store)
+kazi init <repo-dir> [--out <file>] [--discover] [--enrich] [--with-mcp] [--with-gist]  # adopt a repo -> a goal-file (+ .mcp.json / context store); --discover writes a spec-coverage discovery goal
 kazi plan "<idea>" [--workspace <path>]   # draft predicates from plain English
 kazi list-proposed [--status <state>]        # review drafts (proposed/approved/rejected)
 kazi approve <proposal-ref>                  # bless a drafted goal
