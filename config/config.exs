@@ -52,6 +52,13 @@ config :kazi, KaziWeb.Endpoint,
 # after the window it errors with the current name as a hint. Default 10 minutes.
 config :kazi, :bus_rename_grace_s, 600
 
+# T67.3 (ADR-0079 / ADR-0034): the opt-in session-stats velocity collector is
+# DISABLED by default. A machine reads NO local transcript until the operator
+# opts in here (`enabled: true`) or via the `KAZI_VELOCITY_COLLECTOR` env
+# override. See `docs/velocity-collector.md` for the privacy contract (what is and
+# is NOT collected).
+config :kazi, :velocity_collector, enabled: false
+
 # Default (dev) read-model database. WAL keeps reads (the LiveView console,
 # analytics queries) from blocking the projector's writes (concept §7).
 #
