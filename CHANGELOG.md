@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.266.1](https://github.com/kazi-org/kazi/compare/v1.266.0...v1.266.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **landing:** name where converged work lands + real commit metadata (T68.5, [#1550](https://github.com/kazi-org/kazi/issues/1550)) ([30fdfee](https://github.com/kazi-org/kazi/commit/30fdfee539a03dd98c496ed3d76c411098aa6924))
+
 ## [1.266.0](https://github.com/kazi-org/kazi/compare/v1.265.0...v1.266.0) (2026-07-19)
 
 
