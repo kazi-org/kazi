@@ -254,7 +254,7 @@ defmodule Kazi.CLI do
     replace:
       "`plan` only: allow re-proposing onto a proposal_ref that already holds an APPROVED proposal (default: refused, to protect against silently discarding an approved goal's audit trail).",
     discover:
-      "`plan` only (kazi-drafts, T45.6/UC-059): opt-in; attaches best-effort discovery evidence (stack detection, `.feature` use-cases, a public-surface codebase scan) to the drafted proposal, visible via `kazi status <proposal-ref> --json`. Caller-drafts (--predicates/--project) bypass it entirely; any discovery step failing degrades to a plain draft with a warning, never a hard error.",
+      "`plan` (kazi-drafts, T45.6/UC-059): opt-in; attaches best-effort discovery evidence (stack detection, `.feature` use-cases, a public-surface codebase scan) to the drafted proposal, visible via `kazi status <proposal-ref> --json`; caller-drafts (--predicates/--project) bypass it, and any discovery step failing degrades to a plain draft with a warning, never a hard error. `init` (T41.4/UC-053): opt-in; writes a starter goal-file whose SOLE predicate is the manifest-coverage check (`spec_coverage`), scoped to the target repo -- RED on a repo with no `.feature` files yet. Off by default (mirrors --enrich); it only AUTHORS the goal, it never dispatches a harness -- run `kazi apply` on the written goal to converge it.",
     obsidian:
       "`export` only: the target directory for the Obsidian vault (group/predicate notes + Mermaid).",
     json:
@@ -420,7 +420,7 @@ defmodule Kazi.CLI do
       summary:
         "Adopt a repo by stack detection and write a starter goal-file (incl. a learned [budget] suggestion when local history has one, ADR-0058).",
       args: [%{name: "repo-dir", required: true}],
-      flags: [:out, :enrich, :with_mcp, :with_gist, :workspace]
+      flags: [:out, :discover, :enrich, :with_mcp, :with_gist, :workspace]
     },
     %{
       name: "install-skill",
@@ -607,7 +607,7 @@ defmodule Kazi.CLI do
       kazi portfolio [--full] [--json]             # sitrep: headline % + bucketed summaries + honest rate (E64, #1427); --full = full ledger
       kazi economy [--goal <ref>] [--json]         # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
-      kazi init <repo-dir> [--out <file>] [--enrich] [--with-mcp] [--with-gist]
+      kazi init <repo-dir> [--out <file>] [--discover] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi install-hooks [--local] [--uninstall]  # register session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
@@ -1258,6 +1258,7 @@ defmodule Kazi.CLI do
       [] ->
         {:init, repo_dir,
          out: flags[:out],
+         discover: flags[:discover],
          enrich: flags[:enrich],
          with_mcp: flags[:with_mcp],
          with_gist: flags[:with_gist],
@@ -4655,17 +4656,32 @@ defmodule Kazi.CLI do
   # Assemble the single-goal map from an adoption: the detected acceptance
   # predicate, the conservative guards, and any enrichment-proposed live
   # predicates. The id is derived stably from the repo dir's basename.
+  #
+  # `--discover` (T41.4, ADR-0054/UC-053) swaps the predicate set: the authored
+  # goal's SOLE predicate becomes the manifest-coverage check (`spec_coverage`),
+  # scoped to the target repo -- RED on a repo with no `.feature` files yet. Stack
+  # detection still gates the command (a repo with no marker refuses), but the
+  # detected acceptance predicate + guards + enrichment are all replaced by that
+  # single discovery predicate. Absent the flag, the goal-file is byte-identical
+  # to before (regression guard).
   defp stack_goal_map(repo_dir, adoption, opts) do
-    guards = Adopt.guards(adoption, file_reader: File, path: repo_dir)
-    proposed = Map.get(adoption, :proposed, [])
     base = repo_dir |> Path.expand() |> Path.basename()
     id = if base in ["", ".", "/"], do: "adopted", else: "adopt-#{base}"
 
+    {name, predicates} =
+      if opts[:discover] == true do
+        {"Spec-coverage discovery goal for #{base}", [Adopt.spec_coverage_predicate()]}
+      else
+        guards = Adopt.guards(adoption, file_reader: File, path: repo_dir)
+        proposed = Map.get(adoption, :proposed, [])
+        {"Adopted baseline for #{base}", [adoption.predicate | guards] ++ proposed}
+      end
+
     %{
       "id" => id,
-      "name" => "Adopted baseline for #{base}",
+      "name" => name,
       "scope" => %{"workspace" => opts[:workspace] || repo_dir},
-      "predicate" => [adoption.predicate | guards] ++ proposed
+      "predicate" => predicates
     }
   end
 
