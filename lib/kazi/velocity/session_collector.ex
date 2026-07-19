@@ -41,6 +41,14 @@ defmodule Kazi.Velocity.SessionCollector do
 
   @truthy ~w(1 true yes on)
 
+  # The per-transcript, per-pass byte budget (#1606). A pass reads at most this
+  # many NEW bytes from each transcript, so a first scan of a large ~/.claude tree
+  # advances the cursors in bounded chunks across successive passes instead of one
+  # unbounded read that blocks past the ticker's collect_timeout and is killed
+  # every tick. A transcript already caught up (cursor at EOF) is skipped with only
+  # a stat, so a steady-state pass over a large tree completes in seconds.
+  @default_max_bytes_per_pass 8 * 1024 * 1024
+
   @typedoc "A per-session collection result."
   @type collected :: %{
           session_uuid: String.t(),
@@ -94,6 +102,9 @@ defmodule Kazi.Velocity.SessionCollector do
     * `:write` — `(map -> any)` sink for the read-model row attrs. Defaults to the
       `Kazi.ReadModel.Writer` upsert. Injectable so a test asserts row shape.
     * `:bucket_cap_s` — active-time gap cap, passed to the parser.
+    * `:max_bytes` — the per-transcript, per-pass NEW-byte budget (#1606, default
+      #{@default_max_bytes_per_pass}). Bounds each pass so it completes on a large
+      transcript tree instead of being killed at the ticker deadline.
   """
   @spec collect(keyword()) :: [collected()]
   def collect(opts) do
@@ -111,45 +122,74 @@ defmodule Kazi.Velocity.SessionCollector do
   end
 
   defp collect_transcript(path, state_dir, machine, opts) do
-    with {:ok, content} <- File.read(path) do
-      cursor = Cursor.load(state_dir, path)
-      {chunk, next_offset} = new_bytes(content, cursor.offset)
+    cursor = Cursor.load(state_dir, path)
+    max_bytes = Keyword.get(opts, :max_bytes, @default_max_bytes_per_pass)
 
-      result =
-        TranscriptParser.parse(chunk,
-          prev_ts: cursor.prev_ts,
-          bucket_cap_s: Keyword.get(opts, :bucket_cap_s, 300)
-        )
+    case new_bytes(path, cursor.offset, max_bytes) do
+      # No new complete line since the cursor (a caught-up or unreadable
+      # transcript): skip WITHOUT parsing or re-shipping — the row is already
+      # current from the pass that first read it. This is what makes a steady-state
+      # pass over a large tree cost only a stat per file (#1606).
+      :skip ->
+        []
 
-      cumulative = Counters.merge(cursor.counters, result.counters)
-      session_uuid = cursor.session_uuid || result.session_uuid
-      session_name = cursor.session_name || result.session_name
+      {:ok, chunk, next_offset} ->
+        result =
+          TranscriptParser.parse(chunk,
+            prev_ts: cursor.prev_ts,
+            bucket_cap_s: Keyword.get(opts, :bucket_cap_s, 300)
+          )
 
-      Cursor.save(state_dir, path, %{
-        offset: next_offset,
-        counters: cumulative,
-        prev_ts: result.counters.last_observed_at || cursor.prev_ts,
-        session_uuid: session_uuid,
-        session_name: session_name
-      })
+        cumulative = Counters.merge(cursor.counters, result.counters)
+        session_uuid = cursor.session_uuid || result.session_uuid
+        session_name = cursor.session_name || result.session_name
 
-      ship(session_uuid, session_name, machine, cumulative, opts)
-    else
-      _ -> []
+        Cursor.save(state_dir, path, %{
+          offset: next_offset,
+          counters: cumulative,
+          prev_ts: result.counters.last_observed_at || cursor.prev_ts,
+          session_uuid: session_uuid,
+          session_name: session_name
+        })
+
+        ship(session_uuid, session_name, machine, cumulative, opts)
     end
   end
 
-  # Only consume up to the last COMPLETE line (the byte after the final newline),
-  # so a transcript whose final line is still being written is re-read next pass
-  # rather than parsed half-formed. Returns the fresh chunk and the new offset.
-  defp new_bytes(content, offset) do
-    size = byte_size(content)
-    offset = min(offset, size)
-    tail = binary_part(content, offset, size - offset)
+  # Read only the NEW bytes past `offset`, capped at `max_bytes`, WITHOUT reading
+  # the whole file (#1606) — a `stat` skips a caught-up transcript for free, and a
+  # positioned read (`:file.pread`) touches only the fresh tail rather than
+  # re-reading the entire multi-hundred-MB file every pass (the live hang). Only
+  # bytes up to the last COMPLETE line in the window are consumed, so a partially
+  # written final line is re-read next pass rather than parsed half-formed.
+  # Returns `{:ok, chunk, next_offset}` or `:skip` (caught up / no complete line in
+  # the window / unreadable).
+  @spec new_bytes(String.t(), non_neg_integer(), pos_integer()) ::
+          {:ok, binary(), non_neg_integer()} | :skip
+  defp new_bytes(path, offset, max_bytes) do
+    with {:ok, %File.Stat{size: size}} when size > offset <- File.stat(path),
+         length = min(size - offset, max_bytes),
+         {:ok, fd} <- :file.open(path, [:read, :binary, :raw]) do
+      try do
+        read_tail(fd, offset, length)
+      after
+        :file.close(fd)
+      end
+    else
+      _ -> :skip
+    end
+  end
 
-    case last_newline(tail) do
-      nil -> {"", offset}
-      idx -> {binary_part(tail, 0, idx + 1), offset + idx + 1}
+  defp read_tail(fd, offset, length) do
+    case :file.pread(fd, offset, length) do
+      {:ok, tail} ->
+        case last_newline(tail) do
+          nil -> :skip
+          idx -> {:ok, binary_part(tail, 0, idx + 1), offset + idx + 1}
+        end
+
+      _eof_or_error ->
+        :skip
     end
   end
 
