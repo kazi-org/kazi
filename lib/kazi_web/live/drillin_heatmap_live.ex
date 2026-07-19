@@ -61,7 +61,14 @@ defmodule KaziWeb.DrillinHeatmapLive do
   end
 
   defp load_iterations(socket) do
-    assign(socket, :iterations, socket.assigns.source.list_iterations(socket.assigns.goal_ref))
+    source = socket.assigns.source
+    goal_ref = socket.assigns.goal_ref
+    iterations = source.list_iterations(goal_ref)
+
+    socket
+    |> assign(:iterations, iterations)
+    |> assign(:gap, gap_fields(source, goal_ref))
+    |> assign(:summary, summarize(iterations))
   end
 
   # The injectable read-model seam (ADR-0011 §3): override in test config to feed
@@ -70,23 +77,138 @@ defmodule KaziWeb.DrillinHeatmapLive do
     Application.get_env(:kazi, :drillin_source, Kazi.ReadModel)
   end
 
+  # T63.10's gap-field projection (narrative intent, predicate display groups,
+  # missing-counter tally). Read through the same injectable source when it
+  # exposes the projection, else the real read-model — a fixture source that only
+  # implements `list_iterations/1` still renders (empty gap fields).
+  defp gap_fields(source, goal_ref) do
+    if function_exported?(source, :goal_gap_fields, 1) do
+      source.goal_gap_fields(goal_ref)
+    else
+      Kazi.ReadModel.goal_gap_fields(goal_ref)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Summary + narrative (#1379 mock): plain-language reads over the REAL vectors.
+  # ---------------------------------------------------------------------------
+
+  # A one-sentence read of the goal's latest state: status, iteration, pass/total,
+  # named blockers, and a regression tally — every number straight from the
+  # persisted vectors, never fabricated. `nil` when the goal has no iterations.
+  defp summarize([]), do: nil
+
+  defp summarize(iterations) do
+    latest = List.last(iterations)
+    %Kazi.PredicateVector{results: results} = Kazi.ReadModel.to_predicate_vector(latest)
+    sorted = Enum.sort_by(results, fn {id, _result} -> id end)
+    passing = Enum.count(sorted, fn {_id, result} -> result.status == :pass end)
+    blocking = for {id, result} <- sorted, result.status in [:fail, :error], do: to_string(id)
+    regressions = iterations |> Enum.flat_map(& &1.regressions) |> length()
+    converged? = latest.converged == true
+
+    %{
+      status: if(converged?, do: "converged", else: "in_progress"),
+      status_label: if(converged?, do: "converged", else: "in progress"),
+      index: latest.iteration_index,
+      total: length(sorted),
+      pass: passing,
+      blocking: blocking,
+      regressions: regressions
+    }
+  end
+
+  defp summary_blocking(%{blocking: []}), do: ", none blocking — all green"
+
+  defp summary_blocking(%{blocking: names}),
+    do: ", #{length(names)} blocking convergence (#{Enum.join(names, ", ")})"
+
+  defp summary_regressions(%{regressions: 0}), do: "No regressions recorded yet."
+
+  defp summary_regressions(%{regressions: n}),
+    do: "#{n} regression#{if n == 1, do: "", else: "s"} recorded across the history."
+
+  # The display group for a predicate id, from T63.10's projection (the id's own
+  # prefix convention) — `nil` for an id with no separable prefix (honest-unknown).
+  defp predicate_group(%{predicate_groups: groups}, predicate_id),
+    do: Map.get(groups, to_string(predicate_id))
+
+  defp predicate_group(_gap, _predicate_id), do: nil
+
+  # The detail panel's narrative-first line: the recorded action (T63.10
+  # narrative-intent, paraphrased — never manufactured), the vector counts, and
+  # the verdict for the selected iteration.
+  defp detail_narrative(%Iteration{} = iteration) do
+    %Kazi.PredicateVector{results: results} = Kazi.ReadModel.to_predicate_vector(iteration)
+    passing = Enum.count(results, fn {_id, result} -> result.status == :pass end)
+
+    action =
+      case iteration.action_kind do
+        kind when is_binary(kind) and kind != "" -> "action: #{kind}"
+        _none -> "observation only (no dispatch recorded)"
+      end
+
+    verdict = if iteration.converged, do: "converged", else: "not converged"
+
+    "Iteration #{iteration.iteration_index}: #{action} → " <>
+      "#{passing} of #{map_size(results)} predicates pass → #{verdict}."
+  end
+
+  defp detail_narrative(_nil), do: ""
+
   @impl true
   def render(assigns) do
     ~H"""
     <main id="drillin" data-goal-ref={@goal_ref}>
-      <h1>kazi drill-in · {@goal_ref}</h1>
-      <p>
-        Predicate x iteration convergence heatmap, with a scrubber onto each
-        iteration's vector, dispatch, and context counters (ADR-0011, read-only).
+      <h1 id="drillin-title">Drill-in · {@goal_ref}</h1>
+      <%!-- T63.11 (#1379 mock): a one-line PURPOSE statement — the question the
+      view answers — replaces the old mechanism-describing subtitle. --%>
+      <p id="drillin-purpose" class="purpose">
+        What this view is for: see exactly <b>which predicate is blocking this goal,
+        on which iteration, and what the evidence says</b>.
       </p>
 
       <nav>
-        <.link navigate={~p"/goals/#{@goal_ref}/history"} id="nav-history">Full history</.link>
+        <.link navigate={~p"/goals/#{@goal_ref}/history"} id="nav-history">
+          → Full history (narrative)
+        </.link>
       </nav>
 
       <p :if={@iterations == []} id="drillin-empty" class="empty-state">
-        No iterations recorded for this goal yet.
+        No iterations recorded for this goal yet — nothing to drill into. This goal
+        has not run, so there is no heatmap to show (not an error).
       </p>
+
+      <%!-- Plain-language summary sentence (#1379 mock): counts + named blockers
+      read straight from the latest real vector; never a fabricated claim. --%>
+      <p :if={@summary} id="drillin-summary" class="summary" data-status={@summary.status}>
+        This goal is <b>{@summary.status_label}, iteration {@summary.index}</b>: {@summary.pass} of {@summary.total} predicates pass{summary_blocking(
+          @summary
+        )}. {summary_regressions(@summary)}
+      </p>
+
+      <%!-- On-page LEGEND (#1379 mock): the cell colors/glyphs were previously
+      decodable only by reading the inline stylesheet. --%>
+      <div :if={@iterations != []} id="drillin-legend" class="legend">
+        <span class="section-label">LEGEND</span>
+        <span class="legend-item" data-legend="pass">
+          <span class="swatch status-pass"></span> ● pass — predicate satisfied
+        </span>
+        <span class="legend-item" data-legend="fail">
+          <span class="swatch status-fail"></span> ✕ fail — predicate not satisfied
+        </span>
+        <span class="legend-item" data-legend="error">
+          <span class="swatch status-error"></span> ! error — predicate could not be evaluated
+        </span>
+        <span class="legend-item" data-legend="not_evaluated">
+          <span class="swatch status-not_evaluated"></span>
+          · not evaluated — predicate not yet in the vector
+        </span>
+        <span class="legend-item" data-legend="regression-flip">
+          <span class="swatch regression-flip"></span>
+          amber outline — a green→red regression flipped here
+        </span>
+      </div>
 
       <div
         :if={@iterations != []}
@@ -115,13 +237,16 @@ defmodule KaziWeb.DrillinHeatmapLive do
         <table id="heatmap">
           <thead>
             <tr>
-              <th>predicate</th>
+              <th class="predicate-col" title="the goal's acceptance predicates (rows)">
+                predicate <span class="col-hint">(click an iteration number to inspect it)</span>
+              </th>
               <th
                 :for={iteration <- @iterations}
                 id={"heatmap-col-#{iteration.iteration_index}"}
                 class={col_class(iteration, @iterations)}
                 data-iteration-index={iteration.iteration_index}
                 data-current={to_string(current?(iteration, @iterations))}
+                title="iteration (a single reconcile-loop observation), oldest to newest"
               >
                 <button
                   type="button"
@@ -130,6 +255,9 @@ defmodule KaziWeb.DrillinHeatmapLive do
                   id={"scrub-#{iteration.iteration_index}"}
                 >
                   {iteration.iteration_index}
+                  <span :if={current?(iteration, @iterations)} class="col-current">
+                    · current
+                  </span>
                 </button>
               </th>
             </tr>
@@ -139,8 +267,15 @@ defmodule KaziWeb.DrillinHeatmapLive do
               :for={predicate_id <- predicate_ids(@iterations)}
               id={"heatmap-row-#{predicate_id}"}
               data-predicate-id={predicate_id}
+              data-group={predicate_group(@gap, predicate_id)}
             >
-              <th>{predicate_id}</th>
+              <th class="predicate-col">
+                {predicate_id}<span
+                  :if={predicate_group(@gap, predicate_id)}
+                  class="group-tag"
+                  data-group-tag={predicate_group(@gap, predicate_id)}
+                >{predicate_group(@gap, predicate_id)}</span>
+              </th>
               <td
                 :for={iteration <- @iterations}
                 id={"heatmap-cell-#{predicate_id}-#{iteration.iteration_index}"}
@@ -160,7 +295,16 @@ defmodule KaziWeb.DrillinHeatmapLive do
         id="drillin-detail"
         data-selected-index={selected(@iterations, @selected_index).iteration_index}
       >
-        <h2>Iteration {selected(@iterations, @selected_index).iteration_index}</h2>
+        <h2>
+          Iteration {selected(@iterations, @selected_index).iteration_index} — what happened here
+        </h2>
+
+        <%!-- Narrative-first line (#1379 mock), paraphrasing T63.10's
+        narrative-intent (the recorded action_kind — never a manufactured
+        sentence) plus the vector counts. --%>
+        <p id="drillin-detail-narrative" class="detail-narrative">
+          {detail_narrative(selected(@iterations, @selected_index))}
+        </p>
 
         <ul id="drillin-detail-vector">
           <li
@@ -205,9 +349,41 @@ defmodule KaziWeb.DrillinHeatmapLive do
             {counter(selected(@iterations, @selected_index), :context, "tier")}
           </dd>
         </dl>
+
+        <%!-- Honest-unknown note (#1379 mock gap #2, T63.10 missing_counters):
+        say how much tool/context history is genuinely unavailable rather than
+        letting the "-" placeholders read as zeros. --%>
+        <p
+          :if={@gap.missing_counters.tools_missing > 0 or @gap.missing_counters.context_missing > 0}
+          id="drillin-detail-missing"
+          class="detail-missing"
+          data-tools-missing={@gap.missing_counters.tools_missing}
+          data-context-missing={@gap.missing_counters.context_missing}
+        >
+          Tool/context counters are unavailable for {@gap.missing_counters.tools_missing} of {@gap.missing_counters.total_iterations} iterations (tools) and {@gap.missing_counters.context_missing} of {@gap.missing_counters.total_iterations} (context) — a "-" means "not
+          recorded", not zero.
+        </p>
       </section>
 
       <style>
+        /* T63.11 (#1379 mock): purpose header, summary, legend, group tags. */
+        .purpose { color: var(--dim); font-size: .95rem; margin: 0 0 1rem; }
+        .summary { background: var(--panel, #101a2e); border: 1px solid var(--line, #1c2a45);
+          border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; font-size: 1rem; }
+        .summary b { color: var(--amb); }
+        .legend { display: flex; gap: 1.1rem; flex-wrap: wrap; align-items: center;
+          margin: 1rem 0 1.4rem; font-size: .8rem; color: var(--dim); }
+        .legend-item { display: inline-flex; align-items: center; gap: .35rem; }
+        .legend .swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; background: #152134; }
+        .legend .swatch.status-pass { background: var(--grn); }
+        .legend .swatch.status-fail { background: var(--red); }
+        .legend .swatch.status-error { background: var(--red); opacity: .7; }
+        .legend .swatch.regression-flip { background: #152134; outline: 2px solid var(--amb); }
+        .col-hint { color: var(--dim); font-weight: 400; font-size: .72rem; }
+        .col-current { color: var(--amb); font-size: .72rem; }
+        .group-tag { color: var(--amb); font-size: .68rem; margin-left: .4rem; opacity: .8; }
+        .detail-narrative { color: var(--dim); margin: .2rem 0 1rem; }
+        .detail-missing { color: var(--amb); font-size: .8rem; margin-top: .8rem; }
         .dna-strip { margin: 1rem 0; }
         .dna-squares { display: flex; gap: 3px; flex-wrap: wrap; margin-top: .4rem; }
         .dna-square { width: 15px; height: 15px; display: inline-block; background: #152134; border-radius: 2px; }
