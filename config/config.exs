@@ -57,7 +57,15 @@ config :kazi, :bus_rename_grace_s, 600
 # opts in here (`enabled: true`) or via the `KAZI_VELOCITY_COLLECTOR` env
 # override. See `docs/velocity-collector.md` for the privacy contract (what is and
 # is NOT collected).
-config :kazi, :velocity_collector, enabled: false
+#
+# T67.6 (ADR-0079): when enabled, the daemon's `Kazi.Daemon.VelocityTicker` runs
+# the collector every `:interval_s` seconds (default 300) over `:transcript_dir`
+# (default `~/.claude/projects`, the standard Claude Code transcript location).
+# A disabled collector reads no transcript -- the ticker only performs the gate
+# check each interval.
+config :kazi, :velocity_collector,
+  enabled: false,
+  interval_s: 300
 
 # Default (dev) read-model database. WAL keeps reads (the LiveView console,
 # analytics queries) from blocking the projector's writes (concept §7).
