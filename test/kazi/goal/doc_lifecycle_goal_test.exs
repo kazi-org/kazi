@@ -126,6 +126,11 @@ defmodule Kazi.Goal.DocLifecycleGoalTest do
     end
   end
 
+  # The wrapped checker (check_d_plan_trimmed.sh) parses the whole live WBS and
+  # can burn ~90s+ of wall time on a loaded box -- well past ExUnit's 60s default.
+  # It is a legitimate cost, not a hang, so give this one test comfortable headroom
+  # rather than blanket-raising the suite timeout (#1547 / T68.2).
+  @tag timeout: 300_000
   test "a freshness custom_script wrapper EVALUATES to a real verdict (not :error)", %{goal: goal} do
     # plan-trimmed (predicate (d)) runs purely off the repo tree, so it produces a
     # real verdict here without a network or an installed tool; evaluating it proves
