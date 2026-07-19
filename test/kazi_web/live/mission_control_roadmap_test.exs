@@ -20,9 +20,15 @@ defmodule KaziWeb.MissionControlRoadmapTest do
   alias Kazi.ReadModel.RunRegistry
 
   setup do
+    # Hermetic default: no cross-machine bus facts. CI has no daemon, but a
+    # developer box may have one reachable, which would otherwise inject phantom
+    # remote cards into the flat grid and its LIVE count.
+    Application.put_env(:kazi, :remote_run_facts_fetcher, fn -> [] end)
+
     on_exit(fn ->
       Application.delete_env(:kazi, :starmap_goal_source)
       Application.delete_env(:kazi, :starmap_roadmap_goal)
+      Application.delete_env(:kazi, :remote_run_facts_fetcher)
     end)
 
     :ok
