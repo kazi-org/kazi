@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.269.0](https://github.com/kazi-org/kazi/compare/v1.268.0...v1.269.0) (2026-07-19)
+
+
+### Features
+
+* **goal:** capture recipe schema — [[capture]] block (T68.7, [#1521](https://github.com/kazi-org/kazi/issues/1521)) ([57308aa](https://github.com/kazi-org/kazi/commit/57308aa46f312317d87e568165a753caa7e3a160))
+* **loop:** render_proof predicate + controller capture wiring (T68.7, [#1521](https://github.com/kazi-org/kazi/issues/1521)) ([ead1163](https://github.com/kazi-org/kazi/commit/ead1163c22990a6e8607113e7f43a6987b330a19))
+* **sink:** controller-side capture executor + run evidence store (T68.7, [#1521](https://github.com/kazi-org/kazi/issues/1521)) ([7ea21d2](https://github.com/kazi-org/kazi/commit/7ea21d274ea449d6faf8a9004f910f05ff19f2c6))
+* **status:** surface run capture evidence in status --json (T68.7, [#1521](https://github.com/kazi-org/kazi/issues/1521)) ([874c85b](https://github.com/kazi-org/kazi/commit/874c85bea6683b5c446735a8f3d46c2dc8df02c4))
+
 ## [1.268.0](https://github.com/kazi-org/kazi/compare/v1.267.1...v1.268.0) (2026-07-19)
 
 
