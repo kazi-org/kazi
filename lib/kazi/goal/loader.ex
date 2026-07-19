@@ -467,6 +467,12 @@ defmodule Kazi.Goal.Loader do
     # cannot converge on file presence. Its `capture`/`input` reference is
     # validated below so a predicate pointing at no capture fails at load.
     "render_proof" => :render_proof,
+    # T68.8 (#1522): `visual_judge` sends a CONTROLLER-produced capture (ADR-0081)
+    # + optional sealed reference image(s) + a hashed rubric to a pinned model and
+    # gates on its ITEMIZED pass/fail verdict (critique-as-red-detail). Its
+    # capture/rubric/model config is validated below so a mis-authored predicate
+    # fails at load, not silently at dispatch.
+    "visual_judge" => :visual_judge,
     # T62.1 (ADR-0071): the runtime `gherkin` provider. A `provider = "gherkin"`
     # entry is EXPANDED at goal-load (expand_gherkin_predicates/1) into one
     # `:gherkin` sub-predicate per Scenario (per Examples row for an outline), so
@@ -2329,7 +2335,40 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  # T68.8 (#1522): a visual_judge predicate must name the capture it judges, a
+  # non-empty rubric, and the pinned model id — so a mis-authored predicate fails
+  # at load, not silently at dispatch.
+  defp validate_provider_config(:visual_judge, config, id) do
+    cond do
+      not is_binary(render_proof_capture(config)) ->
+        {:error,
+         "visual_judge predicate #{inspect(id)} must name a capture via " <>
+           "`capture = \"<name>\"` or `input = \"capture:<name>\"`"}
+
+      visual_judge_rubric(config) == [] ->
+        {:error,
+         "visual_judge predicate #{inspect(id)} must declare a non-empty " <>
+           "`rubric` (a list of pass/fail criterion strings)"}
+
+      not (is_binary(config[:model]) and config[:model] != "") ->
+        {:error,
+         "visual_judge predicate #{inspect(id)} must pin a `model` id " <>
+           "(recorded in the goal-file, sealed)"}
+
+      true ->
+        :ok
+    end
+  end
+
   defp validate_provider_config(_kind, _config, _id), do: :ok
+
+  defp visual_judge_rubric(config) do
+    case config[:rubric] do
+      s when is_binary(s) and s != "" -> [s]
+      list when is_list(list) -> Enum.filter(list, &(is_binary(&1) and String.trim(&1) != ""))
+      _ -> []
+    end
+  end
 
   defp render_proof_capture(config) do
     cond do
