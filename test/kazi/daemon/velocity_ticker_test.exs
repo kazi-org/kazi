@@ -110,6 +110,98 @@ defmodule Kazi.Daemon.VelocityTickerTest do
     end
   end
 
+  describe "in-daemon writes go direct, never through the control socket (T67.6)" do
+    # The T67.6 live wedge: the collector's DEFAULT sink is `Kazi.ReadModel.Writer`,
+    # a client seam that routes writes over the daemon control socket when a daemon
+    # is alive. Run INSIDE the daemon, that probe finds the daemon alive (itself)
+    # and the write blocks on a socket round-trip the daemon must serve while the
+    # ticker is busy -- a self-deadlock. The ticker must therefore inject the
+    # direct `Repo` sink and never let the collector reach `Writer`.
+    test "the tick injects the direct in-daemon write sink, not the socket-routing default",
+         %{state_dir: state_dir} do
+      test_pid = self()
+
+      capturing = fn opts ->
+        send(test_pid, {:collect_opts, opts})
+        {:ok, []}
+      end
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_direct_sink,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: capturing}
+        )
+
+      assert {:ok, {:ok, []}} = VelocityTicker.collect_now(pid)
+      assert_received {:collect_opts, opts}
+      # The sink handed to the collector is the DIRECT Repo write, never the
+      # default `Writer` (socket-routing) path.
+      assert Keyword.fetch!(opts, :write) == (&SessionCollector.direct_write/1)
+    end
+
+    test "a tick completes and writes even when the control socket would block on connect",
+         %{state_dir: state_dir} do
+      System.put_env("KAZI_VELOCITY_COLLECTOR", "1")
+
+      # Point the read-model Writer seam at a socket that will NEVER connect: any
+      # write that (wrongly) routed through `Writer` would hang here. The direct
+      # sink ignores it entirely, so the tick must still complete, bounded.
+      prev = Application.get_env(:kazi, :read_model_writer_sock)
+
+      Application.put_env(
+        :kazi,
+        :read_model_writer_sock,
+        Path.join(
+          System.tmp_dir!(),
+          "kazi-velticker-nonexistent-#{System.unique_integer([:positive])}.sock"
+        )
+      )
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:kazi, :read_model_writer_sock, prev),
+          else: Application.delete_env(:kazi, :read_model_writer_sock)
+      end)
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_wedge,
+           interval_ms: 3_600_000,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: &real_run/1}
+        )
+
+      # Bounded: the direct sink never dials the socket, so this returns promptly.
+      task = Task.async(fn -> VelocityTicker.collect_now(pid) end)
+      assert {:ok, {:ok, {:ok, collected}}} = Task.yield(task, 2_000) || Task.shutdown(task)
+      assert length(collected) == 2
+      assert length(rows()) == 2
+    end
+  end
+
+  describe "direct_write persists straight through Repo (T67.6)" do
+    test "upserts the counters row on (session_uuid, machine), last-write-wins" do
+      base = %{
+        "session_uuid" => "11111111-2222-3333-4444-555555555555",
+        "machine" => "test-host",
+        "message_count" => 3
+      }
+
+      assert {:ok, _} = SessionCollector.direct_write(base)
+      assert [%SessionCounters{message_count: 3}] = rows()
+
+      # A cumulative re-post collapses to ONE current row (idempotent upsert).
+      assert {:ok, _} = SessionCollector.direct_write(%{base | "message_count" => 9})
+      assert [%SessionCounters{message_count: 9}] = rows()
+    end
+  end
+
   describe "interval is configurable" do
     test "interval_s is converted to ms" do
       pid = start_supervised!({VelocityTicker, name: :velticker_intv, interval_s: 42})
