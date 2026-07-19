@@ -135,6 +135,78 @@ defmodule Kazi.Velocity.SessionCollectorTest do
     end
   end
 
+  describe "collect/1 — bounded scan (#1606)" do
+    defp incr_dir do
+      dir =
+        Path.join(System.tmp_dir!(), "kazi-velocity-bound-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+      dir
+    end
+
+    defp line(ts, tokens) do
+      ~s({"type":"assistant","timestamp":"#{ts}","sessionId":"sess-bound","message":{"role":"assistant","usage":{"input_tokens":#{tokens},"output_tokens":1},"content":[]}}\n)
+    end
+
+    defp collect_bounded(dir, state_dir, max_bytes) do
+      SessionCollector.collect(
+        dir: dir,
+        state_dir: state_dir,
+        machine: "test-host",
+        max_bytes: max_bytes,
+        poster: fn _, _, _ -> :ok end
+      )
+    end
+
+    defp bound_row do
+      Repo.one(from(s in SessionCounters, where: s.session_uuid == "sess-bound"))
+    end
+
+    test "a per-pass byte budget advances the cursor in chunks; totals complete over passes",
+         %{state_dir: state_dir} do
+      dir = incr_dir()
+      path = Path.join(dir, "s.jsonl")
+
+      lines =
+        line("2026-07-18T12:00:00Z", 10) <>
+          line("2026-07-18T12:00:30Z", 20) <> line("2026-07-18T12:01:00Z", 30)
+
+      File.write!(path, lines)
+
+      # A budget just over one line: each pass ingests exactly ONE new line, so a
+      # single pass never reads the whole (potentially huge) file — the property
+      # that keeps a pass under the ticker deadline on a large tree.
+      one_line = byte_size(line("2026-07-18T12:00:00Z", 10))
+
+      collect_bounded(dir, state_dir, one_line + 5)
+      assert bound_row().message_count == 1
+      assert bound_row().input_tokens == 10
+
+      collect_bounded(dir, state_dir, one_line + 5)
+      assert bound_row().message_count == 2
+
+      collect_bounded(dir, state_dir, one_line + 5)
+      row = bound_row()
+      # All three lines are now counted, each exactly once (cumulative, no double
+      # count across the bounded passes).
+      assert row.message_count == 3
+      assert row.input_tokens == 60
+    end
+
+    test "a caught-up transcript is skipped (returns nothing) on the next pass",
+         %{state_dir: state_dir} do
+      dir = incr_dir()
+      path = Path.join(dir, "s.jsonl")
+      File.write!(path, line("2026-07-18T12:00:00Z", 10))
+
+      assert [_one] = collect_bounded(dir, state_dir, 8 * 1024 * 1024)
+      # Nothing has grown: the second pass stat-skips the file and ships nothing
+      # (no re-read, no duplicate ship) — steady-state cost is a stat per file.
+      assert collect_bounded(dir, state_dir, 8 * 1024 * 1024) == []
+    end
+  end
+
   describe "run/1 — opt-in gate" do
     test "is a no-op and disabled by default" do
       System.delete_env("KAZI_VELOCITY_COLLECTOR")
