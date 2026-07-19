@@ -629,4 +629,93 @@ defmodule Kazi.ReadModelTest do
       assert gap.missing_counters == %{tools_missing: 0, context_missing: 0, total_iterations: 0}
     end
   end
+
+  describe "goal_progress_rate/1 (T63.9, IA Q4 — rate-only per ADR-0046)" do
+    # An 8-predicate vector whose first `passing` predicates are green.
+    defp octo(passing) do
+      PredicateVector.new(
+        for i <- 0..7, into: %{} do
+          {:"p#{i}", PredicateResult.new(if(i < passing, do: :pass, else: :fail), %{})}
+        end
+      )
+    end
+
+    test "projects the predicate ratio, flip velocity, and budget consumed vs cap" do
+      {:ok, run} =
+        Kazi.ReadModel.RunRegistry.start(%{
+          run_id: "run-prog-1",
+          pid: "#PID<0.1.0>",
+          workspace: "/tmp/ws",
+          goal_ref: "rate-goal",
+          harness: "claude",
+          model: "claude-sonnet-5"
+        })
+
+      run
+      |> Kazi.ReadModel.Run.changeset(%{"dispatch_count" => 2, "max_iterations" => 10})
+      |> Repo.update!()
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "rate-goal",
+          iteration_index: 0,
+          predicate_vector: octo(1)
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "rate-goal",
+          iteration_index: 1,
+          predicate_vector: octo(3)
+        })
+
+      rate = ReadModel.goal_progress_rate("rate-goal")
+
+      assert rate.goal_ref == "rate-goal"
+      # Latest vector: 3 of 8 green.
+      assert rate.predicates == {3, 8}
+      # Two predicates flipped red→green over the single transition → 2.0/iter.
+      assert rate.flip_velocity == %{flips: 2, transitions: 1, per_iteration: 2.0}
+      assert rate.budget == %{consumed: 2, cap: 10}
+    end
+
+    test "a single-iteration goal has no measurable velocity — nil, never a fabricated 0.0" do
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "solo-goal",
+          iteration_index: 0,
+          predicate_vector: octo(2)
+        })
+
+      rate = ReadModel.goal_progress_rate("solo-goal")
+
+      assert rate.predicates == {2, 8}
+      assert rate.flip_velocity == %{flips: 0, transitions: 0, per_iteration: nil}
+      # No run registered → honest zeroed consumption with no cap.
+      assert rate.budget == %{consumed: 0, cap: nil}
+    end
+
+    test "an unbounded run (no max_iterations) reports a nil cap, not a fabricated ceiling" do
+      {:ok, _} =
+        Kazi.ReadModel.RunRegistry.start(%{
+          run_id: "run-prog-2",
+          pid: "#PID<0.1.0>",
+          workspace: "/tmp/ws",
+          goal_ref: "unbounded-goal",
+          harness: "claude",
+          model: "claude-sonnet-5"
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "unbounded-goal",
+          iteration_index: 0,
+          predicate_vector: octo(0)
+        })
+
+      rate = ReadModel.goal_progress_rate("unbounded-goal")
+
+      assert rate.budget == %{consumed: 0, cap: nil}
+    end
+  end
 end
