@@ -214,10 +214,11 @@ defmodule KaziWeb.MissionControlLiveTest do
     assert html =~ "PEEK →"
   end
 
-  test "the event river renders its empty state with no events", %{conn: conn} do
+  test "the event river renders its empty state with no events (debug mode)", %{conn: conn} do
     seed()
 
-    {:ok, _view, html} = live(conn, ~p"/")
+    # The EVENT RIVER is a debug-only expert surface (ADR-0078, T63.7).
+    {:ok, _view, html} = live(conn, ~p"/?debug=1")
 
     assert html =~ ~s(id="mission-control-river-empty")
     assert html =~ "EVENT RIVER"
@@ -536,6 +537,60 @@ defmodule KaziWeb.MissionControlLiveTest do
       html = view |> element(~s(button[data-count="converged"])) |> render_click()
       assert html =~ ~s(id="mc-card-done-one")
       refute html =~ ~s(id="mc-card-run-one")
+    end
+  end
+
+  describe "operator/debug mode split (T63.7, ADR-0078)" do
+    test "the default (operator) mount hides the DAG, event-river, and lease-map surfaces", %{
+      conn: conn
+    } do
+      seed(%{goal_ref: "op"})
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      # No expert markup in the DOM: no debug nav (DAG / lease-map links), no
+      # SESSIONS rail (lease presence), no EVENT RIVER footer.
+      refute html =~ ~s(id="mc-debug-nav")
+      refute html =~ ~s(id="mc-debug-dag")
+      refute html =~ ~s(id="mc-debug-leases")
+      refute html =~ ~s(id="mc-event-river")
+      refute html =~ ~s(id="mc-sessions")
+      # The mode toggle itself is present and reads operator.
+      assert html =~ ~s(id="mc-mode")
+      assert html =~ ~s(data-mode="operator")
+    end
+
+    test "debug mode reveals all three expert surfaces", %{conn: conn} do
+      seed(%{goal_ref: "dbg"})
+
+      {:ok, _view, html} = live(conn, ~p"/?debug=1")
+
+      assert html =~ ~s(data-mode="debug")
+      # The debug nav links to the three full expert pages.
+      assert html =~ ~s(id="mc-debug-dag")
+      assert html =~ ~s(href="/dag")
+      assert html =~ ~s(id="mc-debug-leases")
+      assert html =~ ~s(href="/leases")
+      assert html =~ ~s(id="mc-debug-events")
+      # The inline expert surfaces render too.
+      assert html =~ ~s(id="mc-sessions")
+      assert html =~ ~s(id="mc-event-river")
+    end
+
+    test "the toggle patches the mode without a remount", %{conn: conn} do
+      seed(%{goal_ref: "toggly"})
+
+      {:ok, view, html} = live(conn, ~p"/")
+      refute html =~ ~s(id="mc-event-river")
+
+      html = view |> element(~s(#mc-mode a[data-mode-option="debug"])) |> render_click()
+      assert html =~ ~s(data-mode="debug")
+      assert html =~ ~s(id="mc-event-river")
+      assert html =~ ~s(id="mc-sessions")
+
+      html = view |> element(~s(#mc-mode a[data-mode-option="operator"])) |> render_click()
+      assert html =~ ~s(data-mode="operator")
+      refute html =~ ~s(id="mc-event-river")
     end
   end
 end

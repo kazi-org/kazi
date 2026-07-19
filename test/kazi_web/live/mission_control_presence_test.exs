@@ -51,7 +51,7 @@ defmodule KaziWeb.MissionControlPresenceTest do
 
     start_supervised!({Fixture, snapshot: roster})
 
-    {:ok, _view, html} = live(conn, ~p"/starmap")
+    {:ok, _view, html} = live(conn, ~p"/starmap?debug=1")
 
     assert html =~ ~s(id="mc-sessions-list")
     assert html =~ ~s(id="presence-session-a")
@@ -68,7 +68,7 @@ defmodule KaziWeb.MissionControlPresenceTest do
     Application.put_env(:kazi, :lease_map_source, Fixture)
     start_supervised!({Fixture, snapshot: CoordinationSource.build([], [], [])})
 
-    {:ok, _view, html} = live(conn, ~p"/starmap")
+    {:ok, _view, html} = live(conn, ~p"/starmap?debug=1")
 
     assert html =~ ~s(id="mc-sessions-empty")
     assert html =~ "No sessions present"
