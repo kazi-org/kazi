@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.262.0](https://github.com/kazi-org/kazi/compare/v1.261.0...v1.262.0) (2026-07-19)
+
+
+### Features
+
+* **cli:** show velocity collector state in `kazi daemon status` (T67.6) ([b84ae86](https://github.com/kazi-org/kazi/commit/b84ae868db74746dfc59830eceb8def042366304))
+* **velocity:** periodic daemon trigger for the session-stats collector (T67.6, ADR-0079) ([15b3c86](https://github.com/kazi-org/kazi/commit/15b3c86f6e5f0b8f319269d18a54e5cade621ef3))
+
 ## [1.261.0](https://github.com/kazi-org/kazi/compare/v1.260.0...v1.261.0) (2026-07-19)
 
 
