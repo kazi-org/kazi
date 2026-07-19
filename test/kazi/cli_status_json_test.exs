@@ -152,6 +152,58 @@ defmodule Kazi.CLIStatusJsonTest do
              }
     end
 
+    test "surfaces the latest sampled predicate mutation audit (T68.9, #1501)" do
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "status-audit",
+          iteration_index: 0,
+          predicate_vector: PredicateVector.new(%{a: PredicateResult.pass()}),
+          converged: true
+        })
+
+      {:ok, _} =
+        ReadModel.record_predicate_audit("status-audit", %{
+          tested: 3,
+          constrained: 2,
+          survived: 1,
+          sensitivity: 2 / 3,
+          survivors: [:weak]
+        })
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["status", "status-audit", "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      audit = payload["predicate_audit"]
+      assert audit["tested"] == 3
+      assert audit["constrained"] == 2
+      assert audit["survived"] == 1
+      assert_in_delta audit["sensitivity"], 2 / 3, 1.0e-9
+      assert audit["survivors"] == ["weak"]
+      assert is_binary(audit["sampled_at"])
+    end
+
+    test "predicate_audit is null for a never-audited goal" do
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "status-noaudit",
+          iteration_index: 0,
+          predicate_vector: PredicateVector.new(%{a: PredicateResult.pass()}),
+          converged: true
+        })
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["status", "status-noaudit", "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert Map.has_key?(payload, "predicate_audit")
+      assert payload["predicate_audit"] == nil
+    end
+
     test "first_pass_rate is null when there is no measurable history" do
       # A single converged iteration with an EMPTY vector: nothing to score.
       {:ok, _} =
