@@ -103,6 +103,15 @@ defmodule Kazi.Daemon.VelocityTicker do
   from real runs only (never fabricated), plus the last delivery-projection pass
   (`{workspaces_scanned, events_written, at}` or `nil` before the first pass), so
   `kazi daemon status` can show the operator both halves are alive.
+
+  It ALSO reports `passes_killed` (+ `last_kill_at`): a run-lifetime count of
+  passes killed at the `collect_timeout_ms` deadline (#1606). This makes a pass
+  that dies every tick OBSERVABLE from `kazi daemon status` alone — the live #1606
+  gap was that the `:error` kill log did not reach the LaunchAgent's log file, so
+  a silently-killed pass looked identical to "no run yet". A status counter that
+  does not depend on log delivery closes that gap; the bounded transcript scan
+  (`SessionCollector`, `:max_bytes`) then keeps a real pass from being killed at
+  all so the counter stays at 0 in steady state.
   """
 
   use GenServer
@@ -165,7 +174,14 @@ defmodule Kazi.Daemon.VelocityTicker do
       # `collect_timeout_ms` and logged LOUD. A second tick that fires while a
       # pass is still running is skipped (never piled up).
       pass: nil,
-      collect_timeout_ms: Keyword.get(opts, :collect_timeout_ms, configured_collect_timeout_ms())
+      collect_timeout_ms: Keyword.get(opts, :collect_timeout_ms, configured_collect_timeout_ms()),
+      # #1606: a run-lifetime counter of passes KILLED at the collect_timeout
+      # deadline, surfaced in `kazi daemon status` so a pass that dies every tick
+      # is OBSERVABLE without depending on the :error log reaching the LaunchAgent
+      # log file (the live #1606 gap: no kill log appeared even though the deadline
+      # elapsed). `last_kill_at` timestamps the most recent kill.
+      passes_killed: 0,
+      last_kill_at: nil
     }
 
     schedule(state.interval_ms)
@@ -184,6 +200,8 @@ defmodule Kazi.Daemon.VelocityTicker do
           enabled: boolean(),
           last_run_at: DateTime.t() | nil,
           last_session_count: non_neg_integer() | nil,
+          passes_killed: non_neg_integer(),
+          last_kill_at: DateTime.t() | nil,
           last_projection:
             %{
               workspaces_scanned: non_neg_integer(),
@@ -200,6 +218,8 @@ defmodule Kazi.Daemon.VelocityTicker do
         enabled: safe_enabled?(),
         last_run_at: nil,
         last_session_count: nil,
+        passes_killed: 0,
+        last_kill_at: nil,
         last_projection: nil
       }
   end
@@ -221,6 +241,8 @@ defmodule Kazi.Daemon.VelocityTicker do
       workspaces: state.workspaces,
       last_run_at: state.last_run_at,
       last_session_count: state.last_session_count,
+      passes_killed: state.passes_killed,
+      last_kill_at: state.last_kill_at,
       last_projection: state.last_projection
     }
 
@@ -278,14 +300,17 @@ defmodule Kazi.Daemon.VelocityTicker do
   # collector half (#1595) — deaf-but-running is impossible because the pass is
   # off the mainloop AND bounded.
   def handle_info({:pass_timeout, ref}, %{pass: %{ref: ref, pid: pid}} = state) do
+    killed = state.passes_killed + 1
+
     Logger.error(
       "kazi daemon: velocity pass exceeded #{state.collect_timeout_ms}ms and was killed " <>
-        "(a hung session-transcript scan or projection); the daemon stayed responsive"
+        "(a hung session-transcript scan or projection); the daemon stayed responsive " <>
+        "(#{killed} pass(es) killed at the deadline so far)"
     )
 
     Process.exit(pid, :kill)
     Process.demonitor(ref, [:flush])
-    {:noreply, %{state | pass: nil}}
+    {:noreply, %{state | pass: nil, passes_killed: killed, last_kill_at: DateTime.utc_now()}}
   end
 
   # A stale timeout/down for a pass that already completed — ignore.

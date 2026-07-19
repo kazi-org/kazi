@@ -89,6 +89,10 @@ defmodule Kazi.Daemon.Control do
       "enabled" => s.enabled,
       "last_run_at" => s.last_run_at && DateTime.to_iso8601(s.last_run_at),
       "last_session_count" => s.last_session_count,
+      # #1606: the deadline-kill counter, so `kazi daemon status` shows a pass that
+      # dies every tick without depending on the :error log reaching the log file.
+      "passes_killed" => Map.get(s, :passes_killed, 0),
+      "last_kill_at" => Map.get(s, :last_kill_at) && DateTime.to_iso8601(s.last_kill_at),
       "last_projection" => encode_projection(Map.get(s, :last_projection))
     }
   rescue
@@ -102,6 +106,8 @@ defmodule Kazi.Daemon.Control do
       "enabled" => false,
       "last_run_at" => nil,
       "last_session_count" => nil,
+      "passes_killed" => 0,
+      "last_kill_at" => nil,
       "last_projection" => nil
     }
   end
