@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.264.0](https://github.com/kazi-org/kazi/compare/v1.263.0...v1.264.0) (2026-07-19)
+
+
+### Features
+
+* **config:** KAZI_VELOCITY_WORKSPACES runtime override for delivery projection (T67.6 gap 3) ([010c263](https://github.com/kazi-org/kazi/commit/010c263f98c5603b5f6b43cc2a33623c353246b0))
+
 ## [1.263.0](https://github.com/kazi-org/kazi/compare/v1.262.1...v1.263.0) (2026-07-19)
 
 
