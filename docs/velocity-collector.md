@@ -27,6 +27,37 @@ that has not opted in reads no transcript at all. Enable it either way:
 `SessionCollector.run/1` is a no-op returning `{:ok, :disabled}` when the collector
 is off. Opt-in is **per machine** — the counters record which host produced them.
 
+## What triggers it (T67.6)
+
+The collector is driven in production by `Kazi.Daemon.VelocityTicker`, a supervised
+GenServer in the **daemon's** supervision tree (the daemon owns the read-model write
+path, ADR-0068). On a fixed interval it calls `SessionCollector.run/1`, so the
+read-model rows the E67 velocity dashboard reads actually get written — without the
+trigger the collector had no production caller and those tables stayed silently
+empty. It rides the existing daemon lifecycle rather than adding a second transport
+(ADR-0079). Both knobs live under the same config key:
+
+```elixir
+config :kazi, :velocity_collector,
+  enabled: false,           # opt-in gate (above)
+  interval_s: 300,          # seconds between collection passes (default 300)
+  transcript_dir: "..."     # transcript root to scan; default ~/.claude/projects
+```
+
+When the collector is **disabled**, the ticker still starts but performs no
+collection and reads no transcript — each interval costs only the `enabled?/0`
+check. Daemon boot never blocks on a slow first scan: the first collection runs on
+the first timer tick, not during startup. A collector crash is logged and swallowed,
+and the ticker is a `one_for_one` child, so a failure never takes down the daemon.
+Cursors persist under `<KAZI_STATE_DIR>/velocity/cursors` so collection stays
+incremental across daemon restarts.
+
+**Observability.** `kazi daemon status` prints a `velocity collector:` line —
+`disabled`, `enabled (no run yet)`, or `enabled (last run <ts>, <n> session(s))`.
+The run timestamp and session count come from real runs only; nothing is fabricated
+when no collection has happened yet. The same fields appear under `"velocity"` in
+`kazi daemon status --json`.
+
 ## The privacy contract — what is and is NOT collected
 
 The collector's payload is a **closed whitelist** of aggregate counters, defined
