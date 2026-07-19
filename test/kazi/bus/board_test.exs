@@ -25,6 +25,10 @@ defmodule Kazi.Bus.BoardTest do
     )
   end
 
+  # A minimal live-roster entry for `session` -- attention entries are
+  # roster-gated (#1567), so waiting facts only render for present sessions.
+  defp present(session), do: %{"session" => session}
+
   describe "render/2 fact projection" do
     test "three facts on one topic collapse to ONE current line -- the latest value" do
       facts = [
@@ -116,7 +120,7 @@ defmodule Kazi.Bus.BoardTest do
         )
       ]
 
-      board = Board.render(facts, [])
+      board = Board.render(facts, [present("worker-1")])
 
       assert board["total_attention"] == 1
       assert [entry] = board["attention"]
@@ -130,7 +134,7 @@ defmodule Kazi.Bus.BoardTest do
     test "a generic (no-summary) waiting fact still surfaces" do
       facts = [fact("attention-worker-2", "waiting-on-operator (since 2026-07-17T00:00:00Z)", 1)]
 
-      board = Board.render(facts, [])
+      board = Board.render(facts, [present("worker-2")])
 
       assert [entry] = board["attention"]
       assert entry["session"] == "worker-2"
@@ -140,7 +144,7 @@ defmodule Kazi.Bus.BoardTest do
     test "a \"none\" clear fact on an attention topic is EXCLUDED" do
       facts = [fact("attention-worker-3", "none", 1)]
 
-      board = Board.render(facts, [])
+      board = Board.render(facts, [present("worker-3")])
 
       assert board["attention"] == []
       assert board["total_attention"] == 0
@@ -156,7 +160,7 @@ defmodule Kazi.Bus.BoardTest do
         )
       ]
 
-      board = Board.render(facts, [])
+      board = Board.render(facts, [present("worker-4")])
 
       assert board["total_attention"] == 1
       assert [%{"session" => "worker-4"}] = board["attention"]
@@ -172,9 +176,38 @@ defmodule Kazi.Bus.BoardTest do
         fact("attention-stale", "waiting-on-operator: y (since #{older})", 2)
       ]
 
-      board = Board.render(facts, [])
+      board = Board.render(facts, [present("fresh"), present("stale")])
 
       assert Enum.map(board["attention"], & &1["session"]) == ["stale", "fresh"]
+    end
+
+    test "a waiting fact from a session ABSENT from the roster is excluded (#1567)" do
+      facts = [
+        fact(
+          "attention-dead-session",
+          "waiting-on-operator: needs approval (since 2026-07-17T00:00:00Z)",
+          1
+        ),
+        fact(
+          "attention-live-session",
+          "waiting-on-operator: blocked (since 2026-07-17T00:00:00Z)",
+          2
+        )
+      ]
+
+      board = Board.render(facts, [present("live-session")])
+
+      assert board["total_attention"] == 1
+      assert [%{"session" => "live-session"}] = board["attention"]
+    end
+
+    test "roster gating matches through the topic sanitizer (#1567)" do
+      session = "team/lead one"
+      topic = Kazi.Bus.attention_topic(session)
+      facts = [fact(topic, "waiting-on-operator (since 2026-07-17T00:00:00Z)", 1)]
+
+      assert [_entry] = Board.render(facts, [present(session)])["attention"]
+      assert Board.render(facts, [present("someone-else")])["attention"] == []
     end
   end
 
