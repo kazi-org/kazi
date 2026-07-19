@@ -16,6 +16,16 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.263.0](https://github.com/kazi-org/kazi/compare/v1.262.1...v1.263.0) (2026-07-19)
+
+
+### Features
+
+* **config:** velocity_collector workspaces knob (T67.6 finding 2) ([befc731](https://github.com/kazi-org/kazi/commit/befc731742d9ab1829da6a83af42b639e629eff6))
+* **daemon:** project delivery events from the velocity ticker (T67.6 finding 2) ([3e00f13](https://github.com/kazi-org/kazi/commit/3e00f135afe85527be453fa85eede8456fe22ebc))
+* **daemon:** show delivery projection in daemon status (T67.6 finding 2) ([ff01ccc](https://github.com/kazi-org/kazi/commit/ff01ccc2a5cc1585411972b3578ee85599e51252))
+* **read-model:** injectable direct-write sink for delivery projection (T67.6) ([6d5bac5](https://github.com/kazi-org/kazi/commit/6d5bac5e1caf49a1a9831ad27d0765335ae4fcc8))
+
 ## [1.262.1](https://github.com/kazi-org/kazi/compare/v1.262.0...v1.262.1) (2026-07-19)
 
 
