@@ -17,7 +17,7 @@ defmodule KaziWeb.TestSeedController do
   use KaziWeb, :controller
 
   alias Kazi.{PredicateResult, PredicateVector, ReadModel}
-  alias Kazi.ReadModel.{Iteration, Run, RunRegistry}
+  alias Kazi.ReadModel.{DeliveryEvent, Iteration, Run, RunRegistry, SessionCounters}
 
   @doc """
   Resets the iterations projection to empty, then seeds a deterministic set of
@@ -177,8 +177,83 @@ defmodule KaziWeb.TestSeedController do
     text(conn, "seeded-progress")
   end
 
+  @doc """
+  Seeds the T67.5 fleet velocity strip + per-agent drill-in (E67, ADR-0079): two
+  delivery events and one session-counter row for a delivering agent, plus a
+  terminal `stuck` run whose goal the drill-in must NAME. Returns `200
+  seeded-velocity`.
+  """
+  def seed_velocity(conn, _params) do
+    reset_velocity()
+
+    now = DateTime.utc_now()
+    session = "pw-velo-session"
+
+    for i <- 1..2 do
+      sha = "pw-velo-sha-#{i}"
+
+      %DeliveryEvent{}
+      |> DeliveryEvent.changeset(%{
+        kind: "task_tick",
+        task_id: "T67.#{i}",
+        epic: "E67",
+        merge_commit_sha: sha,
+        merged_at: DateTime.add(now, -i * 3600, :second),
+        session_uuid: session,
+        goal_ref: "pw-velo-goal",
+        dedup_key: "task_tick|#{sha}"
+      })
+      |> Kazi.Repo.insert!()
+    end
+
+    %SessionCounters{}
+    |> SessionCounters.changeset(%{
+      session_uuid: session,
+      session_name: "pw-velo-agent",
+      machine: "box-1",
+      input_tokens: 40_000,
+      output_tokens: 8_000,
+      first_observed_at: DateTime.add(now, -7200, :second),
+      last_observed_at: now
+    })
+    |> Kazi.Repo.insert!()
+
+    # A terminal STUCK run for this session so the fleet + agent stuck ratio is
+    # measured and the drill-in NAMES the offending goal.
+    %Run{}
+    |> Run.changeset(%{
+      run_id: "pw-velo-run",
+      pid: "#PID<0.1.0>",
+      workspace: "/tmp/pw/org-velo/svc",
+      goal_ref: "pw-velo-stuck-goal",
+      harness: "claude",
+      model: "claude-sonnet-5",
+      harness_session_id: session,
+      session_name: "pw-velo-agent",
+      status: "stuck",
+      started_at: DateTime.add(now, -10_800, :second),
+      finished_at: DateTime.add(now, -600, :second),
+      heartbeat_at: now
+    })
+    |> Kazi.Repo.insert!()
+
+    text(conn, "seeded-velocity")
+  end
+
+  @doc "Clears the velocity projections so the strip renders its 'not enough data yet' state."
+  def reset_velocity(conn, _params) do
+    reset_velocity()
+    text(conn, "reset-velocity")
+  end
+
   defp reset_iterations, do: Kazi.Repo.delete_all(Iteration)
   defp reset_fleet, do: Kazi.Repo.delete_all(Run)
+
+  defp reset_velocity do
+    Kazi.Repo.delete_all(DeliveryEvent)
+    Kazi.Repo.delete_all(SessionCounters)
+    Kazi.Repo.delete_all(Run)
+  end
 
   # An 8-predicate vector whose first `passing` predicates are green.
   defp octo_vector(passing) do
