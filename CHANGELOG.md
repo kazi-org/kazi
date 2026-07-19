@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.257.0](https://github.com/kazi-org/kazi/compare/v1.256.0...v1.257.0) (2026-07-19)
+
+
+### Features
+
+* **read-model:** create delivery_events table (T67.2, ADR-0079 §3) ([f180ca9](https://github.com/kazi-org/kazi/commit/f180ca9eca1e336693b35940137d4582efdd63ea))
+* **read-model:** git-derived delivery-event projection (T67.2, ADR-0079) ([154a356](https://github.com/kazi-org/kazi/commit/154a356fe7aaf1edca96136d53059878187a1887))
+
 ## [1.256.0](https://github.com/kazi-org/kazi/compare/v1.255.0...v1.256.0) (2026-07-19)
 
 
