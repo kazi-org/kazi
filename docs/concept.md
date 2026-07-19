@@ -213,7 +213,7 @@ syntax) at the product/capability scope, imported through the SAME
 `GherkinImporter` §10c already uses (extended to read tags), via the SAME CLI
 verb §10c describes — no new schema, no new importer module. Discovering those
 Scenarios for an existing, undocumented codebase is not a one-shot prompt kazi
-trusts blindly; it is a new `--discover` flag on `kazi init` (ADR-0013) writing <!-- verb-drift:allow: `--discover` is planned (E41/ADR-0054), not yet shipped -->
+trusts blindly; it is a `--discover` flag on `kazi init` (ADR-0013, T41.4) writing
 a starter goal whose predicate is a manifest-coverage check (every
 surface-scanner-found element, T13.4, is referenced by ≥1 Scenario) — FALSE
 until documented, driven to TRUE by ordinary `kazi apply`, converging over
