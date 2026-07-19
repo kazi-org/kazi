@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.266.0](https://github.com/kazi-org/kazi/compare/v1.265.0...v1.266.0) (2026-07-19)
+
+
+### Features
+
+* **harness:** tell the grind agent to implement first and verify in the foreground ([4e55b5f](https://github.com/kazi-org/kazi/commit/4e55b5faa4d4dd6902fd964898462151444a7034))
+* **loop:** classify a parked-on-background zero-diff dispatch as a distinct stuck cause ([7dbf83c](https://github.com/kazi-org/kazi/commit/7dbf83c283828b47765fd2af1ab732269c2c0b93))
+
+
+### Bug Fixes
+
+* **read-model:** handle read-model degrade in HeartbeatTicker (T68.1, [#1511](https://github.com/kazi-org/kazi/issues/1511)) ([0e3e8ba](https://github.com/kazi-org/kazi/commit/0e3e8ba0efaeefe8a89513f389cd841afb99aad6))
+* **spec-coverage:** exclude Mix.Project boilerplate from surface scan (T68.3, [#1551](https://github.com/kazi-org/kazi/issues/1551)) ([acc2019](https://github.com/kazi-org/kazi/commit/acc201985cd32f2cc1952760f7a8a5a447459229))
+
 ## [1.265.0](https://github.com/kazi-org/kazi/compare/v1.264.2...v1.265.0) (2026-07-19)
 
 
