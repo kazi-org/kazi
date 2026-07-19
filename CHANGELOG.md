@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.268.0](https://github.com/kazi-org/kazi/compare/v1.267.1...v1.268.0) (2026-07-19)
+
+
+### Features
+
+* **goal:** the [seal] block -- sealed-input tamper contract (T68.6, [#1520](https://github.com/kazi-org/kazi/issues/1520)) ([9ffa792](https://github.com/kazi-org/kazi/commit/9ffa7929a1d0f7893152412c4e5011ec38d8aacb))
+* **loop:** terminal :tampered outcome -- verify the seal every observe pass (T68.6, [#1520](https://github.com/kazi-org/kazi/issues/1520)) ([cafaf7a](https://github.com/kazi-org/kazi/commit/cafaf7a7e44d7233a5f22c1ef67c4b211b8093e0))
+
 ## [1.267.1](https://github.com/kazi-org/kazi/compare/v1.267.0...v1.267.1) (2026-07-19)
 
 
