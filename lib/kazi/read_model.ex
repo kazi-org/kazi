@@ -28,6 +28,7 @@ defmodule Kazi.ReadModel do
   alias Kazi.ReadModel.{
     DebriefHypothesis,
     GoalGapFields,
+    GoalProgressRate,
     GoalSummary,
     Iteration,
     LandedRef,
@@ -35,6 +36,8 @@ defmodule Kazi.ReadModel do
     ProposedGoal,
     ProposedMemory,
     RetrievalSnippetCache,
+    Run,
+    RunRegistry,
     Writer
   }
 
@@ -699,6 +702,92 @@ defmodule Kazi.ReadModel do
       predicate_groups: predicate_groups,
       missing_counters: missing_counters
     }
+  end
+
+  # The recent iteration TRANSITIONS the flip-velocity figure is measured over.
+  # A window, not the whole history, so the "how fast is it greening lately"
+  # answer reflects recent momentum rather than being diluted by an old run.
+  @flip_window 5
+
+  @doc """
+  Projects the per-goal progress-RATE fields for the mission-control "how long
+  until done" panel (E63/T63.9, UC-061/UC-068, ADR-0011 — projection only, no
+  write path). Returns a `Kazi.ReadModel.GoalProgressRate` carrying the predicate
+  pass/total ratio, the red→green flip velocity over recent iteration
+  transitions, and the run's iteration budget consumed vs cap.
+
+  ADR-0046 honest-unknown: NOTHING here is a date, duration, or ETA — only
+  objective rates/ratios the read-model already records. A single-iteration goal
+  has no transition to measure, so `per_iteration` is `nil` (never a fabricated
+  `0.0`); an unbounded goal (or a run that captured no ceiling) has a `nil` budget
+  `cap`. This is a pure read over the iterations projection plus the run registry;
+  it never touches the loop or a write path.
+  """
+  @spec goal_progress_rate(Kazi.Goal.id()) :: GoalProgressRate.t()
+  def goal_progress_rate(goal_ref) do
+    ref = to_string(goal_ref)
+    history = iteration_history(ref)
+
+    %GoalProgressRate{
+      goal_ref: ref,
+      predicates: latest_predicate_ratio(history),
+      flip_velocity: flip_velocity(history),
+      budget: iteration_budget(ref)
+    }
+  end
+
+  # The current pass/total ratio over the newest vector — {0, 0} for a goal with
+  # no recorded iteration (honest empty, not a fabricated ratio).
+  defp latest_predicate_ratio([]), do: {0, 0}
+
+  defp latest_predicate_ratio(history) do
+    {_index, %PredicateVector{results: results}} = List.last(history)
+    total = map_size(results)
+    passing = Enum.count(results, fn {_id, result} -> PredicateResult.passed?(result) end)
+    {passing, total}
+  end
+
+  # Red→green flips summed over the last @flip_window transitions: for each
+  # adjacent iteration pair, count predicates that were not-passing then passing.
+  # `per_iteration` is nil when there is no transition (single-iteration goal) —
+  # an honest unknown, never a fabricated 0.0.
+  defp flip_velocity(history) do
+    transitions =
+      history
+      |> Enum.map(fn {_index, vector} -> vector end)
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.take(-@flip_window)
+
+    flips = Enum.sum(Enum.map(transitions, fn [before, later] -> red_to_green(before, later) end))
+    count = length(transitions)
+
+    per_iteration =
+      case count do
+        0 -> nil
+        n -> Float.round(flips / n, 1)
+      end
+
+    %{flips: flips, transitions: count, per_iteration: per_iteration}
+  end
+
+  defp red_to_green(%PredicateVector{results: before}, %PredicateVector{results: later}) do
+    Enum.count(later, fn {id, result} ->
+      PredicateResult.passed?(result) and not was_passing?(Map.get(before, id))
+    end)
+  end
+
+  defp was_passing?(nil), do: false
+  defp was_passing?(result), do: PredicateResult.passed?(result)
+
+  # Iteration budget consumed vs cap, from the goal's most-recently-started run:
+  # `dispatch_count` (always known) vs `max_iterations` (nil when unbounded, or a
+  # run predating the captured ceiling — ADR-0057). No run at all yields a zeroed
+  # consumed with a nil cap, an honest "no run recorded".
+  defp iteration_budget(ref) do
+    case RunRegistry.list_by_goal_ref(ref, "") do
+      [%Run{} = run | _] -> %{consumed: run.dispatch_count || 0, cap: run.max_iterations}
+      [] -> %{consumed: 0, cap: nil}
+    end
   end
 
   @doc """
