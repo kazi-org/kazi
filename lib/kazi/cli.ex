@@ -3478,7 +3478,15 @@ defmodule Kazi.CLI do
       # In-place (or non-git) run: the work already lives in the caller's checkout.
       {result, 0}
     else
-      case Kazi.Scheduler.SerialLanding.land(goal, runtime_opts, base_workspace, workspace) do
+      land_opts = [vector: Map.get(result, :vector)]
+
+      case Kazi.Scheduler.SerialLanding.land(
+             goal,
+             runtime_opts,
+             base_workspace,
+             workspace,
+             land_opts
+           ) do
         :nothing_to_land ->
           {result, 0}
 
@@ -8312,8 +8320,57 @@ defmodule Kazi.CLI do
     maybe_report_release(result)
     IO.puts("\npredicate vector:")
     IO.puts(format_vector(result.vector))
+    report_landing(result)
     print_convergence_cost_table(goal, result, economy)
   end
+
+  # issue #1550: LOUDLY name WHERE the converged work landed, so an operator is
+  # never left thinking a `converged` run did nothing. A worktree-isolated serial
+  # run lands its commits on a branch (the base checkout's branch when it
+  # rebase-merges, or a surviving task branch when landing failed); without this
+  # line the human report showed convergence but not the branch, and the work
+  # sat on a kazi-internal branch (`task/...`, `kazi/integrate-...`) with the
+  # checkout looking clean. The same facts are on the `--json` surface's
+  # `integration` object. Absent an attempted landing (in-place run, nothing to
+  # land) this prints nothing -- byte-identical to before.
+  defp report_landing(%{integration: %{landed: true} = info}) do
+    branch = info[:task_branch] || landed_branch(info)
+    base = info[:base]
+    where = if is_binary(base) and base != "", do: "#{branch} → #{base}", else: branch
+
+    IO.puts("\nlanded: #{where}#{landed_commit_suffix(info)}")
+  end
+
+  defp report_landing(%{integration: %{landed: false} = info}) do
+    IO.puts(
+      "\nNOT LANDED: work survives on branch #{info[:task_branch] || "?"}" <>
+        "#{if info[:base], do: " (base #{info[:base]})", else: ""} -- " <>
+        "#{info[:reason] || "integration failed"}"
+    )
+  end
+
+  defp report_landing(_result), do: :ok
+
+  # The landed branch from the integrator refs when the verdict map itself did
+  # not carry a task branch (defensive; SerialLanding always sets `task_branch`).
+  defp landed_branch(%{refs: refs}) when is_map(refs), do: refs[:branch] || refs["branch"]
+  defp landed_branch(_), do: nil
+
+  # A compact "(commit <sha>)" / "(PR <url>)" suffix from whatever the integrator
+  # surfaced in `refs`, so the operator can jump straight to the landed work.
+  defp landed_commit_suffix(%{refs: refs}) when is_map(refs) do
+    cond do
+      pr = refs[:pr] || refs["pr"] -> " (PR #{pr})"
+      sha = refs[:merge_commit] || refs["merge_commit"] -> " (commit #{short_sha(sha)})"
+      sha = refs[:commit] || refs["commit"] -> " (commit #{short_sha(sha)})"
+      true -> ""
+    end
+  end
+
+  defp landed_commit_suffix(_info), do: ""
+
+  defp short_sha(sha) when is_binary(sha), do: String.slice(sha, 0, 12)
+  defp short_sha(sha), do: to_string(sha)
 
   # T60.5 (#1070): the human-readable cost/token breakdown table on
   # convergence/budget-exhaustion. `--json` already carries this data
