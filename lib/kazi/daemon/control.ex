@@ -88,13 +88,35 @@ defmodule Kazi.Daemon.Control do
     %{
       "enabled" => s.enabled,
       "last_run_at" => s.last_run_at && DateTime.to_iso8601(s.last_run_at),
-      "last_session_count" => s.last_session_count
+      "last_session_count" => s.last_session_count,
+      "last_projection" => encode_projection(Map.get(s, :last_projection))
     }
   rescue
-    _ -> %{"enabled" => false, "last_run_at" => nil, "last_session_count" => nil}
+    _ -> velocity_status_down()
   catch
-    _, _ -> %{"enabled" => false, "last_run_at" => nil, "last_session_count" => nil}
+    _, _ -> velocity_status_down()
   end
+
+  defp velocity_status_down do
+    %{
+      "enabled" => false,
+      "last_run_at" => nil,
+      "last_session_count" => nil,
+      "last_projection" => nil
+    }
+  end
+
+  # The last delivery-projection pass (T67.6 finding 2): real facts only, `nil`
+  # before the first pass (or when no workspaces are configured).
+  defp encode_projection(%{workspaces_scanned: scanned, events_written: written, at: at}) do
+    %{
+      "workspaces_scanned" => scanned,
+      "events_written" => written,
+      "at" => at && DateTime.to_iso8601(at)
+    }
+  end
+
+  defp encode_projection(_absent), do: nil
 
   defp vsn do
     case Application.spec(:kazi, :vsn) do

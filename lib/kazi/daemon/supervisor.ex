@@ -84,6 +84,8 @@ defmodule Kazi.Daemon.Supervisor do
               {:velocity_dir, v} -> [dir: v]
               {:velocity_state_dir, v} -> [state_dir: v]
               {:velocity_collect_fun, v} -> [collect_fun: v]
+              {:velocity_workspaces, v} -> [workspaces: v]
+              {:velocity_project_fun, v} -> [project_fun: v]
               _other -> []
             end)
 
