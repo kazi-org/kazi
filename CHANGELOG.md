@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.255.0](https://github.com/kazi-org/kazi/compare/v1.254.0...v1.255.0) (2026-07-19)
+
+
+### Features
+
+* **dashboard:** rebuild the drill-in view for legibility (T63.11, UC-062) ([4305561](https://github.com/kazi-org/kazi/commit/430556188411974a1b50fee079a02e2191098022))
+
 ## [1.254.0](https://github.com/kazi-org/kazi/compare/v1.253.0...v1.254.0) (2026-07-19)
 
 
