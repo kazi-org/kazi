@@ -45,6 +45,28 @@ defmodule Kazi.Daemon.VelocityTicker do
   never crash-loops the daemon tree. It is a `one_for_one` child, so even a hard
   crash restarts only the ticker, never the listener/writer.
 
+  ## In-daemon writes go DIRECT, never through the socket (T67.6)
+
+  The collector's default read-model sink is `Kazi.ReadModel.Writer`, a CLIENT
+  seam: when a daemon is alive it routes the write over the daemon control socket
+  to the single writer (ADR-0068). But this ticker runs INSIDE the daemon, so
+  that probe would find the daemon alive (itself) and the ticker would block
+  waiting on a control-socket round-trip the daemon must serve -- while `kazi
+  daemon status` also calls into this ticker -- self-deadlocking the daemon (the
+  T67.6 live wedge: with the collector enabled, v1.262.0 wedged exactly one
+  interval after boot). The daemon IS the single writer, so the ticker injects
+  `Kazi.Velocity.SessionCollector.direct_write/1` as the collector's `:write`
+  sink: a direct `Kazi.Repo` upsert, the same mechanism `Kazi.Daemon.Write` uses
+  to apply a client batch. The ticker's writes therefore never touch its own
+  socket.
+
+  The collector's OTHER ship -- the bus `fact` (`Kazi.Bus.post/3`) -- does dial
+  the control socket to discover the NATS port, but is safe in-daemon: every
+  `Kazi.Bus` call runs under `Kazi.Bus.run/3`'s hard deadline (it degrades to
+  `{:error, :bus_unavailable}` rather than block past the bound), and the
+  collector additionally swallows any post error. It can never wedge the daemon
+  the way the unbounded `Writer` socket write did.
+
   ## Observability
 
   `status/1` reports `{enabled?, last run's timestamp, last run's session count}`
@@ -81,6 +103,13 @@ defmodule Kazi.Daemon.VelocityTicker do
       # Injectable so a test drives a deterministic collector (default: the real
       # opt-in-gated collector). `(keyword -> {:ok, term})`.
       collect_fun: Keyword.get(opts, :collect_fun, &SessionCollector.run/1),
+      # The read-model sink the collector writes through. We run INSIDE the
+      # daemon, which is the ADR-0068 single writer, so we MUST write direct to
+      # `Kazi.Repo` -- never through `Kazi.ReadModel.Writer`, whose client seam
+      # would probe the daemon control socket, find it alive (itself), and route
+      # the write back over that socket, self-deadlocking the daemon (T67.6 live
+      # wedge). Injectable so a test can pin the sink. `(map -> term())`.
+      write_fun: Keyword.get(opts, :write_fun, &SessionCollector.direct_write/1),
       last_run_at: nil,
       last_session_count: nil
     }
@@ -148,7 +177,8 @@ defmodule Kazi.Daemon.VelocityTicker do
   # that collected, record the timestamp + session count for observability. All
   # errors are logged and swallowed -- a tick never crashes the ticker.
   defp run_tick(state) do
-    result = state.collect_fun.(dir: state.dir, state_dir: state.state_dir)
+    result =
+      state.collect_fun.(dir: state.dir, state_dir: state.state_dir, write: state.write_fun)
 
     case result do
       {:ok, collected} when is_list(collected) ->

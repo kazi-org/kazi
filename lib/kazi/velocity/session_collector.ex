@@ -202,14 +202,39 @@ defmodule Kazi.Velocity.SessionCollector do
 
   # The default read-model sink: an upsert on `(session_uuid, machine)` routed
   # through the daemon single-writer seam (ADR-0068). Last-write-wins on the
-  # cumulative counters, so a re-post overwrites the session's current row.
+  # cumulative counters, so a re-post overwrites the session's current row. This
+  # is the CLIENT-context sink: from outside the daemon, `Writer` correctly
+  # routes the write to the daemon over the control socket.
   defp default_write(wire) do
-    changeset = SessionCounters.changeset(%SessionCounters{}, wire)
+    Writer.insert(upsert_changeset(wire), upsert_opts())
+  end
 
-    Writer.insert(changeset,
-      on_conflict: {:replace, replaceable_fields()},
-      conflict_target: [:session_uuid, :machine]
-    )
+  @doc """
+  The IN-DAEMON DIRECT read-model sink: the same `(session_uuid, machine)` upsert
+  as `default_write/1`, but written STRAIGHT to `Kazi.Repo` instead of through
+  `Kazi.ReadModel.Writer`.
+
+  This exists because the collector's default sink (`Writer.insert/2`) is a
+  client seam: it probes the daemon control socket and, when a daemon is alive,
+  routes the write over that socket to the daemon's single writer. When the
+  COLLECTOR ITSELF runs inside the daemon (the `Kazi.Daemon.VelocityTicker`
+  path), that probe finds the daemon alive -- because it is probing itself -- and
+  the ticker then blocks waiting on a control-socket round-trip the daemon must
+  serve while the ticker (which `kazi daemon status` calls into) is busy: the
+  daemon self-deadlocks (the T67.6 live wedge). The daemon IS the ADR-0068 single
+  writer, so a write it originates must be a direct `Repo` write -- exactly what
+  `Kazi.Daemon.Write` does when it applies a client batch. The ticker injects
+  this as its `:write` sink so its writes never touch its own socket.
+  """
+  @spec direct_write(map()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  def direct_write(wire) do
+    Kazi.Repo.insert(upsert_changeset(wire), upsert_opts())
+  end
+
+  defp upsert_changeset(wire), do: SessionCounters.changeset(%SessionCounters{}, wire)
+
+  defp upsert_opts do
+    [on_conflict: {:replace, replaceable_fields()}, conflict_target: [:session_uuid, :machine]]
   end
 
   defp replaceable_fields do
