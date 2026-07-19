@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.252.0](https://github.com/kazi-org/kazi/compare/v1.251.0...v1.252.0) (2026-07-19)
+
+
+### Features
+
+* **hooks:** binary/plugin version-skew check at SessionStart (T61.5, ADR-0077) ([d072f5c](https://github.com/kazi-org/kazi/commit/d072f5cfdc42ea86f17fd48fda387d9074425416))
+
 ## [1.251.0](https://github.com/kazi-org/kazi/compare/v1.250.1...v1.251.0) (2026-07-19)
 
 
