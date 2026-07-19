@@ -97,6 +97,52 @@ defmodule KaziWeb.TestSeedController do
     text(conn, "reset-fleet")
   end
 
+  @doc """
+  Seeds the attention fan-in (T63.8): a stuck run (a clickable run-attention
+  alert deep-linking to its drill-in) plus one waiting-on-operator session
+  (injected via the `waiting_sessions_fetcher` seam the LiveView reads).
+  Returns `200 seeded-attention`.
+  """
+  def seed_attention(conn, _params) do
+    reset_fleet()
+    reset_iterations()
+
+    run = seed_run("mc-attention-stuck", "/tmp/pw/org-x/svc")
+    # A single failing predicate across enough iterations to trip the detector.
+    for i <- 0..2 do
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "mc-attention-stuck",
+          iteration_index: i,
+          predicate_vector: vector(probe: :fail)
+        })
+    end
+
+    finish(run, "stuck")
+
+    Application.put_env(:kazi, :waiting_sessions_fetcher, fn ->
+      [
+        %{
+          "session" => "pw-sess",
+          "machine" => "box-1",
+          "summary" => "approve the destructive migration",
+          "since" => "2026-07-19T00:00:00Z",
+          "age_s" => 90
+        }
+      ]
+    end)
+
+    text(conn, "seeded-attention")
+  end
+
+  @doc "Clears the attention fan-in so it renders its empty state."
+  def reset_attention(conn, _params) do
+    reset_fleet()
+    reset_iterations()
+    Application.put_env(:kazi, :waiting_sessions_fetcher, fn -> [] end)
+    text(conn, "reset-attention")
+  end
+
   defp reset_iterations, do: Kazi.Repo.delete_all(Iteration)
   defp reset_fleet, do: Kazi.Repo.delete_all(Run)
 
