@@ -384,6 +384,32 @@ defmodule Kazi.Adopt do
   end
 
   @doc """
+  The single `spec_coverage` predicate map `kazi init --discover` writes (T41.4,
+  ADR-0054 / UC-053).
+
+  A discovery goal's SOLE predicate is the manifest-coverage check
+  (`Kazi.Providers.SpecCoverage`, T41.3): "is every public surface element
+  referenced by >=1 Scenario across the product's `.feature` specs?" On a repo
+  with no `.feature` files yet the whole surface is uncovered, so this predicate
+  starts RED — the honest starting state a discovery run drives down.
+
+  It is a plain acceptance predicate (not a guard) in the string-keyed shape
+  `Kazi.Goal.Loader.from_map/1` accepts. Config is left at the provider's
+  documented defaults (features glob `docs/specs/**/*.feature`, the default
+  surface scan), so the authored goal-file stays minimal and the human edits the
+  glob only if their specs live elsewhere.
+  """
+  @spec spec_coverage_predicate() :: %{optional(String.t()) => term()}
+  def spec_coverage_predicate do
+    %{
+      "id" => "spec-coverage",
+      "provider" => "spec_coverage",
+      "description" =>
+        "every public surface element is referenced by >=1 Scenario across the product's .feature specs"
+    }
+  end
+
+  @doc """
   Returns the harness-proposed live predicate maps for `path`, or `[]`.
 
   OFF by default: with `enrich: false` (or absent) this returns `[]` without
