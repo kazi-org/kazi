@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.256.0](https://github.com/kazi-org/kazi/compare/v1.255.0...v1.256.0) (2026-07-19)
+
+
+### Features
+
+* **dashboard:** narrative newest-first goal history view (T63.12, UC-062) ([d28331e](https://github.com/kazi-org/kazi/commit/d28331e5a1bf100c8fcb85fbe4310794aaac5657))
+
 ## [1.255.0](https://github.com/kazi-org/kazi/compare/v1.254.0...v1.255.0) (2026-07-19)
 
 
