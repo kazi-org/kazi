@@ -99,6 +99,10 @@ its config at runtime via `kazi schema <kind>`.
 - **[`spec_coverage`](spec-coverage-predicate.md)** — manifest coverage: every
   scanned surface element is referenced by ≥1 Scenario across the product's
   `.feature` specs; a `:fail` names each undocumented element (T41.3, ADR-0050/0054).
+- **[`render_proof` + capture recipes](capture-recipes.md)** — controller-owned
+  `[[capture]]` screenshots so a UI goal proves pixels, not file presence: the
+  controller runs the recipe each observe pass into a run-keyed evidence store the
+  worker cannot write, and `render_proof` fails a blank/crash frame (ADR-0081).
 - **[Live providers](live-providers.md)** — `http_probe` sustained health,
   `:metrics` (RED / SLO burn-rate), and the synthetic-journey monitor (ADR-0043).
 - **[Browser assertions](browser-assertions.md)** — the full `browser` predicate
