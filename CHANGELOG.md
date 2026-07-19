@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.270.0](https://github.com/kazi-org/kazi/compare/v1.269.0...v1.270.0) (2026-07-19)
+
+
+### Features
+
+* **loader:** register + validate visual_judge predicate (T68.8, [#1522](https://github.com/kazi-org/kazi/issues/1522)) ([9818f7b](https://github.com/kazi-org/kazi/commit/9818f7b95a8d46e412b0a67a2bded41e592696fc))
+* **providers:** visual_judge provider + injectable model seam (T68.8, [#1522](https://github.com/kazi-org/kazi/issues/1522)) ([6d67ee4](https://github.com/kazi-org/kazi/commit/6d67ee4a63278a62a2fad3ea70edd96c85010b52))
+* **runtime:** dispatch visual_judge to its provider module (T68.8, [#1522](https://github.com/kazi-org/kazi/issues/1522)) ([a6491ed](https://github.com/kazi-org/kazi/commit/a6491edcb1579ab2af1b070119e35ec0327dded9))
+
 ## [1.269.0](https://github.com/kazi-org/kazi/compare/v1.268.0...v1.269.0) (2026-07-19)
 
 
