@@ -680,4 +680,88 @@ defmodule KaziWeb.MissionControlLiveTest do
       assert html =~ ~s(href="/goals/needs-me/drillin")
     end
   end
+
+  describe "progress-rate panel (T63.9, IA Q4 — rate-only per ADR-0046)" do
+    # An 8-predicate vector whose first `passing` predicates are green — the
+    # fixture shape the T63.9 acceptance names (3/8 at the latest iteration).
+    defp octo_vector(passing) do
+      results =
+        for i <- 0..7, into: %{} do
+          status = if i < passing, do: :pass, else: :fail
+          {:"p#{i}", PredicateResult.new(status, %{})}
+        end
+
+      PredicateVector.new(results)
+    end
+
+    test "renders the ratio, a flip velocity, and budget — never an ETA", %{conn: conn} do
+      run = seed(%{goal_ref: "converging-goal"})
+
+      # Iteration budget: 2 of 10 dispatches consumed.
+      run
+      |> Run.changeset(%{"dispatch_count" => 2, "max_iterations" => 10})
+      |> Repo.update!()
+
+      # Two recorded iterations: 1 green → 3 green (two predicates flipped
+      # red→green across the single transition).
+      record("converging-goal", 0, octo_vector(1))
+      record("converging-goal", 1, octo_vector(3))
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ ~s(id="mc-progress")
+      assert html =~ ~s(id="mc-progress-converging-goal")
+
+      # The panel fragment carries the three objective figures.
+      panel =
+        html
+        |> String.split(~s(id="mc-progress"))
+        |> Enum.at(1)
+        |> String.split("</section>")
+        |> hd()
+
+      # Predicate ratio 3/8.
+      assert panel =~ ~r/PREDICATES GREEN.*?3 \/ 8/s
+      # Flip velocity: 2 predicates greened over 1 transition → 2.0 per iteration.
+      assert panel =~ "2.0 /iter"
+      assert panel =~ "red→green"
+      # Budget consumed vs cap.
+      assert panel =~ "2 / 10 iterations"
+
+      # ADR-0046 honest-unknown: no fabricated time estimate anywhere in the panel.
+      refute panel =~ ~r/\bETA\b/
+      refute panel =~ ~r/estimated/i
+      refute panel =~ ~r/remaining/i
+      refute panel =~ ~r/\bdate\b/i
+    end
+
+    test "a single-iteration goal shows an honest 'needs 2+ iterations', not a fabricated 0", %{
+      conn: conn
+    } do
+      seed(%{goal_ref: "just-started"})
+      record("just-started", 0, octo_vector(2))
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      panel =
+        html
+        |> String.split(~s(id="mc-progress"))
+        |> Enum.at(1)
+        |> String.split("</section>")
+        |> hd()
+
+      assert panel =~ ~s(id="mc-progress-just-started")
+      assert panel =~ "needs 2+ iterations"
+    end
+
+    test "a converged goal drops out of the active progress panel", %{conn: conn} do
+      run = seed(%{goal_ref: "all-done"})
+      record("all-done", 0, octo_vector(8))
+      {:ok, _} = RunRegistry.finish(run.run_id, "converged")
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      refute html =~ ~s(id="mc-progress-all-done")
+    end
+  end
 end
