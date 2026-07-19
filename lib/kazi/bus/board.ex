@@ -75,7 +75,7 @@ defmodule Kazi.Bus.Board do
       |> Enum.map(&Digest.line/1)
       |> bound()
 
-    attention = render_attention(topics)
+    attention = render_attention(topics, roster)
 
     %{
       "facts" => fact_lines,
@@ -121,9 +121,24 @@ defmodule Kazi.Bus.Board do
   # the attention text is always short, so it never hits the digest's
   # stub/overflow bound, but reading it BEFORE `Digest.line/1` means this
   # never depends on that render happening not to have stubbed it anyway.
-  defp render_attention(topics) do
+  # Roster-gated (#1567): the auto-clear is the waiting session's OWN next
+  # turn-hook, so a session that dies mid-wait leaves an immortal
+  # `waiting-on-operator` fact. A session with no live presence cannot be
+  # waiting on anyone -- drop its entry instead of rendering a stale card.
+  # Alive-but-idle sessions stay: a waiting session is by definition idle.
+  # Roster ids are matched through the same sanitizer the topic was built
+  # with (`Kazi.Bus.attention_topic/1`), so an id that needed sanitizing
+  # still gates its own topic.
+  defp render_attention(topics, roster) do
+    live =
+      for %{"session" => session} <- roster,
+          is_binary(session) and session != "",
+          into: MapSet.new(),
+          do: Kazi.Bus.attention_topic(session)
+
     topics
     |> Enum.filter(&attention_fact?/1)
+    |> Enum.filter(&MapSet.member?(live, &1[:topic]))
     |> Enum.map(&attention_entry/1)
     |> Enum.sort_by(& &1["age_s"], &age_desc/2)
   end
