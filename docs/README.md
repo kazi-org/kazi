@@ -172,6 +172,16 @@ its config at runtime via `kazi schema <kind>`.
 - **[Doc-freshness predicate set](doc-freshness.md)** — the runnable checks that
   keep these docs from drifting.
 
+## Essays & growth
+
+- **[Essays](essays/README.md)** — one evergreen deep-dive per significant
+  shipped feature, held fresh by a kazi standing goal
+  (`essays/essays.goal.toml`): coverage and staleness are machine-checked, so
+  the tier cannot silently rot.
+- **[Growth strategy](marketing/strategy.md)** — the public, research-grounded
+  plan for kazi's adoption, with the [launch plan](marketing/launch-plan.md)
+  and the [operator task list](marketing/operator-tasks.md).
+
 ## Decision records
 
 - **[ADRs](adr/README.md)** — the frozen architecture decisions. To change a
