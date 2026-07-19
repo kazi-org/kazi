@@ -54,7 +54,8 @@ error, it is "safe to upgrade."
       "status": "running",
       "heartbeat_age_s": 3
     }
-  ]
+  ],
+  "first_pass_rate": { "total": 4, "first_pass": 3, "reworked": 1, "rate": 0.75 }
 }
 ```
 
@@ -67,6 +68,7 @@ error, it is "safe to upgrade."
 | `runs[].run_id`    | string           | The run registry's unique run id. |
 | `runs[].status`    | string           | Always `"running"` (a terminal or stale run is excluded). |
 | `runs[].heartbeat_age_s` | integer    | Seconds since the last heartbeat. |
+| `first_pass_rate`  | object \| null   | The **fleet-wide** predicate first-pass rate (T68.9, #1501), pooled across every live run's goal (predicate-weighted; each distinct goal counted once). `null` when no live run has measurable iteration history. See [First-pass rate](#first-pass-rate-adr-t689-1501). |
 | `schema_version`   | integer          | The contract version. |
 
 ## Run status (`kind: "run"`)
@@ -83,6 +85,7 @@ error, it is "safe to upgrade."
     { "id": "code", "verdict": "pass" },
     { "id": "live", "verdict": "fail" }
   ],
+  "first_pass_rate": { "total": 2, "first_pass": 1, "reworked": 1, "rate": 0.5 },
   "release_ref": "v2026.06.24-abc1234",
   "observed_at": "2026-06-24T03:25:31.118115Z",
   "landed": [
@@ -99,6 +102,7 @@ error, it is "safe to upgrade."
 | `converged`      | boolean          | Whether the latest recorded iteration was judged converged (T0.8). |
 | `iteration`      | integer          | The latest recorded 0-based iteration index. |
 | `predicates`     | array of objects | The predicate **vector** at the latest observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as `apply --json`, including the optional ADR-0041 graded fields (`score`, `prior_score`, `direction`, `evidence`) when present. See [`run-result.md`](run-result.md#predicates--graded-fields-adr-0041). |
+| `first_pass_rate`| object \| null   | This goal's predicate first-pass rate (T68.9, #1501). `null` when unmeasurable. See [First-pass rate](#first-pass-rate-adr-t689-1501). |
 | `release_ref`    | string \| null   | The release ref recorded on the latest iteration (T3.3c), or `null`. |
 | `observed_at`    | string (ISO 8601)| When the latest iteration's predicates were evaluated. |
 | `landed`         | array of objects | **Optional** (T62.6, issue #1241). Present only when the run PERSISTED per-group landed refs — a `--parallel` run with `[integration] mode != none` that landed converged work. One entry per landed group, carrying the SAME `{branch, pr, merge_commit}` detail (T44.10 shape) the immediate `apply --parallel --json` collective output showed, so `kazi status` surfaces "what landed where" AFTER the run has exited. **Omitted entirely** for a run that landed nothing (a single-goal run, or `mode = none`), keeping the object byte-identical to the pre-T62.6 shape. |
@@ -111,6 +115,40 @@ error, it is "safe to upgrade."
 The `landed` array is a purely additive projection: `schema_version` is
 **unchanged** (still `2`), since a run without landed refs emits the identical
 object it did pre-T62.6.
+
+## First-pass rate (T68.9, #1501)
+
+The **predicate first-pass rate** is the fraction of a goal's authored
+predicates that were already GREEN on the FIRST recorded observation — before
+the reconcile loop did any work — versus the ones that started red and needed
+predicate/plan rework to reach `:pass`. It is the single best proxy for
+*just-in-time authoring quality*: a low first-pass rate means `acc:` lines were
+drafted against stale context (the dispatch layer, not the grind loop, is the
+weak point).
+
+It is a pure projection over the persisted iteration history
+(`Kazi.Reconcile.FirstPassRate`): a predicate is **first-pass** when it is
+`:pass` in the earliest recorded `Kazi.PredicateVector` for the goal;
+everything else (`:fail`/`:error`/`:unknown`) is **reworked**. No provider is
+re-run.
+
+```json
+{ "total": 4, "first_pass": 3, "reworked": 1, "rate": 0.75 }
+```
+
+| Field        | Type          | Meaning |
+|--------------|---------------|---------|
+| `total`      | integer       | Authored predicates measured (the first vector's size). |
+| `first_pass` | integer       | Green on the first observation. |
+| `reworked`   | integer       | `total - first_pass` — needed loop rework. |
+| `rate`       | number        | `first_pass / total`, a 0.0–1.0 float. |
+
+The whole object is `null` when there is nothing to measure (no recorded
+iterations, or an empty first vector). On the single-`<ref>` `run` surface it is
+that goal's rate; on the no-`<ref>` `live_runs` surface it is the fleet-wide pool
+across every live run's goal, summing numerators and denominators
+(predicate-weighted, each distinct goal counted once). Additive: `schema_version`
+is unchanged (still `2`).
 
 ## Proposal status (`kind: "proposal"`)
 

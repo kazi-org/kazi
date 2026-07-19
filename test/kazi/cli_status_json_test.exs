@@ -117,6 +117,61 @@ defmodule Kazi.CLIStatusJsonTest do
       assert vector_json == %{"code" => "pass", "live" => "fail"}
     end
 
+    test "reports the predicate first-pass rate from the FIRST iteration (T68.9, #1501)" do
+      # First observation: 1 of 2 green. A later iteration drives the other green.
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "status-fpr",
+          iteration_index: 0,
+          predicate_vector:
+            PredicateVector.new(%{code: PredicateResult.pass(), live: PredicateResult.fail()}),
+          converged: false
+        })
+
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "status-fpr",
+          iteration_index: 1,
+          predicate_vector:
+            PredicateVector.new(%{code: PredicateResult.pass(), live: PredicateResult.pass()}),
+          converged: true
+        })
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["status", "status-fpr", "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      # Scored on iteration 0 (1/2 green), NOT the converged iteration (2/2).
+      assert payload["first_pass_rate"] == %{
+               "total" => 2,
+               "first_pass" => 1,
+               "reworked" => 1,
+               "rate" => 0.5
+             }
+    end
+
+    test "first_pass_rate is null when there is no measurable history" do
+      # A single converged iteration with an EMPTY vector: nothing to score.
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "status-fpr-empty",
+          iteration_index: 0,
+          predicate_vector: PredicateVector.new(),
+          converged: true
+        })
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["status", "status-fpr-empty", "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      assert Map.has_key?(payload, "first_pass_rate")
+      assert payload["first_pass_rate"] == nil
+    end
+
     test "a converged run reports status converged" do
       vector = PredicateVector.new(%{code: PredicateResult.pass()})
 
@@ -196,6 +251,8 @@ defmodule Kazi.CLIStatusJsonTest do
       assert out =~ "STATUS"
       assert out =~ "kind=run"
       assert out =~ "converged: true"
+      # T68.9 (#1501): the human first-pass line (1/1 green on first observation).
+      assert out =~ "first-pass: 1/1 (100%)"
       refute out =~ "schema_version"
     end
 
