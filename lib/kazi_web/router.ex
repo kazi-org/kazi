@@ -89,6 +89,10 @@ defmodule KaziWeb.Router do
       post("/fleet/seed", TestSeedController, :seed_fleet)
       post("/fleet/seed_single", TestSeedController, :seed_fleet_single)
       post("/fleet/reset", TestSeedController, :reset_fleet)
+      # T63.8: seed/clear the attention fan-in (a run-attention alert + a
+      # waiting-on-operator session) for the browser cert.
+      post("/attention/seed", TestSeedController, :seed_attention)
+      post("/attention/reset", TestSeedController, :reset_attention)
       # T3.6c: drive the lease-map fixture source (presence/intent/lease snapshot).
       post("/leases/seed", LeaseMapSeedController, :seed)
       post("/leases/release", LeaseMapSeedController, :release)

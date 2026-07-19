@@ -232,6 +232,7 @@ defmodule KaziWeb.MissionControlLive do
     |> assign_grid(all_runs, scoped)
     |> assign(:clock, utc_clock())
     |> assign(:alerts, alerts(scoped))
+    |> assign(:waiting, waiting_alerts())
     |> assign_planned(all_runs)
     |> assign(:river_entries, river_entries(all_runs))
   end
@@ -935,6 +936,62 @@ defmodule KaziWeb.MissionControlLive do
     }
   end
 
+  # ---------------------------------------------------------------------------
+  # WAITING ON YOU — the SESSION-level fan-in half of the attention panel
+  # (T63.8, IA Q2/Q3, #1386 reconciliation): sessions blocked on a human are a
+  # different identity from run-level attention (a session vs a run, cleared by
+  # a human reply vs a state change), so they compose as their OWN labeled
+  # sub-section, not interleaved. E60/T60.3 ships the plumbing — a session posts
+  # a `waiting-on-operator` fact the bus board already fans in fleet-wide
+  # (`Kazi.Bus.board`'s `"attention"` list); this only READS and renders it,
+  # NAMING the awaited action. Best-effort/injectable (ADR-0011 §2), mirroring
+  # `remote_run_facts/0`: an unreachable daemon degrades to an empty sub-section.
+  # ---------------------------------------------------------------------------
+
+  defp waiting_alerts do
+    waiting_sessions()
+    |> Enum.map(&waiting_alert/1)
+    |> Enum.filter(& &1)
+  end
+
+  defp waiting_alert(%{"session" => session} = entry) when is_binary(session) do
+    %{
+      session: session,
+      machine: entry["machine"],
+      detail: waiting_detail(entry["summary"])
+    }
+  end
+
+  defp waiting_alert(_other), do: nil
+
+  # The awaited human action, named. The board's summary is the harness's own
+  # stdin message when it captured one; the degraded form (bare
+  # `"waiting-on-operator"`, no stdin summary) still names WHAT is awaited.
+  defp waiting_detail(summary)
+       when is_binary(summary) and summary != "" and summary != "waiting-on-operator",
+       do: summary
+
+  defp waiting_detail(_none), do: "awaiting operator input"
+
+  defp waiting_sessions do
+    fetch = Application.get_env(:kazi, :waiting_sessions_fetcher, &default_waiting_sessions/0)
+
+    try do
+      fetch.()
+    rescue
+      _ -> []
+    catch
+      _, _ -> []
+    end
+  end
+
+  defp default_waiting_sessions do
+    case Kazi.Bus.board(claims: false) do
+      {:ok, %{"attention" => entries}} when is_list(entries) -> entries
+      _other -> []
+    end
+  end
+
   defp alert_severity(:cause), do: "NEEDS YOU"
   defp alert_severity(:stuck), do: "STUCK"
   defp alert_severity(:budget), do: "BUDGET"
@@ -953,6 +1010,15 @@ defmodule KaziWeb.MissionControlLive do
     do: "predicate #{predicate_id} red for consecutive iterations"
 
   defp alert_detail(:stuck, _predicate_id, _detail), do: "stuck detector fired"
+
+  # T63.8 (IA Q3): name the over-budget CAP, not just a percentage — the operator
+  # sees the exact ceiling their run is about to hit.
+  defp alert_detail(:budget, _predicate_id, %{
+         consumed_iterations: consumed,
+         max_iterations: max
+       })
+       when is_integer(consumed) and is_integer(max),
+       do: "#{consumed} of #{max} iteration budget consumed (cap #{max})"
 
   defp alert_detail(:budget, _predicate_id, _detail), do: "iteration budget ≥85% consumed"
 
@@ -1064,12 +1130,17 @@ defmodule KaziWeb.MissionControlLive do
           </div>
         </header>
 
-        <section :if={@alerts != []} id="mc-attention">
+        <%!-- The attention fan-in (T63.8, IA Q2/Q3): run-level attention (the
+        ranked queue) and session-level "waiting on you" facts compose as two
+        labeled sub-sections under one heading; each entry NAMES its blocker.
+        Always rendered so the empty state ("nothing needs you") is honest. --%>
+        <section id="mc-attention">
           <div class="seclabel section-label">NEEDS ATTENTION</div>
           <div id="mc-attention-affordance" class="attnaffordance">
             stuck, over-budget, or awaiting operator — live runs only
           </div>
-          <div class="attnrow">
+
+          <div :if={@alerts != []} id="mc-attention-runs" class="attnrow">
             <.link
               :for={a <- @alerts}
               id={"mc-alert-#{a.goal_ref}-#{a.signal}"}
@@ -1086,6 +1157,30 @@ defmodule KaziWeb.MissionControlLive do
               <span class="peek">PEEK →</span>
             </.link>
           </div>
+
+          <div :if={@waiting != []} id="mc-attention-waiting" class="attnwaiting">
+            <div class="seclabel section-label attnsublabel">WAITING ON YOU</div>
+            <div class="attnrow">
+              <div
+                :for={w <- @waiting}
+                id={"mc-waiting-#{w.session}"}
+                class="alert al-bad"
+                data-signal="waiting"
+                data-session={w.session}
+              >
+                <div class="asev">WAITING</div>
+                <div class="abody">
+                  <div class="atitle">{w.session}</div>
+                  <div class="adetail" title={w.detail}>{w.detail}</div>
+                </div>
+                <span :if={w.machine} class="peek">{w.machine}</span>
+              </div>
+            </div>
+          </div>
+
+          <p :if={@alerts == [] and @waiting == []} id="mc-attention-empty" class="empty-state">
+            Nothing needs you right now.
+          </p>
         </section>
 
         <section id="mc-fleet">
@@ -1302,6 +1397,9 @@ defmodule KaziWeb.MissionControlLive do
 
         .seclabel { margin: 20px 0 10px; }
         .attnaffordance { color: var(--dim); font-size: 10px; letter-spacing: .04em; margin: -6px 0 8px; }
+        /* WAITING ON YOU sub-section (T63.8): the session-level attention half. */
+        .attnwaiting { margin-top: 14px; }
+        .attnsublabel { margin: 0 0 8px; opacity: .85; }
         .fleethead { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
         /* Direction B (T63.6): state / scope / repo / time controls fold into the
            FLEET header as one right-aligned cluster of segmented controls. */
