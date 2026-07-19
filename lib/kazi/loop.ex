@@ -667,7 +667,19 @@ defmodule Kazi.Loop do
               # = nothing sealed, byte-identical to pre-ADR-0080. Appended last so
               # the existing field order is untouched.
               seal_manifest: %{},
-              tampered_file: nil
+              tampered_file: nil,
+              # --- ADR-0081 (#1521): controller-owned capture recipes ------------
+              # `capture_fn` is the controller-side capture executor (built by the
+              # runtime, `build_capture_fn/4`): given the 0-based observe iteration
+              # it runs every `[[capture]]` recipe into the run-keyed evidence store
+              # and returns `%{name => result}`. Default is a no-op returning `%{}`
+              # (a Loop.start_link with no captures, byte-identical to before).
+              # `captures` holds the LATEST pass's results, threaded into each
+              # predicate's `context[:captures]` so a `render_proof` predicate reads
+              # the CONTROLLER-produced artifact, never a worker claim. Appended last
+              # so the existing field order is untouched.
+              capture_fn: nil,
+              captures: %{}
   end
 
   # T3.1d resource lease: the default TTL a held lease is minted/renewed with. The
@@ -1060,7 +1072,11 @@ defmodule Kazi.Loop do
       check_workspace_liveness: Keyword.get(opts, :check_workspace_liveness, false),
       # ADR-0080 (#1520): the t0 seal manifest, armed by the runtime. Absent = %{}
       # (nothing sealed), so a loop with no seal is byte-identical to pre-ADR-0080.
-      seal_manifest: Keyword.get(opts, :seal_manifest, %{})
+      seal_manifest: Keyword.get(opts, :seal_manifest, %{}),
+      # ADR-0081 (#1521): the controller-side capture executor, built by the
+      # runtime. Absent = a no-op returning `%{}`, so a loop with no captures is
+      # byte-identical to before.
+      capture_fn: Keyword.get(opts, :capture_fn) || fn _iter -> %{} end
     }
 
     # Kick off the first observation as soon as we are initialized, without
@@ -1300,6 +1316,14 @@ defmodule Kazi.Loop do
   end
 
   defp observe_tick(%Data{} = data) do
+    # ADR-0081 (#1521): run the controller-owned capture recipes FIRST, so every
+    # predicate this pass observes against the SAME controller-produced artifacts
+    # (a `render_proof` predicate reads them via `context[:captures]`). Keyed to
+    # this observe iteration; a goal with no captures gets `%{}` (no-op). Runs at
+    # the seal-verify precedence tier — after workspace-liveness + seal, before
+    # predicate evaluation.
+    data = %Data{data | captures: data.capture_fn.(data.iterations)}
+
     # T1.3 flake: observe now also evolves the quarantine set (a failing
     # predicate is re-run via the real provider path and may be classified flaky).
     # T32.4 enforcement: observe runs the tamper-prone graders (guard + held-out
@@ -3120,7 +3144,11 @@ defmodule Kazi.Loop do
       workspace: checker_workspace || data.workspace,
       landed?: data.landed?,
       deployed?: data.deployed?,
-      iteration: data.iterations
+      iteration: data.iterations,
+      # ADR-0081 (#1521): the controller-produced captures for THIS observe pass,
+      # `%{name => result}`; a `render_proof` predicate resolves its named capture
+      # here rather than from a worker-chosen workspace path.
+      captures: data.captures
     }
   end
 

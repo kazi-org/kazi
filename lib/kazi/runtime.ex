@@ -80,6 +80,10 @@ defmodule Kazi.Runtime do
     # point. A new verification kind is CONFIG (a goal-file verdict), not a kazi
     # release.
     custom_script: Kazi.Providers.CustomScript,
+    # ADR-0081 (#1521): the render-proof provider — gates on a CONTROLLER-produced
+    # capture being a plausible non-blank/non-crash frame, so a UI goal cannot
+    # converge on file presence. Consumes `context[:captures]`.
+    render_proof: Kazi.Providers.RenderProof,
     # T32.3 (ADR-0041): the first-class ratchet mode — signal-vs-baseline within
     # an allowed regression. Coverage/perf/size are configs of this one provider.
     ratchet: Kazi.Providers.Ratchet,
@@ -417,7 +421,10 @@ defmodule Kazi.Runtime do
           :enforcement,
           # goal-drift-guard-1415: consumed after the loop terminates
           # (detect_goal_drift/2 below), never a Loop opt.
-          :goal_source
+          :goal_source,
+          # ADR-0081 (#1521): the injectable capture command runner is consumed by
+          # build_capture_fn/4 below, not a Loop opt.
+          :capture_runner
         ])
         |> Keyword.merge(
           goal: goal,
@@ -454,7 +461,13 @@ defmodule Kazi.Runtime do
           # unlike the loop's own default (off, for fixture-path test loops).
           check_workspace_liveness: true,
           # ADR-0080 (#1520): the t0 seal manifest the loop re-verifies each observe.
-          seal_manifest: seal_manifest
+          seal_manifest: seal_manifest,
+          # ADR-0081 (#1521): the controller-side capture executor the loop runs at
+          # the start of every observe pass — executes each `[[capture]]` recipe
+          # into the run-keyed evidence store and returns the `%{name => result}`
+          # map the loop threads into `context[:captures]`. A no-op closure when the
+          # goal declares no captures (byte-identical to before).
+          capture_fn: build_capture_fn(goal, opts, run_id, workspace)
         )
 
       # Issue #1013 (T53.4): register the run BEFORE starting the loop, not
@@ -1231,6 +1244,30 @@ defmodule Kazi.Runtime do
 
   defp maybe_events_sink_path(true, run_id, opts) do
     Path.join([sinks_dir(opts), run_id, "events.jsonl"])
+  end
+
+  # =============================================================================
+  # Capture recipes / run evidence store (T68.7, ADR-0081)
+  # =============================================================================
+
+  # The controller-side capture executor the loop runs at the start of every
+  # observe pass. Closes over the goal's recipes, the run id, the workspace, and
+  # an injectable command runner (`:capture_runner`, default the real
+  # `Kazi.Providers.CommandRunner`), keying the evidence store to the run under the
+  # SAME `sinks_dir` tree the events/transcript sinks use — outside the workspace
+  # the worker edits (ADR-0081 §3). A goal with no `[[capture]]` gets a no-op
+  # closure, so capture execution is inert (byte-identical) unless declared.
+  defp build_capture_fn(%Goal{captures: []}, _opts, _run_id, _workspace), do: fn _iter -> %{} end
+
+  defp build_capture_fn(%Goal{captures: captures}, opts, run_id, workspace) do
+    base = sinks_dir(opts)
+    runner = Keyword.get(opts, :capture_runner, &Kazi.Providers.CommandRunner.run/4)
+
+    fn iteration ->
+      dir = Kazi.Sink.Captures.iteration_dir(base, run_id, iteration)
+      File.mkdir_p!(dir)
+      Kazi.Sink.Captures.run(captures, dir: dir, workspace: workspace, runner: runner)
+    end
   end
 
   # The per-run sinks directory: an explicit `:sinks_dir` opt (the test-override
