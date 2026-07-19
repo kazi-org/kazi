@@ -39,6 +39,21 @@ kazi install-skill        # teaches Claude Code the kazi skill (writes ~/.claude
                           # SKILL.md + AUTHORING.md + RECIPES.md; your own LOCAL.md is never touched)
 ```
 
+**Or install the Claude Code plugin** — one marketplace install bundles the skill, the
+kazi MCP server, and the session-bus hooks together, and refreshes them on the release
+cadence instead of on-demand re-runs of the explicit commands
+([ADR-0077](docs/adr/0077-claude-code-plugin-distribution.md)):
+
+```text
+/plugin marketplace add kazi-org/claude-plugins
+/plugin install kazi@kazi
+```
+
+Both paths are fully supported and neither is "the" way — pick the explicit `kazi
+install-skill` commands or the plugin. See [Install via the Claude Code
+plugin](#install-via-the-claude-code-plugin) for the full comparison. You still need the
+`kazi` binary on your `PATH` (`brew install kazi-org/tap/kazi`) either way.
+
 Then drive it from Claude Code with the kazi skill — author the checks, then converge:
 
 ```text
@@ -526,7 +541,7 @@ before the BEAM, so its time is not counted against the deadline.
 > fails at the Zig link; build the macOS binaries on a macOS 15 (or earlier)
 > runner — which is what the release CI matrix (T6.3) targets.
 
-### Render the Claude Code plugin bundle
+### Install via the Claude Code plugin
 
 kazi also ships as a [Claude Code plugin](https://code.claude.com/docs/en/plugins-reference):
 one install bundles the kazi skill, the kazi MCP server registration, and the
