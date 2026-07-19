@@ -1,7 +1,7 @@
 # ADR 0082: Generated roadmap view lands beside the WBS, not in place of it
 
 ## Status
-Proposed (operator acceptance required; supersedes the scope of ADR-0056
+Accepted (operator, 2026-07-19; supersedes the scope of ADR-0056
 decision 3 for the plan.md cutover)
 
 ## Date
