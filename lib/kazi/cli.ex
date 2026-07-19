@@ -5445,13 +5445,25 @@ defmodule Kazi.CLI do
   defp velocity_status_line(%{"enabled" => false}), do: "disabled"
 
   defp velocity_status_line(%{"enabled" => true} = v) do
-    case {v["last_run_at"], v["last_session_count"]} do
-      {nil, _} -> "enabled (no run yet)"
-      {at, n} -> "enabled (last run #{at}, #{n} session(s))"
-    end
+    base =
+      case {v["last_run_at"], v["last_session_count"]} do
+        {nil, _} -> "enabled (no run yet)"
+        {at, n} -> "enabled (last run #{at}, #{n} session(s))"
+      end
+
+    base <> killed_suffix(v["passes_killed"])
   end
 
   defp velocity_status_line(_absent), do: "unknown"
+
+  # #1606: append the deadline-kill count when non-zero, so a pass that is killed
+  # every tick is visible in `kazi daemon status` even if its :error log never
+  # reached the LaunchAgent log file. Absent/zero adds nothing (a healthy pass
+  # reads exactly as before). A daemon older than #1606 omits the field -> nothing.
+  defp killed_suffix(n) when is_integer(n) and n > 0,
+    do: " -- WARNING: #{n} pass(es) killed at deadline (scan exceeds the collect timeout)"
+
+  defp killed_suffix(_), do: ""
 
   # T67.6 finding 2: the `kazi daemon status` line for the delivery projection --
   # real pass facts only (workspaces scanned, events written), never fabricated. No
