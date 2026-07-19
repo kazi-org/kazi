@@ -53,6 +53,17 @@ commit ref. The patch, proposed upstream as well:
 3. **Escape hatch.** `BURRITO_NO_CLEAN_OLD=1` skips the cleanup pass entirely.
 4. **Windows keeps upstream behavior** (no cheap liveness probe there; in-use
    executables are protected by mandatory file locking anyway).
+5. **Wrapper-output stream contract (T58.4, #1060).** The zig wrapper's
+   housekeeping lines — `[i]` (info: the first-invocation "New install path
+   is: …" extraction line and the uninstall flow), `[l]` (the skipped-cleanup
+   notice above), `[w]`/`[!]` (warnings/errors) — all go to **STDERR**. STDOUT
+   carries ONLY the wrapped program's own output, so a machine-parsed invocation
+   on a fresh-install / post-upgrade run (`kazi version --json`) is clean JSON
+   with no leading `[i]` line. The sole STDOUT use is the interactive `[?]`
+   confirmation prompt (`kazi uninstall`), which pairs with a STDIN read. This is
+   pre-BEAM zig output, so no Elixir-side logger change (T58.3) can reach it —
+   the fix lives in the fork's `src/logger.zig` (`info` → stderr) and rides the
+   pin bump to `65eaf29`.
 
 The patch is covered by `zig test` blocks in `src/maintenance.zig`
 (own-pid alive, EPERM-alive, live-pidfile-blocks / stale-pidfile-prunes /
