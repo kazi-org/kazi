@@ -262,3 +262,44 @@ jobs:
           # current surfaces (T30.5 zero-stub requirement).
           echo "running the tiering-gate load-bearing tests."
           node --test .github/scripts/check-tiering-coherence.test.mjs
+
+  plan-generated-drift:
+    name: plan-generated view is fresh (T45.9, ADR-0082, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      # ADR-0082 drift gate: docs/plan-generated.md is the committed `kazi plan
+      # render` of the live roadmap. `kazi plan render` needs the release
+      # binary's booted+migrated read-model (a bare `mix run` cannot render), so
+      # this job downloads the latest released binary -- the SAME toolchain that
+      # produced the committed file -- and regenerates + diffs. Gated on a change
+      # to the roadmap source or the generated view (or the checker itself), so a
+      # PR that touches neither pays no download.
+      - name: Check docs/plan-generated.md is fresh
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          set -uo pipefail
+          if ! git diff --name-only "${BASE_REF}"...HEAD \
+              | grep -qE '^(docs/roadmap/|docs/plan-generated\.md|\.github/scripts/check_plan_generated_drift\.sh)'; then
+            echo "no roadmap / generated-view / checker changes in this PR -> skipping (exit 0)."
+            exit 0
+          fi
+          echo "roadmap or generated view changed -> regenerating and checking for drift."
+          TAG="$(curl -fsSL --retry 5 --retry-all-errors \
+            https://api.github.com/repos/kazi-org/kazi/releases/latest \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')"
+          echo "using released kazi ${TAG}"
+          base="https://github.com/kazi-org/kazi/releases/download/${TAG}"
+          curl -fsSL --retry 5 --retry-all-errors "${base}/kazi_linux_x86_64" -o /tmp/kazi
+          curl -fsSL --retry 5 --retry-all-errors "${base}/kazi_linux_x86_64.sha256" \
+            | awk '{print $1"  /tmp/kazi"}' | sha256sum -c -
+          chmod +x /tmp/kazi
+          KAZI_BIN=/tmp/kazi .github/scripts/check_plan_generated_drift.sh
