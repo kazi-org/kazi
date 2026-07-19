@@ -188,6 +188,34 @@ defmodule Kazi.Loop.CauseClassTest do
     end
   end
 
+  describe "parked_on_background -- the T68.4 (#1546) parked-on-background-jobs path" do
+    test "names the failing ids with no reasons" do
+      result =
+        CauseClass.classify(
+          inputs(%{
+            outcome: :stopped,
+            reason: :stuck,
+            stuck_cause: :parked_on_background,
+            stuck_failing: [:code, :adr]
+          })
+        )
+
+      assert result == %{
+               class: :parked_on_background,
+               ids: [:adr, :code],
+               reasons: nil,
+               exhausted: nil
+             }
+    end
+
+    test "renders in status/attention output via format/2 with its implicated ids" do
+      # The read-model persists the classified detail; format/2 is the single
+      # renderer kazi status / attention / mission-control all read (T48.14).
+      assert CauseClass.format("parked_on_background", %{"ids" => ["code", "adr"]}) ==
+               "parked_on_background (code, adr)"
+    end
+  end
+
   describe "no cause class -- plain converged/stuck-on-failing-work runs" do
     test "a converged outcome classifies nil" do
       refute CauseClass.classify(inputs(%{outcome: :converged}))
