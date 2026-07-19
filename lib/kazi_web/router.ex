@@ -90,6 +90,10 @@ defmodule KaziWeb.Router do
       post("/fleet/seed_single", TestSeedController, :seed_fleet_single)
       # T63.9: seed an active goal with iterations + budget for the progress-rate panel.
       post("/fleet/seed_progress", TestSeedController, :seed_progress)
+      # T67.5: seed the fleet velocity strip + per-agent drill-in (deliveries,
+      # session counters, and a terminal stuck run whose goal the drill-in names).
+      post("/fleet/seed_velocity", TestSeedController, :seed_velocity)
+      post("/fleet/reset_velocity", TestSeedController, :reset_velocity)
       post("/fleet/reset", TestSeedController, :reset_fleet)
       # T63.8: seed/clear the attention fan-in (a run-attention alert + a
       # waiting-on-operator session) for the browser cert.
