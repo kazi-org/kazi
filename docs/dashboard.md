@@ -222,7 +222,23 @@ tails a sink file back into decoded maps (dropping a torn final line), the
 same contract as `Kazi.Sink.Events.read/1` -- the reader the transcript peek
 view below polls.
 
-## The drill-in convergence heatmap (`/goals/:id/drillin`, T46.7)
+## The drill-in convergence heatmap (`/goals/:id/drillin`, T46.7, legibility T63.11)
+
+The view leads with a one-line **purpose** statement (`#drillin-purpose` — "see
+exactly which predicate is blocking this goal, on which iteration, and what the
+evidence says") and, once the goal has run, a plain-language **summary**
+sentence (`#drillin-summary`): the status, iteration, `pass / total` count, the
+named blocking predicates, and a regression tally — every number read straight
+from the latest real vector (T63.11, the approved #1379 mock). An on-page
+**legend** (`#drillin-legend`) decodes every cell state (pass / fail / error /
+not-evaluated / regression-flip) so a first-time viewer need not read the
+stylesheet. Predicate rows carry a display **group tag** (`data-group`, derived
+from the id's prefix via `Kazi.ReadModel.goal_gap_fields/1`, T63.10), the detail
+panel opens with a **narrative** line (`#drillin-detail-narrative`, paraphrasing
+the recorded `action_kind`), and when a goal's tool/context counters are
+genuinely absent an honest note (`#drillin-detail-missing`) says so rather than
+letting the `-` placeholders read as zeros. The empty state
+(`#drillin-empty`) explains itself ("not an error"). Below that:
 
 Per-goal, below the full history timeline (`/goals/:id/history`): a
 **predicates x iterations matrix** built straight from
