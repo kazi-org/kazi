@@ -24,7 +24,16 @@ defmodule KaziWeb.MissionControlLiveTest do
   # describe block overrides this in-body via `with_remote_facts/1`.
   setup do
     Application.put_env(:kazi, :remote_run_facts_fetcher, fn -> [] end)
-    on_exit(fn -> Application.delete_env(:kazi, :remote_run_facts_fetcher) end)
+    # T63.8: the attention fan-in reads the bus board's waiting-on-operator
+    # entries; stub it empty by default so a reachable daemon can't inject a
+    # phantom WAITING entry. Tests that exercise the surface inject their own.
+    Application.put_env(:kazi, :waiting_sessions_fetcher, fn -> [] end)
+
+    on_exit(fn ->
+      Application.delete_env(:kazi, :remote_run_facts_fetcher)
+      Application.delete_env(:kazi, :waiting_sessions_fetcher)
+    end)
+
     :ok
   end
 
@@ -591,6 +600,84 @@ defmodule KaziWeb.MissionControlLiveTest do
       html = view |> element(~s(#mc-mode a[data-mode-option="operator"])) |> render_click()
       assert html =~ ~s(data-mode="operator")
       refute html =~ ~s(id="mc-event-river")
+    end
+  end
+
+  describe "attention fan-in: where can I help / what is blocking (T63.8)" do
+    defp with_waiting(entries) do
+      Application.put_env(:kazi, :waiting_sessions_fetcher, fn -> entries end)
+    end
+
+    test "run + session attention compose into three entries, each naming its blocker",
+         %{conn: conn} do
+      # A stuck run: only `probe` fails, across enough iterations to trip the
+      # stuck detector, so the entry names predicate `probe`.
+      stuck = seed(%{goal_ref: "wedged-goal"})
+      record("wedged-goal", 0, vector(:pass, :fail))
+      record("wedged-goal", 1, vector(:pass, :fail))
+      record("wedged-goal", 2, vector(:pass, :fail))
+      {:ok, _} = RunRegistry.finish(stuck.run_id, "stuck")
+
+      # An over-budget run: 4 of 4 iterations consumed, so the entry names the cap.
+      ob = seed(%{goal_ref: "spendy-goal", max_iterations: 4})
+      record("spendy-goal", 3, vector(:pass, :fail))
+      {:ok, _} = RunRegistry.finish(ob.run_id, "over_budget")
+
+      # A session blocked on a human (the T60.3 board fan-in), naming the action.
+      with_waiting([
+        %{
+          "session" => "sess-alpha",
+          "machine" => "box-1",
+          "summary" => "approve the destructive migration",
+          "since" => "2026-07-19T00:00:00Z",
+          "age_s" => 120
+        }
+      ])
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      # Three attention entries, each NAMING its specific blocker.
+      assert html =~ ~s(id="mc-alert-wedged-goal-stuck")
+      assert html =~ "predicate probe red for consecutive iterations"
+
+      assert html =~ ~s(id="mc-alert-spendy-goal-budget")
+      assert html =~ "4 of 4 iteration budget consumed (cap 4)"
+
+      assert html =~ ~s(id="mc-attention-waiting")
+      assert html =~ ~s(id="mc-waiting-sess-alpha")
+      assert html =~ "approve the destructive migration"
+    end
+
+    test "a blocked session with no stdin summary still names the awaited action", %{conn: conn} do
+      with_waiting([
+        %{"session" => "sess-bare", "machine" => nil, "summary" => "waiting-on-operator"}
+      ])
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ ~s(id="mc-waiting-sess-bare")
+      assert html =~ "awaiting operator input"
+    end
+
+    test "an empty fleet and no blocked sessions renders the honest empty state", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ ~s(id="mc-attention")
+      assert html =~ ~s(id="mc-attention-empty")
+      assert html =~ "Nothing needs you right now."
+      refute html =~ ~s(id="mc-attention-waiting")
+    end
+
+    test "a run-attention entry deep-links to the goal drill-in", %{conn: conn} do
+      run = seed(%{goal_ref: "needs-me"})
+      record("needs-me", 0, vector(:fail, :pass))
+      record("needs-me", 1, vector(:fail, :pass))
+      record("needs-me", 2, vector(:fail, :pass))
+      {:ok, _} = RunRegistry.finish(run.run_id, "stuck")
+
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ ~s(href="/goals/needs-me/drillin")
     end
   end
 end
