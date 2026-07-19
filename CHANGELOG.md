@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.251.0](https://github.com/kazi-org/kazi/compare/v1.250.1...v1.251.0) (2026-07-19)
+
+
+### Features
+
+* **dashboard:** operator/debug mode split, expert surfaces behind debug toggle (T63.7, ADR-0078, UC-061) ([b0e3a25](https://github.com/kazi-org/kazi/commit/b0e3a257f2537710e814c28e6b697fe6ed83db5f))
+
 ## [1.250.1](https://github.com/kazi-org/kazi/compare/v1.250.0...v1.250.1) (2026-07-19)
 
 
