@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.262.1](https://github.com/kazi-org/kazi/compare/v1.262.0...v1.262.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **daemon:** velocity ticker writes direct, not through its own socket (T67.6 live finding) ([9702b2a](https://github.com/kazi-org/kazi/commit/9702b2acf019c168999c4a2d7ea2d88034564d26))
+
 ## [1.262.0](https://github.com/kazi-org/kazi/compare/v1.261.0...v1.262.0) (2026-07-19)
 
 
