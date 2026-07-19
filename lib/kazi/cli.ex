@@ -4386,14 +4386,18 @@ defmodule Kazi.CLI do
     # predicates green on the FIRST observation vs. needing reconcile-loop
     # rework — computed from this goal's persisted iteration history.
     first_pass = FirstPassRate.from_history(ReadModel.iteration_history(ref))
+    # T68.9 (#1501): the goal's latest sampled predicate mutation audit — the
+    # verification-of-verification sensitivity score — when one has been recorded.
+    audit = ReadModel.latest_predicate_audit(ref)
 
-    emit(json?(opts), run_status_json(ref, iteration, vector, landed, first_pass), fn ->
+    emit(json?(opts), run_status_json(ref, iteration, vector, landed, first_pass, audit), fn ->
       IO.puts("STATUS     ref=#{ref} kind=run")
       IO.puts("converged: #{iteration.converged}")
       IO.puts("iteration: #{iteration.iteration_index}")
       maybe_status_release(iteration.release_ref)
       IO.puts("observed:  #{iteration.observed_at}")
       print_status_first_pass(first_pass)
+      print_status_audit(audit)
       IO.puts("\npredicate vector:")
       IO.puts(format_vector(vector))
       print_status_landed(landed)
@@ -4414,6 +4418,25 @@ defmodule Kazi.CLI do
   end
 
   defp format_rate(rate) when is_float(rate), do: "#{round(rate * 100)}%"
+
+  # T68.9 (#1501): the human predicate-audit line, printed only when the goal
+  # has a recorded sampled mutation audit. Names the survivor count — the
+  # weak/gamed predicates a fixer strengthens.
+  defp print_status_audit(nil), do: :ok
+
+  defp print_status_audit(audit) do
+    sensitivity =
+      case audit.sensitivity do
+        s when is_float(s) -> format_rate(s)
+        _ -> "n/a"
+      end
+
+    IO.puts(
+      "audit:     sensitivity=#{sensitivity} " <>
+        "(#{audit.constrained}/#{audit.tested} converged predicates flip under sabotage, " <>
+        "#{audit.survived} survived)"
+    )
+  end
 
   # T62.6: the persisted per-group landed refs appended to a run's human status
   # block — one line per group, `<partition-id>: landed=<branch> pr=<pr>
@@ -4470,7 +4493,7 @@ defmodule Kazi.CLI do
   # predicate VECTOR (the same `{id, verdict}` shape as `run --json`), the last
   # iteration index, the release ref, and the observation timestamp — plus
   # `schema_version`. `kind: "run"` distinguishes it from a proposal status.
-  defp run_status_json(ref, iteration, vector, landed, first_pass) do
+  defp run_status_json(ref, iteration, vector, landed, first_pass, audit) do
     base = %{
       schema_version: @run_schema_version,
       kind: "run",
@@ -4483,6 +4506,9 @@ defmodule Kazi.CLI do
       # iteration history / empty vector), a stable key an orchestrator reads to
       # judge JIT authoring quality without re-deriving it.
       first_pass_rate: first_pass_json(first_pass),
+      # T68.9 (#1501): the latest sampled predicate mutation audit (null when the
+      # goal has never been audited).
+      predicate_audit: predicate_audit_json(audit),
       release_ref: iteration.release_ref,
       observed_at: status_timestamp(iteration.observed_at)
     }
@@ -4514,6 +4540,23 @@ defmodule Kazi.CLI do
 
   defp first_pass_json(%{total: total, first_pass: first_pass, reworked: reworked, rate: rate}) do
     %{total: total, first_pass: first_pass, reworked: reworked, rate: rate}
+  end
+
+  # T68.9 (#1501): the sampled predicate mutation audit object, or `nil` (JSON
+  # null) when the goal has never been audited. `sensitivity` is `constrained /
+  # tested` (null when nothing to test); `survivors` names the weak/gamed
+  # predicates that stayed green under sabotage.
+  defp predicate_audit_json(nil), do: nil
+
+  defp predicate_audit_json(audit) do
+    %{
+      tested: audit.tested,
+      constrained: audit.constrained,
+      survived: audit.survived,
+      sensitivity: audit.sensitivity,
+      survivors: ReadModel.audit_survivors(audit),
+      sampled_at: status_timestamp(audit.sampled_at)
+    }
   end
 
   # The `status --json` result object for a PROPOSAL (T15.5): its lifecycle state,
