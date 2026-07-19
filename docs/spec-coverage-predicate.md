@@ -15,7 +15,12 @@ only a library function usable from tests).
 
 1. **Scan the surface.** `Kazi.Reconcile.SurfaceScanner` inventories the
    workspace's public surface (exported `def`s as `Module.fun/arity`, Mix tasks as
-   `mix <task>`).
+   `mix <task>`). `mix.exs` is scanned too, but a `Mixfile`'s `Mix.Project`
+   behaviour callbacks (`project/0`, `application/0`, `cli/0`) are excluded by
+   default — they are universal build configuration, not product surface, and
+   would otherwise be spec noise on discovery goals. A project's own
+   `Mix.Tasks.*` task modules and any custom public helper it defines in `mix.exs`
+   stay in scope. No `allow_list` entry is needed for this boilerplate.
 2. **Read the specs.** The `.feature` files selected by the `features` glob are
    parsed into Scenarios.
 3. **Match.** A surface element is **covered** when a Scenario's name or steps
