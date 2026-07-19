@@ -81,8 +81,12 @@ defmodule Kazi.Daemon.VelocityTickerTest do
            collect_fun: &real_run/1}
         )
 
-      # The interval fires collection; the fixture dir has two sessions.
-      wait_until(fn -> length(rows()) == 2 end)
+      # The interval fires collection; the fixture dir has two sessions. #1595:
+      # the pass now runs in an isolated child, so wait for the ticker to have
+      # ADOPTED the pass result (last_session_count), which also guarantees the
+      # rows were written.
+      wait_until(fn -> VelocityTicker.status(pid).last_session_count == 2 end)
+      assert length(rows()) == 2
 
       status = VelocityTicker.status(pid)
       assert status.enabled
@@ -484,6 +488,89 @@ defmodule Kazi.Daemon.VelocityTickerTest do
         )
 
       assert VelocityTicker.status(pid).workspaces == ["/a", "/b"]
+    end
+  end
+
+  describe "the periodic tick never wedges the ticker (#1595)" do
+    test "a pass that hangs forever does NOT block :status (the alive-but-deaf wedge)",
+         %{state_dir: state_dir} do
+      System.put_env("KAZI_VELOCITY_COLLECTOR", "1")
+      test_pid = self()
+
+      # A collection pass that never returns — the #1595 live wedge (a session
+      # transcript scan that hung on the first tick). Pre-fix this ran INLINE in
+      # handle_info(:collect), wedging the ticker so every GenServer.call(:status)
+      # stalled to the 5s call timeout (alive-but-deaf).
+      hanging = fn _opts ->
+        send(test_pid, :pass_started)
+        Process.sleep(:infinity)
+      end
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_hang,
+           interval_ms: 20,
+           collect_timeout_ms: 300,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: hanging}
+        )
+
+      # The timer fired and started the (hung) pass in the isolated child.
+      assert_receive :pass_started, 1_000
+
+      # CRITICAL: :status must answer PROMPTLY while the pass is hung. If the pass
+      # ran inline the ticker would be stuck and this call would only return after
+      # the 5s GenServer.call timeout (via status/1's catch). Answering well under
+      # that bound proves the mainloop is free.
+      task = Task.async(fn -> VelocityTicker.status(pid) end)
+      assert {:ok, status} = Task.yield(task, 1_000) || Task.shutdown(task)
+      assert status.enabled
+      # The hung pass recorded nothing (it never completed).
+      assert status.last_run_at == nil
+      assert Process.alive?(pid)
+    end
+
+    test "a hung pass is killed at the deadline and the ticker keeps serving + recovers",
+         %{state_dir: state_dir} do
+      System.put_env("KAZI_VELOCITY_COLLECTOR", "1")
+      test_pid = self()
+
+      # First pass hangs; later passes run a normal collector. A single-shot
+      # long interval + explicit collect_now would not exercise the timer-kill, so
+      # use a short interval and swap behaviour after the first (hung) pass.
+      counter = :counters.new(1, [])
+
+      collect_fun = fn opts ->
+        n = :counters.get(counter, 1)
+        :counters.add(counter, 1, 1)
+
+        if n == 0 do
+          send(test_pid, :hung_pass_started)
+          Process.sleep(:infinity)
+        else
+          real_run(opts)
+        end
+      end
+
+      pid =
+        start_supervised!(
+          {VelocityTicker,
+           name: :velticker_kill_recover,
+           interval_ms: 40,
+           collect_timeout_ms: 120,
+           dir: @fixtures,
+           state_dir: state_dir,
+           collect_fun: collect_fun}
+        )
+
+      assert_receive :hung_pass_started, 1_000
+      # The ticker stays alive and responsive while the first pass hangs, then the
+      # deadline kills it and a later interval runs a clean pass that records rows.
+      assert Process.alive?(pid)
+      wait_until(fn -> VelocityTicker.status(pid).last_session_count == 2 end)
+      assert length(rows()) == 2
     end
   end
 
