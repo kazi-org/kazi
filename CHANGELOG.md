@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.250.1](https://github.com/kazi-org/kazi/compare/v1.250.0...v1.250.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **daemon:** refuse-to-serve via failing child, not init raise ([#1504](https://github.com/kazi-org/kazi/issues/1504)) ([3da4e01](https://github.com/kazi-org/kazi/commit/3da4e01e9c3d436a1fc0d4ff2eeec35825c45dc3))
+* **daemon:** start+migrate Kazi.Repo on standalone boot ([#1504](https://github.com/kazi-org/kazi/issues/1504)) ([0b79233](https://github.com/kazi-org/kazi/commit/0b79233232301588e0cee0d7300b3d0b779156ae))
+* **daemon:** trap the boot so a failed start returns {:error}, not a crash ([#1504](https://github.com/kazi-org/kazi/issues/1504)) ([8861871](https://github.com/kazi-org/kazi/commit/88618716f4d94e2964887a3034786f90a021aadd))
+
 ## [1.250.0](https://github.com/kazi-org/kazi/compare/v1.249.0...v1.250.0) (2026-07-19)
 
 
