@@ -51,6 +51,32 @@ centered, `padding: 0 28px`. Three stacked regions plus a pinned footer:
   last poll tick (a glance, not a wall clock — no per-second client JS, keeping
   the page build-free and tests hermetic). The fleet-count / state filters no
   longer live here — direction B (T63.6) folds them into the FLEET header (below).
+  The topbar also carries the **operator/debug mode toggle** (`#mc-mode`, a
+  `.segmented .modetoggle` of `OPERATOR` / `DEBUG`; `data-mode` reflects the
+  active mode) — see "Operator/debug mode split" below.
+
+## Operator/debug mode split (ADR-0078, T63.7)
+
+Mission Control renders in one of two modes, keyed off the URL query param
+`?debug=1` (canonical; its absence is the default **operator** view). The
+default is deliberately calm — topbar, NEEDS ATTENTION, FLEET, PLANNED — with
+the three EXPERT surfaces absent from the DOM. **Debug** mode additionally
+renders:
+
+- a **debug nav** (`#mc-debug-nav`) linking the three full expert pages —
+  `#mc-debug-dag` → `/dag`, `#mc-debug-leases` → `/leases` (lease map),
+  `#mc-debug-events` → `/events`;
+- the inline **SESSIONS** rail (`#mc-sessions`, lease presence);
+- the **EVENT RIVER** footer (`#mc-event-river`).
+
+The toggle is a `<.link patch>` pair, so switching modes patches the URL param
+without remounting. The choice persists **per browser** via `localStorage`
+(`kazi:mc-debug`), mirrored from the URL by the `McDebug` LiveView JS hook
+(wired into the LiveSocket in the root layout): the hook writes the store on
+every mode change and, on a bare `/` visit, restores a stored debug preference
+by asking the server to patch the param back in. The URL stays canonical (so
+the first server render is already correct and a shared link carries its mode);
+`localStorage` only makes a bare visit sticky.
 
 - **NEEDS ATTENTION** (`#mc-attention`, rendered only when the queue is
   non-empty): a `.section-label` + a 3-column grid (`.attnrow`) of **alert
@@ -89,11 +115,11 @@ centered, `padding: 0 28px`. Three stacked regions plus a pinned footer:
   `#mission-control-filtered-empty` (an honest "clear the filters" message)
   rather than the no-runs empty state.
 
-- **EVENT RIVER** (`.river` footer, top hairline): a `.section-label` + a
-  masked marquee ticker (`.ticker`, 48s linear scroll, span duplicated for a
-  seamless loop) of `[HH:MM:SS] goal · event` entries — the newest fleet-wide
-  events (`Kazi.Sink.Events`, the same source `/events` reads). Empty →
-  `#mission-control-river-empty`.
+- **EVENT RIVER** (`#mc-event-river` `.river` footer, top hairline; **debug mode
+  only** — ADR-0078): a `.section-label` + a masked marquee ticker (`.ticker`,
+  48s linear scroll, span duplicated for a seamless loop) of `[HH:MM:SS] goal ·
+  event` entries — the newest fleet-wide events (`Kazi.Sink.Events`, the same
+  source `/events` reads). Empty → `#mission-control-river-empty`.
 
 ## Fleet cards
 
