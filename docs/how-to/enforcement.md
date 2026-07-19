@@ -116,6 +116,65 @@ keeps its real score — so a genuine convergence is never blocked; only the *pr
 view* the stuck detector reads is downgraded. The flagged events surface in `--json`
 (below) as `diff_gaming` entries.
 
+## Sealed predicates — cryptographic tamper detection (the `[seal]` block, ADR-0080)
+
+The read-only lease (§2) is **advisory**: a write to a `read_only_path` is flagged
+as a `read_only_write` event, but the run continues and can still report
+`converged`. **Sealing** is the layer that makes tampering with the acceptance
+contract **fatal**. It is the enforcement layer's teeth.
+
+Declare the files whose CONTENT is part of the acceptance bar in a `[seal]` block:
+
+```toml
+[seal]
+enabled = true                       # default true; false fully opts out
+sealed_inputs = [
+  "checks/pixel_manifest.toml",      # threshold manifests
+  "checks/reference/**/*.png",       # reference images (globs allowed)
+  "checks/selftest_fixtures",        # a directory seals its whole tree
+]
+mutable_inputs = [                   # subtractive opt-out (see below)
+  "checks/reference/regenerated_baseline.png",
+]
+```
+
+At run start kazi content-hashes (SHA-256) the goal-file plus every sealed input.
+Before every observe pass it re-hashes; the FIRST mismatch terminates the run in
+a distinct `tampered` status (never `converged`, exit non-zero), with the
+offending file named in `tampered_file` (`{ path, change }` in `--json`, a
+`TAMPERED` line in the human report). A converging worker that loosens its own
+threshold manifest to reach green can no longer get away with it — the run is
+void, not green.
+
+**The goal-file itself is always implicitly sealed** whenever sealing is enabled,
+even with no `[seal]` block — so every goal already gets "the declared bar cannot
+be edited mid-run" for free. This is fully backward-compatible: a goal-file with
+no `[seal]` block seals only its own goal-file.
+
+**Opt-outs — two levers for two legitimate cases:**
+
+- **`mutable_inputs`** (subtractive) — a path excluded from the seal even if a
+  `sealed_inputs` glob matches it. Use it for an input the goal legitimately
+  **regenerates** while converging (e.g. a ratchet that rewrites one golden
+  baseline). The rest of the sealed tree stays sealed.
+- **`enabled = false`** (whole-run) — disables sealing entirely, INCLUDING the
+  implicit goal-file seal. Use it for the rare self-modifying / standing goal that
+  rewrites its own contract by design (e.g. the doc-lifecycle standing goal). The
+  goal-file cannot be carved out with `mutable_inputs` — "the bar is mutable" is
+  always a single, greppable, all-or-nothing declaration.
+
+**Sealing vs the read-only lease.** They are orthogonal and compose; a path may be
+in both.
+
+| | `[enforcement] read_only_paths` (§2) | `[seal] sealed_inputs` |
+|---|---|---|
+| Layer | advisory pathing | cryptographic detection |
+| Checked | once per dispatch | every observe pass |
+| On violation | flag a `read_only_write` event, run continues | terminate `tampered`, run void |
+| Scope | the agent's write lease | acceptance-contract immutability |
+
+See ADR-0080 for the full rationale and manifest format.
+
 ## Role-scoped path policy (scenario predicates, ADR-0064)
 
 A `scenario` predicate (see [the scenario how-to](../scenario-predicate.md)) has TWO
