@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.264.2](https://github.com/kazi-org/kazi/compare/v1.264.1...v1.264.2) (2026-07-19)
+
+
+### Bug Fixes
+
+* **bus:** roster-gate board attention entries ([#1567](https://github.com/kazi-org/kazi/issues/1567)) ([118d499](https://github.com/kazi-org/kazi/commit/118d499e59880595b7b8ad1497d69d13fa08cad1))
+
 ## [1.264.1](https://github.com/kazi-org/kazi/compare/v1.264.0...v1.264.1) (2026-07-19)
 
 
