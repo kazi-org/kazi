@@ -86,6 +86,10 @@ error, it is "safe to upgrade."
     { "id": "live", "verdict": "fail" }
   ],
   "first_pass_rate": { "total": 2, "first_pass": 1, "reworked": 1, "rate": 0.5 },
+  "predicate_audit": {
+    "tested": 3, "constrained": 2, "survived": 1, "sensitivity": 0.6667,
+    "survivors": ["weak-predicate"], "sampled_at": "2026-07-19T04:00:00.000000Z"
+  },
   "release_ref": "v2026.06.24-abc1234",
   "observed_at": "2026-06-24T03:25:31.118115Z",
   "landed": [
@@ -103,6 +107,7 @@ error, it is "safe to upgrade."
 | `iteration`      | integer          | The latest recorded 0-based iteration index. |
 | `predicates`     | array of objects | The predicate **vector** at the latest observation — the same `{ "id", "verdict" }` shape (sorted by `id`) as `apply --json`, including the optional ADR-0041 graded fields (`score`, `prior_score`, `direction`, `evidence`) when present. See [`run-result.md`](run-result.md#predicates--graded-fields-adr-0041). |
 | `first_pass_rate`| object \| null   | This goal's predicate first-pass rate (T68.9, #1501). `null` when unmeasurable. See [First-pass rate](#first-pass-rate-adr-t689-1501). |
+| `predicate_audit`| object \| null   | The goal's latest sampled predicate mutation audit (T68.9, #1501): `tested`/`constrained`/`survived` counts, `sensitivity` (`constrained / tested`, a 0.0–1.0 float or `null`), the `survivors` id list, and `sampled_at`. `null` when the goal has never been audited. See [`docs/predicate-audit.md`](../predicate-audit.md). |
 | `release_ref`    | string \| null   | The release ref recorded on the latest iteration (T3.3c), or `null`. |
 | `observed_at`    | string (ISO 8601)| When the latest iteration's predicates were evaluated. |
 | `landed`         | array of objects | **Optional** (T62.6, issue #1241). Present only when the run PERSISTED per-group landed refs — a `--parallel` run with `[integration] mode != none` that landed converged work. One entry per landed group, carrying the SAME `{branch, pr, merge_commit}` detail (T44.10 shape) the immediate `apply --parallel --json` collective output showed, so `kazi status` surfaces "what landed where" AFTER the run has exited. **Omitted entirely** for a run that landed nothing (a single-goal run, or `mode = none`), keeping the object byte-identical to the pre-T62.6 shape. |
@@ -148,7 +153,8 @@ iterations, or an empty first vector). On the single-`<ref>` `run` surface it is
 that goal's rate; on the no-`<ref>` `live_runs` surface it is the fleet-wide pool
 across every live run's goal, summing numerators and denominators
 (predicate-weighted, each distinct goal counted once). Additive: `schema_version`
-is unchanged (still `2`).
+is unchanged (still `2`). See [`docs/predicate-audit.md`](../predicate-audit.md)
+for the companion mutation-audit metric.
 
 ## Proposal status (`kind: "proposal"`)
 
