@@ -913,6 +913,48 @@ every connecting machine's `--nats-host` invocation. Running cross-machine
 without a token means the bus is unauthenticated on the LAN — anyone who can
 reach the port can read and post.
 
+## Running the daemon as a service (#1579)
+
+For an always-on bus, run `kazi daemon start` under an OS service manager. The
+canonical service templates are rendered by `Kazi.Daemon.LaunchAgent` (macOS
+launchd LaunchAgent + Linux systemd user unit) and **carry explicit high
+file-descriptor limits**, because this is a real production failure mode:
+
+> launchd starts a LaunchAgent with a **soft open-files limit of 256**. Each
+> `kazi bus who`/`join`/`daemon status` opens a control-socket connection; under
+> routine churn from a large `/apply --pool` fleet (~30 concurrent sessions
+> sharing one bus) the daemon exhausts 256 descriptors and every subsequent
+> `accept` fails with `:emfile` — the daemon is then **alive but deaf**, and
+> launchd's `KeepAlive` cannot recover a process that never exits.
+
+The launchd template therefore ships `SoftResourceLimits`/`HardResourceLimits`
+→ `NumberOfFiles` (8192 / 16384 by default); the systemd unit ships the
+equivalent `LimitNOFILE`. Install the LaunchAgent to
+`~/Library/LaunchAgents/run.kazi.bushost.plist` and load it with `launchctl
+bootstrap gui/$(id -u) <path>`. If the daemon ever goes alive-but-deaf, force a
+restart with:
+
+```
+launchctl kickstart -k gui/$(id -u)/run.kazi.bushost
+```
+
+## Daemon error taxonomy (#1579)
+
+A bus/daemon CLI call distinguishes these states, so a misleading error never
+sends an operator chasing the wrong fix:
+
+| State | How it is detected | CLI message |
+|---|---|---|
+| **no daemon** | no socket file at the path | `no daemon running -- start one with kazi daemon start` |
+| **socket present but not accepting** | socket file exists but a connect is refused, or a live socket never answers `ping` (the alive-but-deaf / `:emfile` wedge) | `daemon socket exists but is not accepting connections … force-restart it with launchctl kickstart -k …` |
+| **wedged / slow** | a call exceeded its hard deadline | `bus call timed out -- the daemon or its NATS connection may be wedged …` |
+| **version conflict** | starting when an OLDER daemon still holds the socket | `daemon already running: the socket is held by vsn X, this binary is vsn Y … restart it with kazi daemon restart` |
+
+The version-conflict message names **both** the running daemon's version and the
+starting binary's, plus the remedy — an old daemon still bound to the socket when
+a newer `kazi` starts is the exact case where the stale process must be
+restarted first.
+
 ## MCP tools
 
 The same verbs are exposed through `kazi mcp` (ADR-0044) so an MCP-speaking
