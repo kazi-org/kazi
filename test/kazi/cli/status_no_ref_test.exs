@@ -15,6 +15,7 @@ defmodule Kazi.CLI.StatusNoRefTest do
 
   import ExUnit.CaptureIO
 
+  alias Kazi.{PredicateResult, PredicateVector, ReadModel}
   alias Kazi.ReadModel.{Run, RunRegistry}
   alias Kazi.Repo
 
@@ -68,6 +69,53 @@ defmodule Kazi.CLI.StatusNoRefTest do
       assert payload["kind"] == "live_runs"
       assert payload["count"] == 0
       assert payload["runs"] == []
+      # T68.9 (#1501): no live run to pool -> null fleet first-pass rate.
+      assert Map.has_key?(payload, "first_pass_rate")
+      assert payload["first_pass_rate"] == nil
+    end
+
+    test "pools the fleet first-pass rate across live runs' goals (T68.9, #1501)" do
+      # Two live runs on two goals; each goal's FIRST iteration mixes green/red.
+      for {goal, run_id} <- [{"goal-a", "run-a"}, {"goal-b", "run-b"}] do
+        assert {:ok, _} = RunRegistry.start(run_attrs(%{goal_ref: goal, run_id: run_id}))
+      end
+
+      # goal-a: 2/3 green on first observation.
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "goal-a",
+          iteration_index: 0,
+          predicate_vector:
+            PredicateVector.new(%{
+              x: PredicateResult.pass(),
+              y: PredicateResult.pass(),
+              z: PredicateResult.fail()
+            }),
+          converged: false
+        })
+
+      # goal-b: 0/1 green on first observation.
+      {:ok, _} =
+        ReadModel.record_iteration(%{
+          goal_ref: "goal-b",
+          iteration_index: 0,
+          predicate_vector: PredicateVector.new(%{w: PredicateResult.fail()}),
+          converged: false
+        })
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["status", "--json"]) == 0
+        end)
+
+      assert {:ok, payload} = Jason.decode(String.trim(out))
+      # Predicate-weighted pool: (2+0) first-pass of (3+1) total = 2/4 = 0.5.
+      assert payload["first_pass_rate"] == %{
+               "total" => 4,
+               "first_pass" => 2,
+               "reworked" => 2,
+               "rate" => 0.5
+             }
     end
 
     test "a fresh-heartbeat running run is included" do

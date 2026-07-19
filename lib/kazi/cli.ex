@@ -74,6 +74,7 @@ defmodule Kazi.CLI do
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.ReadModel.ProposedMemory
   alias Kazi.ReadModel.RunRegistry
+  alias Kazi.Reconcile.FirstPassRate
   alias Kazi.Reconcile.GherkinImporter
   alias Kazi.Teach.InstallHooks
   alias Kazi.Teach.InstallSkill
@@ -4301,8 +4302,12 @@ defmodule Kazi.CLI do
   # inventing a new one.
   defp report_live_runs(opts) do
     live_runs = RunRegistry.list_live()
+    # T68.9 (#1501): the fleet-wide first-pass rate — pooled across every live
+    # run's goal, a predicate-weighted read of JIT authoring quality across the
+    # board. Nil when no live run has measurable iteration history.
+    first_pass = live_runs_first_pass(live_runs)
 
-    emit(json?(opts), live_runs_json(live_runs), fn ->
+    emit(json?(opts), live_runs_json(live_runs, first_pass), fn ->
       case live_runs do
         [] ->
           IO.puts("no LIVE runs (safe to install/upgrade kazi)")
@@ -4316,22 +4321,39 @@ defmodule Kazi.CLI do
                 "heartbeat_age_s=#{heartbeat_age_seconds(run)}"
             )
           end)
+
+          print_status_first_pass(first_pass)
       end
     end)
 
     0
   end
 
+  # T68.9 (#1501): pool the first-pass summaries of every live run's goal into
+  # one fleet figure. Distinct goal_refs only — two live runs sharing a goal
+  # read the same iteration history, so counting it once avoids double-weighting.
+  defp live_runs_first_pass(live_runs) do
+    live_runs
+    |> Enum.map(& &1.goal_ref)
+    |> Enum.uniq()
+    |> Enum.map(fn goal_ref ->
+      FirstPassRate.from_history(ReadModel.iteration_history(goal_ref))
+    end)
+    |> FirstPassRate.aggregate()
+  end
+
   # The `status --json` result for the no-ref live-run list (issue #971): an
   # array of `{goal_ref, run_id, status, heartbeat_age_s}`, `schema_version`-
   # tagged like every other --json surface. `kind: "live_runs"` distinguishes it
   # from the single-ref run/proposal status shapes.
-  defp live_runs_json(live_runs) do
+  defp live_runs_json(live_runs, first_pass) do
     %{
       schema_version: @run_schema_version,
       kind: "live_runs",
       count: length(live_runs),
-      runs: Enum.map(live_runs, &live_run_json/1)
+      runs: Enum.map(live_runs, &live_run_json/1),
+      # T68.9 (#1501): the pooled fleet first-pass rate (null when unmeasurable).
+      first_pass_rate: first_pass_json(first_pass)
     }
   end
 
@@ -4360,13 +4382,18 @@ defmodule Kazi.CLI do
     # a run that never landed (e.g. a single-goal run) — the surface then stays
     # byte-identical to the pre-T62.6 shape.
     landed = ReadModel.landed_refs(ref)
+    # T68.9 (#1501): the predicate first-pass rate — the fraction of authored
+    # predicates green on the FIRST observation vs. needing reconcile-loop
+    # rework — computed from this goal's persisted iteration history.
+    first_pass = FirstPassRate.from_history(ReadModel.iteration_history(ref))
 
-    emit(json?(opts), run_status_json(ref, iteration, vector, landed), fn ->
+    emit(json?(opts), run_status_json(ref, iteration, vector, landed, first_pass), fn ->
       IO.puts("STATUS     ref=#{ref} kind=run")
       IO.puts("converged: #{iteration.converged}")
       IO.puts("iteration: #{iteration.iteration_index}")
       maybe_status_release(iteration.release_ref)
       IO.puts("observed:  #{iteration.observed_at}")
+      print_status_first_pass(first_pass)
       IO.puts("\npredicate vector:")
       IO.puts(format_vector(vector))
       print_status_landed(landed)
@@ -4374,6 +4401,19 @@ defmodule Kazi.CLI do
 
     0
   end
+
+  # T68.9 (#1501): the human first-pass line, printed only when there is
+  # iteration history to measure. Nothing printed for an unmeasurable goal so
+  # the human block stays byte-identical to the pre-T68.9 shape there.
+  defp print_status_first_pass(nil), do: :ok
+
+  defp print_status_first_pass(%{total: total, first_pass: first_pass, rate: rate}) do
+    IO.puts(
+      "first-pass: #{first_pass}/#{total} (#{format_rate(rate)}) predicates green on first observation"
+    )
+  end
+
+  defp format_rate(rate) when is_float(rate), do: "#{round(rate * 100)}%"
 
   # T62.6: the persisted per-group landed refs appended to a run's human status
   # block — one line per group, `<partition-id>: landed=<branch> pr=<pr>
@@ -4430,7 +4470,7 @@ defmodule Kazi.CLI do
   # predicate VECTOR (the same `{id, verdict}` shape as `run --json`), the last
   # iteration index, the release ref, and the observation timestamp — plus
   # `schema_version`. `kind: "run"` distinguishes it from a proposal status.
-  defp run_status_json(ref, iteration, vector, landed) do
+  defp run_status_json(ref, iteration, vector, landed, first_pass) do
     base = %{
       schema_version: @run_schema_version,
       kind: "run",
@@ -4439,6 +4479,10 @@ defmodule Kazi.CLI do
       converged: iteration.converged,
       iteration: iteration.iteration_index,
       predicates: predicate_vector_json(vector),
+      # T68.9 (#1501): the first-pass rate object (null when unmeasurable — no
+      # iteration history / empty vector), a stable key an orchestrator reads to
+      # judge JIT authoring quality without re-deriving it.
+      first_pass_rate: first_pass_json(first_pass),
       release_ref: iteration.release_ref,
       observed_at: status_timestamp(iteration.observed_at)
     }
@@ -4461,6 +4505,15 @@ defmodule Kazi.CLI do
     |> maybe_put_ref(:branch, row.branch)
     |> maybe_put_ref(:pr, row.pr)
     |> maybe_put_ref(:merge_commit, row.merge_commit)
+  end
+
+  # T68.9 (#1501): the first-pass-rate object on a --json status surface, or
+  # `nil` (JSON null) when there is nothing to measure. `rate` is a 0.0–1.0
+  # float; `total`/`first_pass`/`reworked` are the counts behind it.
+  defp first_pass_json(nil), do: nil
+
+  defp first_pass_json(%{total: total, first_pass: first_pass, reworked: reworked, rate: rate}) do
+    %{total: total, first_pass: first_pass, reworked: reworked, rate: rate}
   end
 
   # The `status --json` result object for a PROPOSAL (T15.5): its lifecycle state,
