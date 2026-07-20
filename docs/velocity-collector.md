@@ -144,6 +144,38 @@ keeps a run-lifetime `passes_killed` counter (with `last_kill_at`), surfaced in
 with no dependence on log delivery. In steady state the bounded scan above keeps the
 counter at 0.
 
+**Tick-lifecycle counters (#1606, tick-never-fires).** A later live observation
+found a subtler failure: `enabled: true` with `passes_killed: 0` **and**
+`last_run_at: null` after several tick windows — the pass never ran, and neither the
+kill counter nor the run fields said why (`enabled` is read from the env at call
+time, so it does not even prove the ticker armed its timer). The ticker now exposes
+the full tick lifecycle in `kazi daemon status --json`, so the next observation is
+conclusive rather than ambiguous:
+
+| field | meaning |
+|---|---|
+| `interval_ms` | the interval the ticker armed at boot (independent of the env-read `enabled`) |
+| `ticks_fired` | periodic ticks that actually spawned a pass — **0 means the timer never fired** (an arming/boot fault) |
+| `passes_completed` | passes that returned results (a healthy collector) |
+| `passes_killed` / `last_kill_at` | passes killed at the `collect_timeout` deadline |
+| `passes_crashed` | passes that went DOWN below their guards without completing and without a deadline kill — previously a **silent** reset, now counted and logged at `:warning` |
+
+The human `velocity collector:` line surfaces the first applicable warning: timer
+never fired > passes crashing > passes killed. The ticker also logs an arming line
+at boot (`velocity ticker armed — first tick in <n>ms`) so the LaunchAgent log shows
+it armed.
+
+**`KAZI_VELOCITY_INTERVAL_S`** (seconds) is read directly at ticker init, mirroring
+`KAZI_VELOCITY_WORKSPACES`/`KAZI_VELOCITY_COLLECTOR`: it wins over the app-env
+`interval_s`, so it is immune to the release-binary boot ordering (the supervision
+tree boots before `config/runtime.exs` applies) AND lets an operator arm a short
+interval to confirm the tick fires on the release binary without waiting the full
+default 300s.
+
+```bash
+KAZI_VELOCITY_INTERVAL_S=10 KAZI_VELOCITY_COLLECTOR=1 kazi daemon start
+```
+
 ## The privacy contract — what is and is NOT collected
 
 The collector's payload is a **closed whitelist** of aggregate counters, defined
