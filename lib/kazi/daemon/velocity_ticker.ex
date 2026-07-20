@@ -104,14 +104,29 @@ defmodule Kazi.Daemon.VelocityTicker do
   (`{workspaces_scanned, events_written, at}` or `nil` before the first pass), so
   `kazi daemon status` can show the operator both halves are alive.
 
-  It ALSO reports `passes_killed` (+ `last_kill_at`): a run-lifetime count of
-  passes killed at the `collect_timeout_ms` deadline (#1606). This makes a pass
-  that dies every tick OBSERVABLE from `kazi daemon status` alone — the live #1606
-  gap was that the `:error` kill log did not reach the LaunchAgent's log file, so
-  a silently-killed pass looked identical to "no run yet". A status counter that
-  does not depend on log delivery closes that gap; the bounded transcript scan
-  (`SessionCollector`, `:max_bytes`) then keeps a real pass from being killed at
-  all so the counter stays at 0 in steady state.
+  It ALSO reports the tick-lifecycle counters (#1606), which make a
+  silently-non-advancing collector diagnosable from `kazi daemon status` alone —
+  no dependence on any log reaching the LaunchAgent log file (the live #1606 gap):
+
+    * `interval_ms` — the armed tick interval (proves what the ticker resolved at
+      boot, independent of the env-read `enabled` field).
+    * `ticks_fired` — periodic ticks that actually spawned a pass. **0 live proves
+      the timer never fired** (an arming/boot fault), distinguishing it from a
+      timer that fires but whose pass dies.
+    * `passes_completed` — passes that returned deltas (a healthy collector).
+    * `passes_killed` (+ `last_kill_at`) — passes killed at the `collect_timeout_ms`
+      deadline (a scan overrunning the bound; the bounded `SessionCollector` scan
+      keeps this at 0 in steady state).
+    * `passes_crashed` — passes that went DOWN below their guards without
+      completing and without a deadline kill. Previously a SILENT reset that looked
+      identical to "no run yet" AND to "no tick"; now counted and logged.
+
+  Together these turn the ambiguous live signature (`enabled: true` from the
+  call-time env read, everything else nil/0) into a specific diagnosis on the next
+  observation. `KAZI_VELOCITY_INTERVAL_S` (read at init, mirroring
+  `KAZI_VELOCITY_WORKSPACES`/`KAZI_VELOCITY_COLLECTOR`) lets the operator arm a
+  short interval on the release binary to confirm the tick fires without waiting a
+  full default interval.
   """
 
   use GenServer
@@ -181,8 +196,28 @@ defmodule Kazi.Daemon.VelocityTicker do
       # log file (the live #1606 gap: no kill log appeared even though the deadline
       # elapsed). `last_kill_at` timestamps the most recent kill.
       passes_killed: 0,
-      last_kill_at: nil
+      last_kill_at: nil,
+      # #1606 (tick-never-fires): the tick lifecycle counters that make the live
+      # "status shows enabled but nothing ever runs" state DIAGNOSABLE without a
+      # log file. `ticks_fired` counts periodic ticks that actually spawned a pass
+      # (so ticks_fired == 0 live proves the timer never fired — an arming/boot
+      # problem — vs > 0 which proves the timer fires and the fault is downstream);
+      # `passes_completed` counts passes that returned deltas; `passes_crashed`
+      # counts passes that went DOWN without completing and without a timeout kill
+      # — previously a SILENT reset, indistinguishable from "no tick".
+      ticks_fired: 0,
+      passes_completed: 0,
+      passes_crashed: 0
     }
+
+    # #1606: log the arming at boot so the LaunchAgent log shows the ticker armed
+    # its first tick (and at what interval) — an armed ticker that never runs is
+    # then distinguishable from one that never armed. Info, so it survives the
+    # default log level.
+    Logger.info(
+      "kazi daemon: velocity ticker armed — first tick in #{state.interval_ms}ms " <>
+        "(enabled=#{safe_enabled?()})"
+    )
 
     schedule(state.interval_ms)
     {:ok, state}
@@ -200,7 +235,11 @@ defmodule Kazi.Daemon.VelocityTicker do
           enabled: boolean(),
           last_run_at: DateTime.t() | nil,
           last_session_count: non_neg_integer() | nil,
+          interval_ms: pos_integer() | nil,
+          ticks_fired: non_neg_integer(),
+          passes_completed: non_neg_integer(),
           passes_killed: non_neg_integer(),
+          passes_crashed: non_neg_integer(),
           last_kill_at: DateTime.t() | nil,
           last_projection:
             %{
@@ -218,7 +257,11 @@ defmodule Kazi.Daemon.VelocityTicker do
         enabled: safe_enabled?(),
         last_run_at: nil,
         last_session_count: nil,
+        interval_ms: nil,
+        ticks_fired: 0,
+        passes_completed: 0,
         passes_killed: 0,
+        passes_crashed: 0,
         last_kill_at: nil,
         last_projection: nil
       }
@@ -241,7 +284,11 @@ defmodule Kazi.Daemon.VelocityTicker do
       workspaces: state.workspaces,
       last_run_at: state.last_run_at,
       last_session_count: state.last_session_count,
+      interval_ms: state.interval_ms,
+      ticks_fired: state.ticks_fired,
+      passes_completed: state.passes_completed,
       passes_killed: state.passes_killed,
+      passes_crashed: state.passes_crashed,
       last_kill_at: state.last_kill_at,
       last_projection: state.last_projection
     }
@@ -269,7 +316,10 @@ defmodule Kazi.Daemon.VelocityTicker do
     {pid, ref} = spawn_monitor(fn -> send(parent, {:pass_done, self(), run_pass(state)}) end)
     Process.send_after(self(), {:pass_timeout, ref}, state.collect_timeout_ms)
     schedule(state.interval_ms)
-    {:noreply, %{state | pass: %{pid: pid, ref: ref}}}
+    # #1606: a tick that actually spawned a pass. `ticks_fired` is the boot-path
+    # proof — if it stays 0 live, the timer never fired (arming/boot), not a
+    # downstream pass fault.
+    {:noreply, %{state | pass: %{pid: pid, ref: ref}, ticks_fired: state.ticks_fired + 1}}
   end
 
   def handle_info(:collect, state) do
@@ -285,14 +335,28 @@ defmodule Kazi.Daemon.VelocityTicker do
   # only fields a pass mutates), demonitor, and go idle.
   def handle_info({:pass_done, pid, deltas}, %{pass: %{pid: pid, ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
+    state = %{state | passes_completed: state.passes_completed + 1}
     {:noreply, apply_pass_deltas(state, deltas)}
   end
 
-  # The pass process went down WITHOUT delivering a result. `run_pass/1` is fully
-  # guarded (a collector error is caught, not raised), so this is the killed-on-
-  # timeout DOWN or an unexpected crash — either way go idle, never wedged.
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{pass: %{ref: ref}} = state) do
-    {:noreply, %{state | pass: nil}}
+  # The pass process went DOWN without delivering a result AND without the timeout
+  # kill having flushed this monitor (the kill path demonitors [:flush], so a DOWN
+  # that still reaches here is an UNEXPECTED CRASH, not the deadline kill). This was
+  # previously a silent reset — a crashed pass looked identical to "no run yet" AND
+  # to "no tick" (passes_killed stays 0, last_run stays nil). Count + log it LOUD so
+  # a pass that dies every tick is diagnosable (#1606). `run_pass/1` is fully
+  # guarded, so reaching here means the child died below the guards (e.g. killed by
+  # the OS, an exit signal) — go idle, never wedged.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{pass: %{ref: ref}} = state) do
+    crashed = state.passes_crashed + 1
+
+    Logger.warning(
+      "kazi daemon: velocity pass went DOWN without completing (#{inspect(reason)}); " <>
+        "not a deadline kill — the pass crashed below its guards " <>
+        "(#{crashed} crash(es) so far). velocity data will not advance this tick."
+    )
+
+    {:noreply, %{state | pass: nil, passes_crashed: crashed}}
   end
 
   # A pass overran its hard deadline: kill it LOUD (a hung collector must never
@@ -441,8 +505,32 @@ defmodule Kazi.Daemon.VelocityTicker do
     _, _ -> false
   end
 
+  # The collection interval in seconds. `KAZI_VELOCITY_INTERVAL_S` is read directly
+  # at init and wins, mirroring `KAZI_VELOCITY_WORKSPACES` / `KAZI_VELOCITY_COLLECTOR`
+  # (T67.6 gap 4 / #1571): on the Burrito release binary the daemon supervision tree
+  # (this ticker's `init/1`) boots BEFORE the `config/runtime.exs` provider applies,
+  # so a provider-set app-env value is not yet visible when the ticker arms its first
+  # tick — reading the env at call time is immune to that ordering AND gives the
+  # operator a runtime lever (e.g. a short interval to confirm the tick fires on the
+  # release binary). Unset falls back to app-env, then the compile-time default.
   defp configured_interval_s do
-    Application.get_env(:kazi, :velocity_collector, [])[:interval_s] || @default_interval_s
+    case System.get_env("KAZI_VELOCITY_INTERVAL_S") do
+      value when is_binary(value) ->
+        case Integer.parse(String.trim(value)) do
+          {s, ""} when s > 0 -> s
+          _ -> app_env_interval_s()
+        end
+
+      _ ->
+        app_env_interval_s()
+    end
+  end
+
+  defp app_env_interval_s do
+    case Application.get_env(:kazi, :velocity_collector, [])[:interval_s] do
+      s when is_integer(s) and s > 0 -> s
+      _ -> @default_interval_s
+    end
   end
 
   # #1595: the hard deadline a single collection+projection pass may run before it
