@@ -76,6 +76,11 @@ defmodule Kazi.Bus do
   @default_call_timeout_ms 15_000
   @watch_call_grace_ms 15_000
 
+  # #1606: the isolated connect+call worker does MORE than the call's own bound —
+  # it also establishes the connection — so its outer deadline is the call
+  # timeout plus this grace window for the connect itself.
+  @connect_grace_ms 5_000
+
   # The board's ephemeral fact consumer is deleted the moment its read
   # finishes; this threshold only bounds cleanup if that delete is ever missed
   # (e.g. a crash mid-board), so the server reaps the orphan quickly.
@@ -2047,20 +2052,79 @@ defmodule Kazi.Bus do
   defp connect_discovered(sock_path, fun, timeout_ms) do
     case Probe.ping(sock_path) do
       {:ok, %{"nats_port" => port} = pong} when is_integer(port) ->
-        with :ok <- check_protocol_skew(pong),
-             {:ok, conn} <- Gnat.start_link(discovered_connect_opts(pong, port)) do
-          try do
-            run(conn, fun, timeout_ms)
-          after
-            if Process.alive?(conn), do: Gnat.stop(conn)
-          end
-        else
-          {:error, {:daemon_protocol_skew, _vsn}} = skew_error -> skew_error
-          _other -> {:error, :no_daemon}
+        # The skew check is a pure map inspection (no network), so it stays here
+        # and keeps returning its own error verbatim.
+        with :ok <- check_protocol_skew(pong) do
+          connect_and_run(discovered_connect_opts(pong, port), fun, timeout_ms)
         end
 
       _no_reply ->
         {:error, :daemon_socket_unresponsive}
+    end
+  end
+
+  # #1606: connection establishment AND the call run in ONE isolated, monitored,
+  # UNLINKED worker.
+  #
+  # `Gnat.start_link/1` links the connection to whoever calls it. Establishing it
+  # on the CALLER's process therefore killed any caller that does not trap exits
+  # the moment a remote bus peer was unreachable — and it happens BEFORE `run/3`
+  # is entered, which is why un-linking `run/3`'s task (PR #1637) did not change
+  # the live failure at all: the pass never got that far. Live cost: the velocity
+  # collection pass (a bare `spawn_monitor`'d child) died every tick with
+  # `:ehostunreach`, so velocity data never advanced.
+  #
+  # Isolating the WHOLE path — discovery's connect, the call, and cleanup — means
+  # they degrade together and the caller only ever sees a value. This is
+  # deliberately broader than un-linking the one call we currently know about: we
+  # have been wrong twice about WHICH call links, so the fix targets the class
+  # rather than the line.
+  #
+  # Keeping `Gnat.start_link` INSIDE the worker is also deliberate: the connection
+  # stays linked to the WORKER, so killing the worker at the deadline reaps the
+  # connection with it — no leaked conns and no cleanup path to get wrong. The
+  # worker traps exits so a failed connect returns a VALUE it can classify
+  # (preserving the previous `{:error, :no_daemon}`) instead of dying before it
+  # can report; anything untrappable still degrades via the `:DOWN` clause.
+  @spec connect_and_run(map(), (Gnat.t() -> term()), timeout()) :: term()
+  defp connect_and_run(connect_opts, fun, timeout_ms) do
+    parent = self()
+    ref = make_ref()
+
+    {pid, mon} =
+      spawn_monitor(fn ->
+        Process.flag(:trap_exit, true)
+
+        result =
+          case Gnat.start_link(connect_opts) do
+            {:ok, conn} ->
+              try do
+                run(conn, fun, timeout_ms)
+              after
+                if Process.alive?(conn), do: Gnat.stop(conn)
+              end
+
+            _unreachable_or_refused ->
+              {:error, :no_daemon}
+          end
+
+        send(parent, {ref, result})
+      end)
+
+    receive do
+      {^ref, result} ->
+        Process.demonitor(mon, [:flush])
+        result
+
+      {:DOWN, ^mon, :process, ^pid, reason} ->
+        unavailable(reason)
+    after
+      # The worker does connect + call, so the outer bound is the call's own
+      # deadline plus a grace window for establishing the connection.
+      timeout_ms + @connect_grace_ms ->
+        Process.exit(pid, :kill)
+        Process.demonitor(mon, [:flush])
+        unavailable({:timeout, timeout_ms})
     end
   end
 
