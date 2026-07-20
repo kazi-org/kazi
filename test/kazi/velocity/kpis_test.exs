@@ -419,14 +419,44 @@ defmodule Kazi.Velocity.KpisTest do
       a = Enum.find(agents, &(&1.session_uuid == "agent-a"))
       b = Enum.find(agents, &(&1.session_uuid == "agent-b"))
 
-      # The agent WITH an attributed delivery still reports its real rate...
-      assert a.delivered_attribution == :ok
+      # The agent WITH an attributed delivery still reports its real numbers...
       assert a.delivered_count == 1
       assert a.delivered_per_day > 0
+      # ...but marked a FLOOR, because an unattributed delivery in the same
+      # window may also be theirs (#1651 follow-up).
+      assert a.delivered_attribution == :partial
 
       # ...in the SAME render where the one that cannot be measured says so.
       assert b.delivered_per_day == nil
       assert b.delivered_attribution == :unattributable
+    end
+
+    test "partial: a positive count beside unattributed deliveries is a FLOOR, not a measurement" do
+      seed_counters(%{session_uuid: "agent-a", machine: "m", message_count: 1})
+      seed_tick(%{merged_at: days_ago(1), session_uuid: "agent-a"})
+      seed_tick(%{merged_at: days_ago(2), session_uuid: nil})
+
+      [a] = Enum.filter(Kpis.compute(now: @now).per_agent, &(&1.session_uuid == "agent-a"))
+
+      # Real observations are kept — a floor is still built from what we saw.
+      assert a.delivered_count == 1
+      assert a.delivered_per_day > 0
+      # But flagged, so the render can say "≥" rather than assert exactness.
+      assert a.delivered_attribution == :partial
+    end
+
+    test "the floor qualifier DISAPPEARS once attribution is complete" do
+      seed_counters(%{session_uuid: "agent-a", machine: "m", message_count: 1})
+      # Every delivery in the window is attributed -> nothing unknown remains.
+      seed_tick(%{merged_at: days_ago(1), session_uuid: "agent-a"})
+      seed_tick(%{merged_at: days_ago(2), session_uuid: "agent-a"})
+
+      [a] = Enum.filter(Kpis.compute(now: @now).per_agent, &(&1.session_uuid == "agent-a"))
+
+      # This is the guard against ambient hedging: the qualifier must carry
+      # information, not become decoration an operator learns to ignore.
+      assert a.delivered_attribution == :ok
+      assert a.delivered_count == 2
     end
   end
 end
