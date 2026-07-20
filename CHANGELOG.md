@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.5](https://github.com/kazi-org/kazi/compare/v1.273.4...v1.273.5) (2026-07-20)
+
+
+### Bug Fixes
+
+* **read-model:** bound RunRegistry.list/0 so a contended writer can't hang the dashboard ([#1483](https://github.com/kazi-org/kazi/issues/1483)) ([fba7f4b](https://github.com/kazi-org/kazi/commit/fba7f4bc96399a1240c31fcd17b730ba302716e5))
+
 ## [1.273.4](https://github.com/kazi-org/kazi/compare/v1.273.3...v1.273.4) (2026-07-20)
 
 
