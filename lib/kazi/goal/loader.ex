@@ -1132,6 +1132,16 @@ defmodule Kazi.Goal.Loader do
   # empty/`mode = "none"` table both resolve to the SAME default map, a :none
   # goal is byte-identical to a goal-file with no `[integration]` block. Modeled
   # on the `[economy]`/`[memory]` handling above.
+  @doc """
+  Parses a string-keyed `[integration]` map into the `Kazi.Goal.integration`
+  shape — the SAME parser goal-file loading uses. Exposed so the proposal chain
+  (`Kazi.Authoring.parse_proposal/2`) honors an `"integration"` block with
+  identical validation rather than forking it (T45.11, #1620). `nil` yields the
+  `mode: :none` default; a malformed block fails loudly.
+  """
+  @spec parse_integration(map() | nil) :: {:ok, map()} | {:error, String.t()}
+  def parse_integration(integration), do: build_integration(integration)
+
   defp build_integration(nil), do: {:ok, Goal.default_integration()}
 
   defp build_integration(integration) when is_map(integration) do
