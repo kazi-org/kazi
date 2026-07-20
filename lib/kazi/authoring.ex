@@ -767,14 +767,31 @@ defmodule Kazi.Authoring do
   def parse_proposal(proposal, goal_id) do
     with {:ok, decoded} <- decode_proposal(proposal),
          map = unwrap_proposal(decoded),
-         {:ok, predicates} <- build_predicates(extract_predicates(map)) do
+         {:ok, predicates} <- build_predicates(extract_predicates(map)),
+         # T45.11 (#1620): honor an `"integration"` block so the single-goal
+         # proposal chain (plan -> approve -> apply) can LAND a PR, not just
+         # converge in a worktree. Parsed by the SAME `Kazi.Goal.Loader` parser
+         # goal-file loading uses (parity, not a fork); absent -> the mode `:none`
+         # default (byte-identical to before); malformed -> a loud invalid-proposal.
+         {:ok, integration} <- parse_proposal_integration(Map.get(map, "integration")) do
       {:ok,
        Goal.new(goal_id,
          name: optional_string(Map.get(map, "name")),
          mode: :create,
          predicates: predicates,
+         integration: integration,
          metadata: draft_metadata(Map.get(map, "rationale"))
        )}
+    end
+  end
+
+  # Reuse the goal-file `[integration]` parser, mapping its loud string error into
+  # the proposal chain's `{:invalid_proposal, reason}` shape so a bad integration
+  # block fails the draft exactly like a bad predicate does.
+  defp parse_proposal_integration(integration) do
+    case Kazi.Goal.Loader.parse_integration(integration) do
+      {:ok, parsed} -> {:ok, parsed}
+      {:error, reason} -> {:error, {:invalid_proposal, reason}}
     end
   end
 
@@ -1015,7 +1032,31 @@ defmodule Kazi.Authoring do
       "metadata" => stringify_keys(goal.metadata),
       "predicate" => predicates
     }
+    # T45.11 (#1620): round-trip the `[integration]` block through the persisted
+    # proposal, so an approved single-goal proposal that declared how to LAND
+    # actually lands on `kazi apply <proposal-ref>` (before this it was dropped
+    # here, defaulted to `:none`, and SerialLanding reported `:nothing_to_land`).
+    # A `:none`-mode goal omits the key -- byte-identical to the prior serialization.
+    |> put_integration(goal.integration)
   end
+
+  # Emit the `[integration]` table only for a landing goal; a `:none` (default)
+  # goal serializes exactly as before. The reserved keys are dropped when nil so a
+  # re-load is byte-stable, mirroring `serialize_group/1`.
+  defp put_integration(map, %{mode: :none}), do: map
+
+  defp put_integration(map, %{mode: mode} = integration) when is_atom(mode) do
+    table =
+      %{"mode" => Atom.to_string(mode)}
+      |> maybe_put("branch", integration[:branch])
+      |> maybe_put("branch_prefix", integration[:branch_prefix])
+      |> maybe_put("base", integration[:base])
+      |> maybe_put("commit_style", integration[:commit_style])
+
+    Map.put(map, "integration", table)
+  end
+
+  defp put_integration(map, _integration), do: map
 
   # A group as a [[group]] table. nil parent/budget are dropped so a re-load is
   # byte-stable (the loader treats an absent key the same as nil).
