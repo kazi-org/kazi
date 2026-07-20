@@ -371,4 +371,62 @@ defmodule Kazi.Velocity.KpisTest do
       assert velocity_terminal == 3
     end
   end
+
+  describe "per-agent delivered attribution (#1651)" do
+    # An agent's 0 is a MEASUREMENT only when attribution actually works for the
+    # window. Rendering "0.0 /day" over deliveries that carry no session_uuid
+    # asserts "this agent delivered nothing" when the truth is "we cannot tell" —
+    # the ADR-0046 fabricated-measurement failure this epic exists to prevent.
+
+    test "unattributable: deliveries exist but carry no session_uuid -> nil, never 0.0" do
+      seed_counters(%{session_uuid: "agent-a", machine: "m", message_count: 1})
+      # Deliveries in-window with NO session_uuid — the live shape on a
+      # trailer-stripped repo, where a git-derived tick has no goal_ref.
+      seed_tick(%{merged_at: days_ago(1), session_uuid: nil})
+      seed_tick(%{merged_at: days_ago(2), session_uuid: nil})
+
+      [agent] = Kpis.compute(now: @now).per_agent
+
+      # per_day asserted FIRST so a pre-fix run shows the fabricated value itself.
+      assert agent.delivered_per_day == nil
+      assert agent.delivered_count == nil
+      assert agent.delivered_attribution == :unattributable
+    end
+
+    test "honest zero: every delivery IS attributed, so an agent with none really delivered 0" do
+      seed_counters(%{session_uuid: "agent-a", machine: "m", message_count: 1})
+      seed_counters(%{session_uuid: "agent-b", machine: "m", message_count: 1})
+      # Fully attributed corpus: agent-a landed one, agent-b landed nothing.
+      seed_tick(%{merged_at: days_ago(1), session_uuid: "agent-a"})
+
+      agents = Kpis.compute(now: @now).per_agent
+      b = Enum.find(agents, &(&1.session_uuid == "agent-b"))
+
+      # Guards against over-correcting into "never show a zero" — this 0 is real.
+      assert b.delivered_attribution == :ok
+      assert b.delivered_count == 0
+      assert b.delivered_per_day == 0.0
+    end
+
+    test "MIXED: a partially-working join degrades per ROW, never collapsing to the worst case" do
+      seed_counters(%{session_uuid: "agent-a", machine: "m", message_count: 1})
+      seed_counters(%{session_uuid: "agent-b", machine: "m", message_count: 1})
+      # agent-a has an attributed delivery; a second delivery is unattributed.
+      seed_tick(%{merged_at: days_ago(1), session_uuid: "agent-a"})
+      seed_tick(%{merged_at: days_ago(2), session_uuid: nil})
+
+      agents = Kpis.compute(now: @now).per_agent
+      a = Enum.find(agents, &(&1.session_uuid == "agent-a"))
+      b = Enum.find(agents, &(&1.session_uuid == "agent-b"))
+
+      # The agent WITH an attributed delivery still reports its real rate...
+      assert a.delivered_attribution == :ok
+      assert a.delivered_count == 1
+      assert a.delivered_per_day > 0
+
+      # ...in the SAME render where the one that cannot be measured says so.
+      assert b.delivered_per_day == nil
+      assert b.delivered_attribution == :unattributable
+    end
+  end
 end
