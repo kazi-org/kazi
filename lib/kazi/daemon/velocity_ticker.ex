@@ -418,7 +418,11 @@ defmodule Kazi.Daemon.VelocityTicker do
     case result do
       {:ok, collected} when is_list(collected) ->
         {result,
-         %{state | last_run_at: DateTime.utc_now(), last_session_count: length(collected)}}
+         %{
+           state
+           | last_run_at: DateTime.utc_now(),
+             last_session_count: session_count(collected, state.last_session_count)
+         }}
 
       _disabled_or_other ->
         {result, state}
@@ -435,6 +439,20 @@ defmodule Kazi.Daemon.VelocityTicker do
 
       {{:error, :caught}, state}
   end
+
+  # The session count to REPORT after a pass. Since the bounded transcript scan
+  # (#1606, `SessionCollector` `:max_bytes`/stat-skip) a steady-state pass over
+  # transcripts that have not grown legitimately collects NOTHING — so taking
+  # `length(collected)` unconditionally would overwrite the real count with 0 on
+  # the very next tick, making `kazi daemon status` read "0 session(s)" forever on
+  # a perfectly healthy machine (and making anything that polls the count racy).
+  # A pass that collected nothing therefore KEEPS the last meaningful count; only
+  # the very first pass, with nothing to preserve, honestly reports 0. `last_run_at`
+  # still advances on every pass, so liveness stays visible.
+  @spec session_count([term()], non_neg_integer() | nil) :: non_neg_integer()
+  defp session_count([], nil), do: 0
+  defp session_count([], previous), do: previous
+  defp session_count(collected, _previous), do: length(collected)
 
   # T67.6 finding 2: project each configured workspace's delivery events after
   # session collection. Independent of collection and per-workspace crash-isolated
