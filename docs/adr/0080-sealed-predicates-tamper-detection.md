@@ -228,6 +228,17 @@ two documented opt-outs, and loudly diagnosed when it fires) and a default that
 is too permissive (silent, and invisible until an audit), this ADR takes the
 strict default and pays the costs above.
 
+**The decisive argument came from opt-in's own author.** Opt-in was not
+overruled from outside: the engineer who designed, implemented, and merged it
+reverted their own shipped work after concluding it was wrong, on the grounds
+that opt-in *"silently gutted goal-file tamper protection for any goal without a
+`[seal]` block, i.e. nearly all of them."* That is a sharper statement of the
+objection than the one above — it names the blast radius (almost every goal in
+existence) and the failure mode (silent), and it is recorded here deliberately.
+Three people reached seal-wins from different directions, one of them by
+arguing against their own merge. A future reader weighing a fourth flip should
+know the alternative's strongest advocate is the one who retired it.
+
 If the reachability cost in (1) proves to matter more in practice than the
 tamper protection it buys, the honest fix is a superseding ADR that revisits the
 default — not a quiet flip of the implementation.
