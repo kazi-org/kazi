@@ -5451,17 +5451,36 @@ defmodule Kazi.CLI do
         {at, n} -> "enabled (last run #{at}, #{n} session(s))"
       end
 
-    base <> killed_suffix(v["passes_killed"])
+    base <> tick_suffix(v)
   end
 
   defp velocity_status_line(_absent), do: "unknown"
 
-  # #1606: append the deadline-kill count when non-zero, so a pass that is killed
-  # every tick is visible in `kazi daemon status` even if its :error log never
-  # reached the LaunchAgent log file. Absent/zero adds nothing (a healthy pass
-  # reads exactly as before). A daemon older than #1606 omits the field -> nothing.
-  defp killed_suffix(n) when is_integer(n) and n > 0,
-    do: " -- WARNING: #{n} pass(es) killed at deadline (scan exceeds the collect timeout)"
+  # #1606: append a WARNING naming WHY the collector has no run — the tick
+  # lifecycle counters make a silently-non-advancing collector visible in
+  # `kazi daemon status`, without depending on any log reaching the LaunchAgent
+  # log file. Priority: a timer that never fired (arming/boot) > passes crashing >
+  # passes killed at the deadline. A healthy collector (or a daemon older than
+  # #1606, missing these fields) adds nothing and reads exactly as before.
+  defp tick_suffix(v) do
+    killed = v["passes_killed"]
+    crashed = v["passes_crashed"]
+    ticks = v["ticks_fired"]
+
+    cond do
+      is_nil(v["last_run_at"]) and ticks == 0 ->
+        " -- WARNING: the collection timer has never fired (no tick since boot); the ticker armed but is not running its pass"
+
+      is_integer(crashed) and crashed > 0 ->
+        " -- WARNING: #{crashed} pass(es) crashed below their guards (velocity is not advancing)"
+
+      is_integer(killed) and killed > 0 ->
+        " -- WARNING: #{killed} pass(es) killed at deadline (scan exceeds the collect timeout)"
+
+      true ->
+        ""
+    end
+  end
 
   defp killed_suffix(_), do: ""
 
