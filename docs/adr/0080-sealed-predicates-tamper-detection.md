@@ -180,12 +180,57 @@ fatal (`:tampered`, run void). Both refuse to report `converged`.
   tampered contract as "the work was too hard"; (3) fail-fast — a void run should
   not keep spending budget; (4) one answer for "acceptance-contract bytes
   changed", whether the file is the goal-file or a declared sealed input.
-- **Nothing is lost.** `goal_drifted`/`goal_drift` are still computed and still
+- **What survives.** `goal_drifted`/`goal_drift` are still computed and still
   attached to the `:tampered` result (`Kazi.Runtime.put_goal_drift/3` is
   outcome-agnostic), so the operator keeps drift's unique value — *which*
   predicate ids were added/removed/changed. The seal alone names only the file.
-  Drift is demoted from an outcome mechanism to the explanation of one, which is
-  its strongest role.
+  Drift is demoted from an outcome mechanism to the explanation of one.
+- **What this COSTS (stated plainly; an earlier draft of this note claimed
+  "nothing is lost", which was too generous to the winning side).** Two real
+  regressions follow from sealing the goal-file *implicitly*:
+  1. **`goal_drifted` becomes effectively unreachable in production for the
+     goal-file.** Because every goal-file is sealed by default, the seal
+     preempts drift on essentially every run that would have reported it. The
+     field survives on the `:tampered` result, but the *observational* path it
+     was built for — a run that reaches its natural terminal and reports the
+     delta — is now reachable only by explicitly setting `[seal] enabled = false`.
+  2. **Good-faith goal-file edits are now fatal.** A regenerated or templated
+     goal-file, or an operator correcting a typo mid-run, terminates the run
+     `:tampered` rather than producing the more informative drift report. The
+     escape hatches are `[seal] mutable_inputs` and `[seal] enabled = false`,
+     but the default is now strict where it used to be tolerant.
+
+### Considered and rejected: opt-in sealing
+
+The alternative — **sealing is opt-in per goal-file: no `[seal]` block seals
+nothing, declaring `[seal]` opts the goal-file in alongside the declared
+inputs** — was implemented and briefly merged before being reverted in favour of
+the precedence above. It is recorded here so it is not re-litigated from scratch.
+
+Its merits are real and are the source of the two costs listed above:
+
+- It preserves the shipped #1415 contract for goals that say nothing about
+  sealing — the original t0 bar still governs, and drift stays observational.
+- It keeps `goal_drifted` reachable in production, instead of making the field
+  nearly vestigial for the goal-file.
+- It still covers the #1520 incident class in full, because the goal in that
+  incident declares `sealed_inputs` and therefore opts in.
+- It is strictly backward-compatible for every pre-ADR-0080 goal-file.
+
+**Why it lost:** opt-in makes this ADR's central claim — *the bar that grades
+the work cannot be edited mid-run* — **false by default**. A worker's goal-file
+would be immutable only when its author had already thought to ask for that,
+which is precisely the honour-system posture the Context section identifies as
+the thing to fix. The same objection defeats "drift wins outright": both leave
+the default state of a kazi run one where the acceptance contract is editable by
+the party being graded. Between a default that is too strict (recoverable via
+two documented opt-outs, and loudly diagnosed when it fires) and a default that
+is too permissive (silent, and invisible until an audit), this ADR takes the
+strict default and pays the costs above.
+
+If the reachability cost in (1) proves to matter more in practice than the
+tamper protection it buys, the honest fix is a superseding ADR that revisits the
+default — not a quiet flip of the implementation.
 - **"The ORIGINAL bar wins" is untouched.** That guarantee is structural to the
   loop (the goal-file is parsed once at t0 and never re-read), not something
   either mechanism confers — so a tampered run still cannot fake convergence.

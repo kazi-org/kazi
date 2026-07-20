@@ -661,6 +661,13 @@ Rules:
   With `[seal] enabled = false` the goal-file is unsealed and drift keeps its
   original purely-observational behaviour (the run reaches its natural terminal
   and still reports the delta).
+- **Consequence worth knowing:** because the goal-file is sealed *by default*,
+  the seal preempts drift on essentially every run that would otherwise have
+  reported it — so in practice you will see `goal_drifted` on a `tampered`
+  result, and the observational path (natural terminal + delta) is reachable
+  only by opting out with `[seal] enabled = false`. This is a deliberate,
+  documented cost of the strict default; see the ADR-0080 amendment for the
+  trade and the rejected opt-in alternative.
 - **Best-effort.** A goal-file that fails to re-parse at detection time (mid
   edit, deleted, or replaced with something that no longer loads) is treated as
   `:unchanged` — drift detection can never itself become a new way for a run to
