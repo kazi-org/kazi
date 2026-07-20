@@ -461,6 +461,16 @@ on its own branch and the collective result carries per-group `landed:
 {branch, pr, merge_commit}`; `mode = "merge"` over a `needs`-DAG merges in
 topological order with `git cherry` silent-revert verification.
 
+A drafted PROPOSAL may carry the same `integration` block, so the
+plan -> approve -> apply chain lands as well (#1620) -- the proposal parser reuses
+the goal-file integration parser, and the block round-trips through the persisted
+proposal. To land an APPROVED proposal (or a goal-file) that declared none, override
+the landing mode at apply time rather than re-authoring the goal:
+`--integration <none|commit|branch|pr|merge>`, paired with `--base <ref>` for the
+target branch. The flag sets the mode only; declaring `[integration]` remains the
+primary path (it also synthesizes the `landed` predicate that gates convergence on
+the work being committed).
+
 **`[conventions]` -- the controller-owned process contract.** kazi appends a small,
 versioned block of UNIVERSAL working rules to every dispatch prompt (small
 conventional commits scoped to one directory; commit as you go; no stubs; grep
