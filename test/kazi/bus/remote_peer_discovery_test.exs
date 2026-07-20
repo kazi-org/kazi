@@ -35,19 +35,10 @@ defmodule Kazi.Bus.RemotePeerDiscoveryTest do
 
   alias Kazi.Bus
 
-  # A remote bus peer that cannot be reached. Depending on the network this
-  # either refuses fast (`:ehostunreach`, as the live daemon saw) or drops
-  # (`:timeout`); both are the same defect and this test accepts either.
-  @unreachable_peer "192.0.2.1"
-
-  defp remote_peer_daemon do
-    Kazi.TestSupport.FakeDaemonSocket.start!(%{
-      "ok" => true,
-      "bus_vsn" => Kazi.Bus.ProtocolSkew.required_bus_vsn(),
-      "nats_port" => 4222,
-      "nats_host" => @unreachable_peer
-    })
-  end
+  # The unreachable remote peer (TEST-NET-1, RFC 5737) now lives in
+  # `Kazi.TestSupport.BusPeer` (#1649), promoted so every bus suite reaches the
+  # same fixture. Kept as a thin alias so this test reads unchanged.
+  defp remote_peer_daemon, do: Kazi.TestSupport.BusPeer.blackhole()
 
   test "a non-trapping caller SURVIVES a bus post to an unreachable remote peer" do
     sock_path = remote_peer_daemon()
