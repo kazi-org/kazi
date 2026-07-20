@@ -2116,32 +2116,50 @@ defmodule Kazi.Bus do
   # for why this exists.
   @spec run(Gnat.t(), (Gnat.t() -> term()), timeout()) :: term()
   def run(conn, fun, timeout_ms \\ @default_call_timeout_ms) do
-    task =
-      Task.async(fn ->
-        try do
-          {__MODULE__, :ok, fun.(conn)}
-        catch
-          {:bus_error, reason} -> {__MODULE__, :error, reason}
-        end
+    # #1606: the worker is spawn_monitor'd, NOT `Task.async`'d, because
+    # `Task.async` LINKS. A linked task that exits abnormally sends an exit
+    # SIGNAL that kills a caller which does not trap exits — before `Task.yield`
+    # can ever turn it into a `{:exit, reason}` value. That defeated this
+    # function's entire purpose for every non-trapping caller: a bus call against
+    # an unreachable NATS host exited `:ehostunreach` and took the CALLER down
+    # with it, uncatchable by the caller's own try/rescue/catch. (Live: the
+    # velocity collector's best-effort `fact` post killed its own collection pass
+    # every tick — the pass "went DOWN without completing (:ehostunreach)".)
+    # `spawn_monitor` does not link, so a crashing bus call now degrades to
+    # `{:error, :bus_unavailable}` for EVERY caller, trapping or not, which is
+    # what the bound was always documented to guarantee.
+    parent = self()
+    ref = make_ref()
+
+    {pid, mon} =
+      spawn_monitor(fn ->
+        result =
+          try do
+            {__MODULE__, :ok, fun.(conn)}
+          catch
+            {:bus_error, reason} -> {__MODULE__, :error, reason}
+          end
+
+        send(parent, {ref, result})
       end)
 
-    result =
-      case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-        {:ok, {__MODULE__, :ok, value}} -> value
-        {:ok, {__MODULE__, :error, reason}} -> {:error, reason}
-        {:exit, reason} -> unavailable(reason)
-        nil -> unavailable({:timeout, timeout_ms})
-      end
-
-    # `Task.async/1` links the task; flush its `{:EXIT, ...}` here so a
-    # trapping caller's mailbox never sees it (mirrors Guard.run/3).
     receive do
-      {:EXIT, pid, _reason} when pid == task.pid -> :ok
-    after
-      0 -> :ok
-    end
+      {^ref, {__MODULE__, :ok, value}} ->
+        Process.demonitor(mon, [:flush])
+        value
 
-    result
+      {^ref, {__MODULE__, :error, reason}} ->
+        Process.demonitor(mon, [:flush])
+        {:error, reason}
+
+      {:DOWN, ^mon, :process, ^pid, reason} ->
+        unavailable(reason)
+    after
+      timeout_ms ->
+        Process.exit(pid, :kill)
+        Process.demonitor(mon, [:flush])
+        unavailable({:timeout, timeout_ms})
+    end
   end
 
   defp unavailable(reason) do
