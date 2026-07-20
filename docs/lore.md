@@ -1152,16 +1152,34 @@ the call blocked to the bound once PER item, so the pass overran its tick
 interval without ever reaching its own kill deadline. One root cause, two
 symptoms -- diagnosing only one of them would have left the other.
 
-Fix: run the bounded work in an UNLINKED monitored process (`spawn_monitor` +
-`receive` on the result / `:DOWN` / an `after` deadline), never `Task.async`.
-Then a crash degrades for every caller, trapping or not. `Kazi.Bus.run/3` was
-fixed this way (PR #1637).
+SAME SHAPE IS NOT SAME INSTANCE -- the most expensive lesson here. `Bus.run/3`
+really did have this defect and was un-linked for it (PR #1637), and that fix
+changed the live failure NOT AT ALL: 7 of 7 passes still died with the identical
+reason. The call actually killing the pass was one layer up --
+`Gnat.start_link/1` in `Kazi.Bus.connect_discovered/3`, which links the
+CONNECTION to the caller and runs BEFORE `run/3` is entered, so the pass never
+reached the bound that had been fixed. Fixed by PR #1644 (isolate connect + call
+together). Two real instances of one mechanism, and patching the one we found
+first bought nothing: when you match this shape at a new site, demonstrate that
+THAT site is what fails before fixing it.
 
-Landmine, still live at time of writing: `Kazi.ReadModel.Guard.run/3` -- the
-mechanism L-0049's invariant leans on for every registry/projection write and
-the boot migration -- has the IDENTICAL `Task.async` shape, and its callers
-(the loop, the writer) do not trap exits. Grep for `Task.async` before trusting
-any "this call can never take down the caller" comment.
+Fix shape: run the bounded work -- INCLUDING connection establishment, not just
+the call -- in an UNLINKED monitored process (`spawn_monitor` + `receive` on the
+result / `:DOWN` / an `after` deadline), never `Task.async`. Keep any
+`start_link` INSIDE that worker so the resource stays linked to the worker and
+is reaped when it is killed; unlinking the resource from everything leaks it.
+
+Suspected, NOT demonstrated: `Kazi.ReadModel.Guard.run/3` -- the mechanism
+L-0049's invariant leans on for every registry/projection write and the boot
+migration -- has the same `Task.async` shape and its callers (the loop, the
+writer) do not trap exits. BUT it wraps the guarded fun in try/rescue/catch
+INSIDE the task, so ordinary exceptions and throws become values rather than a
+task crash, and it flushes `{:EXIT, task.pid, _}` with `after 0`. The residual
+hole therefore needs an exit that rescue/catch cannot convert (a linked-process
+exit inside the fun, or the SQLite NIF taking the process down). That has NOT
+been demonstrated there and this entry does not claim it is live. Grep for
+`Task.async` before trusting any "this call can never take down the caller"
+comment -- then reproduce before patching.
 
 NOTE ON CITATIONS: ~8 modules cite "lore L-0035" for this never-hang invariant,
 but L-0035 is the `opencode --dir` landmine; the invariant actually lives in
