@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.3](https://github.com/kazi-org/kazi/compare/v1.273.2...v1.273.3) (2026-07-20)
+
+
+### Bug Fixes
+
+* **bus:** run/3 must not LINK -- a crashing bus call killed non-trapping callers ([#1606](https://github.com/kazi-org/kazi/issues/1606)) ([28e77da](https://github.com/kazi-org/kazi/commit/28e77da396c4419c0a91ecda79c1f086460e7c28))
+* **velocity:** circuit-break the best-effort fact post after one bus failure ([#1606](https://github.com/kazi-org/kazi/issues/1606)) ([8d68d7f](https://github.com/kazi-org/kazi/commit/8d68d7f1679e64d637a38ec9498a318ec41f771e))
+
 ## [1.273.2](https://github.com/kazi-org/kazi/compare/v1.273.1...v1.273.2) (2026-07-20)
 
 
