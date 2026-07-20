@@ -128,6 +128,37 @@ universals — the only sanctioned way to extend the contract. Repo-specific sty
 otherwise stays in the repo's own `CLAUDE.md`/`AGENTS.md`; the contract carries
 only universals, to avoid double-carrying.
 
+### How a `plan → approve → apply` proposal lands (T45.11, #1620)
+
+The single-goal proposal chain honors `[integration]` the SAME way a goal-file
+does — the proposal parser (`Kazi.Authoring.parse_proposal/2`) reuses the goal-file
+integration parser, and the block round-trips through the persisted proposal. So a
+drafted proposal that carries an integration block lands on `kazi apply
+<proposal-ref>`:
+
+```json
+{
+  "predicates": [ ... ],
+  "integration": { "mode": "pr", "base": "main" }
+}
+```
+
+For an **already-approved** proposal (or a goal-file) that declared no
+`[integration]`, override the landing mode at apply time — no re-authoring:
+
+```
+kazi apply <proposal-ref> --integration pr --base main
+```
+
+`--integration <none|commit|branch|pr|merge>` sets the goal's landing mode (and
+`--base` the target branch); `SerialLanding` / `Integrate` then land the converged
+work. Declaring `[integration]` in the goal-file or proposal is the primary path —
+it also synthesizes the `landed` predicate that gates convergence on the work being
+committed; the flag is the lighter, explicit override for landing without editing
+the goal. Before #1620 neither existed for the single-goal chain: the proposal
+parser dropped the block, the converged goal defaulted to `mode :none`, and
+`SerialLanding` returned `:nothing_to_land` — no branch, no PR.
+
 ## 2. The Tier-0 pattern: a hand-written `landed` predicate
 
 If your goal-file targets a kazi binary that PREDATES the `[integration]` block,
