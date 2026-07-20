@@ -64,11 +64,25 @@ mutable_inputs = [                   # subtractive opt-out (see §4)
   of the acceptance contract: threshold manifests, reference images, checker
   scripts, fixtures. A directory entry seals its entire sorted file tree, so
   adding/removing/altering a file under it is detected.
-- **The goal-file itself is always implicitly sealed** whenever sealing is
-  enabled, whether or not a `[seal]` block is present. A goal-file with no
-  `[seal]` block therefore already gets a strict improvement (the bar it declares
-  cannot be edited mid-run) at zero authoring cost — the change is fully
-  backward-compatible.
+- **Sealing is OPT-IN per goal-file: declaring `[seal]` opts the goal in.** A goal
+  with no `[seal]` block seals nothing — not even its own goal-file — and behaves
+  exactly as it did before this ADR. Once `[seal]` is declared, the goal-file
+  itself is sealed alongside the declared `sealed_inputs` (the bar that grades the
+  work is part of the contract).
+
+  > **Amendment (2026-07-20, #1606 CI).** As first written this ADR sealed the
+  > goal-file *unconditionally*, "for free". That silently replaced a shipped
+  > contract: the goal-drift guard (#1415) deliberately TOLERATES a goal-file
+  > rewritten mid-run — the original t0 bar still governs convergence and the
+  > drift is surfaced observationally as `goal_drifted`, never fatally. An
+  > unconditional goal-file seal terminated every such run `:tampered` before
+  > goal-drift could report anything, which turned `Kazi.Runtime.GoalDriftTest`
+  > red on main and made `goal_drifted` unreachable in production. Sealing is
+  > therefore opt-in: a goal that says nothing about sealing keeps the
+  > goal-drift semantics, and a goal that declares `[seal]` accepts the stricter
+  > tamper-fatal contract for its goal-file too. The #1520 incident class (a
+  > worker loosening the pixel manifest that grades it) is still fully covered,
+  > because that goal declares `sealed_inputs`.
 
 ### 2. Seal manifest format
 
