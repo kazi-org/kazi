@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.2](https://github.com/kazi-org/kazi/compare/v1.273.1...v1.273.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* **seal:** defer to the ADR-0080 seal&gt;drift precedence -- restore the implicit goal-file seal ([49516d1](https://github.com/kazi-org/kazi/commit/49516d1d9661dcf990167b1368c78bdbe335dd7e))
+
 ## [1.273.1](https://github.com/kazi-org/kazi/compare/v1.273.0...v1.273.1) (2026-07-20)
 
 
