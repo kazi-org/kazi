@@ -414,6 +414,62 @@ defmodule Kazi.AuthoringTest do
       assert {:ok, goal} = Authoring.parse_proposal(json, "g")
       assert [%{id: "p"}] = goal.predicates
     end
+  end
+
+  # T45.11 (#1620): the single-goal proposal chain could not land a PR because
+  # parse_proposal ignored `"integration"` and serialize_goal dropped it, so an
+  # approved proposal reloaded with mode :none and SerialLanding returned
+  # :nothing_to_land. parse_proposal now honors it (via the SAME loader parser),
+  # and serialize_goal round-trips it through persistence.
+  describe "parse_proposal/2 + serialize_goal/1 integration (T45.11, #1620)" do
+    @proposal ~s({
+      "predicates": [{"id": "p", "provider": "http_probe", "url": "https://example.test"}],
+      "integration": {"mode": "pr", "branch": "feat/x", "base": "main"}
+    })
+
+    test "honors an [integration] block in the proposal payload" do
+      assert {:ok, goal} = Authoring.parse_proposal(@proposal, "g")
+      assert goal.integration.mode == :pr
+      assert goal.integration.branch == "feat/x"
+      assert goal.integration.base == "main"
+    end
+
+    test "PARITY: proposal integration parsing == goal-file loader integration parsing" do
+      {:ok, goal} = Authoring.parse_proposal(@proposal, "g")
+
+      {:ok, loader_parsed} =
+        Kazi.Goal.Loader.parse_integration(%{
+          "mode" => "pr",
+          "branch" => "feat/x",
+          "base" => "main"
+        })
+
+      assert goal.integration == loader_parsed
+    end
+
+    test "round-trips through serialize_goal -> from_map (the drop that broke landing)" do
+      {:ok, goal} = Authoring.parse_proposal(@proposal, "g")
+
+      serialized = Authoring.serialize_goal(goal)
+      assert serialized["integration"]["mode"] == "pr"
+
+      {:ok, reloaded} = Kazi.Goal.Loader.from_map(serialized)
+      assert reloaded.integration == goal.integration
+      refute reloaded.integration.mode == :none
+    end
+
+    test "no integration block -> mode :none default; serialize omits the key (byte-identical)" do
+      json = ~s({"predicates":[{"id":"p","provider":"http_probe"}]})
+      assert {:ok, goal} = Authoring.parse_proposal(json, "g")
+      assert goal.integration.mode == :none
+      refute Map.has_key?(Authoring.serialize_goal(goal), "integration")
+    end
+
+    test "a malformed integration block fails the draft loudly" do
+      json = ~s({"predicates":[{"id":"p","provider":"http_probe"}],"integration":{"mode":"wat"}})
+      assert {:error, {:invalid_proposal, reason}} = Authoring.parse_proposal(json, "g")
+      assert reason =~ "integration"
+    end
 
     test "accepts a goal-file-shaped object with the singular \"predicate\" array" do
       json =

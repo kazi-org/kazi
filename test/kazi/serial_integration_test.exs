@@ -279,6 +279,63 @@ defmodule Kazi.SerialIntegrationTest do
     |> then(fn {code, out} -> {out, code} end)
   end
 
+  # T45.11 (#1620): `--integration <mode>` is the explicit landing override for a
+  # goal-file / approved proposal that declared no `[integration]` block. It sets
+  # the goal's integration mode so the converged run LANDS (branch + integrate
+  # commit) rather than reaching SerialLanding with mode `:none`.
+  test "--integration override lands a converged run (#1620)", %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    goal_file = write_goal_file(tmp_dir, work, "test -f fixed.txt")
+
+    {out, code} =
+      with_io(fn ->
+        Kazi.CLI.run(
+          ["apply", goal_file, "--workspace", work, "--integration", "commit", "--json"],
+          adapter_opts: [command: committing_harness(tmp_dir)],
+          reobserve_interval_ms: 5,
+          await_timeout: 15_000
+        )
+      end)
+      |> then(fn {c, o} -> {o, c} end)
+
+    assert code == 0
+    payload = Jason.decode!(out)
+    # A REAL landing: the converged work rebase-merged onto the base branch.
+    assert payload["integration"]["landed"] == true
+    assert payload["integration"]["task_branch"] == "task/serial-integration-fixture"
+  end
+
+  test "--integration with an unknown mode errors clearly (#1620)", %{tmp_dir: tmp_dir} do
+    work = git_repo(tmp_dir)
+    goal_file = write_goal_file(tmp_dir, work, "test -f fixed.txt")
+    parent = self()
+
+    err =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        code =
+          Kazi.CLI.run(
+            ["apply", goal_file, "--workspace", work, "--integration", "wat"],
+            adapter_opts: [command: committing_harness(tmp_dir)]
+          )
+
+        send(parent, {:code, code})
+      end)
+
+    assert_received {:code, 1}
+    assert err =~ "invalid --integration"
+  end
+
+  test "help --json stays healthy and lists apply's --integration flag (#1620/#1617 class)" do
+    {out, code} =
+      with_io(fn -> Kazi.CLI.run(["help", "--json"], []) end) |> then(fn {c, o} -> {o, c} end)
+
+    assert code == 0
+    payload = Jason.decode!(out)
+    apply_cmd = Enum.find(payload["commands"], &(&1["name"] == "apply"))
+    flag_names = Enum.map(apply_cmd["flags"], & &1["name"])
+    assert "--integration" in flag_names
+  end
+
   # --- fixtures ---------------------------------------------------------------
 
   defp git_repo(tmp_dir) do
