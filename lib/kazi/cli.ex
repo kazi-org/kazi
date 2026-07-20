@@ -162,6 +162,7 @@ defmodule Kazi.CLI do
     in_place: :boolean,
     base: :string,
     strict_landing: :boolean,
+    integration: :string,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -299,6 +300,8 @@ defmodule Kazi.CLI do
       "`apply` only (T50.1, ADR-0065 decision 1): edit --workspace directly instead of kazi's default of creating a kazi-owned task worktree off its HEAD and editing there. Without this flag, --workspace is the base the run integrates ONTO, not the edit site itself -- the dispatched agent's shell, and every predicate, runs inside a worktree kazi creates and removes on every terminal state (converged / stuck / over_budget / error / crash). Pass this flag to reproduce pre-T50.1 direct-edit behavior byte-identically (e.g. a throwaway clone where isolation buys nothing). A non-git workspace always runs in place -- worktree isolation needs a git repo.",
     base:
       "`apply` only (T50.8, ADR-0065 decision 5): the git ref the kazi-owned task worktree is created FROM (e.g. origin/main), instead of the default — the workspace's current HEAD. Passing it states intent: the stale-base warning (emitted when the defaulted HEAD base is behind its locally-known upstream) is silenced. The ref must already resolve in the local ref store — kazi NEVER fetches; an unknown ref is an error naming it, not a network call. Contradicts --in-place (there is no worktree to base): the combination is rejected.",
+    integration:
+      "`apply` only (T45.11, #1620): override how the converged goal LANDS, one of `none` | `commit` | `branch` | `pr` | `merge` (the `[integration] mode` values). The primary way to land is to declare `[integration]` in the goal-file or proposal (honored end to end since #1620); this flag is the explicit override for landing an APPROVED proposal (or a goal-file) that did not declare one, without re-authoring -- e.g. `kazi apply <proposal-ref> --integration pr --base main`. Combine with `--base` for the target branch; `none` (the default) is converge-and-stop.",
     strict_landing:
       "`apply` only (issue #1407): couple the exit code to landing, not just convergence. By DEFAULT the exit code mirrors convergence alone (0 on `:converged`, even when the worktree-isolated serial landing FAILS — a converged-but-unlanded run still exits 0; the surviving task branch and the `integration.landed == false` evidence remain visible in the result and a stderr warning). Pass --strict-landing to restore the pre-#1407 behavior: a converged-but-unlanded run downgrades the exit code to 1, for a caller (e.g. a CI gate) that wants a landing failure to fail the invocation outright. Has no effect on an in-place run (nothing to land) or when landing succeeds.",
     port:
@@ -392,6 +395,7 @@ defmodule Kazi.CLI do
         :no_preflight,
         :in_place,
         :base,
+        :integration,
         :strict_landing
       ]
     },
@@ -2105,6 +2109,7 @@ defmodule Kazi.CLI do
           no_preflight: flags[:no_preflight] || false,
           in_place: flags[:in_place] || false,
           base: flags[:base],
+          integration: flags[:integration],
           strict_landing: flags[:strict_landing] || false,
           json: flags[:json] || false,
           stream: flags[:stream] || false,
@@ -2376,7 +2381,7 @@ defmodule Kazi.CLI do
   defp execute_single_run(goal_source, opts, runtime_opts) do
     persist? = ensure_read_model()
 
-    case load_goal_source(goal_source, persist?) do
+    case load_goal_source(goal_source, persist?) |> maybe_override_integration(opts) do
       {:ok, goal, proposal_ref, proposal_session_name} ->
         run_opts =
           opts
@@ -2886,6 +2891,38 @@ defmodule Kazi.CLI do
 
   defp proposal_ref?(source) do
     String.starts_with?(source, "prop-") and not File.exists?(source)
+  end
+
+  # T45.11 (#1620): the `--integration <mode>` override. The PRIMARY way to land is
+  # a declared `[integration]` block (goal-file or proposal, honored since #1620);
+  # this flag lets an operator land an APPROVED proposal / goal-file that did NOT
+  # declare one, without re-authoring. It overrides only `mode` (and `base` when
+  # `--base` is given), preserving any branch/prefix/commit_style the goal already
+  # declared. Validated by the SAME `[integration]` parser (an unknown mode fails
+  # loudly). Absent -> the loaded goal is unchanged.
+  defp maybe_override_integration({:ok, goal, ref, session}, opts) do
+    case opts[:integration] do
+      mode when is_binary(mode) and mode != "" ->
+        case Goal.Loader.parse_integration(override_integration_map(goal, mode, opts)) do
+          {:ok, integration} -> {:ok, %Goal{goal | integration: integration}, ref, session}
+          {:error, reason} -> {:error, "invalid --integration: #{reason}"}
+        end
+
+      _ ->
+        {:ok, goal, ref, session}
+    end
+  end
+
+  defp maybe_override_integration({:error, _} = err, _opts), do: err
+
+  defp override_integration_map(%Goal{integration: current}, mode, opts) do
+    current = current || %{}
+
+    %{"mode" => mode}
+    |> put_present("branch", current[:branch])
+    |> put_present("branch_prefix", current[:branch_prefix])
+    |> put_present("base", opts[:base] || current[:base])
+    |> put_present("commit_style", current[:commit_style])
   end
 
   # A proposal ref lives in the read-model, so without one (the escript's
