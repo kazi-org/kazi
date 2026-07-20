@@ -158,10 +158,21 @@ defmodule Kazi.CLISelfConformanceTest do
     end
   end
 
-  # Run `fun` under a hard wall-clock bound. A `--json` command that blocked on
-  # stdin (the failure mode the contract forbids) would never return; the timeout
-  # converts that hang into an explicit test FAILURE. The CaptureIO group leader
-  # is shared into the task so captured output is still collected.
+  # The wall-clock bound `drive/1` gives one `--json` invocation.
+  #
+  # It MUST stay >= the longest `:await_timeout` any fixture in this file declares
+  # (`converging_run/0` uses 15s). Those two bounds contradicted each other before:
+  # the probe killed at 10s a run the fixture explicitly allowed 15s to finish, so
+  # a converging fixture that legitimately took 11-14s on a slower machine failed
+  # as if it had hung. This bound is a LIVENESS backstop for a command that never
+  # returns — not a performance budget — so it is deliberately generous; a genuine
+  # stdin block never returns at all and still fails here with full force.
+  @drive_timeout_ms 20_000
+
+  # Run `fun` under the hard wall-clock bound above. A `--json` command that
+  # blocked on stdin (the failure mode the contract forbids) would never return;
+  # the timeout converts that hang into an explicit test FAILURE. The CaptureIO
+  # group leader is shared into the task so captured output is still collected.
   defp drive(fun) do
     parent_gl = Process.group_leader()
 
@@ -171,12 +182,24 @@ defmodule Kazi.CLISelfConformanceTest do
         fun.()
       end)
 
-    case Task.yield(task, 10_000) || Task.shutdown(task, :brutal_kill) do
+    case Task.yield(task, @drive_timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} ->
         result
 
       nil ->
-        flunk("a --json command did not return within 10s — it blocked (likely on stdin)")
+        # State only what is KNOWN: the invocation overran this probe's budget.
+        # Naming a cause here (the old message asserted "likely on stdin") sends
+        # readers chasing a phantom -- an overrun is equally a genuinely slow run,
+        # and for most commands stdin is not even reachable (`read_stdin_payload/2`
+        # is reached only via `caller_proposal/2` in `execute_propose/3`).
+        flunk(
+          "a --json command did not return within drive/1's #{@drive_timeout_ms}ms budget. " <>
+            "This means it OVERRAN the probe -- not necessarily that it blocked. Check, in " <>
+            "order: (1) does the command's own fixture declare an `:await_timeout` longer " <>
+            "than this budget (then raise @drive_timeout_ms, not the fixture); (2) is the " <>
+            "run simply slow on this machine; (3) only then suspect a real block (a blocked " <>
+            "command never returns at all, and only the propose/plan path reads stdin)."
+        )
     end
   end
 
