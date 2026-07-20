@@ -42,12 +42,25 @@ defmodule Kazi.SealTest do
       assert Seal.arm(seal, goal_file, dir) == %{}
     end
 
-    test "a nil seal config still seals the goal-file (the implicit seal)", %{
+    test "a nil seal config (no [seal] block) seals NOTHING — sealing is opt-in", %{
       dir: dir,
       goal_file: goal_file
     } do
-      manifest = Seal.arm(nil, goal_file, dir)
-      assert Map.keys(manifest) == [goal_file]
+      # A goal that declares no `[seal]` block behaves exactly as it did before
+      # ADR-0080: nothing is sealed, not even the goal-file. This is what keeps the
+      # #1415 goal-drift guard's observational contract intact (a goal-file
+      # rewritten mid-run must still reach `:over_budget` + `goal_drifted`, NOT a
+      # `:tampered` hard stop). Declaring `[seal]` is the explicit opt-in.
+      assert Seal.arm(nil, goal_file, dir) == %{}
+    end
+
+    test "declaring [seal] opts the goal-file itself in, alongside the inputs", %{
+      dir: dir,
+      goal_file: goal_file
+    } do
+      manifest = Seal.arm(%Seal{sealed_inputs: ["checks/manifest.toml"]}, goal_file, dir)
+      assert Map.has_key?(manifest, goal_file)
+      assert Map.has_key?(manifest, "checks/manifest.toml")
     end
 
     test "mutable_inputs subtracts a legitimately-regenerated path from the seal", %{
@@ -79,8 +92,12 @@ defmodule Kazi.SealTest do
                {:tampered, %{path: "checks/manifest.toml", change: :modified}}
     end
 
-    test "a modified goal-file is detected", %{dir: dir, goal_file: goal_file} do
-      manifest = Seal.arm(nil, goal_file, dir)
+    test "a modified goal-file is detected once [seal] is declared", %{
+      dir: dir,
+      goal_file: goal_file
+    } do
+      # An empty-but-present `[seal]` block is the opt-in; it seals the goal-file.
+      manifest = Seal.arm(%Seal{}, goal_file, dir)
       File.write!(goal_file, "id = \"g\"\n# tampered\n")
 
       assert {:tampered, %{path: ^goal_file, change: :modified}} = Seal.verify(manifest)
