@@ -59,6 +59,29 @@ defmodule Kazi.TestSupport.BusPeer do
   end
 
   @doc """
+  A daemon whose NATS peer STALLS deterministically: a local socket that listens
+  but never accepts, so the kernel completes the TCP handshake into the backlog
+  while the NATS handshake never finishes. The connect therefore blocks to the
+  caller's bound — the same shape as `blackhole/0`, but with NO network
+  dependency at all.
+
+  Use this wherever a test asserts on TIMING. `blackhole/0` relies on TEST-NET
+  being DROPPED, which is a property of the network, not of the address: on a
+  network that answers with ICMP-unreachable it errors fast instead (the #1644
+  test says as much). Measured here: TEST-NET blocked ~3.2s, this stalls ~1.1s,
+  a refusing peer errors in ~22ms.
+
+  The listening socket is closed on test exit.
+  """
+  @spec stalling() :: Path.t()
+  def stalling do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, backlog: 1])
+    {:ok, port} = :inet.port(listen)
+    ExUnit.Callbacks.on_exit(fn -> :gen_tcp.close(listen) end)
+    daemon("127.0.0.1", port)
+  end
+
+  @doc """
   A daemon control socket answering `ping` with a well-formed pong that names
   `host`/`port` as the NATS peer — enough for discovery to pass the protocol-skew
   check and genuinely attempt the connection.
