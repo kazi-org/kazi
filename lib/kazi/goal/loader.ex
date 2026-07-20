@@ -135,16 +135,13 @@ defmodule Kazi.Goal.Loader do
   cryptographic-DETECTION layer that gives ADR-0042's advisory `read_only_paths`
   its teeth: enforcement FLAGS a write; sealing VOIDS the run.
 
-  **Sealing is OPT-IN: declaring this block opts the goal in.** A goal with NO
-  `[seal]` block seals nothing — not even its own goal-file — and is byte-identical
-  to pre-ADR-0080 behavior, which is what keeps the #1415 goal-drift guard's
-  observational contract intact (a goal-file rewritten mid-run still reaches its
-  normal terminal outcome with `goal_drifted`, rather than a `tampered` hard stop).
-  Once the block IS declared, the goal-file is sealed alongside the declared inputs.
+  **The goal-file itself is always implicitly sealed** whenever sealing is enabled,
+  even with no `[seal]` block — so every goal already gets "the declared bar cannot
+  be edited mid-run" for free (fully backward-compatible).
 
   | Key             | TOML type        | Default | Maps to / effect |
   |-----------------|------------------|---------|------------------|
-  | `enabled`       | boolean          | `true`  | whole-run switch; `false` fully opts out INCLUDING the goal-file seal (for a self-modifying / standing goal that rewrites its own contract by design) |
+  | `enabled`       | boolean          | `true`  | whole-run switch; `false` fully opts out INCLUDING the implicit goal-file seal (for a self-modifying / standing goal that rewrites its own contract by design) |
   | `sealed_inputs` | array of strings | `[]`    | repo-relative paths (globs allowed; a directory seals its whole tree) whose content is part of the contract — manifests, reference images, checker scripts, fixtures |
   | `mutable_inputs`| array of strings | `[]`    | subtractive opt-out: a path excluded from the seal even if a `sealed_inputs` glob matches it (for an input the goal legitimately regenerates while converging) |
 
@@ -854,8 +851,7 @@ defmodule Kazi.Goal.Loader do
   # opt-out; `sealed_inputs` the repo-relative paths (globs allowed) whose content
   # is part of the acceptance bar; `mutable_inputs` the subtractive opt-out (a
   # sealed-glob-matched path the goal legitimately regenerates). Absent → nil (no
-  # block, so NOTHING is sealed — sealing is opt-in per goal-file, which preserves
-  # the #1415 goal-drift contract). Wrong types fail loudly.
+  # block, so only the goal-file is implicitly sealed). Wrong types fail loudly.
   defp build_seal(nil), do: {:ok, nil}
 
   defp build_seal(seal) when is_map(seal) do

@@ -34,21 +34,8 @@ defmodule Kazi.Seal do
     * `digest` — SHA-256 of the bytes at t0, or `:absent`.
 
   An empty manifest (`%{}`) means "nothing sealed" and `verify/1` is a no-op —
-  the state a `Loop.start_link` with no seal, a goal with NO `[seal]` block, or a
-  `[seal] enabled = false` goal produces (byte-identical to pre-ADR-0080 behavior).
-
-  ## Sealing is opt-in per goal-file
-
-  A goal that declares no `[seal]` block seals NOTHING — not even its own
-  goal-file. This keeps the goal-drift guard (#1415) intact: goal-drift
-  deliberately tolerates a goal-file rewritten mid-run (the original t0 bar still
-  governs convergence, and the drift is reported observationally via
-  `goal_drifted`, never fatally). Sealing the goal-file unconditionally would
-  terminate every such run `:tampered` before goal-drift could surface anything,
-  silently replacing that shipped contract. Declaring `[seal]` is the explicit
-  opt-in: from then on the goal-file AND the declared `sealed_inputs` are
-  tamper-fatal, which is the #1520 incident class (a worker loosening the pixel
-  manifest that grades it).
+  the state a `Loop.start_link` with no seal, or a `[seal] enabled = false` goal,
+  produces (byte-identical to pre-ADR-0080 behavior).
   """
 
   @type change :: :modified | :removed | :added
@@ -68,11 +55,7 @@ defmodule Kazi.Seal do
   into a manifest.
 
     * `seal` — the goal's authored `%Kazi.Seal{}` config, or `nil` when the
-      goal-file declared no `[seal]` block. `nil` seals NOTHING: sealing is
-      opt-in per goal-file, so a goal that declares no `[seal]` behaves exactly
-      as it did before ADR-0080 (and the #1415 goal-drift guard keeps its
-      observational contract). Declaring `[seal]` opts the goal in, and then the
-      goal-file itself is sealed alongside the declared inputs.
+      goal-file declared no `[seal]` block (still seals the goal-file itself).
     * `goal_source` — the goal-file's on-disk path, or `nil` when the goal was
       built in memory / from a proposal (then the goal-file is not sealable and
       only `sealed_inputs` are).
@@ -89,16 +72,6 @@ defmodule Kazi.Seal do
   """
   @spec arm(t() | nil, String.t() | nil, String.t() | nil) :: manifest()
   def arm(%__MODULE__{enabled: false}, _goal_source, _workspace), do: %{}
-
-  # No `[seal]` block ⇒ sealing is OFF for this goal, including the goal-file.
-  # Sealing is opt-in per goal-file (declaring `[seal]` opts in), which keeps the
-  # goal-drift guard (#1415) intact: goal-drift deliberately TOLERATES a goal-file
-  # rewritten mid-run — the original t0 bar governs convergence and the drift is
-  # reported observationally (`goal_drifted`), never fatally. An unconditional
-  # implicit goal-file seal would terminate every such run `:tampered` before
-  # goal-drift could surface anything, silently replacing a shipped contract. An
-  # author who wants the goal-file itself to be tamper-fatal declares `[seal]`.
-  def arm(nil, _goal_source, _workspace), do: %{}
 
   def arm(seal, goal_source, workspace) do
     goal_entry(goal_source)
