@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.7](https://github.com/kazi-org/kazi/compare/v1.273.6...v1.273.7) (2026-07-20)
+
+
+### Bug Fixes
+
+* **velocity:** mark a per-agent rate as a FLOOR when the window holds unattributed deliveries ([#1651](https://github.com/kazi-org/kazi/issues/1651)) ([392c68b](https://github.com/kazi-org/kazi/commit/392c68b02517ddff2f64ef5560c7621f60686028))
+
 ## [1.273.6](https://github.com/kazi-org/kazi/compare/v1.273.5...v1.273.6) (2026-07-20)
 
 
