@@ -1120,3 +1120,49 @@ changed-file paths until the failure has a usable floor (`@min_failure_room`),
 and caps the failure to `max(room, 1)` so it is shrunk, never blanked. Test the
 degenerate case (budget so small only the frame fits), not just the happy path.
 (T54.3, #1075, verifies UC-036.)
+
+### L-0053 #otp #task #link #bounded-call #bus #read-model #invariant #landmine -- a "never hangs the caller" bound built on `Task.async` protects only callers that TRAP EXITS; for everyone else it converts a hang into a KILL
+
+kazi has a standing invariant that a call to its own telemetry/transport can
+never take down the caller: a read-model write degrades to
+`{:error, :read_model_unavailable}` (L-0049) and a bus call degrades to
+`{:error, :bus_unavailable}`, rather than blocking or crashing the run. Both
+bounds were implemented the same way -- run the work in a `Task.async` and
+`Task.yield(task, timeout_ms)`, treating a `{:exit, reason}` reply as "degrade".
+
+**`Task.async` LINKS.** A linked task that exits abnormally sends an exit
+SIGNAL, and for a caller that does not trap exits that signal kills the caller
+*immediately* -- before `Task.yield` can ever turn it into the `{:exit, reason}`
+VALUE the degrade path is written against. So the guarantee held only for
+trapping callers. Nothing advertised that restriction; the tell was a comment in
+each wrapper about flushing `{:EXIT, ...}` "so a *trapping* caller's mailbox
+never sees it" -- written for a narrower case than the invariant claimed. Most
+callers do not trap: a `GenServer`/`gen_statem` does not by default, and a bare
+`spawn`/`spawn_monitor`'d worker never does.
+
+Live cost (#1606): the velocity collector's best-effort bus `fact` post reached
+an unreachable NATS host, the call exited `:ehostunreach`, and the LINK killed
+the whole collection pass -- a bare `spawn_monitor`'d process -- uncatchable by
+the collector's own `try/rescue/catch`, which never saw it. The pass "went DOWN
+without completing" every tick and velocity data never advanced. It read as a
+mystery for days because the failure was silent and looked identical to "the
+tick never fired". The SAME unreachable host also produced a completely
+different-looking symptom when the network blackholed instead of failing fast:
+the call blocked to the bound once PER item, so the pass overran its tick
+interval without ever reaching its own kill deadline. One root cause, two
+symptoms -- diagnosing only one of them would have left the other.
+
+Fix: run the bounded work in an UNLINKED monitored process (`spawn_monitor` +
+`receive` on the result / `:DOWN` / an `after` deadline), never `Task.async`.
+Then a crash degrades for every caller, trapping or not. `Kazi.Bus.run/3` was
+fixed this way (PR #1637).
+
+Landmine, still live at time of writing: `Kazi.ReadModel.Guard.run/3` -- the
+mechanism L-0049's invariant leans on for every registry/projection write and
+the boot migration -- has the IDENTICAL `Task.async` shape, and its callers
+(the loop, the writer) do not trap exits. Grep for `Task.async` before trusting
+any "this call can never take down the caller" comment.
+
+NOTE ON CITATIONS: ~8 modules cite "lore L-0035" for this never-hang invariant,
+but L-0035 is the `opencode --dir` landmine; the invariant actually lives in
+L-0049 and here. Do not follow that citation expecting to find it.
