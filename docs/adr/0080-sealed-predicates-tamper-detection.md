@@ -228,16 +228,28 @@ two documented opt-outs, and loudly diagnosed when it fires) and a default that
 is too permissive (silent, and invisible until an audit), this ADR takes the
 strict default and pays the costs above.
 
-**The decisive argument came from opt-in's own author.** Opt-in was not
-overruled from outside: the engineer who designed, implemented, and merged it
-reverted their own shipped work after concluding it was wrong, on the grounds
-that opt-in *"silently gutted goal-file tamper protection for any goal without a
-`[seal]` block, i.e. nearly all of them."* That is a sharper statement of the
-objection than the one above — it names the blast radius (almost every goal in
-existence) and the failure mode (silent), and it is recorded here deliberately.
-Three people reached seal-wins from different directions, one of them by
-arguing against their own merge. A future reader weighing a fourth flip should
-know the alternative's strongest advocate is the one who retired it.
+**The sharpest statement of the objection came from opt-in's own author**, who
+put it this way:
+
+> Making sealing opt-in silently gutted goal-file tamper protection for every
+> goal that declares no `[seal]` block — which is nearly all of them. It
+> preserved the drift contract by abandoning the guarantee the ADR existed to
+> provide, for the default case.
+
+That is a better statement of the case than the paragraph above it: it names the
+blast radius (nearly every goal in existence), the failure mode (silent), and it
+concedes the decisive point outright — opt-in bought the #1415 contract by giving
+up this ADR's central guarantee *in the default case*, which is the same
+honour-system posture the Context section exists to remove.
+
+Opt-in was implemented and merged before being reverted by its own author. At
+their explicit request the credit here goes to the argument, not to the reversal:
+they reverted after reading the amendment above, finding its reasoning better
+than their own, and seeing main red on the seam between the two changes — a
+considered change of mind on the merits, not restraint in the abstract. Recorded
+because a future reader weighing a fourth flip should know that the position was
+argued from both sides by the people who held them, and that the alternative's
+author judged this one stronger.
 
 If the reachability cost in (1) proves to matter more in practice than the
 tamper protection it buys, the honest fix is a superseding ADR that revisits the
