@@ -605,6 +605,25 @@ answers is a different question: did the file on disk change underneath the run
 anyway? An operator otherwise has no signal of that short of eyeballing `git
 diff` themselves.
 
+With the goal-file sealed (the default since ADR-0080), a mid-run edit voids the
+run and the drift delta explains it:
+
+```json
+{
+  "status": "tampered",
+  "tampered_file": { "path": "goal.toml", "change": "modified" },
+  "goal_drifted": true,
+  "goal_drift": {
+    "added": [],
+    "removed": ["hard"],
+    "changed": []
+  }
+}
+```
+
+With `[seal] enabled = false`, the same edit is purely observational — the run
+reaches its natural terminal and still reports the delta:
+
 ```json
 {
   "status": "over_budget",
@@ -630,9 +649,18 @@ Rules:
   proposal ref, which has no on-disk bar to drift against) AND a drift was
   actually detected. Absent on every other run — byte-identical to before this
   field existed.
-- **Never changes `status` or `next_action`.** The predicate vector, the
-  convergence verdict, and the exit code are ALL decided against the ORIGINAL
-  t0 bar; `goal_drift` is purely observational.
+- **Observational — but the SEAL decides the outcome.** `goal_drift` itself never
+  changes `status`: the predicate vector, the convergence verdict, and the exit
+  code are all decided against the ORIGINAL t0 bar. Since ADR-0080, however, the
+  goal-file is **implicitly sealed**, so editing it mid-run terminates the run
+  `status: "tampered"` (with `tampered_file`) *before* it reaches its natural
+  terminal — the seal wins the outcome, and `goal_drift` rides along on that
+  tampered result as the diagnostic naming *which* predicates moved (the seal
+  alone names only the file). See the
+  [ADR-0080 precedence amendment](../adr/0080-sealed-predicates-tamper-detection.md#amendment-2026-07-20-precedence-over-goal-drift-guard-for-the-goal-file).
+  With `[seal] enabled = false` the goal-file is unsealed and drift keeps its
+  original purely-observational behaviour (the run reaches its natural terminal
+  and still reports the delta).
 - **Best-effort.** A goal-file that fails to re-parse at detection time (mid
   edit, deleted, or replaced with something that no longer loads) is treated as
   `:unchanged` — drift detection can never itself become a new way for a run to
