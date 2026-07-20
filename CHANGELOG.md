@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.6](https://github.com/kazi-org/kazi/compare/v1.273.5...v1.273.6) (2026-07-20)
+
+
+### Bug Fixes
+
+* **velocity:** per-agent delivered must not fabricate 0.0/day for unattributable deliveries ([#1651](https://github.com/kazi-org/kazi/issues/1651)) ([479855d](https://github.com/kazi-org/kazi/commit/479855dc77cb7263ad3594b2499cf5d70a2e10ce))
+
 ## [1.273.5](https://github.com/kazi-org/kazi/compare/v1.273.4...v1.273.5) (2026-07-20)
 
 
