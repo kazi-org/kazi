@@ -7,6 +7,62 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-07-19 — T45.10 EXIT PROOF: **FAIL** — kazi drafts + edits a real slice zero-skill, but the plan→approve→apply chain neither lands a PR nor converged (2 gaps filed); external skills REMAIN the fallback
+
+**Type:** dogfood
+**Tags:** T45.10, exit-proof, retirement-gate, ADR-0031, ADR-0026, zero-skill, #1617, #1620, #1621
+
+**Verdict: FAIL.** The retirement claim is NOT proven. ADR-0031/ADR-0026 status
+notes and the README/AGENTS.md retirement note were **left unchanged**; the
+external plan/apply skills remain the documented fallback for engineering repos.
+Slice: issue #1617 (the `--project` @flag_docs mislabel — real, small, freshly
+filed). All steps on the RELEASE binary `kazi 1.271.0`, zero `/apply`-skill or
+external-skill involvement.
+
+**What worked (zero-skill).**
+- **Idea → predicates.** `kazi plan "<idea for #1617>" --yes --json` (kazi-drafts)
+  autonomously drafted a strong 5-predicate proposal
+  (`prop-fix-issue-1617-in-lib-kazi-0bb6840ab58f`) that triangulates the fix:
+  a `cli` predicate running the help-schema ExUnit suite, positive + negative-space
+  `custom_script` greps over the `@flag_docs` `:project` entry, a test-pin existence
+  check, and `mix format --check-formatted`. Genuinely good, checkable predicates.
+- **Approve.** `kazi approve <ref> --json` → `"status":"approved"`.
+- **Dispatch + edit.** `kazi apply <ref> --workspace . --json` created a task
+  worktree (`task/fix-issue-1617-in-lib-kazi`), dispatched the claude harness, which
+  made a **correct** 2-file edit: the `--project` `@flag_docs` entry rewritten to
+  document BOTH uses (`bus who` roster filter + `kazi plan` roadmap persistence) and
+  a new `help --json` regression test asserting both. iter 0 recorded all 5
+  predicates red-at-t0 (correct). One minor over-edit: it also re-hyphenated the
+  `machine:` entry despite the drafted predicate's "do not touch machine" note —
+  harmless, but a fidelity miss.
+
+**What FAILED.**
+1. **Convergence wedged (#1621).** After the harness's correct edits, `kazi status`
+   stayed at `iter: 0` (all predicates red) for **70+ minutes**, the controller
+   blocked in `Kazi.Loop.await/2`, no result JSON ever written. Matches the
+   await-wedge shape this devlog noted for E66 (#1407/#1415). The box was heavily
+   loaded (a confounder for the slow observe), but iteration never advanced past 0
+   — a merely-slow re-observe would have recorded `iter: 1`. I terminated the run.
+2. **No PR could land (#1620).** Independently of the wedge: the single-goal
+   proposal chain has **no CLI-native way to land a PR**. `Kazi.Authoring.parse_proposal/2`
+   ignores any `"integration"` key (only the `--project` roadmap path reads one),
+   and there is no `kazi apply --integration` flag, so the goal defaults to
+   `[integration] mode: :none` and `SerialLanding.land/5` returns `:nothing_to_land`.
+   No branch, no PR, hence no merged PR and no live predicate on landed code.
+
+**Honest read.** kazi's authoring (idea→predicates) and dispatch (harness makes the
+real edit) work zero-skill and impressively. But the acc's bar — a **merged PR AND a
+passing live predicate** driven end-to-end — was not reached: the chain cannot land
+a single-goal proposal, and this run did not converge. Two steps needed capability
+kazi does not yet expose on this path, so per the T45.10 rule this is a FAIL, the
+gaps are filed (#1620 landing, #1621 wedge), and the retirement notes are NOT written.
+
+**Commands (verbatim, release binary 1.271.0):**
+- `kazi plan "Fix issue #1617: … document BOTH uses … add/update an ExUnit test …" --yes --json --workspace .` → `prop-fix-issue-1617-in-lib-kazi-0bb6840ab58f` (a #1255 startup-watchdog DIAGNOSTIC printed but the command completed).
+- `kazi approve prop-fix-issue-1617-in-lib-kazi-0bb6840ab58f --json` → approved.
+- `kazi apply prop-fix-issue-1617-in-lib-kazi-0bb6840ab58f --workspace . --json` → harness edited 2 files correctly; loop wedged at iter 0 for 70+ min; terminated.
+- `kazi status fix-issue-1617-in-lib-kazi --json` → `iter: 0`, all 5 predicates red, never advanced.
+
 ## 2026-07-18 — T41.7 LIVE dogfood: `kazi init --discover` converges real spec-coverage in 2 iterations; `spec import` swallows Jekyll's 288 real Scenarios; two honest wrinkles
 
 **Type:** dogfood
