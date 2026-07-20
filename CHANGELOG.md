@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.0](https://github.com/kazi-org/kazi/compare/v1.272.0...v1.273.0) (2026-07-20)
+
+
+### Features
+
+* **cli:** daemon status names WHY velocity has no run (T66.7, [#1606](https://github.com/kazi-org/kazi/issues/1606)) ([65a052f](https://github.com/kazi-org/kazi/commit/65a052f128092725e9e6d4016ad1e7bae90b9b94))
+* **cli:** kazi apply --integration &lt;mode&gt; landing override (T45.11, [#1620](https://github.com/kazi-org/kazi/issues/1620)) ([0d513f8](https://github.com/kazi-org/kazi/commit/0d513f857c4dabd0059d1d83488e3111cebda676))
+
+
+### Bug Fixes
+
+* **authoring:** honor + round-trip [integration] in the proposal chain (T45.11, [#1620](https://github.com/kazi-org/kazi/issues/1620)) ([8f4643f](https://github.com/kazi-org/kazi/commit/8f4643faf067d6a2214ab0ed73e6f8dfc6593df4))
+* **daemon:** make the velocity tick lifecycle observable + arm reliably under burrito (T66.7, [#1606](https://github.com/kazi-org/kazi/issues/1606)) ([21fbf80](https://github.com/kazi-org/kazi/commit/21fbf80bbcc879c32d51e217610c17328ee7f2fe))
+
 ## [1.272.0](https://github.com/kazi-org/kazi/compare/v1.271.0...v1.272.0) (2026-07-19)
 
 
