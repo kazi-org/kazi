@@ -190,18 +190,29 @@ defmodule Kazi.Velocity.Kpis do
   # attributed deliveries still reports its real rate alongside neighbours that
   # report unattributable, so a partially-working join degrades row by row and
   # never collapses everyone to the worst case.
+  # `:partial` (#1651 follow-up): the agent HAS attributed deliveries, but the
+  # window also holds unattributed ones that may be theirs too. The count is a
+  # real observation and a LOWER BOUND -- not an exact measurement. Rendering it
+  # bare would be the same species as the bug above: a partial measurement
+  # presented as complete. The qualifier appears ONLY in this state and vanishes
+  # once attribution is complete, so it carries information rather than becoming
+  # ambient hedging an operator learns to ignore.
   @spec delivered_attribution(non_neg_integer(), non_neg_integer()) ::
-          :ok | :unattributable
+          :ok | :partial | :unattributable
   defp delivered_attribution(0, unattributed) when unattributed > 0, do: :unattributable
+
+  defp delivered_attribution(delivered, unattributed) when delivered > 0 and unattributed > 0,
+    do: :partial
+
   defp delivered_attribution(_delivered, _unattributed), do: :ok
 
   # `nil` over a fabricated 0 -- the Agent struct's own contract ("nil fields are
   # honest-unknown, never 0").
   defp delivered_or_unknown(_delivered, :unattributable), do: nil
-  defp delivered_or_unknown(delivered, :ok), do: delivered
+  defp delivered_or_unknown(delivered, _attributed), do: delivered
 
   defp delivered_rate(_delivered, _days, :unattributable), do: nil
-  defp delivered_rate(delivered, days, :ok), do: rate(delivered, days)
+  defp delivered_rate(delivered, days, _attributed), do: rate(delivered, days)
 
   # A rate is count ÷ window days, rounded to 2dp. Zero deliveries is a real
   # measured 0.0/day (the window happened and nothing landed), not an unknown.

@@ -346,6 +346,16 @@ defmodule KaziWeb.MissionControlLive do
   defp agent_delivered_label(%{delivered_attribution: :unattributable}),
     do: "— deliveries not attributable to an agent"
 
+  # #1651 follow-up: a FLOOR, not a measurement — this agent has attributed
+  # deliveries but the window also holds unattributed ones that may be theirs.
+  # Marked only in this state; a fully-attributed window renders bare.
+  defp agent_delivered_label(%{
+         delivered_attribution: :partial,
+         delivered_per_day: per_day,
+         delivered_count: count
+       }),
+       do: "≥ #{per_day} /day · ≥ #{count} (some deliveries unattributed)"
+
   defp agent_delivered_label(%{delivered_per_day: nil}), do: "— not enough data yet"
 
   defp agent_delivered_label(%{delivered_per_day: per_day, delivered_count: count}),
