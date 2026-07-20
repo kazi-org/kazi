@@ -156,3 +156,44 @@ The seal deliberately does NOT route through the `gaming_events` advisory path.
 - Follow-up: a richer diff summary in the diagnostic, and per-predicate
   declaration of inputs (so the seal set can be derived rather than authored) are
   left for later; this ADR ships the author-declared `sealed_inputs` form.
+
+## Amendment (2026-07-20): precedence over goal-drift-guard for the goal-file
+
+**The accepted decision above is unchanged.** This note records the precedence
+the implementation settled when the two mechanisms collided, discovered when
+this ADR's implicit goal-file seal turned `Kazi.Runtime.GoalDriftTest`'s
+"deleted a failing predicate" scenario from `:over_budget` into `:tampered`.
+
+Sealing and **goal-drift-guard** (#1415) answer the same question for the same
+file: *the dispatched agent edited the goal-file mid-run — now what?* Before this
+ADR, drift's answer was observational (`goal_drifted`/`goal_drift` on the result,
+`status` untouched, run continues to its natural terminal). This ADR's answer is
+fatal (`:tampered`, run void). Both refuse to report `converged`.
+
+**Precedence: the seal wins the OUTCOME; goal-drift remains the DIAGNOSTIC.**
+
+- A tampered goal-file terminates the run `:tampered` with `tampered_file`
+  (path + change kind), not the natural budget/stuck terminal. Rationale: (1)
+  this ADR's Context names goal-drift-guard as insufficient *precisely* because
+  it "never changes status", so drift-wins would silently overturn the accepted
+  decision; (2) honest cause attribution (ADR-0046) — `:over_budget` misreports a
+  tampered contract as "the work was too hard"; (3) fail-fast — a void run should
+  not keep spending budget; (4) one answer for "acceptance-contract bytes
+  changed", whether the file is the goal-file or a declared sealed input.
+- **Nothing is lost.** `goal_drifted`/`goal_drift` are still computed and still
+  attached to the `:tampered` result (`Kazi.Runtime.put_goal_drift/3` is
+  outcome-agnostic), so the operator keeps drift's unique value — *which*
+  predicate ids were added/removed/changed. The seal alone names only the file.
+  Drift is demoted from an outcome mechanism to the explanation of one, which is
+  its strongest role.
+- **"The ORIGINAL bar wins" is untouched.** That guarantee is structural to the
+  loop (the goal-file is parsed once at t0 and never re-read), not something
+  either mechanism confers — so a tampered run still cannot fake convergence.
+- **Drift is subordinate, not retired.** With `[seal] enabled = false` the
+  goal-file is unsealed and drift reverts to its original observational contract:
+  the run reaches its natural terminal and still reports the delta. Both branches
+  are pinned in `test/kazi/runtime/goal_drift_test.exs`.
+- **Consequence of ordering:** the seal verifies *before* each observe, so a
+  tampered run's terminal vector is the last PRE-tamper observation. Work the
+  agent did in the tampering dispatch is deliberately not graded — once the
+  contract is void there is nothing trustworthy to grade against.
