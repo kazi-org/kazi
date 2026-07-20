@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.4](https://github.com/kazi-org/kazi/compare/v1.273.3...v1.273.4) (2026-07-20)
+
+
+### Bug Fixes
+
+* **bus:** isolate connect+call in one unlinked worker -- the real [#1606](https://github.com/kazi-org/kazi/issues/1606) killer ([#1606](https://github.com/kazi-org/kazi/issues/1606)) ([c72b743](https://github.com/kazi-org/kazi/commit/c72b7430628d244483a60e7ac42f164215dbd447))
+
 ## [1.273.3](https://github.com/kazi-org/kazi/compare/v1.273.2...v1.273.3) (2026-07-20)
 
 
