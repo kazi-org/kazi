@@ -566,9 +566,15 @@ defmodule Kazi.Daemon.VelocityTickerTest do
         )
 
       assert_receive :hung_pass_started, 5_000
-      # The ticker stays alive and responsive while the first pass hangs, then the
-      # deadline kills it and a later interval runs a clean pass that records rows.
+      # The ticker stays alive and responsive while the first pass hangs.
       assert Process.alive?(pid)
+
+      # Phase 1 — the deadline actually kills the hung pass. Pinned explicitly via
+      # the #1606 counter rather than inferred from recovery, so a failure says
+      # WHICH half broke (and each phase gets its own budget under load).
+      wait_until(fn -> VelocityTicker.status(pid).passes_killed >= 1 end, 1_000)
+
+      # Phase 2 — a later interval runs a clean pass that records rows.
       wait_until(fn -> VelocityTicker.status(pid).last_session_count == 2 end, 1_000)
       assert length(rows()) == 2
     end
