@@ -545,7 +545,11 @@ defmodule Kazi.Teach.InstallSkill do
       commits; a dirty tree is a distinct error, never a silent bulk commit). Under
       `--parallel`, each group lands on its own branch; `mode = "merge"` over a
       `needs`-DAG merges in topological order with `git cherry` silent-revert
-      verification.
+      verification. A drafted PROPOSAL may carry the same `integration` block, so
+      the plan -> approve -> apply chain lands too (#1620); to land an approved
+      proposal that declared none, override the mode at apply time with
+      `--integration <none|commit|branch|pr|merge>` (pair with `--base` for the
+      target branch) instead of re-authoring the goal.
     - **`[conventions]` -- the process contract.** kazi appends a small, versioned
       block of UNIVERSAL working rules to every dispatch prompt (small conventional
       commits scoped to one directory; commit as you go; no stubs; grep
