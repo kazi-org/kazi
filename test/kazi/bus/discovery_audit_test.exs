@@ -134,6 +134,15 @@ defmodule Kazi.Bus.DiscoveryAuditTest do
 
   # These guard the AUDIT ITSELF. Without them the sweep above could silently
   # decay into testing nothing, which is exactly how #1649 arose.
+  #
+  # They assert on TIMING, so they use `BusPeer.stalling/0` (a local
+  # never-accepting listener) rather than `blackhole/0`. `blackhole/0` relies on
+  # TEST-NET being DROPPED, which is a property of the network rather than of the
+  # address — on a network that answers ICMP-unreachable it errors fast, and these
+  # comparisons would flake. `stalling/0` blocks deterministically with no network
+  # involved. The per-verb sweep above is unaffected either way: it asserts
+  # "degrades, does not kill, within a bound", which holds whether TEST-NET drops
+  # or refuses.
   describe "the sweep really reaches discovery (guards against a vacuous audit)" do
     # THE TRAP: `{:error, :no_daemon}` is returned BOTH when there is no socket
     # at all (discovery never starts) AND when discovery ran and the connection
@@ -141,12 +150,12 @@ defmodule Kazi.Bus.DiscoveryAuditTest do
     # anything — asserting on it would be the same false comfort #1649 is about.
     # Timing is the discriminator: a peer that blackholes must cost materially
     # more than a path that never dialled at all.
-    test "a blackholing peer costs materially more than never dialling (so the connect IS attempted)" do
+    test "a stalling peer costs materially more than never dialling (so the connect IS attempted)" do
       no_socket = "/tmp/kazi-absent-#{System.unique_integer([:positive])}.sock"
       opts = fn sock -> [sock_path: sock, call_timeout_ms: @call_timeout_ms] end
 
       {control_us, control} = :timer.tc(fn -> Bus.who(opts.(no_socket)) end)
-      {blackhole_us, blackholed} = :timer.tc(fn -> Bus.who(opts.(BusPeer.blackhole())) end)
+      {blackhole_us, blackholed} = :timer.tc(fn -> Bus.who(opts.(BusPeer.stalling())) end)
 
       # Both degrade to the SAME value — documenting the trap in an assertion so
       # nobody later "simplifies" this file down to value checks.
@@ -162,10 +171,10 @@ defmodule Kazi.Bus.DiscoveryAuditTest do
              """
     end
 
-    test "a blackholing peer BLOCKS to the bound; a refusing peer errors fast" do
+    test "a stalling peer BLOCKS to the bound; a refusing peer errors fast" do
       opts = fn sock -> [sock_path: sock, call_timeout_ms: @call_timeout_ms] end
 
-      {blackhole_us, _} = :timer.tc(fn -> Bus.who(opts.(BusPeer.blackhole())) end)
+      {blackhole_us, _} = :timer.tc(fn -> Bus.who(opts.(BusPeer.stalling())) end)
       {refuse_us, _} = :timer.tc(fn -> Bus.who(opts.(BusPeer.refusing())) end)
 
       # The refusing peer answers well inside the call bound; the blackholing
