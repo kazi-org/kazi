@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.1](https://github.com/kazi-org/kazi/compare/v1.273.0...v1.273.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **daemon:** a caught-up velocity pass must not reset last_session_count to 0 ([66ba430](https://github.com/kazi-org/kazi/commit/66ba4309c54927c3ebc312f40fca9c1372c327ef))
+* **seal:** sealing is opt-in per goal-file -- restores the [#1415](https://github.com/kazi-org/kazi/issues/1415) goal-drift contract ([bca6497](https://github.com/kazi-org/kazi/commit/bca64977b5a6e97f41b9ebc99d7e9dcd4ab8caff))
+
 ## [1.273.0](https://github.com/kazi-org/kazi/compare/v1.272.0...v1.273.0) (2026-07-20)
 
 
