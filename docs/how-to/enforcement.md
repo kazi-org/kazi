@@ -146,10 +146,13 @@ offending file named in `tampered_file` (`{ path, change }` in `--json`, a
 threshold manifest to reach green can no longer get away with it — the run is
 void, not green.
 
-**The goal-file itself is always implicitly sealed** whenever sealing is enabled,
-even with no `[seal]` block — so every goal already gets "the declared bar cannot
-be edited mid-run" for free. This is fully backward-compatible: a goal-file with
-no `[seal]` block seals only its own goal-file.
+**Sealing is opt-in: declaring a `[seal]` block opts the goal in.** A goal with no
+`[seal]` block seals nothing — not even its own goal-file — and behaves exactly as
+it did before ADR-0080. This keeps the goal-drift guard (#1415) intact: a goal-file
+rewritten mid-run still reaches its normal terminal outcome with `goal_drifted`
+surfaced observationally, rather than being killed as `tampered`. Once you declare
+`[seal]`, the goal-file itself is sealed alongside the declared inputs — the bar
+that grades the work is part of the contract it grades.
 
 **Opt-outs — two levers for two legitimate cases:**
 
