@@ -89,9 +89,15 @@ defmodule Kazi.Daemon.Control do
       "enabled" => s.enabled,
       "last_run_at" => s.last_run_at && DateTime.to_iso8601(s.last_run_at),
       "last_session_count" => s.last_session_count,
-      # #1606: the deadline-kill counter, so `kazi daemon status` shows a pass that
-      # dies every tick without depending on the :error log reaching the log file.
+      # #1606: the tick-lifecycle counters, so `kazi daemon status` distinguishes
+      # "the timer never fired" (ticks_fired == 0) from "it fired but every pass
+      # died" (passes_killed / passes_crashed > 0) without depending on any log
+      # reaching the LaunchAgent log file.
+      "interval_ms" => Map.get(s, :interval_ms),
+      "ticks_fired" => Map.get(s, :ticks_fired, 0),
+      "passes_completed" => Map.get(s, :passes_completed, 0),
       "passes_killed" => Map.get(s, :passes_killed, 0),
+      "passes_crashed" => Map.get(s, :passes_crashed, 0),
       "last_kill_at" => Map.get(s, :last_kill_at) && DateTime.to_iso8601(s.last_kill_at),
       "last_projection" => encode_projection(Map.get(s, :last_projection))
     }
@@ -106,7 +112,11 @@ defmodule Kazi.Daemon.Control do
       "enabled" => false,
       "last_run_at" => nil,
       "last_session_count" => nil,
+      "interval_ms" => nil,
+      "ticks_fired" => 0,
+      "passes_completed" => 0,
       "passes_killed" => 0,
+      "passes_crashed" => 0,
       "last_kill_at" => nil,
       "last_projection" => nil
     }
