@@ -205,19 +205,121 @@ defmodule Kazi.Runtime.GoalDriftTest do
                await_timeout: 20_000
              )
 
-    # ORIGINAL bar wins: the loop never re-read the file, so `hard` is still
-    # part of the vector it converges against -- and since `hard.txt` was
-    # never created, the run stalls on the ORIGINAL budget instead of falsely
-    # reporting `:converged`.
-    assert result.outcome == :over_budget
-    assert PredicateVector.get(result.vector, "hard").status == :fail
-    assert PredicateVector.get(result.vector, "code").status == :pass
+    # PRECEDENCE (ADR-0080 amendment, seal > drift on the OUTCOME): the goal-file
+    # is implicitly sealed, so editing it mid-run VOIDS the run -- `:tampered`,
+    # not the natural budget terminal. `:tampered` is the honest cause here;
+    # `:over_budget` (the pre-ADR-0080 outcome) misattributed a tampered contract
+    # as "the work was too hard".
+    assert result.outcome == :tampered
+    assert result.tampered_file.path == goal_path
+    assert result.tampered_file.change == :modified
 
-    # Drift surfaced: the result names exactly what moved on disk.
+    # ORIGINAL bar wins -- UNCHANGED by the precedence. The loop never re-reads
+    # the goal-file, so the DELETED predicate `hard` is still in the vector the
+    # run is judged against, and the run can never falsely report `:converged`.
+    # This guarantee is structural to the loop, not something either mechanism
+    # confers.
+    assert PredicateVector.get(result.vector, "hard").status == :fail
+    refute result.outcome == :converged
+
+    # The seal fires BEFORE the next observe, so the terminal vector is the last
+    # PRE-tamper observation: `code` is still :fail here even though the harness
+    # did create fixed.txt, because that work was never observed. Deliberate --
+    # once the contract is void there is nothing trustworthy left to grade
+    # against, so the run stops rather than scoring work under a changed bar.
+    assert PredicateVector.get(result.vector, "code").status == :fail
+
+    # Drift STILL surfaced -- the two mechanisms COMPOSE. Seal decides the
+    # outcome; goal-drift remains the diagnostic that names exactly WHICH
+    # predicates moved on disk (the seal alone only names the file).
     assert result.goal_drifted == true
     assert result.goal_drift.removed == ["hard"]
     assert result.goal_drift.added == []
     assert result.goal_drift.changed == []
+  end
+
+  test "with sealing OFF, goal-drift keeps its observational contract: the run reaches its NATURAL terminal and the drift is still surfaced",
+       %{tmp_dir: tmp_dir} do
+    # The coherence half of the precedence: goal-drift is SUBORDINATE to the seal,
+    # not RETIRED by it. With `[seal] enabled = false` the goal-file is not sealed,
+    # so nothing voids the run -- drift reverts to purely observational and the run
+    # terminates on the ORIGINAL budget, exactly as it did pre-ADR-0080.
+    work = Path.join(tmp_dir, "work")
+    File.mkdir_p!(work)
+
+    goal_path = Path.join(tmp_dir, "goal.toml")
+
+    File.write!(goal_path, """
+    id = "goal-drift-unsealed"
+
+    [budget]
+    max_iterations = 2
+
+    [seal]
+    enabled = false
+
+    [[predicate]]
+    id = "code"
+    provider = "custom_script"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+    verdict = "exit_zero"
+
+    [[predicate]]
+    id = "hard"
+    provider = "custom_script"
+    cmd = "sh"
+    args = ["-c", "test -f hard.txt"]
+    verdict = "exit_zero"
+    """)
+
+    {:ok, goal} = Kazi.Goal.Loader.load(goal_path)
+
+    stub = Path.join(tmp_dir, "gaming_harness_unsealed.sh")
+
+    File.write!(stub, """
+    #!/bin/sh
+    echo "the converged fix" > fixed.txt
+    cat > #{goal_path} <<'GOALEOF'
+    id = "goal-drift-unsealed"
+
+    [budget]
+    max_iterations = 2
+
+    [seal]
+    enabled = false
+
+    [[predicate]]
+    id = "code"
+    provider = "custom_script"
+    cmd = "sh"
+    args = ["-c", "test -f fixed.txt"]
+    verdict = "exit_zero"
+    GOALEOF
+    exit 0
+    """)
+
+    File.chmod!(stub, 0o755)
+
+    assert {:ok, result} =
+             Runtime.run(goal,
+               workspace: work,
+               persist?: false,
+               goal_source: goal_path,
+               adapter_opts: [command: stub],
+               reobserve_interval_ms: 5,
+               await_timeout: 20_000
+             )
+
+    # Nothing sealed => no tamper stop; the ORIGINAL bar still wins and the run
+    # stalls on its own budget rather than falsely converging.
+    assert result.outcome == :over_budget
+    refute Map.has_key?(result, :tampered_file)
+    assert PredicateVector.get(result.vector, "hard").status == :fail
+
+    # ...and the observational drift report is intact.
+    assert result.goal_drifted == true
+    assert result.goal_drift.removed == ["hard"]
   end
 
   test "no drift ⇒ goal_drifted is absent from the result (additive field)", %{tmp_dir: tmp_dir} do
