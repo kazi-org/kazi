@@ -75,7 +75,12 @@ defmodule Kazi.Velocity.Kpis do
       :delivered_per_day,
       :tokens_per_delivered_task,
       :stuck_ratio,
-      :terminal_count
+      :terminal_count,
+      # #1651: WHY `delivered_*` is nil. `:ok` means attribution worked and the
+      # numbers are measured (including a real 0). `:unattributable` means this
+      # window contains deliveries that carry NO session_uuid, so this agent may
+      # own some of them and a 0 would be a fabricated measurement, not a fact.
+      :delivered_attribution
     ]
   end
 
@@ -175,6 +180,29 @@ defmodule Kazi.Velocity.Kpis do
 
   defp delivered_at(_), do: nil
 
+  # #1651: an agent's delivered figure is a MEASUREMENT only when attribution is
+  # actually working for this window. If any delivery in the window carries no
+  # session_uuid, an agent with no attributed deliveries may own some of them --
+  # so "0.0 /day" would assert something we cannot know. That is the ADR-0046
+  # fabricated-measurement failure, and it is worse than an empty cell: an empty
+  # cell says nothing, "0.0 /day" affirmatively claims the agent delivered
+  # nothing. Note the branch is per AGENT, not per corpus: an agent WITH
+  # attributed deliveries still reports its real rate alongside neighbours that
+  # report unattributable, so a partially-working join degrades row by row and
+  # never collapses everyone to the worst case.
+  @spec delivered_attribution(non_neg_integer(), non_neg_integer()) ::
+          :ok | :unattributable
+  defp delivered_attribution(0, unattributed) when unattributed > 0, do: :unattributable
+  defp delivered_attribution(_delivered, _unattributed), do: :ok
+
+  # `nil` over a fabricated 0 -- the Agent struct's own contract ("nil fields are
+  # honest-unknown, never 0").
+  defp delivered_or_unknown(_delivered, :unattributable), do: nil
+  defp delivered_or_unknown(delivered, :ok), do: delivered
+
+  defp delivered_rate(_delivered, _days, :unattributable), do: nil
+  defp delivered_rate(delivered, days, :ok), do: rate(delivered, days)
+
   # A rate is count ÷ window days, rounded to 2dp. Zero deliveries is a real
   # measured 0.0/day (the window happened and nothing landed), not an unknown.
   defp rate(_count, days) when days <= 0, do: nil
@@ -218,6 +246,12 @@ defmodule Kazi.Velocity.Kpis do
   # ---------------------------------------------------------------------------
 
   defp per_agent(by_session, counters_by_session, terminal_by_session, window_days) do
+    # #1651: deliveries in this window that carry NO session_uuid. A git-derived
+    # tick has no goal_ref, so `DeliveryProjection.attribute_session/1` leaves
+    # `session_uuid` nil rather than guessing (ADR-0046) -- correct at the data
+    # layer, but it means an agent's 0 is only a MEASURED zero when this is empty.
+    unattributed = length(Map.get(by_session, nil, []))
+
     session_uuids =
       [Map.keys(by_session), Map.keys(counters_by_session), Map.keys(terminal_by_session)]
       |> Enum.concat()
@@ -230,12 +264,14 @@ defmodule Kazi.Velocity.Kpis do
       counters = Map.get(counters_by_session, uuid, [])
       terminal = Map.get(terminal_by_session, uuid, [])
       delivered = length(deliveries)
+      attribution = delivered_attribution(delivered, unattributed)
 
       %Agent{
         session_uuid: uuid,
         session_name: session_name(counters, terminal),
-        delivered_count: delivered,
-        delivered_per_day: rate(delivered, window_days),
+        delivered_count: delivered_or_unknown(delivered, attribution),
+        delivered_per_day: delivered_rate(delivered, window_days, attribution),
+        delivered_attribution: attribution,
         tokens_per_delivered_task: agent_tokens_per_task(counters, delivered),
         stuck_ratio: stuck_ratio(terminal),
         terminal_count: length(terminal)

@@ -339,6 +339,13 @@ defmodule KaziWeb.MissionControlLive do
     do: "p50 #{fmt_duration(p50)} · p90 #{fmt_duration(p90)} · #{n} samples"
 
   # Per-agent drill-in labels reuse the same rate/ratio vocabulary.
+  # #1651: distinguish "wait for more data" from "this can never populate here".
+  # On a trailer-stripped repo a git-derived tick has no session_uuid by design,
+  # so telling the operator to wait for data that cannot arrive is its own small
+  # dishonesty. Both are still honest-unknown -- never a fabricated 0.0 /day.
+  defp agent_delivered_label(%{delivered_attribution: :unattributable}),
+    do: "— deliveries not attributable to an agent"
+
   defp agent_delivered_label(%{delivered_per_day: nil}), do: "— not enough data yet"
 
   defp agent_delivered_label(%{delivered_per_day: per_day, delivered_count: count}),
