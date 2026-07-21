@@ -20,11 +20,13 @@ defmodule Kazi.CLI.DaemonTest do
   # ===========================================================================
 
   describe "parse/1 -- the daemon verb" do
-    test "`daemon start`/`stop`/`status`/`restart` parse to the daemon command" do
+    test "`daemon start`/`stop`/`status`/`restart`/`reregister` parse to the daemon command" do
       assert {:daemon, "start", [], _opts} = Kazi.CLI.parse(["daemon", "start"])
       assert {:daemon, "stop", [], _opts} = Kazi.CLI.parse(["daemon", "stop"])
       assert {:daemon, "status", [], _opts} = Kazi.CLI.parse(["daemon", "status"])
       assert {:daemon, "restart", [], _opts} = Kazi.CLI.parse(["daemon", "restart"])
+      # #1484/ADR-0083: re-pins a stale launchd LWCR against the current binary.
+      assert {:daemon, "reregister", [], _opts} = Kazi.CLI.parse(["daemon", "reregister"])
     end
 
     test "--json is threaded through" do
