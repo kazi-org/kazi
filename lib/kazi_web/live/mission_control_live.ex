@@ -222,7 +222,19 @@ defmodule KaziWeb.MissionControlLive do
 
   defp assign_fleet(socket) do
     scope = socket.assigns[:session_scope] || :current
-    all_runs = RunRegistry.list()
+    # T66.5 (#1483 reopened): bounded, NOT `RunRegistry.list/0`. This helper
+    # runs on every mount AND every `@poll_ms` tick, and everything below
+    # (grid, velocity strip, the per-run event-sink reads `river_entries/1`
+    # does) fans out from `all_runs` -- so an unbounded fetch here made the
+    # whole mount scale with TOTAL accumulated run history, not the small
+    # "current fleet" glance this view actually renders. `list_recent/1`'s
+    # default keeps ordinary fleets looking identical while flattening the
+    # cost once history runs into the hundreds/thousands of rows. The
+    # trade-off: `@scope_counts.closed` and the CLOSED tab both reflect the
+    # recent window, not literal all-time totals -- full history stays one
+    # `RunRegistry.list/0` call away for the CLI/API, just not on this polled
+    # path.
+    all_runs = RunRegistry.list_recent()
     live_map = liveness_source().alive_map(Enum.map(all_runs, & &1.session_os_pid))
     {current, closed} = Enum.split_with(all_runs, &session_current?(&1, live_map))
     scoped = if scope == :closed, do: closed, else: current
