@@ -16,6 +16,21 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.274.0](https://github.com/kazi-org/kazi/compare/v1.273.9...v1.274.0) (2026-07-21)
+
+
+### Features
+
+* **authoring:** add SelfHost self-hosting detection ([#1668](https://github.com/kazi-org/kazi/issues/1668), [#1669](https://github.com/kazi-org/kazi/issues/1669)) ([cf6c31e](https://github.com/kazi-org/kazi/commit/cf6c31e3d53c264869505ffc47a94e240bbfb663))
+* **authoring:** steer drafting away from self-hosting cli predicates and default read_only_paths ([#1668](https://github.com/kazi-org/kazi/issues/1668), [#1669](https://github.com/kazi-org/kazi/issues/1669)) ([2118b2b](https://github.com/kazi-org/kazi/commit/2118b2b328d3f1037ddf722027d084f37997b7cd))
+* **authoring:** warn on a cli/custom_script predicate that measures the installed binary ([#1668](https://github.com/kazi-org/kazi/issues/1668)) ([364b2de](https://github.com/kazi-org/kazi/commit/364b2deab26f3a23dfa3e46eb1a488c85b1d9572))
+* **cli:** surface the self-hosting-cli-predicate advisory in plan output ([#1668](https://github.com/kazi-org/kazi/issues/1668)) ([cbd586c](https://github.com/kazi-org/kazi/commit/cbd586c071095f281aa08357c30d2129c9924067))
+
+
+### Bug Fixes
+
+* **authoring:** stop the [#1669](https://github.com/kazi-org/kazi/issues/1669) enforcement default from turning ON for a repair goal ([15ca94a](https://github.com/kazi-org/kazi/commit/15ca94aea860c331e96de266915a0ab4b5b10552))
+
 ## [1.273.9](https://github.com/kazi-org/kazi/compare/v1.273.8...v1.273.9) (2026-07-21)
 
 
