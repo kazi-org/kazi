@@ -681,6 +681,19 @@ plan/approve, then
 `stuck` / `over_budget` / `error`, escalate and do NOT merge. Full copy-pasteable
 gate (git-refs only, no NATS): `docs/pool-verification-gate.md`.
 
+## Commits carry no attribution
+
+Never add `Co-Authored-By: <assistant>`, "Generated with ...", or any other
+attribution or self-promotion line to a commit message, code comment, or file.
+This holds for every commit you author here, including ones made inside a
+`kazi apply` dispatch.
+
+A `Co-Authored-By:` naming a HUMAN collaborator is fine; the rule is about
+attributing work to an assistant. Enforced by
+`.github/scripts/no_attribution_guard.sh` (blocking) over both commit messages
+and added lines. A doc that must quote the forbidden string can carry an inline
+`attribution-guard:allow` marker.
+
 ## See also
 
 - `docs/landing.md` -- landing: `[integration]`/`[conventions]`, the process contract, the Tier-0 `landed` pattern, and the ADR-0055 routing decision.

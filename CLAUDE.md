@@ -97,6 +97,20 @@ lives in kazi core. See `docs/doc-freshness.md` ("The standing goal") and
 - NATS JetStream and Phoenix LiveView are NOT dependencies until Slice 3. Deploy
   IS in Slice 0 (thin, behind a stub until the cloud target T0.6h is provisioned).
 
+## Commits carry no attribution
+
+NEVER add `Co-Authored-By: Claude`, "Generated with Claude Code", or ANY other
+attribution or self-promotion line to a commit message, code comment, or file
+in this repo. No exceptions, including for commits authored by an agent kazi
+dispatched.
+
+This lives here, in the repo, on purpose. An agent driven by `kazi apply` on a
+fresh machine has this file but NOT the operator's own global config, so a rule
+that lives only in an operator's `~/.claude/CLAUDE.md` does not reach it. On
+2026-07-21 a dispatched agent added `Co-Authored-By:` trailers to all five
+commits of an otherwise-good change; they were caught by hand at review, not by
+any gate.
+
 ## Definition of done
 
 Per the global definition of done: tests green, `mix format` clean, PR
