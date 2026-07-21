@@ -616,6 +616,7 @@ defmodule Kazi.CLI do
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
       kazi install-hooks [--local] [--uninstall]  # register session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071)
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
+      kazi dashboard [--port <n>] [--bind <ip>] [--roadmap <goal-file>]  # standalone fleet-mode web endpoint (read-only mission control, ADR-0057)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
       kazi plan --json [--predicates <json>] [--replace]   # caller-drafts (predicates supplied)
       kazi plan render <roadmap-file> [--out <path>]       # render the roadmap DAG as a GENERATED markdown plan (T45.5)
@@ -626,6 +627,7 @@ defmodule Kazi.CLI do
          release binary or `mix`; the escript build lacks the SQLite NIF)
       kazi export <goal-file> --obsidian <dir> [--json]   # write an Obsidian vault
       kazi lint <goal-file|roadmap> [--json]      # advisory group-name warnings; or validate a roadmap DAG (cycles, refs)
+      kazi spec import <feature-file>... --into <goal-file> [--lower scenario] [--json]  # derive predicates from Gherkin (ADR-0050)
       kazi context index <label> <file> [--provider gist] [--json]   # index an artifact
       kazi context search "<query>" [--budget N] [--provider gist] [--json]
       kazi context stats [--provider gist] [--json]                  # byte accounting
