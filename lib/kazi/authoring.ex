@@ -93,9 +93,10 @@ defmodule Kazi.Authoring do
   a clear refusal, not a silent overwrite.
   """
 
-  alias Kazi.{Goal, Predicate, ReadModel}
+  alias Kazi.{Enforcement, Goal, Predicate, ReadModel}
   alias Kazi.Authoring.Clarify
   alias Kazi.Authoring.Draft
+  alias Kazi.Authoring.SelfHost
   alias Kazi.Goal.Group
   alias Kazi.Goal.Loader
   alias Kazi.ReadModel.ProposedGoal
@@ -157,6 +158,20 @@ defmodule Kazi.Authoring do
       passed (#787/#793): refused rather than silently resetting it.
     * `{:error, %Ecto.Changeset{}}` — the proposal could not be persisted.
 
+  ## Self-hosting (T45.10, #1668/#1669, `docs/self-hosting.md`)
+
+  When `:workspace` is kazi's OWN source tree, the drafted goal gets two extra,
+  advisory-only treatments — both no-ops against an ordinary target repo:
+
+    * a `cli`/`custom_script` predicate whose `cmd` names the SAME executable this
+      workspace builds surfaces a `self-hosting-cli-predicate` entry in the
+      draft's clarify floor (`Kazi.Authoring.Clarify.gaps/2`) — it measures the
+      installed binary, not the source edit, and can never turn green alone.
+    * absent an authored `[enforcement]` block, the goal's own predicate kinds'
+      provider file(s) default into `read_only_paths` (`Kazi.Authoring.SelfHost`),
+      so a dispatched agent editing the code that grades its own goal is flagged
+      as evidence rather than invisible.
+
   ## Examples
 
       iex> defmodule OneShotHarness do
@@ -178,6 +193,7 @@ defmodule Kazi.Authoring do
          idea = resolve_idea(proposal, idea, opts),
          {goal_id, proposal_ref} = resolve_identity(proposal, idea, opts),
          {:ok, goal} <- parse_proposal(proposal, goal_id),
+         goal = apply_default_enforcement(goal, opts),
          :ok <- validate_loadable(goal),
          opts = Keyword.put_new(opts, :proposal_ref, proposal_ref),
          opts = Keyword.put(opts, :discovery, maybe_discover(opts)),
@@ -185,6 +201,27 @@ defmodule Kazi.Authoring do
       {:ok, draft}
     end
   end
+
+  # #1669 (T45.10): when the harness/caller authored NO `[enforcement]` block at
+  # all, and this workspace is kazi's OWN source tree (the self-hosting sibling of
+  # #1668), default `read_only_paths` to the provider file(s) that grade THIS
+  # goal's own predicate kinds (`SelfHost.default_read_only_paths/2`) — so a
+  # dispatched agent cannot edit the code that decides whether its own work
+  # passed. A goal that already carries an authored profile (of ANY shape,
+  # including `enabled: false`) is left completely alone: this only fills a true
+  # absence, never overrides an explicit choice. `[]` (the overwhelmingly common
+  # case — an ordinary target repo) leaves the goal byte-identical to before.
+  @spec apply_default_enforcement(Goal.t(), opts()) :: Goal.t()
+  defp apply_default_enforcement(%Goal{enforcement: nil} = goal, opts) do
+    workspace = Keyword.get(opts, :workspace, ".")
+
+    case SelfHost.default_read_only_paths(workspace, goal) do
+      [] -> goal
+      paths -> %{goal | enforcement: Enforcement.new(enabled: true, read_only_paths: paths)}
+    end
+  end
+
+  defp apply_default_enforcement(%Goal{} = goal, _opts), do: goal
 
   # T45.6 (UC-059): the `--discover` on-ramp is OPT-IN and BYPASSED by
   # caller-drafts (a supplied `:proposal`), so it runs only for a kazi-drafts
@@ -651,6 +688,15 @@ defmodule Kazi.Authoring do
     — those are not kazi config keys and the goal will fail to load. Put a shell
     line in `cmd: "sh"`, `args: ["-c", "<line>"]`, never in a `script` key.
 
+    SELF-HOSTING TRAP (#1668): if this workspace is the SOURCE of the CLI/binary a
+    `cli` or `custom_script` predicate would invoke (e.g. the idea is about fixing
+    a command this very project ships), do NOT verify it by shelling out to that
+    executable resolved from `$PATH` — that predicate observes the LAST BUILD, not
+    the source edit being made, and can never turn green from a source change
+    alone until a release/rebuild happens. Prefer a HERMETIC, in-process check
+    instead (e.g. `mix test`, `mix run -e '...'`), or pair the predicate with an
+    explicit build/install step that runs before it.
+
     Author at least one predicate. These are acceptance criteria for NEW
     behavior: they are expected to fail now and pass once the idea is built.
 
@@ -1038,6 +1084,15 @@ defmodule Kazi.Authoring do
     # here, defaulted to `:none`, and SerialLanding reported `:nothing_to_land`).
     # A `:none`-mode goal omits the key -- byte-identical to the prior serialization.
     |> put_integration(goal.integration)
+    # #1669 (T45.10): round-trip a drafted `[enforcement]` block -- today only
+    # `apply_default_enforcement/2`'s self-hosting default -- so an approved goal
+    # keeps the read-only lease `Kazi.Enforcement.resolve/1` would otherwise only
+    # default `enabled` for. `nil` (no block -- the overwhelmingly common case)
+    # omits the key, byte-identical to before this existed. Serializes the scalar
+    # fields only (`guards`/`roles` are always empty on the synthesized default;
+    # a HAND-edited draft that adds either via `edit/3` will not round-trip them
+    # yet -- a narrower, pre-existing gap, not one this introduces).
+    |> put_enforcement(goal.enforcement)
   end
 
   # Emit the `[integration]` table only for a landing goal; a `:none` (default)
@@ -1057,6 +1112,20 @@ defmodule Kazi.Authoring do
   end
 
   defp put_integration(map, _integration), do: map
+
+  defp put_enforcement(map, nil), do: map
+
+  defp put_enforcement(map, %Enforcement{} = enforcement) do
+    table = %{
+      "enabled" => enforcement.enabled,
+      "clean_tree" => enforcement.clean_tree,
+      "clean_ref" => enforcement.clean_ref,
+      "fail_on_skip" => enforcement.fail_on_skip,
+      "read_only_paths" => enforcement.read_only_paths
+    }
+
+    Map.put(map, "enforcement", table)
+  end
 
   # A group as a [[group]] table. nil parent/budget are dropped so a re-load is
   # byte-stable (the loader treats an absent key the same as nil).

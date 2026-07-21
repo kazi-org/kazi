@@ -647,6 +647,19 @@ defmodule Kazi.AuthoringTest do
         assert prompt =~ "- #{kind}:"
       end
     end
+
+    # #1668 (T45.10 exit-proof): the drafting prompt must STEER the harness away
+    # from a `cli`/`custom_script` predicate that shells out to the workspace's
+    # own installed binary -- the defect that stalled the T45.10 run at 1/3
+    # predicates. This is unconditional guidance (no workspace probing at prompt
+    # build time), so it applies to every draft, not only a detected self-hosting
+    # one.
+    test "steers away from cli/custom_script predicates that measure the installed binary" do
+      prompt = Authoring.build_prompt("fix a command this project ships")
+      assert prompt =~ "SELF-HOSTING TRAP"
+      assert prompt =~ "LAST BUILD"
+      assert prompt =~ "HERMETIC"
+    end
   end
 
   # T3.5b (UC-017): the approval workflow over a proposed goal. Tier 2 — every
@@ -797,6 +810,77 @@ defmodule Kazi.AuthoringTest do
                  "mode" => "create",
                  "predicate" => [%{"id" => "p", "provider" => "test_runner"}]
                })
+    end
+  end
+
+  # #1669 (T45.10 exit-proof): `propose/2` defaults `[enforcement] read_only_paths`
+  # onto a drafted goal when its workspace is kazi's OWN source tree -- the
+  # provider file(s) grading THIS goal's own predicate kinds, never the whole
+  # engine. Runs with `:workspace` defaulted (".") against the real repo checkout
+  # the test suite runs from, which genuinely IS kazi's own source (`Kazi.Authoring.
+  # SelfHost.own_source_tree?` is private, but its signal -- `lib/kazi/providers`
+  # existing under cwd -- is simply true here, exactly like a real self-hosted run).
+  describe "propose/2 — self-hosting default enforcement (#1669, Tier 1)" do
+    defmodule CliProposalHarness do
+      @behaviour Kazi.HarnessAdapter
+      @impl true
+      def run(_prompt, _workspace, _opts) do
+        {:ok,
+         %{
+           result: ~s({"name":"Fix kazi help","predicates":[
+                {"id":"help_text","provider":"cli",
+                 "cmd":"kazi","args":["help"],
+                 "assertions":[{"target":"stdout","match":"contains","expected":"dashboard"}]},
+                {"id":"unit","provider":"test_runner","cmd":"mix test"}
+              ]})
+         }}
+      end
+    end
+
+    test "defaults read_only_paths to the graders of THIS goal's own predicate kinds" do
+      {:ok, draft} = Authoring.propose("fix kazi's own CLI", harness: CliProposalHarness)
+
+      assert %Kazi.Enforcement{enabled: true, read_only_paths: paths} = draft.goal.enforcement
+      assert "lib/kazi/providers/cli.ex" in paths
+      assert "lib/kazi/providers/command_runner.ex" in paths
+      assert "lib/kazi/providers/test_runner.ex" in paths
+      # an unrelated provider this goal never touches stays fully editable
+      refute "lib/kazi/providers/browser.ex" in paths
+    end
+
+    test "the defaulted enforcement round-trips through approve" do
+      {:ok, draft} =
+        Authoring.propose("fix kazi's own CLI, round trip", harness: CliProposalHarness)
+
+      assert {:ok, %Goal{} = goal} = Authoring.approve(draft.proposal_ref)
+      assert %Kazi.Enforcement{read_only_paths: paths} = goal.enforcement
+      assert "lib/kazi/providers/cli.ex" in paths
+    end
+
+    test "an ordinary (non-self-hosting) workspace gets no enforcement default" do
+      {:ok, draft} =
+        Authoring.propose("fix an unrelated CLI",
+          harness: CliProposalHarness,
+          workspace: System.tmp_dir!()
+        )
+
+      assert draft.goal.enforcement == nil
+    end
+
+    # A goal that touches none of the self-hosting-flavored kinds (cli/
+    # custom_script) still gets its OWN predicate kinds' graders protected when
+    # run against kazi's own tree -- the threat is "this workspace holds the
+    # grader code", not "this goal is topically about kazi's engine" (see the
+    # `SelfHost` moduledoc). It stays MINIMAL: only http_probe/browser here, never
+    # an unrelated provider like cli.ex or mutation.ex.
+    test "a goal using other kinds still gets ITS OWN (and only its own) graders protected" do
+      {:ok, draft} = Authoring.propose("a health endpoint that returns 200", harness: StubHarness)
+
+      assert %Kazi.Enforcement{read_only_paths: paths} = draft.goal.enforcement
+      assert "lib/kazi/providers/http_probe.ex" in paths
+      assert "lib/kazi/providers/browser.ex" in paths
+      refute "lib/kazi/providers/cli.ex" in paths
+      refute "lib/kazi/providers/mutation.ex" in paths
     end
   end
 end
