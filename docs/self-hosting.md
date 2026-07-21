@@ -133,6 +133,48 @@ done). kazi converges the goal and proposes the change; the human is the gate.
   green, formatted, PR rebase-merged with CI green, deployed/verified-live where
   there is a production surface) — see `CLAUDE.md`.
 
+## Authoring pitfalls when `kazi plan` targets kazi itself (T45.10, #1668/#1669)
+
+The T45.10 exit-proof dogfood (2026-07-21) ran the *authoring* surface — not a
+hand-written goal-file — against kazi's own repo for the first time, and hit two
+gaps that only exist BECAUSE the workspace under test is also the source of the
+engine grading it. Both are now handled by `Kazi.Authoring.SelfHost`, which is a
+no-op the instant `workspace` is not kazi's own tree (no `lib/kazi/providers`
+there) — an ordinary target repo is unaffected.
+
+**A `cli`/`custom_script` predicate can measure the LAST BUILD, not the source
+edit (#1668).** Asked to fix kazi's own CLI, a drafted `cli` predicate shelled
+out to `kazi help` — the INSTALLED binary. A source edit cannot change an
+already-built binary, so the predicate was unsatisfiable from the moment it was
+written:
+
+```
+kazi help | grep -c "kazi dashboard"        -> 0   (installed binary)
+mix run -e 'Kazi.CLI.run(["help"])' | ...   -> 1   (modified source, same tree)
+```
+
+`kazi plan`'s drafting prompt now carries an explicit rule against this
+(`Kazi.Authoring.build_prompt/2`'s "SELF-HOSTING TRAP" paragraph), and any
+`cli`/`custom_script` predicate whose `cmd` still names the workspace's own
+built executable (`Kazi.Authoring.SelfHost.own_binary_name/1`, read from
+`mix.exs`'s `escript` config) surfaces a `self-hosting-cli-predicate` entry in
+the draft's clarify floor (`kazi plan --json`'s `clarify` array, and a `warning:`
+line in the human report) — ADVISORY, never a drafting blocker. Prefer a
+hermetic in-process check (`mix test`, `mix run -e '...'`) instead, or add a
+build/install step before the predicate runs.
+
+**No `[enforcement]` block means the agent can edit its own grader (#1669).**
+`kazi plan` used to author no `[enforcement]` table at all, so a dispatched
+agent was free to edit the very provider file that grades one of its own
+predicates — and, in the dogfood, did (a legitimate fix, but nothing
+distinguished it from one that was not; see #1663). `kazi plan` now defaults
+`read_only_paths` (ADR-0042) to the provider file(s) implementing the drafted
+goal's OWN predicate kinds — never the whole engine, so kazi's routine
+self-improvement of an unrelated provider is not additionally flagged
+(`Kazi.Authoring.SelfHost.default_read_only_paths/2`). This only fills a true
+absence: a goal that already carries an authored `[enforcement]` block (of any
+shape) is left alone.
+
 ## See also
 
 - `docs/concept.md` — canonical concept (§3 objective predicates, §10 slices).
@@ -146,3 +188,6 @@ done). kazi converges the goal and proposes the change; the human is the gate.
 - `Kazi.Goal.Loader` — the goal-file TOML schema.
 - `priv/examples/create_feature.toml` — the creation-mode authoring pattern.
 - `priv/goals/e3-t3.4-standing-reconciler.toml` — the first self-hosted goal.
+- `docs/adr/0042-anti-gaming-enforcement.md` — `[enforcement]`/`read_only_paths`.
+- `Kazi.Authoring.SelfHost` — the self-hosting detection behind #1668/#1669.
+- `priv/examples/doc_lifecycle.goal.toml` — the reference `[enforcement]` shape.
