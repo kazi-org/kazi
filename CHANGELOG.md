@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.275.0](https://github.com/kazi-org/kazi/compare/v1.274.0...v1.275.0) (2026-07-21)
+
+
+### Features
+
+* **cli:** kazi daemon reregister + exit-0 crashloop suppression ([#1484](https://github.com/kazi-org/kazi/issues/1484)) ([a71e098](https://github.com/kazi-org/kazi/commit/a71e098684b294c5cb1b29c01e7b0fa2608710dd))
+* **daemon:** launchd re-registration + conditional KeepAlive ([#1484](https://github.com/kazi-org/kazi/issues/1484)) ([f7e1055](https://github.com/kazi-org/kazi/commit/f7e1055cbd719c15f460a338164d2ecb9d066afe))
+
+
+### Bug Fixes
+
+* **mission-control:** mount and poll tick read the bounded fleet query ([d403ea8](https://github.com/kazi-org/kazi/commit/d403ea8213701f624a9d1198459be09bdd0d957b))
+* **read-model:** bound RunRegistry with a recent-N query (T66.5, [#1483](https://github.com/kazi-org/kazi/issues/1483)) ([80a0472](https://github.com/kazi-org/kazi/commit/80a0472fe3a3f52834f082d0e93938efbf297846))
+
 ## [1.274.0](https://github.com/kazi-org/kazi/compare/v1.273.9...v1.274.0) (2026-07-21)
 
 
