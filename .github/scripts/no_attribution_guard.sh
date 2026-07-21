@@ -27,7 +27,7 @@
 #   BASE_REF=origin/develop .github/scripts/no_attribution_guard.sh
 #
 # Test mode (no git): pipe candidate lines on stdin --
-#   printf 'Co-Authored-By: Claude <x@y>\n' | ATTRIB_STDIN=1 .github/scripts/no_attribution_guard.sh
+#   printf 'Co-Authored-By: Claude <x@y>\n' | ATTRIB_STDIN=1 .github/scripts/no_attribution_guard.sh  # attribution-guard:allow
 
 set -euo pipefail
 
@@ -41,7 +41,7 @@ ASSISTANTS='claude|chatgpt|gpt-4|gpt-5|copilot|codex|cursor|gemini|anthropic\.co
 PATTERNS=(
   "co-authored-by:.*(${ASSISTANTS})"
   "(generated|created|written|authored) (with|by) .*(${ASSISTANTS})"
-  "🤖 generated"
+  "🤖 generated" # attribution-guard:allow
 )
 
 ALLOW_MARKER='attribution-guard:allow'

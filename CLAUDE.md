@@ -99,7 +99,7 @@ lives in kazi core. See `docs/doc-freshness.md` ("The standing goal") and
 
 ## Commits carry no attribution
 
-NEVER add `Co-Authored-By: Claude`, "Generated with Claude Code", or ANY other
+NEVER add `Co-Authored-By: Claude`, "Generated with Claude Code", or ANY other <!-- attribution-guard:allow -->
 attribution or self-promotion line to a commit message, code comment, or file
 in this repo. No exceptions, including for commits authored by an agent kazi
 dispatched.
