@@ -7566,7 +7566,8 @@ defmodule Kazi.CLI do
 
         case Authoring.propose_roadmap(map, propose_opts) do
           {:ok, result} ->
-            emit(json?(opts), roadmap_json(result), fn -> report_roadmap(result) end)
+            workspace = opts[:workspace] || "."
+            emit(json?(opts), roadmap_json(result, workspace), fn -> report_roadmap(result) end)
             0
 
           {:error, reason} ->
@@ -7584,7 +7585,7 @@ defmodule Kazi.CLI do
     end
   end
 
-  defp roadmap_json(result) do
+  defp roadmap_json(result, workspace) do
     %{
       schema_version: @run_schema_version,
       kind: "roadmap",
@@ -7595,7 +7596,7 @@ defmodule Kazi.CLI do
             proposal_ref: draft.proposal_ref,
             goal_id: to_string(draft.goal.id),
             status: to_string(draft.status),
-            clarify: clarify_json(draft)
+            clarify: clarify_json(draft, workspace)
           }
         end),
       clarify:
@@ -7745,9 +7746,13 @@ defmodule Kazi.CLI do
   # Render a successful draft: a single JSON object under --json (the machine
   # surface, ADR-0023 decision 2), the existing human report otherwise. BOTH modes
   # share the same `Kazi.Authoring` draft, so the clarify floor and the proposal
-  # are identical; only the OUTPUT shape differs.
+  # are identical; only the OUTPUT shape differs. `workspace` (T45.10) is the SAME
+  # value `propose_opts` drove drafting with, resolved once here so both render
+  # paths can detect a self-hosting predicate against it (`Kazi.Authoring.SelfHost`).
   defp report_drafted(draft, opts) do
-    emit(json?(opts), proposed_json(draft), fn -> report_proposed(draft) end)
+    workspace = opts[:workspace] || "."
+
+    emit(json?(opts), proposed_json(draft, workspace), fn -> report_proposed(draft, workspace) end)
   end
 
   # A draft-level error: a JSON error envelope on stdout under --json (so the
@@ -8143,7 +8148,7 @@ defmodule Kazi.CLI do
     end
   end
 
-  defp report_proposed(draft) do
+  defp report_proposed(draft, workspace) do
     IO.puts("PROPOSED   goal=#{draft.goal.id}")
     IO.puts("proposal:  #{draft.proposal_ref}")
     IO.puts("idea:      #{draft.idea}")
@@ -8151,7 +8156,28 @@ defmodule Kazi.CLI do
     IO.puts(format_proposed_predicates(draft.goal))
     report_rationale(draft.goal)
     report_suggested_budget(draft.goal)
+    report_self_hosting_warning(draft, workspace)
     IO.puts("\nReview, then: kazi approve #{draft.proposal_ref}")
+  end
+
+  # T45.10 (#1668): surface the `self-hosting-cli-predicate` advisory in the
+  # human report too -- otherwise it is visible only under `--json`'s `clarify`
+  # array, and the T45.10 dogfood ran `kazi plan` in human mode. Deliberately
+  # narrow: prints ONLY this one advisory, not the whole clarify floor (several
+  # other floor questions -- naked-grep-predicate, tree-clean-predicate, landing
+  # -- are pre-existing and out of scope here; changing their human-mode
+  # visibility is a separate decision).
+  defp report_self_hosting_warning(draft, workspace) do
+    draft.idea
+    |> Clarify.gaps(
+      draft: draft.goal,
+      own_binary_name: Authoring.SelfHost.own_binary_name(workspace)
+    )
+    |> Enum.find(&(&1.id == "self-hosting-cli-predicate"))
+    |> case do
+      nil -> :ok
+      %Question{prompt: prompt} -> IO.puts("\nwarning: #{prompt}")
+    end
   end
 
   # T48.9 (ADR-0058 decision 2): a learned `[budget]` suggestion for the drafted
@@ -8211,7 +8237,7 @@ defmodule Kazi.CLI do
   # live-verification target + scope is FLAGGED even when nothing was asked
   # interactively. The floor applies in BOTH drive modes (kazi-drafts and
   # caller-drafts) because both produce the same `Kazi.Authoring.Draft` here.
-  defp proposed_json(draft) do
+  defp proposed_json(draft, workspace) do
     base = %{
       schema_version: @run_schema_version,
       goal_id: to_string(draft.goal.id),
@@ -8220,7 +8246,7 @@ defmodule Kazi.CLI do
       idea: draft.idea,
       predicates: Enum.map(Goal.all_predicates(draft.goal), &predicate_json/1),
       rationale: rationale_text(draft.goal),
-      clarify: clarify_json(draft)
+      clarify: clarify_json(draft, workspace)
     }
 
     # T48.9 (ADR-0058 decision 2): the `suggested_budget` key is present ONLY
@@ -8248,9 +8274,15 @@ defmodule Kazi.CLI do
   # it guards is still open (e.g. no live-verification predicate present), so an
   # orchestrator sees exactly what is missing. Each question carries its id, prompt,
   # and recommended answer — enough to re-propose with the gap closed.
-  defp clarify_json(draft) do
+  # `workspace` (T45.10, #1668) resolves the `self-hosting-cli-predicate` gap's
+  # `:own_binary_name` opt; `nil` against an ordinary (non-self-hosting) workspace,
+  # so that gap simply never fires there.
+  defp clarify_json(draft, workspace) do
     draft.idea
-    |> Clarify.gaps(draft: draft.goal)
+    |> Clarify.gaps(
+      draft: draft.goal,
+      own_binary_name: Authoring.SelfHost.own_binary_name(workspace)
+    )
     |> Enum.map(fn %Question{} = q ->
       %{id: q.id, prompt: q.prompt, recommended: q.recommended}
     end)
