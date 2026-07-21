@@ -938,6 +938,59 @@ restart with:
 launchctl kickstart -k gui/$(id -u)/run.kazi.bushost
 ```
 
+## Re-registering after an in-place upgrade (#1484, ADR-0083)
+
+The installed `kazi` binary is adhoc / linker-signed, so its code signature is
+bound to the exact bytes. If something replaces the binary IN PLACE (a
+Homebrew upgrade, downloading a new release over the old one, a future
+self-update) while a LaunchAgent job is already registered against it,
+launchd keeps the job's Lightweight Code Requirement (LWCR) pinned to the OLD
+bytes. `launchctl print gui/$(id -u)/run.kazi.bushost` then shows
+`needs LWCR update`, and launchd refuses to spawn the job at all, reporting
+
+```
+last exit code = 78: EX_CONFIG
+```
+
+**This is launchd's own exit code, not kazi's** — kazi is never executed, so
+nothing appears in the configured log. Confirmed by experiment: re-registering
+the SAME plist, with NO change to the binary, flipped a job's `last exit code`
+from 78 to 1 (kazi's own honest "already running" message) and its `runs`
+counter from 33,035 to 2.
+
+The remedy is to re-register the job so its LWCR is re-pinned against the
+current binary:
+
+```
+kazi daemon reregister
+```
+
+which runs `launchctl bootout gui/$(id -u)/run.kazi.bushost` (allowed to fail
+— an unloaded job is a valid starting state) then
+`launchctl bootstrap gui/$(id -u) <plist path>`. `kickstart -k` is NOT the
+right remedy here — it re-runs the job under the same, still-invalid
+registration. `daemon reregister` is macOS-only; it is a documented no-op on
+Linux, where the systemd unit carries no LWCR-equivalent to go stale.
+Anything that installs or upgrades `kazi` under a registered LaunchAgent
+should run this afterward.
+
+## The crashloop this exit code hid (#1484 defect 2)
+
+Because launchd's `KeepAlive` respawns the job at its throttle interval
+forever, a stale registration (or any other permanently-failing precondition,
+such as a stale daemon still holding the socket) produced a **33,035-attempt**
+crashloop before the underlying cause was found. The shipped plist now uses
+`KeepAlive: {SuccessfulExit: false}` (restart only a FAILED run, not every
+run) with an explicit `ThrottleInterval`; the systemd unit carries the
+equivalent `RestartSec`/`StartLimitIntervalSec`/`StartLimitBurst`. Both
+templates set a `KAZI_SUPERVISOR` environment variable so a supervised
+`kazi daemon start` can tell it is being respawned: when the failure is "the
+socket is already held by another daemon" (a condition no respawn can fix)
+AND the process is running under a supervisor, `kazi daemon start` now exits
+**0** instead of 1 — a "do not retry" signal to `KeepAlive`/`Restart=on-failure`
+— while printing the exact same error message either way. A hand-run
+`kazi daemon start` (no supervisor) is unaffected: still exit 1.
+
 ## Daemon error taxonomy (#1579)
 
 A bus/daemon CLI call distinguishes these states, so a misleading error never
@@ -954,6 +1007,13 @@ The version-conflict message names **both** the running daemon's version and the
 starting binary's, plus the remedy — an old daemon still bound to the socket when
 a newer `kazi` starts is the exact case where the stale process must be
 restarted first.
+
+**Stale launchd registration (`last exit code = 78: EX_CONFIG`, #1484) is
+NOT in this table** — deliberately: kazi is never executed in that state, so
+there is no CLI message to distinguish it by. Diagnose it from `launchctl
+print gui/$(id -u)/run.kazi.bushost` instead (`needs LWCR update` in
+`properties`, or a bare `last exit code = 78`); the remedy is `kazi daemon
+reregister`, above.
 
 ## MCP tools
 
