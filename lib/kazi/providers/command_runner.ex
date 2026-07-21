@@ -112,6 +112,35 @@ defmodule Kazi.Providers.CommandRunner do
   defp scrub_release_env(opts) do
     scrub = Enum.map(@scrubbed_release_vars, &{&1, nil})
     caller_env = opts |> Keyword.get(:env, []) |> Enum.to_list()
-    Keyword.put(opts, :env, scrub ++ caller_env)
+    Keyword.put(opts, :env, scrub ++ scrubbed_path() ++ caller_env)
   end
+
+  # L-0022 (PATH facet): the standard Elixir release env.sh ALSO prepends the
+  # release's own `$RELEASE_ROOT/bin` and `$RELEASE_ROOT/erts-*/bin` (== $BINDIR)
+  # to PATH. Those dirs hold the release BOOT SCRIPT — itself named `kazi` for the
+  # burrito binary — which shadows the operator's real `kazi` launcher on the
+  # child's PATH. A nested `kazi <verb>` then resolves to the boot script, which
+  # only knows start/eval/version/… and rejects every CLI verb ("Unknown command
+  # help"), so a `cli`/`custom_script` predicate that shells out to `kazi` can
+  # never SEE the real CLI. Strip any PATH entry that lives under the host
+  # RELEASE_ROOT so a spawned child resolves `kazi`/`erl`/`escript` from its own
+  # toolchain instead of the release's private ERTS. Returns `[]` (leaving the
+  # inherited PATH untouched) when not running from a release — the from-source
+  # dev/test path, where RELEASE_ROOT is unset.
+  defp scrubbed_path do
+    with root when is_binary(root) and root != "" <- System.get_env("RELEASE_ROOT"),
+         path when is_binary(path) <- System.get_env("PATH") do
+      kept =
+        path
+        |> String.split(":", trim: true)
+        |> Enum.reject(&under_release_root?(&1, root))
+
+      [{"PATH", Enum.join(kept, ":")}]
+    else
+      _ -> []
+    end
+  end
+
+  defp under_release_root?(entry, root),
+    do: entry == root or String.starts_with?(entry, root <> "/")
 end
