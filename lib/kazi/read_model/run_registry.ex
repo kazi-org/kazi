@@ -212,19 +212,22 @@ defmodule Kazi.ReadModel.RunRegistry do
   end
 
   @doc """
-  Lists every registered run, most recently started first.
+  Lists EVERY registered run, most recently started first -- unbounded by row
+  count.
 
-  Bounded (#1483 reopened): `MissionControlLive.assign_fleet/1` calls this on
-  every mount AND every 2s poll tick, so an unbounded `Repo.all/2` here is a
-  single point of failure for the whole dashboard process -- under fleet write
-  contention (RunReaperTicker/HeartbeatTicker/VelocityTicker all share this
-  one SQLite writer) a raw call can queue behind a writer for the full 60s
-  `busy_timeout`, and LiveView is single-process per connection, so `GET /`
-  simply never responds. Routed through the SAME `Guard.run/3` bounded-task
-  deadline every WRITE in this module already uses; degrades to `[]` on
-  timeout/crash rather than blocking, matching every other `assign_*` helper
-  in `MissionControlLive`'s already-documented "never blocks, never 500s"
-  read-only-projection contract (ADR-0011 §2) -- this was the one gap in it.
+  Guarded against BLOCKING (#1483, first pass): routed through the same
+  `Guard.run/3` bounded-task deadline every WRITE in this module already
+  uses, so a call queued behind a contended writer degrades to `[]` at the
+  15s deadline instead of riding out the full 60s `busy_timeout`. That closes
+  the "never responds at all" failure mode, but NOT the "responds slowly
+  because there are now hundreds of rows" one -- this function still does a
+  full-table `Repo.all/2`, so its cost (and, transitively, the cost of
+  anything that iterates its result -- e.g. `MissionControlLive`'s per-run
+  event-sink reads for the activity river) still scales with TOTAL
+  accumulated run history (#1483 reopened, T66.5). Use `list_recent/1` on any
+  hot/polled path (a LiveView mount, a poll tick); reserve this for genuinely
+  on-demand full-history reads (CLI reports, the JSON API) where an
+  occasional slower call is an acceptable trade for completeness.
   """
   @spec list() :: [Run.t()]
   def list do
@@ -237,6 +240,43 @@ defmodule Kazi.ReadModel.RunRegistry do
   defp do_list do
     Run
     |> order_by(desc: :started_at)
+    |> Repo.all()
+  end
+
+  # Generous enough to cover the whole "current" scope in ordinary fleet sizes
+  # (a handful to a few dozen concurrently running goals) plus a healthy slice
+  # of recent closed history for the "CLOSED" tab, while staying flat-cost
+  # regardless of how many thousands of terminal rows have accumulated over a
+  # daemon's lifetime.
+  @default_recent_limit 150
+
+  @doc """
+  Lists the `limit` most-recently-started runs (default #{@default_recent_limit}),
+  most recently started first -- bounded at the SQL layer via `LIMIT`, not by
+  fetching everything and truncating in Elixir.
+
+  This is the fix for #1483's reopen (T66.5): `MissionControlLive.assign_fleet/1`
+  calls a fleet listing on every mount AND every `@poll_ms` tick, and everything
+  downstream of that call (the grid, the velocity strip, the per-run event-sink
+  reads that build the activity river) previously scaled with the TOTAL run
+  count via `list/0`. Bounding the row count here bounds all of it at the
+  source, independent of how large `runs` has grown. Older history remains
+  reachable on demand via `list/0` (the CLI, the JSON API) -- this function
+  trades literal completeness for a flat mount cost, which is the "recent-N +
+  on-demand history" split the reopened issue asked for.
+  """
+  @spec list_recent(non_neg_integer()) :: [Run.t()]
+  def list_recent(limit \\ @default_recent_limit) when is_integer(limit) and limit > 0 do
+    case Guard.run("run list (recent)", fn -> do_list_recent(limit) end) do
+      {:error, :read_model_unavailable} -> []
+      runs -> runs
+    end
+  end
+
+  defp do_list_recent(limit) do
+    Run
+    |> order_by(desc: :started_at)
+    |> limit(^limit)
     |> Repo.all()
   end
 
