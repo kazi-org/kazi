@@ -368,7 +368,9 @@ defmodule Kazi.ReadModel do
   table.
 
   Best-effort like every projection: a degraded read-model (`Guard`) returns
-  `{:error, :read_model_unavailable}` and never fails the run.
+  `{:error, :read_model_unavailable}` and never fails the run — including when
+  the guarded write dies from an exit it cannot catch, which `Guard.run/3`
+  contains in an unlinked worker rather than propagating (#1652).
   """
   @spec record_landed_refs(Kazi.Goal.id(), [map()]) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -441,7 +443,9 @@ defmodule Kazi.ReadModel do
   re-audit overwrites the goal's prior score rather than accumulating rows.
   `:sensitivity` persists NULL when the audit had nothing to test (honest-unknown,
   ADR-0046). Best-effort like every projection: a degraded read-model returns
-  `{:error, :read_model_unavailable}` and never fails the caller.
+  `{:error, :read_model_unavailable}` and never fails the caller — a guarantee
+  that holds whether or not the caller traps exits, because `Guard.run/3` runs
+  the write in an unlinked monitored worker (#1652).
   """
   @spec record_predicate_audit(Kazi.Goal.id(), map()) ::
           {:ok, PredicateAudit.t()} | {:error, term()}
