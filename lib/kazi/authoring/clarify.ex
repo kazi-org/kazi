@@ -62,6 +62,18 @@ defmodule Kazi.Authoring.Clarify do
       and never asked for a goal with nothing to land (docs-only, live-probe
       only). Like `naked-grep-predicate` it is draft-derived, so it never
       participates in the pre-draft `--strict` refusal.
+    * `self-hosting-cli-predicate` -- ADVISORY (T45.10, #1668): when the draft
+      carries a `cli`/`custom_script` predicate whose `cmd` names the SAME
+      executable the target workspace itself builds (resolved by the caller via
+      `Kazi.Authoring.SelfHost.own_binary_name/1` and passed in as the
+      `:own_binary_name` opt -- kept out of this pure module, which only takes the
+      resolved name as data). Such a predicate observes the INSTALLED/last-built
+      binary, never the source tree a fix edits, so it cannot turn green from a
+      source change alone until a release happens -- exactly the defect that
+      stalled the T45.10 exit-proof at 1/3 predicates. WARN only, like the other
+      draft-derived gaps above: it never blocks drafting or persisting, and is
+      silent (absent `own_binary_name`) for every ordinary, non-self-hosting
+      target workspace.
 
   ## Folding answers (`fold_answers/2`)
 
@@ -86,12 +98,17 @@ defmodule Kazi.Authoring.Clarify do
 
   Pure and total. `opts` may carry `:draft` -- a `Kazi.Goal` or a proposal map
   (string-keyed `"predicates"`) -- so a question is suppressed when the draft
-  already covers the gap (e.g. it already has a live-verification predicate). A
-  fully-specified idea returns `[]`.
+  already covers the gap (e.g. it already has a live-verification predicate). It
+  may also carry `:own_binary_name` (T45.10, #1668) -- the target workspace's own
+  built executable name, when resolved by the caller
+  (`Kazi.Authoring.SelfHost.own_binary_name/1`) -- so the `self-hosting-cli-predicate`
+  gap can fire; absent, that gap never fires. A fully-specified idea against a
+  non-self-hosting workspace returns `[]`.
   """
   @spec gaps(String.t(), keyword()) :: [Question.t()]
   def gaps(idea, opts \\ []) when is_binary(idea) and is_list(opts) do
     draft = Keyword.get(opts, :draft)
+    own_binary_name = Keyword.get(opts, :own_binary_name)
 
     [
       live_target_question(idea, draft),
@@ -99,7 +116,8 @@ defmodule Kazi.Authoring.Clarify do
       http_status_question(idea),
       naked_grep_question(draft),
       tree_clean_question(draft),
-      landing_question(draft)
+      landing_question(draft),
+      self_hosting_question(draft, own_binary_name)
     ]
     |> Enum.reject(&is_nil/1)
   end
@@ -566,6 +584,75 @@ defmodule Kazi.Authoring.Clarify do
       )
     end
   end
+
+  # When the draft carries a `cli`/`custom_script` predicate whose `cmd` names the
+  # SAME executable the target workspace itself builds, warn (T45.10, #1668).
+  # Advisory only -- see the self-hosting-cli-predicate floor entry in the
+  # moduledoc. Silent whenever `own_binary_name` is absent (not a self-hosting
+  # workspace, or the caller did not resolve one) -- the common case.
+  defp self_hosting_question(_draft, nil), do: nil
+
+  defp self_hosting_question(draft, own_binary_name) do
+    case self_hosting_predicate_ids(draft, own_binary_name) do
+      [] ->
+        nil
+
+      ids ->
+        Question.new(
+          "self-hosting-cli-predicate",
+          "Predicate(s) #{Enum.join(ids, ", ")} shell out to `#{own_binary_name}` -- " <>
+            "the SAME executable this workspace itself builds. That measures the " <>
+            "INSTALLED/last-built binary, not the source tree a fix edits (#1668): a " <>
+            "source change cannot make it observe anything new until a release/" <>
+            "rebuild happens. Prefer a hermetic in-process check (e.g. `mix test`, " <>
+            "`mix run -e '...'`) to verify the change directly, or add a " <>
+            "build/install step to the goal before this predicate runs.",
+          options: [
+            Option.new("Swap it for a hermetic in-process check", "hermetic_check"),
+            Option.new("Add a build/install step before this predicate", "build_step"),
+            Option.new("Leave as-is -- accept the risk", "accept_risk")
+          ],
+          recommended: "hermetic_check"
+        )
+    end
+  end
+
+  # The `{id, cmd}` pair of every `cli`/`custom_script` predicate in `draft` (nil,
+  # a `Kazi.Goal`, or a string-keyed proposal map -- mirrors
+  # `custom_script_commands/1`'s two accepted shapes), filtered to those whose
+  # `cmd` matches `own_binary_name` exactly (an executable-NAME match, unlike the
+  # grep signal's text search over the whole command).
+  @self_hosting_providers ~w(cli custom_script)
+
+  defp self_hosting_predicate_ids(nil, _own_binary_name), do: []
+
+  defp self_hosting_predicate_ids(%Kazi.Goal{} = goal, own_binary_name) do
+    goal
+    |> Kazi.Goal.all_predicates()
+    |> Enum.filter(fn predicate ->
+      to_string(predicate.kind) in @self_hosting_providers and
+        to_string(Map.get(predicate.config, :cmd, "")) == own_binary_name
+    end)
+    |> Enum.map(&to_string(&1.id))
+  end
+
+  defp self_hosting_predicate_ids(%{} = map, own_binary_name) do
+    case Map.get(map, "predicates") do
+      list when is_list(list) ->
+        list
+        |> Enum.filter(fn entry ->
+          Map.get(entry, "provider") in @self_hosting_providers and
+            to_string(Map.get(entry, "cmd", "")) == own_binary_name
+        end)
+        |> Enum.map(&Map.get(&1, "id"))
+        |> Enum.reject(&is_nil/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp self_hosting_predicate_ids(_draft, _own_binary_name), do: []
 
   # --- signal detectors (pure) -----------------------------------------------
 
