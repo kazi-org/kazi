@@ -56,7 +56,7 @@ poll-tick refresh, navigation deep-links, and a **CURRENT/CLOSED scope toggle**
 The **SESSIONS** rail (T51.5) shows live bus presence — who is on the bus and
 each session's last-seen freshness — alongside the run cards. It reads from the
 SAME injectable `KaziWeb.CoordinationSource` the [lease map](#the-lease-map-leases)
-uses (T55.3, [ADR-0073](adr/0073-team-board-and-claim-visibility.md) §4): the
+uses (T55.3, [ADR-0073](adr/0073-the-board-current-state-claims-identity.md) §4): the
 transport-backed source when a daemon is reachable (the live bus roster), and
 the NATS-free Native source otherwise — an honest empty rail, never a 500
 ([L-0021](lore.md)). A fresh roster pushed on the source topic re-renders the

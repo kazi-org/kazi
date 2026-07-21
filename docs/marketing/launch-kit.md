@@ -5,7 +5,7 @@ The actual words for launch day. Fills in the drafts referenced by
 against the shipped surface (`apply`, `plan`, `status`, `approve`, `reject`,
 `list-proposed`, `init`, `help`, `version`); the removed verbs `run`/`propose`
 appear nowhere. Positioning strings quote `site/src/canonical.mjs` verbatim.
-Editorial bar: [ADR-0048](adr/0048-adoption-blog-series-editorial-stance.md) —
+Editorial bar: [ADR-0048](../adr/0048-adoption-blog-series-editorial-stance.md) —
 pain first, no hype words, no unshipped capability as working, honest
 limitations stated.
 
