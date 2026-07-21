@@ -1169,17 +1169,35 @@ result / `:DOWN` / an `after` deadline), never `Task.async`. Keep any
 `start_link` INSIDE that worker so the resource stays linked to the worker and
 is reaped when it is killed; unlinking the resource from everything leaks it.
 
-Suspected, NOT demonstrated: `Kazi.ReadModel.Guard.run/3` -- the mechanism
-L-0049's invariant leans on for every registry/projection write and the boot
-migration -- has the same `Task.async` shape and its callers (the loop, the
-writer) do not trap exits. BUT it wraps the guarded fun in try/rescue/catch
-INSIDE the task, so ordinary exceptions and throws become values rather than a
-task crash, and it flushes `{:EXIT, task.pid, _}` with `after 0`. The residual
-hole therefore needs an exit that rescue/catch cannot convert (a linked-process
-exit inside the fun, or the SQLite NIF taking the process down). That has NOT
-been demonstrated there and this entry does not claim it is live. Grep for
-`Task.async` before trusting any "this call can never take down the caller"
-comment -- then reproduce before patching.
+DEMONSTRATED and FIXED at `Kazi.ReadModel.Guard.run/3` (#1652, 2026-07-20) --
+the mechanism L-0049's invariant leans on for every registry/projection write
+and the boot migration. It had the same `Task.async` shape, and its callers (the
+loop, the writer, `KaziWeb.MissionControlLive` via `RunRegistry.list/0`) do not
+trap exits. Its try/rescue/catch INSIDE the task did convert everything the fun
+RAISES -- exceptions, and `:throw`/`:exit`/`:error` raised in the fun's own
+execution -- so the hole was narrow: an ASYNCHRONOUS exit signal, which kills
+the process outright instead of unwinding through `catch`.
+
+Demonstrated for an INJECTED async exit (a `spawn_link`ed process dying inside
+the fun); **no production trigger was ever identified** -- the realistic
+candidates (a linked death in the Ecto/DBConnection path, the SQLite NIF taking
+the process down) were never shown to occur. The fix is therefore
+contract-correctness, not an incident response: Guard's documented promise is
+"never fails the caller", and that promise was false for non-trapping callers.
+The proof is a two-arm test differing ONLY in `Process.flag(:trap_exit, ...)`
+(`guard_exit_demonstration_test.exs`); before the fix it asserted the caller
+DIED, and the fix inverted it.
+
+Guard now uses an unlinked `spawn_monitor` worker. Note it deliberately does NOT
+trap exits (unlike the Bus worker, which must classify a failed connect as a
+value): an async death there SHOULD degrade the write to
+`:read_model_unavailable` rather than let a fun continue whose dependency just
+vanished. If you replace `Task.async` with `spawn_monitor` anywhere that touches
+Ecto, propagate `$callers` by hand -- `Task.async` did it for you and the SQL
+Sandbox reads it to route ownership in tests.
+
+Grep for `Task.async` before trusting any "this call can never take down the
+caller" comment -- then reproduce before patching.
 
 NOTE ON CITATIONS: ~8 modules cite "lore L-0035" for this never-hang invariant,
 but L-0035 is the `opencode --dir` landmine; the invariant actually lives in
