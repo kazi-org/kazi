@@ -205,19 +205,28 @@ defmodule Kazi.Authoring do
   # #1669 (T45.10): when the harness/caller authored NO `[enforcement]` block at
   # all, and this workspace is kazi's OWN source tree (the self-hosting sibling of
   # #1668), default `read_only_paths` to the provider file(s) that grade THIS
-  # goal's own predicate kinds (`SelfHost.default_read_only_paths/2`) — so a
+  # goal's own predicate kinds (`SelfHost.default_enforcement/2`) — so a
   # dispatched agent cannot edit the code that decides whether its own work
   # passed. A goal that already carries an authored profile (of ANY shape,
   # including `enabled: false`) is left completely alone: this only fills a true
-  # absence, never overrides an explicit choice. `[]` (the overwhelmingly common
-  # case — an ordinary target repo) leaves the goal byte-identical to before.
+  # absence, never overrides an explicit choice.
+  #
+  # Deliberately delegates the WHOLE profile (not just the paths) to
+  # `SelfHost.default_enforcement/2`, which overlays `read_only_paths` onto
+  # whatever `Kazi.Enforcement.resolve/1` would already give this goal — so
+  # `enabled` still comes from the goal's own mode (default-on for `:create`,
+  # opt-in for `:repair`, ADR-0042) rather than being hardcoded here. A goal
+  # whose enforcement would otherwise be off (a `:repair` goal, none drafted by
+  # `propose/2` today, but a future/direct caller could) stays off; only the
+  # lease is pre-populated. `nil` (the overwhelmingly common case — an ordinary
+  # target repo) leaves the goal byte-identical to before.
   @spec apply_default_enforcement(Goal.t(), opts()) :: Goal.t()
   defp apply_default_enforcement(%Goal{enforcement: nil} = goal, opts) do
     workspace = Keyword.get(opts, :workspace, ".")
 
-    case SelfHost.default_read_only_paths(workspace, goal) do
-      [] -> goal
-      paths -> %{goal | enforcement: Enforcement.new(enabled: true, read_only_paths: paths)}
+    case SelfHost.default_enforcement(workspace, goal) do
+      nil -> goal
+      enforcement -> %{goal | enforcement: enforcement}
     end
   end
 

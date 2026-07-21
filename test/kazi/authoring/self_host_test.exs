@@ -113,11 +113,80 @@ defmodule Kazi.Authoring.SelfHostTest do
     end
   end
 
+  # --- default_enforcement/2 (overlays the lease onto Enforcement.resolve/1) --
+  #
+  # The team-lead review caught a real defect in the first cut: constructing a
+  # fresh `Kazi.Enforcement.new(enabled: true, ...)` from scratch hardcodes
+  # `enabled: true` (plus the struct's `clean_tree: true`/`fail_on_skip: true`
+  # defaults) regardless of what the goal's OWN mode would otherwise resolve to.
+  # `default_enforcement/2` instead resolves the profile the goal would have
+  # gotten anyway (`Kazi.Enforcement.resolve/1`, mode-respecting) and overlays
+  # ONLY `read_only_paths` -- so a goal whose enforcement would be OFF (a
+  # `:repair` goal, ADR-0042's opt-in policy) stays off; the lease is merely
+  # pre-populated for whenever enforcement IS active.
+  describe "default_enforcement/2" do
+    test "nil against an ordinary (non-kazi-source) workspace" do
+      tmp = tmp_workspace()
+      goal = goal_with([cli_predicate(:a, "kazi")])
+      assert SelfHost.default_enforcement(tmp, goal) == nil
+    end
+
+    test "nil when the goal names no kind kazi ships a provider file for" do
+      goal = Goal.new("g", mode: :create, predicates: [])
+      assert SelfHost.default_enforcement(File.cwd!(), goal) == nil
+    end
+
+    test "a :create-mode goal (ADR-0042 default-on) gets an ACTIVE profile with the lease" do
+      goal = goal_with([cli_predicate(:a, "kazi")], mode: :create)
+
+      assert %Kazi.Enforcement{enabled: true, clean_tree: true, fail_on_skip: true} =
+               enforcement = SelfHost.default_enforcement(File.cwd!(), goal)
+
+      assert "lib/kazi/providers/cli.ex" in enforcement.read_only_paths
+    end
+
+    # The case the team-lead review flagged: a self-hosted :repair goal must
+    # NOT be switched from "enforcement off" to "enforcement on" merely because
+    # it happens to run against kazi's own tree. `Kazi.Enforcement.resolve/1`'s
+    # own opt-in-for-repair policy must still be what decides `enabled`.
+    test ":repair-mode goal (ADR-0042 opt-in) stays enabled: false -- the lease is present but inert" do
+      goal = goal_with([cli_predicate(:a, "kazi")], mode: :repair)
+
+      assert %Kazi.Enforcement{enabled: false} =
+               enforcement = SelfHost.default_enforcement(File.cwd!(), goal)
+
+      # The lease is still populated (so it is already there the moment a human
+      # later flips `enabled: true`), but inert: every enforcement check gates
+      # on `enabled: true` first (Kazi.Enforcement.enforce_result/2, isolate?/1,
+      # guarantee_atoms/1), so a false `enabled` here can never itself trigger
+      # clean-tree isolation or a read-only-write flag.
+      assert "lib/kazi/providers/cli.ex" in enforcement.read_only_paths
+      refute Kazi.Enforcement.active?(enforcement)
+      assert Kazi.Enforcement.guarantee_atoms(enforcement) == []
+
+      assert Kazi.Enforcement.enforce_result(enforcement, Kazi.PredicateResult.pass(%{})) ==
+               Kazi.PredicateResult.pass(%{})
+    end
+
+    test "a goal that already authors its own [enforcement] block is untouched by resolve/1's default" do
+      # (default_enforcement/2 is only ever called by Kazi.Authoring when the
+      # goal's enforcement is nil -- pinning that Enforcement.resolve/1 itself
+      # honors an already-authored profile verbatim, so the caller-side nil
+      # guard is sufficient and not accidentally bypassable here.)
+      authored = Kazi.Enforcement.new(enabled: false, clean_tree: false)
+      goal = %{goal_with([cli_predicate(:a, "kazi")], mode: :create) | enforcement: authored}
+
+      assert Kazi.Enforcement.resolve(goal) == authored
+    end
+  end
+
   defp cli_predicate(id, cmd) do
     Predicate.new(id, :cli, config: %{cmd: cmd, assertions: [%{"target" => "exit_code"}]})
   end
 
-  defp goal_with(predicates), do: Goal.new("g", mode: :create, predicates: predicates)
+  defp goal_with(predicates, opts \\ []) do
+    Goal.new("g", mode: Keyword.get(opts, :mode, :create), predicates: predicates)
+  end
 
   defp tmp_workspace do
     path =
