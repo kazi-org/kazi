@@ -89,6 +89,23 @@ jobs:
           SCAN_TREE: "0"
         run: .github/scripts/no_internal_leak_guard.sh
 
+  no-attribution:
+    name: no agent attribution (ADR-0034, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - name: Run no-attribution guard
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: .github/scripts/no_attribution_guard.sh
+
   doc-freshness:
     name: docs are fresh (T31.5, warn)
     runs-on: ubuntu-latest
