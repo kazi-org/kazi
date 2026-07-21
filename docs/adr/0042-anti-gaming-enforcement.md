@@ -208,6 +208,24 @@ advisory — surface, don't block":
   never blocked — only the *progress view* is downgraded, exactly the ADVISORY
   contract the "Consequences" false-positive risk demands.
 
+## Authoring default for self-hosting goals (T45.10, #1669)
+
+The T45.10 exit-proof dogfood (2026-07-21) found that `kazi plan` authored NO
+`[enforcement]` block at all, so a goal targeting kazi's own repo left the
+dispatched agent free to edit the very provider file that grades one of its own
+predicates — and, in the dogfood, it did (a legitimate fix, merged as #1663, but
+nothing in the system distinguished it from one that was not).
+
+`Kazi.Authoring.SelfHost.default_read_only_paths/2` now fills that gap AT
+AUTHORING TIME, not by changing this ADR's decision: when a drafted goal carries
+no authored `[enforcement]` block AND its workspace is kazi's own source tree,
+`read_only_paths` defaults to the provider file(s) implementing the goal's OWN
+predicate kinds — never the whole engine, so kazi's routine self-improvement of
+an unrelated provider is not additionally flagged. A goal that already authors
+an `[enforcement]` block (of any shape, including `enabled = false`) is left
+completely alone; this only fills a true absence. See `docs/self-hosting.md`
+("Authoring pitfalls when `kazi plan` targets kazi itself").
+
 ## Alternatives rejected
 
 - **Keep guards declarative (today).** A capable model defeats convention; the METR
