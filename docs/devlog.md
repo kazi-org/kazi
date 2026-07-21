@@ -4968,3 +4968,86 @@ the only cluster-member failure was the SemanticIndexTest ordering bug fixed
 above; the other 3 failures are distinct, non-cluster tests
 (`OriginLandingLiveTest`, `HeartbeatTickerTest` DateTime struct-compare,
 `DaemonDigestTest`) — noted for triage, out of T59.5 scope.
+
+## T45.10 exit-proof attempt 2 (2026-07-21) — FAIL, with the failure in a new place
+
+Second attempt at the zero-skill exit proof: drive one real engineering slice
+end to end through the kazi surface only (`kazi plan` -> `kazi approve` ->
+`kazi apply` -> landed PR -> live check), no external plan/apply skill.
+
+**Verdict: FAIL.** The run stopped `STUCK` without converging, so no PR landed
+through the chain and no live predicate was verified. Per the task's FAIL
+branch, the external skills REMAIN the documented fallback and no ADR-0031 /
+ADR-0026 retirement notes were written.
+
+### Environment (the previous attempt's confound, removed)
+
+Attempt 1's verdict was half mis-diagnosed: "the apply wedged" was wrong, and
+its re-run bar demanded a quiet box and a provisioned workspace. Both were met
+and verified this time on a quiet 20-core aarch64 Linux host (load < 1
+throughout), toolchain at CI parity (OTP 28.3 / Elixir 1.20.1 / nats-server
+2.10.24), released binary v1.273.7, and a **green 4554-test baseline in the
+exact workspace before any kazi command ran**. Nothing below is attributable to
+an unprovisioned or loaded machine.
+
+### What worked, and worked well
+
+- `kazi plan` turned prose into three sound predicates and, unprompted, split
+  the two-command fix into separate predicates "so a partial fix cannot pass",
+  adding a registry-enumerating parity test as an anti-gaming backstop and
+  declaring what it deliberately left out of scope.
+- The dispatched agent produced 5 well-formed commits in house style (fix +
+  paired test per concern, `docs/lore.md` updated per ADR-0034 without being
+  asked), and independently found and fixed a REAL separate product bug
+  (L-0022 PATH facet) with its own regression test. That work is sound on its
+  own review and landed separately.
+- The controller was honest: it detected the stable failing set, stopped,
+  escalated to a human, and reported cost ($8.41, 4 iterations, 1/3 pass). It
+  did not fake convergence or thrash.
+
+### The blocking defect: `kazi plan` has no notion of self-hosting
+
+Asked to fix kazi's own CLI, `kazi plan` authored two `cli` predicates that
+shell out to `kazi help` — i.e. they measure the **installed binary**, not the
+working tree. A source edit cannot change the installed binary, so those two
+predicates were unsatisfiable the moment they were written. Proof:
+
+```
+kazi help | grep -c "kazi dashboard"        -> 0   (installed v1.273.7)
+mix run -e 'Kazi.CLI.run(["help"])' | ...   -> 1   (modified source)
+```
+
+The one predicate authored hermetically (`mix test`, in-process) passed and
+correctly proved the fix. So the goal was 1/3-convergeable by construction: the
+agent did everything right and still could not pass. This is a finding about
+the AUTHORING surface, not about dispatch or convergence.
+
+Recorded ironically: the agent's own L-0022 fix made `kazi` resolve to the
+operator's real launcher instead of the release boot script — which is exactly
+what guaranteed the predicate then measured the unmodified installed binary.
+
+### Gaps found en route (filed)
+
+- **#1642** — `kazi apply` runs predicates in a task worktree; `deps/` and
+  `_build/` are gitignored, so mix-backed predicates are red at t0 by
+  construction. Sharper than previously recorded: the plan's remedy ("provision
+  the workspace first") is **unachievable as written**, because the directory an
+  operator provisions is not the directory kazi grades. Verified by provisioning
+  thoroughly and observing no difference.
+- **#937 interaction** — the obvious escape (`--in-place`) is correctly refused
+  on a primary worktree. Combined with #1642 there is no out-of-the-box
+  `kazi apply` invocation that converges on an Elixir repo whose predicates
+  shell out to `mix`; the operator must know to `git worktree add` AND warm it.
+- **#1662** — the #1255 startup watchdog prints a "hang" banner during normal
+  long waits (`System.cmd` harness dispatch, `Loop.await`). Observed twice on
+  commands that completed correctly. This is the diagnostic that produced
+  attempt 1's wrong "wedged at iter 0" verdict.
+- **No `[enforcement]` block.** `kazi plan` authored the goal without
+  `read_only_paths` (ADR-0042), so the agent was free to edit
+  `lib/kazi/providers/command_runner.ex` — the provider that GRADES this goal —
+  and did. This time the edit was a correct, well-tested product fix. Nothing in
+  the system distinguished that from an edit that was not.
+- **House rules do not travel.** The dispatched agent added
+  `Co-Authored-By:` trailers to all 5 commits, which repo convention forbids. A
+  harness on a fresh machine has the repo's CLAUDE.md but not the operator's
+  global conventions; the trailers were caught by hand, not by any gate.
