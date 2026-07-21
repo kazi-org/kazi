@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.8](https://github.com/kazi-org/kazi/compare/v1.273.7...v1.273.8) (2026-07-21)
+
+
+### Bug Fixes
+
+* **cli:** list dashboard and spec in the human `kazi help` usage ([91f434f](https://github.com/kazi-org/kazi/commit/91f434fcd3dc019d4c30df7baf18e362106f0277))
+* **providers:** strip the release's own bin dirs from spawned-child PATH (L-0022) ([10b854a](https://github.com/kazi-org/kazi/commit/10b854a09426f380798bf24f5c906f278d17a885))
+
 ## [1.273.7](https://github.com/kazi-org/kazi/compare/v1.273.6...v1.273.7) (2026-07-20)
 
 
