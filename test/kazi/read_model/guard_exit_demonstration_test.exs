@@ -81,18 +81,20 @@ defmodule Kazi.ReadModel.GuardExitDemonstrationTest do
       assert {:survived, {:error, :read_model_unavailable}} = caller_outcome(true)
     end
 
-    @tag :known_defect
-    test "NON-TRAPPING caller: is KILLED — pins the DEMONSTRATED defect (#1483 ground (b))" do
-      # DEMONSTRATED 2026-07-20, not theorised: the only difference from the
-      # trapping arm above is Process.flag(:trap_exit, true), and it flips the
-      # outcome from "survives with the honest error tuple" to "dead".
+    test "NON-TRAPPING caller: ALSO survives — the contract now holds for every caller (#1652)" do
+      # INVERTED 2026-07-20 by the #1652 fix, as the previous revision of this
+      # test instructed. Before the fix this arm asserted
+      # `{:died, :linked_process_died}` — the caller was killed, because
+      # `Task.async/1` linked the worker to it and an async exit signal is not
+      # convertible by `try/catch`. `Guard.run/3` now runs the fun in an UNLINKED
+      # monitored worker, so that death surfaces as `:DOWN` and degrades to the
+      # honest error tuple instead of propagating.
       #
-      # This assertion deliberately pins the CURRENT, DEFECTIVE behaviour so the
-      # gap cannot regress silently and so the eventual fix has to prove it
-      # changed something. WHEN GUARD IS FIXED, INVERT THIS: the expectation
-      # becomes {:survived, {:error, :read_model_unavailable}}, matching the
-      # trapping arm. Do not delete the test — flip it.
-      assert {:died, :linked_process_died} = caller_outcome(false)
+      # This is the proof the fix changed something: it is the same scenario,
+      # same harness, opposite outcome. Both arms now agree, which is the whole
+      # point — the guard's behaviour no longer depends on whether its caller
+      # happens to trap exits.
+      assert {:survived, {:error, :read_model_unavailable}} = caller_outcome(false)
     end
   end
 
