@@ -457,7 +457,7 @@ defmodule Kazi.CLI do
     %{
       name: "daemon",
       summary:
-        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status|restart` over a local Unix-socket control plane with a version handshake (`status --json` reports `schema_vsn`, the daemon's stamped read-model schema version, for the ADR-0068 skew handshake); `start` also supervises nats-server for the session bus and migrates the read-model ONCE before serving any write (T52.4, migrate-before-serve). `restart` (T52.4) is stop-then-start -- the operator's one-command schema-skew remedy -- and errors clearly if no daemon was running. Convergence never depends on the daemon.",
+        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status|restart|reregister` over a local Unix-socket control plane with a version handshake (`status --json` reports `schema_vsn`, the daemon's stamped read-model schema version, for the ADR-0068 skew handshake); `start` also supervises nats-server for the session bus and migrates the read-model ONCE before serving any write (T52.4, migrate-before-serve). `restart` (T52.4) is stop-then-start -- the operator's one-command schema-skew remedy -- and errors clearly if no daemon was running. `reregister` (ADR-0083, #1484, macOS-only) re-pins a registered launchd LaunchAgent's Lightweight Code Requirement against the CURRENT binary -- the remedy after an in-place upgrade leaves the job spawning against stale bytes and launchd refusing to exec it (`last exit code = 78: EX_CONFIG`, launchd's own code, never kazi's); a no-op elsewhere. Convergence never depends on the daemon.",
       args: [%{name: "subcommand", required: true}],
       flags: [:json, :nats_bin, :nats_port, :nats_host, :nats_token]
     },
@@ -639,6 +639,7 @@ defmodule Kazi.CLI do
       kazi daemon status [--json]                  # ping the running daemon (--json includes schema_vsn, the daemon's read-model schema version)
       kazi daemon stop                             # clean shutdown
       kazi daemon restart [--nats-bin <path>] [--nats-port <n>]  # stop-then-start (schema-skew remedy); errors if none was running
+      kazi daemon reregister [--json]              # re-pin a launchd job's code requirement to the CURRENT binary (remedy for exit 78 after an in-place upgrade, #1484); macOS-only, no-op elsewhere
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
       kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
       kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--json]  # block until a NEW message arrives (#1091/#1097)
@@ -1580,8 +1581,11 @@ defmodule Kazi.CLI do
 
   # T51.1: `daemon start|stop|status [--json]`; T52.4 adds `restart`
   # (stop-then-start, the operator's one-command schema-skew remedy, ADR-0068
-  # point 2). No positional args beyond the subcommand.
-  @daemon_subcommands ~w(start stop status restart)
+  # point 2). `reregister` (#1484, ADR-0083) re-pins the launchd/systemd job
+  # against the CURRENT binary -- the remedy for a stale Lightweight Code
+  # Requirement after an in-place upgrade. No positional args beyond the
+  # subcommand.
+  @daemon_subcommands ~w(start stop status restart reregister)
 
   defp parse_daemon([sub | rest], flags) when sub in @daemon_subcommands do
     case rest do
@@ -1601,12 +1605,12 @@ defmodule Kazi.CLI do
   defp parse_daemon([sub | _], _flags),
     do:
       {:error,
-       "unknown daemon subcommand #{inspect(sub)} (expected `start`, `stop`, `status`, or `restart`)"}
+       "unknown daemon subcommand #{inspect(sub)} (expected `start`, `stop`, `status`, `restart`, or `reregister`)"}
 
   defp parse_daemon([], _flags),
     do:
       {:error,
-       "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`, `restart`)"}
+       "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`, `restart`, `reregister`)"}
 
   # T51.2 (ADR-0067 decision point 4)/#1060: `bus post|read|peek|who|tell` --
   # `post`/`tell` take a required positional (kind+text, or session+text);
@@ -5349,12 +5353,22 @@ defmodule Kazi.CLI do
         # remedy. A stale-version daemon still holding the socket when a newer
         # binary starts otherwise read as a bare "already running", leaving the
         # operator to guess that the OLD process must be force-restarted first.
-        daemon_error(
+        #
+        # #1484 defect 2: under launchd/systemd supervision this condition is a
+        # PERMANENT precondition failure -- a daemon started outside the
+        # supervisor is holding the socket, and respawning cannot fix that
+        # (the reported crashloop reached 33,035 spawn attempts). The shipped
+        # templates now use KeepAlive={SuccessfulExit: false} / Restart=on-failure,
+        # so exiting 0 here tells the supervisor "do not retry" instead of feeding
+        # the loop; the message is still printed loudly exactly as before, and a
+        # hand-run invocation (unsupervised) keeps returning 1.
+        daemon_permanent_error(
           "daemon already running: the socket is held by vsn #{vsn}, this binary is " <>
             "vsn #{version()}. If this binary is newer, the old daemon still owns the " <>
             "socket -- restart it with `kazi daemon restart` (or force it with " <>
             "`#{Kazi.Daemon.LaunchAgent.kickstart_command()}` under launchd).",
-          opts
+          opts,
+          inject_opts
         )
 
       {:error, :nats_bin_not_found} ->
@@ -5452,8 +5466,120 @@ defmodule Kazi.CLI do
     end
   end
 
+  # #1484 (ADR-0083): an in-place binary upgrade (Homebrew, a downloaded release,
+  # a self-update) leaves a REGISTERED launchd job pinned against the previous
+  # binary's Lightweight Code Requirement -- launchd then refuses to spawn it at
+  # all, reporting `last exit code = 78: EX_CONFIG` (launchd's code, never
+  # kazi's -- kazi is never executed). The only remedy is to re-register the job
+  # so its LWCR is re-pinned against the current bytes. macOS-only (launchd is a
+  # macOS concept); on any other OS this is a documented no-op, not an error --
+  # the systemd unit has no LWCR-equivalent staleness to correct.
+  #
+  # `inject_opts[:launchd_os]` / `:reregister_runner` / `:uid_fn` are the test
+  # seams: production never overrides them, so the real path shells out to
+  # `launchctl` via `System.cmd/3`, but the whole decision tree is exercised in
+  # CI WITHOUT touching a real launchd job.
+  defp execute_daemon("reregister", [], opts, inject_opts) do
+    case Keyword.get(inject_opts, :launchd_os, default_launchd_os()) do
+      :darwin ->
+        do_reregister(opts, inject_opts)
+
+      _not_darwin ->
+        emit(
+          json?(opts),
+          %{"ok" => true, "skipped" => true, "reason" => "launchd is macOS-only"},
+          fn ->
+            IO.puts(
+              "kazi daemon: reregister is a no-op on this OS -- launchd's stale-LWCR " <>
+                "condition (#1484) is macOS-only; the systemd unit has no equivalent to fix."
+            )
+          end
+        )
+
+        0
+    end
+  end
+
   defp execute_daemon(sub, _args, opts, _inject_opts),
     do: daemon_error("unknown daemon subcommand #{inspect(sub)}", opts)
+
+  defp default_launchd_os do
+    case :os.type() do
+      {:unix, :darwin} -> :darwin
+      _other -> :other
+    end
+  end
+
+  defp do_reregister(opts, inject_opts) do
+    uid_fn = Keyword.get(inject_opts, :uid_fn, &reregister_uid/0)
+
+    case uid_fn.() do
+      {:ok, uid} ->
+        plist_path = Kazi.Daemon.LaunchAgent.plist_install_path()
+
+        if Keyword.get(inject_opts, :skip_plist_check, false) or File.exists?(plist_path) do
+          run_reregister_steps(uid, plist_path, opts, inject_opts)
+        else
+          daemon_error(
+            "no LaunchAgent plist installed at #{plist_path} -- nothing to re-register " <>
+              "(install it first; see docs/session-bus.md)",
+            opts
+          )
+        end
+
+      {:error, reason} ->
+        daemon_error("could not determine the current uid: #{reason}", opts)
+    end
+  end
+
+  defp reregister_uid do
+    case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+      {out, 0} -> {:ok, String.trim(out)}
+      {out, status} -> {:error, "`id -u` exited #{status}: #{String.trim(out)}"}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # Runs the bootout+bootstrap pair from `LaunchAgent.reregister_argv/2`. The
+  # FIRST step (bootout) is allowed to fail -- an unloaded job is a legitimate
+  # starting state (the operator may be re-registering after a manual bootout,
+  # or installing for the first time); only the bootstrap step's exit decides
+  # success, matching the confirming experiment in #1484 (bootout+bootstrap of
+  # the SAME plist, no binary change, flipped the job's last exit code 78 -> 1).
+  defp run_reregister_steps(uid, plist_path, opts, inject_opts) do
+    runner = Keyword.get(inject_opts, :reregister_runner, &System.cmd/3)
+
+    [bootout, bootstrap] =
+      Enum.map(Kazi.Daemon.LaunchAgent.reregister_argv(uid, plist_path), fn {cmd, args} ->
+        {out, status} = runner.(cmd, args, stderr_to_stdout: true)
+        %{"cmd" => Enum.join([cmd | args], " "), "output" => String.trim(out), "status" => status}
+      end)
+
+    if bootstrap["status"] == 0 do
+      emit(
+        json?(opts),
+        %{
+          "ok" => true,
+          "label" => Kazi.Daemon.LaunchAgent.label(),
+          "steps" => [bootout, bootstrap]
+        },
+        fn ->
+          IO.puts(
+            "kazi daemon: re-registered #{Kazi.Daemon.LaunchAgent.label()} against the current binary"
+          )
+        end
+      )
+
+      0
+    else
+      daemon_error(
+        "re-registration failed (`#{bootstrap["cmd"]}` exited #{bootstrap["status"]}): " <>
+          "#{bootstrap["output"]}",
+        opts
+      )
+    end
+  end
 
   # The shutdown ack means "accepted", not "torn down": the listener frees the
   # socket asynchronously as the tree exits. Poll (bounded) until the old daemon
@@ -5570,6 +5696,27 @@ defmodule Kazi.CLI do
     end
 
     1
+  end
+
+  # #1484 defect 2: a PERMANENT precondition failure (today, only "the socket is
+  # already held by another daemon") that respawning cannot fix. Under
+  # launchd/systemd supervision (`KAZI_SUPERVISOR`, set by the shipped
+  # templates), the shipped KeepAlive/Restart contract only retries a NON-zero
+  # exit, so returning 0 here stops the crashloop instead of feeding it -- the
+  # confirmed failure mode was 33,035 spawn attempts against exactly this
+  # condition. The message is printed identically either way; only the exit
+  # code changes, and only under a supervisor. `inject_opts[:supervisor_env]`
+  # is the test seam for `Kazi.Daemon.LaunchAgent.supervised?/1` (defaults to
+  # the real process environment).
+  defp daemon_permanent_error(message, opts, inject_opts) do
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    env = Keyword.get(inject_opts, :supervisor_env)
+    if Kazi.Daemon.LaunchAgent.supervised?(env), do: 0, else: 1
   end
 
   # =============================================================================
