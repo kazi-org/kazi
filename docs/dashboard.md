@@ -413,11 +413,29 @@ instead of the strip; velocity appears only once the fleet actually ships.
 ### Per-agent drill-in
 
 Below the strip, one expandable row (`<details>`) per session shows that agent's
-`<per_day> /day · <count>` delivered and `<pct>% stuck · <terminal> terminal`;
-expanding it **names the offending stuck goals** — the `goal_ref`s whose runs went
+delivered figure and `<pct>% stuck · <terminal> terminal`; expanding it
+**names the offending stuck goals** — the `goal_ref`s whose runs went
 `stuck` / `over_budget`, attributed from the run registry (the same terminal-verdict
 universe the fleet stuck ratio counts, the same attribution `kazi economy` reads).
 A high stuck ratio thus points at *which* lane needs attention, not just a number.
+
+**The delivered figure has four states**, because attributing a delivery to an
+agent can fail in two different ways and the panel must not blur them into a
+number (#1651):
+
+| State | Copy it renders | What it means |
+|---|---|---|
+| measured | `<per_day> /day · <count>` | every delivery in this agent's window carried a session attribution — an exact count |
+| floor | `≥ <per_day> /day · ≥ <count> (some deliveries unattributed)` | this agent has attributed deliveries *and* the window holds unattributed ones that may also be theirs. The count is a real observation and a **lower bound**, never an exact measurement |
+| not attributable | `— deliveries not attributable to an agent` | the window holds deliveries but **none** carry a session attribution, so no per-agent figure can ever populate here — distinct from "wait for more data" |
+| no data | `— not enough data yet` | nothing delivered in the window yet; more data would change this |
+
+The distinction matters on a **trailer-stripped repo**, where a git-derived
+delivery has no `session_uuid` by design: telling the operator to wait for data
+that cannot arrive is its own small dishonesty. None of the four ever renders a
+fabricated `0.0 /day`. The `≥` qualifier appears **only** in the floor state and
+vanishes once attribution is complete, so it carries information rather than
+becoming ambient hedging.
 
 ### The opt-in story — why a card is empty
 
