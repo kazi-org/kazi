@@ -80,4 +80,65 @@ defmodule Kazi.Providers.CommandRunnerTest do
       assert out =~ ~r/^KAZI_CR_EXTRA=added$/m, "scrub must not drop caller-supplied :env"
     end
   end
+
+  # L-0022 (PATH facet): the release env.sh PREPENDS the release's own
+  # `$RELEASE_ROOT/bin` + `$RELEASE_ROOT/erts-*/bin` to PATH. Those dirs hold the
+  # release BOOT SCRIPT (named `kazi` for the burrito binary), which shadows the
+  # operator's real `kazi` launcher on a child's PATH — a nested `kazi <verb>`
+  # then resolves to the boot script and is rejected ("Unknown command <verb>").
+  # The command runner must strip any PATH entry under RELEASE_ROOT from every
+  # child it spawns, while keeping the rest of PATH intact.
+  describe "run/4 — strips the release's own bin dirs from the child PATH (L-0022)" do
+    setup do
+      root = "/nonexistent/.burrito/kazi_erts-9.9.9_9.9.9"
+
+      prior_root = System.get_env("RELEASE_ROOT")
+      prior_path = System.get_env("PATH")
+
+      # Simulate the release footprint: RELEASE_ROOT set, with the release's own
+      # bin + erts/bin PREPENDED to an otherwise-real PATH.
+      System.put_env("RELEASE_ROOT", root)
+      System.put_env("PATH", "#{root}/erts-9.9.9/bin:#{root}/bin:#{prior_path}")
+
+      on_exit(fn ->
+        if prior_root,
+          do: System.put_env("RELEASE_ROOT", prior_root),
+          else: System.delete_env("RELEASE_ROOT")
+
+        System.put_env("PATH", prior_path)
+      end)
+
+      %{root: root, real_path: prior_path}
+    end
+
+    test "the release bin dirs are gone from the child PATH; the rest survives", %{
+      root: root,
+      real_path: real_path
+    } do
+      assert {:ran, out, 0} =
+               CommandRunner.run("bash", ["-c", "echo \"PATH=$PATH\""], stderr_to_stdout: true)
+
+      [child_path] = Regex.run(~r/^PATH=(.*)$/m, out, capture: :all_but_first)
+      entries = String.split(child_path, ":", trim: true)
+
+      refute Enum.any?(entries, &String.starts_with?(&1, root)),
+             "release bin dirs must not reach the child PATH (got #{child_path})"
+
+      # Every non-release dir the parent had is still present (nothing else stripped).
+      for dir <- String.split(real_path, ":", trim: true) do
+        assert dir in entries, "scrub dropped a non-release PATH dir: #{dir}"
+      end
+    end
+
+    test "from source (no RELEASE_ROOT) the inherited PATH is left untouched" do
+      System.delete_env("RELEASE_ROOT")
+      real = System.get_env("PATH")
+
+      assert {:ran, out, 0} =
+               CommandRunner.run("bash", ["-c", "echo \"PATH=$PATH\""], stderr_to_stdout: true)
+
+      [child_path] = Regex.run(~r/^PATH=(.*)$/m, out, capture: :all_but_first)
+      assert child_path == real, "PATH must be inherited verbatim when not running from a release"
+    end
+  end
 end
