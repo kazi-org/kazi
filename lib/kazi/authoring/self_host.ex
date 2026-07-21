@@ -25,15 +25,21 @@ defmodule Kazi.Authoring.SelfHost do
       read-only lease — only the provider file(s) THIS goal's own predicate kinds
       are graded by, never the whole engine — so kazi's routine self-improvement
       of an UNRELATED provider is not additionally flagged by a goal that merely
-      happens to run against this repo.
+      happens to run against this repo. `default_enforcement/2` OVERLAYS that
+      lease onto whatever profile `Kazi.Enforcement.resolve/1` would already give
+      the goal (mode-respecting: default-on for `:create`, opt-in for `:repair`)
+      rather than constructing a fresh `enabled: true` profile from scratch — a
+      goal whose enforcement would otherwise be OFF stays off; the lease is
+      merely present for whenever it turns on.
 
-  Both helpers degrade to `nil`/`[]` the instant `workspace` is not kazi's own
-  source tree (no `lib/kazi/providers` directory there) — the overwhelmingly
-  common case for `kazi plan`/`kazi apply` against an arbitrary target repo, and
-  byte-identical to before this module existed.
+  Both `at_risk_predicates/2` and `default_read_only_paths/2` (and therefore
+  `default_enforcement/2`) degrade to `nil`/`[]` the instant `workspace` is not
+  kazi's own source tree (no `lib/kazi/providers` directory there) — the
+  overwhelmingly common case for `kazi plan`/`kazi apply` against an arbitrary
+  target repo, and byte-identical to before this module existed.
   """
 
-  alias Kazi.{Goal, Predicate}
+  alias Kazi.{Enforcement, Goal, Predicate}
 
   # =============================================================================
   # #1668 — a predicate that measures the installed binary, not the edited tree
@@ -158,6 +164,34 @@ defmodule Kazi.Authoring.SelfHost do
       |> Enum.sort()
     else
       []
+    end
+  end
+
+  @doc """
+  The `Kazi.Enforcement` profile to author for `goal` against `workspace`
+  (#1669): whatever profile `Kazi.Enforcement.resolve/1` would ALREADY give this
+  goal — respecting its own mode (default-ON for `:create`, opt-in for `:repair`,
+  ADR-0042) — with ONLY `read_only_paths` added on top, when this workspace is
+  kazi's own source tree and the goal's own predicate kinds resolve to a
+  non-empty lease.
+
+  Deliberately does NOT hardcode `enabled: true`: this is a *lease*, not a
+  policy override. A `:repair`-mode goal (opt-in policy) gets `read_only_paths`
+  set on an otherwise-INACTIVE profile (`enabled: false`) — present but inert,
+  since every enforcement check (`enforce_result/2`, `isolate?/1`,
+  `guarantee_atoms/1`) gates on `enabled: true` first. It never flips a repair
+  goal's enforcement on by itself; it only ensures the lease is already there
+  the moment enforcement IS active (by mode, or a later explicit author choice).
+
+  Returns `nil` when there is nothing to add — an ordinary (non-self-hosting)
+  workspace, or a goal naming no kind kazi ships a provider file for — so the
+  caller leaves the goal exactly as drafted.
+  """
+  @spec default_enforcement(String.t(), Goal.t()) :: Enforcement.t() | nil
+  def default_enforcement(workspace, %Goal{} = goal) do
+    case default_read_only_paths(workspace, goal) do
+      [] -> nil
+      paths -> %{Enforcement.resolve(goal) | read_only_paths: paths}
     end
   end
 
