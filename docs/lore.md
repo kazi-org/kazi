@@ -1214,3 +1214,55 @@ caller" comment -- then reproduce before patching.
 NOTE ON CITATIONS: ~8 modules cite "lore L-0035" for this never-hang invariant,
 but L-0035 is the `opencode --dir` landmine; the invariant actually lives in
 L-0049 and here. Do not follow that citation expecting to find it.
+
+### L-0054 #otp #task #link #scheduler #audit -- not every `Task.async` site is the L-0053 defect; a structural match still needs BOTH a live async-exit source AND a non-trapping caller that was meant to survive
+
+Following #1637's lesson (a fix shipped on shape alone at a site where the
+instance was never live -- see the note appended above at #1652's landing),
+a full audit of every remaining `Task.async` call in `lib/kazi/`
+walked each site through the two-part test -- can the fun's call graph
+actually produce an UNTRAPPABLE async exit, and does a caller that must
+survive not trap -- before touching anything.
+
+**Not reachable (no linked process in the fun's call graph):**
+`Kazi.Providers.CommandRunner.run/4`, both `Task.async` sites in
+`Kazi.Bus.TeamId` (`git_origin_url/1`, `repo_root/1`), and
+`Kazi.Loop.run_integrate/4` all bottom out in `System.cmd/3` (a port, not a
+linked process) or -- for `run_integrate`, whose fun is the INJECTED
+`:integrate` module's `execute/2` -- the real production module
+(`Kazi.Actions.Integrate` and its `GhIntegrator`/`ActionIntegrator`/
+`LocalIntegrator`/`OriginIntegrator` sub-modules) traced all the way through:
+every step is `System.cmd`, `Process.sleep`, or pure data transforms. No
+`spawn_link`/`start_link` anywhere in any of these call graphs, so no async
+exit signal can ever originate there -- the class does not apply.
+
+`Kazi.Runtime.BusMirror.emit/4`'s `:wait` branch and `Kazi.Bus.Hook.run/2`
+both wrap calls that go through `Kazi.Bus` (`post`/`read_digest`/`join`/
+`board`/`waiting_on_operator?`) -- which, since #1606, already runs its own
+connect+call in an unlinked `spawn_monitor` worker (see the note above). The
+default poster/payload path therefore has no linked process to die
+asynchronously either; `Kazi.Plugin.Skew.check/1` (the other half of
+`session_start`) is a plain file read.
+
+**Structurally reachable, but not a live defect (`Kazi.Scheduler.invoke_reconciler/3`,
+`Kazi.Scheduler.DepScheduler.invoke_reconciler/4`):** the injected reconciler's
+real production chain (`Kazi.Fleet.Execution` -> `Kazi.Runtime.run/2` ->
+`Kazi.Loop.start_link/1`) DOES start a linked, non-trapping `gen_statem`, so an
+untrappable async exit can genuinely arise several layers down. But the
+surrounding architecture already treats that as equivalent to an ordinary
+raise: both files' own comments (citing "M8, deep-review-001" and T21.10)
+document that a crash makes the per-partition supervised `Task` "exit
+abnormally," and the coordinator (`Kazi.Scheduler`/`DepScheduler`, a GenServer)
+only `Process.monitor`s that per-partition `Task` -- it never links to it. So
+whether `Task.yield`'s `{:exit, reason} -> :crashed` clause fires (a trapping
+caller) or the cascading kill reaches the coordinator via its `{:DOWN, ...}`
+handler (the actual, non-trapping case), `normalize_status`/`down_status` land
+on the SAME `:crashed` verdict either way -- there is no caller here that was
+meant to survive and doesn't. Left unconverted: this is the honest majority
+outcome the audit method expects, not a gap.
+
+Method going forward: "does an async exit reach a caller expected to survive"
+is the whole test -- a `Task.async` inside a supervised, monitored-not-linked
+worker can be perfectly safe even when a linked process lives further down its
+call graph, because the crash's blast radius stops at a boundary the system
+already treats as disposable.
