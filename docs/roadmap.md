@@ -9,8 +9,9 @@ screen instead of reconstructing it from 70+ ADRs and 50+ epics. E45
 ("plan-as-generated-view") may eventually generate a view like this from plan
 data; until then it is hand-maintained under the contract at the bottom.
 
-Last updated: **2026-07-17** (at v1.153.0, ADRs through 0073, E55 wave A
-SHIPPED -- 7 tasks merged and released; waves B-D next).
+Last updated: **2026-07-21** (at v1.275.0, ADRs through 0083, 392/396 plan
+tasks done; E67 -- velocity/dashboard KPIs -- fully SHIPPED this session. Full
+session detail: `docs/handover.md`).
 
 ## Where we came from
 
