@@ -555,7 +555,19 @@ claude-sonnet-5): the price-map/suite predicates read `exit 2` until the clean-e
 wrapper was added, after which the goal converged in 2 iterations. Real fix lives in
 kazi core: scrub `RELEASE_*` / `ELIXIR_ERL_OPTIONS` from the `custom_script`
 provider's spawn env so `mix test` (and any app-booting child) is hermetic without an
-author workaround.
+author workaround. **PATH facet (extends the fix):** scrubbing the env VARS is not
+enough. The standard Elixir release `env.sh` also PREPENDS the release's own
+`$RELEASE_ROOT/bin` + `$RELEASE_ROOT/erts-*/bin` (== `$BINDIR`) to `PATH`, and for the
+Burrito binary the release boot script in `$RELEASE_ROOT/bin` is itself named `kazi`.
+So a child that shells out to `kazi <verb>` resolves the BOOT SCRIPT (which only knows
+`start`/`eval`/`version`/… and answers every CLI verb with `Unknown command <verb>`,
+exit 1, empty stdout) instead of the operator's real launcher on `/usr/local/bin` --
+the SAME "kazi can't SEE the green" shape, now hitting a `cli`/`custom_script`
+predicate that runs `kazi help`/`kazi status`/etc. `Kazi.Providers.CommandRunner` now
+also strips any `PATH` entry under `RELEASE_ROOT` from every child it spawns (a no-op
+from source, where `RELEASE_ROOT` is unset), so a nested `kazi` resolves to the real
+launcher. Found 2026-07-21 dogfooding the `help-parity` goal: `kazi help` read the
+release boot script's `Unknown command help` until the PATH strip landed.
 
 ### L-0023 #claude #harness #permission #trust-dialog #stuck #landmine -- a headless `claude -p` dispatch against an untrusted workspace silently denies EVERY tool call, burning cost with zero progress
 `kazi apply --harness claude` against a workspace that has never been through
