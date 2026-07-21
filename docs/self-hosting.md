@@ -149,8 +149,11 @@ already-built binary, so the predicate was unsatisfiable from the moment it was
 written:
 
 ```
-kazi help | grep -c "kazi dashboard"        -> 0   (installed binary)
-mix run -e 'Kazi.CLI.run(["help"])' | ...   -> 1   (modified source, same tree)
+$ kazi help > installed.txt              # the INSTALLED binary's help
+$ grep "kazi dashboard" installed.txt    -> no match
+
+$ mix run -e 'Kazi.CLI.run(["help"])' > source.txt   # the EDITED tree's help
+$ grep "kazi dashboard" source.txt       -> matches
 ```
 
 `kazi plan`'s drafting prompt now carries an explicit rule against this
