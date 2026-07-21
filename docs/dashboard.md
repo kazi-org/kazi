@@ -76,6 +76,25 @@ groups" (ADR-0056): every run is its own card with no declared order between
 them, newest first (past the card cap, a `+N more` link points to `/goals`).
 Roadmap wave mode resolves state across all runs and ignores the scope.
 
+**Bounded fleet query (T66.5, #1483).** `assign_fleet/1` runs on every mount
+AND every 2-second poll tick, and everything it derives — the grid, the
+velocity strip, and the per-run event-sink reads that build the EVENT RIVER —
+fans out from its one fleet listing call. That call is
+`Kazi.ReadModel.RunRegistry.list_recent/1` (default 150, most-recently-started
+first, bounded at the SQL layer via `LIMIT`), not `list/0`: an accumulated
+fleet of hundreds or thousands of historical runs no longer costs the mount
+anything beyond that fixed window. #1605 had already guarded `list/0` against
+BLOCKING under writer contention (`Kazi.ReadModel.Guard`, degrading to `[]` on
+a 15s timeout); it did not bound the row count, so a query that completed in,
+say, 10–14s still cleared the guard's deadline but still cost the mount that
+long, and cost grew with total history. `list_recent/1` closes that gap at the
+source. The trade-off: the `CURRENT`/`CLOSED` chip counts and the CLOSED tab
+now reflect the recent window, not literal all-time totals — full history
+remains reachable on demand via `RunRegistry.list/0` (the CLI, `GET
+/api/runs`), just not on this polled path. A dedicated read-only connection
+pool (so a contended writer can't add latency to the mount's read even within
+the bounded window) remains a possible fast-follow, not implemented here.
+
 **Fleet cards.** Each run-backed card (a link to `/goals/:ref/drillin`) shows
 the goal name and a state pill (RUNNING / CONVERGED / STUCK / STALE /
 OVER-BUDGET), a harness badge (`harness · model`), the workspace basename, and
