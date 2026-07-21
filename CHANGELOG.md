@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.273.9](https://github.com/kazi-org/kazi/compare/v1.273.8...v1.273.9) (2026-07-21)
+
+
+### Bug Fixes
+
+* **read-model:** run guarded writes in an unlinked worker ([#1652](https://github.com/kazi-org/kazi/issues/1652), [#1483](https://github.com/kazi-org/kazi/issues/1483)) ([17945a2](https://github.com/kazi-org/kazi/commit/17945a29046779b9cba3b39d5f6c4bab0fe75ef0))
+
 ## [1.273.8](https://github.com/kazi-org/kazi/compare/v1.273.7...v1.273.8) (2026-07-21)
 
 
