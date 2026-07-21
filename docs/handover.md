@@ -94,6 +94,10 @@ out T66.2 (see Blocked).
   verified against the published `.sha256`), matching the latest release --
   required so this machine's own dogfooding reflects today's fixes rather
   than silently running around them.
+- **Main CI is green at HEAD** (`a6aaca4c`, release 1.275.0 auto-cut) --
+  confirmed after it finished running (conclusion `success`). It was still
+  in progress when this note was first drafted; re-checked before finalizing
+  rather than left marked "unverified" once the real answer was available.
 - **Separate repo, `dndungu/skills`:** the personal `/sitrep` skill was
   rewritten to forbid bare task/issue IDs (every ID must now carry a
   plain-English gloss); a `parse_plan.py` regex bug that undercounted
@@ -131,10 +135,6 @@ Restore any of these with: `git push origin <sha>:refs/heads/<name>`.
 
 ## Done but UNVERIFIED
 
-- **Main CI at the current HEAD (`a6aaca4c`, release 1.275.0 auto-cut) was
-  still IN PROGRESS when this session ended.** Not confirmed green. Check
-  `gh run list --branch main --workflow CI --limit 1` before trusting main is
-  clean.
 - **T66.5's own live acceptance criterion** (a released binary, hours after
   restart, real accumulated history, `GET /` under 20s) was explicitly NOT
   verified -- that needs a release + live check, which is why the plan line
@@ -243,8 +243,9 @@ worktrees beyond the main checkout.
    `docs/plan.md` + `docs/plans/E66.md` (T66.2) / `E45.md` (T45.10) /
    `E25.md` (T25.10) for the three open tasks' exact acceptance text --
    don't rely on this summary alone for the acceptance bar wording.
-3. Confirm main's CI is actually green at HEAD (see Unverified above) before
-   building on top of it.
+3. Main's CI was confirmed green at HEAD (`a6aaca4c`) at handover time --
+   re-check if new commits have landed since (`gh run list --branch main
+   --workflow CI --limit 1`).
 4. Pick a lane: T66.2 needs mac-mini access; T25.10 needs David; T45.10
    attempt 3 needs explicit buy-in given its cost, plus a fresh check that
    the remote GPU host and its Claude Code/`gh` auth are still live.
