@@ -94,6 +94,20 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
+**Near term (2026-08-08, from a full open-issue triage -- E69, 14 tasks, 3
+waves):** resolve the entire open backlog. Wave A is the P0 pair on v1.275.0
+-- the `plan --replace` false green (#1679, apply converging against a
+superseded predicate set) and the #1255-class apply startup wedge
+(#1683/#1680), plus the watchdog false-diagnosis de-noise (#1662). Wave B is
+daemon/dashboard reliability: the orphaned-nats-server crash-restart loop
+(#1684), the dashboard accept-but-silent startup block (#1685), the
+mount-query-scales-with-run-history residual (#1483), the
+workspace-derivation contract (#1678), and the self-conformance fixture cost
+(#1636). Wave C is surface + tests: the portfolio schema registration
+(#1681), the `--project` flag-doc fix (#1617), the ACCEPTED post-disposition
+hook (#1682), the DECIDED explicit goal-file setup step (#1642, ADR ~0084),
+and real-discovery bus tests (#1649). #382/#372 close via T25.10 (E25).
+
 **Near term (2026-07-17, from a full open-issue triage -- 7 new epics,
 E56-E62):** doc/lore/ADR hygiene (E56); predicate correctness -- serial-apply
 landing routing, guard/acceptance flag round-tripping, and a disambiguated
