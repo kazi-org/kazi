@@ -378,6 +378,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E68 -- Triage 2026-07-19: runtime robustness fixes + predicate-integrity feature family (#1511, #1547, #1551, #1546, #1550, #1520, #1521, #1522, #1501) -> plans/E68.md
 
+### E69 -- Triage 2026-08-08: full open-backlog resolution -- replace/apply false green, #1255-class startup wedges, daemon crash-loop, DX contract gaps, accepted enhancements (P0/P1) -> plans/E69.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -481,6 +483,7 @@ never swept into your commit.
 
 ## Progress Log
 
+- 2026-08-08: /plan resolve-all-open-issues -- new epic E69 (plans/E69.md, executable, 14 tasks ~41h, 3 waves) giving every open issue a plan home: P0 #1679 false green + #1683/#1680 apply wedge/contract + #1662 watchdog de-noise (wave A); #1684/#1685/#1483/#1678/#1636 reliability (wave B); #1681/#1617/#1682/#1642/#1649 surface+tests (wave C). Operator decisions recorded: #1682 hook ACCEPTED, #1642 explicit goal-file setup step (option 2, ADR ~0084 in T69.12). #382/#372 ride T25.10 (E25).
 - 2026-07-19: /plan resolve-open-issues -- ADR-0082 proposed (#1554 option B), T45.9 re-scoped (deps: ADR acceptance), wave E66-C added for T66.5-T66.7 (#1483 reopen, #1579, #1606); all 7 open issues now have plan homes.
 ### 2026-07-18 -- Change Summary (E65 planned: deterministic bus identity)
 - New epic E65 (plans/E65.md, executable, 5 tasks ~15h) from the operator's
