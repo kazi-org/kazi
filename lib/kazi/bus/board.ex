@@ -42,9 +42,9 @@ defmodule Kazi.Bus.Board do
   entry list) into the board's bounded, JSON-ready shape:
 
       %{
-        "facts" => [line],       # last value per topic, stubbed + bounded
+        "facts" => [line],       # last value per NON-attention topic, newest first, bounded
         "roster" => [entry],     # stable identity per live session
-        "total_facts" => n,      # distinct fact topics before bounding
+        "total_facts" => n,      # distinct NON-attention fact topics before bounding
         "total_sessions" => m,
         "attention" => [entry],  # T60.3: sessions waiting on a human, oldest first
         "total_attention" => k
@@ -54,6 +54,24 @@ defmodule Kazi.Bus.Board do
   rendering, so posting three facts on one topic yields ONE current line -- the
   last, never three. `total_facts` counts distinct topics, so an `overflow`
   fact line never hides how many topics the board actually holds.
+
+  ## Facts window excludes attention (issue #1687)
+
+  Every `attention-*` topic is dropped from `"facts"`/`"total_facts"` entirely
+  -- it already has its own roster-gated `"attention"` section above, and
+  showing it twice (once live-filtered, once raw) is how a `session-start`
+  injection built from `"facts"` alone (`Kazi.Bus.Hook.fact_lines/1`, which
+  never reads `"attention"`) ended up dominated by dead sessions' immortal
+  `attention-*` topics -- a `"none"` clear posts a NEW last-value message
+  rather than erasing the topic, so a cleared attention fact still occupied a
+  facts-window slot as `attention-<id>: none` before this fix. The exclusion
+  is unconditional (waiting or cleared), so `"facts"` never carries an
+  `attention-*` line under any value.
+
+  `"facts"` is also ordered NEWEST-FIRST (`id` descending) before the digest
+  bound is applied, so a busy topic namespace bounds by RECENCY, not by
+  alphabetical topic name -- the old order silently favored topics whose name
+  sorted early over whatever actually just happened.
 
   ## Attention (T60.3, issue #1156)
 
@@ -69,9 +87,11 @@ defmodule Kazi.Bus.Board do
   @spec render([fact()], [roster_entry()]) :: %{required(String.t()) => term()}
   def render(facts, roster) when is_list(facts) and is_list(roster) do
     topics = collapse_latest(facts)
+    non_attention_topics = Enum.reject(topics, &attention_topic?/1)
 
     fact_lines =
-      topics
+      non_attention_topics
+      |> Enum.sort_by(&(&1[:id] || -1), :desc)
       |> Enum.map(&Digest.line/1)
       |> bound()
 
@@ -80,7 +100,7 @@ defmodule Kazi.Bus.Board do
     %{
       "facts" => fact_lines,
       "roster" => render_roster(roster),
-      "total_facts" => length(topics),
+      "total_facts" => length(non_attention_topics),
       "total_sessions" => length(roster),
       "attention" => attention,
       "total_attention" => length(attention)
@@ -116,6 +136,15 @@ defmodule Kazi.Bus.Board do
 
   @attention_prefix "attention-"
   @waiting_prefix "waiting-on-operator"
+
+  # #1687: topic-only test -- ANY attention-<session> topic, regardless of its
+  # current value (a live "waiting-on-operator" line, a "none" clear, or
+  # anything else). This is deliberately broader than `attention_fact?/1`
+  # below (which also requires a live waiting value): the facts window must
+  # drop an attention topic categorically, since a cleared "none" fact is
+  # still noise there once the topic has its own dedicated section.
+  defp attention_topic?(%{topic: @attention_prefix <> _}), do: true
+  defp attention_topic?(_fact), do: false
 
   # T60.3: the raw (unstubbed, atom-keyed) collapsed facts are the input --
   # the attention text is always short, so it never hits the digest's

@@ -107,6 +107,55 @@ defmodule Kazi.Bus.BoardTest do
                "total_attention" => 0
              }
     end
+
+    test "issue #1687: a board with 50 stale attention topics injects a facts window containing zero of them" do
+      attention_facts =
+        for i <- 1..50 do
+          fact(
+            "attention-dead-#{i}",
+            "waiting-on-operator: gone (since 2026-07-16T00:00:00Z)",
+            i
+          )
+        end
+
+      board = Board.render(attention_facts ++ [fact("ci", "main is green", 51)], [])
+
+      assert board["total_facts"] == 1
+      assert [%{"topic" => "ci"}] = board["facts"]
+      refute Enum.any?(board["facts"], &String.starts_with?(&1["topic"] || "", "attention-"))
+    end
+
+    test "issue #1687: a \"none\"-cleared attention topic is ALSO excluded from facts (not just attention)" do
+      board = Board.render([fact("attention-worker-9", "none", 1)], [])
+
+      assert board["facts"] == []
+      assert board["total_facts"] == 0
+    end
+
+    test "issue #1687: non-attention facts are unaffected by the attention exclusion" do
+      facts = [fact("ci", "red", 1), fact("deploy", "rolling", 2)]
+
+      board = Board.render(facts, [])
+
+      assert board["total_facts"] == 2
+      assert length(board["facts"]) == 2
+    end
+
+    test "issue #1687: the fact section bounds by RECENCY (highest id), not topic name" do
+      facts = for i <- 1..(Digest.max_lines() + 10), do: fact("topic-#{i}", "v#{i}", i)
+
+      board = Board.render(facts, [])
+
+      kept_ids =
+        board["facts"]
+        |> Enum.reject(&(&1["type"] == "overflow"))
+        |> Enum.map(& &1["id"])
+
+      # The newest ids (highest) survive the bound; the oldest fold into overflow.
+      newest_ids = Enum.to_list((length(facts) - length(kept_ids) + 1)..length(facts))
+      assert Enum.sort(kept_ids) == newest_ids
+      assert List.last(board["facts"])["type"] == "overflow"
+    end
   end
 
   describe "render/2 attention projection (T60.3, issue #1156)" do

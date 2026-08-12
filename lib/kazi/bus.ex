@@ -1258,6 +1258,99 @@ defmodule Kazi.Bus do
     end)
   end
 
+  @doc """
+  Issue #1687 root cause 2 ("no retract/prune/TTL verb; topics are
+  immortal"): erases every message on a fact topic's subject, not just its
+  current value. Unlike posting `"none"` (which appends a NEW last-value
+  message -- the topic and its whole history stay in the stream until the
+  stream's `max_age` naturally rolls off, ADR-0067's 30-day window), this
+  actually drops the topic: it stops counting toward `board/1`'s
+  `total_facts`, stops appearing in `board/1`'s `facts`, and a subsequent
+  `read`/`peek` never sees it either.
+
+  Pass an exact `topic`, OR `nil` with `opts[:prefix]` set to purge every
+  CURRENTLY LIVE topic (per the same last-per-subject read `board/1` uses)
+  whose name starts with the prefix -- the bulk path a one-shot cleanup of
+  an accumulated backlog (e.g. `retract(nil, prefix: "attention-")`) needs,
+  since NATS subject wildcards match whole tokens and cannot glob inside one
+  (`attention-<session>` is a single token). Exactly one of `topic`/
+  `opts[:prefix]` must be given.
+
+  Returns the list of topics actually purged. Naming a `topic` with no
+  messages (or a `prefix` matching nothing live) is a no-op that returns
+  `{:ok, []}`, never an error.
+  """
+  @spec retract(String.t() | nil, keyword()) :: {:ok, [String.t()]} | {:error, error()}
+  def retract(topic, opts \\ [])
+
+  def retract(nil, opts) do
+    case Keyword.fetch(opts, :prefix) do
+      {:ok, prefix} when is_binary(prefix) and prefix != "" -> do_retract_prefix(prefix, opts)
+      _absent_or_blank -> {:error, :topic_or_prefix_required}
+    end
+  end
+
+  def retract(topic, opts) when is_binary(topic) and topic != "" do
+    with_conn(opts, fn conn ->
+      case purge_topic(conn, opts, topic) do
+        :purged -> {:ok, [topic]}
+        :not_found -> {:ok, []}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
+  end
+
+  defp do_retract_prefix(prefix, opts) do
+    with_conn(opts, fn conn ->
+      topics =
+        conn
+        |> read_facts(opts)
+        |> Enum.map(&(&1[:topic] || "_"))
+        |> Enum.uniq()
+        |> Enum.filter(&String.starts_with?(&1, prefix))
+
+      Enum.reduce_while(topics, {:ok, []}, fn topic, {:ok, acc} ->
+        case purge_topic(conn, opts, topic) do
+          :purged -> {:cont, {:ok, [topic | acc]}}
+          # Discovered via the SAME last-per-subject read as `board/1` just
+          # above -- a topic vanishing between that listing and its own purge
+          # (another retract landed first) is a benign race, not an error.
+          :not_found -> {:cont, {:ok, acc}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+      |> case do
+        {:ok, purged} -> {:ok, Enum.reverse(purged)}
+        error -> error
+      end
+    end)
+  end
+
+  # `Stream.purge/4` with a `filter:` succeeds even when the filter matches
+  # NOTHING (JetStream's purge-by-subject is a no-op on an absent subject, not
+  # an error), so a bare purge call cannot tell "erased something" from
+  # "topic never existed". A `last_by_subj` existence check FIRST makes the
+  # two distinguishable, which is what keeps `retract/2`'s `purged` list
+  # honest -- a topic that was never posted is never reported as purged.
+  defp purge_topic(conn, opts, topic) do
+    stream = Provision.stream_name()
+    subject = Enum.join(["bus", scope(opts), "fact", topic], ".")
+
+    case JetStream.get_message(conn, stream, %{last_by_subj: subject}) do
+      {:ok, _message} ->
+        case JetStream.purge(conn, stream, nil, %{filter: subject}) do
+          :ok -> :purged
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, %{"code" => 404}} ->
+        :not_found
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @attention_topic_prefix "attention-"
   @waiting_prefix "waiting-on-operator"
 
