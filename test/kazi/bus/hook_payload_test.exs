@@ -314,6 +314,38 @@ defmodule Kazi.Bus.HookPayloadTest do
       assert board["attention"] == []
       assert board["total_facts"] == 0
     end
+
+    # Issue #1687: the session-start INJECTED TEXT (what a fresh session's
+    # context actually receives) must never carry a dead session's stale
+    # attention-* topic in its facts window -- the symptom the issue reported
+    # ("~38 of 40 injected rows were dead attention-* facts"). A waiting fact
+    # from a session with NO live presence is exactly that (roster-gated,
+    # #1567): dead-and-immortal until this fix stopped rendering it as a fact.
+    test "session-start injection carries a dead session's attention-* noise in NEITHER facts NOR attention",
+         %{conn: conn} do
+      scope = "hook-1687-#{System.unique_integer([:positive])}"
+      dead_session = "dead-#{System.unique_integer([:positive])}"
+
+      assert :ok =
+               Bus.post("fact", "waiting-on-operator: gone (since 2026-07-16T00:00:00Z)",
+                 conn: conn,
+                 scope: scope,
+                 topic: Bus.attention_topic(dead_session)
+               )
+
+      live_session = unique_session()
+      opts = [conn: conn, session: live_session, scope: scope]
+
+      assert {:emit, block} = Hook.session_start(opts)
+
+      refute block =~ "attention-#{dead_session}"
+      refute block =~ "waiting-on-operator"
+
+      {:ok, board} = Bus.board(opts)
+      assert board["attention"] == []
+      assert board["facts"] == []
+      assert board["total_facts"] == 0
+    end
   end
 
   # ---------------------------------------------------------------------------

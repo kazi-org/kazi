@@ -77,6 +77,14 @@ merge — the empirical case for gate-then-merge.
 
 In flight right now:
 
+- **Issue #1687** — session-start bus injection ~95% stale `attention-*`
+  facts (6,123+ immortal fact topics, no facts GC). Fix: `Board.render/2`
+  drops `attention-*` from the `facts`/`total_facts` window entirely
+  (roster-gated `attention` already covers it) and orders `facts` by
+  recency instead of topic name; a new `kazi bus prune <topic>|--prefix
+  <prefix>` verb (`Kazi.Bus.retract/2`) adds the retract/GC verb the facts
+  stream never had, for a one-shot cleanup of the existing backlog. PR open
+  against main.
 - **E55 wave B/C** — unblocked and claimable: the board (T55.4), deliberate
   pull (T55.6), daemon-side digest (T55.7), delivery visibility (T55.12), and
   the wake-contract doc (T55.13, now that T54.9 landed).

@@ -182,6 +182,7 @@ defmodule Kazi.CLI do
     timeout: :integer,
     since: :string,
     attention: :boolean,
+    prefix: :string,
     roadmap: :string,
     goal: :string,
     into: :string,
@@ -197,7 +198,7 @@ defmodule Kazi.CLI do
   # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
   # defined here (above `parse/1`) so both the `--help` interception below and
   # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who board tell status get watch join leave name hook)
+  @bus_verbs ~w(post read peek who board tell status get watch join leave name hook prune)
   @bus_kinds ~w(fact announce note intent)
   @default_bus_kind "fact"
 
@@ -341,6 +342,8 @@ defmodule Kazi.CLI do
       "`bus watch` only (T54.9, issue #1097): what counts as a NEW message -- `now` (default) anchors to the stream's current last sequence so only messages posted AFTER the watch starts are delivered (pending backlog is left for `bus read`/`bus peek`); `all` restores the pre-T54.9 drain-first behavior (anything already pending returns immediately); a numeric stream sequence anchors there precisely.",
     attention:
       "`bus board` only (T60.3, issue #1156): render ONLY the NEEDS OPERATOR section of the human board -- the fleet-wide list of sessions with a live `waiting-on-operator` fact, oldest first. --json is unaffected: the full board (including `attention`) is always returned; this only trims the human render.",
+    prefix:
+      "`bus prune` only (issue #1687): purge every currently-live fact topic starting with this prefix in one shot, instead of naming one exact <topic>. Mutually exclusive with the positional <topic> -- pass exactly one.",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0070): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. Mission Control loads it through `KaziWeb.Starmap.GoalSource` and GROUPS the fleet grid into needs-DAG wave sections (`Kazi.Goal.DepGraph.frontiers/1`, the SAME computation `kazi apply --explain` prints). Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, mission control keeps its flat-grid fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty roadmap.",
     goal:
@@ -464,7 +467,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`; join also returns a daemon-ASSIGNED short name `<team>-a/b/c...` allocated atomically through the KV bucket, T65.3)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`.",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook|prune` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read; `attention-*` topics never appear in its `facts` section (issue #1687) -- they have their own roster-gated `attention` section, and a `\"none\"` clear still leaves the topic in the stream, so showing it in `facts` too was pure noise. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`; join also returns a daemon-ASSIGNED short name `<team>-a/b/c...` allocated atomically through the KV bucket, T65.3)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`. `bus prune <topic>` (issue #1687 root cause 2) erases every message on a fact topic outright -- the retract verb the facts stream never had, since a `\"none\"` clear only appends a new last-value message and the topic (and its whole history) stays in the stream until the 30-day `max_age` rolls off; `bus prune --prefix <prefix>` purges every currently-live topic starting with the prefix in one shot (a NATS subject wildcard cannot glob inside a single token, so a bulk cleanup like `--prefix attention-` needs this rather than a wildcard filter).",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -480,7 +483,8 @@ defmodule Kazi.CLI do
         :timeout,
         :since,
         :session_name,
-        :attention
+        :attention,
+        :prefix
       ]
     },
     %{
@@ -1622,12 +1626,12 @@ defmodule Kazi.CLI do
   defp parse_bus([sub | _], _flags),
     do:
       {:error,
-       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`)"}
+       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`, `prune`)"}
 
   defp parse_bus([], _flags),
     do:
       {:error,
-       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`)"}
+       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`, `prune`)"}
 
   defp bus_flags(flags) do
     [
@@ -1649,7 +1653,10 @@ defmodule Kazi.CLI do
       # T60.3: `bus board` only -- trims the HUMAN render to the NEEDS
       # OPERATOR section; --json is unaffected (bus_flags is shared across
       # every verb, so this is simply ignored by every other verb).
-      attention: flags[:attention] || false
+      attention: flags[:attention] || false,
+      # Issue #1687: `bus prune` only -- the bulk retract path, purging every
+      # currently-live topic starting with this prefix.
+      prefix: flags[:prefix]
     ]
   end
 
@@ -1897,6 +1904,13 @@ defmodule Kazi.CLI do
     `board.total_attention`, alongside the unchanged `facts`/`roster`. --attention
     trims the HUMAN render to ONLY this section (--json is unaffected -- the
     full board is always returned).
+
+    `attention-*` topics NEVER appear in `facts`/`total_facts` (issue #1687)
+    -- they only ever render in the `attention` section above, waiting or
+    cleared alike, so a stale/dead session's topic cannot flood the facts
+    window a `session-start` hook injects. `facts` is also ordered by
+    RECENCY (newest first) before the 40-line bound applies, not by topic
+    name. See `bus prune` to erase an accumulated topic outright.
     """
   end
 
@@ -2052,6 +2066,33 @@ defmodule Kazi.CLI do
     a slow or stalled daemon can never tax or break a turn. Injected content
     is framed as UNTRUSTED, provenance-stamped, advisory external input, never
     a command channel (ADR-0067 point 7).
+    """
+  end
+
+  defp bus_help_text("prune") do
+    """
+    kazi bus prune <topic> [--scope machine|project] [--json]
+    kazi bus prune --prefix <prefix> [--scope machine|project] [--json]
+
+    Erase every message on a fact topic's subject outright (issue #1687 root
+    cause 2) -- the retract verb the facts stream never had. Posting `"none"`
+    on a topic (an attention clear, e.g.) only appends a NEW last-value
+    message; the topic and its whole history stay in the stream until the
+    30-day `max_age` naturally rolls off. `bus prune` actually drops it: the
+    topic stops counting toward `bus board`'s `total_facts`, stops appearing
+    in `facts`, and a later `read`/`peek` never sees it either.
+
+    Exactly one of <topic> or --prefix is required. <topic> purges one exact
+    topic. --prefix purges every CURRENTLY LIVE topic (per the same
+    last-per-subject read `bus board` uses) whose name starts with the
+    prefix -- the one-shot bulk cleanup for an accumulated backlog (e.g.
+    `kazi bus prune --prefix attention-`), since a NATS subject wildcard
+    matches a whole token and cannot glob inside one.
+
+    Purging a topic with no messages, or a --prefix matching nothing, is a
+    no-op (exit 0), never an error. Under --json: `{ok, schema_version,
+    purged: [topic, ...]}`. Requires a running `kazi daemon` -- prints a
+    one-line no-daemon error (exit 1) otherwise.
     """
   end
 
@@ -5894,6 +5935,27 @@ defmodule Kazi.CLI do
   defp execute_bus("board", extra, opts),
     do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
 
+  # Issue #1687 root cause 2: the retract/prune verb the facts stream never
+  # had -- a "none" clear posts a NEW message and leaves the topic (and its
+  # whole history) in the stream until the 30-day `max_age` rolls off, so a
+  # busy topic namespace (one attention-<session> topic per ephemeral
+  # session, e.g.) only grows. `bus prune <topic>` erases one topic outright;
+  # `bus prune --prefix <prefix>` is the bulk one-shot cleanup for an
+  # accumulated backlog (e.g. `--prefix attention-`).
+  defp execute_bus("prune", [topic], opts) do
+    do_bus_prune(topic, opts)
+  end
+
+  defp execute_bus("prune", [], opts) do
+    case opts[:prefix] do
+      prefix when is_binary(prefix) and prefix != "" -> do_bus_prune(nil, opts)
+      _absent_or_blank -> bus_error("`bus prune` requires <topic> or --prefix <prefix>", opts)
+    end
+  end
+
+  defp execute_bus("prune", extra, opts),
+    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
+
   # #1091: block until a NEW message arrives, then consume and print it.
   # T54.9/#1097: --since <seq|now|all> anchors what counts as new (default
   # `now` -- pending backlog never satisfies the watch).
@@ -6126,6 +6188,35 @@ defmodule Kazi.CLI do
   end
 
   defp do_bus_peek(opts), do: do_bus_assembled_read(opts, peek: true)
+
+  # Issue #1687: `bus prune <topic>` / `bus prune --prefix <prefix>` -- the
+  # retract call, then the same emit(json?/human) split every other bus verb
+  # uses.
+  defp do_bus_prune(topic, opts) do
+    prune_opts =
+      if topic, do: bus_call_opts(opts), else: bus_call_opts(opts) ++ [prefix: opts[:prefix]]
+
+    case Kazi.Bus.retract(topic, prune_opts) do
+      {:ok, purged} ->
+        emit(
+          json?(opts),
+          %{"ok" => true, "schema_version" => @run_schema_version, "purged" => purged},
+          fn ->
+            if purged == [] do
+              IO.puts("pruned: (nothing matched)")
+            else
+              IO.puts("pruned #{length(purged)} topic(s):")
+              Enum.each(purged, &IO.puts("  " <> &1))
+            end
+          end
+        )
+
+        0
+
+      {:error, reason} ->
+        bus_error(reason, opts)
+    end
+  end
 
   # T55.7 (ADR-0072 d5): the ONE read path. The daemon pulls the consumer,
   # aggregates, and enforces the bound; the CLI renders what came back and

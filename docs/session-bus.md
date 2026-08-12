@@ -163,6 +163,8 @@ kazi bus join -- <team>                                    # explicit team, cros
 kazi bus leave                                             # clear team membership
 kazi bus name <alias>                                     # attach an alias on top of the assigned name (T55.5/T65.3, ADR-0073)
 kazi bus hook <event>                                      # harness hook entry point (ADR-0076) -- ALWAYS exits 0 silently
+kazi bus prune <topic> [--json]                            # erase a fact topic outright (issue #1687) -- unlike "none", the topic itself is gone
+kazi bus prune --prefix <prefix> [--json]                  # bulk-erase every currently-live topic starting with the prefix
 kazi bus <verb> --help                                     # per-verb usage (signature, flags, valid kinds)
 ```
 
@@ -689,7 +691,11 @@ not three).
 It is bounded by the SAME digest rules as `read` (ADR-0072): an oversize fact
 body renders as a one-line stub carrying its `id` (the body stays addressable in
 the stream), and the fact section is at most 40 lines regardless of topic count,
-the tail folding into one `overflow` line. Under `--json` (contract:
+the tail folding into one `overflow` line, newest first. `attention-*` topics
+NEVER appear in `facts`/`total_facts` (issue #1687) — they only ever render in
+the roster-gated `attention` section below, whether currently waiting or
+already cleared, so a dead session's `attention-<session>` topic cannot flood
+the facts window a `session-start` hook injects. Under `--json` (contract:
 `kazi schema bus`):
 
 ```json
@@ -765,6 +771,33 @@ hooks T55.9 already installs:
 Requires `kazi install-hooks` (below) to be installed — the `Notification`
 hook is the third registration it writes, alongside `SessionStart` and
 `UserPromptSubmit`.
+
+#### Retracting a topic outright: `bus prune` (issue #1687)
+
+Posting `"none"` on a topic (the `turn` hook's attention clear, e.g.) appends a
+NEW last-value message — the topic, and its whole history, stays in the
+JetStream stream until the stream's `max_age` naturally rolls off (30 days,
+ADR-0067). Facts have no other TTL/retract verb, so a topic namespace with one
+entry per ephemeral session (`attention-<session>`, e.g.) only grows: cleared
+attention topics still counted toward `total_facts` and still occupied a
+facts-window slot before the exclusion above, and even a daemon restart does
+not shed them, since the stream is durable, file-backed storage.
+
+```
+kazi bus prune <topic> [--scope machine|project] [--json]
+kazi bus prune --prefix <prefix> [--scope machine|project] [--json]
+```
+
+`bus prune` erases every message on a fact topic's subject outright: the topic
+stops counting toward `total_facts`, stops appearing in `facts`, and a later
+`read`/`peek` never sees it either. Name an exact `<topic>`, or `--prefix
+<prefix>` to purge every CURRENTLY LIVE topic (per the same last-per-subject
+read `bus board` uses) starting with the prefix in one shot — the bulk
+cleanup an accumulated backlog needs (`kazi bus prune --prefix attention-`),
+since a NATS subject wildcard matches a whole token and cannot glob inside one
+(`attention-<session>` is a single token, not several). Naming a topic with no
+messages, or a prefix matching nothing, is a no-op (`{"purged": []}`), never an
+error. Under `--json`: `{ok, schema_version, purged: [topic, ...]}`.
 
 #### Claim ownership: read at source (T55.8, ADR-0073 point 2)
 
