@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.275.1](https://github.com/kazi-org/kazi/compare/v1.275.0...v1.275.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **bus:** exclude attention-* from the facts window, add bus prune ([#1687](https://github.com/kazi-org/kazi/issues/1687)) ([909e883](https://github.com/kazi-org/kazi/commit/909e883a815e5d8a901fd637b00f23bc1a1f88b9))
+
 ## [1.275.0](https://github.com/kazi-org/kazi/compare/v1.274.0...v1.275.0) (2026-07-21)
 
 
