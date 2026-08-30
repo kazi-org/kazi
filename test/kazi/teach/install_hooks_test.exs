@@ -287,4 +287,59 @@ defmodule Kazi.Teach.InstallHooksTest do
       assert path |> File.read!() |> Jason.decode!() |> Map.has_key?("hooks")
     end
   end
+
+  # ===========================================================================
+  # ADR-0084 (issue #1705): install/uninstall also arm/disarm the opt-in gate
+  # `kazi bus hook <event>` checks (`Kazi.Bus.HookGate`). With no explicit
+  # `:marker_path`, the marker co-locates inside the injected `:dir` -- so
+  # every test above stays hermetic (none touches the real
+  # `~/.config/kazi/bus-hooks-enabled`) with no opt threaded through.
+  # ===========================================================================
+
+  describe "the ADR-0084 opt-in gate (marker co-located under :dir)" do
+    test "a fresh install arms the gate and reports :armed", %{dir: dir} do
+      assert {:ok, %{status: :installed, gate: :armed}} = InstallHooks.install(dir: dir)
+      assert File.exists?(Path.join(dir, "bus-hooks-enabled"))
+    end
+
+    test "an idempotent (:unchanged) re-install ALSO re-arms the gate", %{dir: dir} do
+      {:ok, %{status: :installed}} = InstallHooks.install(dir: dir)
+      marker = Path.join(dir, "bus-hooks-enabled")
+      File.rm!(marker)
+
+      assert {:ok, %{status: :unchanged, gate: :armed}} = InstallHooks.install(dir: dir)
+      assert File.exists?(marker)
+    end
+
+    test "uninstall (:removed) disarms the gate", %{dir: dir} do
+      {:ok, %{status: :installed}} = InstallHooks.install(dir: dir)
+      assert File.exists?(Path.join(dir, "bus-hooks-enabled"))
+
+      assert {:ok, %{status: :removed, gate: :disarmed}} = InstallHooks.uninstall(dir: dir)
+      refute File.exists?(Path.join(dir, "bus-hooks-enabled"))
+    end
+
+    test "uninstall (:unchanged) leaves the gate key absent -- never touches an independent marker",
+         %{dir: dir, path: path} do
+      File.write!(path, @operator_settings)
+      marker = Path.join(dir, "bus-hooks-enabled")
+      File.mkdir_p!(Path.dirname(marker))
+      File.write!(marker, "set independently, not by install-hooks\n")
+
+      assert {:ok, %{status: :unchanged} = result} = InstallHooks.uninstall(dir: dir)
+      refute Map.has_key?(result, :gate)
+      assert File.exists?(marker)
+    end
+
+    test "an explicit :marker_path always wins over the :dir-derived default", %{dir: dir} do
+      explicit =
+        Path.join(System.tmp_dir!(), "kazi-explicit-marker-#{System.unique_integer([:positive])}")
+
+      on_exit(fn -> File.rm(explicit) end)
+
+      assert {:ok, %{gate: :armed}} = InstallHooks.install(dir: dir, marker_path: explicit)
+      assert File.exists?(explicit)
+      refute File.exists?(Path.join(dir, "bus-hooks-enabled"))
+    end
+  end
 end

@@ -60,6 +60,16 @@ defmodule Kazi.Bus.Hook do
       external input -- never a command channel (ADR-0067 point 7). The payload
       is produced inside the task and only WRITTEN after the task returns within
       budget, so a timed-out (killed) task can never emit a partial block.
+
+  A FOURTH property, added by ADR-0084 (issue #1705): `run/2` is a silent
+  exit 0, with NO work done at all (no task spawned, no daemon contact), when
+  the opt-in gate (`Kazi.Bus.HookGate`) is not armed. Installing the Claude
+  Code plugin bundles these hook DECLARATIONS (ADR-0077), but a declaration
+  firing on every `SessionStart` is not itself consent to pay a live daemon's
+  injection cost -- that requires the separate `KAZI_BUS_HOOKS=1` env var or
+  the `kazi install-hooks`-managed marker file. See `Kazi.Bus.HookGate`'s
+  moduledoc for the full rationale and `docs/session-bus.md` ("Installing
+  delivery").
   """
 
   alias Kazi.Bus
@@ -103,17 +113,26 @@ defmodule Kazi.Bus.Hook do
   injection block to stdout. ALWAYS returns exit code 0 -- a hook must never
   break a session.
 
-  The payload is computed in a bounded `Task` under the PER-EVENT budget
-  (`timeout_ms/1`); only a block returned within the budget is written, so a hung
-  daemon (a killed, timed-out task) prints nothing.
+  ADR-0084 (issue #1705): checks `Kazi.Bus.HookGate.enabled?/1` FIRST -- when
+  the gate is not armed, this is an immediate silent no-op (no `Task`
+  spawned, no daemon contact attempted at all), regardless of `event` or
+  whether a daemon is running. Installing the Claude Code plugin declares
+  these hooks (ADR-0077); it does not by itself arm this gate.
+
+  When the gate IS armed, the payload is computed in a bounded `Task` under
+  the PER-EVENT budget (`timeout_ms/1`); only a block returned within the
+  budget is written, so a hung daemon (a killed, timed-out task) prints
+  nothing.
   """
   @spec run(String.t(), keyword()) :: 0
   def run(event, opts \\ []) when is_binary(event) and is_list(opts) do
-    task = Task.async(fn -> bounded_payload(event, opts) end)
+    if Kazi.Bus.HookGate.enabled?(opts) do
+      task = Task.async(fn -> bounded_payload(event, opts) end)
 
-    case Task.yield(task, timeout_ms(event)) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:emit, block}} when is_binary(block) -> IO.write(block)
-      _timed_out_or_silent -> :ok
+      case Task.yield(task, timeout_ms(event)) || Task.shutdown(task, :brutal_kill) do
+        {:ok, {:emit, block}} when is_binary(block) -> IO.write(block)
+        _timed_out_or_silent -> :ok
+      end
     end
 
     0
