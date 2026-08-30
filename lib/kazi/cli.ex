@@ -440,7 +440,7 @@ defmodule Kazi.CLI do
     %{
       name: "install-hooks",
       summary:
-        "Register the session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071/T60.3): SessionStart + UserPromptSubmit + Notification run `kazi bus hook <event>`. Merge-never-clobber and idempotent -- an operator's own hooks/keys survive byte-identically; `--uninstall` removes exactly what was added. Default target is the user-level ~/.claude/settings.json; `--local` targets the repo's LOCAL (uncommitted) .claude/settings.local.json.",
+        "Register the session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071/T60.3): SessionStart + UserPromptSubmit + Notification run `kazi bus hook <event>`. ALSO arms the ADR-0084 opt-in gate those hooks check (a marker file) -- so this command's hooks work with no second manual step even though a Claude Code plugin install alone no longer arms it. Merge-never-clobber and idempotent -- an operator's own hooks/keys survive byte-identically; `--uninstall` removes exactly what was added (and disarms the gate). Default target is the user-level ~/.claude/settings.json; `--local` targets the repo's LOCAL (uncommitted) .claude/settings.local.json.",
       args: [],
       flags: [:dir, :local, :uninstall]
     },
@@ -618,7 +618,7 @@ defmodule Kazi.CLI do
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--discover] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
-      kazi install-hooks [--local] [--uninstall]  # register session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071)
+      kazi install-hooks [--local] [--uninstall]  # register session-bus delivery hooks (opt-in, ADR-0071) + arm the ADR-0084 opt-in gate they check
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi dashboard [--port <n>] [--bind <ip>] [--roadmap <goal-file>]  # standalone fleet-mode web endpoint (read-only mission control, ADR-0057)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
@@ -654,7 +654,7 @@ defmodule Kazi.CLI do
       kazi bus peek [--json]                       # non-destructive read (issue #1059)
       kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
       kazi bus board [--scope machine|project] [--json]   # current state: facts + roster + claim ownership (T55.4/T55.8)
-      kazi bus hook <event>                        # harness hook entry point (session-start | turn | notification) -- ALWAYS exits 0 silently
+      kazi bus hook <event>                        # harness hook entry point (session-start | turn | notification) -- ALWAYS exits 0 silently; no-op unless the ADR-0084 opt-in gate is armed (KAZI_BUS_HOOKS=1, or `kazi install-hooks`)
       kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s), a provider schema (custom_script), or an artifact schema (roadmap)
@@ -889,7 +889,7 @@ defmodule Kazi.CLI do
       kazi init ./my-service --with-mcp            # also write .mcp.json (canonical kazi MCP config)
       kazi init ./my-service --with-gist           # opt this repo into the Gist context store (ADR-0045)
       kazi install-skill
-      kazi install-hooks                           # opt into session-bus delivery (ADR-0071); --uninstall reverts
+      kazi install-hooks                           # opt into session-bus delivery (ADR-0071) + arm the ADR-0084 opt-in gate; --uninstall reverts both
       kazi mcp                                     # an MCP client runs this as its server command
       kazi apply my.goal.toml --workspace ./svc --json --stream
       kazi status cli-e2e --json
@@ -2060,12 +2060,18 @@ defmodule Kazi.CLI do
     the binding rule below by construction -- see `bus board --attention` and
     docs/session-bus.md).
 
-    Contract: ALWAYS exits 0 and never blocks a session. With no daemon
-    running, or an unknown/missing <event>, it prints nothing and returns
-    immediately. A hard ~2s wall-clock bound applies even to a HUNG daemon --
-    a slow or stalled daemon can never tax or break a turn. Injected content
-    is framed as UNTRUSTED, provenance-stamped, advisory external input, never
-    a command channel (ADR-0067 point 7).
+    Contract: ALWAYS exits 0 and never blocks a session. An opt-in gate
+    (ADR-0084, issue #1705) is checked FIRST, before any daemon contact is
+    even attempted: default OFF, armed by `KAZI_BUS_HOOKS=1` in the
+    environment or a marker file `kazi install-hooks` writes automatically
+    (`~/.config/kazi/bus-hooks-enabled`) -- so installing the Claude Code
+    plugin alone no longer makes these hooks do anything; see
+    docs/session-bus.md ("The opt-in gate"). With the gate armed but no
+    daemon running, or an unknown/missing <event>, it prints nothing and
+    returns immediately. A hard ~2s wall-clock bound applies even to a HUNG
+    daemon -- a slow or stalled daemon can never tax or break a turn.
+    Injected content is framed as UNTRUSTED, provenance-stamped, advisory
+    external input, never a command channel (ADR-0067 point 7).
     """
   end
 
@@ -5199,12 +5205,14 @@ defmodule Kazi.CLI do
           IO.puts("UNCHANGED  #{path} (no kazi hooks installed)")
           0
 
-        {:ok, %{status: :removed, deleted: true, path: path}} ->
+        {:ok, %{status: :removed, deleted: true, path: path} = result} ->
           IO.puts("REMOVED  #{path} (the file install-hooks created; deleted)")
+          report_gate_disarmed(result)
           0
 
-        {:ok, %{status: :removed, path: path}} ->
+        {:ok, %{status: :removed, path: path} = result} ->
           IO.puts("REMOVED  kazi hooks from #{path} (everything else preserved)")
+          report_gate_disarmed(result)
           0
 
         {:error, message} ->
@@ -5213,17 +5221,19 @@ defmodule Kazi.CLI do
       end
     else
       case InstallHooks.install(hooks_opts) do
-        {:ok, %{status: :unchanged, path: path}} ->
+        {:ok, %{status: :unchanged, path: path} = result} ->
           IO.puts("UNCHANGED  #{path} (kazi hooks already installed)")
+          report_gate_armed(result)
           0
 
-        {:ok, %{status: :installed, path: path}} ->
+        {:ok, %{status: :installed, path: path} = result} ->
           IO.puts("WROTE  #{path}")
           IO.puts("")
           IO.puts("Session-bus delivery is installed (ADR-0071/T60.3): SessionStart,")
           IO.puts("UserPromptSubmit, and Notification now run `kazi bus hook <event>` --")
           IO.puts("a silent no-op unless a `kazi daemon` is up. Re-running is a no-op;")
           IO.puts("`kazi install-hooks --uninstall` removes exactly what was added.")
+          report_gate_armed(result)
           0
 
         {:error, message} ->
@@ -5231,6 +5241,30 @@ defmodule Kazi.CLI do
           1
       end
     end
+  end
+
+  # ADR-0084/issue #1705: `install/1` and `uninstall/1` also arm/disarm the
+  # opt-in gate `kazi bus hook <event>` checks; report that outcome alongside
+  # the settings-file outcome so an operator sees the hooks they just
+  # registered will actually run, not silently stay gated off.
+  defp report_gate_armed(%{gate: :armed}) do
+    IO.puts("ARMED  the KAZI_BUS_HOOKS opt-in gate (ADR-0084) -- these hooks will run.")
+  end
+
+  defp report_gate_armed(%{gate: {:error, reason}}) do
+    IO.puts(
+      :stderr,
+      "warning: hooks registered, but could not arm the opt-in gate: #{:file.format_error(reason)}"
+    )
+
+    IO.puts(
+      :stderr,
+      "  they will stay silent until you set KAZI_BUS_HOOKS=1 or re-run install-hooks."
+    )
+  end
+
+  defp report_gate_disarmed(%{gate: :disarmed}) do
+    IO.puts("DISARMED  the KAZI_BUS_HOOKS opt-in gate marker (ADR-0084).")
   end
 
   # Resolve the settings target dir, NON-DEFAULT only when given: `--dir`

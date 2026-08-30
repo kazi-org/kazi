@@ -171,6 +171,70 @@ defmodule Kazi.CLIInstallHooksTest do
   end
 
   # ===========================================================================
+  # ADR-0084 (issue #1705): install-hooks also arms/disarms the opt-in gate
+  # `kazi bus hook <event>` checks. `--dir` co-locates the gate marker inside
+  # the SAME tmp dir (`Kazi.Teach.InstallHooks`'s `gate_opts/1`), so these
+  # stay hermetic for free -- the real `~/.config/kazi` is never touched.
+  # ===========================================================================
+
+  describe "run/2 — install-hooks arms/disarms the ADR-0084 gate" do
+    test "a fresh install ARMS the gate and writes its marker under --dir", %{dir: dir} do
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["install-hooks", "--dir", dir]) == 0
+        end)
+
+      assert out =~ "ARMED"
+      assert File.exists?(Path.join(dir, "bus-hooks-enabled"))
+    end
+
+    test "a re-run (:unchanged) ALSO re-arms the gate -- an upgrade past ADR-0084 self-heals",
+         %{dir: dir} do
+      capture_io(fn -> assert Kazi.CLI.run(["install-hooks", "--dir", dir]) == 0 end)
+      # Simulate a pre-ADR-0084 install: hooks registered, marker absent.
+      marker = Path.join(dir, "bus-hooks-enabled")
+      File.rm!(marker)
+      refute File.exists?(marker)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["install-hooks", "--dir", dir]) == 0
+        end)
+
+      assert out =~ "UNCHANGED"
+      assert out =~ "ARMED"
+      assert File.exists?(marker)
+    end
+
+    test "--uninstall DISARMS the gate (removes the marker) after removing registrations", %{
+      dir: dir
+    } do
+      capture_io(fn -> assert Kazi.CLI.run(["install-hooks", "--dir", dir]) == 0 end)
+      marker = Path.join(dir, "bus-hooks-enabled")
+      assert File.exists?(marker)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["install-hooks", "--dir", dir, "--uninstall"]) == 0
+        end)
+
+      assert out =~ "DISARMED"
+      refute File.exists?(marker)
+    end
+
+    test "--uninstall with nothing installed leaves the gate untouched (no DISARMED line)", %{
+      dir: dir
+    } do
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["install-hooks", "--dir", dir, "--uninstall"]) == 0
+        end)
+
+      refute out =~ "DISARMED"
+    end
+  end
+
+  # ===========================================================================
   # consent-first: a NORMAL run never writes harness config
   # ===========================================================================
 

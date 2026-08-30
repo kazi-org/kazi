@@ -1112,12 +1112,45 @@ SAME hook declarations from the same source (T61.3):
   harness and for operators who prefer an opt-in command; `--uninstall` reverts
   exactly what it added.
 - **The Claude Code plugin** ([ADR-0077](adr/0077-claude-code-plugin-distribution.md))
-  — one marketplace install (`/plugin install kazi@kazi`) bundles these hooks
-  alongside the skill and the kazi MCP server, and refreshes them on the release
-  cadence. The plugin's hook declarations are rendered from the same source as
-  `install-hooks`, so the two paths are equivalent, not a fork — pick whichever
-  install channel you already use (see the README's *Install via the Claude Code
-  plugin* section). Installing both is redundant, not harmful.
+  — one marketplace install (`/plugin install kazi@kazi`) bundles these hook
+  DECLARATIONS alongside the skill and the kazi MCP server, and refreshes them on
+  the release cadence. The plugin's hook declarations are rendered from the same
+  source as `install-hooks` — but ([ADR-0084](adr/0084-bus-hooks-require-an-opt-in-gate-independent-of-plugin-install.md),
+  issue #1705) installing the plugin no longer by itself makes those hooks DO
+  anything; see "The opt-in gate" below.
+
+### The opt-in gate (ADR-0084)
+
+`kazi bus hook <event>` — the single command both install paths above
+register — checks one more thing before doing any work at all: an opt-in
+gate, independent of and in addition to whichever install path wired the
+hook. **Default OFF.** Without it, a session on a machine where the plugin is
+installed (for the skill and MCP server, say — the bus may never have been
+adopted, or may have been retired) pays nothing: no daemon contact, no
+board/digest injection, zero added latency, regardless of what `SessionStart`
+/ `UserPromptSubmit` / `Notification` declare.
+
+Two independent ways to arm it:
+
+```
+export KAZI_BUS_HOOKS=1          # fleet-wide: one shell profile / launch agent export
+kazi install-hooks                # ALSO arms it automatically (see below)
+```
+
+- **`KAZI_BUS_HOOKS=1`** (or `=true`) — the cheapest signal, exported once
+  and covering every session on that machine.
+- **A marker file at `~/.config/kazi/bus-hooks-enabled`** — for an opt-in
+  that persists without touching shell config. `kazi install-hooks` writes
+  this automatically on a successful install (running that explicit command
+  already IS consent, ADR-0071 — no second manual step) and removes it after
+  a successful `--uninstall`. Delete the file yourself, or run
+  `install-hooks --uninstall`, to opt back out.
+
+An operator who installs ONLY the Claude Code plugin (no `install-hooks` run)
+gets neither signal, so the plugin's declared hooks stay silent until one of
+the two above is set. Installing both channels is still redundant, not
+harmful — they register the identical `{event, command}` set and share this
+same gate.
 
 It registers three hooks in the Claude Code settings. Two are matched to the
 two moments that matter — and bound ONLY to events whose stdout reaches the
@@ -1159,8 +1192,11 @@ payload logic upgrades with the binary. What each event does (T55.9/T60.3):
 - **`notification`** posts the `waiting-on-operator` fact (see "NEEDS
   OPERATOR" above) and ALWAYS returns silent — it never injects, by design.
 
-Its contract: **always exit 0, never block.** With no daemon running (or an
-unknown event) `kazi bus hook` prints nothing and returns immediately. And a
+Its contract: **always exit 0, never block.** The opt-in gate above is
+checked FIRST — not armed, and this is an immediate no-op with zero daemon
+contact attempted, regardless of `event`. With the gate armed but no daemon
+running (or an unknown event) `kazi bus hook` prints nothing and returns
+immediately. And a
 hard wall-clock bound applies even to a HUNG daemon (one that accepted the
 connection but never answers): the payload is computed in a bounded task and
 only written if it returns within budget, so a slow or stalled daemon can

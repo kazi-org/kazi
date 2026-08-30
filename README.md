@@ -556,11 +556,21 @@ host, for example) needs the deadline raised.
 
 kazi also ships as a [Claude Code plugin](https://code.claude.com/docs/en/plugins-reference):
 one install bundles the kazi skill, the kazi MCP server registration, and the
-session-bus hooks together, and marketplace updates refresh them with the binary
-release cadence instead of on-demand re-runs of the explicit installers
-([ADR-0077](docs/adr/0077-claude-code-plugin-distribution.md)). The explicit
-`install-skill` / `init --with-mcp` / `install-hooks` commands are unchanged — the
-plugin is an *additional* channel rendered from the SAME sources, never a fork.
+session-bus hook *declarations* together, and marketplace updates refresh them
+with the binary release cadence instead of on-demand re-runs of the explicit
+installers ([ADR-0077](docs/adr/0077-claude-code-plugin-distribution.md)). The
+explicit `install-skill` / `init --with-mcp` / `install-hooks` commands are
+unchanged — the plugin is an *additional* channel rendered from the SAME
+sources, never a fork.
+
+**The bus hooks need one more opt-in after installing the plugin**
+([ADR-0084](docs/adr/0084-bus-hooks-require-an-opt-in-gate-independent-of-plugin-install.md)):
+installing the plugin no longer by itself arms them, so a session on a
+machine that installed the plugin for the skill/MCP alone pays nothing for
+the bus. Set `KAZI_BUS_HOOKS=1` in your environment, or run
+`kazi install-hooks` (which arms it automatically, with no other change to
+this section's flow) — see [`docs/session-bus.md`](docs/session-bus.md#the-opt-in-gate-adr-0084)
+for the full mechanism.
 
 **Install from the marketplace.** The release pipeline publishes the bundle to the
 [kazi-org/claude-plugins](https://github.com/kazi-org/claude-plugins) marketplace on

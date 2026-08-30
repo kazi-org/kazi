@@ -53,6 +53,19 @@ defmodule Kazi.Teach.InstallHooks do
 
   Harness-agnostic by profile (ADR-0071 decision 6): Claude Code is the first
   and only profile shipped.
+
+  ## The registered hooks are gated OFF until this command also arms them (ADR-0084)
+
+  The three registrations above only make `kazi bus hook <event>` RUN on the
+  matching Claude Code event -- they no longer make it DO anything, because
+  `Kazi.Bus.Hook.run/2` checks the separate opt-in gate
+  (`Kazi.Bus.HookGate`) first (issue #1705). Running THIS command already is
+  the explicit consent act (ADR-0071), so `install/1` also writes the gate's
+  marker file (`HookGate.enable/1`) on a successful install, and `uninstall/1`
+  removes it (`HookGate.disable/1`) after it actually removes the hook
+  registrations -- no second manual step for an `install-hooks` operator.
+  Both are best-effort: a marker-file failure is reported in the result but
+  never blocks or reverts the settings-file edit itself.
   """
 
   # The default settings directory (the user-level Claude Code config). Tests
@@ -96,16 +109,32 @@ defmodule Kazi.Teach.InstallHooks do
       Tests pass a tmp dir so the real `~/.claude` is never touched.
     * `:project` -- target the project-local `settings.local.json` file name
       instead of `settings.json` (with no `:dir`, under `<cwd>/.claude`).
+    * `:marker_path` -- overrides `Kazi.Bus.HookGate`'s marker path (ADR-0084).
+      Tests point this at a tmp file so the real `~/.config/kazi` is never
+      touched.
 
-  Returns `{:ok, %{path: path, status: status}}` where `status` is
+  Returns `{:ok, %{path: path, status: status, gate: gate}}` where `status` is
   `:installed` (the file was created or extended) or `:unchanged` (both hooks
   were already registered -- the file is NOT rewritten, so re-running is a
-  byte-level no-op). Returns `{:error, message}` (one clear line, nothing
-  written) when the existing file is not valid JSON, is not a JSON object, or
-  holds a `"hooks"` value with a shape kazi cannot merge into.
+  byte-level no-op) and `gate` is `:armed` or `{:error, reason}` from arming
+  the ADR-0084 opt-in gate (`Kazi.Bus.HookGate.enable/1`) -- armed on BOTH
+  statuses, so an operator who ran `install-hooks` before ADR-0084 shipped
+  gets the marker on their next re-run rather than the hooks going silent
+  after a binary upgrade. A `gate` failure is reported but never fails the
+  settings-file edit it rides alongside. Returns `{:error, message}` (one
+  clear line, nothing written) when the existing file is not valid JSON, is
+  not a JSON object, or holds a `"hooks"` value with a shape kazi cannot
+  merge into.
   """
   @spec install(keyword()) :: {:ok, result()} | {:error, String.t()}
   def install(opts \\ []) do
+    case do_install(opts) do
+      {:ok, result} -> {:ok, arm_gate(result, opts)}
+      error -> error
+    end
+  end
+
+  defp do_install(opts) do
     path = settings_path(opts)
 
     case read_settings(path) do
@@ -126,6 +155,44 @@ defmodule Kazi.Teach.InstallHooks do
     end
   end
 
+  # ADR-0084/issue #1705: arm the opt-in gate on ANY successful install
+  # outcome (fresh, extended, or already-registered) -- `install-hooks`
+  # running at all IS the explicit consent, so an operator upgrading past
+  # ADR-0084 with hooks already registered (:unchanged) still gets armed on
+  # their next re-run instead of discovering the hooks went silent.
+  defp arm_gate(result, opts) do
+    Map.put(result, :gate, gate_result(Kazi.Bus.HookGate.enable(gate_opts(opts))))
+  end
+
+  defp gate_result(:ok), do: :armed
+  defp gate_result({:error, _reason} = error), do: error
+
+  # Derives the `Kazi.Bus.HookGate` opts this install/uninstall call passes
+  # through. An explicit `:marker_path` always wins outright. Otherwise, when
+  # `:dir` overrides the settings target (the SAME seam tests inject to keep
+  # every write off the real `~/.claude`, ADR-0071), the gate marker
+  # co-locates INSIDE that directory too -- so a hermetic settings-dir test
+  # is a hermetic gate-marker test for free, with no second opt to thread
+  # through every call site. With neither override (the real default,
+  # `~/.claude`), the gate keeps ITS OWN true default
+  # (`~/.config/kazi/bus-hooks-enabled`, deliberately outside `~/.claude` --
+  # see `Kazi.Bus.HookGate`'s moduledoc) rather than being pulled under it.
+  defp gate_opts(opts) do
+    case Keyword.get(opts, :marker_path) do
+      path when is_binary(path) ->
+        opts
+
+      _absent ->
+        case Keyword.get(opts, :dir) do
+          dir when is_binary(dir) ->
+            Keyword.put(opts, :marker_path, Path.join(Path.expand(dir), "bus-hooks-enabled"))
+
+          _no_dir_override ->
+            opts
+        end
+    end
+  end
+
   @doc """
   Removes exactly what `install/1` added from the target settings file.
 
@@ -135,13 +202,26 @@ defmodule Kazi.Teach.InstallHooks do
   deleting the file when the install created it (the file's bytes still equal
   a fresh install's output, so nothing else has touched it).
 
-  Returns `{:ok, %{path: path, status: status}}` where `status` is `:removed`
-  (with `deleted: true` when the whole install-created file was deleted) or
-  `:unchanged` (no kazi hooks were installed). Returns `{:error, message}`
-  (nothing written) on a malformed settings file.
+  Returns `{:ok, %{path: path, status: status, gate: gate}}` where `status`
+  is `:removed` (with `deleted: true` when the whole install-created file was
+  deleted) or `:unchanged` (no kazi hooks were installed). `gate` is
+  `:disarmed` (the ADR-0084 opt-in marker was removed via
+  `Kazi.Bus.HookGate.disable/1`, best-effort and idempotent) on a `:removed`
+  status, and absent on `:unchanged` -- an uninstall that found nothing to
+  remove leaves the gate untouched, so a marker an operator set some other
+  way (a plain `KAZI_BUS_HOOKS=1` export, or a manual file) is never
+  clobbered by an uninstall of registrations that were never kazi's.
+  Returns `{:error, message}` (nothing written) on a malformed settings file.
   """
   @spec uninstall(keyword()) :: {:ok, result()} | {:error, String.t()}
   def uninstall(opts \\ []) do
+    case do_uninstall(opts) do
+      {:ok, %{status: :removed} = result} -> {:ok, disarm_gate(result, opts)}
+      other -> other
+    end
+  end
+
+  defp do_uninstall(opts) do
     path = settings_path(opts)
 
     case read_settings(path) do
@@ -169,6 +249,15 @@ defmodule Kazi.Teach.InstallHooks do
       {:error, reason} ->
         {:error, "could not read #{path}: #{:file.format_error(reason)}"}
     end
+  end
+
+  # ADR-0084/issue #1705: disarm the opt-in gate only after registrations
+  # were ACTUALLY removed (:removed) -- an :unchanged uninstall found nothing
+  # kazi added, so it must not touch a gate signal the operator may have set
+  # independently (env var, or a marker made outside `install-hooks`).
+  defp disarm_gate(result, opts) do
+    :ok = Kazi.Bus.HookGate.disable(gate_opts(opts))
+    Map.put(result, :gate, :disarmed)
   end
 
   @doc """

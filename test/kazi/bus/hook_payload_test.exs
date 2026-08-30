@@ -16,6 +16,14 @@ defmodule Kazi.Bus.HookPayloadTest do
   longer reaches it -- its traffic/quiet/verbatim/bounded coverage lives in
   `Kazi.Bus.DaemonDigestTest`, which boots a real daemon, the only place the
   daemon-assembled digest can be exercised.
+
+  ADR-0084 (issue #1705) added an opt-in gate `run/2` checks BEFORE any of
+  the above: every test in this file that exercises the payload contract
+  passes `bus_hooks_enabled: true` explicitly (the test seam) so it stays
+  gate-independent; the gate's own default-off/env/marker/override behavior
+  is pinned in the dedicated `describe "run/2's opt-in gate (ADR-0084)"`
+  block below (unit coverage for the gate primitives themselves lives in
+  `Kazi.Bus.HookGateTest`).
   """
   use ExUnit.Case, async: false
 
@@ -57,19 +65,44 @@ defmodule Kazi.Bus.HookPayloadTest do
     end
 
     test "turn with no daemon injects nothing and exits 0" do
-      out = capture_io(fn -> assert Hook.run("turn", sock_path: missing_sock()) == 0 end)
+      out =
+        capture_io(fn ->
+          assert Hook.run("turn", sock_path: missing_sock(), bus_hooks_enabled: true) == 0
+        end)
+
       assert out == ""
     end
 
     test "session-start with no daemon injects nothing and exits 0" do
-      out = capture_io(fn -> assert Hook.run("session-start", sock_path: missing_sock()) == 0 end)
+      out =
+        capture_io(fn ->
+          assert Hook.run("session-start",
+                   sock_path: missing_sock(),
+                   bus_hooks_enabled: true,
+                   # Pre-existing hermeticity gap, unrelated to the gate this
+                   # opt is pinning: with no `:local_version`/`:plugin_version`
+                   # override, `Kazi.Plugin.Skew.check/1` reads the REAL
+                   # `~/.claude/plugins` tree, so this test flapped on any
+                   # machine with a kazi plugin installed at a different
+                   # version than the local build. `:claude_home` pointed at
+                   # a directory with no plugin tree makes the skew check
+                   # `:silent` deterministically, which is what "injects
+                   # nothing" is actually asserting.
+                   claude_home: missing_claude_home()
+                 ) == 0
+        end)
+
       assert out == ""
     end
 
     test "notification with no daemon prints nothing and exits 0 (T60.3)" do
       out =
         capture_io(fn ->
-          assert Hook.run("notification", sock_path: missing_sock(), summary: "x") == 0
+          assert Hook.run("notification",
+                   sock_path: missing_sock(),
+                   summary: "x",
+                   bus_hooks_enabled: true
+                 ) == 0
         end)
 
       assert out == ""
@@ -77,6 +110,99 @@ defmodule Kazi.Bus.HookPayloadTest do
 
     test "payload/2 returns :silent for an unknown event with no work done" do
       assert Hook.payload("nope", []) == :silent
+    end
+  end
+
+  # ===========================================================================
+  # Untagged: ADR-0084 (issue #1705) -- run/2's opt-in gate, checked BEFORE
+  # any work is attempted. Every OTHER test in this file passes
+  # `bus_hooks_enabled: true` explicitly (the test seam) so it keeps pinning
+  # the payload contract independent of the gate; these tests are the gate's
+  # own coverage.
+  # ===========================================================================
+
+  describe "run/2's opt-in gate (ADR-0084)" do
+    test "gate off (default, no daemon needed): a payload that WOULD emit is never even invoked" do
+      ref = make_ref()
+      test_pid = self()
+
+      would_emit = fn _event, _opts ->
+        send(test_pid, {ref, :payload_invoked})
+        {:emit, "SHOULD-NEVER-APPEAR\n"}
+      end
+
+      out =
+        capture_io(fn ->
+          assert Hook.run("session-start", payload_fun: would_emit, getenv: fn _ -> nil end) == 0
+        end)
+
+      assert out == ""
+      refute_received {^ref, :payload_invoked}
+    end
+
+    test "gate off via explicit false override, even with a live-looking marker" do
+      path = tmp_marker_path()
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "")
+
+      out =
+        capture_io(fn ->
+          assert Hook.run("session-start",
+                   sock_path: missing_sock(),
+                   local_version: "1.251.0",
+                   plugin_version: "1.250.0",
+                   bus_hooks_enabled: false,
+                   marker_path: path
+                 ) == 0
+        end)
+
+      assert out == ""
+    end
+
+    test "gate on via the KAZI_BUS_HOOKS env var: the payload runs" do
+      out =
+        capture_io(fn ->
+          assert Hook.run("session-start",
+                   sock_path: missing_sock(),
+                   local_version: "1.251.0",
+                   plugin_version: "1.250.0",
+                   getenv: fn "KAZI_BUS_HOOKS" -> "1" end
+                 ) == 0
+        end)
+
+      assert out =~ "1.251.0"
+    end
+
+    test "gate on via a present marker file: the payload runs" do
+      path = tmp_marker_path()
+      assert :ok = Kazi.Bus.HookGate.enable(marker_path: path)
+
+      out =
+        capture_io(fn ->
+          assert Hook.run("session-start",
+                   sock_path: missing_sock(),
+                   local_version: "1.251.0",
+                   plugin_version: "1.250.0",
+                   getenv: fn _ -> nil end,
+                   marker_path: path
+                 ) == 0
+        end)
+
+      assert out =~ "1.251.0"
+    end
+
+    test "gate off returns essentially instantly -- no Task, no daemon contact attempted" do
+      {elapsed_us, out} =
+        :timer.tc(fn ->
+          capture_io(fn ->
+            assert Hook.run("turn", sock_path: missing_sock(), getenv: fn _ -> nil end) == 0
+          end)
+        end)
+
+      assert out == ""
+      # Nowhere near the 2s hot-path bound -- a gated-off run does no I/O at all.
+      assert elapsed_us < 200_000,
+             "gate-off run took #{div(elapsed_us, 1000)}ms -- expected near-0"
     end
   end
 
@@ -91,7 +217,8 @@ defmodule Kazi.Bus.HookPayloadTest do
           assert Hook.run("session-start",
                    sock_path: missing_sock(),
                    local_version: "1.251.0",
-                   plugin_version: "1.250.0"
+                   plugin_version: "1.250.0",
+                   bus_hooks_enabled: true
                  ) == 0
         end)
 
@@ -110,7 +237,8 @@ defmodule Kazi.Bus.HookPayloadTest do
           assert Hook.run("session-start",
                    sock_path: missing_sock(),
                    local_version: "1.250.0",
-                   plugin_version: "1.250.0"
+                   plugin_version: "1.250.0",
+                   bus_hooks_enabled: true
                  ) == 0
         end)
 
@@ -160,7 +288,9 @@ defmodule Kazi.Bus.HookPayloadTest do
 
       {elapsed_us, out} =
         :timer.tc(fn ->
-          capture_io(fn -> assert Hook.run("turn", sock_path: path) == 0 end)
+          capture_io(fn ->
+            assert Hook.run("turn", sock_path: path, bus_hooks_enabled: true) == 0
+          end)
         end)
 
       # Zero bytes injected: a hung daemon must deliver NOTHING to the session.
@@ -201,7 +331,7 @@ defmodule Kazi.Bus.HookPayloadTest do
       {elapsed_us, out} =
         :timer.tc(fn ->
           capture_io(fn ->
-            assert Hook.run("session-start", payload_fun: slow) == 0
+            assert Hook.run("session-start", payload_fun: slow, bus_hooks_enabled: true) == 0
           end)
         end)
 
@@ -219,7 +349,9 @@ defmodule Kazi.Bus.HookPayloadTest do
 
       {elapsed_us, out} =
         :timer.tc(fn ->
-          capture_io(fn -> assert Hook.run("turn", payload_fun: slow) == 0 end)
+          capture_io(fn ->
+            assert Hook.run("turn", payload_fun: slow, bus_hooks_enabled: true) == 0
+          end)
         end)
 
       # A payload slower than the hot-path bound is shut down: nothing injected.
@@ -364,6 +496,24 @@ defmodule Kazi.Bus.HookPayloadTest do
   defp missing_sock,
     do:
       Path.join(System.tmp_dir!(), "kazi_hook_missing_#{System.unique_integer([:positive])}.sock")
+
+  # A directory with no plugin tree, so `Kazi.Plugin.Skew.check/1`'s
+  # `:claude_home` discovery finds nothing and stays :silent deterministically
+  # -- never the real `~/.claude/plugins`.
+  defp missing_claude_home,
+    do:
+      Path.join(
+        System.tmp_dir!(),
+        "kazi_hook_no_claude_home_#{System.unique_integer([:positive])}"
+      )
+
+  # ADR-0084 (issue #1705): a tmp gate-marker path, never the real
+  # ~/.config/kazi/bus-hooks-enabled.
+  defp tmp_marker_path do
+    dir = Path.join(System.tmp_dir!(), "kazi_hook_gate_#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+    Path.join(dir, "bus-hooks-enabled")
+  end
 
   # A stalled control socket: it accepts the connection (so `Probe.probe/1`
   # classifies it `:alive`) but never writes a reply, standing in for a daemon
