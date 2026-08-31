@@ -114,7 +114,7 @@ combined, E69 + E70 are the entire open backlog (32 real issues). Wave A
 also now includes #1708 (`apply --parallel` with no `--workspace` against
 a workspace-less goal CRASHES THE WHOLE OTP APPLICATION -- an uncaught
 `FunctionClauseError` in the scheduler's partitioner, not a clean error)
-and #1707a (`kazi integrate`'s generated PR title/body lists only the
+and #1707a (`kazi integrate`'s generated PR title/body lists only the <!-- verb-drift:allow: forward reference to the #1707a deliverable, unbuilt at this line's writing -->
 predicates that PASSED, silently omitting any that did not converge -- a
 caller reading the PR alone has no signal that part of the goal's
 acceptance criteria was dropped, the same lying-surface class as the rest
