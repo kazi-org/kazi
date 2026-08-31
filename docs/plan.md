@@ -380,6 +380,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E69 -- Triage 2026-08-08: full open-backlog resolution -- replace/apply false green, #1255-class startup wedges, daemon crash-loop, DX contract gaps, accepted enhancements (P0/P1) -> plans/E69.md
 
+### E70 -- Triage 2026-08-30: full open-backlog resolution, second pass -- false-green/false-stuck --parallel verdicts, a VM crash, PR-omits-failures, disk-pressure worktree placement, predicate-authoring hazards, scope-boundary enforcement (P0/P1, ADR-0085) -> plans/E70.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
@@ -451,6 +453,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 | R-E49-2 | The demonstrator needs a REACHABLE app (base_url/built binary) and browser/CLI automation the harness may lack in a headless pool session, so Wave B stalls or a false "demonstrated" is reported. | Med | Med | Wave A ships hand-authored-pin value with zero demonstrator involvement; T49.7's acceptance gate (validate + green replay) makes a false "demonstrated" structurally impossible -- a claim without a replaying pin changes nothing; T49.13 is `kind: any` with the R-E43-3 honest-report discipline. |
 | R-E49-3 | Cross-epic deps (T43.1/T43.7-8, T40.2, T41.1 -- all OPEN) stall the epic if encoded as epic-wide gates. | Med | High (known) | Deps are isolated per-task: Waves A/B depend ONLY on code shipped on main today (verified against main 2026-07-08, seams pinned in the epic's Implementation contract); only T49.10/T49.11/T49.13 gate on E43/E40/E41 tasks and the pool schedules them whenever those land. |
 | R-E49-4 | The two-role loop thrashes: repin churn masks a real regression, or demonstrate-fail loops burn budget. | Med | Med | At most ONE re-demonstration per iteration; a red replay at the minted commit routes to the FIXER (never re-demonstrated); two failed demonstrations on an unchanged workspace terminate `:stuck` cause `capability_unreachable` (T49.8) ranked needs-a-human (T48.14); demonstrator dispatches are budget-counted + economy-attributed (T49.9). |
+| R-E69/E70-1 | E69 (planned 2026-08-08, 14 tasks) sat at 0/14 for 22 days before E70 was planned -- neither triage epic's Wave A (both P0 false-verdict classes) has been picked up despite being the single worst bug class kazi can ship (a lying `converged`/`stuck` report). | High | High (observed) | Both epics are `fidelity: executable` and fully unblocked NOW; the Waves note in E70 explicitly tells `/apply --pool` to treat E69-A and E70-A as one combined P0 front with no ordering dependency between them, so either epic being picked up first makes progress. |
+| R-E70-1 | ADR-0085 (T70.9) and E69's T69.12 (#1642) both reserved "~0084" at their respective plan times; neither has executed. | Low | Med | Both epic files carry an explicit collision note: whichever task executes first takes 0084 via a fresh `ls docs/adr/` check, the other takes the next free number and updates its own epic file's reservation note. |
 
 ## Operating Procedure
 
@@ -483,6 +487,43 @@ never swept into your commit.
 
 ## Progress Log
 
+- 2026-08-30 (second pass, same session): re-invoked /plan on the same
+  request after a shared-machine disk-pressure incident (unrelated to
+  this repo) delayed the write; verified all prior work survived intact
+  (E70.md, ADR-0085, plan.md/roadmap.md edits, the parse_plan.py fix all
+  confirmed present) and re-checked open issues before writing -- 2 new
+  ones had opened in the interim (#1707, #1708), 0 closed. Folded into
+  E70 as T70.14 (#1708, a HARD VM CRASH: apply --parallel with no
+  --workspace against a workspace-less goal kills the whole OTP node via
+  an uncaught FunctionClauseError in Partitioner.partition/3), T70.15
+  (#1707a, kazi integrate's PR title/body silently lists only PASSING
+  predicates -- the same lying-surface class as T70.1-T70.3, on the PR
+  artifact instead of JSON status), and T70.16 (#1707b, swift_test/
+  xcodebuild predicates cannot execute at all under --parallel's ephemeral
+  worktree, distinct from the already-fixed #1406 class). E70 is now 16
+  tasks ~50h, Wave A grown to 6 tasks, Wave B to 5. E70's epic-file title
+  and acceptance updated to cite #1690-#1708.
+- 2026-08-30: /plan to fix all open and unresolved github issues -- new
+  epic E70 (plans/E70.md, executable, 13 tasks ~44h, 3 waves) covering the
+  16 issues opened since E69's 2026-08-08 triage (#1690-#1705) that never
+  had a plan home; E69 itself (14 tasks) is NOT re-decomposed, only
+  referenced -- it is still 0/14 unstarted (flagged as risk R-E69/E70-1).
+  P0 false-verdict cluster (wave A): #1694 match_count false-pass under
+  --parallel, #1703 HeartbeatTicker crash + false converged, #1696 false
+  stuck via synthetic :workspace predicate after real convergence, #1698
+  scheduler worktrees ignoring --workspace (confirmed root cause of a live
+  2026-08-29/30 fleet disk-pressure incident). Wave B: #1699 launcher-
+  liveness/nohup fix, #1697 orphan-checkout reaping, new `[scope]`
+  goal-file block closing #1695+#1704 (ADR-0085), #1705 bus-hook opt-in
+  gate independent of plugin install. Wave C: #1690/#1693/#1701 predicate-
+  authoring lint hazards (one `kazi lint` feature), #1700 vitest doc fix,
+  #1702 auto roadmap-note PR removal, #1691 plugin version-lag fix. Three
+  operator decisions recorded before task authoring: #1692 (claim
+  `transfer` verb) REDIRECTED -- traced to `lib/kazi/bus/claims.ex`'s own
+  ADR-0067 pt 6 boundary, no kazi-repo code task; #1702 auto roadmap-note
+  PR REMOVED entirely (not gated); #1699 launcher check FIXED (not merely
+  documented). New ADR-0085 (`[scope]` forbidden_paths/forbidden_commands,
+  Accepted). #382/#372 continue to ride T25.10 (E25), unchanged.
 - 2026-08-08: /plan resolve-all-open-issues -- new epic E69 (plans/E69.md, executable, 14 tasks ~41h, 3 waves) giving every open issue a plan home: P0 #1679 false green + #1683/#1680 apply wedge/contract + #1662 watchdog de-noise (wave A); #1684/#1685/#1483/#1678/#1636 reliability (wave B); #1681/#1617/#1682/#1642/#1649 surface+tests (wave C). Operator decisions recorded: #1682 hook ACCEPTED, #1642 explicit goal-file setup step (option 2, ADR ~0084 in T69.12). #382/#372 ride T25.10 (E25).
 - 2026-07-19: /plan resolve-open-issues -- ADR-0082 proposed (#1554 option B), T45.9 re-scoped (deps: ADR acceptance), wave E66-C added for T66.5-T66.7 (#1483 reopen, #1579, #1606); all 7 open issues now have plan homes.
 ### 2026-07-18 -- Change Summary (E65 planned: deterministic bus identity)

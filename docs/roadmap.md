@@ -104,6 +104,45 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
+**Near term (2026-08-30, from a full open-issue triage, second pass --
+E70, 16 tasks, 3 waves):** E69 below is still **0/14, unstarted 22 days
+after being planned** -- neither triage epic's Wave A has been picked up.
+E70 covers the 18 issues opened since E69 (#1690-#1708) that never had a
+plan home, including two (#1707, #1708) that opened during this same
+triage's own write window and were caught by a re-check, not missed;
+combined, E69 + E70 are the entire open backlog (32 real issues). Wave A
+also now includes #1708 (`apply --parallel` with no `--workspace` against
+a workspace-less goal CRASHES THE WHOLE OTP APPLICATION -- an uncaught
+`FunctionClauseError` in the scheduler's partitioner, not a clean error)
+and #1707a (`kazi integrate`'s generated PR title/body lists only the
+predicates that PASSED, silently omitting any that did not converge -- a
+caller reading the PR alone has no signal that part of the goal's
+acceptance criteria was dropped, the same lying-surface class as the rest
+of Wave A). #1707b (swift_test/xcodebuild predicates cannot execute at all
+under `--parallel`'s ephemeral worktree) rides Wave B. Wave A is a P0 false-verdict cluster on `--parallel`: #1694
+(`match_count` predicates report `pass` on zero matches, defeating #1690's
+own recommended fix), #1703 (a `HeartbeatTicker` crash coincides with a
+false `converged` report on a zero-diff branch), #1696 (a real convergence
+gets reported `stuck` against a synthetic `:workspace` predicate after the
+ephemeral scheduler worktree vanishes out from under it), and #1698
+(scheduler partition worktrees ignore `--workspace` and always land under
+`$TMPDIR` -- confirmed root cause of a live 2026-08-29/30 fleet-wide
+disk-pressure incident, internal disk under 500MB free with ~88 concurrent
+sessions). Wave B: the #1699 launcher-liveness fix (a `nohup`/`disown`-
+backgrounded run was being reaped as "launcher gone"), #1697 orphaned-
+checkout reaping, a new `[scope]` goal-file block (ADR-0085) closing both
+#1695 and #1704 -- the grind loop editing files/opening PRs an
+orchestrating session explicitly excluded, only in prose it never saw --
+and #1705 (gate the plugin's bundled session-bus hooks behind an opt-in
+independent of plugin install). Wave C: a `kazi lint` feature for three
+related predicate-authoring hazards (#1690/#1693/#1701, "a shell/regex
+idiom for counting matches interacts badly with a runner default"), a
+vitest predicate doc fix (#1700), removing the auto-generated
+roadmap-note PR entirely (#1702, decided), and the plugin-marketplace
+version-lag fix (#1691). #1692 (claim `transfer` verb) was REDIRECTED, not
+built here -- kazi's own code says that primitive lives outside this repo
+(ADR-0067 pt 6).
+
 **Near term (2026-08-08, from a full open-issue triage -- E69, 14 tasks, 3
 waves):** resolve the entire open backlog. Wave A is the P0 pair on v1.275.0
 -- the `plan --replace` false green (#1679, apply converging against a
