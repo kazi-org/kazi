@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.275.2](https://github.com/kazi-org/kazi/compare/v1.275.1...v1.275.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* **runtime:** bound the apply startup wait so a wedged first observation exits loudly ([#1683](https://github.com/kazi-org/kazi/issues/1683)) ([ab92b22](https://github.com/kazi-org/kazi/commit/ab92b2207c23d2fdf5844333235016e3816ca51d))
+
 ## [1.275.1](https://github.com/kazi-org/kazi/compare/v1.275.0...v1.275.1) (2026-08-12)
 
 
