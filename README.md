@@ -535,6 +535,17 @@ ms, default `30000`; `0` disables) and opt into a hard exit on timeout with
 `KAZI_STARTUP_WATCHDOG_HALT=1` (exit code `124`). The Burrito extraction step runs
 before the BEAM, so its time is not counted against the deadline.
 
+An `apply` run's STARTUP leg is separately bounded (issue #1683): the run must
+complete its first predicate observation — and the t0 observation that guards
+against a vacuous goal — within `KAZI_APPLY_STARTUP_TIMEOUT_MS` (default
+`300000`; `0` or `infinity` disables). Past the deadline the run exits loudly
+with a named error instead of wedging forever, and the run record is finished
+as `error` (not left `running` at `iteration 0`). The bound covers only this
+startup leg: once the first observation lands, the run is live and a real
+multi-hour dispatch is never cut off. A first observation that legitimately
+takes minutes under heavy load (a large test suite collecting on a loaded
+host, for example) needs the deadline raised.
+
 > **macOS 26 + Zig note.** Burrito 1.5.0 pins Zig **0.15.2**, which cannot link
 > native binaries against the macOS 26 SDK (Xcode 26); Zig 0.16 links it but is
 > API-incompatible with Burrito's `build.zig`. On a macOS 26 host the wrap step

@@ -4149,6 +4149,17 @@ defmodule Kazi.CLI do
   defp format_run_error(:await_timeout),
     do: "the loop did not reach a terminal state within the await timeout"
 
+  # T69.2 (issue #1683): the loop produced NO observation within the startup
+  # deadline — it was wedged below loop start (the #1683 apply-startup wedge,
+  # an unbounded wait on the goal's own observe-time commands). The remedy is
+  # the deadline knob, not a retry.
+  defp format_run_error({:startup_deadline_exceeded, ms}),
+    do:
+      "the loop completed no observation within the #{ms}ms startup deadline " <>
+        "(issue #1683): the run was wedged below loop start, most likely a predicate " <>
+        "or capture command that never returns. Inspect the goal's observe-time " <>
+        "commands; tune the deadline with KAZI_APPLY_STARTUP_TIMEOUT_MS."
+
   defp format_run_error({:duplicate_run, %{run_id: run_id} = live}) do
     session = if live[:session_name], do: " session=#{live[:session_name]}", else: ""
 

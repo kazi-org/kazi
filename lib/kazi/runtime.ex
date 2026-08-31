@@ -307,6 +307,7 @@ defmodule Kazi.Runtime do
   def run(%Goal{} = goal, opts \\ []) do
     workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
     await_timeout = Keyword.get(opts, :await_timeout, :infinity)
+    startup_timeout_ms = resolve_startup_timeout_ms(opts)
 
     # T32.4 anti-gaming enforcement (ADR-0042): resolve the profile (default-on for
     # creation mode, opt-in for repair — `Kazi.Enforcement.resolve/1`) and SYNTHESIZE
@@ -344,7 +345,7 @@ defmodule Kazi.Runtime do
 
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
-         :ok <- guard_not_vacuous(goal, providers, workspace),
+         :ok <- guard_not_vacuous(goal, providers, workspace, startup_timeout_ms),
          :ok <- guard_no_live_duplicate(goal, opts),
          :ok <- guard_no_workspace_collision(goal, opts, workspace) do
       # T46.1 (ADR-0057): the fleet run registry's identity for this process —
@@ -441,7 +442,11 @@ defmodule Kazi.Runtime do
           deploy: @deploy,
           workspace: workspace,
           adapter_opts: build_adapter_opts(goal, opts, harness_opts, transcript_sink_path),
-          on_iteration: build_on_iteration(goal, opts, run_id, persist?, events_sink_path),
+          on_iteration:
+            on_iteration_with_startup_signal(
+              build_on_iteration(goal, opts, run_id, persist?, events_sink_path),
+              self()
+            ),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
           extra_action_context: build_action_context(opts, run_id, goal_ref),
@@ -523,7 +528,12 @@ defmodule Kazi.Runtime do
         # standalone binary so a test loop never arms a self-halt (R-E54-3).
         parent_monitor = start_parent_monitor(persist?, run_id)
 
-        result = Loop.await(loop, await_timeout)
+        # T69.2 (issue #1683): the terminal wait is two-phase. The STARTUP leg —
+        # until the loop completes its FIRST observation — is bounded and
+        # degrades to a loud error exit; once the loop is demonstrably live the
+        # terminal wait keeps the caller's `:await_timeout` semantics (the
+        # default `:infinity` a real multi-hour run relies on).
+        result = await_loop_terminal(loop, await_timeout, startup_timeout_ms)
         Loop.stop(loop)
 
         # T51.5 (ADR-0067 point 1): mirror the TERMINAL verdict onto the bus,
@@ -647,13 +657,55 @@ defmodule Kazi.Runtime do
   # failing at t0; an all-pass-at-t0 goal is underspecified, and letting it
   # "converge" would mean kazi built and verified nothing (R3). On rejection the
   # loop never starts, so nothing is persisted as converged.
-  @spec guard_not_vacuous(Goal.t(), %{optional(Predicate.provider_kind()) => module()}, term()) ::
-          :ok | {:error, :vacuous_goal}
-  defp guard_not_vacuous(%Goal{} = goal, providers, workspace) do
-    if goal |> observe_t0(providers, workspace) |> PredicateVector.satisfied?() do
-      {:error, :vacuous_goal}
-    else
-      :ok
+  @spec guard_not_vacuous(
+          Goal.t(),
+          %{optional(Predicate.provider_kind()) => module()},
+          term(),
+          :infinity | pos_integer()
+        ) ::
+          :ok | {:error, :vacuous_goal} | {:error, {:startup_deadline_exceeded, pos_integer()}}
+  # The t0 vacuous-goal guard observes the FULL predicate vector — through the
+  # same real providers the loop would use — BEFORE the loop starts. T69.2
+  # (issue #1683): that observation runs the goal's own commands unbounded in
+  # THIS process, so a command that never returns wedges the whole apply on the
+  # startup path (the same class as the loop-side wedge the startup deadline
+  # bounds below). Bound it with the SAME startup deadline: past the deadline
+  # the observation task is killed and the run fails loudly instead of wedging.
+  defp guard_not_vacuous(%Goal{} = goal, providers, workspace, startup_timeout_ms) do
+    case bounded_t0_observation(goal, providers, workspace, startup_timeout_ms) do
+      {:ok, vector} ->
+        if PredicateVector.satisfied?(vector), do: {:error, :vacuous_goal}, else: :ok
+
+      # The named cause fails the with-chain; the caller reports it loudly and
+      # no run record exists yet (registration happens after this guard).
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # The startup-deadline-bounded t0 observation (the #1266 treatment: a
+  # monitored Task + a hard deadline, degrading to a named error instead of
+  # hanging past the bound). With the bound disabled (`:infinity`) the
+  # observation runs inline — byte-identical to the pre-T69.2 behavior.
+  defp bounded_t0_observation(goal, providers, workspace, :infinity) do
+    {:ok, observe_t0(goal, providers, workspace)}
+  end
+
+  defp bounded_t0_observation(goal, providers, workspace, deadline_ms) do
+    task = Task.async(fn -> observe_t0(goal, providers, workspace) end)
+
+    case Task.yield(task, deadline_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, vector} ->
+        {:ok, vector}
+
+      nil ->
+        Logger.error(
+          "kazi.runtime: the t0 observation completed no predicate within the " <>
+            "#{deadline_ms}ms startup deadline (issue #1683) — a predicate command is " <>
+            "wedged. Failing the run loudly; tune with KAZI_APPLY_STARTUP_TIMEOUT_MS."
+        )
+
+        {:error, {:startup_deadline_exceeded, deadline_ms}}
     end
   end
 
@@ -1009,9 +1061,10 @@ defmodule Kazi.Runtime do
   # =============================================================================
 
   # Build the loop's :on_iteration side-effect callback that projects each
-  # observed iteration into the SQLite read-model. Returns nil when persistence
-  # is disabled AND no `:stream` observer is supplied, so the loop runs without
-  # the seam at all.
+  # observed iteration into the SQLite read-model. Always returns a 1-arity fn:
+  # the T51.5 bus-mirror effect is unconditional (a non-persisted fixture loop
+  # still projects live progress onto the bus), so the seam never degrades to
+  # nil.
   #
   # T15.4 (ADR-0023 decision 3): an optional `:stream` callback is COMPOSED here
   # over the persistence projection — the loop fires ONE `on_iteration` per
@@ -1633,6 +1686,175 @@ defmodule Kazi.Runtime do
   # work), but run/2 owns this loop's lifecycle, so a timeout is a real error.
   defp normalize_await({:ok, result}), do: {:ok, result}
   defp normalize_await({:error, :timeout}), do: {:error, :await_timeout}
+  defp normalize_await({:error, reason}), do: {:error, reason}
+
+  # =============================================================================
+  # Bounded startup leg (T69.2, issue #1683)
+  # =============================================================================
+
+  # #1683's wedge, root-caused: the blocking site the watchdog dumps name — the
+  # CLI process stuck in `{:gen, :do_call, 4}` inside
+  # `Kazi.Scheduler.await_coordinator/2` with all-zero run queues — is the outer
+  # end of an unbounded wait chain. The scheduler's `:await` (default
+  # `:infinity`) waits for partition terminal statuses that never arrive because
+  # `run/2` waits in `Loop.await(loop, :infinity)` for a loop that is blocked
+  # BEFORE its first observation completes: every live #1683 specimen froze with
+  # the run record at `iteration: 0`, and everything between `Loop.start_link`
+  # and the first projected observation — the predicate providers running the
+  # goal's own scripts (a command that never returns was the recorded trigger
+  # class) and the capture recipes — runs unbounded inside the loop's
+  # `gen_statem` process. Idle schedulers, alive forever, SIGTERM-only.
+  #
+  # The fix bounds ONLY the startup leg: from loop start until the loop's first
+  # `on_iteration` (iteration 0's observation projected — fired by
+  # `on_iteration_with_startup_signal/2`). Past the deadline the run exits
+  # LOUDLY: the wedged loop is killed, the run record is finished as `error`,
+  # and a structured reason names the deadline and the `KAZI_APPLY_STARTUP_TIMEOUT_MS`
+  # remedy — instead of a process that sits alive indefinitely. Once the first
+  # observation lands, the run is demonstrably live and the terminal wait keeps
+  # the caller's `:await_timeout` semantics (default `:infinity` — a real
+  # multi-hour run is never cut off).
+  @default_startup_timeout_ms 300_000
+  @startup_timeout_env "KAZI_APPLY_STARTUP_TIMEOUT_MS"
+
+  # `:startup_timeout_ms` opt > `KAZI_APPLY_STARTUP_TIMEOUT_MS` env >
+  # `@default_startup_timeout_ms`. `:infinity` (and `0`) DISABLE the bound —
+  # the pre-T69.2 unbounded startup wait — mirroring `KAZI_STARTUP_WATCHDOG_MS=0`.
+  # An unparsable env value falls back to the default rather than guessing.
+  @doc false
+  @spec resolve_startup_timeout_ms(keyword()) :: :infinity | pos_integer()
+  def resolve_startup_timeout_ms(opts) do
+    value =
+      case Keyword.fetch(opts, :startup_timeout_ms) do
+        {:ok, value} -> value
+        :error -> System.get_env(@startup_timeout_env)
+      end
+
+    normalize_startup_timeout_ms(value)
+  end
+
+  defp normalize_startup_timeout_ms(:infinity), do: :infinity
+  defp normalize_startup_timeout_ms(ms) when is_integer(ms) and ms > 0, do: ms
+  defp normalize_startup_timeout_ms(ms) when is_integer(ms) and ms <= 0, do: :infinity
+
+  defp normalize_startup_timeout_ms(raw) when is_binary(raw) do
+    case String.trim(raw) |> String.downcase() do
+      "infinity" ->
+        :infinity
+
+      trimmed ->
+        case Integer.parse(trimmed) do
+          {ms, ""} when ms > 0 -> ms
+          {0, ""} -> :infinity
+          _ -> @default_startup_timeout_ms
+        end
+    end
+  end
+
+  defp normalize_startup_timeout_ms(_unset), do: @default_startup_timeout_ms
+
+  # Tag the FIRST projected observation (iteration 0) so the bounded startup
+  # wait in `await_first_observation/3` learns the loop completed an observe
+  # pass. The payload's 0-based iteration index is 0 only for the first
+  # projected observation (the stuck-stop projection reuses the LAST index,
+  # which is 0 only when that observation WAS the first — still a completed
+  # observation). Mailbox-only, exactly once per run, side-effect free; the
+  # composed persistence/stream/mirror effects run unchanged after it.
+  # (`build_on_iteration/5` always returns a 1-arity fn — the bus-mirror effect
+  # is unconditional — so there is no nil clause.)
+  defp on_iteration_with_startup_signal(base, report_to) when is_function(base, 1) do
+    fn
+      %{iteration: 0} = payload ->
+        send(report_to, :first_observation)
+        base.(payload)
+
+      payload ->
+        base.(payload)
+    end
+  end
+
+  # The two-phase terminal wait. With the bound disabled (`:infinity`) this is
+  # byte-identical to the pre-T69.2 `Loop.await(loop, await_timeout)`.
+  defp await_loop_terminal(loop, await_timeout, :infinity) do
+    Loop.await(loop, await_timeout)
+  end
+
+  defp await_loop_terminal(loop, await_timeout, startup_timeout_ms) do
+    case await_first_observation(loop, startup_timeout_ms, await_timeout) do
+      :live ->
+        # Unblocked path: the loop completed an observation (or already reached
+        # a terminal) — wait for the terminal state exactly as before.
+        Loop.await(loop, await_timeout)
+
+      {:error, {:startup_deadline_exceeded, _deadline}} = error ->
+        stop_wedged_loop(loop, startup_timeout_ms)
+        error
+    end
+  end
+
+  # Bounded wait for the loop's first observation. Also tolerates a
+  # NO-observation terminal (a vanished workspace, a tampered seal, a t0
+  # over-budget stop, or a crash): those are legitimate outcomes that
+  # `Loop.await` returns immediately, never startup wedges.
+  defp await_first_observation(loop, startup_timeout_ms, await_timeout) do
+    # A finite `:await_timeout` bounds the TOTAL wait its caller asked for, so
+    # it also bounds the startup leg — and on its expiry the pre-existing
+    # `{:error, :timeout}` contract stands (the loop is still running and
+    # `Loop.await` returns the timeout immediately).
+    deadline =
+      case await_timeout do
+        :infinity -> startup_timeout_ms
+        ms when is_integer(ms) -> min(startup_timeout_ms, ms)
+      end
+
+    ref = Process.monitor(loop)
+
+    receive do
+      :first_observation ->
+        Process.demonitor(ref, [:flush])
+        :live
+
+      {:DOWN, ^ref, :process, ^loop, _reason} ->
+        Process.demonitor(ref, [:flush])
+        :live
+    after
+      deadline ->
+        Process.demonitor(ref, [:flush])
+
+        cond do
+          # Raced a terminal: the loop exited just before the deadline fired.
+          not Process.alive?(loop) ->
+            :live
+
+          # A finite :await_timeout elapsed first — keep its contract.
+          await_timeout != :infinity and await_timeout <= startup_timeout_ms ->
+            :live
+
+          true ->
+            {:error, {:startup_deadline_exceeded, startup_timeout_ms}}
+        end
+    end
+  end
+
+  # The LOUD degradation: no observation completed within the deadline, so the
+  # loop is wedged below `Loop.start_link` and no observation or dispatch will
+  # EVER happen. Kill it untrappably (a loop blocked in a port `System.cmd`
+  # wait is killable; the dying process closes its ports, so the wedged
+  # command and any child tree die with it) and log the named cause + remedy.
+  # The run record is finished as `error` by the existing post-await pipeline
+  # (`finish_run/3`), so `kazi status` no longer freezes at `iteration: 0`.
+  defp stop_wedged_loop(loop, startup_timeout_ms) do
+    Logger.error(
+      "kazi.runtime: the reconcile loop completed NO observation within the " <>
+        "#{startup_timeout_ms}ms startup deadline (issue #1683) — the run is wedged " <>
+        "below loop start, most likely a predicate/capture command that never returns. " <>
+        "Stopping the loop and failing the run loudly; tune with #{@startup_timeout_env}."
+    )
+
+    if Process.alive?(loop), do: Process.exit(loop, :kill)
+
+    :ok
+  end
 
   # =============================================================================
   # Goal-drift detection (goal-drift-guard-1415)
