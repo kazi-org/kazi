@@ -119,6 +119,47 @@ defmodule Kazi.CLI.DaemonTest do
     end
   end
 
+  # #1724: a KAZI_STATE_DIR deep enough to blow the AF_UNIX `sun_path` budget
+  # used to surface as `could not start daemon: {:shutdown,
+  # {:failed_to_start_child, Kazi.Daemon.Listener, :einval}}` -- the operator
+  # had no way to know the state dir was the problem.
+  describe "kazi daemon start -- an over-long KAZI_STATE_DIR" do
+    setup do
+      # `<state dir>/daemon/daemon.sock` well past the 104-byte macOS limit.
+      state_dir = "/tmp/" <> String.duplicate("d", 180)
+
+      previous = System.get_env("KAZI_STATE_DIR")
+      System.put_env("KAZI_STATE_DIR", state_dir)
+
+      on_exit(fn ->
+        if previous,
+          do: System.put_env("KAZI_STATE_DIR", previous),
+          else: System.delete_env("KAZI_STATE_DIR")
+
+        File.rm_rf(state_dir)
+      end)
+
+      :ok
+    end
+
+    test "names the measurement and the remedy, not a bare :einval" do
+      sock_path = Kazi.Daemon.Supervisor.default_sock_path()
+      limit = Kazi.Daemon.Listener.sun_path_limit()
+
+      # `--nats-host` is connect mode: no nats-server binary needed, so the
+      # listener's own bind is what decides the outcome (hermetic).
+      output =
+        capture_io(:stderr, fn ->
+          assert Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1"], []) == 1
+        end)
+
+      assert output =~ "socket path too long (#{byte_size(sock_path)} bytes, limit #{limit})"
+      assert output =~ "shorten KAZI_STATE_DIR"
+      refute output =~ ":einval"
+      refute output =~ "failed_to_start_child"
+    end
+  end
+
   describe "kazi daemon status -- a live daemon" do
     setup do
       NatsPrereq.ensure!()

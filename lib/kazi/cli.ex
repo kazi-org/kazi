@@ -5464,9 +5464,35 @@ defmodule Kazi.CLI do
         )
 
       {:error, reason} ->
-        daemon_error("could not start daemon: #{inspect(reason)}", opts)
+        case socket_path_too_long(reason) do
+          # #1724: the listener measured the socket path against the platform
+          # `sun_path` limit, so say what the raw `:einval` never could. The
+          # remedy is always the same -- the path is `<state dir>/daemon/
+          # daemon.sock`, so shortening the state dir is what fixes it.
+          {bytes, limit} ->
+            daemon_error(
+              "socket path too long (#{bytes} bytes, limit #{limit}): shorten KAZI_STATE_DIR",
+              opts
+            )
+
+          nil ->
+            daemon_error("could not start daemon: #{inspect(reason)}", opts)
+        end
     end
   end
+
+  # The listener's stop reason reaches here wrapped by its supervisor, as
+  # `{:shutdown, {:failed_to_start_child, Kazi.Daemon.Listener, reason}}` --
+  # match the wrapped shape AND the bare one, so the message survives a change
+  # in where the check lives.
+  defp socket_path_too_long({:socket_path_too_long, bytes, limit}), do: {bytes, limit}
+
+  defp socket_path_too_long({:shutdown, inner}), do: socket_path_too_long(inner)
+
+  defp socket_path_too_long({:failed_to_start_child, _child, inner}),
+    do: socket_path_too_long(inner)
+
+  defp socket_path_too_long(_other), do: nil
 
   defp execute_daemon("status", [], opts, _inject_opts) do
     sock_path = Kazi.Daemon.Supervisor.default_sock_path()
