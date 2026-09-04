@@ -104,6 +104,18 @@ creation mode** (the highest gaming-risk surface — the agent writes tests/feat
 - Risk: "run the checker outside the sandbox" interacts with how dispatch + worktrees
   are wired; the exact seam needs verification against `loop.ex` before implementation
   (flagged as a task precondition, not assumed).
+- Risk, confirmed live 2026-08-30 (#1709): the clean-tree checker worktree
+  (`Kazi.Enforcement.Isolation.prepare/3`, always `git worktree add
+  --detach`, by design since the goal's real branch is checked out
+  elsewhere) has no branch identity of its own. A guard or held-out
+  predicate that resolves `git rev-parse '@{u}'` or `--abbrev-ref HEAD` is
+  therefore structurally unsatisfiable inside isolation regardless of
+  whether the underlying work is correct and pushed -- a false-negative
+  class this ADR did not originally anticipate. Tracked as E71/T71.1
+  (docs/plans/E71.md): thread the goal's real target branch into the
+  isolated predicate's execution environment (`KAZI_GOAL_BRANCH`/
+  `KAZI_GOAL_UPSTREAM`) so branch/upstream assertions have a stable
+  alternative to `@{u}`, plus an AUTHORING.md note on the constraint.
 
 ## Verified seam (T32.4, the precondition discharged)
 
