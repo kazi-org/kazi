@@ -10,6 +10,12 @@ defmodule Kazi.Daemon.Listener do
   either absent or a stale leftover from a dead process — this module never
   probes on its own, so it never races to steal a socket a live daemon holds.
 
+  #1724: `init/1` measures `sock_path` against the platform `sun_path` limit
+  (`sun_path_limit/0`) BEFORE binding and stops with
+  `{:socket_path_too_long, bytes, limit}`. `:gen_tcp.listen` reports that
+  condition as a bare `:einval`, which named nothing — a `KAZI_STATE_DIR`
+  deeper than ~104 bytes on macOS failed the whole daemon with no clue why.
+
   A `{"op":"shutdown"}` request causes the connection handler to notify this
   process, which asks its OWN supervisor (`opts[:sup_pid]`, passed down by
   `Kazi.Daemon.Supervisor.init/1` — `self()` there IS the supervisor pid) to
@@ -30,10 +36,31 @@ defmodule Kazi.Daemon.Listener do
 
   defstruct [:sock_path, :pid_path, :listen_socket, :acceptor, :started_at, :sup_pid, :nats_name]
 
+  # #1724: an AF_UNIX address carries its path in a fixed-width `sun_path`
+  # buffer -- `char sun_path[104]` on macOS/BSD, `[108]` on Linux -- and the
+  # path must fit INSIDE it with its NUL terminator. So a path whose byte size
+  # reaches the buffer size is already too long; measured on macOS, 103 bytes
+  # binds and 104 fails.
+  @sun_path_bytes_bsd 104
+  @sun_path_bytes_linux 108
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
+  end
+
+  @doc """
+  The platform's `sun_path` buffer size in bytes: 104 on macOS/BSD, 108 on
+  Linux. A socket path is bindable only when its byte size is STRICTLY less
+  than this (#1724).
+  """
+  @spec sun_path_limit() :: pos_integer()
+  def sun_path_limit do
+    case :os.type() do
+      {:unix, :linux} -> @sun_path_bytes_linux
+      _bsd_darwin_or_other -> @sun_path_bytes_bsd
+    end
   end
 
   @impl true
@@ -45,6 +72,27 @@ defmodule Kazi.Daemon.Listener do
     sup_pid = Keyword.get(opts, :sup_pid)
     nats_name = Keyword.get(opts, :nats_name, Kazi.Daemon.Nats)
 
+    case check_sock_path(sock_path) do
+      :ok -> listen(sock_path, pid_path, sup_pid, nats_name)
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  # #1724: `:gen_tcp.listen` reports an over-long path as a bare `:einval`,
+  # which the CLI could only render as `could not start daemon: {:shutdown,
+  # {:failed_to_start_child, Kazi.Daemon.Listener, :einval}}` -- nothing in
+  # that names the cause, and the operator is left to guess that
+  # `KAZI_STATE_DIR` is too deep. Measure first, so the stop reason carries
+  # the two numbers that make the fix obvious. Checked BEFORE `mkdir_p!` so a
+  # path that can never be bound leaves no directories behind.
+  defp check_sock_path(sock_path) do
+    limit = sun_path_limit()
+    bytes = byte_size(sock_path)
+
+    if bytes >= limit, do: {:error, {:socket_path_too_long, bytes, limit}}, else: :ok
+  end
+
+  defp listen(sock_path, pid_path, sup_pid, nats_name) do
     File.mkdir_p!(Path.dirname(sock_path))
     File.mkdir_p!(Path.dirname(pid_path))
     # A leftover file at sock_path (verified dead by the caller's probe, or

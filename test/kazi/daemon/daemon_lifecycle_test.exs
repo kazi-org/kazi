@@ -17,6 +17,7 @@ defmodule Kazi.Daemon.LifecycleTest do
   use ExUnit.Case, async: false
 
   alias Kazi.Daemon
+  alias Kazi.Daemon.Listener
   alias Kazi.Daemon.Probe
   alias Kazi.Daemon.Write
   alias Kazi.TestSupport.NatsPrereq
@@ -344,6 +345,71 @@ defmodule Kazi.Daemon.LifecycleTest do
 
     assert {:error, _reason} = Daemon.start(opts)
     assert Probe.probe(sock_path) == :missing
+  end
+
+  # ===========================================================================
+  # (#1724) an over-long socket path names ITSELF
+  #
+  # An AF_UNIX address carries its path in a fixed `sun_path` buffer, and
+  # `:gen_tcp.listen` reports an over-long one as a bare `:einval` -- so a
+  # KAZI_STATE_DIR deeper than ~104 bytes on macOS failed the whole daemon with
+  # `could not start daemon: {:shutdown, {:failed_to_start_child,
+  # Kazi.Daemon.Listener, :einval}}`, which names nothing.
+  # ===========================================================================
+
+  describe "an over-long socket path" do
+    test "sun_path_limit/0 is the platform's buffer: 104 on macOS/BSD, 108 on Linux" do
+      expected = if match?({:unix, :linux}, :os.type()), do: 108, else: 104
+
+      assert Listener.sun_path_limit() == expected
+    end
+
+    test "a 200-byte sock_path stops the listener with {:socket_path_too_long, bytes, limit}" do
+      limit = Listener.sun_path_limit()
+      sock_path = sock_path_of_bytes(200)
+      pid_path = "/tmp/kazi_too_long_#{System.unique_integer([:positive])}.pid"
+
+      assert {:error, {:socket_path_too_long, 200, ^limit}} =
+               GenServer.start(Listener, sock_path: sock_path, pid_path: pid_path)
+
+      # Measured BEFORE any mkdir/write: a path that can never be bound leaves
+      # nothing behind on disk.
+      refute File.exists?(sock_path)
+      refute File.exists?(pid_path)
+    end
+
+    test "the whole tree fails with that reason, wrapped by the supervisor" do
+      limit = Listener.sun_path_limit()
+      sock_path = sock_path_of_bytes(200)
+      {_unused, pid_path} = tmp_paths()
+
+      assert {:error, reason} = Daemon.start(daemon_opts(sock_path, pid_path))
+
+      # The exact shape `kazi daemon start` has to render.
+      assert {:shutdown, {:failed_to_start_child, Listener, {:socket_path_too_long, 200, ^limit}}} =
+               reason
+    end
+
+    test "one byte under the limit still binds -- the check is not off by one" do
+      sock_path = sock_path_of_bytes(Listener.sun_path_limit() - 1)
+      pid_path = "/tmp/kazi_at_limit_#{System.unique_integer([:positive])}.pid"
+
+      assert {:ok, listener} =
+               GenServer.start(Listener, sock_path: sock_path, pid_path: pid_path)
+
+      on_exit(fn -> if Process.alive?(listener), do: GenServer.stop(listener) end)
+
+      assert File.exists?(sock_path)
+    end
+  end
+
+  # A /tmp-rooted path of EXACTLY `n` bytes, all length in the FILENAME so the
+  # dirname is a directory that already exists (no deep tree to clean up).
+  defp sock_path_of_bytes(n) do
+    prefix = "/tmp/kazi_sock_"
+    suffix = ".sock"
+
+    prefix <> String.duplicate("x", n - byte_size(prefix) - byte_size(suffix)) <> suffix
   end
 
   defp repo_running?(repo) do
