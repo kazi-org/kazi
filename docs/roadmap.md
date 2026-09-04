@@ -104,13 +104,45 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
+**Near term (2026-09-02, from a full open-issue triage, third pass --
+E71, 1 task):** the entire open backlog is now three triage epics deep
+(E69, E70, E71) plus T25.10 (#382/#372) -- 34 issues total, every one with
+a plan home. E71 covers the single issue that opened since E70's write
+(#1709: a `custom_script` guard/held-out predicate resolving `git
+rev-parse '@{u}'` or `--abbrev-ref HEAD` is structurally unsatisfiable
+inside `Kazi.Enforcement.Isolation`'s always-detached checker worktree --
+distinct from, and not fixed by, the scheduler-worktree branch-identity
+fixes T54.1/T70.5 already landed). Also caught this pass: **T69.2 (#1683)
+was actually DONE** -- fixed and released (PR #1710/#1711, v1.275.2,
+2026-08-31) -- but its checkbox sat unticked in `plans/E69.md` for a full
+day; refined the plan to match reality. **Correction (checked live via
+`claim.sh list`, not assumed from checkboxes):** both P0 fronts ARE
+claimed, not idle -- E69 Wave A (T69.1-T69.4) and all six of E70 Wave A
+(T70.1/T70.2/T70.3/T70.5/T70.14/T70.15) were claimed together by one
+`/loop pool` run starting 2026-08-31T06:01 UTC. Only T69.2 (#1683) has
+landed a merged fix so far; the other 9 show no merged fix ~2 days in --
+consistent with either continued grinding or a stalled/dead claim (claims
+are not auto-released on completion; T66.7's claim from 2026-07-19, done
+since 2026-07-20, is a confirmed-stale example). Do not re-dispatch
+`/apply --pool` against those specific tasks without first checking
+`claim.sh holder <task>` -- if no further merges land in the next few
+days, treat the claim as dead and re-dispatch then. Separately, this same
+pass ran the T31.2 deterministic plan trim for the first time in over a
+month: 28 fully-done, release-covered epics archived out of the live WBS
+(54 epic pointers -> 26; see `docs/plan.md`'s Archived epics section).
+**Update 2026-09-03:** #1705 (T70.13, bus-hook opt-in gate) closed via PR
+#1706 (ADR-0084), verified independently (`gh pr view`/`gh issue view`) --
+the open backlog is now **33** issues, not 34 (E69: 12 open, E70: 15 open,
+E71: 1 open, T25.10: #382/#372).
+
 **Near term (2026-08-30, from a full open-issue triage, second pass --
 E70, 16 tasks, 3 waves):** E69 below is still **0/14, unstarted 22 days
 after being planned** -- neither triage epic's Wave A has been picked up.
 E70 covers the 18 issues opened since E69 (#1690-#1708) that never had a
 plan home, including two (#1707, #1708) that opened during this same
 triage's own write window and were caught by a re-check, not missed;
-combined, E69 + E70 are the entire open backlog (32 real issues). Wave A
+combined, E69 + E70 were the entire open backlog at that time (32 real
+issues; E71 above adds the 34th, #1709). Wave A
 also now includes #1708 (`apply --parallel` with no `--workspace` against
 a workspace-less goal CRASHES THE WHOLE OTP APPLICATION -- an uncaught
 `FunctionClauseError` in the scheduler's partitioner, not a clean error)
@@ -156,6 +188,9 @@ workspace-derivation contract (#1678), and the self-conformance fixture cost
 (#1681), the `--project` flag-doc fix (#1617), the ACCEPTED post-disposition
 hook (#1682), the DECIDED explicit goal-file setup step (#1642, ADR ~0084),
 and real-discovery bus tests (#1649). #382/#372 close via T25.10 (E25).
+**Update 2026-08-31:** #1683 fixed and released (PR #1710/#1711, v1.275.2)
+-- the only E69/E70 task to land so far, and it landed outside a
+dispatched wave against this epic.
 
 **Near term (2026-07-17, from a full open-issue triage -- 7 new epics,
 E56-E62):** doc/lore/ADR hygiene (E56); predicate correctness -- serial-apply
