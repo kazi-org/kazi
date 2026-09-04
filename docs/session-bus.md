@@ -971,6 +971,27 @@ restart with:
 launchctl kickstart -k gui/$(id -u)/run.kazi.bushost
 ```
 
+### Signal-driven shutdown reaps nats-server (#1719)
+
+`kickstart -k`, `systemctl restart` and a plain `kill` all stop the daemon with
+SIGTERM, which the BEAM handles by halting the VM. Two layers make sure the
+supervised `nats-server` goes down with it, so the next daemon can bind its
+port:
+
+* `kazi daemon start` traps SIGTERM and stops the daemon supervisor first, so a
+  signalled shutdown runs the same `terminate/2` callbacks the control-socket
+  `shutdown` op (`kazi daemon stop`) runs. The socket file and pidfile are
+  removed on this path.
+* `nats-server` is spawned through a `/bin/sh` shim whose stdin is the port
+  pipe. The pipe reaches EOF the moment the VM goes away, and the shim kills the
+  server — which covers SIGKILL, where no in-VM handler can run at all. After a
+  SIGKILL the socket file is left behind; the next `kazi daemon start` detects it
+  as stale and replaces it.
+
+An orphaned `nats-server` (ppid 1) still holding the port is the symptom this
+prevents: every client, including the new daemon's own provisioner, connects to
+the orphan, so the bus looks healthy until the orphan dies.
+
 ## Re-registering after an in-place upgrade (#1484, ADR-0083)
 
 The installed `kazi` binary is adhoc / linker-signed, so its code signature is

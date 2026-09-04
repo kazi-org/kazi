@@ -28,6 +28,10 @@ defmodule Kazi.Daemon.Nats do
   (spawn side) or as `auth_token:` on the `Gnat` connect opts (both spawn
   side's `wait_ready/2` and connect side) -- see `docs/session-bus.md`
   ("Cross-machine setup") for the security tradeoff of running without one.
+
+  Issue #1719: the local spawn goes through a `/bin/sh` shim (`@shim`) that
+  kills nats-server when the port pipe reaches EOF, so the server dies with the
+  BEAM even when the BEAM is signalled away and `terminate/2` never runs.
   """
 
   use GenServer
@@ -36,6 +40,47 @@ defmodule Kazi.Daemon.Nats do
   @default_port 4223
   @ready_retry_ms 100
   @ready_timeout_ms 5_000
+
+  # #1719: nats-server is spawned THROUGH this `/bin/sh` shim instead of as a
+  # bare `Port.open({:spawn_executable, bin}, ...)`. A port's OS process has no
+  # death pact with the BEAM on macOS/Linux, and the daemon tree runs from the
+  # CLI process rather than under `Kazi.Application` -- so when the VM is stopped
+  # by a signal (`launchctl kickstart -k`, `kill`, SIGKILL) `terminate/2` never
+  # runs and the nats-server is orphaned still holding the TCP port. The next
+  # daemon can then never bind it and logs `nats-server exited (status 1)`
+  # forever while every client silently talks to the orphan.
+  #
+  # The shim's stdin IS the port pipe, whose write end only the BEAM holds, so it
+  # reaches EOF the instant the VM goes away by ANY means -- including SIGKILL,
+  # which no in-BEAM handler can cover. What each line is for:
+  #
+  #   * `trap ... TERM INT` -- `terminate/2` kills the SHIM (the port's os_pid);
+  #     the trap forwards that to nats-server and `wait`s for it, so the shim
+  #     outlives nats-server and `wait_for_exit/2` returning still means the TCP
+  #     port is genuinely free.
+  #   * `exec 4<&0` -- a background command's stdin is reassigned to /dev/null
+  #     before its own redirections (POSIX), so the reader below would see an
+  #     instant EOF and kill the server at boot. Fd 4 preserves the real pipe.
+  #   * the `<&4 &` subshell -- blocks on the pipe and, at EOF, signals the shim
+  #     so the SAME trap does the killing (one shutdown path, not two).
+  #   * `wait "$p"` in the foreground -- keeps the shim alive exactly as long as
+  #     nats-server, so a server that dies on its own still closes the port and
+  #     reaches `handle_info/2`'s `:exit_status` clause with its real status.
+  @shim """
+  p=""
+  trap 'if [ -n "$p" ]; then kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; fi; exit 0' TERM INT
+  exec 4<&0
+  "$@" </dev/null &
+  p=$!
+  (trap - TERM INT; while read -r _line; do :; done; kill "$$" 2>/dev/null) <&4 &
+  r=$!
+  wait "$p"
+  rc=$?
+  kill "$r" 2>/dev/null
+  exit "$rc"
+  """
+
+  @shim_shell "/bin/sh"
 
   defstruct [:port, :os_pid, :nats_host, :nats_port, :nats_token]
 
@@ -138,12 +183,16 @@ defmodule Kazi.Daemon.Nats do
       token = Keyword.get(opts, :nats_token)
       args = ["-js", "-p", to_string(nats_port), "-sd", store_dir] ++ auth_args(token)
 
+      # #1719: `@shim`'s argv is `sh -c <script> sh <nats-bin> <nats args...>`,
+      # so `$0` is `sh` and `"$@"` inside the script is exactly the command that
+      # used to be spawned directly. `os_pid` is now the SHIM's pid -- see
+      # `terminate/2` for why that keeps the stop path correct.
       port =
-        Port.open({:spawn_executable, bin}, [
+        Port.open({:spawn_executable, @shim_shell}, [
           :binary,
           :exit_status,
           :stderr_to_stdout,
-          args: args
+          args: ["-c", @shim, "sh", bin | args]
         ])
 
       {:os_pid, os_pid} = Port.info(port, :os_pid)
@@ -199,6 +248,11 @@ defmodule Kazi.Daemon.Nats do
     # otherwise the very next daemon instance to start (a live concern in
     # tests, which start/stop the tree repeatedly) can race a still-dying
     # nats-server for the same TCP port.
+    #
+    # #1719: `os_pid` is the `@shim` shell, not nats-server itself. The signal
+    # sent here is what the shim's TERM trap forwards to nats-server, and the
+    # shim only exits once it has `wait`ed on nats-server -- so waiting on the
+    # shim below still means "nats-server is reaped, the TCP port is free".
     System.cmd("kill", [to_string(os_pid)], stderr_to_stdout: true)
     wait_for_exit(os_pid, System.monotonic_time(:millisecond) + @stop_wait_ms)
     :ok

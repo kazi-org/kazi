@@ -5422,6 +5422,8 @@ defmodule Kazi.CLI do
       {:ok, sup_pid} ->
         IO.puts("kazi daemon listening on #{sock_path} (vsn #{version()})")
 
+        trap = trap_daemon_sigterm(sup_pid)
+
         wait_for_stop =
           Keyword.get(inject_opts, :daemon_wait, fn pid ->
             ref = Process.monitor(pid)
@@ -5432,6 +5434,7 @@ defmodule Kazi.CLI do
           end)
 
         wait_for_stop.(sup_pid)
+        untrap_daemon_sigterm(trap)
         0
 
       {:error, {:already_running, vsn}} ->
@@ -5588,6 +5591,53 @@ defmodule Kazi.CLI do
 
   defp execute_daemon(sub, _args, opts, _inject_opts),
     do: daemon_error("unknown daemon subcommand #{inspect(sub)}", opts)
+
+  # #1719: `launchctl kickstart -k`, `systemctl restart` and a plain `kill` all
+  # deliver SIGTERM, whose DEFAULT BEAM disposition halts the VM without running
+  # any `terminate/2`. The daemon tree is started from this CLI process rather
+  # than from `Kazi.Application`, so nothing else stops it either -- the
+  # supervised nats-server was left orphaned holding its TCP port and the next
+  # daemon could never bind. Trapping SIGTERM routes signal-driven shutdown
+  # through the SAME `Supervisor.stop` the control-socket `shutdown` op takes,
+  # so every child gets its `terminate/2` before the VM halts.
+  #
+  # `System.trap_signal/2` is `:os.set_signal(:sigterm, :handle)` plus a
+  # `:gen_event` handler on `:erl_signal_server`; the handler owns the halt now
+  # that it has intercepted the default disposition. Best-effort, exactly as
+  # `Kazi.Runtime.Finalizer` treats its own traps: a runtime that refuses the
+  # trap still has `Kazi.Daemon.Nats`'s port-pipe shim as the backstop, which
+  # covers SIGKILL too.
+  defp trap_daemon_sigterm(sup_pid) do
+    case System.trap_signal(:sigterm, fn -> daemon_signal_shutdown(sup_pid) end) do
+      {:ok, id} -> id
+      _other -> nil
+    end
+  rescue
+    _error -> nil
+  end
+
+  defp daemon_signal_shutdown(sup_pid) do
+    try do
+      Supervisor.stop(sup_pid, :normal, 10_000)
+    catch
+      # An already-dead tree (or one that raced this signal) must never stop the
+      # halt: the operator asked for termination and gets it either way.
+      _kind, _reason -> :ok
+    end
+
+    System.halt(0)
+  end
+
+  # The trap is VM-global, so a `daemon start` that returns (tests, `restart`'s
+  # injected wait) must not leave a handler behind pointing at a dead tree.
+  defp untrap_daemon_sigterm(nil), do: :ok
+
+  defp untrap_daemon_sigterm(id) do
+    _ = System.untrap_signal(:sigterm, id)
+    :ok
+  rescue
+    _error -> :ok
+  end
 
   defp default_launchd_os do
     case :os.type() do
