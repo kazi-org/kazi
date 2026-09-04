@@ -978,7 +978,12 @@ defmodule Kazi.Bus do
     tell_consumer = tell_consumer_name(session)
     ensure_consumer(conn, stream, tell_consumer, "bus.*.msg.#{session}")
 
-    scoped = pull(conn, stream, scope_consumer, session, mode)
+    # Issue #1720: a `directed: true` drain (only `watch/1` sets it) leaves
+    # the scope consumer ALONE -- broadcast traffic neither satisfies the
+    # watch nor gets consumed out from under the next `read/1`/`peek/1`.
+    scoped =
+      if directed?(opts), do: [], else: pull(conn, stream, scope_consumer, session, mode)
+
     told = pull(conn, stream, tell_consumer, session, mode)
 
     # Team fan-in (#1069): a joined session also drains directed-at-team
@@ -995,7 +1000,34 @@ defmodule Kazi.Bus do
           pull(conn, stream, team_consumer, "@" <> team, mode)
       end
 
+    # Issue #1720: a `tell` publishes to `bus.<scope>.msg.<session>`, which the
+    # scope consumer's `bus.<scope>.>` filter matches TOO -- an ordinary drain
+    # acks that copy on both consumers and dedups them below. A directed drain
+    # skipped the scope consumer, so advance it past exactly the sequences just
+    # consumed; without this the next `read/1` redelivers a directed message
+    # the watch already handed to the caller. Broadcasts are NAKed straight
+    # back to pending, which is the whole point of the option.
+    if directed?(opts) do
+      ack_consumed_on_scope(conn, stream, scope_consumer, session, told ++ team_msgs)
+    end
+
     dedup_by_stream_seq(scoped ++ told ++ team_msgs)
+  end
+
+  defp directed?(opts), do: opts[:directed] == true
+
+  defp ack_consumed_on_scope(_conn, _stream, _consumer_name, _session, []), do: :ok
+
+  defp ack_consumed_on_scope(conn, stream, consumer_name, session, messages) do
+    seqs = for m <- messages, is_integer(m.stream_seq), into: MapSet.new(), do: m.stream_seq
+
+    if MapSet.size(seqs) > 0 do
+      pull_selective(conn, stream, consumer_name, session, fn m ->
+        MapSet.member?(seqs, m.stream_seq)
+      end)
+    end
+
+    :ok
   end
 
   defp pull(conn, stream, consumer_name, session, {:ack, ack?}),
@@ -1021,10 +1053,22 @@ defmodule Kazi.Bus do
     * `:all` -- the pre-T54.9 behavior: drain first, so anything already
       pending (backlog included) returns immediately.
 
-  While parked it holds ephemeral core-NATS subscriptions on the caller's
-  scope, directed, and team subjects as a wake signal, then drains the
-  durables again. The `:now` anchor is captured AFTER those subscriptions
-  are live (risk R-E54-6), so a message landing in between cannot be lost.
+  `opts[:directed]` (issue #1720) narrows what can wake the park:
+
+    * `false` (the DEFAULT, unchanged behavior) -- the caller's scope,
+      directed, and team subjects all wake it, so any broadcast past the
+      anchor satisfies the watch.
+    * `true` -- only `bus.*.msg.<session>` and (in a team)
+      `bus.*.msg.@<team>`. The scope consumer is never pulled, so a
+      broadcast landing mid-park neither wakes the watch nor is consumed:
+      it stays pending for the next `read/1`/`peek/1`. This is what a
+      PARKED watch wants -- a park woken by every run-mirroring or
+      attention fact on the machine is the poll loop the verb replaces.
+
+  While parked it holds ephemeral core-NATS subscriptions on those subjects
+  as a wake signal, then drains the durables again. The `:now` anchor is
+  captured AFTER those subscriptions are live (risk R-E54-6), so a message
+  landing in between cannot be lost.
   `opts[:timeout]` is in SECONDS (default #{@default_watch_timeout_s}); on
   expiry returns `{:error, :watch_timeout}` -- always distinguishable from
   an arrival. Presence is re-upserted on entry and on wake, so a watching
@@ -1062,12 +1106,7 @@ defmodule Kazi.Bus do
     scope = scope(opts)
     session = session(opts)
 
-    subjects =
-      ["bus.#{scope}.>", "bus.*.msg.#{session}"] ++
-        case current_team(conn, opts) do
-          nil -> []
-          team -> ["bus.*.msg.@#{team}"]
-        end
+    subjects = wake_subjects(conn, opts, scope, session)
 
     sids =
       Enum.map(subjects, fn subject ->
@@ -1104,6 +1143,26 @@ defmodule Kazi.Bus do
         flush_bus_msgs()
         {:ok, messages}
     end
+  end
+
+  # The core-NATS subjects a park sleeps on as its wake signal. Issue #1720:
+  # `directed: true` drops `bus.<scope>.>`, leaving only the subjects a message
+  # ADDRESSED to this session (or its team) lands on. Subscribing the whole
+  # scope tree woke a parked watch on every broadcast on the machine --
+  # measured at 2 spurious wakes in 2 minutes with one run in progress, and
+  # each wake re-invokes the parked session -- so the verb that exists to
+  # replace a poll loop was being driven at tick rate by other sessions'
+  # run-mirroring and attention facts.
+  defp wake_subjects(conn, opts, scope, session) do
+    scope_subjects = if directed?(opts), do: [], else: ["bus.#{scope}.>"]
+
+    team_subjects =
+      case current_team(conn, opts) do
+        nil -> []
+        team -> ["bus.*.msg.@#{team}"]
+      end
+
+    scope_subjects ++ ["bus.*.msg.#{session}"] ++ team_subjects
   end
 
   defp await_wake(conn, opts, mode, deadline, sids) do
@@ -2530,13 +2589,23 @@ defmodule Kazi.Bus do
   # a prior peek left un-acked stays consumable by `read`/`peek` and never
   # satisfies a watch.
   defp pull_new(conn, stream, consumer_name, session, anchor) do
+    pull_selective(conn, stream, consumer_name, session, fn m ->
+      is_integer(m.stream_seq) and m.stream_seq > anchor
+    end)
+  end
+
+  # The take-some-ack-the-rest-back primitive behind `pull_new/5`: pull the
+  # whole pending set unacked, ACK what `take?` selects (returned as consumed)
+  # and NAK everything else back to pending. Issue #1720's directed drain
+  # reuses it with a "these exact sequences" predicate to advance the scope
+  # consumer past a directed message without touching the broadcasts beside it.
+  defp pull_selective(conn, stream, consumer_name, session, take?) do
     inbox = "_INBOX.#{Integer.to_string(System.unique_integer([:positive]))}"
     {:ok, sid} = Gnat.sub(conn, self(), inbox)
     pulled = pull_pending(conn, stream, consumer_name, inbox, [])
     Gnat.unsub(conn, sid)
 
-    {new, backlog} =
-      Enum.split_with(pulled, fn m -> is_integer(m.stream_seq) and m.stream_seq > anchor end)
+    {new, backlog} = Enum.split_with(pulled, take?)
 
     Enum.each(backlog, fn m -> Gnat.pub(conn, m.reply_to, "-NAK") end)
     Enum.each(new, fn m -> Gnat.pub(conn, m.reply_to, "") end)

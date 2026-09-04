@@ -296,7 +296,9 @@ defmodule Kazi.MCP.Server do
             "is in SECONDS (keep it bounded); on expiry the result is {ok: true, " <>
             "timed_out: true, digest: {total: 0, lines: []}} (messages: [] under " <>
             "full: true) rather than an error, so branch on timed_out. Watching also " <>
-            "refreshes this session's presence.",
+            "refreshes this session's presence. Pass directed: true (issue #1720) " <>
+            "whenever you PARK this call: it wakes only on a message addressed to " <>
+            "this session or its team, instead of on any broadcast on the machine.",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
@@ -316,6 +318,16 @@ defmodule Kazi.MCP.Server do
                 "What counts as new: \"now\" (default -- strictly after the watch " <>
                   "starts), \"all\" (drain anything pending immediately), or a " <>
                   "numeric stream sequence to anchor at precisely."
+            },
+            "directed" => %{
+              "type" => "boolean",
+              "description" =>
+                "true: wake ONLY on a message addressed to this session " <>
+                  "(kazi_bus_tell) or, in a team, to its team -- broadcast facts " <>
+                  "neither satisfy the watch nor are consumed, staying pending for " <>
+                  "the next kazi_bus_read. Default false, which also sleeps on the " <>
+                  "whole scope, so on a busy machine any session's traffic wakes " <>
+                  "the park (issue #1720). Recommended whenever you park this call."
             },
             "scope" => %{
               "type" => "string",
@@ -668,6 +680,9 @@ defmodule Kazi.MCP.Server do
       bus_opts(args, opts)
       |> maybe_put_opt(:timeout, watch_timeout(Map.get(args, "timeout")))
       |> maybe_put_opt(:since, watch_since(Map.get(args, "since")))
+      # Issue #1720: park on the directed/team subjects only. Absent (or
+      # false) keeps the pre-#1720 scope-wide wake, so no caller changes.
+      |> maybe_put_opt(:directed, Map.get(args, "directed") == true || nil)
 
     case Bus.watch(watch_opts) do
       {:ok, messages} ->

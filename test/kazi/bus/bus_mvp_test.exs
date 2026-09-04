@@ -892,6 +892,147 @@ defmodule Kazi.Bus.MvpTest do
                Bus.watch(conn: conn, session: session, scope: "machine", timeout: 1)
     end
 
+    # ---- watch --directed (issue #1720) ---------------------------------
+    #
+    # The default park also sleeps on `bus.<scope>.>`, so ANY broadcast past
+    # the anchor satisfied it -- another session's run-mirroring facts, an
+    # `attention-<session>` fact from a permission prompt. Measured at two
+    # spurious wakes in two minutes with one run in flight: a parked worker
+    # re-invoked at the fleet's tick rate, which is the poll loop the verb
+    # exists to replace. `directed: true` parks on the directed and team
+    # subjects only.
+
+    test "a directed watch is NOT woken by a broadcast post, which stays consumable by read", %{
+      conn: conn
+    } do
+      session = unique_session()
+      broadcast = "fleet chatter #{session}"
+      parent = self()
+
+      # T55.5: any bus call establishes presence.
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
+      watcher =
+        Task.async(fn ->
+          # a second connection: the watcher parks a receive on ITS process
+          {host, port} = parse_nats_url(System.fetch_env!("NATS_URL"))
+          {:ok, watch_conn} = Gnat.start_link(%{host: host, port: port})
+          send(parent, :watching)
+
+          result =
+            Bus.watch(
+              conn: watch_conn,
+              session: session,
+              scope: "machine",
+              timeout: 3,
+              directed: true
+            )
+
+          Gnat.stop(watch_conn)
+          result
+        end)
+
+      assert_receive :watching, 5_000
+      # let the watcher anchor + park, then broadcast at the whole scope
+      Process.sleep(300)
+
+      assert :ok =
+               Bus.post("fact", broadcast,
+                 conn: conn,
+                 scope: "machine",
+                 topic: "run:1720"
+               )
+
+      # the park rides out its whole timeout: the broadcast is addressed to
+      # nobody, so it is not this watch's business
+      assert {:error, :watch_timeout} = Task.await(watcher, 20_000)
+
+      # ... and it was never consumed either -- the scope consumer was left
+      # untouched, so the next read still sees it
+      assert {:ok, read_back} = Bus.read(conn: conn, session: session, scope: "machine")
+      assert Enum.any?(read_back, fn m -> m.text == broadcast end)
+    end
+
+    test "a directed watch wakes on a tell to this session", %{conn: conn} do
+      session = unique_session()
+      text = "yours alone #{session}"
+      parent = self()
+
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+
+      watcher =
+        Task.async(fn ->
+          {host, port} = parse_nats_url(System.fetch_env!("NATS_URL"))
+          {:ok, watch_conn} = Gnat.start_link(%{host: host, port: port})
+          send(parent, :watching)
+
+          result =
+            Bus.watch(
+              conn: watch_conn,
+              session: session,
+              scope: "machine",
+              timeout: 15,
+              directed: true
+            )
+
+          Gnat.stop(watch_conn)
+          result
+        end)
+
+      assert_receive :watching, 5_000
+      Process.sleep(300)
+      # T55.5: establish the recipient's presence (tell resolves the roster).
+      assert {:ok, _} = Bus.who(conn: conn, session: session)
+      assert {:ok, _receipt} = Bus.tell(session, text, conn: conn, scope: "machine")
+
+      assert {:ok, messages} = Task.await(watcher, 20_000)
+      # exactly once, as the non-directed wake path already guarantees
+      assert Enum.count(messages, fn m -> m.kind == "msg" and m.text == text end) == 1
+
+      # A tell lands on `bus.<scope>.msg.<session>`, which the scope
+      # consumer's `bus.<scope>.>` filter matches too. A directed drain never
+      # pulls that consumer for wakes, so it advances it past exactly what it
+      # consumed -- otherwise the next read redelivers a message this watch
+      # already handed over.
+      assert {:ok, read_back} = Bus.read(conn: conn, session: session, scope: "machine")
+      refute Enum.any?(read_back, fn m -> m.text == text end)
+    end
+
+    test "a directed watch wakes a team member on `tell @team`", %{conn: conn} do
+      team = "team_#{System.unique_integer([:positive])}"
+      member = unique_session()
+      text = "team wake #{team}"
+      parent = self()
+
+      assert :ok = Bus.join(team, conn: conn, session: member)
+
+      watcher =
+        Task.async(fn ->
+          {host, port} = parse_nats_url(System.fetch_env!("NATS_URL"))
+          {:ok, watch_conn} = Gnat.start_link(%{host: host, port: port})
+          send(parent, :watching)
+
+          result =
+            Bus.watch(
+              conn: watch_conn,
+              session: member,
+              scope: "machine",
+              timeout: 15,
+              directed: true
+            )
+
+          Gnat.stop(watch_conn)
+          result
+        end)
+
+      assert_receive :watching, 5_000
+      Process.sleep(300)
+      assert {:ok, _receipt} = Bus.tell("@" <> team, text, conn: conn, scope: "machine")
+
+      assert {:ok, messages} = Task.await(watcher, 20_000)
+      assert Enum.any?(messages, fn m -> m.kind == "msg" and m.text == text end)
+    end
+
     # ---- provision reconcile -------------------------------------------
 
     test "provision reconciles an existing stream's limits up to current config", %{conn: conn} do

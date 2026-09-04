@@ -895,11 +895,15 @@ defmodule Kazi.Teach.InstallSkill do
     - **Consume** -- `kazi bus read --json`. LANDMINE: read ACKS everything it
       pulls; a casual check silently drains messages a later wait was counting
       on. Not ready to act? Peek.
-    - **Wait** -- `kazi bus watch --timeout <s> --json` (MCP: `kazi_bus_watch`).
+    - **Wait** -- `kazi bus watch --timeout <s> --directed --json` (MCP:
+      `kazi_bus_watch` with `directed: true`).
       Blocks until a NEW message arrives and keeps your presence fresh.
       `--since` anchors what counts as new: `now` (default) delivers only
       messages posted AFTER the watch starts, leaving backlog for
-      `read`/`peek`; `all` is the drain-first behavior (T54.9). NEVER poll
+      `read`/`peek`; `all` is the drain-first behavior (T54.9). `--directed`
+      anchors WHOSE messages count: only a `tell` to you or your team, so
+      another session's broadcast facts cannot wake a parked watch (#1720).
+      NEVER poll
       `read` in a loop -- watch is the no-poll primitive. The CLI exits 3 on
       timeout; the MCP tool returns
       `{ok: true, timed_out: true, digest: {total: 0, lines: []}}` -- branch

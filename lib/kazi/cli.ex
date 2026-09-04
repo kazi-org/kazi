@@ -181,6 +181,7 @@ defmodule Kazi.CLI do
     machine: :string,
     timeout: :integer,
     since: :string,
+    directed: :boolean,
     attention: :boolean,
     prefix: :string,
     roadmap: :string,
@@ -340,6 +341,8 @@ defmodule Kazi.CLI do
       "`bus watch` only (issue #1091): maximum seconds to block waiting for a message (default 300). On expiry `bus watch` prints a one-line notice and exits 3.",
     since:
       "`bus watch` only (T54.9, issue #1097): what counts as a NEW message -- `now` (default) anchors to the stream's current last sequence so only messages posted AFTER the watch starts are delivered (pending backlog is left for `bus read`/`bus peek`); `all` restores the pre-T54.9 drain-first behavior (anything already pending returns immediately); a numeric stream sequence anchors there precisely.",
+    directed:
+      "`bus watch` only (issue #1720): wake ONLY on a message addressed to this session (`bus tell <session>`) or, in a team, to its team (`bus tell @<team>`). Without it a park also sleeps on the whole `bus.<scope>.>` subject tree, so any broadcast wakes it -- another session's run-mirroring facts, an `attention-<session>` fact from a permission prompt -- and a parked worker on a busy machine is re-invoked at the fleet's tick rate, which is the poll loop the verb exists to replace. Broadcast traffic is left untouched under this flag: it neither satisfies the watch nor is consumed, staying pending for the next `bus read`/`bus peek`. Recommended for every PARKED watch (`--timeout` + re-park); leave it off for a watch that should see everything on the scope.",
     attention:
       "`bus board` only (T60.3, issue #1156): render ONLY the NEEDS OPERATOR section of the human board -- the fleet-wide list of sessions with a live `waiting-on-operator` fact, oldest first. --json is unaffected: the full board (including `attention`) is always returned; this only trims the human render.",
     prefix:
@@ -467,7 +470,7 @@ defmodule Kazi.CLI do
     %{
       name: "bus",
       summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook|prune` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read; `attention-*` topics never appear in its `facts` section (issue #1687) -- they have their own roster-gated `attention` section, and a `\"none\"` clear still leaves the topic in the stream, so showing it in `facts` too was pure noise. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`; join also returns a daemon-ASSIGNED short name `<team>-a/b/c...` allocated atomically through the KV bucket, T65.3)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`. `bus prune <topic>` (issue #1687 root cause 2) erases every message on a fact topic outright -- the retract verb the facts stream never had, since a `\"none\"` clear only appends a new last-value message and the topic (and its whole history) stays in the stream until the 30-day `max_age` rolls off; `bus prune --prefix <prefix>` purges every currently-live topic starting with the prefix in one shot (a NATS subject wildcard cannot glob inside a single token, so a bulk cleanup like `--prefix attention-` needs this rather than a wildcard filter).",
+        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook|prune` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read; `attention-*` topics never appear in its `facts` section (issue #1687) -- they have their own roster-gated `attention` section, and a `\"none\"` clear still leaves the topic in the stream, so showing it in `facts` too was pure noise. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout; `--directed` (issue #1720) wakes ONLY on a message addressed to this session or its team, leaving broadcast scope traffic unconsumed for the next `bus read` -- the recommended flag for a parked watch); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`; join also returns a daemon-ASSIGNED short name `<team>-a/b/c...` allocated atomically through the KV bucket, T65.3)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`. `bus prune <topic>` (issue #1687 root cause 2) erases every message on a fact topic outright -- the retract verb the facts stream never had, since a `\"none\"` clear only appends a new last-value message and the topic (and its whole history) stays in the stream until the 30-day `max_age` rolls off; `bus prune --prefix <prefix>` purges every currently-live topic starting with the prefix in one shot (a NATS subject wildcard cannot glob inside a single token, so a bulk cleanup like `--prefix attention-` needs this rather than a wildcard filter).",
       args: [%{name: "subcommand", required: true}],
       flags: [
         :json,
@@ -482,6 +485,7 @@ defmodule Kazi.CLI do
         :machine,
         :timeout,
         :since,
+        :directed,
         :session_name,
         :attention,
         :prefix
@@ -646,7 +650,7 @@ defmodule Kazi.CLI do
       kazi daemon reregister [--json]              # re-pin a launchd job's code requirement to the CURRENT binary (remedy for exit 78 after an in-place upgrade, #1484); macOS-only, no-op elsewhere
       kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
       kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
-      kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--json]  # block until a NEW message arrives (#1091/#1097)
+      kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--directed] [--json]  # block until a NEW message arrives (#1091/#1097); --directed: only messages addressed to this session/team (#1720)
       kazi bus join [--json]                             # derive team from git origin + daemon-assigned name (T65.1/T65.3); `join -- <team>` for explicit
       kazi bus leave [--json]
       kazi bus name <alias> [--json]                     # attach an alias on top of the assigned name (T55.5/T65.3)
@@ -1647,6 +1651,10 @@ defmodule Kazi.CLI do
       machine: flags[:machine],
       timeout: flags[:timeout],
       since: flags[:since],
+      # Issue #1720: `bus watch` only -- park on the directed and team
+      # subjects ONLY, so broadcast scope traffic neither wakes the watch nor
+      # is consumed (it stays pending for the next `bus read`).
+      directed: flags[:directed] || false,
       # T55.5: an explicit --session-name heads the sender-identity resolution
       # chain (ADR-0067 point 2) for every bus verb.
       session_name: flags[:session_name],
@@ -1916,7 +1924,7 @@ defmodule Kazi.CLI do
 
   defp bus_help_text("watch") do
     """
-    kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]
+    kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--directed] [--full] [--json]
 
     Block until a NEW message arrives for this session, then consume and
     print it -- the no-poll-loop alternative to running `bus read` in a
@@ -1926,6 +1934,17 @@ defmodule Kazi.CLI do
     can always tell a timeout from an arrival. Under --json the result
     renders through the same bounded digest envelope as `bus read`
     (T55.1, ADR-0072); `--full` returns the messages unabridged.
+
+    --directed narrows WHOSE message counts (issue #1720): sleep only on
+    `bus tell <session>` and `bus tell @<team>`, never on the scope's
+    broadcast tree. Without it any broadcast wakes the park -- another
+    session's run-mirroring facts, an `attention-<session>` fact raised by
+    a permission prompt -- so on a busy machine a parked worker is
+    re-invoked at the fleet's tick rate on traffic addressed to nobody.
+    Broadcasts are left alone under the flag: they neither satisfy the
+    watch nor get consumed, and stay pending for the next `bus read`.
+    Pass it on every parked watch; omit it when the watch should see
+    everything on the scope.
 
     --since anchors what counts as new (T54.9, issue #1097):
       now   (default) only messages posted AFTER the watch starts; any
@@ -1943,10 +1962,12 @@ defmodule Kazi.CLI do
     The wake contract (T55.13): an IDLE session has no turn boundary to
     deliver into, so park this verb as a BACKGROUND TASK of your harness --
     arrival (exit 0) wakes the session with the message already in hand,
-    timeout (exit 3) means re-park. Keep the `--since now` default: with
-    `--since all` a park fires instantly on backlog and degenerates into
-    the poll loop this verb exists to replace. Full contract, and when to
-    use harness-native agent teams instead: `docs/session-bus.md`.
+    timeout (exit 3) means re-park. Keep the `--since now` default and add
+    `--directed`: with `--since all` a park fires instantly on backlog, and
+    without `--directed` it fires on every broadcast on the machine -- both
+    degenerate into the poll loop this verb exists to replace. Full
+    contract, and when to use harness-native agent teams instead:
+    `docs/session-bus.md`.
 
     Requires a running `kazi daemon` -- prints a one-line no-daemon error
     (exit 1) otherwise.
@@ -6080,13 +6101,17 @@ defmodule Kazi.CLI do
   # #1091: block until a NEW message arrives, then consume and print it.
   # T54.9/#1097: --since <seq|now|all> anchors what counts as new (default
   # `now` -- pending backlog never satisfies the watch).
+  # #1720: --directed narrows WHOSE message counts -- only messages addressed
+  # to this session or its team, never broadcast scope traffic.
   defp execute_bus("watch", [], opts) do
     case parse_watch_since(opts[:since]) do
       {:error, message} ->
         bus_error(message, opts)
 
       {:ok, since} ->
-        case Kazi.Bus.watch(bus_call_opts(opts) ++ [since: since]) do
+        watch_opts = bus_call_opts(opts) ++ [since: since, directed: opts[:directed] == true]
+
+        case Kazi.Bus.watch(watch_opts) do
           {:ok, messages} ->
             reply = local_bus_reply(messages, opts)
             emit(json?(opts), bus_read_payload(reply), fn -> print_read_digest(reply) end)
