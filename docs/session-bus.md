@@ -154,7 +154,9 @@ kazi bus get <id> [--full] [--json]                        # fetch a message's f
 kazi bus read [--peek] [--full] [--since <cursor>] [--json] # pull + ack this session's durable consumers, prints a digest the DAEMON assembled (T55.7)
                                                            # --since <cursor>: replay only past a stream sequence (numeric only -- NOT watch's now|all)
 kazi bus peek [--full] [--json]                            # non-destructive read (issue #1059): same as `bus read --peek`
-kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--full] [--json]  # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
+kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--directed] [--full] [--json]
+                                                           # BLOCK until a NEW message arrives (#1091/#1097); exit 3 on timeout
+                                                           # --directed: wake only on messages addressed to this session/team (#1720)
 kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]
                                                            # roster with liveness (active|idle) + inbox depth; --all includes stale rows
 kazi bus board [--scope machine|project] [--json]         # current state: last-value fact per topic + live roster (T55.4); consumes nothing
@@ -192,14 +194,21 @@ NEW arrival, consuming and printing it. "New" is anchored by `--since`
   with a greater sequence return immediately.
 
 The anchor is captured only after the wake subscriptions are live, so a
-message landing in the gap is never lost. `--timeout <seconds>` (default
-300) bounds the wait — expiry prints a one-line notice and exits 3, always
-distinguishable from an arrival (exit 0), so scripted waiters can loop on
-the exit code:
+message landing in the gap is never lost.
+
+`--directed` (issue #1720) narrows WHOSE messages count, independently of the
+anchor: the watch parks on `bus.*.msg.<session>` and `bus.*.msg.@<team>` only,
+so a `bus post` broadcast never wakes it and is never consumed — it stays
+pending for the next `bus read`. Pass it on any watch you re-park; see [the
+wake contract](#a-park-also-depends-on---directed-issue-1720).
+
+`--timeout <seconds>` (default 300) bounds the wait — expiry prints a one-line
+notice and exits 3, always distinguishable from an arrival (exit 0), so
+scripted waiters can loop on the exit code:
 
 ```bash
 while :; do
-  kazi bus watch --timeout 600 --json && handle_messages
+  kazi bus watch --timeout 600 --directed --json && handle_messages
 done
 ```
 
@@ -1290,7 +1299,7 @@ sleep on the bus is to park a bounded watch as a **background task of the
 worker's own harness**:
 
 ```
-kazi bus watch --timeout 600 --json
+kazi bus watch --timeout 600 --directed --json
 ```
 
 The pattern needs exactly two things from the harness, and nothing from kazi
@@ -1317,6 +1326,43 @@ from the sending side.
 A harness that cannot re-invoke a session on a background task's completion has
 no wake mechanism, and its sessions keep using the pull verbs at turn
 boundaries — exactly as ADR-0076 says of a harness with no hook mechanism.
+
+### A park also depends on `--directed` (issue #1720)
+
+`--since now` decides WHEN a message counts as new. `--directed` decides WHOSE
+messages count at all, and a park needs both.
+
+Without it, a watch sleeps on the whole `bus.<scope>.>` subject tree alongside
+the directed and team subjects, so ANY broadcast past the anchor satisfies it —
+another session's run-mirroring facts, an `attention-<session>` fact a
+permission prompt raised somewhere else on the fleet. None of that is addressed
+to the watcher, and every one of them re-invokes it. Measured on a machine with
+a single `kazi apply` run in flight: two spurious wakes in two minutes, one per
+reconcile iteration. On a busy fleet a parked worker is woken at the fleet's
+tick rate by traffic it has no business reading — the poll loop this verb
+exists to replace, now driven by other people's work. A shared cross-machine
+bus (`--nats-host`) multiplies it: the literal `machine` scope spans every
+connected machine.
+
+With `--directed`, the park sleeps on `bus.*.msg.<session>` and — for a session
+that has run `bus join` — `bus.*.msg.@<team>`, and nothing else. So it wakes on
+a `bus tell <session>` and on a `bus tell @<team>`, which is exactly the traffic
+the wake contract is about.
+
+Broadcasts are not lost, only ignored: a directed watch never pulls the scope
+consumer, so a fact posted mid-park stays pending and the next `bus read` (or
+`bus board`, which projects current state without consuming) still sees it. The
+`--since now` anchor is unaffected — a broadcast that arrives during the park is
+backlog for the reader, not a wake for the watcher.
+
+```
+# a parked worker: wake on work assigned to me, not on the fleet's chatter
+kazi bus watch --timeout 600 --directed --json
+```
+
+Leave the flag off when a watch genuinely wants everything on the scope — a
+one-shot `--since all` drain, or a monitor that mirrors fleet traffic. Default
+behavior is unchanged for every existing caller.
 
 ### This depends on `--since now` (T54.9, issue #1097)
 
