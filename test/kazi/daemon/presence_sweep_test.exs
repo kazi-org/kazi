@@ -12,6 +12,8 @@ defmodule Kazi.Daemon.PresenceSweepTest do
   """
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Gnat.Jetstream.API.KV
   alias Kazi.Bus.Liveness
   alias Kazi.Bus.Provision
@@ -135,6 +137,60 @@ defmodule Kazi.Daemon.PresenceSweepTest do
       assert {:ok, %{idled: idled, reaped: reaped}} = PresenceSweep.sweep(conn)
       refute sanitize(session) in idled
       refute sanitize(session) in reaped
+    end
+
+    # #1721: the mass-reap. An unusable `ps` used to yield an empty start-time
+    # map, every local row verdicted :dead from it, and a single failed fork
+    # deleted the whole local roster. Both rows here would be reaped by a
+    # WORKING ps -- one for a genuinely dead pid, one for pid reuse -- which is
+    # what makes "nothing was reaped" a real assertion rather than a vacuous
+    # one: it fails on the old code and passes only when the unusable ps is
+    # held at :unknown.
+    test "an unusable ps reaps NOTHING -- every local row is :unknown", %{conn: conn} do
+      dead = unique_session()
+      reused = unique_session()
+      quiet = unique_session()
+
+      put_row(conn, dead, ts_seconds_ago(1), pid: dead_os_pid(), started_at: "gone")
+      put_row(conn, reused, ts_seconds_ago(1), started_at: "Thu Jan  1 00:00:00 1970")
+      put_row(conn, quiet, ts_seconds_ago(500))
+
+      keys = Enum.map([dead, reused, quiet], &sanitize/1)
+      before = Map.new(keys, &{&1, KV.get_value(conn, Provision.sessions_bucket(), &1)})
+
+      # A ps that cannot run at all: the live 2026-09-03 fork failure.
+      ps_fun = fn _args -> raise ErlangError, original: :eagain end
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %{reaped: reaped, idled: idled}} =
+                   PresenceSweep.sweep(conn, ps_fun: ps_fun)
+
+          send(self(), {:swept, reaped, idled})
+        end)
+
+      assert_received {:swept, reaped, idled}
+      assert reaped == []
+      assert idled == []
+
+      # The tick must SAY it could not judge -- the silent version of this is
+      # what left the live mass-reap with no trace.
+      assert log =~ "ps unusable"
+
+      # The rows are still there, byte-identical -- not reaped, not
+      # re-heartbeated, left for the bucket TTL.
+      {:ok, contents} = KV.contents(conn, Provision.sessions_bucket())
+
+      for key <- keys do
+        assert Map.has_key?(contents, key), "#{key} was reaped on an unusable ps"
+        assert KV.get_value(conn, Provision.sessions_bucket(), key) == before[key]
+      end
+
+      # Control: the SAME rows against a working ps do get reaped, so the
+      # assertion above is about the ps failure and nothing else.
+      assert {:ok, %{reaped: really_reaped}} = PresenceSweep.sweep(conn)
+      assert sanitize(dead) in really_reaped
+      assert sanitize(reused) in really_reaped
     end
 
     test "the supervised GenServer sweeps periodically", %{conn: conn, host: host, port: port} do

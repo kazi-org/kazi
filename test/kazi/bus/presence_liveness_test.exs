@@ -65,6 +65,75 @@ defmodule Kazi.Bus.PresenceLivenessTest do
   end
 
   # ===========================================================================
+  # Untagged: an unusable `ps` is `:unknown`, never `:dead` (#1721)
+  #
+  # The regression: `started_map/1` returned `%{}` for a ps that never ran, and
+  # `verdict/2` reads an absent pid as `:dead` -- so ONE failed fork made every
+  # local row look dead and the daemon sweep reaped the whole roster. The two
+  # facts are now distinct: `{:ok, map}` (ps answered) vs `:error` (it did not).
+  # ===========================================================================
+
+  describe "Liveness.started_map/2 distinguishes a ps that answered from one that did not" do
+    test "ok: a real batched ps answers with the live pid's start time" do
+      pid = own_os_pid()
+
+      assert {:ok, map} = Liveness.started_map([pid])
+      assert map[pid] == Liveness.proc_started_at(pid)
+    end
+
+    test "ok: an empty pid list never forks and answers with an empty map" do
+      assert Liveness.started_map([]) == {:ok, %{}}
+    end
+
+    test "ok: exit 1 (some pids not found) is still an answer -- the found ones count" do
+      live = own_os_pid()
+
+      ps_fun = fn _args -> {"#{live} Thu Jan  1 00:00:00 2026\n", 1} end
+
+      assert {:ok, map} = Liveness.started_map([live, 999_999], ps_fun: ps_fun)
+      assert map == %{live => "Thu Jan  1 00:00:00 2026"}
+    end
+
+    test "error: a non-0/1 ps exit is unusable, not an empty answer" do
+      ps_fun = fn _args -> {"ps: command not found", 127} end
+
+      assert Liveness.started_map([own_os_pid()], ps_fun: ps_fun) == :error
+    end
+
+    test "error: a RAISED System.cmd (:eagain on fork) is unusable, not a crash" do
+      # The live 2026-09-03 shape: fork pressure makes `open_port` raise
+      # before ps ever runs.
+      ps_fun = fn _args -> raise ErlangError, original: :eagain end
+
+      assert Liveness.started_map([own_os_pid()], ps_fun: ps_fun) == :error
+    end
+  end
+
+  describe "Liveness.verdict/2 holds every verdict at :unknown when ps was unusable" do
+    test "unknown: the SAME row that verdicts :dead against an answered ps" do
+      # An answered ps with the pid absent is real evidence of death...
+      row = %{"pid" => own_os_pid(), "started_at" => "whenever"}
+      assert Liveness.verdict(row, {:ok, %{}}) == :dead
+
+      # ...an unusable ps is no evidence at all.
+      assert Liveness.verdict(row, :error) == :unknown
+    end
+
+    test "unknown: a row that would verdict :alive is also withheld" do
+      pid = own_os_pid()
+      row = %{"pid" => pid, "started_at" => Liveness.proc_started_at(pid)}
+
+      assert Liveness.verdict(row, Liveness.started_map([pid])) == :alive
+      assert Liveness.verdict(row, :error) == :unknown
+    end
+
+    test "unknown: a row with no pid at all, either way" do
+      assert Liveness.verdict(%{"session" => "x"}, {:ok, %{}}) == :unknown
+      assert Liveness.verdict(%{"session" => "x"}, :error) == :unknown
+    end
+  end
+
+  # ===========================================================================
   # Untagged: the stable-anchor pid (T55.14, issue #1164)
   #
   # The regression: presence recorded the EPHEMERAL CLI invocation's own pid
