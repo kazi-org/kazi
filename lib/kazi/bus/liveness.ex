@@ -68,47 +68,87 @@ defmodule Kazi.Bus.Liveness do
 
   def verdict(_entry), do: :unknown
 
+  @typedoc """
+  The outcome of one batched `ps`: `{:ok, map}` when ps ANSWERED (pids absent
+  from the map do not exist), `:error` when ps could not answer at all.
+
+  The two are different facts and #1721 turned on conflating them: an
+  unusable ps used to return an empty map, which reads as "every recorded pid
+  is gone" and made the daemon sweep reap the whole local roster on one bad
+  fork.
+  """
+  @type started :: {:ok, %{integer() => String.t()}} | :error
+
   @doc """
   Batched start times: ONE `ps -o pid=,lstart=` fork for the whole pid list
   (verification-gate finding: per-row forks made `who` and the sweep O(rows)
-  in process spawns). Returns a map of pid (integer) => lstart string; pids
-  absent from the map do not exist. An empty list never forks.
+  in process spawns). Returns `{:ok, map}` of pid (integer) => lstart string;
+  pids absent from that map do not exist. An empty list never forks.
+
+  Returns `:error` when ps itself is unusable (#1721) -- see `t:started/0`.
+
+  Options:
+
+    * `:ps_fun` -- test seam, a 1-arity function taking the `ps` argv and
+      returning what `System.cmd/3` returns. Defaults to the real fork.
   """
-  @spec started_map([integer()]) :: %{integer() => String.t()}
-  def started_map([]), do: %{}
+  @spec started_map([integer()], keyword()) :: started()
+  def started_map(pids, opts \\ [])
 
-  def started_map(pids) do
+  def started_map([], _opts), do: {:ok, %{}}
+
+  def started_map(pids, opts) do
     args = ["-o", "pid=,lstart=", "-p", Enum.map_join(pids, ",", &to_string/1)]
+    ps_fun = Keyword.get(opts, :ps_fun, &default_ps/1)
 
-    case System.cmd("ps", args, stderr_to_stdout: true) do
+    case run_ps(ps_fun, args) do
       {out, code} when code in [0, 1] ->
         # exit 1 = some pids not found; the found ones still print.
-        out
-        |> String.split("\n", trim: true)
-        |> Enum.reduce(%{}, fn line, acc ->
-          case String.split(String.trim(line), " ", parts: 2) do
-            [pid_s, started] ->
-              case Integer.parse(pid_s) do
-                {pid, ""} -> Map.put(acc, pid, String.trim(started))
-                _bad -> acc
-              end
-
-            _bad ->
-              acc
-          end
-        end)
+        {:ok, parse_started(out)}
 
       _ps_unusable ->
-        %{}
+        :error
     end
   end
 
+  defp default_ps(args), do: System.cmd("ps", args, stderr_to_stdout: true)
+
+  # #1721: ps can fail in TWO ways that are not "no such process". A non-0/1
+  # exit means it could not answer, and under fork pressure `System.cmd`
+  # RAISES before returning anything at all (observed live 2026-09-03:
+  # `{:eagain, ... :erlang.open_port ... "/bin/ps"}`, which the daemon sweep's
+  # rescue then swallowed at debug). Both collapse to the unusable case here
+  # so callers hold their verdicts at `:unknown` instead of reading silence as
+  # death.
+  defp run_ps(ps_fun, args) do
+    ps_fun.(args)
+  rescue
+    _ps_unusable -> :error
+  end
+
+  defp parse_started(out) do
+    out
+    |> String.split("\n", trim: true)
+    |> Enum.reduce(%{}, fn line, acc ->
+      case String.split(String.trim(line), " ", parts: 2) do
+        [pid_s, started] ->
+          case Integer.parse(pid_s) do
+            {pid, ""} -> Map.put(acc, pid, String.trim(started))
+            _bad -> acc
+          end
+
+        _bad ->
+          acc
+      end
+    end)
+  end
+
   @doc """
-  `verdict/1` against a preloaded `started_map/1` -- no fork. Same contract:
+  `verdict/1` against a preloaded `started_map/2` -- no fork. Same contract:
   `:alive` / `:dead` / `:unknown`.
   """
-  @spec verdict(map(), %{integer() => String.t()}) :: :alive | :dead | :unknown
-  def verdict(%{"pid" => pid} = entry, started_map) when is_integer(pid) do
+  @spec verdict(map(), started()) :: :alive | :dead | :unknown
+  def verdict(%{"pid" => pid} = entry, {:ok, started_map}) when is_integer(pid) do
     case Map.get(started_map, pid) do
       nil ->
         :dead
@@ -122,5 +162,11 @@ defmodule Kazi.Bus.Liveness do
     end
   end
 
-  def verdict(_entry, _started_map), do: :unknown
+  # #1721: ps was unusable, so NOTHING is known about any pid this pass --
+  # every row is inconclusive and the caller must leave it alone (the bucket
+  # TTL is the backstop). Spelled as its own clause, not left to the catch-all
+  # below, because the whole bug was this case being implicit.
+  def verdict(_entry, :error), do: :unknown
+
+  def verdict(_entry, _started), do: :unknown
 end

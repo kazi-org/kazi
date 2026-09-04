@@ -1821,9 +1821,12 @@ defmodule Kazi.Bus do
   end
 
   # A pid can only be judged on the machine that recorded it; every other
-  # machine's rows are `:remote` -- never guessed about (T55.11).
-  defp local_verdict(entry, local, started_map) do
-    if entry["machine"] == local, do: Liveness.verdict(entry, started_map), else: :remote
+  # machine's rows are `:remote` -- never guessed about (T55.11). `started` is
+  # `Liveness.started_map/2`'s tagged result: `:error` (ps unusable, #1721)
+  # verdicts every local row `:unknown`, so `who` renders them by their stored
+  # liveness instead of flipping the whole roster to `dead-reaping`.
+  defp local_verdict(entry, local, started) do
+    if entry["machine"] == local, do: Liveness.verdict(entry, started), else: :remote
   end
 
   # The pids this machine may judge -- one batched `ps` covers them all.

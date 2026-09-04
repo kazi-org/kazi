@@ -22,6 +22,11 @@ defmodule Kazi.Daemon.PresenceSweep do
     * inconclusive (no pid, or a pre-T55.11 row without a recorded start time
       whose pid is currently taken) -- left alone; the bucket TTL ages it out.
 
+  #1721: when the batched `ps` is UNUSABLE (a non-0/1 exit, or `System.cmd`
+  raising `:eagain` under fork pressure), every local row is inconclusive for
+  that pass and NOTHING is reaped. The old code read the resulting empty map
+  as "every pid is gone" and deleted the entire local roster on one bad fork.
+
   Rows for OTHER machines are NEVER touched -- a connect-mode daemon must not
   guess about pids it cannot see; each machine's daemon sweeps only its own
   rows, so on a shared cross-machine bus every machine's rows are swept by
@@ -31,7 +36,7 @@ defmodule Kazi.Daemon.PresenceSweep do
   sibling `Kazi.Daemon.Nats` (host/port/token) -- or `opts[:connect_opts]`
   (a `Gnat.start_link/1` map), which tests use to point a sweep at a scratch
   server. A failed tick (nats not accepting yet, transient error) logs at
-  debug and retries on the next interval; the sweep never crash-loops the
+  warning and retries on the next interval; the sweep never crash-loops the
   daemon tree.
   """
 
@@ -86,7 +91,8 @@ defmodule Kazi.Daemon.PresenceSweep do
   -- the tick body, public so tests drive it directly without the timer.
 
   Options: `:machine` (default: the local hostname -- the ONLY machine whose
-  rows are judged), `:idle_after_s` (default #{@default_idle_after_s}).
+  rows are judged), `:idle_after_s` (default #{@default_idle_after_s}),
+  `:ps_fun` (test seam, passed through to `Kazi.Bus.Liveness.started_map/2`).
 
   Returns `{:ok, %{reaped: keys, idled: keys}}`.
   """
@@ -111,7 +117,18 @@ defmodule Kazi.Daemon.PresenceSweep do
           |> Enum.map(fn {_key, entry} -> entry end)
           |> Enum.filter(fn e -> e["machine"] == machine and is_integer(e["pid"]) end)
           |> Enum.map(fn e -> e["pid"] end)
-          |> Liveness.started_map()
+          |> Liveness.started_map(Keyword.take(opts, [:ps_fun]))
+
+        # #1721: an unusable `ps` is not evidence that anything died. Every
+        # verdict is `:unknown` for the pass, so this tick reaps nothing --
+        # say so out loud, because the silent version of this reaped the whole
+        # local roster on one failed fork.
+        if started == :error do
+          Logger.warning(
+            "kazi daemon: presence sweep could not read process state (ps unusable) -- " <>
+              "no rows judged this tick"
+          )
+        end
 
         result =
           Enum.reduce(decoded, %{reaped: [], idled: []}, fn {key, entry}, acc ->
@@ -172,6 +189,11 @@ defmodule Kazi.Daemon.PresenceSweep do
     end
   end
 
+  # #1721: a failed tick logs at WARNING, not debug. The daemon runs with the
+  # default log level, so debug meant these lines were never written anywhere
+  # -- the live 2026-09-03 mass-reap left no trace of the `ps` fork failure
+  # that caused it. A skipped tick is still harmless (the next one retries),
+  # but it must be visible.
   defp run_tick(state) do
     case resolve_connect_opts(state) do
       {:ok, connect_opts} ->
@@ -184,18 +206,18 @@ defmodule Kazi.Daemon.PresenceSweep do
             end
 
           {:error, reason} ->
-            Logger.debug("kazi daemon: presence sweep skipped (#{inspect(reason)})")
+            Logger.warning("kazi daemon: presence sweep skipped (#{inspect(reason)})")
         end
 
       {:error, reason} ->
-        Logger.debug("kazi daemon: presence sweep skipped (#{inspect(reason)})")
+        Logger.warning("kazi daemon: presence sweep skipped (#{inspect(reason)})")
     end
   rescue
     error ->
-      Logger.debug("kazi daemon: presence sweep failed (#{Exception.message(error)})")
+      Logger.warning("kazi daemon: presence sweep failed (#{Exception.message(error)})")
   catch
     kind, reason ->
-      Logger.debug("kazi daemon: presence sweep failed (#{inspect(kind)}: #{inspect(reason)})")
+      Logger.warning("kazi daemon: presence sweep failed (#{inspect(kind)}: #{inspect(reason)})")
   end
 
   defp resolve_connect_opts(%{connect_opts: %{} = connect_opts}), do: {:ok, connect_opts}
