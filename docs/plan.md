@@ -306,10 +306,8 @@ E9 core T9.1-T9.4/T9.7-T9.9) are removed from this WBS -- they are done on `main
 their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E9 (leftovers) -- Website polish (P2, ADR-0018) -> plans/E9.md
-### E15 -- Harness-friendly, agent-drivable kazi: JSON CLI + result contract (P3, ADR-0023) -> plans/E15.md
 ### E19 -- Realize the unwired token-efficiency levers + measure (P2, ADR-0010) -> plans/E19.md
 ### E20 -- kazi UNDER /apply --pool: objective-done + coordination + observability beneath pooled sessions (P1, ADR-0026) -> plans/E20.md
-### E21 -- kazi owns parallelization: a native scheduler over a partitioned goal-set (P1, ADR-0027) -> plans/E21.md
 ### E22 -- Pre-publish documentation refresh -- RETIRED / CONSOLIDATED into E25 (2026-06-25) -> plans/E22.md
 ### E23 -- Dependency-aware partitioning: predicate-graph waves (P2, ADR-0028) -> plans/E23.md
 ### E25 -- Content-marketing refocus: lead with the agent-drives-kazi paradigm (P1, ADR-0030) -> plans/E25.md
@@ -324,63 +322,39 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E34 -- Economy accounting envelope: cached-vs-fresh tokens + cost-per-converged-predicate (P1, ADR-0046) -> plans/E34.md
 ### E35 -- Context-store layer + Gist provider: evidence compression + stuck-bundle replay (P2, ADR-0045) -> plans/E35.md
 ### E36 -- Inner-harness minimalism: tool-surface restriction now, context tiers measured (P2, ADR-0047) -> plans/E36.md
-### E37 -- Wire the Gemini CLI harness profile (P2, ADR-0016/0022) -> plans/E37.md
 ### E38 -- Adoption blog series: "From Vibe Coding to Reconciliation" (12 parts) (P1, ADR-0048) -> plans/E38.md
-### E39 -- Orchestrator-driving ergonomics: close the plan -> approve -> apply loop over `--json` (P1, ADR-0049) -> plans/E39.md
-### E40 -- Behavior specs: wire the dormant Gherkin importer into a first-class `docs/specs/` tier (P2, ADR-0050) -> plans/E40.md
-### E41 -- Crystallize discovered truth: Gherkin + tags for product-level use cases, iterative discovery via `kazi init --discover`, and prod-log predicate correlation (P2, ADR-0054/ADR-0051) -> plans/E41.md
-### E42 -- Fix kazi's self-teaching artifacts: no personal-skill assumptions, retire dead Graphify retrieval (P1, ADR-0052) -> plans/E42.md
-### E43 -- Higher-level interactive-surface predicates: a `:browser` assertion pack + a first-class `:cli` provider (P1, ADR-0053) -> plans/E43.md
-### E44 -- Landing is part of convergence: `[integration]` + implicit `landed` predicate + controller-owned process contract (P1, ADR-0055) -> plans/E44.md
 ### E45 -- One system: roadmap-scope planning, plan-as-generated-view, escalation-as-data, skill retirement (P1, ADR-0056) -> plans/E45.md
 ### E46 -- Fleet observability: run registry, per-run sinks, `kazi dashboard` starmap (P1, ADR-0057) -> plans/E46.md
 
-### E47 -- Fleet observability follow-up: event river + roadmap-ref starmap (P2, ADR-0057/ADR-0056) -> plans/E47.md
 
-### E48 -- Economy feedback loop: persisted run economics, learned budgets, behavior-first prompting, honest budget stops (P1, ADR-0058) -> plans/E48.md
 
-### E49 -- Scenario predicates: capability-level verification by demonstrate-then-pin (P1, ADR-0064) -> plans/E49.md
-### E50 -- Safe concurrent work: serial worktree indirection, wave checkpoints, fleets over goal-files (P1, ADR-0065) -> plans/E50.md
 
 ### E51 -- Session coordination bus: `kazi daemon` + bus primitives on the JetStream substrate (P1, ADR-0067) -> plans/E51.md
 
-### E52 -- The daemon becomes the single writer for the read-model (P2, ADR-0068) -> plans/E52.md
 
-### E53 -- Reliability hardening: the four open runtime bugs from the E50 execution sweep (P0/P1) -> plans/E53.md
 
-### E54 -- Reliability hardening II: the nine 2026-07-11/12 execution-sweep bugs -- partition branch lifecycle, dispatch budget-burn safety, --json locale, provider/bus DX (P0/P1) -> plans/E54.md
 
-### E55 -- Teamwork is first-class: installed delivery, a bounded digest, and a board (P1, ADR-0076/0072/0073) -> plans/E55.md
 
-### E56 -- Plan/lore/ADR doc hygiene sweep (P2) -> plans/E56.md
 
-### E57 -- Predicate correctness: landing routing, guard/acceptance flags, vacuous-convergence follow-up (P1) -> plans/E57.md
 
-### E58 -- Bus reliability: version-skew dead-letters + CLI discoverability (P1) -> plans/E58.md
 
-### E59 -- Concurrency, multi-process safety, and CI flakiness (P1) -> plans/E59.md
 
-### E60 -- Fleet-wide visibility: cross-machine runs, ghost-row reaping, operator attention, portfolio view, cost report (P2) -> plans/E60.md
 
-### E61 -- Ship kazi as a Claude Code plugin: skill + MCP + hooks in one installable, auto-updating artifact (P2, ADR-0077) -> plans/E61.md
 
-### E62 -- Gherkin runtime predicate provider + parallel-landing follow-ups (P1, ADR-0071) -> plans/E62.md
 
-### E63 -- Dashboard UX: truthful attention, balanced widgets, legible goal views, operator questions (P1) -> plans/E63.md
 
 ### E64 -- kazi portfolio v2 "sitrep": headline percentages, todo/blocked buckets, honest summaries (#1427, P2) -> plans/E64.md
 
-### E65 -- Deterministic session/team identity: derived teams, daemon-assigned names, UUID-keyed presence (#1430, P1) -> plans/E65.md
 
 ### E66 -- Triage 2026-07-18: release-binary boot correctness (P0 #1483, #1484) + swift_test provider landing (#1406) -> plans/E66.md
 
-### E67 -- Dashboard velocity surface: per-agent delivery, tokens, and stuck stats, full-fusion (P2) -> plans/E67.md
 
-### E68 -- Triage 2026-07-19: runtime robustness fixes + predicate-integrity feature family (#1511, #1547, #1551, #1546, #1550, #1520, #1521, #1522, #1501) -> plans/E68.md
 
 ### E69 -- Triage 2026-08-08: full open-backlog resolution -- replace/apply false green, #1255-class startup wedges, daemon crash-loop, DX contract gaps, accepted enhancements (P0/P1) -> plans/E69.md
 
 ### E70 -- Triage 2026-08-30: full open-backlog resolution, second pass -- false-green/false-stuck --parallel verdicts, a VM crash, PR-omits-failures, disk-pressure worktree placement, predicate-authoring hazards, scope-boundary enforcement (P0/P1, ADR-0085) -> plans/E70.md
+
+### E71 -- Triage 2026-09-02: full open-backlog resolution, third pass -- enforce-worktree detached HEAD breaks branch/upstream guard predicates (P1, #1709) -> plans/E71.md
 
 ## Risk Register
 
@@ -453,8 +427,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 | R-E49-2 | The demonstrator needs a REACHABLE app (base_url/built binary) and browser/CLI automation the harness may lack in a headless pool session, so Wave B stalls or a false "demonstrated" is reported. | Med | Med | Wave A ships hand-authored-pin value with zero demonstrator involvement; T49.7's acceptance gate (validate + green replay) makes a false "demonstrated" structurally impossible -- a claim without a replaying pin changes nothing; T49.13 is `kind: any` with the R-E43-3 honest-report discipline. |
 | R-E49-3 | Cross-epic deps (T43.1/T43.7-8, T40.2, T41.1 -- all OPEN) stall the epic if encoded as epic-wide gates. | Med | High (known) | Deps are isolated per-task: Waves A/B depend ONLY on code shipped on main today (verified against main 2026-07-08, seams pinned in the epic's Implementation contract); only T49.10/T49.11/T49.13 gate on E43/E40/E41 tasks and the pool schedules them whenever those land. |
 | R-E49-4 | The two-role loop thrashes: repin churn masks a real regression, or demonstrate-fail loops burn budget. | Med | Med | At most ONE re-demonstration per iteration; a red replay at the minted commit routes to the FIXER (never re-demonstrated); two failed demonstrations on an unchanged workspace terminate `:stuck` cause `capability_unreachable` (T49.8) ranked needs-a-human (T48.14); demonstrator dispatches are budget-counted + economy-attributed (T49.9). |
-| R-E69/E70-1 | E69 (planned 2026-08-08, 14 tasks) sat at 0/14 for 22 days before E70 was planned -- neither triage epic's Wave A (both P0 false-verdict classes) has been picked up despite being the single worst bug class kazi can ship (a lying `converged`/`stuck` report). | High | High (observed) | Both epics are `fidelity: executable` and fully unblocked NOW; the Waves note in E70 explicitly tells `/apply --pool` to treat E69-A and E70-A as one combined P0 front with no ordering dependency between them, so either epic being picked up first makes progress. |
-| R-E70-1 | ADR-0085 (T70.9) and E69's T69.12 (#1642) both reserved "~0084" at their respective plan times; neither has executed. | Low | Med | Both epic files carry an explicit collision note: whichever task executes first takes 0084 via a fresh `ls docs/adr/` check, the other takes the next free number and updates its own epic file's reservation note. |
+| R-E69/E70-1 | UPDATED 2026-09-02: verified via `~/.claude/skills/claim/scripts/claim.sh list` -- E69 Wave A (T69.1/T69.2/T69.3/T69.4) and ALL SIX of E70 Wave A (T70.1/T70.2/T70.3/T70.5/T70.14/T70.15) are claimed, all by one `purpose: "E69/E70 wave-A /loop pool"` run starting 2026-08-31T06:01:30Z. Only T69.2 (#1683) shows a landed, merged fix (PR #1710/#1711, v1.275.2, 2026-08-31) -- ticked `[x]` this pass. The other 9 claimed tasks show no merged fix as of this triage (~2 days into the claim); cannot distinguish "still grinding" from "stalled with a dead claim" from claim state alone (T66.7's claim from 2026-07-19, done+ticked since 2026-07-20, is confirmed STALE -- claims are not auto-released on task completion). | High | Med (was High/observed -- work IS in flight, unlike the prior "0/14 unpicked" read) | Both P0 fronts are claimed, not idle -- do NOT dispatch a second `/apply --pool` wave against T69.1-4/T70.1-3,5,14-15 without first checking `claim.sh holder <task>` to avoid duplicate work. If no further merges land within a few more days, treat the claim as dead (stale, same as T66.7) and re-dispatch. |
+| R-E70-1 | RESOLVED 2026-09-02: ADR-0084 (originally reserved "~0084" by both T70.9 and E69's T69.12) was taken by neither -- T70.13 (#1705) executed first and claimed it (`docs/adr/0084-bus-hooks-require-an-opt-in-gate-independent-of-plugin-install.md`, PR #1706, merged). T70.9 separately already drafted+Accepted ADR-0085 at plan time (docs/adr/0085-scope-goal-file-forbidden-paths-commands.md exists). E69's T69.12 (#1642) must now take the next free number (0086 at time of writing) via a fresh `ls docs/adr/` check when it executes -- its own reservation note is stale and updated accordingly. | Low | Low | T69.12's acc/description updated to require the fresh check; no other task currently reserves a number. |
 
 ## Operating Procedure
 
@@ -487,6 +461,42 @@ never swept into your commit.
 
 ## Progress Log
 
+- 2026-09-03 (third touch, same refinement pass): T70.13/#1705 ticked
+  `[x]` in plans/E70.md -- PR #1706 (ADR-0084, bus-hook opt-in gate) merged
+  2026-09-03T04:46:47Z, #1705 auto-closed; verified independently via `gh
+  pr view 1706` + `gh issue view 1705` (not taken on a peer report's word
+  alone). E70 now 15 open of 16 (T70.13 done).
+- 2026-09-02 (second pass, same request, reconciled with a concurrent
+  session): a second `/plan` invocation of this same "refine the backlog
+  and triage unresolved github issues" request ran concurrently in this
+  shared working tree (this repo's documented multi-process default) and
+  independently produced the E71/#1709 entry above, the ADR-0042 addendum,
+  and the roadmap.md "third pass" section -- all verified sound (code
+  anchors re-checked against `lib/kazi/enforcement/isolation.ex:81-96` and
+  `lib/kazi/loop.ex:1656-1671`) and left as-is, not duplicated. This pass's
+  OWN addition, orthogonal to that work: ran `.github/scripts/trim_plan.py
+  --apply` (T31.2/ADR-0036 L1, the deterministic lossless trim) for the
+  first time in over a month of accumulated growth -- **28 fully-done,
+  release-covered epics archived** (E15, E21, E37, E39-E44, E47-E50, E52-E56,
+  E58-E63, E65, E67, E68; see Archived epics below), cutting the live WBS
+  from 54 epic pointers to 26. Also ran
+  `~/.claude/skills/claim/scripts/claim.sh list` to check real in-flight
+  state before touching the risk register: found E69 Wave A (T69.1-T69.4)
+  and all six of E70 Wave A (T70.1/T70.2/T70.3/T70.5/T70.14/T70.15) already
+  claimed by one pool run since 2026-08-31T06:01 UTC -- corrected
+  R-E69/E70-1 from "0/14 unpicked" (stale) to "claimed, largely unlanded
+  except T69.2" (see the row). `/claim R-plan-md` held for this write,
+  released after.
+- 2026-09-02: /plan refine-backlog-and-triage-issues -- new epic E71
+  (plans/E71.md, executable, 1 task ~3.5h, 1 wave) covering #1709 (enforce-
+  worktree detached HEAD makes `@{u}`/`--abbrev-ref HEAD` guard predicates
+  unsatisfiable), the sole open issue with no plan home; drift-fix: T69.2
+  (#1683) ticked `[x]` -- closed 2026-08-31 via PR #1710/#1711 (v1.275.2)
+  but left unticked in the plan. E69 (13 open) + E70 (16 open, unstarted) +
+  E71 (1) + T25.10 (#382/#372) now account for the entire 34-issue open
+  backlog. No new ADR (extends existing ADR-0042 territory, no decision
+  reversal). Superseded the same day: see the 2026-09-03 entry above --
+  #1705/T70.13 closed, dropping the live count to 33.
 - 2026-08-30 (second pass, same session): re-invoked /plan on the same
   request after a shared-machine disk-pressure incident (unrelated to
   this repo) delayed the write; verified all prior work survived intact
@@ -1473,3 +1483,31 @@ Their bodies live verbatim under `docs/plans/archive/`.
 - E18 -- Bug fixes from the T15.9 token-benchmark dogfood (P2, no ADR) (archived 2026-06-25) -> plans/archive/E18.md
 - E24 -- Remove the Telegram bridge (P2, ADR-0029; cleanup) (archived 2026-06-25) -> plans/archive/E24.md
 - E16 -- kazi self-teaching to harnesses: skill + MCP + machine-readable help (P3, ADR-0024) (archived 2026-06-26) -> plans/archive/E16.md
+- E15 -- Harness-friendly, agent-drivable kazi: JSON CLI + result contract (P3, ADR-0023) (archived 2026-08-31) -> plans/archive/E15.md
+- E21 -- kazi owns parallelization: a native scheduler over a partitioned goal-set (P1, ADR-0027) (archived 2026-08-31) -> plans/archive/E21.md
+- E37 -- Wire the Gemini CLI harness profile (P2, ADR-0016/0022) (archived 2026-08-31) -> plans/archive/E37.md
+- E39 -- Orchestrator-driving ergonomics: close the plan -> approve -> apply loop over `--json` (P1, ADR-0049) (archived 2026-08-31) -> plans/archive/E39.md
+- E40 -- Behavior specs: wire the dormant Gherkin importer into a first-class `docs/specs/` tier (P2, ADR-0050) (archived 2026-08-31) -> plans/archive/E40.md
+- E41 -- Crystallize discovered truth: Gherkin + tags for product-level use cases, iterative discovery via `kazi init --discover`, and prod-log predicate correlation (P2, ADR-0054/ADR-0051) (archived 2026-08-31) -> plans/archive/E41.md
+- E42 -- Fix kazi's self-teaching artifacts: no personal-skill assumptions, retire dead Graphify retrieval (P1, ADR-0052) (archived 2026-08-31) -> plans/archive/E42.md
+- E43 -- Higher-level interactive-surface predicates: a `:browser` assertion pack + a first-class `:cli` provider (P1, ADR-0053) (archived 2026-08-31) -> plans/archive/E43.md
+- E44 -- Landing is part of convergence: `[integration]` + implicit `landed` predicate + controller-owned process contract (P1, ADR-0055) (archived 2026-08-31) -> plans/archive/E44.md
+- E47 -- Fleet observability follow-up: event river + roadmap-ref starmap (P2, ADR-0057/ADR-0056) (archived 2026-08-31) -> plans/archive/E47.md
+- E48 -- Economy feedback loop: persisted run economics, learned budgets, behavior-first prompting, honest budget stops (P1, ADR-0058) (archived 2026-08-31) -> plans/archive/E48.md
+- E49 -- Scenario predicates: capability-level verification by demonstrate-then-pin (P1, ADR-0064) (archived 2026-08-31) -> plans/archive/E49.md
+- E50 -- Safe concurrent work: serial worktree indirection, wave checkpoints, fleets over goal-files (P1, ADR-0065) (archived 2026-08-31) -> plans/archive/E50.md
+- E52 -- The daemon becomes the single writer for the read-model (P2, ADR-0068) (archived 2026-08-31) -> plans/archive/E52.md
+- E53 -- Reliability hardening: the four open runtime bugs from the E50 execution sweep (P0/P1) (archived 2026-08-31) -> plans/archive/E53.md
+- E54 -- Reliability hardening II: the nine 2026-07-11/12 execution-sweep bugs -- partition branch lifecycle, dispatch budget-burn safety, --json locale, provider/bus DX (P0/P1) (archived 2026-08-31) -> plans/archive/E54.md
+- E55 -- Teamwork is first-class: installed delivery, a bounded digest, and a board (P1, ADR-0076/0072/0073) (archived 2026-08-31) -> plans/archive/E55.md
+- E56 -- Plan/lore/ADR doc hygiene sweep (P2) (archived 2026-08-31) -> plans/archive/E56.md
+- E57 -- Predicate correctness: landing routing, guard/acceptance flags, vacuous-convergence follow-up (P1) (archived 2026-08-31) -> plans/archive/E57.md
+- E58 -- Bus reliability: version-skew dead-letters + CLI discoverability (P1) (archived 2026-08-31) -> plans/archive/E58.md
+- E59 -- Concurrency, multi-process safety, and CI flakiness (P1) (archived 2026-08-31) -> plans/archive/E59.md
+- E60 -- Fleet-wide visibility: cross-machine runs, ghost-row reaping, operator attention, portfolio view, cost report (P2) (archived 2026-08-31) -> plans/archive/E60.md
+- E61 -- Ship kazi as a Claude Code plugin: skill + MCP + hooks in one installable, auto-updating artifact (P2, ADR-0077) (archived 2026-08-31) -> plans/archive/E61.md
+- E62 -- Gherkin runtime predicate provider + parallel-landing follow-ups (P1, ADR-0071) (archived 2026-08-31) -> plans/archive/E62.md
+- E63 -- Dashboard UX: truthful attention, balanced widgets, legible goal views, operator questions (P1) (archived 2026-08-31) -> plans/archive/E63.md
+- E65 -- Deterministic session/team identity: derived teams, daemon-assigned names, UUID-keyed presence (#1430, P1) (archived 2026-08-31) -> plans/archive/E65.md
+- E67 -- Dashboard velocity surface: per-agent delivery, tokens, and stuck stats, full-fusion (P2) (archived 2026-08-31) -> plans/archive/E67.md
+- E68 -- Triage 2026-07-19: runtime robustness fixes + predicate-integrity feature family (#1511, #1547, #1551, #1546, #1550, #1520, #1521, #1522, #1501) (archived 2026-08-31) -> plans/archive/E68.md
