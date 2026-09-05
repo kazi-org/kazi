@@ -89,6 +89,15 @@ defmodule Kazi.Goal do
       distinct `{:error, {:setup_failed, _}}` result, never a predicate
       `:fail` verdict.
 
+      **ADR-0085 override (#1695/#1704):** a goal whose `scope.no_integration`
+      is `true` gets this field FORCED to `default_integration/0` regardless of
+      what `[integration]` declares — resolved once, in `new/2`, so every
+      construction path (the TOML loader, a proposal, a direct `Goal.new/2`
+      call) shares the same override with no separate enforcement code path.
+      `Kazi.Actions.Integrate` separately refuses to run AT ALL for such a
+      goal (stronger than "no `landed` predicate synthesized" — see its
+      moduledoc).
+
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
   T0.9) builds against.
@@ -322,9 +331,17 @@ defmodule Kazi.Goal do
 
       iex> Kazi.Goal.new("keep-it-green", standing: true).standing
       true
+
+      iex> g = Kazi.Goal.new("locked-down",
+      ...>   scope: [no_integration: true],
+      ...>   integration: [mode: :pr, base: "main"])
+      iex> g.integration.mode
+      :none
   """
   @spec new(id(), keyword()) :: t()
   def new(id, opts \\ []) when not is_nil(id) do
+    scope = opts |> Keyword.get(:scope, %Scope{}) |> to_scope()
+
     %__MODULE__{
       id: id,
       name: Keyword.get(opts, :name),
@@ -333,7 +350,7 @@ defmodule Kazi.Goal do
       predicates: Keyword.get(opts, :predicates, []),
       guards: Keyword.get(opts, :guards, []),
       budget: opts |> Keyword.get(:budget, %Budget{}) |> to_budget(),
-      scope: opts |> Keyword.get(:scope, %Scope{}) |> to_scope(),
+      scope: scope,
       # T3.4d standing wiring: declared standing/maintenance mode (UC-016).
       standing: Keyword.get(opts, :standing, false),
       # T8.6 harness selection (ADR-0016): the goal's preferred harness map.
@@ -350,8 +367,14 @@ defmodule Kazi.Goal do
       debrief: Keyword.get(opts, :debrief, false),
       # ADR-0062: the declared `[memory] corpus` override.
       memory_corpus: Keyword.get(opts, :memory_corpus),
-      # T44.1 (ADR-0055): the declared `[integration]` landing block.
-      integration: Keyword.get(opts, :integration, @default_integration),
+      # T44.1 (ADR-0055): the declared `[integration]` landing block. ADR-0085
+      # (#1695/#1704): `[scope].no_integration = true` FORCES this to the same
+      # mode-:none default map no matter what `[integration]` declares — the
+      # single source of truth resolved here so every construction path (the
+      # TOML loader, a proposal, a test building a Goal directly) gets the
+      # same override with no separate enforcement code path.
+      integration:
+        resolve_integration(scope, Keyword.get(opts, :integration, @default_integration)),
       conventions: Keyword.get(opts, :conventions, @default_conventions),
       escalation: Keyword.get(opts, :escalation, @default_escalation),
       # T69.12 (ADR-0088, issue #1642): the declared `[setup]` provisioning step.
@@ -359,6 +382,9 @@ defmodule Kazi.Goal do
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
+
+  defp resolve_integration(%Scope{no_integration: true}, _integration), do: @default_integration
+  defp resolve_integration(_scope, integration), do: integration
 
   @doc """
   The default `[integration]` landing block (T44.1, ADR-0055): mode `:none` with
