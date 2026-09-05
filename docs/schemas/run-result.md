@@ -108,6 +108,14 @@ only tells the operator that it happened. See
 [`goal_drift` — on-disk bar mismatch](#goal_drift--on-disk-bar-mismatch-goal-drift-guard-1415)
 below.
 
+TKE.7 adds the OPTIONAL top-level `job_outcome` string, mapping `status` (+
+`integration.landed` / commits ahead of the base) onto hq's exit-code
+vocabulary (`done`/`blocked`/`checkpointed`/`refused`). **Additive** — present
+only on a lane-mode run (`single_node` ON and `--in-place`), absent on every
+other run — so `schema_version` stays **2**. See
+[`job_outcome` — hq exit-code mapping](#job_outcome--hq-exit-code-mapping-tke7)
+below.
+
 ## Shape
 
 ```json
@@ -194,6 +202,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `error`          | string              | Present **only** when `status` is `error`: a human-readable failure message (a pre-loop failure, e.g. a vacuous goal or an unknown provider/harness). |
 | `tampered_file`  | object (optional)   | ADR-0080 (#1520): present **only** when `status` is `tampered` — the sealed input (or goal-file) that changed mid-run, `{ "path": string, "change": "modified" \| "removed" \| "added" }`. Names the file only, never its contents. Absent on every other run. |
 | `single_node`    | boolean (optional)  | T73.5 (ADR-0086/ADR-0087): `true` when this run was dispatched under single_node mode (`--single-node` or `KAZI_SINGLE_NODE=1`/`"true"`). **Additive, optional** — present ONLY as `true` when single_node was requested AND the goal-set was the one partition single_node allows (a multi-partition goal-set under single_node never reaches a terminal result — it is refused first, see [Error object](#error-object)). Absent on every run that did not request single_node, byte-identical to before this field existed. |
+| `job_outcome`    | string (enum, optional) | TKE.7: maps `status` (+ `integration.landed` / commits ahead of the base) onto hq's exit-code vocabulary — `done`, `blocked`, `checkpointed`, or `refused`. **Additive, optional** — present ONLY on a lane-mode run (single_node ON **and** `--in-place`, an interim gate ahead of `--lane-contract`, TKE.1). Absent on every other run, byte-identical to before this field existed. See [`job_outcome` — hq exit-code mapping](#job_outcome--hq-exit-code-mapping-tke7) below. |
 
 ### `status`
 
@@ -222,6 +231,43 @@ escalation ladder (start cheap, step the model up on a stuck/non-converged slice
 see [`docs/tiering-signals.md`](../tiering-signals.md) (ADR-0035). That mapping is
 a pure interpretation of the fields above -- kazi adds no escalation field or
 policy.
+
+### `job_outcome` — hq exit-code mapping (TKE.7)
+
+kazi's own `status` vocabulary (`converged`/`stuck`/`over_budget`/`error`/
+`tampered`) does not line up 1:1 with a dispatcher's exit-code vocabulary
+(`done`/`blocked`/`checkpointed`/`refused`, e.g. hq's `CONTRACT.md`) — this
+field names that mapping once, computed the SAME principled way `next_action`
+is (a pure function of already-rendered fields, `Kazi.CLI.JobOutcome`), so a
+dispatcher never has to invent and hand-maintain it itself:
+
+| `status`      | additional condition                                  | `job_outcome`  |
+|---------------|--------------------------------------------------------|----------------|
+| `converged`   | nothing to land, or `integration.landed` absent/`true` | `done`         |
+| `converged`   | `integration.landed: false` (a resumable PR/branch survives) | `checkpointed` |
+| `stuck`       | commits ahead of the declared base                     | `checkpointed` |
+| `stuck`       | zero commits ahead of the declared base                | `blocked`      |
+| `over_budget` | commits ahead of the declared base                     | `checkpointed` |
+| `over_budget` | zero commits ahead of the declared base                | `blocked`      |
+| `error`       | —                                                        | `refused`      |
+| `tampered`    | —                                                        | `refused`      |
+
+**Present only on a lane-mode run** — INTERIM definition (ahead of TKE.1,
+which will extend it to also require a parsed `--lane-contract`): `single_node`
+was ON for this run **and** the run was `--in-place`. Absent on every other
+run, so the result stays byte-identical to before this field existed for
+every caller that is not a governed lane dispatch.
+
+Scoped to THIS shape only: the separate [Error object](#error-object)
+(`status: "error"`) does not carry `job_outcome`, mirroring `single_node`'s
+own absence there — `error` appears in the table above for a complete,
+principled mapping, but today's wiring only reaches the run-result shape
+(reachable statuses: `converged`/`stuck`/`over_budget`/`tampered`).
+
+`status: converged` + `integration.landed: false` is not yet reachable
+end-to-end (in-place runs do not populate an `integration` object at all
+until TKE.3 lands, `docs/plans/E-KAZI-ENTRYPOINT.md` §1.2/§3.3) — the mapping
+is declared now so a dispatcher can code against it ahead of that wiring.
 
 ### `predicates[].verdict`
 
