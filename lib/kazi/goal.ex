@@ -79,6 +79,15 @@ defmodule Kazi.Goal do
       byte-identical to a goal-file with no block. This task parses/validates/
       exposes the block only; the synthesized `landed` predicate and the
       landing actions are later tasks (T44.2, T44.3).
+    * `setup` — the goal's declared provisioning step (T69.12, ADR-0088, issue
+      #1642), from the goal-file's `[setup]` table: commands (`Kazi.Setup`) the
+      controller runs ONCE, in the workspace, BEFORE the t0 predicate
+      observation, so a build-tool-backed predicate is never red because a
+      fresh `git worktree` never ran `mix deps.get` (or any
+      language-appropriate equivalent). Default `nil` (no setup step —
+      byte-identical to before this feature existed). A setup failure is a
+      distinct `{:error, {:setup_failed, _}}` result, never a predicate
+      `:fail` verdict.
 
   In Slice 0 a goal is loaded from a TOML goal-file (T0.4); this struct is the
   in-memory shape every later component (loader, loop T0.7, actions, read-model
@@ -198,6 +207,7 @@ defmodule Kazi.Goal do
           integration: integration(),
           conventions: conventions(),
           escalation: escalation(),
+          setup: Kazi.Setup.t() | nil,
           metadata: map()
         }
 
@@ -268,6 +278,12 @@ defmodule Kazi.Goal do
             # block resolves to, so a goal with no `[escalation]` is byte-identical
             # to the single-model loop. Appended additively.
             escalation: @default_escalation,
+            # T69.12 (ADR-0088, issue #1642): the declared `[setup]` provisioning
+            # step (`Kazi.Setup`) — commands the controller runs ONCE, in the
+            # workspace, before the t0 observation. Default nil = no setup step
+            # (byte-identical to before this feature existed). Appended
+            # additively so the existing field order is untouched.
+            setup: nil,
             metadata: %{}
 
   @doc """
@@ -287,7 +303,9 @@ defmodule Kazi.Goal do
   `:memory_corpus` (default `nil`) overrides the semantic-recall corpus
   (ADR-0062); `nil` means "use the built-in default corpus". `:integration`
   (default `default_integration/0`, mode `:none`) is the goal's `[integration]`
-  landing block (T44.1, ADR-0055).
+  landing block (T44.1, ADR-0055). `:setup` (default `nil`) is the goal's
+  declared `[setup]` provisioning step (`Kazi.Setup`, T69.12, ADR-0088) —
+  commands run once, in the workspace, before the t0 observation.
   `:budget` and `:scope` accept either a struct or a keyword list (forwarded to
   `Kazi.Budget.new/1` / `Kazi.Scope.new/1`).
 
@@ -336,6 +354,8 @@ defmodule Kazi.Goal do
       integration: Keyword.get(opts, :integration, @default_integration),
       conventions: Keyword.get(opts, :conventions, @default_conventions),
       escalation: Keyword.get(opts, :escalation, @default_escalation),
+      # T69.12 (ADR-0088, issue #1642): the declared `[setup]` provisioning step.
+      setup: Keyword.get(opts, :setup),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end

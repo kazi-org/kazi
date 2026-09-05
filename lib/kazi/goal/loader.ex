@@ -596,6 +596,10 @@ defmodule Kazi.Goal.Loader do
          {:ok, conventions} <- build_conventions(Map.get(data, "conventions")),
          # T45.7 (ADR-0056 decision 5): optional `[escalation]` table (the model ladder).
          {:ok, escalation} <- build_escalation(Map.get(data, "escalation")),
+         # T69.12 (ADR-0088, issue #1642): optional `[setup]` table — provisioning
+         # commands the controller runs ONCE, in the workspace, before the t0
+         # observation (e.g. `mix deps.get` for a mix-backed predicate goal).
+         {:ok, setup} <- build_setup(Map.get(data, "setup")),
          {:ok, all} <- build_predicates(raw_predicates),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
@@ -637,6 +641,7 @@ defmodule Kazi.Goal.Loader do
           integration: integration,
           conventions: conventions,
           escalation: escalation,
+          setup: setup,
           metadata: Map.get(data, "metadata", %{})
         )
 
@@ -868,6 +873,54 @@ defmodule Kazi.Goal.Loader do
   end
 
   defp build_seal(_), do: {:error, "[seal] must be a table"}
+
+  # T69.12 (ADR-0088, issue #1642): the optional `[setup]` table — the
+  # declared provisioning step the controller runs ONCE, in the workspace,
+  # before the t0 observation. `commands` is required (a non-empty list of
+  # non-empty strings) when the block is present — an empty/absent `[setup]`
+  # table is ambiguous authoring intent, so it fails loudly rather than
+  # silently no-op'ing like an absent block does. `timeout_ms` is optional (a
+  # positive integer), defaulting to `Kazi.Setup.default_timeout_ms/0`. Absent
+  # block -> nil (no setup step, byte-identical to before this feature
+  # existed). Wrong types fail loudly at load.
+  defp build_setup(nil), do: {:ok, nil}
+
+  defp build_setup(setup) when is_map(setup) do
+    with {:ok, commands} <- setup_commands(setup),
+         {:ok, timeout_ms} <- setup_timeout_ms(setup) do
+      {:ok, Kazi.Setup.new(commands: commands, timeout_ms: timeout_ms)}
+    end
+  end
+
+  defp build_setup(_), do: {:error, "[setup] must be a table"}
+
+  defp setup_commands(setup) do
+    case Map.get(setup, "commands") do
+      nil ->
+        {:error, "[setup] is missing required key \"commands\""}
+
+      [] ->
+        {:error, "[setup].commands must be a non-empty list of strings"}
+
+      commands when is_list(commands) ->
+        if Enum.all?(commands, &(is_binary(&1) and &1 != "")) do
+          {:ok, commands}
+        else
+          {:error, "[setup].commands must be a list of non-empty strings"}
+        end
+
+      _ ->
+        {:error, "[setup].commands must be a list of strings"}
+    end
+  end
+
+  defp setup_timeout_ms(setup) do
+    case Map.get(setup, "timeout_ms") do
+      nil -> {:ok, Kazi.Setup.default_timeout_ms()}
+      ms when is_integer(ms) and ms > 0 -> {:ok, ms}
+      _ -> {:error, "[setup].timeout_ms must be a positive integer"}
+    end
+  end
 
   # ADR-0081 (#1521): the optional `[[capture]]` array of controller-owned capture
   # recipes. Each entry requires `name`, `launch_cmd`, and `output`; optional
