@@ -45,7 +45,7 @@ currently sized for "first observation on a cold worktree under load."
 `KAZI_APPLY_STARTUP_TIMEOUT_MS` set higher than 300_000 (e.g. 1_200_000) for
 any goal whose guard set includes a full-suite/cold-compile command,
 especially when dispatching several such lanes concurrently on one shared
-host. Filed nowhere yet as a kazi-org/kazi issue -- worth one if this repeats:
+host. Filed as [kazi-org/kazi#1751](https://github.com/kazi-org/kazi/issues/1751):
 the precedent goal `.kazi/goals/0070-parent-monitor-and-orphans.goal.toml`
 carries the identical `guard-full-suite` shape and would hit the same wall
 under the same conditions.
