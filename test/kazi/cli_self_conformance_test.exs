@@ -672,10 +672,17 @@ defmodule Kazi.CLISelfConformanceTest do
     %{bare: bare, work: work}
   end
 
+  # Writes the identity config directly into `.git/config` instead of three
+  # `git config` subprocess spawns (T69.14, #1636): each `System.cmd` fork+exec
+  # is cheap in isolation but adds up under host load, and there is nothing
+  # about *setting config values* that needs a real git process — the format
+  # is a stable, documented file the test can append to directly.
   defp git_config(repo) do
-    {_, 0} = System.cmd("git", ["config", "user.email", "kazi-test@example.com"], cd: repo)
-    {_, 0} = System.cmd("git", ["config", "user.name", "kazi test"], cd: repo)
-    {_, 0} = System.cmd("git", ["config", "commit.gpgsign", "false"], cd: repo)
+    File.write!(
+      Path.join(repo, ".git/config"),
+      "\n[user]\n\temail = kazi-test@example.com\n\tname = kazi test\n[commit]\n\tgpgsign = false\n",
+      [:append]
+    )
   end
 
   defp write_harness_stub(tmp) do
@@ -728,20 +735,37 @@ defmodule Kazi.CLISelfConformanceTest do
     {pid, "http://127.0.0.1:#{port}/healthz", body_file}
   end
 
+  # Lands `branch` onto `base` directly in the bare `origin` -- no working tree
+  # (T69.14, #1636: `converging_run/0` was blowing its own 15s `await_timeout`
+  # under host load; profiling pinned the cost to this stub, not the real
+  # loop). `branch` is always a straight-line, fast-forward descendant of
+  # `base` here: the loop branches off `base`'s current HEAD and the stub
+  # harness adds exactly one commit, and nothing else advances `bare`
+  # concurrently. So landing it is a single ref update, not a rebase — assert
+  # the fast-forward invariant so a future change to the fixture that breaks
+  # it fails loudly here instead of silently reordering history. This
+  # replaces a full clone + checkout + rebase + merge + push dance: that
+  # machinery bought realism this fixture doesn't need — `local_rebase_merge`
+  # is a TEST-owned stand-in for the injectable `:integrator` seam, not the
+  # kazi code under test, and materializing a whole extra working tree per run
+  # (the actual fork+exec+disk-checkout cost, not just call count) was most of
+  # this fixture's real expense under parallel load.
   defp local_rebase_merge(bare, branch, base) do
-    tmp = Path.join(System.tmp_dir!(), "self-conf-merge-#{System.unique_integer([:positive])}")
-    {_, 0} = System.cmd("git", ["clone", bare, tmp], stderr_to_stdout: true)
-    git_config(tmp)
+    {_, 0} =
+      System.cmd("git", ["merge-base", "--is-ancestor", base, branch],
+        cd: bare,
+        stderr_to_stdout: true
+      )
 
-    {_, 0} = System.cmd("git", ["checkout", base], cd: tmp, stderr_to_stdout: true)
-    {_, 0} = System.cmd("git", ["checkout", branch], cd: tmp, stderr_to_stdout: true)
-    {_, 0} = System.cmd("git", ["rebase", base], cd: tmp, stderr_to_stdout: true)
-    {_, 0} = System.cmd("git", ["checkout", base], cd: tmp, stderr_to_stdout: true)
-    {_, 0} = System.cmd("git", ["merge", "--ff-only", branch], cd: tmp, stderr_to_stdout: true)
-    {_, 0} = System.cmd("git", ["push", "origin", base], cd: tmp, stderr_to_stdout: true)
+    {sha, 0} = System.cmd("git", ["rev-parse", branch], cd: bare)
+    sha = String.trim(sha)
 
-    {sha, 0} = System.cmd("git", ["rev-parse", base], cd: tmp)
-    File.rm_rf!(tmp)
-    String.trim(sha)
+    {_, 0} =
+      System.cmd("git", ["update-ref", "refs/heads/#{base}", sha],
+        cd: bare,
+        stderr_to_stdout: true
+      )
+
+    sha
   end
 end
