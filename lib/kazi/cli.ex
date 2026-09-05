@@ -649,7 +649,7 @@ defmodule Kazi.CLI do
       kazi memory approve <proposal-ref> [--json]                     # promote into its routed corpus file
       kazi memory reject <proposal-ref> [--json]                      # decline (kept for audit)
       kazi daemon start [--nats-bin <path>] [--nats-port <n>]  # boot the session-bus daemon (foreground)
-      kazi daemon status [--json]                  # ping the running daemon (--json includes schema_vsn, the daemon's read-model schema version)
+      kazi daemon status [--json]                  # ping the running daemon (--json includes schema_vsn, the daemon's read-model schema version, and nats_health -- the nats-server restart-loop/bind-conflict watchdog, #1684)
       kazi daemon stop                             # clean shutdown
       kazi daemon restart [--nats-bin <path>] [--nats-port <n>]  # stop-then-start (schema-skew remedy); errors if none was running
       kazi daemon reregister [--json]              # re-pin a launchd job's code requirement to the CURRENT binary (remedy for exit 78 after an in-place upgrade, #1484); macOS-only, no-op elsewhere
@@ -5734,6 +5734,7 @@ defmodule Kazi.CLI do
 
           IO.puts("  velocity collector: #{velocity_status_line(resp["velocity"])}")
           IO.puts("  delivery projection: #{delivery_projection_line(resp["velocity"])}")
+          IO.puts("  nats: #{nats_health_line(resp["nats_health"])}")
         end)
 
         0
@@ -6047,6 +6048,27 @@ defmodule Kazi.CLI do
   end
 
   defp delivery_projection_line(_absent), do: "unknown"
+
+  # T69.5 (#1684): the `kazi daemon status` line for the nats-server
+  # restart-loop / bind-conflict watchdog (`Kazi.Daemon.Nats.health/1`, surfaced
+  # via `Kazi.Daemon.Control`'s `nats_health` ping field). A daemon predating
+  # this field omits it entirely -- falls back to "unknown", never fabricated.
+  defp nats_health_line(%{"restart_loop" => true} = h) do
+    "RESTART LOOP -- #{h["exits_in_window"]} exit(s) in #{div(h["exit_window_ms"] || 0, 1000)}s" <>
+      bind_conflict_suffix(h["bind_conflict"])
+  end
+
+  defp nats_health_line(%{"restart_loop" => false} = h) do
+    "ok" <> bind_conflict_suffix(h["bind_conflict"])
+  end
+
+  defp nats_health_line(_absent), do: "unknown"
+
+  defp bind_conflict_suffix(nil), do: ""
+
+  defp bind_conflict_suffix(%{"disposition" => d, "holder_pid" => pid}) do
+    " (last bind conflict: #{d}, pid #{pid})"
+  end
 
   # Shared `status` probe: `:missing` / `:dead` render the point-4 down/stale
   # messages; `:alive` pings and surfaces the raw handshake.
