@@ -420,7 +420,7 @@ absent; add non-main-base and shallow-clone wiring tests; log a git failure
 to stderr instead of silently returning 0. Relayed to the dispatched agent
 for a fix-and-repush.
 
-**Also this cycle: T72.4 dispatched** (interactive `kazi plan render --tree`
+**Also this cycle: T72.4 dispatched** (interactive `kazi plan render --tree` <!-- verb-drift:allow: forward reference to T72.4, unbuilt at this line's writing -->
 adapter, E72's critical path, unblocked once T72.2+T72.3 both landed) as a
 third concurrent lane -- still in progress. And a real, 100%-reproducible
 (not flaky) test-hermeticity bug was found and fixed while verifying TKE.1's
