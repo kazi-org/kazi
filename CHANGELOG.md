@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.279.2](https://github.com/kazi-org/kazi/compare/v1.279.1...v1.279.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* **test:** stop worktree teardown fixture symlink from dispatching as Xcode git ([#1136](https://github.com/kazi-org/kazi/issues/1136)) ([b2f39c0](https://github.com/kazi-org/kazi/commit/b2f39c0469d30c260861df52d23abff2ec9d73ad))
+
 ## [1.279.1](https://github.com/kazi-org/kazi/compare/v1.279.0...v1.279.1) (2026-09-05)
 
 
