@@ -186,6 +186,29 @@ cleanly); ran the full 285-test claim locally (matched) plus
 This closes out the fourth dispatch: T69.12, T69.13, T70.9 all shipped,
 0 stranded PRs, all claims released, all worktrees cleaned up.
 
+**In flight (2026-09-05, fifth dispatch -- the T69.12/T70.4/T73.5/T73.1
+retry):** now that T69.12 shipped, retried the three tasks blocked on it
+earlier today. Landmine found: T69.12 only adds the CAPABILITY for a
+goal-file to declare `[setup]` -- it does not retroactively add one to a
+goal already authored before the feature existed. T70.4's and T73.5's
+banked goal-files had no `[setup]` block, so simply re-running
+`kazi apply --parallel` against them would have hit the identical deps wall
+again. Added `[setup] commands = ["mix deps.get"]` to both goal-files,
+rebased both branches onto current main (they were several days stale),
+re-verified `mix compile` clean, pushed, and redispatched both via
+`kazi apply --parallel` with `KAZI_APPLY_STARTUP_TIMEOUT_MS=1500000` (both
+still running as of this note). T73.1's approved proposal
+(`prop-t73-1-scope-shared-paths-schema-ac7d9ff0999d`) lives in the
+read-model, not an editable goal-file, and `--parallel`/serial apply both
+derive a fresh isolated worktree from `--workspace` regardless -- there is
+no way to inject a `[setup]` step into a stored proposal today. Dispatched
+it instead as a direct agent in a manually-provisioned worktree (deps
+fetched by hand before dispatch), the same proven pattern as the fourth
+dispatch's T69.12/T70.9/T69.13, rather than through kazi's own grind loop.
+Held dispatch to these three (no fourth lane) -- host load climbed to 6.4
+with these three running; adding another risked the concurrent-`mix test`
+contention #1751 already documented.
+
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
