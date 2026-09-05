@@ -117,7 +117,7 @@ coordinating sessions before the ADR; the fleet-repo dispatcher half is
 tracked in that repo. Shipped: PR #1731 (ADR-0086 + E72, rebase-merged
 2026-09-05 at `22d92b2e`). Unstarted: all of E72. **ADR-0087 (shipped, PR
 #1732, rebase-merged 2026-09-05 at `93f758a9`; implementing epic E73, 7 tasks,
-4 waves, planned 2026-09-05, T73.1 depends on E72 T72.1):** the scheduling boundary -- kazi plans (nodes, edges, `--dag`
+4 waves, planned 2026-09-05 in PR #1737, rebase-merged at `c8fdc9b9`; T73.1 depends on E72 T72.1; the sibling scheduler repo's fleet-daemon row is amended to consume the export, Attempt-scoped shared-key leases in v1):** the scheduling boundary -- kazi plans (nodes, edges, `--dag`
 export, per-node render), the fleet dispatcher schedules and executes one
 goal per container with fleet and partitions off via a `single_node`
 contract flag, the concurrency cap lives only in the dispatcher;
