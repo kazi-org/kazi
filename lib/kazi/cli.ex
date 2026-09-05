@@ -163,6 +163,7 @@ defmodule Kazi.CLI do
     no_preflight: :boolean,
     in_place: :boolean,
     base: :string,
+    lane_contract: :string,
     strict_landing: :boolean,
     integration: :string,
     rediscovery: :string,
@@ -306,6 +307,8 @@ defmodule Kazi.CLI do
       "`apply` only (T50.1, ADR-0065 decision 1): edit --workspace directly instead of kazi's default of creating a kazi-owned task worktree off its HEAD and editing there. Without this flag, --workspace is the base the run integrates ONTO, not the edit site itself -- the dispatched agent's shell, and every predicate, runs inside a worktree kazi creates and removes on every terminal state (converged / stuck / over_budget / error / crash). Pass this flag to reproduce pre-T50.1 direct-edit behavior byte-identically (e.g. a throwaway clone where isolation buys nothing). A non-git workspace always runs in place -- worktree isolation needs a git repo.",
     base:
       "`apply` only (T50.8, ADR-0065 decision 5): the git ref the kazi-owned task worktree is created FROM (e.g. origin/main), instead of the default — the workspace's current HEAD. Passing it states intent: the stale-base warning (emitted when the defaulted HEAD base is behind its locally-known upstream) is silenced. The ref must already resolve in the local ref store — kazi NEVER fetches; an unknown ref is an error naming it, not a network call. Contradicts --in-place (there is no worktree to base): the combination is rejected.",
+    lane_contract:
+      "`apply` only (TKE.1, ADR-0086/ADR-0087): path to a contract.json-shaped lane contract (an hq/sire dispatcher's per-lane payload — run_id, task, task_sha, goal, predicates, budget, ... — the exact shape is owned by the dispatcher, not kazi). The equivalent env var KAZI_LANE_CONTRACT (mirroring --single-node/KAZI_SINGLE_NODE's CLI-flag-or-env pattern, since ADR-0086's lane adapter passes dispatch inputs by contract file + env, not a CLI rewrite) is the mechanism a lane container sets without a CLI change; the flag wins when both are set. Kazi reads ONLY the contract's \"task_sha\" (required to exist and be a string) — every other field is neither validated nor required. Only ACTED ON in combination with --single-node --in-place (a governed lane has no worktree indirection — the workspace IS the edit site): before any predicate observation or harness dispatch, compares `git -C <workspace> rev-parse HEAD` against the contract's task_sha and refuses on mismatch (`\"reason\": \"lane_contract_violation\"`, `\"kind\": \"wrong_task_sha\"`, naming both shas) or on an unreadable/unparsable/incomplete contract (same reason, `\"kind\": \"invalid_contract\"`); on a match, proceeds exactly as today. Without --in-place it is accepted but INERT — documented, not silently ignored, since there is no worktree-free edit site yet to compare a HEAD against. A lone --lane-contract with NO --single-node is itself a refusal (`\"reason\": \"lane_contract_requires_single_node\"`), checked before anything else runs (goal load, fleet load) — a lane contract implies a governed lane, and a governed lane is always single_node. Unset (neither the flag nor the env var): behavior is byte-identical to today.",
     integration:
       "`apply` only (T45.11, #1620): override how the converged goal LANDS, one of `none` | `commit` | `branch` | `pr` | `merge` (the `[integration] mode` values). The primary way to land is to declare `[integration]` in the goal-file or proposal (honored end to end since #1620); this flag is the explicit override for landing an APPROVED proposal (or a goal-file) that did not declare one, without re-authoring -- e.g. `kazi apply <proposal-ref> --integration pr --base main`. Combine with `--base` for the target branch; `none` (the default) is converge-and-stop.",
     strict_landing:
@@ -406,6 +409,7 @@ defmodule Kazi.CLI do
         :no_preflight,
         :in_place,
         :base,
+        :lane_contract,
         :integration,
         :strict_landing
       ]
@@ -616,6 +620,7 @@ defmodule Kazi.CLI do
       kazi apply <goal-file> --workspace <path> --explain [--json]      # print the schedule, run nothing
       kazi apply <goal-file> --workspace <path> --check [--json]        # observe the vector once, dispatch nothing
       kazi apply <goal-file> --workspace <path> [--in-place] [--base <ref>]  # workspace = the BASE; --in-place edits it directly (ADR-0065)
+      kazi apply <goal-file> --workspace <path> --single-node --in-place --lane-contract <path>  # governed-lane task_sha match; refuses before dispatch on mismatch (TKE.1, ADR-0086/ADR-0087)
       kazi apply <goal-file> --workspace <path> --parallel --pause-between-waves  # pause at each wave boundary with a resume_token
       kazi apply <goal-file> --workspace <path> --resume <token>        # continue a paused run from its checkpoint
       kazi apply <roadmap-file> --workspace <path> [--explain] [--json] # run a roadmap's goals in needs order (T45.4, ADR-0075)
@@ -2176,6 +2181,18 @@ defmodule Kazi.CLI do
     flags[:single_node] == true or System.get_env("KAZI_SINGLE_NODE") in ["1", "true"]
   end
 
+  # TKE.1 (ADR-0086/ADR-0087): `--lane-contract <path>`'s CLI-flag-or-env
+  # pattern, mirroring `single_node_requested?/1` above -- also readable from
+  # `KAZI_LANE_CONTRACT`, since ADR-0086's lane adapter passes dispatch inputs
+  # by contract file + env, not a CLI rewrite. Unlike single_node (a bare
+  # boolean), this flag carries a VALUE (a path), so the flag wins over the
+  # env var when both are set -- the same precedence `--nats-token`/
+  # `KAZI_NATS_TOKEN` already uses (line ~1636).
+  @spec lane_contract_path(keyword()) :: String.t() | nil
+  defp lane_contract_path(flags) do
+    flags[:lane_contract] || System.get_env("KAZI_LANE_CONTRACT")
+  end
+
   defp parse_run(goal_file, rest, flags) do
     case rest do
       # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
@@ -2224,6 +2241,7 @@ defmodule Kazi.CLI do
           no_preflight: flags[:no_preflight] || false,
           in_place: flags[:in_place] || false,
           base: flags[:base],
+          lane_contract: lane_contract_path(flags),
           integration: flags[:integration],
           strict_landing: flags[:strict_landing] || false,
           json: flags[:json] || false,
@@ -2488,6 +2506,17 @@ defmodule Kazi.CLI do
   # code (never halts) so it stays testable.
   defp execute_run(goal_source, opts, runtime_opts) do
     cond do
+      # TKE.1 (ADR-0086/ADR-0087): a lane contract implies a governed lane, and
+      # a governed lane is always single_node -- a lone --lane-contract (or
+      # KAZI_LANE_CONTRACT) with NO --single-node is refused OUTRIGHT, before
+      # ANYTHING else (goal load, fleet load, roadmap detection): the contract
+      # file is never even opened. Checked FIRST of all, ahead of the
+      # single_node+fleet check below, so this refusal fires regardless of
+      # which destination (fleet/roadmap/single-goal) the invocation would
+      # otherwise have routed to.
+      is_binary(opts[:lane_contract]) and opts[:single_node] != true ->
+        refuse_lane_contract_requires_single_node(goal_source, opts)
+
       # T73.5 (ADR-0086/ADR-0087): single_node mode caps this invocation to ONE
       # node -- a fleet spans multiple goal-files/worktrees by construction, so
       # it is refused OUTRIGHT before `Kazi.Fleet.load/1` is ever called: no
@@ -2822,6 +2851,32 @@ defmodule Kazi.CLI do
     1
   end
 
+  # TKE.1 (ADR-0086/ADR-0087): --lane-contract with no --single-node -- the
+  # contract file named by `path` is never opened; `goal_source` is still just
+  # the raw positional argument (a goal-file path, proposal ref, or fleet
+  # dir/manifest -- whatever this invocation's destination would have been).
+  # The `reason` field is always the literal string
+  # "lane_contract_requires_single_node" (never derived/inspected), mirroring
+  # `refuse_single_node_fleet/2`'s stable machine-readable reason.
+  defp refuse_lane_contract_requires_single_node(goal_source, opts) do
+    path = opts[:lane_contract]
+
+    message =
+      "--lane-contract #{path} (or KAZI_LANE_CONTRACT) was passed for #{goal_source} " <>
+        "without --single-node (or KAZI_SINGLE_NODE); a lane contract implies a " <>
+        "governed lane, and a governed lane is always single_node (ADR-0086/ADR-0087) " <>
+        "-- refused before #{path} is even opened. Add --single-node/KAZI_SINGLE_NODE, " <>
+        "or drop --lane-contract."
+
+    if json?(opts) do
+      emit_json_error(message, %{reason: "lane_contract_requires_single_node"})
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
   defp explain_fleet(%Fleet{} = fleet, opts) do
     json? = json?(opts)
     frontiers = Fleet.frontiers(fleet)
@@ -3133,7 +3188,26 @@ defmodule Kazi.CLI do
   # (one goal / no blast radius) degrades to today's serial behavior. Without
   # `--parallel` the run is byte-identical to the pre-T21.8 serial path.
   defp run_goal(%Goal{} = goal, opts, persist?, runtime_opts) do
+    # TKE.1 (ADR-0086/ADR-0087): computed ONCE, up front, so the cond clause
+    # below never re-reads the contract file or re-shells to git. By the time
+    # this function runs, a lone --lane-contract with no --single-node has
+    # ALREADY been refused in execute_run/3 -- so :lane_contract present here
+    # means single_node is true; `lane_contract_check/2` still checks it
+    # defensively, matching the style of the (already-gated) single_node
+    # partition check below.
+    lane_contract_check = lane_contract_check(goal, opts)
+
     cond do
+      # TKE.1: refuse BEFORE any predicate observation or harness dispatch --
+      # checked first of all, ahead of every other flag-interplay guard, so a
+      # workspace whose checked-out HEAD does not match the lane contract's
+      # task_sha (or an unreadable/unparsable contract) can never reach
+      # --explain/--check (both of which still observe/compute against the
+      # workspace) let alone a real dispatch.
+      match?({:refuse, _message, _extra}, lane_contract_check) ->
+        {:refuse, message, extra} = lane_contract_check
+        refuse_lane_contract(message, extra, opts)
+
       # T50.8 (ADR-0065 decision 5): --in-place + --base is CONTRADICTORY —
       # --base selects the ref the kazi-owned task worktree is created FROM,
       # and --in-place runs with no worktree at all. Rejected up front, before
@@ -3455,6 +3529,131 @@ defmodule Kazi.CLI do
 
     if json?(opts) do
       emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  # TKE.1 (ADR-0086/ADR-0087): the lane-contract task_sha match check.
+  # ONLY ACTED ON in --single-node --in-place combination -- a governed lane
+  # has no worktree indirection (the workspace IS the edit site), so a HEAD
+  # comparison against it is meaningful; elsewhere (no --in-place) the flag is
+  # accepted but INERT, per the plan's documented (not silently ignored)
+  # behavior. (A lone --lane-contract with no --single-node never reaches this
+  # function at all -- it is refused earlier, in execute_run/3, before a Goal
+  # is even loaded.)
+  #
+  # Returns `:ok` (proceed exactly as today, including the flag absent and the
+  # inert cases) or `{:refuse, message, extra}` for the caller's `cond` to
+  # branch on without re-doing the file read/git call.
+  @spec lane_contract_check(Goal.t(), keyword()) :: :ok | {:refuse, String.t(), map()}
+  defp lane_contract_check(%Goal{} = goal, opts) do
+    path = opts[:lane_contract]
+
+    if is_binary(path) and opts[:single_node] == true and opts[:in_place] == true do
+      workspace = opts[:workspace] || goal.scope.workspace
+
+      case load_lane_contract_task_sha(path) do
+        {:ok, task_sha} -> lane_contract_match(path, task_sha, workspace)
+        {:error, reason} -> lane_contract_invalid(path, reason)
+      end
+    else
+      :ok
+    end
+  end
+
+  defp lane_contract_match(path, task_sha, workspace) do
+    case workspace_head_sha(workspace) do
+      {:ok, actual_sha} when actual_sha == task_sha ->
+        :ok
+
+      {:ok, actual_sha} ->
+        message =
+          "--lane-contract #{path} names task_sha #{task_sha}, but #{workspace}'s " <>
+            "checked-out HEAD is #{actual_sha} -- refusing before any predicate " <>
+            "observation or harness dispatch (ADR-0086/ADR-0087). The workspace has " <>
+            "moved since the contract was composed; re-dispatch at the pinned sha, or " <>
+            "re-compose the contract at the workspace's current HEAD."
+
+        {:refuse, message,
+         %{
+           reason: "lane_contract_violation",
+           kind: "wrong_task_sha",
+           task_sha: task_sha,
+           actual_sha: actual_sha
+         }}
+
+      {:error, git_error} ->
+        message =
+          "--lane-contract #{path} names task_sha #{task_sha}, but #{workspace}'s HEAD " <>
+            "could not be read (git rev-parse HEAD: #{git_error}) -- refusing before any " <>
+            "predicate observation or harness dispatch; fail-closed, matching an unresolvable " <>
+            "--base."
+
+        {:refuse, message,
+         %{reason: "lane_contract_violation", kind: "wrong_task_sha", task_sha: task_sha}}
+    end
+  end
+
+  defp lane_contract_invalid(path, reason) do
+    message =
+      "--lane-contract #{path} is invalid: #{reason} -- refusing before any predicate " <>
+        "observation or harness dispatch (fail-closed; a lane contract kazi cannot parse " <>
+        "can never be trusted to gate a governed lane, ADR-0086/ADR-0087)."
+
+    {:refuse, message, %{reason: "lane_contract_violation", kind: "invalid_contract"}}
+  end
+
+  # Parse a contract.json-shaped file (the hq/sire dispatcher's per-lane
+  # payload — run_id, task, task_sha, goal, predicates, budget, ...) and pull
+  # out `task_sha`, the ONLY field kazi's parsing needs to exist and be a
+  # string. Every other field belongs to the dispatcher, not kazi (per the
+  # plan: "be permissive about the rest of the shape"), so nothing else is
+  # validated or required here.
+  @spec load_lane_contract_task_sha(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  defp load_lane_contract_task_sha(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, decoded} <- Jason.decode(body) do
+      case decoded do
+        %{"task_sha" => task_sha} when is_binary(task_sha) and task_sha != "" ->
+          {:ok, task_sha}
+
+        %{"task_sha" => _other} ->
+          {:error, "\"task_sha\" is present but is not a non-empty string"}
+
+        _ ->
+          {:error, "no \"task_sha\" field"}
+      end
+    else
+      {:error, %Jason.DecodeError{} = error} ->
+        {:error, "not valid JSON (#{Exception.message(error)})"}
+
+      {:error, posix} when is_atom(posix) ->
+        {:error, "could not be read (#{:file.format_error(posix)})"}
+    end
+  end
+
+  # A pure local read (`git rev-parse HEAD`) — the workspace's currently
+  # checked-out commit. Fail-closed on anything unexpected (no git, not a
+  # repo, detached-but-unreadable): the caller treats an error as a refusal,
+  # never as "assume it matches".
+  @spec workspace_head_sha(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  defp workspace_head_sha(workspace) when is_binary(workspace) do
+    case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+      {out, 0} -> {:ok, String.trim(out)}
+      {out, _} -> {:error, String.trim(out)}
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp workspace_head_sha(_workspace), do: {:error, "no workspace to read HEAD from"}
+
+  defp refuse_lane_contract(message, extra, opts) do
+    if json?(opts) do
+      emit_json_error(message, extra)
     else
       IO.puts(:stderr, "error: #{message}")
     end
