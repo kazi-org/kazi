@@ -106,9 +106,9 @@ single tasks on E20/E25/E39.
 
 **In flight (2026-09-05, `/apply` pool run, kazi lane, claims held):** T72.1
 (scope roots + glob overlap, E72 Wave A), T71.1 (#1709 branch-identity env
-for isolated predicates), T69.9 (#1681 `portfolio` in `Kazi.CLI.Schema`,
-PR #1740, rebased green -- awaiting merge), T69.10 (#1617 `--project` flag
-doc). Each converging via `kazi apply --in-place` in its own offload
+for isolated predicates), T69.9 (#1681 `portfolio` in `Kazi.CLI.Schema`),
+T69.10 (#1617 `--project` flag doc). Each converging via `kazi apply
+--in-place` in its own offload
 worktree; PRs carry the task id. Found at t0:
 `test/kazi/cli/daemon_reregister_test.exs:43` fails on `main` independently
 of any of these (excluded from T69.9's suite guard; needs its own triage).
