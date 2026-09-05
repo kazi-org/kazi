@@ -121,9 +121,13 @@ defmodule Kazi.Runtime do
     # the diff-vs-base touches a user-facing surface (CLI/provider/public behaviour/
     # MCP) without a matching docs change or a `[no-docs]` commit-message marker.
     docs_updated: Kazi.Providers.DocsUpdated,
-    # issue #860: the scope `deny`-path guard, synthesized by
-    # `Kazi.Scope.guard_predicates/1` — independent of the `[enforcement]` profile.
+    # issue #860 / ADR-0085: the scope `deny`/`forbidden_paths` guard,
+    # synthesized by `Kazi.Scope.guard_predicates/1` — independent of the
+    # `[enforcement]` profile.
     scope_guard: Kazi.Providers.ScopeGuard,
+    # ADR-0085 (#1695/#1704): the `[scope].forbidden_commands` best-effort
+    # dispatch-transcript scan — a tripwire, never a sandbox (see moduledoc).
+    forbidden_commands: Kazi.Providers.ForbiddenCommands,
     # T44.2 (ADR-0055): the `:landed` provider — the deterministic check that
     # converged work has landed to the goal's `[integration] mode` degree.
     # Synthesized by `Kazi.Goal.landed_predicate/1` at load time; evaluated
@@ -485,7 +489,8 @@ defmodule Kazi.Runtime do
             ),
           integrate_params: Keyword.get(opts, :integrate_params, %{}),
           deploy_params: Keyword.get(opts, :deploy_params, %{}),
-          extra_action_context: build_action_context(opts, run_id, goal_ref),
+          extra_action_context:
+            build_action_context(opts, run_id, goal_ref, transcript_sink_path),
           # T3.4d standing wiring: the CLI `--standing` flag (an explicit
           # `:standing` opt) wins; otherwise fall back to the goal-file's own
           # declared `standing` field. So a goal authored standing runs standing
@@ -1113,12 +1118,18 @@ defmodule Kazi.Runtime do
   # action so its shared-workspace staging guard (T59.8, #937 Gap A4) can skip
   # this run's own row and same-goal rows when it asks the registry whether a
   # DIFFERENT live run holds the workspace.
-  defp build_action_context(opts, run_id, goal_ref) do
+  defp build_action_context(opts, run_id, goal_ref, transcript_sink_path) do
     %{}
     |> maybe_put(:integrator, Keyword.get(opts, :integrator))
     |> maybe_put(:deploy_cmd, Keyword.get(opts, :deploy_cmd))
     |> maybe_put(:run_id, run_id)
     |> maybe_put(:goal_ref, goal_ref)
+    # ADR-0085 (#1695/#1704): the SAME transcript sink path the harness adapter
+    # tees to (T46.3) — threaded through so `Kazi.Loop`'s `provider_context/3`
+    # can hand it to `Kazi.Providers.ForbiddenCommands`. `extra_action_context`
+    # is merged into BOTH the action context and the predicate-provider
+    # context, so this one addition covers both seams with no new Loop field.
+    |> maybe_put(:transcript_path, transcript_sink_path)
   end
 
   defp maybe_put(map, _key, nil), do: map
