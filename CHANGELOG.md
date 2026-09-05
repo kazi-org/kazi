@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.282.0](https://github.com/kazi-org/kazi/compare/v1.281.0...v1.282.0) (2026-09-05)
+
+
+### Features
+
+* **fleet:** add Kazi.Fleet.effective_shared_paths/1 (ADR-0087 T73.1) ([da3656f](https://github.com/kazi-org/kazi/commit/da3656f8557ece44a266abe550f6e23dc1d8e258))
+* **goal:** add [scope].shared_paths schema field (ADR-0087 T73.1) ([982f6c6](https://github.com/kazi-org/kazi/commit/982f6c618373f8574e628bfb675e437158c4ef72))
+
 ## [1.281.0](https://github.com/kazi-org/kazi/compare/v1.280.0...v1.281.0) (2026-09-05)
 
 
