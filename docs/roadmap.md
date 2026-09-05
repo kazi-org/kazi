@@ -262,6 +262,63 @@ released as v1.283.0. Self-caught and fixed a doc-coherence guard regression
 worktree removed. Direct-agent dispatch now 6-for-6 today (T69.12, T70.9,
 T69.13, T73.1, T70.4, T73.5) -- the fifth dispatch is fully closed out.
 
+**In flight (2026-09-05, sixth dispatch):** three direct agents claimed and
+dispatched off current main (`882c2a25`): T73.2 (symmetric `shared_paths`
+exclusion, ADR-0087 decision 4), T72.2 (nesting lint, ADR-0086 decision 2),
+T69.5 (kazi-org/kazi#1684's daemon nats-server crash-loop -- the exact
+incident diagnosed live during the fifth dispatch, now getting a real fix:
+adopt-or-reap on bind conflict, a distinct greppable error, and a
+`restart_loop` flag in `daemon status`). Plan-checkbox lag for T73.1/T70.4/
+T73.5 fixed same-day via PR #1780 (a third recurrence of the T69.2/T72.1
+pattern).
+
+**Shipped (2026-09-05): T72.2** -- `Kazi.Scope.nesting_conflicts/1` (reusable,
+loader-agnostic pairwise scope-root nesting/equality check) plus a new
+`kazi plan lint <roadmap-file>` subcommand that refuses (exit 1) when two
+roadmap goals' declared scope roots nest or are equal, naming both goal ids
+and the shared root. PR #1781, `3c58fc65`, released as v1.284.0.
+CLI-shape judgment call: `plan lint <roadmap>` (mirrors `plan render
+<roadmap>`, matches ADR-0086 decision 2's verbatim naming and this repo's
+"roadmap=validate, fleet=execute" convention) over a `Kazi.Fleet`-style
+dir/manifest input -- flagged for T72.4 to reconsider if the interactive
+`--tree` adapter ends up needing dir/manifest input instead. `render --tree`
+(T72.4) itself untouched; the check is built standalone so that task can call
+it. Verified independently before merging: read the full diff, reran the 21
+new tests locally (21/21), confirmed `mix format` clean and no attribution in
+any of the 3 commits, and ran the full suite twice -- the agent's own claim of
+a second pre-existing failure (`Kazi.Authoring.SessionAttributionTest`) did
+NOT reproduce in isolation (that test manages its own
+`CLAUDE_CODE_SESSION_ID` per-case and asserts nothing about it being absent);
+the full-suite run's second failure was a one-off (passed clean on immediate
+rerun via `mix test --failed`, unrelated to this PR's diff). Only
+`Kazi.CLI.DaemonReregisterTest` (this machine's real launchd plist, already
+flagged) reproduced consistently. Claim released, worktree removed.
+Direct-agent dispatch, sixth dispatch's first task closed.
+
+**Planning (2026-09-05, not yet minted):** hq ruled (dec-0849, founder-direct)
+that governed lane containers should enter through `kazi apply
+<goal> --single-node --in-place` rather than `claude -p` directly -- kazi
+renders the node, runs its own grind/observe loop, and its predicates decide
+the Job outcome. Relayed via `chief-architect`; dispatched a planning-only
+agent (no code, no PRs) that read ADR-0086, ADR-0087, kazi#1777's actual
+`--single-node` code, sire's ADR-0137, and hq's session-container/dgx-canary
+dispatcher scripts (including `CONTRACT.md`). Plan written to
+`docs/plans/E-KAZI-ENTRYPOINT.md` (untracked, not yet wired into
+`docs/plan.md`'s master index -- that's a decision for chief-architect/a
+human once reviewed): 8 kazi-side tasks (TKE.1-TKE.8, ~24h) plus 6 named
+hq/sire-side dependencies for `sire-planner` to mint. Two judgment calls
+flagged for chief-architect: whether kazi's in-place integrator calls
+git/gh directly or always delegates to an injectable `--integration-command`
+hook (the "git plumbing stays in entrypoint.sh" constraint is in tension with
+kazi's existing `--parallel`-path integrator already shelling to git/gh
+today), and that every repo row is currently `gh none` (dec-0768) so kazi has
+no credential to open a PR with regardless -- a security-model call, not an
+engineering-cost one. Also corrected the dispatch's citation: the real ADR is
+`sirerun/sire/docs/adr/0136-fleetd-node-agent-and-where-the-control-plane-runs.md`,
+not an hq path; confirmed its two payload kinds (prompt / declared connector
+call) are unchanged by this plan. Nothing to ship here before chief-architect
+reviews and sire-planner mints the hq-side rows.
+
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
