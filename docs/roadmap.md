@@ -124,15 +124,29 @@ code correctness (red->green reproduction where applicable, symmetric
 provider coverage, doc-vs-code match, or a direct read confirming the fix
 it depends on already exists in `lib/`), not merged on green CI alone.
 
+**Shipped (2026-09-05, T69.12 landed same day as claimed):** T69.12 (#1642,
+ADR-0088, PR #1762, `37dd6a5e` -> v1.280.0). A declared `[setup]` goal-file
+block (commands + a per-command `timeout_ms`, always bounded) runs once in
+the workspace immediately before the t0 predicate observation, wired into
+BOTH `Kazi.Runtime.run/2` and `check/2` since both share that observation --
+a scope decision beyond the literal task wording, reviewed and confirmed
+correct before merge. A failing setup step returns a distinct
+`{:setup_failed, _}` environment error, never a predicate verdict, mirroring
+the existing `{:startup_deadline_exceeded, _}` shape (#1683). Verified
+independently before merging: read `lib/kazi/setup.ex` and its
+`Kazi.Runtime` call sites directly (real `sh -c` execution, no stub), ran
+`mix format --check-formatted` and the three new test files locally (25
+passed, matching the PR's own report), and confirmed no attribution trailer
+on any commit. Issue #1642 auto-closed on merge. This is the fix that
+unblocks T73.1/T70.4/T73.5 for redispatch -- do so once the local `kazi`
+binary is confirmed upgraded to v1.280.0 (`kazi version`), not before.
+
 **In flight (2026-09-05, fourth dispatch, manually-provisioned worktrees):**
-T69.12 (#1642 fix itself -- see the root-cause reclassification below; ADR
-+ goal-file `[setup]` step), T70.9 (ADR-0085 implementation -- `[scope]
-forbidden_paths`/`no_integration`, closes #1695/#1704), T69.13 (#1649 real
-bus-discovery test coverage). All three claimed and dispatched with `mix
-deps.get` run by hand in each worktree before dispatch, since kazi's own
-`--parallel` worktree creation does not do this yet (that's exactly what
-T69.12 fixes) -- once T69.12 merges and releases, this workaround stops
-being necessary for future dispatches.
+T70.9 (ADR-0085 implementation -- `[scope] forbidden_paths`/`no_integration`,
+closes #1695/#1704) and T69.13 (#1649 real bus-discovery test coverage), both
+still running. Dispatched with `mix deps.get` run by hand in each worktree
+before dispatch, since T69.12 (above) had not yet landed at dispatch time;
+future dispatches no longer need this workaround.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
