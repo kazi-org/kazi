@@ -114,8 +114,17 @@ feeds the ADR-0065 §3 overlap rule, so disjoint roots is what "can run in
 parallel" means. Tamper protection is freshness plus auto-added ADR-0085
 `forbidden_paths`, never sealing a derived file. Reviewed by two
 coordinating sessions before the ADR; the fleet-repo dispatcher half is
-tracked in that repo. In flight: PR #1731 (ADR + E72, 2026-09-05, awaiting merge).
-Unstarted: all of E72.
+tracked in that repo. Shipped: PR #1731 (ADR-0086 + E72, rebase-merged
+2026-09-05 at `22d92b2e`). Unstarted: all of E72. **ADR-0087 (in flight,
+2026-09-05):** the scheduling boundary -- kazi plans (nodes, edges, `--dag`
+export, per-node render), the fleet dispatcher schedules and executes one
+goal per container with fleet and partitions off via a `single_node`
+contract flag, the concurrency cap lives only in the dispatcher;
+`[scope].shared_paths` hotspot lease keys (Attempt-scoped across containers
+in v1) and `[scope].contract` + lint. Parent-converges-on-contract held
+pending evidence. Reviewed by both coordinating sessions; the paired
+sibling-repo row exists and is blocked on this ADR merging. Its
+implementing epic is planned after merge.
 
 **Near term (2026-09-02, from a full open-issue triage, third pass --
 E71, 1 task):** the entire open backlog is now three triage epics deep
