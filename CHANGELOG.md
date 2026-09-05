@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.276.1](https://github.com/kazi-org/kazi/compare/v1.276.0...v1.276.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **cli:** document plan's --project use, not just bus who's ([e2c519a](https://github.com/kazi-org/kazi/commit/e2c519ae70ea0067756f61eb79456806fa622aca))
+
 ## [1.276.0](https://github.com/kazi-org/kazi/compare/v1.275.5...v1.276.0) (2026-09-05)
 
 
