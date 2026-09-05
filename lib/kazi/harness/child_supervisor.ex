@@ -135,11 +135,34 @@ defmodule Kazi.Harness.ChildSupervisor do
 
   @doc """
   True when the OS process `pid` (an integer or its string form) is alive —
-  i.e. `kill -0 pid` succeeds. Used both by the watchdog's own liveness check
-  conceptually and, in Elixir, by the orphan-on-resume check (issue #857)
-  deciding whether a prior run's recorded `harness_child_pid` is still
-  running. Never raises: an unparseable/blank pid, or a `kill` invocation
-  failure, is treated as "not alive" (no evidence of life).
+  i.e. `kill -0 pid` succeeds OR fails with EPERM. Used both by the
+  watchdog's own liveness check conceptually and, in Elixir, by the
+  orphan-on-resume check (issue #857) deciding whether a prior run's
+  recorded `harness_child_pid` is still running, and by
+  `Kazi.Runtime.ParentMonitor`'s default liveness poll (issue #1073/#1699).
+  Never raises: an unparseable/blank pid, or a `kill` invocation failure, is
+  treated as "not alive" (no evidence of life).
+
+  ## EPERM counts as alive (issue #1699)
+
+  `kill -0 pid` fails two ways: ESRCH ("No such process" — the process is
+  genuinely gone) and EPERM ("Operation not permitted" — the process EXISTS
+  but is owned by another user, so this caller cannot signal it). Only ESRCH
+  is evidence of death; EPERM is proof of life with the details withheld.
+  Conflating the two misreads a process reparented to init (PID 1, owned by
+  root) as dead PURELY because it now belongs to someone else — exactly what
+  happens when a `kazi apply` launcher is deliberately detached from its
+  shell via `nohup ... & disown` (or `setsid`): the shell exits almost
+  immediately after backgrounding, the launcher reparents to init within
+  ~1-2s, and `kill -0 1` is EPERM for any non-root caller even though init
+  is definitionally always running. Distinguishing the two makes a
+  reparent-to-init read as "alive" (init doesn't die), so
+  `Kazi.Runtime.ParentMonitor` never fires on an intentional detach — while
+  a launcher that is ACTUALLY killed still resolves ESRCH and is correctly
+  reaped (no #1073 regression: a real launcher's pid is owned by the same
+  user, so its death is never masked by this distinction). This mirrors the
+  same EPERM-alive idiom the burrito fork's own payload-liveness guard uses
+  for PID 1 (ADR-0066).
   """
   @spec alive?(String.t() | integer()) :: boolean()
   def alive?(pid) when is_integer(pid), do: alive?(Integer.to_string(pid))
@@ -147,7 +170,7 @@ defmodule Kazi.Harness.ChildSupervisor do
   def alive?(pid) when is_binary(pid) and pid != "" do
     case System.cmd("kill", ["-0", pid], stderr_to_stdout: true) do
       {_output, 0} -> true
-      _ -> false
+      {output, _status} -> permission_denied?(output)
     end
   rescue
     _ -> false
@@ -207,4 +230,12 @@ defmodule Kazi.Harness.ChildSupervisor do
   # sub-second `poll_ms` (as tests use, to keep the watchdog loop fast) renders
   # cleanly rather than truncating to 0 (which would busy-loop).
   defp poll_seconds(poll_ms), do: :erlang.float_to_binary(poll_ms / 1000, decimals: 3)
+
+  # POSIX standardizes strerror(EPERM) as "Operation not permitted" -- the text
+  # `kill(1)` echoes verbatim on every kill implementation this project targets
+  # (macOS/BSD, GNU coreutils, util-linux, busybox), so a case-insensitive
+  # substring match is a reliable cross-platform EPERM/ESRCH discriminator
+  # without needing a NIF to read kill(2)'s raw errno.
+  defp permission_denied?(output),
+    do: output |> String.downcase() |> String.contains?("operation not permitted")
 end
