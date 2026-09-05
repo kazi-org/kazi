@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.277.0](https://github.com/kazi-org/kazi/compare/v1.276.1...v1.277.0) (2026-09-05)
+
+
+### Features
+
+* **cli/schema:** add portfolio result schema ([9464ad1](https://github.com/kazi-org/kazi/commit/9464ad17fa1bb8da9dd9ff740f38f79c70ab4733))
+
+
+### Reverts
+
+* **roadmap:** drop the self-reported 'rebased green' claim ([4b53f60](https://github.com/kazi-org/kazi/commit/4b53f601d40ee7120e46a3856882ba56940c3517))
+
 ## [1.276.1](https://github.com/kazi-org/kazi/compare/v1.276.0...v1.276.1) (2026-09-05)
 
 
