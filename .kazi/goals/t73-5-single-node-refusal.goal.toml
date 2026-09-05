@@ -6,6 +6,9 @@ task = "T73.5"
 epic = "E73"
 plan = "docs/plans/E73.md"
 adr = "ADR-0087, ADR-0086"
+
+[setup]
+commands = ["mix deps.get"]
 proposal_ref = "prop-t73-5"
 
 [[predicate]]
