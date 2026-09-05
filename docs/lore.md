@@ -1266,3 +1266,37 @@ is the whole test -- a `Task.async` inside a supervised, monitored-not-linked
 worker can be perfectly safe even when a linked process lives further down its
 call graph, because the crash's blast radius stops at a boundary the system
 already treats as disposable.
+
+### L-0055 #test #env #ambient #known-issue -- `Kazi.Authoring.SessionAttributionTest`'s "falls back to the proposal's session_name" case was NOT a timing flake (L-0033 doesn't apply); it was 100% reproducible whenever `CLAUDE_CODE_SESSION_ID` was set in the invoking shell -- i.e. every time it ran from inside a real Claude Code session
+
+Misdiagnosed twice in one session (2026-09-05) before the real cause was
+pinned down: first as "an ambient env var, but doesn't reproduce" (wrong --
+it reproduces every time, just not in the environment that first check
+happened to run in), then as an L-0033-class concurrency timing race (also
+wrong -- L-0033 names three specific tests and this isn't one of them, and
+the failure is deterministic, not intermittent).
+
+Root cause: `resolve_session_name/1` (lib/kazi/cli.ex) intentionally checks
+`CLAUDE_CODE_SESSION_ID` (auto-detected "orchestrator session id") BEFORE
+falling back to an applied proposal's own recorded `session_name` -- correct,
+documented production behavior. But the test that asserts the fallback path
+(`apply <proposal-ref>` with no `--session-name` of its own picks up the
+PROPOSAL's `session_name`) never cleared that env var, so it silently
+inherited whatever `CLAUDE_CODE_SESSION_ID` was already set in the process
+running `mix test` -- which is EVERY dispatched agent in this fleet, since
+every one of them runs inside a Claude Code session that sets exactly this
+var. Confirmed airtight both ways: `mix test
+test/kazi/authoring/session_attribution_test.exs` failed 100% of the time
+with the ambient var set (the assertion's actual value was literally the
+running session's own id) and passed 100% of the time with `env -u
+CLAUDE_CODE_SESSION_ID` in front of the same command.
+
+Fixed by clearing (and restoring on `on_exit`) both `CLAUDE_CODE_SESSION_ID`
+and `KAZI_SESSION_NAME` in the test file's own `setup` block, matching the
+env-hygiene discipline its sibling tests in the same file already use for
+the env vars THEY set.
+
+Before treating this test as flaky or pre-existing-and-unrelated: check
+whether the fix above already landed (grep the test file's `setup` block for
+`CLAUDE_CODE_SESSION_ID`). If it's there, a failure is a real regression, not
+this landmine.

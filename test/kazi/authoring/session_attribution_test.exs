@@ -24,6 +24,25 @@ defmodule Kazi.Authoring.SessionAttributionTest do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
     Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
+    # `resolve_session_name/1` (lib/kazi/cli.ex) auto-detects `CLAUDE_CODE_SESSION_ID`
+    # / `KAZI_SESSION_NAME` from the environment BEFORE falling back to a proposal's
+    # own recorded session_name (intentional precedence, see that function's doc).
+    # Every test in this file runs `mix test` from inside a real Claude Code session,
+    # which always sets `CLAUDE_CODE_SESSION_ID` -- so without clearing it here, the
+    # "falls back to the proposal's session_name" cases deterministically fail
+    # locally (this session's own id wins) while staying green in CI (GitHub
+    # Actions sets neither var). Save + restore rather than a bare delete, in case
+    # either is ever set for an unrelated reason.
+    claude_session_id = System.get_env("CLAUDE_CODE_SESSION_ID")
+    kazi_session_name = System.get_env("KAZI_SESSION_NAME")
+    System.delete_env("CLAUDE_CODE_SESSION_ID")
+    System.delete_env("KAZI_SESSION_NAME")
+
+    on_exit(fn ->
+      if claude_session_id, do: System.put_env("CLAUDE_CODE_SESSION_ID", claude_session_id)
+      if kazi_session_name, do: System.put_env("KAZI_SESSION_NAME", kazi_session_name)
+    end)
+
     work =
       Path.join(System.tmp_dir!(), "kazi-session-attr-#{System.unique_integer([:positive])}")
 
