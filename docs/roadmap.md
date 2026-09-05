@@ -209,6 +209,36 @@ Held dispatch to these three (no fourth lane) -- host load climbed to 6.4
 with these three running; adding another risked the concurrent-`mix test`
 contention #1751 already documented.
 
+**Shipped (2026-09-05): T73.1** -- `[scope].shared_paths` schema field +
+`Kazi.Fleet.effective_shared_paths/1` (ADR-0087 decision 4), PR #1771,
+released as v1.282.0. Direct-agent dispatch (not through kazi's own runtime)
+went 4-for-4 today: T69.12, T70.9, T69.13, T73.1 all shipped this way with
+zero stranded PRs. Claim released, worktree removed.
+
+**Incident (2026-09-05): T70.4's and T73.5's `kazi apply --parallel`
+redispatches both permanently wedged**, unrelated to the `[setup]` fix --
+both logged `bus call unavailable ({:timeout, 300}); degrading` around
+12:53, then stayed at 0% CPU with zero output growth for 30+ minutes
+(confirmed stuck, not slow: file sizes static across repeated checks,
+`ps` showed sleeping beam.smp processes with ~8s total CPU time accumulated
+over 25+ minutes). Root cause: the shared `run.kazi.bushost` daemon had been
+crash-looping (`nats-server exited (status 1)`) for 10+ hours, because an
+orphaned `nats-server` process (ppid 1, zero active connections, squatting
+on port 4223 since 2:21am) blocked the daemon's own supervised `nats-server`
+from binding -- exactly kazi-org/kazi#1684's already-documented mechanism.
+Killed the orphan; the daemon's own nats-server bound immediately and the
+crash loop stopped (confirmed stable). Posted corroborating evidence to
+#1684 (still open) rather than filing a duplicate; #1719 (closed today,
+13:36) fixes the SIGTERM-orphan mechanism going forward but doesn't
+retroactively clean up an orphan from before that fix landed, which is
+what this was. Also flagged on #1684: even after the daemon healed, both
+wedged `kazi apply --parallel` processes never recovered on their own --
+the bus-degrade path may not unwind cleanly once a call has already timed
+out, a possibly separate bug worth a look. Killed both wedged processes and
+redispatched T70.4 and T73.5 as direct agents (`apply-t70-4`, `apply-t73-5`)
+in their existing (already `[setup]`-fixed, rebased, deps-installed)
+worktrees -- in progress as of this note.
+
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
