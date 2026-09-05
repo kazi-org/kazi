@@ -105,7 +105,7 @@ dispatcher records the rendered content's sha256 in the lane contract beside
 the task sha") but nothing produces it yet on either side. That gap is
 `TKE.2` below plus hq dependency `D2`.
 
-- [ ] TKE.1 Lane-contract input + workspace/task-sha match. A new
+- [x] TKE.1 Lane-contract input + workspace/task-sha match. A new
   `--lane-contract <path>` flag (mirroring `--single-node`'s CLI-flag-or-env
   pattern, T73.5 precedent: also readable from `KAZI_LANE_CONTRACT`, since
   ADR-0086's lane adapter passes dispatch inputs by contract file + env, not
@@ -130,6 +130,14 @@ the task sha") but nothing produces it yet on either side. That gap is
   `--json` carries `reason: "lane_contract_violation"`, `kind:
   "wrong_task_sha"`; a fixture whose HEAD matches `task_sha` proceeds
   unchanged; `--lane-contract` absent is byte-identical to today.]
+  Done: 2026-09-05 (PR #1795, `5850d0dc`. `--lane-contract <path>`/
+  `KAZI_LANE_CONTRACT` gates `--single-node --in-place` on a `git rev-parse
+  HEAD` vs the contract's `task_sha` match; refuses before any harness
+  dispatch on mismatch or an unparsable/incomplete contract (fail-closed); a
+  lone `--lane-contract` with no `--single-node` refuses before the goal or
+  contract file is even opened. Without `--in-place`, accepted but inert
+  (documented). 15/15 tests passed locally (12 new + reverse-coherence).
+  Direct-agent dispatch.)
 
 - [ ] TKE.2 Render-freshness check against the contract's `render_sha256`
   (ADR-0086 decision 5(b)). When the lane contract carries `render_sha256`,
