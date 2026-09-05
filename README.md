@@ -981,7 +981,7 @@ kazi daemon start|status|stop                # the per-machine session-bus daemo
 kazi bus post [<kind>] <text>                # broadcast to the local/team bus; <kind> defaults to `fact` (ADR-0067)
 kazi bus tell <session>|<nickname>|@<team> <text>  # direct message; prints a message id (T55.12)
 kazi bus status <id>                         #   pending|consumed delivery state for a `bus tell` (T55.12)
-kazi bus watch [--timeout <n>] [--since <seq|now|all>]  # block until a NEW message arrives (#1091/#1097)
+kazi bus watch [--timeout <n>] [--since <seq|now|all>] [--directed]  # block until a NEW message arrives (#1091/#1097); --directed: only messages addressed to you (#1720)
 kazi bus who [--all] [--team <t>] [--project <dir>] [--machine <host>]  # roster with liveness + inbox depth
 kazi bus read [--peek] | kazi bus peek       #   consume / non-destructively view your inbox (digest by default, ADR-0072)
 kazi bus join <team> | kazi bus leave        #   named-team membership (issue #1069)
