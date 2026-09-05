@@ -62,4 +62,67 @@ defmodule Kazi.Daemon.ControlTest do
     assert resp["ok"] == true
     refute Map.has_key?(resp, "schema_vsn")
   end
+
+  describe "nats_health (T69.5, #1684)" do
+    test "is present, all-clear-shaped, and additive when no nats_name is configured" do
+      resp = ping(repo: Repo)
+
+      # Every pre-existing field is still there, unchanged.
+      assert resp["ok"] == true
+      assert is_binary(resp["vsn"])
+      assert resp["bus_vsn"] == Kazi.Bus.ProtocolSkew.required_bus_vsn()
+
+      assert %{
+               "restart_loop" => false,
+               "exits_in_window" => 0,
+               "bind_conflict" => nil
+             } = resp["nats_health"]
+    end
+
+    test "surfaces the live Kazi.Daemon.Nats process's restart-loop window and last bind-conflict" do
+      name = :"control_test_nats_health_#{System.unique_integer([:positive])}"
+      on_exit(fn -> :persistent_term.erase({Kazi.Daemon.Nats, :health, name}) end)
+
+      # `Kazi.Daemon.Nats.health/1` is `:persistent_term`-backed and keyed by
+      # name alone -- no real GenServer needs to be running for `ping` to
+      # report on it, which is the whole point (see `Nats.health/1`'s doc).
+      :persistent_term.put(
+        {Kazi.Daemon.Nats, :health, name},
+        %{
+          restart_loop: true,
+          exits_in_window: 4,
+          exit_window_ms: 60_000,
+          bind_conflict: %{
+            disposition: :orphan,
+            holder_pid: 12_345,
+            port: 4223,
+            detected_at: ~U[2026-09-05 00:00:00Z]
+          },
+          last_exit_at: ~U[2026-09-05 00:00:01Z],
+          last_exit_monotonic_ms: System.monotonic_time(:millisecond)
+        }
+      )
+
+      resp = ping(repo: Repo, nats_name: name)
+
+      assert resp["nats_health"] == %{
+               "restart_loop" => true,
+               "exits_in_window" => 4,
+               "exit_window_ms" => 60_000,
+               "bind_conflict" => %{
+                 "disposition" => "orphan",
+                 "holder_pid" => 12_345,
+                 "port" => 4223,
+                 "detected_at" => "2026-09-05T00:00:00Z"
+               },
+               "last_exit_at" => "2026-09-05T00:00:01Z"
+             }
+
+      # Purely additive: an old client that never looks for `nats_health`
+      # still decodes the SAME reply unchanged.
+      assert {:ok, decoded} = Jason.decode(Jason.encode!(resp))
+      assert decoded["ok"] == true
+      assert decoded["nats_health"]["restart_loop"] == true
+    end
+  end
 end
