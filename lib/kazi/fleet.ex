@@ -28,8 +28,9 @@ defmodule Kazi.Fleet do
       no loader change needed). A `depends_on` on an unknown goal id, or a cycle
       among explicit edges, is a load error naming the offending file(s).
     * **inferred (overlap)** — between any two nodes whose declared `[scope]`
-      paths overlap (one path prefix-contains the other, after normalization)
-      when no explicit edge already orders them. Overlap = same blast radius =
+      paths overlap per `Kazi.Scope.overlap?/2` (directory-prefix or glob match,
+      by path segment, after normalization) when no explicit edge already
+      orders them. Overlap = same blast radius =
       never concurrent, the same rule `Kazi.Enforcement.Isolation` applies WITHIN
       a goal-file, lifted to ACROSS goal-files. Ordered by file sequence (the
       earlier-loaded file is the edge's `from`), since neither node depends on
@@ -348,26 +349,13 @@ defmodule Kazi.Fleet do
   end
 
   defp overlapping_paths(%Node{goal: goal_a}, %Node{goal: goal_b}) do
-    paths_a = scope_paths(goal_a)
-    paths_b = scope_paths(goal_b)
+    paths_a = Scope.roots(goal_a.scope)
+    paths_b = Scope.roots(goal_b.scope)
 
     if paths_a == [] or paths_b == [] do
       []
     else
-      for p1 <- paths_a, p2 <- paths_b, paths_overlap?(p1, p2), do: {p1, p2}
+      for p1 <- paths_a, p2 <- paths_b, Scope.overlap?([p1], [p2]), do: {p1, p2}
     end
   end
-
-  # Prefer `write_paths` (the sharper signal) when a node declares any; fall
-  # back to the coarser `paths` read allow-list otherwise (issue #860).
-  defp scope_paths(%Goal{scope: %Scope{write_paths: []} = scope}), do: scope.paths
-  defp scope_paths(%Goal{scope: %Scope{write_paths: write_paths}}), do: write_paths
-
-  defp paths_overlap?(a, b) do
-    na = normalize_path(a)
-    nb = normalize_path(b)
-    String.starts_with?(na, nb) or String.starts_with?(nb, na)
-  end
-
-  defp normalize_path(path), do: String.trim_trailing(path, "/") <> "/"
 end

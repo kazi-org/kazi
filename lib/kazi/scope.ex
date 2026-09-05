@@ -91,4 +91,70 @@ defmodule Kazi.Scope do
       )
     ]
   end
+
+  @doc """
+  The path roots that bound this scope: `write_paths` when declared (the sharper
+  signal, issue #860), else the coarser `paths` read allow-list. Callers that need
+  "the set of paths this goal may touch" (T72.1, e.g. `Kazi.Fleet`'s inferred
+  scope-overlap edges) should use this instead of reaching into the struct
+  directly, so the write_paths-over-paths preference lives in one place.
+
+  ## Examples
+
+      iex> Kazi.Scope.roots(Kazi.Scope.new(write_paths: ["a/**"], paths: ["b/"]))
+      ["a/**"]
+
+      iex> Kazi.Scope.roots(Kazi.Scope.new(paths: ["b/"]))
+      ["b/"]
+
+      iex> Kazi.Scope.roots(Kazi.Scope.new())
+      []
+  """
+  @spec roots(t()) :: [String.t()]
+  def roots(%__MODULE__{write_paths: []} = scope), do: scope.paths
+  def roots(%__MODULE__{write_paths: write_paths}), do: write_paths
+
+  @doc """
+  Whether any path in `paths_a` overlaps any path in `paths_b` (T72.1): two
+  goals whose scopes overlap have the same blast radius and must never run
+  concurrently (`Kazi.Fleet`'s inferred-edge rule).
+
+  A path is either a plain directory/file prefix (`"pkg/foo"`) or a directory
+  glob (`"pkg/foo/**"` or `"pkg/foo/*"`); a glob's `/**`/`/*` suffix is stripped
+  before comparison so `"pkg/foo/**"` overlaps `"pkg/foo/bar/x.ex"` but NOT
+  `"pkg/foobar/**"` — comparison is by path SEGMENT, never a raw string prefix
+  (which would wrongly match `"pkg/foo"` against `"pkg/foobar"`).
+
+  ## Examples
+
+      iex> Kazi.Scope.overlap?(["pkg/foo/**"], ["pkg/foobar/**"])
+      false
+
+      iex> Kazi.Scope.overlap?(["pkg/foo/**"], ["pkg/foo/bar/x.ex"])
+      true
+
+      iex> Kazi.Scope.overlap?(["pkg/foo"], ["pkg/foo/bar/x.ex"])
+      true
+
+      iex> Kazi.Scope.overlap?(["lib/a"], ["lib/b"])
+      false
+  """
+  @spec overlap?([String.t()], [String.t()]) :: boolean()
+  def overlap?(paths_a, paths_b) do
+    Enum.any?(paths_a, fn a -> Enum.any?(paths_b, &path_overlap?(a, &1)) end)
+  end
+
+  defp path_overlap?(a, b) do
+    na = normalize_path(a)
+    nb = normalize_path(b)
+    String.starts_with?(na, nb) or String.starts_with?(nb, na)
+  end
+
+  defp normalize_path(path) do
+    path
+    |> String.trim_trailing("/**")
+    |> String.trim_trailing("/*")
+    |> String.trim_trailing("/")
+    |> Kernel.<>("/")
+  end
 end
