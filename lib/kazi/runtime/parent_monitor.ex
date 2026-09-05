@@ -27,6 +27,29 @@ defmodule Kazi.Runtime.ParentMonitor do
   is defense-in-depth tracked as a separate burrito-fork issue (ADR-0066) and is
   NOT implemented here.
 
+  ## Intentional detach vs. genuine death (issue #1699)
+
+  `kazi apply --parallel`, launched via `nohup kazi apply ... & disown` (or
+  `setsid`) so it deliberately reparents off its invoking shell, used to get
+  reaped within seconds as "launcher process 1 is gone" before any dispatch
+  happened. The shell exits almost immediately after backgrounding, the
+  launcher reparents to init (PID 1, owned by root) within ~1-2s, and
+  `resolve_launcher_pid/0` records "1" as the watched pid from the very first
+  poll -- indistinguishable, by pid alone, from "the launcher already died".
+
+  The distinguishing signal lives in `Kazi.Harness.ChildSupervisor.alive?/1`
+  (the default `:alive_fn`), not here: `kill -0 1` fails EPERM ("Operation
+  not permitted", the process exists but is owned by another user) rather
+  than ESRCH ("No such process", the process is genuinely gone), because
+  init is owned by root. `alive?/1` treats EPERM as proof of life -- so a
+  reparent-to-init reads as (and stays) alive forever, since init doesn't
+  die, and this monitor never fires on an intentional detach. A REAL
+  launcher's pid is owned by the same user that started `kazi`, so its
+  actual death still resolves ESRCH and is reaped exactly as before -- this
+  distinction cannot mask a genuine #1073 death. A caller providing a custom
+  `:alive_fn` (as every test in this suite does) opts out of this nuance
+  entirely and gets whatever liveness semantics it implements.
+
   ## Why `dead_threshold` consecutive reads, not one
 
   A single `ps`/`kill -0` misread (a transient fork failure under load) must
