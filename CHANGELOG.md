@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.285.0](https://github.com/kazi-org/kazi/compare/v1.284.0...v1.285.0) (2026-09-05)
+
+
+### Features
+
+* **fleet:** exclude shared_paths from inferred-overlap test symmetrically (T73.2) ([8827006](https://github.com/kazi-org/kazi/commit/8827006255baa35a056215cb04b2a2cec9227e3e))
+* **partition:** exclude shared_paths from blast radius before overlap (T73.2) ([728c4e1](https://github.com/kazi-org/kazi/commit/728c4e11a089c9064ed81a26122ca6278ff8044d))
+
 ## [1.284.0](https://github.com/kazi-org/kazi/compare/v1.283.0...v1.284.0) (2026-09-05)
 
 
