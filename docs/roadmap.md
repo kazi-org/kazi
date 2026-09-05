@@ -164,12 +164,27 @@ upgraded to v1.280.0 (checksum-verified release binary) so T69.12's `[setup]`
 fix is actually available for the next `--parallel` dispatch, not just
 merged-but-unpulled.
 
-**In flight (2026-09-05, fourth dispatch, manually-provisioned worktrees):**
-T70.9 (ADR-0085 implementation -- `[scope] forbidden_paths`/`no_integration`,
-closes #1695/#1704), still running (5 commits so far, no PR yet). Dispatched
-with `mix deps.get` run by hand in the worktree before dispatch, since T69.12
-(above) had not yet landed at dispatch time; future dispatches no longer need
-this workaround.
+**Shipped (2026-09-05, fourth dispatch complete):** T70.9 (ADR-0085, PR #1767,
+`b381adc1`; release pending as of this check). `[scope]` gains
+`forbidden_paths` (enforced twice: the existing `deny` guard predicate,
+generalized to accept either key, plus a real landing-time refusal --
+unstage-before-commit on the legacy path, whole-landing refusal on the
+verify-then-ship path since the inner agent already owns that commit),
+`no_integration` (forces `[integration] mode: :none` AND a direct structural
+check in `Kazi.Actions.Integrate.execute/2`), and `forbidden_commands`
+(best-effort transcript scan, documented as a tripwire, not a sandbox).
+Closes #1695 and #1704. A real gap was found and fixed beyond the ADR's
+literal text: a bare `mode: :none` goal (what `no_integration` forces) still
+routes through the legacy auto-landing path today, so mode alone does not
+stop a PR from landing -- confirmed by tracing `verifies_then_ships?/1`
+myself before merging, not taken on faith. Needed one rebase to resolve an
+`AUTHORING.md` conflict against T69.12's own new section (both merged
+cleanly); ran the full 285-test claim locally (matched) plus
+`mix compile --warnings-as-errors` (only the two pre-existing unrelated
+`lib/kazi/cli.ex` warnings, nothing new) before merging.
+
+This closes out the fourth dispatch: T69.12, T69.13, T70.9 all shipped,
+0 stranded PRs, all claims released, all worktrees cleaned up.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
