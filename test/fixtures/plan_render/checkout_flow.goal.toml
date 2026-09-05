@@ -1,0 +1,46 @@
+# Fixture goal-file for Kazi.Plan.RenderTest (T72.3, ADR-0086 decision 3).
+#
+# Deliberately carries one of each predicate SHAPE the node renderer must
+# handle: an ordinary predicate, a guard, and a HELD-OUT predicate (ADR-0042
+# §6) that must never appear in the rendered node regardless of its own
+# status.
+
+id = "checkout-flow"
+name = "Checkout flow keeps converging"
+description = "Guest checkout completes without a 500 and the cart total matches the receipt."
+
+[scope]
+write_paths = ["lib/checkout/**"]
+
+[[predicate]]
+id = "unit_tests"
+provider = "custom_script"
+description = "the checkout unit suite passes"
+cmd = "mix"
+args = ["test", "test/checkout"]
+verdict = "exit_zero"
+
+[[predicate]]
+id = "checkout_probe"
+provider = "http_probe"
+description = "the deployed checkout endpoint returns 200 for a guest cart"
+url = "https://example.test/checkout"
+expect_status = 200
+
+[[predicate]]
+id = "coverage_floor"
+provider = "custom_script"
+description = "checkout module test count never drops below its recorded baseline"
+guard = true
+cmd = "mix"
+args = ["test", "test/checkout", "--cover"]
+verdict = "exit_zero"
+
+[[predicate]]
+id = "gold_regression"
+provider = "custom_script"
+description = "the hidden acceptance regression suite passes"
+held_out = true
+cmd = "mix"
+args = ["test", "test/checkout/gold"]
+verdict = "exit_zero"
