@@ -239,6 +239,15 @@ redispatched T70.4 and T73.5 as direct agents (`apply-t70-4`, `apply-t73-5`)
 in their existing (already `[setup]`-fixed, rebased, deps-installed)
 worktrees -- in progress as of this note.
 
+**Shipped (2026-09-05): T70.4** -- fixed #1699 (`Kazi.Runtime.ParentMonitor`
+reaping an intentionally nohup/disown-detached launcher as dead). Root cause:
+`Kazi.Harness.ChildSupervisor.alive?/1` conflated `kill -0`'s ESRCH ("no such
+process") with EPERM ("operation not permitted") -- a launcher reparented to
+init (PID 1, root-owned) after `nohup ... & disown` reads EPERM, not death.
+Fixed at the shared `alive?/1` layer (ParentMonitor's default `:alive_fn`);
+verified red->green (new test fails without the fix, passes with it) and no
+#1073 regression (genuine-kill test unaffected). PR #1774. Claim released,
+worktree removed. Direct-agent dispatch now 5-for-5 today.
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
