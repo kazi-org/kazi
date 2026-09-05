@@ -7,6 +7,56 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-09-05 — three fresh kazi-lane dispatches (T70.4, T66.5, T70.8) all hit `startup_deadline_exceeded` before any predicate verdict, under host load
+
+**Type:** finding
+**Tags:** kazi-lane, #1683, startup-deadline, apply--pool, guard-full-suite
+
+**Problem:** Dispatching `kazi apply <goal> --in-place --parallel-off ...`
+(three concurrent `/apply --pool` lanes, each a fresh `git worktree` off
+`origin/main` with only `mix deps.get` run, no `_build/` cache) against
+goal-files whose guard set includes a `mix test` (whole suite, no filter,
+`timeout_ms = 900000`) all returned the SAME terminal error before reaching
+ANY predicate verdict:
+```
+{"error":"the loop completed no observation within the 300000ms startup
+deadline (issue #1683): the run was wedged below loop start, most likely a
+predicate or capture command that never returns. Inspect the goal's
+observe-time commands; tune the deadline with
+KAZI_APPLY_STARTUP_TIMEOUT_MS.","reason":"{:startup_deadline_exceeded,
+300000}","status":"error", ...}
+```
+**Root cause:** kazi's own pre-loop startup deadline (`KAZI_APPLY_STARTUP_
+TIMEOUT_MS`, default 300_000ms / 5 min) bounds the FIRST observation of the
+full predicate vector, including guard predicates. A `guard-full-suite`
+predicate that runs the whole ~4500-test ExUnit suite from a COLD `_build/`
+(first compile of the whole app + deps in a brand-new worktree) routinely
+exceeds 5 minutes on its own -- and this machine was running three such
+lanes concurrently plus ~20 other kazi/BEAM processes already resident, so
+CPU contention pushed each well past the deadline. This is NOT the same bug
+class as #1255/#1683's idle-scheduler wedge (confirmed: the startup watchdog
+diagnostic printed mid-run showed a genuinely busy scheduler compiling/
+running tests, not an idle receive-block) -- it is a legitimate slow
+observation that outran an unrelated, unconditional outer deadline. Every
+predicate's own `timeout_ms` was generous (900_000ms); the deadline that
+actually fired lives one layer up, in the loop-start guard, and is not
+currently sized for "first observation on a cold worktree under load."
+**Fix (not yet applied):** the error message names its own remedy --
+`KAZI_APPLY_STARTUP_TIMEOUT_MS` set higher than 300_000 (e.g. 1_200_000) for
+any goal whose guard set includes a full-suite/cold-compile command,
+especially when dispatching several such lanes concurrently on one shared
+host. Filed nowhere yet as a kazi-org/kazi issue -- worth one if this repeats:
+the precedent goal `.kazi/goals/0070-parent-monitor-and-orphans.goal.toml`
+carries the identical `guard-full-suite` shape and would hit the same wall
+under the same conditions.
+**Impact:** all three lanes (T70.4 #1699, T66.5 #1483 reopened, T70.8 #1700)
+ended this pool pass at `status: error` / `startup_deadline_exceeded`, not a
+predicate verdict -- treated per KAZI-EXEC.md step 6 as kazi infra error, not
+evidence about the drafted goals. Claims released; worktrees and goal-files
+left in place under `/Volumes/BuildOffload/kazi-worktrees/{t70-4,t66-5,
+t70-8}/` for a re-dispatch with `KAZI_APPLY_STARTUP_TIMEOUT_MS` raised (the
+worktrees already have `deps/` fetched, so a retry skips that cost).
+
 ## 2026-07-19 — T45.10 EXIT PROOF: **FAIL** — kazi drafts + edits a real slice zero-skill, but the plan→approve→apply chain neither lands a PR nor converged (2 gaps filed); external skills REMAIN the fallback
 
 **Type:** dogfood
