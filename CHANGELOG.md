@@ -16,6 +16,19 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.286.0](https://github.com/kazi-org/kazi/compare/v1.285.0...v1.286.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** show nats bind-conflict/restart-loop status in daemon status ([f36dd13](https://github.com/kazi-org/kazi/commit/f36dd13ba478af68b2e9149e508afb340fa2c649))
+* **daemon:** surface nats bind-conflict/restart-loop status on ping ([5da825e](https://github.com/kazi-org/kazi/commit/5da825e04a75d1c15c7b610693f18d5878281cf2))
+
+
+### Bug Fixes
+
+* **daemon:** classify nats-server bind conflicts instead of treating every exit as fatal ([0543880](https://github.com/kazi-org/kazi/commit/0543880021cc6629ebeefe2c24818fba592a6b45))
+
 ## [1.285.0](https://github.com/kazi-org/kazi/compare/v1.284.0...v1.285.0) (2026-09-05)
 
 
