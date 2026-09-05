@@ -145,6 +145,26 @@ survives. T70.4's worktree is clean (nothing was ever written). Claims
 released on both; redispatch again only once host load is verified low, not
 on a fixed schedule.
 
+**Update 2026-09-05 (root cause reclassified -- disentangled from host
+contention):** a third dispatch (T73.1, a T70.4 retry, T73.5) hit an
+IDENTICAL failure with host load confirmed low and zero concurrent
+`mix test` runs, ruling out contention as the sole cause. All three were
+fresh worktrees with `_build`/`deps` absent -- this is
+[kazi-org/kazi#1642](https://github.com/kazi-org/kazi/issues/1642) (DECIDED
+2026-08-08, option 2: an explicit `[setup]` step in the goal-file, run
+before t0), already tracked as T69.12 and previously unstarted. Every
+mix-backed predicate in a fresh `--parallel` worktree is unconvergeable
+until T69.12 lands; the SQLite-lock finding above is a real, separate
+symptom of concurrent-lane contention, not the whole story. T69.12 claimed
+and dispatched this session (worktree pre-provisioned with `mix deps.get`
+to work around the very gap it fixes, since a `--parallel` dispatch would
+hit the same wall trying to build its own fix). T73.1 found no salvageable
+work (never reached a real observation) and its throwaway worktree/branch
+were removed; T70.4's and T73.5's drafted goal-files were banked and pushed
+(`task/t70-4-parent-monitor-nohup-disown`, `task/t73-5`) rather than lost.
+All three claims released. Do not redispatch T73.1/T70.4/T73.5 via
+`kazi apply --parallel` until T69.12 merges and releases.
+
 T70.10 (#1702, DECIDED 2026-08-30 "remove entirely"): two independent
 searches (a lane's own diligence, then an independent re-check of all git
 history and branches) found zero trace of the described auto-generated
