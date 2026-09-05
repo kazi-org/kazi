@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.279.1](https://github.com/kazi-org/kazi/compare/v1.279.0...v1.279.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **plan:** correct T69.9/T69.10 release version citations ([7547f9a](https://github.com/kazi-org/kazi/commit/7547f9a07a1ad5c1aa6916273ada9e9e4916bbd1))
+
 ## [1.279.0](https://github.com/kazi-org/kazi/compare/v1.278.0...v1.279.0) (2026-09-05)
 
 
