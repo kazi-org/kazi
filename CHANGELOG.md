@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.275.3](https://github.com/kazi-org/kazi/compare/v1.275.2...v1.275.3) (2026-09-05)
+
+
+### Bug Fixes
+
+* **bus:** an unusable ps is :unknown, not a whole-roster reap ([be4ad0c](https://github.com/kazi-org/kazi/commit/be4ad0c16df344ecaad6bae5891e33c62d065b3b)), closes [#1721](https://github.com/kazi-org/kazi/issues/1721)
+
 ## [1.275.2](https://github.com/kazi-org/kazi/compare/v1.275.1...v1.275.2) (2026-08-31)
 
 
