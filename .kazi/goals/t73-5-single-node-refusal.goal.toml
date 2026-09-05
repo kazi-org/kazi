@@ -1,0 +1,76 @@
+id = "t73-5"
+name = "single_node refusal: --fleet and multi-partition apply refused under KAZI_SINGLE_NODE/--single-node"
+
+[metadata]
+task = "T73.5"
+epic = "E73"
+plan = "docs/plans/E73.md"
+adr = "ADR-0087, ADR-0086"
+proposal_ref = "prop-t73-5"
+
+[[predicate]]
+id = "cli-single-node-fleet-refusal"
+provider = "custom_script"
+description = "TASK BRIEF (T73.5, docs/plans/E73.md, ADR-0087/ADR-0086). Add a single_node mode to `kazi apply` (lib/kazi/cli.ex). `--single-node` is a new boolean CLI flag; `KAZI_SINGLE_NODE=1` (or \"true\") is the env-var equivalent a lane contract sets without a CLI change (ADR-0086's lane adapter passes dispatch inputs by contract file + env). EITHER means single_node is ON for this invocation. Register `--single-node` in the switches map (cli.ex ~line 120-195, alongside `fleet: :boolean`), in the `apply` command's `flags:` list (cli.ex ~line 375-406, `@commands`), and in `@flag_docs` (cli.ex ~line 209+, alongside the :fleet/:parallel entries) so `kazi help apply --json` documents it (ADR-0034, same PR). Read the env var the same way `KAZI_SESSION_NAME` is read (cli.ex:4104) or `KAZI_STARTUP_WATCHDOG_HALT` (lib/kazi/startup_watchdog.ex:189) -- accept \"1\" or \"true\". Thread the resolved boolean into the `apply` opts map built in `parse_run/3` (cli.ex ~line 2137-2203) as `:single_node`, next to `:fleet`. CAPABILITY 1/4 (this predicate): with single_node ON, `kazi apply --fleet <dir>` MUST refuse BEFORE `Kazi.Fleet.load/1` is ever called -- add a cond clause to `execute_run/3` (cli.ex:2436) checked BEFORE the existing `opts[:fleet] == true -> execute_fleet(goal_source, opts, runtime_opts)` branch. On refusal: exit code 1; under --json, emit a JSON object on stdout containing a `\"reason\": \"single_node_violation\"` field (the exact atom-string) and a message/error string naming what was attempted (must mention \"--fleet\" and the fleet path); under human output, the same on stderr prefixed `error:`. Follow the existing refusal pattern at `refuse_primary_workspace/2` (cli.ex:3254) and `emit_json_error/1` (cli.ex:2289) (add a small `emit_json_error/2` overload merging an extra map, or an equivalent structured error builder). No fleet load, no worktree, no run record is created when refused. DO NOT touch Kazi.Fleet, Kazi.Partition, Kazi.Scheduler, or Kazi.Fleet.Execution internals. Do not add a `[scope].single_node` goal-file field. Do not touch T73.1/T73.2/T73.3/T73.4/T73.6 territory. TESTS (drive ALL 4 capability predicates from ONE new file): add `test/kazi/cli_single_node_test.exs` following the EXACT pattern of `test/kazi/cli_run_schedule_explain_test.exs` and `test/kazi/cli_run_parallel_worktree_isolation_test.exs` -- call `Kazi.CLI.run(args, inject_opts)` directly (NEVER shell out to the installed `kazi` binary), wrap in `ExUnit.CaptureIO.capture_io/1`, assert exit code + decode JSON. Tag: `@tag :single_node_fleet_refusal`. Checker: `mix test test/kazi/cli_single_node_test.exs --only single_node_fleet_refusal`."
+cmd = "sh"
+args = ["-c", "mix test test/kazi/cli_single_node_test.exs --only single_node_fleet_refusal"]
+timeout_ms = 300000
+
+[[predicate]]
+id = "cli-single-node-multi-partition-refusal"
+provider = "custom_script"
+description = "CAPABILITY 2/4. With single_node ON and `--parallel`, a goal-set that would PARTITION INTO MORE THAN ONE PARTITION is refused BEFORE any scheduler dispatch (`Kazi.Scheduler.run_goals/2` never called; no partition worktree/lease/harness created). Add as a cond clause in `run_goal/4` (cli.ex:3050), AFTER `--explain`/`--check` and BEFORE `opts[:parallel] == true -> run_goal_parallel(...)`. Compute total partition count the SAME way `explain_schedule/3` does (cli.ex:9934-9997) -- reuse `frontiers(goal)` + `explain_partition/4` with `partition_opts = Keyword.take(runtime_opts, [:graph_source])`; sum across frontiers; refuse when sum > 1. Exit 1; JSON/human error carries `\"reason\": \"single_node_violation\"` and names the partition count. Reusing `report_run_error/3` (cli.ex:4030) + a new `format_run_error(:single_node_violation)` clause (cli.ex:4158-4220) is one clean way. A single-partition goal-set is UNAFFECTED. TEST: fixture with TWO `[[group]]` entries + one trivially-passing predicate each (cmd sh -c true), no partition_terms, matching `write_disjoint_groups_goal_file/1` at test/kazi/cli_run_schedule_explain_test.exs:641-665 (partitions into 2). `@tag :single_node_partition_refusal`: assert non-zero exit, reason == single_node_violation, and a spy reconciler/member_runner seam was never invoked. Checker: `mix test test/kazi/cli_single_node_test.exs --only single_node_partition_refusal`."
+cmd = "sh"
+args = ["-c", "mix test test/kazi/cli_single_node_test.exs --only single_node_partition_refusal"]
+timeout_ms = 300000
+
+[[predicate]]
+id = "cli-single-node-result-field"
+provider = "custom_script"
+description = "CAPABILITY 3/4. A ONE-partition goal run under single_node RUNS NORMALLY (converges, exit 0) and its --json terminal result includes `\"single_node\": true`. Additive: serial path via `run_result_json/5` (cli.ex:9290-9316) `put_*` pipeline reading a `:single_node` key stashed onto the loop result in `run_goal_serial_at/6` (~cli.ex:3501) when `opts[:single_node] == true`; parallel/collective path via `collective_result_json/2` (cli.ex:9721+, both FLAT and DAG clauses) fed by stashing `:single_node` onto the scheduler result in `run_goal_parallel/4` (cli.ex:3776-3824) before `report_collective/3`. Present (true) ONLY when requested; never false. TEST: `@tag :single_node_result_field` -- one serial-converged assertion + one single-partition --parallel assertion, both asserting `[\"single_node\"] == true`. Checker: `mix test test/kazi/cli_single_node_test.exs --only single_node_result_field`."
+cmd = "sh"
+args = ["-c", "mix test test/kazi/cli_single_node_test.exs --only single_node_result_field"]
+timeout_ms = 300000
+
+[[predicate]]
+id = "cli-single-node-unset-unchanged"
+provider = "custom_script"
+description = "CAPABILITY 4/4 (negative-space regression guard). With single_node NOT requested: --fleet and a multi-partition --parallel run are COMPLETELY UNAFFECTED (no refusal fires), and every --json terminal result carries NO `single_node` key at all (absent, not false). TEST: `@tag :single_node_unset_unchanged` -- reuse capability 2's fixture WITHOUT single_node and assert the spy reconciler/member_runner IS invoked and the run proceeds normally; separately assert a converged single-partition run's JSON has no `single_node` key. Checker: `mix test test/kazi/cli_single_node_test.exs --only single_node_unset_unchanged`."
+cmd = "sh"
+args = ["-c", "mix test test/kazi/cli_single_node_test.exs --only single_node_unset_unchanged"]
+timeout_ms = 300000
+
+[[predicate]]
+id = "guard-repo-identity"
+provider = "custom_script"
+guard = true
+description = "GUARD: environment identity -- refuse to run this goal anywhere but a linked (non-primary) git worktree with the kazi repo's own markers present."
+cmd = "sh"
+args = ["-c", "[ \"$(git rev-parse --git-dir)\" != \"$(git rev-parse --git-common-dir)\" ] && test -f mix.exs && grep -q 'app: :kazi' mix.exs && test -f lib/kazi/cli.ex"]
+timeout_ms = 30000
+
+[[predicate]]
+id = "guard-format"
+provider = "custom_script"
+guard = true
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "guard-suite"
+provider = "custom_script"
+guard = true
+description = "GUARD: the full ExUnit suite stays green (TEST_SERVER=false to avoid colliding with sibling lanes' HTTP servers on this host)."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test TEST_SERVER=false TEST_HTTP_PORT=4102 mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref (partition-safe: no hardcoded branch name)."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
