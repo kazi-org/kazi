@@ -32,6 +32,10 @@ need them.
   Code skill.
 - **[Add a harness](add-a-harness.md)** — point kazi at `opencode`, `codex`, or
   your own CLI coding agent; the harness tier table.
+- **[The `[setup]` step](how-to/setup-step.md)** — declared provisioning
+  commands (e.g. `mix deps.get`) the controller runs before the t0 observation,
+  so a build-tool-backed predicate is never red for a missing dependency
+  instead of a real product reason (ADR-0088).
 - **[Self-hosting: kazi builds kazi](self-hosting.md)** — kazi dogfooding itself.
 
 ## Guides — pooled / parallel runs

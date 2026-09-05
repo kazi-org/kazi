@@ -435,6 +435,29 @@ markdown from the roadmap DAG + its read-model verdicts. It is OUTPUT, never inp
 file is lost work by design: regenerate, never hand-edit, so the document cannot
 drift from the truth it renders.
 
+## Provisioning: `[setup]` (ADR-0088)
+
+A `kazi apply` task worktree is a fresh `git worktree` -- it carries no
+`deps/`, `_build/`, or `node_modules/`. If any predicate shells out to a build
+tool (`mix test`, a `mix format` formatting check, `npm test`, ...), that
+predicate is red at t0 for an ENVIRONMENTAL reason, not a product reason
+(issue #1642) -- unless the goal declares a setup step. Full how-to:
+`docs/how-to/setup-step.md`.
+
+```toml
+[setup]
+commands = ["mix deps.get"]
+timeout_ms = 300000   # optional; per-command hard deadline, default 300000
+```
+
+kazi runs `commands` IN ORDER, each through `sh -c`, in the workspace, ONCE
+before the t0 predicate observation -- in both `kazi apply` and `kazi apply
+--check`. A command that exits non-zero, cannot be started, or overruns
+`timeout_ms` stops the run with a distinct `{:setup_failed, _}` environment
+error (never a predicate `:fail`), naming the offending command; no harness
+is ever dispatched on a setup failure. Declare `[setup]` for any
+build-tool-backed goal; a goal with no such dependency needs none.
+
 ## Landing: `[integration]`, `[conventions]`, and the process contract
 
 Convergence is not the end: a goal whose code predicates pass but whose fix is

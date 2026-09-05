@@ -42,3 +42,28 @@ git rev-parse "$KAZI_GOAL_UPSTREAM"
 A goal-file-declared `:env` entry with the same name overrides the
 controller-supplied value (`Kazi.Providers.CustomScript`'s env merge), so an
 explicit override is still possible when a predicate needs one.
+
+## A build-tool-backed predicate needs a declared `[setup]` step (ADR-0088)
+
+A `kazi apply` task worktree is a fresh `git worktree` -- it carries no
+`deps/`, `_build/`, or `node_modules/`. If any predicate shells out to a
+build tool (`mix test`, `mix format --check-formatted`, `npm test`, `cargo
+test`, ...), that predicate is red at t0 for an ENVIRONMENTAL reason
+("Unchecked dependencies for environment test ... run mix deps.get"), not a
+product reason -- red-at-t0 no longer proves the predicate measures real
+behavior (issue #1642).
+
+Declare a `[setup]` block naming the provisioning commands to run once, in
+the workspace, BEFORE the t0 observation:
+
+```toml
+[setup]
+commands = ["mix deps.get"]
+```
+
+With `[setup]` declared, red-at-t0 means what it is supposed to mean again:
+the product is wrong, not that nobody ran `mix deps.get` first. A goal made
+only of predicates with no build-tool dependency needs no `[setup]` block.
+See [`docs/how-to/setup-step.md`](how-to/setup-step.md) for the full field
+reference and the distinct `{:setup_failed, _}` environment-error shape a
+failing setup command produces (never a predicate `:fail`).
