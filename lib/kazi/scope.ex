@@ -62,6 +62,20 @@ defmodule Kazi.Scope do
   All three are additive and default to the empty/off value, so a goal-file
   declaring none of them is byte-identical to before ADR-0085.
 
+  ## Nesting lint (ADR-0086 decision 2, T72.2)
+
+  `nesting_conflicts/1` is the reusable check behind `kazi plan lint <roadmap>`
+  (and, per ADR-0086, the same check `kazi plan render --tree` (T72.4) runs
+  before writing any file): across a set of goals kazi can see together,
+  `roots/1` must be pairwise disjoint — no root may nest inside, or exactly
+  equal, another goal's root. The rationale is the walk-up itself: a harness
+  launched in `pkg/foo/bar` reads every ancestor `AGENTS.md`, so a goal rooted
+  at `pkg/foo` and a goal rooted at `pkg/foo/bar` would hand the child goal's
+  agent the parent goal's brief too. A goal with no declared scope (`roots/1`
+  returns `[]`) does not render and so never participates — mirroring the
+  existing rule that an unscoped goal gets no inferred `Kazi.Fleet` edges
+  either.
+
   ## `shared_paths` (ADR-0087 decision 4, T73.1)
 
   `shared_paths` names hotspot files (`mix.exs`, `go.mod`, `docs/plan.md`) this
@@ -268,5 +282,70 @@ defmodule Kazi.Scope do
     |> String.trim_trailing("/*")
     |> String.trim_trailing("/")
     |> Kernel.<>("/")
+  end
+
+  @typedoc "One nesting-lint finding: two goal ids whose roots nest or are equal, and the shared root."
+  @type nesting_conflict :: %{a: String.t(), b: String.t(), root: String.t()}
+
+  @doc """
+  Finds every pair of goals, among `entries`, whose `roots/1` nest inside or
+  exactly equal one another (ADR-0086 decision 2, T72.2). `entries` is a list
+  of `{goal_id, roots}` — the caller supplies whatever roots it already
+  computed via `roots/1` (a roadmap node's goal, a fleet member's goal, ...);
+  this function does no loading of its own so it is reusable from any caller
+  that has assembled "the goals kazi can see together".
+
+  A goal with `roots == []` is unscoped and never participates (same rule as
+  `Kazi.Fleet`'s inferred-edge exemption for an unscoped goal). Equal roots
+  count as nesting — `overlap?/2`'s prefix test already treats identical
+  normalized paths as overlapping, so no separate equality check is needed.
+
+  Returns `[]` when every declared root is disjoint. Each conflict names both
+  goal ids and the shared/nesting root (the shallower of the two declared
+  roots, i.e. the ancestor); when a goal declares more than one root, only the
+  first conflicting pair found is reported for that goal pair.
+
+  ## Examples
+
+      iex> Kazi.Scope.nesting_conflicts([{"a", ["pkg/foo"]}, {"b", ["pkg/bar"]}])
+      []
+
+      iex> Kazi.Scope.nesting_conflicts([{"a", ["pkg/foo"]}, {"b", ["pkg/foo/bar"]}])
+      [%{a: "a", b: "b", root: "pkg/foo"}]
+
+      iex> Kazi.Scope.nesting_conflicts([{"a", ["pkg/foo"]}, {"b", ["pkg/foo"]}])
+      [%{a: "a", b: "b", root: "pkg/foo"}]
+
+      iex> Kazi.Scope.nesting_conflicts([{"a", []}, {"b", ["pkg/foo"]}])
+      []
+  """
+  @spec nesting_conflicts([{String.t(), [String.t()]}]) :: [nesting_conflict()]
+  def nesting_conflicts(entries) do
+    scoped = Enum.reject(entries, fn {_id, roots} -> roots == [] end)
+
+    scoped
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {{id_a, roots_a}, i} ->
+      scoped
+      |> Enum.drop(i + 1)
+      |> Enum.flat_map(fn {id_b, roots_b} ->
+        case first_shared_root(roots_a, roots_b) do
+          nil -> []
+          root -> [%{a: id_a, b: id_b, root: root}]
+        end
+      end)
+    end)
+  end
+
+  defp first_shared_root(roots_a, roots_b) do
+    Enum.find_value(roots_a, fn a ->
+      Enum.find_value(roots_b, fn b -> path_overlap?(a, b) && shallower_of(a, b) end)
+    end)
+  end
+
+  # The ancestor of two overlapping (nesting-or-equal) paths — the one whose
+  # normalized form the other starts with. Equal paths return `a`.
+  defp shallower_of(a, b) do
+    if String.starts_with?(normalize_path(b), normalize_path(a)), do: a, else: b
   end
 end
