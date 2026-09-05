@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.288.0](https://github.com/kazi-org/kazi/compare/v1.287.0...v1.288.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** add --lane-contract task_sha match check for governed lanes (TKE.1) ([2c70138](https://github.com/kazi-org/kazi/commit/2c70138e29d854899633d9da32c0af68260ce6e6))
+
 ## [1.287.0](https://github.com/kazi-org/kazi/compare/v1.286.0...v1.287.0) (2026-09-05)
 
 
