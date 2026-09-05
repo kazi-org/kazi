@@ -1653,11 +1653,21 @@ defmodule Kazi.Loop do
   # worktree is never created and this is exactly the pre-T32.4 single-workspace
   # observe.
   @spec observe_with_isolation(Data.t()) :: {PredicateVector.t(), MapSet.t(), map(), boolean()}
-  defp observe_with_isolation(%Data{enforcement: enf, workspace: ws} = data) do
+  defp observe_with_isolation(%Data{enforcement: enf, workspace: ws, goal: goal} = data) do
     if Enforcement.isolate?(enf) and is_binary(ws) and any_isolated?(data) do
+      # #1709: the detached isolation worktree has no branch identity of its own, so
+      # thread the goal's real branch/upstream in as env for the isolated predicates
+      # only — the non-isolated ones already run against `ws`, a real branch
+      # checkout, where `@{u}`/`--abbrev-ref HEAD` resolve unchanged.
+      isolated_env = Isolation.goal_env(ws, Goal.integration_branch(goal))
+
       result =
         Isolation.with_clean_tree(ws, enf.clean_ref, enf.read_only_paths, fn clean_ws ->
-          observe(data, fn predicate -> if isolated?(predicate), do: clean_ws, else: ws end)
+          observe(
+            data,
+            fn predicate -> if isolated?(predicate), do: clean_ws, else: ws end,
+            fn predicate -> if isolated?(predicate), do: isolated_env, else: [] end
+          )
         end)
 
       case result do
@@ -1668,7 +1678,9 @@ defmodule Kazi.Loop do
           {vector, quarantine, streaks, false}
       end
     else
-      {vector, quarantine, streaks} = observe(data, fn _predicate -> ws end)
+      {vector, quarantine, streaks} =
+        observe(data, fn _predicate -> ws end, fn _predicate -> [] end)
+
       {vector, quarantine, streaks, false}
     end
   end
@@ -1699,6 +1711,11 @@ defmodule Kazi.Loop do
   # else the working copy. With enforcement off it is `fn _ -> data.workspace end`,
   # so the context is byte-identical to the pre-T32.4 path.
   #
+  # `checker_env_fn` resolves the extra env each predicate's checker runs with
+  # (#1709): an isolated grader gets `KAZI_GOAL_BRANCH`/`KAZI_GOAL_UPSTREAM`
+  # (`Isolation.goal_env/2`), everything else `[]`. With enforcement off it is
+  # `fn _ -> [] end`, so the context is byte-identical to the pre-#1709 path.
+  #
   # T1.3 flake: returns `{vector, quarantine, streaks}` — observation also
   # evolves the quarantine set (a failing predicate is re-run through the real
   # provider path and may be classified flaky) AND the #820 rehabilitation streak
@@ -1710,15 +1727,20 @@ defmodule Kazi.Loop do
   # T32.4 enforcement: each result passes through `Kazi.Enforcement.enforce_result/2`
   # so a checker that "passed" only by skipping/erroring/xfailing work is downgraded
   # to :fail (a no-op when enforcement is off, ADR-0042 §3).
-  @spec observe(Data.t(), (Predicate.t() -> String.t() | nil)) ::
-          {PredicateVector.t(), MapSet.t(), map()}
-  defp observe(%Data{goal: goal} = data, checker_workspace_fn) do
+  @spec observe(
+          Data.t(),
+          (Predicate.t() -> String.t() | nil),
+          (Predicate.t() -> [{String.t(), String.t()}])
+        ) :: {PredicateVector.t(), MapSet.t(), map()}
+  defp observe(%Data{goal: goal} = data, checker_workspace_fn, checker_env_fn) do
     {pairs, {quarantine, streaks}} =
       goal
       |> Goal.all_predicates()
       |> Enum.map_reduce({data.quarantine, data.quarantine_streaks}, fn %Predicate{} = predicate,
                                                                         {quarantine, streaks} ->
-        context = provider_context(data, checker_workspace_fn.(predicate))
+        context =
+          provider_context(data, checker_workspace_fn.(predicate), checker_env_fn.(predicate))
+
         {result, quarantine, streaks} = evaluate(predicate, context, data, quarantine, streaks)
         result = Enforcement.enforce_result(data.enforcement, result)
         {{predicate.id, result}, {quarantine, streaks}}
@@ -3136,8 +3158,13 @@ defmodule Kazi.Loop do
   # clean detached worktree for an isolated grader, the working copy otherwise. It
   # defaults to `data.workspace`, so a caller that does not thread enforcement gets
   # the pre-T32.4 context unchanged.
-  @spec provider_context(Data.t(), String.t() | nil) :: map()
-  defp provider_context(%Data{} = data, checker_workspace) do
+  #
+  # #1709: `env` is the extra environment an isolated grader's subprocess needs
+  # (`KAZI_GOAL_BRANCH`/`KAZI_GOAL_UPSTREAM`) — `[]` otherwise. `Providers.CustomScript`
+  # merges it with any goal-file-declared `:env` (the goal-file value wins on a
+  # name collision) before spawning the checker.
+  @spec provider_context(Data.t(), String.t() | nil, [{String.t(), String.t()}]) :: map()
+  defp provider_context(%Data{} = data, checker_workspace, env) do
     %{
       goal: data.goal,
       scope: data.goal.scope,
@@ -3148,7 +3175,8 @@ defmodule Kazi.Loop do
       # ADR-0081 (#1521): the controller-produced captures for THIS observe pass,
       # `%{name => result}`; a `render_proof` predicate resolves its named capture
       # here rather than from a worker-chosen workspace path.
-      captures: data.captures
+      captures: data.captures,
+      env: env
     }
   end
 
