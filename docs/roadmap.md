@@ -104,6 +104,19 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
+**Planned (2026-09-05, ADR-0086 -> E72, 8 tasks, 5 waves):** a
+per-directory `AGENTS.md` node rendered from `goal.toml` + an observe pass,
+never committed, so an agent opened inside a goal's scope root reads that
+goal's brief and predicates through the harness walk-up, and a dispatched
+lane gets the same node embedded in its existing prompt channel. `[scope].
+write_paths` (fallback `paths`) is the declared scope -- no new field -- and
+feeds the ADR-0065 §3 overlap rule, so disjoint roots is what "can run in
+parallel" means. Tamper protection is freshness plus auto-added ADR-0085
+`forbidden_paths`, never sealing a derived file. Reviewed by two
+coordinating sessions before the ADR; the fleet-repo dispatcher half is
+tracked in that repo. In flight: the ADR + E72 PR (owner: this session,
+2026-09-05). Unstarted: all of E72.
+
 **Near term (2026-09-02, from a full open-issue triage, third pass --
 E71, 1 task):** the entire open backlog is now three triage epics deep
 (E69, E70, E71) plus T25.10 (#382/#372) -- 34 issues total, every one with

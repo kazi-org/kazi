@@ -356,6 +356,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E71 -- Triage 2026-09-02: full open-backlog resolution, third pass -- enforce-worktree detached HEAD breaks branch/upstream guard predicates (P1, #1709) -> plans/E71.md
 
+### E72 -- Per-directory AGENTS.md projection and `write_paths` as declared scope (ADR-0086) -> plans/E72.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
