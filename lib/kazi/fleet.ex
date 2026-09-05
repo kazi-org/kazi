@@ -41,6 +41,17 @@ defmodule Kazi.Fleet do
   Scope comparison prefers `write_paths` over `paths` when a node declares
   `write_paths` (the sharper signal — see `Kazi.Scope` issue #860); falls back to
   `paths` otherwise.
+
+  ## `shared_paths` (ADR-0087 decision 4, T73.1)
+
+  A manifest `.toml` file may also declare a top-level `shared_paths = [...]`
+  array, alongside `[[member]]` — resolved relative to nothing (these are
+  hotspot path strings, not files, so no path-resolution applies). A plain
+  directory fleet has no manifest, so it contributes none.
+  `effective_shared_paths/1` unions this manifest-level list with every
+  member's own declared `[scope].shared_paths`. T73.2 consumes the effective
+  set to exclude these paths from the partition survey and from this module's
+  own inferred-overlap test.
   """
 
   alias Kazi.Goal
@@ -65,8 +76,12 @@ defmodule Kazi.Fleet do
     defstruct [:from, :to, :kind, overlap: []]
   end
 
-  @type t :: %__MODULE__{nodes: [Node.t()], edges: [Edge.t()]}
-  defstruct nodes: [], edges: []
+  @type t :: %__MODULE__{
+          nodes: [Node.t()],
+          edges: [Edge.t()],
+          manifest_shared_paths: [String.t()]
+        }
+  defstruct nodes: [], edges: [], manifest_shared_paths: []
 
   @doc """
   Loads a fleet from a directory of `*.goal.toml` files or a manifest `.toml`
@@ -76,14 +91,45 @@ defmodule Kazi.Fleet do
   """
   @spec load(Path.t()) :: {:ok, t()} | {:error, String.t()}
   def load(path) when is_binary(path) do
-    with {:ok, files} <- member_files(path),
+    with {:ok, files, manifest_shared_paths} <- member_files(path),
          {:ok, nodes} <- load_nodes(files),
          :ok <- validate_no_duplicate_ids(nodes),
          {:ok, explicit_edges} <- build_explicit_edges(nodes),
          :ok <- validate_no_cycle(nodes, explicit_edges) do
       inferred_edges = build_inferred_edges(nodes, explicit_edges)
-      {:ok, %__MODULE__{nodes: nodes, edges: explicit_edges ++ inferred_edges}}
+
+      {:ok,
+       %__MODULE__{
+         nodes: nodes,
+         edges: explicit_edges ++ inferred_edges,
+         manifest_shared_paths: manifest_shared_paths
+       }}
     end
+  end
+
+  @doc """
+  ADR-0087 decision 4 / T73.1: the effective `shared_paths` set for this
+  fleet — the union of every member goal's own declared `[scope].shared_paths`
+  plus the optional fleet-manifest-level `shared_paths` list (`[]` when the
+  fleet was loaded from a plain directory, which has no manifest to declare
+  one). A plain set union: order-independent, duplicates collapse. This is a
+  pure read of already-loaded data; it does not itself exclude anything from
+  `edges` (T73.2 is the exclusion).
+
+  ## Examples
+
+      iex> Kazi.Fleet.effective_shared_paths(%Kazi.Fleet{})
+      []
+  """
+  @spec effective_shared_paths(t()) :: [String.t()]
+  def effective_shared_paths(%__MODULE__{
+        nodes: nodes,
+        manifest_shared_paths: manifest_shared_paths
+      }) do
+    member_declared =
+      Enum.flat_map(nodes, fn %Node{goal: %Goal{scope: scope}} -> scope.shared_paths end)
+
+    (member_declared ++ manifest_shared_paths) |> Enum.uniq() |> Enum.sort()
   end
 
   @doc """
@@ -137,7 +183,9 @@ defmodule Kazi.Fleet do
         if files == [] do
           {:error, "fleet directory #{path} contains no *.goal.toml files"}
         else
-          {:ok, files}
+          # A plain directory fleet has no manifest, so no manifest-level
+          # `shared_paths` (ADR-0087 decision 4 / T73.1) to contribute.
+          {:ok, files, []}
         end
 
       File.regular?(path) ->
@@ -160,14 +208,38 @@ defmodule Kazi.Fleet do
         |> Enum.reject(&is_nil/1)
         |> Enum.map(&resolve_member_path(&1, base))
 
-      if files == [] do
-        {:error, "fleet manifest #{path} declares no [[member]] path entries"}
-      else
-        {:ok, files}
+      cond do
+        files == [] ->
+          {:error, "fleet manifest #{path} declares no [[member]] path entries"}
+
+        true ->
+          case fetch_manifest_shared_paths(data, path) do
+            {:ok, shared_paths} -> {:ok, files, shared_paths}
+            {:error, _} = err -> err
+          end
       end
     else
       {:error, reason} when is_binary(reason) -> {:error, "fleet manifest #{path}: #{reason}"}
       {:error, reason} -> {:error, "fleet manifest #{path}: malformed TOML: #{inspect(reason)}"}
+    end
+  end
+
+  # ADR-0087 decision 4 / T73.1: the optional top-level `shared_paths = [...]`
+  # array on a fleet manifest, unioned into `effective_shared_paths/1` beside
+  # every member's own `[scope].shared_paths`. Absent → `[]` (byte-identical to
+  # before this feature); present but not a list of strings is a load-time
+  # error naming the manifest, like every other malformed field in this module.
+  defp fetch_manifest_shared_paths(data, path) do
+    case Map.get(data, "shared_paths", []) do
+      list when is_list(list) ->
+        if Enum.all?(list, &is_binary/1) do
+          {:ok, list}
+        else
+          {:error, "fleet manifest #{path}: shared_paths must be an array of strings"}
+        end
+
+      _other ->
+        {:error, "fleet manifest #{path}: shared_paths must be an array of strings"}
     end
   end
 
