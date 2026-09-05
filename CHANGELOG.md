@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.287.0](https://github.com/kazi-org/kazi/compare/v1.286.0...v1.287.0) (2026-09-05)
+
+
+### Features
+
+* **goal/roadmap:** expose ADR-0082 banner for cross-renderer reuse (T72.3) ([0e775f1](https://github.com/kazi-org/kazi/commit/0e775f105c12cc01a1250cfbb322b32533e691eb))
+* **plan:** add Kazi.Plan.Render.node/3 (T72.3, ADR-0086 decision 3) ([4792b7c](https://github.com/kazi-org/kazi/commit/4792b7c5d582537b9881d8e9a63ff41bdd335c6d))
+
 ## [1.286.0](https://github.com/kazi-org/kazi/compare/v1.285.0...v1.286.0) (2026-09-05)
 
 
