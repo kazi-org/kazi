@@ -334,7 +334,7 @@ defmodule Kazi.CLI do
     all:
       "`bus who` only: include presence entries older than the 10-minute TTL (hidden by default so closed sessions age out of the roster instead of looking active; a TTL-stale entry whose process is verified alive locally is always shown, as `idle` -- T55.11).",
     project:
-      "`bus who` only (T55.11): filter the roster to sessions whose cwd is this directory or lives under it (expanded to an absolute path) -- replaces the `who | grep <path>` pipeline.",
+      "`bus who` (T55.11): filter the roster to sessions whose cwd is this directory or lives under it (expanded to an absolute path) -- replaces the `who | grep <path>` pipeline. `plan` (T45.2, ADR-0054, caller-drafts): instead reads this as a JSON payload naming a multi-goal roadmap (a `goals` array), persisted as N linked proposals sharing one roadmap ref via `Authoring.propose_roadmap/2`; bypasses --discover.",
     machine:
       "`bus who` only (T55.11): filter the roster to sessions recorded by this machine (exact hostname match).",
     timeout:
