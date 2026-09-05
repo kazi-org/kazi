@@ -122,6 +122,39 @@ defmodule Kazi.Enforcement.Isolation do
     end
   end
 
+  @doc """
+  Builds the `KAZI_GOAL_BRANCH`/`KAZI_GOAL_UPSTREAM` predicate-execution
+  environment (#1709, ADR-0042 "Consequences"): the detached worktree
+  `prepare/3` creates has no branch identity of its own (`--abbrev-ref HEAD`
+  returns the literal string `HEAD`; `@{u}` fatals — there is no
+  `branch.<name>.remote` upstream config to resolve), so a guard or held-out
+  predicate that resolves either idiom is structurally unsatisfiable there,
+  independent of whether the underlying work is correct and pushed.
+
+  `branch` is the goal's REAL target branch (`Kazi.Goal.integration_branch/1`)
+  and is always set. `KAZI_GOAL_UPSTREAM` (`origin/<branch>`) is added only
+  when `workspace` — the base, non-detached checkout — has an `origin` remote
+  configured; this does not require (and cannot create, since git refuses the
+  same branch checked out twice) a real git upstream on the detached worktree
+  itself, only a stable ref string a predicate can compare `HEAD` against.
+  """
+  @spec goal_env(String.t(), String.t()) :: [{String.t(), String.t()}]
+  def goal_env(workspace, branch) when is_binary(workspace) and is_binary(branch) do
+    base = [{"KAZI_GOAL_BRANCH", branch}]
+
+    case git(workspace, ["remote"]) do
+      {:ok, remotes} ->
+        if "origin" in String.split(remotes, "\n", trim: true) do
+          base ++ [{"KAZI_GOAL_UPSTREAM", "origin/" <> branch}]
+        else
+          base
+        end
+
+      {:error, _reason} ->
+        base
+    end
+  end
+
   # Overlays `workspace`'s candidate state — tracked edits (staged + unstaged) AND
   # untracked new files — onto the clean worktree `tmp`, so an isolated checker
   # grades the agent's actual fix instead of frozen `ref`. Tracked changes travel as
