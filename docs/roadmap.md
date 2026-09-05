@@ -295,6 +295,49 @@ rerun via `mix test --failed`, unrelated to this PR's diff). Only
 flagged) reproduced consistently. Claim released, worktree removed.
 Direct-agent dispatch, sixth dispatch's first task closed.
 
+**Shipped (2026-09-05): T73.2** -- symmetric `shared_paths` exclusion
+(ADR-0087 decision 4). `Kazi.Partition.partition/3` gains a `:shared_paths`
+option, excluded from EACH goal's raw blast radius before
+`group_overlapping/1` (order-independent, verified both ways); `Kazi.Fleet.load/1`
+excludes the fleet's effective `shared_paths` symmetrically before the
+inferred-overlap test, so two members overlapping only on a declared hotspot
+get no edge while a genuinely shared path still does. New `lease_keys` field
+on both `%Partition{}` and `Kazi.Fleet.Edge`, for T73.3/T73.4 to consume.
+PR #1785, `88270062`, released as v1.285.0. Judgment call flagged by the
+dispatched agent and accepted as-is pending T73.3/T73.4: a hotspot-only pair
+gets no `Edge` at all (the point of the exclusion), so there's nowhere on an
+edge to carry that pair's `lease_keys` -- populated only where an edge exists
+for another reason; may need a per-node carrier once the real consumer shape
+is known. Verified independently before merging: read the full diff, reran
+both new test files locally (24/24), confirmed `mix format` clean and no
+attribution across both commits. Claim released, worktree removed. Also
+dispatched T72.3 (Node renderer, E72's critical path -- unblocked by T72.1,
+unclaimed) as a fourth concurrent lane once host load dropped back to ~3;
+still in progress.
+
+**Shipped (2026-09-05): T69.5** -- fixed kazi-org/kazi#1684 (the daemon
+nats-server bind-conflict crash loop, the exact incident diagnosed live
+during the fifth dispatch). `Kazi.Daemon.Nats` now classifies every
+unexpected nats-server exit BEHAVIORALLY (via `lsof`/`ps`, not stderr text)
+into four dispositions: foreign (unrelated process, stays fatal), incompatible
+(a nats-server with a different store dir, stays fatal), orphan (our store
+dir, ppid 1 -- reaped and retried, bounded to 3 auto-reaps, no fatal stop),
+peer (our store dir, live parent -- adopted via connect-mode instead of a
+second writer against the same JetStream dir). A distinct greppable
+`nats bind conflict: ...` log line on every conflict, plus a `:persistent_term`-backed
+(crash-survives-itself) rolling 60s/3-exit restart-loop window surfaced as an
+additive `nats_health` field on `ping`/`kazi daemon status --json` and a
+`nats: ok` / `nats: RESTART LOOP -- ...` human line. #1719's shim/death-pact
+mechanism untouched. PR #1786, in review as of this note (CI green on all
+gates but the final `mix format + test` job at write time). Verified
+independently: read the full 948-line diff, reran the new
+`nats_bind_conflict_test.exs` (three REAL-process scenarios: a foreign
+`:gen_tcp`-listening decoy, a genuine bare-spawned orphan nats-server with
+only its ppid-1 fact injected via a test seam, and a genuinely-unrelated
+`kill -9`) plus `control_test.exs`/`daemon_test.exs` locally (26/26 passed,
+confirmed real nats-server process output in the log, not mocked), checked
+`mix format` clean and no attribution across all 6 commits.
+
 **Planning (2026-09-05, not yet minted):** hq ruled (dec-0849, founder-direct)
 that governed lane containers should enter through `kazi apply
 <goal> --single-node --in-place` rather than `claude -p` directly -- kazi
