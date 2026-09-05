@@ -397,7 +397,11 @@ defmodule Kazi.Daemon.LifecycleTest do
       assert {:ok, listener} =
                GenServer.start(Listener, sock_path: sock_path, pid_path: pid_path)
 
-      on_exit(fn -> if Process.alive?(listener), do: GenServer.stop(listener) end)
+      on_exit(fn ->
+        if Process.alive?(listener), do: GenServer.stop(listener)
+        File.rm(sock_path)
+        File.rm(pid_path)
+      end)
 
       assert File.exists?(sock_path)
     end
