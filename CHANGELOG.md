@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.275.4](https://github.com/kazi-org/kazi/compare/v1.275.3...v1.275.4) (2026-09-05)
+
+
+### Bug Fixes
+
+* **daemon:** name the sun_path limit instead of a bare :einval ([c599dcf](https://github.com/kazi-org/kazi/commit/c599dcf461052a84fb2ea7750dba35d0ea897faf)), closes [#1724](https://github.com/kazi-org/kazi/issues/1724)
+
 ## [1.275.3](https://github.com/kazi-org/kazi/compare/v1.275.2...v1.275.3) (2026-09-05)
 
 
