@@ -104,45 +104,71 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
-**Shipped (2026-09-05, `/apply --pool`, two dispatches this day):** T69.9
+**Shipped (2026-09-05, `/apply --pool`, three dispatches this day):** T69.9
 (#1681 `portfolio` in `Kazi.CLI.Schema`, PR #1740, `4b53f601` -> v1.277.0),
+T69.10 (#1617 `--project` flag doc, PR #1741, `437f7845` -> v1.276.1),
 T71.1 (#1709 branch-identity env for isolated predicates, PR #1742,
 `71443c7e` -> v1.278.0), T72.1 (scope roots + glob overlap, E72 Wave A, PR
-#1746, `52d15876` -> v1.279.0; adopted from a banked worktree rather than
-redrafted, its own tests (9 + 16) verified green locally before merge),
-T69.10 (#1617 `--project` flag doc, PR #1741, `437f7845` -> v1.276.1; the
-plan checkbox itself was left open in `docs/plans/E69.md` -- a small
-housekeeping gap, not a code gap). Both #1740 and #1742 were reviewed for
-actual code correctness (red->green reproduction, symmetric provider
-coverage, doc-vs-code match), not merged on green CI alone.
+#1746, `52d15876` -> v1.279.0), T69.14 (#1636 self-conformance fixture cut
+from 13-24s to under 1.2s by landing the mock integrator's merge as a direct
+`git update-ref` instead of a clone+rebase+push dance, PR #1754,
+`cd3fca1f`), T66.5 (#1483 reopened -- acceptance-pinning regression tests
+for the already-landed bounded-mount fix, PR #1755, `fc14347d`). T70.11
+dispositioned directly (no code): closed kazi-org/kazi#1692 citing
+`lib/kazi/bus/claims.ex` + ADR-0067 point 6. Plan/reality drift fixed in PR
+#1752: T69.9/T69.10/T71.1/T72.1 sat unticked after their own PRs merged;
+release-version citations were corrected twice more after that (T69.9 and
+T69.10 were first mislabeled v1.278.0, actually v1.277.0/v1.276.1) in PR
+#1752's own follow-up commit. Every PR in this list was reviewed for actual
+code correctness (red->green reproduction where applicable, symmetric
+provider coverage, doc-vs-code match, or a direct read confirming the fix
+it depends on already exists in `lib/`), not merged on green CI alone.
 
-**Blocked -- infra, not code (2026-09-05):** T70.4 (#1699 nohup/disown vs.
-a genuinely dead launcher, `Kazi.Runtime.ParentMonitor`), T66.5 (#1483
-reopened -- the bounded-mount fix already landed in
-`RunRegistry.list_recent/1` + `MissionControlLive`; what's missing and now
-drafted is the acceptance-pinning regression test under a large run
-history), T70.8 (#1700 -- document the vitest `-t` predicate hazard, pinned
-by a real fixture). Goal-files drafted (red-at-t0 verified directly against
-the target commands) and dispatched via `kazi apply --in-place`, but all
-three hit `startup_deadline_exceeded` (kazi's 300s pre-loop startup
-deadline) before the full-suite guard predicate could finish observing on a
-cold `_build/` under concurrent-lane host load -- an infra error, not a
-predicate verdict; no code was judged red or green. Remedy per the error
-text: raise `KAZI_APPLY_STARTUP_TIMEOUT_MS` above 300000 on redispatch.
-Claims released; worktrees left in place under
-`/Volumes/BuildOffload/kazi-worktrees/` (`t70-4`, `t66-5`, `t70-8`, deps/
-already fetched) for a fast redispatch.
+**Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
+T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
+`Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
+predicate hazard) both failed a SECOND time even after raising
+`KAZI_APPLY_STARTUP_TIMEOUT_MS` from 300s to 25 minutes -- the real limiter
+is concurrent-lane host contention, not the timeout size: T70.4's log shows
+`Exqlite.Error: database is locked` / `DBConnection.OwnershipError` inside
+its own `mix test` run while 3+ other full-suite-compiling sessions ran on
+the same host. Filed as an update on
+[kazi-org/kazi#1751](https://github.com/kazi-org/kazi/issues/1751): likely
+concurrent `mix test` invocations sharing one SQLite test-DB path rather
+than each getting an isolated one -- a test-isolation gap, not something a
+caller-side env var fixes. T70.8's worktree
+(`/Volumes/BuildOffload/kazi-worktrees/t70-8`) has substantial uncommitted
+progress (the vitest `-t` fixture project + a 28-line `install_skill.ex`
+diff; missing only the pinning test itself) -- do not run a fresh
+`kazi apply --in-place` against it without first confirming that state
+survives. T70.4's worktree is clean (nothing was ever written). Claims
+released on both; redispatch again only once host load is verified low, not
+on a fixed schedule.
+
+T70.10 (#1702, DECIDED 2026-08-30 "remove entirely"): two independent
+searches (a lane's own diligence, then an independent re-check of all git
+history and branches) found zero trace of the described auto-generated
+roadmap-note-PR behavior anywhere in this repo's tracked history. Posted
+findings on the issue rather than closing it -- reversing a maintainer's
+DECIDED call isn't a task lane's or pool orchestrator's call to make.
+**Needs David's or the original decider's input**: confirm where the
+behavior was actually observed, or close #1702 as not-reproducible and mark
+T70.10 invalidated in `docs/plans/E70.md`.
 
 Found at t0: `test/kazi/cli/daemon_reregister_test.exs:43` fails on `main`
 independently of any of the above (excluded from T69.9's suite guard; needs
 its own triage). Filed [kazi-org/kazi#1744](https://github.com/kazi-org/kazi/issues/1744):
 a kazi lane's grinder must not self-report status into `docs/roadmap.md` --
-two lanes in the first dispatch each committed a premature or false
-"rebased green" claim into this shared paragraph; both were reverted before
-merge. Rescued (first pass): orphaned worktree branch
-`task/e50-safe-concurrent-work` (3 unmerged commits + a goal file) pushed to
-origin, worktree left in place for its owner. Also swept: the fully-merged
-`fix/1483-mission-control-unbounded-read` worktree (PR #1605) removed.
+three separate lanes across two dispatches each committed a premature or
+false "rebased green" claim into this shared paragraph; all were reverted
+before merge (one required rebuilding the branch from its non-roadmap
+commits after a rebase-merge failure the false commit caused). Rescued
+(first pass): orphaned worktree branch `task/e50-safe-concurrent-work` (3
+unmerged commits + a goal file) pushed to origin, worktree left in place for
+its owner. Also swept: the fully-merged
+`fix/1483-mission-control-unbounded-read` worktree (PR #1605) removed, and
+the fully-merged `task/t66-5-mission-control-bounded-mount-test` worktree
+removed after PR #1755 landed.
 
 **Planned (2026-09-05, ADR-0086 -> E72, 8 tasks, 5 waves):** a
 per-directory `AGENTS.md` node rendered from `goal.toml` + an observe pass,
