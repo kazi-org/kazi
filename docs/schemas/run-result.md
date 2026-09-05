@@ -193,6 +193,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `release_ref`    | string \| null      | The release tag of the artifact deployed this run (T3.3c), or `null` if nothing was deployed. |
 | `error`          | string              | Present **only** when `status` is `error`: a human-readable failure message (a pre-loop failure, e.g. a vacuous goal or an unknown provider/harness). |
 | `tampered_file`  | object (optional)   | ADR-0080 (#1520): present **only** when `status` is `tampered` — the sealed input (or goal-file) that changed mid-run, `{ "path": string, "change": "modified" \| "removed" \| "added" }`. Names the file only, never its contents. Absent on every other run. |
+| `single_node`    | boolean (optional)  | T73.5 (ADR-0086/ADR-0087): `true` when this run was dispatched under single_node mode (`--single-node` or `KAZI_SINGLE_NODE=1`/`"true"`). **Additive, optional** — present ONLY as `true` when single_node was requested AND the goal-set was the one partition single_node allows (a multi-partition goal-set under single_node never reaches a terminal result — it is refused first, see [Error object](#error-object)). Absent on every run that did not request single_node, byte-identical to before this field existed. |
 
 ### `status`
 
@@ -693,6 +694,31 @@ surface and branches on the non-zero exit:
   "next_action": "investigate"
 }
 ```
+
+### `single_node_violation` (T73.5, ADR-0086/ADR-0087)
+
+Under single_node mode (`--single-node` or `KAZI_SINGLE_NODE=1`/`"true"`), a
+`--parallel` goal-set that would partition into more than one partition is
+refused through this SAME error object, before
+`Kazi.Scheduler.run_goals/2` ever dispatches — no partition worktree, lease, or
+harness is created:
+
+```json
+{
+  "schema_version": 2,
+  "goal_id": "cli-two-groups",
+  "status": "error",
+  "error": "single_node mode is ON ..., but this --parallel goal-set would partition into 2 partitions (> 1) ...",
+  "reason": "single_node_violation",
+  "next_action": "investigate"
+}
+```
+
+`--fleet` under single_node refuses BEFORE any goal-file loads (before
+`Kazi.Fleet.load/1`), so there is no `goal_id` to report — that refusal is the
+smaller `{ "error": string, "schema_version": integer, "reason":
+"single_node_violation" }` envelope instead, on stdout under `--json` or on
+stderr (prefixed `error:`) otherwise.
 
 ## Streaming progress (JSONL) — `apply --json --stream` (T15.4, ADR-0023 decision 3)
 
