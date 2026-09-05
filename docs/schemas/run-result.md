@@ -720,6 +720,51 @@ smaller `{ "error": string, "schema_version": integer, "reason":
 "single_node_violation" }` envelope instead, on stdout under `--json` or on
 stderr (prefixed `error:`) otherwise.
 
+### `lane_contract_violation` / `lane_contract_requires_single_node` (TKE.1, ADR-0086/ADR-0087)
+
+`--lane-contract <path>` (or `KAZI_LANE_CONTRACT`) names a contract.json-shaped
+lane contract (an hq/sire dispatcher's per-lane payload — `run_id`, `task`,
+`task_sha`, `goal`, `predicates`, `budget`, ... — the exact shape belongs to the
+dispatcher, not kazi; kazi reads only `task_sha`, required to be a non-empty
+string). It is only ACTED ON in `--single-node --in-place` combination (a
+governed lane has no worktree indirection — the workspace IS the edit site);
+without `--in-place` it is accepted but INERT (documented, not silently
+ignored — there is no worktree-free edit site yet to compare a HEAD against).
+
+**A lone `--lane-contract` with NO `--single-node`** is itself a refusal,
+before ANYTHING else runs (the goal is never loaded, the contract file is never
+opened) — the smaller envelope, like `single_node_violation`'s `--fleet` case:
+
+```json
+{
+  "schema_version": 2,
+  "error": "--lane-contract ... was passed ... without --single-node ...",
+  "reason": "lane_contract_requires_single_node"
+}
+```
+
+**Under `--single-node --in-place`, before any predicate observation or harness
+dispatch**, kazi compares `git -C <workspace> rev-parse HEAD` against the
+contract's `task_sha` — same smaller envelope shape, additive `kind` naming the
+specific failure:
+
+```json
+{
+  "schema_version": 2,
+  "error": "--lane-contract ... names task_sha ..., but ...'s checked-out HEAD is ... -- refusing before any predicate observation or harness dispatch ...",
+  "reason": "lane_contract_violation",
+  "kind": "wrong_task_sha",
+  "task_sha": "<the contract's task_sha>",
+  "actual_sha": "<the workspace's actual HEAD>"
+}
+```
+
+An unreadable file, invalid JSON, or a contract missing a string `task_sha`
+fails CLOSED the same way (`"kind": "invalid_contract"`, no `task_sha`/
+`actual_sha` fields — the workspace's HEAD is never even read): a lane contract
+kazi cannot parse can never be trusted to gate a governed lane. A `task_sha`
+match proceeds exactly as today, byte-identical to `--lane-contract` absent.
+
 ## Streaming progress (JSONL) — `apply --json --stream` (T15.4, ADR-0023 decision 3)
 
 `kazi apply --json --stream` emits a **JSONL
