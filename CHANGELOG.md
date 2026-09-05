@@ -16,6 +16,15 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.278.0](https://github.com/kazi-org/kazi/compare/v1.277.0...v1.278.0) (2026-09-05)
+
+
+### Features
+
+* **enforcement:** add Isolation.goal_env/2 for the detached-worktree branch gap ([#1709](https://github.com/kazi-org/kazi/issues/1709)) ([85d896a](https://github.com/kazi-org/kazi/commit/85d896ab8035043ef0b388ca30b94d4a06a2fa33))
+* **loop:** thread goal branch/upstream env into isolated predicate checkers ([#1709](https://github.com/kazi-org/kazi/issues/1709)) ([3537713](https://github.com/kazi-org/kazi/commit/3537713c48411526616dacb55570cac8bff19325))
+* **providers:** merge controller-threaded env into custom_script/test_runner ([#1709](https://github.com/kazi-org/kazi/issues/1709)) ([714a08b](https://github.com/kazi-org/kazi/commit/714a08bc8eb8799f3d1b233685a5a449a55c5afd))
+
 ## [1.277.0](https://github.com/kazi-org/kazi/compare/v1.276.1...v1.277.0) (2026-09-05)
 
 
