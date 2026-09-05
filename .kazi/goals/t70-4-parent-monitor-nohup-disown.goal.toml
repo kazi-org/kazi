@@ -5,6 +5,9 @@ name = "T70.4 Fix #1699: distinguish an intentionally-detached (nohup/disown/set
 issue = "https://github.com/kazi-org/kazi/issues/1699"
 epic = "E70"
 
+[setup]
+commands = ["mix deps.get"]
+
 [[predicate]]
 id = "cap-detach-vs-dead"
 provider = "custom_script"
