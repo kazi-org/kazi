@@ -28,7 +28,9 @@ defmodule Kazi.Providers.TestRunner do
       line (`cmd: "go"`, not `cmd: "go test ./..."`); use `:args` for the rest
       (docs/lore.md L-0012).
     * `:args` — argument list (list of strings). Optional, defaults to `[]`.
-    * `:env`  — extra environment as `{name, value}` pairs. Optional.
+    * `:env`  — extra environment as `{name, value}` pairs. Optional. Merged with
+      any controller-threaded `context[:env]` (`Kazi.Providers.CustomScript`'s
+      `:env` merge, #1709).
 
   A shell one-liner is `cmd: "sh", args: ["-c", "mix test"]`.
 
