@@ -37,3 +37,22 @@ The default commit message and PR title/body always carry the goal's id and
 name plus the list of predicates that converged, never a bare "land
 converged change" — so a reviewer looking at `git log` or the PR list can
 tell what landed and why without cross-referencing a run id.
+
+## Scope-declared landing refusals (ADR-0085, issues #1695/#1704)
+
+Two more `[scope]` fields make Integrate refuse to land — see
+`docs/how-to/scope-write-guard.md` for the full authoring picture:
+
+  * `[scope].no_integration = true` — `execute/2` returns
+    `{:ok, %{skipped: :no_integration}}` before touching git at all: no
+    branch, no commit, no push, no PR, no merge (#1704: an orchestrating
+    session's "do not open a PR" prose never reached the dispatched model).
+  * `[scope].forbidden_paths = [...]` — a touched forbidden path is excluded
+    from what lands: unstaged before commit on the legacy path, or the WHOLE
+    landing refused on the `[integration]` verify-then-ship path where the
+    inner agent already owns the commit (#1695: `docs/plan.md`/
+    `docs/roadmap.md` landed despite a prose exclusion list).
+
+Both are checked directly in `Kazi.Actions.Integrate`, independent of the
+`[enforcement]` profile — the same "scope contract, not an anti-gaming one"
+line `[scope].deny` already draws.
