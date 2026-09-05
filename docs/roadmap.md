@@ -104,16 +104,37 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
-**In flight (2026-09-05, `/apply` pool run, kazi lane, claims held):** T72.1
-(scope roots + glob overlap, E72 Wave A), T71.1 (#1709 branch-identity env
-for isolated predicates), T69.9 (#1681 `portfolio` in `Kazi.CLI.Schema`),
-T69.10 (#1617 `--project` flag doc). Each converging via `kazi apply
---in-place` in its own offload
-worktree; PRs carry the task id. Found at t0:
-`test/kazi/cli/daemon_reregister_test.exs:43` fails on `main` independently
-of any of these (excluded from T69.9's suite guard; needs its own triage).
-Rescued: orphaned worktree branch `task/e50-safe-concurrent-work` (3 unmerged
-commits + a goal file) pushed to origin; worktree left in place for its owner.
+**In flight (2026-09-05, `/apply --pool`, second dispatch):**
+- T72.1 (scope roots + glob overlap, E72 Wave A) — PR #1746, adopted from a
+  banked worktree (2 commits already there) rather than redrafted; its own
+  tests (9 + 16) green and `mix format --check-formatted` clean before
+  opening the PR. Claim released on PR-open.
+- T69.9 (#1681 `portfolio` in `Kazi.CLI.Schema`) — PR #1740, open, under
+  review by a sibling session; T71.1 (#1709 branch-identity env for isolated
+  predicates) — PR #1742, open, under review. Neither touched by this pass.
+- T69.10 (#1617 `--project` flag doc) — code merged (437f7845) and released
+  in v1.276.1; the plan checkbox itself is still open (T69.10 in
+  `docs/plans/E69.md`) -- a small housekeeping gap for whoever picks it up,
+  not a code gap.
+- T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
+  `Kazi.Runtime.ParentMonitor`), T66.5 (#1483 reopened -- the bounded-mount
+  fix already landed in `RunRegistry.list_recent/1` + `MissionControlLive`;
+  what's missing and now drafted is the acceptance-pinning regression test
+  under a large run history), T70.8 (#1700 -- document the vitest `-t`
+  predicate hazard, pinned by a real fixture): kazi-lane goal-files drafted
+  (red-at-t0 verified directly against the target commands) and dispatched
+  via `kazi apply --in-place` in their own offload worktrees. Still
+  converging (compiling + the full-suite guard) when this pass's 50-minute
+  box closed; claims released per the box so a later pass can pick them up.
+  Worktrees left in place under `/Volumes/BuildOffload/kazi-worktrees/`
+  (`t70-4`, `t66-5`, `t70-8`) for adoption or a fresh re-dispatch.
+Found at t0: `test/kazi/cli/daemon_reregister_test.exs:43` fails on `main`
+independently of any of these (excluded from T69.9's suite guard; needs its
+own triage).
+Rescued (prior pass): orphaned worktree branch `task/e50-safe-concurrent-work`
+(3 unmerged commits + a goal file) pushed to origin; worktree left in place
+for its owner. Also swept this pass: the fully-merged
+`fix/1483-mission-control-unbounded-read` worktree (PR #1605) removed.
 
 **Planned (2026-09-05, ADR-0086 -> E72, 8 tasks, 5 waves):** a
 per-directory `AGENTS.md` node rendered from `goal.toml` + an observe pass,
