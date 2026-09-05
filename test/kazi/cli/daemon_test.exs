@@ -252,6 +252,24 @@ defmodule Kazi.CLI.DaemonTest do
         sock_path = Kazi.Daemon.Supervisor.default_sock_path()
         Kazi.Daemon.Probe.request(sock_path, %{"op" => "shutdown"})
 
+        # The fresh daemon `restart` stood up runs under the DEFAULT supervisor
+        # name (the CLI passes none), and `shutdown` only ASKS it to stop. Wait
+        # for the registration to clear, or the next test that runs the CLI's
+        # `start` races it and gets `{:already_started, pid}` (#1724 flake).
+        case Process.whereis(Kazi.Daemon.Supervisor) do
+          nil ->
+            :ok
+
+          pid ->
+            ref = Process.monitor(pid)
+
+            receive do
+              {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+            after
+              5_000 -> Process.exit(pid, :kill)
+            end
+        end
+
         if previous,
           do: System.put_env("KAZI_STATE_DIR", previous),
           else: System.delete_env("KAZI_STATE_DIR")
