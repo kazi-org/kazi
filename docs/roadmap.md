@@ -328,39 +328,60 @@ second writer against the same JetStream dir). A distinct greppable
 (crash-survives-itself) rolling 60s/3-exit restart-loop window surfaced as an
 additive `nats_health` field on `ping`/`kazi daemon status --json` and a
 `nats: ok` / `nats: RESTART LOOP -- ...` human line. #1719's shim/death-pact
-mechanism untouched. PR #1786, in review as of this note (CI green on all
-gates but the final `mix format + test` job at write time). Verified
-independently: read the full 948-line diff, reran the new
-`nats_bind_conflict_test.exs` (three REAL-process scenarios: a foreign
-`:gen_tcp`-listening decoy, a genuine bare-spawned orphan nats-server with
-only its ppid-1 fact injected via a test seam, and a genuinely-unrelated
-`kill -9`) plus `control_test.exs`/`daemon_test.exs` locally (26/26 passed,
-confirmed real nats-server process output in the log, not mocked), checked
-`mix format` clean and no attribution across all 6 commits.
+mechanism untouched. PR #1786, `62a3e7f3`, released as v1.286.0, closes
+kazi-org/kazi#1684 (auto-closed on merge). Verified independently: read the
+full 948-line diff, reran the new `nats_bind_conflict_test.exs` (three REAL-
+process scenarios: a foreign `:gen_tcp`-listening decoy, a genuine bare-
+spawned orphan nats-server with only its ppid-1 fact injected via a test
+seam, and a genuinely-unrelated `kill -9`) plus
+`control_test.exs`/`daemon_test.exs` locally (26/26 passed, confirmed real
+nats-server process output in the log, not mocked), checked `mix format`
+clean and no attribution across all 6 commits.
 
-**Planning (2026-09-05, not yet minted):** hq ruled (dec-0849, founder-direct)
-that governed lane containers should enter through `kazi apply
-<goal> --single-node --in-place` rather than `claude -p` directly -- kazi
-renders the node, runs its own grind/observe loop, and its predicates decide
-the Job outcome. Relayed via `chief-architect`; dispatched a planning-only
-agent (no code, no PRs) that read ADR-0086, ADR-0087, kazi#1777's actual
-`--single-node` code, sire's ADR-0137, and hq's session-container/dgx-canary
-dispatcher scripts (including `CONTRACT.md`). Plan written to
-`docs/plans/E-KAZI-ENTRYPOINT.md` (untracked, not yet wired into
-`docs/plan.md`'s master index -- that's a decision for chief-architect/a
-human once reviewed): 8 kazi-side tasks (TKE.1-TKE.8, ~24h) plus 6 named
-hq/sire-side dependencies for `sire-planner` to mint. Two judgment calls
-flagged for chief-architect: whether kazi's in-place integrator calls
-git/gh directly or always delegates to an injectable `--integration-command`
-hook (the "git plumbing stays in entrypoint.sh" constraint is in tension with
-kazi's existing `--parallel`-path integrator already shelling to git/gh
-today), and that every repo row is currently `gh none` (dec-0768) so kazi has
-no credential to open a PR with regardless -- a security-model call, not an
-engineering-cost one. Also corrected the dispatch's citation: the real ADR is
-`sirerun/sire/docs/adr/0136-fleetd-node-agent-and-where-the-control-plane-runs.md`,
-not an hq path; confirmed its two payload kinds (prompt / declared connector
-call) are unchanged by this plan. Nothing to ship here before chief-architect
-reviews and sire-planner mints the hq-side rows.
+**Shipped (2026-09-05): T72.3** -- Node renderer, `Kazi.Plan.Render.node/3`
+(ADR-0086 decision 3): pure `(goal, scope root, observe result) -> string`.
+Renders the ADR-0082 "GENERATED -- DO NOT HAND-EDIT" banner (exposed from a
+previously-private `Kazi.Goal.Roadmap.Render` function, reused verbatim so
+both generated views share one banner source), goal id/name/scope
+root/brief, every VISIBLE predicate's definition, and currently-failing
+predicates with evidence -- held-out predicates (ADR-0042 section 6)
+excluded from both sections. No compile-time read-model dependency, enforced
+by inspecting the compiled module's `:beam_lib` imports chunk (same
+technique as `Kazi.Scenario.Pin`), with a sanity test proving the mechanism
+catches a real violation. PR #1791, `14643bb2`. Verified independently: read
+the full diff, reran the golden-file/byte-stability/purity tests locally
+(26/26 passed combined with the roadmap-render and plan-render-CLI suites),
+`mix format` clean, no attribution. Direct-agent dispatch, fourth concurrent
+lane of the sixth dispatch. T72.4 (--tree adapter) is next on E72's critical
+path, unblocked by T72.2 + T72.3.
+
+**Landed (2026-09-05): E-KAZI-ENTRYPOINT plan.** hq ruled (dec-0849,
+founder-direct) that governed lane containers should enter through `kazi
+apply <goal> --single-node --in-place` rather than `claude -p` directly.
+`docs/plans/E-KAZI-ENTRYPOINT.md` merged via PR #1784, `0135c6df` (docs-only):
+8 kazi-side tasks (TKE.1-TKE.8, ~22h after chief-architect's ruling
+simplified TKE.3/TKE.4) plus 6 named hq/sire-side dependencies (D1-D6) for
+sire-planner to mint. chief-architect RULED both judgment calls the planning
+agent flagged: (1) mode B everywhere -- kazi computes the integration action
+and hands it to an injectable `--integration-command` hook; it never calls
+`git push`/`gh pr create`/`gh api` itself and never holds a GitHub credential
+in lane mode (this also fixed TKE.6: review comments arrive via a
+`review_comments` field on the lane contract, not fetched by kazi); (2)
+dec-0768 (gh-none in every container) stays as-is, no founder reopen needed.
+Approved hq-side as epic E7 (T7.1-T7.6, D8-D13 in hq's own plan). While
+scoping hq's lane-mode JSON surface, found and confirmed two things
+chief-architect needed for E7: `kazi apply --help`'s human prose is stale --
+13 of `apply`'s 31 real flags (including `--single-node`) are undocumented
+there, a hand-maintained-heredog-vs-generated-table drift with no existing
+CI guard for flags (only commands); filed
+[kazi-org/kazi#1792](https://github.com/kazi-org/kazi/issues/1792). And
+TKE.7's `job_outcome` field (done/blocked/checkpointed/refused) is NOT yet
+shipped -- hq will not build an interim mapping and instead blocks T7.1/T7.3
+on TKE.3 + TKE.7 landing first (no calendar cost: E7's own sequencing hold
+already parks those rows). Confirmed for hq: a true `--in-place` run never
+adds an `integration` key to the `--json` result (traced
+`land_converged_serial/6`'s short-circuit) -- T7.3 must not wait on it.
+Next: mint and dispatch TKE.3 and TKE.7 as the next kazi pool rows.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
