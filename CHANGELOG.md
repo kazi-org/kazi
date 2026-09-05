@@ -16,6 +16,20 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.281.0](https://github.com/kazi-org/kazi/compare/v1.280.0...v1.281.0) (2026-09-05)
+
+
+### Features
+
+* **goal:** add [scope] forbidden_paths/forbidden_commands/no_integration ([2063197](https://github.com/kazi-org/kazi/commit/20631979365f504aaa98d8b34c2e3f1eab375364))
+* **providers:** forbidden_commands best-effort transcript scan (ADR-0085) ([25e7558](https://github.com/kazi-org/kazi/commit/25e755821e29f7345a22d8fad3e69b3058575a8b))
+* **scope:** support directory-glob suffixes in ScopeDiff.under_any?/2 ([7a9532a](https://github.com/kazi-org/kazi/commit/7a9532a28e0624c929d1d83211b6c17e5da15299))
+
+
+### Bug Fixes
+
+* **integrate:** refuse to land forbidden_paths/no_integration goals ([75c0a29](https://github.com/kazi-org/kazi/commit/75c0a2979f10e88165851f2e099c52529c824f46))
+
 ## [1.280.0](https://github.com/kazi-org/kazi/compare/v1.279.2...v1.280.0) (2026-09-05)
 
 
