@@ -61,6 +61,22 @@ defmodule Kazi.Scope do
 
   All three are additive and default to the empty/off value, so a goal-file
   declaring none of them is byte-identical to before ADR-0085.
+
+  ## `shared_paths` (ADR-0087 decision 4, T73.1)
+
+  `shared_paths` names hotspot files (`mix.exs`, `go.mod`, `docs/plan.md`) this
+  goal touches but does not want treated as a blast-radius overlap: without it,
+  any two goals that both touch a shared hotspot merge into one partition
+  (`Kazi.Partition`) or fleet edge (`Kazi.Fleet`), serializing unrelated work
+  behind that single file. `shared_paths` resolves at FLEET level, not per-goal
+  — `Kazi.Fleet.effective_shared_paths/1` is the union of every member goal's
+  own declaration plus an optional fleet-manifest-level `shared_paths` list.
+  T73.2 excludes the effective set from both the partition survey's blast
+  radius and the fleet's `write_paths` overlap test, and turns each path into a
+  per-file lease key. This field only DECLARES the hotspot; it synthesizes no
+  guard predicate (unlike `deny`/`forbidden_paths`) and enforces nothing by
+  itself. Additive and defaults to `[]`, so a goal-file declaring no
+  `shared_paths` is byte-identical to before this feature.
   """
 
   alias Kazi.Predicate
@@ -73,7 +89,8 @@ defmodule Kazi.Scope do
           deny: [String.t()],
           forbidden_paths: [String.t()],
           forbidden_commands: [String.t()],
-          no_integration: boolean()
+          no_integration: boolean(),
+          shared_paths: [String.t()]
         }
 
   defstruct workspace: nil,
@@ -85,7 +102,9 @@ defmodule Kazi.Scope do
             # existing field order is untouched. See moduledoc.
             forbidden_paths: [],
             forbidden_commands: [],
-            no_integration: false
+            no_integration: false,
+            # ADR-0087 decision 4 / T73.1: additive, appended last. See moduledoc.
+            shared_paths: []
 
   @doc """
   Builds a scope.
@@ -105,7 +124,8 @@ defmodule Kazi.Scope do
       deny: Keyword.get(opts, :deny, []),
       forbidden_paths: Keyword.get(opts, :forbidden_paths, []),
       forbidden_commands: Keyword.get(opts, :forbidden_commands, []),
-      no_integration: Keyword.get(opts, :no_integration, false)
+      no_integration: Keyword.get(opts, :no_integration, false),
+      shared_paths: Keyword.get(opts, :shared_paths, [])
     }
   end
 
