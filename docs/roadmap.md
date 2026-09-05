@@ -433,6 +433,26 @@ once as an L-0033-class timing flake -- neither correct; it's deterministic,
 not intermittent, and not one of L-0033's three named tests). PR #1797,
 fixed by clearing/restoring both vars in the test's own `setup` block;
 documented as `docs/lore.md` L-0055 so it isn't misdiagnosed a third time.
+Merged (`1b65ff9f`). The T72.4-dispatch/TKE.1-tick roadmap PR (#1799) hit its
+own doc-command-accuracy failure for the same reason it warned about above --
+`--tree` referenced in this file before T72.4 ships -- fixed with the
+established `<!-- verb-drift:allow: ... -->` inline-comment escape (repo
+precedent `18e6476a`) and merged (`ef8f4f51`).
+
+**Dispatched (2026-09-05, eighth dispatch): TKE.2, TKE.3, TKE.8a** -- the next
+unblocked wave now that TKE.1 has landed (Wave KE-B/KE-C/KE-A's doc-only half,
+`docs/plans/E-KAZI-ENTRYPOINT.md` section 3.3). TKE.2 (render-freshness check
+against the lane contract's `render_sha256`, reusing T72.3's `Render.node/3`)
+and TKE.3 (`--integration-command` hook -- kazi computes the PR/branch/trailer
+action and hands it to an external publisher, never calling `git push`/`gh`
+itself in lane mode, per chief-architect's "mode B everywhere" ruling folded
+into the plan's section 3.2) run as independent lanes, both depending only on
+TKE.1. TKE.8a (new `docs/schemas/check-result.md`, documenting `--check
+--json`'s existing but previously-undocumented shape) is a small, no-code-dep
+doc task that was schedulable since Wave KE-A but hadn't been dispatched yet.
+All three claimed via claim.sh, fresh worktrees off `origin/main`
+(`ef8f4f51`), `mix compile` verified clean before dispatch. Still in progress
+alongside the ongoing TKE.7 fix-and-repush and T72.4.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
