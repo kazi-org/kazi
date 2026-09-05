@@ -47,10 +47,27 @@ defmodule Kazi.Bus.DiscoveryAuditTest do
   # Every PUBLIC verb that routes through `with_conn/2`. Derived by mapping each
   # `with_conn(opts, ...)` call site to its enclosing public function; `scope/1`
   # and `attention_topic/1` are NOT here (they are pure helpers that never reach
-  # the bus, despite sitting near a call site).
+  # the bus, despite sitting near a call site). `read_digest/1` is also NOT
+  # here: its default path calls `Probe.request/3` directly against the
+  # control socket (never `nats_host`/`nats_port`, never `Gnat.start_link`), so
+  # `BusPeer`'s blackhole/refuse simulation -- which is encoded in the pong's
+  # `nats_host`/`nats_port` -- cannot reach it; only its `opts[:full]` mode
+  # delegates to `read/1`, `peek/1`, `read_since/2` (already covered below).
+  #
+  # `read` and `peek` route through `with_conn/2` INDIRECTLY, via the private
+  # `consume/2` helper they both call -- a call-site-to-enclosing-function
+  # mapping done literally (as the original #1649 sweep did) walks up to
+  # `consume/2` and stops there, since it is not itself public, and so misses
+  # that `read/1`/`peek/1` are its two public callers. `retract/2` did not
+  # exist at all when the original sweep landed (added later by #1687); it
+  # reaches `with_conn/2` on its binary-topic clause. All three were absent
+  # from the original 15-verb list and are added here to keep this audit
+  # honest against the CURRENT public surface, not just the one that existed
+  # in July.
   @verbs ~w(
     post tell who board join join_derived leave name assign_name
     name_bindings read_since status get waiting_on_operator? watch
+    read peek retract
   )
 
   # Drive `fun` in a NON-TRAPPING process and assert the #1606 contract: it
@@ -102,6 +119,9 @@ defmodule Kazi.Bus.DiscoveryAuditTest do
   defp call_verb("status", o), do: Bus.status(1, o)
   defp call_verb("get", o), do: Bus.get(1, o)
   defp call_verb("waiting_on_operator?", o), do: Bus.waiting_on_operator?(o)
+  defp call_verb("read", o), do: Bus.read(o)
+  defp call_verb("peek", o), do: Bus.peek(o)
+  defp call_verb("retract", o), do: Bus.retract("some-topic", o)
   # `watch` owns a long internal bound by design; pin it short so the blackhole
   # case bounds inside this test rather than its default wait.
   defp call_verb("watch", o), do: Bus.watch([timeout: 1] ++ o)
