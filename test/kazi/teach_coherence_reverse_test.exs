@@ -68,7 +68,9 @@ defmodule Kazi.TeachCoherenceReverseTest do
     "--strict-landing" =>
       "opt-in exit-code/landing coupling (issue #1407); an advanced CI-gate flag documented in docs/landing.md and docs/schemas/run-result.md, not part of the intro recipes",
     "--single-node" =>
-      "T73.5 (ADR-0086/ADR-0087): caps this invocation to one node for a Sire dispatcher lane (the KAZI_SINGLE_NODE env var is the mechanism a lane contract actually sets); an internal fleet-scheduling flag documented in `kazi help apply` and docs/schemas/run-result.md + docs/schemas/collective-result.md, not part of the intro recipes"
+      "T73.5 (ADR-0086/ADR-0087): caps this invocation to one node for a Sire dispatcher lane (the KAZI_SINGLE_NODE env var is the mechanism a lane contract actually sets); an internal fleet-scheduling flag documented in `kazi help apply` and docs/schemas/run-result.md + docs/schemas/collective-result.md, not part of the intro recipes",
+    "--lane-contract" =>
+      "TKE.1 (ADR-0086/ADR-0087): the governed-lane task_sha match check (the KAZI_LANE_CONTRACT env var is the mechanism a lane contract actually sets); an internal, --single-node-paired dispatcher flag documented in `kazi help apply` and docs/schemas/run-result.md, not part of the intro recipes"
   }
 
   describe "every real `apply` flag is documented somewhere (the reverse guard, issue #973)" do
