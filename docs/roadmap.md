@@ -173,7 +173,13 @@ findings on the issue rather than closing it -- reversing a maintainer's
 DECIDED call isn't a task lane's or pool orchestrator's call to make.
 **Needs David's or the original decider's input**: confirm where the
 behavior was actually observed, or close #1702 as not-reproducible and mark
-T70.10 invalidated in `docs/plans/E70.md`.
+T70.10 invalidated in `docs/plans/E70.md`. **Update 2026-09-05:** routed to
+`chief` for founder-card queuing (this isn't resolvable by more technical
+diligence -- it needs the original decider's memory of what was observed).
+Queued in `dndungu/hq`'s `docs/FOUNDER-QUEUE.md` with a standing default: if
+unanswered by the next founder sync, close #1702 as not-reproducible and
+mark T70.10 invalidated, per that card-resolution policy. No action needed
+here until either David answers or that default fires.
 
 Found at t0: `test/kazi/cli/daemon_reregister_test.exs:43` fails on `main`
 independently of any of the above (excluded from T69.9's suite guard; needs
