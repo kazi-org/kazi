@@ -115,8 +115,9 @@ parallel" means. Tamper protection is freshness plus auto-added ADR-0085
 `forbidden_paths`, never sealing a derived file. Reviewed by two
 coordinating sessions before the ADR; the fleet-repo dispatcher half is
 tracked in that repo. Shipped: PR #1731 (ADR-0086 + E72, rebase-merged
-2026-09-05 at `22d92b2e`). Unstarted: all of E72. **ADR-0087 (in flight,
-2026-09-05):** the scheduling boundary -- kazi plans (nodes, edges, `--dag`
+2026-09-05 at `22d92b2e`). Unstarted: all of E72. **ADR-0087 (shipped, PR
+#1732, rebase-merged 2026-09-05 at `93f758a9`; implementing epic E73, 7 tasks,
+4 waves, planned 2026-09-05, T73.1 depends on E72 T72.1):** the scheduling boundary -- kazi plans (nodes, edges, `--dag`
 export, per-node render), the fleet dispatcher schedules and executes one
 goal per container with fleet and partitions off via a `single_node`
 contract flag, the concurrency cap lives only in the dispatcher;
