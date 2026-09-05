@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.280.0](https://github.com/kazi-org/kazi/compare/v1.279.2...v1.280.0) (2026-09-05)
+
+
+### Features
+
+* **goal:** add the [setup] goal-file block schema (T69.12, ADR-0088) ([71033b1](https://github.com/kazi-org/kazi/commit/71033b164859e629d0084141cb935a93d0001d48))
+* **runtime:** run the declared [setup] step before t0 observation (T69.12) ([33172a8](https://github.com/kazi-org/kazi/commit/33172a8c5cccb6d964b6f31a95e8273e09c53323))
+
 ## [1.279.2](https://github.com/kazi-org/kazi/compare/v1.279.1...v1.279.2) (2026-09-05)
 
 
