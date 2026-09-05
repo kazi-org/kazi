@@ -91,6 +91,36 @@ defmodule Kazi.Actions.Integrate do
   "whatever branch HEAD is on" silently passing against a substituted integrate
   branch while the named task branch had zero commits.
 
+  ## Scope-declared landing refusals (ADR-0085, kazi-org/kazi#1695/#1704)
+
+  Two `[scope]` fields make Integrate refuse to land, STRUCTURALLY — the
+  controller's own tooling refuses, not merely a detected-after-the-fact
+  report (that half already exists as the `Kazi.Providers.ScopeGuard` /
+  `:scope_forbidden_paths` guard predicate `Kazi.Scope.guard_predicates/1`
+  synthesizes; this is the other half):
+
+    * `[scope].no_integration = true` — `execute/2` returns
+      `{:ok, %{skipped: :no_integration}}` before touching git AT ALL: no
+      branch, no commit, no push, no PR, no merge. Checked directly off
+      `goal.scope.no_integration` (not `goal.integration.mode`) so the refusal
+      holds even for a goal struct built without going through
+      `Kazi.Goal.new/2`'s mode-`:none` override.
+    * `[scope].forbidden_paths = [...]` — a touched forbidden path is refused
+      from what actually lands:
+        * **legacy path** (no `[integration]` block) — `unstage_forbidden/2`
+          runs after staging, before commit: any staged path matching
+          `forbidden_paths` is `git reset`-unstaged, so it is EXCLUDED from
+          the landed commit (left modified-but-uncommitted in the working
+          tree, not silently discarded).
+        * **verify-then-ship path** (`[integration]` mode `commit`/`branch`/
+          `pr`/`merge`) — the inner agent already committed its own work, so a
+          touched forbidden path there cannot be surgically excluded without
+          rewriting the agent's history (a destructive op this action will not
+          perform). Instead the WHOLE landing is refused —
+          `{:error, {:forbidden_path_touched, paths}}` — before any push, the
+          same "verify before shipping" discipline `verify_clean_committed/2`
+          already applies to a dirty tree.
+
   ## Integrate discipline (issue #819)
 
   A live firing of this action once committed ~1800 untracked-but-unignored
@@ -137,6 +167,7 @@ defmodule Kazi.Actions.Integrate do
   alias Kazi.Providers.Landed
   alias Kazi.ReadModel.RunRegistry
   alias Kazi.Scope
+  alias Kazi.ScopeDiff
 
   @typedoc """
   The request handed to the integrator seam to open + merge a PR. The local git
@@ -187,22 +218,42 @@ defmodule Kazi.Actions.Integrate do
   @spec execute(Action.t(), Action.context()) :: Action.result()
   def execute(%Action{kind: :integrate} = action, context) do
     with {:ok, workspace} <- fetch_workspace(action, context) do
-      case already_landed(workspace) do
-        {:ok, branch, commit} ->
-          {:ok, base} = resolve_base(workspace, action.params)
-          {:ok, %{branch: branch, commit: commit, base: base, already_landed: true}}
+      # ADR-0085 (#1704): checked FIRST, before even the already-landed
+      # idempotence check — a `no_integration` goal never lands a PR, full
+      # stop, so nothing below this line may run for it.
+      if no_integration?(context[:goal]) do
+        {:ok, %{skipped: :no_integration}}
+      else
+        case already_landed(workspace) do
+          {:ok, branch, commit} ->
+            {:ok, base} = resolve_base(workspace, action.params)
+            {:ok, %{branch: branch, commit: commit, base: base, already_landed: true}}
 
-        :not_landed ->
-          if verifies_then_ships?(context) do
-            verify_then_ship(workspace, action, context)
-          else
-            do_integrate(workspace, action, context)
-          end
+          :not_landed ->
+            if verifies_then_ships?(context) do
+              verify_then_ship(workspace, action, context)
+            else
+              do_integrate(workspace, action, context)
+            end
+        end
       end
     end
   end
 
   def execute(%Action{kind: kind}, _context), do: {:error, {:unsupported_kind, kind}}
+
+  # ADR-0085 (#1695/#1704): checked directly off `scope.no_integration`, NOT
+  # `goal.integration.mode` — `Kazi.Goal.new/2` already forces the mode-`:none`
+  # override, but checking the scope flag itself here is defense in depth for a
+  # goal struct assembled without going through `new/2` (a direct `%Goal{}`
+  # literal, as several existing tests in this repo already do).
+  defp no_integration?(%{scope: %Scope{no_integration: true}}), do: true
+  defp no_integration?(_goal), do: false
+
+  # ADR-0085: the goal's declared `[scope].forbidden_paths` (`[]` when the
+  # goal carries no scope, or declares none).
+  defp forbidden_paths(%{scope: %Scope{forbidden_paths: paths}}) when is_list(paths), do: paths
+  defp forbidden_paths(_goal), do: []
 
   # T44.3 (ADR-0055): a goal that declares an `[integration] mode` (commit | branch
   # | pr | merge) opts into the verifies-then-ships contract — the INNER AGENT owns
@@ -229,6 +280,7 @@ defmodule Kazi.Actions.Integrate do
 
     with {:ok, base} <- resolve_base(workspace, action.params),
          {:ok, branch} <- verify_clean_committed(workspace, base),
+         :ok <- verify_no_forbidden_paths(workspace, base, forbidden_paths(goal)),
          {:ok, commit} <- head_sha(workspace),
          {:ok, _} <- push(workspace, branch),
          {:ok, remote} <-
@@ -279,6 +331,27 @@ defmodule Kazi.Actions.Integrate do
     end
   end
 
+  # ADR-0085 (#1695): the verify-then-ship refusal half of `forbidden_paths`.
+  # The inner agent already committed `base..branch` by the time this runs
+  # (`verify_clean_committed/2` just confirmed a clean, committed tree), so a
+  # touched forbidden path cannot be surgically excluded without rewriting the
+  # agent's own commit history — a destructive rewrite this action refuses to
+  # perform. Instead the WHOLE landing is refused, before any push, so the
+  # branch is never pushed and no PR is ever opened for it.
+  defp verify_no_forbidden_paths(_workspace, _base, []), do: :ok
+
+  defp verify_no_forbidden_paths(workspace, base, forbidden) do
+    touched =
+      workspace
+      |> ScopeDiff.changed_paths(base)
+      |> Enum.filter(&ScopeDiff.under_any?(&1, forbidden))
+
+    case touched do
+      [] -> :ok
+      paths -> {:error, {:forbidden_path_touched, paths}}
+    end
+  end
+
   defp current_branch(workspace) do
     case git(workspace, ["rev-parse", "--abbrev-ref", "HEAD"]) do
       {:ok, out} -> String.trim(out)
@@ -296,6 +369,7 @@ defmodule Kazi.Actions.Integrate do
          message = resolve_message(action.params, branch, base, goal, passed),
          {:ok, _} <- create_branch(workspace, branch),
          :ok <- stage_all(workspace, resolve_scope(context), context),
+         :ok <- unstage_forbidden(workspace, forbidden_paths(goal)),
          {:ok, commit} <- commit(workspace, message),
          {:ok, _} <- push(workspace, branch),
          {:ok, remote} <-
@@ -553,6 +627,40 @@ defmodule Kazi.Actions.Integrate do
     case git(workspace, ["add", "-u"]) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, {:stage_failed, reason}}
+    end
+  end
+
+  # ADR-0085 (#1695): the legacy-path refusal half of `forbidden_paths`. Runs
+  # AFTER `stage_all/3`, BEFORE `commit/2`: any path just staged that matches a
+  # declared `forbidden_paths` entry is `git reset`-unstaged, excluding it from
+  # the commit this action is about to make. The path's own modification is
+  # left in the working tree (uncommitted, dirty) — never destroyed, never
+  # landed. A goal with no `forbidden_paths` declared is a no-op, so this
+  # changes nothing for the common case.
+  defp unstage_forbidden(_workspace, []), do: :ok
+
+  defp unstage_forbidden(workspace, forbidden) do
+    case git(workspace, ["diff", "--cached", "--name-only"]) do
+      {:ok, out} ->
+        offending =
+          out
+          |> String.split("\n", trim: true)
+          |> Enum.filter(&ScopeDiff.under_any?(&1, forbidden))
+
+        case offending do
+          [] -> :ok
+          paths -> unstage(workspace, paths)
+        end
+
+      {:error, reason} ->
+        {:error, {:diff_cached_failed, reason}}
+    end
+  end
+
+  defp unstage(workspace, paths) do
+    case git(workspace, ["reset", "--"] ++ paths) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:unstage_forbidden_failed, reason}}
     end
   end
 
