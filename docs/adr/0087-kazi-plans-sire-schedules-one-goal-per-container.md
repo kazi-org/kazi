@@ -130,8 +130,13 @@ has no evidence yet. Revisit once decisions 4 and 5 have run at least once.
 - The layering question has one answer: no layer parallelizes what another
   layer already parallelized, and the check is a flag the dispatcher records
   and kazi honors, not an operator convention.
-- Hotspot files stop serializing whole fleets; the cost of a shared file is
-  one lease around one integration step.
+- Hotspot files stop merging unrelated goals into one partition. In the
+  interactive adapter the cost of a shared file is one lease around one
+  integration step. Under the lane adapter in v1 every Job sharing a key is
+  pairwise excluded for the Attempt's lifetime, which chains that key's
+  sharers into the same serialization an overlap edge would give; the gain
+  there is only that goals sharing different keys no longer collapse into
+  one partition.
 - The kazi-dispatcher interface is one exported document, so either side can
   change its internals without the other noticing.
 
