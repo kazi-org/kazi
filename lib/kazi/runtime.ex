@@ -48,7 +48,8 @@ defmodule Kazi.Runtime do
     PredicateResult,
     PredicateVector,
     ReadModel,
-    Scope
+    Scope,
+    Setup
   }
 
   alias Kazi.Runtime.GoalDrift
@@ -266,6 +267,11 @@ defmodule Kazi.Runtime do
       `:infinity`).
     * `:providers` — override the predicate-kind → provider-module map (advanced;
       defaults to the built-in Slice-0 map).
+    * `:setup_command_runner` — override the goal's declared `[setup]` step's
+      command-execution seam (T69.12, ADR-0088), the same
+      `(cmd, args, opts, timeout_ms -> CommandRunner.result())` contract as
+      `Kazi.Providers.CommandRunner.run/4` (the default). Advanced; hermetic
+      tests use it to avoid shelling out for real.
     * `:enforcement` — a `Kazi.Enforcement` profile to apply (T32.4, ADR-0042),
       overriding the goal's authored/derived profile. Omitted, the policy is
       resolved from the goal: default-on for creation-mode goals, opt-in for repair.
@@ -288,8 +294,28 @@ defmodule Kazi.Runtime do
       forwarded verbatim to `Kazi.Loop.start_link/1`.
 
   Returns `{:ok, result}` once the loop terminates, or `{:error, reason}` if the
-  loop could not be started, a predicate names an unknown provider, or the goal is
-  vacuous (`{:error, :vacuous_goal}` — see the t0 guard below).
+  loop could not be started, a predicate names an unknown provider, the goal's
+  declared setup step failed (`{:error, {:setup_failed, _}}` — see below), or the
+  goal is vacuous (`{:error, :vacuous_goal}` — see the t0 guard below).
+
+  ## Setup step (T69.12, ADR-0088, issue #1642)
+
+  Before the vacuous-goal guard's t0 observation, `run/2` runs the goal's
+  declared `[setup]` provisioning commands (`Kazi.Setup`) ONCE, in the
+  workspace — e.g. `mix deps.get` for a mix-backed predicate goal. A `kazi
+  apply` task worktree is created via `git worktree add`, which carries no
+  `deps/`/`_build`/`node_modules`; without a setup step, a build-tool-backed
+  predicate is red at t0 for that ENVIRONMENTAL reason regardless of the
+  goal's real state, defeating the "red-at-t0 proves the predicate measures
+  real behavior" guarantee below. A goal with no `[setup]` block is
+  byte-identical to before this feature existed. A setup command that exits
+  non-zero, cannot be started, or overruns its (always-bounded)
+  `[setup].timeout_ms` STOPS the run and reports
+  `{:error, {:setup_failed, failure}}` — a distinct, named INFRASTRUCTURE
+  error, never a predicate `:fail` verdict (the same `:error`-vs-`:fail`
+  boundary ADR-0002 draws, and the same shape `{:error,
+  {:startup_deadline_exceeded, ms}}` already uses for the sibling
+  environment-error case, issue #1683).
 
   ## Vacuous-goal guard (T2.3, UC-010, Risk R3)
 
@@ -345,6 +371,13 @@ defmodule Kazi.Runtime do
 
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
+         # T69.12 (ADR-0088, issue #1642): run the goal's declared `[setup]`
+         # provisioning commands ONCE, in the workspace, BEFORE the t0
+         # observation below — so a build-tool-backed predicate is never red
+         # because a fresh `git worktree` never ran `mix deps.get` (or any
+         # language-appropriate equivalent). A goal with no `[setup]` block is
+         # byte-identical to before (`Kazi.Setup.run/3` no-ops on nil/`[]`).
+         :ok <- run_setup(goal, workspace, opts),
          :ok <- guard_not_vacuous(goal, providers, workspace, startup_timeout_ms),
          :ok <- guard_no_live_duplicate(goal, opts),
          :ok <- guard_no_workspace_collision(goal, opts, workspace) do
@@ -428,7 +461,10 @@ defmodule Kazi.Runtime do
           :goal_source,
           # ADR-0081 (#1521): the injectable capture command runner is consumed by
           # build_capture_fn/4 below, not a Loop opt.
-          :capture_runner
+          :capture_runner,
+          # T69.12 (ADR-0088, issue #1642): the injectable setup command runner
+          # is consumed by run_setup/3 above, not a Loop opt.
+          :setup_command_runner
         ])
         |> Keyword.merge(
           goal: goal,
@@ -579,15 +615,21 @@ defmodule Kazi.Runtime do
 
   Returns `{:ok, %{status: :pass | :fail, vector: PredicateVector.t()}}`, or
   `{:error, reason}` if the goal names a predicate kind with no registered
-  provider (the same resolution error `run/2` returns).
+  provider (the same resolution error `run/2` returns), or its declared
+  `[setup]` step failed (`{:error, {:setup_failed, _}}`, T69.12, ADR-0088 —
+  see `run/2`'s "Setup step" section; `check/2` runs the SAME setup step
+  `run/2` does, before this SAME t0 observation, so a merge-gate check
+  against an unprovisioned workspace is never a false red either).
 
   ## Options
 
-  Accepts `:workspace`, `:providers`, and `:enforcement` — the same meaning as in
-  `run/2`. Every other `run/2` option (harness, budget, persistence, streaming,
-  deploy/integrate params, ...) is irrelevant here, since nothing is dispatched.
+  Accepts `:workspace`, `:providers`, `:enforcement`, and
+  `:setup_command_runner` — the same meaning as in `run/2`. Every other `run/2`
+  option (harness, budget, persistence, streaming, deploy/integrate params,
+  ...) is irrelevant here, since nothing is dispatched.
   """
-  @spec check(Goal.t(), keyword()) :: {:ok, check_result()} | {:error, term()}
+  @spec check(Goal.t(), keyword()) ::
+          {:ok, check_result()} | {:error, term()} | {:error, {:setup_failed, Setup.failure()}}
   def check(%Goal{} = goal, opts \\ []) do
     workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
 
@@ -602,7 +644,11 @@ defmodule Kazi.Runtime do
             Enforcement.guard_predicates(enforcement) ++ Scope.guard_predicates(goal.scope)
     }
 
-    with {:ok, providers} <- resolve_providers(goal, opts) do
+    with {:ok, providers} <- resolve_providers(goal, opts),
+         # T69.12 (ADR-0088, issue #1642): the SAME setup step run/2 runs,
+         # before this SAME t0 observation (observe_t0/3) — a `kazi check`
+         # against a freshly created worktree must not be a false red either.
+         :ok <- run_setup(goal, workspace, opts) do
       vector = observe_t0(goal, providers, workspace)
       status = if PredicateVector.satisfied?(vector), do: :pass, else: :fail
       {:ok, %{status: status, vector: vector}}
@@ -706,6 +752,28 @@ defmodule Kazi.Runtime do
         )
 
         {:error, {:startup_deadline_exceeded, deadline_ms}}
+    end
+  end
+
+  # =============================================================================
+  # Setup step (T69.12, ADR-0088, issue #1642)
+  # =============================================================================
+
+  # Runs the goal's declared `[setup]` provisioning commands ONCE, in the
+  # workspace, before `guard_not_vacuous`'s t0 observation — a mix-backed (or
+  # any build-tool-backed) predicate must never be red because a fresh `git
+  # worktree` never ran `mix deps.get`, only because the PRODUCT is wrong. A
+  # goal with no `[setup]` block is byte-identical to before this feature
+  # existed (`Kazi.Setup.run/3` no-ops on `nil`/`commands: []`). A failure here
+  # fails the `with`-chain in `run/2` the same way `guard_not_vacuous` does: no
+  # run record exists yet (registration happens after this guard), so nothing
+  # is orphaned at "running" forever.
+  @spec run_setup(Goal.t(), term(), keyword()) ::
+          :ok | {:error, {:setup_failed, Setup.failure()}}
+  defp run_setup(%Goal{setup: setup}, workspace, opts) do
+    case Keyword.fetch(opts, :setup_command_runner) do
+      {:ok, runner} -> Setup.run(setup, workspace, command_runner: runner)
+      :error -> Setup.run(setup, workspace, [])
     end
   end
 

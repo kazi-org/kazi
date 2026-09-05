@@ -4187,6 +4187,24 @@ defmodule Kazi.CLI do
         "or capture command that never returns. Inspect the goal's observe-time " <>
         "commands; tune the deadline with KAZI_APPLY_STARTUP_TIMEOUT_MS."
 
+  # T69.12 (ADR-0088, issue #1642): a declared `[setup]` command failed BEFORE the
+  # t0 observation — a distinct environment/provisioning error, never a predicate
+  # verdict (ADR-0002's :error vs :fail boundary). `:raised` (could not start at
+  # all) gets its own wording; `:exit_code`/`:timeout` already carry a
+  # self-descriptive `detail` (`Kazi.Setup.run/3`) so they render as-is.
+  defp format_run_error({:setup_failed, %{command: command, reason: :raised, detail: detail}}) do
+    "goal [setup] step failed before t0 observation (issue #1642): `#{command}` could " <>
+      "not run (#{detail}) — this is an environment/provisioning error, not a predicate " <>
+      "result. Fix the setup command (or the goal's declared [setup] commands) and re-run."
+  end
+
+  defp format_run_error({:setup_failed, %{command: command, detail: detail}}) do
+    "goal [setup] step failed before t0 observation (issue #1642): `#{command}` " <>
+      detail <>
+      " — this is an environment/provisioning error, not a predicate result. Fix the " <>
+      "setup command (or the goal's declared [setup] commands) and re-run."
+  end
+
   defp format_run_error({:duplicate_run, %{run_id: run_id} = live}) do
     session = if live[:session_name], do: " session=#{live[:session_name]}", else: ""
 
