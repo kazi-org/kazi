@@ -147,6 +147,7 @@ defmodule Kazi.CLI do
     dry_run: :boolean,
     fleet: :boolean,
     fleet_concurrency: :integer,
+    single_node: :boolean,
     pause_between_waves: :boolean,
     resume: :string,
     check: :boolean,
@@ -274,6 +275,8 @@ defmodule Kazi.CLI do
       "`apply` only (T50.4/T50.5, ADR-0065 decision 3): treat the positional argument as a fleet — a DIRECTORY of *.goal.toml files (non-recursive, sorted) or a manifest .toml file ([[member]] path = \"...\" entries) — instead of a single goal-file. Builds a fleet DAG (explicit [metadata] depends_on edges + inferred scope-overlap serialization) and EXECUTES it through the partition scheduler one level up: each member goal runs in its own kazi-owned task worktree off the shared --workspace base, dispatching the instant its deps settle (pipelined frontiers), landing converged work on the base per the serial landing, with a registry row per member and an honest-unknown economy rollup in the terminal object. With --explain: print the schedule and dispatch nothing.",
     fleet_concurrency:
       "`apply --fleet` only (T50.5): cap how many fleet member goals RUN at once (a counting-semaphore gate around the member runner; DAG readiness/frontier semantics are untouched). Default: unbounded within a frontier — every ready member runs concurrently, the same behavior as a needs-DAG goal's groups.",
+    single_node:
+      "`apply` only (T73.5, ADR-0086/ADR-0087): cap this invocation to ONE node -- refuse --fleet and refuse a --parallel goal-set that would partition into more than one partition, BEFORE any load/dispatch (no Kazi.Fleet.load/1 call, no Kazi.Scheduler.run_goals/2 call, no partition worktree/lease/harness). The equivalent env var KAZI_SINGLE_NODE=1 (or \"true\") is the mechanism a Sire lane contract sets without a CLI change (ADR-0086's lane adapter passes dispatch inputs by contract file + env); either means single_node is ON. A refusal exits non-zero with `\"reason\": \"single_node_violation\"` under --json (an `error:`-prefixed line under human output) naming what was attempted. A one-partition goal-set is unaffected: it runs normally and its --json terminal result carries the additive `\"single_node\": true`. Unset (neither the flag nor the env var), behavior is byte-identical to today -- no refusal, and the result never carries a `single_node` key at all.",
     pause_between_waves:
       "`apply` only (T50.3, ADR-0065 decision 3, issue #936): the supervised-checkpoint mode. With --parallel on a needs-DAG/group goal, or with --fleet, stop STARTING new groups once the current frontier settles (in-flight groups finish, by pipelining), persist a resume checkpoint to the read-model, and exit 0 with a `paused` collective carrying a resume_token — continue later with --resume <token>. Rejected without --parallel/--fleet (a serial loop has no wave boundaries); on a flat goal-set with no frontiers it is a no-op, mirroring frontier_complete.",
     resume:
@@ -389,6 +392,7 @@ defmodule Kazi.CLI do
         :dry_run,
         :fleet,
         :fleet_concurrency,
+        :single_node,
         :pause_between_waves,
         :resume,
         :check,
@@ -2135,6 +2139,17 @@ defmodule Kazi.CLI do
     do: {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
 
   # The `apply` parse body (parses to the internal `{:run, ...}` tuple).
+  # T73.5 (ADR-0086/ADR-0087): whether single_node mode is ON for this
+  # invocation -- EITHER the `--single-node` flag OR the `KAZI_SINGLE_NODE`
+  # env var (the lane-contract equivalent: ADR-0086's lane adapter passes
+  # dispatch inputs by contract file + env, without a CLI change), read the
+  # same way `KAZI_STARTUP_WATCHDOG_HALT` is
+  # (lib/kazi/startup_watchdog.ex:189): "1" or "true".
+  @spec single_node_requested?(keyword()) :: boolean()
+  defp single_node_requested?(flags) do
+    flags[:single_node] == true or System.get_env("KAZI_SINGLE_NODE") in ["1", "true"]
+  end
+
   defp parse_run(goal_file, rest, flags) do
     case rest do
       # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
@@ -2192,6 +2207,7 @@ defmodule Kazi.CLI do
           explain: flags[:explain] || flags[:dry_run] || false,
           fleet: flags[:fleet] || false,
           fleet_concurrency: flags[:fleet_concurrency],
+          single_node: single_node_requested?(flags),
           pause_between_waves: flags[:pause_between_waves] || false,
           resume: flags[:resume],
           check: flags[:check] || false
@@ -2288,6 +2304,17 @@ defmodule Kazi.CLI do
   @spec emit_json_error(String.t()) :: :ok
   defp emit_json_error(message) when is_binary(message) do
     IO.puts(encode_json!(%{error: message, schema_version: @run_schema_version}))
+  end
+
+  # T73.5: the same envelope, with extra structured fields merged in (e.g. a
+  # `reason` a lane contract branches on) -- for a refusal that has no `Goal`
+  # to hang a `goal_id`/`status` off of (the --fleet path refuses before ANY
+  # goal-file loads), so the fuller `run_error_json/3` shape doesn't apply.
+  @spec emit_json_error(String.t(), map()) :: :ok
+  defp emit_json_error(message, extra) when is_binary(message) and is_map(extra) do
+    IO.puts(
+      encode_json!(Map.merge(%{error: message, schema_version: @run_schema_version}, extra))
+    )
   end
 
   defp format_invalid(invalid) do
@@ -2435,6 +2462,15 @@ defmodule Kazi.CLI do
   # code (never halts) so it stays testable.
   defp execute_run(goal_source, opts, runtime_opts) do
     cond do
+      # T73.5 (ADR-0086/ADR-0087): single_node mode caps this invocation to ONE
+      # node -- a fleet spans multiple goal-files/worktrees by construction, so
+      # it is refused OUTRIGHT before `Kazi.Fleet.load/1` is ever called: no
+      # fleet load, no worktree, no run record. Checked FIRST, before the
+      # existing --fleet branch, so single_node can never fall through to a
+      # real fleet execution.
+      opts[:single_node] == true and opts[:fleet] == true ->
+        refuse_single_node_fleet(goal_source, opts)
+
       opts[:fleet] == true ->
         execute_fleet(goal_source, opts, runtime_opts)
 
@@ -2730,6 +2766,29 @@ defmodule Kazi.CLI do
   defp fleet_error(message, opts) do
     if json?(opts) do
       emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  # T73.5 (ADR-0086/ADR-0087, CAPABILITY 1/4): single_node + --fleet is
+  # refused BEFORE `Kazi.Fleet.load/1` ever runs -- `goal_source` here is
+  # still just the raw positional argument (the fleet dir/manifest path), not
+  # a loaded `Kazi.Fleet` struct. The `reason` field is always the literal
+  # string "single_node_violation" (never derived/inspected), so a lane
+  # contract can branch on it as a stable machine-readable value.
+  defp refuse_single_node_fleet(path, opts) do
+    message =
+      "single_node mode is ON (--single-node or KAZI_SINGLE_NODE) but --fleet #{path} " <>
+        "was requested; a fleet spans multiple goal-files/worktrees by construction, so " <>
+        "single_node refuses it before Kazi.Fleet.load/1 ever runs -- no fleet load, " <>
+        "worktree, or run record is created. Drop --single-node/KAZI_SINGLE_NODE, or " <>
+        "drop --fleet."
+
+    if json?(opts) do
+      emit_json_error(message, %{reason: "single_node_violation"})
     else
       IO.puts(:stderr, "error: #{message}")
     end
@@ -3095,6 +3154,19 @@ defmodule Kazi.CLI do
           (opts[:parallel] == true or opts[:in_place] == true) ->
         refuse_primary_workspace(goal, opts)
 
+      # T73.5 (ADR-0086/ADR-0087, CAPABILITY 2/4): single_node caps this
+      # invocation to ONE partition. Computed the SAME way `explain_schedule/3`
+      # computes it (`frontiers/1` + `explain_partition/4` over the same
+      # `:graph_source` seam) so single_node's count can never disagree with
+      # what `--explain` would show; summed across every frontier. Checked
+      # AFTER the flag-interplay/primary-workspace guards above and BEFORE the
+      # real parallel dispatch, so `Kazi.Scheduler.run_goals/2` is never
+      # called, and no partition worktree/lease/harness is ever created, when
+      # this refuses. A single-partition goal-set is unaffected.
+      opts[:single_node] == true and opts[:parallel] == true and
+          single_node_partition_count(goal, opts, runtime_opts) > 1 ->
+        refuse_single_node_partition(goal, opts, runtime_opts)
+
       opts[:parallel] == true ->
         with_preflight(goal, opts, persist?, fn ->
           warn_unwritable_permission_mode(goal, opts)
@@ -3364,6 +3436,44 @@ defmodule Kazi.CLI do
     1
   end
 
+  # T73.5 (ADR-0086/ADR-0087, CAPABILITY 2/4): the total partition count a
+  # `--parallel` run of `goal` would dispatch, computed the SAME way
+  # `explain_schedule/3` does -- `frontiers/1` (the topological `needs`-DAG
+  # layering) then `explain_partition/4` (the blast-radius partitioning WITHIN
+  # each frontier, over the same injected `:graph_source` seam), summed across
+  # every frontier. Pure/read-only: calling this never dispatches anything.
+  @spec single_node_partition_count(Goal.t(), keyword(), keyword()) :: non_neg_integer()
+  defp single_node_partition_count(%Goal{} = goal, opts, runtime_opts) do
+    workspace = opts[:workspace] || goal.scope.workspace
+    partition_opts = Keyword.take(runtime_opts, [:graph_source])
+
+    goal
+    |> frontiers()
+    |> Enum.map(&length(explain_partition(goal, &1, workspace, partition_opts)))
+    |> Enum.sum()
+  end
+
+  # T73.5 (CAPABILITY 2/4): refuse a --parallel run whose goal-set would
+  # partition into MORE THAN ONE partition under single_node -- before
+  # `Kazi.Scheduler.run_goals/2` is ever called (no partition worktree, lease,
+  # or harness). The JSON/human `reason` is always the literal string
+  # "single_node_violation" (never derived/inspected, mirroring
+  # `refuse_single_node_fleet/2`); the message separately names the computed
+  # partition count via a dedicated `format_run_error/1` clause.
+  @spec refuse_single_node_partition(Goal.t(), keyword(), keyword()) :: 1
+  defp refuse_single_node_partition(%Goal{} = goal, opts, runtime_opts) do
+    count = single_node_partition_count(goal, opts, runtime_opts)
+    message = format_run_error({:single_node_violation, count})
+
+    if json?(opts) do
+      IO.puts(encode_json!(run_error_json(goal, :single_node_violation, message)))
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
   # `workspace` is only "a git repo" for T50.1's purposes when it is itself a
   # repo/worktree ROOT (`--show-toplevel` resolves back to it) — matching
   # `primary_worktree_root?/1`'s own check. A plain directory NESTED inside
@@ -3498,7 +3608,16 @@ defmodule Kazi.CLI do
     # and `:stopped` (which carries `reason: :stuck` for a stuck stop, T1.5) — and
     # rendered as the versioned JSON contract under --json or the human report
     # otherwise. The exit code is the same on both surfaces: 0 only on convergence.
-    case attach_run_context_store(Runtime.run(goal, run_opts), run_opts) do
+    #
+    # T73.5 (ADR-0086/ADR-0087, CAPABILITY 3/4): when single_node was ON for
+    # this run, stash the additive `single_node: true` marker onto the loop's
+    # result map here (BEFORE the outcome match), so `run_result_json/5`'s
+    # `put_single_node/2` renders it on whichever terminal status this run
+    # reaches. Purely additive -- absent (not `false`) when single_node was
+    # never requested.
+    attach_run_context_store(Runtime.run(goal, run_opts), run_opts)
+    |> maybe_stash_single_node_result(opts)
+    |> case do
       {:ok, %{outcome: :converged} = result} ->
         # T50.2 (ADR-0065 decision 2): a worktree-isolated serial run that
         # converged LANDS its task-branch commits on the base before the
@@ -3730,6 +3849,26 @@ defmodule Kazi.CLI do
 
   defp attach_run_context_store(other, _run_opts), do: other
 
+  # T73.5 (ADR-0086/ADR-0087, CAPABILITY 3/4): stash the additive
+  # `single_node: true` marker onto a successful run result when single_node
+  # was ON for this invocation -- read back by `run_result_json/5`'s
+  # `put_single_node/2`. Never stashed as `false`; absent when single_node
+  # was not requested, so an unset run's result is byte-identical to today
+  # (CAPABILITY 4/4).
+  defp maybe_stash_single_node_result({:ok, result}, opts),
+    do: {:ok, maybe_stash_single_node(result, opts)}
+
+  defp maybe_stash_single_node_result(other, _opts), do: other
+
+  @spec maybe_stash_single_node(map(), keyword()) :: map()
+  defp maybe_stash_single_node(result, opts) when is_map(result) do
+    if opts[:single_node] == true do
+      Map.put(result, :single_node, true)
+    else
+      result
+    end
+  end
+
   defp attach_context_store_stats(result, run_opts) do
     adapter = Keyword.get(run_opts, :adapter_opts, [])
 
@@ -3807,6 +3946,14 @@ defmodule Kazi.CLI do
 
     case Kazi.Scheduler.run_goals([goal], scheduler_opts) do
       {:ok, result} ->
+        # T73.5 (ADR-0086/ADR-0087, CAPABILITY 3/4): stash the additive
+        # `single_node: true` marker onto the scheduler's collective result
+        # BEFORE reporting it, so `collective_result_json/2`'s
+        # `put_single_node/2` renders it (a single-partition goal-set is the
+        # only way to reach here under single_node — CAPABILITY 2/4 already
+        # refused anything larger).
+        result = maybe_stash_single_node(result, opts)
+
         # T62.6 (issue #1241 part 2): persist the per-group landed refs the
         # collective just computed so `kazi status <goal-id>` shows the same
         # per-group landing detail AFTER the run exits, not only this immediate
@@ -4234,6 +4381,19 @@ defmodule Kazi.CLI do
     do: "resume token #{token} not found; re-run without it"
 
   defp format_run_error({:goal_changed, message}), do: "cannot resume: #{message}"
+
+  # T73.5 (ADR-0086/ADR-0087, CAPABILITY 2/4): names the computed partition
+  # count so the refusal is actionable, not just "too many". The stable
+  # machine-readable `reason` string ("single_node_violation") is set
+  # separately by the caller (`refuse_single_node_partition/3`) -- this clause
+  # only renders the human-readable `message`.
+  defp format_run_error({:single_node_violation, count}) do
+    "single_node mode is ON (--single-node or KAZI_SINGLE_NODE), but this " <>
+      "--parallel goal-set would partition into #{count} partitions (> 1); " <>
+      "single_node requires exactly one. Refused before Kazi.Scheduler.run_goals/2 " <>
+      "is ever invoked -- no partition worktree, lease, or harness is created. " <>
+      "Drop --single-node/KAZI_SINGLE_NODE, or narrow the goal-set to one partition."
+  end
 
   defp format_run_error(other), do: inspect(other)
 
@@ -9331,6 +9491,7 @@ defmodule Kazi.CLI do
     |> put_collateral(goal, workspace)
     |> put_goal_drifted(result)
     |> put_tampered_file(result)
+    |> put_single_node(result)
   end
 
   # ADR-0080 (#1520): the additive `tampered_file` object — the sealed input (or
@@ -9340,6 +9501,16 @@ defmodule Kazi.CLI do
     do: Map.put(map, :tampered_file, %{path: to_string(path), change: to_string(change)})
 
   defp put_tampered_file(map, _result), do: map
+
+  # T73.5 (ADR-0086/ADR-0087, CAPABILITY 3/4 + 4/4): the additive
+  # `single_node: true` field — present ONLY when this run was actually
+  # dispatched under single_node mode (the `:single_node` key was stashed
+  # onto the result by `run_goal_serial_at/6`/`run_goal_parallel/4`). NEVER
+  # rendered as `false`; absent on every run that did not request single_node,
+  # so the result stays byte-identical to before this field existed.
+  defp put_single_node(map, %{single_node: true}), do: Map.put(map, :single_node, true)
+
+  defp put_single_node(map, _result), do: map
 
   # T50.2 (ADR-0065 decision 2): the additive `integration` object — how a
   # worktree-isolated serial run's converged commits landed on the base
@@ -9746,6 +9917,7 @@ defmodule Kazi.CLI do
       partitions: partitions_json(partitions, landed_index(result)),
       next_action: next_action(collective_str)
     }
+    |> put_single_node(result)
   end
 
   defp collective_result_json(%Goal{id: id} = goal, %{groups: groups} = result) do
@@ -9768,6 +9940,7 @@ defmodule Kazi.CLI do
       nil -> base
       token -> Map.put(base, :resume_token, token)
     end
+    |> put_single_node(result)
   end
 
   defp partitions_json(partitions, landed_index) do
