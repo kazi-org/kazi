@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.282.1](https://github.com/kazi-org/kazi/compare/v1.282.0...v1.282.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **harness:** treat kill -0 EPERM as alive, not dead ([#1699](https://github.com/kazi-org/kazi/issues/1699)) ([c81c4f6](https://github.com/kazi-org/kazi/commit/c81c4f60e5a0e36e8b1dda8aeb3a982de2881f31))
+
 ## [1.282.0](https://github.com/kazi-org/kazi/compare/v1.281.0...v1.282.0) (2026-09-05)
 
 
