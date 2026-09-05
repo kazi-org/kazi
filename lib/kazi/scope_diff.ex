@@ -119,14 +119,38 @@ defmodule Kazi.ScopeDiff do
 
   @doc """
   Whether `path` sits under any of `prefixes` (an exact match or a directory
-  prefix — a trailing slash on a prefix is tolerated either way).
+  prefix — a trailing slash on a prefix is tolerated either way). A prefix
+  ending in a directory-glob suffix (`/**` or `/*`, ADR-0085's `forbidden_paths`
+  glob authoring convention, mirroring `Kazi.Scope.overlap?/2`) has that suffix
+  stripped before the same exact/prefix comparison, so `"docs/plans/**"`
+  matches `"docs/plans/E70.md"` exactly like a bare `"docs/plans"` would. This
+  is directory-prefix matching, not a general glob engine — no mid-path `*`/`?`
+  wildcard support.
+
+  ## Examples
+
+      iex> Kazi.ScopeDiff.under_any?("docs/plan.md", ["docs/plan.md"])
+      true
+
+      iex> Kazi.ScopeDiff.under_any?("docs/plans/E70.md", ["docs/plans/**"])
+      true
+
+      iex> Kazi.ScopeDiff.under_any?("docs/other.md", ["docs/plan.md"])
+      false
   """
   @spec under_any?(String.t(), [String.t()]) :: boolean()
   def under_any?(path, prefixes) do
     Enum.any?(prefixes, fn prefix ->
-      trimmed = String.trim_trailing(prefix, "/")
+      trimmed = normalize_prefix(prefix)
       path == trimmed or String.starts_with?(path, trimmed <> "/")
     end)
+  end
+
+  defp normalize_prefix(prefix) do
+    prefix
+    |> String.trim_trailing("/**")
+    |> String.trim_trailing("/*")
+    |> String.trim_trailing("/")
   end
 
   defp git(workspace, args) do
