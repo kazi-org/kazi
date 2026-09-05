@@ -76,6 +76,7 @@ defmodule Kazi.CLI do
   alias Kazi.ReadModel.RunRegistry
   alias Kazi.Reconcile.FirstPassRate
   alias Kazi.Reconcile.GherkinImporter
+  alias Kazi.Scope
   alias Kazi.Teach.InstallHooks
   alias Kazi.Teach.InstallSkill
 
@@ -505,8 +506,8 @@ defmodule Kazi.CLI do
     %{
       name: "plan",
       summary:
-        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058). `plan render <roadmap>` instead renders a roadmap DAG as a GENERATED markdown plan (T45.5).",
-      args: [%{name: "idea|render <roadmap>", required: false}],
+        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058). `plan render <roadmap>` instead renders a roadmap DAG as a GENERATED markdown plan (T45.5). `plan lint <roadmap>` (T72.2, ADR-0086 decision 2) refuses -- non-zero exit -- when two of the roadmap's goals declare `[scope]` roots (`Kazi.Scope.roots/1`) that nest inside or exactly equal one another, naming both goal ids and the shared root; disjoint roots exit 0.",
+      args: [%{name: "idea|render <roadmap>|lint <roadmap>", required: false}],
       flags: [
         :workspace,
         :yes,
@@ -549,7 +550,7 @@ defmodule Kazi.CLI do
     %{
       name: "lint",
       summary:
-        "Advisory group-name check on a goal-file (exit 0 even with warnings); or validate a roadmap artifact's DAG (cycles, unresolvable refs — non-zero on a broken roadmap).",
+        "Advisory group-name check on a goal-file (exit 0 even with warnings); or validate a roadmap artifact's DAG (cycles, unresolvable refs — non-zero on a broken roadmap). For a CROSS-GOAL scope-nesting check across a roadmap's members, see `plan lint <roadmap>` (T72.2) instead — a different concern over the same roadmap artifact.",
       args: [%{name: "goal-file|roadmap", required: true}],
       flags: [:json]
     },
@@ -1033,6 +1034,9 @@ defmodule Kazi.CLI do
       {:plan_render, roadmap, opts} ->
         execute_plan_render(roadmap, opts)
 
+      {:plan_lint, roadmap, opts} ->
+        execute_plan_lint(roadmap, opts)
+
       {:list_proposed, opts} ->
         execute_list_proposed(opts)
 
@@ -1090,6 +1094,7 @@ defmodule Kazi.CLI do
           | {:bus_help, String.t()}
           | {:propose, String.t(), keyword()}
           | {:plan_render, Path.t(), keyword()}
+          | {:plan_lint, Path.t(), keyword()}
           | {:list_proposed, keyword()}
           | {:approve, String.t(), keyword()}
           | {:reject, String.t(), keyword()}
@@ -1120,6 +1125,10 @@ defmodule Kazi.CLI do
       positional prose idea and `opts` (`[workspace: path | nil]`).
     * `{:plan_render, roadmap, opts}` — the `plan render <roadmap>` subcommand
       (T45.5, UC-059) with `opts` (`[out: path | nil]`, the optional file target).
+    * `{:plan_lint, roadmap, opts}` — the `plan lint <roadmap>` subcommand
+      (T72.2, ADR-0086 decision 2) with `opts` (`[json: boolean]`): refuses
+      (non-zero exit) when two of the roadmap's goals have `Kazi.Scope.roots/1`
+      that nest or are equal, naming both goal ids and the shared root.
     * `{:list_proposed, opts}` — the `list-proposed` subcommand with `opts`
       (`[status: state | nil]`, an optional lifecycle-state filter).
     * `{:approve, proposal_ref, opts}` / `{:reject, proposal_ref, opts}` — the
@@ -1377,6 +1386,23 @@ defmodule Kazi.CLI do
 
   defp parse_command(["plan", "render"], _flags),
     do: {:error, "the `plan render` command requires a <roadmap-file> argument"}
+
+  # T72.2 (ADR-0086 decision 2): `plan lint <roadmap>` is a SUBCOMMAND of `plan`,
+  # matched the same way `plan render <roadmap>` is — before the authoring
+  # catch-all, so `lint` is never mistaken for a prose idea. Unlike the existing
+  # top-level `kazi lint <goal-file|roadmap>` (single-artifact, advisory for a
+  # goal-file), `plan lint` is cross-goal and REFUSES (non-zero exit): it loads a
+  # roadmap and checks every pair of member goals' `Kazi.Scope.roots/1` for
+  # nesting/equality (`Kazi.Scope.nesting_conflicts/1`).
+  defp parse_command(["plan", "lint", roadmap | rest], flags) do
+    case rest do
+      [] -> {:plan_lint, roadmap, json: flags[:json] || false}
+      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+    end
+  end
+
+  defp parse_command(["plan", "lint"], _flags),
+    do: {:error, "the `plan lint` command requires a <roadmap-file> argument"}
 
   defp parse_command(["plan" | rest], flags), do: parse_propose(rest, flags)
 
@@ -7202,6 +7228,84 @@ defmodule Kazi.CLI do
         IO.puts(:stderr, "error: cannot write #{out_path}: #{:file.format_error(reason)}")
         1
     end
+  end
+
+  # T72.2 (ADR-0086 decision 2): `plan lint <roadmap>` loads the roadmap (the
+  # SAME artifact `plan render` reads) and runs `Kazi.Scope.nesting_conflicts/1`
+  # across every member goal's `Kazi.Scope.roots/1`. Unlike `kazi lint`'s
+  # roadmap path (DAG validity only), this REFUSES — non-zero exit — on any
+  # nesting or equal-root pair, naming both goal ids and the shared root.
+  defp execute_plan_lint(roadmap_path, opts) do
+    case Kazi.Goal.Roadmap.load(roadmap_path) do
+      {:ok, roadmap} ->
+        entries = Enum.map(roadmap.nodes, fn node -> {node.id, Scope.roots(node.goal.scope)} end)
+
+        case Scope.nesting_conflicts(entries) do
+          [] ->
+            report_plan_lint_clean(roadmap_path, roadmap, opts)
+            0
+
+          conflicts ->
+            refuse_plan_lint(roadmap_path, conflicts, opts)
+        end
+
+      {:error, message} ->
+        plan_lint_load_error(roadmap_path, message, opts)
+    end
+  end
+
+  defp report_plan_lint_clean(roadmap_path, %Kazi.Goal.Roadmap{nodes: nodes}, opts) do
+    json = %{
+      schema_version: @run_schema_version,
+      kind: "plan_lint",
+      roadmap: roadmap_path,
+      goal_count: length(nodes),
+      conflicts: []
+    }
+
+    emit(json?(opts), json, fn ->
+      IO.puts(
+        "LINT  roadmap=#{roadmap_path} — #{length(nodes)} goal(s), " <>
+          "no nesting scope-root conflicts."
+      )
+    end)
+  end
+
+  defp refuse_plan_lint(roadmap_path, conflicts, opts) do
+    message = plan_lint_conflict_message(roadmap_path, conflicts)
+
+    if json?(opts) do
+      emit_json_error(message, %{
+        reason: "nesting_conflict",
+        roadmap: roadmap_path,
+        conflicts: conflicts
+      })
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  defp plan_lint_conflict_message(roadmap_path, conflicts) do
+    details =
+      Enum.map_join(conflicts, "; ", fn %{a: a, b: b, root: root} ->
+        "goal #{inspect(a)} and goal #{inspect(b)} share scope root #{inspect(root)}"
+      end)
+
+    "roadmap #{roadmap_path}: nested/overlapping scope roots (ADR-0086 decision 2) -- #{details}"
+  end
+
+  defp plan_lint_load_error(roadmap_path, message, opts) do
+    full_message = "roadmap #{roadmap_path} is invalid: #{message}"
+
+    if json?(opts) do
+      emit_json_error(full_message)
+    else
+      IO.puts(:stderr, "error: #{full_message}")
+    end
+
+    1
   end
 
   defp execute_lint(goal_file, opts) do
