@@ -43,21 +43,56 @@ defmodule Kazi.Scheduler.WorktreeTeardownTest do
 
   # A `git_cmd` that WORKS for worktree creation but then vanishes (mirroring
   # #1053's `:enoent` from `:erlang.open_port`) once the inner reconciler has
-  # already returned — a copy of the real `git` binary the inner reconciler
-  # deletes itself, so `System.cmd/3` raises `:enoent` ONLY when teardown
-  # tries to invoke it, not before.
+  # already returned — a wrapper the inner reconciler deletes itself, so
+  # `System.cmd/3` raises `:enoent` ONLY when teardown tries to invoke it,
+  # not before.
+  #
+  # A real, executable WRAPPER SCRIPT that execs the real git binary — NOT a
+  # symlink to it (issue #1136). A symlink under a throwaway basename breaks
+  # deterministically on a host where `git` resolves to Apple's Xcode/Command
+  # Line Tools binary (`/usr/bin/git`): that binary dispatches on argv[0]'s
+  # basename the way `xcrun`-provided toolchain proxies do, and for a name it
+  # doesn't recognize it shells out to `xcodebuild -find <name>` and fails —
+  # exit 72, "xcode-select: Failed to locate '<name>'" — never running git at
+  # all, so worktree creation's `rev-parse` fails BEFORE the inner reconciler
+  # even runs. A wrapper script's own basename is irrelevant to the git it
+  # execs (its argv[0] is the literal `git` in the script body below), so
+  # this runs identically regardless of which git binary the host provides.
+  # (NOT named `git-<suffix>` either: plain git itself dispatches an argv0 of
+  # that shape as its own subcommand shim -- moot here since the wrapper's
+  # name is never passed to git as argv0, but kept nonce-shaped regardless.)
   defp vanishing_git!(base) do
-    # NOT named `git-<suffix>`: git dispatches an argv0 of that shape as its
-    # OWN subcommand shim ("cannot handle <suffix> as a builtin") rather than
-    # running it as plain git.
     real_git = System.find_executable("git")
     link = Path.join(base, "kazigit#{System.unique_integer([:positive])}")
     File.mkdir_p!(base)
-    File.ln_s!(real_git, link)
+    File.write!(link, "#!/bin/sh\nexec #{real_git} \"$@\"\n")
+    File.chmod!(link, 0o755)
     link
   end
 
   describe "sub-fix (1): teardown independence" do
+    test "the vanishing_git! fixture runs real git regardless of argv0 dispatch (#1136)",
+         ctx do
+      # Pins the actual #1136 root cause directly: the fixture executable,
+      # invoked under its own throwaway basename (never "git"), must still
+      # behave as real git. A `File.ln_s!` symlink to the executable failed
+      # this on a host where `git` resolves to Apple's Xcode/Command Line
+      # Tools binary (it dispatches on argv[0]'s basename and, for a name it
+      # doesn't recognize, shells out to `xcodebuild -find <name>` instead of
+      # running git) -- silently breaking worktree creation itself, before
+      # either "teardown independence" test below ever reached teardown.
+      git_cmd = vanishing_git!(ctx.base)
+
+      {out, status} =
+        System.cmd(git_cmd, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+          cd: ctx.repo,
+          stderr_to_stdout: true
+        )
+
+      assert status == 0
+      assert String.trim(out) != ""
+    end
+
     test "a converged member stays converged even when teardown itself raises", ctx do
       git_cmd = vanishing_git!(ctx.base)
 
