@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.279.0](https://github.com/kazi-org/kazi/compare/v1.278.0...v1.279.0) (2026-09-05)
+
+
+### Features
+
+* **scope:** lift Fleet's write_paths-over-paths + overlap into Kazi.Scope ([f6d6a42](https://github.com/kazi-org/kazi/commit/f6d6a421800aa12463aec3865e9264fa13c1f630))
+
 ## [1.278.0](https://github.com/kazi-org/kazi/compare/v1.277.0...v1.278.0) (2026-09-05)
 
 
