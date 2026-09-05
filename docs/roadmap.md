@@ -248,6 +248,20 @@ Fixed at the shared `alive?/1` layer (ParentMonitor's default `:alive_fn`);
 verified red->green (new test fails without the fix, passes with it) and no
 #1073 regression (genuine-kill test unaffected). PR #1774. Claim released,
 worktree removed. Direct-agent dispatch now 5-for-5 today.
+
+**Shipped (2026-09-05): T73.5** -- `kazi apply` gains a single_node cap
+(ADR-0086/ADR-0087) for a Sire dispatcher lane running one goal per
+container: `--single-node` or `KAZI_SINGLE_NODE=1`/`"true"` refuses
+`--fleet` before `Kazi.Fleet.load/1` and refuses a `--parallel` goal-set
+that would partition into more than one partition before
+`Kazi.Scheduler.run_goals/2`, both before any load/dispatch; a one-partition
+run is unaffected and its `--json` result carries the additive
+`"single_node": true`. Unset, behavior is byte-identical to today. PR #1777,
+released as v1.283.0. Self-caught and fixed a doc-coherence guard regression
+(`Kazi.TeachCoherenceReverseTest`, #973) along the way. Claim released,
+worktree removed. Direct-agent dispatch now 6-for-6 today (T69.12, T70.9,
+T69.13, T73.1, T70.4, T73.5) -- the fifth dispatch is fully closed out.
+
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
