@@ -76,3 +76,68 @@ guarantee on the specific paths that must never move.
 See `Kazi.CollateralReport` and `Kazi.ScopeDiff` for the implementation; both
 the guard and the report measure the same diff, so they can never disagree
 about "what changed this run".
+
+## `[scope].forbidden_paths` — a HARDER `deny`, with landing-time refusal (ADR-0085)
+
+```toml
+[scope]
+forbidden_paths = ["docs/plan.md", "docs/roadmap.md"]
+```
+
+`deny` above is soft: a violation fails a guard predicate, and that is the
+whole guarantee — nothing stops the change from landing anyway if the loop's
+convergence check is ever bypassed. `forbidden_paths` closes that gap
+(kazi-org/kazi#1695: a converging grind loop committed a change to
+`docs/plan.md`/`docs/roadmap.md` despite a prose exclusion list its dispatch
+brief carried — prose is not a channel the grind model reads). It is enforced
+TWICE:
+
+  1. the SAME `:scope_forbidden_paths` guard predicate `deny` gets
+     (`Kazi.Providers.ScopeGuard`, same diff-based detection);
+  2. `Kazi.Actions.Integrate` structurally refuses to LAND a touched path:
+     * **legacy commit path** (no `[integration]` block) — the touched path is
+       excluded from what gets staged/committed (`git reset`-unstaged after
+       staging, left modified-but-uncommitted in the working tree — never
+       silently discarded);
+     * **`[integration]` verify-then-ship path** (mode `commit`/`branch`/
+       `pr`/`merge`) — the inner agent already committed its own work, so a
+       touched path there cannot be surgically excluded without rewriting
+       history; the WHOLE landing is refused instead, before any push.
+
+An entry is an exact path, a directory prefix, or a directory prefix suffixed
+`/**`/`/*` (`Kazi.ScopeDiff.under_any?/2`) — this is directory-prefix
+matching, not a general glob engine (no mid-path `*`/`?` wildcards).
+
+## `[scope].no_integration` — refuse to land at all (ADR-0085)
+
+```toml
+[scope]
+no_integration = true
+```
+
+Closes kazi-org/kazi#1704: an orchestrating session told its dispatched
+sub-agent not to open a PR in prose the sub-agent never saw, and the agent
+opened one anyway. `no_integration = true` makes "never land" a DECLARED
+goal-file contract instead: it forces this goal's `[integration]` block to the
+existing `mode: :none` default regardless of what `[integration]` declares
+(`Kazi.Goal.new/2`), and `Kazi.Actions.Integrate` refuses to run AT ALL for
+this goal — no commit, no push, no PR, no merge, checked directly off
+`scope.no_integration` so the refusal holds even for a goal struct assembled
+without going through `Goal.new/2`.
+
+## `[scope].forbidden_commands` — a best-effort tripwire, NOT a sandbox (ADR-0085)
+
+```toml
+[scope]
+forbidden_commands = ["gh pr create", "gh pr merge"]
+```
+
+`Kazi.Providers.ForbiddenCommands` best-effort scans the run's dispatch
+transcript for a declared pattern and fails a `:scope_forbidden_commands`
+guard predicate on a hit. **This cannot stop a determined or confused model
+from running the command** — a dispatched harness run under
+`--permission-mode bypassPermissions` has real shell access this does not
+attempt to revoke. It only makes an attempt VISIBLE, the same way any other
+failing predicate is. Use `forbidden_paths`/`no_integration` above for a
+guarantee that actually holds structurally; use `forbidden_commands` only as
+an early-warning signal on top of them.

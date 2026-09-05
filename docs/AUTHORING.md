@@ -67,3 +67,48 @@ only of predicates with no build-tool dependency needs no `[setup]` block.
 See [`docs/how-to/setup-step.md`](how-to/setup-step.md) for the full field
 reference and the distinct `{:setup_failed, _}` environment-error shape a
 failing setup command produces (never a predicate `:fail`).
+
+## Stopping the grind model from touching a path or landing a PR: use `[scope]`, not prose
+
+**The dispatch prompt is the ONLY channel the grind model reads.** It never
+sees the orchestrating session's own conversation, a strategy doc, or a
+human-authored dispatch brief's prose caveats. Two real incidents happened
+because that prose caveat was the only place the constraint lived:
+
+  * kazi-org/kazi#1695 — a dispatch brief's prose explicitly excluded
+    `docs/plan.md`, `docs/plans/<epic>.md`, and `docs/roadmap.md` as "the
+    orchestrator's to edit, after convergence." The grind loop committed a
+    change to two of them anyway, as part of its own convergence stack.
+  * kazi-org/kazi#1704 — an orchestrating session told its dispatched
+    sub-agent, in its own never-seen conversation, not to open a PR. Running
+    under `--permission-mode bypassPermissions` with ambient `gh`
+    credentials, the sub-agent opened one anyway.
+
+**Stable alternative:** declare the constraint in the goal-file's `[scope]`
+table (ADR-0085) — the one channel that actually reaches the grind model, and
+the one kazi's own tooling enforces rather than merely hopes is honored:
+
+```toml
+[scope]
+# Would have caught #1695: excluded from BOTH the guard predicate AND from
+# what Kazi.Actions.Integrate will ever land, not just flagged after the fact.
+forbidden_paths = ["docs/plan.md", "docs/plans/", "docs/roadmap.md"]
+
+# Would have caught #1704: Kazi.Actions.Integrate refuses to commit, push,
+# open, or merge a PR for this goal at all, no matter what the dispatched
+# model's own shell access lets it attempt.
+no_integration = true
+
+# Best-effort tripwire ONLY — see docs/how-to/scope-write-guard.md. Does not
+# by itself replace `no_integration` above; a bypassPermissions dispatch has
+# real shell access this cannot revoke.
+forbidden_commands = ["gh pr create", "gh pr merge"]
+```
+
+`forbidden_paths` and `no_integration` are STRUCTURAL: the controller's own
+commit/landing tooling refuses, independent of whether the dispatched model
+ever "reads" the constraint at all. `forbidden_commands` is the one exception
+— it is advisory detection, documented as such everywhere it appears, never a
+claim of prevention. See `docs/how-to/scope-write-guard.md` for the full
+authoring reference and `docs/adr/0085-scope-goal-file-forbidden-paths-commands.md`
+for the decision.
