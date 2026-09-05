@@ -51,6 +51,26 @@ defmodule Kazi.Partition do
   A goal whose blast radius is empty (the source found nothing) still becomes its
   own singleton partition — it shares paths with no one — keyed off its goal id so
   the key is stable and distinct.
+
+  ## `shared_paths` exclusion (ADR-0087 decision 4, T73.2)
+
+  The optional `:shared_paths` option (fed `Kazi.Fleet.effective_shared_paths/1`
+  by callers that partition fleet members) names hotspot files — `mix.exs`,
+  `go.mod`, `docs/plan.md` — that should NOT count as a blast-radius overlap:
+  without this, any two goals that both touch a hotspot merge into one
+  partition, serializing unrelated work behind that single file.
+
+  Every path in `:shared_paths` is removed from EACH goal's blast radius
+  **before** `group_overlapping/1` runs, so the exclusion cannot depend on
+  which goal is surveyed first — two goals overlapping only on an excluded
+  path land in separate partitions regardless of input order (a hard
+  requirement; see Determinism above). The excluded paths that a goal's raw
+  (pre-exclusion) radius actually intersected are not discarded — they travel
+  on the resulting `Kazi.Partition`'s `:lease_keys` field, the union across the
+  partition's members, so a later caller (T73.3) can acquire a per-file lease
+  for each hotspot this partition's work will touch without re-deriving it
+  from the raw surveys. `:lease_keys` is `[]` when `:shared_paths` is omitted
+  or empty — byte-identical to before this feature.
   """
 
   alias Kazi.Context.RepoMapSource
@@ -71,18 +91,26 @@ defmodule Kazi.Partition do
   @typedoc """
     * `:goal_ids` — the member goals, sorted by their string form.
     * `:blast_radius` — the sorted, de-duplicated union of the members'
-      blast-radius file paths.
+      blast-radius file paths, with any `:shared_paths` already excluded
+      (ADR-0087 decision 4, T73.2).
     * `:key` — a stable `sha256` hex of the blast radius (singleton goals with an
       empty radius key off their goal id). **T3.2b uses this as the lease key.**
+    * `:lease_keys` — the sorted, de-duplicated union of `:shared_paths` entries
+      the members' RAW (pre-exclusion) blast radii actually touched (T73.2).
+      `[]` when no `:shared_paths` option was given or none of it was touched —
+      byte-identical to before this feature. T73.3 acquires one
+      `Kazi.Coordination.Lease` per entry around the partition's integration
+      step.
   """
   @type t :: %__MODULE__{
           goal_ids: [Kazi.Goal.id()],
           blast_radius: [String.t()],
-          key: String.t()
+          key: String.t(),
+          lease_keys: [String.t()]
         }
 
   @enforce_keys [:goal_ids, :blast_radius, :key]
-  defstruct goal_ids: [], blast_radius: [], key: nil
+  defstruct goal_ids: [], blast_radius: [], key: nil, lease_keys: []
 
   @typedoc """
   Options:
@@ -91,8 +119,16 @@ defmodule Kazi.Partition do
       `{module, init_opts}` tuple. Injected for hermetic tests (pass
       `Kazi.Context.StaticGraphSource`). Defaults to `Kazi.Context.RepoMapSource`,
       the same default `Kazi.Context` uses.
+    * `:shared_paths` — hotspot file paths (ADR-0087 decision 4, T73.2) excluded
+      from every goal's blast radius before the overlap test, so two goals
+      touching only a declared hotspot land in separate partitions instead of
+      merging. Typically `Kazi.Fleet.effective_shared_paths/1`'s result.
+      Defaults to `[]` — byte-identical to before this feature.
   """
-  @type opts :: [graph_source: module() | {module(), keyword()}]
+  @type opts :: [
+          graph_source: module() | {module(), keyword()},
+          shared_paths: [String.t()]
+        ]
 
   @doc """
   Partitions `goals` into disjoint blast-radius groups against `workspace`.
@@ -121,16 +157,27 @@ defmodule Kazi.Partition do
     {source_mod, source_opts} =
       resolve_source(Keyword.get(opts, :graph_source, RepoMapSource))
 
-    # One survey per goal -> {goal_id, sorted unique blast-radius paths}. Sorted
-    # on the goal id's string form first so equal-key tie-breaks are stable.
+    shared_set = opts |> Keyword.get(:shared_paths, []) |> MapSet.new()
+
+    # One survey per goal -> {goal_id, sorted unique NON-shared blast-radius
+    # paths, sorted unique shared paths this goal's raw radius touched}. The
+    # shared_paths exclusion (ADR-0087 decision 4, T73.2) happens HERE, before
+    # group_overlapping/1 ever runs, so two goals overlapping only on a shared
+    # path never merge regardless of which is surveyed first. Sorted on the
+    # goal id's string form first so equal-key tie-breaks are stable.
     radii =
       goals
       |> Enum.map(&normalize_goal/1)
       |> Enum.map(fn {id, terms} ->
         survey = source_mod.survey(workspace, terms, source_opts)
-        {id, blast_radius(survey, terms)}
+        raw_radius = blast_radius(survey, terms)
+
+        {kept, excluded} =
+          Enum.split_with(raw_radius, fn path -> not MapSet.member?(shared_set, path) end)
+
+        {id, kept, excluded}
       end)
-      |> Enum.sort_by(fn {id, _radius} -> to_string(id) end)
+      |> Enum.sort_by(fn {id, _radius, _lease_keys} -> to_string(id) end)
 
     radii
     |> group_overlapping()
@@ -199,10 +246,11 @@ defmodule Kazi.Partition do
 
   # --- transitive-closure grouping (union-find by shared path) ----------------
 
-  # Groups `{id, radius}` entries into clusters whose radii transitively overlap.
-  # Walks the entries in their (already stable) order, merging each into the first
-  # existing cluster it shares a path with, then collapsing clusters that a later
-  # entry bridges. Returns a list of clusters, each a list of `{id, radius}`.
+  # Groups `{id, radius, lease_keys}` entries into clusters whose (already
+  # shared_paths-excluded) radii transitively overlap. Walks the entries in
+  # their (already stable) order, merging each into the first existing cluster
+  # it shares a path with, then collapsing clusters that a later entry bridges.
+  # Returns a list of clusters, each a list of `{id, radius, lease_keys}`.
   defp group_overlapping(radii) do
     Enum.reduce(radii, [], fn entry, clusters ->
       {touched, untouched} = Enum.split_with(clusters, &overlaps_cluster?(&1, entry))
@@ -214,10 +262,10 @@ defmodule Kazi.Partition do
     end)
   end
 
-  defp overlaps_cluster?(cluster, {_id, radius}) do
+  defp overlaps_cluster?(cluster, {_id, radius, _lease_keys}) do
     radius_set = MapSet.new(radius)
 
-    Enum.any?(cluster, fn {_other_id, other_radius} ->
+    Enum.any?(cluster, fn {_other_id, other_radius, _other_lease_keys} ->
       sets_intersect?(radius_set, other_radius)
     end)
   end
@@ -230,18 +278,26 @@ defmodule Kazi.Partition do
   # --- partition assembly -----------------------------------------------------
 
   defp build_partition(cluster) do
-    goal_ids = cluster |> Enum.map(fn {id, _radius} -> id end) |> Enum.sort_by(&to_string/1)
+    goal_ids =
+      cluster |> Enum.map(fn {id, _radius, _lease_keys} -> id end) |> Enum.sort_by(&to_string/1)
 
     blast_radius =
       cluster
-      |> Enum.flat_map(fn {_id, radius} -> radius end)
+      |> Enum.flat_map(fn {_id, radius, _lease_keys} -> radius end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    lease_keys =
+      cluster
+      |> Enum.flat_map(fn {_id, _radius, lease_keys} -> lease_keys end)
       |> Enum.uniq()
       |> Enum.sort()
 
     %__MODULE__{
       goal_ids: goal_ids,
       blast_radius: blast_radius,
-      key: partition_key(goal_ids, blast_radius)
+      key: partition_key(goal_ids, blast_radius),
+      lease_keys: lease_keys
     }
   end
 
