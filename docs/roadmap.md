@@ -104,36 +104,44 @@ single tasks on E20/E25/E39.
 
 ## Where we are going
 
-**In flight (2026-09-05, `/apply --pool`, second dispatch):**
-- T72.1 (scope roots + glob overlap, E72 Wave A) — PR #1746, adopted from a
-  banked worktree (2 commits already there) rather than redrafted; its own
-  tests (9 + 16) green and `mix format --check-formatted` clean before
-  opening the PR. Claim released on PR-open.
-- T69.9 (#1681 `portfolio` in `Kazi.CLI.Schema`) — PR #1740, open, under
-  review by a sibling session; T71.1 (#1709 branch-identity env for isolated
-  predicates) — PR #1742, open, under review. Neither touched by this pass.
-- T69.10 (#1617 `--project` flag doc) — code merged (437f7845) and released
-  in v1.276.1; the plan checkbox itself is still open (T69.10 in
-  `docs/plans/E69.md`) -- a small housekeeping gap for whoever picks it up,
-  not a code gap.
-- T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
-  `Kazi.Runtime.ParentMonitor`), T66.5 (#1483 reopened -- the bounded-mount
-  fix already landed in `RunRegistry.list_recent/1` + `MissionControlLive`;
-  what's missing and now drafted is the acceptance-pinning regression test
-  under a large run history), T70.8 (#1700 -- document the vitest `-t`
-  predicate hazard, pinned by a real fixture): kazi-lane goal-files drafted
-  (red-at-t0 verified directly against the target commands) and dispatched
-  via `kazi apply --in-place` in their own offload worktrees. Still
-  converging (compiling + the full-suite guard) when this pass's 50-minute
-  box closed; claims released per the box so a later pass can pick them up.
-  Worktrees left in place under `/Volumes/BuildOffload/kazi-worktrees/`
-  (`t70-4`, `t66-5`, `t70-8`) for adoption or a fresh re-dispatch.
+**Shipped (2026-09-05, `/apply --pool`, two dispatches this day):** T69.9
+(#1681 `portfolio` in `Kazi.CLI.Schema`, PR #1740, `4b53f601` -> v1.277.0),
+T71.1 (#1709 branch-identity env for isolated predicates, PR #1742,
+`71443c7e` -> v1.278.0), T72.1 (scope roots + glob overlap, E72 Wave A, PR
+#1746, `52d15876` -> v1.279.0; adopted from a banked worktree rather than
+redrafted, its own tests (9 + 16) verified green locally before merge),
+T69.10 (#1617 `--project` flag doc, PR #1741, `437f7845` -> v1.276.1; the
+plan checkbox itself was left open in `docs/plans/E69.md` -- a small
+housekeeping gap, not a code gap). Both #1740 and #1742 were reviewed for
+actual code correctness (red->green reproduction, symmetric provider
+coverage, doc-vs-code match), not merged on green CI alone.
+
+**Blocked -- infra, not code (2026-09-05):** T70.4 (#1699 nohup/disown vs.
+a genuinely dead launcher, `Kazi.Runtime.ParentMonitor`), T66.5 (#1483
+reopened -- the bounded-mount fix already landed in
+`RunRegistry.list_recent/1` + `MissionControlLive`; what's missing and now
+drafted is the acceptance-pinning regression test under a large run
+history), T70.8 (#1700 -- document the vitest `-t` predicate hazard, pinned
+by a real fixture). Goal-files drafted (red-at-t0 verified directly against
+the target commands) and dispatched via `kazi apply --in-place`, but all
+three hit `startup_deadline_exceeded` (kazi's 300s pre-loop startup
+deadline) before the full-suite guard predicate could finish observing on a
+cold `_build/` under concurrent-lane host load -- an infra error, not a
+predicate verdict; no code was judged red or green. Remedy per the error
+text: raise `KAZI_APPLY_STARTUP_TIMEOUT_MS` above 300000 on redispatch.
+Claims released; worktrees left in place under
+`/Volumes/BuildOffload/kazi-worktrees/` (`t70-4`, `t66-5`, `t70-8`, deps/
+already fetched) for a fast redispatch.
+
 Found at t0: `test/kazi/cli/daemon_reregister_test.exs:43` fails on `main`
-independently of any of these (excluded from T69.9's suite guard; needs its
-own triage).
-Rescued (prior pass): orphaned worktree branch `task/e50-safe-concurrent-work`
-(3 unmerged commits + a goal file) pushed to origin; worktree left in place
-for its owner. Also swept this pass: the fully-merged
+independently of any of the above (excluded from T69.9's suite guard; needs
+its own triage). Filed [kazi-org/kazi#1744](https://github.com/kazi-org/kazi/issues/1744):
+a kazi lane's grinder must not self-report status into `docs/roadmap.md` --
+two lanes in the first dispatch each committed a premature or false
+"rebased green" claim into this shared paragraph; both were reverted before
+merge. Rescued (first pass): orphaned worktree branch
+`task/e50-safe-concurrent-work` (3 unmerged commits + a goal file) pushed to
+origin, worktree left in place for its owner. Also swept: the fully-merged
 `fix/1483-mission-control-unbounded-read` worktree (PR #1605) removed.
 
 **Planned (2026-09-05, ADR-0086 -> E72, 8 tasks, 5 waves):** a
