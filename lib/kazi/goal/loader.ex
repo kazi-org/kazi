@@ -66,6 +66,9 @@ defmodule Kazi.Goal.Loader do
   | `paths`       | array of strings | `Scope.paths`         |
   | `write_paths` | array of strings | `Scope.write_paths` — issue #860: the EDITABLE subset of `paths` (distinct from the readable allow-list); absent/empty keeps today's `paths`-only behavior byte-identical. Used by `kazi apply --json`'s `collateral` field to flag out-of-write-scope changes. |
   | `deny`        | array of strings | `Scope.deny` — issue #860: protected paths that must NEVER be modified by this goal (entitlements, auth config, CI workflows). `Kazi.Scope.guard_predicates/1` synthesizes a `:scope_guard` GUARD predicate from it (independent of `[enforcement]`) that fails — with the offending paths as evidence — if a run changes anything under a `deny` path; absent/empty synthesizes no guard. |
+  | `forbidden_paths` | array of strings | `Scope.forbidden_paths` — ADR-0085 (kazi-org/kazi#1695/#1704): like `deny`, but enforced TWICE — the SAME `:scope_forbidden_paths` guard predicate `deny` gets (`Kazi.Providers.ScopeGuard`), PLUS `Kazi.Actions.Integrate` structurally refuses to LAND a touched path (excluded from staging on the legacy commit path; the whole landing refused on the `[integration]` verify-then-ship path) rather than only reporting it. An entry is an exact path, a directory prefix, or a directory prefix suffixed `/**`/`/*` (`Kazi.ScopeDiff.under_any?/2`) — not a general glob engine. Absent/empty enforces nothing. |
+  | `forbidden_commands` | array of strings | `Scope.forbidden_commands` — ADR-0085: command name/pattern strings `Kazi.Providers.ForbiddenCommands` best-effort scans the dispatch transcript for, synthesized as a `:scope_forbidden_commands` guard predicate. **Advisory only, never a sandbox** — a `bypassPermissions` dispatch has real shell access this cannot revoke; a violation is detected and surfaced, never prevented. Absent/empty enforces nothing. |
+  | `no_integration` | boolean | `Scope.no_integration` — ADR-0085: when `true`, FORCES this goal's `[integration]` block to the existing `mode: :none` default (`Kazi.Goal.default_integration/0`) regardless of what `[integration]` declares, and `Kazi.Actions.Integrate` refuses to run AT ALL for this goal — no commit, no push, no PR, no merge, not even the legacy bulk-commit path a bare `mode: :none` goal otherwise still takes. Reuses the `[integration]` `none`-mode DATA shape as its enforcement primitive. Default `false`. |
 
   ### `[harness]` table (optional, → `Goal.harness`, T8.6/ADR-0016)
 
@@ -765,19 +768,39 @@ defmodule Kazi.Goal.Loader do
          {:ok, repo} <- optional_string(scope, "repo", "scope"),
          {:ok, paths} <- optional_string_list(scope, "paths", "scope"),
          {:ok, write_paths} <- optional_string_list(scope, "write_paths", "scope"),
-         {:ok, deny} <- optional_string_list(scope, "deny", "scope") do
+         {:ok, deny} <- optional_string_list(scope, "deny", "scope"),
+         # ADR-0085 (#1695/#1704): optional `forbidden_paths`/`forbidden_commands`/
+         # `no_integration` — see the `[scope]` table doc above.
+         {:ok, forbidden_paths} <- optional_string_list(scope, "forbidden_paths", "scope"),
+         {:ok, forbidden_commands} <-
+           optional_string_list(scope, "forbidden_commands", "scope"),
+         {:ok, no_integration} <- fetch_no_integration(scope) do
       {:ok,
        Scope.new(
          workspace: workspace,
          repo: repo,
          paths: paths,
          write_paths: write_paths,
-         deny: deny
+         deny: deny,
+         forbidden_paths: forbidden_paths,
+         forbidden_commands: forbidden_commands,
+         no_integration: no_integration
        )}
     end
   end
 
   defp build_scope(_), do: {:error, "[scope] must be a table"}
+
+  # ADR-0085: optional `[scope].no_integration` boolean. Default `false` (byte-
+  # identical to before ADR-0085); a non-boolean fails loudly at load time,
+  # like every other boolean field in this loader (`standing`, `debrief`,
+  # `[conventions].process_contract`).
+  defp fetch_no_integration(scope) do
+    case Map.get(scope, "no_integration", false) do
+      value when is_boolean(value) -> {:ok, value}
+      _ -> {:error, "scope.no_integration must be a boolean"}
+    end
+  end
 
   # T8.6 harness selection (ADR-0016): the optional `[harness]` table. Absent
   # (nil) → the goal carries no harness preference (`nil`), loading exactly as
