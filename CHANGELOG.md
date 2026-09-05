@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.276.0](https://github.com/kazi-org/kazi/compare/v1.275.5...v1.276.0) (2026-09-05)
+
+
+### Features
+
+* **bus:** add --directed so a parked watch wakes only on its own messages ([a5ec1a9](https://github.com/kazi-org/kazi/commit/a5ec1a90205e5524de9c65778cc5adee42feb89b)), closes [#1720](https://github.com/kazi-org/kazi/issues/1720)
+
 ## [1.275.5](https://github.com/kazi-org/kazi/compare/v1.275.4...v1.275.5) (2026-09-05)
 
 
