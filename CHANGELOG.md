@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.284.0](https://github.com/kazi-org/kazi/compare/v1.283.0...v1.284.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** add `plan lint <roadmap>` nesting refusal (T72.2) ([d72aa71](https://github.com/kazi-org/kazi/commit/d72aa71cbe7c30e5a7d607cb38d5ec919290384b))
+* **scope:** add nesting_conflicts/1 for cross-goal scope-root nesting (T72.2) ([95e1f58](https://github.com/kazi-org/kazi/commit/95e1f588cb912eecde70f11cd9193ebfdc68f958))
+
 ## [1.283.0](https://github.com/kazi-org/kazi/compare/v1.282.1...v1.283.0) (2026-09-05)
 
 
