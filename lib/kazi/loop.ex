@@ -3176,7 +3176,13 @@ defmodule Kazi.Loop do
       # `%{name => result}`; a `render_proof` predicate resolves its named capture
       # here rather than from a worker-chosen workspace path.
       captures: data.captures,
-      env: env
+      env: env,
+      # ADR-0085 (#1695/#1704): the run's transcript sink path (when the caller
+      # threaded one via `extra_action_context[:transcript_path]`, T46.3) — the
+      # `:forbidden_commands` provider's best-effort scan target. `nil` when no
+      # sink is configured (a fixture loop, `persist?: false`), which the
+      # provider treats as "nothing to scan", never a violation.
+      transcript_path: Map.get(data.extra_action_context, :transcript_path)
     }
   end
 
