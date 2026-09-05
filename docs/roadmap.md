@@ -141,12 +141,35 @@ on any commit. Issue #1642 auto-closed on merge. This is the fix that
 unblocks T73.1/T70.4/T73.5 for redispatch -- do so once the local `kazi`
 binary is confirmed upgraded to v1.280.0 (`kazi version`), not before.
 
+**Shipped (2026-09-05):** T69.13 (#1649, PR #1764, `d95960b4`; no version bump
+-- test/docs/plan commits only). Finding first, fix second: the worktree's
+`origin/main` already carried ~95% of this task -- `Kazi.TestSupport.BusPeer`
++ a 15-verb real-discovery sweep shipped via PR #1656 six weeks earlier
+(2026-07-20), but that PR said "Refs #1649" instead of "Fixes", so the issue
+never auto-closed and the 2026-08-08 triage authored this task against a
+still-open issue for already-shipped work -- a process gap now logged in
+`docs/devlog.md` with a "Fixes", not "Refs", recommendation for issue-closing
+PRs going forward. What the PR actually added: `read`/`peek` (missed
+originally -- they reach `with_conn/2` only indirectly through a private
+`consume/2` helper) and `retract/2` (added after the original sweep, by
+PR #1687) were genuinely missing from the audit's 15-verb list; all three are
+now covered against both peer states. No new defect surfaced. Verified
+independently before merging: confirmed PR #1656's "Refs" wording and merge
+date directly, grepped `lib/kazi/bus.ex` to confirm `read/1`/`peek/1` really
+do route through `consume/2`, and ran the audit test locally (38 passed,
+matching the PR). Needed one rebase to resolve an adjacent-line conflict in
+`docs/plans/E69.md` against T69.12's just-merged Done note; force-pushed with
+lease, re-verified clean, re-ran CI green before merging. Local `kazi`
+upgraded to v1.280.0 (checksum-verified release binary) so T69.12's `[setup]`
+fix is actually available for the next `--parallel` dispatch, not just
+merged-but-unpulled.
+
 **In flight (2026-09-05, fourth dispatch, manually-provisioned worktrees):**
 T70.9 (ADR-0085 implementation -- `[scope] forbidden_paths`/`no_integration`,
-closes #1695/#1704) and T69.13 (#1649 real bus-discovery test coverage), both
-still running. Dispatched with `mix deps.get` run by hand in each worktree
-before dispatch, since T69.12 (above) had not yet landed at dispatch time;
-future dispatches no longer need this workaround.
+closes #1695/#1704), still running (5 commits so far, no PR yet). Dispatched
+with `mix deps.get` run by hand in the worktree before dispatch, since T69.12
+(above) had not yet landed at dispatch time; future dispatches no longer need
+this workaround.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
