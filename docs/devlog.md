@@ -7,6 +7,43 @@ see "Boundary: kazi memory vs. Claude Code memory vs. docs/lore.md /
 docs/devlog.md"): entries here are recalled at dispatch time (ADR-0062) and
 new ones can be proposed here by harvest (ADR-0063).
 
+## 2026-09-05 — T69.13 was dispatched against already-shipped work because its fix PR said "Refs", not "Fixes"
+
+**Type:** finding
+**Tags:** process, T69.13, #1649, #1656, plan-drift
+
+**Problem:** T69.13 (E69, dispatched 2026-09-05) asked for a real-discovery
+audit of every `Kazi.Bus` verb -- fixture promotion, per-verb sweep, both
+#1606 peer states on TEST-NET. All of that already merged via PR #1656 on
+2026-07-20, six weeks earlier: `Kazi.TestSupport.BusPeer` in `test/support`,
+a 15-verb sweep in `test/kazi/bus/discovery_audit_test.exs`, both `blackhole`/
+`refusing` states covered. The worktree provisioned for T69.13 was already at
+`origin/main` HEAD with none of this work to do.
+
+**Root cause:** PR #1656's description said "Refs #1649, #1606" rather than
+"Fixes #1649" (or "Closes"), so merging it did not auto-close the issue.
+kazi-org/kazi#1649 sat OPEN on GitHub for six weeks with its substance already
+shipped. The 2026-08-08 full-backlog triage that authored T69.13 evidently
+worked from the (still-open) issue list rather than checking whether each
+issue's fix had already landed under a different closing keyword, and nothing
+in the triage or dispatch path cross-checks an open issue against merged PRs
+that reference it.
+
+**Impact:** a dispatched agent-hour spent rediscovering already-shipped work
+before finding the actual (small) residual gap -- three verbs (`read`, `peek`,
+`retract`) that were genuinely missing from the sweep, two from a gap in the
+original call-site-mapping methodology and one from later drift (#1687 added
+`retract` after the sweep landed). Closed via PR #1764, which also marks
+T69.13 done in `docs/plans/E69.md`.
+
+**Fix (not yet applied, process-level):** triage/planning passes that
+originate a task from an open GitHub issue should check `gh pr list --search
+"#<issue>"` for a merged PR referencing it before authoring a task, not just
+the issue's own `state`. More durably: prefer "Fixes #N"/"Closes #N" over
+"Refs #N" in a PR description whenever the PR is actually intended to resolve
+the issue, so the auto-close keeps the issue tracker in sync with what
+actually shipped without a separate reconciliation pass.
+
 ## 2026-09-05 — three fresh kazi-lane dispatches (T70.4, T66.5, T70.8) all hit `startup_deadline_exceeded` before any predicate verdict, under host load
 
 **Type:** finding
