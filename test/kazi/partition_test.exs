@@ -264,6 +264,86 @@ defmodule Kazi.PartitionTest do
     end
   end
 
+  describe "partition/3 — shared_paths exclusion (ADR-0087 decision 4, T73.2)" do
+    test "two goals overlapping ONLY on a shared path merge on main but split with shared_paths set" do
+      # g1 and g2 both touch mix.exs and nothing else in common (each also
+      # touches a private file the other does not).
+      source =
+        TermSource.new(%{
+          "g1-terms" => ["mix.exs", "lib/a.ex"],
+          "g2-terms" => ["mix.exs", "lib/b.ex"]
+        })
+
+      goals = [{"g1", ["g1-terms"]}, {"g2", ["g2-terms"]}]
+
+      # Without shared_paths: today's behavior — one merged partition.
+      assert [merged] = Partition.partition(goals, "/ws", graph_source: source)
+      assert merged.goal_ids == ["g1", "g2"]
+      assert merged.blast_radius == ["lib/a.ex", "lib/b.ex", "mix.exs"]
+      assert merged.lease_keys == []
+
+      # With shared_paths: ["mix.exs"] — mix.exs is excluded from each goal's
+      # radius BEFORE the overlap test, so g1 and g2 no longer overlap on
+      # anything and land in two separate partitions.
+      assert [p1, p2] =
+               Partition.partition(goals, "/ws", graph_source: source, shared_paths: ["mix.exs"])
+
+      assert p1.goal_ids == ["g1"]
+      assert p1.blast_radius == ["lib/a.ex"]
+      assert p1.lease_keys == ["mix.exs"]
+
+      assert p2.goal_ids == ["g2"]
+      assert p2.blast_radius == ["lib/b.ex"]
+      assert p2.lease_keys == ["mix.exs"]
+
+      assert p1.key != p2.key
+    end
+
+    test "the split result is identical when goal order is reversed" do
+      source =
+        TermSource.new(%{
+          "g1-terms" => ["mix.exs", "lib/a.ex"],
+          "g2-terms" => ["mix.exs", "lib/b.ex"]
+        })
+
+      opts = [graph_source: source, shared_paths: ["mix.exs"]]
+
+      forward =
+        Partition.partition([{"g1", ["g1-terms"]}, {"g2", ["g2-terms"]}], "/ws", opts)
+
+      reverse =
+        Partition.partition([{"g2", ["g2-terms"]}, {"g1", ["g1-terms"]}], "/ws", opts)
+
+      assert forward == reverse
+      assert Enum.map(forward, & &1.goal_ids) == [["g1"], ["g2"]]
+    end
+
+    test "a genuinely shared, non-excluded path still merges goals into one partition" do
+      source =
+        TermSource.new(%{
+          "g1-terms" => ["mix.exs", "lib/shared.ex"],
+          "g2-terms" => ["mix.exs", "lib/shared.ex"]
+        })
+
+      goals = [{"g1", ["g1-terms"]}, {"g2", ["g2-terms"]}]
+
+      assert [partition] =
+               Partition.partition(goals, "/ws", graph_source: source, shared_paths: ["mix.exs"])
+
+      assert partition.goal_ids == ["g1", "g2"]
+      assert partition.blast_radius == ["lib/shared.ex"]
+      assert partition.lease_keys == ["mix.exs"]
+    end
+
+    test "omitting shared_paths keeps every partition's lease_keys empty (byte-identical default)" do
+      source = TermSource.new(%{"a" => ["lib/a.ex"]})
+      goals = [{"g1", ["a"]}]
+
+      assert [p] = Partition.partition(goals, "/ws", graph_source: source)
+      assert p.lease_keys == []
+    end
+  end
+
   describe "partition_key/2" do
     test "is stable and content-addressed by the sorted radius" do
       assert Partition.partition_key(["g1"], ["lib/a.ex", "lib/b.ex"]) ==
