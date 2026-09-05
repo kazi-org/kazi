@@ -1,0 +1,169 @@
+# E50 -- Safe concurrent work: serial worktree indirection, wave checkpoints,
+# fleets over goal-files (P1, ADR-0065). Closes issues #936/#937's remaining
+# structural gaps. Full epic: docs/plans/E50.md. T50.7 (LIVE dogfood on the
+# RELEASED binary) is intentionally EXCLUDED from this goal -- it can only be
+# observed honestly after T50.1-T50.6 ship in a real release, so it is a manual
+# follow-up, not something a fixer agent can self-certify.
+
+id = "e50-safe-concurrent-work"
+name = "E50: serial-as-1-partition, wave checkpoints, fleets over goal-files (ADR-0065, T50.1-T50.6)"
+mode = "create"
+
+[metadata]
+adr = "0065"
+epic = "E50"
+issues = "936,937"
+
+[budget]
+max_iterations = 60
+max_tokens = 30000000
+
+[scope]
+paths = ["lib/kazi/**", "test/kazi/**", "docs/**", "README.md"]
+
+# ---------------------------------------------------------------------------
+# Wave E50-1 (foundations, parallel, no deps)
+# ---------------------------------------------------------------------------
+
+[[group]]
+id = "serial-worktree"
+name = "T50.1 -- serial-as-1-partition worktree indirection"
+
+[[group]]
+id = "checkpoint"
+name = "T50.3 -- supervised checkpoint mode (--pause-between-waves/--resume)"
+
+[[group]]
+id = "fleet-discovery"
+name = "T50.4 -- fleet discovery + DAG"
+
+# ---------------------------------------------------------------------------
+# Wave E50-2 (composition)
+# ---------------------------------------------------------------------------
+
+[[group]]
+id = "serial-integration"
+name = "T50.2 -- 1-partition integration per T21.5"
+needs = ["serial-worktree"]
+
+[[group]]
+id = "fleet-execution"
+name = "T50.5 -- fleet execution"
+needs = ["serial-worktree", "checkpoint", "fleet-discovery"]
+
+# ---------------------------------------------------------------------------
+# Wave E50-3 (ship)
+# ---------------------------------------------------------------------------
+
+[[group]]
+id = "docs"
+name = "T50.6 -- docs land with the code"
+needs = ["serial-worktree", "checkpoint", "fleet-execution"]
+
+# ===========================================================================
+# T50.1 -- Serial-as-1-partition (docs/plans/E50.md)
+# ===========================================================================
+
+[[predicate]]
+id = "t50-1-serial-worktree"
+provider = "custom_script"
+group = "serial-worktree"
+description = "T50.1 (Est 4h): route a non-`--parallel` executing `apply` through the group scheduler's EXISTING worktree indirection instead of editing `--workspace` in place. Reuse T21.4's machinery verbatim -- do not reinvent it: `Kazi.Scheduler.Worktree` (lib/kazi/scheduler/worktree.ex) already provides `wrap/2` (worktree-wrapping reconciler adapter, :83-84), `default_base_dir/0` (:130-131, where task worktrees live), `reap/2` (:147-148, cleanup on terminal state via `Kazi.Scheduler.WorktreeTable`), and `safe_cleanup/3` (:174-175, the worktree-guard-safe removal -- NEVER `rm -r` a cwd worktree, this is the existing landmine guard, keep it). Today's serial (non-`--parallel`) `kazi apply <goal-file> --workspace <path>` path dispatches directly against `--workspace` with no indirection -- find that dispatch call site (search `lib/kazi/cli.ex` for `run_goal_serial/4`) and make it create a task worktree from the `--workspace` ref (same as a 1-partition group would under `--parallel`), dispatch the fixer THERE, and clean up (via the T21.4 reap/safe_cleanup path) on every terminal state (converged/stuck/over_budget/crash) -- mirroring how a parallel partition already behaves, just for the degenerate N=1 case. `--in-place` (a new flag) preserves TODAY'S direct-edit behavior for callers who explicitly opt out. `--check`/`--explain` stay untouched (they already dispatch nothing). The existing primary-worktree guard (issue #937 Gap A, `--allow-primary-workspace`) now only needs to apply to the `--in-place` path, since the new default path never touches the caller's actual checkout at all. Write test/kazi/cli/serial_worktree_indirection_test.exs covering: an executing serial apply against a base leaves the base checkout BYTE-IDENTICAL (untracked files included -- this is the T21.4-style safety guarantee, verified with a fixture repo + an untracked scratch file that must survive untouched) while the goal converges in a kazi-owned worktree; `--in-place` reproduces today's direct-edit behavior exactly; guard interplay is covered (`--in-place` + primary-worktree -> still refuses; worktree-indirected path -> no refusal, since it never touches the primary checkout). PROCESS: branch task/e50-safe-concurrent-work, small conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/cli/serial_worktree_indirection_test.exs']
+timeout_ms = 300000
+
+# ===========================================================================
+# T50.3 -- Supervised checkpoint mode (docs/plans/E50.md)
+# ===========================================================================
+
+[[predicate]]
+id = "t50-3-checkpoint"
+provider = "custom_script"
+group = "checkpoint"
+description = "T50.3 (Est 4h, #936's FULL ask -- the minimal slice, the `frontier_complete` stream event, already shipped via PR #964/issue #936; this task is the remaining piece). `Kazi.Scheduler.DepScheduler` (lib/kazi/scheduler/dep_scheduler.ex) already supports an `:on_frontier_complete` callback (:47-60, :203, :215, :254, :283) invoked once per frontier with `%{event: \"frontier_complete\", frontier: index, ...}` -- this is what `apply --parallel --json --stream` already wires to emit the JSONL event. ADD a new `--pause-between-waves` flag to `apply --parallel`: when set, the callback (or a new hook alongside it) STOPS the scheduler after emitting `frontier_complete` for the current frontier -- exit 0, with a resumable state TOKEN embedded in the terminal `--json` result object (a compact serialization of: goal-set identity/hash, the next frontier index to dispatch, `schema_version`). Add `kazi apply --resume <token|run-id>` (a new CLI arg mode alongside the existing goal-file/proposal-ref modes) that reconstructs scheduler state from the token and continues from the NEXT frontier -- one resume mechanism, designed to also cover fleet-node boundaries in T50.5 (do not build two separate pause/resume mechanisms). Find the scheduler's frontier-dispatch loop in `Kazi.Scheduler.DepScheduler` to see where `on_frontier_complete` fires and add the pause branch there. Write test/kazi/scheduler/pause_resume_test.exs covering: a 2-frontier fixture goal with `--pause-between-waves` stops cleanly after frontier 0 (frontier 1's groups are NOT dispatched -- assert on dispatch call count/argv, not just timing), the terminal result carries a resume handle, and `kazi apply --resume <handle>` completes frontier 1 to collective convergence; WITHOUT the flag, behavior is byte-identical to today (both frontiers dispatch in one run, no behavior regression). PROCESS: branch task/e50-safe-concurrent-work, small conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/scheduler/pause_resume_test.exs']
+timeout_ms = 300000
+
+# ===========================================================================
+# T50.4 -- Fleet discovery + DAG (docs/plans/E50.md)
+# ===========================================================================
+
+[[predicate]]
+id = "t50-4-fleet-discovery"
+provider = "custom_script"
+group = "fleet-discovery"
+description = "T50.4 (Est 3h): `kazi apply --fleet <dir|manifest.toml>` (a new CLI flag/mode alongside the existing goal-file/proposal-ref/--parallel modes in lib/kazi/cli.ex) loads every `*.goal.toml` file in `<dir>` and builds a goal-DAG: edges come from EITHER an explicit `[metadata] depends_on = [\"other-goal-id\"]` array in a goal-file, OR are INFERRED when two goal-files' `[scope] paths` glob patterns overlap (an overlapping pair with no explicit edge in either direction is treated as \"never run concurrently\" -- serialize them, don't error). Loading is LOAD-TIME validated: a dependency cycle, or a `depends_on` entry naming a goal-id that doesn't exist among the loaded files, is a hard load error that names the OFFENDING FILE PATHS (not just goal-ids, since a caller debugging this needs to find the file). `--explain`/`--dry-run` (extend the existing explain path, don't duplicate it) render the fleet's computed schedule (which goals run in which frontier, and why -- explicit edge vs inferred overlap vs independent) WITHOUT executing anything -- no worktree, no harness, no lease touched, matching how `--explain` already behaves for a single goal's `needs`-DAG (T23.1/ADR-0028 precedent -- reuse that computation's SHAPE, just one level up over goal-files instead of predicate groups). Write test/kazi/fleet/discovery_test.exs covering: a fixture directory with three goal-files (one explicit `depends_on` edge, one pair with overlapping `[scope]` globs and no explicit edge, one fully independent pair) yields the expected DAG under `--fleet <dir> --explain --json`; a fixture with a dependency cycle fails load with a clear error naming the cycle's file paths; a fixture with a `depends_on` entry naming a nonexistent goal-id fails load naming the dangling reference. PROCESS: branch task/e50-safe-concurrent-work, small conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/fleet/discovery_test.exs']
+timeout_ms = 300000
+
+# ===========================================================================
+# T50.2 -- 1-partition integration per T21.5 (docs/plans/E50.md)
+# ===========================================================================
+
+[[predicate]]
+id = "t50-2-serial-integration"
+provider = "custom_script"
+group = "serial-integration"
+description = "T50.2 (Est 3h, needs T50.1's worktree indirection to exist first): the serial path lands its work the SAME way a parallel partition already does under T21.5 -- reuse `Kazi.Actions.Integrate` (lib/kazi/actions/integrate.ex, `execute/2` for `%Action{kind: :integrate}` at :124-125, the git helper `git/2` at :348-349, the remote-integrate submodule `integrate/2` at :398-400) rather than any bespoke serial-path landing logic. Task-branch commits -> rebase-merge onto the base (or a pushed-branch handoff when the goal's `landed` contract is push-only, matching how a parallel partition already resolves this). A conflict during integration triggers RE-DISPATCH of the fixer with the conflict evidence (mirroring T21.5's existing conflict-detection-and-re-dispatch behavior for parallel partitions) -- never a forced merge. ADR-0065 decision 2 (pinned by this task's own test): the serial path must NEVER call `git reset`/`git clean` against the operator's base/caller checkout -- this is the exact mechanism that caused the original #937 data-loss incident, so a test must structurally prove it is absent (grep the serial integration code path's actual git invocations from its recorded argv/call-site, not just behaviorally probe it). Write test/kazi/cli/serial_integration_test.exs covering: a converged serial run's work is integrated onto the base by rebase-merge against a FIXTURE remote (a real git repo, not a mock); a conflicting base advance (base moves forward with a conflicting change between dispatch and integration) triggers re-dispatch with conflict evidence, not a force-push or forced merge; a `git reset`/`git clean` call against the BASE tree is structurally absent from the serial integration path (no call site -- assert this by inspecting/grepping the actual git command list the integration code issues, the same technique T21.5's own tests already use for the parallel path). PROCESS: branch task/e50-safe-concurrent-work, small conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/cli/serial_integration_test.exs']
+timeout_ms = 300000
+
+# ===========================================================================
+# T50.5 -- Fleet execution (docs/plans/E50.md)
+# ===========================================================================
+
+[[predicate]]
+id = "t50-5-fleet-execution"
+provider = "custom_script"
+group = "fleet-execution"
+description = "T50.5 (Est 5h, needs T50.1's worktree machinery + T50.3's checkpoint mechanism + T50.4's DAG to all exist first): drive the T50.4 fleet DAG through the SAME partition scheduler one level up -- one worktree PER GOAL (reusing T50.1's per-goal worktree indirection, not a new mechanism), pipelined frontier advancement across goal-files (not just within one goal-file's predicate groups), a per-fleet concurrency cap (`--fleet-concurrency N`, default unlimited) that throttles how many goal-files run concurrently. Register a lease/registry row PER FLEET MEMBER in the shared run registry (`Kazi.ReadModel.RunRegistry`, lib/kazi/read_model/run_registry.ex; `list_live/1` at :232 is the existing staleness-aware live-run query -- reuse it, do not build a parallel tracking mechanism) so a concurrent operator session (or the duplicate-run guard, issue #942) sees every fleet member as an ordinary live run, keyed per `goal_ref` exactly like a standalone run. Aggregate a budget/economy ROLLUP across all fleet members into the terminal `--fleet` result object (one level up from the existing per-partition budget rollup, issue #343's precedent -- reuse its shape). The `frontier_complete` event (already shipped, issue #936 minimal slice) generalizes to fire at FLEET-NODE boundaries too, not just within-goal predicate-group boundaries; T50.3's `--pause-between-waves`/`--resume` mechanism applies here unchanged (one mechanism for both). Write test/kazi/fleet/execution_test.exs covering: a 3-goal fixture fleet (goals A and B independent/no edge, goal C has `depends_on = [\"A\"]`) executes A and B concurrently then C, using stub harnesses, each goal in its OWN worktree (assert distinct worktree paths); setting `--fleet-concurrency 1` forces strict serialization (assert no two goals' dispatch windows overlap); the terminal `--fleet --json` result aggregates per-goal economy figures; a registry row (via RunRegistry) exists for each fleet member while it's executing."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/fleet/execution_test.exs']
+timeout_ms = 300000
+
+# ===========================================================================
+# T50.6 -- Docs land with the code (docs/plans/E50.md, ADR-0034)
+# ===========================================================================
+
+[[predicate]]
+id = "t50-6-docs"
+provider = "custom_script"
+group = "docs"
+description = "T50.6 (Est 1.5h, needs T50.1/T50.3/T50.5 to exist first so the docs describe REAL, shipped behavior): document every new flag this epic added -- `--in-place` (T50.1), `--pause-between-waves` and `--resume` (T50.3), `--fleet <dir>` and `--fleet-concurrency N` (T50.4/T50.5) -- in `kazi help` (so `kazi help --json` reports them, matching the T16.1 generated-help convention), `docs/orchestrator-recipe.md` (a fleet walkthrough: a directory of 2-3 goal-files with one dependency edge, run end to end), and README.md's command summary block. Cross-link ADR-0065 from wherever the orchestrator-recipe teaches the new flags. Post a closing comment on issues #937 and #936 (via `gh issue comment`) pointing at the shipped surface once this lands -- do this as a manual step after merge, not as part of the predicate itself. Extend test/kazi/teach_coherence_reverse_test.exs's real-flag enumeration (or the equivalent doc-freshness check) to cover the new flags, OR add a focused test asserting each new flag string appears in `kazi help --json` AND in docs/orchestrator-recipe.md's text. Write test/kazi/teach/e50_flags_documented_test.exs asserting: `--in-place`, `--pause-between-waves`, `--resume`, `--fleet`, and `--fleet-concurrency` all appear in `kazi help --json`'s flag list for the relevant command(s), AND each appears in the combined text of README.md + docs/orchestrator-recipe.md. PROCESS: branch task/e50-safe-concurrent-work, small conventional commits, push with -u."
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test test/kazi/teach/e50_flags_documented_test.exs']
+timeout_ms = 300000
+
+# ===========================================================================
+# Guards (apply to the whole goal regardless of group)
+# ===========================================================================
+
+[[predicate]]
+id = "full-suite-green"
+provider = "custom_script"
+description = "GUARD: the full ExUnit suite stays green."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix test']
+timeout_ms = 900000
+
+[[predicate]]
+id = "format-clean"
+provider = "custom_script"
+description = "GUARD: mix format --check-formatted stays clean (CI enforces it)."
+guard = true
+cmd = "sh"
+args = ["-c", 'env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" MIX_ENV=test mix format --check-formatted']
+timeout_ms = 120000
+
+[[predicate]]
+id = "landed"
+provider = "custom_script"
+description = "The work is COMMITTED and PUSHED: working tree clean, an upstream is set, and HEAD equals the upstream ref."
+cmd = "sh"
+args = ["-c", 'test -z "$(git status --porcelain)" && git rev-parse --abbrev-ref @{u} >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]']
+timeout_ms = 30000
