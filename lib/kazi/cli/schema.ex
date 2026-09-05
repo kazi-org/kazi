@@ -15,9 +15,10 @@ defmodule Kazi.CLI.Schema do
   T27.4/T27.9 (ADR-0032): the schemas are keyed by the verbs `apply`/`plan` (was
   `run`/`propose`). The deprecated `run`/`propose` schema aliases were REMOVED in
   v0.6.0 (T27.9), so `kazi schema run` / `kazi schema propose` no longer resolve;
-  `apply`/`plan`/`status`/`bus` are the valid schema keys (`bus` is the T55.1 /
-  ADR-0072 digest envelope shared by `bus read|peek|watch --json` and the
-  `kazi_bus_read`/`kazi_bus_watch` MCP tools).
+  `apply`/`plan`/`status`/`bus`/`portfolio` are the valid schema keys (`bus` is
+  the T55.1 / ADR-0072 digest envelope shared by `bus read|peek|watch --json`
+  and the `kazi_bus_read`/`kazi_bus_watch` MCP tools; `portfolio` is the T69.9
+  fleet sitrep envelope).
   """
 
   # The contract version, shared with `Kazi.CLI`'s `@run_schema_version`. Kept in
@@ -340,6 +341,134 @@ defmodule Kazi.CLI.Schema do
         }
       }
     },
+    "portfolio" => %{
+      schema_version: @schema_version,
+      command: "portfolio",
+      title: "kazi portfolio --json result",
+      description:
+        "The single, versioned JSON object `kazi portfolio --json` emits — the " <>
+          "fleet's sitrep composed purely from kazi's own objective surfaces " <>
+          "(proposals, the run registry, the attention queue, cross-machine bus " <>
+          "facts; E64/T64.3, T60.4 #1160). No manual curation. v1 keys " <>
+          "(`planned`/`by_repo`/`fleet_remote`) are byte-identical to T60.4; " <>
+          "`totals`/`todo`/`blocked`/`rate` are E64/T64.3 additive keys — " <>
+          "`schema_version` stays 2 for either shape.",
+      fields: [
+        %{name: "schema_version", type: "integer", description: "The contract version."},
+        %{name: "kind", type: "string", description: "Always \"portfolio\"."},
+        %{
+          name: "planned",
+          type: "array<object>",
+          description:
+            "Proposals `proposed`/`approved` but not yet applied: " <>
+              "{proposal_ref, goal_id, idea, status}. Not grouped by repo — a " <>
+              "proposal carries no workspace until applied."
+        },
+        %{
+          name: "by_repo",
+          type: "object",
+          description:
+            "LOCAL runs grouped by repo, then by bucket (\"in_progress\" / " <>
+              "\"stuck\" / \"complete\"): {repo => {bucket => [{goal_ref, run_id, " <>
+              "status}]}}."
+        },
+        %{
+          name: "fleet_remote",
+          type: "array<object>",
+          description:
+            "Runs in flight on OTHER machines, read from the same cross-machine " <>
+              "bus facts Mission Control's remote cards use: {goal_ref, bucket, " <>
+              "machine}. Degrades to [] when the daemon is unreachable — never an " <>
+              "error."
+        },
+        %{
+          name: "totals",
+          type: "object",
+          description:
+            "The five-bucket headline: {base: integer, empty: boolean, rows: " <>
+              "[{bucket, count, pct}]}. `pct` is an integer percentage per bucket " <>
+              "(largest-remainder apportionment, sums to 100); `empty` is true " <>
+              "when nothing is tracked (base == 0)."
+        },
+        %{
+          name: "todo",
+          type: "array<object>",
+          description:
+            "Approved proposals with no registered run yet (ready to dispatch): " <>
+              "{proposal_ref, goal_id, idea, status}."
+        },
+        %{
+          name: "blocked",
+          type: "array<object>",
+          description:
+            "Stuck/over_budget/error runs plus DAG-blocked roadmap goals, each " <>
+              "naming WHY (T64.2): {goal_ref, cause, blocker} plus cause-specific " <>
+              "fields — over_budget carries {iterations, cap}; stuck/error carry " <>
+              "{red_predicates: [{id, red_iterations}]}; a DAG block carries " <>
+              "{blocked_by}. `blocker` is the rendered one-line human string."
+        },
+        %{
+          name: "rate",
+          type: "object",
+          description:
+            "The fleet-wide honest rate (never a projected date, ADR-0046): " <>
+              "{green, total, delta, empty}. `empty` is true when no running goal " <>
+              "has a recorded rate yet."
+        }
+      ],
+      example: %{
+        "schema_version" => @schema_version,
+        "kind" => "portfolio",
+        "planned" => [
+          %{
+            "proposal_ref" => "prop-ship-healthz-abc1234",
+            "goal_id" => "ship-healthz",
+            "idea" => "ship a healthz endpoint",
+            "status" => "proposed"
+          }
+        ],
+        "by_repo" => %{
+          "kazi-org/kazi" => %{
+            "complete" => [
+              %{"goal_ref" => "done-1", "run_id" => "run-1", "status" => "converged"}
+            ]
+          }
+        },
+        "fleet_remote" => [
+          %{"goal_ref" => "remote-goal", "bucket" => "in_progress", "machine" => "host2"}
+        ],
+        "totals" => %{
+          "base" => 13,
+          "empty" => false,
+          "rows" => [
+            %{"bucket" => "done", "count" => 5, "pct" => 39},
+            %{"bucket" => "running", "count" => 3, "pct" => 23},
+            %{"bucket" => "blocked", "count" => 2, "pct" => 15},
+            %{"bucket" => "todo", "count" => 2, "pct" => 15},
+            %{"bucket" => "planned", "count" => 1, "pct" => 8}
+          ]
+        },
+        "todo" => [
+          %{
+            "proposal_ref" => "prop-todo-1",
+            "goal_id" => "todo-1",
+            "idea" => "an idea",
+            "status" => "approved"
+          }
+        ],
+        "blocked" => [
+          %{
+            "goal_ref" => "stuck-probe",
+            "run_id" => "run-9",
+            "status" => "stuck",
+            "cause" => "stuck",
+            "red_predicates" => [%{"id" => "probe", "red_iterations" => 3}],
+            "blocker" => "blocked: probe red 3 iterations"
+          }
+        ],
+        "rate" => %{"green" => 5, "total" => 8, "delta" => 1, "empty" => false}
+      }
+    },
     "status" => %{
       schema_version: @schema_version,
       command: "status",
@@ -415,8 +544,9 @@ defmodule Kazi.CLI.Schema do
 
   # The verbs with a documented result schema, in emit order. `all/0` keys by
   # these. The deprecated `run`/`propose` schema aliases were removed in v0.6.0
-  # (T27.9), so these are the only valid schema keys.
-  @ordered_commands ["apply", "plan", "status", "bus"]
+  # (T27.9), so these are the only valid schema keys. `portfolio` (T69.9) is the
+  # `kazi portfolio --json` sitrep envelope (E64/T64.3, T60.4 #1160).
+  @ordered_commands ["apply", "plan", "status", "bus", "portfolio"]
 
   @doc "The shared `--json` contract version."
   @spec schema_version() :: pos_integer()
