@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.283.0](https://github.com/kazi-org/kazi/compare/v1.282.1...v1.283.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** add single_node mode to apply (--single-node/KAZI_SINGLE_NODE) ([a3bc1e6](https://github.com/kazi-org/kazi/commit/a3bc1e65af83d5a8f1fe1f4234e9e7d5a4edfeeb))
+
 ## [1.282.1](https://github.com/kazi-org/kazi/compare/v1.282.0...v1.282.1) (2026-09-05)
 
 
