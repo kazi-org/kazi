@@ -381,7 +381,58 @@ on TKE.3 + TKE.7 landing first (no calendar cost: E7's own sequencing hold
 already parks those rows). Confirmed for hq: a true `--in-place` run never
 adds an `integration` key to the `--json` result (traced
 `land_converged_serial/6`'s short-circuit) -- T7.3 must not wait on it.
-Next: mint and dispatch TKE.3 and TKE.7 as the next kazi pool rows.
+Corrected sequencing before dispatch: TKE.3 needs TKE.1 first (its own
+`deps:`), so dispatched TKE.1 (genuinely deps: []) and TKE.7 (the plan's own
+Wave-KE-A footnote: its synthetic-input/table-driven acceptance form has no
+real dependency on TKE.3's code) in parallel instead.
+
+**Shipped (2026-09-05): TKE.1** -- `--lane-contract <path>`/
+`KAZI_LANE_CONTRACT` gates `kazi apply --single-node --in-place` on a `git
+rev-parse HEAD` vs the contract's `task_sha` match, refusing before any
+harness dispatch on mismatch (`reason: "lane_contract_violation"`, `kind:
+"wrong_task_sha"`, naming both shas) or on an unreadable/unparsable/
+incomplete contract (`kind: "invalid_contract"`, fail-closed). A lone
+`--lane-contract` with no `--single-node` refuses before the goal or
+contract file is even opened (`reason:
+"lane_contract_requires_single_node"`) -- a governed lane is always
+single_node. Without `--in-place`, accepted but inert (documented, not
+silently ignored). PR #1795, `5850d0dc`. Verified independently: read the
+full diff, ran the new test file + the reverse-doc-coherence allow-list
+locally (15/15 passed), `mix format` clean, no attribution. Direct-agent
+dispatch. TKE.2 and TKE.3 are now unblocked.
+
+**In review (2026-09-05): TKE.7** -- additive `job_outcome` field
+(done/blocked/checkpointed/refused) on `apply --json`, the synthetic-input
+form per the plan's Wave-KE-A footnote (pure `Kazi.CLI.JobOutcome.classify/1`
++ additive wiring into `run_result_json/6`, interim lane-mode gate =
+single_node + in_place pending TKE.1's `--lane-contract`). PR #1796. My own
+review passed (30/30 new tests, format clean, no attribution) but
+chief-architect (who owns this review since hq scripts against the field)
+requested changes at `1aa4e63b`: `commits_ahead_of_base`'s use of
+`Kazi.ScopeDiff.base_ref/1` (merge-base with origin/main, root-commit
+fallback) is wrong for a governed lane container -- those are shallow clones
+of `develop` with no `origin/main`, so a stuck run with real committed
+progress can misclassify as `blocked` (losing the salvage signal) and a
+clean stuck run over `develop` can misclassify as `checkpointed`. Fix:
+count `opts[:base]..HEAD` when `--base` is present (in-place already
+requires it to resolve), falling back to `ScopeDiff.base_ref/1` only when
+absent; add non-main-base and shallow-clone wiring tests; log a git failure
+to stderr instead of silently returning 0. Relayed to the dispatched agent
+for a fix-and-repush.
+
+**Also this cycle: T72.4 dispatched** (interactive `kazi plan render --tree`
+adapter, E72's critical path, unblocked once T72.2+T72.3 both landed) as a
+third concurrent lane -- still in progress. And a real, 100%-reproducible
+(not flaky) test-hermeticity bug was found and fixed while verifying TKE.1's
+full-suite run: `Kazi.Authoring.SessionAttributionTest`'s "falls back to the
+proposal's session_name" case never cleared `CLAUDE_CODE_SESSION_ID`/
+`KAZI_SESSION_NAME`, so it silently inherited whatever was set in the
+process running `mix test` -- which is every dispatched agent's own session
+id. Misdiagnosed twice already this session (once as "doesn't reproduce",
+once as an L-0033-class timing flake -- neither correct; it's deterministic,
+not intermittent, and not one of L-0033's three named tests). PR #1797,
+fixed by clearing/restoring both vars in the test's own `setup` block;
+documented as `docs/lore.md` L-0055 so it isn't misdiagnosed a third time.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
