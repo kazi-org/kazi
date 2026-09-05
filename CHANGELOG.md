@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.275.5](https://github.com/kazi-org/kazi/compare/v1.275.4...v1.275.5) (2026-09-05)
+
+
+### Bug Fixes
+
+* **daemon:** reap nats-server when the BEAM is signalled away ([321772e](https://github.com/kazi-org/kazi/commit/321772e2a1f2ef4e37f5a3a5f1b798198746f10e)), closes [#1719](https://github.com/kazi-org/kazi/issues/1719)
+
 ## [1.275.4](https://github.com/kazi-org/kazi/compare/v1.275.3...v1.275.4) (2026-09-05)
 
 
