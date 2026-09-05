@@ -219,6 +219,31 @@ defmodule Kazi.CLI.DaemonTest do
       assert output =~ expected_vsn()
     end
 
+    # T69.5 (#1684): the nats-server restart-loop / bind-conflict watchdog.
+    # A freshly-started daemon with no exits yet reports the all-clear shape,
+    # additively, alongside every pre-existing field.
+    test "reports nats_health additively under --json" do
+      output = capture_io(fn -> assert Kazi.CLI.run(["daemon", "status", "--json"], []) == 0 end)
+
+      decoded = Jason.decode!(output)
+      # Pre-existing fields untouched.
+      assert decoded["ok"] == true
+      assert decoded["vsn"] == expected_vsn()
+      assert is_integer(decoded["pid"])
+      assert is_integer(decoded["uptime_s"])
+
+      assert %{
+               "restart_loop" => false,
+               "exits_in_window" => 0,
+               "bind_conflict" => nil
+             } = decoded["nats_health"]
+    end
+
+    test "reports nats_health human-readably" do
+      output = capture_io(fn -> assert Kazi.CLI.run(["daemon", "status"], []) == 0 end)
+      assert output =~ "nats: ok"
+    end
+
     test "stop shuts the daemon down cleanly" do
       output = capture_io(fn -> assert Kazi.CLI.run(["daemon", "stop"], []) == 0 end)
       assert output =~ "stopped"
