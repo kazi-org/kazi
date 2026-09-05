@@ -28,7 +28,10 @@ defmodule Kazi.Providers.CustomScript do
       never a silent pass.
     * `:args` — argument list (list of strings). Optional, defaults to `[]`.
     * `:env`  — extra environment, a `{name, value}` list or a `{name => value}`
-      map. Optional.
+      map. Optional. Merged with any controller-threaded `context[:env]` (#1709:
+      `KAZI_GOAL_BRANCH`/`KAZI_GOAL_UPSTREAM`, set for a guard/held-out predicate
+      running inside clean-tree isolation) — a name declared here overrides the
+      controller-supplied value for the same key.
     * `:verdict` — how the result maps to a status. One of:
       * `"exit_zero"` (the default) — exit `0` is `:pass`; any other exit is
         `:fail`. The safe baseline for a tool whose exit code already means
@@ -146,7 +149,7 @@ defmodule Kazi.Providers.CustomScript do
 
     with {:ok, cmd, args} <- fetch_cmd(config),
          {:ok, verdict} <- fetch_verdict(config) do
-      run(cmd, args, workspace, config, verdict)
+      run(cmd, args, workspace, config, verdict, context)
     else
       {:error, reason} -> PredicateResult.error(%{reason: reason, workspace: workspace})
     end
@@ -180,9 +183,9 @@ defmodule Kazi.Providers.CustomScript do
   # declared :error_codes are checked FIRST (the checker could not run), so a
   # broken evidence pipeline is never read as a pass; otherwise the verdict
   # decides. A missing binary / bad cwd is mapped to :error, never :fail.
-  defp run(cmd, args, workspace, config, verdict) do
+  defp run(cmd, args, workspace, config, verdict, context) do
     cmd = resolve_cmd(cmd, workspace)
-    opts = [cd: workspace, stderr_to_stdout: merge_stderr?(config)] ++ env_opt(config)
+    opts = [cd: workspace, stderr_to_stdout: merge_stderr?(config)] ++ env_opt(config, context)
 
     case CommandRunner.run(cmd, args, opts, Map.get(config, :timeout_ms)) do
       {:ran, output, exit_code} ->
@@ -504,10 +507,28 @@ defmodule Kazi.Providers.CustomScript do
     end
   end
 
-  defp env_opt(config) do
+  # Merges the controller-threaded context env (#1709: `KAZI_GOAL_BRANCH`/
+  # `KAZI_GOAL_UPSTREAM` for an isolated grader, `[]` otherwise) with the
+  # goal-file-declared `:env`, config winning on a name collision — the
+  # controller-supplied values are DEFAULTS an explicit goal-file declaration
+  # may override, never an override themselves.
+  defp env_opt(config, context) do
+    context_env = normalize_env(context[:env] || [])
+    config_env = normalize_env(config_env_pairs(config))
+
+    context_env
+    |> Map.new()
+    |> Map.merge(Map.new(config_env))
+    |> case do
+      empty when map_size(empty) == 0 -> []
+      merged -> [env: Map.to_list(merged)]
+    end
+  end
+
+  defp config_env_pairs(config) do
     case Map.get(config, :env) do
-      list when is_list(list) -> [env: normalize_env(list)]
-      map when is_map(map) -> [env: normalize_env(Map.to_list(map))]
+      list when is_list(list) -> list
+      map when is_map(map) -> Map.to_list(map)
       _ -> []
     end
   end
