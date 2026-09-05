@@ -114,8 +114,8 @@ feeds the ADR-0065 §3 overlap rule, so disjoint roots is what "can run in
 parallel" means. Tamper protection is freshness plus auto-added ADR-0085
 `forbidden_paths`, never sealing a derived file. Reviewed by two
 coordinating sessions before the ADR; the fleet-repo dispatcher half is
-tracked in that repo. In flight: the ADR + E72 PR (owner: this session,
-2026-09-05). Unstarted: all of E72.
+tracked in that repo. In flight: PR #1731 (ADR + E72, 2026-09-05, awaiting merge).
+Unstarted: all of E72.
 
 **Near term (2026-09-02, from a full open-issue triage, third pass --
 E71, 1 task):** the entire open backlog is now three triage epics deep
