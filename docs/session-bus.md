@@ -76,6 +76,10 @@ and prints the reply. The reply is a single JSON line:
   `schema_vsn` it is never omitted by an up-to-date daemon: its absence on a real
   `ping` reply IS the skew signal — it names a daemon compiled before this field
   existed.
+- `nats_health` (T69.5, #1684) — the nats-server restart-loop / bind-conflict
+  watchdog. Always present (like `velocity`, never omitted by an up-to-date
+  daemon). See "Bind-conflict recovery" below for the full shape and the
+  detection/recovery mechanics behind it.
 
 ### Write-path schema skew (T52.7 / T52.8, ADR-0068)
 
@@ -1000,6 +1004,67 @@ port:
 An orphaned `nats-server` (ppid 1) still holding the port is the symptom this
 prevents: every client, including the new daemon's own provisioner, connects to
 the orphan, so the bus looks healthy until the orphan dies.
+
+### Bind-conflict recovery (#1684)
+
+The two layers above close the SIGNALED-shutdown path, but a daemon can also
+find its port already squatted for reasons that have nothing to do with its
+own shutdown — a previous orphan that outlived a signal `kazi daemon` never
+saw (a hard power loss, an OOM kill, `kill -9`), a stale process from an
+unrelated tool, or a second daemon instance racing the first one up. Before
+this, `Kazi.Daemon.Nats` treated **every** nats-server exit as fatal with no
+way to tell these apart — a live incident had an orphaned nats-server (ppid 1)
+hold the port for 10+ hours while the daemon crash-looped with nothing but a
+generic `nats-server exited (status 1)` line.
+
+On every unexpected nats-server exit, the daemon now asks BEHAVIORALLY — via
+`lsof`/`ps`, not by parsing nats-server's stderr for a phrase like "address
+already in use" (log text is version/locale-fragile; port occupancy is not) —
+whether its configured port is held by someone else, and classifies the
+holder into one of four dispositions:
+
+| Holder is...                                             | Disposition | Action |
+|------------------------------------------------------------|-------------|--------|
+| not a `nats-server` process at all                          | foreign      | left alone, fatal stop (unchanged behavior) |
+| a `nats-server`, but a DIFFERENT `-sd` store dir             | incompatible | left alone, fatal stop (unrelated data) |
+| a `nats-server` with OUR store dir, ppid 1 (reparented to init — no live parent) | orphan | reaped (`kill`, escalating to `-9`), then the daemon retries its own spawn — no fatal stop |
+| a `nats-server` with OUR store dir, a live parent            | peer         | adopted (connect-mode, like the cross-machine case) instead of spawning a second writer against the same JetStream directory — no fatal stop |
+
+Every disposition logs a distinct, greppable line in ADDITION to (or, for the
+two recoverable dispositions, INSTEAD of) the generic exit warning:
+
+```
+nats bind conflict: port 4223 held by pid 8842 (nats-server), not ours -- orphaned (ppid 1, matching store dir); reaping and retrying
+```
+
+The orphan self-heal is bounded (3 automatic reap-and-retry attempts per
+daemon process) so a holder that is somehow unkillable, or whose death never
+actually frees the port, cannot spin an infinite in-process respawn loop —
+past the bound, the conflict is logged and the daemon falls back to the
+unchanged fatal stop.
+
+**`nats_health`** (the `ping`/`kazi daemon status` field) reports a rolling
+60-second exit-restart window on top of this, independent of whether any given
+exit was recovered:
+
+```jsonc
+{
+  "restart_loop": false,        // true once 3+ nats-server exits land within 60s
+  "exits_in_window": 0,
+  "exit_window_ms": 60000,
+  "bind_conflict": null,        // the last classified conflict, once one occurs:
+                                 // {"disposition": "orphan", "holder_pid": 8842,
+                                 //  "port": 4223, "detected_at": "2026-...Z"}
+  "last_exit_at": null
+}
+```
+
+`kazi daemon status`'s human-readable output adds one line: `nats: ok`, or
+`nats: RESTART LOOP -- N exit(s) in 60s (last bind conflict: <disposition>,
+pid <p>)` once the window trips. Backed by `:persistent_term` (not the
+crashing GenServer's own state) so it survives the exact crash it describes —
+keyed by the daemon's stable process name, so a supervisor-restarted `Nats`
+child still reports its OWN prior exit history.
 
 ## Re-registering after an in-place upgrade (#1484, ADR-0083)
 
