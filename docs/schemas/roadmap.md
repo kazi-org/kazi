@@ -158,3 +158,30 @@ is no cache:
 > **The rendered file is GENERATED.** Hand-edits to a written `--out` file are
 > **lost on the next render** — the banner says so loudly. Edit the roadmap-file
 > (the source of truth) and re-run `kazi plan render`, never the rendered view.
+
+## Nesting lint (`kazi plan lint <roadmap>`, T72.2, ADR-0086 decision 2)
+
+`kazi plan lint <roadmap-file>` loads the roadmap and checks every pair of
+member goals' declared `[scope]` roots (`Kazi.Scope.roots/1` — `write_paths`
+when declared, else `paths`). Two goals whose roots **nest inside, or exactly
+equal,** one another **refuse** — non-zero exit — naming both (roadmap-declared)
+goal ids and the shared/nesting root:
+
+```sh
+kazi plan lint priv/examples/roadmap/pipeline.roadmap.toml
+kazi plan lint priv/examples/roadmap/pipeline.roadmap.toml --json
+```
+
+- A goal with no declared scope (`roots/1` is `[]`) never participates — the
+  same exemption `Kazi.Fleet`'s inferred-edge rule gives an unscoped goal.
+- Disjoint roots exit `0`, printing the goal count and that no conflicts were
+  found (`--json`: `"conflicts": []`).
+- This is a **different concern** from `kazi lint <roadmap>` (the
+  "Validation" section above), which checks the roadmap's DAG (cycles,
+  unresolvable refs) and says nothing about scope overlap. Both commands
+  accept a roadmap file; they check unrelated things.
+- **Rationale (ADR-0086 decision 2):** the per-directory `AGENTS.md` projection
+  (`kazi plan render --tree`) relies on a harness's walk-up reading every
+  ancestor directory's node — a goal rooted at `pkg/foo` and a goal rooted at
+  `pkg/foo/bar` would hand the child goal's agent the parent goal's brief too.
+  `kazi plan render --tree` runs this SAME check before writing any file.
