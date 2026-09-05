@@ -77,6 +77,7 @@ optional `landed` array).
 | `blocked`        | array of objects | **DAG goals only (T23.6).** The BLOCKED sub-DAG: one entry per group an unsatisfiable `needs` dependency poisoned, naming the blocking dep. `[]` when nothing is blocked. |
 | `next_action`    | string (enum)    | An orchestration **hint** derived from `collective` — `done`, `investigate`, `raise_budget`, or the paused-run resume hint. NOT a kazi action; the orchestrator owns the policy (ADR-0023). |
 | `resume_token`   | string           | **Paused DAG/fleet runs only (T50.3, ADR-0065 decision 3, ADDITIVE).** The persisted checkpoint's handle: `collective` is `"paused"`, the exit code is `0`, and re-running with `--resume <token>` (same goal-set) continues from the next frontier. Absent on a run that did not pause. |
+| `single_node`    | boolean          | **T73.5 (ADR-0086/ADR-0087), ADDITIVE, optional.** `true` when this `--parallel` run was dispatched under single_node mode (`--single-node` or `KAZI_SINGLE_NODE=1`/`"true"`). Present only on the ONE-partition goal-set single_node allows — a multi-partition goal-set under single_node never reaches a collective result; it is refused before `Kazi.Scheduler.run_goals/2` dispatches, via the SAME `single_node_violation` error object `run-result.md` documents. Absent on every run that did not request single_node, byte-identical to before this field existed. |
 
 A goal carries EITHER `partitions` (flat, no `needs`) OR `schedule` + `blocked`
 (a `needs`-DAG over its groups), never both. Both shapes share `schema_version`,
