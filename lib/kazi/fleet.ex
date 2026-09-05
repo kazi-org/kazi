@@ -42,16 +42,25 @@ defmodule Kazi.Fleet do
   `write_paths` (the sharper signal — see `Kazi.Scope` issue #860); falls back to
   `paths` otherwise.
 
-  ## `shared_paths` (ADR-0087 decision 4, T73.1)
+  ## `shared_paths` (ADR-0087 decision 4, T73.1/T73.2)
 
   A manifest `.toml` file may also declare a top-level `shared_paths = [...]`
   array, alongside `[[member]]` — resolved relative to nothing (these are
   hotspot path strings, not files, so no path-resolution applies). A plain
   directory fleet has no manifest, so it contributes none.
   `effective_shared_paths/1` unions this manifest-level list with every
-  member's own declared `[scope].shared_paths`. T73.2 consumes the effective
-  set to exclude these paths from the partition survey and from this module's
-  own inferred-overlap test.
+  member's own declared `[scope].shared_paths`.
+
+  `load/1` excludes this effective set from BOTH sides of the inferred-overlap
+  test (T73.2): a shared path is removed from each node's scope roots before
+  `overlapping_paths/2` runs, so two nodes overlapping only on a declared
+  hotspot get NO `:inferred_overlap` edge between them — they still get one if
+  they also share a genuinely un-declared path. A pair that already gets an
+  edge (explicit or inferred) additionally carries, on that `Edge`'s
+  `:lease_keys`, any hotspots from the effective set that BOTH its endpoints'
+  scope roots touch — data T73.3/T73.4 need but do not yet consume. `[]` when
+  no `shared_paths` is declared anywhere in the fleet — byte-identical to
+  before this feature.
   """
 
   alias Kazi.Goal
@@ -71,9 +80,10 @@ defmodule Kazi.Fleet do
             from: String.t(),
             to: String.t(),
             kind: kind(),
-            overlap: [{String.t(), String.t()}]
+            overlap: [{String.t(), String.t()}],
+            lease_keys: [String.t()]
           }
-    defstruct [:from, :to, :kind, overlap: []]
+    defstruct [:from, :to, :kind, overlap: [], lease_keys: []]
   end
 
   @type t :: %__MODULE__{
@@ -96,7 +106,17 @@ defmodule Kazi.Fleet do
          :ok <- validate_no_duplicate_ids(nodes),
          {:ok, explicit_edges} <- build_explicit_edges(nodes),
          :ok <- validate_no_cycle(nodes, explicit_edges) do
-      inferred_edges = build_inferred_edges(nodes, explicit_edges)
+      # ADR-0087 decision 4 / T73.2: the effective shared_paths set only needs
+      # `nodes` + `manifest_shared_paths` (not `edges`, which is what we're
+      # about to build), so it's computed via the existing accessor against a
+      # partial struct rather than duplicating its union logic here.
+      shared_paths =
+        effective_shared_paths(%__MODULE__{
+          nodes: nodes,
+          manifest_shared_paths: manifest_shared_paths
+        })
+
+      inferred_edges = build_inferred_edges(nodes, explicit_edges, shared_paths)
 
       {:ok,
        %__MODULE__{
@@ -399,7 +419,12 @@ defmodule Kazi.Fleet do
 
   # --- inferred scope-overlap edges ---
 
-  defp build_inferred_edges(nodes, explicit_edges) do
+  # ADR-0087 decision 4 / T73.2: `shared_paths` is the effective set
+  # (`effective_shared_paths/1`) — excluded from BOTH sides before the overlap
+  # test, symmetrically, so the result cannot depend on which node is
+  # considered `a` vs `b`.
+  defp build_inferred_edges(nodes, explicit_edges, shared_paths) do
+    shared_set = MapSet.new(shared_paths)
     indexed = Enum.with_index(nodes)
     ordered_pairs = for {a, i} <- indexed, {b, j} <- indexed, i < j, do: {a, b}
 
@@ -412,22 +437,51 @@ defmodule Kazi.Fleet do
       if MapSet.member?(explicit_pairs, {a.id, b.id}) do
         []
       else
-        case overlapping_paths(a, b) do
-          [] -> []
-          overlap -> [%Edge{from: a.id, to: b.id, kind: :inferred_overlap, overlap: overlap}]
+        case overlapping_paths(a, b, shared_set) do
+          [] ->
+            []
+
+          overlap ->
+            [
+              %Edge{
+                from: a.id,
+                to: b.id,
+                kind: :inferred_overlap,
+                overlap: overlap,
+                lease_keys: pair_lease_keys(a, b, shared_set)
+              }
+            ]
         end
       end
     end)
   end
 
-  defp overlapping_paths(%Node{goal: goal_a}, %Node{goal: goal_b}) do
-    paths_a = Scope.roots(goal_a.scope)
-    paths_b = Scope.roots(goal_b.scope)
+  # The overlap test itself, run on each side's roots with every effective
+  # shared path removed first (T73.2) — so two nodes overlapping ONLY on a
+  # declared hotspot yield `[]` here (no edge), while a genuinely shared,
+  # un-declared path still produces one.
+  defp overlapping_paths(%Node{goal: goal_a}, %Node{goal: goal_b}, shared_set) do
+    paths_a = goal_a.scope |> Scope.roots() |> reject_shared(shared_set)
+    paths_b = goal_b.scope |> Scope.roots() |> reject_shared(shared_set)
 
     if paths_a == [] or paths_b == [] do
       []
     else
       for p1 <- paths_a, p2 <- paths_b, Scope.overlap?([p1], [p2]), do: {p1, p2}
     end
+  end
+
+  defp reject_shared(paths, shared_set), do: Enum.reject(paths, &MapSet.member?(shared_set, &1))
+
+  # The effective shared paths BOTH nodes' (unfiltered) scope roots declare —
+  # carried on an edge that already exists for another reason, for T73.3/T73.4
+  # to consume without re-deriving it from the raw roots.
+  defp pair_lease_keys(%Node{goal: goal_a}, %Node{goal: goal_b}, shared_set) do
+    roots_a = goal_a.scope |> Scope.roots() |> MapSet.new()
+    roots_b = goal_b.scope |> Scope.roots() |> MapSet.new()
+
+    shared_set
+    |> Enum.filter(&(MapSet.member?(roots_a, &1) and MapSet.member?(roots_b, &1)))
+    |> Enum.sort()
   end
 end
