@@ -358,6 +358,8 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 
 ### E72 -- Per-directory AGENTS.md projection and `write_paths` as declared scope (ADR-0086) -> plans/E72.md
 
+### E73 -- Scheduling boundary: shared_paths lease keys, --dag export, single_node refusal, contract lint (ADR-0087) -> plans/E73.md
+
 ## Risk Register
 
 | ID | Risk | Impact | Likelihood | Mitigation |
