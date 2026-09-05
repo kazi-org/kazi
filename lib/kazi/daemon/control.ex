@@ -21,6 +21,12 @@ defmodule Kazi.Daemon.Control do
   every bus verb already passes through, so an old daemon is caught with a
   clear "restart the daemon" error BEFORE an op is attempted, instead of
   reaching the `unknown_op` catch-all below.
+
+  T69.5 (#1684): `ping` also reports `nats_health` -- `Kazi.Daemon.Nats`'s
+  restart-loop window and last classified bind-conflict (an orphaned or
+  otherwise-squatted nats-server holding the daemon's configured port). Purely
+  additive, like `schema_vsn`; see `nats_health/1` and `docs/session-bus.md`
+  ("Bind-conflict recovery").
   """
 
   # T58.2: bump together with `Kazi.Bus.ProtocolSkew`'s `@required_bus_vsn`.
@@ -51,6 +57,7 @@ defmodule Kazi.Daemon.Control do
     |> maybe_put("nats_token", nats_token(nats_name))
     |> maybe_put("schema_vsn", schema_vsn(opts))
     |> Map.put("velocity", velocity_status(opts))
+    |> Map.put("nats_health", nats_health(nats_name))
   end
 
   # T55.7 (ADR-0072 d5): assembly is the DAEMON's job -- the reply is already
@@ -133,6 +140,45 @@ defmodule Kazi.Daemon.Control do
   end
 
   defp encode_projection(_absent), do: nil
+
+  # T69.5 (#1684): the nats-server restart-loop / bind-conflict watchdog.
+  # Always present (like `velocity`, never omitted) -- absent a configured
+  # `nats_name` (should not happen in production; a defensive default for the
+  # handshake tests that ping without one), reports the same "all clear" shape
+  # `Kazi.Daemon.Nats.health/1` returns for a process that has never exited.
+  defp nats_health(nil), do: encode_nats_health(%{})
+
+  defp nats_health(nats_name) do
+    encode_nats_health(Kazi.Daemon.Nats.health(nats_name))
+  rescue
+    _ -> encode_nats_health(%{})
+  catch
+    _, _ -> encode_nats_health(%{})
+  end
+
+  defp encode_nats_health(h) do
+    %{
+      "restart_loop" => Map.get(h, :restart_loop, false),
+      "exits_in_window" => Map.get(h, :exits_in_window, 0),
+      "exit_window_ms" => Map.get(h, :exit_window_ms),
+      "bind_conflict" => encode_bind_conflict(Map.get(h, :bind_conflict)),
+      "last_exit_at" => encode_datetime(Map.get(h, :last_exit_at))
+    }
+  end
+
+  defp encode_bind_conflict(nil), do: nil
+
+  defp encode_bind_conflict(%{disposition: d, holder_pid: pid, port: port, detected_at: at}) do
+    %{
+      "disposition" => to_string(d),
+      "holder_pid" => pid,
+      "port" => port,
+      "detected_at" => encode_datetime(at)
+    }
+  end
+
+  defp encode_datetime(nil), do: nil
+  defp encode_datetime(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
   defp vsn do
     case Application.spec(:kazi, :vsn) do
