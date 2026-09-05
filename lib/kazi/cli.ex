@@ -3669,6 +3669,7 @@ defmodule Kazi.CLI do
           result,
           run_economy(goal, :converged, result, opts, persist?),
           workspace,
+          opts,
           json?
         )
 
@@ -3681,6 +3682,7 @@ defmodule Kazi.CLI do
           result,
           run_economy(goal, :over_budget, result, opts, persist?),
           workspace,
+          opts,
           json?
         )
 
@@ -3693,6 +3695,7 @@ defmodule Kazi.CLI do
           result,
           run_economy(goal, :stopped, result, opts, persist?),
           workspace,
+          opts,
           json?
         )
 
@@ -3707,6 +3710,7 @@ defmodule Kazi.CLI do
           result,
           run_economy(goal, :tampered, result, opts, persist?),
           workspace,
+          opts,
           json?
         )
 
@@ -4179,8 +4183,10 @@ defmodule Kazi.CLI do
   # Render the loop's terminal result on the requested surface (T15.3): the
   # versioned JSON result object under --json, the existing human report
   # otherwise. Both share the SAME loop result; only the OUTPUT shape differs.
-  defp report_outcome(%Goal{} = goal, outcome, result, economy, workspace, json?) do
-    emit(json?, run_result_json(goal, outcome, result, economy, workspace), fn ->
+  # `opts` is threaded through ONLY for `run_result_json/6`'s additive
+  # `job_outcome` gate (TKE.7) — the human report never reads it.
+  defp report_outcome(%Goal{} = goal, outcome, result, economy, workspace, opts, json?) do
+    emit(json?, run_result_json(goal, outcome, result, economy, workspace, opts), fn ->
       report(goal, human_outcome(outcome), result, economy)
       Kazi.MCP.Nudge.maybe_print(workspace)
     end)
@@ -9583,15 +9589,25 @@ defmodule Kazi.CLI do
   #                        no drift detected, byte-identical to before this
   #                        field existed. Never changes `status` — the loop
   #                        always converges against the ORIGINAL t0 bar.
+  #   * `job_outcome`     — TKE.7 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.3): an
+  #                        ADDITIVE, optional string mapping `status` (+
+  #                        `integration.landed` / commits-ahead-of-base) onto
+  #                        hq's exit-code vocabulary (`done`/`blocked`/
+  #                        `checkpointed`/`refused`, `Kazi.CLI.JobOutcome`).
+  #                        Present ONLY on a lane-mode run (interim
+  #                        definition, see `lane_mode?/1`); absent on every
+  #                        other run, byte-identical to before this field
+  #                        existed.
   @spec run_result_json(
           Goal.t(),
           :converged | :stopped | :over_budget | :tampered,
           map(),
           map(),
-          String.t() | nil
+          String.t() | nil,
+          keyword()
         ) ::
           map()
-  defp run_result_json(%Goal{id: id} = goal, outcome, result, economy, workspace) do
+  defp run_result_json(%Goal{id: id} = goal, outcome, result, economy, workspace, opts) do
     status = run_status(outcome, result)
 
     %{
@@ -9618,6 +9634,7 @@ defmodule Kazi.CLI do
     |> put_goal_drifted(result)
     |> put_tampered_file(result)
     |> put_single_node(result)
+    |> put_job_outcome(status, result, opts, workspace)
   end
 
   # ADR-0080 (#1520): the additive `tampered_file` object — the sealed input (or
@@ -9637,6 +9654,72 @@ defmodule Kazi.CLI do
   defp put_single_node(map, %{single_node: true}), do: Map.put(map, :single_node, true)
 
   defp put_single_node(map, _result), do: map
+
+  # TKE.7 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.3): the additive `job_outcome`
+  # string — see `Kazi.CLI.JobOutcome` for the full mapping. Present ONLY on a
+  # lane-mode run (`lane_mode?/1`); absent otherwise, so the result stays
+  # byte-identical to before this field existed for every caller that is not a
+  # governed lane dispatch. Commits-ahead is only computed for the two
+  # statuses that need it (`stuck`/`over_budget`) — a converged/tampered run
+  # never shells out to git for this field.
+  defp put_job_outcome(map, status, result, opts, workspace) do
+    if lane_mode?(opts) do
+      has_commits? = status in ["stuck", "over_budget"] and commits_ahead_of_base(workspace) > 0
+
+      outcome =
+        Kazi.CLI.JobOutcome.classify(%{
+          status: status,
+          integration_landed: get_in(result, [:integration, :landed]),
+          has_commits: has_commits?
+        })
+
+      Map.put(map, :job_outcome, to_string(outcome))
+    else
+      map
+    end
+  end
+
+  # TKE.7: the INTERIM "lane mode" gate for `job_outcome` — single_node ON for
+  # this run AND `--in-place` (T50.1). TKE.1 (`--lane-contract`, unbuilt as of
+  # this task) will extend this once a governed lane also carries a parsed
+  # lane contract: per the plan (§1.3), lane mode is properly `single_node +
+  # in_place + a lane contract`, but TKE.1 has not landed yet, so a parsed
+  # contract cannot be checked for here. TODO(TKE.1): once `--lane-contract`
+  # exists, require a contract to be present too — revisit this gate then.
+  @spec lane_mode?(keyword()) :: boolean()
+  defp lane_mode?(opts), do: opts[:single_node] == true and opts[:in_place] == true
+
+  # TKE.7: commits ahead of the base for a NON-landed `stuck`/`over_budget`
+  # in-place run — the blocked-vs-checkpointed split needs to know whether the
+  # run left any committed progress behind. Reuses `Kazi.ScopeDiff.base_ref/1`
+  # (the SAME base `collateral` already measures against: merge-base with
+  # `origin/main`, else the repo's root commit, else git's empty-tree object)
+  # rather than inventing a second base-ref convention. `git rev-list --count
+  # <base>..HEAD` mirrors `Kazi.Scheduler.SerialLanding`'s own ahead-count
+  # call. A non-git/unreadable workspace (or any git failure) degrades to `0`
+  # — no progress observable, never a crash — matching this module's other
+  # git call sites (`base_ref_resolves?/2`, `git_repo?/1`).
+  @spec commits_ahead_of_base(String.t() | nil) :: non_neg_integer()
+  defp commits_ahead_of_base(workspace) when is_binary(workspace) do
+    base = Kazi.ScopeDiff.base_ref(workspace)
+
+    case System.cmd("git", ["-C", workspace, "rev-list", "--count", base <> "..HEAD"],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} ->
+        case Integer.parse(String.trim(out)) do
+          {n, ""} -> n
+          _ -> 0
+        end
+
+      _ ->
+        0
+    end
+  rescue
+    _ -> 0
+  end
+
+  defp commits_ahead_of_base(_workspace), do: 0
 
   # T50.2 (ADR-0065 decision 2): the additive `integration` object — how a
   # worktree-isolated serial run's converged commits landed on the base
