@@ -124,6 +124,16 @@ code correctness (red->green reproduction where applicable, symmetric
 provider coverage, doc-vs-code match, or a direct read confirming the fix
 it depends on already exists in `lib/`), not merged on green CI alone.
 
+**In flight (2026-09-05, fourth dispatch, manually-provisioned worktrees):**
+T69.12 (#1642 fix itself -- see the root-cause reclassification below; ADR
++ goal-file `[setup]` step), T70.9 (ADR-0085 implementation -- `[scope]
+forbidden_paths`/`no_integration`, closes #1695/#1704), T69.13 (#1649 real
+bus-discovery test coverage). All three claimed and dispatched with `mix
+deps.get` run by hand in each worktree before dispatch, since kazi's own
+`--parallel` worktree creation does not do this yet (that's exactly what
+T69.12 fixes) -- once T69.12 merges and releases, this workaround stops
+being necessary for future dispatches.
+
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
