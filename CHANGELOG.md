@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.292.0](https://github.com/kazi-org/kazi/compare/v1.291.0...v1.292.0) (2026-09-06)
+
+
+### Features
+
+* **cli:** resume handle / run-lineage via --resume-pr (TKE.5) ([6b78fc3](https://github.com/kazi-org/kazi/commit/6b78fc32fe49d1df9be5b2cbdf423c860b07a7a7))
+
 ## [1.291.0](https://github.com/kazi-org/kazi/compare/v1.290.0...v1.291.0) (2026-09-06)
 
 
