@@ -331,7 +331,7 @@ design, not an open choice.
   disconnected new run; a contract naming a `resume_pr` that does not exist
   (or is already merged/closed) refuses clearly rather than silently
   starting fresh.]
-  Done: 2026-09-05 (PR pending. `--resume-pr <ref>`/`KAZI_RESUME_PR` and a
+  Done: 2026-09-05 (PR #1814. `--resume-pr <ref>`/`KAZI_RESUME_PR` and a
   lane contract's own `"resume_pr"` field, same CLI-flag-or-env pattern as
   `--lane-contract`/`KAZI_LANE_CONTRACT` (TKE.1) and `--integration-command`/
   `KAZI_INTEGRATION_COMMAND` (TKE.3). Design decision (flagged for review,
