@@ -985,6 +985,19 @@ measured zero (e.g. orientation off ⇒ `orientation_tokens: 0`,
 | `memory_recall_tokens`  | integer \| null | Estimated tokens of the ADR-0062 semantic memory-recall section. `null` when the `:memory_recall` layer is off (the **default**) — distinct from `0`, which means the layer is on but rendered nothing (issue #978). |
 | `tier`               | integer \| null | The active context-budget tier the dispatch assembled its context at (T36.3, ADR-0047 §3): `0` evidence-only, `1` + cached orientation (**default**), `2` + code-review-graph MCP, `3` + retrieval snippets, `4` + compact snapshot. `null` for the no-dispatch baseline. Selected per dispatch via the `:context_tier` adapter opt. |
 
+A fourth optional prompt layer, **reviewer feedback** (TKE.6,
+`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2), sits alongside `attempt_ledger` and
+`memory_recall` but is not counted in `context` above (it carries no
+token-budget dial of its own — it is purely data-driven, not flag-gated). It
+renders an optional `review_comments` array off the `--lane-contract` file
+(TKE.1) — unresolved GitHub PR review comments fetched by whoever already
+holds the GitHub credential upstream of kazi, never by kazi itself — into a
+`## Reviewer feedback (unresolved PR review comments)` section appended after
+evidence/context-store and before the attempt ledger. Absent or an empty
+`review_comments` array renders no section at all, so the prompt is
+byte-identical to a fresh dispatch's shape. See `docs/integration-hook.md`
+("Review-comment ingestion (TKE.6)") for the contract field and rendering.
+
 The **first** observation has no preceding dispatch, so it reports the
 all-`disabled` / all-`0` context with `tier: null`.
 

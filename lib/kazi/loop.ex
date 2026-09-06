@@ -2587,6 +2587,7 @@ defmodule Kazi.Loop do
           digest: String.t(),
           evidence: String.t(),
           context_store: String.t() | nil,
+          review_comments: String.t() | nil,
           attempt_ledger: String.t() | nil,
           memory_recall: String.t() | nil,
           retrieval: String.t() | nil,
@@ -2621,6 +2622,15 @@ defmodule Kazi.Loop do
       digest: Digest.render(data.working_set_digest),
       evidence: evidence,
       context_store: context_store,
+      # TKE.6 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): unresolved GitHub PR
+      # review comments, read-and-rendered ONLY -- kazi never fetches these
+      # itself (no GitHub credential, ever). Populated by the caller that
+      # already holds the credential via an optional `review_comments` array
+      # on the lane contract (TKE.1), folded into `adapter_opts[:review_comments]`
+      # by the CLI (`Kazi.CLI.maybe_put_review_comments/2`). `nil` when absent
+      # or empty, so the prompt is byte-identical to before this layer existed
+      # unless a contract actually carries comments to surface.
+      review_comments: review_comments_section(data),
       # ADR-0061 decision 2: the episodic ATTEMPT LEDGER section, appended after
       # evidence. `nil` unless the `:attempt_ledger` flag is on (default off,
       # config.exs) AND the fold over the recorded history/dispatch log yields at
@@ -2761,6 +2771,7 @@ defmodule Kazi.Loop do
          digest: digest,
          evidence: evidence,
          context_store: context_store,
+         review_comments: review_comments,
          attempt_ledger: attempt_ledger,
          memory_recall: memory_recall,
          retrieval: retrieval,
@@ -2785,6 +2796,11 @@ defmodule Kazi.Loop do
     # and BEFORE retrieval; nil when no artifact was compressed this iteration, so
     # the default path is unchanged.
     prompt = append_section(prompt, context_store)
+    # TKE.6: reviewer feedback sits after the (now-compact) evidence/context-store
+    # slot and before the attempt ledger; nil when the contract carried no
+    # `review_comments` (or none), so the prompt is byte-identical to before
+    # this layer existed by default.
+    prompt = append_section(prompt, review_comments)
     # ADR-0061 decision 2: the ATTEMPT LEDGER sits after evidence/context-store,
     # before retrieval; nil unless the flag is on and the fold is non-empty, so
     # the prompt is byte-identical to before the ledger existed by default.
@@ -2979,6 +2995,49 @@ defmodule Kazi.Loop do
   # rest of the adapter opts). Absent a `:retriever`, this yields `[]` and the
   # resolved default is the no-op — off by default.
   defp retrieval_opts(adapter_opts), do: Keyword.take(adapter_opts, [:retriever])
+
+  # TKE.6 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): unresolved GitHub PR review
+  # comments, read-and-rendered ONLY. Unlike `attempt_ledger?/1`/`memory_recall?/1`
+  # this is NOT gated behind an app-config flag -- it is purely DATA-driven: the
+  # section exists only when `adapter_opts[:review_comments]` is a non-empty list
+  # (folded in by `Kazi.CLI.maybe_put_review_comments/2` from an optional
+  # `review_comments` array on the lane contract, TKE.1). Absent or empty ⇒ `nil`
+  # ⇒ the prompt is byte-identical to a fresh dispatch's prompt shape (the
+  # acceptance bar: a contract with no `review_comments` never adds this section).
+  @spec review_comments_section(Data.t()) :: String.t() | nil
+  defp review_comments_section(%Data{adapter_opts: adapter_opts}) do
+    case Keyword.get(adapter_opts, :review_comments, []) do
+      [] -> nil
+      nil -> nil
+      comments when is_list(comments) -> render_review_comments_section(comments)
+    end
+  end
+
+  @spec render_review_comments_section([map()]) :: String.t()
+  defp render_review_comments_section(comments) do
+    "## Reviewer feedback (unresolved PR review comments)\n\n" <>
+      "These comments were left on the open PR for this task by a human or " <>
+      "automated reviewer, upstream of kazi (kazi never fetches review state " <>
+      "itself). Address them as part of this iteration's work.\n\n" <>
+      Enum.map_join(comments, "\n\n", &render_review_comment/1)
+  end
+
+  @spec render_review_comment(map()) :: String.t()
+  defp render_review_comment(comment) when is_map(comment) do
+    text = comment["body"] || comment["text"] || ""
+
+    case review_comment_location(comment) do
+      nil -> "```\n" <> text <> "\n```"
+      location -> "### " <> location <> "\n```\n" <> text <> "\n```"
+    end
+  end
+
+  defp review_comment_location(%{"path" => path, "line" => line})
+       when is_binary(path) and not is_nil(line),
+       do: "#{path}:#{line}"
+
+  defp review_comment_location(%{"path" => path}) when is_binary(path), do: path
+  defp review_comment_location(_), do: nil
 
   # ADR-0061 decision 2: the episodic ATTEMPT LEDGER section. Gated on
   # `attempt_ledger?/1` (default off, `config :kazi, :attempt_ledger`, T19.4-style

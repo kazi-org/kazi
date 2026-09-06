@@ -3973,6 +3973,28 @@ defmodule Kazi.CLI do
     end
   end
 
+  # TKE.6 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): read-and-render only --
+  # kazi never calls `gh`/the GitHub API to FETCH review comments itself (the
+  # same "no GitHub credential in kazi, ever" constraint TKE.3/TKE.5 exist
+  # for). Whoever already holds the credential and composes the resume
+  # dispatch (host-side `lane.sh`/`entrypoint.sh`) writes the fetched
+  # unresolved comments onto an optional `review_comments` array on the lane
+  # contract before kazi ever runs; this just parses that array back out.
+  # Absent field, unreadable file, or a non-list value all degrade to `[]`
+  # (byte-identical default) rather than erroring the run over a malformed
+  # contract this task doesn't own the shape of.
+  @spec contract_review_comments(String.t() | nil) :: [map()]
+  defp contract_review_comments(nil), do: []
+
+  defp contract_review_comments(path) when is_binary(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, %{"review_comments" => comments}} when is_list(comments) <- Jason.decode(body) do
+      Enum.filter(comments, &is_map/1)
+    else
+      _ -> []
+    end
+  end
+
   defp normalize_pr_ref(ref) when is_integer(ref), do: Integer.to_string(ref)
 
   defp normalize_pr_ref(ref) when is_binary(ref) do
@@ -4265,6 +4287,11 @@ defmodule Kazi.CLI do
       # dispatch + result are byte-identical. A caller/test that already set
       # :context_store in adapter_opts wins (the flag does not override it).
       |> maybe_put_context_store(opts)
+      # TKE.6 (ADR-0055 §1.2): fold the lane contract's optional
+      # `review_comments` array into adapter_opts, so the loop renders them
+      # into the next dispatch prompt. Off (no contract, or no
+      # `review_comments` field) → adapter_opts unchanged → byte-identical.
+      |> maybe_put_review_comments(opts)
 
     json? = opts[:json] == true
 
@@ -4826,6 +4853,31 @@ defmodule Kazi.CLI do
             # review L11) — warn on stderr rather than swallowing it.
             IO.puts(:stderr, "warning: unknown --context-store #{inspect(name)}; store left off")
             run_opts
+        end
+    end
+  end
+
+  # TKE.6: fold a lane contract's optional `review_comments` array into
+  # run_opts[:adapter_opts], so the loop's `review_comments_section/1` renders
+  # them into the next dispatch prompt (`Kazi.Loop`). A caller/test that
+  # already set :review_comments in adapter_opts wins (mirrors
+  # `maybe_put_context_store/2`'s precedence). With no lane contract, or a
+  # contract carrying no (or an empty) `review_comments` array, run_opts is
+  # returned unchanged -- byte-identical to a fresh dispatch's prompt shape.
+  defp maybe_put_review_comments(run_opts, opts) do
+    adapter = Keyword.get(run_opts, :adapter_opts, [])
+
+    cond do
+      Keyword.has_key?(adapter, :review_comments) ->
+        run_opts
+
+      true ->
+        case contract_review_comments(opts[:lane_contract]) do
+          [] ->
+            run_opts
+
+          comments ->
+            Keyword.put(run_opts, :adapter_opts, Keyword.put(adapter, :review_comments, comments))
         end
     end
   end
