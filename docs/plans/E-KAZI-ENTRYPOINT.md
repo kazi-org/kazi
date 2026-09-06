@@ -139,7 +139,7 @@ the task sha") but nothing produces it yet on either side. That gap is
   (documented). 15/15 tests passed locally (12 new + reverse-coherence).
   Direct-agent dispatch.)
 
-- [ ] TKE.2 Render-freshness check against the contract's `render_sha256`
+- [x] TKE.2 Render-freshness check against the contract's `render_sha256`
   (ADR-0086 decision 5(b)). When the lane contract carries `render_sha256`,
   re-render the node (reusing ADR-0086 decision 3's pure `render(goal.toml,
   scope root, observe result) -> node content` -- E72 T72.3's renderer) from
@@ -164,6 +164,18 @@ the task sha") but nothing produces it yet on either side. That gap is
   expected vs actual sha256; absent `render_sha256` in an otherwise-valid
   contract is a distinct, clearly-worded refusal (fail closed, not silently
   skipped), so `D2` landing late is loud, not invisible.]
+  Done: 2026-09-05 (PR #1803, `6ed29e92`. `render_freshness_check/4` chains
+  after TKE.1's task_sha match: a scoped goal re-renders its first scope root
+  via T72.3's `Kazi.Plan.Render.node/3` fed by `Kazi.Runtime.check/2`'s
+  observe pass, sha256-compares against the contract's `render_sha256` --
+  match proceeds, mismatch refuses `kind: "stale_render"` naming both shas,
+  an otherwise-valid contract with no `render_sha256` refuses `kind:
+  "render_sha256_missing"` (fail-closed, not skipped), and a re-render
+  failure refuses `kind: "render_unavailable"`; a scopeless goal skips the
+  check entirely (ADR-0086 decision 3). 5 new tests through the real CLI
+  exec core (match/mismatch/missing/render-failure/scopeless-skip), plus
+  docs/schemas/run-result.md's render-freshness subsection. Direct-agent
+  dispatch.)
 
 ### 1.2 The `[integration]` contract and a resumable apply
 
@@ -323,7 +335,7 @@ line up 1:1, and today's `integration` object is structurally absent for
 `--in-place` runs (Section 1.2), which is exactly the shape lane mode always
 uses.
 
-- [ ] TKE.7 Additive `job_outcome` field. `apply --json`'s terminal result
+- [x] TKE.7 Additive `job_outcome` field. `apply --json`'s terminal result
   gains an optional `job_outcome` string -- `done`, `blocked`,
   `checkpointed`, or `refused` -- computed the same principled way
   `next_action` already is (a pure function of existing fields, no new
@@ -342,6 +354,16 @@ uses.
   (status, integration.landed, has_commits) combination asserts the
   documented `job_outcome`; a non-lane-mode run's result carries no
   `job_outcome` key at all.]
+  Done: 2026-09-05 (PR #1796, `4988fa00` after chief-architect's review fix.
+  `Kazi.CLI.JobOutcome` maps `status`/`integration.landed`/commits-ahead into
+  `done`/`blocked`/`checkpointed`/`refused`, present only for lane-mode runs.
+  Review fix: `commits_ahead_of_base/2` now resolves the real declared base
+  (`opts[:base]`, else the goal's `[integration] base`, else
+  `Kazi.ScopeDiff.base_ref/1`'s guess) instead of always guessing, and
+  surfaces a real git failure on stderr instead of silently returning 0 --
+  closes false-positive `checkpointed` classifications for a non-`main` base
+  or a shallow clone. Chief-architect approved at this head. Direct-agent
+  dispatch.)
 
 - [ ] TKE.8 Close two documentation gaps this switch depends on: (a)
   `docs/schemas/run-result.md`'s `integration` section documents the
@@ -356,6 +378,10 @@ uses.
   `integration` section as present; a reader following only
   `docs/schemas/*.md` (no source read) can correctly predict the shape of
   both a lane-mode `integration` object and a `--check --json` result.]
+  Part (b) done: 2026-09-05 (PR #1801, `docs/schemas/check-result.md` added,
+  documenting `--check --json`'s existing shape against `check_result_json/3`
+  source. Part (a) -- the `integration` section's in-place worked example --
+  still needs TKE.3, so TKE.8 as a whole stays open.)
 
 **Kazi-side total: 8 tasks, ~22h estimated** (3 + 3 + 4 + 1.5 + 3 + 3 + 2.5 + 2).
 
