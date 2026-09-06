@@ -264,6 +264,32 @@ design, not an open choice.
   `--integration-command` set, the same fixture refuses with reason
   `lane_integration_hook_missing` instead of converging silently with no
   integration attempted.]
+  Done: 2026-09-05 (PR #1806, `f321c2fb`. `--integration-command`/
+  `KAZI_INTEGRATION_COMMAND` hook, invoked on stdin as JSON via a
+  temp-file-redirected `/bin/sh -c` wrapper so neither the command path nor
+  the temp path is ever shell-parsed; hook stdout JSON populates the
+  terminal `integration` object verbatim. Hook schema (unpinned by the plan)
+  designed and documented in `docs/integration-hook.md`. Real design gap
+  found and fixed mid-implementation: the loop's own pre-existing mid-run
+  `:integrate` action (ADR-0055) fires for any goal declaring `[integration]`
+  mode pr/merge independent of lane mode, which would have made kazi call
+  real `git push`/`gh pr create` against a credential-less lane workspace and
+  hung the loop forever -- fixed by forcing the dispatched goal's integration
+  mode to `:none` and stripping the synthesized `landed` predicate for lane
+  dispatch only, while the original goal's real `[integration]` block is
+  preserved for the post-convergence hook decision. A second real bug
+  surfaced on rebase after TKE.7/TKE.2 merged: this module had gained two
+  same-name/arity `declared_integration_base/1` and `commits_ahead_of_base/2`
+  clause sets (TKE.3's own, duplicating TKE.7's not-yet-merged helpers as
+  its own code comment had flagged) -- Elixir merges same-arity `defp`
+  clauses into one function tried in file order, so TKE.3's unguarded,
+  no-nil-fallback clauses silently shadowed TKE.7's landed ones, misclassifying
+  `job_outcome`. Fixed by deleting the duplicates and calling TKE.7's
+  canonical helpers directly. 7 new tests; 31 tests across the 3 touched
+  lane-mode test files pass together; full suite 4898/4899 (1 pre-existing
+  unrelated flake); `mix format` clean; no attribution. Leaves TKE.4's
+  trailer-value refinement (`Plan-row: <id>` when a sire-style task id
+  exists) as an explicit TODO. Direct-agent dispatch.)
 
 - [ ] TKE.4 Trailer value computation for the integration action (TKE.3).
   Under lane mode, the structured action kazi hands to
