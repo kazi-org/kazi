@@ -3,7 +3,11 @@
 ## Status
 
 Accepted (operator, 2026-09-05, after review by the chief and chief-architect
-sessions; their positions are recorded under Alternatives rejected)
+sessions; their positions are recorded under Alternatives rejected). Implemented
+by epic E72 (T72.1-T72.8); decision 6's walk-up claim is settled by T72.5
+(`test/kazi/harness/walkup_test.exs`, PR #1820): claude follows the
+`CLAUDE.md -> AGENTS.md` symlink, codex reads `AGENTS.md` directly, and
+neither in-scope harness needed the symlink-unsupported fallback.
 
 ## Date
 
@@ -139,9 +143,14 @@ container at dispatch time.
    `CLAUDE.md` exists at the root, kazi creates a `CLAUDE.md -> AGENTS.md`
    symlink so Claude Code's walk-up reads the node; where a hand-written
    `CLAUDE.md` exists, kazi leaves it alone and the failure message tells the
-   operator to add an `@AGENTS.md` include line by hand. Whether each
-   harness's walk-up follows the symlink is asserted by a test in the
-   implementing task, not by this ADR.
+   operator to add an `@AGENTS.md` include line by hand. T72.5's
+   `test/kazi/harness/walkup_test.exs` proved, for both harnesses this repo
+   drives, that the walk-up follows the symlink: claude reads the rendered
+   node through `CLAUDE.md -> AGENTS.md`, and codex reads `AGENTS.md`
+   directly (it never reads `CLAUDE.md`, so it needs no symlink). Neither
+   harness needed the one-line `CLAUDE.md` w/ `@AGENTS.md`-include fallback
+   this decision describes for a harness that does not follow the symlink;
+   no such harness was found among the two in scope.
 
 7. **`kazi apply --cwd <scope-root>`** launches the harness inside the scope
    root so the walk-up supplies exactly the parent chain. It defaults to the
