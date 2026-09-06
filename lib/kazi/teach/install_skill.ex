@@ -701,6 +701,48 @@ defmodule Kazi.Teach.InstallSkill do
     Confirm the payload shape against the live CLI before drafting:
     `kazi help --json`, `kazi schema plan`. If this document and the schema
     disagree, the schema wins.
+
+    ## shared_paths and contract (ADR-0087)
+
+    When authoring or refining a goal (or a fleet of goals) that touches a
+    hotspot file shared across the fleet, declare it -- do not rely on kazi to
+    infer it. `[scope].shared_paths` (a fleet-level `[scope]` field, T73.1) is
+    a list of paths the goal-set treats as shared lease keys; it is ADDITIVE
+    to each goal's own blast-radius write set, never a replacement for it. A
+    path left off `shared_paths` is not protected as shared, no matter how
+    many goals actually touch it -- kazi never guesses hotspots from observed
+    overlap.
+
+    The EFFECTIVE shared-paths set for a fleet is the UNION across every
+    goal's declared `shared_paths` (`Kazi.Fleet.effective_shared_paths/1`),
+    not the intersection and not any single goal's own list. Author each
+    goal's `shared_paths` as if the other goals in the fleet cannot be trusted
+    to declare the same path -- the union means one goal naming a hotspot is
+    enough to protect it fleet-wide, but every goal that actually touches it
+    should still name it for readability and for `kazi plan lint`'s
+    fleet-scope contract check.
+
+    Two leases exist over a shared path, at different scopes -- name the right
+    one when writing operational docs or a runbook, since conflating them
+    understates the blast radius:
+
+    - The INTERACTIVE lease (single-process, one `kazi apply --parallel`
+      invocation) is INTEGRATION-scoped (T73.3): held only around the
+      integration (landing) step for a shared path, not for the whole
+      partition's lifetime.
+    - The CROSS-CONTAINER lease (the fleet daemon coordinating separate `kazi
+      apply --single-node` dispatches, e.g. under Sire/hq lane dispatch) is
+      Attempt-scoped, held by the scheduler on the dispatcher side (E73.md's
+      Notes) -- v1 semantics are "never run concurrently while both hold the
+      key", with phase-scoped early release as a documented follow-up, not
+      yet shipped.
+
+    A lane running under `--single-node`/`KAZI_SINGLE_NODE` refuses `--fleet`
+    and any goal-set that would partition into more than one partition
+    (`single_node_violation`) before any load or dispatch -- so a governed
+    lane never contends for a shared-path lease with itself; contention only
+    arises across separate lane containers, which is exactly what the
+    Attempt-scoped cross-container lease exists to serialize.
     """
   end
 
