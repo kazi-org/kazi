@@ -97,6 +97,23 @@ converged-but-not-landed run then exits **1**). See
 [`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065)
 below and `docs/landing.md`.
 
+TKE.3 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2) extends `integration` to a
+**second, previously-absent case**: an IN-PLACE, lane-mode run
+(`--single-node --in-place`) whose `[integration]` mode is `pr`/`merge` and
+which converges with commits ahead of the declared base. There is no separate
+task worktree to land from in this case, so kazi hands a computed
+"integration action" to the injectable `--integration-command`/
+`KAZI_INTEGRATION_COMMAND` hook (see `docs/integration-hook.md`) — kazi never
+runs `git push`/`gh pr create`/`git commit` itself here, and never holds a
+GitHub credential. The `integration` object's SHAPE is unchanged
+(`landed`/`base`/`task_branch`/`refs`/`reason`); only who performs the landing
+(the hook, not `Kazi.Scheduler.SerialLanding`) and how kazi learns the verdict
+(the hook's own stdout JSON, not a real integrator call kazi makes itself)
+differ. `[integration]` wanting `pr`/`merge` under lane mode with no hook
+configured is a distinct, loud case: `integration.landed: false`,
+`integration.reason: "lane_integration_hook_missing"`, exit 1 — never a
+silent converge-with-nothing-landed.
+
 goal-drift-guard-1415 adds the OPTIONAL top-level `goal_drifted` boolean and
 `goal_drift` object. **Additive** — present only when the run was started from a
 real goal-file path (never a proposal ref) AND the file on disk no longer
@@ -192,7 +209,7 @@ omitted when unreported — the example above shows a Claude run that reported n
 | `stuck_bundle`   | object (optional)   | ADR-0045 §5 stuck-escalation bundle, present only on a stuck stop (`status` `stopped`, `reason` `stuck`). **Additive, optional** — `{ "failing_predicates": [{ "id": string, "failure": string }], "changed_files": [string], "snippets": [{ "source": string\|null, "text": string }], "bytes": integer }`. Bounded + redacted; the escalating orchestrator hands the higher model rung this instead of the full transcript. Absent ⇒ no stuck stop. |
 | `quarantine`     | array of strings (optional) | i795/#795: the predicate ids quarantined as flaky (T1.3, `Kazi.Loop.Flake`) at the terminal observation. **Additive, optional** — present only when non-empty. A quarantined predicate's status is `unknown`, never `pass`, so `status` can never be `converged` while this is present; it names WHICH predicate(s) keep a non-converged run from reporting a false positive over an `unknown` verdict. Absent ⇒ nothing was quarantined, byte-identical to today. |
 | `cause`          | object (optional)   | T48.4 (ADR-0058 decision 4): the honest terminal cause class alongside `status`/`reason`. **Additive, optional** — present only when the loop classified one. See [`cause` — honest terminal cause class](#cause--honest-terminal-cause-class-adr-0058). |
-| `integration`    | object (optional)   | T50.2 (ADR-0065 decision 2): how a worktree-isolated serial run's converged task-branch commits LANDED on the base. **Additive, optional** — present only when a landing was attempted. See [`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065) below. Absent ⇒ nothing was integrable (in-place run, or no commits ahead of the base), byte-identical to before this field existed. |
+| `integration`    | object (optional)   | T50.2 (ADR-0065 decision 2): how a worktree-isolated serial run's converged task-branch commits LANDED on the base; TKE.3 extends this to an in-place LANE-MODE run's `--integration-command` hook landing (`docs/integration-hook.md`). **Additive, optional** — present only when a landing was attempted. See [`integration` — serial landing verdict](#integration--serial-landing-verdict-adr-0065) below. Absent ⇒ nothing was integrable (a non-lane-mode in-place run, or no commits ahead of the base), byte-identical to before this field existed. |
 | `collateral`     | array of objects (optional) | issue #860: files changed this run that sit OUTSIDE the goal's write scope, net-deletion entries first. **Additive, optional** — present only when non-empty. See [`collateral` — out-of-intent diff report](#collateral--out-of-intent-diff-report-issue-860) below. Absent ⇒ nothing collateral was found, byte-identical to before this field existed. |
 | `goal_drifted`   | boolean (optional) | goal-drift-guard-1415: `true` when the goal-file this run was loaded from no longer matches the predicate bar it was fingerprinted against at t0. **Additive, optional** — present only when a drift was actually detected. See [`goal_drift` — on-disk bar mismatch](#goal_drift--on-disk-bar-mismatch-goal-drift-guard-1415) below. Absent ⇒ no drift detected (or the run was not started from a goal-file path), byte-identical to before this field existed. |
 | `goal_drift`     | object (optional) | goal-drift-guard-1415: paired with `goal_drifted: true` — names which predicate ids were added/removed/reconfigured on disk since t0. See below. |
@@ -603,6 +620,47 @@ Rules:
   landing is branch → push → PR → rebase-merge (the parallel path's real
   integrator); otherwise a plain LOCAL rebase-merge of the task branch onto
   the base checkout. Both are injectable seams for tests.
+
+### The IN-PLACE lane-mode case (TKE.3)
+
+An in-place run (`--in-place`) normally has no separate task worktree to land
+FROM, so `integration` stays absent — see the rule above. TKE.3
+(`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2) adds the one exception: an in-place
+**lane-mode** run (`--single-node --in-place`) whose `[integration]` mode is
+`pr`/`merge`, converging with commits ahead of the declared base. There is
+still no task worktree, so landing happens through the injectable
+`--integration-command`/`KAZI_INTEGRATION_COMMAND` hook instead of
+`Kazi.Scheduler.SerialLanding` — see `docs/integration-hook.md` for the
+hook's exact stdin/stdout JSON schema. The `integration` object's shape is
+identical either way:
+
+```json
+"integration": {
+  "landed": true,
+  "base": "a1b2c3d4e5f6...",
+  "task_branch": "main",
+  "refs": { "pr": 42 }
+}
+```
+
+```json
+"integration": {
+  "landed": false,
+  "base": "a1b2c3d4e5f6...",
+  "task_branch": "main",
+  "reason": "lane_integration_hook_missing"
+}
+```
+
+The one lane-mode-specific `reason` value, `"lane_integration_hook_missing"`,
+means `[integration]` wanted `pr`/`merge` but no
+`--integration-command`/`KAZI_INTEGRATION_COMMAND` hook was configured — kazi
+refuses to silently converge with nothing landed rather than attempting to
+push/open a PR itself (lane mode never holds a GitHub credential). Every
+other `reason` in this case is whatever the hook itself reported, or a
+`integration_hook_failed`/`integration_hook_invalid_output`-prefixed message
+when the hook crashed, exited non-zero, or printed something kazi could not
+parse as its documented JSON result.
 
 ## `collateral` — out-of-intent diff report (issue #860)
 

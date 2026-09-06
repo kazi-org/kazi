@@ -70,7 +70,9 @@ defmodule Kazi.TeachCoherenceReverseTest do
     "--single-node" =>
       "T73.5 (ADR-0086/ADR-0087): caps this invocation to one node for a Sire dispatcher lane (the KAZI_SINGLE_NODE env var is the mechanism a lane contract actually sets); an internal fleet-scheduling flag documented in `kazi help apply` and docs/schemas/run-result.md + docs/schemas/collective-result.md, not part of the intro recipes",
     "--lane-contract" =>
-      "TKE.1 (ADR-0086/ADR-0087): the governed-lane task_sha match check (the KAZI_LANE_CONTRACT env var is the mechanism a lane contract actually sets); an internal, --single-node-paired dispatcher flag documented in `kazi help apply` and docs/schemas/run-result.md, not part of the intro recipes"
+      "TKE.1 (ADR-0086/ADR-0087): the governed-lane task_sha match check (the KAZI_LANE_CONTRACT env var is the mechanism a lane contract actually sets); an internal, --single-node-paired dispatcher flag documented in `kazi help apply` and docs/schemas/run-result.md, not part of the intro recipes",
+    "--integration-command" =>
+      "TKE.3 (docs/plans/E-KAZI-ENTRYPOINT.md §1.2): the in-place lane-mode landing hook (the KAZI_INTEGRATION_COMMAND env var is the mechanism a lane contract actually sets); an internal, --single-node --in-place-paired dispatcher flag documented in `kazi help apply`, docs/integration-hook.md, and docs/schemas/run-result.md, not part of the intro recipes"
   }
 
   describe "every real `apply` flag is documented somewhere (the reverse guard, issue #973)" do
