@@ -4283,7 +4283,15 @@ defmodule Kazi.CLI do
   defp land_in_place_lane(%Goal{integration: %{mode: mode}} = goal, result, opts, workspace)
        when mode in [:pr, :merge] do
     if lane_mode?(opts) do
-      base = declared_base_or_fallback(opts, goal, workspace)
+      # `declared_base/2` + the `Kazi.ScopeDiff.base_ref/1` fallback are
+      # `Kazi.CLI.JobOutcome`'s TKE.7 helpers (merged separately) -- reused
+      # verbatim rather than duplicated, so there is exactly one base-
+      # resolution/ahead-count implementation in this module (a prior
+      # duplicate here caused a real bug: two same-name/arity `defp` clauses
+      # merge into ONE function whose clauses are tried in FILE order, so this
+      # module's own duplicate silently shadowed TKE.7's, dropping its
+      # `nil`-base handling and misclassifying `job_outcome`).
+      base = declared_base(opts, goal) || Kazi.ScopeDiff.base_ref(workspace)
 
       if commits_ahead_of_base(workspace, base) > 0 do
         invoke_integration_hook(goal, result, opts, workspace, base, mode)
@@ -4296,16 +4304,6 @@ defmodule Kazi.CLI do
   end
 
   defp land_in_place_lane(_goal, result, _opts, _workspace), do: {result, 0}
-
-  # TKE.3's interim "lane mode" gate -- deliberately the SAME definition
-  # `Kazi.CLI.JobOutcome`'s TKE.7 gate uses (single_node ON for this run AND
-  # --in-place): a governed lane today is single_node + in_place; TKE.1's
-  # `--lane-contract` additionally GATES dispatch on a matching task_sha but a
-  # contract's mere presence isn't required for THIS check (mirroring TKE.7's
-  # own TODO -- once --lane-contract's semantics settle further this may want
-  # to require a parsed contract too).
-  @spec lane_mode?(keyword()) :: boolean()
-  defp lane_mode?(opts), do: opts[:single_node] == true and opts[:in_place] == true
 
   # See the call site's comment (`run_goal_serial_at/6`): forces the DISPATCHED
   # goal's integration mode to `:none` in lane mode only, so `code_failing?`/
@@ -4338,45 +4336,11 @@ defmodule Kazi.CLI do
     end
   end
 
-  # The run's declared base, when one is known: an explicit `--base` (kept for
-  # completeness though `--base` + `--in-place` are refused as contradictory
-  # elsewhere, T50.8), else the goal-file's own `[integration] base = "..."`,
-  # else `Kazi.ScopeDiff.base_ref/1`'s merge-base guess against the workspace.
-  # NOTE: duplicates the shape of TKE.7's (not-yet-merged) `declared_base/2` --
-  # intentional, since TKE.3 does not depend on TKE.7 landing first; reconcile
-  # the two at merge time rather than couple these branches.
-  @spec declared_base_or_fallback(keyword(), Goal.t(), String.t()) :: String.t()
-  defp declared_base_or_fallback(opts, %Goal{integration: integration}, workspace) do
-    case opts[:base] do
-      base when is_binary(base) -> base
-      _ -> declared_integration_base(integration) || Kazi.ScopeDiff.base_ref(workspace)
-    end
-  end
-
-  defp declared_integration_base(%{base: base}) when is_binary(base) and base != "", do: base
-  defp declared_integration_base(_integration), do: nil
-
-  # Commits on the current checkout ahead of `base` -- degrades to 0 on any git
-  # failure (non-git workspace, unresolvable base) rather than crashing; a
-  # governed lane with zero ahead has nothing to land, matching
-  # `SerialLanding`'s `:nothing_to_land` for the worktree-isolated path.
-  @spec commits_ahead_of_base(String.t(), String.t()) :: non_neg_integer()
-  defp commits_ahead_of_base(workspace, base) do
-    case System.cmd("git", ["-C", workspace, "rev-list", "--count", base <> "..HEAD"],
-           stderr_to_stdout: true
-         ) do
-      {out, 0} ->
-        case Integer.parse(String.trim(out)) do
-          {n, ""} -> n
-          _ -> 0
-        end
-
-      _ ->
-        0
-    end
-  rescue
-    _ -> 0
-  end
+  # `declared_base/2` and `commits_ahead_of_base/2` -- the base-resolution and
+  # ahead-count helpers `land_in_place_lane/4` uses -- are `Kazi.CLI.JobOutcome`'s
+  # TKE.7 helpers (further down this module); reused directly rather than
+  # duplicated here. See `land_in_place_lane/4`'s comment for why (a prior
+  # duplicate here shadowed TKE.7's clauses and silently broke `job_outcome`).
 
   # The current checkout's branch name -- lane mode has no worktree, so the
   # "task branch" the plan describes IS whatever branch is already checked out.
