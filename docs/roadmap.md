@@ -445,11 +445,36 @@ crash, and non-JSON-stdout cases all degrade to a named `integration.reason`
 rather than a crash or a silent no-op. Hook I/O schema at
 `docs/integration-hook.md`; `docs/schemas/run-result.md`'s `integration`
 section documents the in-place case. 7 new tests, all green; no regression
-on TKE.1's 12 existing tests. PR #1806.
+on TKE.1's 12 existing tests. PR #1806, merged (`4f8a75fd` on main). A
+rebase after TKE.7/TKE.2 merged surfaced a second real bug: this module had
+gained two same-arity `declared_integration_base/1`/`commits_ahead_of_base/2`
+clause sets (TKE.3's own, duplicating TKE.7's landed helpers, as TKE.3's own
+code comment had flagged as a reconcile-at-merge-time risk) — Elixir merges
+same-arity `defp` clauses into one function tried in file order, so TKE.3's
+unguarded, no-nil-fallback clauses silently shadowed TKE.7's, misclassifying
+`job_outcome`. Fixed by deleting the duplicates and calling TKE.7's canonical
+helpers directly; 31 tests across the 3 touched lane-mode test files pass
+together. Verified independently before merge (both fix rounds): read each
+diff in full, confirmed HEAD matched the PR, re-ran the affected suites
+locally. Worktree/branch cleaned up, claim released.
 
-**Also this cycle: T72.4 dispatched** (interactive `kazi plan render --tree` <!-- verb-drift:allow: forward reference to T72.4, unbuilt at this line's writing -->
-adapter, E72's critical path, unblocked once T72.2+T72.3 both landed) as a
-third concurrent lane -- still in progress. And a real, 100%-reproducible
+**Also this cycle: T72.4 shipped** (interactive `kazi plan render --tree`
+adapter, E72's critical path). `Kazi.Plan.Tree` writes each scoped goal's
+rendered node to `<root>/AGENTS.md`, `.git/info/exclude`-scoped (never
+`.gitignore`), refuses to overwrite a hand-written `AGENTS.md` lacking the
+banner, and symlinks `CLAUDE.md -> AGENTS.md` only when no `CLAUDE.md`
+already exists at the root. Resolves a real ADR-0086/ADR-0065 tension the
+task text assumed away: since the artifact is untracked/add-only by design,
+there is no commit for a worktree-landing path to integrate, so the adapter
+writes directly into the given workspace instead of routing through a
+second, nested worktree. 29/29 new tests, `mix format` clean, doc-command-
+accuracy passed. Also fixed a real test-isolation bug found during review:
+a test using `File.cd!` (a process/OS-wide mutation) under `async: true` was
+racing every concurrently-scheduled test file, causing 4 straight CI runs to
+fail on a different, unrelated file each time with a random compile enoent
+-- fixed by marking that test module `async: false`. PR #1802, merged
+(`d31bfc06`). Verified independently, worktree/branch cleaned up, claim
+released. And a real, 100%-reproducible
 (not flaky) test-hermeticity bug was found and fixed while verifying TKE.1's
 full-suite run: `Kazi.Authoring.SessionAttributionTest`'s "falls back to the
 proposal's session_name" case never cleared `CLAUDE_CODE_SESSION_ID`/
@@ -485,12 +510,14 @@ CLI exec core, `mix format` clean, only the 2 pre-existing unrelated
 warnings, no attribution; merged on green. Both worktrees/branches cleaned
 up, claims released.
 
-**In progress: TKE.3** -- `--integration-command` hook (kazi computes the
-PR/branch/trailer action and hands it to an external publisher, never
-calling `git push`/`gh` itself in lane mode, per chief-architect's "mode B
-everywhere" ruling folded into the plan's section 3.2). Dispatched agent is
-designing the hook's stdin/stdout JSON schema (not pinned by the plan doc)
-and building the flag/invocation/refusal logic; not yet reported back.
+**Also this cycle: site redesign applied** (PR #1807). Reviewed and fixed
+before landing: dropped a third-party font-mirror stylesheet link
+(`db.onlinewebfonts.com`, serving a commercial font with no clear license
+for public production use) — the already-bundled local Geist Pixel Circle
+font is now the sole display font. The hero background video still points
+at an external CloudFront URL from the source patch (confirmed with the
+site owner to leave as-is). Validated: `check:coherence`, `check:commands`,
+build, and the full Playwright suite (100/100 passed). Merged.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
