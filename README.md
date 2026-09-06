@@ -194,7 +194,9 @@ installed it. From there Claude authors the acceptance predicates with `kazi pla
 agent does.
 
 The skill ships as three files (ADR-0074): `SKILL.md` (the router), `AUTHORING.md`
-(predicate authoring quality — dense briefs, capability-vs-guard, the red-at-t0 rule), and
+(predicate authoring quality — dense briefs, capability-vs-guard, the red-at-t0 rule, and a
+"shared_paths and contract" section, ADR-0087, on declaring fleet hotspots and the two lease
+scopes — interactive/integration-scoped vs. cross-container/Attempt-scoped), and
 `RECIPES.md` (escalation ladder, streaming, the check-only gate variant, the session bus).
 It is fully self-contained — it never assumes any other skill exists. To wire kazi into
 your own local workflow (routing conventions, model policy), put them in
