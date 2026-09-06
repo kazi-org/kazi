@@ -562,9 +562,21 @@ sire-side) dependencies named but not owned in this repo (section 2 of the
 plan doc) -- nothing further is dispatchable here until that side's work
 lands.
 
-**Dispatched (2026-09-06, tenth dispatch): TKE.6** -- review-comment
-ingestion, the next unblocked task now that TKE.5 has landed (Wave KE-F,
-deps: [TKE.5]). Claimed via claim.sh, fresh worktree off `origin/main`.
+**Shipped: E72 wave E72-D** (2026-09-06) -- T72.5 (PR #1820, `b0d71079`, walk-up
+test: T72.4's `Kazi.Plan.Tree` already walked up correctly for claude+codex
+as-is, no code fix needed), T72.6 (PR #1821, `581561dc`, freshness +
+forbidden_paths: new `Kazi.Plan.Freshness` module, a hand-edited rendered
+node terminates the run `:rendered_node_drift`, mirroring ADR-0080's
+`:tampered`), T72.7 (PR #1823, `5c5dd078`, `kazi apply --cwd <dir>`,
+defaulting to the goal's first declared scope root). All three dispatched
+in parallel against the same base; I rebased T72.7 myself past T72.5/T72.6
+(one trivial conflict in a shared test-doc map) before merging. Each
+independently reviewed (full diff, local test runs against the merged
+head, format/attribution checked) before merge.
+
+**Dispatched (2026-09-06, eleventh dispatch): T72.8** -- docs land with the
+code (Wave E72-E, deps: [T72.5, T72.6, T72.7], all now shipped). Claimed via
+claim.sh, fresh worktree off `origin/main`.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
