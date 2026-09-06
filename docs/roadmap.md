@@ -519,6 +519,21 @@ at an external CloudFront URL from the source patch (confirmed with the
 site owner to leave as-is). Validated: `check:coherence`, `check:commands`,
 build, and the full Playwright suite (100/100 passed). Merged.
 
+**Dispatched (2026-09-05, ninth dispatch): TKE.4, TKE.5** -- the next
+unblocked wave now that TKE.3 has landed (Wave KE-D/KE-E,
+`docs/plans/E-KAZI-ENTRYPOINT.md` section 3.3). TKE.4 (trailer-value
+computation: prefer `Plan-row: <id>` from the lane contract's sire-style
+task id, falling back to `Kazi-Goal: <goal-id>` -- TKE.3's own explicit TODO)
+and TKE.5 (resume handle: a lane contract or `--resume-pr <ref>` names an
+already-open PR to continue against, recorded in the read-model as the same
+run-lineage rather than an unrelated fresh run) both depend only on TKE.3.
+TKE.6 stays blocked on TKE.5. "TKE.7 (full form)" in Wave KE-D is not new
+kazi-side code -- TKE.7 (already merged) simply becomes exercisable
+end-to-end now that TKE.3 exists; the actual integration test lives in the
+hq repo (plan section 3.4), not this repo. Both claimed via claim.sh, fresh
+worktrees off `origin/main` (`6c5fde74`), `mix compile` verified clean
+before dispatch. In progress.
+
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
