@@ -676,7 +676,16 @@ contract flag, the concurrency cap lives only in the dispatcher;
 in v1) and `[scope].contract` + lint. Parent-converges-on-contract held
 pending evidence. Reviewed by both coordinating sessions; the paired
 sibling-repo row exists and is blocked on this ADR merging. Its
-implementing epic is planned after merge.
+implementing epic is planned after merge. **Progress (2026-09-05/06):**
+Wave E73-A (T73.1, T73.5) and Wave E73-B (T73.2) shipped earlier. **Wave
+E73-C shipped**: T73.3 (per-file integration-scoped lease around
+`Kazi.Scheduler.Integration.integrate_one/3`, PR #1829), T73.4 (`kazi plan
+render --dag`, new `Kazi.Plan.Dag` module, PR #1828), T73.6 (`[scope].contract`
++ own/fleet lint + render "Contract" section, PR #1830) -- all three
+independently verified (diff read, tests re-run against exact head, format
+clean, no attribution) before merge. **Wave E73-D (T73.7, the epic's last
+task -- docs land with the code) dispatched** in worktree
+`/Volumes/BuildOffload/kazi-worktrees/t73-7`, branch `task/t73-7`.
 
 **Near term (2026-09-02, from a full open-issue triage, third pass --
 E71, 1 task):** the entire open backlog is now three triage epics deep
