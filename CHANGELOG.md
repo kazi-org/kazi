@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.290.0](https://github.com/kazi-org/kazi/compare/v1.289.0...v1.290.0) (2026-09-06)
+
+
+### Features
+
+* **cli:** in-place PR-opening via injectable --integration-command hook (TKE.3) ([d0cc28f](https://github.com/kazi-org/kazi/commit/d0cc28f14af3aeb623f6e4bbd427a83ed2680958))
+
+
+### Bug Fixes
+
+* **cli:** unify TKE.3's base/ahead-count helpers with TKE.7's merged ones ([4f8a75f](https://github.com/kazi-org/kazi/commit/4f8a75fd1da64763507daf33623769e455c2d689))
+
 ## [1.289.0](https://github.com/kazi-org/kazi/compare/v1.288.0...v1.289.0) (2026-09-06)
 
 
