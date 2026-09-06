@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.293.0](https://github.com/kazi-org/kazi/compare/v1.292.0...v1.293.0) (2026-09-06)
+
+
+### Features
+
+* **cli,loop:** review-comment ingestion as new grind input (TKE.6) ([f563ae4](https://github.com/kazi-org/kazi/commit/f563ae4645fa82ade628cb83b3264d1bca8367fe))
+
 ## [1.292.0](https://github.com/kazi-org/kazi/compare/v1.291.0...v1.292.0) (2026-09-06)
 
 
