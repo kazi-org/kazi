@@ -5,7 +5,11 @@
 Proposed (awaiting review by the chief and chief-architect sessions; drafted
 from their unanimous verdict of 2026-09-05). Recorded in the fleet's decision
 ledger; founder ratification of the layering ruling pending at the next
-scheduled sync.
+scheduled sync. The `single_node` refusal mechanism this ADR names (decision
+4) has SHIPPED (T73.5): `kazi apply --single-node` / `KAZI_SINGLE_NODE`
+refuses `--fleet` and any multi-partition goal-set before load/dispatch with
+`single_node_violation`, and a single-partition run's `--json` result carries
+`single_node: true`. The layering ruling itself remains pending ratification.
 
 ## Date
 
