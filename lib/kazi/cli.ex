@@ -191,6 +191,7 @@ defmodule Kazi.CLI do
     into: :string,
     lower: :string,
     write: :string,
+    tree: :boolean,
     reap: :boolean,
     help: :boolean,
     version: :boolean
@@ -221,6 +222,8 @@ defmodule Kazi.CLI do
       "`spec import` only (T49.11, ADR-0054 d3): the lowering mode for TAGGED Scenarios — `test_runner` (default; byte-identical to today) or `scenario` (a Scenario tagged @interface:web lowers to a `scenario` predicate on the browser surface, @interface:cli to the cli surface, wiring the runtime scenario provider / demonstrate-then-pin ADR-0064). Untagged Scenarios and other-interface tags stay `test_runner` regardless.",
     write:
       "`approve` only (T39.3, ADR-0049): materialize the approved goal as a loadable goal-file at <path>, so a file-based / version-controlled workflow can `apply <path>` and get the SAME goal `apply <ref>` runs. Under --json the result carries the written `path`. Absent, approve is unchanged.",
+    tree:
+      "`plan render` only (T72.4, ADR-0086 decision 4): the INTERACTIVE delivery adapter -- instead of the generated markdown plan, project every roadmap goal's declared `[scope]` root(s) (`Kazi.Scope.roots/1`) onto `<root>/AGENTS.md` (T72.3's node render: brief, predicate definitions, currently-failing predicates with evidence), so a harness's own directory walk-up delivers the goal's acceptance contract the moment an operator `cd`s into the scope root. Runs `plan lint`'s nesting-conflict check first and refuses -- writing nothing -- on any conflict; an existing `AGENTS.md` missing the generated banner (a hand-written file) also refuses the WHOLE call, naming the path, before anything is written. Adds each written path to the workspace's local, untracked `.git/info/exclude` (never `.gitignore`), and creates a `CLAUDE.md -> AGENTS.md` symlink only where no `CLAUDE.md` exists at that root -- otherwise prints the `@AGENTS.md` include instruction (structured under --json) and leaves the existing file untouched. Idempotent: re-running with unchanged inputs rewrites the same bytes. Combine with --workspace to target a repo other than the current directory (default `.`).",
     reap:
       "`orphans` only (T54.5, issue #1073): actually KILL each orphaned harness process group (TERM then KILL) instead of only listing it. Read-only without it.",
     debrief:
@@ -506,7 +509,7 @@ defmodule Kazi.CLI do
     %{
       name: "plan",
       summary:
-        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058). `plan render <roadmap>` instead renders a roadmap DAG as a GENERATED markdown plan (T45.5). `plan lint <roadmap>` (T72.2, ADR-0086 decision 2) refuses -- non-zero exit -- when two of the roadmap's goals declare `[scope]` roots (`Kazi.Scope.roots/1`) that nest inside or exactly equal one another, naming both goal ids and the shared root; disjoint roots exit 0.",
+        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058). `plan render <roadmap>` instead renders a roadmap DAG as a GENERATED markdown plan (T45.5), or -- with `--tree` (T72.4, ADR-0086 decision 4) -- delivers each scoped goal's node as `<root>/AGENTS.md` (+ a `CLAUDE.md` symlink) directly into `--workspace` for a harness's directory walk-up. `plan lint <roadmap>` (T72.2, ADR-0086 decision 2) refuses -- non-zero exit -- when two of the roadmap's goals declare `[scope]` roots (`Kazi.Scope.roots/1`) that nest inside or exactly equal one another, naming both goal ids and the shared root; disjoint roots exit 0.",
       args: [%{name: "idea|render <roadmap>|lint <roadmap>", required: false}],
       flags: [
         :workspace,
@@ -519,7 +522,8 @@ defmodule Kazi.CLI do
         :discover,
         :session_name,
         :project,
-        :out
+        :out,
+        :tree
       ]
     },
     %{
@@ -1377,10 +1381,23 @@ defmodule Kazi.CLI do
   # (not a new verb — the help-json command set stays `plan`), matched before the
   # authoring form so the `render` token is never mistaken for a prose idea. It
   # renders the roadmap DAG as a generated markdown plan to stdout (or --out).
+  #
+  # T72.4 (ADR-0086 decision 4): `--tree` switches to the INTERACTIVE delivery
+  # adapter (`Kazi.Plan.Tree`) instead of the markdown render -- `--workspace`
+  # (default ".") and `--json` matter only in that mode, `--out` only in the
+  # markdown mode; both are threaded through unconditionally (mirroring every
+  # other command here) rather than validated per-mode at the parse boundary.
   defp parse_command(["plan", "render", roadmap | rest], flags) do
     case rest do
-      [] -> {:plan_render, roadmap, out: flags[:out]}
-      extra -> {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
+      [] ->
+        {:plan_render, roadmap,
+         out: flags[:out],
+         tree: flags[:tree] || false,
+         workspace: flags[:workspace],
+         json: flags[:json] || false}
+
+      extra ->
+        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
     end
   end
 
@@ -3558,6 +3575,36 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T72.4 (ADR-0086 decision 4): best-effort, non-fatal AGENTS.md render — see
+  # the call site above for why this never aborts the run. A goal with no
+  # declared scope root (`Kazi.Scope.roots/1 == []`) is the common case and
+  # `render_goal/3` is a silent `{:ok, []}` no-op then, so this adds no
+  # observable cost to an unscoped goal's run.
+  defp render_scope_tree_before_dispatch(%Goal{} = goal, workspace) do
+    case Kazi.Plan.Tree.render_goal(goal, workspace) do
+      {:ok, _deliveries} ->
+        :ok
+
+      {:error, reason} ->
+        IO.puts(
+          :stderr,
+          "warning: could not render this goal's AGENTS.md node before dispatch " <>
+            "(T72.4, ADR-0086 decision 4): #{inspect(reason)}; proceeding without it"
+        )
+
+        :ok
+    end
+  rescue
+    e ->
+      IO.puts(
+        :stderr,
+        "warning: AGENTS.md node render crashed before dispatch (T72.4): " <>
+          Exception.format(:error, e, __STACKTRACE__)
+      )
+
+      :ok
+  end
+
   defp run_goal_serial_at(%Goal{} = goal, opts, persist?, runtime_opts, base_workspace, workspace) do
     # The caller's static run config; CLI-owned keys (workspace/persist?) win, and
     # an explicit :persist? in runtime_opts can still override (tests).
@@ -3635,6 +3682,27 @@ defmodule Kazi.CLI do
     # rendered as the versioned JSON contract under --json or the human report
     # otherwise. The exit code is the same on both surfaces: 0 only on convergence.
     #
+    # T72.4 (ADR-0086 decision 4): render this goal's AGENTS.md node into the
+    # workspace it is ABOUT TO DISPATCH IN, before the harness ever starts --
+    # the same delivery `kazi plan render --tree` does interactively
+    # (`Kazi.Plan.Tree.render_goal/3`), so a harness that walks up from the
+    # scope root sees the SAME acceptance contract whether it was launched by
+    # `apply` or by an operator's own `cd` after a `--tree` render. `workspace`
+    # here is already the isolated task worktree (or the in-place/non-git
+    # workspace) `run_goal_serial_at` was handed -- never the caller's own
+    # checkout -- so this never fights ADR-0065's "never mutate the caller's
+    # checkout" intent even without a second nested worktree indirection.
+    #
+    # Deliberately BEST-EFFORT and NON-FATAL, unlike `--tree`'s hard refusal:
+    # an automatic per-run render that could newly abort every scoped goal's
+    # `apply` (e.g. over a pre-existing hand-written AGENTS.md nobody
+    # anticipated this feature for) is a much larger behavior change than
+    # this task's acceptance criteria test, so a render failure here is
+    # logged and the run proceeds unaffected -- flagged explicitly as a
+    # scoped-down follow-up (a hard-refusal apply-side policy, if wanted
+    # later, is its own decision) rather than silently skipped.
+    render_scope_tree_before_dispatch(goal, workspace)
+
     # T73.5 (ADR-0086/ADR-0087, CAPABILITY 3/4): when single_node was ON for
     # this run, stash the additive `single_node: true` marker onto the loop's
     # result map here (BEFORE the outcome match), so `run_result_json/5`'s
@@ -7205,15 +7273,137 @@ defmodule Kazi.CLI do
   # the read-model; when persistence is unavailable every goal renders `unknown`
   # rather than crashing.
   defp execute_plan_render(roadmap_path, opts) do
+    if opts[:tree] == true do
+      execute_plan_render_tree(roadmap_path, opts)
+    else
+      case Kazi.Goal.Roadmap.load(roadmap_path) do
+        {:ok, roadmap} ->
+          markdown = Kazi.Goal.Roadmap.Render.render(roadmap, roadmap_verdicts(roadmap))
+          write_rendered_plan(markdown, opts[:out])
+
+        {:error, message} ->
+          IO.puts(:stderr, "error: #{message}")
+          1
+      end
+    end
+  end
+
+  # T72.4 (ADR-0086 decision 4): `plan render --tree` -- the interactive
+  # AGENTS.md delivery adapter. Loads the roadmap (the SAME artifact `plan
+  # render`/`plan lint` read) and hands it to `Kazi.Plan.Tree.render/3`, which
+  # runs the nesting-conflict refusal first (mirroring `plan lint`), then
+  # validates every target before writing any of them.
+  defp execute_plan_render_tree(roadmap_path, opts) do
     case Kazi.Goal.Roadmap.load(roadmap_path) do
       {:ok, roadmap} ->
-        markdown = Kazi.Goal.Roadmap.Render.render(roadmap, roadmap_verdicts(roadmap))
-        write_rendered_plan(markdown, opts[:out])
+        workspace = opts[:workspace] || "."
+
+        case Kazi.Plan.Tree.render(roadmap, workspace) do
+          {:ok, deliveries} ->
+            report_plan_render_tree(roadmap_path, workspace, deliveries, opts)
+            0
+
+          {:error, {:nesting_conflict, conflicts}} ->
+            refuse_plan_render_tree(
+              plan_lint_conflict_message(roadmap_path, conflicts),
+              "nesting_conflict",
+              %{roadmap: roadmap_path, conflicts: conflicts},
+              opts
+            )
+
+          {:error, {:hand_written, paths}} ->
+            message =
+              "roadmap #{roadmap_path}: refusing to overwrite hand-written AGENTS.md file(s) " <>
+                "lacking the generated banner (ADR-0086 decision 6) -- #{Enum.join(paths, ", ")}. " <>
+                "Move the hand-written content elsewhere (or delete the file) and re-run " <>
+                "`--tree`; nothing was written."
+
+            refuse_plan_render_tree(
+              message,
+              "hand_written_agents_md",
+              %{roadmap: roadmap_path, paths: paths},
+              opts
+            )
+
+          {:error, {:observe_failed, goal_id, reason}} ->
+            message =
+              "roadmap #{roadmap_path}: could not observe goal #{inspect(goal_id)}'s " <>
+                "predicates: #{inspect(reason)}; nothing was written"
+
+            refuse_plan_render_tree(
+              message,
+              "observe_failed",
+              %{roadmap: roadmap_path, goal_id: goal_id},
+              opts
+            )
+        end
 
       {:error, message} ->
-        IO.puts(:stderr, "error: #{message}")
-        1
+        plan_lint_load_error(roadmap_path, message, opts)
     end
+  end
+
+  defp report_plan_render_tree(roadmap_path, workspace, deliveries, opts) do
+    json = %{
+      schema_version: @run_schema_version,
+      kind: "plan_render_tree",
+      roadmap: roadmap_path,
+      workspace: workspace,
+      deliveries: Enum.map(deliveries, &delivery_json/1)
+    }
+
+    emit(json?(opts), json, fn -> render_tree_human(roadmap_path, workspace, deliveries) end)
+  end
+
+  defp delivery_json(delivery) do
+    %{
+      goal_id: delivery.goal_id,
+      root: delivery.root,
+      dir: delivery.dir,
+      agents_path: delivery.agents_path,
+      written: delivery.written,
+      symlink: delivery.symlink && to_string(delivery.symlink),
+      claude_include_hint: delivery.claude_include_hint
+    }
+  end
+
+  defp render_tree_human(roadmap_path, workspace, []) do
+    IO.puts(
+      "TREE  roadmap=#{roadmap_path} workspace=#{workspace} — no goal declares a [scope] " <>
+        "root; nothing to render."
+    )
+  end
+
+  defp render_tree_human(roadmap_path, workspace, deliveries) do
+    IO.puts(
+      "TREE  roadmap=#{roadmap_path} workspace=#{workspace} — #{length(deliveries)} root(s):"
+    )
+
+    Enum.each(deliveries, fn delivery ->
+      state = if delivery.written, do: "written", else: "unchanged"
+
+      IO.puts(
+        "  goal=#{delivery.goal_id} root=#{delivery.root} -> #{delivery.agents_path} (#{state})"
+      )
+
+      case delivery.symlink do
+        :created -> IO.puts("    CLAUDE.md -> AGENTS.md symlink created")
+        :already_present -> IO.puts("    CLAUDE.md -> AGENTS.md symlink already present")
+        nil -> :ok
+      end
+
+      if delivery.claude_include_hint, do: IO.puts("    #{delivery.claude_include_hint}")
+    end)
+  end
+
+  defp refuse_plan_render_tree(message, reason, extra, opts) do
+    if json?(opts) do
+      emit_json_error(message, Map.put(extra, :reason, reason))
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
   end
 
   # Build the `goal-id => verdict` map the renderer projects into checkboxes. The

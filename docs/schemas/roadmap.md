@@ -185,3 +185,52 @@ kazi plan lint priv/examples/roadmap/pipeline.roadmap.toml --json
   ancestor directory's node — a goal rooted at `pkg/foo` and a goal rooted at
   `pkg/foo/bar` would hand the child goal's agent the parent goal's brief too.
   `kazi plan render --tree` runs this SAME check before writing any file.
+
+## Interactive `AGENTS.md` delivery (`kazi plan render --tree`, T72.4, ADR-0086 decision 4)
+
+`kazi plan render <roadmap-file> --tree --workspace <path>` (workspace default
+`.`) is a DIFFERENT delivery mode of the same `render` subcommand: instead of
+the generated markdown plan, it projects EVERY scoped goal's node
+(`Kazi.Plan.Render.node/3`, T72.3 — brief, predicate definitions, currently
+failing predicates with evidence, under the same GENERATED banner) onto
+`<scope-root>/AGENTS.md`, so a harness's own directory walk-up delivers the
+goal's acceptance contract the moment an operator `cd`s into the scope root:
+
+```sh
+kazi plan render priv/examples/roadmap/pipeline.roadmap.toml --tree --workspace .
+kazi plan render priv/examples/roadmap/pipeline.roadmap.toml --tree --workspace . --json
+```
+
+- **Nesting check first.** `--tree` runs the SAME nesting-conflict check
+  `kazi plan lint` does (see above) before any write; a conflict refuses —
+  writing nothing — naming both goal ids and the shared root.
+- **Never overwrites a hand-written file.** An existing `AGENTS.md` at a scope
+  root that lacks the generated banner is HAND-WRITTEN, not a stale render —
+  `--tree` refuses the WHOLE call (nothing is written for ANY goal), naming
+  every offending path. A stale GENERATED `AGENTS.md` (one that DOES carry the
+  banner, from a prior render) is overwritten — this is what makes a re-run
+  idempotent.
+- **`.git/info/exclude`, never `.gitignore`.** Every written path is appended
+  to the workspace's local, untracked `.git/info/exclude` (idempotent — no
+  duplicate lines across re-runs), so the generated `AGENTS.md`/`CLAUDE.md`
+  never show up in `git status` and are never a committed, tracked edit.
+- **`CLAUDE.md -> AGENTS.md` symlink.** Created only where no `CLAUDE.md`
+  exists at the scope root at all, so Claude Code's own walk-up reads the node
+  too. Where a `CLAUDE.md` already exists (of any kind, including a prior
+  run's own symlink, left untouched and reported as `already_present`),
+  `--tree` leaves it alone and instead reports a `claude_include_hint`
+  (`--json`) / prints a human line naming the file and instructing the
+  operator to add an `@AGENTS.md` include line to it by hand.
+- **Direct workspace write, not the ADR-0065 worktree indirection.** Unlike
+  every other workspace-mutating verb, `--tree` writes directly into the given
+  `--workspace` (see `Kazi.Plan.Tree`'s moduledoc for the full reasoning): the
+  artifact is untracked and add-only by design (ADR-0086 decision 3 — "nothing
+  it produces is ever committed"), so there is no commit for the worktree
+  indirection's landing step to integrate, and spinning up a throwaway
+  worktree for it would put the render somewhere the operator's own `cd` never
+  reaches — the opposite of what this adapter is for.
+- **`kazi apply` runs the same render before dispatch**, into whichever
+  workspace it is about to dispatch the harness in (normally its own isolated
+  task worktree, per ADR-0065 decision 1) — best-effort: a render failure
+  there (e.g. a hand-written `AGENTS.md` nobody anticipated) warns on stderr
+  and the run proceeds, rather than `--tree`'s hard refusal.
