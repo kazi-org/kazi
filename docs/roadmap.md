@@ -574,9 +574,14 @@ in parallel against the same base; I rebased T72.7 myself past T72.5/T72.6
 independently reviewed (full diff, local test runs against the merged
 head, format/attribution checked) before merge.
 
-**Dispatched (2026-09-06, eleventh dispatch): T72.8** -- docs land with the
-code (Wave E72-E, deps: [T72.5, T72.6, T72.7], all now shipped). Claimed via
-claim.sh, fresh worktree off `origin/main`.
+**Shipped: T72.8, closing epic E72** (2026-09-06, PR #1826, `2716f726`) --
+docs consolidation: new `docs/AUTHORING.md` "Scope roots and the AGENTS.md
+node" section, a README pointer, and ADR-0086 decision 6's "asserted by a
+test" hedge resolved with T72.5's actual result. Independently verified
+(full diff, `check-doc-commands.mjs` re-run locally, attribution checked);
+found and fixed a leftover unfilled `PR #TBD` placeholder in the agent's own
+`Done:` entry before merge. **All 8 tasks of E72 (ADR-0086, per-directory
+AGENTS.md projection) are now shipped.**
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
