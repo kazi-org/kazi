@@ -230,7 +230,7 @@ defmodule Kazi.Loop do
   saw the same non-empty failing set persist across N iterations, escalated to a
   human, and stopped rather than burning more work (concept §5).
   """
-  @type outcome :: :converged | :stopped | :over_budget | :tampered
+  @type outcome :: :converged | :stopped | :over_budget | :tampered | :rendered_node_drift
 
   @typedoc """
   The final result handed to `await/2` waiters when the loop stops.
@@ -668,6 +668,21 @@ defmodule Kazi.Loop do
               # the existing field order is untouched.
               seal_manifest: %{},
               tampered_file: nil,
+              # --- T72.6 (ADR-0086 decision 5): rendered-node freshness ----------
+              # `rendered_node_manifest` is the t0 content-hash manifest of this
+              # run's delivered AGENTS.md node(s) (`Kazi.Plan.Freshness.arm/1`),
+              # armed by the runtime and threaded in as a loop opt — SAME shape
+              # and SAME termination class as `seal_manifest`/`tampered_file`
+              # above (ADR-0080), just for a different input. Before every
+              # observe pass the loop re-verifies it
+              # (`Kazi.Plan.Freshness.verify/1`); the FIRST mismatch sets
+              # `drifted_node` (`%{path:, change:}`) and terminates the run
+              # `:rendered_node_drift`. Empty manifest (an unscoped goal, or a
+              # Loop.start_link with none supplied) = nothing rendered,
+              # byte-identical to pre-T72.6. Appended last so the existing field
+              # order is untouched.
+              rendered_node_manifest: %{},
+              drifted_node: nil,
               # --- ADR-0081 (#1521): controller-owned capture recipes ------------
               # `capture_fn` is the controller-side capture executor (built by the
               # runtime, `build_capture_fn/4`): given the 0-based observe iteration
@@ -1073,6 +1088,7 @@ defmodule Kazi.Loop do
       # ADR-0080 (#1520): the t0 seal manifest, armed by the runtime. Absent = %{}
       # (nothing sealed), so a loop with no seal is byte-identical to pre-ADR-0080.
       seal_manifest: Keyword.get(opts, :seal_manifest, %{}),
+      rendered_node_manifest: Keyword.get(opts, :rendered_node_manifest, %{}),
       # ADR-0081 (#1521): the controller-side capture executor, built by the
       # runtime. Absent = a no-op returning `%{}`, so a loop with no captures is
       # byte-identical to before.
@@ -1191,13 +1207,13 @@ defmodule Kazi.Loop do
   # under a `:transient` supervisor would even resurrect a deliberately stopped
   # standing loop. Terminal states accept no more observations, so it is a no-op.
   def handle_event({:timeout, :reobserve}, :reobserve, state, %Data{})
-      when state in [:converged, :stopped, :over_budget, :tampered] do
+      when state in [:converged, :stopped, :over_budget, :tampered, :rendered_node_drift] do
     :keep_state_and_data
   end
 
   # --- stop / await / snapshot (handled in any state) --------------------------
   def handle_event(:cast, :stop, state, %Data{} = data)
-      when state not in [:converged, :stopped, :over_budget, :tampered] do
+      when state not in [:converged, :stopped, :over_budget, :tampered, :rendered_node_drift] do
     terminate_with(:stopped, data)
   end
 
@@ -1205,7 +1221,7 @@ defmodule Kazi.Loop do
 
   # In a terminal state the result is cached in data; reply to await immediately.
   def handle_event({:call, from}, :await, state, %Data{} = data)
-      when state in [:converged, :stopped, :over_budget, :tampered] do
+      when state in [:converged, :stopped, :over_budget, :tampered, :rendered_node_drift] do
     {:keep_state_and_data, [{:reply, from, {:ok, data.result}}]}
   end
 
@@ -1291,6 +1307,23 @@ defmodule Kazi.Loop do
     case Kazi.Seal.verify(data.seal_manifest) do
       {:tampered, info} ->
         terminate_tampered(info, data)
+
+      :ok ->
+        rendered_node_check_then_observe(data)
+    end
+  end
+
+  # T72.6 (ADR-0086 decision 5): re-verify this run's rendered AGENTS.md
+  # node(s) right after the seal check, same precedence rationale (checked
+  # after workspace-liveness, before budget/observe) — a hand-edited rendered
+  # node is a distinct fatal cause from a tampered goal-file/sealed input, so
+  # it gets its own manifest and its own terminal outcome
+  # (`:rendered_node_drift`), never conflated with `:tampered`. A no-op when
+  # nothing was rendered (an unscoped goal).
+  defp rendered_node_check_then_observe(%Data{} = data) do
+    case Kazi.Plan.Freshness.verify(data.rendered_node_manifest) do
+      {:drift, info} ->
+        terminate_rendered_node_drift(info, data)
 
       :ok ->
         # T1.4 budget: the hard ceiling is checked ONCE at the start of every
@@ -3414,6 +3447,10 @@ defmodule Kazi.Loop do
         # ADR-0080 (#1520): a tampered run is a distinct terminal outcome — it can
         # NEVER collapse to :converged, and is not an ordinary :stopped either.
         :tampered -> :tampered
+        # T72.6 (ADR-0086 decision 5): same rationale as :tampered above — a
+        # rendered-node drift is a distinct terminal outcome, never :converged,
+        # never an ordinary :stopped.
+        :rendered_node_drift -> :rendered_node_drift
         _ -> :stopped
       end
 
@@ -3461,6 +3498,7 @@ defmodule Kazi.Loop do
     |> maybe_attach_stuck_bundle(data)
     |> maybe_attach_permission_denials(data)
     |> maybe_attach_tampered_file(data)
+    |> maybe_attach_drifted_node(data)
   end
 
   # ADR-0080 (#1520): on a :tampered stop, surface the offending file + the kind
@@ -3473,6 +3511,16 @@ defmodule Kazi.Loop do
 
   defp maybe_attach_tampered_file(result, %Data{tampered_file: info}),
     do: Map.put(result, :tampered_file, info)
+
+  # T72.6 (ADR-0086 decision 5): on a :rendered_node_drift stop, surface the
+  # offending path + change kind as `drifted_node` — same rationale and same
+  # names-only hygiene as `maybe_attach_tampered_file/2` above, ABSENT on
+  # every non-drift stop.
+  @spec maybe_attach_drifted_node(map(), Data.t()) :: map()
+  defp maybe_attach_drifted_node(result, %Data{drifted_node: nil}), do: result
+
+  defp maybe_attach_drifted_node(result, %Data{drifted_node: info}),
+    do: Map.put(result, :drifted_node, info)
 
   # T54.6 (#1072, regression of #769): surface the denied tool calls on the TERMINAL
   # result, beside `changed_files` in the bundle. `permission_denied_tool_calls` is
@@ -3606,6 +3654,10 @@ defmodule Kazi.Loop do
   # ADR-0080 (#1520): a tampered stop names itself, ahead of the stuck/budget
   # reasons (a tamper terminates before either fires).
   defp stop_reason(%Data{tampered_file: file}) when not is_nil(file), do: :tampered
+
+  # T72.6 (ADR-0086 decision 5): a rendered-node-drift stop names itself the
+  # same way, ahead of stuck/budget.
+  defp stop_reason(%Data{drifted_node: node}) when not is_nil(node), do: :rendered_node_drift
   defp stop_reason(%Data{stuck_failing: failing}) when not is_nil(failing), do: :stuck
   defp stop_reason(%Data{budget_reason: reason}), do: reason
 
@@ -3729,6 +3781,24 @@ defmodule Kazi.Loop do
     end)
 
     terminate_with(:tampered, %Data{data | tampered_file: info})
+  end
+
+  # T72.6 (ADR-0086 decision 5): a rendered AGENTS.md node changed mid-run —
+  # same rationale and shape as `terminate_tampered/2` above, for a different
+  # input and a different (but equally fatal, equally non-`:converged`)
+  # terminal outcome. `info` is the `%{path:, change:}` from
+  # `Kazi.Plan.Freshness.verify/1`.
+  @spec terminate_rendered_node_drift(%{path: String.t(), change: atom()}, Data.t()) ::
+          :gen_statem.event_handler_result(atom())
+  defp terminate_rendered_node_drift(%{path: path, change: change} = info, %Data{} = data) do
+    Logger.warning(fn ->
+      "kazi.loop goal=#{goal_id(data.goal)} rendered node #{inspect(path)} was #{change} " <>
+        "mid-run (ADR-0086 decision 5, T72.6) — the dispatch-context AGENTS.md/CLAUDE.md " <>
+        "node kazi rendered for this scope root was hand-edited. Terminating " <>
+        ":rendered_node_drift (the run is VOID, never converged)."
+    end)
+
+    terminate_with(:rendered_node_drift, %Data{data | drifted_node: info})
   end
 
   # Fire the human-escalation callback with the stuck context (the persistent
