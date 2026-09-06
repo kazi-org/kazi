@@ -167,6 +167,7 @@ defmodule Kazi.CLI do
     lane_contract: :string,
     strict_landing: :boolean,
     integration: :string,
+    integration_command: :string,
     rediscovery: :string,
     port: :integer,
     bind: :string,
@@ -317,6 +318,8 @@ defmodule Kazi.CLI do
       "`apply` only (T45.11, #1620): override how the converged goal LANDS, one of `none` | `commit` | `branch` | `pr` | `merge` (the `[integration] mode` values). The primary way to land is to declare `[integration]` in the goal-file or proposal (honored end to end since #1620); this flag is the explicit override for landing an APPROVED proposal (or a goal-file) that did not declare one, without re-authoring -- e.g. `kazi apply <proposal-ref> --integration pr --base main`. Combine with `--base` for the target branch; `none` (the default) is converge-and-stop.",
     strict_landing:
       "`apply` only (issue #1407): couple the exit code to landing, not just convergence. By DEFAULT the exit code mirrors convergence alone (0 on `:converged`, even when the worktree-isolated serial landing FAILS — a converged-but-unlanded run still exits 0; the surviving task branch and the `integration.landed == false` evidence remain visible in the result and a stderr warning). Pass --strict-landing to restore the pre-#1407 behavior: a converged-but-unlanded run downgrades the exit code to 1, for a caller (e.g. a CI gate) that wants a landing failure to fail the invocation outright. Has no effect on an in-place run (nothing to land) or when landing succeeds.",
+    integration_command:
+      "`apply` only (TKE.3, `docs/plans/E-KAZI-ENTRYPOINT.md` §1.2, decided design \"mode (B) everywhere\"): path to an executable hook that performs the git-level mechanics of landing an IN-PLACE (lane-mode: --single-node --in-place) run's converged work -- push/PR/merge. The equivalent env var KAZI_INTEGRATION_COMMAND (mirroring --lane-contract/KAZI_LANE_CONTRACT's flag-or-env pattern) is the mechanism a lane container sets without a CLI change; the flag wins when both are set. kazi NEVER runs `git push`/`gh pr create`/`git commit` itself in lane mode and never holds a GitHub credential -- this hook is the ONLY in-place integration path. On convergence with commits ahead of the goal's declared base and `[integration]` mode `pr`/`merge` under lane mode, kazi computes a structured integration action (base, task branch, PR title/body, a `Kazi-Goal: <id>` trailer) and invokes this command with that action as JSON on stdin (see `docs/integration-hook.md` for the exact stdin/stdout schema); the hook's own stdout JSON (`{\"landed\": true|false, \"refs\": {...} | \"reason\": ...}`) populates the terminal result's `integration` object verbatim -- kazi never invents `landed`/`refs`/`reason` itself. When `[integration]` wants pr/merge under lane mode but this is unset, the run refuses to silently converge with nothing landed (`integration.reason: \"lane_integration_hook_missing\"`, exit 1). Has no effect outside lane mode, or when `[integration]` mode is `none`/`commit`/`branch`, or when there are no commits ahead of the base.",
     port:
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
@@ -415,6 +418,7 @@ defmodule Kazi.CLI do
         :base,
         :lane_contract,
         :integration,
+        :integration_command,
         :strict_landing
       ]
     },
@@ -2211,6 +2215,16 @@ defmodule Kazi.CLI do
     flags[:lane_contract] || System.get_env("KAZI_LANE_CONTRACT")
   end
 
+  # TKE.3 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): `--integration-command
+  # <path>`'s CLI-flag-or-env pattern, mirroring `lane_contract_path/1` above
+  # -- also readable from `KAZI_INTEGRATION_COMMAND`. The flag wins over the
+  # env var when both are set (the same precedence `--lane-contract`/
+  # `KAZI_LANE_CONTRACT` already uses).
+  @spec integration_command_path(keyword()) :: String.t() | nil
+  defp integration_command_path(flags) do
+    flags[:integration_command] || System.get_env("KAZI_INTEGRATION_COMMAND")
+  end
+
   defp parse_run(goal_file, rest, flags) do
     case rest do
       # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
@@ -2261,6 +2275,7 @@ defmodule Kazi.CLI do
           base: flags[:base],
           lane_contract: lane_contract_path(flags),
           integration: flags[:integration],
+          integration_command: integration_command_path(flags),
           strict_landing: flags[:strict_landing] || false,
           json: flags[:json] || false,
           stream: flags[:stream] || false,
@@ -3960,6 +3975,17 @@ defmodule Kazi.CLI do
   end
 
   defp run_goal_serial_at(%Goal{} = goal, opts, persist?, runtime_opts, base_workspace, workspace) do
+    # TKE.3 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): computed up front so the
+    # `:goal_source` forwarding below can skip itself when this run's DISPATCHED
+    # goal differs from what is on disk (see `disable_mid_loop_integration_for_lane/2`'s
+    # own doc). Forwarding `:goal_source` unconditionally here would make
+    # goal-drift-guard-1415 compare the lane-stripped dispatch goal's t0 bar
+    # against a fresh re-parse of the ORIGINAL file (still carrying the
+    # synthesized `landed` predicate) and report a spurious `goal_drifted: true`
+    # / `goal_drift: {"added": ["landed"]}` — a false positive, not a real
+    # on-disk edit. Every non-lane run is unaffected (`dispatch_goal == goal`).
+    dispatch_goal = disable_mid_loop_integration_for_lane(goal, opts)
+
     # The caller's static run config; CLI-owned keys (workspace/persist?) win, and
     # an explicit :persist? in runtime_opts can still override (tests).
     #
@@ -4010,7 +4036,7 @@ defmodule Kazi.CLI do
       # goal-drift-guard-1415: forward the loaded goal-file path so
       # Kazi.Runtime.run/2 can fingerprint the t0 bar and report if the file
       # on disk drifted from it by the time the run terminates.
-      |> maybe_put(:goal_source, opts[:goal_source])
+      |> maybe_put(:goal_source, if(dispatch_goal == goal, do: opts[:goal_source]))
       |> maybe_put(:allow_duplicate_run, if(opts[:allow_duplicate_run] == true, do: true))
       |> maybe_put(
         :allow_workspace_collision,
@@ -4063,7 +4089,20 @@ defmodule Kazi.CLI do
     # `put_single_node/2` renders it on whichever terminal status this run
     # reaches. Purely additive -- absent (not `false`) when single_node was
     # never requested.
-    attach_run_context_store(Runtime.run(goal, run_opts), run_opts)
+    # TKE.3 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2, decided design "mode (B)
+    # everywhere"): a governed lane (`lane_mode?/1`) NEVER lands via the loop's
+    # own mid-run `:integrate` action (`Kazi.Actions.Integrate`, ADR-0055) --
+    # that action pushes/opens a PR/merges FOR REAL against `origin`, which is
+    # exactly the "kazi calls git/gh itself" path lane mode forbids. It would
+    # also WEDGE convergence: with a real `[integration]` mode, the loop's own
+    # `landed` predicate gates `:converged` on a successful mid-run push/PR,
+    # which a lane workspace (no remote, no credential) can never satisfy. So
+    # `dispatch_goal` (computed above) has its integration mode forced to
+    # `:none` in lane mode -- the loop converges on the goal's OWN declared
+    # predicates alone; landing happens ONCE, after convergence, via
+    # `land_in_place_lane/4` reading `goal`'s REAL (unforced) `[integration]`
+    # block below. Every non-lane run is unaffected (`dispatch_goal == goal`).
+    attach_run_context_store(Runtime.run(dispatch_goal, run_opts), run_opts)
     |> maybe_stash_single_node_result(opts)
     |> case do
       {:ok, %{outcome: :converged} = result} ->
@@ -4082,7 +4121,7 @@ defmodule Kazi.CLI do
             runtime_opts,
             base_workspace,
             workspace,
-            opts[:strict_landing] == true
+            opts
           )
 
         report_outcome(
@@ -4169,11 +4208,19 @@ defmodule Kazi.CLI do
          runtime_opts,
          base_workspace,
          workspace,
-         strict_landing?
+         opts
        ) do
+    strict_landing? = opts[:strict_landing] == true
+
     if Path.expand(base_workspace) == Path.expand(workspace) do
-      # In-place (or non-git) run: the work already lives in the caller's checkout.
-      {result, 0}
+      # In-place run: there is no separate task worktree to land FROM -- the
+      # workspace IS the edit site. TKE.3 (`docs/plans/E-KAZI-ENTRYPOINT.md`
+      # §1.2): a governed lane (single_node + in_place) run still needs a way
+      # to land pr/merge-mode work, via the injectable `--integration-command`
+      # hook -- see `land_in_place_lane/4`. Every other in-place run (not lane
+      # mode, or `[integration]` mode none/commit/branch) is unchanged: the
+      # work already lives in the caller's checkout, nothing to land here.
+      land_in_place_lane(goal, result, opts, workspace)
     else
       land_opts = [vector: Map.get(result, :vector)]
 
@@ -4205,6 +4252,291 @@ defmodule Kazi.CLI do
 
           {Map.put(result, :integration, info), if(strict_landing?, do: 1, else: 0)}
       end
+    end
+  end
+
+  # =============================================================================
+  # in-place lane-mode integration hook (TKE.3, `docs/plans/E-KAZI-ENTRYPOINT.md`
+  # §1.2, decided design "mode (B) everywhere" -- chief-architect ruling
+  # 2026-09-05, folded in full at plan §3.2)
+  # =============================================================================
+  #
+  # An in-place run (--in-place, no separate task worktree) has no landing path
+  # today -- `land_converged_serial/6` above returns `{result, 0}` unconditionally
+  # for it, so a converged governed-lane run with `[integration]` mode pr/merge
+  # silently drops its commits nowhere. This closes that gap for LANE MODE only
+  # (single_node + in_place -- `lane_mode?/1`, the same interim gate TKE.7 uses):
+  # kazi computes a structured "integration action" (base, task branch, PR
+  # title/body, a task-identifying trailer) and hands it to the injectable
+  # `--integration-command`/`KAZI_INTEGRATION_COMMAND` hook on stdin as JSON --
+  # kazi NEVER runs `git push`/`gh pr create`/`git commit` itself here, and never
+  # holds a GitHub credential (the "no GitHub credential in kazi, ever, in lane
+  # mode" constraint). See `docs/integration-hook.md` for the hook's stdin/stdout
+  # JSON schema. This is a WHOLLY DISTINCT, hook-only path from
+  # `Kazi.Scheduler.SerialLanding`'s worktree-landing branch above (which calls
+  # `git`/`gh` directly) -- lane mode never falls back to that.
+  #
+  # Every other in-place run -- not lane mode, or `[integration]` mode
+  # none/commit/branch, or lane mode with nothing ahead of the base -- is
+  # UNCHANGED: `{result, 0}`, no `integration` object, byte-identical to before
+  # this function existed.
+  defp land_in_place_lane(%Goal{integration: %{mode: mode}} = goal, result, opts, workspace)
+       when mode in [:pr, :merge] do
+    if lane_mode?(opts) do
+      base = declared_base_or_fallback(opts, goal, workspace)
+
+      if commits_ahead_of_base(workspace, base) > 0 do
+        invoke_integration_hook(goal, result, opts, workspace, base, mode)
+      else
+        {result, 0}
+      end
+    else
+      {result, 0}
+    end
+  end
+
+  defp land_in_place_lane(_goal, result, _opts, _workspace), do: {result, 0}
+
+  # TKE.3's interim "lane mode" gate -- deliberately the SAME definition
+  # `Kazi.CLI.JobOutcome`'s TKE.7 gate uses (single_node ON for this run AND
+  # --in-place): a governed lane today is single_node + in_place; TKE.1's
+  # `--lane-contract` additionally GATES dispatch on a matching task_sha but a
+  # contract's mere presence isn't required for THIS check (mirroring TKE.7's
+  # own TODO -- once --lane-contract's semantics settle further this may want
+  # to require a parsed contract too).
+  @spec lane_mode?(keyword()) :: boolean()
+  defp lane_mode?(opts), do: opts[:single_node] == true and opts[:in_place] == true
+
+  # See the call site's comment (`run_goal_serial_at/6`): forces the DISPATCHED
+  # goal's integration mode to `:none` in lane mode only, so `code_failing?`/
+  # `decide/2` never route to the loop's own `:integrate` action. Setting the
+  # MODE alone is not enough -- `Kazi.Goal.Loader.append_landed/1` already
+  # baked a synthesized `:landed`-kind predicate into `goal.predicates` at LOAD
+  # time (before this run even started), and that predicate would otherwise
+  # sit in the vector forever failing (nothing in lane mode ever pushes to
+  # satisfy it), blocking `all_satisfied?/1` and re-triggering `:integrate` on
+  # every tick. So this ALSO strips that predicate by kind. `goal`'s real
+  # `[integration]` block (mode + base) is otherwise untouched on the ORIGINAL
+  # `goal` -- this returns a COPY for dispatch only, never mutates the caller's
+  # `goal`, which `land_in_place_lane/4` still reads post-convergence.
+  @spec disable_mid_loop_integration_for_lane(Goal.t(), keyword()) :: Goal.t()
+  defp disable_mid_loop_integration_for_lane(%Goal{integration: %{mode: :none}} = goal, _opts),
+    do: goal
+
+  defp disable_mid_loop_integration_for_lane(
+         %Goal{integration: integration, predicates: predicates} = goal,
+         opts
+       ) do
+    if lane_mode?(opts) do
+      %Goal{
+        goal
+        | integration: %{integration | mode: :none},
+          predicates: Enum.reject(predicates, &(&1.kind == :landed))
+      }
+    else
+      goal
+    end
+  end
+
+  # The run's declared base, when one is known: an explicit `--base` (kept for
+  # completeness though `--base` + `--in-place` are refused as contradictory
+  # elsewhere, T50.8), else the goal-file's own `[integration] base = "..."`,
+  # else `Kazi.ScopeDiff.base_ref/1`'s merge-base guess against the workspace.
+  # NOTE: duplicates the shape of TKE.7's (not-yet-merged) `declared_base/2` --
+  # intentional, since TKE.3 does not depend on TKE.7 landing first; reconcile
+  # the two at merge time rather than couple these branches.
+  @spec declared_base_or_fallback(keyword(), Goal.t(), String.t()) :: String.t()
+  defp declared_base_or_fallback(opts, %Goal{integration: integration}, workspace) do
+    case opts[:base] do
+      base when is_binary(base) -> base
+      _ -> declared_integration_base(integration) || Kazi.ScopeDiff.base_ref(workspace)
+    end
+  end
+
+  defp declared_integration_base(%{base: base}) when is_binary(base) and base != "", do: base
+  defp declared_integration_base(_integration), do: nil
+
+  # Commits on the current checkout ahead of `base` -- degrades to 0 on any git
+  # failure (non-git workspace, unresolvable base) rather than crashing; a
+  # governed lane with zero ahead has nothing to land, matching
+  # `SerialLanding`'s `:nothing_to_land` for the worktree-isolated path.
+  @spec commits_ahead_of_base(String.t(), String.t()) :: non_neg_integer()
+  defp commits_ahead_of_base(workspace, base) do
+    case System.cmd("git", ["-C", workspace, "rev-list", "--count", base <> "..HEAD"],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} ->
+        case Integer.parse(String.trim(out)) do
+          {n, ""} -> n
+          _ -> 0
+        end
+
+      _ ->
+        0
+    end
+  rescue
+    _ -> 0
+  end
+
+  # The current checkout's branch name -- lane mode has no worktree, so the
+  # "task branch" the plan describes IS whatever branch is already checked out.
+  # Falls back to the short HEAD sha for a detached checkout (never crashes).
+  @spec current_branch(String.t()) :: String.t()
+  defp current_branch(workspace) do
+    case System.cmd("git", ["-C", workspace, "rev-parse", "--abbrev-ref", "HEAD"],
+           stderr_to_stdout: true
+         ) do
+      {"HEAD\n", 0} ->
+        case System.cmd("git", ["-C", workspace, "rev-parse", "--short", "HEAD"],
+               stderr_to_stdout: true
+             ) do
+          {out, 0} -> String.trim(out)
+          _ -> "HEAD"
+        end
+
+      {out, 0} ->
+        String.trim(out)
+
+      _ ->
+        "HEAD"
+    end
+  rescue
+    _ -> "HEAD"
+  end
+
+  # Dispatch on whether `--integration-command`/`KAZI_INTEGRATION_COMMAND` is
+  # configured: unset REFUSES (nothing lands silently); set invokes it with the
+  # computed action and folds its result into the `integration` object.
+  defp invoke_integration_hook(goal, result, opts, workspace, base, mode) do
+    task_branch = current_branch(workspace)
+
+    case integration_command_path(opts) do
+      nil ->
+        info = %{
+          landed: false,
+          base: base,
+          task_branch: task_branch,
+          reason: "lane_integration_hook_missing"
+        }
+
+        IO.puts(
+          :stderr,
+          "warning: goal #{goal.id} converged with commits ahead of #{base} and " <>
+            "[integration] mode #{mode}, but no --integration-command/" <>
+            "KAZI_INTEGRATION_COMMAND hook is configured -- lane mode never lands " <>
+            "pr/merge work itself (no GitHub credential in kazi, ever); the task " <>
+            "branch #{task_branch} survives in #{workspace}"
+        )
+
+        {Map.put(result, :integration, info), 1}
+
+      command ->
+        action = integration_action(goal, mode, base, task_branch)
+
+        info =
+          case run_integration_hook(command, action) do
+            {:ok, %{landed: true, refs: refs}} ->
+              %{landed: true, base: base, task_branch: task_branch, refs: refs}
+
+            {:ok, %{landed: false, reason: reason}} ->
+              %{landed: false, base: base, task_branch: task_branch, reason: reason}
+
+            {:error, reason} ->
+              %{landed: false, base: base, task_branch: task_branch, reason: reason}
+          end
+
+        if info.landed != true do
+          IO.puts(
+            :stderr,
+            "warning: goal #{goal.id} converged but --integration-command did not land " <>
+              "its work on #{base}: #{info[:reason] || "integration failed"}; the task " <>
+              "branch #{task_branch} survives in #{workspace}"
+          )
+        end
+
+        {Map.put(result, :integration, info), if(info.landed == true, do: 0, else: 1)}
+    end
+  end
+
+  # The structured "integration action" TKE.3 hands to the hook -- computed
+  # entirely by kazi, never by the hook (the hook does mechanics, not policy).
+  # `trailer` is the ONLY field TKE.4 will later refine (preferring
+  # `Plan-row: <id>` when the lane contract names a sire-style task id); TKE.3
+  # alone always computes the generic `Kazi-Goal: <id>` default.
+  # TODO(TKE.4): read a sire-style task id off the lane contract and prefer
+  # "Plan-row: <id>" here when one is present.
+  defp integration_action(%Goal{id: id}, mode, base, task_branch) do
+    goal_id = to_string(id)
+    trailer = "Kazi-Goal: #{goal_id}"
+
+    %{
+      schema_version: 1,
+      goal_id: goal_id,
+      mode: to_string(mode),
+      base: base,
+      task_branch: task_branch,
+      trailer: trailer,
+      pr_title: "#{goal_id}: converged via kazi",
+      pr_body:
+        "Converged by `kazi apply --single-node --in-place`.\n\n" <>
+          "Goal: #{goal_id}\nBase: #{base}\nTask branch: #{task_branch}\n\n#{trailer}\n"
+    }
+  end
+
+  # Invoke `command` with `action` as JSON on stdin (see
+  # `docs/integration-hook.md` for the full schema). Feeds stdin via a
+  # short-lived temp file redirected through a tiny `/bin/sh -c` wrapper that
+  # takes the real command and the temp path as POSITIONAL ARGS ($1/$2, after
+  # `--`) rather than interpolating them into the script text -- so neither the
+  # (operator-configured) command path nor the temp path is ever shell-parsed,
+  # only executed/redirected.
+  @spec run_integration_hook(String.t(), map()) ::
+          {:ok, %{landed: true, refs: map()} | %{landed: false, reason: String.t()}}
+          | {:error, String.t()}
+  defp run_integration_hook(command, action) do
+    payload = Jason.encode!(action)
+
+    tmp_path =
+      Path.join(
+        System.tmp_dir!(),
+        "kazi-integration-hook-#{:erlang.unique_integer([:positive, :monotonic])}.json"
+      )
+
+    File.write!(tmp_path, payload)
+
+    try do
+      case System.cmd("/bin/sh", ["-c", ~s(exec "$1" < "$2"), "--", command, tmp_path],
+             stderr_to_stdout: true
+           ) do
+        {output, 0} ->
+          decode_integration_hook_output(output)
+
+        {output, exit_code} ->
+          {:error, "integration_hook_failed (exit #{exit_code}): #{String.trim(output)}"}
+      end
+    rescue
+      error -> {:error, "integration_hook_failed: #{Exception.message(error)}"}
+    after
+      File.rm(tmp_path)
+    end
+  end
+
+  defp decode_integration_hook_output(output) do
+    case Jason.decode(String.trim(output)) do
+      {:ok, %{"landed" => true} = json} ->
+        {:ok, %{landed: true, refs: Map.get(json, "refs", %{})}}
+
+      {:ok, %{"landed" => false} = json} ->
+        {:ok,
+         %{landed: false, reason: Map.get(json, "reason", "integration_hook_reported_failure")}}
+
+      {:ok, _other} ->
+        {:error, "integration_hook_invalid_output: no boolean \"landed\" field in stdout"}
+
+      {:error, _} ->
+        {:error,
+         "integration_hook_invalid_output: stdout was not valid JSON " <>
+           "(#{inspect(String.slice(output, 0, 200))})"}
     end
   end
 

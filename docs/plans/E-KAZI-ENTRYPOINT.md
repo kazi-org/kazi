@@ -205,7 +205,7 @@ host_publish` for session-container (dec-0768's `gh none` is unchanged), and
 agent's own ad hoc git usage). TKE.3/TKE.4 below reflect this as a decided
 design, not an open choice.
 
-- [ ] TKE.3 In-place PR-opening via an injectable `--integration-command`
+- [x] TKE.3 In-place PR-opening via an injectable `--integration-command`
   hook -- **kazi never calls `git push`/`gh pr create`/`git commit` itself
   in lane mode, and never holds a GitHub credential** (decided design, 3.2).
   Add an in-place path that, on convergence with commits ahead of the
@@ -229,6 +229,25 @@ design, not an open choice.
   than silently converging with nothing landed.
   Owner: pool  Est: 4h  kind: agent  verifies: [cli, infrastructure]
   deps: [TKE.1]
+  Done: 2026-09-05 (PR #TKE3-PENDING. `--integration-command <path>`/
+  `KAZI_INTEGRATION_COMMAND` (flag wins over env, mirroring TKE.1's
+  `--lane-contract` pattern). In lane mode (`--single-node --in-place`) the
+  loop's own mid-run `:integrate` action (ADR-0055) is disabled -- convergence
+  gates on the goal's OWN declared predicates only, never on a real push/PR
+  the lane workspace could never satisfy; landing happens exactly once, post-
+  convergence, via the hook. Hook invoked once via a temp-file-redirected
+  stdin (`/bin/sh -c 'exec "$1" < "$2"' -- <command> <tmpfile>`, so neither
+  the command path nor the tmp path is ever shell-parsed); its stdout JSON
+  (`{"landed": ..., "refs"|"reason": ...}`) populates the terminal
+  `integration` object verbatim. Missing hook / hook crash / non-JSON stdout
+  all refuse or degrade to `landed: false` with a named reason, never a
+  crash. Hook I/O schema documented at `docs/integration-hook.md`; the
+  `integration` object's in-place case documented in
+  `docs/schemas/run-result.md`. 7 new tests (invocation+stdin shape, success,
+  hook-reported failure, hook-crash failure, missing-hook refusal, nothing-
+  ahead no-op, flag-over-env precedence), all green; no regression on the 12
+  existing `--lane-contract` tests. TKE.4 (trailer refinement toward
+  `Plan-row: <id>`) is a TODO left in `integration_action/4`.)
   acc: [RED today: `kazi apply <goal> --single-node --in-place` against a
   fixture with commits ahead of its base and `[integration]` mode `pr`
   converges, and the terminal `--json` result carries no `integration`

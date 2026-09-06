@@ -422,6 +422,31 @@ unrelated pre-existing failures: nats-bind-conflict flake, a local
 session-id env leak, a real-machine launchd-state test), no attribution.
 Worktree/branch cleaned up, claim released.
 
+**Shipped (2026-09-05): TKE.3** -- in-place PR-opening via an injectable
+`--integration-command <path>`/`KAZI_INTEGRATION_COMMAND` hook (flag wins
+over env, TKE.1's precedent). On convergence of a lane-mode
+(`--single-node --in-place`) run with commits ahead of the declared base and
+`[integration]` mode `pr`/`merge`, kazi computes a structured integration
+action (base, task branch, PR title/body, a `Kazi-Goal: <id>` trailer — TKE.4
+will later prefer `Plan-row: <id>`) and hands it to the hook on stdin as
+JSON; the hook's own stdout JSON populates the terminal `integration` object.
+Found and fixed a real design gap while implementing: the loop's own mid-run
+`:integrate` action (ADR-0055) fires for ANY goal declaring `[integration]`
+mode pr/merge whenever its synthesized `landed` predicate hasn't passed —
+completely independent of `--in-place`/`--single-node` — and would have kept
+a lane run spinning forever trying to satisfy a real push/PR a credential-
+less lane workspace can never complete. Lane mode now dispatches with that
+mid-run action disabled (predicates alone gate convergence; the synthesized
+`landed` predicate is stripped so it can't wedge the vector), with the real
+`[integration]` block preserved for the POST-convergence hook decision. No
+GitHub credential anywhere in this path (kazi still never calls
+`git push`/`gh pr create`/`git commit` in lane mode); missing-hook, hook-
+crash, and non-JSON-stdout cases all degrade to a named `integration.reason`
+rather than a crash or a silent no-op. Hook I/O schema at
+`docs/integration-hook.md`; `docs/schemas/run-result.md`'s `integration`
+section documents the in-place case. 7 new tests, all green; no regression
+on TKE.1's 12 existing tests. PR #TKE3-PENDING.
+
 **Also this cycle: T72.4 dispatched** (interactive `kazi plan render --tree` <!-- verb-drift:allow: forward reference to T72.4, unbuilt at this line's writing -->
 adapter, E72's critical path, unblocked once T72.2+T72.3 both landed) as a
 third concurrent lane -- still in progress. And a real, 100%-reproducible
