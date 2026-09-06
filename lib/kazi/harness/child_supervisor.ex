@@ -69,10 +69,17 @@ defmodule Kazi.Harness.ChildSupervisor do
   # their own), plain `&` where it does not (macOS ships no setsid binary, but
   # its /bin/sh is bash, whose non-interactive `set -m` genuinely groups
   # background jobs).
+  # stdin is /dev/null EXPLICITLY: `set -m` turned job control on, so a
+  # background job inherits this shell's stdin -- the Erlang port's pipe,
+  # which the controller never closes -- instead of the /dev/null a
+  # job-control-less shell would hand it. A harness that reads a non-TTY
+  # stdin to EOF before starting (`opencode run`, which accepts a piped
+  # prompt) then blocks forever at iteration 0 and writes nothing. No
+  # profile feeds its prompt through stdin (prompt_via is :argv or :file).
   if command -v setsid >/dev/null 2>&1; then
-    setsid "$@" &
+    setsid "$@" </dev/null &
   else
-    "$@" &
+    "$@" </dev/null &
   fi
   child_pid=$!
   echo "$child_pid" > "$pid_file" 2>/dev/null
