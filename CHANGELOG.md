@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.291.0](https://github.com/kazi-org/kazi/compare/v1.290.0...v1.291.0) (2026-09-06)
+
+
+### Features
+
+* **cli:** compute Plan-row/Kazi-Goal integration trailer value (TKE.4) ([3ba4eea](https://github.com/kazi-org/kazi/commit/3ba4eea7c67e1422cafce96cee394ff962fed7a7))
+
 ## [1.290.0](https://github.com/kazi-org/kazi/compare/v1.289.0...v1.290.0) (2026-09-06)
 
 
