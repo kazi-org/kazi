@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.295.0](https://github.com/kazi-org/kazi/compare/v1.294.0...v1.295.0) (2026-09-06)
+
+
+### Features
+
+* **cli:** kazi apply --cwd &lt;dir&gt; (T72.7) ([172cc7d](https://github.com/kazi-org/kazi/commit/172cc7dc19c1d1d03a91d744b29df1979128f6c6))
+
 ## [1.294.0](https://github.com/kazi-org/kazi/compare/v1.293.0...v1.294.0) (2026-09-06)
 
 
