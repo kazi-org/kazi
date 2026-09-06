@@ -445,7 +445,7 @@ crash, and non-JSON-stdout cases all degrade to a named `integration.reason`
 rather than a crash or a silent no-op. Hook I/O schema at
 `docs/integration-hook.md`; `docs/schemas/run-result.md`'s `integration`
 section documents the in-place case. 7 new tests, all green; no regression
-on TKE.1's 12 existing tests. PR #TKE3-PENDING.
+on TKE.1's 12 existing tests. PR #1806.
 
 **Also this cycle: T72.4 dispatched** (interactive `kazi plan render --tree` <!-- verb-drift:allow: forward reference to T72.4, unbuilt at this line's writing -->
 adapter, E72's critical path, unblocked once T72.2+T72.3 both landed) as a

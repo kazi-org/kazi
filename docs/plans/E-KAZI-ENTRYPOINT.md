@@ -229,7 +229,7 @@ design, not an open choice.
   than silently converging with nothing landed.
   Owner: pool  Est: 4h  kind: agent  verifies: [cli, infrastructure]
   deps: [TKE.1]
-  Done: 2026-09-05 (PR #TKE3-PENDING. `--integration-command <path>`/
+  Done: 2026-09-05 (PR #1806. `--integration-command <path>`/
   `KAZI_INTEGRATION_COMMAND` (flag wins over env, mirroring TKE.1's
   `--lane-contract` pattern). In lane mode (`--single-node --in-place`) the
   loop's own mid-run `:integrate` action (ADR-0055) is disabled -- convergence
