@@ -535,8 +535,23 @@ worktrees off `origin/main` (`6c5fde74`), `mix compile` verified clean
 before dispatch.
 
 **Shipped: TKE.4** (2026-09-06, PR #1811, `324b1b4d`) -- trailer-value
-computation. Independently reviewed and verified before merge. TKE.5 still
-in progress.
+computation. Independently reviewed and verified before merge.
+
+**Shipped: TKE.5** (2026-09-06, PR #1814, `6b78fc32`) -- resume handle /
+run-lineage (`--resume-pr`/`KAZI_RESUME_PR`, `runs.lineage_id`/`runs.pr_ref`).
+Local-only verification against kazi's own run registry + a git ancestry
+check, mirroring TKE.3's "no GitHub credential in lane mode" constraint.
+Independently reviewed (full diff, 8/8 new tests run locally against the
+merged head, format/attribution checked) before merge.
+
+**Shipped: TKE.8** (2026-09-06) -- part (b) (PR #1801) plus part (a), the
+latter closed incidentally by TKE.3's own PR #1806's `run-result.md`
+in-place worked example. Confirmed against the acc criterion and ticked;
+no new PR needed.
+
+**Dispatched (2026-09-06, tenth dispatch): TKE.6** -- review-comment
+ingestion, the next unblocked task now that TKE.5 has landed (Wave KE-F,
+deps: [TKE.5]). Claimed via claim.sh, fresh worktree off `origin/main`.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,

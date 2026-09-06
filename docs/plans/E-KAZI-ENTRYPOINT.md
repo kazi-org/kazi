@@ -448,7 +448,7 @@ uses.
   or a shallow clone. Chief-architect approved at this head. Direct-agent
   dispatch.)
 
-- [ ] TKE.8 Close two documentation gaps this switch depends on: (a)
+- [x] TKE.8 Close two documentation gaps this switch depends on: (a)
   `docs/schemas/run-result.md`'s `integration` section documents the
   in-place case TKE.3 adds as populated, with a worked example; (b) a new
   `docs/schemas/check-result.md` documents `--check --json`'s existing shape
@@ -463,8 +463,15 @@ uses.
   both a lane-mode `integration` object and a `--check --json` result.]
   Part (b) done: 2026-09-05 (PR #1801, `docs/schemas/check-result.md` added,
   documenting `--check --json`'s existing shape against `check_result_json/3`
-  source. Part (a) -- the `integration` section's in-place worked example --
-  still needs TKE.3, so TKE.8 as a whole stays open.)
+  source.)
+  Done: 2026-09-06 (part (a) closed incidentally by TKE.3's own PR #1806,
+  which added the full "The IN-PLACE lane-mode case (TKE.3)" subsection to
+  `docs/schemas/run-result.md` -- worked examples for `landed: true`,
+  `landed: false` with a hook-reported reason, and the
+  `lane_integration_hook_missing` refusal case. Verified against the acc
+  criterion directly (re-read the doc with no source access): it fully
+  predicts the in-place `integration` object's shape. No new PR needed for
+  this tick -- confirmed and closed as part of the TKE.4/TKE.5 wave cleanup.)
 
 **Kazi-side total: 8 tasks, ~22h estimated** (3 + 3 + 4 + 1.5 + 3 + 3 + 2.5 + 2).
 
