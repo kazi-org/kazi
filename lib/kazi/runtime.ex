@@ -421,6 +421,9 @@ defmodule Kazi.Runtime do
           # Session provenance part 2: consumed by register_run/10 above, not
           # a Loop opt.
           :proposal_ref,
+          # TKE.5: consumed by register_run/10 above (lineage resolution), not
+          # a Loop opt.
+          :resume_pr,
           :providers,
           :adapter_opts,
           :extra_action_context,
@@ -541,7 +544,8 @@ defmodule Kazi.Runtime do
         events_sink_path,
         goal,
         Keyword.get(opts, :session_name),
-        Keyword.get(opts, :proposal_ref)
+        Keyword.get(opts, :proposal_ref),
+        Keyword.get(opts, :resume_pr)
       )
 
       # T51.5 (ADR-0067 point 1): mirror the run START onto the bus, best-effort.
@@ -590,6 +594,7 @@ defmodule Kazi.Runtime do
         result
         |> normalize_await()
         |> put_goal_drift(t0_snapshot, Keyword.get(opts, :goal_source))
+        |> put_run_id(run_id)
       else
         {:error, reason} = error ->
           # Registration now happens before `Loop.start_link/1` (see the
@@ -1436,7 +1441,8 @@ defmodule Kazi.Runtime do
          _events_sink_path,
          _goal,
          _session_name,
-         _proposal_ref
+         _proposal_ref,
+         _resume_pr
        ),
        do: :ok
 
@@ -1450,8 +1456,18 @@ defmodule Kazi.Runtime do
          events_sink_path,
          goal,
          session_name,
-         proposal_ref
+         proposal_ref,
+         resume_pr
        ) do
+    # TKE.5 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): a resolved+validated
+    # `resume_pr` (the CLI already refused an unverifiable one before this run
+    # was ever dispatched, `Kazi.CLI.resume_pr_check/2`) chains this row onto
+    # the PRIOR landing run's lineage; absent resume_pr, this row is the root
+    # of its own lineage (`run_id`). `pr_ref` is set here too (not only at
+    # landing) so a resumed run stays resolvable by a FURTHER `--resume-pr`
+    # of the same PR even before it lands anything itself.
+    lineage_id = RunRegistry.resolve_lineage_id(run_id, resume_pr)
+
     attrs = %{
       run_id: run_id,
       pid: inspect(self()),
@@ -1477,7 +1493,9 @@ defmodule Kazi.Runtime do
       os_pid: to_string(System.pid()),
       # The driving agent session's OS pid (nearest `claude`-like ancestor),
       # so the dashboard can tell live-session runs from dead history.
-      session_os_pid: Kazi.SessionLiveness.find_session_pid()
+      session_os_pid: Kazi.SessionLiveness.find_session_pid(),
+      lineage_id: lineage_id,
+      pr_ref: resume_pr
     }
 
     case RunRegistry.start(attrs) do
@@ -1953,4 +1971,17 @@ defmodule Kazi.Runtime do
   end
 
   defp put_goal_drift(result, _t0_snapshot, _goal_source), do: result
+
+  # TKE.5 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): additive `:run_id` on the
+  # terminal result map, so a caller landing an in-place lane's work AFTER
+  # `run/2` returns (`Kazi.CLI.land_in_place_lane/4`, which runs entirely
+  # outside this function) can record the PR it lands onto THIS run's own
+  # registry row (`RunRegistry.record_pr_ref/2`) without re-deriving or
+  # re-threading the run_id a second time. `Map.put_new/3` never overwrites a
+  # caller-supplied `:run_id` already on the map (none does today).
+  defp put_run_id({:ok, result}, run_id) when is_map(result) do
+    {:ok, Map.put_new(result, :run_id, run_id)}
+  end
+
+  defp put_run_id(result, _run_id), do: result
 end

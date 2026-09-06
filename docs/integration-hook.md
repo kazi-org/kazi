@@ -138,3 +138,31 @@ whose shape this in-place path reuses exactly.
 wins when both are set. Neither has any effect outside lane mode, or when
 `[integration] mode` is `none`/`commit`/`branch`, or when there is nothing
 ahead of the base to land.
+
+## Resume handle / run-lineage (TKE.5)
+
+A successful hook reply's `refs.pr` (or `refs["pr"]`) is recorded onto the
+landing run's own fleet-registry row (`Kazi.ReadModel.RunRegistry.record_pr_ref/2`,
+normalized to a bare number with no leading `#`). That recording is what
+makes the PR **resumable**: a later `kazi apply` naming
+`--resume-pr <that number>` (or a lane contract's own `"resume_pr"` field --
+same CLI-flag-or-env precedence pattern, `--resume-pr`/`KAZI_RESUME_PR`) is
+recorded in the read-model under the SAME `lineage_id` as this run, rather
+than starting an unrelated fresh one.
+
+kazi verifies a named `--resume-pr` **locally only** -- it never calls
+`gh`/the GitHub API (the same "no GitHub credential in kazi, ever, in lane
+mode" constraint this hook exists for): it looks up its own registry for a
+prior run that recorded landing that exact PR number, and separately checks
+(via `git merge-base --is-ancestor`, no network) whether the workspace's
+checked-out HEAD already looks merged into the declared base. A `--resume-pr`
+naming a PR the registry has never seen, or one that already looks merged,
+refuses before any predicate observation or harness dispatch
+(`"reason": "resume_pr_invalid"`, `"kind"` one of `"resume_pr_not_found"` /
+`"resume_pr_already_landed"`). This is advisory, not a live GitHub truth
+check: a PR closed *without* merging is not caught here (that gap is
+intentional -- a real GitHub-side check belongs in this SAME hook mechanism,
+which already holds the credential, not in a direct `gh` call from kazi).
+
+See `--resume-pr`'s full flag help (`kazi apply --help`) for the exact
+refusal shapes.

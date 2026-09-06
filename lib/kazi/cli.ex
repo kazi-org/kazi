@@ -74,6 +74,7 @@ defmodule Kazi.CLI do
   alias Kazi.Plan.Render, as: PlanRender
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.ReadModel.ProposedMemory
+  alias Kazi.ReadModel.Run
   alias Kazi.ReadModel.RunRegistry
   alias Kazi.Reconcile.FirstPassRate
   alias Kazi.Reconcile.GherkinImporter
@@ -165,6 +166,7 @@ defmodule Kazi.CLI do
     in_place: :boolean,
     base: :string,
     lane_contract: :string,
+    resume_pr: :string,
     strict_landing: :boolean,
     integration: :string,
     integration_command: :string,
@@ -314,6 +316,8 @@ defmodule Kazi.CLI do
       "`apply` only (T50.8, ADR-0065 decision 5): the git ref the kazi-owned task worktree is created FROM (e.g. origin/main), instead of the default — the workspace's current HEAD. Passing it states intent: the stale-base warning (emitted when the defaulted HEAD base is behind its locally-known upstream) is silenced. The ref must already resolve in the local ref store — kazi NEVER fetches; an unknown ref is an error naming it, not a network call. Contradicts --in-place (there is no worktree to base): the combination is rejected.",
     lane_contract:
       "`apply` only (TKE.1/TKE.2, ADR-0086/ADR-0087): path to a contract.json-shaped lane contract (an hq/sire dispatcher's per-lane payload — run_id, task, task_sha, goal, predicates, budget, render_sha256, ... — the exact shape is owned by the dispatcher, not kazi). The equivalent env var KAZI_LANE_CONTRACT (mirroring --single-node/KAZI_SINGLE_NODE's CLI-flag-or-env pattern, since ADR-0086's lane adapter passes dispatch inputs by contract file + env, not a CLI rewrite) is the mechanism a lane container sets without a CLI change; the flag wins when both are set. Kazi requires the contract's \"task_sha\" (a non-empty string) and reads an optional \"render_sha256\" (TKE.2, ADR-0086 decision 5(b)); every other field is neither validated nor required. Only ACTED ON in combination with --single-node --in-place (a governed lane has no worktree indirection — the workspace IS the edit site): before any predicate observation or harness dispatch, compares `git -C <workspace> rev-parse HEAD` against the contract's task_sha and refuses on mismatch (`\"reason\": \"lane_contract_violation\"`, `\"kind\": \"wrong_task_sha\"`, naming both shas) or on an unreadable/unparsable/incomplete contract (same reason, `\"kind\": \"invalid_contract\"`). On a task_sha match, for a goal that declares a `[scope]` root: re-renders the node from the current goal-file plus one observe pass (T72.3's `Kazi.Plan.Render.node/3`) and sha256-compares it against the contract's \"render_sha256\" — a mismatch refuses (`\"kind\": \"stale_render\"`, naming both shas), and an otherwise-valid contract that declares NO \"render_sha256\" also refuses (`\"kind\": \"render_sha256_missing\"`) rather than silently skipping the check; a scopeless goal has no node to compare (ADR-0086 decision 3) and skips this check. On a match (or a scopeless goal), proceeds exactly as today. Without --in-place it is accepted but INERT — documented, not silently ignored, since there is no worktree-free edit site yet to compare a HEAD against. A lone --lane-contract with NO --single-node is itself a refusal (`\"reason\": \"lane_contract_requires_single_node\"`), checked before anything else runs (goal load, fleet load) — a lane contract implies a governed lane, and a governed lane is always single_node. Unset (neither the flag nor the env var): behavior is byte-identical to today.",
+    resume_pr:
+      "`apply` only (TKE.5, `docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): names an already-open PR (a number, e.g. `42` or `#42`) this invocation continues against, rather than starting an unrelated fresh run. The equivalent env var KAZI_RESUME_PR (mirroring --lane-contract/KAZI_LANE_CONTRACT's flag-or-env pattern) is the mechanism a lane container sets without a CLI change; the flag wins when both are set, and both win over a lane contract's own \"resume_pr\" field (the contract is the fallback source, not the override). Kazi never holds a GitHub credential and never calls `gh`/the GitHub API to verify a named PR (the same lane-mode constraint TKE.3's --integration-command hook exists for) -- verification is LOCAL only: kazi looks up its own run registry for a prior run that recorded landing this exact PR number (via a completed --integration-command hook invocation, TKE.3), and separately checks (git only) whether the current workspace's checked-out HEAD is already an ancestor of the declared base (a strong local signal the PR already merged). A --resume-pr naming a PR kazi's own registry has no record of, or one whose branch already looks merged into the base, REFUSES before any predicate observation or harness dispatch (`\"reason\": \"resume_pr_invalid\"`, `\"kind\": \"resume_pr_not_found\"` or `\"resume_pr_already_landed\"`) rather than silently starting fresh. On a match, this run's registry row is persisted under the SAME run-lineage id as the run that opened/last landed that PR, so the fleet read-model records it as continuing the same logical task. Unset (neither the flag, the env var, nor a contract field): behavior is byte-identical to today (a fresh lineage per run).",
     integration:
       "`apply` only (T45.11, #1620): override how the converged goal LANDS, one of `none` | `commit` | `branch` | `pr` | `merge` (the `[integration] mode` values). The primary way to land is to declare `[integration]` in the goal-file or proposal (honored end to end since #1620); this flag is the explicit override for landing an APPROVED proposal (or a goal-file) that did not declare one, without re-authoring -- e.g. `kazi apply <proposal-ref> --integration pr --base main`. Combine with `--base` for the target branch; `none` (the default) is converge-and-stop.",
     strict_landing:
@@ -417,6 +421,7 @@ defmodule Kazi.CLI do
         :in_place,
         :base,
         :lane_contract,
+        :resume_pr,
         :integration,
         :integration_command,
         :strict_landing
@@ -2225,6 +2230,16 @@ defmodule Kazi.CLI do
     flags[:integration_command] || System.get_env("KAZI_INTEGRATION_COMMAND")
   end
 
+  # TKE.5 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): `--resume-pr <ref>`'s
+  # CLI-flag-or-env pattern, mirroring `lane_contract_path/1` above -- also
+  # readable from `KAZI_RESUME_PR`. The flag/env win over a lane contract's
+  # own "resume_pr" field (checked separately, `resume_pr_ref/2`) the same
+  # way `--integration` overrides a goal-file's own `[integration]` block.
+  @spec resume_pr_flag(keyword()) :: String.t() | nil
+  defp resume_pr_flag(flags) do
+    flags[:resume_pr] || System.get_env("KAZI_RESUME_PR")
+  end
+
   defp parse_run(goal_file, rest, flags) do
     case rest do
       # T3.3d deploy wiring: carry the optional --env selector alongside workspace.
@@ -2274,6 +2289,7 @@ defmodule Kazi.CLI do
           in_place: flags[:in_place] || false,
           base: flags[:base],
           lane_contract: lane_contract_path(flags),
+          resume_pr: resume_pr_flag(flags),
           integration: flags[:integration],
           integration_command: integration_command_path(flags),
           strict_landing: flags[:strict_landing] || false,
@@ -3231,6 +3247,8 @@ defmodule Kazi.CLI do
     # render-freshness re-render, which needs the SAME `:providers`/
     # `:enforcement` seams `check_goal/3` uses for its own observe pass.
     lane_contract_check = lane_contract_check(goal, opts, runtime_opts)
+    # TKE.5: computed once, up front, alongside lane_contract_check above.
+    resume_pr_check = resume_pr_check(goal, opts)
 
     cond do
       # TKE.1: refuse BEFORE any predicate observation or harness dispatch --
@@ -3241,6 +3259,14 @@ defmodule Kazi.CLI do
       # workspace) let alone a real dispatch.
       match?({:refuse, _message, _extra}, lane_contract_check) ->
         {:refuse, message, extra} = lane_contract_check
+        refuse_lane_contract(message, extra, opts)
+
+      # TKE.5: a --resume-pr/lane-contract "resume_pr" naming a PR kazi's own
+      # run registry has no landing record for, or one that already looks
+      # merged onto the base, refuses before any predicate observation or
+      # harness dispatch -- same seam as the lane-contract check above.
+      match?({:refuse, _message, _extra}, resume_pr_check) ->
+        {:refuse, message, extra} = resume_pr_check
         refuse_lane_contract(message, extra, opts)
 
       # T50.8 (ADR-0065 decision 5): --in-place + --base is CONTRADICTORY —
@@ -3848,6 +3874,149 @@ defmodule Kazi.CLI do
     1
   end
 
+  # =============================================================================
+  # Resume handle / run-lineage (TKE.5, `docs/plans/E-KAZI-ENTRYPOINT.md` §1.2)
+  # =============================================================================
+  #
+  # A lane contract (or `--resume-pr`/`KAZI_RESUME_PR`) may name an already-open
+  # PR/branch this invocation continues against. Design decision (flagged for
+  # review, same as TKE.3's hook-schema decision): kazi never holds a GitHub
+  # credential and never calls `gh`/the GitHub API to verify a named PR (the
+  # same lane-mode constraint TKE.3's --integration-command hook exists for),
+  # so this verifies ONLY against state kazi already owns locally --
+  #
+  #   1. its own run registry, which TKE.3's hook-landing path already records
+  #      a PR number onto (`record_pr_ref/2` below, called from
+  #      `land_in_place_lane/4` on a successful hook landing) -- a resume_pr
+  #      naming a PR that registry has never recorded a landing for refuses
+  #      (`kind: "resume_pr_not_found"`); and
+  #   2. a purely local git check -- if the workspace's checked-out HEAD is
+  #      already an ancestor of the goal's declared base, the branch looks
+  #      already merged, so a resume onto it refuses too
+  #      (`kind: "resume_pr_already_landed"`).
+  #
+  # This is advisory/local, not a live GitHub truth check -- a PR closed
+  # WITHOUT merging (so its branch never lands on base, and kazi's own
+  # registry still shows it un-landed) is NOT caught here; that gap is
+  # intentional, matching the "no GitHub credential in kazi, ever, in lane
+  # mode" constraint (decided design 3.2) rather than reaching for `gh`
+  # directly the way TKE.6 explicitly forbids for review-comment ingestion.
+  # A real GitHub-side check, if wanted, belongs in the SAME hook mechanism
+  # TKE.3 already uses (the dispatcher/hook holds the credential), not here.
+  #
+  # On a match, this run's registry row is persisted under the SAME
+  # `lineage_id` as the run that landed that PR (`lineage_id_for/2`), so two
+  # `kazi apply` invocations against the same PR are recorded in the
+  # read-model as one continuing logical task rather than two disconnected
+  # runs. A fresh run (no resume_pr resolves) gets its own `run_id` as its
+  # `lineage_id` -- the root of its own (so far one-run) lineage.
+
+  @doc false
+  # Exposed for Kazi.Runtime -- computes the SAME resolved resume_pr ref
+  # `resume_pr_check/3` already validated, so run registration threads the
+  # identical value (never re-derives it from raw flags a second time).
+  @spec resume_pr_ref(keyword()) :: String.t() | nil
+  def resume_pr_ref(opts) do
+    case opts[:resume_pr] || contract_resume_pr(opts[:lane_contract]) do
+      nil -> nil
+      ref -> normalize_pr_ref(ref)
+    end
+  end
+
+  defp contract_resume_pr(nil), do: nil
+
+  defp contract_resume_pr(path) when is_binary(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, %{"resume_pr" => ref}} <- Jason.decode(body),
+         true <- is_binary(ref) or is_integer(ref) do
+      ref
+    else
+      _ -> nil
+    end
+  end
+
+  defp normalize_pr_ref(ref) when is_integer(ref), do: Integer.to_string(ref)
+
+  defp normalize_pr_ref(ref) when is_binary(ref) do
+    ref |> String.trim() |> String.trim_leading("#")
+  end
+
+  # Refuses BEFORE any predicate observation or harness dispatch, same seam
+  # as `lane_contract_check/3` -- checked independently of lane mode, since
+  # this validates against kazi's own local state (read-model + git), never
+  # a GitHub credential the lane-mode constraint would forbid.
+  @spec resume_pr_check(Goal.t(), keyword()) :: :ok | {:refuse, String.t(), map()}
+  defp resume_pr_check(%Goal{} = goal, opts) do
+    case resume_pr_ref(opts) do
+      nil ->
+        :ok
+
+      ref ->
+        case RunRegistry.find_by_pr_ref(ref) do
+          nil ->
+            message =
+              "--resume-pr #{ref} names a PR kazi's own run registry has no record of " <>
+                "landing -- refusing before any predicate observation or harness dispatch " <>
+                "(TKE.5). kazi never calls gh/the GitHub API to verify a resume_pr against " <>
+                "live GitHub state (no GitHub credential in kazi, ever, in lane mode); it " <>
+                "trusts only what its own registry already recorded via a prior " <>
+                "--integration-command hook landing. Either this PR was never opened by a " <>
+                "kazi run this registry has seen, or it was opened by another kazi install/" <>
+                "read-model."
+
+            {:refuse, message,
+             %{reason: "resume_pr_invalid", kind: "resume_pr_not_found", resume_pr: ref}}
+
+          %Run{} = run ->
+            workspace = opts[:workspace] || goal.scope.workspace
+            # The SAME base resolution `land_in_place_lane/4` uses (declared
+            # `[integration] base` > `--base` > the `ScopeDiff` merge-base
+            # guess) -- comparing against the wrong base would falsely flag
+            # (or miss) an already-merged branch.
+            base = declared_base(opts, goal) || Kazi.ScopeDiff.base_ref(workspace)
+
+            if already_landed_on_base?(workspace, base) do
+              message =
+                "--resume-pr #{ref} names a PR whose branch (#{workspace}'s checked-out " <>
+                  "HEAD) is already an ancestor of #{base} -- it looks already merged, so " <>
+                  "refusing before any predicate observation or harness dispatch (TKE.5) " <>
+                  "rather than silently starting a fresh run against already-landed work."
+
+              {:refuse, message,
+               %{
+                 reason: "resume_pr_invalid",
+                 kind: "resume_pr_already_landed",
+                 resume_pr: ref,
+                 base: base
+               }}
+            else
+              _ = run
+              :ok
+            end
+        end
+    end
+  end
+
+  # A purely local git signal (no network, no gh): true when `workspace`'s
+  # checked-out HEAD is already reachable from `base` -- i.e. HEAD's work is
+  # already folded into base, the strongest local hint a PR already merged.
+  # Fail-open (false) on any git error -- an unreadable ancestry check is not
+  # itself evidence of a merge, and `resume_pr_check/3`'s registry lookup is
+  # the primary gate here.
+  @spec already_landed_on_base?(String.t(), String.t() | nil) :: boolean()
+  defp already_landed_on_base?(_workspace, nil), do: false
+
+  defp already_landed_on_base?(workspace, base) when is_binary(workspace) and is_binary(base) do
+    case System.cmd("git", ["-C", workspace, "merge-base", "--is-ancestor", "HEAD", base],
+           stderr_to_stdout: true
+         ) do
+      {_, 0} -> true
+      {_, _} -> false
+    end
+  rescue
+    _ -> false
+  end
+
   # T73.5 (ADR-0086/ADR-0087, CAPABILITY 2/4): the total partition count a
   # `--parallel` run of `goal` would dispatch, computed the SAME way
   # `explain_schedule/3` does -- `frontiers/1` (the topological `needs`-DAG
@@ -4033,6 +4202,11 @@ defmodule Kazi.CLI do
       # when one resolves, so the default path is unchanged when none do.
       |> maybe_put(:session_name, resolve_session_name(opts))
       |> maybe_put(:proposal_ref, opts[:proposal_ref])
+      # TKE.5: forward the resolved resume_pr (flag/env/contract, already
+      # validated by resume_pr_check/2 in run_goal/4) so Kazi.Runtime records
+      # this run's registry row under the SAME lineage as the run that landed
+      # that PR. Absent when no resume_pr resolves (byte-identical default).
+      |> maybe_put(:resume_pr, resume_pr_ref(opts))
       # goal-drift-guard-1415: forward the loaded goal-file path so
       # Kazi.Runtime.run/2 can fingerprint the t0 bar and report if the file
       # on disk drifted from it by the time the run terminates.
@@ -4400,6 +4574,13 @@ defmodule Kazi.CLI do
         info =
           case run_integration_hook(command, action) do
             {:ok, %{landed: true, refs: refs}} ->
+              # TKE.5: the ONE place a lane-mode run's registry row learns a
+              # PR number -- record it (via the SAME run_id Runtime.run/2
+              # additively stamped on `result`) so a LATER --resume-pr of
+              # this exact PR resolves (`RunRegistry.find_by_pr_ref/1`).
+              # Best-effort: a read-model write failure never fails landing
+              # (the hook already succeeded; the PR is genuinely landed).
+              record_landed_pr_ref(result, refs)
               %{landed: true, base: base, task_branch: task_branch, refs: refs}
 
             {:ok, %{landed: false, reason: reason}} ->
@@ -4421,6 +4602,21 @@ defmodule Kazi.CLI do
         {Map.put(result, :integration, info), if(info.landed == true, do: 0, else: 1)}
     end
   end
+
+  # TKE.5: pulls a PR number off the hook's `refs` reply (mirroring the
+  # existing `refs[:pr] || refs["pr"]` reads elsewhere in this module,
+  # e.g. `format_run_error`'s PR-parenthetical) and records it onto this
+  # run's registry row when both a run_id and a PR number are present.
+  defp record_landed_pr_ref(%{run_id: run_id}, refs) when is_binary(run_id) do
+    case refs[:pr] || refs["pr"] do
+      nil -> :ok
+      pr -> RunRegistry.record_pr_ref(run_id, pr)
+    end
+
+    :ok
+  end
+
+  defp record_landed_pr_ref(_result, _refs), do: :ok
 
   # The structured "integration action" TKE.3 hands to the hook -- computed
   # entirely by kazi, never by the hook (the hook does mechanics, not policy).
