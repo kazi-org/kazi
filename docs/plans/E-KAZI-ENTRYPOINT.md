@@ -370,7 +370,7 @@ design, not an open choice.
   pre-existing unrelated warnings as main); doc-command-accuracy and
   attribution-guard checks pass locally; no attribution.)
 
-- [ ] TKE.6 Review-comment ingestion as new grind input, read from the
+- [x] TKE.6 Review-comment ingestion as new grind input, read from the
   contract, not fetched by kazi. Consistent with "kazi never holds a GitHub
   credential" (decided design, 3.2): kazi does not call `gh api`/`gh pr
   view` itself -- whoever already holds the credential and composes the
@@ -395,6 +395,27 @@ design, not an open choice.
   section entirely (byte-identical to a fresh dispatch's prompt shape); a
   subprocess spy proves kazi makes zero `gh`/network calls to fetch review
   state itself.]
+  Done: 2026-09-05 (PR #1817, `779f1158`. An optional `"review_comments"` array on the
+  lane contract (TKE.1) -- permissive about shape, same rule
+  `load_lane_contract_task_sha/1` already follows for `task_sha` -- is parsed
+  by `Kazi.CLI.contract_review_comments/1` and folded into
+  `adapter_opts[:review_comments]` by `maybe_put_review_comments/2` (mirrors
+  `maybe_put_context_store/2`'s precedence: an explicit `adapter_opts` value
+  wins over the contract). `Kazi.Loop.review_comments_section/1` renders a
+  new `## Reviewer feedback (unresolved PR review comments)` section into the
+  dispatch prompt, appended after the evidence/context-store slot and before
+  the ADR-0061 attempt ledger -- unlike that layer and ADR-0062 memory
+  recall, this one is NOT gated behind an app-config flag; it is purely
+  DATA-driven (present only when the contract actually carries comments), so
+  it is not counted in the per-iteration `context` token counters (documented
+  as a fourth prompt layer alongside them in `docs/schemas/run-result.md`).
+  `test/kazi/cli_review_comments_test.exs` covers the full CLI-level
+  acceptance scenario (one comment rendered with its `path:line` label), the
+  absent-vs-empty-array byte-identical default, and a PATH-shim subprocess
+  spy proving zero `gh` invocations. `docs/integration-hook.md` documents the
+  contract field and rendering. `mix test` green, `mix format
+  --check-formatted` clean, `mix compile` clean (the same 2 pre-existing
+  unrelated warnings as main); no attribution. Direct-agent dispatch.)
 
 ### 1.3 A stable, machine-readable Job-outcome shape
 

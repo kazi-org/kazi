@@ -166,3 +166,61 @@ which already holds the credential, not in a direct `gh` call from kazi).
 
 See `--resume-pr`'s full flag help (`kazi apply --help`) for the exact
 refusal shapes.
+
+## Review-comment ingestion (TKE.6)
+
+kazi never holds a GitHub credential and never calls `gh api`/`gh pr view`
+itself (the same constraint the resume handle above and the
+`--integration-command` hook exist for). Reviewer feedback on a resumed PR
+still needs to reach the grind loop -- so TKE.6 is kazi's **read-and-render
+half only**: whoever already holds the credential and composes the resume
+dispatch (host-side `lane.sh` for session-container, or `entrypoint.sh` for
+dgx-canary/AWS) fetches the resume PR's unresolved review comments and writes
+them onto an optional `"review_comments"` array on the lane contract (TKE.1)
+before kazi ever runs:
+
+```json
+{
+  "task_sha": "abc123...",
+  "resume_pr": 42,
+  "review_comments": [
+    { "path": "lib/kazi/loop.ex", "line": 42, "body": "This branch never handles the empty-list case -- please add a test." },
+    { "body": "please rebase onto main" }
+  ]
+}
+```
+
+Each entry is permissive about its shape -- kazi renders whatever `"body"`
+(or `"text"`) it finds, prefixed with `"path"`/`"line"` when present, and
+does not otherwise validate the array (composing it correctly is the
+dispatcher's job, not kazi's, per the same "be permissive about the rest of
+the shape" rule `load_lane_contract_task_sha/1` already follows for
+`task_sha`). When the contract carries a non-empty `review_comments`, kazi
+folds it into the next dispatch's prompt as a new, clearly labeled section
+(`Kazi.Loop.review_comments_section/1`):
+
+```
+## Reviewer feedback (unresolved PR review comments)
+
+These comments were left on the open PR for this task by a human or
+automated reviewer, upstream of kazi (kazi never fetches review state
+itself). Address them as part of this iteration's work.
+
+### lib/kazi/loop.ex:42
+```
+This branch never handles the empty-list case -- please add a test.
+```
+
+```
+please rebase onto main
+```
+```
+
+The section sits after the evidence/context-store slot and before the
+episodic attempt-ledger section (parallel to it, ADR-0061/ADR-0062) -- see
+`docs/schemas/run-result.md`'s "reviewer feedback" note. An absent
+`review_comments` field, or a contract with an empty array, renders **no**
+section at all: the prompt is byte-identical to a fresh dispatch's shape.
+Kazi's own subprocess calls make zero `gh`/network calls to fetch review
+state anywhere in this path -- it only ever reads the field the contract
+already carries.
