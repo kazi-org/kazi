@@ -127,3 +127,66 @@ mid-run, not only at landing. `kazi apply --check --node-sha <sha256>` is
 the equivalent one-shot check for a lane's dispatched (non-interactive)
 context: it re-renders from the goal-file and fails if the digest no longer
 matches.
+
+## Scope roots and the AGENTS.md node
+
+A goal's `[scope].write_paths` (falling back to `[scope].paths`) is more than
+a read/write allow-list — it is also where kazi delivers the goal's brief and
+failing predicates to whatever harness is working in that directory
+(ADR-0086). Two entry points render the same node:
+
+  * `kazi plan render --tree` writes `<scope-root>/AGENTS.md` for every
+    scoped goal in a roadmap, so an operator who `cd`s into a goal's
+    directory and opens a harness by hand gets the goal's brief through the
+    harness's own walk-up convention, not repo-wide `CLAUDE.md`/`AGENTS.md`
+    prose.
+  * `kazi apply` re-renders the same node before every dispatch, so a
+    dispatched agent working under `--cwd <scope-root>` (T72.7; defaults to
+    the goal's first declared scope root) reads it too.
+
+**What renders.** `render(goal.toml, scope root, observe result) -> content`
+is a pure function of the goal-file and one observe pass: the goal's brief,
+its predicate definitions, the currently failing predicates, and their
+evidence, under the generated banner ADR-0082 uses. It never reads the host
+read-model registry, so any host with the goal-file and the `kazi` binary
+reproduces it byte-for-byte. A goal with no declared scope root renders
+nothing, and the repo root is never a render target — it holds only repo-wide
+convention files.
+
+**What never commits.** The rendered `AGENTS.md` (and the `CLAUDE.md ->
+AGENTS.md` symlink `--tree` creates when no `CLAUDE.md` exists) is delivered
+as an untracked, ignored file (`.git/info/exclude`, never `.gitignore` —
+that would be a tracked edit) — ADR-0086 decision 3. `kazi apply`
+automatically extends the goal's effective `forbidden_paths` (ADR-0085) with
+every path it renders, so a landed commit touching its own dispatch-context
+node fails the same guard a hand-authored entry would (see "Stopping the
+grind model from touching a path" above). The generator never edits,
+overwrites, or shadows a hand-written file: an existing `AGENTS.md` lacking
+the generated banner makes `--tree` fail, naming the path, and an existing
+hand-written `CLAUDE.md` is left untouched (the failure message names the
+`@AGENTS.md` include line to add by hand) — decision 6.
+
+**Why the node is not an authority.** ADR-0080 seals `goal.toml`, not its
+projection: two sealed authorities with no tiebreak is worse than one.
+Instead, freshness enforces the derived file — at run start and every
+observe pass, an interactive run re-renders and byte-compares against the
+worktree's copy, terminating the run with `:rendered_node_drift` (the same
+fatal class as ADR-0080's `:tampered`) on any mismatch; `kazi apply --check
+--node-sha <sha256>` gives a lane's dispatched context the equivalent
+one-shot check. Decision 6's walk-up claim is settled, not asserted: T72.5's
+`test/kazi/harness/walkup_test.exs` proved, for each of the two harnesses
+this repo drives (claude, codex), that a real filesystem walk-up from the
+scope root reads the rendered node — claude via the `CLAUDE.md -> AGENTS.md`
+symlink, codex directly via `AGENTS.md` (codex never reads `CLAUDE.md`, so it
+needs no symlink). Both harnesses already followed the walk-up correctly;
+neither needed the one-line `CLAUDE.md` w/ `@AGENTS.md`-include fallback
+decision 6 describes for a harness that doesn't follow the symlink.
+
+**The nesting rule.** Across the goals kazi can see together — a fleet, or
+one `--tree` render — scope roots must be disjoint, and each root carries at
+most one goal (decision 2). `kazi plan lint` and `kazi plan render --tree`
+both refuse otherwise, naming both goal ids and the shared root: with the
+walk-up, an agent working in `pkg/foo/bar` reads every ancestor node, so a
+goal rooted at `pkg/foo` and a goal rooted at `pkg/foo/bar` would hand the
+child's agent the parent's brief too. Nesting with explicit inheritance is a
+follow-up ADR, not a v1 behavior.
