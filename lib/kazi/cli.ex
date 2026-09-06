@@ -198,6 +198,7 @@ defmodule Kazi.CLI do
     lower: :string,
     write: :string,
     tree: :boolean,
+    dag: :boolean,
     node_sha: :string,
     reap: :boolean,
     help: :boolean,
@@ -231,6 +232,8 @@ defmodule Kazi.CLI do
       "`approve` only (T39.3, ADR-0049): materialize the approved goal as a loadable goal-file at <path>, so a file-based / version-controlled workflow can `apply <path>` and get the SAME goal `apply <ref>` runs. Under --json the result carries the written `path`. Absent, approve is unchanged.",
     tree:
       "`plan render` only (T72.4, ADR-0086 decision 4): the INTERACTIVE delivery adapter -- instead of the generated markdown plan, project every roadmap goal's declared `[scope]` root(s) (`Kazi.Scope.roots/1`) onto `<root>/AGENTS.md` (T72.3's node render: brief, predicate definitions, currently-failing predicates with evidence), so a harness's own directory walk-up delivers the goal's acceptance contract the moment an operator `cd`s into the scope root. Runs `plan lint`'s nesting-conflict check first and refuses -- writing nothing -- on any conflict; an existing `AGENTS.md` missing the generated banner (a hand-written file) also refuses the WHOLE call, naming the path, before anything is written. Adds each written path to the workspace's local, untracked `.git/info/exclude` (never `.gitignore`), and creates a `CLAUDE.md -> AGENTS.md` symlink only where no `CLAUDE.md` exists at that root -- otherwise prints the `@AGENTS.md` include instruction (structured under --json) and leaves the existing file untouched. Idempotent: re-running with unchanged inputs rewrites the same bytes. Combine with --workspace to target a repo other than the current directory (default `.`).",
+    dag:
+      "`plan render` only (T73.4, ADR-0087): instead of a roadmap-file, `<roadmap-file>` is read as a FLEET source (a `<dir>` of `*.goal.toml` or a manifest `.toml`, loaded via `Kazi.Fleet.load/1`) and rendered as a stable JSON DAG document -- `source_commit` (`--workspace`'s HEAD, default `.`), `goals[]` (id, file, sha256 of the goal-file bytes, write_paths, roots), the effective `shared_paths` set (T73.1), `nodes[]` (id + a planning-time `render_sha256` snapshot of T72.3's node render), `edges[]` (from/to/kind -- `explicit` or `inferred_overlap` -- and the overlapping paths, T73.2), and a `note` field stating the dispatcher re-renders each node at dispatch time -- that later render is authoritative, not this snapshot. `--out` writes the document to a file; without it the JSON prints to stdout. The plain roadmap-file markdown render (no `--dag`) and `--tree` (T72.4) are unchanged.",
     reap:
       "`orphans` only (T54.5, issue #1073): actually KILL each orphaned harness process group (TERM then KILL) instead of only listing it. Read-only without it.",
     debrief:
@@ -545,8 +548,13 @@ defmodule Kazi.CLI do
     %{
       name: "plan",
       summary:
-        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058). `plan render <roadmap>` instead renders a roadmap DAG as a GENERATED markdown plan (T45.5), or -- with `--tree` (T72.4, ADR-0086 decision 4) -- delivers each scoped goal's node as `<root>/AGENTS.md` (+ a `CLAUDE.md` symlink) directly into `--workspace` for a harness's directory walk-up. `plan lint <roadmap>` (T72.2, ADR-0086 decision 2) refuses -- non-zero exit -- when two of the roadmap's goals declare `[scope]` roots (`Kazi.Scope.roots/1`) that nest inside or exactly equal one another, naming both goal ids and the shared root; disjoint roots exit 0.",
-      args: [%{name: "idea|render <roadmap>|lint <roadmap>", required: false}],
+        "Draft a goal of acceptance predicates from a prose idea (or caller-supplied predicates); includes a learned [budget] suggestion when local history has one (ADR-0058). `plan render <roadmap>` instead renders a roadmap DAG as a GENERATED markdown plan (T45.5), or -- with `--tree` (T72.4, ADR-0086 decision 4) -- delivers each scoped goal's node as `<root>/AGENTS.md` (+ a `CLAUDE.md` symlink) directly into `--workspace` for a harness's directory walk-up, or -- with `--dag` (T73.4, ADR-0087) -- reads `<roadmap>` as a `<fleet-dir>|manifest` and renders it as a stable JSON DAG document instead. `plan lint <roadmap>` (T72.2, ADR-0086 decision 2) refuses -- non-zero exit -- when two of the roadmap's goals declare `[scope]` roots (`Kazi.Scope.roots/1`) that nest inside or exactly equal one another, naming both goal ids and the shared root; disjoint roots exit 0.",
+      args: [
+        %{
+          name: "idea|render <roadmap>|render --dag <fleet-dir|manifest>|lint <roadmap>",
+          required: false
+        }
+      ],
       flags: [
         :workspace,
         :yes,
@@ -559,7 +567,8 @@ defmodule Kazi.CLI do
         :session_name,
         :project,
         :out,
-        :tree
+        :tree,
+        :dag
       ]
     },
     %{
@@ -674,6 +683,7 @@ defmodule Kazi.CLI do
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
       kazi plan --json [--predicates <json>] [--replace]   # caller-drafts (predicates supplied)
       kazi plan render <roadmap-file> [--out <path>]       # render the roadmap DAG as a GENERATED markdown plan (T45.5)
+      kazi plan render --dag <fleet-dir|manifest> [--workspace <path>] [--out <path>]  # render a fleet DAG as JSON (T73.4)
       kazi list-proposed [--status <proposed|approved|rejected>] [--json]
       kazi approve <proposal-ref> [--json]
       kazi reject <proposal-ref> [--json]
@@ -1424,12 +1434,22 @@ defmodule Kazi.CLI do
   # (default ".") and `--json` matter only in that mode, `--out` only in the
   # markdown mode; both are threaded through unconditionally (mirroring every
   # other command here) rather than validated per-mode at the parse boundary.
+  #
+  # T73.4 (ADR-0087): `--dag` switches to a THIRD mode -- the positional
+  # argument is read as a fleet source (`Kazi.Fleet.load/1`: a directory or a
+  # manifest .toml), not a roadmap-file, and rendered as a JSON DAG document.
+  # `--workspace` (default ".") seeds `source_commit` and each node's observe
+  # pass; `--out` behaves exactly as it does for the markdown render. `--dag`
+  # and `--tree` are mutually exclusive delivery modes over the SAME
+  # `plan render <src>` surface; `execute_plan_render/2` dispatches on which
+  # (if either) is set, `--dag` checked first.
   defp parse_command(["plan", "render", roadmap | rest], flags) do
     case rest do
       [] ->
         {:plan_render, roadmap,
          out: flags[:out],
          tree: flags[:tree] || false,
+         dag: flags[:dag] || false,
          workspace: flags[:workspace],
          json: flags[:json] || false}
 
@@ -8437,18 +8457,64 @@ defmodule Kazi.CLI do
   # the read-model; when persistence is unavailable every goal renders `unknown`
   # rather than crashing.
   defp execute_plan_render(roadmap_path, opts) do
-    if opts[:tree] == true do
-      execute_plan_render_tree(roadmap_path, opts)
-    else
-      case Kazi.Goal.Roadmap.load(roadmap_path) do
-        {:ok, roadmap} ->
-          markdown = Kazi.Goal.Roadmap.Render.render(roadmap, roadmap_verdicts(roadmap))
-          write_rendered_plan(markdown, opts[:out])
+    cond do
+      opts[:dag] == true -> execute_plan_render_dag(roadmap_path, opts)
+      opts[:tree] == true -> execute_plan_render_tree(roadmap_path, opts)
+      true -> execute_plan_render_markdown(roadmap_path, opts)
+    end
+  end
 
-        {:error, message} ->
-          IO.puts(:stderr, "error: #{message}")
-          1
-      end
+  defp execute_plan_render_markdown(roadmap_path, opts) do
+    case Kazi.Goal.Roadmap.load(roadmap_path) do
+      {:ok, roadmap} ->
+        markdown = Kazi.Goal.Roadmap.Render.render(roadmap, roadmap_verdicts(roadmap))
+        write_rendered_plan(markdown, opts[:out])
+
+      {:error, message} ->
+        IO.puts(:stderr, "error: #{message}")
+        1
+    end
+  end
+
+  # T73.4 (ADR-0087): `plan render --dag <fleet-dir|manifest>` -- loads the
+  # source as a FLEET (`Kazi.Fleet.load/1`, the same loader `apply --fleet`
+  # uses, ADR-0065 decision 3), reads the target `--workspace`'s HEAD as
+  # `source_commit` the same pure way `--lane-contract`'s task_sha check does
+  # (`workspace_head_sha/1`), hands both to `Kazi.Plan.Dag.build/3`, and emits
+  # the resulting JSON document -- to `--out` or stdout, mirroring the
+  # markdown render's own `write_rendered_plan/2` contract exactly.
+  defp execute_plan_render_dag(src, opts) do
+    workspace = opts[:workspace] || "."
+
+    with {:ok, source_commit} <- workspace_head_sha(workspace),
+         {:ok, fleet} <- Kazi.Fleet.load(src),
+         {:ok, document} <- Kazi.Plan.Dag.build(fleet, source_commit, workspace) do
+      write_rendered_dag(document, opts[:out])
+    else
+      {:error, {:observe_failed, goal_id, reason}} ->
+        IO.puts(:stderr, "error: observe failed for goal #{inspect(goal_id)}: #{inspect(reason)}")
+        1
+
+      {:error, message} when is_binary(message) ->
+        IO.puts(:stderr, "error: #{message}")
+        1
+    end
+  end
+
+  defp write_rendered_dag(document, nil) do
+    IO.write(Jason.encode!(document))
+    0
+  end
+
+  defp write_rendered_dag(document, out_path) do
+    case File.write(out_path, Jason.encode!(document)) do
+      :ok ->
+        IO.puts(:stderr, "wrote fleet DAG document to #{out_path}")
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, "error: cannot write #{out_path}: #{:file.format_error(reason)}")
+        1
     end
   end
 
