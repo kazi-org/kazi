@@ -13,6 +13,7 @@ defmodule Kazi.Loop.WorkspacePrepTest do
   @moduletag :tmp_dir
 
   alias Kazi.{Goal, Predicate}
+  alias Kazi.Harness.Registry
 
   # A provider that reports a code predicate failing once (so the loop dispatches
   # the agent), then passing (so the loop converges and stops). One status per
@@ -76,6 +77,13 @@ defmodule Kazi.Loop.WorkspacePrepTest do
     goal =
       Goal.new("loop-prep-test", predicates: [Predicate.new(:code, :tests)])
 
+    # Issue #1833: `.mcp.json` injection is gated on the resolved harness
+    # profile (only Claude can opt back out via `--strict-mcp-config`). This
+    # test is a RecordingHarness double, not a real resolved adapter, so it
+    # carries a real Claude profile explicitly to keep exercising the mcp-
+    # injection wiring this test is actually about.
+    {:ok, claude_profile} = Registry.fetch(:claude)
+
     {:ok, loop} =
       Kazi.Loop.start_link(
         goal: goal,
@@ -84,7 +92,7 @@ defmodule Kazi.Loop.WorkspacePrepTest do
         integrate: NoopIntegrate,
         deploy: NoopDeploy,
         workspace: dir,
-        adapter_opts: [collector: self()],
+        adapter_opts: [collector: self(), profile: claude_profile],
         workspace_opts: [graph_cmd: graph_cmd],
         reobserve_interval_ms: 5,
         flake_max_retries: 0,

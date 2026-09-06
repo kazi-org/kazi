@@ -3209,8 +3209,14 @@ defmodule Kazi.Loop do
   @spec prepare_workspace(Data.t()) :: :ok
   defp prepare_workspace(%Data{workspace: nil}), do: :ok
 
-  defp prepare_workspace(%Data{workspace: workspace, workspace_opts: workspace_opts} = data) do
-    opts = Keyword.put_new(workspace_opts, :orientation, {failing_slice(data), []})
+  defp prepare_workspace(
+         %Data{workspace: workspace, workspace_opts: workspace_opts, adapter_opts: adapter_opts} =
+           data
+       ) do
+    opts =
+      workspace_opts
+      |> Keyword.put_new(:orientation, {failing_slice(data), []})
+      |> Keyword.put_new(:adapter_opts, adapter_opts)
 
     case Kazi.Workspace.prepare(workspace, opts) do
       {:ok, _summary} ->
