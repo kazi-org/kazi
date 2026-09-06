@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.294.0](https://github.com/kazi-org/kazi/compare/v1.293.0...v1.294.0) (2026-09-06)
+
+
+### Features
+
+* **loop,runtime,cli:** rendered-node freshness + forbidden_paths (T72.6) ([2232ee6](https://github.com/kazi-org/kazi/commit/2232ee6720b7b9df2f77e92d422742aa4f62464c))
+
 ## [1.293.0](https://github.com/kazi-org/kazi/compare/v1.292.0...v1.293.0) (2026-09-06)
 
 
