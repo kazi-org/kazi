@@ -549,6 +549,19 @@ latter closed incidentally by TKE.3's own PR #1806's `run-result.md`
 in-place worked example. Confirmed against the acc criterion and ticked;
 no new PR needed.
 
+**Shipped: TKE.6** (2026-09-06, PR #1817, `9acdacef`) -- review-comment
+ingestion, read-and-render only (an optional `review_comments` array on the
+lane contract, rendered into the dispatch prompt; zero `gh`/network calls
+from kazi, matching TKE.3/TKE.5's "no GitHub credential in lane mode"
+constraint). Independently reviewed (full diff, 4/4 new tests run locally
+against the merged head, format/attribution checked) before merge.
+
+**All 8 kazi-side tasks of `docs/plans/E-KAZI-ENTRYPOINT.md` (TKE.1-TKE.8)
+are now shipped.** The remaining work in that plan is hq-side (and one
+sire-side) dependencies named but not owned in this repo (section 2 of the
+plan doc) -- nothing further is dispatchable here until that side's work
+lands.
+
 **Dispatched (2026-09-06, tenth dispatch): TKE.6** -- review-comment
 ingestion, the next unblocked task now that TKE.5 has landed (Wave KE-F,
 deps: [TKE.5]). Claimed via claim.sh, fresh worktree off `origin/main`.
