@@ -83,6 +83,20 @@ defmodule Kazi.ReadModel.Run do
     # can say WHAT is being worked on without reloading the goal.
     field(:goal_name, :string)
     field(:goal_description, :string)
+    # --- TKE.5 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): resume handle /
+    # run-lineage --------------------------------------------------------
+    # The shared id a chain of runs continuing the same logical task (via
+    # `--resume-pr`/a lane contract's `resume_pr` field) is recorded under.
+    # Defaults to this row's own `run_id` at registration (the root of its
+    # own, so-far-one-run lineage) — a resumed run instead copies the PRIOR
+    # landing run's `lineage_id` (`RunRegistry.resolve_lineage_id/2`), so the
+    # read-model can tell "same task, later round" from "unrelated re-run".
+    field(:lineage_id, :string)
+    # The normalized PR number (no leading `#`) this run either landed (via
+    # a successful `--integration-command` hook invocation, TKE.3 +
+    # `RunRegistry.record_pr_ref/2`) or resumed against (the validated
+    # `--resume-pr`). Nil for a run that neither landed nor resumed a PR.
+    field(:pr_ref, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -112,7 +126,9 @@ defmodule Kazi.ReadModel.Run do
     :predicate_count,
     :predicate_kind_histogram,
     :goal_name,
-    :goal_description
+    :goal_description,
+    :lineage_id,
+    :pr_ref
   ]
 
   @doc """

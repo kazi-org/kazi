@@ -319,7 +319,7 @@ design, not an open choice.
   proving zero `git commit`/`git config` calls in lane mode. `docs/integration-hook.md`
   trailer field row rewritten. Direct-agent dispatch.)
 
-- [ ] TKE.5 Resume handle: a lane contract (or `--resume-pr <ref>`) may name
+- [x] TKE.5 Resume handle: a lane contract (or `--resume-pr <ref>`) may name
   an already-open PR/branch to continue against. Persist that reference the
   same way kazi already persists a run to its read-model, so a later
   invocation against the same goal is recorded as continuing the same
@@ -337,6 +337,38 @@ design, not an open choice.
   disconnected new run; a contract naming a `resume_pr` that does not exist
   (or is already merged/closed) refuses clearly rather than silently
   starting fresh.]
+  Done: 2026-09-05 (PR pending. `--resume-pr <ref>`/`KAZI_RESUME_PR` and a
+  lane contract's own `"resume_pr"` field, same CLI-flag-or-env pattern as
+  `--lane-contract`/`KAZI_LANE_CONTRACT` (TKE.1) and `--integration-command`/
+  `KAZI_INTEGRATION_COMMAND` (TKE.3). Design decision (flagged for review,
+  same as TKE.3's hook-schema decision): kazi never calls `gh`/the GitHub API
+  to verify a named resume_pr (no GitHub credential in kazi, ever, in lane
+  mode) -- verification is LOCAL only, against two things kazi already owns:
+  its own run registry (a prior run must have recorded LANDING that exact PR
+  number via a successful `--integration-command` hook invocation,
+  `RunRegistry.record_pr_ref/2`) and a purely local `git merge-base
+  --is-ancestor` check (the workspace's HEAD already folded into the declared
+  base looks like an already-merged branch). `resume_pr_check/2` in
+  `lib/kazi/cli.ex` refuses before any predicate observation or harness
+  dispatch on either signal (`"reason": "resume_pr_invalid"`, `"kind"`
+  `"resume_pr_not_found"` or `"resume_pr_already_landed"`) -- checked at the
+  SAME seam as `lane_contract_check/3`, independent of lane mode (it
+  validates local state, not a credentialed one). On a match, the new run's
+  registry row (`runs.lineage_id`/`runs.pr_ref`, migration
+  `20260719030000`) is persisted under the prior landing run's own
+  `lineage_id` (`RunRegistry.resolve_lineage_id/2`) -- chaining through a
+  THIRD resume of the same PR onto the original root, not just the
+  immediately-prior run. `docs/integration-hook.md` documents the resume
+  contract; `test/kazi/cli_resume_pr_test.exs` covers the full two-invocation
+  acceptance scenario plus both refusal kinds and the unset (byte-identical)
+  default. This is advisory/local, not a live GitHub truth check -- a PR
+  closed WITHOUT merging is not caught here; a real GitHub-side check, if
+  wanted, belongs in the SAME `--integration-command` hook mechanism TKE.3
+  already uses (the dispatcher/hook holds the credential), never a direct
+  `gh` call from kazi (TKE.6's own explicit constraint). `mix test` green,
+  `mix format --check-formatted` clean, `mix compile` clean (the same 2
+  pre-existing unrelated warnings as main); doc-command-accuracy and
+  attribution-guard checks pass locally; no attribution.)
 
 - [ ] TKE.6 Review-comment ingestion as new grind input, read from the
   contract, not fetched by kazi. Consistent with "kazi never holds a GitHub

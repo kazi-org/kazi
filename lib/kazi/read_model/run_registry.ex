@@ -72,6 +72,8 @@ defmodule Kazi.ReadModel.RunRegistry do
            :session_name,
            :proposal_ref,
            :os_pid,
+           :lineage_id,
+           :pr_ref,
            :updated_at
          ]},
       conflict_target: :run_id,
@@ -370,6 +372,90 @@ defmodule Kazi.ReadModel.RunRegistry do
         run
         |> Run.changeset(%{"status" => "terminated", "finished_at" => DateTime.utc_now()})
         |> Writer.update()
+    end
+  end
+
+  # =============================================================================
+  # Resume handle / run-lineage (TKE.5, `docs/plans/E-KAZI-ENTRYPOINT.md` §1.2)
+  # =============================================================================
+
+  @doc """
+  Finds the most-recently-started run this registry has recorded as having
+  landed PR `pr_ref` (a normalized string, e.g. `"42"`, no leading `#`) — i.e.
+  a run whose `pr_ref` column matches. `nil` when no run has ever recorded
+  landing that PR.
+
+  This is the ONLY verification `--resume-pr` gets (`Kazi.CLI.resume_pr_check/2`):
+  kazi never calls `gh`/the GitHub API to confirm a PR exists or is open (no
+  GitHub credential in kazi, ever, in lane mode) — a resume_pr this registry
+  has no record of is treated as unverifiable, not merely unconfirmed.
+  """
+  @spec find_by_pr_ref(String.t()) :: Run.t() | nil
+  def find_by_pr_ref(pr_ref) when is_binary(pr_ref) and pr_ref != "" do
+    Run
+    |> where([r], r.pr_ref == ^pr_ref)
+    |> order_by(desc: :started_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
+  Records the PR number a run's `--integration-command` hook reported landing
+  (`refs["pr"]`/`refs[:pr]` in the hook's `{landed: true, refs: ...}` reply,
+  TKE.3) onto that run's registry row, normalized the same way
+  `Kazi.CLI.resume_pr_ref/1` normalizes a `--resume-pr` value (a bare string,
+  no leading `#`) so `find_by_pr_ref/1` lookups always compare like-for-like.
+  This is what makes a LATER `--resume-pr <that number>` resolvable at all —
+  without it, `find_by_pr_ref/1` can never find this run. Idempotent, like
+  `record_harness_session/2`.
+  """
+  @spec record_pr_ref(String.t(), String.t() | integer()) ::
+          {:ok, Run.t()} | {:error, :not_found | :read_model_unavailable}
+  def record_pr_ref(run_id, pr_ref) when is_binary(run_id) do
+    normalized = pr_ref |> to_string() |> String.trim() |> String.trim_leading("#")
+    Guard.run("pr-ref record", fn -> do_record_pr_ref(run_id, normalized) end)
+  end
+
+  defp do_record_pr_ref(run_id, normalized) do
+    case Repo.get_by(Run, run_id: run_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Run{pr_ref: ^normalized} = run ->
+        {:ok, run}
+
+      run ->
+        run
+        |> Run.changeset(%{"pr_ref" => normalized})
+        |> Writer.update()
+    end
+  end
+
+  @doc """
+  Resolves the `lineage_id` a run named `run_id` should register under, given
+  its resolved (and, by the time this is called, already-validated)
+  `resume_pr_ref` — `nil` when this invocation names no resume_pr, in which
+  case `run_id` is its own lineage root.
+
+  A resolved resume_pr chains onto the PRIOR landing run's own `lineage_id`
+  (falling back to that run's `run_id` for a pre-TKE.5 row with no
+  `lineage_id` recorded) — so a THIRD invocation resuming the same PR again
+  chains onto the same original root, not just the immediately-prior run.
+  """
+  @spec resolve_lineage_id(String.t(), String.t() | nil) :: String.t()
+  def resolve_lineage_id(run_id, nil) when is_binary(run_id), do: run_id
+
+  def resolve_lineage_id(run_id, resume_pr_ref)
+      when is_binary(run_id) and is_binary(resume_pr_ref) do
+    case find_by_pr_ref(resume_pr_ref) do
+      %Run{lineage_id: lineage_id} when is_binary(lineage_id) and lineage_id != "" ->
+        lineage_id
+
+      %Run{run_id: prior_run_id} ->
+        prior_run_id
+
+      nil ->
+        run_id
     end
   end
 end
