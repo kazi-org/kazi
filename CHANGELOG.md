@@ -16,6 +16,18 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.289.0](https://github.com/kazi-org/kazi/compare/v1.288.0...v1.289.0) (2026-09-06)
+
+
+### Features
+
+* **cli:** add Kazi.CLI.JobOutcome, the additive job_outcome field (TKE.7) ([dd1a7c3](https://github.com/kazi-org/kazi/commit/dd1a7c36c555ce7970e95ab8a33639eaf0bdf2b8))
+
+
+### Bug Fixes
+
+* **cli:** count commits ahead of the declared base, not a guessed one ([327ad88](https://github.com/kazi-org/kazi/commit/327ad88b18821e6a4058c1029fce5492e9606a23))
+
 ## [1.288.0](https://github.com/kazi-org/kazi/compare/v1.287.0...v1.288.0) (2026-09-05)
 
 
