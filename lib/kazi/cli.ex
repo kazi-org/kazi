@@ -3680,6 +3680,44 @@ defmodule Kazi.CLI do
     end
   end
 
+  # TKE.4: the integration-action trailer VALUE -- `Plan-row: <id>` when
+  # `opts[:lane_contract]` names a sire-style task id, else the generic
+  # `Kazi-Goal: <goal_id>` default. Never reads anything beyond the contract
+  # file already named by `--lane-contract`/`KAZI_LANE_CONTRACT`; a missing
+  # `--lane-contract`, an unreadable/unparseable file, or a contract with no
+  # non-empty `"task"` field all fall back the same way -- fail-soft here
+  # (unlike `lane_contract_check/3`'s fail-closed refusals), since a trailer
+  # is metadata for the hook to use, not a gate gating dispatch itself.
+  @spec integration_trailer(keyword(), String.t()) :: String.t()
+  defp integration_trailer(opts, goal_id) do
+    with path when is_binary(path) <- opts[:lane_contract],
+         {:ok, task_id} <- load_lane_contract_task_id(path) do
+      "Plan-row: #{task_id}"
+    else
+      _ -> "Kazi-Goal: #{goal_id}"
+    end
+  end
+
+  # Parse the SAME contract.json-shaped file `load_lane_contract_task_sha/1`
+  # reads, pulling out the optional sire-style task id (the contract's
+  # `"task"` field -- `{schema_version, run_id, task, task_sha, goal,
+  # predicates, budget, predicted, history, memory_gate}`, TKE.1). Absent
+  # entirely, or present but not a non-empty string, both return `:absent`:
+  # either way there is no sire-style task id to prefer over the generic
+  # goal-id trailer.
+  @spec load_lane_contract_task_id(String.t()) :: {:ok, String.t()} | :absent
+  defp load_lane_contract_task_id(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, decoded} <- Jason.decode(body) do
+      case decoded do
+        %{"task" => task_id} when is_binary(task_id) and task_id != "" -> {:ok, task_id}
+        _ -> :absent
+      end
+    else
+      _ -> :absent
+    end
+  end
+
   # TKE.2 (ADR-0086 decision 5(b)): render-freshness, chained after
   # `lane_contract_match/3` already returned `:ok` -- so the task_sha gate has
   # already passed and this runs at the SAME point in the flow, still before
@@ -4395,7 +4433,7 @@ defmodule Kazi.CLI do
         {Map.put(result, :integration, info), 1}
 
       command ->
-        action = integration_action(goal, mode, base, task_branch)
+        action = integration_action(goal, mode, base, task_branch, opts)
 
         info =
           case run_integration_hook(command, action) do
@@ -4424,14 +4462,20 @@ defmodule Kazi.CLI do
 
   # The structured "integration action" TKE.3 hands to the hook -- computed
   # entirely by kazi, never by the hook (the hook does mechanics, not policy).
-  # `trailer` is the ONLY field TKE.4 will later refine (preferring
-  # `Plan-row: <id>` when the lane contract names a sire-style task id); TKE.3
-  # alone always computes the generic `Kazi-Goal: <id>` default.
-  # TODO(TKE.4): read a sire-style task id off the lane contract and prefer
-  # "Plan-row: <id>" here when one is present.
-  defp integration_action(%Goal{id: id}, mode, base, task_branch) do
+  # `trailer` (TKE.4) is the VALUE only -- stamping it onto an actual commit
+  # is the hook's git-level mechanics (decided design, 3.2), never kazi's;
+  # kazi itself makes zero `git commit`/`git config` calls in lane mode.
+  # Default: reuse the literal `Plan-row: <id>` key sire's own Intake gate
+  # already checks for, using the lane contract's sire-style task id
+  # (`"task"` in contract.json, per `--lane-contract`'s TKE.1 parsing) when
+  # present -- so a kazi-driven sire lane keeps passing sire's existing
+  # `check-row-trailer.sh`-style gate unmodified. Falls back to the generic
+  # `Kazi-Goal: <id>` when no `--lane-contract` was given, the file can't be
+  # read/parsed, or it carries no non-empty `"task"` field (the hq
+  # session-container case, which has no `Plan-row` convention of its own).
+  defp integration_action(%Goal{id: id}, mode, base, task_branch, opts) do
     goal_id = to_string(id)
-    trailer = "Kazi-Goal: #{goal_id}"
+    trailer = integration_trailer(opts, goal_id)
 
     %{
       schema_version: 1,
