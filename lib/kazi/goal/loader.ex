@@ -70,6 +70,7 @@ defmodule Kazi.Goal.Loader do
   | `forbidden_commands` | array of strings | `Scope.forbidden_commands` — ADR-0085: command name/pattern strings `Kazi.Providers.ForbiddenCommands` best-effort scans the dispatch transcript for, synthesized as a `:scope_forbidden_commands` guard predicate. **Advisory only, never a sandbox** — a `bypassPermissions` dispatch has real shell access this cannot revoke; a violation is detected and surfaced, never prevented. Absent/empty enforces nothing. |
   | `no_integration` | boolean | `Scope.no_integration` — ADR-0085: when `true`, FORCES this goal's `[integration]` block to the existing `mode: :none` default (`Kazi.Goal.default_integration/0`) regardless of what `[integration]` declares, and `Kazi.Actions.Integrate` refuses to run AT ALL for this goal — no commit, no push, no PR, no merge, not even the legacy bulk-commit path a bare `mode: :none` goal otherwise still takes. Reuses the `[integration]` `none`-mode DATA shape as its enforcement primitive. Default `false`. |
   | `shared_paths` | array of strings | `Scope.shared_paths` — ADR-0087 decision 4 (T73.1): hotspot files this goal touches that should NOT count as a blast-radius overlap with other goals/fleet members. Resolves at FLEET level: `Kazi.Fleet.effective_shared_paths/1` unions every member's declaration with an optional fleet-manifest-level `shared_paths` list. Declares the hotspot only — synthesizes no guard predicate and enforces nothing by itself; T73.2 excludes the effective set from the partition survey and the fleet overlap test. Absent/empty keeps today's behavior byte-identical. |
+  | `contract` | string | `Scope.contract` — T73.6: a single, optional path to this goal's human-authored acceptance contract file. Auto-folded into `Scope.forbidden_paths` (the same "auto-extend" pattern T72.6 established for the rendered node), so a goal cannot LAND a change to its own contract. `kazi lint <goal-file>` fails (non-zero exit) when the goal's own `write_paths`/`paths` covers this path (`Kazi.Scope.own_contract_conflict/1`); `kazi plan lint <roadmap>` additionally fails when another member's `write_paths` covers it (`Kazi.Scope.contract_conflicts/1`), naming both goals and the path. `Kazi.Plan.Render.node/3` renders a "Contract" section with the file's raw content when declared. Absent keeps today's behavior byte-identical. |
 
   ### `[harness]` table (optional, → `Goal.harness`, T8.6/ADR-0016)
 
@@ -778,7 +779,10 @@ defmodule Kazi.Goal.Loader do
          {:ok, no_integration} <- fetch_no_integration(scope),
          # ADR-0087 decision 4 (T73.1): optional `shared_paths` — see the
          # `[scope]` table doc above.
-         {:ok, shared_paths} <- optional_string_list(scope, "shared_paths", "scope") do
+         {:ok, shared_paths} <- optional_string_list(scope, "shared_paths", "scope"),
+         # T73.6: optional single-path `contract` — see the `[scope]` table
+         # doc above.
+         {:ok, contract} <- optional_string(scope, "contract", "scope") do
       {:ok,
        Scope.new(
          workspace: workspace,
@@ -789,7 +793,8 @@ defmodule Kazi.Goal.Loader do
          forbidden_paths: forbidden_paths,
          forbidden_commands: forbidden_commands,
          no_integration: no_integration,
-         shared_paths: shared_paths
+         shared_paths: shared_paths,
+         contract: contract
        )}
     end
   end
