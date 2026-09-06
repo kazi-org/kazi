@@ -71,6 +71,7 @@ defmodule Kazi.CLI do
   alias Kazi.Harness.ChildSupervisor
   alias Kazi.Memory.SemanticIndex
   alias Kazi.Partition
+  alias Kazi.Plan.Render, as: PlanRender
   alias Kazi.ReadModel.ProposedGoal
   alias Kazi.ReadModel.ProposedMemory
   alias Kazi.ReadModel.RunRegistry
@@ -308,7 +309,7 @@ defmodule Kazi.CLI do
     base:
       "`apply` only (T50.8, ADR-0065 decision 5): the git ref the kazi-owned task worktree is created FROM (e.g. origin/main), instead of the default — the workspace's current HEAD. Passing it states intent: the stale-base warning (emitted when the defaulted HEAD base is behind its locally-known upstream) is silenced. The ref must already resolve in the local ref store — kazi NEVER fetches; an unknown ref is an error naming it, not a network call. Contradicts --in-place (there is no worktree to base): the combination is rejected.",
     lane_contract:
-      "`apply` only (TKE.1, ADR-0086/ADR-0087): path to a contract.json-shaped lane contract (an hq/sire dispatcher's per-lane payload — run_id, task, task_sha, goal, predicates, budget, ... — the exact shape is owned by the dispatcher, not kazi). The equivalent env var KAZI_LANE_CONTRACT (mirroring --single-node/KAZI_SINGLE_NODE's CLI-flag-or-env pattern, since ADR-0086's lane adapter passes dispatch inputs by contract file + env, not a CLI rewrite) is the mechanism a lane container sets without a CLI change; the flag wins when both are set. Kazi reads ONLY the contract's \"task_sha\" (required to exist and be a string) — every other field is neither validated nor required. Only ACTED ON in combination with --single-node --in-place (a governed lane has no worktree indirection — the workspace IS the edit site): before any predicate observation or harness dispatch, compares `git -C <workspace> rev-parse HEAD` against the contract's task_sha and refuses on mismatch (`\"reason\": \"lane_contract_violation\"`, `\"kind\": \"wrong_task_sha\"`, naming both shas) or on an unreadable/unparsable/incomplete contract (same reason, `\"kind\": \"invalid_contract\"`); on a match, proceeds exactly as today. Without --in-place it is accepted but INERT — documented, not silently ignored, since there is no worktree-free edit site yet to compare a HEAD against. A lone --lane-contract with NO --single-node is itself a refusal (`\"reason\": \"lane_contract_requires_single_node\"`), checked before anything else runs (goal load, fleet load) — a lane contract implies a governed lane, and a governed lane is always single_node. Unset (neither the flag nor the env var): behavior is byte-identical to today.",
+      "`apply` only (TKE.1/TKE.2, ADR-0086/ADR-0087): path to a contract.json-shaped lane contract (an hq/sire dispatcher's per-lane payload — run_id, task, task_sha, goal, predicates, budget, render_sha256, ... — the exact shape is owned by the dispatcher, not kazi). The equivalent env var KAZI_LANE_CONTRACT (mirroring --single-node/KAZI_SINGLE_NODE's CLI-flag-or-env pattern, since ADR-0086's lane adapter passes dispatch inputs by contract file + env, not a CLI rewrite) is the mechanism a lane container sets without a CLI change; the flag wins when both are set. Kazi requires the contract's \"task_sha\" (a non-empty string) and reads an optional \"render_sha256\" (TKE.2, ADR-0086 decision 5(b)); every other field is neither validated nor required. Only ACTED ON in combination with --single-node --in-place (a governed lane has no worktree indirection — the workspace IS the edit site): before any predicate observation or harness dispatch, compares `git -C <workspace> rev-parse HEAD` against the contract's task_sha and refuses on mismatch (`\"reason\": \"lane_contract_violation\"`, `\"kind\": \"wrong_task_sha\"`, naming both shas) or on an unreadable/unparsable/incomplete contract (same reason, `\"kind\": \"invalid_contract\"`). On a task_sha match, for a goal that declares a `[scope]` root: re-renders the node from the current goal-file plus one observe pass (T72.3's `Kazi.Plan.Render.node/3`) and sha256-compares it against the contract's \"render_sha256\" — a mismatch refuses (`\"kind\": \"stale_render\"`, naming both shas), and an otherwise-valid contract that declares NO \"render_sha256\" also refuses (`\"kind\": \"render_sha256_missing\"`) rather than silently skipping the check; a scopeless goal has no node to compare (ADR-0086 decision 3) and skips this check. On a match (or a scopeless goal), proceeds exactly as today. Without --in-place it is accepted but INERT — documented, not silently ignored, since there is no worktree-free edit site yet to compare a HEAD against. A lone --lane-contract with NO --single-node is itself a refusal (`\"reason\": \"lane_contract_requires_single_node\"`), checked before anything else runs (goal load, fleet load) — a lane contract implies a governed lane, and a governed lane is always single_node. Unset (neither the flag nor the env var): behavior is byte-identical to today.",
     integration:
       "`apply` only (T45.11, #1620): override how the converged goal LANDS, one of `none` | `commit` | `branch` | `pr` | `merge` (the `[integration] mode` values). The primary way to land is to declare `[integration]` in the goal-file or proposal (honored end to end since #1620); this flag is the explicit override for landing an APPROVED proposal (or a goal-file) that did not declare one, without re-authoring -- e.g. `kazi apply <proposal-ref> --integration pr --base main`. Combine with `--base` for the target branch; `none` (the default) is converge-and-stop.",
     strict_landing:
@@ -3192,10 +3193,12 @@ defmodule Kazi.CLI do
     # below never re-reads the contract file or re-shells to git. By the time
     # this function runs, a lone --lane-contract with no --single-node has
     # ALREADY been refused in execute_run/3 -- so :lane_contract present here
-    # means single_node is true; `lane_contract_check/2` still checks it
+    # means single_node is true; `lane_contract_check/3` still checks it
     # defensively, matching the style of the (already-gated) single_node
-    # partition check below.
-    lane_contract_check = lane_contract_check(goal, opts)
+    # partition check below. `runtime_opts` is threaded through for TKE.2's
+    # render-freshness re-render, which needs the SAME `:providers`/
+    # `:enforcement` seams `check_goal/3` uses for its own observe pass.
+    lane_contract_check = lane_contract_check(goal, opts, runtime_opts)
 
     cond do
       # TKE.1: refuse BEFORE any predicate observation or harness dispatch --
@@ -3536,7 +3539,8 @@ defmodule Kazi.CLI do
     1
   end
 
-  # TKE.1 (ADR-0086/ADR-0087): the lane-contract task_sha match check.
+  # TKE.1 (ADR-0086/ADR-0087): the lane-contract task_sha match check, PLUS
+  # TKE.2's render-freshness check chained after it (ADR-0086 decision 5(b)).
   # ONLY ACTED ON in --single-node --in-place combination -- a governed lane
   # has no worktree indirection (the workspace IS the edit site), so a HEAD
   # comparison against it is meaningful; elsewhere (no --in-place) the flag is
@@ -3545,19 +3549,28 @@ defmodule Kazi.CLI do
   # function at all -- it is refused earlier, in execute_run/3, before a Goal
   # is even loaded.)
   #
+  # `runtime_opts` (TKE.2) is threaded through ONLY to seed the render's own
+  # observe pass with the SAME `:providers`/`:enforcement` seams `check_goal/3`
+  # uses -- it plays no part in the task_sha match itself.
+  #
   # Returns `:ok` (proceed exactly as today, including the flag absent and the
   # inert cases) or `{:refuse, message, extra}` for the caller's `cond` to
   # branch on without re-doing the file read/git call.
-  @spec lane_contract_check(Goal.t(), keyword()) :: :ok | {:refuse, String.t(), map()}
-  defp lane_contract_check(%Goal{} = goal, opts) do
+  @spec lane_contract_check(Goal.t(), keyword(), keyword()) :: :ok | {:refuse, String.t(), map()}
+  defp lane_contract_check(%Goal{} = goal, opts, runtime_opts) do
     path = opts[:lane_contract]
 
     if is_binary(path) and opts[:single_node] == true and opts[:in_place] == true do
       workspace = opts[:workspace] || goal.scope.workspace
 
       case load_lane_contract_task_sha(path) do
-        {:ok, task_sha} -> lane_contract_match(path, task_sha, workspace)
-        {:error, reason} -> lane_contract_invalid(path, reason)
+        {:ok, task_sha} ->
+          with :ok <- lane_contract_match(path, task_sha, workspace) do
+            render_freshness_check(path, goal, opts, runtime_opts)
+          end
+
+        {:error, reason} ->
+          lane_contract_invalid(path, reason)
       end
     else
       :ok
@@ -3632,6 +3645,148 @@ defmodule Kazi.CLI do
 
       {:error, posix} when is_atom(posix) ->
         {:error, "could not be read (#{:file.format_error(posix)})"}
+    end
+  end
+
+  # TKE.2 (ADR-0086 decision 5(b)): render-freshness, chained after
+  # `lane_contract_match/3` already returned `:ok` -- so the task_sha gate has
+  # already passed and this runs at the SAME point in the flow, still before
+  # any predicate observation for the real run or any harness dispatch.
+  #
+  # A goal with no declared `[scope]` root renders NOTHING (ADR-0086 decision
+  # 3: "Goals with no scope render nothing; the repo root is never a render
+  # target") -- there is no node for a `render_sha256` to describe, so this
+  # check does not apply, mirroring `Kazi.Scope.nesting_conflicts/1`'s own
+  # unscoped-goal exemption. A real governed lane's goal always declares the
+  # scope it is dispatched for (the lane's editable directory IS the scope),
+  # so this is a defensive no-op for a well-formed lane, never a bypass a
+  # real lane contract could lean on.
+  #
+  # When a scope root IS declared, `render_sha256`'s ABSENCE from an
+  # otherwise-valid contract (task_sha present and matching) is itself a
+  # refusal -- fail-closed, not silently treated as "no render check needed" --
+  # per the plan: "so D2 landing late is loud, not invisible."
+  @spec render_freshness_check(String.t(), Goal.t(), keyword(), keyword()) ::
+          :ok | {:refuse, String.t(), map()}
+  defp render_freshness_check(path, %Goal{} = goal, opts, runtime_opts) do
+    case Scope.roots(goal.scope) do
+      [] ->
+        :ok
+
+      [root | _] ->
+        case load_lane_contract_render_sha256(path) do
+          :absent ->
+            refuse_render_sha256_missing(path)
+
+          {:ok, expected_sha} ->
+            workspace = opts[:workspace] || goal.scope.workspace
+            check_render_sha256(path, goal, root, workspace, runtime_opts, expected_sha)
+        end
+    end
+  end
+
+  defp check_render_sha256(path, goal, root, workspace, runtime_opts, expected_sha) do
+    case rendered_node_sha256(goal, root, workspace, runtime_opts) do
+      {:ok, ^expected_sha} ->
+        :ok
+
+      {:ok, actual_sha} ->
+        refuse_stale_render(path, expected_sha, actual_sha)
+
+      {:error, reason} ->
+        refuse_render_unavailable(path, reason)
+    end
+  end
+
+  # Re-renders the node the SAME way `kazi apply --check` would (T72.3's pure
+  # `Kazi.Plan.Render.node/3`, fed by `Kazi.Runtime.check/2`'s "one observe
+  # pass" -- the exact machinery `check_goal/3` already uses), then sha256s
+  # the result. `root` is the goal's FIRST declared scope root (ADR-0086
+  # decision 7 precedent: "`kazi apply --cwd <scope-root>` ... defaults to the
+  # goal's first scope root when one is declared") -- a governed lane's goal
+  # declares exactly one root in practice (the lane's own directory), so this
+  # never has to arbitrate among several.
+  @spec rendered_node_sha256(Goal.t(), String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp rendered_node_sha256(%Goal{} = goal, root, workspace, runtime_opts) do
+    check_opts = Keyword.take(runtime_opts, [:providers, :enforcement]) ++ [workspace: workspace]
+
+    case Runtime.check(goal, check_opts) do
+      {:ok, %{vector: vector}} ->
+        content = PlanRender.node(goal, root, vector)
+        {:ok, :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp refuse_render_sha256_missing(path) do
+    message =
+      "--lane-contract #{path} names a matching task_sha but declares no " <>
+        "\"render_sha256\" -- refusing before any predicate observation or harness " <>
+        "dispatch (ADR-0086 decision 5(b)). A lane contract with no render_sha256 " <>
+        "can never be confirmed fresh, so the gap is a loud refusal, not a silently " <>
+        "skipped check: have the dispatcher record the rendered node's sha256 " <>
+        "beside task_sha when composing the contract."
+
+    {:refuse, message, %{reason: "lane_contract_violation", kind: "render_sha256_missing"}}
+  end
+
+  defp refuse_stale_render(path, expected_sha, actual_sha) do
+    message =
+      "--lane-contract #{path} names render_sha256 #{expected_sha}, but the node " <>
+        "freshly re-rendered from the current goal-file plus one observe pass hashes " <>
+        "to #{actual_sha} -- refusing before any harness dispatch (ADR-0086 decision " <>
+        "5(b)). The goal-file (or its observed state) has moved since the contract " <>
+        "was composed; re-dispatch at the pinned sha, or re-compose the contract " <>
+        "against the workspace's current state."
+
+    {:refuse, message,
+     %{
+       reason: "lane_contract_violation",
+       kind: "stale_render",
+       render_sha256: expected_sha,
+       actual_render_sha256: actual_sha
+     }}
+  end
+
+  # Fail-closed counterpart to a hash mismatch: the observe pass needed to
+  # produce a comparable render could not even complete (e.g. an unresolvable
+  # predicate provider, or a failed `[setup]` step, `Kazi.Runtime.check/2`'s
+  # own error cases). Freshness can never be confirmed against a render that
+  # was never produced, so this refuses the same as a genuine mismatch would.
+  defp refuse_render_unavailable(path, reason) do
+    message =
+      "--lane-contract #{path} declares render_sha256, but re-rendering the node to " <>
+        "confirm it could not complete (#{inspect(reason)}) -- refusing before any " <>
+        "harness dispatch; fail-closed, since freshness can never be confirmed " <>
+        "against a render that could not be produced."
+
+    {:refuse, message, %{reason: "lane_contract_violation", kind: "render_unavailable"}}
+  end
+
+  # Parse the SAME contract.json-shaped file `load_lane_contract_task_sha/1`
+  # reads, pulling out the optional `render_sha256` field (TKE.2, ADR-0086
+  # decision 5(b)) -- a string the dispatcher records beside `task_sha`. Absent
+  # entirely, or present but not a non-empty string, both return `:absent`:
+  # either way there is nothing usable to compare a fresh render against, and
+  # the caller's refusal wording is the same fail-closed "cannot confirm
+  # freshness" either way. A file-level read/parse error can't actually occur
+  # here in practice -- `lane_contract_check/3` only reaches this after
+  # `load_lane_contract_task_sha/1` already parsed the same file successfully
+  # -- but is still handled fail-closed (as :absent) rather than assumed away,
+  # matching this module's file-I/O style elsewhere.
+  @spec load_lane_contract_render_sha256(String.t()) :: {:ok, String.t()} | :absent
+  defp load_lane_contract_render_sha256(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, decoded} <- Jason.decode(body) do
+      case decoded do
+        %{"render_sha256" => sha} when is_binary(sha) and sha != "" -> {:ok, sha}
+        _ -> :absent
+      end
+    else
+      _ -> :absent
     end
   end
 
