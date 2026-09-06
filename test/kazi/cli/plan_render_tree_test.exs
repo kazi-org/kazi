@@ -7,7 +7,12 @@ defmodule Kazi.CLI.PlanRenderTreeTest do
   than `Kazi.Plan.Tree` directly (see `Kazi.Plan.TreeTest` for the module's
   own unit coverage).
   """
-  use ExUnit.Case, async: true
+  # async: false -- the "--workspace defaults to the current directory" test
+  # below calls File.cd!/1, which mutates the OS-level cwd for the ENTIRE
+  # BEAM VM, not just this test's process. Under async: true that transiently
+  # broke unrelated concurrently-scheduled tests (and the compiler's own
+  # lazy require_file calls) with a random {:error, :enoent}.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 
