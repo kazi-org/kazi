@@ -821,7 +821,56 @@ An unreadable file, invalid JSON, or a contract missing a string `task_sha`
 fails CLOSED the same way (`"kind": "invalid_contract"`, no `task_sha`/
 `actual_sha` fields — the workspace's HEAD is never even read): a lane contract
 kazi cannot parse can never be trusted to gate a governed lane. A `task_sha`
-match proceeds exactly as today, byte-identical to `--lane-contract` absent.
+match proceeds — chained immediately into the render-freshness check below —
+byte-identical to `--lane-contract` absent only once that check also passes
+(or does not apply).
+
+#### Render-freshness (TKE.2, ADR-0086 decision 5(b))
+
+Chained after a `task_sha` match, still before any predicate observation or
+harness dispatch: for a goal that declares a `[scope]` root (`Kazi.Scope.roots/1`
+non-empty), kazi re-renders that root's node from the CURRENT goal-file plus one
+fresh observe pass (`Kazi.Plan.Render.node/3`, T72.3's pure renderer — the same
+render `kazi apply --check` would produce), sha256s it, and compares against the
+contract's `render_sha256`. A goal with no declared scope root has no node to
+compare (ADR-0086 decision 3: "the repo root is never a render target") and
+skips this check entirely.
+
+A mismatch refuses the same smaller envelope, additive `kind`:
+
+```json
+{
+  "schema_version": 2,
+  "error": "--lane-contract ... names render_sha256 ..., but the node freshly re-rendered ... hashes to ... -- refusing before any harness dispatch ...",
+  "reason": "lane_contract_violation",
+  "kind": "stale_render",
+  "render_sha256": "<the contract's render_sha256>",
+  "actual_render_sha256": "<the freshly re-rendered node's sha256>"
+}
+```
+
+`render_sha256` **absent** from an otherwise-valid contract (task_sha present
+and matching) is its OWN distinct refusal — fail-closed, not silently treated
+as "no render check needed", since the hq-side dependency that emits this
+field (D2) may land late and this gap must be loud, not invisible:
+
+```json
+{
+  "schema_version": 2,
+  "error": "--lane-contract ... names a matching task_sha but declares no \"render_sha256\" ...",
+  "reason": "lane_contract_violation",
+  "kind": "render_sha256_missing"
+}
+```
+
+If the re-render's own observe pass cannot even complete (an unresolvable
+predicate provider, a failed `[setup]` step — the same error cases
+`Kazi.Runtime.check/2` returns), kazi refuses fail-closed rather than treat an
+unconfirmable freshness as a pass: `"kind": "render_unavailable"`. Freshness can
+never be confirmed against a render that was never produced.
+
+A match (or a scopeless goal) proceeds exactly as today, byte-identical to
+`--lane-contract` absent.
 
 ## Streaming progress (JSONL) — `apply --json --stream` (T15.4, ADR-0023 decision 3)
 
