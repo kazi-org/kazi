@@ -66,6 +66,9 @@ defmodule Kazi.Scheduler.Integration do
   require Logger
 
   @default_max_attempts 3
+  @default_lease_ttl_ms 60_000
+  @default_lease_acquire_timeout_ms 30_000
+  @default_lease_retry_interval_ms 10
 
   @typedoc """
   The request handed to the integrator seam to merge one partition into the shared
@@ -151,6 +154,30 @@ defmodule Kazi.Scheduler.Integration do
     * `:order_fun` — projects a partition onto a sortable term for the safe order
       (default by the partition's lease `:key`, then a stable index).
     * `:integrator_opts` — opts forwarded to every integrator call.
+    * `:lease_backend` — a `Kazi.Coordination.Lease` backend module (e.g.
+      `Kazi.Coordination.Lease.Memory`). When supplied, EACH partition acquires a
+      lease per `lease_key` it carries (`entry.partition.lease_keys`, T73.2 — the
+      shared paths excluded from its blast radius) in SORTED order, held for the
+      duration of that partition's rebase-merge (all attempts, including
+      re-dispatch retries) and released on every exit, including a crash. This is
+      a SECOND, narrower lease scope than the partition-scoped `PartitionLease`
+      (`Kazi.Scheduler.LeasedReconciler`, held for the whole grind): two
+      partitions sharing a `lease_key` observe/dispatch (grind) CONCURRENTLY but
+      serialize only around this integration step. Default `nil` — no leasing,
+      today's behavior (grind and integrate both partition-scoped only).
+    * `:lease_opts` — opts forwarded to every `:lease_backend` call (the in-memory
+      backend needs its `:store` handle here; a virtual clock's `:now_ms`/
+      `:now_fn` may ride here too).
+    * `:lease_ttl_ms` — lease TTL in ms (default `#{@default_lease_ttl_ms}`); a
+      crash inside integration still frees the key within this TTL even when the
+      `after` release cannot run (e.g. the BEAM node itself dies).
+    * `:lease_acquire_timeout_ms` — how long to block waiting for a contended
+      integration lease before giving up (default
+      `#{@default_lease_acquire_timeout_ms}`). Exhausting it fails this
+      partition's integration with `{:lease_timeout, keys}` (not retried as a
+      merge conflict).
+    * `:lease_retry_interval_ms` — poll interval while an integration lease is
+      contended (default `#{@default_lease_retry_interval_ms}`).
 
   Returns `{:ok, t:result/0}`. The collective is `:converged` ONLY when every
   partition merged within its budget; any residual conflict ⇒ `:stuck`.
@@ -171,6 +198,15 @@ defmodule Kazi.Scheduler.Integration do
     max_attempts = Keyword.get(opts, :max_attempts, @default_max_attempts)
     order_fun = Keyword.get(opts, :order_fun, &default_order_key/1)
     integrator_opts = Keyword.get(opts, :integrator_opts, [])
+    lease_backend = Keyword.get(opts, :lease_backend)
+    lease_opts = Keyword.get(opts, :lease_opts, [])
+    lease_ttl_ms = Keyword.get(opts, :lease_ttl_ms, @default_lease_ttl_ms)
+
+    lease_acquire_timeout_ms =
+      Keyword.get(opts, :lease_acquire_timeout_ms, @default_lease_acquire_timeout_ms)
+
+    lease_retry_interval_ms =
+      Keyword.get(opts, :lease_retry_interval_ms, @default_lease_retry_interval_ms)
 
     normalized = Enum.map(entries, &normalize_entry/1)
 
@@ -186,7 +222,12 @@ defmodule Kazi.Scheduler.Integration do
       redispatcher: redispatcher,
       base: base,
       max_attempts: max_attempts,
-      integrator_opts: integrator_opts
+      integrator_opts: integrator_opts,
+      lease_backend: lease_backend,
+      lease_opts: lease_opts,
+      lease_ttl_ms: lease_ttl_ms,
+      lease_acquire_timeout_ms: lease_acquire_timeout_ms,
+      lease_retry_interval_ms: lease_retry_interval_ms
     }
 
     initial = %{integrated: [], conflicts: [], redispatched: [], merged_keys: []}
@@ -204,8 +245,18 @@ defmodule Kazi.Scheduler.Integration do
 
   # Integrate ONE partition into the (advancing) base, with conflict re-dispatch up
   # to the attempt budget. Accumulates into the running result.
+  #
+  # T73.3: when the caller configured a `:lease_backend`, the partition's
+  # `lease_key`s (its declared shared paths, T73.2) are acquired — in sorted
+  # order — for the duration of THIS call (every merge attempt, including
+  # re-dispatch retries), and released on every exit path via `after`, so a crash
+  # inside integration still frees the keys. This is narrower than, and
+  # independent of, the partition-scoped `PartitionLease` held for the whole
+  # grind; grind itself is untouched by this.
   defp integrate_one(entry, acc, ctx) do
-    case attempt_merge(entry, ctx, acc.merged_keys, 1) do
+    case with_integration_lease(entry, ctx, fn ->
+           attempt_merge(entry, ctx, acc.merged_keys, 1)
+         end) do
       {:merged, refs, attempts} ->
         acc
         |> Map.update!(:integrated, &[{entry.partition, with_branch(refs, entry)} | &1])
@@ -220,6 +271,87 @@ defmodule Kazi.Scheduler.Integration do
       {:error, reason} ->
         Map.update!(acc, :conflicts, &[{entry.partition, reason} | &1])
     end
+  end
+
+  # No backend configured: run `fun` unleased (today's behavior, byte-identical).
+  defp with_integration_lease(_entry, %{lease_backend: nil}, fun), do: fun.()
+
+  defp with_integration_lease(entry, ctx, fun) do
+    keys = entry.partition |> integration_lease_keys() |> Enum.sort() |> Enum.uniq()
+
+    case keys do
+      [] ->
+        fun.()
+
+      _ ->
+        holder = integration_lease_holder(entry.key || inspect(entry.partition))
+
+        case acquire_leases(ctx, keys, holder) do
+          {:ok, leases} ->
+            try do
+              fun.()
+            after
+              release_leases(ctx, leases)
+            end
+
+          :timeout ->
+            {:error, {:lease_timeout, keys}}
+        end
+    end
+  end
+
+  defp integration_lease_keys(%{lease_keys: keys}) when is_list(keys), do: keys
+  defp integration_lease_keys(_partition), do: []
+
+  # A holder UNIQUE to this integration attempt, so two DIFFERENT partitions that
+  # nonetheless share a lease key are different holders contending on it — the
+  # same shape as `Kazi.Scheduler.LeasedReconciler.holder_for/1`, but namespaced
+  # to the integration step so the two lease scopes never collide as "the same
+  # holder" on a shared backend/store.
+  defp integration_lease_holder(entry_key) do
+    nonce = :erlang.unique_integer([:positive, :monotonic])
+    "kazi.integration:" <> to_string(entry_key) <> ":" <> Integer.to_string(nonce)
+  end
+
+  # Acquires every key in sorted order, blocking-with-retry on a contended key.
+  # On timeout for any key, releases whatever was already acquired (so a partial
+  # acquisition never dangles) and reports `:timeout`.
+  defp acquire_leases(ctx, keys, holder), do: acquire_leases(ctx, keys, holder, [])
+
+  defp acquire_leases(_ctx, [], _holder, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp acquire_leases(ctx, [key | rest], holder, acc) do
+    case acquire_lease(ctx, key, holder, ctx.lease_acquire_timeout_ms) do
+      {:ok, lease} ->
+        acquire_leases(ctx, rest, holder, [lease | acc])
+
+      :timeout ->
+        release_leases(ctx, acc)
+        :timeout
+    end
+  end
+
+  defp acquire_lease(ctx, key, holder, timeout_remaining) do
+    case ctx.lease_backend.acquire(key, holder, ctx.lease_ttl_ms, ctx.lease_opts) do
+      {:ok, lease} ->
+        {:ok, lease}
+
+      {:error, :held} when timeout_remaining > 0 ->
+        Process.sleep(ctx.lease_retry_interval_ms)
+        acquire_lease(ctx, key, holder, timeout_remaining - ctx.lease_retry_interval_ms)
+
+      {:error, :held} ->
+        :timeout
+    end
+  end
+
+  # Releases in reverse acquisition order. Best-effort per key: `Lease.release/2`
+  # is total/idempotent (ADR-0006), so this never raises on an already-released
+  # or superseded lease.
+  defp release_leases(ctx, leases) do
+    leases
+    |> Enum.reverse()
+    |> Enum.each(&ctx.lease_backend.release(&1, ctx.lease_opts))
   end
 
   # Try to merge `entry` onto the current base. On a cross-partition conflict,
