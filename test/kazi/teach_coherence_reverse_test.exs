@@ -74,7 +74,9 @@ defmodule Kazi.TeachCoherenceReverseTest do
     "--integration-command" =>
       "TKE.3 (docs/plans/E-KAZI-ENTRYPOINT.md §1.2): the in-place lane-mode landing hook (the KAZI_INTEGRATION_COMMAND env var is the mechanism a lane contract actually sets); an internal, --single-node --in-place-paired dispatcher flag documented in `kazi help apply`, docs/integration-hook.md, and docs/schemas/run-result.md, not part of the intro recipes",
     "--resume-pr" =>
-      "TKE.5 (docs/plans/E-KAZI-ENTRYPOINT.md §1.2): the resume handle / run-lineage flag (the KAZI_RESUME_PR env var, or a lane contract's own `resume_pr` field, are the mechanisms a lane contract actually sets); an internal dispatcher flag documented in `kazi help apply` and docs/integration-hook.md, not part of the intro recipes"
+      "TKE.5 (docs/plans/E-KAZI-ENTRYPOINT.md §1.2): the resume handle / run-lineage flag (the KAZI_RESUME_PR env var, or a lane contract's own `resume_pr` field, are the mechanisms a lane contract actually sets); an internal dispatcher flag documented in `kazi help apply` and docs/integration-hook.md, not part of the intro recipes",
+    "--node-sha" =>
+      "T72.6 (ADR-0086 decision 5): the lane adapter's `--check` freshness hook, re-rendering from the goal-file and comparing a pinned sha256; an internal dispatcher-paired flag documented in `kazi help apply` and docs/AUTHORING.md, not part of the intro recipes"
   }
 
   describe "every real `apply` flag is documented somewhere (the reverse guard, issue #973)" do

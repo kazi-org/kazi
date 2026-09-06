@@ -112,3 +112,18 @@ ever "reads" the constraint at all. `forbidden_commands` is the one exception
 claim of prevention. See `docs/how-to/scope-write-guard.md` for the full
 authoring reference and `docs/adr/0085-scope-goal-file-forbidden-paths-commands.md`
 for the decision.
+
+**A goal with a declared scope root (ADR-0086) never needs to author its own
+rendered node into `forbidden_paths`.** `kazi apply` extends the goal's
+EFFECTIVE `forbidden_paths` automatically with every `AGENTS.md`/`CLAUDE.md`
+path it renders for that run (T72.6, ADR-0086 decision 5(c)) — a landed
+commit touching the dispatch-context node it just handed the agent fails the
+SAME `:scope_forbidden_paths` guard a hand-authored entry would. Freshness
+enforcement is separate and stricter still: at run start and every observe
+pass, an interactive run re-renders the node and byte-compares it against
+the worktree's file, terminating `:rendered_node_drift` (fatal, the same
+class ADR-0080's `:tampered` is) on any mismatch — so a hand-edit is caught
+mid-run, not only at landing. `kazi apply --check --node-sha <sha256>` is
+the equivalent one-shot check for a lane's dispatched (non-interactive)
+context: it re-renders from the goal-file and fails if the digest no longer
+matches.

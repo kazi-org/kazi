@@ -346,6 +346,37 @@ defmodule Kazi.Runtime do
     # guards. An `:enforcement` opt overrides the goal's authored/derived profile.
     enforcement = Keyword.get(opts, :enforcement) || Enforcement.resolve(goal)
 
+    # T72.6 (ADR-0086 decision 5, T72.4): render/deliver this run's scope-root
+    # node(s) ONCE — `Kazi.Plan.Freshness.arm/1` (the freshness manifest below)
+    # and the `forbidden_paths` fold-in just below both derive from this SAME
+    # delivery list, so they can never disagree about what was rendered.
+    rendered_node_deliveries = Kazi.Plan.Freshness.deliveries(goal, workspace)
+
+    # T72.6 (ADR-0086 decision 5, ADR-0085): fold every path this run's
+    # rendered AGENTS.md/CLAUDE.md node(s) occupy into the goal's EFFECTIVE
+    # `[scope].forbidden_paths` BEFORE `Scope.guard_predicates/1` synthesizes
+    # the `:scope_forbidden_paths` guard below — so a commit touching a
+    # rendered node fails the SAME guard + `Kazi.Actions.Integrate` landing
+    # refusal a hand-authored `forbidden_paths` entry would. A goal with no
+    # declared scope root renders nothing (`rendered_node_deliveries == []`),
+    # so this is byte-identical for an unscoped goal.
+    goal =
+      case Kazi.Plan.Freshness.forbidden_paths(rendered_node_deliveries, workspace) do
+        [] ->
+          goal
+
+        rendered_paths ->
+          %Scope{} = scope = goal.scope
+
+          %Goal{
+            goal
+            | scope: %Scope{
+                scope
+                | forbidden_paths: Enum.uniq(scope.forbidden_paths ++ rendered_paths)
+              }
+          }
+      end
+
     # issue #860: SYNTHESIZE the scope's `deny`-path guard the same way — it is a
     # SCOPE contract, not an anti-gaming one, so it applies regardless of whether
     # `[enforcement]` is active.
@@ -372,6 +403,15 @@ defmodule Kazi.Runtime do
     # goal declared no `[seal]` block AND has no on-disk source, so a byte-identical
     # no-op for an in-memory goal.
     seal_manifest = Kazi.Seal.arm(goal.seal, Keyword.get(opts, :goal_source), workspace)
+
+    # T72.6 (ADR-0086 decision 5): arm the SAME-shaped t0 manifest for this
+    # run's rendered node(s), from the SAME delivery list `forbidden_paths`
+    # above just folded in. The loop re-verifies it before every observe pass
+    # (`Kazi.Plan.Freshness.verify/1`) and terminates `:rendered_node_drift` on
+    # the first mismatch — see `Kazi.Plan.Freshness`'s moduledoc for why this
+    # is the same fatal termination class as ADR-0080's `:tampered`. Empty
+    # (nothing rendered) for an unscoped goal, byte-identical to before T72.6.
+    rendered_node_manifest = Kazi.Plan.Freshness.arm(rendered_node_deliveries)
 
     with {:ok, {adapter_module, harness_opts}} <- resolve_harness(goal, opts),
          {:ok, providers} <- resolve_providers(goal, opts),
@@ -514,6 +554,8 @@ defmodule Kazi.Runtime do
           check_workspace_liveness: true,
           # ADR-0080 (#1520): the t0 seal manifest the loop re-verifies each observe.
           seal_manifest: seal_manifest,
+          # T72.6 (ADR-0086 decision 5): the t0 rendered-node manifest.
+          rendered_node_manifest: rendered_node_manifest,
           # ADR-0081 (#1521): the controller-side capture executor the loop runs at
           # the start of every observe pass — executes each `[[capture]]` recipe
           # into the run-keyed evidence store and returns the `%{name => result}`
@@ -1772,6 +1814,8 @@ defmodule Kazi.Runtime do
   # ADR-0080 (#1520): a tampered run gets its own distinct terminal status — never
   # folded into "stuck"/"stopped", so the fleet surfaces it as the hard-FAIL it is.
   defp registry_status(:tampered, _reason), do: "tampered"
+  # T72.6 (ADR-0086 decision 5): same rationale, distinct fleet status.
+  defp registry_status(:rendered_node_drift, _reason), do: "rendered_node_drift"
   defp registry_status(:stopped, :stuck), do: "stuck"
   defp registry_status(:stopped, _reason), do: "stopped"
 

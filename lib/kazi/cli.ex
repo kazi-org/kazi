@@ -197,6 +197,7 @@ defmodule Kazi.CLI do
     lower: :string,
     write: :string,
     tree: :boolean,
+    node_sha: :string,
     reap: :boolean,
     help: :boolean,
     version: :boolean
@@ -292,6 +293,8 @@ defmodule Kazi.CLI do
       "`apply` only (T50.3, ADR-0065 decision 3): continue a run previously paused by --pause-between-waves from its persisted checkpoint — settled groups keep their terminal statuses; execution continues from the next frontier to the collective verdict. Pass the SAME goal-file (or --fleet source) plus the resume_token the paused result carried: a changed goal-set REFUSES loudly ('goal file changed since pause; re-run instead') rather than resuming against different work, and an unknown token is a clear error, never a silent fresh run. Composes with --pause-between-waves to advance one frontier at a time.",
     check:
       "`apply` only (issue #805): observe-only mode — evaluate the predicate vector EXACTLY ONCE via the real provider path and exit; never dispatches a harness, integrates, or deploys. All-pass exits 0 (`status: \"pass\"`, NOT the vacuous_goal error a normal run would give); any failing predicate exits 1 (`status: \"fail\"`) carrying predicates[] with captured evidence for the failures. For merge gates (ADR-0026) and release qualification.",
+    node_sha:
+      "`apply --check` only (T72.6, ADR-0086 decision 5): re-render the goal's first declared scope root's AGENTS.md node from the goal-file (one observe pass, the SAME machinery `--check` alone uses) and sha256 the result; exits 0 when it matches this hex digest, 1 (with both digests reported) on any mismatch -- one byte of drift included. The lane-adapter hook side of freshness enforcement: a dispatcher pins the node's sha256 at render time (`contract.json`) and re-checks it here before trusting a lane's dispatch context. A goal with no declared scope root refuses (there is no node to check against). Requires --check; --node-sha with no --check is rejected.",
     provider:
       "`context` only: the context-store provider to proxy to (currently `gist`, the default). The provider stays independently usable; this is a thin wrapper so users learn one CLI (ADR-0045).",
     budget:
@@ -411,6 +414,7 @@ defmodule Kazi.CLI do
         :pause_between_waves,
         :resume,
         :check,
+        :node_sha,
         :context_store,
         :context_budget,
         :session_name,
@@ -2303,7 +2307,8 @@ defmodule Kazi.CLI do
           single_node: single_node_requested?(flags),
           pause_between_waves: flags[:pause_between_waves] || false,
           resume: flags[:resume],
-          check: flags[:check] || false
+          check: flags[:check] || false,
+          node_sha: flags[:node_sha]
         }
 
       extra ->
@@ -3276,6 +3281,12 @@ defmodule Kazi.CLI do
       opts[:in_place] == true and is_binary(opts[:base]) ->
         refuse_contradictory_base(opts)
 
+      # T72.6 (ADR-0086 decision 5): --node-sha is a --check sub-mode (it
+      # re-renders and compares, never dispatches) — meaningless standalone.
+      # Rejected up front like the other flag-interplay checks here.
+      is_binary(opts[:node_sha]) and opts[:check] != true ->
+        refuse_node_sha_without_check(opts)
+
       # T23.6 (ADR-0028): --explain / --dry-run is PURE PLANNING — compute and print
       # the wave schedule, dispatch NOTHING, exit 0. Checked FIRST so it never falls
       # through to a real serial/parallel run (the spy seam asserts no reconciler is
@@ -3572,6 +3583,22 @@ defmodule Kazi.CLI do
       "--in-place and --base are contradictory: --base <ref> selects the ref the " <>
         "kazi-owned task worktree is created from (ADR-0065 decision 5), and " <>
         "--in-place runs without a task worktree at all. Drop one of the two flags."
+
+    if json?(opts) do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  defp refuse_node_sha_without_check(opts) do
+    message =
+      "--node-sha requires --check (T72.6, ADR-0086 decision 5): it re-renders this " <>
+        "goal's AGENTS.md node from the goal-file and compares its sha256 against the " <>
+        "given digest, the same observe-only, never-dispatch contract --check alone has. " <>
+        "Pass --check --node-sha <sha256>."
 
     if json?(opts) do
       emit_json_error(message)
@@ -4416,6 +4443,22 @@ defmodule Kazi.CLI do
 
         1
 
+      # T72.6 (ADR-0086 decision 5): a rendered AGENTS.md node was hand-edited
+      # mid-run — same distinct hard-FAIL shape as :tampered above, exit
+      # non-zero, never green.
+      {:ok, %{outcome: :rendered_node_drift} = result} ->
+        report_outcome(
+          goal,
+          :rendered_node_drift,
+          result,
+          run_economy(goal, :rendered_node_drift, result, opts, persist?),
+          workspace,
+          opts,
+          json?
+        )
+
+        1
+
       {:error, reason} ->
         report_run_error(goal, reason, json?)
         1
@@ -5210,6 +5253,9 @@ defmodule Kazi.CLI do
   # ADR-0080 (#1520): a tampered run gets its own human line naming the file, not
   # the generic STOPPED line — the operator must see WHY the run is void.
   defp human_outcome(:tampered), do: :tampered
+  # T72.6 (ADR-0086 decision 5): same rationale — a rendered-node drift gets
+  # its own human line, not the generic STOPPED line.
+  defp human_outcome(:rendered_node_drift), do: :rendered_node_drift
   defp human_outcome(_), do: :stopped
 
   # A pre-loop run error (an unknown provider/harness, a vacuous goal, an await
@@ -10616,6 +10662,21 @@ defmodule Kazi.CLI do
     end
   end
 
+  # T72.6 (ADR-0086 decision 5): a rendered AGENTS.md/CLAUDE.md node changed
+  # mid-run — the SAME void-run shape as :tampered above, for a different
+  # input.
+  defp outcome_line(%Goal{id: id}, :rendered_node_drift, result) do
+    case Map.get(result, :drifted_node) do
+      %{path: path, change: change} ->
+        "RENDERED_NODE_DRIFT   goal=#{id} — rendered node #{path} was #{change} mid-run; " <>
+          "the run is void (ADR-0086 decision 5)."
+
+      _ ->
+        "RENDERED_NODE_DRIFT   goal=#{id} — a rendered node changed mid-run; the run is " <>
+          "void (ADR-0086 decision 5)."
+    end
+  end
+
   defp format_actions([]), do: "(none)"
   defp format_actions(actions), do: Enum.map_join(actions, " → ", &to_string/1)
 
@@ -10732,7 +10793,7 @@ defmodule Kazi.CLI do
   #                        existed.
   @spec run_result_json(
           Goal.t(),
-          :converged | :stopped | :over_budget | :tampered,
+          :converged | :stopped | :over_budget | :tampered | :rendered_node_drift,
           map(),
           map(),
           String.t() | nil,
@@ -10765,6 +10826,7 @@ defmodule Kazi.CLI do
     |> put_collateral(goal, workspace)
     |> put_goal_drifted(result)
     |> put_tampered_file(result)
+    |> put_drifted_node(result)
     |> put_single_node(result)
     |> put_job_outcome(status, result, opts, workspace, goal)
   end
@@ -10776,6 +10838,14 @@ defmodule Kazi.CLI do
     do: Map.put(map, :tampered_file, %{path: to_string(path), change: to_string(change)})
 
   defp put_tampered_file(map, _result), do: map
+
+  # T72.6 (ADR-0086 decision 5): the additive `drifted_node` object — the
+  # rendered node (or nil) the run terminated over, mirroring
+  # `put_tampered_file/2` above for a different termination class.
+  defp put_drifted_node(map, %{drifted_node: %{path: path, change: change}}),
+    do: Map.put(map, :drifted_node, %{path: to_string(path), change: to_string(change)})
+
+  defp put_drifted_node(map, _result), do: map
 
   # T73.5 (ADR-0086/ADR-0087, CAPABILITY 3/4 + 4/4): the additive
   # `single_node: true` field — present ONLY when this run was actually
@@ -11117,6 +11187,9 @@ defmodule Kazi.CLI do
   defp run_status(:over_budget, _result), do: "over_budget"
   # ADR-0080 (#1520): a distinct terminal status, never folded into "stuck".
   defp run_status(:tampered, _result), do: "tampered"
+  # T72.6 (ADR-0086 decision 5): same rationale — a distinct terminal status,
+  # never folded into "stuck".
+  defp run_status(:rendered_node_drift, _result), do: "rendered_node_drift"
   defp run_status(:stopped, _result), do: "stuck"
 
   # The orchestrator's branch hint, derived purely from the terminal status.
@@ -11692,6 +11765,14 @@ defmodule Kazi.CLI do
   # already-green vector is the whole point of a check.
 
   defp check_goal(%Goal{} = goal, opts, runtime_opts) do
+    if is_binary(opts[:node_sha]) do
+      check_node_sha(goal, opts, runtime_opts)
+    else
+      check_predicates(goal, opts, runtime_opts)
+    end
+  end
+
+  defp check_predicates(%Goal{} = goal, opts, runtime_opts) do
     workspace = opts[:workspace] || goal.scope.workspace
     json? = opts[:json] == true
 
@@ -11706,6 +11787,86 @@ defmodule Kazi.CLI do
         report_run_error(goal, reason, json?)
         1
     end
+  end
+
+  # T72.6 (ADR-0086 decision 5): `kazi apply --check --node-sha <sha256>` --
+  # re-renders the goal's first declared scope root's node from the
+  # goal-file (`rendered_node_sha256/4`, the SAME machinery the
+  # `--lane-contract`/`render_freshness_check/4` path above already uses) and
+  # exits 0 only when it matches `expected_sha`. A goal with no declared
+  # scope root refuses -- there is no node this flag could ever check
+  # against.
+  defp check_node_sha(%Goal{} = goal, opts, runtime_opts) do
+    expected_sha = opts[:node_sha] |> to_string() |> String.downcase() |> String.trim()
+    workspace = opts[:workspace] || goal.scope.workspace
+    json? = opts[:json] == true
+
+    case Scope.roots(goal.scope) do
+      [] ->
+        report_node_sha_no_scope(goal, json?)
+        1
+
+      [root | _] ->
+        case rendered_node_sha256(goal, root, workspace, runtime_opts) do
+          {:ok, ^expected_sha} ->
+            report_node_sha_match(goal, expected_sha, json?)
+            0
+
+          {:ok, actual_sha} ->
+            report_node_sha_mismatch(goal, expected_sha, actual_sha, json?)
+            1
+
+          {:error, reason} ->
+            report_run_error(goal, reason, json?)
+            1
+        end
+    end
+  end
+
+  defp report_node_sha_no_scope(%Goal{id: id}, json?) do
+    message =
+      "goal #{id} declares no [scope] root -- there is no rendered AGENTS.md node for " <>
+        "--node-sha to check against (ADR-0086 decision 3: goals with no scope render nothing)"
+
+    if json? do
+      emit_json_error(message)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+  end
+
+  defp report_node_sha_match(%Goal{id: id}, sha, json?) do
+    emit(
+      json?,
+      %{
+        schema_version: @run_schema_version,
+        goal_id: to_string(id),
+        status: "match",
+        node_sha256: sha
+      },
+      fn ->
+        IO.puts("NODE-SHA MATCH  goal=#{id} node_sha256=#{sha}")
+      end
+    )
+  end
+
+  defp report_node_sha_mismatch(%Goal{id: id}, expected_sha, actual_sha, json?) do
+    emit(
+      json?,
+      %{
+        schema_version: @run_schema_version,
+        goal_id: to_string(id),
+        status: "mismatch",
+        expected_node_sha256: expected_sha,
+        actual_node_sha256: actual_sha
+      },
+      fn ->
+        IO.puts(
+          "NODE-SHA MISMATCH  goal=#{id} expected=#{expected_sha} actual=#{actual_sha} -- " <>
+            "the rendered node no longer matches the pinned digest"
+        )
+      end
+    )
   end
 
   defp report_check(%Goal{} = goal, status, vector, json?) do
