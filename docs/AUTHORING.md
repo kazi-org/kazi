@@ -113,6 +113,42 @@ claim of prevention. See `docs/how-to/scope-write-guard.md` for the full
 authoring reference and `docs/adr/0085-scope-goal-file-forbidden-paths-commands.md`
 for the decision.
 
+## `[scope].contract`: a goal cannot write, or land a change to, its own contract (T73.6)
+
+A goal that names its own human-authored acceptance contract file lets kazi
+enforce a narrower version of the same worry `forbidden_paths` addresses: the
+grind loop should never be able to edit the very document it is being held
+to.
+
+```toml
+[scope]
+write_paths = ["lib/foo/**"]
+contract = "lib/foo/contract.ex"
+```
+
+Declaring `contract` gets a goal two things, both additive (a goal-file with
+no `contract` behaves byte-identically to before this feature):
+
+  * **`kazi lint <goal-file>` fails (non-zero exit) when the goal's own
+    `write_paths`/`paths` covers its own `contract`** — the example above
+    fails naming both `lib/foo/**` and `lib/foo/contract.ex`; a contract
+    declared outside the goal's write scope (`lib/contracts/foo.ex`) passes.
+    Unlike the near-duplicate-group-name net, this IS a hard failure —
+    `kazi plan lint <roadmap>` runs the fleet-level version alongside the
+    existing nesting check, failing when one member's `write_paths` covers
+    ANOTHER member's `contract`, naming both goal ids and the shared path.
+  * **The contract path is auto-folded into `forbidden_paths`** — the same
+    "auto-extend" pattern below extends `forbidden_paths` with every rendered
+    `AGENTS.md`/`CLAUDE.md` path — so a commit touching the contract fails
+    the same `:scope_forbidden_paths` guard and `Kazi.Actions.Integrate`
+    landing refusal a hand-authored `forbidden_paths` entry would.
+
+A goal with a declared scope root and a `contract` also gets a "Contract"
+section in its rendered `AGENTS.md`/`CLAUDE.md` node (see "Scope roots and
+the AGENTS.md node" below), containing the contract file's raw content, so a
+harness working at the goal's scope root reads its contract through the same
+walk-up channel it reads the goal's brief and failing predicates through.
+
 **A goal with a declared scope root (ADR-0086) never needs to author its own
 rendered node into `forbidden_paths`.** `kazi apply` extends the goal's
 EFFECTIVE `forbidden_paths` automatically with every `AGENTS.md`/`CLAUDE.md`

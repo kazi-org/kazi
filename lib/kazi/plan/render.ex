@@ -41,11 +41,31 @@ defmodule Kazi.Plan.Render do
       into by an agent's harness is exactly the dispatch-context channel that
       hidden-for-acceptance withholding already protects (`Kazi.Loop`'s
       `held_out_ids/1` filtering), so this module applies the SAME exclusion
-      independently rather than assume a caller already filtered; and
+      independently rather than assume a caller already filtered;
+    * a "Contract" section (T73.6), present only when the goal declares
+      `[scope].contract`, containing that file's raw content verbatim (see
+      "The Contract section" below); and
     * the CURRENTLY FAILING predicates (status `:fail` in `observed`, again
       excluding held-out ones), each with its evidence rendered the same
       sorted-map-then-redacted shape `Kazi.Harness.Prompt` uses for the dispatch
       prompt, so the two evidence-facing surfaces read identically.
+
+  ## The Contract section (T73.6) — the one file read this module performs
+
+  Every other section renders from `(goal, root, observed)` alone, with zero
+  I/O — the purity this module's own moduledoc and tests otherwise pin. The
+  Contract section is a deliberate, narrow exception: it `File.read/1`s the
+  goal's declared `[scope].contract` path (resolved against `goal.scope.workspace`
+  when set, else as given) so the rendered node carries the actual contract
+  bytes an agent is held to, not merely its path. This is judged safe for the
+  SAME reason the goal-file itself is safe to read: `contract` is DECLARED,
+  versioned repo content — any host with the checkout kazi is rendering from
+  has it, the identical way it has the goal-file `Kazi.Goal.Loader.load/1`
+  already read from disk before `node/3` ever runs. It does not reach into the
+  read-model or any live host-runtime state — the "purity" the imports-chunk
+  test below pins is about avoiding THAT dependency, not about zero
+  filesystem access. A goal declaring no `contract` renders no such section
+  and this module performs no read.
 
   ## Byte-stability
 
@@ -67,6 +87,7 @@ defmodule Kazi.Plan.Render do
   alias Kazi.Predicate
   alias Kazi.PredicateResult
   alias Kazi.PredicateVector
+  alias Kazi.Scope
 
   @doc """
   Renders `goal`'s node for the scope root `root`, seeded with `observed` (the
@@ -91,8 +112,10 @@ defmodule Kazi.Plan.Render do
       RoadmapRender.banner(),
       header(goal, root),
       predicate_definitions(goal),
+      contract_section(goal),
       failing_section(goal, observed)
     ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
     |> ensure_trailing_newline()
   end
@@ -143,6 +166,33 @@ defmodule Kazi.Plan.Render do
     do: description
 
   defp description_or_placeholder(_description), do: "(no description)"
+
+  # T73.6: absent when the goal declares no `[scope].contract` — `nil` is
+  # filtered out of `node/3`'s section list, so a contract-less goal renders
+  # byte-identically to before this feature.
+  defp contract_section(%Goal{scope: %Scope{contract: nil}}), do: nil
+
+  defp contract_section(%Goal{scope: %Scope{contract: contract} = scope}) do
+    [
+      "## Contract\n",
+      "**Path:** `#{contract}`\n",
+      contract_body(contract, scope.workspace)
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp contract_body(contract, workspace) do
+    case File.read(resolve_contract_path(contract, workspace)) do
+      {:ok, content} ->
+        "```\n" <> content <> "\n```\n"
+
+      {:error, reason} ->
+        "_(unable to read contract #{inspect(contract)}: #{:file.format_error(reason)})_\n"
+    end
+  end
+
+  defp resolve_contract_path(contract, nil), do: contract
+  defp resolve_contract_path(contract, workspace), do: Path.join(workspace, contract)
 
   defp failing_section(%Goal{} = goal, %PredicateVector{} = observed) do
     header = "## Currently failing\n"

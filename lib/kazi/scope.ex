@@ -76,6 +76,34 @@ defmodule Kazi.Scope do
   existing rule that an unscoped goal gets no inferred `Kazi.Fleet` edges
   either.
 
+  ## `contract` (T73.6)
+
+  `contract` names a single, optional path to the file that carries a goal's
+  human-authored acceptance contract — the spec a `[scope].write_paths` (or
+  `paths` fallback) goal is being held to. Two enforcements follow from it,
+  both additive (a goal-file declaring no `contract` is byte-identical to
+  before this feature):
+
+    * **A goal cannot write its own contract.** `kazi lint <goal-file>` fails
+      (non-zero exit, unlike the advisory near-duplicate-name net) when a
+      goal's own `roots/1` covers its declared `contract` path — a goal
+      shouldn't be able to edit the very file constraining it.
+      `own_contract_conflict/1` is the check; `kazi plan lint <roadmap>`
+      additionally runs the FLEET version, `contract_conflicts/1`, which fails
+      when one member's `roots/1` covers ANOTHER member's `contract`, naming
+      both goal ids and the shared path.
+    * **A goal cannot LAND a change to its own contract.** Like the rendered
+      node (T72.6), `contract` is auto-folded into the goal's `forbidden_paths`
+      at construction time (`new/1`) — the same `:scope_forbidden_paths` guard
+      predicate and `Kazi.Actions.Integrate` landing refusal `forbidden_paths`
+      itself gets, with no separate enforcement path to keep in sync.
+
+  `Kazi.Plan.Render.node/3` (ADR-0086 decision 3, T72.3) also renders a
+  "Contract" section containing the contract file's raw content, when a goal
+  declares one, so an agent working at the goal's scope root reads its
+  contract through the same walk-up channel it reads the goal's brief and
+  failing predicates through.
+
   ## `shared_paths` (ADR-0087 decision 4, T73.1)
 
   `shared_paths` names hotspot files (`mix.exs`, `go.mod`, `docs/plan.md`) this
@@ -104,7 +132,8 @@ defmodule Kazi.Scope do
           forbidden_paths: [String.t()],
           forbidden_commands: [String.t()],
           no_integration: boolean(),
-          shared_paths: [String.t()]
+          shared_paths: [String.t()],
+          contract: String.t() | nil
         }
 
   defstruct workspace: nil,
@@ -118,7 +147,9 @@ defmodule Kazi.Scope do
             forbidden_commands: [],
             no_integration: false,
             # ADR-0087 decision 4 / T73.1: additive, appended last. See moduledoc.
-            shared_paths: []
+            shared_paths: [],
+            # T73.6: additive, appended last. See moduledoc.
+            contract: nil
 
   @doc """
   Builds a scope.
@@ -130,18 +161,32 @@ defmodule Kazi.Scope do
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
+    contract = Keyword.get(opts, :contract)
+    forbidden_paths = Keyword.get(opts, :forbidden_paths, [])
+
     %__MODULE__{
       workspace: Keyword.get(opts, :workspace),
       repo: Keyword.get(opts, :repo),
       paths: Keyword.get(opts, :paths, []),
       write_paths: Keyword.get(opts, :write_paths, []),
       deny: Keyword.get(opts, :deny, []),
-      forbidden_paths: Keyword.get(opts, :forbidden_paths, []),
+      # T73.6: `contract` is auto-folded into `forbidden_paths` here, the same
+      # "auto-extend forbidden_paths" pattern T72.6 established for the
+      # rendered node — a goal's own declared contract path lands the SAME
+      # `:scope_forbidden_paths` guard and `Integrate` refusal a hand-authored
+      # `forbidden_paths` entry would, with one source of truth.
+      forbidden_paths: extend_forbidden_paths(forbidden_paths, contract),
       forbidden_commands: Keyword.get(opts, :forbidden_commands, []),
       no_integration: Keyword.get(opts, :no_integration, false),
-      shared_paths: Keyword.get(opts, :shared_paths, [])
+      shared_paths: Keyword.get(opts, :shared_paths, []),
+      contract: contract
     }
   end
+
+  defp extend_forbidden_paths(forbidden_paths, nil), do: forbidden_paths
+
+  defp extend_forbidden_paths(forbidden_paths, contract),
+    do: Enum.uniq(forbidden_paths ++ [contract])
 
   @doc """
   Synthesizes the `deny`-path GUARD predicate (issue #860 proposal 2), so a goal
@@ -347,5 +392,72 @@ defmodule Kazi.Scope do
   # normalized form the other starts with. Equal paths return `a`.
   defp shallower_of(a, b) do
     if String.starts_with?(normalize_path(b), normalize_path(a)), do: a, else: b
+  end
+
+  @doc """
+  Whether `scope`'s OWN write-scope (`roots/1`) covers its OWN declared
+  `contract` path (T73.6): a goal shouldn't be able to write the very
+  contract file constraining it. `kazi lint <goal-file>` fails (non-zero
+  exit) on this, unlike the advisory near-duplicate-group-name net.
+
+  Returns `nil` when no contract is declared, or when the contract lies
+  outside every declared root. Otherwise returns `{root, contract}` — the
+  specific overlapping root and the contract path, so the caller can name
+  both.
+
+  ## Examples
+
+      iex> Kazi.Scope.own_contract_conflict(Kazi.Scope.new(write_paths: ["lib/foo/**"], contract: "lib/foo/contract.ex"))
+      {"lib/foo/**", "lib/foo/contract.ex"}
+
+      iex> Kazi.Scope.own_contract_conflict(Kazi.Scope.new(write_paths: ["lib/foo/**"], contract: "lib/contracts/foo.ex"))
+      nil
+
+      iex> Kazi.Scope.own_contract_conflict(Kazi.Scope.new(write_paths: ["lib/foo/**"]))
+      nil
+  """
+  @spec own_contract_conflict(t()) :: {String.t(), String.t()} | nil
+  def own_contract_conflict(%__MODULE__{contract: nil}), do: nil
+
+  def own_contract_conflict(%__MODULE__{contract: contract} = scope) do
+    scope
+    |> roots()
+    |> Enum.find_value(fn root -> path_overlap?(root, contract) && {root, contract} end)
+  end
+
+  @typedoc "One fleet-level contract-write finding: the contract's owner goal, the writer goal, and the shared path."
+  @type contract_conflict :: %{owner: String.t(), writer: String.t(), path: String.t()}
+
+  @doc """
+  Finds every pair of DISTINCT goals, among `entries` (`{goal_id, roots,
+  contract}`), where one goal's `roots/1` covers ANOTHER goal's declared
+  `contract` path (T73.6, the fleet-level extension of `own_contract_conflict/1`
+  — `kazi plan lint <roadmap>` runs this alongside `nesting_conflicts/1`).
+  `contract` may be `nil` (no declared contract — that goal never appears as
+  an `:owner`). A goal covering its OWN contract is `own_contract_conflict/1`'s
+  concern, not this one, so self-pairs are excluded.
+
+  Returns `[]` when no member's roots cover another member's contract.
+
+  ## Examples
+
+      iex> Kazi.Scope.contract_conflicts([{"a", ["lib/foo/**"], nil}, {"b", ["lib/foo/**"], "lib/foo/contract.ex"}])
+      [%{owner: "b", writer: "a", path: "lib/foo/contract.ex"}]
+
+      iex> Kazi.Scope.contract_conflicts([{"a", ["lib/foo/**"], "lib/foo/contract.ex"}])
+      []
+  """
+  @spec contract_conflicts([{String.t(), [String.t()], String.t() | nil}]) :: [
+          contract_conflict()
+        ]
+  def contract_conflicts(entries) do
+    for {writer_id, writer_roots, _writer_contract} <- entries,
+        {owner_id, _owner_roots, owner_contract} <- entries,
+        writer_id != owner_id,
+        is_binary(owner_contract),
+        Enum.any?(writer_roots, &path_overlap?(&1, owner_contract)) do
+      %{owner: owner_id, writer: writer_id, path: owner_contract}
+    end
+    |> Enum.uniq()
   end
 end

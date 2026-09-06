@@ -8535,7 +8535,7 @@ defmodule Kazi.CLI do
 
           {:error, {:nesting_conflict, conflicts}} ->
             refuse_plan_render_tree(
-              plan_lint_conflict_message(roadmap_path, conflicts),
+              plan_lint_conflict_message(roadmap_path, conflicts, []),
               "nesting_conflict",
               %{roadmap: roadmap_path, conflicts: conflicts},
               opts
@@ -8682,13 +8682,21 @@ defmodule Kazi.CLI do
       {:ok, roadmap} ->
         entries = Enum.map(roadmap.nodes, fn node -> {node.id, Scope.roots(node.goal.scope)} end)
 
-        case Scope.nesting_conflicts(entries) do
-          [] ->
+        contract_entries =
+          Enum.map(roadmap.nodes, fn node ->
+            {node.id, Scope.roots(node.goal.scope), node.goal.scope.contract}
+          end)
+
+        nesting_conflicts = Scope.nesting_conflicts(entries)
+        contract_conflicts = Scope.contract_conflicts(contract_entries)
+
+        case {nesting_conflicts, contract_conflicts} do
+          {[], []} ->
             report_plan_lint_clean(roadmap_path, roadmap, opts)
             0
 
-          conflicts ->
-            refuse_plan_lint(roadmap_path, conflicts, opts)
+          {_nesting, _contract} ->
+            refuse_plan_lint(roadmap_path, nesting_conflicts, contract_conflicts, opts)
         end
 
       {:error, message} ->
@@ -8702,25 +8710,38 @@ defmodule Kazi.CLI do
       kind: "plan_lint",
       roadmap: roadmap_path,
       goal_count: length(nodes),
-      conflicts: []
+      conflicts: [],
+      contract_conflicts: []
     }
 
     emit(json?(opts), json, fn ->
       IO.puts(
         "LINT  roadmap=#{roadmap_path} — #{length(nodes)} goal(s), " <>
-          "no nesting scope-root conflicts."
+          "no nesting scope-root conflicts, no contract-write conflicts."
       )
     end)
   end
 
-  defp refuse_plan_lint(roadmap_path, conflicts, opts) do
-    message = plan_lint_conflict_message(roadmap_path, conflicts)
+  # T73.6: `contract_conflicts` (a member's write_paths covering ANOTHER
+  # member's declared contract) refuses alongside the existing nesting check —
+  # either list being non-empty is a refusal, and both are reported together
+  # when both fire.
+  defp refuse_plan_lint(roadmap_path, nesting_conflicts, contract_conflicts, opts) do
+    message = plan_lint_conflict_message(roadmap_path, nesting_conflicts, contract_conflicts)
+
+    reason =
+      case {nesting_conflicts, contract_conflicts} do
+        {[], _} -> "contract_write_conflict"
+        {_, []} -> "nesting_conflict"
+        _ -> "nesting_and_contract_write_conflict"
+      end
 
     if json?(opts) do
       emit_json_error(message, %{
-        reason: "nesting_conflict",
+        reason: reason,
         roadmap: roadmap_path,
-        conflicts: conflicts
+        conflicts: nesting_conflicts,
+        contract_conflicts: contract_conflicts
       })
     else
       IO.puts(:stderr, "error: #{message}")
@@ -8729,13 +8750,22 @@ defmodule Kazi.CLI do
     1
   end
 
-  defp plan_lint_conflict_message(roadmap_path, conflicts) do
-    details =
-      Enum.map_join(conflicts, "; ", fn %{a: a, b: b, root: root} ->
+  defp plan_lint_conflict_message(roadmap_path, nesting_conflicts, contract_conflicts) do
+    nesting_details =
+      Enum.map(nesting_conflicts, fn %{a: a, b: b, root: root} ->
         "goal #{inspect(a)} and goal #{inspect(b)} share scope root #{inspect(root)}"
       end)
 
-    "roadmap #{roadmap_path}: nested/overlapping scope roots (ADR-0086 decision 2) -- #{details}"
+    contract_details =
+      Enum.map(contract_conflicts, fn %{owner: owner, writer: writer, path: path} ->
+        "goal #{inspect(writer)}'s write_paths covers goal #{inspect(owner)}'s contract " <>
+          "#{inspect(path)}"
+      end)
+
+    details = Enum.join(nesting_details ++ contract_details, "; ")
+
+    "roadmap #{roadmap_path}: nested/overlapping scope roots or contract-write conflicts " <>
+      "(ADR-0086 decision 2 / T73.6) -- #{details}"
   end
 
   defp plan_lint_load_error(roadmap_path, message, opts) do
@@ -8748,6 +8778,32 @@ defmodule Kazi.CLI do
     end
 
     1
+  end
+
+  # T73.6: `kazi lint <goal-file>` fails a goal whose own write_paths (or
+  # paths fallback) covers its own declared [scope].contract — naming both
+  # the offending root and the contract path.
+  defp refuse_own_contract_conflict(%Goal{id: id}, root, contract, opts) do
+    message = own_contract_conflict_message(id, root, contract)
+
+    if json?(opts) do
+      emit_json_error(message, %{
+        reason: "contract_write_conflict",
+        goal_id: to_string(id),
+        root: root,
+        contract: contract
+      })
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  defp own_contract_conflict_message(id, root, contract) do
+    "goal #{id}: [scope].contract #{inspect(contract)} is covered by its own " <>
+      "write_paths/paths root #{inspect(root)} (T73.6) -- a goal must not be able to write " <>
+      "the contract file constraining it"
   end
 
   defp execute_lint(goal_file, opts) do
@@ -8771,10 +8827,20 @@ defmodule Kazi.CLI do
 
     case Goal.Loader.load(goal_file) do
       {:ok, goal} ->
-        report_lint(goal, GroupLint.warnings(goal), integration_warnings, opts)
-        # ADVISORY: exit 0 whether or not warnings were emitted — the second net
-        # never fails a goal that loads (ADR-0020 §Decision 3).
-        0
+        # T73.6: UNLIKE the advisory near-duplicate-name net below, a goal
+        # covering its own declared [scope].contract with its own
+        # write_paths/paths is a HARD failure (non-zero exit) — a goal
+        # shouldn't be able to write the very contract file constraining it.
+        case Scope.own_contract_conflict(goal.scope) do
+          nil ->
+            report_lint(goal, GroupLint.warnings(goal), integration_warnings, opts)
+            # ADVISORY: exit 0 whether or not warnings were emitted — the second net
+            # never fails a goal that loads (ADR-0020 §Decision 3).
+            0
+
+          {root, contract} ->
+            refuse_own_contract_conflict(goal, root, contract, opts)
+        end
 
       {:error, reason} ->
         if integration_warnings == [] do

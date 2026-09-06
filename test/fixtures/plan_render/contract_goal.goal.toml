@@ -1,0 +1,17 @@
+# Fixture goal-file for Kazi.Plan.RenderContractTest (T73.6).
+
+id = "contract-goal"
+name = "Contract-bearing goal"
+description = "Declares [scope].contract; the render Contract section carries this file's raw bytes."
+
+[scope]
+write_paths = ["lib/contracted/**"]
+contract = "test/fixtures/plan_render/contract_goal.contract.md"
+
+[[predicate]]
+id = "unit_tests"
+provider = "custom_script"
+description = "the contracted module's unit suite passes"
+cmd = "mix"
+args = ["test", "test/contracted"]
+verdict = "exit_zero"
