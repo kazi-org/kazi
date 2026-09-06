@@ -291,7 +291,7 @@ design, not an open choice.
   trailer-value refinement (`Plan-row: <id>` when a sire-style task id
   exists) as an explicit TODO. Direct-agent dispatch.)
 
-- [ ] TKE.4 Trailer value computation for the integration action (TKE.3).
+- [x] TKE.4 Trailer value computation for the integration action (TKE.3).
   Under lane mode, the structured action kazi hands to
   `--integration-command` carries a trailer field identifying the task --
   kazi computes the VALUE only; stamping it onto an actual commit is the
@@ -312,6 +312,12 @@ design, not an open choice.
   proves kazi itself makes zero `git commit`/`git config` calls in lane mode
   -- computing the value and stamping it are different steps, and only the
   first is kazi's.]
+  Done: 2026-09-06 (PR #1811, `324b1b4d`. New `integration_trailer/2` reads the
+  lane contract's `task` field when present (`Plan-row: <id>`), else falls
+  back to `Kazi-Goal: <goal-id>`; `integration_action/4` threads `opts`
+  through as the new arity-5 form. 4 new tests, including a subprocess spy
+  proving zero `git commit`/`git config` calls in lane mode. `docs/integration-hook.md`
+  trailer field row rewritten. Direct-agent dispatch.)
 
 - [ ] TKE.5 Resume handle: a lane contract (or `--resume-pr <ref>`) may name
   an already-open PR/branch to continue against. Persist that reference the

@@ -532,7 +532,11 @@ kazi-side code -- TKE.7 (already merged) simply becomes exercisable
 end-to-end now that TKE.3 exists; the actual integration test lives in the
 hq repo (plan section 3.4), not this repo. Both claimed via claim.sh, fresh
 worktrees off `origin/main` (`6c5fde74`), `mix compile` verified clean
-before dispatch. In progress.
+before dispatch.
+
+**Shipped: TKE.4** (2026-09-06, PR #1811, `324b1b4d`) -- trailer-value
+computation. Independently reviewed and verified before merge. TKE.5 still
+in progress.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
