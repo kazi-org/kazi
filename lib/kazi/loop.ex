@@ -325,6 +325,15 @@ defmodule Kazi.Loop do
               deploy: nil,
               # static config threaded to providers/adapter/actions
               workspace: nil,
+              # T72.7 (ADR-0086 decision 7): the directory the HARNESS is
+              # launched in (`kazi apply --cwd`, or the goal's first declared
+              # scope root), which may be a subdirectory of `workspace`. `nil`
+              # (no --cwd, no declared scope root) falls back to `workspace`
+              # at the dispatch call site — byte-identical to before this
+              # field existed. Only the harness's launch directory moves;
+              # predicate observation, the diff, and every other seam here
+              # still reads `workspace` directly.
+              dispatch_cwd: nil,
               adapter_opts: [],
               # T45.7 (ADR-0056 decision 5): the model escalation ladder
               # (`Kazi.Loop.Ladder`) or `nil` when no `[escalation]` block is
@@ -1024,6 +1033,9 @@ defmodule Kazi.Loop do
       integrate: fetch!(opts, :integrate),
       deploy: fetch!(opts, :deploy),
       workspace: Keyword.get(opts, :workspace),
+      # T72.7: `nil` unless the CLI resolved a --cwd/scope-root dispatch
+      # directory (`Kazi.CLI.resolve_dispatch_cwd/3`).
+      dispatch_cwd: Keyword.get(opts, :dispatch_cwd),
       adapter_opts: adapter_opts,
       # T45.7 (ADR-0056 decision 5): the model escalation ladder (nil = none).
       ladder: ladder,
@@ -2235,7 +2247,14 @@ defmodule Kazi.Loop do
     # above, plus the E35 context store once it lands) and the standard edit/shell
     # tools the agent needs to fix predicates, NOT the ambient set. See
     # `dispatch_adapter_opts/1`.
-    result = data.harness.run(prompt, data.workspace, dispatch_adapter_opts(data))
+    # T72.7 (ADR-0086 decision 7): the harness launches in `dispatch_cwd` when
+    # one resolved (--cwd, or the goal's first declared scope root), else the
+    # workspace root — byte-identical to before this field existed. Every
+    # other seam in this module (predicate observation, the diff, landing)
+    # keeps reading `data.workspace` directly; only the harness's own launch
+    # directory moves.
+    result =
+      data.harness.run(prompt, data.dispatch_cwd || data.workspace, dispatch_adapter_opts(data))
 
     # T32.4 read-only lease: re-hash the leased paths and flag any write to one —
     # "a write attempt is a flagged event, not a silent edit" (ADR-0042 §2).
