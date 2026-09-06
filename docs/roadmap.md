@@ -401,24 +401,26 @@ full diff, ran the new test file + the reverse-doc-coherence allow-list
 locally (15/15 passed), `mix format` clean, no attribution. Direct-agent
 dispatch. TKE.2 and TKE.3 are now unblocked.
 
-**In review (2026-09-05): TKE.7** -- additive `job_outcome` field
-(done/blocked/checkpointed/refused) on `apply --json`, the synthetic-input
-form per the plan's Wave-KE-A footnote (pure `Kazi.CLI.JobOutcome.classify/1`
-+ additive wiring into `run_result_json/6`, interim lane-mode gate =
-single_node + in_place pending TKE.1's `--lane-contract`). PR #1796. My own
-review passed (30/30 new tests, format clean, no attribution) but
-chief-architect (who owns this review since hq scripts against the field)
-requested changes at `1aa4e63b`: `commits_ahead_of_base`'s use of
-`Kazi.ScopeDiff.base_ref/1` (merge-base with origin/main, root-commit
-fallback) is wrong for a governed lane container -- those are shallow clones
-of `develop` with no `origin/main`, so a stuck run with real committed
-progress can misclassify as `blocked` (losing the salvage signal) and a
-clean stuck run over `develop` can misclassify as `checkpointed`. Fix:
-count `opts[:base]..HEAD` when `--base` is present (in-place already
-requires it to resolve), falling back to `ScopeDiff.base_ref/1` only when
-absent; add non-main-base and shallow-clone wiring tests; log a git failure
-to stderr instead of silently returning 0. Relayed to the dispatched agent
-for a fix-and-repush.
+**Shipped (2026-09-05): TKE.7** -- additive `job_outcome` field
+(done/blocked/checkpointed/refused) on `apply --json`. PR #1796,
+`4988fa00`. Chief-architect requested a review fix at `1aa4e63b`:
+`commits_ahead_of_base`'s use of `Kazi.ScopeDiff.base_ref/1` (merge-base with
+origin/main, root-commit fallback) was wrong for a governed lane container --
+those are shallow clones of `develop` with no `origin/main`, so a stuck run
+with real committed progress could misclassify as `blocked` (losing the
+salvage signal) and a clean stuck run over `develop` could misclassify as
+`checkpointed`. Fix landed: `declared_base/2` resolves `opts[:base]`, else
+the goal's own `[integration] base`, else `ScopeDiff.base_ref/1`'s guess;
+`commits_ahead_of_base/2` takes that resolved base and logs a real git
+failure to stderr instead of silently returning 0. 4 new tests (non-main
+base, shallow clone) plus the original 30. Chief-architect approved at
+`4988fa00` and cleared self-merge on green; merged. Verified independently
+before merge: local worktree HEAD matched the PR's remote head, read the
+fix commit in full, `mix format` clean, only the 2 pre-existing unrelated
+compile warnings, targeted test file 12/12, full suite 4885/4888 (3
+unrelated pre-existing failures: nats-bind-conflict flake, a local
+session-id env leak, a real-machine launchd-state test), no attribution.
+Worktree/branch cleaned up, claim released.
 
 **Also this cycle: T72.4 dispatched** (interactive `kazi plan render --tree` <!-- verb-drift:allow: forward reference to T72.4, unbuilt at this line's writing -->
 adapter, E72's critical path, unblocked once T72.2+T72.3 both landed) as a
@@ -439,20 +441,31 @@ own doc-command-accuracy failure for the same reason it warned about above --
 established `<!-- verb-drift:allow: ... -->` inline-comment escape (repo
 precedent `18e6476a`) and merged (`ef8f4f51`).
 
-**Dispatched (2026-09-05, eighth dispatch): TKE.2, TKE.3, TKE.8a** -- the next
-unblocked wave now that TKE.1 has landed (Wave KE-B/KE-C/KE-A's doc-only half,
-`docs/plans/E-KAZI-ENTRYPOINT.md` section 3.3). TKE.2 (render-freshness check
-against the lane contract's `render_sha256`, reusing T72.3's `Render.node/3`)
-and TKE.3 (`--integration-command` hook -- kazi computes the PR/branch/trailer
-action and hands it to an external publisher, never calling `git push`/`gh`
-itself in lane mode, per chief-architect's "mode B everywhere" ruling folded
-into the plan's section 3.2) run as independent lanes, both depending only on
-TKE.1. TKE.8a (new `docs/schemas/check-result.md`, documenting `--check
---json`'s existing but previously-undocumented shape) is a small, no-code-dep
-doc task that was schedulable since Wave KE-A but hadn't been dispatched yet.
-All three claimed via claim.sh, fresh worktrees off `origin/main`
-(`ef8f4f51`), `mix compile` verified clean before dispatch. Still in progress
-alongside the ongoing TKE.7 fix-and-repush and T72.4.
+**Shipped (2026-09-05): TKE.8a, TKE.2** -- the eighth-dispatch wave (Wave
+KE-B/KE-A's doc-only half, `docs/plans/E-KAZI-ENTRYPOINT.md` section 3.3),
+both now landed. TKE.8a: new `docs/schemas/check-result.md` documenting
+`--check --json`'s existing but previously-undocumented shape. PR #1801;
+one CI job hit a pre-existing NATS-bind-conflict timing flake unrelated to
+the docs-only diff, reran green, merged. TKE.2: render-freshness check
+against the lane contract's `render_sha256` (ADR-0086 decision 5(b)),
+reusing T72.3's `Render.node/3` fed by `Runtime.check/2`'s observe pass --
+match proceeds, mismatch refuses `kind: stale_render` naming both shas, a
+contract missing `render_sha256` entirely refuses `kind:
+render_sha256_missing` (fail-closed, not silently skipped, so hq-side D2
+landing late stays loud), a failed re-render refuses `kind:
+render_unavailable`, a scopeless goal skips the check. PR #1803, `6ed29e92`.
+Verified independently: read the full diff, confirmed every refusal path is
+fail-closed and matches TKE.1's conventions, 5 new tests through the real
+CLI exec core, `mix format` clean, only the 2 pre-existing unrelated
+warnings, no attribution; merged on green. Both worktrees/branches cleaned
+up, claims released.
+
+**In progress: TKE.3** -- `--integration-command` hook (kazi computes the
+PR/branch/trailer action and hands it to an external publisher, never
+calling `git push`/`gh` itself in lane mode, per chief-architect's "mode B
+everywhere" ruling folded into the plan's section 3.2). Dispatched agent is
+designing the hook's stdin/stdout JSON schema (not pinned by the plan doc)
+and building the flag/invocation/refusal logic; not yet reported back.
 
 **Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
