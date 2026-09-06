@@ -9833,7 +9833,7 @@ defmodule Kazi.CLI do
     |> put_goal_drifted(result)
     |> put_tampered_file(result)
     |> put_single_node(result)
-    |> put_job_outcome(status, result, opts, workspace)
+    |> put_job_outcome(status, result, opts, workspace, goal)
   end
 
   # ADR-0080 (#1520): the additive `tampered_file` object — the sealed input (or
@@ -9861,9 +9861,11 @@ defmodule Kazi.CLI do
   # governed lane dispatch. Commits-ahead is only computed for the two
   # statuses that need it (`stuck`/`over_budget`) — a converged/tampered run
   # never shells out to git for this field.
-  defp put_job_outcome(map, status, result, opts, workspace) do
+  defp put_job_outcome(map, status, result, opts, workspace, goal) do
     if lane_mode?(opts) do
-      has_commits? = status in ["stuck", "over_budget"] and commits_ahead_of_base(workspace) > 0
+      has_commits? =
+        status in ["stuck", "over_budget"] and
+          commits_ahead_of_base(workspace, declared_base(opts, goal)) > 0
 
       outcome =
         Kazi.CLI.JobOutcome.classify(%{
@@ -9888,19 +9890,59 @@ defmodule Kazi.CLI do
   @spec lane_mode?(keyword()) :: boolean()
   defp lane_mode?(opts), do: opts[:single_node] == true and opts[:in_place] == true
 
+  # TKE.7 (review fix, chief-architect 2026-09-05): the RUN's actual declared
+  # base, when one is known -- never a guess. Two real sources, in precedence
+  # order:
+  #
+  #   1. `opts[:base]` -- an explicit `--base <ref>`. Currently UNREACHABLE in
+  #      combination with `--in-place` (T50.8, ADR-0065 decision 5 refuses
+  #      that combination as contradictory -- confirmed live: `--single-node
+  #      --in-place --base <ref>` errors "--in-place and --base are
+  #      contradictory" before any dispatch). Kept as the top-precedence
+  #      source anyway (an explicit override should always win if it is ever
+  #      reachable -- e.g. a future relaxation of that guard specifically for
+  #      `--lane-contract` mode) but this branch has no live caller today and
+  #      is untested for that reason; do not rely on it being exercised.
+  #   2. `goal.integration.base` -- the goal-file's OWN declared
+  #      `[integration] base = "..."` (`Kazi.Goal.Loader.parse_integration/1`),
+  #      independent of the CLI `--base` flag and NOT subject to the
+  #      `--in-place` contradiction above. This is the live mechanism a
+  #      governed lane whose base is not `main` (e.g. a sire lane branching
+  #      from `develop`) uses today to name its real base.
+  #
+  # Absent both, `nil` -- the caller falls back to `Kazi.ScopeDiff.base_ref/1`'s
+  # guess (merge-base with `origin/main`, which is wrong for a non-main-based
+  # or shallow-cloned lane -- exactly the defect this fix addresses).
+  @spec declared_base(keyword(), Goal.t()) :: String.t() | nil
+  defp declared_base(opts, %Goal{integration: integration}) do
+    case opts[:base] do
+      base when is_binary(base) -> base
+      _ -> declared_integration_base(integration)
+    end
+  end
+
+  defp declared_integration_base(%{base: base}) when is_binary(base), do: base
+  defp declared_integration_base(_integration), do: nil
+
   # TKE.7: commits ahead of the base for a NON-landed `stuck`/`over_budget`
   # in-place run — the blocked-vs-checkpointed split needs to know whether the
-  # run left any committed progress behind. Reuses `Kazi.ScopeDiff.base_ref/1`
-  # (the SAME base `collateral` already measures against: merge-base with
-  # `origin/main`, else the repo's root commit, else git's empty-tree object)
-  # rather than inventing a second base-ref convention. `git rev-list --count
-  # <base>..HEAD` mirrors `Kazi.Scheduler.SerialLanding`'s own ahead-count
-  # call. A non-git/unreadable workspace (or any git failure) degrades to `0`
-  # — no progress observable, never a crash — matching this module's other
-  # git call sites (`base_ref_resolves?/2`, `git_repo?/1`).
-  @spec commits_ahead_of_base(String.t() | nil) :: non_neg_integer()
-  defp commits_ahead_of_base(workspace) when is_binary(workspace) do
-    base = Kazi.ScopeDiff.base_ref(workspace)
+  # run left any committed progress behind. `base_override` (`declared_base/2`)
+  # is used when the run names its own real base; only absent that does this
+  # fall back to `Kazi.ScopeDiff.base_ref/1` (the SAME base `collateral`
+  # already measures against: merge-base with `origin/main`, else the repo's
+  # root commit, else git's empty-tree object) — a guess that is wrong for a
+  # lane whose real base is not `main`, or whose clone is shallow enough that
+  # `origin/main` does not resolve locally (review fix, chief-architect
+  # 2026-09-05). `git rev-list --count <base>..HEAD` mirrors
+  # `Kazi.Scheduler.SerialLanding`'s own ahead-count call. A non-git/unreadable
+  # workspace or any git failure degrades to `0` (no progress observable,
+  # never a crash, matching this module's other git call sites --
+  # `base_ref_resolves?/2`, `git_repo?/1`) but is no longer SILENT: a real git
+  # failure is named on stderr so an operator can tell "genuinely zero commits"
+  # apart from "the check itself could not run".
+  @spec commits_ahead_of_base(String.t() | nil, String.t() | nil) :: non_neg_integer()
+  defp commits_ahead_of_base(workspace, base_override) when is_binary(workspace) do
+    base = base_override || Kazi.ScopeDiff.base_ref(workspace)
 
     case System.cmd("git", ["-C", workspace, "rev-list", "--count", base <> "..HEAD"],
            stderr_to_stdout: true
@@ -9911,14 +9953,27 @@ defmodule Kazi.CLI do
           _ -> 0
         end
 
-      _ ->
+      {out, _exit_code} ->
+        IO.puts(
+          :stderr,
+          "warning: job_outcome: could not count commits ahead of #{base} in #{workspace} " <>
+            "(git rev-list --count #{base}..HEAD: #{String.trim(out)}); treating as 0 commits"
+        )
+
         0
     end
   rescue
-    _ -> 0
+    error ->
+      IO.puts(
+        :stderr,
+        "warning: job_outcome: could not count commits ahead of base in #{workspace} " <>
+          "(#{Exception.message(error)}); treating as 0 commits"
+      )
+
+      0
   end
 
-  defp commits_ahead_of_base(_workspace), do: 0
+  defp commits_ahead_of_base(_workspace, _base_override), do: 0
 
   # T50.2 (ADR-0065 decision 2): the additive `integration` object — how a
   # worktree-isolated serial run's converged commits landed on the base

@@ -252,6 +252,18 @@ dispatcher never has to invent and hand-maintain it itself:
 | `error`       | —                                                        | `refused`      |
 | `tampered`    | —                                                        | `refused`      |
 
+**"The declared base"** is resolved in precedence order, never guessed when a
+real declaration exists: an explicit `--base <ref>` (not reachable together
+with `--in-place` today — ADR-0065 decision 5 refuses that combination as
+contradictory, so this is a forward-compatible top slot, not a live path), else
+the goal-file's own `[integration] base = "..."` (`Kazi.Goal.Loader
+.parse_integration/1` — entirely separate from the CLI `--base` flag; this is
+the live mechanism a governed lane whose base is not `main`, e.g. a lane
+branching from `develop`, uses today), else `Kazi.ScopeDiff.base_ref/1`'s guess
+(merge-base with `origin/main`, else the repo's root commit). A lane that
+declares its real base is therefore counted correctly even against a non-`main`
+base or a shallow clone lacking a resolvable `origin/main`.
+
 **Present only on a lane-mode run** — INTERIM definition (ahead of TKE.1,
 which will extend it to also require a parsed `--lane-contract`): `single_node`
 was ON for this run **and** the run was `--in-place`. Absent on every other
